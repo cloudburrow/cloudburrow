@@ -159,15 +159,66 @@ type connector struct {
 
 	mu    sync.Mutex
 	certs map[string]*tls.Certificate // server certificates, by DNS name
+
+	// dir holds each instance's CA file; camu guards cas, which instances
+	// created and deleted through the API change (#1330).
+	dir  string
+	camu sync.RWMutex
+}
+
+func caPath(dir, instance string) string {
+	return filepath.Join(dir, "cloudsql-"+instance+"-server-ca.json")
+}
+
+// ca is the instance's CA, nil when it has none.
+func (c *connector) ca(instance string) *serverCA {
+	c.camu.RLock()
+	defer c.camu.RUnlock()
+	return c.cas[instance]
+}
+
+// addInstance gives a created instance its own CA, kept beside the others.
+func (c *connector) addInstance(instance string) error {
+	if c.unavailable != "" || c.cas == nil {
+		return nil
+	}
+	ca, err := loadOrCreateCA(caPath(c.dir, instance), instance)
+	if err != nil {
+		return fmt.Errorf("sqladmin: server CA for %s: %w", instance, err)
+	}
+	c.camu.Lock()
+	c.cas[instance] = ca
+	c.camu.Unlock()
+	return nil
+}
+
+// removeInstance forgets a deleted instance's CA and its server
+// certificates, so an instance created again under the name has a new one,
+// as Cloud SQL's has.
+func (c *connector) removeInstance(instance string) {
+	if c.cas == nil {
+		return
+	}
+	c.camu.Lock()
+	delete(c.cas, instance)
+	c.camu.Unlock()
+	_ = os.Remove(caPath(c.dir, instance))
+	c.mu.Lock()
+	for name := range c.certs {
+		if _, in, ok := parseDNSName(name); ok && in == instance {
+			delete(c.certs, name)
+		}
+	}
+	c.mu.Unlock()
 }
 
 // EnableConnector serves the connector path: connectSettings and
 // generateEphemeralCert, and the TLS listener at addr (host:3307) they
 // point at. Each instance's CA is kept in dir.
 func (s *Server) EnableConnector(addr, dir string) error {
-	c := &connector{addr: addr, cas: map[string]*serverCA{}, certs: map[string]*tls.Certificate{}}
+	c := &connector{addr: addr, dir: dir, cas: map[string]*serverCA{}, certs: map[string]*tls.Certificate{}}
 	for _, e := range s.engines {
-		ca, err := loadOrCreateCA(filepath.Join(dir, "cloudsql-"+e.Instance()+"-server-ca.json"), e.Instance())
+		ca, err := loadOrCreateCA(caPath(dir, e.Instance()), e.Instance())
 		if err != nil {
 			err = fmt.Errorf("sqladmin: server CA for %s: %w", e.Instance(), err)
 			s.conn = &connector{unavailable: err.Error()}
@@ -233,7 +284,10 @@ func (c *connector) serverCert(project, instance string) (*tls.Certificate, erro
 	if crt, ok := c.certs[name]; ok && time.Now().Before(crt.Leaf.NotAfter.Add(-time.Hour)) {
 		return crt, nil
 	}
-	ca := c.cas[instance]
+	ca := c.ca(instance)
+	if ca == nil {
+		return nil, fmt.Errorf("no instance %q", instance)
+	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
@@ -269,7 +323,8 @@ func (c *connector) serve(s *Server, raw net.Conn) {
 				return nil, fmt.Errorf("server name %q is not a CloudBurrow Cloud SQL instance", hello.ServerName)
 			}
 			e := s.engine(instance)
-			if e == nil || c.cas[instance] == nil {
+			ca := c.ca(instance)
+			if e == nil || ca == nil {
 				return nil, fmt.Errorf("no instance %q", instance)
 			}
 			crt, err := c.serverCert(project, instance)
@@ -281,7 +336,7 @@ func (c *connector) serve(s *Server, raw net.Conn) {
 				MinVersion:   tls.VersionTLS13,
 				Certificates: []tls.Certificate{*crt},
 				ClientAuth:   tls.RequireAndVerifyClientCert,
-				ClientCAs:    c.cas[instance].pool,
+				ClientCAs:    ca.pool,
 				// The CA signs for every project; the certificate must be
 				// the one issued for this project's instance.
 				VerifyPeerCertificate: func(_ [][]byte, chains [][]*x509.Certificate) error {
@@ -352,7 +407,10 @@ func (s *Server) connectSettings(project string, e Engine) (any, error) {
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
 	}
-	ca := s.conn.cas[e.Instance()]
+	ca := s.conn.ca(e.Instance())
+	if ca == nil {
+		return nil, Errorf(http.StatusServiceUnavailable, "instance %s has no server CA yet", e.Instance())
+	}
 	return map[string]any{
 		"kind":            "sql#connectSettings",
 		"serverCaCert":    sslCertJSON(project, e.Instance(), ca.cert, ca.certPEM),
@@ -405,7 +463,10 @@ func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine
 	if d, err := time.ParseDuration(req.ValidDuration); err == nil && d > 0 && d < life {
 		life = d
 	}
-	ca := s.conn.cas[e.Instance()]
+	ca := s.conn.ca(e.Instance())
+	if ca == nil {
+		return nil, Errorf(http.StatusServiceUnavailable, "instance %s has no server CA yet", e.Instance())
+	}
 	now := time.Now()
 	tmpl := &x509.Certificate{
 		SerialNumber: serial(),

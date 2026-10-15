@@ -89,11 +89,12 @@ func TestSQLAdminInstancesDescribeTheRunningServers(t *testing.T) {
 	wantHTTP(t, "instances.get of an unknown instance", err, http.StatusNotFound)
 }
 
-// TestSQLAdminRefusesWhatItCannotDoFaithfully (#1301): creating, patching,
-// restarting and deleting an instance, IAM database authentication (an
-// access token in generateEphemeralCert, #1330), and tiers, flags and
-// backup runs answer 501.
-// covers: sql.instances.insert (unimplemented), sql.instances.patch (unimplemented), sql.instances.delete (unimplemented), sql.instances.restart (unimplemented), sql.tiers.list (unimplemented), sql.flags.list (unimplemented), sql.backupRuns.list (unimplemented)
+// TestSQLAdminRefusesWhatItCannotDoFaithfully (#1301, #1330): clone,
+// failover, replicas, IAM database authentication (an access token in
+// generateEphemeralCert), and tiers, flags and backup runs answer 501;
+// the instances `up` runs refuse a patch, restart or delete with the
+// reason (instance writes act on created instances, TestCloudSQLInstanceWrites).
+// covers: sql.instances.clone (unimplemented), sql.instances.failover (unimplemented), sql.tiers.list (unimplemented), sql.flags.list (unimplemented), sql.backupRuns.list (unimplemented)
 func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	h := New(t)
 	svc := sqlAdminService(t, h)
@@ -102,14 +103,19 @@ func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	if os.Getenv(EnvCloudSQL) == "" {
 		inst = "mysql"
 	}
-	_, err := svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: "new", DatabaseVersion: "POSTGRES_17"}).Do()
-	wantHTTP(t, "instances.insert", err, 501)
-	_, err = svc.Instances.Patch(p, inst, &sqladmin.DatabaseInstance{Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
-	wantHTTP(t, "instances.patch", err, 501)
+	_, err := svc.Instances.Patch(p, inst, &sqladmin.DatabaseInstance{Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
+	wantHTTP(t, "instances.patch of the instance up runs", err, http.StatusBadRequest)
 	_, err = svc.Instances.Delete(p, inst).Do()
-	wantHTTP(t, "instances.delete", err, 501)
+	wantHTTP(t, "instances.delete of the instance up runs", err, http.StatusBadRequest)
 	_, err = svc.Instances.Restart(p, inst).Do()
-	wantHTTP(t, "instances.restart", err, 501)
+	wantHTTP(t, "instances.restart of the instance up runs", err, http.StatusBadRequest)
+	_, err = svc.Instances.Clone(p, inst, &sqladmin.InstancesCloneRequest{CloneContext: &sqladmin.CloneContext{DestinationInstanceName: "c"}}).Do()
+	wantHTTP(t, "instances.clone", err, 501)
+	_, err = svc.Instances.Failover(p, inst, &sqladmin.InstancesFailoverRequest{}).Do()
+	wantHTTP(t, "instances.failover", err, 501)
+	_, err = svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: "replica", DatabaseVersion: "POSTGRES_17",
+		MasterInstanceName: inst, Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
+	wantHTTP(t, "instances.insert of a read replica", err, 501)
 	_, err = svc.Connect.GenerateEphemeralCert(p, inst, &sqladmin.GenerateEphemeralCertRequest{PublicKey: "x", AccessToken: "iam"}).Do()
 	wantHTTP(t, "connect.generateEphemeralCert with an access token (IAM database authentication)", err, 501)
 	_, err = svc.Tiers.List(p).Do()

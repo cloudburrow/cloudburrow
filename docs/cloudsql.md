@@ -105,10 +105,44 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: creating, changing, restarting or deleting an instance (an
-instance is a server `up` starts with `--services`), IAM database authentication, backups,
-replicas, imports and exports, and SSL certificates. See
+What answers 501, saying why: IAM database authentication, backups, replicas and failover,
+clones, imports and exports, and SSL certificates. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
+
+### Creating instances (#1330)
+
+`instances.insert`, `patch`, `update`, `delete` and `restart` are served, so
+`gcloud sql instances create` and Terraform's `google_sql_database_instance` work. Each
+created instance is **a server of its own**: a Deployment in the cluster named
+`sqlinst-<name>`, from the same image and the same component code as the server `up` runs
+for `--services cloudsql` or `cloudsql-mysql`, with its own host tunnel, its own
+`connectionName` (`{project}:us-central1:{name}`), its own server CA, and an address the
+connectors reach through 3307.
+
+| Field | What happens |
+|---|---|
+| `databaseVersion` | `POSTGRES_17` or `MYSQL_8_4`, the versions of the images CloudBurrow pins; the engine's service must be enabled (412 otherwise). Any other `POSTGRES_*` or `MYSQL_*` is 501 saying so; another value is 400. |
+| `rootPassword` | MySQL's `root` password (empty leaves `root` with none, as Cloud SQL does). PostgreSQL's user is `postgres`, trusted locally like the server `up` runs. |
+| `settings.tier` | Required, recorded and answered. The server is not sized by it. |
+| `settings.databaseFlags` | Passed to the server: `-c name=value` to `postgres`, `--name=value` to `mysqld`. A patch that changes them starts the server again with them; a flag the server rejects fails the operation with its words. `cloudsql.*` flags (IAM authentication, Cloud SQL's extensions) are 501. |
+| `settings.userLabels`, `deletionProtectionEnabled`, other settings | Recorded and answered. `delete` of a protected instance is 400, as on Cloud SQL. |
+| `masterInstanceName`, `replicaConfiguration`, `availabilityType: REGIONAL` | 501: no replicas or standby. |
+
+The operation `insert` returns is `RUNNING` until the server serves through its tunnel, then
+`DONE` (or `DONE` with the server's error, and the instance `FAILED`). `delete` removes the
+server, its Service and its volume. `restart` restarts its pod.
+
+**The instances `up` runs stay as they are:** `postgres` and `mysql` cannot be patched,
+restarted or deleted through the API; each answers 400 naming the `--services` flag that
+starts and stops it.
+
+**Persistence follows the instance's mode.** In persistent mode a created instance's server
+has a volume, and the instance's record is kept in `cloudsql-instances.json` in the instance
+directory, so it is there, with its data, after `stop` and `up`. In ephemeral mode neither is
+kept, and the next `up` removes what an earlier run created.
+
+The console's **Cloud SQL instances** page lists every instance, with Create instance,
+Delete and Restart.
 
 ### The Cloud SQL connectors (#1330)
 

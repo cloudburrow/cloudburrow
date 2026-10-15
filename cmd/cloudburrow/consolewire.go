@@ -221,6 +221,23 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		}
 	}
 
+	// Cloud SQL's Instances page, through the Admin API (#1330).
+	if sqlAdminEnabled(d.cfg) {
+		var versions []string
+		if enabled[config.ServiceCloudSQL] {
+			versions = append(versions, "POSTGRES_17")
+		}
+		if enabled[config.ServiceCloudSQLMySQL] {
+			versions = append(versions, "MYSQL_8_4")
+		}
+		host := d.cfg.BindAddress
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
+		}
+		providers = append(providers, cloudSQLInstancesProvider{
+			endpoint: net.JoinHostPort(host, strconv.Itoa(d.cfg.Endpoints.SQLAdmin)), versions: versions})
+	}
+
 	// The cluster views are read-only and always present: CloudBurrow owns
 	// this cluster, and being able to see what is actually running in it is
 	// the point of running one locally.

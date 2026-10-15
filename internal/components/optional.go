@@ -466,3 +466,45 @@ const (
 	CloudSQLUser     = "cloudburrow"
 	CloudSQLDatabase = "cloudburrow"
 )
+
+// SQLInstancePrefix starts the name of every Deployment, Service and
+// volume of a Cloud SQL instance created through the Admin API (#1330).
+// The prefix keeps them apart from the servers `up` runs.
+const SQLInstancePrefix = "sqlinst-"
+
+// SQLInstanceFlag is one database flag of a created instance.
+type SQLInstanceFlag struct{ Name, Value string }
+
+// CloudSQLInstanceBackend is a Cloud SQL instance created through the Admin
+// API's instances.insert (#1330): the same image and the same settings as
+// cloudSQLBackend or CloudSQLMySQLBackend, under its own name, with
+// Cloud SQL's default user for the engine (postgres, or root with
+// rootPassword) and its database flags passed to the server, as -c
+// name=value to postgres and --name=value to mysqld. mysql is which engine.
+func CloudSQLInstanceBackend(name string, mysql, persistent bool, rootPassword string, flags []SQLInstanceFlag) Backend {
+	var b Backend
+	if mysql {
+		b = CloudSQLMySQLBackend(persistent, MySQLCredentials{RootPassword: rootPassword})
+		b.Env = map[string]string{"MYSQL_ROOT_PASSWORD": rootPassword}
+		if rootPassword == "" {
+			// Cloud SQL's root of an instance created with no password.
+			b.Env = map[string]string{"MYSQL_ALLOW_EMPTY_PASSWORD": "yes"}
+		}
+		b.Args = append([]string{}, b.Args...)
+		for _, f := range flags {
+			b.Args = append(b.Args, "--"+f.Name+"="+f.Value)
+		}
+	} else {
+		b = cloudSQLBackend(persistent)
+		b.Env["POSTGRES_USER"] = "postgres"
+		b.Env["POSTGRES_DB"] = "postgres"
+		if len(flags) > 0 {
+			b.Args = []string{"postgres"}
+			for _, f := range flags {
+				b.Args = append(b.Args, "-c", f.Name+"="+f.Value)
+			}
+		}
+	}
+	b.Name = SQLInstancePrefix + name
+	return b
+}
