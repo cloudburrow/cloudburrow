@@ -30,12 +30,12 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 1 | 1 | 0 | 0 | 0 |
 | Vertex AI | 2 | 0 | 2 | 0 | 0 |
-| BigQuery | 35 | 16 | 16 | 3 | 0 |
+| BigQuery | 33 | 15 | 15 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 3 | 3 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **81** | **32** | **37** | **7** | **5** |
+| **Total** | **79** | **31** | **36** | **7** | **5** |
 
 ## Cloud Storage
 
