@@ -154,6 +154,7 @@ func TestCreateOrReplaceExistingTable(t *testing.T) {
 		log := strings.Join(emu.log, "\n")
 		scratch := strings.SplitN(strings.SplitN(log, resultsDataset+"._cloudburrow_replace_", 2)[1], "`", 2)[0]
 		want := strings.Join([]string{
+			"GET " + tablesBase + "t", // is it a snapshot (#1002)
 			"QUERY SELECT * FROM (\nSELECT * FROM ds.t WHERE a > 1\n) LIMIT 0",
 			"GET " + tablesBase + "t",
 			"QUERY CREATE OR REPLACE TABLE `" + resultsDataset + "._cloudburrow_replace_" + scratch + "` AS SELECT * FROM ds.t WHERE a > 1",

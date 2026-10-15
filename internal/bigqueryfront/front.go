@@ -323,7 +323,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[4] != "" && m[5] == "":
 			f.insertTable(w, r, dataset, table, true)
 		case r.Method == http.MethodGet && m[4] != "" && m[5] == "":
-			f.getTable(w, r, dataset, table) // #1014
+			f.getTable(w, r, dataset, table) // #1014, #1002
+		case r.Method == http.MethodGet && m[3] != "" && m[4] == "" && strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
+			f.listTables(w, r, dataset) // #1002, snapshots.go
 		case r.Method == http.MethodPost && m[5] == "insertAll":
 			f.insertAll(w, r, dataset, table)
 		case r.Method == http.MethodGet && m[5] == "data":
@@ -572,6 +574,9 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	}
 	if !ok {
 		f.next.ServeHTTP(w, r)
+		return
+	}
+	if f.refuseSnapshotWrite(w, r, dataset, table, "tabledata.insertAll") { // #1002, snapshots.go
 		return
 	}
 

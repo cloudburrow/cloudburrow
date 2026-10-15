@@ -338,6 +338,9 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 			// INTO (#1037).
 			"DECLARE x INT64; EXECUTE IMMEDIATE 'SELECT 41 + 1' INTO x; SELECT x":                                    {"42"},
 			"DECLARE q STRING DEFAULT 'SELECT 3 * ?'; DECLARE y INT64; EXECUTE IMMEDIATE q INTO y USING 3; SELECT y": {"9"},
+			// INTO several variables, from the same row (#1037).
+			"DECLARE a INT64; DECLARE b STRING; EXECUTE IMMEDIATE 'SELECT 5, \"five\"' INTO a, b; SELECT a, b":          {"5|five"},
+			"DECLARE a INT64; DECLARE b STRING; EXECUTE IMMEDIATE 'SELECT 6 AS x, \"six\" AS y' INTO a, b; SELECT b, a": {"six|6"},
 		} {
 			if got := read(sql); !reflect.DeepEqual(got, want) {
 				t.Errorf("%s (query job %v): %q, want %q", sql, insert, got, want)
@@ -376,7 +379,7 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 		for _, sql := range []string{
 			"EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)",
 			"DECLARE x INT64; EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".into_" + suffix + " (x INT64)' INTO x",
-			"DECLARE a INT64; DECLARE b STRING; EXECUTE IMMEDIATE 'SELECT 5, \"five\"' INTO a, b",
+			"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 5' INTO `a`",
 			"DECLARE q STRING DEFAULT (SELECT 'SELECT 1'); EXECUTE IMMEDIATE q",
 			"EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a",
 			"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64); EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)",
@@ -394,6 +397,20 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 		// when the variable is read).
 		if err := runIn(ctx, c, project, "", "DECLARE x INT64; EXECUTE IMMEDIATE 'SELECT n FROM UNNEST([1, 2]) AS n' INTO x; SELECT x", insert); err == nil {
 			t.Errorf("INTO of two rows (query job %v) succeeded, want it to fail", insert)
+		}
+		// ... and at the statement, before a later one runs, though the
+		// variables are never read (#1037).
+		for _, sql := range []string{
+			"DECLARE x INT64; EXECUTE IMMEDIATE 'SELECT n FROM UNNEST([1, 2]) AS n' INTO x; SELECT 1",
+			"DECLARE a INT64; DECLARE b INT64; EXECUTE IMMEDIATE 'SELECT n, n FROM UNNEST([1, 2]) AS n' INTO a, b; " +
+				"CREATE TABLE " + d + ".after_many_" + suffix + " (x INT64)",
+		} {
+			if err := runIn(ctx, c, project, "", sql, insert); err == nil {
+				t.Errorf("%s (query job %v) succeeded, want it to fail", sql, insert)
+			}
+		}
+		if _, err := ds.Table("after_many_" + suffix).Metadata(ctx); err == nil {
+			t.Errorf("the statement after an INTO of two rows ran (query job %v)", insert)
 		}
 		// A parameter with no value: 400.
 		err := runIn(ctx, c, project, "", "EXECUTE IMMEDIATE 'SELECT @b' USING 1 AS a", insert)

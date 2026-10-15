@@ -54,10 +54,11 @@ import (
 // as baseTableReference, the job's start as cloneTime), which the emulator
 // keeps and tables.get answers (measured), as BigQuery's does for a clone,
 // a writable table (https://cloud.google.com/bigquery/docs/table-clones-intro).
-// 501, and nothing is copied: SNAPSHOT and RESTORE (the emulator has no
-// snapshots: a table made with a snapshotDefinition reads back type TABLE
-// and writable, measured, and BigQuery's snapshots are read-only), a CLONE
-// of several sources or into a table that exists, destinationEncryptionConfiguration,
+// SNAPSHOT and RESTORE (#1002) are carried out as snapshots.go describes.
+// 501, and nothing is copied: a CLONE, SNAPSHOT or RESTORE of several
+// sources, a CLONE into a table that exists (BigQuery's documentation
+// implies a clone may overwrite one, "If the table clone overwrites an
+// existing table", but gives no writeDisposition rule for it), destinationEncryptionConfiguration,
 // destinationExpirationTime, a table of another project, and a WRITE_APPEND (or
 // a WRITE_EMPTY into an empty table) whose destination's schema differs
 // from the source's (BigQuery's rules for which differences it accepts
@@ -83,6 +84,9 @@ type copyTable struct {
 	kind   string
 	schema json.RawMessage
 	fields []field
+	// snapshot is the table's snapshotDefinition, nil when it is not a
+	// snapshot (#1002, snapshots.go).
+	snapshot map[string]any
 }
 
 // copyJob carries out a copy job (above).
@@ -99,16 +103,14 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		srcs = []tableRef{*c.SourceTable}
 	}
 	op := strings.ToUpper(c.OperationType)
-	clone := op == "CLONE"
+	clone, snapshot, restore := op == "CLONE", op == "SNAPSHOT", op == "RESTORE"
 	switch {
-	case op != "" && op != "COPY" && op != "OPERATION_TYPE_UNSPECIFIED" && !clone:
-		notImplemented(fmt.Sprintf("with operationType %s. BigQuery makes a snapshot or restores one, but the "+
-			"emulator behind CloudBurrow has no snapshots (CREATE SNAPSHOT TABLE is 400 \"not supported\" there, and a "+
-			"table made with a snapshotDefinition reads back type TABLE, writable, measured), so CloudBurrow cannot "+
-			"keep a snapshot read-only as BigQuery does.", c.OperationType))
+	case op != "" && op != "COPY" && op != "OPERATION_TYPE_UNSPECIFIED" && !clone && !snapshot && !restore:
+		invalid("Invalid value for operationType: " + c.OperationType)
 		return
-	case clone && len(c.SourceTables) > 1:
-		notImplemented("with operationType CLONE of several source tables. BigQuery's documentation clones one table.")
+	case (clone || snapshot || restore) && len(c.SourceTables) > 1:
+		notImplemented(fmt.Sprintf("with operationType %s of several source tables. BigQuery's documentation "+
+			"gives it one table.", op))
 		return
 	case len(c.DestinationEncryptionConfiguration) > 0 && string(c.DestinationEncryptionConfiguration) != "null":
 		notImplemented("with destinationEncryptionConfiguration. The emulator behind CloudBurrow has no customer-managed keys.")
@@ -158,6 +160,12 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		notImplemented(fmt.Sprintf("into %s, which is a %s.", tableName(project, dest.ref), dest.kind))
 		return
 	}
+	if dest.exists && dest.snapshot != nil {
+		// A snapshot is read-only (#1002, snapshots.go).
+		writeError(w, http.StatusBadRequest, "invalid", snapshotWriteMessage(project, dest.ref.DatasetID,
+			dest.ref.TableID, "a copy job"))
+		return
+	}
 	if clone && dest.exists {
 		notImplemented(fmt.Sprintf("with operationType CLONE into %s, which exists. BigQuery's documentation does not "+
 			"give how a clone replaces or adds to a table; CloudBurrow clones into a table that does not exist.",
@@ -189,7 +197,23 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			fail("invalid", fmt.Sprintf("%s is not allowed for this operation because it is currently a %s.",
 				tableName(project, s.ref), strings.ToUpper(s.kind)))
 			return
+		case snapshot && s.snapshot != nil:
+			// "The source table type is TABLE" (OperationType).
+			fail("invalid", fmt.Sprintf("%s is not allowed for operationType SNAPSHOT because it is a table snapshot.",
+				tableName(project, s.ref)))
+			return
+		case restore && s.snapshot == nil:
+			// "The source table type is SNAPSHOT" (OperationType).
+			fail("invalid", fmt.Sprintf("%s is not allowed for operationType RESTORE because it is not a table snapshot.",
+				tableName(project, s.ref)))
+			return
 		}
+	}
+	if snapshot && dest.exists {
+		// "You can't overwrite an existing table or table snapshot when you
+		// create a table snapshot" (table-snapshots-intro).
+		fail("duplicate", "Already Exists: Table "+tableName(project, dest.ref))
+		return
 	}
 	// "All source tables must have identical schemas" when several are
 	// copied into one (#1002; https://cloud.google.com/bigquery/docs/managing-tables#copy_multiple_source_tables).
@@ -227,7 +251,20 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		err = f.insertSelect(r, dest.ref, sources)
 	case !dest.exists:
 		var extra map[string]any
-		if clone {
+		switch {
+		case snapshot:
+			// The emulator keeps a table's snapshotDefinition (measured);
+			// the front answers its type SNAPSHOT and refuses writes to it.
+			extra = map[string]any{"snapshotDefinition": map[string]any{
+				"baseTableReference": map[string]string{"projectId": project, "datasetId": sources[0].ref.DatasetID,
+					"tableId": sources[0].ref.TableID},
+				"snapshotTime": j.start.UTC().Format(time.RFC3339Nano),
+			}}
+		case !restore && !clone && sources[0].snapshot != nil:
+			// COPY: "The source and destination table have the same table
+			// type", so a snapshot's copy is a snapshot of the same base.
+			extra = map[string]any{"snapshotDefinition": sources[0].snapshot}
+		case clone:
 			// The emulator keeps a table's cloneDefinition (measured), and
 			// tables.get answers it, as BigQuery's does for a clone.
 			extra = map[string]any{"cloneDefinition": map[string]any{
@@ -274,6 +311,7 @@ func (f front) copyTableMeta(r *http.Request, ref tableRef) copyTable {
 	var s tableSchema
 	_ = json.Unmarshal(meta.Schema, &s)
 	t.exists, t.kind, t.schema, t.fields = true, meta.Type, meta.Schema, s.Fields
+	t.snapshot = snapshotDefinitionOf(got)
 	return t
 }
 

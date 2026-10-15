@@ -55,7 +55,8 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 	vars := map[string]string{}
 	unknown := map[string]bool{}
 	var edits []varEdit
-	for _, stmt := range splitStatements(toks) {
+	stmts := splitStatements(toks)
+	for si, stmt := range stmts {
 		body, _, _ := stripControlFlow(stmt)
 		switch {
 		case len(body) > 1 && body[0].is("DECLARE"):
@@ -130,9 +131,13 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 				case len(names) == 0 || len(rest) > 0 || body[into+1].kind != tokWord:
 					return notImplemented(fmt.Sprintf("... INTO %s, which is not one script variable.",
 						statementText(sql, body[into+1:stop])))
-				case len(names) > 1:
-					return notImplemented("... INTO several variables. CloudBurrow runs INTO as a SET of the " +
-						"variable, and the emulator behind it does not run SET (a, b) = ... (measured).")
+				}
+				for _, t := range body[into+1 : stop] {
+					if t.kind == tokQuoted {
+						return notImplemented(fmt.Sprintf("... INTO %s, a quoted name. CloudBurrow runs INTO as a SET "+
+							"of each variable, and the emulator behind it does not run a SET of a quoted name (measured).",
+							statementText(sql, []token{t})))
+					}
 				}
 				for _, n := range names {
 					intoVars = append(intoVars, n)
@@ -171,7 +176,7 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 				return sql, false, code, why
 			}
 			if into >= 0 {
-				if out, why = immediateInto(out, intoVars); why != "" {
+				if out, why = immediateInto(out, intoVars, laterResult(stmts[si+1:]), len(edits)+1); why != "" {
 					return notImplemented(why)
 				}
 			}
@@ -192,22 +197,39 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 	return b.String(), true, 0, ""
 }
 
-// immediateInto returns the SET statement that runs EXECUTE IMMEDIATE's
-// query, inner, INTO the variable vars[0] (#1037). BigQuery sets the
-// variable from the query's one row, and fails when the query returns
-// more than one row
+// immediateInto returns the statements that run EXECUTE IMMEDIATE's
+// query, inner, INTO the variables vars (#1037). BigQuery sets the
+// variables from the query's one row, the first column into the first
+// variable and so on, and fails the script at the statement when the query
+// returns more than one row
 // (https://cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language#execute_immediate).
-// The emulator runs SET v = (query), but a scalar subquery of several rows
-// gives the first there (measured: SET x = (SELECT n FROM UNNEST([1, 2])
-// n) set 1), so the query is counted first and ERROR fails the script
-// when it has more than one row ("more than one row"; BigQuery's wording
-// UNVERIFIED). The emulator evaluates a SET's value only when the
-// variable is read (measured: a script ending in the SET of two rows
-// succeeded; with SELECT x after it, it failed), so a script that never
-// reads the variable does not fail where BigQuery's does. No rows set the variable NULL, UNVERIFIED against BigQuery.
+//
+// One variable is SET v = (query). The emulator does not run SET (a, b) =
+// ... (measured: a parse error), so several are one SET per variable, each
+// taking its column of the same row by position: (SELECT AS STRUCT * FROM
+// (query))[OFFSET(i)], which the emulator runs (measured: SET a = ...
+// [OFFSET(0)] and SET b = ...[OFFSET(1)] of SELECT 5, 'five' set 5 and
+// 'five', named columns or not). A scalar subquery of several rows gives
+// the first there (measured: SET x = (SELECT n FROM UNNEST([1, 2]) n) set
+// 1), so each value is IF(the query has more than one row, ERROR(...),
+// value) ("more than one row"; BigQuery's wording UNVERIFIED).
+//
+// The emulator evaluates a SET's value only when the variable is read
+// (measured: a script ending in the SET of two rows succeeded), so when
+// guard is true the statements begin with a CREATE TEMP TABLE of that IF,
+// which the emulator runs at once (measured: it failed the script there,
+// and its TEMP table, _cloudburrow_into_n, is dropped at the script's
+// end). A DDL statement is a result of its own in the emulator's answer
+// (measured: SELECT 3; CREATE TEMP TABLE ... answered no rows), so guard
+// is given only when a later statement of the script answers instead
+// (laterResult); otherwise a query of several rows fails only where a
+// variable is read, as before. No rows set the variables NULL, UNVERIFIED
+// against BigQuery. Fewer variables than columns leaves the others unread,
+// where BigQuery's documentation does not say what it does.
+//
 // inner must be a query (SELECT or WITH); it returns why it cannot be run
 // so, or "".
-func immediateInto(inner string, vars []string) (string, string) {
+func immediateInto(inner string, vars []string, guard bool, n int) (string, string) {
 	toks, ok := lex(inner)
 	if !ok || len(toks) == 0 {
 		return "", "... INTO of a statement CloudBurrow cannot read."
@@ -219,8 +241,44 @@ func immediateInto(inner string, vars []string) (string, string) {
 	if first >= len(toks) || !toks[first].is("SELECT") && !toks[first].is("WITH") {
 		return "", "... INTO of " + statementText(inner, toks) + ", which is not a query (SELECT or WITH)."
 	}
-	return "SET " + vars[0] + " = IF((SELECT COUNT(*) FROM (" + inner + ")) > 1, " +
-		"ERROR('EXECUTE IMMEDIATE ... INTO: the query returned more than one row'), (" + inner + "))", ""
+	tooMany := "(SELECT COUNT(*) FROM (" + inner + ")) > 1, ERROR('EXECUTE IMMEDIATE ... INTO: the query returned more than one row')"
+	var b strings.Builder
+	if guard {
+		fmt.Fprintf(&b, "CREATE TEMP TABLE _cloudburrow_into_%d AS SELECT IF(%s, 0) AS ok; ", n, tooMany)
+	}
+	if len(vars) == 1 {
+		b.WriteString("SET " + vars[0] + " = IF(" + tooMany + ", (" + inner + "))")
+		return b.String(), ""
+	}
+	for i, v := range vars {
+		if i > 0 {
+			b.WriteString("; ")
+		}
+		fmt.Fprintf(&b, "SET %s = IF(%s, (SELECT AS STRUCT * FROM (%s))[OFFSET(%d)])", v, tooMany, inner, i)
+	}
+	return b.String(), ""
+}
+
+// laterResult reports whether one of stmts, the statements after an
+// EXECUTE IMMEDIATE ... INTO, gives the script's answer in the emulator
+// (a query, DML or DDL), so that a statement put before them does not
+// change it (immediateInto).
+func laterResult(stmts [][]token) bool {
+	for _, s := range stmts {
+		body, _, _ := stripControlFlow(s)
+		if len(body) == 0 {
+			continue
+		}
+		for _, w := range []string{"SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "DROP", "ALTER", "TRUNCATE"} {
+			if body[0].is(w) {
+				return true
+			}
+		}
+		if body[0].punct("(") {
+			return true
+		}
+	}
+	return false
 }
 
 // declaredNames returns the names a DECLARE gives (a, b, c), and the

@@ -597,10 +597,12 @@ func TestCopyJobs(t *testing.T) {
 		extra string
 		code  int
 	}{
-		{"SNAPSHOT", []string{"ds.s"}, "ds.new", `,"operationType":"SNAPSHOT"`, 501},
+		{"SNAPSHOT into a table that exists", []string{"ds.s"}, "ds.full", `,"operationType":"SNAPSHOT"`, 200}, // a failed job, #1002
+		{"SNAPSHOT of two tables", []string{"ds.s", "ds.s"}, "ds.new", `,"operationType":"SNAPSHOT"`, 501},
 		{"CLONE into a table that exists", []string{"ds.s"}, "ds.full", `,"operationType":"CLONE"`, 501},
 		{"CLONE of two tables", []string{"ds.s", "ds.s"}, "ds.new", `,"operationType":"CLONE"`, 501},
-		{"RESTORE", []string{"ds.s"}, "ds.new", `,"operationType":"RESTORE"`, 501},
+		{"RESTORE of a table", []string{"ds.s"}, "ds.new", `,"operationType":"RESTORE"`, 200}, // a failed job, #1002
+		{"a bad operationType", []string{"ds.s"}, "ds.new", `,"operationType":"MOVE"`, 400},
 		{"an encryption key", []string{"ds.s"}, "ds.new", `,"destinationEncryptionConfiguration":{"kmsKeyName":"k"}`, 501},
 		{"an expiration", []string{"ds.s"}, "ds.new", `,"destinationExpirationTime":"2030-01-01T00:00:00Z"`, 501},
 		{"schemas that differ", []string{"ds.s", "ds.other"}, "ds.new", "", 200}, // a failed job, #1002

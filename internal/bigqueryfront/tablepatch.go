@@ -70,6 +70,12 @@ func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 		f.next.ServeHTTP(w, r) // the emulator's own answer
 		return
 	}
+	if schema != nil && snapshotDefinitionOf(got) != nil && !sameSchema(meta.Schema.Fields, schema.Fields) {
+		// A snapshot's metadata only is updated (#1002, snapshots.go).
+		writeError(w, http.StatusBadRequest, "invalid", snapshotWriteMessage(projectOf(f.base), dataset, table,
+			"a change of its schema"))
+		return
+	}
 	if schema != nil {
 		name := tableName(projectOf(f.base), tableRef{DatasetID: dataset, TableID: table})
 		if isView(meta.Type) || meta.Type != "" && !strings.EqualFold(meta.Type, "TABLE") {
