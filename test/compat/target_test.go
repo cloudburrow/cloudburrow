@@ -166,6 +166,26 @@ func TestGcloudRestrictConfigFailsOnAnotherEndpoint(t *testing.T) {
 	}
 }
 
+// The run shard exports Cloud Logging as RUN_LOGGING only, and that vouches
+// for the logging override as LOGGING does (#1333); one naming another
+// address fails.
+func TestGcloudRestrictConfigVouchesForLoggingWithRunLogging(t *testing.T) {
+	conf := strings.Replace(gcloudSetupConf, "pubsub = ", "logging = http://127.0.0.1:57010/\npubsub = ", 1)
+	kept, problems := gcloudRestrictConfig(conf, map[string]string{"RUN_LOGGING": "127.0.0.1:57010"})
+	if len(problems) > 0 {
+		t.Fatal(problems)
+	}
+	if !strings.Contains(kept, "logging = http://127.0.0.1:57010/\n") {
+		t.Errorf("kept:\n%s\nwant the logging override", kept)
+	}
+	if _, problems := gcloudRestrictConfig(conf, map[string]string{"RUN_LOGGING": "10.96.0.12:8080"}); len(problems) != 1 {
+		t.Errorf("an in-cluster RUN_LOGGING: problems = %q; want one", problems)
+	}
+	if kept, _ := gcloudRestrictConfig(conf, map[string]string{}); strings.Contains(kept, "logging =") {
+		t.Errorf("no logging variable kept the override:\n%s", kept)
+	}
+}
+
 // Nothing in the caller's environment can point gcloud elsewhere.
 func TestGcloudTargetEnvDropsInheritedGcloudSettings(t *testing.T) {
 	got := gcloudTargetEnv([]string{
