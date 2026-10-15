@@ -670,8 +670,9 @@ and nothing is dialled, which is tested. Spans go to that endpoint and nowhere e
   front's call log, which it reads every two seconds, so they reach the collector that much late.
   The official publisher batches messages and sends `Publish` with a context of its own, so its
   `Publish` spans start a trace of their own.
-- **Bigtable gRPC calls, and Firestore and Datastore calls from the host (#1267)**: the same, from
-  the Bigtable front's call log and from the host tunnel's guard, which sees each request it carries.
+- **Bigtable gRPC calls (#1267), and Spanner, Firestore and Datastore calls (#1288)**: the same,
+  from the Bigtable front's call log and from the call front's in the Spanner, Firestore and
+  Datastore pods, which sees every client's calls, a pod's as well as the host's.
 - **Cloud Tasks dispatch:** a client span per attempt, a child of the `CreateTask` call's span,
   with `traceparent` injected into the HTTP request. A task whose own headers already set
   `traceparent` keeps it.
@@ -679,8 +680,7 @@ and nothing is dialled, which is tested. Spans go to that endpoint and nowhere e
 **Not traced:**
 - the Secret Manager, Cloud Tasks, Cloud KMS and Resource Manager JSON APIs, and Cloud Scheduler
   jobs' deliveries to their targets;
-- Storage, Spanner, Cloud SQL, Memorystore and BigQuery, and Firestore's and Datastore's calls
-  from pods, which no front or guard of CloudBurrow's records (#1288);
+- Storage, Cloud SQL, Memorystore and BigQuery, which no front of CloudBurrow's records;
 - the metadata server, the console and the control API.
 
 A trace that passes through one of these breaks at that hop.
@@ -782,7 +782,7 @@ printing it, and it is never written into the runtime file or a diagnose bundle.
 | `POST /admin/seed` | Create resources from a seed document |
 | `GET /admin/events` | Recent events, newest first, filterable by `service`, `kind` and `since` |
 | `GET /admin/instance` | What the other routes accept here: each component `reset` clears, in order, and whether it can be scoped to a project (`byProject`); the startup seed's components, which `reseed=true` re-applies (empty without `--seed-file`); the components a seed document may name; and the manifest an export would begin with. The console's Instance page offers exactly this (#801, `TestInstanceInfoSaysWhatResetSeedAndStateAccept`) |
-| `GET /metrics` | Request counters and latency histograms for every service with a call observer: Cloud Tasks, Cloud Run, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging, Resource Manager, the builtin Cloud Storage server, Pub/Sub (#1266), Bigtable and the host's Firestore and Datastore calls (#1267), in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each enabled service with none (Spanner and the other opt-in emulators with no front or guarded tunnel, whose calls go over a port-forward and are not seen). The unmeasured set is derived from the observers `up` registers, and the console's `/monitoring` page reads the same one (#600) |
+| `GET /metrics` | Request counters and latency histograms for every service with a call observer: Cloud Tasks, Cloud Run, Secret Manager, Cloud KMS, Cloud Scheduler, Cloud Logging, Resource Manager, the builtin Cloud Storage server, Pub/Sub (#1266), Bigtable (#1267), and Spanner, Firestore and Datastore through the call fronts in their pods, a pod's calls as well as the host's (#1288), in the Prometheus text format: `cloudburrow_requests_total{service,method,code}`, `cloudburrow_request_duration_seconds`, and `cloudburrow_service_measured{service} 0` for each enabled service with none (the opt-in backends with no front, whose calls go over a port-forward and are not seen: Cloud SQL, Memorystore). The unmeasured set is derived from the observers `up` registers, and the console's `/monitoring` page reads the same one (#600) |
 
 From the CLI, against the running `up` of the configured instance (`--name`):
 

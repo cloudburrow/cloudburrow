@@ -16,7 +16,8 @@
 // the injected CLOUDBURROW_BIGQUERY_ENDPOINT and reports each status.
 // `envprobe bigquery <query>` runs the same probe once, with <query> as
 // its URL query, prints what it reported and exits: a one-off pod, with no
-// Cloud Run to route to it, runs it so (#902).
+// Cloud Run to route to it, runs it so (#902). `envprobe firestore <query>`
+// (firestore.go, #1288) writes and reads a Firestore document from a pod.
 package main
 
 import (
@@ -45,6 +46,18 @@ func main() {
 			}
 		}
 		fmt.Printf("BIGQUERY PROBE: FAIL %v\n", err)
+		os.Exit(1)
+	}
+	if len(os.Args) == 3 && os.Args[1] == "firestore" {
+		q, err := url.ParseQuery(os.Args[2])
+		if err == nil {
+			var out string
+			if out, err = firestoreProbe(context.Background(), q); err == nil {
+				fmt.Printf("FIRESTORE PROBE: OK %s\n", out)
+				return
+			}
+		}
+		fmt.Printf("FIRESTORE PROBE: FAIL %v\n", err)
 		os.Exit(1)
 	}
 	port := os.Getenv("PORT")

@@ -34,8 +34,8 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
-| Console | 3 | 3 | 0 | 0 | 0 |
-| **Total** | **80** | **34** | **34** | **7** | **5** |
+| Console | 2 | 2 | 0 | 0 | 0 |
+| **Total** | **79** | **33** | **34** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -224,7 +224,6 @@ Closed by this sweep: Test permissions on the Permissions tab (#1242).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Request metrics, the request log and traces for Spanner (raw tunnel, no front; still "not measured"), and for Firestore's and Datastore's calls from pods, which bypass the host tunnel's guard (#1288; Pub/Sub, Bigtable and the host's Firestore and Datastore calls since #1266, #1267) | not built yet | M |
 | Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |
 
