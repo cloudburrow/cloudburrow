@@ -31,21 +31,24 @@ import (
 // Times (#971). BigQuery gives a job's statistics.creationTime, startTime
 // and endTime "in milliseconds since the epoch"
 // (https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobStatistics).
-// The emulator gives every job it runs (query, load from Cloud Storage,
+// The emulator gave every job it runs (query, load from Cloud Storage,
 // extract, and a jobs.query's) its times in seconds (its source,
-// server/handler.go: `startTime.Unix()`), and an upload's job none at all;
-// measured through the official Go client, a load from Cloud Storage and
-// a query job read back with creationTime "1790593527", which
+// server/handler.go: `startTime.Unix()`), and gives an upload's job none
+// at all; measured through the official Go client, a load from Cloud
+// Storage and a query job read back with creationTime "1790593527", which
 // JobStatistics.CreationTime read as 1970-01-21, and an upload's as the
-// zero time. So the front times each jobs.insert and jobs.query it sends
+// zero time. bigquery-emulator patch 0013 (#1310) gives the jobs it runs
+// milliseconds, which the front keeps; jobs saved in seconds by an engine
+// before it remain in a state directory, and an upload still has none.
+// So the front times each jobs.insert and jobs.query it sends
 // on: the job's creationTime and startTime are when the front received
 // it, its endTime when the emulator answered. A job answered with no
 // times, or times in seconds, is given those, in the jobs.insert answer,
 // jobs.get, jobs.cancel and jobs.list; a job the front did not time (one
 // made before the front started, or one of the last maxJobRecords
 // evicted) has its seconds read as milliseconds (times 1000, so to the
-// second). A time already in milliseconds (the jobs the front carries
-// out itself, frontJobs) is left as it is.
+// second). A time already in milliseconds (the engine's since 0013, and the jobs
+// the front carries out itself, frontJobs) is left as it is.
 //
 // jobs.list (#972). The emulator's jobs.list lists every job of the
 // project, in the order it made them, and reads none of the request's

@@ -183,10 +183,9 @@ func sqlOrNull(s string) string {
 }
 
 // millisTimestamp is a resource's milliseconds since the epoch (a string
-// or number) as a SQL TIMESTAMP, or NULL. The emulator's tables.get gives
-// a table's creationTime and lastModifiedTime in seconds (measured
-// 2026-10-15, "1792085781"; BigQuery's are milliseconds), so a value below
-// 1e11 (March 1973 in milliseconds) is read as seconds.
+// or number) as a SQL TIMESTAMP, or NULL. The engine gives a table's
+// creationTime and lastModifiedTime in milliseconds, as BigQuery does
+// (bigquery-emulator patch 0013, #1310).
 func millisTimestamp(v any) string {
 	var ms int64
 	switch x := v.(type) {
@@ -200,9 +199,6 @@ func millisTimestamp(v any) string {
 		ms = int64(x)
 	default:
 		return "NULL"
-	}
-	if ms < 1e11 {
-		ms *= 1000
 	}
 	return "TIMESTAMP_MILLIS(" + strconv.FormatInt(ms, 10) + ")"
 }

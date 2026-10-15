@@ -375,10 +375,7 @@ func (f front) systemTime(r *http.Request, q queryOptions, dataset, ref string, 
 	current := compact == "CURRENT_TIMESTAMP()" || compact == "CURRENT_TIMESTAMP" || ts == now
 	tsMs, nowMs := ts/1000, now/1000
 	earliest := nowMs - hours*int64(time.Hour/time.Millisecond)
-	c, err := strconv.ParseInt(m.Created, 10, 64)
-	if err == nil && c < 1e11 {
-		c *= 1000 // the emulator's creationTime is in seconds (measured)
-	}
+	c, err := strconv.ParseInt(m.Created, 10, 64) // milliseconds (#1310)
 	if err == nil && c > earliest {
 		earliest = c
 	}
