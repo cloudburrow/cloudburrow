@@ -58,16 +58,19 @@ type folderRecord struct {
 	Metageneration int64     `json:"metageneration"`
 }
 
-// operationRecord is a folder operation, done when it is recorded.
+// operationRecord is a folder operation or a bulk restore (#1279), done
+// when it is recorded.
 type operationRecord struct {
 	Bucket  string        `json:"bucket"`
 	ID      string        `json:"id"`
-	Type    string        `json:"type"` // RENAME_FOLDER or DELETE_FOLDER
+	Type    string        `json:"type"` // RENAME_FOLDER, DELETE_FOLDER or BULK_RESTORE_OBJECTS
 	Created time.Time     `json:"created"`
 	Ended   time.Time     `json:"ended"`
 	Source  string        `json:"source"`
 	Dest    string        `json:"dest,omitempty"`
 	Folder  *folderRecord `json:"folder,omitempty"`
+	// Restore is a bulk restore's counts.
+	Restore *bulkRestoreCounts `json:"restore,omitempty"`
 }
 
 func folderKey(bucket, name string) string  { return folderPrefix + bucket + "/" + name }
@@ -442,6 +445,16 @@ func (s *Server) folderJSON(r *http.Request, f folderRecord) map[string]any {
 func operationMetadata(op operationRecord) map[string]any {
 	common := map[string]any{"type": op.Type, "createTime": rfc3339(op.Created),
 		"endTime": rfc3339(op.Ended), "updateTime": rfc3339(op.Ended), "progressPercent": 100}
+	if op.Type == bulkRestoreType {
+		n := bulkRestoreCounts{}
+		if op.Restore != nil {
+			n = *op.Restore
+		}
+		// int64 counts are JSON strings, as proto3 JSON writes them.
+		return map[string]any{"@type": "type.googleapis.com/google.storage.v1.BulkRestoreObjectsMetadata",
+			"commonMetadata": common, "successfulObjectCount": strconv.FormatInt(n.Restored, 10),
+			"skippedObjectCount": strconv.FormatInt(n.Skipped, 10), "failedObjectCount": strconv.FormatInt(n.Failed, 10)}
+	}
 	if op.Type == "RENAME_FOLDER" {
 		return map[string]any{"@type": "type.googleapis.com/google.storage.control.v2.RenameFolderMetadata",
 			"commonMetadata": common, "sourceFolderId": op.Source, "destinationFolderId": op.Dest}

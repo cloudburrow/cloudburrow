@@ -43,7 +43,6 @@ Already tracked: none open. ACLs and object IAM are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `objects.bulkRestore`: restoring soft-deleted objects in bulk (a long-running bucket operation) is 501 (#1279) | not built yet | M |
 | `buckets.operations.list` with a `filter` is 501 (#1280) | not built yet | S |
 | `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) (#1281) | not built yet | M |
 | XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |

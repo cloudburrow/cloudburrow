@@ -2329,8 +2329,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 21,
-      "Verified": 66
+      "Unimplemented": 20,
+      "Verified": 67
     },
     "rows": [
       {
@@ -2858,8 +2858,10 @@
       },
       {
         "method": "storage.objects.bulkRestore",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagebulkrestore_test.go:33 TestStorageBulkRestore"
+        ]
       },
       {
         "method": "storage.objects.compose",

@@ -125,6 +125,7 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.objects.rewrite"] = s.objectsRewrite
 	s.handlers["storage.objects.move"] = s.objectsMove
 	s.handlers["storage.objects.restore"] = s.objectsRestore
+	s.handlers["storage.objects.bulkRestore"] = s.objectsBulkRestore
 	s.handlers["storage.buckets.restore"] = s.bucketsRestore
 	s.handlers["storage.buckets.lockRetentionPolicy"] = s.bucketsLockRetentionPolicy
 	s.handlers["storage.buckets.getIamPolicy"] = s.bucketsGetIamPolicy

@@ -74,7 +74,7 @@ var methodStatus = map[string]status{
 	"storage.objectAccessControls.list":                built,
 	"storage.objectAccessControls.patch":               built,
 	"storage.objectAccessControls.update":              built,
-	"storage.objects.bulkRestore":                      unimplemented,
+	"storage.objects.bulkRestore":                      built,
 	"storage.objects.compose":                          built,
 	"storage.objects.copy":                             built,
 	"storage.objects.delete":                           built,

@@ -266,6 +266,10 @@ type operationMeta struct {
 	Source      string `json:"sourceFolderId"`
 	Destination string `json:"destinationFolderId"`
 	Folder      string `json:"folderId"`
+	// A bulk restore's counts (#1279).
+	Restored string `json:"successfulObjectCount"`
+	Skipped  string `json:"skippedObjectCount"`
+	Failed   string `json:"failedObjectCount"`
 }
 
 func readOperationMeta(op *storagev1.GoogleLongrunningOperation) operationMeta {
@@ -308,12 +312,16 @@ func operationResult(op *storagev1.GoogleLongrunningOperation) *console.Listing 
 	if m.Destination != "" {
 		items = append(items, row("Destination", m.Destination))
 	}
+	if m.Restored != "" {
+		items = append(items, row("Restored", m.Restored), row("Skipped", orDash(m.Skipped)), row("Failed", orDash(m.Failed)))
+	}
 	return &console.Listing{Columns: []string{"Value"}, NameColumn: "Field", Noun: "fields",
 		Items: items, Total: len(items)}
 }
 
-// operationsSection is the Operations tab of an HNS bucket's page, from
-// buckets.operations.list.
+// operationsSection is the Operations tab of a bucket's page, from
+// buckets.operations.list: an HNS bucket's folder operations and any
+// bucket's bulk restores (#1279).
 func (p storageProvider) operationsSection(ctx context.Context, bucket string) console.Section {
 	sec := console.Section{ID: "operations", Label: "Operations", Listing: console.Listing{
 		Columns: []string{"Type", "State", "Folder", "Destination", "Created", "Ended"}, NameColumn: "Operation",
@@ -376,6 +384,11 @@ func (p storageProvider) operationDetail(ctx context.Context, path []string) (co
 	if m.Destination != "" {
 		props = append(props, console.Property{Label: "Destination", Value: m.Destination})
 	}
+	if m.Restored != "" {
+		props = append(props, console.Property{Label: "Restored", Value: m.Restored},
+			console.Property{Label: "Skipped", Value: orDash(m.Skipped)},
+			console.Property{Label: "Failed", Value: orDash(m.Failed)})
+	}
 	props = append(props,
 		console.Property{Label: "Created", Value: orDash(m.Common.CreateTime)},
 		console.Property{Label: "Ended", Value: orDash(m.Common.EndTime)})
@@ -383,7 +396,7 @@ func (p storageProvider) operationDetail(ctx context.Context, path []string) (co
 		Summary: []console.Property{{Label: "Bucket", Value: path[1]}, {Label: "Operation", Value: path[2]}},
 		Sections: []console.Section{{ID: "operation", Label: "Operation", Kind: console.KindProperties,
 			Groups: []console.PropertyGroup{{Heading: "Operation", Properties: props}},
-			Note: "Read with buckets.operations.get. A folder operation is done when it is returned here, " +
+			Note: "Read with buckets.operations.get. A folder operation or a bulk restore is done when it is returned here, " +
 				"so there is nothing to cancel."}},
 	}, nil
 }
