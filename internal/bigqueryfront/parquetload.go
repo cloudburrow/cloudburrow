@@ -361,10 +361,15 @@ func (f front) makeParquetTable(r *http.Request, ref tableRef, schema map[string
 	return ""
 }
 
-// Bounds on one INSERT of rows.
+// Bounds on one INSERT of rows. The engine's time is per row, not per
+// statement: measured on the native emulator (#1070), 20,000 rows of
+// INT64, FLOAT64, STRING went in at 6,600 rows/s by 100 a statement, 9,000-
+// 9,400 by 500, 10,100-10,500 by 2,000 and 10,700 by 5,000, the time spent
+// walking and analyzing each row's literals, with the same memory at 500
+// and 2,000; so larger statements gain little more.
 const (
 	maxInsertBytes = 256 << 10
-	maxInsertRows  = 500
+	maxInsertRows  = 2000
 )
 
 // insertRows inserts the rows, one literal per line of rows, into ref,
