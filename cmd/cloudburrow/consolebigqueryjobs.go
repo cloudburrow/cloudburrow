@@ -29,8 +29,8 @@ package main
 //     delimiter and the header row for CSV. nativeGeographyExportEnabled is
 //     not offered: the official Go client has no field for it.
 //
-// A combination the front refuses (a JSON autodetect load into a new table,
-// a Parquet load whose file has a column the table lacks, a JSON export of a NULL, a
+// A JSON load with autodetect into a new table is detected by the front
+// (#1324). A combination the front refuses (a Parquet load whose file has a column the table lacks, a JSON export of a NULL, a
 // sourceColumnMatch NAME without one header row, ...) is sent as it is, and
 // the refusal is shown in the API's words: the front is the authority, as it
 // is for every BigQuery form (#874).
@@ -116,7 +116,8 @@ func bigqueryLoadFields(withTable bool) []console.Field {
 		console.Field{Name: "writeDisposition", Label: "Write preference", Type: "select", Options: bigqueryWriteModes,
 			Help: "WRITE_APPEND adds the rows to the table; WRITE_TRUNCATE replaces what it holds."},
 		console.Field{Name: "autodetect", Label: "Auto-detect the schema", Type: "checkbox", Section: "Schema",
-			Help: "BigQuery reads the columns from the data. Leave it off, with no fields below, to load into a " +
+			Help: "BigQuery reads the columns from the data: a CSV's header and values, or a JSON file's fields, " +
+				"objects as RECORDs and arrays as REPEATED columns. Leave it off, with no fields below, to load into a " +
 				"table that exists with its own schema."},
 		console.Field{Name: "schema", Label: "Schema", Type: "schema", Options: bigqueryColumnTypes,
 			Pattern: bigqueryFieldNamePattern, Section: "Schema",

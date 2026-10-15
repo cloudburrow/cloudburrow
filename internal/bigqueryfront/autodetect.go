@@ -38,7 +38,9 @@ import (
 //     ignores the map (measured: "a!" was kept under V2), and the front
 //     does not rename. The table is deleted.
 //
-// A NEWLINE_DELIMITED_JSON load with autodetect into a new table is 501
+// A NEWLINE_DELIMITED_JSON load with autodetect into a new table has its
+// schema detected by the front (#1324, jsondetect.go) and does not reach
+// here; one it does not detect (into another project's table) is 501
 // before it is sent: the emulator answers it with 500 "runtime error:
 // invalid memory address or nil pointer dereference" (measured), which the
 // Go client retries until its deadline.
