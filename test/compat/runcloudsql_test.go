@@ -49,6 +49,22 @@ EOF
 chmod +x /tmp/h
 while true; do nc -l -p 8080 -e /tmp/h; done`
 
+// cloudSQLSelectOne waits for a service to answer 1, what SELECT 1 returned
+// through /cloudsql/<conn>.
+func cloudSQLSelectOne(t *testing.T, uri, conn string) {
+	t.Helper()
+	base, host := ingress(t), hostOf(t, uri)
+	var code int
+	var body string
+	for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
+		code, body = httpGet(t, base, host, "/")
+		if code == http.StatusOK && strings.TrimSpace(body) == "1" {
+			return
+		}
+	}
+	t.Fatalf("SELECT 1 through /cloudsql/%s: %d %q", conn, code, body)
+}
+
 // covers: google.cloud.run.v2.Services/CreateService, google.cloud.run.v2.Services/GetService
 //
 // TestRunServiceCloudSQLVolume (#1346): a service with a Cloud SQL volume
@@ -91,18 +107,7 @@ func TestRunServiceCloudSQLVolume(t *testing.T) {
 		v[0].GetCloudSqlInstance().GetInstances()[0] != conn {
 		t.Errorf("volumes read back as %v", v)
 	}
-	base, host := ingress(t), hostOf(t, svc.GetUri())
-	var code int
-	var body string
-	for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
-		code, body = httpGet(t, base, host, "/")
-		if code == http.StatusOK && strings.TrimSpace(body) == "1" {
-			break
-		}
-	}
-	if code != http.StatusOK || strings.TrimSpace(body) != "1" {
-		t.Fatalf("SELECT 1 through /cloudsql/%s: %d %q", conn, code, body)
-	}
+	cloudSQLSelectOne(t, svc.GetUri(), conn)
 
 	_, err = c.CreateService(ctx, &runpb.CreateServiceRequest{Parent: runParent(h), ServiceId: "compat-cloudsql-unknown",
 		Service: &runpb.Service{Template: &runpb.RevisionTemplate{
