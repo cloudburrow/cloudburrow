@@ -41,8 +41,8 @@ import (
 // and vector index views are always empty: the instance makes no index
 // (CREATE SEARCH INDEX and CREATE VECTOR INDEX fail in the engine).
 //
-// Not built (501): MATERIALIZED_VIEWS, OBJECT_PRIVILEGES, SCHEMATA_OPTIONS,
-// SCHEMATA_LINKS.
+// MATERIALIZED_VIEWS and SCHEMATA_OPTIONS: infoschemaschemata.go (#1351).
+// Not built (501): OBJECT_PRIVILEGES, SCHEMATA_LINKS.
 
 func init() {
 	for k, v := range map[string]func(front, *http.Request, string, *datasetMeta) (string, int, string){

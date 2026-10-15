@@ -4314,7 +4314,8 @@
         "method": "google.storage.v2.Storage/ComposeObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpccompose_test.go:20 TestStorageGRPCComposeDeletesSources"
         ]
       },
       {
@@ -5925,6 +5926,7 @@
           "test/compat/bigqueryinfoschemajobs_test.go:27 TestBigQueryInformationSchemaJobs",
           "test/compat/bigqueryinfoschemamore_test.go:75 TestBigQueryInformationSchemaPartitionsAndConstraints",
           "test/compat/bigqueryinfoschemaregion_test.go:16 TestBigQueryInformationSchemaRegionViews",
+          "test/compat/bigqueryinfoschemaschemata_test.go:19 TestBigQueryInformationSchemaSchemataOptions",
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryingestiontime_test.go:31 TestBigQueryIngestionTime",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
@@ -5977,6 +5979,7 @@
           "test/compat/bigqueryinfoschemajobs_test.go:27 TestBigQueryInformationSchemaJobs",
           "test/compat/bigqueryinfoschemamore_test.go:75 TestBigQueryInformationSchemaPartitionsAndConstraints",
           "test/compat/bigqueryinfoschemaregion_test.go:16 TestBigQueryInformationSchemaRegionViews",
+          "test/compat/bigqueryinfoschemaschemata_test.go:19 TestBigQueryInformationSchemaSchemataOptions",
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryingestiontime_test.go:31 TestBigQueryIngestionTime",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",

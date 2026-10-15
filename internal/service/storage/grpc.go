@@ -607,9 +607,6 @@ func (g *grpcStorage) ComposeObject(ctx context.Context, req *pb.ComposeObjectRe
 	if err := noCSEK(req.GetCommonObjectRequestParams()); err != nil {
 		return nil, err
 	}
-	if req.GetDeleteSourceObjects() {
-		return nil, grpcstatus.Error(codes.Unimplemented, "ComposeObject delete_source_objects is not implemented")
-	}
 	d := req.GetDestination()
 	b, err := bucketID(d.GetBucket())
 	if err != nil {
@@ -638,7 +635,7 @@ func (g *grpcStorage) ComposeObject(ctx context.Context, req *pb.ComposeObjectRe
 	setIf(q, "kmsKeyName", req.GetKmsKey())
 	var out jsonObject
 	if err := g.do(ctx, http.MethodPost, objectPath(b, d.GetName())+"/compose", q,
-		map[string]any{"destination": dest, "sourceObjects": srcs}, &out); err != nil {
+		map[string]any{"destination": dest, "sourceObjects": srcs, "deleteSourceObjects": req.GetDeleteSourceObjects()}, &out); err != nil {
 		return nil, err
 	}
 	return out.proto(), nil
