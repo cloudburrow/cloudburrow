@@ -88,6 +88,48 @@ cross:
 	done
 	@echo "cross ok: $(CROSS_TARGETS)"
 
+## build-onnx: Build bin/cloudburrow-onnx with -tags onnx (local embeddings, #41): cgo, the pinned libtokenizers.a, and the embedded binaries
+# The onnx build serves the community ONNX EmbeddingGemma conversion
+# (docs/embeddings.md). It links Hugging Face's tokenizers through
+# github.com/daulet/tokenizers, whose static library is fetched from that
+# module's release at the version go.mod pins and checked against the
+# SHA-256 below; ONNX Runtime itself is loaded when the binary runs
+# (ONNXRUNTIME_LIB), so nothing else is needed to build. No model is
+# fetched: `up -local-ai-embeddings` does that at run time.
+TOKENIZERS_VERSION := v1.27.0
+TOKENIZERS_PLATFORM := $(shell go env GOOS)-$(shell go env GOARCH)
+# The release's asset names, and their SHA-256, by GOOS-GOARCH.
+TOKENIZERS_ASSET_darwin-arm64 := darwin-arm64
+TOKENIZERS_ASSET_darwin-amd64 := darwin-x86_64
+TOKENIZERS_ASSET_linux-amd64 := linux-amd64
+TOKENIZERS_ASSET_linux-arm64 := linux-arm64
+TOKENIZERS_SHA256_darwin-arm64 := fb84b8b2e349a5952767ffe80ccd862fc44084de47f3b0cc3f0b7c9d4e649cf7
+TOKENIZERS_SHA256_darwin-amd64 := 6239efe5a81fde8089ef2df8ae710366542b4e5deab6d8ecb74d7d1862db2ddb
+TOKENIZERS_SHA256_linux-amd64 := 72556cdca798dd4ea7cdaba308e5f0d68a8cb93b67c96edf485b7a0edd7b07f4
+TOKENIZERS_SHA256_linux-arm64 := e96545ad05930c26f51f63d932ee6d3bbd32bbed149e102c5290d587a2293067
+TOKENIZERS_LIB_DIR ?= $(BIN_DIR)/tokenizers/$(TOKENIZERS_VERSION)/$(TOKENIZERS_PLATFORM)
+.PHONY: build-onnx
+build-onnx: storage-binaries bigquery-binaries onnx-compile
+	@echo "built $(BIN_DIR)/$(BINARY)-onnx ($(VERSION)); run it with ONNXRUNTIME_LIB=/path/to/libonnxruntime"
+
+## onnx-compile: Build and vet the onnx-tagged CLI alone, without making the embedded binaries (CI's onnx job)
+.PHONY: onnx-compile
+onnx-compile: $(TOKENIZERS_LIB_DIR)/libtokenizers.a
+	@mkdir -p $(BIN_DIR)
+	CGO_ENABLED=1 CGO_LDFLAGS="-L$(abspath $(TOKENIZERS_LIB_DIR)) $(CGO_LDFLAGS)" \
+		go build -tags onnx -trimpath -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY)-onnx ./cmd/$(BINARY)
+	CGO_ENABLED=1 CGO_LDFLAGS="-L$(abspath $(TOKENIZERS_LIB_DIR)) $(CGO_LDFLAGS)" \
+		go vet -tags onnx ./internal/embedding/ ./internal/localai/ ./cmd/$(BINARY)/
+
+$(BIN_DIR)/tokenizers/$(TOKENIZERS_VERSION)/%/libtokenizers.a:
+	@test -n "$(TOKENIZERS_ASSET_$*)" -a -n "$(TOKENIZERS_SHA256_$*)" || { echo "build-onnx: no pinned libtokenizers for $$(go env GOOS)/$$(go env GOARCH); set TOKENIZERS_LIB_DIR to a directory holding libtokenizers.a"; exit 1; }
+	@mkdir -p $(@D)
+	curl -fsSL -o $(@D)/libtokenizers.tar.gz \
+		https://github.com/daulet/tokenizers/releases/download/$(TOKENIZERS_VERSION)/libtokenizers.$(TOKENIZERS_ASSET_$*).tar.gz
+	echo "$(TOKENIZERS_SHA256_$*)  $(@D)/libtokenizers.tar.gz" | shasum -a 256 -c -
+	tar -xzf $(@D)/libtokenizers.tar.gz -C $(@D) libtokenizers.a
+	@rm -f $(@D)/libtokenizers.tar.gz
+
 ## install: Install the binary into GOBIN
 .PHONY: install
 install: storage-binaries bigquery-binaries

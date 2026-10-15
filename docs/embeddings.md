@@ -7,8 +7,10 @@
 > in `internal/localai/catalog.go`. It is **NOT an official Google artifact**; the Gemma
 > terms apply to its weights. It is served as model `embeddinggemma-300m-onnx-community`.
 >
-> - Build: `go build -tags onnx ./cmd/cloudburrow` (needs cgo and the Hugging Face
->   `libtokenizers.a` from github.com/daulet/tokenizers on the linker path). Run with
+> - Build: `make build-onnx` writes `bin/cloudburrow-onnx` (cgo; it fetches the Hugging Face
+>   `libtokenizers.a` of the github.com/daulet/tokenizers release go.mod pins, checked by
+>   SHA-256, and fetches no model). The ONNX build workflow (`.github/workflows/onnx.yml`)
+>   builds it on every push to main and nightly, never on pull requests. Run with
 >   `ONNXRUNTIME_LIB=/path/to/libonnxruntime.{so,dylib}`. The default build has no ONNX
 >   Runtime and answers every `:predict` 501.
 > - Enable: `cloudburrow up -local-ai-embeddings`. The pinned files (~330 MB) are fetched

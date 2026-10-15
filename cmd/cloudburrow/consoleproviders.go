@@ -3088,7 +3088,8 @@ func eventsProvider(kubeconfig string) kubeProvider {
 // that is the community Gemma conversion, and, in a build with the onnx tag,
 // the community ONNX EmbeddingGemma conversion (#41). Every Google-published
 // artifact is gated, so those are reported as needing credentials rather than
-// as broken.
+// as broken. Not every embedding artifact is: three are ungated, and the
+// runtime refuses them (docs/embeddings.md), which the list's note says.
 
 type aiProvider struct{}
 
@@ -3131,9 +3132,11 @@ func (aiProvider) List(context.Context, string) (console.Listing, error) {
 		RowsOpenable: true,
 		Note: "The generation runtime is built from Google's source and has been " +
 			"measured running (docs/local-ai.md). What a model needs is per-model: " +
-			"every Google-published artifact is gated, and so is every embedding " +
-			"artifact, so the one model that runs today is a community conversion — " +
-			"labelled as one, because it is not Google-published.",
+			"every Google-published artifact is gated, and the ungated embedding " +
+			"artifacts are refused by the runtime (docs/embeddings.md). So the models " +
+			"that run today are community conversions: the Gemma generation model and, " +
+			"in a build with the onnx tag, the ONNX EmbeddingGemma (#41) — each labelled " +
+			"as one, because neither is Google-published.",
 	}, nil
 }
 
