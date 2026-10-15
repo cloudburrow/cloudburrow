@@ -205,42 +205,27 @@ func TestCreateOrReplaceExistingTable(t *testing.T) {
 	}
 }
 
-// TestFailedScriptWithAHandlerIs501 (#918): the emulator never runs an
-// EXCEPTION handler, so a script with one that fails is 501, naming the
-// emulator's error; through jobs.insert the job is failed so, and jobs.get
-// and jobs.list report it. A script with a handler that succeeds is
-// answered as it was.
-func TestFailedScriptWithAHandlerIs501(t *testing.T) {
-	sql := "BEGIN SELECT * FROM nope.nope; EXCEPTION WHEN ERROR THEN SELECT 1; END"
-	emu := &scriptEmulator{run: func(string) (int, string) {
-		return 400, `{"error":{"code":400,"message":"Table not found: nope.nope"}}`
+// TestScriptHandlerRuns (#918, #1201): the emulator never runs an
+// EXCEPTION handler, so the front carries a script with one out itself: a
+// statement in the block that fails runs the handler, with @@error, and
+// the handler's last query is the answer.
+func TestScriptHandlerRuns(t *testing.T) {
+	sql := "BEGIN SELECT * FROM nope.nope; EXCEPTION WHEN ERROR THEN SELECT @@error.message AS m; END"
+	emu := &scriptEmulator{run: func(q string) (int, string) {
+		if strings.Contains(q, "FROM nope.nope") {
+			return 400, `{"error":{"code":400,"message":"Table not found: nope.nope"}}`
+		}
+		return 200, `{"jobComplete":true}`
 	}}
 	code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", sql))
-	if msg, _ := got["error"].(map[string]any)["message"].(string); code != 501 || !strings.Contains(msg, "Table not found: nope.nope") {
-		t.Errorf("jobs.query: %d %v", code, got)
-	}
-
-	emu = &scriptEmulator{run: func(string) (int, string) {
-		return 200, `{"jobReference":{"jobId":"j1"},"status":{"state":"DONE","errorResult":{"reason":"jobInternalError","message":"Table not found: nope.nope"}}}`
-	}}
-	list := &listingEmulator{scriptEmulator: emu}
-	h := Wrap(list)
-	code, got = do(t, h, "POST", base+"/jobs", queryBody("/jobs", sql))
-	if code != 200 || errorReason(got) != "notImplemented" {
-		t.Errorf("jobs.insert: %d %v", code, got)
-	}
-	if _, job := do(t, h, "GET", base+"/jobs/j1", ""); errorReason(job) != "notImplemented" {
-		t.Errorf("jobs.get: %v", job)
-	}
-	_, jobs := do(t, h, "GET", base+"/jobs", "")
-	items, _ := jobs["jobs"].([]any)
-	if len(items) != 2 || errorReason(items[0].(map[string]any)) != "notImplemented" || errorReason(items[1].(map[string]any)) != "" {
-		t.Errorf("jobs.list: %v", jobs)
+	if code != 200 || len(emu.log) == 0 || emu.log[len(emu.log)-1] != "QUERY SELECT ('Table not found: nope.nope') AS m" {
+		t.Errorf("jobs.query: %d %v %q", code, got, emu.log)
 	}
 
 	emu = &scriptEmulator{}
-	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "BEGIN SELECT 1; EXCEPTION WHEN ERROR THEN SELECT 2; END")); code != 200 {
-		t.Errorf("a script whose block succeeds: %d", code)
+	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "BEGIN SELECT 1; EXCEPTION WHEN ERROR THEN SELECT 2; END")); code != 200 ||
+		emu.log[len(emu.log)-1] != "QUERY SELECT 1" {
+		t.Errorf("a script whose block succeeds: %d %q", code, emu.log)
 	}
 }
 
