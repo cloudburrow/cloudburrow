@@ -25,8 +25,10 @@ import (
 // client: an AVRO extract writes TIMESTAMP as timestamp-micros, DATE as a
 // string (an int date with UseAvroLogicalTypes), NUMERIC as decimal(38,
 // 9), a STRUCT as a nested record and an ARRAY as an Avro array, as
-// BigQuery's "Avro export details" give them; a TIME without
-// UseAvroLogicalTypes is 501, and nothing is written.
+// BigQuery's "Avro export details" give them; TIME and DATETIME as
+// strings (time-micros and a string of logicalType datetime with
+// UseAvroLogicalTypes), JSON and GEOGRAPHY as strings with their sqlType;
+// GZIP is 400, as documented.
 func TestBigQueryAvroExtractOfOtherTypes(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -38,7 +40,7 @@ func TestBigQueryAvroExtractOfOtherTypes(t *testing.T) {
 		t.Fatalf("create bucket: %v", err)
 	}
 	t.Cleanup(func() {
-		for _, n := range []string{"plain.avro", "logical.avro", "time.avro", "time-logical.avro"} {
+		for _, n := range []string{"plain.avro", "logical.avro", "time.avro", "time-logical.avro", "dj.avro", "dj-logical.avro"} {
 			_ = bucket.Object(n).Delete(context.Background())
 		}
 		_ = bucket.Delete(context.Background())
@@ -130,17 +132,47 @@ func TestBigQueryAvroExtractOfOtherTypes(t *testing.T) {
 	if tm, _ := read("time-logical.avro")["t"].(map[string]any)["long.time-micros"].(time.Duration); tm != 3*time.Hour+4*time.Minute+5500*time.Millisecond {
 		t.Errorf("TIME read back %v", tm)
 	}
-	wantReason(t, "an AVRO extract of a TIME without logical types", extract("tm", "time.avro", false), 501, "notImplemented")
-	if _, err := bucket.Object("time.avro").Attrs(ctx); err == nil {
-		t.Errorf("a 501 extract wrote time.avro")
+	// "In extract jobs, it's a string by default."
+	if err := extract("tm", "time.avro", false); err != nil {
+		t.Fatalf("an AVRO extract of a TIME without logical types: %v", err)
+	}
+	if tm := read("time.avro")["t"]; !reflect.DeepEqual(tm, map[string]any{"string": "03:04:05.5"}) {
+		t.Errorf("TIME without logical types read back %v", tm)
+	}
+	// DATETIME a string (logicalType datetime with logical types), JSON
+	// and GEOGRAPHY strings with their sqlType (extractavro.go).
+	if err := bqRun(ctx, c, "CREATE TABLE `"+ds.DatasetID+".dj` AS SELECT DATETIME '2020-01-02 03:04:05.5' AS dt, "+
+		"JSON '{\"a\": 1}' AS j, ST_GEOGPOINT(1, 2) AS g", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, logical := range []bool{false, true} {
+		name := map[bool]string{false: "dj.avro", true: "dj-logical.avro"}[logical]
+		if err := extract("dj", name, logical); err != nil {
+			t.Fatalf("an AVRO extract of DATETIME, JSON, GEOGRAPHY (logical %v): %v", logical, err)
+		}
+		row := read(name)
+		want := map[string]any{"dt": map[string]any{"string": "2020-01-02T03:04:05.5"},
+			"j": map[string]any{"string": `{"a":1}`}, "g": map[string]any{"string": "POINT(1 2)"}}
+		if !reflect.DeepEqual(row, want) {
+			t.Errorf("%s: %v, want %v", name, row, want)
+		}
+	}
+	gz := bigquery.NewGCSReference("gs://" + bucket.BucketName() + "/gzip.avro")
+	gz.DestinationFormat = bigquery.Avro
+	gz.Compression = bigquery.Gzip
+	_, err := ds.Table("dj").ExtractorTo(gz).Run(ctx)
+	// "The Avro format can't be used in combination with GZIP compression."
+	wantReason(t, "an AVRO extract with GZIP", err, 400, "invalid")
+	if _, err := bucket.Object("gzip.avro").Attrs(ctx); err == nil {
+		t.Errorf("a refused extract wrote gzip.avro")
 	}
 }
 
 // TestBigQueryParquetExtract (#957), through the official Go client: a
 // PARQUET extract writes each column of the Parquet type and logical type
 // BigQuery's "Parquet export details" give, a RECORD as a group, with the
-// job's compression; a FLOAT64 or REPEATED column is 501, and nothing is
-// written.
+// job's compression; FLOAT64 as DOUBLE, JSON as a STRING and REPEATED
+// columns in Parquet's LIST form.
 func TestBigQueryParquetExtract(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -163,8 +195,8 @@ func TestBigQueryParquetExtract(t *testing.T) {
 			"DATE '2020-01-02' AS d, DATETIME '2020-01-02 03:04:05.5' AS dt, TIMESTAMP '2020-01-02 03:04:05.123456 UTC' AS ts, " +
 			"TIME '03:04:05' AS tm, STRUCT(7 AS a, 'q' AS t) AS r " +
 			"UNION ALL SELECT 2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL",
-		"CREATE TABLE `" + ds.DatasetID + ".fl` AS SELECT 1.5 AS f",
-		"CREATE TABLE `" + ds.DatasetID + ".rep` AS SELECT [1, 2] AS xs",
+		"CREATE TABLE `" + ds.DatasetID + ".fl` AS SELECT 1.5 AS f, JSON '{\"a\": 1}' AS j",
+		"CREATE TABLE `" + ds.DatasetID + ".rep` AS SELECT [1, 2] AS xs, [STRUCT('p' AS a, [3, 4] AS ns), STRUCT('q' AS a, ARRAY<INT64>[] AS ns)] AS rs",
 	} {
 		if err := bqRun(ctx, c, sql, false); err != nil {
 			t.Fatalf("%s: %v", sql, err)
@@ -254,11 +286,58 @@ func TestBigQueryParquetExtract(t *testing.T) {
 			t.Errorf("%s: rows %q, want %q", name, rows, want2)
 		}
 	}
-	wantReason(t, "a PARQUET extract of a FLOAT64", extract("fl", "float.parquet", bigquery.None), 501, "notImplemented")
-	wantReason(t, "a PARQUET extract of a REPEATED column", extract("rep", "rep.parquet", bigquery.None), 501, "notImplemented")
-	for _, n := range []string{"float.parquet", "rep.parquet"} {
-		if _, err := bucket.Object(n).Attrs(ctx); err == nil {
-			t.Errorf("a 501 extract wrote %s", n)
+	// FLOAT64 as DOUBLE, JSON as a STRING, REPEATED columns in the LIST
+	// form (extractparquet.go).
+	if err := extract("fl", "float.parquet", bigquery.None); err != nil {
+		t.Fatalf("a PARQUET extract of FLOAT64 and JSON: %v", err)
+	}
+	if err := extract("rep", "rep.parquet", bigquery.Snappy); err != nil {
+		t.Fatalf("a PARQUET extract of REPEATED columns: %v", err)
+	}
+	readBack := func(name string) (*file.Reader, string) {
+		t.Helper()
+		r, err := bucket.Object(name).NewReader(ctx)
+		if err != nil {
+			t.Fatal(err)
 		}
+		b, _ := io.ReadAll(r)
+		r.Close()
+		pf, err := file.NewParquetReader(bytes.NewReader(b))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		fr, err := pqarrow.NewFileReader(pf, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tbl, err := fr.ReadTable(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tbl.Release()
+		var cols []string
+		for i := 0; i < int(tbl.NumCols()); i++ {
+			j, _ := tbl.Column(i).Data().Chunk(0).MarshalJSON()
+			cols = append(cols, tbl.Schema().Field(i).Name+"="+strings.ReplaceAll(string(j), "\n", ""))
+		}
+		return pf, strings.Join(cols, " ")
+	}
+	pf, got := readBack("float.parquet")
+	if pt := pf.MetaData().Schema.Column(0).PhysicalType().String(); pt != "DOUBLE" {
+		t.Errorf("FLOAT64 written as %s", pt)
+	}
+	if want := `f=[1.5] j=["{\"a\":1}"]`; got != want {
+		t.Errorf("float.parquet: %s, want %s", got, want)
+	}
+	pf, got = readBack("rep.parquet")
+	var paths []string
+	for i := 0; i < pf.MetaData().Schema.NumColumns(); i++ {
+		paths = append(paths, pf.MetaData().Schema.Column(i).Path())
+	}
+	if want := "xs.list.element rs.list.element.a rs.list.element.ns.list.element"; strings.Join(paths, " ") != want {
+		t.Errorf("rep.parquet columns %v, want %s", paths, want)
+	}
+	if want := `xs=[[1,2]] rs=[[{"a":"p","ns":[3,4]},{"a":"q","ns":[]}]]`; got != want {
+		t.Errorf("rep.parquet: %s, want %s", got, want)
 	}
 }

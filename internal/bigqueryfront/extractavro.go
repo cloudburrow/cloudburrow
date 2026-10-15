@@ -77,7 +77,35 @@ func avroExportSchema(typ string, logical bool) (any, string) {
 		if logical {
 			return map[string]any{"type": "long", "logicalType": "time-micros"}, "long.time-micros"
 		}
+		// "In extract jobs, it's a string by default": tabledata.list's
+		// text ("03:04:05.5"), whose form the documentation does not
+		// give (UNVERIFIED against BigQuery).
+		return "string", "string"
+	case "DATETIME":
+		// "a STRING with a custom named logical type datetime" with logical
+		// types; "in extract jobs, it's a string by default". The text is
+		// tabledata.list's ("2020-01-02T03:04:05[.ffffff]"), which the
+		// documentation does not give (UNVERIFIED against BigQuery).
+		if logical {
+			return map[string]any{"type": "string", "logicalType": "datetime"}, "string" // goavro names it by its type
+		}
+		return "string", "string"
+	case "JSON":
+		// The documentation's Avro form of a JSON column is a string with
+		// sqlType JSON ("Annotate your Avro schema with sqlType set to
+		// JSON", loading-data-cloud-storage-avro); the export section does
+		// not name JSON (UNVERIFIED against BigQuery).
+		return map[string]any{"type": "string", "sqlType": "JSON"}, "string"
+	case "GEOGRAPHY":
+		// A WKT string with sqlType GEOGRAPHY, by analogy with JSON: the
+		// export section does not name GEOGRAPHY (UNVERIFIED against BigQuery).
+		return map[string]any{"type": "string", "sqlType": "GEOGRAPHY"}, "string"
 	case "NUMERIC":
+		// The precision and scale of an unparameterized NUMERIC and
+		// BIGNUMERIC are not documented for Avro (only "NUMERIC(P[, S]) ...
+		// precision and scale are passed to the decimal logical type"):
+		// BigQuery's own maximums (38, 9) and (76, 38), as for Parquet,
+		// are used (UNVERIFIED against BigQuery).
 		return map[string]any{"type": "bytes", "logicalType": "decimal", "precision": 38, "scale": 9}, "bytes.decimal"
 	case "BIGNUMERIC":
 		return map[string]any{"type": "bytes", "logicalType": "decimal", "precision": 76, "scale": 38}, "bytes.decimal"

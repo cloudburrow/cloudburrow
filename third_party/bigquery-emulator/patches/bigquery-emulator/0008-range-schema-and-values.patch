@@ -1,0 +1,135 @@
+CloudBurrow patch 8 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1111).
+
+The bug: a RANGE value in a query's result (SELECT RANGE(DATE '2020-01-01',
+DATE '2020-02-01')) was answered with a schema field of no type, at the top
+level, in an ARRAY or in a STRUCT (measured through CloudBurrow's front), as
+TableFieldSchemaFromColumnType had no case for GoogleSQL's TYPE_RANGE (30),
+so no client could read it: the Go client fails "incomplete range schema".
+Its value was GoogleSQL's text, a TIMESTAMP bound as
+"2020-01-01 00:00:00.000000+00" and a DATETIME bound with a space, where
+BigQuery's REST API gives int64 microseconds and a "T" (the forms the
+official Go client parses, cloud.google.com/go/bigquery convertRangeValue,
+and its value_test.go).
+
+The patch gives a RANGE column the type RANGE and rangeElementType (also
+for an ARRAY of them), and Format writes a top-level RANGE value, or a
+REPEATED one's, in the REST form. A RANGE inside a STRUCT gets its schema
+but not the value rewrite (Format does not walk STRUCTs).
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/types/types.go
++++ b/types/types.go
+@@ -324,6 +324,10 @@
+ 	}
+ 	return ""
+ }
++
++// rangeKind is GoogleSQL's TYPE_RANGE, 30 in go-googlesql's TypeKind
++// (TypeKindTypeRange), which zsqltypes does not name.
++const rangeKind zsqltypes.TypeKind = 30
+ 
+ // TableFieldSchemaFromColumnType walks a googlesqlite.ColumnType (the
+ // driver-level type descriptor) and produces a BigQuery v2 schema. It
+@@ -339,11 +343,23 @@
+ 	case zsqltypes.ARRAY:
+ 		elem := TableFieldSchemaFromColumnType("", t.ElementType)
+ 		return &bigqueryv2.TableFieldSchema{
+-			Name:   name,
+-			Type:   elem.Type,
+-			Fields: elem.Fields,
+-			Mode:   string(RepeatedMode),
++			Name:             name,
++			Type:             elem.Type,
++			Fields:           elem.Fields,
++			RangeElementType: elem.RangeElementType,
++			Mode:             string(RepeatedMode),
+ 		}
++	case rangeKind:
++		// RANGE<T> (cloudburrow/cloudburrow#1111): BigQuery's schema
++		// gives the type RANGE and the element type as rangeElementType;
++		// without them a client cannot read the value.
++		elem := TableFieldSchemaFromColumnType("", t.ElementType)
++		return &bigqueryv2.TableFieldSchema{
++			Name:             name,
++			Type:             "RANGE",
++			RangeElementType: &bigqueryv2.TableFieldSchemaRangeElementType{Type: elem.Type},
++			Mode:             string(NullableMode),
++		}
+ 	case zsqltypes.STRUCT:
+ 		fields := make([]*bigqueryv2.TableFieldSchema, 0, len(t.FieldTypes))
+ 		for _, f := range t.FieldTypes {
+--- a/internal/types/types.go
++++ b/internal/types/types.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"fmt"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/apache/arrow-go/v18/arrow/array"
+@@ -226,7 +227,9 @@
+ 	for _, row := range rows {
+ 		cells := make([]*TableCell, 0, len(row.F))
+ 		for colIdx, cell := range row.F {
+-			if schema.Fields[colIdx].Type == "TIMESTAMP" && cell.V != nil {
++			if fl := schema.Fields[colIdx]; fl.Type == "RANGE" && cell.V != nil {
++				cells = append(cells, &TableCell{V: formatRangeCells(fl, cell.V)})
++			} else if schema.Fields[colIdx].Type == "TIMESTAMP" && cell.V != nil {
+ 				cells = append(cells, &TableCell{
+ 					V: formatTimestampCell(cell.V, useInt64Timestamp),
+ 				})
+@@ -263,4 +266,47 @@
+ 		sec--
+ 	}
+ 	return fmt.Sprintf("%d.%06d", sec, frac)
++}
++
++// formatRangeCells renders a RANGE cell, or a REPEATED RANGE's cells, as
++// BigQuery's REST API does (cloudburrow/cloudburrow#1111): "[start, end)",
++// each bound UNBOUNDED or the element's REST form; a TIMESTAMP as int64
++// microseconds since the epoch and a DATETIME with a "T", which is what the
++// official clients parse (cloud.google.com/go/bigquery convertRangeValue).
++func formatRangeCells(fl *bigqueryv2.TableFieldSchema, v interface{}) interface{} {
++	if items, ok := v.([]*TableCell); ok {
++		out := make([]*TableCell, 0, len(items))
++		for _, it := range items {
++			if it == nil || it.V == nil {
++				out = append(out, it)
++				continue
++			}
++			out = append(out, &TableCell{V: formatRangeCells(fl, it.V)})
++		}
++		return out
++	}
++	raw, ok := v.(string)
++	if !ok || fl.RangeElementType == nil || len(raw) < 2 || raw[0] != '[' || raw[len(raw)-1] != ')' {
++		return v
++	}
++	parts := strings.Split(raw[1:len(raw)-1], ", ")
++	if len(parts) != 2 {
++		return v
++	}
++	for i, p := range parts {
++		if p == "UNBOUNDED" {
++			continue
++		}
++		switch fl.RangeElementType.Type {
++		case "TIMESTAMP":
++			t, err := googlesqlite.TimeFromTimestampValue(p)
++			if err != nil {
++				return v
++			}
++			parts[i] = fmt.Sprint(t.UnixMicro())
++		case "DATETIME":
++			parts[i] = strings.Replace(p, " ", "T", 1)
++		}
++	}
++	return "[" + parts[0] + ", " + parts[1] + ")"
+ }

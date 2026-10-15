@@ -150,6 +150,13 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	case format != "" && format != "CSV" && !jsonFormat && !avroFormat && !parquetFormat:
 		f.next.ServeHTTP(w, r)
 		return
+	case avroFormat && gz:
+		// "The Avro format can't be used in combination with GZIP
+		// compression" (exporting-data); BigQuery's own message is not
+		// documented.
+		writeError(w, http.StatusBadRequest, "invalid", "The AVRO destination format can't be used with GZIP "+
+			"compression. Use DEFLATE or SNAPPY.")
+		return
 	case avroFormat && e.Compression != "" && !strings.EqualFold(e.Compression, "NONE") && avroCodec == "":
 		notImplemented(fmt.Sprintf("to AVRO with compression %s. BigQuery documents DEFLATE and SNAPPY for Avro, "+
 			"which CloudBurrow writes.", e.Compression))
@@ -206,7 +213,7 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		if loc, typ := avroUnwritten(meta.Schema.Fields, logical, ""); loc != "" {
 			notImplemented(fmt.Sprintf("to AVRO of a table with a %s column (%s). BigQuery's documentation gives the "+
 				"Avro type of each BigQuery type, but CloudBurrow writes only STRING, INT64, FLOAT64, BOOL, BYTES, "+
-				"TIMESTAMP, DATE, NUMERIC and BIGNUMERIC columns, TIME with useAvroLogicalTypes, and RECORDs and "+
+				"TIMESTAMP, DATE, TIME, DATETIME, JSON, GEOGRAPHY, NUMERIC and BIGNUMERIC columns, and RECORDs and "+
 				"REPEATED columns of them (docs/compatibility.md).", typ, loc))
 			return
 		}
@@ -219,8 +226,8 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	if parquetFormat {
 		if loc, typ := parquetUnwritten(meta.Schema.Fields, ""); loc != "" {
 			notImplemented(fmt.Sprintf("to PARQUET of a table with a %s column (%s). CloudBurrow writes Parquet of "+
-				"the column types whose form BigQuery's documentation gives: INT64, BOOL, STRING, BYTES, NUMERIC, "+
-				"BIGNUMERIC, DATE, DATETIME, TIMESTAMP, TIME and RECORDs of them (docs/compatibility.md).", typ, loc))
+				"the column types whose form BigQuery's documentation gives: INT64, FLOAT64, BOOL, STRING, JSON, BYTES, NUMERIC, "+
+				"BIGNUMERIC, DATE, DATETIME, TIMESTAMP, TIME, and RECORDs and REPEATED columns of them (docs/compatibility.md).", typ, loc))
 			return
 		}
 		if strings.Contains(string(got), `"precision"`) {
