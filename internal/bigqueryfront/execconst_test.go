@@ -14,6 +14,18 @@ func TestExecuteImmediateOfAConstant(t *testing.T) {
 		// INTO (#1037).
 		{"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT @y' INTO a USING 1 AS y", "DECLARE a INT64; SET a = IF((SELECT COUNT(*) FROM (SELECT (1))) > 1, " +
 			"ERROR('EXECUTE IMMEDIATE ... INTO: the query returned more than one row'), (SELECT (1)))"},
+		// INTO several variables, one SET per variable (#1037), and a guard
+		// that runs at once when a later statement gives the answer.
+		{"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2' INTO a, b", "DECLARE a, b INT64; " +
+			"SET a = IF((SELECT COUNT(*) FROM (SELECT 1, 2)) > 1, ERROR('EXECUTE IMMEDIATE ... INTO: the query returned more than one row'), " +
+			"(SELECT AS STRUCT * FROM (SELECT 1, 2))[OFFSET(0)]); " +
+			"SET b = IF((SELECT COUNT(*) FROM (SELECT 1, 2)) > 1, ERROR('EXECUTE IMMEDIATE ... INTO: the query returned more than one row'), " +
+			"(SELECT AS STRUCT * FROM (SELECT 1, 2))[OFFSET(1)])"},
+		{"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 1' INTO a; SELECT 2", "DECLARE a INT64; " +
+			"CREATE TEMP TABLE _cloudburrow_into_1 AS SELECT IF((SELECT COUNT(*) FROM (SELECT 1)) > 1, " +
+			"ERROR('EXECUTE IMMEDIATE ... INTO: the query returned more than one row'), 0) AS ok; " +
+			"SET a = IF((SELECT COUNT(*) FROM (SELECT 1)) > 1, ERROR('EXECUTE IMMEDIATE ... INTO: the query returned more than one row'), " +
+			"(SELECT 1)); SELECT 2"},
 	} {
 		got, changed, code, msg := expandExecuteImmediate(c.sql)
 		if !changed || code != 0 || got != c.want {
@@ -25,7 +37,7 @@ func TestExecuteImmediateOfAConstant(t *testing.T) {
 		"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT ' || x",
 		"EXECUTE IMMEDIATE 'INSERT ds.t VALUES (1)' INTO a",
 		"EXECUTE IMMEDIATE 'SELECT 1' INTO a + 1",
-		"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2' INTO a, b",
+		"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 1, 2' INTO a, `b`",
 	} {
 		if _, _, code, _ := expandExecuteImmediate(sql); code != 501 {
 			t.Errorf("%s: %d, want 501", sql, code)
