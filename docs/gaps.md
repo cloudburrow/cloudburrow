@@ -20,7 +20,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 7 | 1 | 5 | 1 | 0 |
+| Cloud Storage | 11 | 4 | 6 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 9 | 6 | 1 | 0 | 2 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 3 | 3 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **75** | **27** | **36** | **7** | **5** |
+| **Total** | **79** | **30** | **37** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -45,6 +45,10 @@ Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `o
 | Gap | Why open | Size |
 |---|---|---|
 | gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete (#1321) | not built yet | L |
+| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
+| `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) (#1281) | not built yet | M |
+| XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |
+| gRPC `google.storage.v2` (#1321): served on the JSON API's port; `UNIMPLEMENTED` over gRPC are appendable objects, customer-supplied encryption keys, the `acl` fields (use `predefined_acl` or the JSON API), managed-folder IAM, `ListObjects.filter` and `ComposeObject.delete_source_objects` | not built yet | M |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |
 | `buckets.relocate`, `buckets.operations.advanceRelocateBucket` | no emulator support (one location) | M |

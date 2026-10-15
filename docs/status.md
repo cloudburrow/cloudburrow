@@ -118,8 +118,9 @@ and a rough size, is in [gaps.md](gaps.md).
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.
 - **Cloud Storage methods not built answer 501 `notImplemented`** naming the method —
-  object IAM, `managedFolders.update`, folders, caches, `bulkRestore` and the
-  gRPC `google.storage.v2` API — and the official Go client retries a 501 until its deadline.
+  object IAM, `managedFolders.update`, folders, caches and `bulkRestore` — and the official Go
+  client retries a 501 until its deadline. The gRPC `google.storage.v2` API is served on the same
+  port (#1321); what it cannot serve answers `UNIMPLEMENTED`.
   ACLs are stored and returned, never enforced (#1233).
 - **Cloud Run configuration we cannot map is refused, not ignored** — service accounts, VPC
   access, volumes, encryption keys, binary authorization, execution environment, session

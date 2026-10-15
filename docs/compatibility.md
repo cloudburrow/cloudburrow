@@ -287,12 +287,34 @@ test that pins it; the method-level codes are also listed in [docs/coverage/stor
 
 ## Cloud Storage — gRPC (`google.storage.v2`)
 
-Deferred. Not part of the first release; see architecture §10. Requires a separate port from
-the JSON API (`STORAGE_EMULATOR_HOST_GRPC`).
+The builtin server serves `google.storage.v2.Storage` on the **same port** as the JSON and XML
+APIs, as h2c (#1321): `STORAGE_EMULATOR_HOST`'s host:port, which `cloudburrow env` also exports
+as `STORAGE_EMULATOR_HOST_GRPC` for the Go client. `storage.NewGRPCClient` with
+`option.WithEndpoint(host:port)` and insecure transport credentials reaches it, in the cluster
+(through the tunnel) and as `cloudburrow storage-server`. Every method is answered by the JSON
+API's own handler: the gRPC request becomes the JSON request that means the same thing, served
+in process, so both APIs read one store and agree on generations, metagenerations,
+preconditions (`FAILED_PRECONDITION` where JSON says 412), CRC32C and MD5 checks, soft delete,
+holds and retention. Every write goes through a resumable session: chunks persist in whole
+256 KiB units, and the object is committed, with its checksums verified, at `finish_write`.
+`TestStorageGRPCBuckets` and `TestStorageGRPCObjects` (official Go client v1.69.0 on its gRPC
+transport, `ReadObject` and `BidiReadObject` reads, each result read back over JSON and the
+other way round) passed 2026-10-15 on an instance with `--services storage` and against the
+builtin `storage-server`. The console uses the JSON API, so the Cloud Storage pages cover what
+gRPC changes.
 
-| Operation | Status | Notes |
+| Method | Status | Notes |
 |---|---|---|
-| All | Planned | Deferred until the JSON API surface is `Verified`. |
+| `CreateBucket`, `GetBucket`, `ListBuckets`, `UpdateBucket`, `DeleteBucket` | **Verified** | `TestStorageGRPCBuckets`. `UpdateBucket` takes the `update_mask` paths `labels` (and `labels.<key>`), `versioning`, `storage_class`, `default_event_based_hold`, `retention_policy`, `soft_delete_policy`, `iam_config`, `cors`, `website`, `logging`, `billing`, `encryption`, `autoclass`, `lifecycle`, `rpo` and `*`; any other path, and the `acl`, `default_object_acl`, `custom_placement_config` and `ip_filter` fields, are `UNIMPLEMENTED` naming it. A repeat create is `ALREADY_EXISTS`. |
+| `LockBucketRetentionPolicy` | **Verified** | Same test; the JSON lock, so a stale `if_metageneration_match` is refused as it is there. |
+| `GetIamPolicy`, `SetIamPolicy`, `TestIamPermissions` | **Verified** | Same test; the bucket's stored policy, the JSON API's (stored, not enforced). A managed folder's resource name, and `SetIamPolicy`'s `update_mask`, are `UNIMPLEMENTED`. |
+| `BidiWriteObject`, `StartResumableWrite` | **Verified** | `TestStorageGRPCObjects`: one-shot and resumable (1 MiB chunks) writes, a precondition refusal, a wrong CRC32C refused with nothing stored. Appendable objects (`appendable`, `append_object_spec`) are `UNIMPLEMENTED`. |
+| `WriteObject`, `QueryWriteStatus`, `CancelResumableWrite` | Implemented | The Go client calls these only to resume a broken stream; unit-tested (`TestGRPCWriteObjectResumes`: an unfinished stream persists its whole 256 KiB units, `QueryWriteStatus` reports them, a wrong `object_checksums` at the finish is `INVALID_ARGUMENT` and the session survives, a cancelled session is `NOT_FOUND`). |
+| `ReadObject`, `BidiReadObject` | **Verified** | Same test: whole and ranged reads, 2 MiB messages each with its CRC32C, the object's checksums on a whole read, `read_handle` pinning the generation. A stale generation is `FAILED_PRECONDITION`, a missing object `NOT_FOUND`, an offset past the end `OUT_OF_RANGE`. |
+| `GetObject`, `ListObjects` | **Verified** | Same test: prefix and delimiter, versions, soft-deleted, offsets and `match_glob` as the JSON API takes them. `ListObjects.filter` is `UNIMPLEMENTED`. |
+| `UpdateObject` | **Verified** | Same test. Mask paths `content_type`, `content_encoding`, `content_disposition`, `cache_control`, `content_language`, `metadata` (and `metadata.<key>`), `custom_time`, `temporary_hold`, `event_based_hold`, `retention` and `*`; others, and the `acl` field, are `UNIMPLEMENTED`. |
+| `ComposeObject`, `RewriteObject`, `MoveObject`, `DeleteObject`, `RestoreObject` | **Verified** | Same test. `delete_source_objects` on compose is `UNIMPLEMENTED`. |
+| Customer-supplied encryption keys | Not supported | `common_object_request_params` with a key, and a rewrite's `copy_source_encryption_*`, are `UNIMPLEMENTED`, as the JSON API does not serve them. |
 
 ---
 
@@ -830,7 +852,7 @@ It lists every RPC of [Cloud Tasks](coverage/tasks.md), [Secret Manager](coverag
 [Cloud Run v2](coverage/run.md), [Cloud Run v1](coverage/runv1.md) (#1293), [Cloud KMS](coverage/kms.md),
 [Resource Manager v3](coverage/resourcemanager.md), [Resource Manager v1 REST and liens](coverage/resourcemanagerv1.md) (#1296, #1295), [Cloud Scheduler](coverage/scheduler.md), [Memorystore for Redis](coverage/memorystore.md),
 [Cloud Logging](coverage/logging.md), [Vertex AI PredictionService](coverage/vertexai.md), [Pub/Sub](coverage/pubsub.md), the
-[Storage JSON API](coverage/storage.md) and the opt-in [Firestore](coverage/firestore.md),
+[Storage JSON API](coverage/storage.md), the [Storage gRPC API](coverage/storagegrpc.md) (#1321) and the opt-in [Firestore](coverage/firestore.md),
 [Datastore](coverage/datastore.md), [Bigtable](coverage/bigtable.md) and
 [Spanner](coverage/spanner.md) emulators with its status, and every REST method of
 [BigQuery](coverage/bigquery.md), read from the official generated client (#993), every method of the

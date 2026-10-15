@@ -135,6 +135,11 @@ var areas = []area{
 	{Key: "memorystore", Title: "Memorystore for Redis", Own: true, Services: []string{"google.cloud.redis.v1.CloudRedis"}},
 	{Key: "pubsub", Title: "Pub/Sub", Services: []string{"google.pubsub.v1.Publisher", "google.pubsub.v1.Subscriber", "google.pubsub.v1.SchemaService"}},
 	{Key: "storage", Title: "Cloud Storage (JSON API)", Own: true, Methods: storageMethods()},
+	// The gRPC API (#1321), served from the JSON API's handlers. Its proto
+	// is registered under CloudBurrow's own name, since the CLI links the Go
+	// client's copy too, so its methods come from the server's service
+	// descriptor, under the name clients call.
+	{Key: "storagegrpc", Title: "Cloud Storage (gRPC API v2)", Own: true, Methods: gcs.GRPCMethods()},
 	// The opt-in emulators (#717) are Google's, like Pub/Sub's: a method is
 	// Verified only by an annotated official-client test, and Unknown
 	// otherwise. Bigtable's instance admin service is not listed: nothing
