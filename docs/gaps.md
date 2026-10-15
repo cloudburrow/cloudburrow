@@ -23,7 +23,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Storage | 11 | 5 | 5 | 1 | 0 |
 | Pub/Sub | 4 | 1 | 2 | 1 | 0 |
 | Cloud Tasks | 5 | 4 | 1 | 0 | 0 |
-| Cloud Run | 13 | 10 | 1 | 0 | 2 |
+| Cloud Run | 12 | 9 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 2 | 2 | 0 | 0 | 0 |
 | Cloud KMS | 7 | 1 | 3 | 2 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **91** | **47** | **32** | **7** | **5** |
+| **Total** | **90** | **46** | **32** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -81,12 +81,11 @@ conditions are excluded (below).
 
 ## Cloud Run
 
-Already tracked: #1216 (IAM policy methods on Services and Jobs).
+Already tracked: #1216 (IAM policy methods on Services and Jobs). Closed: `UpdateService` with a partial `update_mask` (#1260).
 
 | Gap | Why open | Size |
 |---|---|---|
 | `Operations.ListOperations` with a `filter` is `UNIMPLEMENTED` (listing and `WaitOperation` are served since #1229) | not built yet | S |
-| `UpdateService` with a partial `update_mask` is `UNIMPLEMENTED` (#1260) | not built yet | S |
 | Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity | not built yet | L |
 | Logs are not served through the Cloud Run API | not built yet | M |
 | `Builds.SubmitBuild` is not served | not built yet | M |

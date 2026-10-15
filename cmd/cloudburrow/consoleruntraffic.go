@@ -5,9 +5,8 @@ package main
 // The adapter maps a service's traffic onto Knative's traffic block, so a
 // split between revisions, a pinned revision and a tag are all real. The
 // console offers it as one action on the service's page, prefilled with the
-// traffic as it is, which reads the service back through the API, replaces
-// its traffic and sends UpdateService: the rest of the service is kept as
-// read, since UpdateService replaces the whole configuration.
+// traffic as it is, which sends UpdateService with an update_mask of
+// traffic alone (#1260), so the rest of the service is left as it is.
 
 import (
 	"context"
@@ -19,6 +18,7 @@ import (
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
@@ -123,15 +123,13 @@ func (p runProvider) manageTraffic(ctx context.Context, project, service string,
 	if !strings.HasPrefix(name, "projects/") {
 		name = fmt.Sprintf("projects/%s/locations/%s/services/%s", project, p.location(), service)
 	}
-	svc, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: name})
-	if err != nil {
-		return err
-	}
-	svc.Traffic = traffic
-	// No etag, for the reason Edit sends none: Knative's own status writes
-	// move it while a revision settles.
-	svc.Etag = ""
-	op, err := c.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: svc})
+	// Only traffic is sent, and the mask names it: the adapter keeps every
+	// other field as it is. No etag, for the reason Edit sends none:
+	// Knative's own status writes move it while a revision settles.
+	op, err := c.UpdateService(ctx, &runpb.UpdateServiceRequest{
+		Service:    &runpb.Service{Name: name, Traffic: traffic},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"traffic"}},
+	})
 	if err != nil {
 		return err
 	}

@@ -459,7 +459,13 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 	injected := injectedNames(tann)
 	for _, c := range k.Spec.Template.Spec.Containers {
 		container := &runpb.Container{Image: c.Image, WorkingDir: c.WorkingDir,
-			StartupProbe: c.StartupProbe.toProbe(), LivenessProbe: c.LivenessProbe.toProbe()}
+			StartupProbe: c.StartupProbe.toProbe(), LivenessProbe: c.LivenessProbe.toProbe(),
+			Command: c.Command, Args: c.Args}
+		// Read back what ToKnative renders, so a masked update (#1260) that
+		// leaves the containers alone re-renders them unchanged.
+		if len(c.Resources.Limits) > 0 {
+			container.Resources = &runpb.ResourceRequirements{Limits: c.Resources.Limits}
+		}
 		for _, e := range c.Env {
 			if injected[e.Name] {
 				continue

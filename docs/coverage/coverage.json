@@ -469,7 +469,7 @@
         "method": "google.cloud.run.v2.Revisions/DeleteRevision",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:148 TestRunRevisions"
+          "test/compat/run_test.go:149 TestRunRevisions"
         ]
       },
       {
@@ -477,28 +477,28 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
-          "test/compat/run_test.go:148 TestRunRevisions"
+          "test/compat/run_test.go:149 TestRunRevisions"
         ]
       },
       {
         "method": "google.cloud.run.v2.Revisions/ListRevisions",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:148 TestRunRevisions"
+          "test/compat/run_test.go:149 TestRunRevisions"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/CreateService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:57 TestRunServiceLifecycle"
+          "test/compat/run_test.go:58 TestRunServiceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/DeleteService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:57 TestRunServiceLifecycle"
+          "test/compat/run_test.go:58 TestRunServiceLifecycle"
         ]
       },
       {
@@ -513,7 +513,7 @@
         "method": "google.cloud.run.v2.Services/GetService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:57 TestRunServiceLifecycle",
+          "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
         ]
       },
@@ -522,7 +522,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepredict_test.go:56 TestConsoleOnlinePredictionThroughTheConsoleAPI",
-          "test/compat/run_test.go:57 TestRunServiceLifecycle"
+          "test/compat/run_test.go:58 TestRunServiceLifecycle"
         ]
       },
       {
@@ -559,7 +559,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
-          "test/compat/run_test.go:226 TestRunUpdateService",
+          "test/compat/run_test.go:227 TestRunUpdateService",
+          "test/compat/run_test.go:320 TestRunUpdateServiceWithAMask",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
         ]
       },

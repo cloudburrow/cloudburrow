@@ -106,10 +106,10 @@ var parityRows = []parityRow{
 	// Cloud Run
 	{Resource: "Cloud Run services", Service: "run",
 		Methods:  []string{"Services/CreateService", "Services/DeleteService", "Services/GetService", "Services/ListServices", "Services/UpdateService"},
-		Provider: "run", Offers: "Services list, service detail, Deploy container and Edit and deploy new revision (with labels and variables from Secret Manager, #852), Manage traffic (splits, LATEST, pinned revisions, tags; #1224), Delete",
+		Provider: "run", Offers: "Services list, service detail, Deploy container and Edit and deploy new revision (with labels and variables from Secret Manager, #852), Manage traffic (splits, LATEST, pinned revisions, tags; #1224; sent as an update_mask of traffic, #1260), Delete",
 		Tests: []string{"TestConsoleRunEditAndDeployNewRevision", "TestRunEditDeploysTheFormThroughUpdateService", "TestCloudRunEditFormIsPrefilledAndGivesFocusBack",
 			"TestConsoleRunServiceLabelsAndSecrets", "TestRunEditSetsLabelsAndSecretBackedVariables",
-			"TestTrafficLinesRoundTrip", "TestTrafficListingShowsTags", "TestCloudRunManageTrafficThroughTheBrowser"}},
+			"TestTrafficLinesRoundTrip", "TestTrafficListingShowsTags", "TestRunManageTrafficSendsATrafficMask", "TestCloudRunManageTrafficThroughTheBrowser"}},
 	{Resource: "Cloud Run revisions", Service: "run",
 		Methods:  []string{"Revisions/GetRevision", "Revisions/ListRevisions"},
 		Provider: "run", Offers: "Revision history and Traffic sections on the service page (each tag and its URL, #1224), revision detail",

@@ -109,11 +109,9 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 // UpdateService replaces a service's configuration, which Knative turns into
 // a new revision (#300).
 //
-// The whole service is replaced, as `gcloud run deploy` and Terraform send
-// it. An update_mask naming a subset is refused rather than honoured partly:
-// merging a mask onto a Knative template field by field is not implemented,
-// and applying the full service while claiming to have applied a subset
-// would change fields the caller meant to leave alone.
+// With no update_mask the whole service is replaced, as `gcloud run deploy`
+// and Terraform send it. A mask naming a subset is merged onto the service
+// as it is read back from Knative, so only the named fields change (#1260).
 //
 // The operation completes when Knative has reconciled the new generation and
 // its revision is ready, not when the old revision still reports Ready.
@@ -125,10 +123,6 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 	id, err := ServiceID(svc.GetName())
 	if err != nil {
 		return nil, err
-	}
-	if paths := req.GetUpdateMask().GetPaths(); len(paths) > 0 {
-		return nil, apierror.Unimplemented(
-			"update_mask %v is not supported: send the full service, which replaces its configuration", paths)
 	}
 	parent := strings.TrimSuffix(svc.GetName(), "/services/"+id)
 	existing, err := s.kn.Get(ctx, id)
@@ -145,6 +139,11 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 	}
 	if err := checkEtag(svc.GetEtag(), existing); err != nil {
 		return nil, err
+	}
+	if paths := req.GetUpdateMask().GetPaths(); len(paths) > 0 {
+		if svc, err = mergeServiceMask(FromKnative(existing, parent), svc, paths); err != nil {
+			return nil, err
+		}
 	}
 	manifest, err := renderService(svc, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(svc.GetName())))
 	if err != nil {
