@@ -105,7 +105,7 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication, point-in-time recovery, failover
+What answers 501, saying why: IAM database authentication, `pointInTimeRestore` (a Backup and DR datasource), failover
 replicas and high availability, cascading, cross-region and external-primary replicas, the project-level Backups API, imports and exports, and SSL certificates. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
@@ -163,7 +163,7 @@ The primary may be a created instance or a server `up` runs (`postgres` or `mysq
 config allows it (PostgreSQL's `wal_level` is `replica` by default; MySQL's binary log is on,
 and GTIDs are turned on online, persisted in the server's data directory). A replica of a
 replica, of another project's or region's instance, or a failover replica is 501.
-Point-in-time recovery stays 501: it needs WAL and binary logs archived, which is not built.
+Point-in-time recovery is served for created instances (below).
 
 **The instances `up` runs stay as they are:** `postgres` and `mysql` cannot be patched,
 restarted or deleted through the API; each answers 400 naming the `--services` flag that
@@ -199,13 +199,14 @@ flags, deletion protection, automated backups and their start time, sent as one
   `root` with the password the server was started with; one changed afterwards through
   `users.update` makes the backup fail with MySQL's words.
 - **`instances.clone`** creates a new instance with the source's settings, starts its server,
-  and loads a dump of the source taken then. A clone to a point in time
-  (`pointInTime`, `binLogCoordinates`) and a clone of some databases only are 501.
+  and loads a dump of the source taken then; with `pointInTime` it recovers the source to that
+  time (next section). A clone to `binLogCoordinates` and a clone of some databases only are 501.
 - **`settings.backupConfiguration`** (`enabled`, `startTime`, `backupRetentionSettings`) is
   recorded and answered. **An automated backup is taken at `startTime` (UTC) only if
   CloudBurrow is running then**; a start time that passes while it is stopped is not made up
   afterwards. The newest `retainedBackups` automated backups (7 by default) are kept.
-  `pointInTimeRecoveryEnabled` and `binaryLogEnabled` are 501.
+  `pointInTimeRecoveryEnabled` and `binaryLogEnabled` turn on point-in-time recovery (next
+  section).
 - **Persistence follows the instance's mode**: in persistent mode the dumps and their records
   (`cloudsql-backups/backups.json`) survive `stop` and `up`; in ephemeral mode the next `up`
   removes them. Deleting a created instance deletes its backups.
@@ -213,6 +214,53 @@ flags, deletion protection, automated backups and their start time, sent as one
 The operation is `BACKUP_VOLUME`, `RESTORE_VOLUME` or `CLONE`, `RUNNING` until the dump or the
 load is done. The console's instance page has a **Backups** tab with **Create backup**,
 **Restore**, **Delete backup** and **Clone**.
+
+### Point-in-time recovery (#1330)
+
+A created instance with `settings.backupConfiguration.pointInTimeRecoveryEnabled`
+(PostgreSQL) or `binaryLogEnabled` (MySQL) keeps the engine's own transaction log beside its
+data, on the server's volume, and `instances.clone` with `cloneContext.pointInTime` makes a new
+instance holding the source's databases as they were at that time, to the microsecond. So
+`gcloud sql instances create --enable-point-in-time-recovery` (or `--enable-bin-log`) and
+`gcloud sql instances clone SRC DEST --point-in-time T` work.
+
+- **PostgreSQL** runs with `archive_mode=on` and an `archive_command` that copies each
+  finished WAL segment into `cloudsql-pitr/wal/` next to the data directory; turning it on
+  through `instances.patch` restarts the server with it. A **base** is a `pg_basebackup` into
+  `cloudsql-pitr/base/`. A recovery forces a commit and a WAL switch on the source, so the log
+  past the target is archived, copies the newest base taken before the target into a scratch
+  data directory, and starts a second `postgres` on it, on a Unix socket only, with
+  `restore_command`, `recovery_target_time` and `recovery_target_action = 'promote'`.
+  PostgreSQL replays the WAL up to the target (a commit at exactly the target is kept,
+  `recovery_target_inclusive`); the recovered server is dumped with `pg_dump` as a backup is,
+  loaded into the clone, and stopped and removed.
+- **MySQL**'s binary log is on in MySQL 8.4 by default; a **base** is a `mysqldump
+  --single-transaction --source-data` of the application databases into
+  `cloudsql-pitr/base/`, which records the binary log position it is consistent with. The
+  image has no `mysqlbinlog`, so the replay is MySQL's own replication applier: the clone
+  loads the base, then replicates from the source as a temporary replication user, from the
+  base's position, with `START REPLICA UNTIL` the position of the first transaction committed
+  after the target, and stops there; the replication setup is then removed. The stop position
+  is found by reading the binary logs' (anonymous) GTID events, whose
+  `immediate_commit_timestamp` is in microseconds (`firstCommitAfter`). Account changes made
+  after the base are replayed too, as they are part of the binary log.
+- **Bases are taken** when the instance's server first serves with recovery on, and with each
+  of its backups (on demand or automated). A base's time is the first whole second after it
+  was complete, by the server's clock.
+- **The recovery window** is reported by `projects.instances.getLatestRecoveryTime` as
+  Google documents it: `earliestRecoveryTime` is the oldest base's time, and
+  `latestRecoveryTime` is the server's clock now. A `pointInTime` outside it is 400, naming the
+  window. Bases are not pruned yet (`transactionLogRetentionDays` is recorded, not applied);
+  the log lives on the server's volume, so deleting the instance deletes it, and in ephemeral
+  mode a restart of the server's pod loses it with the data.
+- **What is not recovered to a time:** the servers `up` runs (`postgres`, `mysql`) keep no
+  log, and a clone to a time of one is 400 saying so; a read replica takes no base.
+  `instances.pointInTimeRestore` is 501: it restores from a Backup and DR Service datasource
+  (`projects/…/backupVaults/…/dataSources/…`), which is not served.
+
+The console's instance page shows **Point-in-time recovery**, the earliest and latest recovery
+times, and a **Point-in-time restore** action (a new instance ID and a time); **Create
+instance** and **Edit instance** have a **Point-in-time recovery** checkbox.
 
 ### The Cloud SQL connectors (#1330)
 

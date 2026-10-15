@@ -183,6 +183,12 @@ func (s *Server) bringUp(name, opID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
 	err := s.writes.prov.Start(ctx, spec)
+	if err == nil && spec.PITREnabled() && spec.MasterInstanceName == "" {
+		// The first base, so the instance is recoverable from its start.
+		if err = s.takePITRBase(name); err != nil {
+			err = fmt.Errorf("take the point-in-time recovery base: %w", err)
+		}
+	}
 	s.emu.Lock()
 	if cur := s.writes.byName[name]; cur == c && c.state != "PENDING_DELETE" {
 		if err != nil {
@@ -256,9 +262,6 @@ func (b instanceBody) unsupported() error {
 			return unimplemented("availabilityType REGIONAL", "high availability needs a standby server and failover, which CloudBurrow does not run")
 		}
 		if bc := b.Settings.BackupConfiguration; bc != nil {
-			if bc.PointInTimeRecoveryEnabled || bc.BinaryLogEnabled {
-				return unimplemented("point-in-time recovery", "it needs write-ahead or binary logs archived, which CloudBurrow does not keep; backups are served")
-			}
 			if bc.StartTime != "" {
 				if _, err := time.Parse("15:04", bc.StartTime); err != nil {
 					return Errorf(http.StatusBadRequest, "Invalid request: backupConfiguration.startTime %q is not HH:MM.", bc.StartTime)

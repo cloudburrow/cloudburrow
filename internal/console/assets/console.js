@@ -39,6 +39,11 @@ const ROUTES = [
     product: "run", productTitle: "Cloud Run" },
   { path: "/run/instances", service: "run-instances", title: "Instances", section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
+  // Source builds and the repositories `gcloud run deploy --source` creates (#1347).
+  { path: "/run/builds", service: "run-builds", title: "Build history", section: "Serverless computing",
+    product: "run", productTitle: "Cloud Run" },
+  { path: "/artifact-registry", service: "artifact-registry", title: "Repositories", section: "CI/CD",
+    product: "artifact-registry", productTitle: "Artifact Registry" },
 
   // Kubernetes Engine is one product with five pages, not five products.
   //
@@ -79,6 +84,9 @@ const ROUTES = [
   { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Firestore databases", section: "Databases" },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
   { path: "/bigtable",  service: "bigtable",  title: "Bigtable",  section: "Databases" },
+  // The project's Bigtable instances, with their clusters, app profiles and
+  // IAM policy (#1358). Not under /bigtable/, where it would shadow a table.
+  { path: "/bigtable-instances", service: "bigtable-instances", icon: "bigtable", title: "Bigtable instances", section: "Databases" },
   { path: "/spanner",   service: "spanner",   title: "Spanner",   section: "Databases" },
   // Cloud SQL is one product with a page per engine, as the console this
   // mirrors lists PostgreSQL and MySQL instances under one product (#868).
@@ -213,6 +221,9 @@ const ICONS = {
   "run-jobs": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-instances": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-worker-pools": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+  "run-builds": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+  // Artifact Registry: stacked boxes.
+  "artifact-registry": '<rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="16" height="6" rx="1"/>',
   // Cloud Storage: a bucket.
   storage:   '<path d="M4 7h16l-1.6 11.2a2 2 0 0 1-2 1.8H7.6a2 2 0 0 1-2-1.8z"/><path d="M3 7h18"/><path d="M9 4h6l1 3H8z"/>',
   // Pub/Sub: one publisher, many subscribers.
@@ -286,6 +297,8 @@ const CATEGORY_ICONS = {
   "Security and identity": '<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
   // A pulse line.
   "Operations": '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
+  // Two arrows chasing each other: build, then deploy, then build again.
+  "CI/CD": '<path d="M4 12a8 8 0 0 1 13.7-5.6L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15"/><path d="M4 20v-5h5"/>',
   // A wrench.
   "Management tools": '<path d="M14.5 6.5a4 4 0 0 0 5 5L21 13l-2 2-1.5-1.5a4 4 0 0 1-5-5L5 16v3h3l7.5-7.5"/>',
 };
@@ -299,6 +312,80 @@ const lineMark = (paths) =>
 let SERVICES = [];
 let DEFAULT_PROJECT = "";
 const capabilityOf = (id) => SERVICES.find((s) => s.id === id) || {};
+
+// --- scopes narrower than the project (#1360) ---------------------------
+//
+// A service whose screens address something inside the project — Bigtable's
+// tables live in an instance — names a query parameter (its capability's
+// scope), carried in the URL the way the project is. Every request made for
+// the service and every link within its screens keeps it, so a table's page,
+// its rows and its actions address the instance its list was read from.
+
+// scopeKeyOf is the service's scope parameter, or "" for one scoped by the
+// project alone.
+const scopeKeyOf = (service) => capabilityOf(service).scope || "";
+
+// carryScope copies the service's scope from the address onto url.
+function carryScope(url, service) {
+  const key = scopeKeyOf(service);
+  if (!key) return url;
+  const value = new URLSearchParams(location.search).get(key);
+  if (value && !url.searchParams.has(key)) url.searchParams.set(key, value);
+  return url;
+}
+
+// scopeServiceOfPath is the scoped service whose screens a console path is
+// on, or "".
+function scopeServiceOfPath(pathname) {
+  for (const s of SERVICES) {
+    if (!s.scope) continue;
+    const r = ROUTES.find((x) => x.service === s.id);
+    const base = r ? r.path : "/" + s.id;
+    if (pathname === base || pathname.startsWith(base + "/")) return s.id;
+  }
+  return "";
+}
+
+// scopedAPIPath adds the service's scope to an /api/<kind>/<service> request
+// made from that service's own screens, when the request does not name it. A
+// search, or another product's page reading the service, is not inside the
+// scope chosen there.
+function scopedAPIPath(path) {
+  if (typeof path !== "string" || !path.startsWith("/api/")) return path;
+  const url = new URL(path, location.origin);
+  const service = url.pathname.split("/")[3] || "";
+  if (!scopeKeyOf(service) || scopeServiceOfPath(location.pathname) !== service) return path;
+  carryScope(url, service);
+  return url.pathname + url.search;
+}
+
+// scopeSubtitle names the scope a scoped service's page is in, after its
+// project: " · instance archive".
+function scopeSubtitle(service) {
+  const key = scopeKeyOf(service);
+  const value = key ? new URLSearchParams(location.search).get(key) : "";
+  return value ? ` · ${key} ${value}` : "";
+}
+
+// scopePicker is a list screen's picker for its scope: choosing puts it in
+// the address (the default leaves it out) and redraws.
+function scopePicker(spec, reload) {
+  const id = `scope-${spec.key}`;
+  const select = el("select", { id, name: spec.key },
+    ...(spec.options || []).map((o) =>
+      el("option", { value: o.id, text: o.label || o.id, selected: o.id === spec.selected })));
+  select.addEventListener("change", () => {
+    const params = new URLSearchParams(location.search);
+    if (select.value && select.value !== spec.default) params.set(spec.key, select.value);
+    else params.delete(spec.key);
+    const qs = params.toString();
+    history.pushState(history.state, "", location.pathname + (qs ? `?${qs}` : ""));
+    reload();
+  });
+  return el("div", { class: "card server-filter scope-picker" },
+    el("label", { for: id, text: spec.label || spec.key }),
+    el("div", { class: "server-filter-row" }, select));
+}
 
 const el = (tag, attrs = {}, ...children) => {
   const node = document.createElement(tag);
@@ -361,6 +448,7 @@ async function api(path, options = {}) {
     else outer.addEventListener("abort", onOuter, { once: true });
   }
 
+  path = scopedAPIPath(path);
   let res;
   try {
     res = await fetch(path, {
@@ -2420,6 +2508,7 @@ function detailHref(route, path) {
     location.origin);
   const project = new URLSearchParams(location.search).get("project");
   if (project) url.searchParams.set("project", project);
+  carryScope(url, route.service);
   return url.pathname + url.search;
 }
 
@@ -2434,6 +2523,7 @@ async function renderDetail(view, route, resourcePath) {
   const project = new URLSearchParams(location.search).get("project") || "";
   const back = new URL(route.path, location.origin);
   if (project) back.searchParams.set("project", project);
+  carryScope(back, route.service);
 
   // One crumb per level, built from the path rather than from two fixed
   // nodes. A database, a table and a column are three levels, and every one
@@ -2453,7 +2543,7 @@ async function renderDetail(view, route, resourcePath) {
     // button is a screen you are stuck in.
     el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail),
     el("h1", { text: name }),
-    el("p", { class: "subtitle", text: project ? `Project ${project}` : "All projects" }));
+    el("p", { class: "subtitle", text: (project ? `Project ${project}` : "All projects") + scopeSubtitle(route.service) }));
   const header = [crumb];
   // A provider-drawn trail, for a page whose path is not its hierarchy: an
   // object's crumbs are its bucket and folders (#790).
@@ -3572,6 +3662,7 @@ async function renderList(view, route) {
   // project's Cloud Storage service account over its HMAC keys (#792).
   header.push(...listingSummary(data));
   if (data.serverFilter) header.push(serverFilterBox(data.serverFilter, () => renderList(view, route)));
+  if (data.scope) header.push(scopePicker(data.scope, () => renderList(view, route)));
 
   // A screen that needs something from the user is not a broken screen. This
   // is rendered as a prompt rather than as an error, because a red failure
@@ -4687,6 +4778,7 @@ async function renderCreatePage(view, route) {
   const caps = capabilityOf(target.service);
   const back = new URL(target.path, location.origin);
   if (project) back.searchParams.set("project", project);
+  carryScope(back, target.service);
   const listHref = back.pathname + back.search;
 
   const header = [
@@ -5657,6 +5749,8 @@ function navigate(path) {
   const url = new URL(path, location.origin);
   const project = currentProject();
   if (project) url.searchParams.set("project", project);
+  const scoped = scopeServiceOfPath(url.pathname);
+  if (scoped && scopeServiceOfPath(location.pathname) === scoped) carryScope(url, scoped);
   history.pushState({}, "", url);
   // Focus lands on the main region first and the screen is drawn after, so a
   // screen that wants focus somewhere specific — a form's first field — is

@@ -2,6 +2,7 @@ package sqladmin
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -101,8 +102,8 @@ func TestBackupsRestoreAndClone(t *testing.T) {
 		t.Fatalf("clone get: %v %+v", err, in)
 	}
 	if _, err := svc.Instances.Clone("proj", "pg", &sqladmin.InstancesCloneRequest{CloneContext: &sqladmin.CloneContext{
-		DestinationInstanceName: "pg-pit", PointInTime: "2026-01-01T00:00:00Z"}}).Do(); err == nil || !strings.Contains(err.Error(), "501") {
-		t.Errorf("point-in-time clone: %v, want 501", err)
+		DestinationInstanceName: "pg-pit", PointInTime: "2026-01-01T00:00:00Z"}}).Do(); err == nil || !strings.Contains(err.Error(), "400") {
+		t.Errorf("point-in-time clone of a server that keeps no log: %v, want 400", err)
 	}
 
 	// backupConfiguration is recorded and an automated backup is taken at
@@ -131,8 +132,13 @@ func TestBackupsRestoreAndClone(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if _, err := svc.Instances.Patch("proj", "pg-copy", &sqladmin.DatabaseInstance{Settings: &sqladmin.Settings{
-		BackupConfiguration: &sqladmin.BackupConfiguration{PointInTimeRecoveryEnabled: true}}}).Do(); err == nil || !strings.Contains(err.Error(), "501") {
-		t.Errorf("point-in-time recovery: %v, want 501", err)
+		BackupConfiguration: &sqladmin.BackupConfiguration{PointInTimeRecoveryEnabled: true}}}).Do(); err != nil {
+		t.Errorf("enabling point-in-time recovery: %v", err)
+	}
+	// No base has been taken yet: a clone to a time is refused.
+	if _, err := svc.Instances.Clone("proj", "pg-copy", &sqladmin.InstancesCloneRequest{CloneContext: &sqladmin.CloneContext{
+		DestinationInstanceName: "pg-pit", PointInTime: time.Now().UTC().Format(time.RFC3339)}}).Do(); err == nil || !strings.Contains(err.Error(), "400") {
+		t.Errorf("a clone to a time with no base: %v, want 400", err)
 	}
 
 	// Records survive a restart of the API; delete removes the dump.
@@ -153,4 +159,13 @@ func TestBackupsRestoreAndClone(t *testing.T) {
 	if _, err := svc.BackupRuns.Get("proj", "pg", id).Do(); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Errorf("get of a deleted run: %v, want 404", err)
 	}
+}
+
+// The fake keeps no log: it has no base to recover from.
+func (d *fakeDumper) PITRBase(context.Context, DumpTarget) error { return nil }
+func (d *fakeDumper) RecoveryWindow(context.Context, DumpTarget) (time.Time, time.Time, bool, error) {
+	return time.Time{}, time.Time{}, false, nil
+}
+func (d *fakeDumper) CopyAt(context.Context, DumpTarget, DumpTarget, time.Time, string) error {
+	return errors.New("the fake keeps no log")
 }

@@ -469,6 +469,8 @@ func TestDeployFormOffersOnlyWhatTheAdapterMaps(t *testing.T) {
 		"labels", "secretEnv",
 		// The service account and the secret and in-memory volumes (#1297).
 		"serviceAccount", "secretFiles", "memoryVolumes",
+		// The settings stored and returned without effect (#1346).
+		"executionEnvironment", "vpcConnector", "vpcEgress", "encryptionKey", "sessionAffinity",
 	} {
 		if !offered[want] {
 			t.Errorf("the deploy form does not offer %q, which the adapter maps", want)
@@ -476,8 +478,7 @@ func TestDeployFormOffersOnlyWhatTheAdapterMaps(t *testing.T) {
 	}
 	// Every field its Unsupported refuses.
 	for _, absent := range []string{
-		"vpcAccess", "volumes", "encryptionKey",
-		"binaryAuthorization", "executionEnvironment", "sessionAffinity", "ingress",
+		"vpcAccess", "volumes", "binaryAuthorization", "ingress",
 	} {
 		if offered[absent] {
 			t.Errorf("the deploy form offers %q, which the adapter refuses", absent)

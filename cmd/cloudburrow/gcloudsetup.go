@@ -45,48 +45,62 @@ var gcloudVerified = []struct {
 	path     string
 	// always is set for an endpoint served whatever --services selects.
 	always bool
+	// regional is set for an API some of whose gcloud commands call
+	// {location}-{host}, deriving the host from this override. On a
+	// loopback bind the host is then {property}.localhost, so the prefixed
+	// name still resolves to loopback (RFC 6761), where {location}-127.0.0.1
+	// resolves to nothing.
+	regional bool
 }{
-	{config.ServiceStorage, "storage", "/storage/v1/", false},
-	{config.ServicePubSub, "pubsub", "/", false},
+	{config.ServiceStorage, "storage", "/storage/v1/", false, false},
+	{config.ServicePubSub, "pubsub", "/", false, false},
 	// Cloud KMS (#426): gcloud's apitools client appends v1/ itself, and
 	// TestGcloudKMS drives keyrings, keys and versions through it.
-	{config.ServiceKMS, "cloudkms", "/", false},
+	{config.ServiceKMS, "cloudkms", "/", false, false},
 	// Secret Manager and Cloud Tasks (#590): JSON on the gRPC port, v1/ and
 	// v2/ appended by gcloud. TestGcloudSecrets drives secrets and versions;
 	// TestGcloudTasks drives queues and, since tasks are transcoded (#591),
 	// tasks.
-	{config.ServiceSecrets, "secretmanager", "/", false},
-	{config.ServiceTasks, "cloudtasks", "/", false},
+	{config.ServiceSecrets, "secretmanager", "/", false, false},
+	{config.ServiceTasks, "cloudtasks", "/", false, false},
 	// Cloud Scheduler and Cloud Logging (#591): JSON on the gRPC port
 	// through the shared transcoder, v1/ and v2/ appended by gcloud.
 	// TestGcloudScheduler drives jobs (with --location: gcloud otherwise
 	// looks for an App Engine app); TestGcloudLogging writes, reads, lists
 	// and deletes logs.
-	{config.ServiceScheduler, "cloudscheduler", "/", false},
-	{config.ServiceLogging, "logging", "/", false},
+	{config.ServiceScheduler, "cloudscheduler", "/", false, false},
+	{config.ServiceLogging, "logging", "/", false, false},
 	// Resource Manager (#682): gcloud's projects commands call the v1 REST
 	// API, served since #301 on the Resource Manager port beside v3.
 	// TestGcloudProjectsThroughGcloudSetup drives list, create, describe and
-	// delete through this override alone.
-	{resourceManagerService, "cloudresourcemanager", "/", true},
+	// delete through this override alone. Tag bindings and effective tags
+	// given --location call {location}-cloudresourcemanager (#1350), which
+	// TestGcloudRegionalTagBindings drives.
+	{resourceManagerService, "cloudresourcemanager", "/", true, true},
 	// Service Usage (#1352): gcloud services list, enable and disable call
 	// v1, which gcloud appends. TestGcloudServices drives them.
-	{serviceUsageService, "serviceusage", "/", true},
+	{serviceUsageService, "serviceusage", "/", true, false},
 	// Cloud Run (#1293): gcloud run calls the v1 (Knative) API, served on
 	// the Run port beside v2. A command given --region calls
 	// {region}-{host}, which gcloud derives from this override, so on
-	// loopback the host is run.localhost, whose {region}-run.localhost
-	// still resolves to loopback (RFC 6761). TestGcloudRunServicesList
-	// drives services list, describe and revisions list.
-	{config.ServiceRun, "run", "/", false},
+	// loopback the host is run.localhost. TestGcloudRunServicesList drives
+	// services list, describe and revisions list.
+	{config.ServiceRun, "run", "/", false, true},
+	// Artifact Registry and Cloud Build (#1347), served on the Run port
+	// for `gcloud run deploy --source`, which creates the
+	// cloud-run-source-deploy repository and polls the build's Cloud
+	// Build operation, and for `gcloud builds submit`.
+	// TestGcloudRunDeploySource and TestGcloudBuildsSubmit drive them.
+	{config.ServiceRun, "artifactregistry", "/", false, false},
+	{config.ServiceRun, "cloudbuild", "/", false, false},
 	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.
-	{sqlAdminEndpoint, "sql", "/", false},
+	{sqlAdminEndpoint, "sql", "/", false, false},
 	// Memorystore for Redis (#1302): the admin API's JSON on its port;
 	// gcloud redis appends v1/. TestGcloudRedis creates, describes, lists,
 	// updates and deletes an instance, given --region.
-	{memorystoreAdminEndpoint, "redis", "/", false},
+	{memorystoreAdminEndpoint, "redis", "/", false, false},
 }
 
 // gcloudFamilies is the gcloud-setup help's list of what it writes, from
@@ -150,8 +164,8 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 			(v.service == memorystoreAdminEndpoint && serviceEnabled(cfg, config.ServiceMemorystore))
 		if on && ports[v.service] != 0 {
 			addr := host(ports[v.service])
-			if ip := net.ParseIP(cfg.BindAddress); v.service == config.ServiceRun && ip != nil && ip.IsLoopback() {
-				addr = net.JoinHostPort("run.localhost", strconv.Itoa(ports[v.service]))
+			if ip := net.ParseIP(cfg.BindAddress); v.regional && ip != nil && ip.IsLoopback() {
+				addr = net.JoinHostPort(v.property+".localhost", strconv.Itoa(ports[v.service]))
 			}
 			fmt.Fprintf(&b, "%s = http://%s%s\n", v.property, addr, v.path)
 		}

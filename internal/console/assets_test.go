@@ -418,7 +418,7 @@ func jsObjectKeys(t *testing.T, js, decl string) map[string]bool {
 	block := js[i+len(decl):]
 	block = block[:strings.Index(block, "\n};")]
 	keys := map[string]bool{}
-	key := regexp.MustCompile(`^\s*"?([A-Za-z0-9 -]+?)"?\s*:`)
+	key := regexp.MustCompile(`^\s*"?([A-Za-z0-9 /-]+?)"?\s*:`) // "CI/CD" is a category
 	for _, line := range strings.Split(block, "\n") {
 		if m := key.FindStringSubmatch(line); m != nil {
 			keys[m[1]] = true
@@ -2142,7 +2142,7 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 			cloudRun = append(cloudRun, r["title"]+" "+r["path"]+" "+r["service"])
 		}
 	}
-	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs", "Worker pools /run/worker-pools run-worker-pools", "Instances /run/instances run-instances"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
+	if want := []string{"Services /run run", "Jobs /run/jobs run-jobs", "Worker pools /run/worker-pools run-worker-pools", "Instances /run/instances run-instances", "Build history /run/builds run-builds"}; strings.Join(cloudRun, "|") != strings.Join(want, "|") {
 		t.Errorf("Cloud Run pages = %q, want %q", cloudRun, want)
 	}
 	// Cloud Storage lists Buckets and Deleted buckets (#789).

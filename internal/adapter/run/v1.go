@@ -32,9 +32,11 @@ import (
 //	/v1/projects/{project}/locations/{location}/{collection}[/{name}]
 //
 // for services (list, get, create, replace, delete), revisions (list, get,
-// delete), routes and configurations (list, get). Everything else under
-// /apis/ and /v1/ (domain mappings, jobs, executions, tasks, authorized
-// domains, locations, IAM) answers 501 UNIMPLEMENTED.
+// delete), routes and configurations (list, get); and, in v1global.go,
+// projects.locations.list and the services' IAM methods (#1349), and, in
+// v1jobs.go, jobs (list, get, create, delete), and in v1domains.go domain
+// mappings and authorized domains. Everything else under /apis/ and /v1/
+// (replaceJob, run, executions, tasks) answers 501 UNIMPLEMENTED.
 
 // v1LocationLabel is the label Cloud Run v1 reports a resource's region in.
 const v1LocationLabel = "cloud.googleapis.com/location"
@@ -50,6 +52,14 @@ const (
 	// sets. Locally no CPU is throttled at startup, so the boost holds.
 	v1StartupCPUBoost = "run.googleapis.com/startup-cpu-boost"
 	v1MaxScale        = "autoscaling.knative.dev/maxScale"
+	// The source build `gcloud run deploy --source` deployed (#1347).
+	v1BuildImageURI       = "run.googleapis.com/build-image-uri"
+	v1BuildName           = "run.googleapis.com/build-name"
+	v1BuildSourceLocation = "run.googleapis.com/build-source-location"
+	v1BuildAutoUpdates    = "run.googleapis.com/build-enable-automatic-updates"
+	v1BuildID             = "run.googleapis.com/build-id"
+	v1BuildFunctionTarget = "run.googleapis.com/build-function-target"
+	v1BuildBaseImage      = "run.googleapis.com/build-base-image"
 )
 
 // regionalHostRE is a regional endpoint's host, {region}-{host}: gcloud
@@ -77,10 +87,33 @@ func (s *Server) V1Handler(next http.Handler) http.Handler {
 		v1.HandleFunc("GET "+p+"configurations", s.v1ListConfigurations)
 		v1.HandleFunc("GET "+p+"configurations/{name}", s.v1GetConfiguration)
 	}
+	for _, p := range []string{
+		"/apis/domains.cloudrun.com/v1/namespaces/{ns}/domainmappings",
+		"/v1/projects/{ns}/locations/{loc}/domainmappings",
+	} {
+		v1.HandleFunc("GET "+p, s.v1ListDomainMappings)
+		v1.HandleFunc("POST "+p, s.v1CreateDomainMapping)
+		v1.HandleFunc("GET "+p+"/{name}", s.v1GetDomainMapping)
+		v1.HandleFunc("DELETE "+p+"/{name}", s.v1DeleteDomainMapping)
+	}
+	v1.HandleFunc("GET /v1/projects/{ns}/locations", s.v1Locations)
+	v1.HandleFunc("GET /v1/projects/{ns}/authorizeddomains", s.v1AuthorizedDomains)
+	v1.HandleFunc("GET /apis/domains.cloudrun.com/v1/namespaces/{ns}/authorizeddomains", s.v1AuthorizedDomains)
+	jobs := "/apis/run.googleapis.com/v1/namespaces/{ns}/jobs"
+	v1.HandleFunc("GET "+jobs, s.v1ListJobs)
+	v1.HandleFunc("POST "+jobs, s.v1CreateJob)
+	v1.HandleFunc("GET "+jobs+"/{name}", s.v1GetJob)
+	v1.HandleFunc("DELETE "+jobs+"/{name}", s.v1DeleteJob)
 	v1.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		rest.WriteError(w, apierror.Unimplemented("%s %s is not served by the Cloud Run v1 API locally", r.Method, r.URL.Path))
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A custom method is part of its {name} segment, which a pattern
+		// cannot split, so the IAM methods are matched before the mux.
+		if m := v1IAMRE.FindStringSubmatch(r.URL.Path); m != nil {
+			s.v1IAM(w, r, m)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/apis/") || strings.HasPrefix(r.URL.Path, "/v1/") {
 			v1.ServeHTTP(w, r)
 			return
@@ -805,6 +838,11 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 				svc.Client = v
 			case v1ClientVersion:
 				svc.ClientVersion = v
+			case v1BuildImageURI, v1BuildName, v1BuildSourceLocation, v1BuildAutoUpdates, v1BuildID,
+				v1BuildFunctionTarget, v1BuildBaseImage:
+				// Which build produced the image, which `gcloud run deploy
+				// --source` records (#1347): v2's build_config. Accepted
+				// and not read back; the build is in Cloud Build's history.
 			default:
 				gap(strings.HasPrefix(k, "run.googleapis.com/"), "metadata.annotations["+k+"]")
 				ann[k] = v

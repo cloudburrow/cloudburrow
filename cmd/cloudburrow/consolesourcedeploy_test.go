@@ -1,0 +1,133 @@
+package main
+
+import (
+	"context"
+	"io"
+	"net"
+	"strings"
+	"testing"
+	"time"
+
+	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	"google.golang.org/grpc"
+
+	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
+	runpb "cloud.google.com/go/run/apiv2/runpb"
+
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+)
+
+type stubSource struct{}
+
+func (stubSource) Fetch(context.Context, string, string, int64) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("src")), nil
+}
+
+type stubBuilder struct{}
+
+func (stubBuilder) Build(context.Context, runadapter.BuildSpec) error { return nil }
+
+// TestConsoleSourceDeployScreens (#1347): the Artifact Registry
+// Repositories page lists a repository the API created, with its URL, and
+// Cloud Run's Build history lists a SubmitBuild build, Succeeded, with its
+// image and digest.
+func TestConsoleSourceDeployScreens(t *testing.T) {
+	ctx := context.Background()
+	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
+	if _, err := s.ArtifactRegistry().CreateRepository(ctx, &arpb.CreateRepositoryRequest{
+		Parent: "projects/console-sd/locations/us-central1", RepositoryId: "console-repo",
+		Repository: &arpb.Repository{Format: arpb.Repository_DOCKER, Description: "from the API"}}); err != nil {
+		t.Fatal(err)
+	}
+	repos, _ := artifactRegistryProvider{defaultProject: "console-sd"}.List(ctx, "")
+	if len(repos.Items) != 1 || repos.Items[0].Name != "console-repo" ||
+		repos.Items[0].Fields["URL"] != "us-central1-docker.pkg.dev/console-sd/console-repo" {
+		t.Errorf("repositories = %+v", repos.Items)
+	}
+	image := "us-central1-docker.pkg.dev/console-sd/console-repo/svc"
+	resp, err := s.Builds(stubSource{}, stubBuilder{}).SubmitBuild(ctx, &runpb.SubmitBuildRequest{
+		Parent: "projects/console-sd/locations/us-central1", ImageUri: image,
+		Source:    &runpb.SubmitBuildRequest_StorageSource{StorageSource: &runpb.StorageSource{Bucket: "b", Object: "o.zip"}},
+		BuildType: &runpb.SubmitBuildRequest_DockerBuild_{DockerBuild: &runpb.SubmitBuildRequest_DockerBuild{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 200; i++ {
+		if op, _ := s.Operation(resp.GetBuildOperation().GetName()); op.GetDone() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	builds, _ := runBuildsProvider{}.List(ctx, "console-sd")
+	if len(builds.Items) != 1 || builds.Items[0].Status != "Succeeded" || builds.Items[0].Fields["Image"] != image+":latest" ||
+		!strings.HasPrefix(builds.Items[0].Fields["Digest"], "sha256:") || builds.Items[0].Fields["Source"] != "gs://b/o.zip" {
+		t.Errorf("builds = %+v", builds.Items)
+	}
+
+	// A CreateBuild build's page shows each step's status and the log.
+	op, err := s.Builds(stubSource{}, stubBuilder{}).CloudBuild().CreateBuild(ctx, &cbpb.CreateBuildRequest{
+		Parent: "projects/console-sd/locations/us-central1", Build: &cbpb.Build{
+			Source: &cbpb.Source{Source: &cbpb.Source_StorageSource{StorageSource: &cbpb.StorageSource{Bucket: "b", Object: "o.tgz"}}},
+			Steps: []*cbpb.BuildStep{{Id: "img", Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", image + ":v2", "."}},
+				{Name: "gcr.io/cloud-builders/docker", Args: []string{"push", image + ":v2"}}}, Images: []string{image + ":v2"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 200; i++ {
+		if o, _ := s.Operation(op.GetName()); o.GetDone() {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	id := op.GetName()[strings.LastIndex(op.GetName(), "/")+1:]
+	d, err := runBuildsProvider{}.Detail(ctx, "console-sd", []string{id})
+	if err != nil || len(d.Sections) != 2 || len(d.Sections[0].Listing.Items) != 2 ||
+		d.Sections[0].Listing.Items[0].Status != "Succeeded" || d.Sections[0].Listing.Items[0].Name != "#0 img" ||
+		!strings.Contains(d.Sections[1].Text, "Starting Step #0") || !strings.Contains(d.Sections[1].Text, "DONE") {
+		t.Errorf("build detail = %+v, %v", d, err)
+	}
+}
+
+// blockingBuilder builds until its context ends.
+type blockingBuilder struct{}
+
+func (blockingBuilder) Build(ctx context.Context, _ runadapter.BuildSpec) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestConsoleRunBuildAndCancel (#1347): Run build on the Build history page
+// creates a build through the official Cloud Build client on the Run port,
+// and Cancel on its page cancels it.
+func TestConsoleRunBuildAndCancel(t *testing.T) {
+	ctx := context.Background()
+	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
+	g := grpc.NewServer()
+	s.Builds(stubSource{}, blockingBuilder{}).CloudBuild().Register(g)
+	runadapter.NewOperationsServer(s).Register(g)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = g.Serve(ln) }()
+	t.Cleanup(g.Stop)
+	p := runBuildsProvider{defaultProject: "console-cb", runAddr: func() string { return ln.Addr().String() }}
+	id, err := p.Create(ctx, "", map[string]string{"source": "gs://b/src.tgz", "image": "gcr.io/console-cb/img:v1", "region": "us-central1"})
+	if err != nil || id == "" {
+		t.Fatalf("Create = %q, %v", id, err)
+	}
+	acts := p.DetailActions(ctx, "", []string{id})
+	if len(acts) != 1 || acts[0].ID != "cancel" {
+		t.Fatalf("a running build's actions = %+v", acts)
+	}
+	if err := p.ActAt(ctx, "", []string{id}, "cancel", nil); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	d, _ := p.Detail(ctx, "", []string{id})
+	if len(d.Summary) == 0 || d.Summary[0].Value != "CANCELLED" || len(p.DetailActions(ctx, "", []string{id})) != 0 {
+		t.Errorf("after Cancel: %+v", d.Summary)
+	}
+	if _, err := p.Create(ctx, "", map[string]string{"source": "b/o", "image": "x"}); err == nil {
+		t.Errorf("a source without gs:// was accepted")
+	}
+}

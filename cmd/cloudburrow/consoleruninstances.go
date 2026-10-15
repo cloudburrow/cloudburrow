@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	runclient "cloud.google.com/go/run/apiv2"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
@@ -29,6 +30,21 @@ type runInstancesProvider struct {
 	runAddr        func() string
 	defaultProject string
 	region         string
+	// readyTimeout is the adapter's: how long an operation waits for the
+	// pods and route to be ready before it fails (#1348).
+	readyTimeout time.Duration
+}
+
+// MutationBudget implements console.MutationBudgeter: a create, an update
+// and a start wait until the rollout is ready, as a service's deploy does,
+// so the console waits as long as the adapter's operation can, and a
+// little more for the operation's own answer, rather than the default
+// minute (#1348).
+func (p runInstancesProvider) MutationBudget() time.Duration {
+	if p.readyTimeout <= 0 {
+		return 0
+	}
+	return p.readyTimeout + 30*time.Second
 }
 
 func (runInstancesProvider) ID() string    { return "run-instances" }
@@ -124,7 +140,7 @@ func (runInstancesProvider) CreateForm() (string, []console.Field) {
 			continue
 		case "memory":
 			f.Help = `Optional, as Kubernetes quantities: "512Mi", "1Gi". Not offered, because the Cloud Run ` +
-				"adapter refuses them: ingress and a URL, IAP, VPC access and binary authorization."
+				"adapter refuses them: ingress other than all, IAP, VPC access and binary authorization."
 		}
 		fields = append(fields, f)
 	}
@@ -250,13 +266,15 @@ func (p runInstancesProvider) Detail(ctx context.Context, project string, path [
 				console.Property{Label: "Status", Value: instanceStatus(in)},
 				console.Property{Label: "Region", Value: regionOf(in.GetName())},
 				console.Property{Label: "Description", Value: in.GetDescription()},
+				console.Property{Label: "URL", Value: strings.Join(in.GetUrls(), ", ")},
 				console.Property{Label: "Message", Value: msg},
 				console.Property{Label: "Created", Value: stampText(in.GetCreateTime())},
 				console.Property{Label: "Updated", Value: stampText(in.GetUpdateTime())},
 			),
 			Sections: []console.Section{{ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
 				Groups: containerGroups(in.GetContainers()),
-				Note:   "An instance has no URL here: the adapter makes no route for it, so ingress is refused."}},
+				Note: "The URL is served through the cluster's gateway, as a service's is; the container listening on " +
+					"PORT (8080 unless it declares a port) answers it. Ingress other than all is refused."}},
 		}
 		return nil
 	})
@@ -267,9 +285,10 @@ func (p runInstancesProvider) Detail(ctx context.Context, project string, path [
 }
 
 var (
-	_ console.Driller     = runInstancesProvider{}
-	_ console.PageCreator = runInstancesProvider{}
-	_ console.Deleter     = runInstancesProvider{}
-	_ console.Actor       = runInstancesProvider{}
-	_ console.PathActor   = runInstancesProvider{}
+	_ console.Driller          = runInstancesProvider{}
+	_ console.PageCreator      = runInstancesProvider{}
+	_ console.Deleter          = runInstancesProvider{}
+	_ console.Actor            = runInstancesProvider{}
+	_ console.PathActor        = runInstancesProvider{}
+	_ console.MutationBudgeter = runInstancesProvider{}
 )

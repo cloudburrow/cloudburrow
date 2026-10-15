@@ -235,10 +235,10 @@ func TestRunJobFailureAndCancel(t *testing.T) {
 	name := runParent(h) + "/jobs/" + id
 
 	refused := shellJob("true", 1, nil)
-	refused.Template.Template.VpcAccess = &runpb.VpcAccess{Connector: "projects/p/locations/l/connectors/c"}
+	refused.Template.Template.NodeSelector = &runpb.NodeSelector{Accelerator: "nvidia-l4"}
 	if _, err := jc.CreateJob(ctx, &runpb.CreateJobRequest{Parent: runParent(h), JobId: id, Job: refused}); status.Code(err) != codes.Unimplemented ||
-		!strings.Contains(err.Error(), "template.template.vpcAccess") {
-		t.Fatalf("CreateJob with vpcAccess = %v; want Unimplemented naming template.template.vpcAccess", err)
+		!strings.Contains(err.Error(), "template.template.nodeSelector") {
+		t.Fatalf("CreateJob with nodeSelector = %v; want Unimplemented naming template.template.nodeSelector", err)
 	}
 
 	op, err := jc.CreateJob(ctx, &runpb.CreateJobRequest{Parent: runParent(h), JobId: id,

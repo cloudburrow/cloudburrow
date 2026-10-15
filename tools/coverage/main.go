@@ -60,8 +60,10 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	_ "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	_ "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	_ "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
+	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
@@ -100,6 +102,10 @@ var areas = []area{
 	{Key: "tasks", Title: "Cloud Tasks", Own: true, Services: []string{"google.cloud.tasks.v2.CloudTasks"}},
 	{Key: "secretmanager", Title: "Secret Manager", Own: true, Services: []string{"google.cloud.secretmanager.v1.SecretManagerService"}},
 	{Key: "run", Title: "Cloud Run v2", Own: true, Package: "google.cloud.run.v2"},
+	// Served on the Run port for `gcloud run deploy --source` (#1347): the
+	// repository calls and the builds SubmitBuild runs.
+	{Key: "artifactregistry", Title: "Artifact Registry", Own: true, Services: []string{"google.devtools.artifactregistry.v1.ArtifactRegistry"}},
+	{Key: "cloudbuild", Title: "Cloud Build", Own: true, Services: []string{"google.devtools.cloudbuild.v1.CloudBuild"}},
 	// The v1 (Knative-shaped) API gcloud run calls (#1293): no proto, so
 	// its methods are the official generated client's, and a method is
 	// Verified only by an annotated official-client test.

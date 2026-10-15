@@ -330,6 +330,9 @@ func (s *Server) takeBackup(base, project string, e Engine, typ, description str
 		}
 		_ = b.saveLocked()
 		b.mu.Unlock()
+		if err == nil {
+			err = s.takePITRBase(e.Instance())
+		}
 		if err == nil && typ == "AUTOMATED" {
 			s.pruneAutomated(project, e.Instance())
 		}
@@ -506,8 +509,15 @@ func (s *Server) cloneInstance(r *http.Request, base, project string, e Engine) 
 	if body.Ctx == nil || body.Ctx.Destination == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: cloneContext.destinationInstanceName is required.")
 	}
-	if body.Ctx.PointInTime != "" || len(body.Ctx.BinLog) > 0 {
-		return nil, unimplemented("cloning to a point in time", "point-in-time recovery needs write-ahead or binary logs archived, which CloudBurrow does not keep; a clone copies the source as it is now")
+	if len(body.Ctx.BinLog) > 0 {
+		return nil, unimplemented("cloning to binary log coordinates", "a clone is recovered to cloneContext.pointInTime (docs/cloudsql.md)")
+	}
+	var at time.Time
+	if body.Ctx.PointInTime != "" {
+		var err error
+		if at, err = s.checkPointInTime(e, body.Ctx.PointInTime); err != nil {
+			return nil, err
+		}
 	}
 	if len(body.Ctx.DatabaseNames) > 0 {
 		return nil, unimplemented("cloning some databases only", "a clone copies every database of the source")
@@ -563,7 +573,16 @@ func (s *Server) cloneInstance(r *http.Request, base, project string, e Engine) 
 			return
 		}
 		s.setState(dest, "PENDING_CREATE")
-		err := s.copyData(src, DumpTarget{Instance: dest, MySQL: spec.MySQL(), Created: true})
+		dst := DumpTarget{Instance: dest, MySQL: spec.MySQL(), Created: true}
+		var err error
+		if at.IsZero() {
+			err = s.copyData(src, dst)
+		} else {
+			err = s.copyAt(src, dst, at)
+		}
+		if err == nil {
+			err = s.takePITRBase(dest)
+		}
 		s.emu.Lock()
 		if s.writes.byName[dest] == c && c.state == "PENDING_CREATE" {
 			c.state = "RUNNABLE"

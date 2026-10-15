@@ -76,8 +76,11 @@ const (
 	annServiceLabels      = "cloudburrow.dev/cloud-run-labels"
 	annServiceAnnotations = "cloudburrow.dev/cloud-run-annotations"
 	annDescription        = "cloudburrow.dev/cloud-run-description"
-	annTemplateLabels     = "cloudburrow.dev/revision-labels"
-	annTemplateAnnotation = "cloudburrow.dev/revision-annotations"
+	// annBinaryAuthorization records a service's binaryAuthorization, as
+	// JSON: stored and returned, never enforced (#1346).
+	annBinaryAuthorization = "cloudburrow.dev/binary-authorization"
+	annTemplateLabels      = "cloudburrow.dev/revision-labels"
+	annTemplateAnnotation  = "cloudburrow.dev/revision-annotations"
 	// annSecretEnv records which Secret Manager secret each secretKeyRef
 	// env var came from, so it reads back as the ValueSource that was set
 	// rather than as the Kubernetes Secret it resolved to.

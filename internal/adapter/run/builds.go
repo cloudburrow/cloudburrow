@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
+	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/images"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // SourceFetcher reads a source archive from the instance's Cloud Storage.
@@ -50,6 +51,15 @@ type BuildSpec struct {
 	// FunctionTarget and Env are the buildpacks build's inputs.
 	FunctionTarget string
 	Env            map[string]string
+	// Context is the directory inside the source that a BuildDocker build
+	// sends to Docker, and a BuildBuildpacks build builds; empty is the
+	// source's root. A Cloud Build docker step names it (#1347).
+	Context string
+	// BuildArgs are a BuildDocker build's --build-arg values, NAME=VALUE.
+	BuildArgs []string
+	// Log, when set, receives the builder's output as it runs: a Cloud
+	// Build build's log (#1347).
+	Log io.Writer
 }
 
 // ImageBuilder builds a source archive into an image in the cluster.
@@ -77,6 +87,14 @@ var localBuilds = &builtImages{local: map[string]string{}}
 func tagged(ref string) string {
 	if images.RequireTagged(ref) != nil {
 		return ref + ":latest"
+	}
+	return ref
+}
+
+// untagged is ref without its tag, for its by-digest form.
+func untagged(ref string) string {
+	if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
+		return ref[:i]
 	}
 	return ref
 }
@@ -114,7 +132,21 @@ func containerImage(ref string) string {
 	if l, ok := localBuilds.resolve(ref); ok {
 		return l
 	}
+	// An untagged Artifact Registry image is :latest, as Cloud Run reads
+	// it: `gcloud run deploy --source` validates the service (dryRun)
+	// with the bare image it is about to build (#1347). Any other bare
+	// reference is still refused as a mutable target.
+	if isArtifactRegistryImage(ref) {
+		return images.Localise(tagged(ref))
+	}
 	return images.Localise(ref)
+}
+
+// isArtifactRegistryImage reports whether ref is under an Artifact Registry
+// Docker host, {location}-docker.pkg.dev.
+func isArtifactRegistryImage(ref string) bool {
+	host, _, ok := strings.Cut(ref, "/")
+	return ok && strings.HasSuffix(host, "-docker.pkg.dev")
 }
 
 // localImageFor is the dev.local reference an image_uri is built as: the
@@ -224,19 +256,38 @@ func (b *BuildsServer) SubmitBuild(ctx context.Context, req *runpb.SubmitBuildRe
 		cancel()
 		return nil, err
 	}
-	op := b.s.ops.Create(req.GetParent(), uri)
+	// The operation is Cloud Build's, named after the build's ID, as
+	// gcloud reconstructs it from the metadata's build (#1347).
+	build := newCloudBuild(req.GetParent(), tagged(uri), spec.Kind, src.GetBucket(), src.GetObject())
+	op := b.s.ops.CreateNamed(req.GetParent()+"/operations/"+build.GetId(), uri)
+	_ = b.s.ops.SetMetadata(op.Name, &cbpb.BuildOperationMetadata{Build: build})
 	go func() {
 		defer cancel()
 		defer rc.Close()
 		spec.Archive = rc
+		started := updateCloudBuild(build.GetName(), func(cb *cbpb.Build) {
+			cb.Status, cb.StartTime, cb.Steps[0].Status = cbpb.Build_WORKING, timestamppb.Now(), cbpb.Build_WORKING
+		})
+		_ = b.s.ops.SetMetadata(op.Name, &cbpb.BuildOperationMetadata{Build: started})
 		if err := b.builder.Build(bctx, spec); err != nil {
+			failed := updateCloudBuild(build.GetName(), func(cb *cbpb.Build) {
+				cb.Status, cb.FinishTime, cb.Steps[0].Status = cbpb.Build_FAILURE, timestamppb.Now(), cbpb.Build_FAILURE
+				cb.StatusDetail = err.Error()
+				cb.FailureInfo = &cbpb.Build_FailureInfo{Type: cbpb.Build_FailureInfo_USER_BUILD_STEP, Detail: err.Error()}
+			})
+			_ = b.s.ops.SetMetadata(op.Name, &cbpb.BuildOperationMetadata{Build: failed})
 			_ = b.s.ops.Fail(op.Name, apierror.FailedPrecondition("build failed: %v", err))
 			return
 		}
 		localBuilds.record(uri, spec.LocalImage)
-		// Cloud Build's operation answers with a cloudbuild.v1.Build, which
-		// is not served here; the operation carries no resource.
-		_ = b.s.ops.Succeed(op.Name, &emptypb.Empty{})
+		digest := buildDigest(build.GetId())
+		localBuilds.record(untagged(uri)+"@"+digest, spec.LocalImage)
+		done := updateCloudBuild(build.GetName(), func(cb *cbpb.Build) {
+			cb.Status, cb.FinishTime, cb.Steps[0].Status = cbpb.Build_SUCCESS, timestamppb.Now(), cbpb.Build_SUCCESS
+			cb.Results = &cbpb.Results{Images: []*cbpb.BuiltImage{{Name: tagged(uri), Digest: digest}}}
+		})
+		_ = b.s.ops.SetMetadata(op.Name, &cbpb.BuildOperationMetadata{Build: done})
+		_ = b.s.ops.Succeed(op.Name, done)
 	}()
 	pop, err := b.s.toProtoOperation(op.Name)
 	if err != nil {

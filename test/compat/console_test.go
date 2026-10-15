@@ -32,7 +32,11 @@ func consoleDo(t *testing.T, addr, method, path, body string) (int, string) {
 	if body != "" {
 		rdr = bytes.NewReader([]byte(body))
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// Longer than the console's own default budget of a minute, which ends
+	// every other mutation first: a Cloud Run instance's or worker pool's
+	// create waits until it is ready, for up to the adapter's ready timeout
+	// (#1348).
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, method, "http://"+addr+path, rdr)

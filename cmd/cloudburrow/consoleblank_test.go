@@ -1,7 +1,11 @@
 package main
 
 import (
+	"time"
+
+	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"context"
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -42,6 +46,7 @@ const blankProject = "blank-check"
 var emulatorOnly = map[string]string{
 	"firestore":           "the Firestore emulator is a Java container; there is no in-process fake",
 	"firestore-databases": "Firestore's databases screen reads the Admin API the emulator pod's call front serves",
+	"bigtable-instances":  "the instance admin API is the Bigtable front's, which bttest does not serve (TestConsoleBigtableInstancesScreen drives the front)",
 	"datastore":           "the Datastore emulator is a Java container; there is no in-process fake",
 	"spanner":             "the screens read the instance and database admin APIs, which spannertest does not serve",
 	"cloudsql":            "a PostgreSQL server; there is no in-process one",
@@ -375,6 +380,13 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		Containers: []*runpb.Container{{Image: "example.invalid/pool:1"}}}}}
 	inst := "projects/" + blankProject + "/locations/us-central1/instances/blank-instance"
 	jobs.instances.instances = map[string]*runpb.Instance{inst: {Name: inst}}
+	// A Cloud Build build (#1347), the sparsest CreateBuild runs: one
+	// push step, which fails, and no source.
+	if _, err := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute).Builds(stubSource{}, stubBuilder{}).CloudBuild().
+		CreateBuild(ctx, &cbpb.CreateBuildRequest{ProjectId: blankProject, Build: &cbpb.Build{
+			Steps: []*cbpb.BuildStep{{Name: "gcr.io/cloud-builders/docker", Args: []string{"push", "example.invalid/never"}}}}}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Cloud Run and the cluster screens read through kubectl, so a kubectl
 	// that answers from fixtures stands in for the cluster.

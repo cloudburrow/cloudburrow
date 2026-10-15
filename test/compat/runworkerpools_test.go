@@ -3,6 +3,10 @@
 package compat
 
 import (
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,6 +88,10 @@ func TestRunWorkerPoolLifecycle(t *testing.T) {
 	if created.GetName() != name || created.GetGeneration() != 1 || created.GetLatestCreatedRevision() == "" {
 		t.Fatalf("created = %v", created)
 	}
+	// The operation completes once the instances are ready (#1348).
+	if st := created.GetTerminalCondition().GetState(); st != runpb.Condition_CONDITION_SUCCEEDED || created.GetReconciling() {
+		t.Errorf("CreateWorkerPool's operation completed with the pool %v (reconciling %v); want ready", st, created.GetReconciling())
+	}
 	firstRev := created.GetLatestCreatedRevision()
 	ready := func() {
 		waitCondition(t, "worker pool", func() (*runpb.Condition, error) {
@@ -146,6 +154,9 @@ func TestRunWorkerPoolLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("waiting for UpdateWorkerPool: %v", err)
 	}
+	if after.GetTerminalCondition().GetState() != runpb.Condition_CONDITION_SUCCEEDED || after.GetLatestReadyRevision() != after.GetLatestCreatedRevision() {
+		t.Errorf("UpdateWorkerPool's operation completed before the new revision was ready: %v", after.GetTerminalCondition())
+	}
 	secondRev := after.GetLatestCreatedRevision()
 	if secondRev == firstRev || secondRev == "" {
 		t.Fatalf("a changed template kept revision %s", secondRev)
@@ -206,9 +217,11 @@ func TestRunWorkerPoolLifecycle(t *testing.T) {
 
 // covers: google.cloud.run.v2.Instances/CreateInstance, google.cloud.run.v2.Instances/GetInstance, google.cloud.run.v2.Instances/ListInstances, google.cloud.run.v2.Instances/StopInstance, google.cloud.run.v2.Instances/StartInstance, google.cloud.run.v2.Instances/DeleteInstance
 //
-// TestRunInstanceLifecycle (#1299): through the official InstancesClient, a
-// standalone instance is created and becomes ready, is read and listed, is
-// stopped and started again, refuses ingress, and is deleted.
+// TestRunInstanceLifecycle (#1299, #1348): through the official
+// InstancesClient, a standalone instance is created and its operation
+// completes once it is ready; it has a URL that serves its container; it is
+// read and listed, stopped and started again; ingress other than ALL is
+// refused; and it is deleted.
 func TestRunInstanceLifecycle(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -224,8 +237,15 @@ func TestRunInstanceLifecycle(t *testing.T) {
 			_, _ = op.Wait(ctx)
 		}
 	})
+	if os.Getenv(envKubeconfig) == "" {
+		if cli := os.Getenv(EnvCLI); cli != "" {
+			t.Setenv(envKubeconfig, filepath.Join(instanceDirFrom(t, cliArgs()), "kubeconfig"))
+		}
+	}
 	op, err := c.CreateInstance(ctx, &runpb.CreateInstanceRequest{Parent: runParent(h), InstanceId: id,
-		Instance: &runpb.Instance{Description: "one box", Containers: sleeper("hi")}})
+		Instance: &runpb.Instance{Description: "one box", Ingress: runpb.IngressTraffic_INGRESS_TRAFFIC_ALL,
+			Containers: []*runpb.Container{{Image: "ghcr.io/knative/helloworld-go:latest",
+				Env: []*runpb.EnvVar{{Name: "TARGET", Values: &runpb.EnvVar_Value{Value: "instance"}}}}}}})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
@@ -235,6 +255,15 @@ func TestRunInstanceLifecycle(t *testing.T) {
 	}
 	if created.GetName() != name || created.GetDescription() != "one box" {
 		t.Fatalf("created = %v", created)
+	}
+	if st := created.GetTerminalCondition().GetState(); st != runpb.Condition_CONDITION_SUCCEEDED || created.GetReconciling() {
+		t.Errorf("CreateInstance's operation completed with the instance %v (reconciling %v); want ready", st, created.GetReconciling())
+	}
+	if len(created.GetUrls()) != 1 || created.GetIngress() != runpb.IngressTraffic_INGRESS_TRAFFIC_ALL {
+		t.Fatalf("created urls = %v, ingress = %v; want one URL and INGRESS_TRAFFIC_ALL", created.GetUrls(), created.GetIngress())
+	}
+	if body, code := secretEnvGet(t, ingress(t), hostOf(t, created.GetUrls()[0])); code != http.StatusOK || !strings.Contains(body, "Hello instance") {
+		t.Errorf("GET %s = %d %q; want Hello instance", created.GetUrls()[0], code, body)
 	}
 	ready := func() {
 		waitCondition(t, "instance", func() (*runpb.Condition, error) {
@@ -279,8 +308,8 @@ func TestRunInstanceLifecycle(t *testing.T) {
 	}
 	ready()
 	if _, err := c.CreateInstance(ctx, &runpb.CreateInstanceRequest{Parent: runParent(h), InstanceId: "compat-instance-ingress",
-		Instance: &runpb.Instance{Containers: sleeper("x"), Ingress: runpb.IngressTraffic_INGRESS_TRAFFIC_ALL}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateInstance with ingress = %v, want UNIMPLEMENTED", err)
+		Instance: &runpb.Instance{Containers: sleeper("x"), Ingress: runpb.IngressTraffic_INGRESS_TRAFFIC_INTERNAL_ONLY}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("CreateInstance with internal-only ingress = %v, want UNIMPLEMENTED", err)
 	}
 	dop, err := c.DeleteInstance(ctx, &runpb.DeleteInstanceRequest{Name: name})
 	if err != nil {

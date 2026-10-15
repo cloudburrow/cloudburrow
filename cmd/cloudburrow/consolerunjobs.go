@@ -423,6 +423,8 @@ func (runJobsProvider) CreateForm() (string, []console.Field) {
 		},
 		runSecretEnvField("Container"),
 		runVolumeFields("Container")[0], runVolumeFields("Container")[1], runVolumeFields("Container")[2],
+		runSettingsFields("Settings", false)[0], runSettingsFields("Settings", false)[1], runSettingsFields("Settings", false)[2],
+		runSettingsFields("Settings", false)[3],
 		{
 			Name: "taskCount", Label: "Number of tasks", Type: "text", Default: "1",
 			Help:    "How many tasks each execution runs. Each task gets its own CLOUD_RUN_TASK_INDEX.",
@@ -553,6 +555,9 @@ func runJobFormTemplate(values map[string]string) (*runpb.ExecutionTemplate, err
 	if err := applyRunVolumes(podFields{&tt.ServiceAccount, &tt.Volumes}, c, values); err != nil {
 		return nil, err
 	}
+	if err := applyRunSettings(runSettings{&tt.ExecutionEnvironment, &tt.VpcAccess, &tt.EncryptionKey, nil}, values); err != nil {
+		return nil, err
+	}
 	if v := strings.TrimSpace(values["maxRetries"]); v != "" {
 		n, err := optionalInt(v, "maximum retries")
 		if err != nil {
@@ -600,6 +605,9 @@ func (p runJobsProvider) Edit(ctx context.Context, project string, path []string
 		}
 		tt := job.GetTemplate().GetTemplate()
 		if err := applyRunVolumes(podFields{&tt.ServiceAccount, &tt.Volumes}, tt.Containers[0], values); err != nil {
+			return err
+		}
+		if err := applyRunSettings(runSettings{&tt.ExecutionEnvironment, &tt.VpcAccess, &tt.EncryptionKey, nil}, values); err != nil {
 			return err
 		}
 		if labels, ok, err := runLabels(values); err != nil {
@@ -689,6 +697,9 @@ func runJobEditForm(job *runpb.Job) *console.EditForm {
 	}
 	if t := tt.GetTimeout(); t != nil {
 		prefill["timeout"] = fmt.Sprint(int64(t.AsDuration().Seconds()))
+	}
+	for k, v := range runSettingsDefaults(tt.GetExecutionEnvironment(), tt.GetVpcAccess(), tt.GetEncryptionKey(), false) {
+		prefill[k] = v
 	}
 	_, fields := runJobsProvider{}.CreateForm()
 	for i := range fields {

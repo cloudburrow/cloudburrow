@@ -210,7 +210,7 @@ func bigtableWriteCellFields(withRow bool, family string) []console.Field {
 
 // bigtableFamilies reads a table's column families through the admin client.
 func (p bigtableProvider) bigtableFamilies(ctx context.Context, project, table string) ([]bigtable.FamilyInfo, error) {
-	admin, err := bigtable.NewAdminClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	admin, err := p.newAdmin(ctx, project)
 	if err != nil {
 		return nil, fmt.Errorf("cannot reach the Bigtable admin API: %w", err)
 	}
@@ -410,7 +410,7 @@ func (p bigtableProvider) ActAt(ctx context.Context, project string, path []stri
 
 // admin runs one call with an admin client.
 func (p bigtableProvider) admin(ctx context.Context, project string, call func(*bigtable.AdminClient) error) error {
-	a, err := bigtable.NewAdminClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	a, err := p.newAdmin(ctx, project)
 	if err != nil {
 		return fmt.Errorf("cannot reach Bigtable: %w", err)
 	}
@@ -420,7 +420,7 @@ func (p bigtableProvider) admin(ctx context.Context, project string, call func(*
 
 // apply sends one MutateRow.
 func (p bigtableProvider) apply(ctx context.Context, project, table, row string, mut *bigtable.Mutation) error {
-	c, err := bigtable.NewClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	c, err := p.newData(ctx, project)
 	if err != nil {
 		return fmt.Errorf("cannot reach Bigtable: %w", err)
 	}
@@ -435,7 +435,7 @@ func (p bigtableProvider) apply(ctx context.Context, project, table, row string,
 // worked; a read first and a delete after could also delete what another
 // writer wrote between the two.
 func (p bigtableProvider) applyIf(ctx context.Context, project, table, row string, predicate bigtable.Filter, mut *bigtable.Mutation, missing string) error {
-	c, err := bigtable.NewClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	c, err := p.newData(ctx, project)
 	if err != nil {
 		return fmt.Errorf("cannot reach Bigtable: %w", err)
 	}
@@ -495,7 +495,7 @@ func (p bigtableProvider) readModifyWrite(ctx context.Context, project string, p
 		}
 		m.AppendValue(family, qualifier, []byte(values["value"]))
 	}
-	c, err := bigtable.NewClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	c, err := p.newData(ctx, project)
 	if err != nil {
 		return fmt.Errorf("cannot reach Bigtable: %w", err)
 	}

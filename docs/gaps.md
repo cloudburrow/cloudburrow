@@ -23,7 +23,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Storage | 7 | 1 | 5 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 7 | 4 | 1 | 0 | 2 |
+| Cloud Run | 15 | 12 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 0 | 0 | 0 | 0 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 6 | 6 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **82** | **30** | **39** | **8** | **5** |
+| **Total** | **90** | **38** | **39** | **8** | **5** |
 
 ## Cloud Storage
 
@@ -84,6 +84,15 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 | `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` (#1347) | not built yet | M |
 | Worker pool and standalone instance operations complete when written, not when their instances are ready; an instance gets no URL (`ingress` refused); a worker pool's `update_mask` and instance splits across revisions are refused (served since #1300 and #1299) (#1348) | not built yet | M |
 | `gcloud run deploy` through the v1 (Knative) API, served since #1293 for services, revisions, routes and configurations, is not verified: its default `startupProbe` and other v1 fields are refused as not mapped, and `projects.locations.list` and the rest of v1 (domain mappings, jobs, IAM) are 501 (#1349) | not built yet | M |
+Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` with a partial `update_mask` (#1260); container logs in Cloud Logging as `cloud_run_revision` and `cloud_run_job` (#1298); the v1 (Knative) API, with `gcloud run services list`, `describe` and `deploy --image` (#1293, #1297), and its locations, IAM, jobs and domain mappings (#1349); `Builds.SubmitBuild` (#1268).
+| Refused service and job fields (#1346): Cloud SQL volumes (needs a Cloud SQL Auth Proxy sidecar and the 3307 connector published to pods), Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346) | not built yet | M |
+| `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
+| Refused service and job fields: VPC access, Cloud SQL, Cloud Storage FUSE and NFS volumes, `subPath`, encryption keys, binary authorization, execution environment, session affinity; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297) | not built yet | L |
+| `gcloud run deploy --source` and `gcloud builds submit` are served since #1347 (Artifact Registry repositories, Cloud Build `builds.create`, `CancelBuild` and operations on the Run port, verified with gcloud on Dockerfile sources and a two-step cloudbuild.yaml); left: arbitrary step containers (only docker build, docker push and pack steps run), and no image is pushed to a registry a docker client can reach | not built yet | M |
+| `Instances.*` is not served (#1299) | not built yet | L |
+| `WorkerPools.*` is not served (#1300) | not built yet | L |
+| A worker pool's `update_mask` and instance splits across revisions are refused (served since #1300 and #1299; operations wait for the instances and an instance has a URL since #1348) | not built yet | M |
+| The v1 (Knative) API's `replaceJob` and `run` (`gcloud run jobs update` and `execute`), executions and tasks are 501; a domain mapping never becomes Ready, as no DNS is served (projects.locations.list, IAM, jobs create/get/list/delete and domain mappings since #1349) | not built yet | M |
 | `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
 | `CancelExecution`'s result | needs live GCP | S |
@@ -131,11 +140,12 @@ IAM conditions are excluded (below). Closed: `RotateSecret`, `EnableManagedRotat
 
 ## Resource Manager
 
-Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296).
+Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296), and regional tag bindings and effective tags through the `{location}-cloudresourcemanager` endpoints (#1350).
 
 | Gap | Why open | Size |
 |---|---|---|
 | Regional tag bindings (the `{location}-cloudresourcemanager` endpoints) are not served; Liens, TagKeys, TagValues, TagBindings, TagHolds and EffectiveTags are (#1295), stored, with only the project-delete lien enforced (#1350) | not built yet | S |
+No gap is left open here.
 
 ## Vertex AI
 
@@ -206,7 +216,7 @@ Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`),
 | Gap | Why open | Size |
 |---|---|---|
 | The Memorystore admin API (`redis.googleapis.com`) (#1302) | not built yet | L |
-| The Cloud SQL Admin API beyond instance reads and writes (a server per created instance, POSTGRES_17 and MYSQL_8_4), databases, users, operations (#1301), the connector path (`connectSettings`, `generateEphemeralCert` and TLS on 3307, served for the Go connector), backups, restores and clones over real dumps, and read replicas (streaming and GTID replication, promote, stop and start), all #1330: IAM database authentication, point-in-time recovery, failover replicas and HA, cascading and cross-region replicas, other database versions, and a pinned Auth Proxy test (#1330) | not built yet | L |
+| The Cloud SQL Admin API beyond instance reads and writes (a server per created instance, POSTGRES_17 and MYSQL_8_4), databases, users, operations (#1301), the connector path (`connectSettings`, `generateEphemeralCert` and TLS on 3307, served for the Go connector), backups, restores and clones over real dumps, read replicas (streaming and GTID replication, promote, stop and start), and point-in-time recovery of created instances (archived WAL, the binary log; clone to a time, getLatestRecoveryTime), all #1330: IAM database authentication, `pointInTimeRestore` (a Backup and DR datasource), failover replicas and HA, cascading and cross-region replicas, other database versions, and a pinned Auth Proxy test (#1330) | not built yet | L |
 | The rest of the Memorystore admin API: `ListInstances`, `GetInstance` and `GetInstanceAuthString` are served over the one Valkey server (#1302); creating, updating, upgrading, deleting, importing, exporting and failing over an instance are UNIMPLEMENTED, and the gcloud and Terraform endpoint overrides are not exported until a test drives them | not built yet | M |
 | Memorystore for Redis beyond one BASIC Valkey server per instance (#1302): STANDARD_HA (replicas, failover, read replicas), Redis versions other than `REDIS_7_2`, in-transit encryption, RDB persistence and customer-managed keys are UNIMPLEMENTED | not built yet | L |
 | The Cloud SQL Admin API beyond instance reads, databases, users and operations (served since #1301): creating or changing instances, IAM database authentication, backups, replicas, the Auth Proxy and connector path (`connectSettings`, `generateEphemeralCert`) (#1330) | not built yet | L |
