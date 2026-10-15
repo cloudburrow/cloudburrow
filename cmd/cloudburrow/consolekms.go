@@ -270,8 +270,8 @@ func (p kmsProvider) keyDetail(ctx context.Context, key string) (console.Detail,
 				{Label: "Next rotation time", Value: kmsTime(k.GetNextRotationTime())},
 			},
 		}},
-		Note: "Only symmetric ENCRYPT_DECRYPT keys at SOFTWARE protection exist locally. " +
-			"Key material is never shown: no Cloud KMS method returns it.",
+		Note: "Only SOFTWARE protection exists locally. " +
+			"Key material is never shown: no Cloud KMS method returns it; a public key is, through Get public key.",
 	}
 	if len(k.GetLabels()) > 0 {
 		config.Groups = append(config.Groups, console.PropertyGroup{
@@ -387,10 +387,9 @@ func (p kmsProvider) Create(ctx context.Context, project string, values map[stri
 
 // kmsKeyHelp names what a key created here is, and what is refused, so the
 // form says it before the API has to.
-const kmsKeyHelp = "Creates a symmetric ENCRYPT_DECRYPT key at SOFTWARE protection " +
-	"(GOOGLE_SYMMETRIC_ENCRYPTION) with version 1 as its primary. Asymmetric and MAC " +
-	"keys, HSM and EXTERNAL protection and import are not implemented locally and " +
-	"are not offered."
+const kmsKeyHelp = "Creates a key at SOFTWARE protection with version 1, of the purpose and " +
+	"algorithm chosen below; an ENCRYPT_DECRYPT key gets version 1 as its primary. HSM and " +
+	"EXTERNAL protection are not implemented locally and are not offered."
 
 // kmsCreateKeyFields is the Create key form on a ring's page. A function so
 // the pattern check in consolepatterns_test.go reads the fields shipped.
@@ -398,6 +397,8 @@ func kmsCreateKeyFields() []console.Field {
 	return []console.Field{
 		{Name: "cryptoKeyId", Label: "Key name", Type: "text", Required: true,
 			Help: kmsKeyHelp, Pattern: `^[A-Za-z0-9_\-]{1,63}$`},
+		kmsPurposeField(),
+		kmsAlgorithmField(),
 		{Name: "labels", Label: "Labels", Type: "map",
 			Help: "Optional. Lowercase keys and values."},
 		// Both of these are read back by GetCryptoKey as CreateCryptoKey set
@@ -425,12 +426,33 @@ func kmsCreateKeyRequest(ring string, values map[string]string) (*kmspb.CreateCr
 	if err != nil {
 		return nil, fmt.Errorf("labels: %w", err)
 	}
+	purpose := kmspb.CryptoKey_ENCRYPT_DECRYPT
+	if p := strings.TrimSpace(values["purpose"]); p != "" {
+		v, ok := kmspb.CryptoKey_CryptoKeyPurpose_value[p]
+		if !ok {
+			return nil, fmt.Errorf("purpose: %q is not a key purpose", p)
+		}
+		purpose = kmspb.CryptoKey_CryptoKeyPurpose(v)
+	}
+	// An empty algorithm is sent as unset: CreateCryptoKey implies
+	// GOOGLE_SYMMETRIC_ENCRYPTION for ENCRYPT_DECRYPT and refuses the rest,
+	// with the message the form shows.
+	var alg kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm
+	if a := strings.TrimSpace(values["algorithm"]); a != "" {
+		v, ok := kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm_value[a]
+		if !ok {
+			return nil, fmt.Errorf("algorithm: %q is not a key algorithm", a)
+		}
+		alg = kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm(v)
+	} else if purpose == kmspb.CryptoKey_ENCRYPT_DECRYPT {
+		alg = kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION
+	}
 	key := &kmspb.CryptoKey{
-		Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT,
+		Purpose: purpose,
 		Labels:  labels,
 		VersionTemplate: &kmspb.CryptoKeyVersionTemplate{
 			ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
-			Algorithm:       kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION,
+			Algorithm:       alg,
 		},
 	}
 	if raw := strings.TrimSpace(values["destroyScheduledDuration"]); raw != "" {
@@ -473,35 +495,52 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 	}
 	switch len(path) {
 	case 1:
-		return []console.Action{{ID: "createkey", Label: "Create key", Fields: kmsCreateKeyFields()}}
+		return []console.Action{{ID: "createkey", Label: "Create key", Fields: kmsCreateKeyFields()}, kmsRandomBytesAction}
 	case 2:
-		return []console.Action{
-			{ID: "addversion", Label: "Add version"},
-			{ID: "encrypt", Label: "Encrypt", Fields: []console.Field{
+		key := ring + "/cryptoKeys/" + path[1]
+		k, err := api.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key})
+		if err != nil {
+			return nil
+		}
+		out := []console.Action{{ID: "addversion", Label: "Add version"}}
+		// DeleteCryptoKey needs every version deleted first (service.proto).
+		if vs, err := api.ListCryptoKeyVersions(ctx, &kmspb.ListCryptoKeyVersionsRequest{Parent: key, PageSize: 1}); err == nil && len(vs.GetCryptoKeyVersions()) == 0 {
+			out = append(out, console.Action{ID: "deletekey", Label: "Delete key", Destructive: true,
+				Confirm: "The key is deleted permanently, and its name can never be used again."})
+		}
+		if k.GetPurpose() != kmspb.CryptoKey_ENCRYPT_DECRYPT {
+			// The other purposes' operations name a version: they are on
+			// each version's page.
+			return out
+		}
+		return append(out,
+			console.Action{ID: "encrypt", Label: "Encrypt", Fields: []console.Field{
 				{Name: "plaintext", Label: "Plaintext", Type: "textarea", Required: true,
 					Help: "Encrypted as UTF-8 with the primary version. The ciphertext is shown " +
 						"base64-encoded in the dialog and recorded nowhere."},
 				{Name: "aad", Label: "Additional authenticated data", Type: "text",
 					Help: "Optional. The same value must be given to decrypt."},
 			}},
-			{ID: "decrypt", Label: "Decrypt", Fields: []console.Field{
+			console.Action{ID: "decrypt", Label: "Decrypt", Fields: []console.Field{
 				{Name: "ciphertext", Label: "Ciphertext (base64)", Type: "textarea", Required: true,
 					Help: "As Encrypt returned it. The plaintext is shown in the dialog and recorded nowhere."},
 				{Name: "aad", Label: "Additional authenticated data", Type: "text",
 					Help: "Optional. Must match what was given to encrypt."},
-			}},
-		}
+			}})
 	case 3:
 		name := ring + "/cryptoKeys/" + path[1] + "/cryptoKeyVersions/" + path[2]
 		v, err := api.GetCryptoKeyVersion(ctx, &kmspb.GetCryptoKeyVersionRequest{Name: name})
 		if err != nil {
 			return nil
 		}
+		k, err := api.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: kmsKeyOf(name)})
+		if err != nil {
+			return nil
+		}
 		switch v.GetState() {
 		case kmspb.CryptoKeyVersion_ENABLED:
-			out := []console.Action{}
-			if k, err := api.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: kmsKeyOf(name)}); err == nil &&
-				k.GetPrimary().GetName() != name {
+			out := kmsVersionCryptoActions(k.GetPurpose())
+			if k.GetPurpose() == kmspb.CryptoKey_ENCRYPT_DECRYPT && k.GetPrimary().GetName() != name {
 				out = append(out, console.Action{ID: "makeprimary", Label: "Make primary"})
 			}
 			return append(out,
@@ -514,6 +553,13 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 			}
 		case kmspb.CryptoKeyVersion_DESTROY_SCHEDULED:
 			return []console.Action{{ID: "restore", Label: "Restore"}}
+		case kmspb.CryptoKeyVersion_DESTROYED:
+			// Only a DESTROYED version that was not imported can be deleted
+			// (service.proto DeleteCryptoKeyVersion).
+			if v.GetImportJob() == "" {
+				return []console.Action{{ID: "deleteversion", Label: "Delete version", Destructive: true,
+					Confirm: "The version's record is deleted permanently; its number is never reused."}}
+			}
 		}
 	}
 	return nil
@@ -544,7 +590,22 @@ func (p kmsProvider) ActAtResult(ctx context.Context, project string, path []str
 		version = key + "/cryptoKeyVersions/" + path[2]
 	}
 
+	if len(path) == 3 {
+		if out, ok, err := kmsVersionCryptoAct(ctx, api, version, action, values); ok {
+			return out, err
+		}
+	}
 	switch {
+	case action == "randombytes" && len(path) == 1:
+		return kmsRandomBytes(ctx, api, ring, values)
+
+	case action == "deletekey" && len(path) == 2:
+		op, err := api.DeleteCryptoKey(ctx, &kmspb.DeleteCryptoKeyRequest{Name: key})
+		if err == nil && op.GetError() != nil {
+			err = fmt.Errorf("%s", op.GetError().GetMessage())
+		}
+		return nil, err
+
 	case action == "createkey" && len(path) == 1:
 		req, err := kmsCreateKeyRequest(ring, values)
 		if err != nil {

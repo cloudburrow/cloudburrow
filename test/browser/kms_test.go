@@ -191,3 +191,61 @@ func TestKMSEditKeyRotationThroughTheForm(t *testing.T) {
 		t.Errorf("the reopened dialog shows rotation period %q, next rotation time %q", pr, nr)
 	}
 }
+
+// TestKMSSignAndVerifyThroughTheForm (#1212): Create key on a ring's page
+// offers the purpose and algorithm; an EC signing key created there has a
+// version page offering Sign, Verify and Get public key, and the signature
+// Sign shows in its dialog is Valid to Verify, which checks it against the
+// public key with standard crypto.
+func TestKMSSignAndVerifyThroughTheForm(t *testing.T) {
+	needService(t, "kms")
+	p := open(t)
+	project := uniqueProject(t)
+	ring := "projects/" + project + "/locations/global/keyRings/browser-sign"
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/kms?project="+project,
+		`{"keyRingId":"browser-sign","location":"global"}`); code != http.StatusOK {
+		t.Fatalf("create a key ring through the console API = %d: %s", code, body)
+	}
+	p.navigate("/kms/keyrings?project=" + project)
+	p.clickText("#view tbody a", ring)
+	p.clickText("#view .page-actions button", "Create key")
+	p.waitFor(`document.querySelector(".modal.is-open #f-purpose") !== null`)
+	var purposes []string
+	p.eval(`[...document.querySelector(".modal.is-open #f-purpose").options].map((o) => o.value)`, &purposes)
+	if !strings.Contains(strings.Join(purposes, ","), "ASYMMETRIC_SIGN") {
+		t.Fatalf("Create key offers purposes %v", purposes)
+	}
+	setField(p, ".modal.is-open", "f-cryptoKeyId", "signer")
+	setField(p, ".modal.is-open", "f-purpose", "ASYMMETRIC_SIGN")
+	setField(p, ".modal.is-open", "f-algorithm", "EC_SIGN_P256_SHA256")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+
+	p.clickText("#view tbody a", "signer")
+	p.clickText("#view tbody a", "1")
+	sign := func(action string, values map[string]string) string {
+		p.waitFor(`document.querySelector(".modal") === null`)
+		p.clickText("#view .page-actions button", action)
+		p.waitFor(`document.querySelector(".modal.is-open button[type=\"submit\"]") !== null`)
+		for k, v := range values {
+			p.waitFor(fmt.Sprintf(`document.querySelector(".modal.is-open #f-%s") !== null`, k))
+			setField(p, ".modal.is-open", "f-"+k, v)
+		}
+		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.waitFor(`document.querySelector("#action-result-table") !== null`)
+		var cells []string
+		p.eval(`[...document.querySelectorAll("#action-result-table td")].map((c) => c.textContent)`, &cells)
+		p.run(chromedp.Click(`#action-result .modal-actions button`, chromedp.ByQuery))
+		if len(cells) < 2 {
+			t.Fatalf("%s answered %v", action, cells)
+		}
+		return cells[1]
+	}
+	sig := sign("Sign", map[string]string{"data": "hello"})
+	if got := sign("Verify", map[string]string{"data": "hello", "signature": sig}); got != "Valid" {
+		t.Errorf("Verify of the signature Sign showed = %q, want Valid", got)
+	}
+	if got := sign("Get public key", map[string]string{"format": "PEM"}); !strings.HasPrefix(got, "-----BEGIN PUBLIC KEY-----") {
+		t.Errorf("Get public key showed %q", got)
+	}
+}
