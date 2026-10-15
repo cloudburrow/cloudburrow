@@ -13,7 +13,8 @@ package main
 //
 // What the mode runs is what the validating front (internal/bigqueryfront)
 // serves and the compat tests exercise through jobs.query: DDL (CREATE
-// SCHEMA, CREATE TABLE with columns or AS SELECT, CREATE VIEW, CREATE OR
+// SCHEMA, CREATE TABLE with columns or AS SELECT, CREATE VIEW (with a
+// column list too, #1240), CREATE OR
 // REPLACE, IF NOT EXISTS, DROP) and scripts with DECLARE and SET
 // (docs/compatibility.md). A statement the front answers 501, such as ALTER
 // TABLE or a control-flow block, is sent, and the answer is shown in the
@@ -215,7 +216,7 @@ func (p bigqueryProvider) WriteSpec(path []string) *console.WriteSpec {
 	return &console.WriteSpec{
 		Label: "Read-write",
 		Hint: fmt.Sprintf("Changes datasets, tables and rows: DDL (CREATE SCHEMA, CREATE TABLE, with columns or AS "+
-			"SELECT, CREATE VIEW, CREATE OR REPLACE, IF NOT EXISTS, DROP), scripts with DECLARE and SET, and a DML "+
+			"SELECT, CREATE VIEW, with or without a column list, CREATE OR REPLACE, IF NOT EXISTS, DROP), scripts with DECLARE and SET, and a DML "+
 			"statement of its own (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE), answered with the rows it "+
 			"changed, all sent with jobs.query. Unqualified names resolve in dataset %s. DML inside a script (%s) "+
 			"and UPDATE … FROM (%s) are not run here. What the API refuses is shown in its words.",

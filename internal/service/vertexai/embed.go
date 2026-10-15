@@ -72,25 +72,35 @@ func (s *Server) predict(w http.ResponseWriter, r *http.Request, requested strin
 // provenanceValue is ProvenanceHeader's value, sent as gRPC metadata too.
 const provenanceValue = "community; not an official Google artifact"
 
+// checkEmbeddingModel refuses any model but the one embedding identity
+// served, for :predict and embedContent alike. No substitution is performed.
+func checkEmbeddingModel(requested, verb string) error {
+	if strings.EqualFold(strings.TrimSpace(requested), localai.EmbeddingGemmaONNXID) {
+		return nil
+	}
+	return apierror.NotFound(
+		"model %q is not served for %s; the only embedding model here is %q, "+
+			"a community ONNX conversion of EmbeddingGemma that is not an official Google artifact. "+
+			"No substitution is performed",
+		requested, verb, localai.EmbeddingGemmaONNXID)
+}
+
+// embeddingsUnavailable is the 501 every embedding method answers when the
+// runtime is not installed; why is the reason SetEmbedder was given.
+func embeddingsUnavailable(why error) error {
+	if why == nil {
+		why = errors.New("the embedding endpoint is not enabled; start with -local-ai-embeddings-dir")
+	}
+	return apierror.Unimplemented("embeddings are unavailable: %v", why)
+}
+
 // embedPredict serves one text-embedding :predict, for the JSON route and the
 // gRPC PredictionService alike, so the two answer the same request the same
 // way. body is the JSON request.
 func (s *Server) embedPredict(ctx context.Context, requested string, body io.Reader) (map[string]any, error) {
-	if !strings.EqualFold(strings.TrimSpace(requested), localai.EmbeddingGemmaONNXID) {
-		return nil, apierror.NotFound(
-			"model %q is not served for :predict; the only embedding model here is %q, "+
-				"a community ONNX conversion of EmbeddingGemma that is not an official Google artifact. "+
-				"No substitution is performed",
-			requested, localai.EmbeddingGemmaONNXID)
-	}
-	s.mu.RLock()
-	e, why := s.embedder, s.embedUnavailable
-	s.mu.RUnlock()
-	if e == nil {
-		if why == nil {
-			why = errors.New("the embedding endpoint is not enabled; start with -local-ai-embeddings-dir")
-		}
-		return nil, apierror.Unimplemented("embeddings are unavailable: %v", why)
+	e, err := s.embedderFor(requested, ":predict")
+	if err != nil {
+		return nil, err
 	}
 
 	dec := json.NewDecoder(io.LimitReader(body, maxRequestBytes))

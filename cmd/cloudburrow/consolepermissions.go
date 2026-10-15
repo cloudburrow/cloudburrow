@@ -93,6 +93,16 @@ func protoEtag(p console.Policy) ([]byte, error) {
 type iamServer interface {
 	GetIamPolicy(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error)
 	SetIamPolicy(context.Context, *iampb.SetIamPolicyRequest) (*iampb.Policy, error)
+	TestIamPermissions(context.Context, *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error)
+}
+
+// testProtoPermissions is TestIamPermissions on a gRPC service (#1242).
+func testProtoPermissions(ctx context.Context, api iamServer, resource string, perms []string) ([]string, error) {
+	resp, err := api.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: resource, Permissions: perms})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetPermissions(), nil
 }
 
 func getProtoPolicy(ctx context.Context, api iamServer, resource string) (console.Policy, error) {
@@ -153,6 +163,14 @@ func (p tasksProvider) SetPolicy(ctx context.Context, project string, path []str
 	return setProtoPolicy(ctx, api, queue, pol)
 }
 
+func (p tasksProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error) {
+	api, queue, err := p.queueIAM(project, path)
+	if err != nil {
+		return nil, err
+	}
+	return testProtoPermissions(ctx, api, queue, perms)
+}
+
 // Secret Manager: a secret's page. A version has no policy of its own.
 
 func (secretsProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
@@ -188,6 +206,14 @@ func (p secretsProvider) SetPolicy(ctx context.Context, project string, path []s
 		return err
 	}
 	return setProtoPolicy(ctx, api, name, pol)
+}
+
+func (p secretsProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error) {
+	api, name, err := p.secretIAM(project, path)
+	if err != nil {
+		return nil, err
+	}
+	return testProtoPermissions(ctx, api, name, perms)
 }
 
 // Cloud KMS: a key ring's page and a key's. Cloud KMS keeps a policy on each,
@@ -230,6 +256,14 @@ func (p kmsProvider) SetPolicy(ctx context.Context, project string, path []strin
 		return err
 	}
 	return setProtoPolicy(ctx, api, name, pol)
+}
+
+func (p kmsProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error) {
+	api, name, err := p.kmsIAM(project, path)
+	if err != nil {
+		return nil, err
+	}
+	return testProtoPermissions(ctx, api, name, perms)
 }
 
 // Cloud Storage: a bucket's page (its root) through the official client's
@@ -310,6 +344,29 @@ func (p storageProvider) SetPolicy(ctx context.Context, _ string, path []string,
 		return err
 	}
 	return h.SetPolicy(ctx, &iam.Policy{InternalProto: proto})
+}
+
+// TestPermissions is storage.buckets.testIamPermissions through the official
+// client's bucket IAM handle, or managedFolders.testIamPermissions on a
+// managed folder's page (#1242).
+func (p storageProvider) TestPermissions(ctx context.Context, _ string, path []string, perms []string) ([]string, error) {
+	if len(path) > 1 {
+		s, err := jsonAPI(ctx, p.endpoint)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := s.ManagedFolders.TestIamPermissions(path[0], folderName(path), perms).Context(ctx).Do()
+		if err != nil {
+			return nil, err
+		}
+		return resp.Permissions, nil
+	}
+	h, done, err := p.bucketIAM(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return h.TestPermissions(ctx, perms)
 }
 
 // managedFolderPolicy is managedFolders.getIamPolicy for a folder page.

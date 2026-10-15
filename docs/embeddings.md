@@ -15,8 +15,9 @@
 >   Runtime and answers every `:predict` 501.
 > - Enable: `cloudburrow up -local-ai-embeddings`. The pinned files (~330 MB) are fetched
 >   over HTTPS into `<state-dir>/models` and verified before use.
-> - Use: `POST /v1/projects/{p}/locations/{l}/publishers/google/models/embeddinggemma-300m-onnx-community:predict`,
->   or the console's Vertex AI → Embeddings.
+> - Use: `POST /v1/projects/{p}/locations/{l}/publishers/google/models/embeddinggemma-300m-onnx-community:predict`
+>   or `:embedContent` (#1244), PredictionService `Predict` or `EmbedContent` over gRPC, or the
+>   console's Vertex AI → Embeddings.
 > - Not yet measured against the real model: see docs/compatibility.md.
 >
 > Everything below records why the official LiteRT route is still blocked.

@@ -139,6 +139,9 @@ func TestBigQueryLoadOfSeveralObjectsIsOneJob(t *testing.T) {
 // Measured first through the front: SELECT @p of a STRUCT<X STRING, Y
 // INT64> read back the STRING {"X":"/wBh","Y":"2"}, and SELECT @p.X of a
 // STRUCT failed "Cannot access field X on a value with type STRING".
+// A STRUCT with a BYTES field (#1241) is this test's STRUCT section.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.get
 func TestBigQueryBytesParameters(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)

@@ -86,6 +86,11 @@ type PolicyEditor interface {
 	// SetPolicy is the service's SetIamPolicy with p, whose etag is the one
 	// the page read, so the service refuses it if the policy has changed.
 	SetPolicy(ctx context.Context, project string, path []string, p Policy) error
+	// TestPermissions is the service's TestIamPermissions for the resource
+	// at a path: which of perms the caller holds, as the service answers
+	// (#1242). Nothing is enforced (ADR-0006), so the services answer every
+	// permission of a resource that exists.
+	TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error)
 }
 
 // permissionsSection reads the policy for a resource page.
@@ -127,6 +132,11 @@ type permissionsRequest struct {
 	Remove *struct {
 		Member, Role string
 	}
+	// Test is Test permissions (#1242): it changes nothing, so it needs no
+	// etag.
+	Test *struct {
+		Permissions []string
+	}
 }
 
 // handlePermissions applies Grant access or Remove principal: the service's
@@ -149,8 +159,12 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "malformed request: " + err.Error()})
 		return
 	}
-	if (req.Grant == nil) == (req.Remove == nil) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send one of grant or remove"})
+	if n := btoi(req.Grant != nil) + btoi(req.Remove != nil) + btoi(req.Test != nil); n != 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "send one of grant, remove or test"})
+		return
+	}
+	if req.Test != nil {
+		s.testPermissions(w, r, pe, req.Path, req.Test.Permissions)
 		return
 	}
 	// Without the etag the page read, a change would overwrite whatever the
@@ -216,6 +230,53 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) {
 		OperationID: opID, Message: what + " on " + name,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"applied": action, "operation": opID})
+}
+
+// testPermissions answers Test permissions: the service's
+// TestIamPermissions with the permissions the page names, trimmed, each
+// once, in the order given. It changes nothing, so it records no operation.
+func (s *Server) testPermissions(w http.ResponseWriter, r *http.Request, pe PolicyEditor, path, perms []string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	if len(path) == 0 || pe.PolicyOn(ctx, path) == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "this resource has no IAM policy"})
+		return
+	}
+	asked := splitPermissions(perms)
+	if len(asked) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name at least one permission to test"})
+		return
+	}
+	held, err := pe.TestPermissions(ctx, r.URL.Query().Get("project"), path, asked)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": userMessage(err)})
+		return
+	}
+	if held == nil {
+		held = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"asked": asked, "permissions": held})
+}
+
+// splitPermissions is the permissions a page names, separated by commas,
+// spaces or new lines, trimmed and each once.
+func splitPermissions(in []string) []string {
+	var out []string
+	for _, p := range in {
+		for _, f := range strings.FieldsFunc(p, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' || r == '\r' }) {
+			if !slices.Contains(out, f) {
+				out = append(out, f)
+			}
+		}
+	}
+	return out
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // GrantAccess adds members to role's binding, making one if the policy has

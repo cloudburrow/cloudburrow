@@ -2753,6 +2753,12 @@ async function renderDetail(view, route, resourcePath) {
 
     const grant = el("button", { class: "primary", id: "grant-access", text: "Grant access",
       onclick: () => openGrantForm(view, name, change, reload) });
+    // Test permissions (#1242) is the service's TestIamPermissions: it
+    // changes nothing, so it needs no etag and records no operation.
+    const test = el("button", { class: "secondary", id: "test-permissions", text: "Test permissions",
+      onclick: () => openTestPermissionsForm(view, name, (perms) => send(
+        `/api/permissions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "POST", { Path: segments, Test: { Permissions: perms } })) });
 
     const table = rows.length
       ? el("div", { class: "table-wrap" },
@@ -2773,7 +2779,7 @@ async function renderDetail(view, route, resourcePath) {
       : emptyState("No principals",
           `No principal holds a role on ${name}. Grant access adds one.`);
     setChildren(into, permissionsNote(view),
-      el("div", { class: "action-bar" }, grant), table);
+      el("div", { class: "action-bar" }, grant, test), table);
   };
 
   // Properties render as the same definition list the summary card uses, so a
@@ -3122,6 +3128,57 @@ function openGrantForm(view, name, change, onDone) {
     error,
     ...fields.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
+  fields.focusFirst();
+}
+
+// openTestPermissionsForm is Test permissions (#1242): permissions in, and
+// for each the service's answer, held or not, as TestIamPermissions gives
+// it. The dialog stays open so another set can be tried.
+function openTestPermissionsForm(view, name, ask) {
+  const fields = buildCreateForm({ label: "Test permissions", fields: [
+    { name: "permissions", label: "Permissions", type: "textarea", required: true,
+      help: "One or more permissions, separated by commas or new lines, such as storage.buckets.get. " +
+        "The answer is the service's TestIamPermissions: which of them the caller holds." },
+  ] });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const results = el("div", { id: "test-permissions-result", "aria-live": "polite" });
+  let submitting = false;
+  const { dialog, close } = openModal({ labelledBy: "test-permissions-title", canClose: () => !submitting });
+  const primary = el("button", { type: "submit", class: "primary", text: "Test" });
+  const done = el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !fields.validate()) return;
+    const perms = fields.values().permissions.split(/[\s,]+/).map((p) => p.trim()).filter(Boolean);
+    submitting = true;
+    primary.disabled = true;
+    try {
+      const res = await ask(perms);
+      const held = new Set(res.permissions || []);
+      setChildren(results, el("table", { class: "table", id: "test-permissions-table" },
+        el("thead", {}, el("tr", {}, el("th", { text: "Permission" }), el("th", { text: "Result" }))),
+        el("tbody", {}, ...(res.asked || perms).map((p) => el("tr", {},
+          el("td", { class: "mono", text: p }),
+          el("td", { text: held.has(p) ? "Held" : "Not held" }))))));
+      announce(`${held.size} of ${(res.asked || perms).length} permissions held`);
+    } catch (err) {
+      setChildren(results);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+    submitting = false;
+    primary.disabled = false;
+  };
+
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
+    el("h2", { id: "test-permissions-title", text: `Test permissions on ${name}` }),
+    el("p", { class: "form-help", text: view.note || "" }),
+    error,
+    ...fields.nodes,
+    results,
+    el("div", { class: "modal-actions" }, done, primary)));
   fields.focusFirst();
 }
 
@@ -5319,7 +5376,8 @@ function instanceLoadCard(info, instance, refused) {
     el("p", { text: "Uploads an archive from Save state or cloudburrow state save, and replaces the state of each service " +
       "it captures with it, as cloudburrow state load does." }),
     el("div", { class: "form-row" }, el("label", { for: "instance-load-file", text: "State archive" }), input,
-      el("p", { class: "form-help", text: "Bounded by the upload limit in Settings and utilities." })),
+      el("p", { class: "form-help", text: "Up to 5 GiB, whatever the upload limit in Settings and utilities; " +
+        "a larger archive loads with cloudburrow state load." })),
     error,
     el("div", { class: "form-actions" }, button),
     result);
@@ -7856,12 +7914,13 @@ function stopPrediction() {
   if (PREDICT_ABORT) { PREDICT_ABORT.abort(); PREDICT_ABORT = null; }
 }
 
-// Embeddings (#41) sends text-embedding :predict for the one embedding model
-// served, a community ONNX conversion of EmbeddingGemma. The provenance banner
-// is on the screen that shows the vectors, not only in the documentation.
+// Embeddings (#41) sends text-embedding :predict, or EmbedContent's
+// :embedContent (#1244), for the one embedding model served, a community ONNX
+// conversion of EmbeddingGemma. The provenance banner is on the screen that
+// shows the vectors, not only in the documentation.
 async function renderEmbeddings(view) {
   const title = "Embeddings";
-  const subtitle = "Text-embedding :predict against the local endpoint";
+  const subtitle = "Text-embedding :predict and :embedContent against the local endpoint";
   setChildren(view, pageHeader(title, subtitle), loadingState(3));
   let status;
   try {
@@ -7878,7 +7937,7 @@ async function renderEmbeddings(view) {
     el("dl", {},
       el("dt", { text: "Model" }), el("dd", { class: "mono", text: status.model }),
       el("dt", { text: "Official Google artifact" }), el("dd", { text: "No — community conversion" }),
-      el("dt", { text: "Endpoint" }), el("dd", { class: "mono", text: status.endpoint })),
+      el("dt", { text: "Endpoint" }), el("dd", { class: "mono", id: "emb-endpoint", text: status.endpoint })),
     el("p", { class: "unavailable", text: status.note }));
 
   const texts = el("textarea", { id: "emb-texts", rows: "4",
@@ -7887,8 +7946,29 @@ async function renderEmbeddings(view) {
     ...status.taskTypes.map((t) => el("option", { value: t, text: t })));
   const dim = el("select", { id: "emb-dim", "aria-label": "Output dimensionality" },
     ...status.dimensions.map((d) => el("option", { value: String(d), text: String(d) })));
+  // The API method: :predict embeds every line in one request; EmbedContent
+  // (:embedContent) takes one content, so each line is its own request.
+  const methods = status.methods || ["predict"];
+  const method = el("select", { id: "emb-method", "aria-label": "API method" },
+    ...methods.map((m) => el("option", { value: m,
+      text: m === "embedContent" ? "EmbedContent (:embedContent, one request per text)" : "Predict (:predict, one batch)" })));
+  method.addEventListener("change", () => {
+    const ep = document.getElementById("emb-endpoint");
+    if (ep && status.endpoints) ep.textContent = status.endpoints[method.value] || status.endpoint;
+  });
   const send = el("button", { text: "Embed" });
   const result = el("div", { "aria-live": "polite" });
+
+  const post = async (m, payload) => {
+    const resp = await fetch("/api/ai/embeddings?" + new URLSearchParams({ method: m }), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await resp.text();
+    if (!resp.ok) throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
+    return JSON.parse(body);
+  };
 
   const run = async () => {
     const lines = texts.value.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -7896,27 +7976,35 @@ async function renderEmbeddings(view) {
     send.disabled = true;
     setChildren(result, el("p", { class: "unavailable", text: "running…" }));
     try {
-      const resp = await fetch("/api/ai/embeddings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      // Each result as [values, token count].
+      let got, displayName = "";
+      if (method.value === "embedContent") {
+        got = [];
+        for (const text of lines) {
+          const data = await post("embedContent", {
+            content: { role: "user", parts: [{ text }] },
+            embedContentConfig: { taskType: task.value, outputDimensionality: Number(dim.value) },
+          });
+          got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? ""]);
+        }
+        displayName = "EmbedContent: " + status.model + " — " + status.note;
+      } else {
+        const data = await post("predict", {
           instances: lines.map((content) => ({ content, task_type: task.value })),
           parameters: { outputDimensionality: Number(dim.value) },
-        }),
-      });
-      const body = await resp.text();
-      if (!resp.ok) throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
-      const data = JSON.parse(body);
-      const rows = (data.predictions || []).map((p, i) => {
-        const v = p.embeddings?.values || [];
+        });
+        got = (data.predictions || []).map((p) => [p.embeddings?.values || [], p.embeddings?.statistics?.token_count ?? ""]);
+        displayName = data.modelDisplayName || "";
+      }
+      const rows = got.map(([v, tokens], i) => {
         return el("tr", {},
           el("td", { text: lines[i].length > 60 ? lines[i].slice(0, 60) + "…" : lines[i] }),
           el("td", { class: "mono", text: String(v.length) }),
-          el("td", { class: "mono", text: String(p.embeddings?.statistics?.token_count ?? "") }),
+          el("td", { class: "mono", text: String(tokens) }),
           el("td", { class: "mono", text: v.slice(0, 6).map((x) => x.toFixed(4)).join(", ") + (v.length > 6 ? ", …" : "") }));
       });
-      setChildren(result, 
-        el("p", { class: "unavailable", text: data.modelDisplayName || "" }),
+      setChildren(result,
+        el("p", { class: "unavailable", text: displayName }),
         el("table", {},
           el("thead", {}, el("tr", {},
             el("th", { text: "Text" }), el("th", { text: "Dimensions" }),
@@ -7932,7 +8020,8 @@ async function renderEmbeddings(view) {
 
   setChildren(view, pageHeader(title, subtitle), header,
     el("div", { class: "card" }, texts,
-      el("div", {}, el("label", { text: "Task type " }), task, el("label", { text: " Dimensions " }), dim, " ", send)),
+      el("div", {}, el("label", { text: "Method " }), method, el("label", { text: " Task type " }), task,
+        el("label", { text: " Dimensions " }), dim, " ", send)),
     result);
 }
 

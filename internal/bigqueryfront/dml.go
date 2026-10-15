@@ -177,6 +177,12 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	}
+	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
+		if v, ok := parseViewColumnList(q.Query); ok { // #1240, viewcolumns.go
+			f.createViewWithColumns(w, r, q, v, insert)
+			return
+		}
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.refuseSnapshotQuery(w, r, q, insert) { // #1002, snapshots.go
 		return
 	}
