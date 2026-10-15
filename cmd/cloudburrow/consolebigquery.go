@@ -302,7 +302,6 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 		// A view has no row access policies of its own (#1218).
 		detail.Sections = append(detail.Sections, p.rowPoliciesSection(ctx, datasetID, tableID))
 	}
-	detail.Sections = append(detail.Sections, p.tablePermissions(ctx, datasetID, tableID))
 	return detail, nil
 }
 

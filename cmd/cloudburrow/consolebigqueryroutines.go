@@ -169,7 +169,6 @@ func (p bigqueryProvider) routineDetail(ctx context.Context, datasetID, routineI
 				ID: "details", Label: "Details", Kind: console.KindProperties,
 				Groups: []console.PropertyGroup{{Heading: "Routine", Properties: props}},
 			},
-			p.routinePermissions(ctx, datasetID, routineID), // #1218, consolebigquerypolicies.go
 		},
 	}, nil
 }

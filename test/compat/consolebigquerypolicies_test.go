@@ -3,10 +3,15 @@
 package compat
 
 import (
+	"context"
+	"encoding/base64"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+
+	"cloud.google.com/go/iam/apiv1/iampb"
+	bq "google.golang.org/api/bigquery/v2"
 )
 
 // TestConsoleBigQueryRowAccessPolicies (#1218): a table's page lists its
@@ -15,8 +20,10 @@ import (
 // it (rowAccessPolicies.update); Delete policy on a row deletes it
 // (rowAccessPolicies.delete), and Delete all row access policies deletes
 // every one (rowAccessPolicies.batchDelete), each read back through the
-// generated client. A table's and a routine's Permissions tab show the
-// API's refusal, which names ADR-0006.
+// generated client. A table's and a routine's Permissions tab are the
+// console's (#1231): Grant access and Remove principal through
+// tables.setIamPolicy and routines.setIamPolicy, read back through the
+// official clients, with the note that nothing is enforced.
 func TestConsoleBigQueryRowAccessPolicies(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
@@ -55,9 +62,7 @@ func TestConsoleBigQueryRowAccessPolicies(t *testing.T) {
 	if sec.Unavailable != "" || len(sec.Items) != 1 || sec.Items[0].Name != "eu" || sec.Items[0].Fields["Filter"] != "region = 'us'" {
 		t.Errorf("the Row access policies tab = %+v", sec)
 	}
-	if perm := page(path...).section(t, "permissions"); !strings.Contains(perm.Unavailable, "bigquery.tables.getIamPolicy") || !strings.Contains(perm.Unavailable, "ADR-0006") {
-		t.Errorf("the table's Permissions tab = %+v, want the API's 501 naming ADR-0006", perm)
-	}
+	consolePermissionsRoundTripIn(t, h, addr, "bigquery", project, path, handleOf(tbl.IAM()), "roles/bigquery.dataViewer")
 
 	act([]string{d, tb, "rowAccessPolicies", "eu"}, "deleterowpolicy", nil)
 	if list, err := svc.RowAccessPolicies.List(project, d, tb).Context(ctx).Do(); err != nil || len(list.RowAccessPolicies) != 0 {
@@ -73,7 +78,37 @@ func TestConsoleBigQueryRowAccessPolicies(t *testing.T) {
 	if _, err := c.Query("CREATE FUNCTION `" + d + ".plus_one`(x INT64) AS (x + 1)").Read(ctx); err != nil {
 		t.Fatalf("CREATE FUNCTION: %v", err)
 	}
-	if perm := page(d, "routines", "plus_one").section(t, "permissions"); !strings.Contains(perm.Unavailable, "bigquery.routines.getIamPolicy") {
-		t.Errorf("the routine's Permissions tab = %+v, want the API's 501", perm)
+	consolePermissionsRoundTripIn(t, h, addr, "bigquery", project, []string{d, "routines", "plus_one"},
+		routineHandle(svc, "projects/"+project+"/datasets/"+d+"/routines/plus_one"), "roles/bigquery.dataViewer")
+}
+
+// routineHandle is a routine's IAM through the official generated client,
+// routines.getIamPolicy and setIamPolicy: the Go client has no routine IAM
+// call. The JSON etag is base64.
+func routineHandle(svc *bq.Service, resource string) policyHandle {
+	return policyHandle{
+		get: func(ctx context.Context) (*iampb.Policy, error) {
+			p, err := svc.Routines.GetIamPolicy(resource, &bq.GetIamPolicyRequest{}).Context(ctx).Do()
+			if err != nil {
+				return nil, err
+			}
+			etag, err := base64.StdEncoding.DecodeString(p.Etag)
+			if err != nil {
+				return nil, err
+			}
+			out := &iampb.Policy{Version: int32(p.Version), Etag: etag}
+			for _, b := range p.Bindings {
+				out.Bindings = append(out.Bindings, &iampb.Binding{Role: b.Role, Members: b.Members})
+			}
+			return out, nil
+		},
+		set: func(ctx context.Context, p *iampb.Policy) error {
+			in := &bq.Policy{Version: int64(p.GetVersion()), Etag: base64.StdEncoding.EncodeToString(p.GetEtag())}
+			for _, b := range p.GetBindings() {
+				in.Bindings = append(in.Bindings, &bq.Binding{Role: b.GetRole(), Members: b.GetMembers()})
+			}
+			_, err := svc.Routines.SetIamPolicy(resource, &bq.SetIamPolicyRequest{Policy: in}).Context(ctx).Do()
+			return err
+		},
 	}
 }

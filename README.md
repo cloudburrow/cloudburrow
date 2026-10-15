@@ -112,7 +112,8 @@ Worth reading before you rely on it — the full list is in [docs/status.md](doc
   use CloudBurrow to test whether your permissions are correct. Per
   [ADR-0006](docs/adr/0006-iam-policy-surface.md), Secret Manager, Cloud Tasks and Cloud KMS
   store IAM policies, so code and Terraform that manage them run, and so does bucket IAM on Cloud
-  Storage (#504). Stored, never enforced.
+  Storage (#504) and IAM on BigQuery tables, routines and row access policies (#1231). Stored,
+  never enforced.
 - **Knative is not Cloud Run.** Mapped configuration is mapped and tested; anything the adapter
   cannot map is **refused with the field named**, not silently dropped.
 - **Cloud KMS is not a security boundary.** Key material is stored unencrypted; IAM policies

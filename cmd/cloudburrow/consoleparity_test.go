@@ -436,8 +436,18 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleBigQueryRoutines", "TestBigQueryRoutinesSectionAndPage", "TestBigQueryRoutinesThroughThePage"}},
 	{Resource: "BigQuery row access policies", Service: "bigquery",
 		Methods:  []string{"bigquery.rowAccessPolicies.list", "bigquery.rowAccessPolicies.get", "bigquery.rowAccessPolicies.insert", "bigquery.rowAccessPolicies.update", "bigquery.rowAccessPolicies.delete", "bigquery.rowAccessPolicies.batchDelete"},
-		Provider: "bigquery", Offers: "Row access policies tab on a table's page (rowAccessPolicies.list: each policy's filter and grantees, and whom CloudBurrow takes the caller to be); Create row access policy (rowAccessPolicies.insert, or rowAccessPolicies.update with Replace an existing policy), Delete policy on each row (rowAccessPolicies.delete) and Delete all row access policies (rowAccessPolicies.batchDelete); rowAccessPolicies.get reads one back (#1218). A table's and a routine's Permissions tab show the API's 501 for their IAM methods, which ADR-0006 does not store",
+		Provider: "bigquery", Offers: "Row access policies tab on a table's page (rowAccessPolicies.list: each policy's filter and grantees, and whom CloudBurrow takes the caller to be); Create row access policy (rowAccessPolicies.insert, or rowAccessPolicies.update with Replace an existing policy), Delete policy on each row (rowAccessPolicies.delete) and Delete all row access policies (rowAccessPolicies.batchDelete); rowAccessPolicies.get reads one back (#1218)",
 		Tests: []string{"TestConsoleBigQueryRowAccessPolicies", "TestBigQueryRowAccessPoliciesTab"}},
+	{Resource: "BigQuery table and routine IAM", Service: "bigquery",
+		Methods:  []string{"bigquery.tables.getIamPolicy", "bigquery.tables.setIamPolicy", "bigquery.routines.getIamPolicy", "bigquery.routines.setIamPolicy"},
+		Provider: "bigquery", Offers: "Permissions tab on a table's, a view's and a routine's page: principals and roles, Grant access, Remove principal, with the note that nothing is enforced (#793, #1231)",
+		Tests: []string{"TestConsoleBigQueryRowAccessPolicies", "TestBigQueryRowAccessPoliciesTab"}},
+	{Resource: "BigQuery row access policy IAM", Service: "bigquery",
+		Methods: []string{"bigquery.rowAccessPolicies.getIamPolicy"},
+		Excluded: "a row access policy's IAM policy is its grantees as roles/bigquery.filteredDataViewer, which the Row access policies tab lists in each policy's Grantees column and Create row access policy with Replace changes; " +
+			"the API has no setIamPolicy to write it, and the Permissions tab's note that a binding grants nothing would be false, since the grantees decide which rows a query returns (#1231)"},
+	{Resource: "BigQuery IAM permission checks", Service: "bigquery",
+		Methods: []string{"bigquery.tables.testIamPermissions", "bigquery.routines.testIamPermissions", "bigquery.rowAccessPolicies.testIamPermissions"}, Excluded: testIamPermissionsReason},
 	// The Storage Read and Write APIs (gRPC, google.cloud.bigquery.storage.v1)
 	// have no coverage page; this row writes the exclusion down (#782).
 	{Resource: "BigQuery models", Service: "bigquery",

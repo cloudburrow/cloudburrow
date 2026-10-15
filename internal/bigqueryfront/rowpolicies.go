@@ -34,9 +34,8 @@ package bigqueryfront
 // directory, so a restart of the front does not unfilter a table, and an
 // emulator restart (empty) drops them.
 //
-// The IAM methods of a policy (getIamPolicy, testIamPermissions) stay 501:
-// ADR-0006 stores IAM policies on four services only, BigQuery not among
-// them (unserved.go).
+// The IAM methods of a policy (getIamPolicy, testIamPermissions) answer its
+// grantees as roles/bigquery.filteredDataViewer (iam.go, #1231).
 
 import (
 	"encoding/json"

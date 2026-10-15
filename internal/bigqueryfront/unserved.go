@@ -16,39 +16,25 @@ import (
 //   - datasets.undelete answered 400 "Table ID is required": the emulator
 //     deletes a dataset's tables and their rows with it and keeps nothing
 //     to restore within the time travel window;
-//   - every rowAccessPolicies method (all but the two IAM ones are the
-//     front's since #1218, rowpolicies.go), and tables.getIamPolicy,
-//     tables.setIamPolicy and tables.testIamPermissions, answered 500
-//     ("unexpected request path", "unsupported bigquery.…"), which the Go
-//     client retries;
+//   - every rowAccessPolicies method (the front's since #1218,
+//     rowpolicies.go, and the two IAM ones since #1231, iam.go), and
+//     tables.getIamPolicy, tables.setIamPolicy and tables.testIamPermissions
+//     (the front's since #1231, iam.go), answered 500 ("unexpected request
+//     path", "unsupported bigquery.…"), which the Go client retries;
 //   - routines.getIamPolicy, routines.setIamPolicy and
-//     routines.testIamPermissions answered 405 "method not allowed".
+//     routines.testIamPermissions answered 405 "method not allowed" (the
+//     front's since #1231, iam.go).
 var (
 	serviceAccountRoute = regexp.MustCompile(`^(?:/bigquery/v2)?/projects/([^/]+)/serviceAccount$`)
 	datasetRoute        = regexp.MustCompile(`^(?:/bigquery/v2)?/projects/[^/]+/datasets/[^/:]+(:undelete)?$`)
-	rowPoliciesRoute    = regexp.MustCompile(`^(?:/bigquery/v2)?/projects/[^/]+/datasets/[^/]+/tables/[^/]+/rowAccessPolicies(?:(:batchDelete)|/([^/:]+)(?::(getIamPolicy|testIamPermissions))?)?$`)
-	iamRoute            = regexp.MustCompile(`^(?:/bigquery/v2)?/projects/[^/]+/datasets/[^/]+/(tables|routines)/[^/:]+:(getIamPolicy|setIamPolicy|testIamPermissions)$`)
 )
 
 // unservedMethod is the discovery ID of the method r calls when it is one
-// the front refuses, such as bigquery.tables.getIamPolicy, and "" otherwise.
+// the front refuses, such as bigquery.datasets.undelete, and "" otherwise.
 func unservedMethod(r *http.Request) string {
 	p := r.URL.Path
-	switch {
-	case iamRoute.MatchString(p) && r.Method == http.MethodPost:
-		m := iamRoute.FindStringSubmatch(p)
-		return "bigquery." + m[1] + "." + m[2]
-	}
-	if m := datasetRoute.FindStringSubmatch(p); m != nil {
-		if m[1] != "" && r.Method == http.MethodPost {
-			return "bigquery.datasets.undelete"
-		}
-		return ""
-	}
-	// The other rowAccessPolicies methods are the front's since #1218
-	// (rowpolicies.go).
-	if m := rowPoliciesRoute.FindStringSubmatch(p); m != nil && m[3] != "" && r.Method == http.MethodPost {
-		return "bigquery.rowAccessPolicies." + m[3]
+	if m := datasetRoute.FindStringSubmatch(p); m != nil && m[1] != "" && r.Method == http.MethodPost {
+		return "bigquery.datasets.undelete"
 	}
 	return ""
 }
@@ -63,11 +49,6 @@ func serveUnserved(w http.ResponseWriter, r *http.Request) bool {
 	why := map[string]string{
 		"bigquery.datasets.undelete": "the emulator deletes a dataset's tables and rows with it and keeps no deleted datasets to restore.",
 	}[method]
-	if why == "" {
-		why = "CloudBurrow stores no IAM policies on BigQuery tables, routines or row access policies: ADR-0006 " +
-			"(docs/adr/0006-iam-policy-surface.md) stores policies, never enforced, on Secret Manager, Cloud Tasks, " +
-			"Cloud KMS and Cloud Storage buckets only, and every other service keeps refusing them (#1218)."
-	}
 	writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+method+". "+why)
 	return true
 }
