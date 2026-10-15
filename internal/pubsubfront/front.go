@@ -41,7 +41,9 @@
 //   - every call naming a subscription is activity on it, except a
 //     GetSubscription, which only reads its configuration (#1039), and an open
 //     StreamingPull keeps it active for as long as it is open;
-//   - a subscription idle for its ttl is deleted.
+//   - a subscription idle for its ttl is deleted;
+//   - every call, gRPC and REST, is kept in a call log the CLI reads into
+//     its metrics, request log and traces (calls.go, #1266).
 //
 // Google's rules, from the API reference (google/pubsub/v1/pubsub.proto,
 // Subscription.expiration_policy) and the subscription properties page
@@ -96,6 +98,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 )
 
@@ -211,6 +214,9 @@ type Front struct {
 	saveMu sync.Mutex
 	// dirty is set when activity or a project changed since the last write.
 	dirty atomic.Bool
+
+	// calls is the call log the CLI reads (calls.go, #1266).
+	calls calllog.Ring
 }
 
 // subscriptionAdmin is the part of the emulator's Subscriber service a sweep
@@ -249,6 +255,9 @@ func (f *Front) Server() *grpc.Server {
 	return grpc.NewServer(
 		grpc.ForceServerCodec(rawCodec{}),
 		grpc.UnknownServiceHandler(f.handle),
+		// Every call is recorded for the CLI's metrics, request log and
+		// traces (calls.go, #1266).
+		grpc.StreamInterceptor(calllog.StreamInterceptor(&f.calls, firstName, isStreamingPull)),
 		grpc.MaxRecvMsgSize(math.MaxInt32), grpc.MaxSendMsgSize(math.MaxInt32),
 		// The official clients ping streaming pulls; the server's default
 		// policy would answer a ping more often than every five minutes by
@@ -269,7 +278,7 @@ func (f *Front) Server() *grpc.Server {
 // lower-performance than its own transport (measured: BenchmarkTransport*,
 // #950); only such a connection's gRPC requests take it.
 func (f *Front) Handler(grpcSrv *grpc.Server) http.Handler {
-	rest := f.RESTHandler()
+	rest := f.recordREST(f.RESTHandler())
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && isGRPCContentType(r.Header.Get("Content-Type")) {
 			grpcSrv.ServeHTTP(w, r)
@@ -279,6 +288,10 @@ func (f *Front) Handler(grpcSrv *grpc.Server) http.Handler {
 			// The emulator listens on the pod's loopback alone
 			// (#1114), so its container's readiness is asked here.
 			frontready.Serve(w, f.rest)
+			return
+		}
+		if r.URL.Path == CallsPath && r.Method == http.MethodGet {
+			f.serveCalls(w, r)
 			return
 		}
 		rest.ServeHTTP(w, r)

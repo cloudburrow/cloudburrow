@@ -121,6 +121,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/bigqueryimage/` | Builds the in-cluster BigQuery emulator's image from the patched goccy/bigquery-emulator builds the CLI embeds (#1061), and says which architectures a CLI embeds. |
 | `internal/bigqueryimage/bigqueryimagetest/` | Tests only: stand-in embedded emulator builds, present or missing (#1061). |
 | `internal/buildpacks/` | Turns source into a runnable image with Google Buildpacks and `pack`. |
+| `internal/calllog/` | The call log the Pub/Sub and Bigtable fronts keep in their pods (#1266, #1267): each call's method, resource, code, duration and `traceparent`, never a payload, in a bounded ring at `/_cloudburrow/calls?after=N` that the CLI reads through the tunnel into `/metrics`, `/admin/events` and traces. |
 | `internal/cluster/` | The local kind cluster: create, discover, stop, start, delete, with an explicit kubeconfig. |
 | `internal/components/` | Installs and manages the in-cluster backends and Knative Serving from pinned manifests. |
 | `internal/config/` | Configuration model, precedence (flags over environment over file over defaults), validation. |

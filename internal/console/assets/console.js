@@ -7047,7 +7047,7 @@ async function renderMonitoring(view) {
           foot: `Kubelet node filesystem · ${foot}`,
         })),
       await productActivity(),
-      await requestCharts(),
+      await requestCharts(samples),
       // Absence, stated. The alternative is a reader assuming these charts
       // are missing rather than impossible.
       el("div", { class: "card" },
@@ -8671,11 +8671,33 @@ function openFaultForm(data, onDone) {
   controls.service.focus();
 }
 
-// Request charts on /monitoring (#292): calls CloudBurrow served itself, from
-// the counters /metrics exposes, sampled on the server's own tick. A service
-// reached by direct port-forward is named as not measured, never charted at
-// zero, which would read as "nobody called it".
-async function requestCharts() {
+// Request charts on /monitoring (#292): calls CloudBurrow served itself or
+// saw pass, from the counters /metrics exposes, sampled on the server's own
+// tick: Pub/Sub's and Bigtable's through their fronts, Firestore's and
+// Datastore's from the host through the tunnel's guard (#1266, #1267). A
+// service reached by a raw port-forward (Spanner) is named as not measured,
+// never charted at zero, which would read as "nobody called it".
+//
+// Beside them, each in-cluster emulator's container CPU and memory, from the
+// kubelet's per-pod readings the node charts above come from (#1267).
+const EMULATOR_PODS = ["pubsub", "firestore", "datastore", "bigtable", "spanner"];
+
+// emulatorPodSeries picks, per emulator, its pod's readings out of the
+// series: a Deployment's pod is named <service>-<hash>-<id>.
+function emulatorPodSeries(samples) {
+  const out = new Map();
+  for (const svc of EMULATOR_PODS) {
+    const match = new RegExp(`^${svc}-[a-z0-9]+-[a-z0-9]+$`);
+    const points = samples.map((s) => {
+      const pod = (s.pods || []).find((p) => match.test(p.name));
+      return pod ? { at: s.at, cpu: pod.cpuUsedCores, memory: pod.memoryWorkingSetBytes } : { at: s.at };
+    });
+    if (points.some((p) => p.cpu !== undefined)) out.set(svc, points);
+  }
+  return out;
+}
+
+async function requestCharts(samples = []) {
   let data;
   try {
     data = await api("/api/metrics/requests");
@@ -8705,13 +8727,31 @@ async function requestCharts() {
         foot: "p95 estimated from the histogram, as histogram_quantile does",
       }));
   }
+  const containers = [];
+  for (const [svc, pts] of emulatorPodSeries(samples)) {
+    const last = [...pts].reverse().find((p) => p.cpu !== undefined);
+    containers.push(
+      chartCard(`${svc}: container CPU`, pts.map((p) => ({ at: p.at, value: p.cpu === undefined ? null : p.cpu })), {
+        label: `${svc} pod CPU cores used`,
+        current: last ? `${last.cpu.toFixed(3)} vCPU` : "",
+        foot: "Kubelet instantaneous usage of the emulator's pod",
+      }),
+      chartCard(`${svc}: container memory`, pts.map((p) => ({ at: p.at, value: p.memory === undefined ? null : p.memory })), {
+        label: `${svc} pod memory working set`,
+        current: last ? formatBytes(last.memory) : "",
+        foot: "Kubelet working set of the emulator's pod",
+      }));
+  }
   const unmeasured = data.unmeasured || [];
   return el("div", { class: "card", id: "request-metrics" },
     el("h2", { text: "API requests" }),
     cards.length
       ? el("div", { class: "charts" }, ...cards)
       : el("p", { class: "unavailable", text: data.unavailable ||
-          "No calls to Cloud Tasks, Secret Manager or Cloud Run yet. Charts appear once there are." }),
+          "No API calls yet. Charts appear once there are." }),
+    containers.length
+      ? el("div", { class: "charts", id: "emulator-containers" }, ...containers)
+      : null,
     unmeasured.length
       ? el("ul", { class: "unmeasured" }, ...unmeasured.map((s) =>
           el("li", { text: `${s}: ${data.unmeasured_label}` })))

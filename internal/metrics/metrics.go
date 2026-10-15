@@ -3,7 +3,7 @@
 //
 // It counts the services that register a call observer (Measure), which are
 // the ones whose calls pass through CloudBurrow. An enabled service that never
-// registers one, such as Pub/Sub or an opt-in emulator reached over a raw
+// registers one, such as an opt-in emulator reached over a raw
 // port-forward to an upstream process, is reported as unmeasured rather than
 // as zero, which would read as "nobody called it".
 package metrics

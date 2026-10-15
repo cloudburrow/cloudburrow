@@ -11,10 +11,12 @@ import (
 // The Request Log (#291): the API calls CloudBurrow served, from the same
 // recorder /admin/events reads, filterable and live.
 //
-// Only services CloudBurrow serves itself can appear: traffic to Storage,
-// Pub/Sub and the opt-in emulators goes over a raw port-forward to an
-// upstream process and is never seen. The page names those services rather
-// than showing an empty list that would read as "no calls were made".
+// Only services whose calls CloudBurrow sees can appear: its own, the
+// builtin storage server's and the Pub/Sub front's (#513, #1266), which the
+// CLI reads through the tunnel. Traffic to the opt-in emulators goes over a
+// raw port-forward to an upstream process and is never seen. The page names
+// those services rather than showing an empty list that would read as "no
+// calls were made".
 
 // RequestEvent is one served call, with only the fields the page shows. It
 // is built field by field, so nothing a recorder might hold beyond these,
