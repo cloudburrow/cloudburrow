@@ -260,6 +260,31 @@ func (w *storageWrite) tableFields(ctx context.Context, t readTable) ([]field, e
 	return meta.Schema.Fields, nil
 }
 
+// writableFields is tableFields of a table the Write API may write: a
+// table snapshot (#1002), which the REST front answers with type
+// SNAPSHOT, is read-only, so a stream of it is refused, at
+// CreateWriteStream and at the first AppendRows of a connection to its
+// _default stream, before any row is taken (INVALID_ARGUMENT; BigQuery's
+// code and wording UNVERIFIED). Its rows would otherwise be refused only
+// when written, which for a PENDING stream is at the commit.
+func (w *storageWrite) writableFields(ctx context.Context, t readTable) ([]field, error) {
+	code, body := w.call(ctx, http.MethodGet, t, "", nil)
+	if code != http.StatusOK {
+		return nil, restStatus(code, body, "the table "+t.path())
+	}
+	var meta struct {
+		Type   string      `json:"type"`
+		Schema tableSchema `json:"schema"`
+	}
+	if err := json.Unmarshal(body, &meta); err != nil {
+		return nil, status.Errorf(codes.Internal, "read the table %s: %v", t.path(), err)
+	}
+	if meta.Type == "SNAPSHOT" || snapshotDefinitionOf(body) != nil {
+		return nil, status.Error(codes.InvalidArgument, snapshotWriteMessage(t.project, t.dataset, t.table, "the Storage Write API"))
+	}
+	return meta.Schema.Fields, nil
+}
+
 // call sends a request of the REST front for the table t (tables.get, or
 // suffix "/insertAll") and returns its status and body.
 func (w *storageWrite) call(ctx context.Context, method string, t readTable, suffix string, body []byte) (int, []byte) {
@@ -354,7 +379,7 @@ func (w *storageWrite) createStream(ctx context.Context, req *storagepb.CreateWr
 	if m := req.GetWriteStream().GetWriteMode(); m != storagepb.WriteStream_WRITE_MODE_UNSPECIFIED && m != storagepb.WriteStream_INSERT {
 		return nil, status.Errorf(codes.InvalidArgument, "write_stream.write_mode %s: only INSERT is a write mode", m)
 	}
-	fields, err := w.tableFields(ctx, t)
+	fields, err := w.writableFields(ctx, t)
 	if err != nil {
 		return nil, err
 	}
@@ -738,7 +763,7 @@ func (w *storageWrite) appendOne(ctx context.Context, c *appendConn, req *storag
 
 	cr, ok := c.convs[name]
 	if !ok {
-		cr.fields, cr.err = w.tableFields(ctx, st.table)
+		cr.fields, cr.err = w.writableFields(ctx, st.table)
 		if cr.err == nil {
 			var md, derr = writerDescriptor(c.schema)
 			if derr != nil {

@@ -28,9 +28,12 @@ import (
 //     tables.patch or tables.update that changes its schema. BigQuery's
 //     documentation gives neither the status nor the message of these
 //     refusals; the front answers 400 invalid (invalidQuery for a query,
-//     a failed job for a query job), UNVERIFIED. The Storage Write API is
-//     not checked. tables.delete of it is left to the emulator, and DROP
-//     TABLE too (BigQuery's DROP SNAPSHOT TABLE stays 501, checkDDL).
+//     a failed job for a query job), UNVERIFIED. The Storage Write API
+//     refuses a stream of it (storageWrite.writableFields).
+//     tables.delete of it is left to the emulator, and DROP TABLE too:
+//     BigQuery's DDL reference gives DROP SNAPSHOT TABLE for snapshots
+//     (which stays 501, checkDDL) but does not say DROP TABLE of one
+//     fails.
 //
 // A copy job with operationType SNAPSHOT makes a new table with a
 // snapshotDefinition (the source as baseTableReference, the job's start as

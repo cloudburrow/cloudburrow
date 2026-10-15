@@ -25,7 +25,8 @@ import (
 // So the front carries out what it can before the query is sent: an
 // EXECUTE IMMEDIATE whose SQL is a string literal, or a script variable
 // whose value is one (its DECLARE's DEFAULT, or the last SET of it before
-// the statement), is replaced by that statement, each of its query
+// the statement), or an expression it evaluates first (evalImmediate,
+// #1037), is replaced by that statement, each of its query
 // parameters by the USING clause's expression for it, in parentheses. The
 // rest is 501 before anything runs (expandExecuteImmediate), as the
 // emulator would report it done without running it.
@@ -34,7 +35,10 @@ import (
 // replaced by the statement it runs (above), and whether it replaced any;
 // or the status (400 or 501) and message to answer the query with, when a
 // statement cannot be carried out so.
-func expandExecuteImmediate(sql string) (text string, changed bool, code int, msg string) {
+//
+// eval, when not nil, evaluates SQL given by an expression the front does
+// not read itself (evalImmediate); with nil such SQL is 501.
+func expandExecuteImmediate(sql string, eval immediateEval) (text string, changed bool, code int, msg string) {
 	if !strings.Contains(strings.ToUpper(sql), "IMMEDIATE") {
 		return sql, false, 0, ""
 	}
@@ -47,7 +51,9 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 			"the statement it gives, but the emulator behind CloudBurrow reports every EXECUTE IMMEDIATE done and runs " +
 			"nothing (measured), and CloudBurrow carries one out itself only when its SQL is a string literal, a " +
 			"CONCAT or || of string literals and such variables, or a script variable set to one by its DECLARE's " +
-			"DEFAULT or a SET, run with INTO only of a query, and with literals, " +
+			"DEFAULT or a SET, or an expression it can evaluate first (one after only DECLARE, SET and queries, at the " +
+			"script's top level, with no function whose value changes from one run to the next), run with INTO only " +
+			"of a query, and with literals, " +
 			"variables or query parameters in USING. Nothing was run."
 	}
 	// vars are the script's STRING variables whose value the text gives,
@@ -56,8 +62,15 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 	unknown := map[string]bool{}
 	var edits []varEdit
 	stmts := splitStatements(toks)
+	// pure is whether every statement so far is a DECLARE, a SET or a
+	// query at the script's top level, so that running them again
+	// changes nothing (evalImmediate).
+	pure := true
 	for si, stmt := range stmts {
 		body, _, _ := stripControlFlow(stmt)
+		top := len(body) == len(stmt) && len(body) > 0
+		wasPure := pure && top
+		pure = wasPure && (body[0].is("DECLARE") || body[0].is("SET") || body[0].is("SELECT") || body[0].is("WITH"))
 		switch {
 		case len(body) > 1 && body[0].is("DECLARE"):
 			names, rest := declaredNames(body[1:])
@@ -128,17 +141,19 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 				}
 				names, rest := declaredNames(body[into+1 : stop])
 				switch {
-				case len(names) == 0 || len(rest) > 0 || body[into+1].kind != tokWord:
+				case len(names) == 0 || len(rest) > 0:
 					return notImplemented(fmt.Sprintf("... INTO %s, which is not one script variable.",
 						statementText(sql, body[into+1:stop])))
 				}
 				for _, t := range body[into+1 : stop] {
-					if t.kind == tokQuoted {
-						return notImplemented(fmt.Sprintf("... INTO %s, a quoted name. CloudBurrow runs INTO as a SET "+
-							"of each variable, and the emulator behind it does not run a SET of a quoted name (measured).",
-							statementText(sql, []token{t})))
+					if t.kind == tokQuoted && !plainIdentifier(t.text) {
+						return notImplemented(fmt.Sprintf("... INTO %s, a quoted name that must be quoted. CloudBurrow "+
+							"runs INTO as a SET of each variable, and the emulator behind it does not run a SET of a "+
+							"quoted name (measured).", statementText(sql, []token{t})))
 					}
 				}
+				// A quoted name that need not be quoted names the same
+				// variable unquoted, which the emulator can SET.
 				for _, n := range names {
 					intoVars = append(intoVars, n)
 					delete(vars, strings.ToLower(n))
@@ -150,11 +165,24 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 			switch {
 			case len(expr) == 1 && expr[0].kind == tokWord && vars[strings.ToLower(expr[0].text)] != "":
 				inner = vars[strings.ToLower(expr[0].text)]
-			case len(expr) == 1 && expr[0].kind == tokWord && unknown[strings.ToLower(expr[0].text)]:
-				return notImplemented(fmt.Sprintf("of the variable %s, whose value the script sets with an expression "+
-					"other than a string literal.", expr[0].text))
 			default:
 				s, ok := constantString(expr, vars)
+				if !ok && len(expr) > 0 {
+					// The SQL is computed: evaluated first, with the
+					// variables as the statements before it leave them,
+					// when that can be done faithfully (#1037).
+					var code int
+					var why string
+					s, code, why = evalImmediate(sql, stmts[:si], body, expr, wasPure, eval)
+					switch code {
+					case 0:
+						ok = true
+					case http.StatusNotImplemented:
+						return notImplemented(why)
+					default:
+						return sql, false, code, why
+					}
+				}
 				if !ok {
 					return notImplemented(fmt.Sprintf("of %s, an expression other than a string literal, a CONCAT or "+
 						"|| of them, or a script variable set to one.", statementText(sql, expr)))
@@ -176,6 +204,11 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 				return sql, false, code, why
 			}
 			if into >= 0 {
+				if cols, known := selectItemCount(out); known && cols != len(intoVars) {
+					return notImplemented(fmt.Sprintf("... INTO %d variables of a query of %d columns. BigQuery's "+
+						"documentation assigns the columns to the variables by position, and does not say what it "+
+						"does when their numbers differ.", len(intoVars), cols))
+				}
 				if out, why = immediateInto(out, intoVars, laterResult(stmts[si+1:]), len(edits)+1); why != "" {
 					return notImplemented(why)
 				}
@@ -223,9 +256,11 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 // (measured: SELECT 3; CREATE TEMP TABLE ... answered no rows), so guard
 // is given only when a later statement of the script answers instead
 // (laterResult); otherwise a query of several rows fails only where a
-// variable is read, as before. No rows set the variables NULL, UNVERIFIED
-// against BigQuery. Fewer variables than columns leaves the others unread,
-// where BigQuery's documentation does not say what it does.
+// variable is read, as before. No rows set the variables NULL, as BigQuery
+// documents ("If the query returns zero rows, all variables in the INTO
+// clause are set to NULL"). A number of variables other than the query's
+// columns, when its text gives them (selectItemCount), is 501 before this:
+// BigQuery documents only that the columns are assigned by position.
 //
 // inner must be a query (SELECT or WITH); it returns why it cannot be run
 // so, or "".
@@ -599,4 +634,153 @@ func decodeString(lit string) (string, bool) {
 		}
 	}
 	return b.String(), true
+}
+
+// immediateEval runs probe, a script, on the emulator and returns the
+// value of the one column of its result's first row (evalImmediate): its
+// type, the value, and whether it is NULL; or, when the script failed, the
+// status and message to answer the query with.
+type immediateEval func(probe string) (typ, value string, null bool, code int, msg string)
+
+// unstableFunctions are the functions whose value changes from one run to
+// the next, so that evaluating an expression that calls one first, and
+// then running the script, would not give the value BigQuery gives
+// (evalImmediate). TABLESAMPLE reads rows at random.
+var unstableFunctions = map[string]bool{
+	"RAND": true, "GENERATE_UUID": true, "CURRENT_DATE": true, "CURRENT_TIME": true, "CURRENT_DATETIME": true,
+	"CURRENT_TIMESTAMP": true, "SESSION_USER": true, "TABLESAMPLE": true,
+}
+
+// evalImmediate returns the SQL that EXECUTE IMMEDIATE's expression, expr,
+// gives, when the front does not read it from the text (#1037): FORMAT,
+// CAST and any other expression. BigQuery evaluates the expression when
+// the script reaches the statement, with the variables as the statements
+// before it left them, and then runs the string
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language#execute_immediate).
+// The emulator runs no EXECUTE IMMEDIATE, so the front evaluates it first:
+// it runs the statements before it (before), then SELECT (expr), as a
+// script of its own, and puts the string in the statement's place. This
+// runs those statements twice, so it is done only when that gives the
+// value BigQuery would (pure): each is a DECLARE, a SET or a query, at the
+// script's top level, as the EXECUTE IMMEDIATE is, so running them changes
+// nothing; and neither they nor the expression call a function whose
+// value changes from one run to the next (unstableFunctions), a function
+// of a dataset (it could be one), or read a system variable (@@).
+// Otherwise it is 501.
+//
+// The expression's value must be a STRING that is not NULL; BigQuery fails
+// the script otherwise (its message UNVERIFIED), and the front answers 400.
+// When the evaluation fails, its error is the answer, 400: the script
+// fails there in BigQuery too, before the statement runs, and the
+// statements before it changed nothing.
+func evalImmediate(sql string, before [][]token, stmt, expr []token, pure bool, eval immediateEval) (string, int, string) {
+	text := statementText(sql, expr)
+	if eval == nil || !pure {
+		return "", http.StatusNotImplemented, fmt.Sprintf("of %s, an expression CloudBurrow evaluates first only when "+
+			"the statements before it are DECLARE, SET and queries at the script's top level, as the EXECUTE IMMEDIATE is.", text)
+	}
+	all := append([][]token{}, before...)
+	all = append(all, expr)
+	for _, s := range all {
+		for i, t := range s {
+			switch {
+			case t.kind == tokWord && unstableFunctions[strings.ToUpper(t.text)]:
+				return "", http.StatusNotImplemented, fmt.Sprintf("of %s, after a statement or with an expression that "+
+					"calls %s, whose value differs from one run to the next. CloudBurrow evaluates the SQL first, by "+
+					"running the statements before it, and the script would then see another value.", text, strings.ToUpper(t.text))
+			case t.punct("@") && i+1 < len(s) && s[i+1].punct("@"):
+				return "", http.StatusNotImplemented, fmt.Sprintf("of %s, after a statement or with an expression that "+
+					"reads a system variable, which CloudBurrow's evaluation of the SQL first would not read as the "+
+					"script does.", text)
+			case t.punct(".") && i+2 < len(s) && (s[i+1].kind == tokWord || s[i+1].kind == tokQuoted) && s[i+2].punct("("):
+				return "", http.StatusNotImplemented, fmt.Sprintf("of %s, after a statement or with an expression that "+
+					"calls %s, a function of a dataset, whose value could differ from one run to the next.", text,
+					statementText(sql, s[max(0, i-1):i+2]))
+			}
+		}
+	}
+	probe := sql[:stmt[0].pos] + "SELECT (" + sql[expr[0].pos:expr[len(expr)-1].end] + ")"
+	typ, value, null, code, msg := eval(probe)
+	switch {
+	case code != 0:
+		return "", code, msg
+	case !strings.EqualFold(typ, "STRING"):
+		return "", http.StatusBadRequest, fmt.Sprintf("EXECUTE IMMEDIATE's SQL must be a STRING; %s is %s.", text, typ)
+	case null:
+		return "", http.StatusBadRequest, fmt.Sprintf("EXECUTE IMMEDIATE's SQL cannot be NULL; %s is NULL.", text)
+	}
+	return value, 0, ""
+}
+
+// plainIdentifier reports whether s, a quoted name's text, is a name that
+// need not be quoted: letters, digits and underscores, not first a digit,
+// and not a reserved word.
+func plainIdentifier(s string) bool {
+	if s == "" || s[0] >= '0' && s[0] <= '9' || reservedWords[strings.ToUpper(s)] {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// selectItemCount returns the number of columns a query's text gives, the
+// items of its first SELECT's list, and whether it is known: a *, or
+// SELECT AS STRUCT or AS VALUE, makes it unknown.
+func selectItemCount(query string) (int, bool) {
+	toks, ok := lex(query)
+	if !ok {
+		return 0, false
+	}
+	i, depth := 0, 0
+	if len(toks) > 0 && toks[0].is("WITH") {
+		for i = 1; i < len(toks); i++ {
+			switch {
+			case toks[i].punct("("):
+				depth++
+			case toks[i].punct(")"):
+				depth--
+			}
+			if depth == 0 && toks[i].is("SELECT") {
+				break
+			}
+		}
+	}
+	for i < len(toks) && toks[i].punct("(") {
+		i++
+	}
+	if i >= len(toks) || !toks[i].is("SELECT") {
+		return 0, false
+	}
+	i++
+	for i < len(toks) && (toks[i].is("DISTINCT") || toks[i].is("ALL")) {
+		i++
+	}
+	if i >= len(toks) || toks[i].is("AS") {
+		return 0, false
+	}
+	n, depth := 1, 0
+	for ; i < len(toks); i++ {
+		t := toks[i]
+		if depth == 0 && (t.punct(")") || t.punct(";") || t.is("FROM") || t.is("WHERE") || t.is("UNION") ||
+			t.is("INTERSECT") || t.is("EXCEPT") || t.is("GROUP") || t.is("ORDER") || t.is("LIMIT") || t.is("WINDOW") ||
+			t.is("QUALIFY") || t.is("HAVING")) {
+			break
+		}
+		switch {
+		case t.punct("(") || t.punct("["):
+			depth++
+		case t.punct(")") || t.punct("]"):
+			depth--
+		case depth == 0 && t.punct("*"):
+			return 0, false
+		case depth == 0 && t.punct(","):
+			n++
+		}
+	}
+	return n, true
 }
