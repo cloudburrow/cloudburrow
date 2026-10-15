@@ -173,3 +173,61 @@ func allJobLevels(r *http.Request) bool {
 	v, _ := r.Context().Value(allJobLevelsKey{}).(bool)
 	return v
 }
+
+// failedChild records a statement that failed as a child job of its own,
+// failed with its error (#1201). BigQuery's failed statement is a child
+// job like the others, with its errorResult and its scriptStatistics
+// stackFrames, also when an EXCEPTION handler catches it; the emulator
+// records no job for a jobs.query that fails, so the front makes one: a
+// query job of a statement that does nothing, shown with the statement's
+// text (jobText) and failed with its error (jobFailures, as failBeforeRun).
+func (s *scriptRun) failedChild(text string, rec *recorder, msg string) {
+	if s.children == nil || s.f.records == nil {
+		return
+	}
+	reason := "invalidQuery"
+	var e struct {
+		Error struct {
+			Errors []struct {
+				Reason string `json:"reason"`
+			} `json:"errors"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(rec.body.Bytes(), &e) == nil && len(e.Error.Errors) > 0 && e.Error.Errors[0].Reason != "" {
+		reason = e.Error.Errors[0].Reason
+	}
+	legacy := false
+	body, err := json.Marshal(map[string]any{"jobReference": map[string]any{"projectId": projectOf(s.f.base), "jobId": newJobID()},
+		"configuration": map[string]any{"query": map[string]any{
+			"query": "DROP TABLE IF EXISTS " + quotePath([]string{"_cloudburrow", scratchTable()}), "useLegacySql": &legacy}}})
+	if err != nil {
+		return
+	}
+	req, err := s.f.queryRequest(s.r, body)
+	if err != nil {
+		return
+	}
+	req.URL.Path, req.URL.RawPath = strings.TrimSuffix(req.URL.Path, "/queries")+"/jobs", ""
+	out := newRecorder()
+	s.f.forward(out, req, jobText{query: text})
+	var job map[string]any
+	if out.status != 0 && out.status != http.StatusOK || json.Unmarshal(out.body.Bytes(), &job) != nil {
+		return
+	}
+	project, id := jobRef(job)
+	if id == "" {
+		return
+	}
+	if project == "" {
+		project = projectOf(s.f.base)
+	}
+	s.f.failed.add(project, id, rowError{Reason: reason, Message: msg})
+	s.f.records.markInternal(project, id)
+	kind := "STATEMENT"
+	if s.expr > 0 {
+		kind = "EXPRESSION"
+	}
+	c := scriptChild{project: project, id: id, kind: kind, text: text}
+	c.line, c.col, c.endLine, c.endCol = childAt(s.sql, text)
+	*s.children = append(*s.children, c)
+}

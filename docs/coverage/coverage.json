@@ -6148,9 +6148,13 @@
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
           "test/compat/bigqueryscriptchildren_test.go:27 TestBigQueryScriptChildJobs",
+          "test/compat/bigqueryscriptfailedchildren_test.go:27 TestBigQueryScriptFailedChildJobs",
+          "test/compat/bigqueryscriptflow2_test.go:22 TestBigQueryScriptControlFlowMore",
+          "test/compat/bigqueryscriptflow_test.go:59 TestBigQueryScriptControlFlow",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
+          "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:200 TestConsoleBigQueryJobPageShowsDMLRows",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
@@ -6163,8 +6167,11 @@
         "tests": [
           "test/compat/bigquerymethods_test.go:52 TestBigQueryGetQueryResultsPages",
           "test/compat/bigqueryscriptchildren_test.go:27 TestBigQueryScriptChildJobs",
+          "test/compat/bigqueryscriptflow2_test.go:22 TestBigQueryScriptControlFlowMore",
+          "test/compat/bigqueryscriptflow_test.go:59 TestBigQueryScriptControlFlow",
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
-          "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions"
+          "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
+          "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow"
         ]
       },
       {
@@ -6201,6 +6208,9 @@
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
+          "test/compat/bigqueryscriptfailedchildren_test.go:27 TestBigQueryScriptFailedChildJobs",
+          "test/compat/bigqueryscriptflow2_test.go:22 TestBigQueryScriptControlFlowMore",
+          "test/compat/bigqueryscriptflow_test.go:59 TestBigQueryScriptControlFlow",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
@@ -6209,6 +6219,7 @@
           "test/compat/bigqueryviewcolumns_test.go:138 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
+          "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
@@ -6220,6 +6231,7 @@
         "tests": [
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigqueryscriptchildren_test.go:27 TestBigQueryScriptChildJobs",
+          "test/compat/bigqueryscriptfailedchildren_test.go:27 TestBigQueryScriptFailedChildJobs",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory"
         ]
       },
@@ -6256,6 +6268,8 @@
           "test/compat/bigquerypartitionwrites_test.go:263 TestConsoleBigQueryPartitions",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
+          "test/compat/bigqueryscriptflow2_test.go:22 TestBigQueryScriptControlFlowMore",
+          "test/compat/bigqueryscriptflow_test.go:59 TestBigQueryScriptControlFlow",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",

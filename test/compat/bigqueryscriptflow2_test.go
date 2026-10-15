@@ -16,6 +16,9 @@ import (
 // a query job whose last statement changes data keeping its DML row count.
 // Expected values follow BigQuery's procedural-language reference and
 // multi-statement-queries page.
+// Each construct is a subtest of its own.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.get, bigquery.jobs.getQueryResults
 func TestBigQueryScriptControlFlowMore(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -45,16 +48,18 @@ func TestBigQueryScriptControlFlowMore(t *testing.T) {
 			nil},
 	}
 	for _, cs := range cases {
-		for _, insert := range []bool{false, true} {
-			got, err := scriptRows(ctx, c, cs.sql, insert)
-			if err != nil {
-				t.Errorf("%s (insert %v): %v", cs.name, insert, err)
-				continue
+		t.Run(cs.name, func(t *testing.T) {
+			for _, insert := range []bool{false, true} {
+				got, err := scriptRows(ctx, c, cs.sql, insert)
+				if err != nil {
+					t.Errorf("%s (insert %v): %v", cs.name, insert, err)
+					continue
+				}
+				if !reflect.DeepEqual(got, cs.want) {
+					t.Errorf("%s (insert %v): %v, want %v", cs.name, insert, got, cs.want)
+				}
 			}
-			if !reflect.DeepEqual(got, cs.want) {
-				t.Errorf("%s (insert %v): %v, want %v", cs.name, insert, got, cs.want)
-			}
-		}
+		})
 	}
 
 	// A query job whose last statement changes data keeps its DML count.

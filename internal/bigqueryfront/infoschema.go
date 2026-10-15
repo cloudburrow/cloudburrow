@@ -132,13 +132,30 @@ func (f front) tablesOf(r *http.Request, dataset string, m *datasetMeta) ([]info
 
 // rowsSubquery is the subquery of rows (each a list of SQL values) of the
 // row type columns.
+//
+// The engine makes an array literal with a SQLite function of one
+// argument per element, and SQLite caps a function's arguments: an
+// instance's INFORMATION_SCHEMA.JOBS of 1,630 jobs failed "too many
+// arguments on function googlesqlite_make_array" (measured, #1201). So
+// the rows are arrays of at most rowsPerArray, joined by UNION ALL.
 func rowsSubquery(columns string, rows [][]string) string {
 	lits := make([]string, len(rows))
 	for i, r := range rows {
 		lits[i] = "(" + strings.Join(r, ", ") + ")"
 	}
-	return "(SELECT * FROM UNNEST(ARRAY<" + columns + ">[" + strings.Join(lits, ", ") + "]))"
+	var parts []string
+	for len(lits) > rowsPerArray {
+		parts = append(parts, "SELECT * FROM UNNEST(ARRAY<"+columns+">["+strings.Join(lits[:rowsPerArray], ", ")+"])")
+		lits = lits[rowsPerArray:]
+	}
+	parts = append(parts, "SELECT * FROM UNNEST(ARRAY<"+columns+">["+strings.Join(lits, ", ")+"])")
+	return "(" + strings.Join(parts, " UNION ALL ") + ")"
 }
+
+// rowsPerArray is the most elements rowsSubquery puts in one array
+// literal, below SQLite's default cap of a function's arguments (127 in
+// releases before 3.48, 1,000 since).
+const rowsPerArray = 100
 
 func tableRowsOf(columns string, rows func(project, dataset string, t infoTable) [][]string) func(front, *http.Request, string, *datasetMeta) (string, int, string) {
 	return func(f front, r *http.Request, dataset string, m *datasetMeta) (string, int, string) {

@@ -213,3 +213,38 @@ func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 		t.Errorf("after the refused DELETE the table previews %v, want its 3 rows", preview)
 	}
 }
+
+// TestBigQueryEditorRunsAScriptWithIF (#1201), in the emulators shard: the
+// Read-write editor runs a script with IF / ELSE, which the front carries
+// out itself. Only the branch whose condition holds runs: the dataset has
+// the table the IF branch makes and not the ELSE branch's, and the answer
+// names the job.
+func TestBigQueryEditorRunsAScriptWithIF(t *testing.T) {
+	needService(t, "bigquery")
+	p := open(t)
+	project := servedProject(t)
+	ds := fmt.Sprintf("browser_if_%d", time.Now().UnixNano()%1e12)
+	q := "?project=" + url.QueryEscape(project)
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/bigquery"+q, `{"datasetId":"`+ds+`"}`); code != http.StatusOK {
+		t.Fatalf("create a dataset through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() { consoleDo(t, http.MethodDelete, "/api/resources/bigquery"+q+"&name="+ds, "") })
+
+	p.navigate("/bigquery/" + ds + q)
+	p.waitFor(`document.querySelector("#tab-query") !== null`)
+	p.run(chromedp.Click(`#tab-query`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector("#view .query-editor") !== null && document.querySelector("#view .query-mode") !== null`)
+	p.run(chromedp.Click(`#view .query-mode input[value="read-write"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector("#view .query-pane button.primary").textContent === "Run statement"`)
+	p.eval(`(() => { const e = document.querySelector("#view .query-editor"); e.value = ""; return true; })()`, nil)
+	p.run(chromedp.SendKeys(`#view .query-editor`, "DECLARE x INT64 DEFAULT 2;\n"+
+		"IF x > 1 THEN\n  CREATE TABLE big AS SELECT x AS n;\nELSE\n  CREATE TABLE small AS SELECT x AS n;\nEND IF", chromedp.ByQuery))
+	p.clickText("#view .query-pane button.primary", "Run statement")
+	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
+	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("The statement ran")`)
+	tables := readDataPage(t, "bigquery", project, ds).rows("tables")
+	if tables["big"] == nil || tables["small"] != nil {
+		t.Errorf("after the script with IF the dataset lists %v, want big and not small", tables)
+	}
+}
