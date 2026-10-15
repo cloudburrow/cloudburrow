@@ -358,6 +358,10 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 			"DECLARE x INT64; SELECT 7 AS v; EXECUTE IMMEDIATE 'SELECT 1' INTO x": {"7"},
 			// A quoted INTO variable (#1037).
 			"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 5' INTO `a`; SELECT a": {"5"},
+			// Inside control flow, which the front carries out itself (#1201):
+			// the script's result is the last statement's.
+			"IF TRUE THEN EXECUTE IMMEDIATE FORMAT('SELECT %d', 1); END IF":                                                {"1"},
+			"DECLARE i INT64 DEFAULT 0; WHILE i < 2 DO SET i = i + 1; EXECUTE IMMEDIATE FORMAT('SELECT %d', i); END WHILE": {"2"},
 			// No rows set the variables NULL, as BigQuery documents.
 			"DECLARE a INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT n FROM UNNEST([7]) n WHERE FALSE' INTO a; SELECT IFNULL(a, -1)": {"-1"},
 			"DECLARE a INT64 DEFAULT 1; DECLARE b STRING DEFAULT 'x'; " +
@@ -405,7 +409,7 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 			// Evaluating the SQL first would not be faithful (#1037).
 			"EXECUTE IMMEDIATE FORMAT('SELECT %t', CURRENT_TIMESTAMP())",
 			// Inside control flow the front's interpreter evaluates the SQL in
-			// its turn, so those run (#1201, TestBigQueryScriptControlFlowMore).
+			// its turn, so those run; read back above (#1201).
 			// After DML, an expression that reads a table (#1037).
 			"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64); EXECUTE IMMEDIATE (SELECT FORMAT('SELECT %d', COUNT(*)) FROM " + d + ".not_made_" + suffix + ")",
 			// The numbers of variables and columns differ, which BigQuery

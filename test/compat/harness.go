@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -39,7 +40,27 @@ func New(t *testing.T) *Harness {
 	refuseCloudCredentials(t)
 	return &Harness{
 		t:       t,
-		project: fmt.Sprintf("cb-test-%d", time.Now().UnixNano()%1e12),
+		project: fmt.Sprintf("cb-test-%d", projectSuffix()),
+	}
+}
+
+// lastProject is the suffix of the last project New gave out.
+var lastProject atomic.Int64
+
+// projectSuffix is the clock's nanoseconds, kept below 1e12 so the project
+// ID stays short, and never one given out before. macOS's clock moves in
+// microseconds, so two harnesses made in one test (a bystander project)
+// read the same time; the next free number keeps them apart.
+func projectSuffix() int64 {
+	for {
+		last := lastProject.Load()
+		n := time.Now().UnixNano() % 1e12
+		if n <= last {
+			n = last + 1
+		}
+		if lastProject.CompareAndSwap(last, n) {
+			return n
+		}
 	}
 }
 
