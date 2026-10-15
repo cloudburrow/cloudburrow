@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 )
 
 // Create key on a ring's page sets the destroy scheduled duration, which no
@@ -87,4 +90,24 @@ func TestKMSCreateKeyWithDestroyDurationAndRotation(t *testing.T) {
 			t.Errorf("createkey %v was accepted", bad)
 		}
 	}
+}
+
+// TestKMSCreateFormOffersListLocations (#1291): the Create key ring form's
+// Location is a select of what Locations.ListLocations lists, defaulting to
+// global, so the console reaches the Locations mixin.
+func TestKMSCreateFormOffersListLocations(t *testing.T) {
+	t.Parallel()
+	_, fields := kmsProvider{}.CreateForm()
+	for _, f := range fields {
+		if f.Name != "location" {
+			continue
+		}
+		want := slices.Clone(kms.Locations)
+		slices.Sort(want)
+		if f.Type != "select" || f.Default != "global" || !slices.Equal(f.Options, want) {
+			t.Fatalf("Location field = %+v; want a select of the %d listed locations", f, len(want))
+		}
+		return
+	}
+	t.Fatal("the Create key ring form has no Location field")
 }

@@ -23,19 +23,19 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Storage | 10 | 3 | 6 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 9 | 6 | 1 | 0 | 2 |
+| Cloud Run | 15 | 12 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
-| Cloud Logging | 1 | 1 | 0 | 0 | 0 |
-| Cloud KMS | 7 | 1 | 3 | 2 | 1 |
+| Cloud Logging | 0 | 0 | 0 | 0 | 0 |
+| Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
-| Resource Manager | 2 | 2 | 0 | 0 | 0 |
+| Resource Manager | 1 | 1 | 0 | 0 | 0 |
 | Vertex AI | 4 | 2 | 2 | 0 | 0 |
 | BigQuery | 27 | 9 | 15 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
-| Console | 3 | 3 | 0 | 0 | 0 |
-| **Total** | **79** | **31** | **36** | **7** | **5** |
+| Console | 6 | 6 | 0 | 0 | 0 |
+| **Total** | **85** | **37** | **36** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -89,6 +89,12 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 | `Instances.*` is not served | not built yet | L |
 | `WorkerPools.*` is not served | not built yet | L |
 | `gcloud run services list` / `describe` use the v1 (Knative-shaped) API, which is not served | not built yet | L |
+| Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity (#1297) | not built yet | L |
+| Logs are not served through the Cloud Run API (#1298) | not built yet | M |
+| `Builds.SubmitBuild` is not served (#1268) | not built yet | M |
+| `Instances.*` is not served (#1299) | not built yet | L |
+| `WorkerPools.*` is not served (#1300) | not built yet | L |
+| `gcloud run services list` / `describe` use the v1 (Knative-shaped) API, which is not served (#1293) | not built yet | L |
 | `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
 | `CancelExecution`'s result | needs live GCP | S |
@@ -104,20 +110,17 @@ Closed by this sweep: Locations (#1237).
 
 ## Cloud Logging
 
-Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226).
+Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292).
 
-| Gap | Why open | Size |
-|---|---|---|
-| `ConfigServiceV2`: the Async bucket calls, links and settings are not served (buckets and views since #1264, sinks and exclusions since #1226) | not built yet | M |
+No gap is left open here.
 
 ## Cloud KMS
 
 Closed: asymmetric, MAC and raw keys, random bytes, deletion and import jobs, the 19 Unimplemented
-methods (#1212), and their console (#1219).
+methods (#1212), and their console (#1219). Closed by this sweep: Locations (#1291).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `Locations.ListLocations`, `GetLocation` are `UNIMPLEMENTED` | not built yet | S |
 | HSM, EXTERNAL and EXTERNAL_VPC protection levels, `crypto_key_backend`, `external_protection_level_options` | no emulator support | L |
 | EKM, Autokey, AutokeyAdmin and HSM management services | no emulator support | L |
 | `key_access_justifications_policy` on `UpdateCryptoKey` | no emulator support | S |
@@ -139,12 +142,11 @@ IAM conditions are excluded (below). Closed: `RotateSecret`, `EnableManagedRotat
 
 ## Resource Manager
 
-Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216).
+Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Folders, Organizations, Liens, TagKeys, TagValues, TagBindings are not served (and `ListProjects` under a folder or organization is `UNIMPLEMENTED`) | not built yet | L |
-| The v1 API beyond what is served: org policy (`projects.update` is served since #1265) | not built yet | M |
+| Folders, Organizations (#1294), Liens, TagKeys, TagValues, TagBindings (#1295) are not served (and `ListProjects` under a folder or organization is `UNIMPLEMENTED`) | not built yet | L |
 
 ## Vertex AI
 
@@ -212,15 +214,15 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 
 | Gap | Why open | Size |
 |---|---|---|
-| The Cloud SQL Admin API: instances, connection names, IAM database authentication, backups, replicas, the Auth Proxy path | not built yet | L |
-| The Memorystore admin API (`redis.googleapis.com`) | not built yet | L |
+| The Cloud SQL Admin API: instances, connection names, IAM database authentication, backups, replicas, the Auth Proxy path (#1301) | not built yet | L |
+| The Memorystore admin API (`redis.googleapis.com`) (#1302) | not built yet | L |
 
 ## Functions, credentials, tooling
 
 | Gap | Why open | Size |
 |---|---|---|
-| Functions in languages other than Go | not built yet | L |
-| Terraform resources beyond the verified set | not built yet | L |
+| Functions in languages other than Go (#1303) | not built yet | L |
+| Terraform resources beyond the verified set (#1304) | not built yet | L |
 
 ## Console
 
@@ -231,6 +233,9 @@ Closed by this sweep: Test permissions on the Permissions tab (#1242).
 | Request metrics, the request log and traces for persistent Datastore's calls from pods: its pod runs no call front yet, since with it an entity written shortly before a pod restart was lost (#1307; Spanner, Firestore and ephemeral Datastore since #1288) | not built yet | S |
 | Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |
+| Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured"; #1267) | not built yet | M |
+| Embedding playground (#1305) | not built yet | M |
+| Model download, load and unload from the playground (#1306) | not built yet | M |
 
 ## Excluded on purpose
 

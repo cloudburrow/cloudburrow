@@ -10,14 +10,14 @@ Do not edit these files by hand.
 |---|---|---|---|---|---|---|---|---|
 | [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
-| [Cloud Run v2](run.md) | 41 | 27 | 0 | 0 | 0 | 14 | 0 | 4 |
-| [Cloud KMS](kms.md) | 38 | 36 | 0 | 2 | 0 | 0 | 0 | 82 |
+| [Cloud Run v2](run.md) | 41 | 26 | 0 | 0 | 0 | 15 | 0 | 4 |
+| [Cloud KMS](kms.md) | 40 | 38 | 0 | 2 | 0 | 0 | 0 | 82 |
 | [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 7 | 0 | 4 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud Logging](logging.md) | 43 | 32 | 0 | 11 | 0 | 0 | 0 | 0 |
-| [Vertex AI PredictionService](vertexai.md) | 14 | 10 | 0 | 4 | 0 | 0 | 0 | 0 |
+| [Cloud Logging](logging.md) | 43 | 42 | 0 | 1 | 0 | 0 | 0 | 0 |
+| [Vertex AI PredictionService](vertexai.md) | 14 | 5 | 0 | 9 | 0 | 0 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 4 |
-| [Cloud Storage (JSON API)](storage.md) | 87 | 68 | 0 | 19 | 0 | 0 | 0 | 14 |
+| [Cloud Storage (JSON API)](storage.md) | 87 | 67 | 0 | 20 | 0 | 0 | 0 | 14 |
 | [Firestore](firestore.md) | 17 | 15 | 2 | 0 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 7 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Bigtable](bigtable.md) | 50 | 16 | 34 | 0 | 0 | 0 | 0 | 0 |

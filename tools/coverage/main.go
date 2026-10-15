@@ -95,14 +95,16 @@ var areas = []area{
 	{Key: "run", Title: "Cloud Run v2", Own: true, Package: "google.cloud.run.v2"},
 	// google.iam.v1.IAMPolicy is the mixin cloudkms.googleapis.com serves
 	// (#428). Mixin keys are global, so only one area may list it.
-	{Key: "kms", Title: "Cloud KMS", Own: true, Services: []string{"google.cloud.kms.v1.KeyManagementService", "google.iam.v1.IAMPolicy"}},
+	// google.cloud.location.Locations too (#1291); Cloud Scheduler lists it
+	// as well, and both serve it, so the one registry status is true of both.
+	{Key: "kms", Title: "Cloud KMS", Own: true, Services: []string{"google.cloud.kms.v1.KeyManagementService", "google.iam.v1.IAMPolicy", "google.cloud.location.Locations"}},
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects"}},
 	// google.cloud.location.Locations is the mixin cloudscheduler.googleapis.com
-	// serves (#1237); KMS's is unimplemented and not listed, as mixin keys
-	// are global.
+	// serves (#1237); Cloud KMS serves it too (#1291).
 	{Key: "scheduler", Title: "Cloud Scheduler", Own: true, Services: []string{"google.cloud.scheduler.v1.CloudScheduler", "google.cloud.location.Locations"}},
 	// MetricsServiceV2 and ConfigServiceV2 since #1226: metrics, and project
-	// sinks and exclusions, are served; the rest of ConfigServiceV2 is not.
+	// sinks and exclusions, are served; buckets and views since #1264, the
+	// Async bucket calls, links and settings since #1292; CopyLogEntries is not.
 	{Key: "logging", Title: "Cloud Logging", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2", "google.logging.v2.MetricsServiceV2", "google.logging.v2.ConfigServiceV2"}},
 	// The local AI endpoint's PredictionService (#1193).
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService"}},

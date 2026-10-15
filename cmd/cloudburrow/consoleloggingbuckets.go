@@ -183,10 +183,12 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 					{Label: "Retention", Value: fmt.Sprintf("%d days", b.GetRetentionDays())},
 					{Label: "Lock", Value: lockedWord(b.GetLocked())},
 					{Label: "State", Value: bucketState(b)},
+					{Label: "Log Analytics", Value: map[bool]string{true: "Enabled", false: "Disabled"}[b.GetAnalyticsEnabled()]},
 					{Label: "Created", Value: loggingTime(b.GetCreateTime())},
 					{Label: "Updated", Value: loggingTime(b.GetUpdateTime())},
 				}}}, Note: bucketNote},
 			{ID: "views", Label: "Views", Listing: views},
+			{ID: "links", Label: "Linked datasets", Listing: p.links(ctx, path[0])},
 		},
 	}
 	if !strings.HasSuffix(path[0], "/buckets/_Required") && b.GetLifecycleState() == loggingpb.LifecycleState_ACTIVE {
@@ -194,6 +196,7 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 			{Name: "description", Label: "Description", Type: "text", Default: b.GetDescription()},
 			{Name: "retention", Label: "Retention period (days)", Type: "number", Default: strconv.Itoa(int(b.GetRetentionDays())), Help: "1 to 3650 days."},
 			{Name: "locked", Label: "Lock the bucket (cannot be undone)", Type: "checkbox", Default: strconv.FormatBool(b.GetLocked())},
+			{Name: "analytics", Label: "Log Analytics (needed to link a BigQuery dataset)", Type: "checkbox", Default: strconv.FormatBool(b.GetAnalyticsEnabled())},
 		}}
 	}
 	return d, nil
@@ -217,9 +220,14 @@ func (p loggingBucketsProvider) Edit(ctx context.Context, project string, path [
 	if err != nil {
 		return err
 	}
+	mask := []string{"description", "retention_days", "locked"}
+	if _, ok := values["analytics"]; ok {
+		mask = append(mask, "analytics_enabled")
+	}
 	_, err = a.ConfigServer().UpdateBucket(ctx, &loggingpb.UpdateBucketRequest{Name: path[0],
-		Bucket:     &loggingpb.LogBucket{Description: values["description"], RetentionDays: days, Locked: values["locked"] == "true"},
-		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"description", "retention_days", "locked"}}})
+		Bucket: &loggingpb.LogBucket{Description: values["description"], RetentionDays: days, Locked: values["locked"] == "true",
+			AnalyticsEnabled: values["analytics"] == "true"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: mask}})
 	return err
 }
 
@@ -264,10 +272,98 @@ func (p loggingBucketsProvider) Act(ctx context.Context, project, name, action s
 	return err
 }
 
+// links is a bucket's links (#1292), from ListLinks.
+func (p loggingBucketsProvider) links(ctx context.Context, bucket string) console.Listing {
+	l := console.Listing{Columns: []string{"BigQuery dataset", "Description", "Created"}, NameColumn: "Link", Noun: "links",
+		Note: linkNote}
+	if err := p.fault(ctx, loggingpb.ConfigServiceV2_ListLinks_FullMethodName, bucket); err != nil {
+		l.Unavailable = consoleErr(err)
+		return l
+	}
+	a, err := p.admin()
+	if err != nil {
+		l.Unavailable = consoleErr(err)
+		return l
+	}
+	resp, err := a.ConfigServer().ListLinks(ctx, &loggingpb.ListLinksRequest{Parent: bucket, PageSize: 1000})
+	if err != nil {
+		l.Unavailable = consoleErr(err)
+		return l
+	}
+	for _, k := range resp.GetLinks() {
+		id := k.GetName()[strings.LastIndex(k.GetName(), "/")+1:]
+		l.Items = append(l.Items, console.Resource{Name: id, Fields: map[string]string{
+			"BigQuery dataset": k.GetBigqueryDataset().GetDatasetId(), "Description": orDash(k.GetDescription()),
+			"Created": loggingTime(k.GetCreateTime())}})
+	}
+	l.Total = len(l.Items)
+	return l
+}
+
+const linkNote = "A link names the BigQuery dataset Google would make for the bucket; no dataset is made locally (#1292)."
+
+// DetailActions offers Create link on an active bucket with Log Analytics
+// on, and Delete link on one with links (#1292).
+func (p loggingBucketsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if len(path) != 1 {
+		return nil
+	}
+	b, err := p.get(ctx, project, path[0])
+	if err != nil || b.GetLifecycleState() != loggingpb.LifecycleState_ACTIVE || !b.GetAnalyticsEnabled() {
+		return nil
+	}
+	out := []console.Action{{ID: "create-link", Label: "Create link", Fields: []console.Field{
+		{Name: "linkId", Label: "Link name", Type: "text", Required: true, Pattern: `^[A-Za-z0-9][A-Za-z0-9_\-.]{0,99}$`,
+			Help: "Names the BigQuery dataset too, with hyphens as underscores."},
+		{Name: "description", Label: "Description", Type: "text"},
+	}}}
+	var ids []string
+	for _, k := range p.links(ctx, path[0]).Items {
+		ids = append(ids, k.Name)
+	}
+	if len(ids) > 0 {
+		out = append(out, console.Action{ID: "delete-link", Label: "Delete link", Destructive: true,
+			Fields: []console.Field{{Name: "linkId", Label: "Link", Type: "select", Required: true, Options: ids, Default: ids[0]}}})
+	}
+	return out
+}
+
+// ActAt creates or deletes a link through CreateLink and DeleteLink.
+func (p loggingBucketsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) != 1 {
+		return fmt.Errorf("unknown action %q", action)
+	}
+	if _, err := p.get(ctx, project, path[0]); err != nil {
+		return err
+	}
+	a, err := p.admin()
+	if err != nil {
+		return err
+	}
+	id := strings.TrimSpace(values["linkId"])
+	switch action {
+	case "create-link":
+		if err := p.fault(ctx, loggingpb.ConfigServiceV2_CreateLink_FullMethodName, path[0]); err != nil {
+			return err
+		}
+		_, err = a.ConfigServer().CreateLink(ctx, &loggingpb.CreateLinkRequest{Parent: path[0], LinkId: id,
+			Link: &loggingpb.Link{Description: values["description"]}})
+	case "delete-link":
+		if err := p.fault(ctx, loggingpb.ConfigServiceV2_DeleteLink_FullMethodName, path[0]+"/links/"+id); err != nil {
+			return err
+		}
+		_, err = a.ConfigServer().DeleteLink(ctx, &loggingpb.DeleteLinkRequest{Name: path[0] + "/links/" + id})
+	default:
+		return fmt.Errorf("unknown action %q", action)
+	}
+	return err
+}
+
 var (
-	_ console.Driller = loggingBucketsProvider{}
-	_ console.Creator = loggingBucketsProvider{}
-	_ console.Editor  = loggingBucketsProvider{}
-	_ console.Deleter = loggingBucketsProvider{}
-	_ console.Actor   = loggingBucketsProvider{}
+	_ console.PathActor = loggingBucketsProvider{}
+	_ console.Driller   = loggingBucketsProvider{}
+	_ console.Creator   = loggingBucketsProvider{}
+	_ console.Editor    = loggingBucketsProvider{}
+	_ console.Deleter   = loggingBucketsProvider{}
+	_ console.Actor     = loggingBucketsProvider{}
 )
