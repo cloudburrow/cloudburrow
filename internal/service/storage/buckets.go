@@ -51,7 +51,7 @@ var bucketFields = map[string]string{
 
 	"website": "stored", "logging": "stored", "encryption": "stored", "billing": "stored",
 	"iamConfiguration": "stored", "rpo": "stored", "autoclass": "stored", "customPlacementConfig": "stored",
-	"hierarchicalNamespace": "stored",
+	"hierarchicalNamespace": "kept",
 
 	"etag": "output", "generation": "output", "hardDeleteTime": "output", "id": "output", "kind": "output",
 	"locationType": "output", "metageneration": "output", "projectNumber": "output", "selfLink": "output",
@@ -418,6 +418,10 @@ func (s *Server) bucketsInsert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if err := checkHierarchical(f); err != nil {
+		writeError(w, err)
+		return
+	}
 	now := s.now()
 	if err := checkRetentionPolicy(f, nil, now); err != nil {
 		writeError(w, err)
@@ -647,8 +651,16 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 				// UNVERIFIED: Google's answer to changing a bucket's location.
 				return badRequest("The location of a bucket cannot be changed.")
 			}
+			if ns, sent := next["hierarchicalNamespace"]; sent && hierarchical(bucketRecord{Fields: map[string]any{"hierarchicalNamespace": ns}}) != hierarchical(b) {
+				// hns-overview: the setting is chosen at creation and cannot
+				// be changed. UNVERIFIED: the status and message.
+				return badRequest("Invalid argument: hierarchicalNamespace can only be set when a bucket is created.")
+			}
 			if replace {
 				next["location"] = b.Fields["location"]
+				if ns, ok := b.Fields["hierarchicalNamespace"]; ok {
+					next["hierarchicalNamespace"] = ns
+				}
 				if next["softDeletePolicy"] == nil {
 					next["softDeletePolicy"] = b.Fields["softDeletePolicy"]
 				}
@@ -662,6 +674,9 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 				}
 			}
 			if err := validateKept(next); err != nil {
+				return err
+			}
+			if err := checkHierarchical(next); err != nil {
 				return err
 			}
 			stampSoftDeletePolicy(next, old, s.now())
@@ -713,6 +728,11 @@ func (s *Server) bucketsDelete(w http.ResponseWriter, r *http.Request) {
 			// gcloud storage rm -r deletes them before the bucket.
 			// UNVERIFIED: the status, as above.
 			return conflict("The bucket you tried to delete is not empty: it holds managed folders.")
+		}
+		if hasFolders(tx, name) {
+			// Folders of a hierarchical bucket count as content too (#1203).
+			// UNVERIFIED: the status, as above.
+			return conflict("The bucket you tried to delete is not empty: it holds folders.")
 		}
 		tx.Delete(bucketPrefix + name)
 		deleteNotifications(tx, name)

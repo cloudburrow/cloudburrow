@@ -11,7 +11,7 @@ const (
 // methodStatus lists every method in the discovery document, and only those
 // (TestStorageDiscoveryDrift). A method moves to built in the issue that
 // implements it; until then it answers 501 notImplemented naming it, never a
-// plausible stub. Buckets are built (#490), objects.insert, get and delete (#491), objects.patch and update (#492), objects.list (#494), and compose, copy, rewrite and move (#495); managed folders, all but update (#828).
+// plausible stub. Buckets are built (#490), objects.insert, get and delete (#491), objects.patch and update (#492), objects.list (#494), and compose, copy, rewrite and move (#495); managed folders, all but update (#828); hierarchical-namespace folders and their operations' get and list (#1203).
 var methodStatus = map[string]status{
 	"storage.anywhereCaches.disable":                   unimplemented,
 	"storage.anywhereCaches.get":                       unimplemented,
@@ -35,8 +35,8 @@ var methodStatus = map[string]status{
 	"storage.buckets.lockRetentionPolicy":              built,
 	"storage.buckets.operations.advanceRelocateBucket": unimplemented,
 	"storage.buckets.operations.cancel":                unimplemented,
-	"storage.buckets.operations.get":                   unimplemented,
-	"storage.buckets.operations.list":                  unimplemented,
+	"storage.buckets.operations.get":                   built,
+	"storage.buckets.operations.list":                  built,
 	"storage.buckets.patch":                            built,
 	"storage.buckets.relocate":                         unimplemented,
 	"storage.buckets.restore":                          built,
@@ -50,12 +50,12 @@ var methodStatus = map[string]status{
 	"storage.defaultObjectAccessControls.list":         unimplemented,
 	"storage.defaultObjectAccessControls.patch":        unimplemented,
 	"storage.defaultObjectAccessControls.update":       unimplemented,
-	"storage.folders.delete":                           unimplemented,
-	"storage.folders.deleteRecursive":                  unimplemented,
-	"storage.folders.get":                              unimplemented,
-	"storage.folders.insert":                           unimplemented,
-	"storage.folders.list":                             unimplemented,
-	"storage.folders.rename":                           unimplemented,
+	"storage.folders.delete":                           built,
+	"storage.folders.deleteRecursive":                  built,
+	"storage.folders.get":                              built,
+	"storage.folders.insert":                           built,
+	"storage.folders.list":                             built,
+	"storage.folders.rename":                           built,
 	"storage.managedFolders.delete":                    built,
 	"storage.managedFolders.get":                       built,
 	"storage.managedFolders.getIamPolicy":              built,

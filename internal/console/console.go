@@ -237,6 +237,13 @@ type Field struct {
 	KeyHelp      string `json:"keyHelp,omitempty"`
 	ValueHelp    string `json:"valueHelp,omitempty"`
 	MaxEntries   int    `json:"maxEntries,omitempty"`
+	// Requires and Excludes, on a checkbox, name the checkboxes of the same
+	// form that checking it turns on and off, and holds there while it is
+	// checked: a bucket's hierarchical namespace needs uniform bucket-level
+	// access and excludes object versioning (#1203), so the form cannot
+	// submit what the API refuses.
+	Requires []string `json:"requires,omitempty"`
+	Excludes []string `json:"excludes,omitempty"`
 }
 
 // ParseMap decodes a "map" field's value.
