@@ -388,6 +388,12 @@ func (f front) checkQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 	if committed {
 		kept = "The emulator kept what the statements before the failing one did."
 	}
+	if failed && txnRequest(r) {
+		// A transaction's probe or COMMIT (transactions.go): the emulator
+		// rolled it back whole, as BigQuery rolls a transaction back.
+		rec.copyTo(w)
+		return
+	}
 	if v.handler && failed {
 		e := rowError{Reason: "notImplemented", Message: "Not implemented here: the script failed (" + errMsg + ") and has a " +
 			"BEGIN ... EXCEPTION block. BigQuery runs the handler when a statement in its block fails, but the emulator " +

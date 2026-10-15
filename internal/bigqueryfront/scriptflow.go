@@ -69,8 +69,8 @@ import (
 // cumulative time limit, and a variable of over 1 MB, or variables of over
 // 10 MB together, fail it. It also stops once the client's request is gone.
 //
-// What it cannot do faithfully is 501, before anything runs: a CALL, a
-// transaction, a FOR or SET of a type it cannot write as a literal (RANGE).
+// Transactions are transactions.go; a RANGE value is written as
+// RANGE(lower, upper) (rangeLiteral). What it cannot do faithfully is 501.
 
 // scriptTimeLimit is BigQuery's cumulative time limit for a multi-statement
 // query; scriptNow is the clock it is measured with.
@@ -92,12 +92,30 @@ func hasControlFlow(sql string) bool {
 	if !strings.Contains(upper, "IF") && !strings.Contains(upper, "LOOP") && !strings.Contains(upper, "WHILE") &&
 		!strings.Contains(upper, "REPEAT") && !strings.Contains(upper, "FOR") && !strings.Contains(upper, "CASE") &&
 		!strings.Contains(upper, "EXCEPTION") && !strings.Contains(upper, "RAISE") && !strings.Contains(upper, "PROCEDURE") &&
-		!strings.Contains(upper, "CALL") && !strings.Contains(upper, "ALTER") {
+		!strings.Contains(upper, "CALL") && !strings.Contains(upper, "ALTER") && !strings.Contains(upper, "TRAN") {
 		return false
 	}
 	toks, ok := lex(sql)
 	if !ok {
 		return false
+	}
+	// A script with a transaction the front can carry out, or with a
+	// ROLLBACK, which the emulator refuses ("Statement not supported:
+	// RollbackStatement", measured), is carried out by the front
+	// (transactions.go). Another keeps going to the emulator as before.
+	txn, rollback := false, false
+	for _, stmt := range splitStatements(toks) {
+		body, _, _ := stripControlFlow(stmt)
+		if isTransaction(body) {
+			txn = true
+			rollback = rollback || body[0].is("ROLLBACK")
+		}
+	}
+	if txn {
+		p := &scriptParser{toks: toks}
+		if nodes := p.block(); rollback || p.err == "" && unsupportedInScript(nodes) == "" {
+			return true
+		}
 	}
 	for _, stmt := range splitStatements(toks) {
 		if body, block, handler := stripControlFlow(stmt); block != "" || handler || len(body) > 0 && body[0].is("RAISE") ||
@@ -452,6 +470,9 @@ type scriptRun struct {
 	// anything else is sent.
 	pendingDML bool
 	start      time.Time
+	// txnOpen: a statement of a transaction failed and the transaction
+	// has not ended (transactions.go).
+	txnOpen bool
 	// limit is the error a BigQuery limit failed the script with.
 	limit string
 }
@@ -554,20 +575,23 @@ func unsupportedInScript(nodes []scriptNode) string {
 	var walk func([]scriptNode) string
 	walk = func(ns []scriptNode) string {
 		for _, n := range ns {
-			if n.kind == nodeStmt && len(n.toks) > 0 {
-				t := n.toks[0]
-				switch {
-				case t.is("COMMIT") || t.is("ROLLBACK") || t.is("BEGIN"):
-					return "a transaction inside a script with control flow. CloudBurrow carries such a script out itself, one statement at a time, each in a transaction of its own, so it cannot roll several back together."
-				}
+			if n.kind == nodeCreateProc && hasTransaction(n.body) {
+				return "a transaction in a procedure. CloudBurrow carries out a transaction only in the script that begins and ends it."
 			}
+			// Each block's transactions (transactions.go).
 			for _, b := range append([][]scriptNode{n.body, n.els, n.handler}, n.bodies...) {
+				if msg := unsupportedTransactions(b, false); msg != "" {
+					return msg
+				}
 				if msg := walk(b); msg != "" {
 					return msg
 				}
 			}
 		}
 		return ""
+	}
+	if msg := unsupportedTransactions(nodes, true); msg != "" { // transactions.go
+		return "Not implemented here: " + msg + " Nothing was run."
 	}
 	if msg := walk(nodes); msg != "" {
 		return "Not implemented here: " + msg + " Nothing was run."
@@ -739,9 +763,18 @@ func (s *scriptRun) setVar(name string, v scriptVar) bool {
 
 // run runs nodes in order; a non-nil flow ends them early.
 func (s *scriptRun) run(nodes []scriptNode) *scriptFlow {
-	for _, n := range nodes {
+	for i := 0; i < len(nodes); i++ {
+		n := nodes[i]
 		if !s.step() {
 			return &scriptFlow{}
+		}
+		if isTxnNode(n, "BEGIN") { // transactions.go
+			j, flow := s.transaction(nodes, i)
+			if flow != nil {
+				return flow
+			}
+			i = j
+			continue
 		}
 		if flow := s.runNode(n); flow != nil {
 			if flow.failed && !flow.hasPos {
@@ -766,6 +799,9 @@ func (s *scriptRun) runNode(n scriptNode) *scriptFlow {
 		}
 		if n.toks[0].is("RAISE") {
 			return s.raise(n.toks)
+		}
+		if isTxnNode(n, "COMMIT") || isTxnNode(n, "ROLLBACK") {
+			return s.endTransaction(n) // transactions.go
 		}
 		if isAlterTable(n.toks) {
 			return s.alterTable(n.toks) // #1227, altertable.go
@@ -1027,6 +1063,9 @@ func (s *scriptRun) runText(text string) *scriptFlow {
 
 // send runs text as a query of its own through the front, as jobs.query.
 func (s *scriptRun) send(text string) (*recorder, *scriptFlow) {
+	if !txnRequest(s.r) && s.readsInFailedTxn(text) { // transactions.go
+		return nil, &scriptFlow{}
+	}
 	if s.pendingDML {
 		// A statement that changes data runs before anything that may
 		// read what it changed.
@@ -1544,6 +1583,9 @@ func literalOf(fl field, v any) (scriptVar, string) {
 		return scriptVar{typ, typ + "(" + strings.Join(lits, ", ") + ")"}, ""
 	}
 	s := fmt.Sprint(v)
+	if t == "RANGE" {
+		return rangeLiteral(typ, strings.ToUpper(fl.RangeElementType.Type), s)
+	}
 	switch t {
 	case "STRING":
 		return scriptVar{typ, sqlString(s)}, ""
@@ -1571,6 +1613,39 @@ func literalOf(fl field, v any) (scriptVar, string) {
 	return scriptVar{typ, "CAST(" + sqlString(s) + " AS " + typ + ")"}, ""
 }
 
+// rangeLiteral writes a RANGE's REST value, "[lower, upper)" with
+// UNBOUNDED for a missing bound, as RANGE(lower, upper) (#1201). A
+// TIMESTAMP bound reads as microseconds since the epoch (measured: the
+// emulator gives RANGE(TIMESTAMP '2020-01-01 10:00:00.5', NULL) as
+// "[1577872800500000, UNBOUNDED)"), a DATE or DATETIME bound as its text.
+func rangeLiteral(typ, elem, s string) (scriptVar, string) {
+	bad := "Not implemented here: a " + typ + " value CloudBurrow could not read (" + s + "), in a script with control flow. What the statements before it did was kept."
+	if !strings.HasPrefix(s, "[") || !strings.HasSuffix(s, ")") {
+		return scriptVar{}, bad
+	}
+	parts := strings.Split(s[1:len(s)-1], ",")
+	if len(parts) != 2 {
+		return scriptVar{}, bad
+	}
+	var bounds []string
+	for _, b := range parts {
+		b = strings.TrimSpace(b)
+		switch {
+		case strings.EqualFold(b, "UNBOUNDED"):
+			bounds = append(bounds, "CAST(NULL AS "+elem+")")
+		case elem == "TIMESTAMP":
+			n, ok := new(big.Int).SetString(b, 10)
+			if !ok {
+				return scriptVar{}, bad
+			}
+			bounds = append(bounds, "TIMESTAMP_MICROS("+n.String()+")")
+		default:
+			bounds = append(bounds, "CAST("+sqlString(b)+" AS "+elem+")")
+		}
+	}
+	return scriptVar{typ, "RANGE(" + bounds[0] + ", " + bounds[1] + ")"}, ""
+}
+
 // sqlTypeOf writes a schema field's type in GoogleSQL.
 func sqlTypeOf(fl field) (string, string) {
 	var t string
@@ -1583,6 +1658,17 @@ func sqlTypeOf(fl field) (string, string) {
 		t = "BOOL"
 	case "STRING", "BYTES", "DATE", "DATETIME", "TIME", "TIMESTAMP", "NUMERIC", "BIGNUMERIC", "JSON", "GEOGRAPHY", "INTERVAL":
 		t = u
+	case "RANGE":
+		// #1201: a RANGE<DATE>, RANGE<DATETIME> or RANGE<TIMESTAMP>.
+		if fl.RangeElementType == nil {
+			return "", "Not implemented here: a RANGE value with no element type in a script variable, FOR or condition. What the statements before it did was kept."
+		}
+		switch e := strings.ToUpper(fl.RangeElementType.Type); e {
+		case "DATE", "DATETIME", "TIMESTAMP":
+			t = "RANGE<" + e + ">"
+		default:
+			return "", "Not implemented here: a value of type RANGE<" + e + "> in a script variable, FOR or condition. What the statements before it did was kept."
+		}
 	case "RECORD", "STRUCT":
 		var parts []string
 		for _, sub := range fl.Fields {

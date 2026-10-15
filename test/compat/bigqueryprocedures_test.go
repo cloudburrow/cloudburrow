@@ -152,7 +152,11 @@ func TestBigQueryStoredProcedures(t *testing.T) {
 		t.Errorf("DROP PROCEDURE IF EXISTS of none: %v", err)
 	}
 
-	// Still 501: a transaction in a script the front carries out.
-	err = bqRun(ctx, c, "CALL "+d+".add_row(1); BEGIN TRANSACTION; INSERT INTO "+tbl+" (n) VALUES (5); COMMIT TRANSACTION", false)
-	wantReason(t, "a transaction beside a CALL", err, 501, "notImplemented")
+	// A transaction beside a CALL is carried out (#1201,
+	// TestBigQueryScriptTransactions); a CALL inside one is 501.
+	if err := bqRun(ctx, c, "CALL "+d+".add_row(1); BEGIN TRANSACTION; INSERT INTO "+tbl+" (n) VALUES (5); COMMIT TRANSACTION", false); err != nil {
+		t.Errorf("a transaction beside a CALL: %v", err)
+	}
+	err = bqRun(ctx, c, "BEGIN TRANSACTION; CALL "+d+".add_row(1); COMMIT TRANSACTION", false)
+	wantReason(t, "a CALL inside a transaction", err, 501, "notImplemented")
 }
