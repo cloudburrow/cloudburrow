@@ -10,8 +10,9 @@
 // This is a registry, not a reimplementation of Resource Manager. It holds
 // what a local instance needs — the identifier, a display name, lifecycle
 // state and creation time — and refuses everything it does not implement
-// rather than accepting it silently. Organisations, folders, liens, IAM
-// policies and billing are out of scope and say so.
+// rather than accepting it silently. One fixed organization and the folders
+// under it are kept too (#1294, hierarchy.go); liens, IAM policies and
+// billing are out of scope and say so.
 package resourcemanager
 
 import (
@@ -50,6 +51,9 @@ type Project struct {
 	// It is purged RetentionPeriod later, until when UndeleteProject
 	// restores it (#1216).
 	DeleteTime string `json:"deleteTime,omitempty"`
+	// Parent is "folders/{number}" or OrganizationName, or empty for a
+	// top-level project, as every project was before #1294.
+	Parent string `json:"parent,omitempty"`
 }
 
 // RetentionPeriod is how long a deleted project is kept in DELETE_REQUESTED
@@ -107,6 +111,9 @@ func key(id string) string { return keyPrefix + id }
 // first time someone tries to create it for real.
 func (r *Registry) Create(p Project) (Project, error) {
 	if err := ValidateProjectID(p.ProjectID); err != nil {
+		return Project{}, err
+	}
+	if err := r.CheckParent(p.Parent); err != nil {
 		return Project{}, err
 	}
 	return r.register(p)
@@ -331,9 +338,31 @@ func (r *Registry) Undelete(id string) (Project, error) {
 	return p, r.put(p)
 }
 
+// Move places a project under parent (#1294): a folder, the organization,
+// or, empty, nowhere.
+func (r *Registry) Move(id, parent string) (Project, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, err := r.load(id)
+	if err != nil {
+		return Project{}, err
+	}
+	if p.State == StateDeleteRequested {
+		return Project{}, apierror.FailedPrecondition("project %q is pending deletion; undelete it before moving it", id)
+	}
+	if parent == "" {
+		return Project{}, apierror.InvalidArgument("destination_parent is required")
+	}
+	if _, err := r.checkParentLocked(parent); err != nil {
+		return Project{}, err
+	}
+	p.Parent = parent
+	return p, r.put(p)
+}
+
 // ErrNotImplemented names a Resource Manager capability this does not provide.
 func ErrNotImplemented(what string) error {
 	return apierror.Unimplemented(
 		"%s is not implemented: this is a local project registry, not Resource Manager. "+
-			"Organisations, folders, liens, IAM policies and billing are out of scope", what)
+			"Liens, IAM policies and billing are out of scope", what)
 }

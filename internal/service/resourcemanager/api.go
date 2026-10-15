@@ -34,12 +34,11 @@ import (
 // The Resource Manager v3 Projects API (#298), served from the Registry.
 //
 // One store: the console's project list and this API read and write the same
-// records, so a project created in one is in the other. Only Projects is
-// served. Folders, Organizations, Liens and the tag services are not
-// registered at all, so the gRPC server answers them UNIMPLEMENTED; within
-// Projects, the IAM methods and MoveProject are UNIMPLEMENTED too, each
-// saying why. A deleted project is kept for 30 days, and UndeleteProject
-// restores it.
+// records, so a project created in one is in the other. Projects, Folders and
+// Organizations (#1294, hierarchy_api.go) are served; Liens and the tag
+// services are not registered at all, so the gRPC server answers them
+// UNIMPLEMENTED; the IAM methods are UNIMPLEMENTED too, each saying why. A
+// deleted project is kept for 30 days, and UndeleteProject restores it.
 
 // ProjectsServer serves google.cloud.resourcemanager.v3.Projects.
 type ProjectsServer struct {
@@ -64,9 +63,8 @@ func toProto(p Project) *rmpb.Project {
 		ProjectId:   p.ProjectID,
 		DisplayName: p.DisplayName,
 		Labels:      p.Labels,
-		// Every project here is top-level: there are no organizations or
-		// folders for one to belong to.
-		Parent: "",
+		// A folder, the organization, or empty for a top-level project.
+		Parent: p.Parent,
 		State:  rmpb.Project_ACTIVE,
 	}
 	if p.State == StateDeleteRequested {
@@ -111,23 +109,21 @@ func doneOperation(kind, id string, resp proto.Message) (*longrunningpb.Operatio
 	if err != nil {
 		return nil, apierror.Internal(err, "encode operation response")
 	}
-	return &longrunningpb.Operation{
+	op := &longrunningpb.Operation{
 		Name:   fmt.Sprintf("operations/%s.%s.%d", kind, id, time.Now().UnixNano()),
 		Done:   true,
 		Result: &longrunningpb.Operation_Response{Response: a},
-	}, nil
+	}
+	v3Operations.put(op)
+	return op, nil
 }
 
-// checkParent accepts an empty parent and refuses one naming a folder or an
-// organization: none exist here, and a project cannot be placed under one.
-func checkParent(parent string) error {
-	if parent == "" {
+// splitMask is a REST updateMask query parameter as a field mask.
+func splitMask(m string) *fieldmaskpb.FieldMask {
+	if m == "" {
 		return nil
 	}
-	if strings.HasPrefix(parent, "folders/") || strings.HasPrefix(parent, "organizations/") {
-		return ErrNotImplemented("parent " + parent + ": folders and organizations")
-	}
-	return apierror.InvalidArgument("parent %q must be folders/{id} or organizations/{id}", parent)
+	return &fieldmaskpb.FieldMask{Paths: strings.Split(m, ",")}
 }
 
 func (s *ProjectsServer) GetProject(_ context.Context, req *rmpb.GetProjectRequest) (*rmpb.Project, error) {
@@ -143,16 +139,41 @@ func (s *ProjectsServer) GetProject(_ context.Context, req *rmpb.GetProjectReque
 }
 
 func (s *ProjectsServer) ListProjects(_ context.Context, req *rmpb.ListProjectsRequest) (*rmpb.ListProjectsResponse, error) {
-	// ListProjects requires a parent in Google's API; every project here is
-	// top-level, so there is no parent a listing could match.
-	if req.GetParent() == "" {
+	// ListProjects requires a parent in Google's API. A top-level project
+	// has none, so SearchProjects is how those are listed.
+	parent := req.GetParent()
+	if parent == "" {
 		return nil, apierror.InvalidArgument("parent is required: folders/{id} or organizations/{id}; " +
-			"projects here have no parent, so use SearchProjects to list them")
+			"top-level projects have no parent, so use SearchProjects to list them")
 	}
-	if err := checkParent(req.GetParent()); err != nil {
+	if err := s.reg.CheckParentExists(parent); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	return &rmpb.ListProjectsResponse{}, nil
+	list := s.reg.Active
+	if req.GetShowDeleted() {
+		list = s.reg.List
+	}
+	all, err := list()
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	byID := map[string]Project{}
+	var ids []string
+	for _, p := range all {
+		if p.Parent == parent {
+			byID[p.ProjectID] = p
+			ids = append(ids, p.ProjectID)
+		}
+	}
+	page, next, err := paging.Page(fmt.Sprintf("projects.list:%s:%v", parent, req.GetShowDeleted()), ids, req.GetPageToken(), int(req.GetPageSize()))
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	out := &rmpb.ListProjectsResponse{NextPageToken: next}
+	for _, id := range page {
+		out.Projects = append(out.Projects, toProto(byID[id]))
+	}
+	return out, nil
 }
 
 func (s *ProjectsServer) SearchProjects(_ context.Context, req *rmpb.SearchProjectsRequest) (*rmpb.SearchProjectsResponse, error) {
@@ -230,8 +251,11 @@ func parseQuery(q string) (func(Project) bool, error) {
 		case key == "state" || key == "lifecycleState":
 			preds = append(preds, func(p Project) bool { return string(p.State) == strings.ToUpper(val) })
 		case key == "parent":
-			// No project here has a parent.
-			preds = append(preds, func(Project) bool { return false })
+			preds = append(preds, func(p Project) bool { return p.Parent == val })
+		case key == "parent.type":
+			preds = append(preds, func(p Project) bool { return strings.HasPrefix(p.Parent, val+"s/") })
+		case key == "parent.id":
+			preds = append(preds, func(p Project) bool { _, id, _ := strings.Cut(p.Parent, "/"); return p.Parent != "" && id == val })
 		case strings.HasPrefix(key, "labels."):
 			lk := strings.TrimPrefix(key, "labels.")
 			preds = append(preds, func(p Project) bool { v, ok := p.Labels[lk]; return ok && v == val })
@@ -254,10 +278,7 @@ func (s *ProjectsServer) CreateProject(_ context.Context, req *rmpb.CreateProjec
 	if in == nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("project is required"))
 	}
-	if err := checkParent(in.GetParent()); err != nil {
-		return nil, apierror.Wrap(err)
-	}
-	p, err := s.reg.Create(Project{ProjectID: in.GetProjectId(), DisplayName: in.GetDisplayName(), Labels: in.GetLabels()})
+	p, err := s.reg.Create(Project{ProjectID: in.GetProjectId(), DisplayName: in.GetDisplayName(), Labels: in.GetLabels(), Parent: in.GetParent()})
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -338,11 +359,17 @@ func (s *ProjectsServer) UndeleteProject(_ context.Context, req *rmpb.UndeletePr
 	return doneOperation("up", id, toProto(p))
 }
 
-// MoveProject changes a project's parent, and the only parents are folders
-// and organizations, which CloudBurrow does not have (#298): every project
-// here is top-level, so there is nowhere to move one to.
-func (s *ProjectsServer) MoveProject(context.Context, *rmpb.MoveProjectRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("MoveProject: there are no folders or organizations to move a project to"))
+// MoveProject places a project under a folder or the organization (#1294).
+func (s *ProjectsServer) MoveProject(_ context.Context, req *rmpb.MoveProjectRequest) (*longrunningpb.Operation, error) {
+	id, err := s.idFromName(req.GetName())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	p, err := s.reg.Move(id, req.GetDestinationParent())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	return doneOperation("mp", id, toProto(p))
 }
 
 // projectIAMRefusal is why a project's IAM methods stay UNIMPLEMENTED:
@@ -406,7 +433,12 @@ func readProto(r *http.Request, m proto.Message) error {
 // restList serves GET /v3/projects?parent=.
 func (s *ProjectsServer) restList(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
-	resp, err := s.ListProjects(r.Context(), &rmpb.ListProjectsRequest{Parent: q.Get("parent")})
+	size, err := rest.QueryInt(r, "pageSize", 0)
+	if err != nil {
+		return err
+	}
+	resp, err := s.ListProjects(r.Context(), &rmpb.ListProjectsRequest{Parent: q.Get("parent"), PageToken: q.Get("pageToken"),
+		PageSize: int32(size), ShowDeleted: q.Get("showDeleted") == "true"})
 	if err != nil {
 		return err
 	}
@@ -467,10 +499,7 @@ func (s *ProjectsServer) restUpdate(w http.ResponseWriter, r *http.Request) erro
 		return err
 	}
 	p.Name = "projects/" + id
-	var mask *fieldmaskpb.FieldMask
-	if m := r.URL.Query().Get("updateMask"); m != "" {
-		mask = &fieldmaskpb.FieldMask{Paths: strings.Split(m, ",")}
-	}
+	mask := splitMask(r.URL.Query().Get("updateMask"))
 	op, err := s.UpdateProject(r.Context(), &rmpb.UpdateProjectRequest{Project: &p, UpdateMask: mask})
 	if err != nil {
 		return err
@@ -490,8 +519,8 @@ func (s *ProjectsServer) restDelete(w http.ResponseWriter, r *http.Request) erro
 	return writeProto(w, op)
 }
 
-// restVerb is POST /v3/projects/{project}:{verb}: undelete, and IAM and
-// move, which are not served.
+// restVerb is POST /v3/projects/{project}:{verb}: undelete and move, and
+// IAM, which is not served.
 func (s *ProjectsServer) restVerb(w http.ResponseWriter, r *http.Request) error {
 	raw, err := rest.PathValue(r, "project")
 	if err != nil {
@@ -502,7 +531,16 @@ func (s *ProjectsServer) restVerb(w http.ResponseWriter, r *http.Request) error 
 	case "getIamPolicy", "setIamPolicy", "testIamPermissions":
 		return ErrNotImplemented(verb + projectIAMRefusal)
 	case "move":
-		return ErrNotImplemented("move: there are no folders or organizations to move a project to")
+		id, _, _ := strings.Cut(raw, ":")
+		var in rmpb.MoveProjectRequest
+		if err := readProto(r, &in); err != nil {
+			return err
+		}
+		op, err := s.MoveProject(r.Context(), &rmpb.MoveProjectRequest{Name: "projects/" + id, DestinationParent: in.GetDestinationParent()})
+		if err != nil {
+			return err
+		}
+		return writeProto(w, op)
 	case "undelete":
 		id, _, _ := strings.Cut(raw, ":")
 		op, err := s.UndeleteProject(r.Context(), &rmpb.UndeleteProjectRequest{Name: "projects/" + id})
@@ -521,6 +559,7 @@ func (s *ProjectsServer) restVerb(w http.ResponseWriter, r *http.Request) error 
 type Server struct {
 	addr     string
 	projects *ProjectsServer
+	folders  *FoldersServer
 
 	calls     grpcx.Observer
 	requests  func(rest.Request)
@@ -542,7 +581,7 @@ type Server struct {
 
 // NewServer returns a Resource Manager server over reg, bound to addr.
 func NewServer(addr string, reg *Registry) *Server {
-	return &Server{addr: addr, projects: NewProjectsServer(reg)}
+	return &Server{addr: addr, projects: NewProjectsServer(reg), folders: NewFoldersServer(reg)}
 }
 
 // Observe sets who is told about completed calls. It must be set before Start.
@@ -586,10 +625,17 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	g := grpc.NewServer(opts...)
 	rmpb.RegisterProjectsServer(g, s.projects)
+	rmpb.RegisterFoldersServer(g, s.folders)
+	rmpb.RegisterOrganizationsServer(g, OrganizationsServer{})
+	longrunningpb.RegisterOperationsServer(g, OperationsServer{})
 
 	router := rest.NewRouter()
 	s.projects.restRoutes(router)
-	s.projects.v1Routes(router, &v1Ops{})
+	ops := &v1Ops{}
+	s.projects.v1Routes(router, ops)
+	s.projects.v1OrgRoutes(router)
+	s.folders.restRoutes(router, OrganizationsServer{}, ops)
+	s.folders.v2Routes(router, ops)
 	var jsonAPI http.Handler = router
 	if s.requests != nil {
 		jsonAPI = rest.Observe(router, s.requests)

@@ -147,7 +147,7 @@ Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by 
 
 | Gap | Why open | Size |
 |---|---|---|
-| Folders, Organizations (#1294), Liens, TagKeys, TagValues, TagBindings (#1295) are not served (and `ListProjects` under a folder or organization is `UNIMPLEMENTED`) | not built yet | L |
+| Liens, TagKeys, TagValues, TagBindings (#1295) are not served (Folders and Organizations are, #1294) | not built yet | L |
 
 ## Vertex AI
 

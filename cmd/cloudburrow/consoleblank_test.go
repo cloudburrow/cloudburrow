@@ -202,6 +202,10 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// The resource hierarchy (#1294): a folder under the organization.
+	if _, err := d.projects.CreateFolder(resourcemanager.OrganizationName, "Blank folder"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Cloud Storage: the built-in server, a bucket, and an object under a
 	// prefix so the folder level opens too.

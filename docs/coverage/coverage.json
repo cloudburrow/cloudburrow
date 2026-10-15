@@ -1778,12 +1778,134 @@
   },
   {
     "Key": "resourcemanager",
-    "Title": "Resource Manager v3 (Projects)",
+    "Title": "Resource Manager v3 (Projects, Folders, Organizations)",
     "counts": {
-      "Unimplemented": 4,
-      "Verified": 7
+      "Unimplemented": 9,
+      "Verified": 18
     },
     "rows": [
+      {
+        "method": "google.cloud.resourcemanager.v3.Folders/CreateFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:257 TestTerraformGoogleFolder"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Folders/DeleteFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:257 TestTerraformGoogleFolder"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Folders/GetFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Folders/GetIamPolicy",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Folders/ListFolders",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Folders/MoveFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:257 TestTerraformGoogleFolder"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Folders/SearchFolders",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Folders/SetIamPolicy",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Folders/TestIamPermissions",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Folders/UndeleteFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Folders/UpdateFolder",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:257 TestTerraformGoogleFolder"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Organizations/GetIamPolicy",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Organizations/GetOrganization",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Organizations/SearchOrganizations",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Organizations/SetIamPolicy",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.Organizations/TestIamPermissions",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/CreateProject",
         "status": "Verified",
@@ -1802,7 +1924,7 @@
         "method": "google.cloud.resourcemanager.v3.Projects/GetIamPolicy",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
+          "test/compat/resourcemanager_test.go:206 TestResourceManagerV3RefusesIAM"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -1818,16 +1940,16 @@
         "method": "google.cloud.resourcemanager.v3.Projects/ListProjects",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:260 TestResourceManagerV3ListProjects"
+          "test/compat/resourcemanager_test.go:242 TestResourceManagerV3ListProjects",
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/MoveProject",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
+        ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/SearchProjects",
@@ -1840,7 +1962,7 @@
         "method": "google.cloud.resourcemanager.v3.Projects/SetIamPolicy",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
+          "test/compat/resourcemanager_test.go:206 TestResourceManagerV3RefusesIAM"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -1848,7 +1970,7 @@
         "method": "google.cloud.resourcemanager.v3.Projects/TestIamPermissions",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
+          "test/compat/resourcemanager_test.go:206 TestResourceManagerV3RefusesIAM"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },

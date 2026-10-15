@@ -44,8 +44,8 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 				}
 			}
 			// The Resource Manager rows are always set: the project registry
-			// always runs, whichever services are enabled.
-			if set+len(skipped) != len(services)+2 {
+			// always runs, whichever services are enabled: v1, Cloud Billing and v3.
+			if set+len(skipped) != len(services)+3 {
 				t.Errorf("%v: %d set and %d named as skipped, want every enabled service accounted for", services, set, len(skipped))
 			}
 			if override != strings.Contains(body, "credentials  = null") {

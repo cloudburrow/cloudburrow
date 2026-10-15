@@ -197,14 +197,13 @@ func consoleProjectState(t *testing.T, addr, project, id string) string {
 	return ""
 }
 
-// covers: google.cloud.resourcemanager.v3.Projects/GetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Projects/SetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Projects/TestIamPermissions (unimplemented), google.cloud.resourcemanager.v3.Projects/MoveProject (unimplemented)
+// covers: google.cloud.resourcemanager.v3.Projects/GetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Projects/SetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Projects/TestIamPermissions (unimplemented)
 //
-// TestResourceManagerV3RefusesIAMAndMove (#1216): a project's IAM methods
-// stay UNIMPLEMENTED under ADR-0006, which stores policies only on the
-// resources it names, and MoveProject is UNIMPLEMENTED because there are
-// no folders or organizations to move a project to. Each says why, and so
-// do Folders.
-func TestResourceManagerV3RefusesIAMAndMove(t *testing.T) {
+// TestResourceManagerV3RefusesIAM (#1216): a project's IAM methods stay
+// UNIMPLEMENTED under ADR-0006, which stores policies only on the resources
+// it names, and each says why. MoveProject, once refused here, is served
+// since #1294 (TestResourceManagerV3Folders).
+func TestResourceManagerV3RefusesIAM(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
 	c, err := resourcemanager.NewProjectsClient(ctx, rmOptions(h)...)
@@ -228,35 +227,18 @@ func TestResourceManagerV3RefusesIAMAndMove(t *testing.T) {
 			t.Errorf("%s = %v, want UNIMPLEMENTED citing ADR-0006", what, err)
 		}
 	}
-	if _, err := c.MoveProject(ctx, &rmpb.MoveProjectRequest{Name: name, DestinationParent: "folders/1"}); status.Code(err) != codes.Unimplemented ||
-		!strings.Contains(status.Convert(err).Message(), "no folders or organizations") {
-		t.Errorf("MoveProject = %v, want UNIMPLEMENTED saying there are no folders or organizations", err)
-	}
-	fc, err := resourcemanager.NewFoldersClient(ctx, rmOptions(h)...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer fc.Close()
-	if _, err := fc.GetFolder(ctx, &rmpb.GetFolderRequest{Name: "folders/1"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("GetFolder = %v, want Unimplemented", err)
-	}
-	fit := fc.ListFolders(ctx, &rmpb.ListFoldersRequest{Parent: "organizations/1"})
-	if _, err := fit.Next(); status.Code(err) != codes.Unimplemented {
-		t.Errorf("ListFolders = %v, want Unimplemented", err)
-	}
 }
 
 // covers: google.cloud.resourcemanager.v3.Projects/ListProjects
 //
 // TestResourceManagerV3ListProjects.
 //
-// ListProjects lists a parent's direct children, and no project here has a
-// parent: there are no folders or organizations. Through the official
+// ListProjects lists a parent's direct children. Through the official
 // client, an empty parent is INVALID_ARGUMENT pointing at SearchProjects,
-// as in Google's API; a folder or organization parent is UNIMPLEMENTED
-// rather than an empty list that would pass for "no children"; any other
-// parent is INVALID_ARGUMENT. A project that does exist is not listed under
-// any of them, and SearchProjects finds it.
+// as in Google's API; a folder or organization that does not exist is
+// NOT_FOUND (#1294) rather than an empty list that would pass for "no
+// children"; any other parent is INVALID_ARGUMENT. A top-level project is
+// not listed under the local organization, and SearchProjects finds it.
 func TestResourceManagerV3ListProjects(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -279,8 +261,8 @@ func TestResourceManagerV3ListProjects(t *testing.T) {
 
 	for parent, want := range map[string]codes.Code{
 		"":                  codes.InvalidArgument,
-		"folders/123":       codes.Unimplemented,
-		"organizations/456": codes.Unimplemented,
+		"folders/123":       codes.NotFound,
+		"organizations/456": codes.NotFound,
 		"projects/" + id:    codes.InvalidArgument,
 	} {
 		p, err := c.ListProjects(ctx, &rmpb.ListProjectsRequest{Parent: parent}).Next()
@@ -289,6 +271,18 @@ func TestResourceManagerV3ListProjects(t *testing.T) {
 		}
 		if parent == "" && !strings.Contains(err.Error(), "SearchProjects") {
 			t.Errorf("ListProjects with no parent does not point at SearchProjects: %v", err)
+		}
+	}
+	for lit := c.ListProjects(ctx, &rmpb.ListProjectsRequest{Parent: localOrg}); ; {
+		p, err := lit.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ListProjects(%s): %v", localOrg, err)
+		}
+		if p.GetProjectId() == id {
+			t.Errorf("ListProjects(%s) lists the top-level project %s", localOrg, id)
 		}
 	}
 	it := c.SearchProjects(ctx, &rmpb.SearchProjectsRequest{Query: "id:" + id})
