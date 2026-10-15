@@ -42,7 +42,7 @@ func cbSource() *cbpb.Source {
 
 func TestCreateBuildDockerStepsAndLog(t *testing.T) {
 	s := NewServer(&Knative{}, "t", time.Minute)
-	b := &fakeBuilder{got: make(chan BuildSpec, 2)}
+	b := &fakeBuilder{got: make(chan BuildSpec, 3)}
 	f := &logFetcher{fakeFetcher: fakeFetcher{objects: map[string]string{"b/src.tgz": "archive"}}, logs: map[string]string{}}
 	cb := s.Builds(f, b).CloudBuild()
 	img := "gcr.io/$PROJECT_ID/unit-cb:${_TAG}"
@@ -52,6 +52,8 @@ func TestCreateBuildDockerStepsAndLog(t *testing.T) {
 			Steps: []*cbpb.BuildStep{
 				{Id: "build", Name: "gcr.io/cloud-builders/docker", Dir: "app", Args: []string{"build", "--network", "cloudbuild", "-t", img, "-f", "docker/Dockerfile", "."}},
 				{Name: "gcr.io/cloud-builders/docker", WaitFor: []string{"build"}, Args: []string{"push", img}},
+				// gcloud builds submit --tag's step shape.
+				{Name: "gcr.io/cloud-builders/gcb-internal", Args: []string{"docker", "build", "--network", "cloudbuild", "--no-cache", "-t", "gcr.io/p/other", "."}},
 			},
 			Images: []string{img}},
 	})

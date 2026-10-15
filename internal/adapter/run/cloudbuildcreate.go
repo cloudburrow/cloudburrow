@@ -153,6 +153,12 @@ func planStep(i int, st *cbpb.BuildStep, subs map[string]string) (plannedStep, e
 		p.timeout = t.AsDuration()
 	}
 	name := st.GetName()
+	if (name == "gcr.io/cloud-builders/gcb-internal" || name == "gcr.io/cloud-builders/gcb-internal:latest") &&
+		len(args) > 0 && args[0] == "docker" {
+		// `gcloud builds submit --tag`'s step: Cloud Build's own builder
+		// image running docker, args[0] the command.
+		name, args = "gcr.io/cloud-builders/docker", args[1:]
+	}
 	switch {
 	case dockerBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "docker"):
 		if len(args) == 0 {

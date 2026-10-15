@@ -6,11 +6,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	cloudbuild "cloud.google.com/go/cloudbuild/apiv1/v2"
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -43,7 +48,116 @@ func (p artifactRegistryProvider) List(_ context.Context, project string) (conso
 
 // runBuildsProvider is Cloud Run's build history: every source build,
 // newest first, with its status, image and digest.
-type runBuildsProvider struct{ defaultProject string }
+type runBuildsProvider struct {
+	defaultProject string
+	// runAddr is the Run port, where Cloud Build is served; the console's
+	// Run build and Cancel go through the official client there.
+	runAddr func() string
+}
+
+// withClient dials Cloud Build on the Run port as an SDK would.
+func (p runBuildsProvider) withClient(ctx context.Context, fn func(*cloudbuild.Client) error) error {
+	addr := ""
+	if p.runAddr != nil {
+		addr = p.runAddr()
+	}
+	if addr == "" {
+		return errors.New("the Cloud Run adapter is not running")
+	}
+	c, err := cloudbuild.NewClient(ctx, option.WithEndpoint(addr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		return fmt.Errorf("connect to Cloud Build: %w", err)
+	}
+	defer func() { _ = c.Close() }()
+	return fn(c)
+}
+
+// CreateForm is Run build: a Dockerfile source in this instance's Cloud
+// Storage, built and its image pushed (loaded into the cluster), as
+// `gcloud builds submit --tag` does.
+func (runBuildsProvider) CreateForm() (string, []console.Field) {
+	return "Run build", []console.Field{
+		{Name: "source", Label: "Source", Type: "text", Required: true, Pattern: "^gs://[^/]+/.+$",
+			Help: "gs://bucket/object: a .tar.gz or .zip in this instance's Cloud Storage, with a Dockerfile at its root"},
+		{Name: "image", Label: "Image", Type: "text", Required: true,
+			Help: "the image to build and push, e.g. us-central1-docker.pkg.dev/PROJECT/REPO/IMAGE:TAG; a Cloud Run service naming it runs it"},
+		{Name: "region", Label: "Region", Type: "text", Default: "global", Help: "global, or a region such as us-central1"},
+	}
+}
+
+// Create runs CreateBuild with a docker build step and the image, and
+// returns the build's ID.
+func (p runBuildsProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {
+	if project == "" {
+		project = p.defaultProject
+	}
+	bucket, object, ok := strings.Cut(strings.TrimPrefix(values["source"], "gs://"), "/")
+	if !ok || !strings.HasPrefix(values["source"], "gs://") || object == "" {
+		return "", fmt.Errorf("source must be gs://bucket/object")
+	}
+	image, region := strings.TrimSpace(values["image"]), strings.TrimSpace(values["region"])
+	if region == "" {
+		region = "global"
+	}
+	var id string
+	err := p.withClient(ctx, func(c *cloudbuild.Client) error {
+		op, err := c.CreateBuild(ctx, &cbpb.CreateBuildRequest{ProjectId: project,
+			Parent: "projects/" + project + "/locations/" + region, Build: &cbpb.Build{
+				Source: &cbpb.Source{Source: &cbpb.Source_StorageSource{StorageSource: &cbpb.StorageSource{Bucket: bucket, Object: object}}},
+				Steps:  []*cbpb.BuildStep{{Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", image, "."}}},
+				Images: []string{image}}})
+		if err != nil {
+			return err
+		}
+		md, err := op.Metadata()
+		if err != nil {
+			return err
+		}
+		id = md.GetBuild().GetId()
+		return nil
+	})
+	return id, err
+}
+
+// DetailActions offers Cancel on a build that has not finished.
+func (p runBuildsProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
+	if len(path) != 1 {
+		return nil
+	}
+	if b := p.build(project, path[0]); b != nil && (b.GetStatus() == cbpb.Build_QUEUED || b.GetStatus() == cbpb.Build_WORKING) {
+		return []console.Action{{ID: "cancel", Label: "Cancel", Confirm: "the build stops and is CANCELLED"}}
+	}
+	return nil
+}
+
+// ActAt cancels the build through CancelBuild.
+func (p runBuildsProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+	if action != "cancel" || len(path) != 1 {
+		return fmt.Errorf("unknown action %q", action)
+	}
+	b := p.build(project, path[0])
+	if b == nil {
+		return fmt.Errorf("build %s not found", path[0])
+	}
+	return p.withClient(ctx, func(c *cloudbuild.Client) error {
+		_, err := c.CancelBuild(ctx, &cbpb.CancelBuildRequest{Name: b.GetName(), ProjectId: b.GetProjectId(), Id: b.GetId()})
+		return err
+	})
+}
+
+// build finds a project's build by ID.
+func (p runBuildsProvider) build(project, id string) *cbpb.Build {
+	if project == "" {
+		project = p.defaultProject
+	}
+	for _, x := range runadapter.CloudBuilds(project, "") {
+		if x.GetId() == id {
+			return x
+		}
+	}
+	return nil
+}
 
 func (runBuildsProvider) ID() string    { return "run-builds" }
 func (runBuildsProvider) Title() string { return "Cloud Run build history" }
@@ -83,15 +197,7 @@ func (p runBuildsProvider) Detail(_ context.Context, project string, path []stri
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
 	}
-	if project == "" {
-		project = p.defaultProject
-	}
-	var b *cbpb.Build
-	for _, x := range runadapter.CloudBuilds(project, "") {
-		if x.GetId() == path[0] {
-			b = x
-		}
-	}
+	b := p.build(project, path[0])
 	if b == nil {
 		return console.Detail{Unavailable: "build " + path[0] + " not found"}, nil
 	}
@@ -153,7 +259,9 @@ func buildStatus(b *cbpb.Build) string {
 }
 
 var (
-	_ console.Provider = artifactRegistryProvider{}
-	_ console.Provider = runBuildsProvider{}
-	_ console.Driller  = runBuildsProvider{}
+	_ console.Provider  = artifactRegistryProvider{}
+	_ console.Provider  = runBuildsProvider{}
+	_ console.Driller   = runBuildsProvider{}
+	_ console.Creator   = runBuildsProvider{}
+	_ console.PathActor = runBuildsProvider{}
 )

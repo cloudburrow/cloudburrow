@@ -1,12 +1,15 @@
 package main
 
 import (
-	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"context"
 	"io"
+	"net"
 	"strings"
 	"testing"
 	"time"
+
+	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	"google.golang.org/grpc"
 
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
@@ -82,5 +85,49 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 		d.Sections[0].Listing.Items[0].Status != "Succeeded" || d.Sections[0].Listing.Items[0].Name != "#0 img" ||
 		!strings.Contains(d.Sections[1].Text, "Starting Step #0") || !strings.Contains(d.Sections[1].Text, "DONE") {
 		t.Errorf("build detail = %+v, %v", d, err)
+	}
+}
+
+// blockingBuilder builds until its context ends.
+type blockingBuilder struct{}
+
+func (blockingBuilder) Build(ctx context.Context, _ runadapter.BuildSpec) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestConsoleRunBuildAndCancel (#1347): Run build on the Build history page
+// creates a build through the official Cloud Build client on the Run port,
+// and Cancel on its page cancels it.
+func TestConsoleRunBuildAndCancel(t *testing.T) {
+	ctx := context.Background()
+	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
+	g := grpc.NewServer()
+	s.Builds(stubSource{}, blockingBuilder{}).CloudBuild().Register(g)
+	runadapter.NewOperationsServer(s).Register(g)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = g.Serve(ln) }()
+	t.Cleanup(g.Stop)
+	p := runBuildsProvider{defaultProject: "console-cb", runAddr: func() string { return ln.Addr().String() }}
+	id, err := p.Create(ctx, "", map[string]string{"source": "gs://b/src.tgz", "image": "gcr.io/console-cb/img:v1", "region": "us-central1"})
+	if err != nil || id == "" {
+		t.Fatalf("Create = %q, %v", id, err)
+	}
+	acts := p.DetailActions(ctx, "", []string{id})
+	if len(acts) != 1 || acts[0].ID != "cancel" {
+		t.Fatalf("a running build's actions = %+v", acts)
+	}
+	if err := p.ActAt(ctx, "", []string{id}, "cancel", nil); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	d, _ := p.Detail(ctx, "", []string{id})
+	if len(d.Summary) == 0 || d.Summary[0].Value != "CANCELLED" || len(p.DetailActions(ctx, "", []string{id})) != 0 {
+		t.Errorf("after Cancel: %+v", d.Summary)
+	}
+	if _, err := p.Create(ctx, "", map[string]string{"source": "b/o", "image": "x"}); err == nil {
+		t.Errorf("a source without gs:// was accepted")
 	}
 }

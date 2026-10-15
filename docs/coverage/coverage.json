@@ -963,8 +963,8 @@
     "Key": "cloudbuild",
     "Title": "Cloud Build",
     "counts": {
-      "Unimplemented": 16,
-      "Verified": 3
+      "Unimplemented": 14,
+      "Verified": 5
     },
     "rows": [
       {
@@ -974,13 +974,18 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CancelBuild",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateBuild",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildcreate_test.go:181 TestGcloudBuildsSubmit",
+          "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateBuildTrigger",
@@ -1006,6 +1011,8 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetBuild",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildcreate_test.go:181 TestGcloudBuildsSubmit",
+          "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
           "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
         ]
       },
