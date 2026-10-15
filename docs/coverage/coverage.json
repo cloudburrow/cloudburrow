@@ -4401,7 +4401,8 @@
         "method": "bigquery.projects.getServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:248 TestBigQueryServiceAccount"
+          "test/compat/bigquerymethods_test.go:248 TestBigQueryServiceAccount",
+          "test/compat/consolebigqueryserviceaccount_test.go:17 TestConsoleBigQueryNamesTheServiceAccount"
         ]
       },
       {
