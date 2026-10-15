@@ -60,7 +60,7 @@ func newFrontCallScraper(service string, tunnel *netfwd.Forwarder, rec *admin.Re
 	return s
 }
 
-// frontCalls records the calls a front or a guarded tunnel saw, which
+// frontCalls records the calls a front saw, which
 // CloudBurrow did not serve itself, as callEvents and requestEvents record
 // the ones it serves: /metrics, /admin/events and, with tracing on, a span.
 type frontCalls struct {
@@ -77,20 +77,6 @@ func newFrontCalls(rec *admin.Recorder, reg *metrics.Registry, tracing *telemetr
 		f.tracer = tracing.Provider().Tracer("github.com/cloudburrow/cloudburrow/" + service)
 	}
 	return f
-}
-
-// tunnelCalls records each request a guarded tunnel carried (#1267): the
-// host's calls to persistent Datastore, which runs no call front yet (#1307).
-func tunnelCalls(rec *admin.Recorder, reg *metrics.Registry, tracing *telemetry.Tracing, service string) func(netfwd.Call) {
-	f := newFrontCalls(rec, reg, tracing, service)
-	return func(c netfwd.Call) {
-		transport := "http"
-		if c.GRPC {
-			transport = "grpc"
-		}
-		f.record(calllog.Call{Method: c.Method, Transport: transport, Code: c.Code, Resource: c.Resource,
-			Time: c.Time, Duration: c.Duration, TraceParent: c.TraceParent})
-	}
 }
 
 func (s *frontCallScraper) Name() string { return s.service + "-calls" }

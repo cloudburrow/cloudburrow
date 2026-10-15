@@ -104,10 +104,9 @@ func (c *LifecycleComponent) Backends() []Backend {
 			if b, ok := OptionalBackend(s, project, persistent); ok {
 				// Bigtable's front runs from the storage image (#1206).
 				// So do the call fronts of Spanner, Firestore and
-				// ephemeral Datastore (#1288; persistent Datastore has
-				// none yet, #1307).
-				if b.Front != nil && (s == config.ServiceBigtable || s == config.ServiceSpanner ||
-					s == config.ServiceFirestore || s == config.ServiceDatastore) {
+				// Datastore (#1288).
+				if s == config.ServiceBigtable || s == config.ServiceSpanner ||
+					s == config.ServiceFirestore || s == config.ServiceDatastore {
 					b.Front.Image = c.storageImage
 				}
 				// BigQuery's front runs from the storage image (#902).
