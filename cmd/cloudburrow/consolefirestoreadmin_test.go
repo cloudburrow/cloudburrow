@@ -10,12 +10,33 @@ import (
 
 	admin "cloud.google.com/go/firestore/apiv1/admin"
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 )
+
+// firestoreAdminFront is the screen against the call front's own Admin API
+// (internal/firestoreadmin), in front of a stand-in for the emulator.
+func firestoreAdminFront(t *testing.T) firestoreDatabasesProvider {
+	t.Helper()
+	emu := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	t.Cleanup(emu.Close)
+	up := strings.TrimPrefix(emu.URL, "http://")
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := callfront.Server(callfront.HandlerWith(up, &calllog.Ring{}, t.Logf, firestoreadmin.New(up)), t.Logf)
+	go func() { _ = srv.Serve(l) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	return firestoreDatabasesProvider{endpoint: l.Addr().String()}
+}
 
 // TestConsoleFirestoreDatabasesIndexesAndFields (#1331): the Firestore
 // databases screen lists (default) and a database Create database made, a
@@ -24,17 +45,7 @@ import (
 // The API is the call front's own (internal/firestoreadmin), in front of a
 // stand-in for the emulator.
 func TestConsoleFirestoreDatabasesIndexesAndFields(t *testing.T) {
-	emu := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	defer emu.Close()
-	up := strings.TrimPrefix(emu.URL, "http://")
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := callfront.Server(callfront.HandlerWith(up, &calllog.Ring{}, t.Logf, firestoreadmin.New(up)), t.Logf)
-	go func() { _ = srv.Serve(l) }()
-	defer srv.Close()
-	p := firestoreDatabasesProvider{endpoint: l.Addr().String()}
+	p := firestoreAdminFront(t)
 	ctx := context.Background()
 
 	name, err := p.Create(ctx, "p", map[string]string{"database": "orders", "location": "eur3", "concurrency": "OPTIMISTIC"})
@@ -95,5 +106,176 @@ func TestConsoleFirestoreDatabasesIndexesAndFields(t *testing.T) {
 	}
 	if list, _ := p.List(ctx, "p"); len(list.Items) != 1 || list.Items[0].Name != "(default)" {
 		t.Errorf("after Delete = %+v", list.Items)
+	}
+}
+
+func fsAdminAction(actions []console.Action, id string) (console.Action, bool) {
+	for _, a := range actions {
+		if a.ID == id {
+			return a, true
+		}
+	}
+	return console.Action{}, false
+}
+
+func fsAdminDefaults(a console.Action) map[string]string {
+	out := map[string]string{}
+	for _, f := range a.Fields {
+		out[f.Name] = f.Default
+	}
+	return out
+}
+
+// TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides (#1343): Edit
+// database, prefilled from the database, changes its four settings as the
+// admin client's GetDatabase reads them, and an edit from a form drawn
+// before is refused ABORTED. Create index makes the composite index
+// ListIndexes returns, and its row's Delete index removes it. Add field
+// override sets a TTL policy and an exemption that GetField returns; Edit
+// field override, prefilled from it, changes them, and saved unchanged
+// leaves them; Delete field override returns the field to its inherited
+// settings.
+func TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides(t *testing.T) {
+	p := firestoreAdminFront(t)
+	ctx := context.Background()
+	c, err := admin.NewFirestoreAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	db := "projects/p/databases/(default)"
+
+	// Edit database.
+	edit, ok := fsAdminAction(p.DetailActions(ctx, "p", []string{"(default)"}), "editdatabase")
+	if !ok {
+		t.Fatal("a database's page offers no Edit database")
+	}
+	values := fsAdminDefaults(edit)
+	if values["concurrency"] != "PESSIMISTIC" || values["deleteProtection"] != "false" || values["etag"] == "" {
+		t.Fatalf("Edit database is prefilled %v", values)
+	}
+	stale := fsAdminDefaults(edit)
+	values["concurrency"], values["pitr"], values["appEngine"], values["deleteProtection"] = "OPTIMISTIC", "true", "true", "true"
+	if err := p.ActAt(ctx, "p", []string{"(default)"}, "editdatabase", values); err != nil {
+		t.Fatalf("Edit database: %v", err)
+	}
+	got, err := c.GetDatabase(ctx, &adminpb.GetDatabaseRequest{Name: db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ConcurrencyMode != adminpb.Database_OPTIMISTIC || got.PointInTimeRecoveryEnablement != adminpb.Database_POINT_IN_TIME_RECOVERY_ENABLED ||
+		got.AppEngineIntegrationMode != adminpb.Database_ENABLED || got.DeleteProtectionState != adminpb.Database_DELETE_PROTECTION_ENABLED {
+		t.Errorf("after Edit database, GetDatabase reads %v", got)
+	}
+	if err := p.ActAt(ctx, "p", []string{"(default)"}, "editdatabase", stale); status.Code(err) != codes.Aborted {
+		t.Errorf("Edit database from a stale form: %v, want ABORTED", err)
+	}
+	if err := p.Delete(ctx, "p", "(default)"); err == nil || !strings.Contains(err.Error(), "delete protection") {
+		t.Errorf("Delete database with delete protection on: %v", err)
+	}
+
+	// Create index, and Delete index on its row.
+	if err := p.ActAt(ctx, "p", []string{"(default)"}, "createindex", map[string]string{"collectionGroup": "orders",
+		"fields": "city ascending\ntags array-contains\n", "queryScope": "COLLECTION_GROUP"}); err != nil {
+		t.Fatalf("Create index: %v", err)
+	}
+	if err := p.ActAt(ctx, "p", []string{"(default)"}, "createindex", map[string]string{"collectionGroup": "orders",
+		"fields": "city sideways", "queryScope": "COLLECTION"}); err == nil {
+		t.Error("Create index with a mode that is not one accepted it")
+	}
+	resp, err := c.ListIndexes(ctx, &adminpb.ListIndexesRequest{Parent: db + "/collectionGroups/orders"}).Next()
+	if err != nil {
+		t.Fatalf("ListIndexes: %v", err)
+	}
+	if resp.QueryScope != adminpb.Index_COLLECTION_GROUP || len(resp.Fields) != 3 || resp.Fields[0].FieldPath != "city" ||
+		resp.Fields[0].GetOrder() != adminpb.Index_IndexField_ASCENDING || resp.Fields[1].GetArrayConfig() != adminpb.Index_IndexField_CONTAINS {
+		t.Errorf("the created index = %v", resp)
+	}
+	d, err := p.Detail(ctx, "p", []string{"(default)"})
+	if err != nil || len(d.Sections) != 2 || len(d.Sections[0].Listing.Items) != 1 {
+		t.Fatalf("Detail = %+v, %v", d, err)
+	}
+	row := d.Sections[0].Listing.Items[0]
+	if _, ok := fsAdminAction(row.Actions, "deleteindex"); !ok || len(row.ActsOn) != 4 {
+		t.Fatalf("the index row offers %+v at %v", row.Actions, row.ActsOn)
+	}
+	if _, ok := fsAdminAction(p.DetailActions(ctx, "p", row.ActsOn), "deleteindex"); !ok {
+		t.Fatal("DetailActions at the index row's path offers no Delete index")
+	}
+	if err := p.ActAt(ctx, "p", row.ActsOn, "deleteindex", nil); err != nil {
+		t.Fatalf("Delete index: %v", err)
+	}
+	if _, err := c.GetIndex(ctx, &adminpb.GetIndexRequest{Name: resp.Name}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetIndex after Delete index: %v, want NOT_FOUND", err)
+	}
+
+	// Add, edit and delete a field override.
+	fieldName := db + "/collectionGroups/sessions/fields/expireAt"
+	if err := p.ActAt(ctx, "p", []string{"(default)"}, "addfield", map[string]string{"collectionGroup": "sessions", "field": "expireAt",
+		"ttl": "true", "override": "true", "descCollection": "true"}); err != nil {
+		t.Fatalf("Add field override: %v", err)
+	}
+	f, err := c.GetField(ctx, &adminpb.GetFieldRequest{Name: fieldName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.GetTtlConfig().GetState() != adminpb.Field_TtlConfig_ACTIVE || f.GetIndexConfig().GetUsesAncestorConfig() ||
+		len(f.GetIndexConfig().GetIndexes()) != 1 || f.GetIndexConfig().GetIndexes()[0].Fields[0].GetOrder() != adminpb.Index_IndexField_DESCENDING {
+		t.Errorf("after Add field override, GetField reads %v", f)
+	}
+	if err := p.ActAt(ctx, "p", []string{"(default)"}, "addfield", map[string]string{"collectionGroup": "sessions", "field": "expireAt"}); err == nil {
+		t.Error("Add field override on a field that has one was accepted")
+	}
+	path := []string{"(default)", "fields", "sessions", "expireAt"}
+	editField, ok := fsAdminAction(p.DetailActions(ctx, "p", path), "editfield")
+	if !ok {
+		t.Fatal("the field override offers no Edit field override")
+	}
+	values = fsAdminDefaults(editField)
+	if values["ttl"] != "true" || values["override"] != "true" || values["descCollection"] != "true" || values["ascCollection"] != "false" {
+		t.Errorf("Edit field override is prefilled %v", values)
+	}
+	if err := p.ActAt(ctx, "p", path, "editfield", values); err != nil {
+		t.Fatalf("Edit field override saved unchanged: %v", err)
+	}
+	if again, _ := c.GetField(ctx, &adminpb.GetFieldRequest{Name: fieldName}); !proto.Equal(again, f) {
+		t.Errorf("saved unchanged, GetField reads %v, want %v", again, f)
+	}
+	values["ttl"], values["descCollection"], values["arrayGroup"] = "false", "false", "true"
+	if err := p.ActAt(ctx, "p", path, "editfield", values); err != nil {
+		t.Fatalf("Edit field override: %v", err)
+	}
+	f, _ = c.GetField(ctx, &adminpb.GetFieldRequest{Name: fieldName})
+	if x := f.GetIndexConfig().GetIndexes(); f.GetTtlConfig() != nil || len(x) != 1 || x[0].QueryScope != adminpb.Index_COLLECTION_GROUP ||
+		x[0].Fields[0].GetArrayConfig() != adminpb.Index_IndexField_CONTAINS {
+		t.Errorf("after Edit field override, GetField reads %v", f)
+	}
+	if _, ok := fsAdminAction(p.DetailActions(ctx, "p", path), "deletefield"); !ok {
+		t.Fatal("the field override offers no Delete field override")
+	}
+	if err := p.ActAt(ctx, "p", path, "deletefield", nil); err != nil {
+		t.Fatalf("Delete field override: %v", err)
+	}
+	f, _ = c.GetField(ctx, &adminpb.GetFieldRequest{Name: fieldName})
+	if f.GetTtlConfig() != nil || !f.GetIndexConfig().GetUsesAncestorConfig() {
+		t.Errorf("after Delete field override, GetField reads %v", f)
+	}
+	if acts := p.DetailActions(ctx, "p", path); len(acts) != 0 {
+		t.Errorf("a field with no override is offered %+v", acts)
+	}
+}
+
+// TestFirestoreIndexFieldsParse: Create index's Fields lines, and a field
+// path with a space in it.
+func TestFirestoreIndexFieldsParse(t *testing.T) {
+	fields, err := parseIndexFields("a asc\n\n`odd name` DESCENDING\ntags array\n")
+	if err != nil || len(fields) != 3 || fields[1].FieldPath != "`odd name`" ||
+		fields[1].GetOrder() != adminpb.Index_IndexField_DESCENDING || fields[2].GetArrayConfig() != adminpb.Index_IndexField_CONTAINS {
+		t.Errorf("parseIndexFields = %v, %v", fields, err)
+	}
+	for _, bad := range []string{"", "a", "a up"} {
+		if _, err := parseIndexFields(bad); err == nil {
+			t.Errorf("parseIndexFields(%q) accepted it", bad)
+		}
 	}
 }
