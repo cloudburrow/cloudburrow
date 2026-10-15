@@ -295,3 +295,54 @@ func TestBigQueryStorageWriteArrowRefusesSchemas(t *testing.T) {
 		t.Errorf("rows written: %q", got)
 	}
 }
+
+// TestBigQueryStorageWriteArrowIntervals: an INTERVAL column takes each of
+// Arrow's interval types and Utf8; Table.Read reads each back. (The
+// negative time part has no fraction: the Go client's IntervalValue
+// prints a negative fraction as ".-00001", and reads "-0:0:0.000001" as
+// positive.)
+//
+// covers: bigquery.tabledata.list
+func TestBigQueryStorageWriteArrowIntervals(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds, _ := twoDatasets(t, h, c)
+	if err := bqRun(h.Context(), c, "CREATE TABLE "+ds.DatasetID+".iv (i INT64, a INTERVAL, b INTERVAL, d INTERVAL, s INTERVAL)", false); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	tbl := ds.Table("iv")
+	raw, err := bqstorage.NewBigQueryWriteClient(h.Context(), storageWriteOptions(h)...)
+	if err != nil {
+		t.Fatalf("NewBigQueryWriteClient: %v", err)
+	}
+	defer raw.Close()
+	b := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema([]arrow.Field{
+		{Name: "i", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "a", Type: arrow.FixedWidthTypes.MonthInterval, Nullable: true},
+		{Name: "b", Type: arrow.FixedWidthTypes.DayTimeInterval, Nullable: true},
+		{Name: "d", Type: arrow.FixedWidthTypes.MonthDayNanoInterval, Nullable: true},
+		{Name: "s", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil))
+	b.Field(0).(*array.Int64Builder).Append(1)
+	b.Field(1).(*array.MonthIntervalBuilder).Append(arrow.MonthInterval(14))
+	b.Field(2).(*array.DayTimeIntervalBuilder).Append(arrow.DayTimeInterval{Days: 3, Milliseconds: 3_661_500})
+	b.Field(3).(*array.MonthDayNanoIntervalBuilder).Append(arrow.MonthDayNanoInterval{Months: -13, Days: 2, Nanoseconds: -3_661_000_000_000})
+	b.Field(4).(*array.StringBuilder).Append("1-2 3 4:5:6")
+	schema, batch := arrowMessagesOf(t, b.NewRecord())
+	ar, err := raw.AppendRows(h.Context())
+	if err != nil {
+		t.Fatalf("AppendRows: %v", err)
+	}
+	defer ar.CloseSend()
+	if err := ar.Send(arrowAppend(writeTablePath(tbl)+"/streams/_default", schema, batch, nil)); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if resp, err := ar.Recv(); err != nil || resp.GetError() != nil {
+		t.Fatalf("append: %v, %v", resp, err)
+	}
+	got := readRows(t, tbl.Read(h.Context()), "Table.Read")
+	want := []string{"1|1-2 0 0:0:0|0-0 3 1:1:1.5|-1-1 2 -1:1:1|1-2 3 4:5:6"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Table.Read: %q, want %q", got, want)
+	}
+}

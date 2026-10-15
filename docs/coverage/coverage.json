@@ -5485,6 +5485,9 @@
           "test/compat/bigquerypartitionwrites_test.go:257 TestConsoleBigQueryPartitions",
           "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
           "test/compat/bigquerysilent_test.go:123 TestBigQuerySameTableIDInTwoDatasets",
+          "test/compat/bigquerystoragewritearrow_test.go:162 TestBigQueryStorageWriteArrowRows",
+          "test/compat/bigquerystoragewritearrow_test.go:263 TestBigQueryStorageWriteArrowRefusesSchemas",
+          "test/compat/bigquerystoragewritearrow_test.go:306 TestBigQueryStorageWriteArrowIntervals",
           "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery"
         ]
       },
