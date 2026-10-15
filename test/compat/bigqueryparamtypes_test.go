@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/civil"
@@ -194,4 +196,55 @@ func TestBigQueryRangeParameters(t *testing.T) {
 		_, err := q.Read(ctx)
 		wantReason(t, name, err, 501, "notImplemented")
 	}
+}
+
+// TestBigQueryRangeResults (#1111), through the official Go client: a
+// RANGE value in a query's result reads back as a RangeValue of its
+// element type, DATE, DATETIME or TIMESTAMP, an UNBOUNDED end as nil, a
+// NULL RANGE as nil, and in an ARRAY. The emulator's schema gave a RANGE
+// no type, which the client refused ("incomplete range schema"); the
+// patched emulator gives the type RANGE and rangeElementType, and
+// BigQuery's REST form of the bounds (bigquery-emulator patch 0008).
+func TestBigQueryRangeResults(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ctx := h.Context()
+	it, err := c.Query("SELECT RANGE(DATE '2020-01-01', DATE '2020-02-01') AS d, " +
+		"RANGE(DATETIME '2020-01-01 03:04:05.25', NULL) AS dt, " +
+		"RANGE(TIMESTAMP '2020-01-01 00:00:00 UTC', TIMESTAMP '2020-01-02 00:00:00.5 UTC') AS ts, " +
+		"CAST(NULL AS RANGE<DATE>) AS n, [RANGE(DATE '2020-01-01', NULL)] AS a").Read(ctx)
+	if err != nil {
+		t.Fatalf("a query of RANGE values: %v", err)
+	}
+	var row []bigquery.Value
+	if err := it.Next(&row); err != nil {
+		t.Fatalf("read the RANGE values: %v", err)
+	}
+	for _, f := range it.Schema {
+		if f.Type != bigquery.RangeFieldType || f.RangeElementType == nil {
+			t.Errorf("column %s: type %q, element %v", f.Name, f.Type, f.RangeElementType)
+		}
+	}
+	want := []bigquery.Value{
+		&bigquery.RangeValue{Start: civil.Date{Year: 2020, Month: 1, Day: 1}, End: civil.Date{Year: 2020, Month: 2, Day: 1}},
+		&bigquery.RangeValue{Start: civil.DateTime{Date: civil.Date{Year: 2020, Month: 1, Day: 1}, Time: civil.Time{Hour: 3, Minute: 4, Second: 5, Nanosecond: 250000000}}},
+		&bigquery.RangeValue{Start: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), End: time.Date(2020, 1, 2, 0, 0, 0, 500000000, time.UTC)},
+		nil,
+		[]bigquery.Value{&bigquery.RangeValue{Start: civil.Date{Year: 2020, Month: 1, Day: 1}}},
+	}
+	if !reflect.DeepEqual(row, want) {
+		t.Errorf("RANGE values %v, want %v", fmtRanges(row), fmtRanges(want))
+	}
+}
+
+func fmtRanges(vs []bigquery.Value) []string {
+	var out []string
+	for _, v := range vs {
+		if r, ok := v.(*bigquery.RangeValue); ok {
+			out = append(out, fmt.Sprintf("[%v, %v)", r.Start, r.End))
+			continue
+		}
+		out = append(out, fmt.Sprint(v))
+	}
+	return out
 }
