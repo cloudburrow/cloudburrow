@@ -158,7 +158,7 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		}
 	}
 
-	if f.partitionCopy(w, r, c, srcs, write) { // #1273, partitionwrites.go
+	if f.partitionCopy(w, r, c, srcs, write, create) { // #1273, partitionwrites.go
 		return
 	}
 

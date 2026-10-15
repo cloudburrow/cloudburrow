@@ -211,13 +211,15 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	if policies == nil {
 		policies = &rowPolicies{}
 	}
-	iam := &iamPolicies{} // iam.go, #1231
+	iam := &iamPolicies{}       // iam.go, #1231
+	buffers := &streamBuffers{} // streamingbuffer.go, #1273
 	if o.stateDir != "" {
-		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)      // iam.go, #1231
-		policies.keep(rowPoliciesStateFile(o.stateDir), o.logf) // rowpolicies.go, #1218
-		functions.keep(functionsStateFile(o.stateDir), o.logf)  // functionstate.go
-		texts.keep(jobTextsStateFile(o.stateDir), o.logf)       // jobtextstate.go, #1028
-		views.keep(viewTextsStateFile(o.stateDir), o.logf)      // viewtextstate.go, #1028
+		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf) // streamingbuffer.go, #1273
+		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)       // iam.go, #1231
+		policies.keep(rowPoliciesStateFile(o.stateDir), o.logf)  // rowpolicies.go, #1218
+		functions.keep(functionsStateFile(o.stateDir), o.logf)   // functionstate.go
+		texts.keep(jobTextsStateFile(o.stateDir), o.logf)        // jobtextstate.go, #1028
+		views.keep(viewTextsStateFile(o.stateDir), o.logf)       // viewtextstate.go, #1028
 	}
 	ids := o.ids // #1063
 	if ids == nil {
@@ -236,6 +238,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			ids.reset()
 			policies.reset()
 			iam.reset()
+			buffers.reset()
 		})
 	}
 	// listJobs serves jobs.list, r a GET of a project's jobs: here, and
@@ -259,6 +262,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if serveUnserved(w, r) { // unserved.go, #1200
 			return
 		}
+		buffers.flushDue(next, r)      // streamingbuffer.go, #1273
 		if serveServiceAccount(w, r) { // datasetupdate.go, #1205
 			return
 		}
@@ -375,7 +379,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies}
+		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
+			buffers: buffers}
 		switch {
 		case m[4] != "" && strings.Contains(table, "$") && strings.Index(table, "$") > 0 && (m[5] == "" || m[5] == "data"):
 			f.servePartition(w, r, dataset, table, m[5]) // #1273, partitionreads.go
@@ -433,6 +438,9 @@ type front struct {
 	views *viewTexts
 	// ids are the table IDs of every dataset (tableIDs, #1063), or nil.
 	ids *tableIDs
+	// buffers are the streaming buffers of ingestion-time partitioned
+	// tables (streamingbuffer.go, #1273), or nil.
+	buffers *streamBuffers
 	// policies are the tables' row access policies (rowpolicies.go,
 	// #1218), or nil.
 	policies *rowPolicies
@@ -660,8 +668,15 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 		return
 	}
 
-	status, got := f.get(r, "/datasets/"+url.PathEscape(dataset)+"/tables/"+url.PathEscape(table))
+	// A partition decorator, and an ingestion-time partitioned table's
+	// streaming buffer (#1273, streamingbuffer.go).
+	base, dec, decorated := decorated(table)
+	status, got := f.get(r, "/datasets/"+url.PathEscape(dataset)+"/tables/"+url.PathEscape(base))
 	if status != http.StatusOK {
+		if decorated {
+			writeError(w, http.StatusNotFound, "notFound", "Not found: Table "+projectOf(f.base)+":"+dataset+"."+base)
+			return
+		}
 		// Not found, or the emulator failing: forward, so the client gets
 		// the emulator's own answer to the insert.
 		f.next.ServeHTTP(w, r)
@@ -672,6 +687,22 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	}
 	if err := json.Unmarshal(got, &meta); err != nil {
 		f.next.ServeHTTP(w, r)
+		return
+	}
+	var pm partitionMeta
+	streamed := false
+	if json.Unmarshal(got, &pm) == nil && pm.ingestion() && f.buffers != nil {
+		streamed = true
+	}
+	if decorated && !streamed {
+		name := projectOf(f.base) + ":" + dataset + "." + table
+		if _, code, msg := partitionFilter(pm, dec, name); code != 0 {
+			writeError(w, code, reasonOf(code, "invalid"), msg)
+			return
+		}
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: tabledata.insertAll into the "+
+			"partition "+name+" of a table partitioned by a column. BigQuery documents streaming to a partition "+
+			"decorator for a daily ingestion-time partitioned table only (docs/compatibility.md). Nothing was inserted.")
 		return
 	}
 
@@ -734,7 +765,13 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	setBody(r, out)
 
 	rec := newRecorder()
-	f.next.ServeHTTP(rec, r)
+	if streamed {
+		if !f.streamIngestion(w, r, dataset, base, dec, pm, out, rec) {
+			return
+		}
+	} else {
+		f.next.ServeHTTP(rec, r)
+	}
 	if len(invalid) == 0 || rec.status != http.StatusOK {
 		rec.copyTo(w)
 		return

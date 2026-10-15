@@ -176,5 +176,9 @@ func (f front) getTable(w http.ResponseWriter, r *http.Request, dataset, table s
 		writeRecorded(w, rec, snapshotTyped(meta))
 		return
 	}
+	if f.withStreamingBuffer(r, dataset, table, meta) { // #1273, streamingbuffer.go
+		writeRecorded(w, rec, meta)
+		return
+	}
 	rec.copyTo(w)
 }

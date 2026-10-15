@@ -260,7 +260,18 @@ func (f front) addColumns(w http.ResponseWriter, r *http.Request, dataset, table
 	}
 	ref := tableRef{DatasetID: dataset, TableID: table}
 	scratch := tableRef{DatasetID: resultsDataset, TableID: scratchTable()} // scratch.go
-	if why := f.makeTable(r, scratch, schemaRaw); why != "" {
+	// An ingestion-time partitioned table's rows keep their
+	// _PARTITIONTIME (#1273, #1277): the scratch table holds it in one
+	// more column, ingestionTimeColumn, put back below.
+	unit := ingestionUnitOf(current)
+	scratchSchema := schemaRaw
+	if unit != "" {
+		var err error
+		if scratchSchema, err = withIngestionTimeColumn(schemaRaw); err != nil {
+			return failed(http.StatusNotImplemented, "the new schema could not be read. Nothing was changed.")
+		}
+	}
+	if why := f.makeTable(r, scratch, scratchSchema); why != "" {
 		return failed(http.StatusNotImplemented, why+". Nothing was changed.")
 	}
 	var next tableSchema
@@ -268,7 +279,7 @@ func (f front) addColumns(w http.ResponseWriter, r *http.Request, dataset, table
 		f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 		return failed(http.StatusNotImplemented, "the new schema could not be read. Nothing was changed.")
 	}
-	if why := f.insertConverted(r, scratch, ref, old, next.Fields); why != "" {
+	if why := f.insertConvertedTimes(r, scratch, ref, old, next.Fields, unit != ""); why != "" {
 		f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 		return failed(http.StatusNotImplemented, why+". Nothing was changed.")
 	}
@@ -286,8 +297,24 @@ func (f front) addColumns(w http.ResponseWriter, r *http.Request, dataset, table
 	if st, got := f.createTable(r, dataset, remade); st != http.StatusOK {
 		return failed(http.StatusInternalServerError, errorMessage(got, st)+lost)
 	}
-	if why := f.insertSelect(r, ref, []copyTable{{ref: scratch, fields: old}}); why != "" {
-		return failed(http.StatusInternalServerError, why+lost)
+	back := ""
+	if unit != "" {
+		cols := make([]string, len(old)) // the added columns get their defaults, as insertSelect leaves them
+		for i, fl := range old {
+			cols[i] = quoteName(fl.Name)
+		}
+		list := strings.Join(cols, ", ")
+		pcols, pvals := ", _PARTITIONTIME", ", "+ingestionTimeColumn
+		if unit == "DAY" {
+			pcols, pvals = pcols+", _PARTITIONDATE", pvals+", DATE("+ingestionTimeColumn+")"
+		}
+		back = f.runDML(r, "INSERT INTO "+quotePath([]string{dataset, table})+" ("+list+pcols+") SELECT "+list+pvals+
+			" FROM "+quotePath([]string{scratch.DatasetID, scratch.TableID}))
+	} else {
+		back = f.insertSelect(r, ref, []copyTable{{ref: scratch, fields: old}})
+	}
+	if back != "" {
+		return failed(http.StatusInternalServerError, back+lost)
 	}
 	f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 	if created, ok := current["creationTime"]; ok {
@@ -296,6 +323,57 @@ func (f front) addColumns(w http.ResponseWriter, r *http.Request, dataset, table
 		}
 	}
 	return true
+}
+
+// ingestionTimeColumn is the scratch column that holds an ingestion-time
+// partitioned table's _PARTITIONTIME while addColumns remakes it.
+const ingestionTimeColumn = "cloudburrow_partitiontime"
+
+// ingestionUnitOf returns the partitioning unit of a tables.get answer of
+// an ingestion-time partitioned table (DAY when none is named), or "".
+func ingestionUnitOf(table map[string]any) string {
+	tp, _ := table["timePartitioning"].(map[string]any)
+	if tp == nil {
+		return ""
+	}
+	if f, _ := tp["field"].(string); f != "" {
+		return ""
+	}
+	switch u, _ := tp["type"].(string); strings.ToUpper(u) {
+	case "HOUR", "MONTH", "YEAR":
+		return strings.ToUpper(u)
+	}
+	return "DAY"
+}
+
+// withIngestionTimeColumn returns schema with ingestionTimeColumn at its end.
+func withIngestionTimeColumn(schema json.RawMessage) (json.RawMessage, error) {
+	var s map[string]any
+	if err := json.Unmarshal(schema, &s); err != nil {
+		return nil, err
+	}
+	fields, _ := s["fields"].([]any)
+	s["fields"] = append(fields, map[string]any{"name": ingestionTimeColumn, "type": "TIMESTAMP", "mode": "NULLABLE"})
+	return json.Marshal(s)
+}
+
+// insertConvertedTimes is insertConverted, which with times also copies
+// each row's _PARTITIONTIME into ingestionTimeColumn of dest.
+func (f front) insertConvertedTimes(r *http.Request, dest, src tableRef, old, next []field, times bool) string {
+	if !times || len(old) == 0 {
+		return f.insertConverted(r, dest, src, old, next)
+	}
+	exprs, _, p := convertColumns(old, next, "")
+	if p != nil {
+		return "its rows cannot be read in the new schema: " + p.msg
+	}
+	cols := make([]string, len(next))
+	for i, fl := range next {
+		cols[i] = quoteName(fl.Name)
+	}
+	return f.runDML(r, "INSERT INTO "+quotePath([]string{dest.DatasetID, dest.TableID})+" ("+strings.Join(cols, ", ")+", "+
+		ingestionTimeColumn+") SELECT "+strings.Join(exprs, ", ")+", _PARTITIONTIME FROM "+
+		quotePath([]string{src.DatasetID, src.TableID}))
 }
 
 // insertConverted copies the rows of src, of the columns old, into dest,

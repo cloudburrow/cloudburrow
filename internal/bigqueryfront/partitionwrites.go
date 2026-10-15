@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -26,7 +27,7 @@ import (
 // tabledata.list of `t$P` is answered from the engine: the partition's
 // rows (partitionFilter) are read by a query of the table, in the table's
 // order, a page at a time (startIndex, maxResults, pageToken), with the
-// columns selectedFields names (top-level only; a nested one is 501).
+// columns selectedFields names (a nested one too, selectedfields.go).
 //
 // tables.get of `t$P` answers the table's resource, which `bq head` and
 // the client libraries read the schema of before tabledata.list, with the
@@ -38,16 +39,26 @@ import (
 // queryWrite does, so a query that fails changes nothing. Then every row
 // of the result must be in P, or the job fails, reason invalid, the table
 // unchanged (BigQuery's wording UNVERIFIED); the result's columns must be
-// the table's, or it is 501 (a schema update of a partitioned table
-// through one partition is not built). WRITE_APPEND adds the rows;
-// WRITE_TRUNCATE replaces the partition's rows, and only those, in one
+// the table's, or those schemaUpdateOptions make them (partitionSchema,
+// below; #1273). WRITE_APPEND adds the rows; WRITE_TRUNCATE (and
+// WRITE_TRUNCATE_DATA, the same for one partition: the table's schema is
+// kept) replaces the partition's rows, and only those, in one
 // script (DELETE of P's rows, INSERT of the result), which the emulator
 // runs in one transaction (querywrite.go); WRITE_EMPTY (the default) fails
 // the job, reason duplicate, when P holds rows. The job jobs.get reports
-// names the client's destination (jobText). 501: `$__NULL__` and
-// `$__UNPARTITIONED__` as a destination, WRITE_TRUNCATE_DATA, a query that
-// is not one SELECT, a destination of another project or that does not
-// exist. Into a partition of an ingestion-time partitioned table, the
+// names the client's destination (jobText). `$__NULL__` and
+// `$__UNPARTITIONED__` of a column- or range-partitioned table take the
+// rows of that partition only. 501: `$__UNPARTITIONED__` of an
+// ingestion-time partitioned table (its streaming buffer,
+// streamingbuffer.go; BigQuery documents no write to it), a destination
+// of another project or that does not exist. A query that is not one
+// SELECT is refused, as BigQuery refuses a destination for a DML statement
+// ("You cannot specify a destination table for the query",
+// https://cloud.google.com/bigquery/docs/updating-data) or a script
+// (destination_table "cannot be set for a multi-statement query",
+// https://cloud.google.com/bigquery/docs/multi-statement-queries); the
+// wording of both errors is UNVERIFIED. A dry run is the query's own,
+// without its destination (partitionDryRun). Into a partition of an ingestion-time partitioned table, the
 // rows are not checked: they are written with the partition's
 // _PARTITIONTIME (and _PARTITIONDATE), as a load or a copy into one
 // writes them (ingestionColumns, #1277).
@@ -56,29 +67,14 @@ import (
 // rows hold filter.
 func (f front) partitionRows(w http.ResponseWriter, r *http.Request, dataset, base, filter string, m partitionMeta) {
 	q := r.URL.Query()
+	// The partition's columns, all of them, kept to those selectedFields
+	// names (a.b for a nested field) as tabledata.list of a table keeps
+	// them (#1038, selectedfields.go).
 	cols := "*"
-	if sel := q.Get("selectedFields"); sel != "" {
-		var names []string
-		for _, n := range strings.Split(sel, ",") {
-			n = strings.TrimSpace(n)
-			if strings.Contains(n, ".") {
-				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: tabledata.list of a "+
-					"partition with a nested field in selectedFields ("+n+"). Name top-level columns (docs/compatibility.md).")
-				return
-			}
-			known := false
-			for _, fl := range m.Schema.Fields {
-				if strings.EqualFold(fl.Name, n) {
-					known, n = true, fl.Name
-				}
-			}
-			if !known {
-				writeError(w, http.StatusBadRequest, "invalid", "Field "+n+" not found in table schema") // UNVERIFIED wording
-				return
-			}
-			names = append(names, quoteName(n))
-		}
-		cols = strings.Join(names, ", ")
+	sel, err := parseSelectedFields(m.Schema.Fields, q.Get("selectedFields"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid", err.Error())
+		return
 	}
 	start := int64(0)
 	for _, key := range []string{"startIndex", "pageToken"} {
@@ -120,7 +116,7 @@ func (f front) partitionRows(w http.ResponseWriter, r *http.Request, dataset, ba
 	}
 	out := map[string]any{"kind": "bigquery#tableDataList", "totalRows": strconv.FormatInt(total, 10)}
 	if res.Rows != nil {
-		out["rows"] = res.Rows
+		out["rows"] = selectRows(m.Schema.Fields, sel, res.Rows)
 	}
 	if next := start + int64(len(res.Rows)); next < total && len(res.Rows) > 0 {
 		out["pageToken"] = strconv.FormatInt(next, 10)
@@ -208,9 +204,6 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 	if dest.ProjectID != "" && dest.ProjectID != project {
 		return notImplemented("of another project")
 	}
-	if dryRun(r, true) {
-		return notImplemented("as a dry run")
-	}
 	m, ok := f.partitionMetaOf(r, dest.DatasetID, base)
 	if !ok {
 		return notImplemented("of a table that does not exist")
@@ -220,17 +213,31 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 		writeError(w, code, reasonOf(code, "invalid"), msg)
 		return true
 	}
+	if write == "WRITE_TRUNCATE_DATA" {
+		write = "WRITE_TRUNCATE" // a partition's rows only; the table's schema is kept either way
+	}
 	switch {
-	case dec == "__NULL__" || dec == "__UNPARTITIONED__":
-		return notImplemented("$" + dec)
+	case m.ingestion() && dec == "__UNPARTITIONED__":
+		return notImplemented("$__UNPARTITIONED__ of an ingestion-time partitioned table, which holds its streaming buffer")
 	case write != "" && write != "WRITE_EMPTY" && write != "WRITE_APPEND" && write != "WRITE_TRUNCATE":
 		return notImplemented("with writeDisposition " + write)
-	case !isLoneQuery(c.Query):
-		return notImplemented("whose query is not one SELECT statement")
+	}
+	if why := notOneQuery(c.Query); why != "" {
+		writeError(w, http.StatusBadRequest, "invalid", why)
+		return true
+	}
+	if dryRun(r, true) {
+		return f.partitionDryRun(w, r, c.queryOptions, c.WriteDisposition, dest)
 	}
 	lq, _, _, _ := bytesParameters(c.queryOptions) // as runQuery sends them (#1078)
+	opts := c.SchemaUpdateOptions
+	if write == "" || write == "WRITE_EMPTY" {
+		opts = nil // schemaUpdateOptions are for WRITE_APPEND and WRITE_TRUNCATE (above)
+	}
 	if result, status, _ := f.lone(r, lq, lq.Query); status == http.StatusOK && !sameSchema(result, m.Schema.Fields) {
-		return notImplemented("whose result's columns are not the table's")
+		if _, _, _, why := partitionSchema(m.Schema.Fields, result, opts, name); why != "" {
+			return notImplemented(why)
+		}
 	}
 	scratch := tableRef{ProjectID: project, DatasetID: dest.DatasetID, TableID: scratchTable()}
 	if !editJob(r, func(job map[string]any) bool {
@@ -275,9 +282,19 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 	sstatus, sgot := f.get(r, tablePath(scratch.DatasetID, scratch.TableID))
 	if sstatus != http.StatusOK || json.Unmarshal(sgot, &sm) != nil || json.Unmarshal(sm.Schema, &fields) != nil {
 		e.Message = "CloudBurrow could not read the query's result: " + errorMessage(sgot, sstatus)
-	} else if !sameSchema(fields.Fields, m.Schema.Fields) {
-		e.Reason, e.Message = "notImplemented", "Not implemented here: a query job whose destination is the partition "+
-			dest.DatasetID+"."+dest.TableID+", whose result's columns are not the table's. The table was not changed."
+	}
+	var target []field
+	changed := false
+	if e.Message == "" && !sameSchema(fields.Fields, m.Schema.Fields) {
+		var invalid, why string
+		target, changed, invalid, why = partitionSchema(m.Schema.Fields, fields.Fields, opts, name)
+		switch {
+		case why != "":
+			e.Reason, e.Message = "notImplemented", "Not implemented here: a query job whose destination is the partition "+
+				dest.DatasetID+"."+dest.TableID+", whose result's columns are not the table's. The table was not changed."
+		case invalid != "":
+			e.Reason, e.Message = "invalid", invalid+". The table was not changed."
+		}
 	}
 	if e.Message == "" && !m.ingestion() {
 		if n, why := f.scalar(r, "SELECT COUNT(*) FROM "+sp+" WHERE NOT COALESCE("+filter+", FALSE)"); why != "" {
@@ -292,6 +309,11 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 			e.Message = "CloudBurrow could not read the partition: " + why
 		} else if n > 0 {
 			e.Reason, e.Message = "duplicate", "Already Exists: Table "+name
+		}
+	}
+	if e.Message == "" && changed {
+		if why := f.updatePartitionedSchema(r, dest.DatasetID, base, m.Schema.Fields, target); why != "" {
+			e.Message = "CloudBurrow could not update the schema of " + name + ": " + why
 		}
 	}
 	if e.Message == "" {
@@ -328,17 +350,34 @@ func decorated(id string) (table, dec string, ok bool) {
 }
 
 // partitionCopy carries out a copy job (copyJob) whose destination or a
-// source is a partition (above), and reports whether it answered w. write
-// is the job's writeDisposition, defaulted.
-func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConfig, srcs []tableRef, write string) bool {
+// source is a partition (above), or whose sources are ingestion-time
+// partitioned tables, whose rows' _PARTITIONTIME it keeps (#1273), and
+// reports whether it answered w. write and create are the job's
+// writeDisposition and createDisposition, defaulted.
+func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConfig, srcs []tableRef, write, create string) bool {
 	some := false
 	for _, t := range append(append([]tableRef{}, srcs...), *c.DestinationTable) {
 		if _, _, ok := decorated(t.TableID); ok {
 			some = true
 		}
 	}
+	op := strings.ToUpper(c.OperationType)
+	plain := op == "" || op == "COPY" || op == "OPERATION_TYPE_UNSPECIFIED"
 	if !some {
-		return false
+		// A copy of ingestion-time partitioned tables keeps each row's
+		// _PARTITIONTIME (#1273), which copyJob's INSERT of the columns
+		// would not: it is carried out here too.
+		if !plain {
+			return false
+		}
+		for _, s := range srcs {
+			if m, ok := f.partitionMetaOf(r, s.DatasetID, s.TableID); !ok || !m.ingestion() {
+				return false
+			}
+		}
+		if m, ok := f.partitionMetaOf(r, c.DestinationTable.DatasetID, c.DestinationTable.TableID); ok && !m.ingestion() {
+			return false
+		}
 	}
 	project := projectOf(f.base)
 	notImplemented := func(why string) bool {
@@ -346,7 +385,7 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 			" (docs/compatibility.md). Nothing was copied.")
 		return true
 	}
-	if op := strings.ToUpper(c.OperationType); op != "" && op != "COPY" && op != "OPERATION_TYPE_UNSPECIFIED" {
+	if !plain {
 		return notImplemented("with operationType " + op)
 	}
 	// part reads a table or partition: its table's metadata and the
@@ -383,29 +422,73 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 		}
 		return p, true
 	}
-	dest, ok := read(*c.DestinationTable)
-	if !ok {
-		return true
-	}
-	if dest.dec == "__NULL__" || dest.dec == "__UNPARTITIONED__" {
-		return notImplemented("into $" + dest.dec)
-	}
 	var sources []part
 	for _, s := range srcs {
 		p, ok := read(s)
 		if !ok {
 			return true
 		}
-		if !sameSchema(p.meta.Schema.Fields, dest.meta.Schema.Fields) {
-			return notImplemented("whose source " + tableName(project, s) + " has a schema other than the destination's")
+		if p.meta.ingestion() {
+			// "Some recently streamed rows might not be available for
+			// table copy": the streaming buffer's are not copied (#1273,
+			// streamingbuffer.go).
+			p.where = "(" + p.where + ") AND _PARTITIONTIME IS NOT NULL"
 		}
 		sources = append(sources, p)
+	}
+	// A destination that does not exist is made with the first source's
+	// schema and partitioning, as copyJob makes one (copyjob.go).
+	made := false
+	if _, _, isDec := decorated(c.DestinationTable.TableID); !isDec && !f.copyTableMeta(r, *c.DestinationTable).exists {
+		if create == "CREATE_NEVER" {
+			if j, ok := f.startOwnJob(w, r, "a copy job"); ok {
+				f.finishOwnJob(w, r, j, "COPY", "copy", nil, &rowError{Reason: "notFound",
+					Message: "Not found: Table " + tableName(project, *c.DestinationTable)})
+			}
+			return true
+		}
+		if status, _ := f.get(r, "/datasets/"+url.PathEscape(c.DestinationTable.DatasetID)); status == http.StatusNotFound {
+			if j, ok := f.startOwnJob(w, r, "a copy job"); ok {
+				f.finishOwnJob(w, r, j, "COPY", "copy", nil, &rowError{Reason: "notFound",
+					Message: "Not found: Dataset " + project + ":" + c.DestinationTable.DatasetID})
+			}
+			return true
+		}
+		src := sources[0].meta
+		schema, _ := json.Marshal(src.Schema)
+		extra := map[string]any{}
+		if src.TimePartitioning != nil {
+			extra["timePartitioning"] = src.TimePartitioning
+		}
+		if src.RangePartitioning != nil {
+			extra["rangePartitioning"] = src.RangePartitioning
+		}
+		if why := f.makeTableWith(r, *c.DestinationTable, schema, extra); why != "" {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not make the copy's destination: "+why)
+			return true
+		}
+		made = true
+	}
+	dest, ok := read(*c.DestinationTable)
+	if !ok {
+		return true
+	}
+	if dest.meta.ingestion() && dest.dec == "__UNPARTITIONED__" {
+		return notImplemented("into $__UNPARTITIONED__ of an ingestion-time partitioned table, which holds its streaming buffer")
+	}
+	for _, p := range sources {
+		if !sameSchema(p.meta.Schema.Fields, dest.meta.Schema.Fields) {
+			return notImplemented("whose source " + tableName(project, p.ref) + " has a schema other than the destination's")
+		}
 	}
 	j, ok := f.startOwnJob(w, r, "a copy job")
 	if !ok {
 		return true
 	}
 	fail := func(reason, msg string) bool {
+		if made {
+			f.send(r, http.MethodDelete, tablePath(c.DestinationTable.DatasetID, c.DestinationTable.TableID), nil)
+		}
 		f.finishOwnJob(w, r, j, "COPY", "copy", nil, &rowError{Reason: reason, Message: msg})
 		return true
 	}
@@ -479,6 +562,7 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 	project := projectOf(f.base)
 	name := tableName(project, dest)
 	write := strings.ToUpper(l.WriteDisposition)
+	truncate := write == "WRITE_TRUNCATE" || write == "WRITE_TRUNCATE_DATA" // a partition's rows; the schema is kept
 	notImplemented := func(why string) bool {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a load job whose destination "+
 			"is the partition "+dest.DatasetID+"."+dest.TableID+", "+why+" (docs/compatibility.md). Nothing was loaded.")
@@ -496,12 +580,28 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 	case code != 0:
 		writeError(w, code, reasonOf(code, "invalid"), msg)
 		return nil, false
-	case dec == "__NULL__" || dec == "__UNPARTITIONED__":
-		return nil, notImplemented("$" + dec)
-	case write != "" && write != "WRITE_EMPTY" && write != "WRITE_APPEND" && write != "WRITE_TRUNCATE":
+	case m.ingestion() && dec == "__UNPARTITIONED__":
+		return nil, notImplemented("$__UNPARTITIONED__ of an ingestion-time partitioned table, which holds its streaming buffer")
+	case write != "" && write != "WRITE_EMPTY" && write != "WRITE_APPEND" && write != "WRITE_TRUNCATE" &&
+		write != "WRITE_TRUNCATE_DATA":
 		return nil, notImplemented("with writeDisposition " + write)
-	case l.Schema != nil && !sameSchema(l.Schema.Fields, m.Schema.Fields):
-		return nil, notImplemented("with a schema other than the table's")
+	}
+	// A schema update through the partition (partitionSchema, below).
+	next := m.Schema.Fields
+	var target []field
+	changed := false
+	invalid := ""
+	if l.Schema != nil && !sameSchema(l.Schema.Fields, m.Schema.Fields) {
+		opts := l.SchemaUpdateOptions
+		if write == "" || write == "WRITE_EMPTY" {
+			opts = nil
+		}
+		var why string
+		target, changed, invalid, why = partitionSchema(m.Schema.Fields, l.Schema.Fields, opts, name)
+		if why != "" {
+			return nil, notImplemented(why)
+		}
+		next = l.Schema.Fields
 	}
 	scratch := tableRef{ProjectID: project, DatasetID: dest.DatasetID, TableID: scratchTable()}
 	var client json.RawMessage
@@ -550,7 +650,9 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 		e := rowError{Reason: "backendError"}
 		sp := quotePath([]string{project, scratch.DatasetID, scratch.TableID})
 		bp := quotePath([]string{project, dest.DatasetID, base})
-		if m.ingestion() {
+		if invalid != "" {
+			e.Reason, e.Message = "invalid", invalid+". The table was not changed."
+		} else if m.ingestion() {
 			// The rows are written into the partition (#1277).
 		} else if n, why := f.scalar(r, "SELECT COUNT(*) FROM "+sp+" WHERE NOT COALESCE("+filter+", FALSE)"); why != "" {
 			e.Message = "CloudBurrow could not read the loaded rows: " + why
@@ -565,15 +667,20 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 				e.Reason, e.Message = "duplicate", "Already Exists: Table "+name
 			}
 		}
+		if e.Message == "" && changed {
+			if why := f.updatePartitionedSchema(r, dest.DatasetID, base, m.Schema.Fields, target); why != "" {
+				e.Message = "CloudBurrow could not update the schema of " + name + ": " + why
+			}
+		}
 		if e.Message == "" {
-			cols := make([]string, len(m.Schema.Fields))
-			for i, fl := range m.Schema.Fields {
+			cols := make([]string, len(next))
+			for i, fl := range next {
 				cols[i] = quoteName(fl.Name)
 			}
 			list := strings.Join(cols, ", ")
 			pcols, pvals := ingestionColumns(m, dec) // the partition's time (#1277)
 			sql := "INSERT INTO " + bp + " (" + list + pcols + ") SELECT " + list + pvals + " FROM " + sp
-			if write == "WRITE_TRUNCATE" {
+			if truncate {
 				sql = "DELETE FROM " + bp + " WHERE " + filter + ";\n" + sql
 			}
 			if why := f.runDML(r, sql); why != "" {
@@ -588,4 +695,202 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 		}
 		f.clientJob(w, rec, text)
 	}, true
+}
+
+// A schema update through one partition (#1273). BigQuery takes
+// schemaUpdateOptions "when writeDisposition is WRITE_APPEND; when
+// writeDisposition is WRITE_TRUNCATE_DATA; when writeDisposition is
+// WRITE_TRUNCATE and the destination table is a partition of a table,
+// specified by partition decorators"
+// (https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobConfigurationQuery):
+// ALLOW_FIELD_ADDITION adds a column the rows have and the table does not,
+// NULLABLE, at the table's end, and ALLOW_FIELD_RELAXATION relaxes a
+// REQUIRED column the rows give as NULLABLE. Without the option, the job
+// fails, reason invalid, the table unchanged. The table's columns, in its
+// order, must come first; anything else (a column left out, retyped, given
+// in another order, a RECORD's fields changed) stays 501; a column
+// retyped fails, reason invalid, as "changing a column's data type" is not
+// a schema update BigQuery makes through a write. An ingestion-time
+// partitioned table's rows keep their _PARTITIONTIME through the table's
+// remaking (schemaupdate.go's addColumns).
+
+// partitionSchema compares the rows' columns, next, with the table's,
+// old. It returns the table's schema after the write, whether it changes,
+// and why the job fails (invalid) or is not carried out (501), or "".
+func partitionSchema(old, next []field, opts []string, name string) (target []field, changed bool, invalid, notBuilt string) {
+	if len(next) < len(old) {
+		return nil, false, "", "whose columns are not the table's (one is left out)"
+	}
+	target = make([]field, 0, len(next))
+	for i, o := range old {
+		n := next[i]
+		if strings.EqualFold(o.Name, n.Name) && canonicalType(o.Type) != canonicalType(n.Type) {
+			// "Changing a column's data type" is not a schema update
+			// BigQuery makes through a write (managing-table-schemas).
+			return nil, false, "Provided Schema does not match Table " + name + ". Field " + o.Name +
+				" has changed type from " + canonicalType(o.Type) + " to " + canonicalType(n.Type), "" // UNVERIFIED wording
+		}
+		if !strings.EqualFold(o.Name, n.Name) || !sameSchema(o.Fields, n.Fields) {
+			return nil, false, "", "whose columns are not the table's (" + n.Name + ")"
+		}
+		t := o
+		switch om, nm := modeOf(o), modeOf(n); {
+		case om == nm, om == "NULLABLE" && nm == "REQUIRED":
+		case om == "REQUIRED" && nm == "NULLABLE":
+			if !hasOption(opts, "ALLOW_FIELD_RELAXATION") {
+				return nil, false, "Provided Schema does not match Table " + name + ". Field " + o.Name +
+					" has changed mode from REQUIRED to NULLABLE", "" // UNVERIFIED wording
+			}
+			t.Mode, changed = "NULLABLE", true
+		default:
+			return nil, false, "", "whose column " + n.Name + " has another mode than the table's"
+		}
+		target = append(target, t)
+	}
+	for _, n := range next[len(old):] {
+		if !hasOption(opts, "ALLOW_FIELD_ADDITION") {
+			return nil, false, "Provided Schema does not match Table " + name + ". Cannot add fields (field: " + n.Name + ")", "" // UNVERIFIED wording
+		}
+		if modeOf(n) == "REQUIRED" {
+			return nil, false, "Provided Schema does not match Table " + name + ". Cannot add required fields to an " +
+				"existing schema. (field: " + n.Name + ")", "" // UNVERIFIED wording
+		}
+		t := n
+		if t.Mode == "" {
+			t.Mode = "NULLABLE"
+		}
+		target, changed = append(target, t), true
+	}
+	return target, changed, "", ""
+}
+
+// updatePartitionedSchema gives dataset.table the schema target: added
+// columns through addColumns (schemaupdate.go), which keeps its rows and
+// settings, or a relaxed mode through tables.patch, the metadata's alone
+// (schemaupdate.go). It returns why it could not, or "".
+func (f front) updatePartitionedSchema(r *http.Request, dataset, table string, old, target []field) string {
+	status, got := f.get(r, tablePath(dataset, table))
+	current, ok := decodeMap(got)
+	if status != http.StatusOK || !ok {
+		return errorMessage(got, status)
+	}
+	// The table's own schema (descriptions and all), relaxed, with the
+	// new columns at its end.
+	schema, _ := current["schema"].(map[string]any)
+	fields, _ := schema["fields"].([]any)
+	if len(fields) != len(old) {
+		return "could not read the table's schema"
+	}
+	out := make([]any, 0, len(target))
+	for i, fl := range fields {
+		m, _ := fl.(map[string]any)
+		if m == nil {
+			return "could not read the table's schema"
+		}
+		c := map[string]any{}
+		for k, v := range m {
+			c[k] = v
+		}
+		c["mode"] = modeOf(target[i])
+		out = append(out, c)
+	}
+	for _, t := range target[len(old):] {
+		b, _ := json.Marshal(t)
+		var c map[string]any
+		if json.Unmarshal(b, &c) != nil {
+			return "could not write the new column " + t.Name
+		}
+		out = append(out, c)
+	}
+	raw, err := json.Marshal(map[string]any{"fields": out})
+	if err != nil {
+		return err.Error()
+	}
+	if len(target) > len(old) {
+		rec := newRecorder()
+		if !f.addColumns(rec, r, dataset, table, got, old, raw) {
+			return errorMessage(rec.body.Bytes(), rec.status)
+		}
+		return ""
+	}
+	body, _ := json.Marshal(map[string]json.RawMessage{"schema": raw})
+	if status, got := f.send(r, http.MethodPatch, tablePath(dataset, table), body); status != http.StatusOK {
+		return errorMessage(got, status)
+	}
+	return ""
+}
+
+// notOneQuery answers why BigQuery refuses a query job whose
+// destinationTable is set and whose query is not one query statement: a
+// script, a DML or a DDL statement (#1273), or "" when it is one.
+func notOneQuery(sql string) string {
+	if isLoneQuery(sql) {
+		return ""
+	}
+	toks, ok := lex(sql)
+	if !ok {
+		return "" // the emulator's syntax error, as without a destination
+	}
+	var stmts [][]token
+	for _, s := range splitStatements(toks) {
+		if len(s) > 0 {
+			stmts = append(stmts, s)
+		}
+	}
+	switch {
+	case len(stmts) > 1:
+		return "configuration.query.destinationTable cannot be set for scripts" // UNVERIFIED wording
+	case len(stmts) == 1 && (stmts[0][0].is("INSERT") || stmts[0][0].is("UPDATE") || stmts[0][0].is("DELETE") ||
+		stmts[0][0].is("MERGE") || stmts[0][0].is("TRUNCATE")):
+		return "Cannot set destination table in jobs with DML statements" // UNVERIFIED wording
+	case len(stmts) == 1:
+		return "Cannot set destination table in jobs with DDL statements" // UNVERIFIED wording
+	}
+	return ""
+}
+
+// partitionDryRun answers a dry run of a query job whose destination is
+// the partition dest (#1273): the query is dry run without its
+// destination, which the job BigQuery answers names, with its statistics
+// (totalBytesProcessed, and the result's schema, which the front reads with
+// lone, as the emulator answers none). Nothing is written, so the
+// rows are not checked against the partition.
+func (f front) partitionDryRun(w http.ResponseWriter, r *http.Request, q queryOptions, write string, dest *tableRef) bool {
+	if !editJob(r, func(job map[string]any) bool {
+		conf, _ := job["configuration"].(map[string]any)
+		q, _ := conf["query"].(map[string]any)
+		if q == nil {
+			return false
+		}
+		delete(q, "destinationTable")
+		delete(q, "writeDisposition")
+		delete(q, "createDisposition")
+		delete(q, "schemaUpdateOptions")
+		return true
+	}) {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a dry run whose destination "+
+			"is the partition "+dest.DatasetID+"."+dest.TableID+", which CloudBurrow could not send (docs/compatibility.md).")
+		return true
+	}
+	rec := newRecorder()
+	f.runQuery(rec, r, q, true)
+	// BigQuery's dry run gives "the schema of the results"
+	// (statistics.query.schema), which the emulator leaves out.
+	var resp map[string]any
+	if rec.status == 0 || rec.status == http.StatusOK {
+		if json.Unmarshal(rec.body.Bytes(), &resp) == nil {
+			st, _ := resp["statistics"].(map[string]any)
+			qs, _ := st["query"].(map[string]any)
+			lq, _, _, _ := bytesParameters(q) // as runQuery sends them (#1078)
+			if fields, status, _ := f.lone(r, lq, lq.Query); qs != nil && qs["schema"] == nil && status == http.StatusOK {
+				qs["schema"] = map[string]any{"fields": fields}
+				if b, err := json.Marshal(resp); err == nil {
+					rec.body.Reset()
+					rec.body.Write(b)
+				}
+			}
+		}
+	}
+	f.clientJob(w, rec, jobText{dest: dest, queryWrite: write})
+	return true
 }

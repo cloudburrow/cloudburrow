@@ -16,7 +16,8 @@ import (
 
 // TestBigQueryIngestionTime (#1277, #1273): an ingestion-time partitioned
 // table keeps each row's ingestion time, truncated to its partitioning
-// unit, whatever writes it: DML, tabledata.insertAll, a load. Its
+// unit, whatever writes it: DML, tabledata.insertAll (once its streaming
+// buffer flushes, #1273), a load. Its
 // _PARTITIONTIME reads the start of the row's partition and _PARTITIONDATE
 // (by day only) its date, as BigQuery documents
 // (https://cloud.google.com/bigquery/docs/querying-partitioned-tables);
@@ -85,9 +86,11 @@ func TestBigQueryIngestionTime(t *testing.T) {
 	if got := rows("SELECT TO_JSON_STRING(t) FROM " + p("ingday") + " AS t WHERE n = 1"); !reflect.DeepEqual(got, []string{`{"n":1}`}) {
 		t.Errorf("SELECT *: %v, want only n", got)
 	}
-	if got, want := rows("SELECT CONCAT(CAST(n AS STRING), ' ', CAST(_PARTITIONTIME = TIMESTAMP(CURRENT_DATE()) AS STRING), ' ', "+
-		"CAST(_PARTITIONDATE = CURRENT_DATE() AS STRING)) FROM "+p("ingday")+" WHERE n < 4"),
-		[]string{"1 true true", "2 true true", "3 true true"}; !reflect.DeepEqual(got, want) {
+	// The streamed rows are in the streaming buffer, _PARTITIONTIME NULL,
+	// until it flushes (TestBigQueryStreamingBuffer, #1273).
+	if got, want := rows("SELECT CONCAT(CAST(n AS STRING), ' ', IFNULL(CAST(_PARTITIONTIME = TIMESTAMP(CURRENT_DATE()) AS STRING), 'null'), ' ', "+
+		"IFNULL(CAST(_PARTITIONDATE = CURRENT_DATE() AS STRING), 'null')) FROM "+p("ingday")+" WHERE n < 4"),
+		[]string{"1 null null", "2 null null", "3 true true"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("rows of today: %v, want %v", got, want)
 	}
 	if got := rows("SELECT CONCAT(CAST(n AS STRING), ' ', FORMAT_TIMESTAMP('%F %T', _PARTITIONTIME), ' ', CAST(_PARTITIONDATE AS STRING)) FROM " +
