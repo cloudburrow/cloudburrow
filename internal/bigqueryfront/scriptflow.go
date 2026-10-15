@@ -43,7 +43,11 @@ import (
 //     already run, and is jobs.query's answer, while a query job is then
 //     recorded with a statement that does nothing (failBeforeRun's).
 //
-// What it cannot do faithfully is 501, before anything runs: a RAISE, a
+// RAISE USING MESSAGE fails the script with its message, which a handler
+// may catch; a bare RAISE in a handler raises its error again. A script
+// with a RAISE and no block is carried out so too.
+//
+// What it cannot do faithfully is 501, before anything runs: a
 // CALL, a transaction, a FOR or SET of a type it cannot write as a literal
 // (RANGE), EXECUTE IMMEDIATE inside a block, and a script of over
 // scriptStepLimit steps (BigQuery's own limit is the job's time, 6 hours).
@@ -59,7 +63,7 @@ func hasControlFlow(sql string) bool {
 	upper := strings.ToUpper(sql)
 	if !strings.Contains(upper, "IF") && !strings.Contains(upper, "LOOP") && !strings.Contains(upper, "WHILE") &&
 		!strings.Contains(upper, "REPEAT") && !strings.Contains(upper, "FOR") && !strings.Contains(upper, "CASE") &&
-		!strings.Contains(upper, "EXCEPTION") {
+		!strings.Contains(upper, "EXCEPTION") && !strings.Contains(upper, "RAISE") {
 		return false
 	}
 	toks, ok := lex(sql)
@@ -67,7 +71,7 @@ func hasControlFlow(sql string) bool {
 		return false
 	}
 	for _, stmt := range splitStatements(toks) {
-		if _, block, handler := stripControlFlow(stmt); block != "" || handler {
+		if body, block, handler := stripControlFlow(stmt); block != "" || handler || len(body) > 0 && body[0].is("RAISE") {
 			return true
 		}
 	}
@@ -469,8 +473,6 @@ func unsupportedInScript(nodes []scriptNode) string {
 			if n.kind == nodeStmt && len(n.toks) > 0 {
 				t := n.toks[0]
 				switch {
-				case t.is("RAISE"):
-					return "RAISE inside a script with control flow. BigQuery ends the script with the error it raises, but CloudBurrow, which carries such a script out itself, does not raise one yet."
 				case t.is("CALL"):
 					return "CALL inside a script with control flow. CloudBurrow carries such a script out itself, statement by statement, and does not run procedures."
 				case t.is("COMMIT") || t.is("ROLLBACK") || t.is("BEGIN"):
@@ -497,7 +499,7 @@ func unsupportedInScript(nodes []scriptNode) string {
 // first refusal.
 func checkStatements(sql string, nodes []scriptNode) ddlVerdict {
 	for _, n := range nodes {
-		if n.kind == nodeStmt && len(n.toks) > 0 {
+		if n.kind == nodeStmt && len(n.toks) > 0 && !n.toks[0].is("RAISE") {
 			if v := checkDDL(sql[n.toks[0].pos:n.toks[len(n.toks)-1].end]); v.code != 0 {
 				return v
 			}
@@ -564,6 +566,9 @@ func (s *scriptRun) runNode(n scriptNode) *scriptFlow {
 		if len(n.toks) == 1 && n.toks[0].is("RETURN") {
 			return &scriptFlow{brk: true, label: "\x00return"}
 		}
+		if n.toks[0].is("RAISE") {
+			return s.raise(n.toks)
+		}
 		return s.statement(n.toks)
 	case nodeDeclare:
 		return s.declare(n.toks)
@@ -621,6 +626,7 @@ func (s *scriptRun) runNode(n scriptNode) *scriptFlow {
 				"stack_trace":           {"ARRAY<STRUCT<line INT64, column INT64, filename STRING, location STRING>>", "CAST([] AS ARRAY<STRUCT<line INT64, column INT64, filename STRING, location STRING>>)"},
 				"formatted_stack_trace": {"STRING", sqlString("")},
 			}
+			errVars["\x00raw"] = scriptVar{lit: flow.msg}
 			s.inHandler = append(s.inHandler, errVars)
 			out := s.run(n.handler)
 			s.inHandler = s.inHandler[:len(s.inHandler)-1]
@@ -1132,4 +1138,64 @@ func sqlTypeOf(fl field) (string, string) {
 		t = "ARRAY<" + t + ">"
 	}
 	return t, ""
+}
+
+// raise carries out RAISE [USING MESSAGE = expr]: the script fails with
+// the message, which an EXCEPTION block may catch. A bare RAISE in a
+// handler raises the error it handles again.
+func (s *scriptRun) raise(toks []token) *scriptFlow {
+	text := s.text(toks)
+	if s.notImpl != "" {
+		return &scriptFlow{}
+	}
+	var msg string
+	switch {
+	case len(toks) == 1 && len(s.inHandler) > 0:
+		msg = s.inHandler[len(s.inHandler)-1]["\x00raw"].lit
+	case len(toks) > 4 && toks[1].is("USING") && toks[2].is("MESSAGE") && toks[3].punct("="):
+		expr := s.text(toks[4:])
+		if s.notImpl != "" {
+			return &scriptFlow{}
+		}
+		v, flow := s.evaluate(expr, "STRING")
+		if flow != nil {
+			return flow
+		}
+		msg = unquoteRaised(v.lit)
+	default:
+		s.notImpl = "Not implemented here: RAISE without USING MESSAGE outside an EXCEPTION handler. What the statements before it did was kept."
+		return &scriptFlow{}
+	}
+	if flow := s.flush(); flow != nil {
+		return flow
+	}
+	body, _ := json.Marshal(map[string]any{"error": map[string]any{"code": http.StatusBadRequest, "message": msg,
+		"errors": []map[string]string{{"message": msg, "domain": "global", "reason": "invalidQuery"}}, "status": "INVALID_ARGUMENT"}})
+	return &scriptFlow{failed: true, status: http.StatusBadRequest, body: body, msg: msg, text: text}
+}
+
+// unquoteRaised reads back a STRING literal sqlString wrote; NULL is "".
+func unquoteRaised(lit string) string {
+	if !strings.HasPrefix(lit, "'") {
+		return ""
+	}
+	var b strings.Builder
+	in := lit[1 : len(lit)-1]
+	for i := 0; i < len(in); i++ {
+		c := in[i]
+		if c == '\\' && i+1 < len(in) {
+			i++
+			if in[i] == 'U' && i+9 <= len(in) {
+				var r rune
+				fmt.Sscanf(in[i+1:i+9], "%08x", &r)
+				b.WriteRune(r)
+				i += 8
+				continue
+			}
+			b.WriteByte(in[i])
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }

@@ -248,7 +248,10 @@ func TestBigQueryExceptionHandlersRaiseAndCreateOrReplace(t *testing.T) {
 	if got := rows(t, ctx, c, "BEGIN SELECT 1 AS n; EXCEPTION WHEN ERROR THEN SELECT 2 AS n; END"); len(got) != 1 || got[0][0] != int64(1) {
 		t.Errorf("a script whose block succeeds read %v", got)
 	}
-	wantReason(t, "RAISE", bqRun(ctx, c, "RAISE USING MESSAGE = 'boom'", false), http.StatusNotImplemented, "notImplemented")
+	// #1201: RAISE ends the script with its message.
+	if err := bqRun(ctx, c, "RAISE USING MESSAGE = 'boom'", false); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("RAISE: %v, want the error boom", err)
+	}
 
 	if err := bqRun(ctx, c, "CREATE TABLE "+path("r")+" AS SELECT 1 AS a UNION ALL SELECT 2", false); err != nil {
 		t.Fatal(err)

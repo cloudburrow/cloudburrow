@@ -79,3 +79,22 @@ func TestScriptLiterals(t *testing.T) {
 		t.Errorf("RANGE: %s", msg)
 	}
 }
+
+// TestScriptRaise (#1201): RAISE fails the script with its message, which
+// a handler catches; uncaught, it is the answer, 400.
+func TestScriptRaise(t *testing.T) {
+	emu := &scriptEmulator{run: func(q string) (int, string) {
+		if strings.Contains(q, "CAST(('boom') AS STRING)") {
+			return 200, `{"jobComplete":true,"schema":{"fields":[{"name":"f0_","type":"STRING"}]},"rows":[{"f":[{"v":"boom"}]}]}`
+		}
+		return 200, `{"jobComplete":true}`
+	}}
+	code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "RAISE USING MESSAGE = 'boom'"))
+	if msg, _ := got["error"].(map[string]any)["message"].(string); code != 400 || msg != "boom" {
+		t.Errorf("RAISE: %d %v", code, got)
+	}
+	code, got = do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "BEGIN RAISE USING MESSAGE = 'boom'; EXCEPTION WHEN ERROR THEN SELECT @@error.message AS m; END"))
+	if code != 200 || emu.log[len(emu.log)-1] != "QUERY SELECT ('boom') AS m" {
+		t.Errorf("a caught RAISE: %d %v %q", code, got, emu.log)
+	}
+}

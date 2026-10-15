@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,6 +96,8 @@ func TestBigQueryScriptControlFlow(t *testing.T) {
 			[][]bigquery.Value{{true, true}}},
 		{"RETURN", "SELECT 1 AS n; IF TRUE THEN RETURN; END IF; SELECT 2 AS n",
 			[][]bigquery.Value{{int64(1)}}},
+		{"RAISE caught", "BEGIN RAISE USING MESSAGE = CONCAT('bo', 'om'); EXCEPTION WHEN ERROR THEN SELECT @@error.message AS m; END",
+			[][]bigquery.Value{{"boom"}}},
 		{"EXCEPTION not raised", "BEGIN SELECT 1 AS n; EXCEPTION WHEN ERROR THEN SELECT 2 AS n; END",
 			[][]bigquery.Value{{int64(1)}}},
 	}
@@ -122,6 +125,18 @@ func TestBigQueryScriptControlFlow(t *testing.T) {
 			t.Errorf("after an uncaught failure (insert %v), the table holds %v %v, want [[42]]", insert, got, err)
 		}
 	}
+	// RAISE no handler catches ends the script with its message, also a
+	// bare RAISE in a handler.
+	for _, insert := range []bool{false, true} {
+		for _, sql := range []string{
+			"IF TRUE THEN RAISE USING MESSAGE = 'boom'; END IF",
+			"BEGIN RAISE USING MESSAGE = 'boom'; EXCEPTION WHEN ERROR THEN RAISE; END",
+		} {
+			if err := bqRun(ctx, c, sql, insert); err == nil || !strings.Contains(err.Error(), "boom") {
+				t.Errorf("%s (insert %v): %v, want the error boom", sql, insert, err)
+			}
+		}
+	}
 	// What cannot be carried out faithfully is 501, before anything runs.
-	wantReason(t, "RAISE in a block", bqRun(ctx, c, "IF TRUE THEN RAISE USING MESSAGE = 'boom'; END IF", false), 501, "notImplemented")
+	wantReason(t, "CALL in a block", bqRun(ctx, c, "IF TRUE THEN CALL "+ds.DatasetID+".p(); END IF", false), 501, "notImplemented")
 }
