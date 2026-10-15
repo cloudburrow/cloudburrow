@@ -34,9 +34,9 @@ import (
 //     creates its table only on success; the job is answered with
 //     status.errorResult reason "invalid", and jobs.get reports it so
 //     (jobFailures).
-//   - V1 or V2: 501. BigQuery would rename the column; the emulator
-//     ignores the map (measured: "a!" was kept under V2), and the front
-//     does not rename. The table is deleted.
+//   - V1 or V2: the front renames the column, as BigQuery does
+//     (charmap.go, #1326); a name it cannot rename is 501 and the table
+//     deleted.
 //
 // A NEWLINE_DELIMITED_JSON load with autodetect into a new table has its
 // schema detected by the front (#1324, jsondetect.go) and does not reach
@@ -101,6 +101,16 @@ func (f front) autodetectLoad(w http.ResponseWriter, r *http.Request, job jobBod
 	var header string
 	if csv {
 		header = headerDiffers(meta.Schema.Fields)
+	}
+	if header == "" && csv && (charMap == "V1" || charMap == "V2") && loadSucceeded(rec.body.Bytes()) {
+		// The detected names renamed to the map's rules (#1326, charmap.go).
+		if renamed, why := f.applyCharacterMap(r, *dest, table, charMap, check, got, meta.Schema.Fields); why != "" {
+			f.failLoadedRename(w, rec, job, why)
+			return
+		} else if renamed != nil {
+			got = renamed
+			_ = json.Unmarshal(got, &meta)
+		}
 	}
 	msg := ""
 	if header == "" {
