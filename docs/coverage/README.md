@@ -14,7 +14,7 @@ Do not edit these files by hand.
 | [Cloud KMS](kms.md) | 38 | 19 | 0 | 19 | 0 | 0 | 0 | 72 |
 | [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 6 | 0 | 5 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud Logging (write and read)](logging.md) | 6 | 6 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Cloud Logging](logging.md) | 43 | 21 | 0 | 22 | 0 | 0 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 40 | 0 | 47 | 0 | 0 | 0 | 11 |
 | [Firestore](firestore.md) | 17 | 15 | 2 | 0 | 0 | 0 | 0 | 0 |

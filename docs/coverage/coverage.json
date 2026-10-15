@@ -1416,11 +1416,192 @@
   },
   {
     "Key": "logging",
-    "Title": "Cloud Logging (write and read)",
+    "Title": "Cloud Logging",
     "counts": {
-      "Verified": 6
+      "Unimplemented": 22,
+      "Verified": 21
     },
     "rows": [
+      {
+        "method": "google.logging.v2.ConfigServiceV2/CopyLogEntries",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/CreateBucket",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/CreateBucketAsync",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/CreateExclusion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+        ]
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/CreateLink",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/CreateSink",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+        ]
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/CreateView",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/DeleteBucket",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/DeleteExclusion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+        ]
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/DeleteLink",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/DeleteSink",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+        ]
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/DeleteView",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/GetBucket",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/GetCmekSettings",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/GetExclusion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+        ]
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/GetLink",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/GetSettings",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/GetSink",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+        ]
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/GetView",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/ListBuckets",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/ListExclusions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+        ]
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/ListLinks",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/ListSinks",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+        ]
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/ListViews",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/UndeleteBucket",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/UpdateBucket",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/UpdateBucketAsync",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/UpdateCmekSettings",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/UpdateExclusion",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+        ]
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/UpdateSettings",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/UpdateSink",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+        ]
+      },
+      {
+        "method": "google.logging.v2.ConfigServiceV2/UpdateView",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
       {
         "method": "google.logging.v2.LoggingServiceV2/DeleteLog",
         "status": "Verified",
@@ -1467,6 +1648,41 @@
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
+        ]
+      },
+      {
+        "method": "google.logging.v2.MetricsServiceV2/CreateLogMetric",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+        ]
+      },
+      {
+        "method": "google.logging.v2.MetricsServiceV2/DeleteLogMetric",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+        ]
+      },
+      {
+        "method": "google.logging.v2.MetricsServiceV2/GetLogMetric",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+        ]
+      },
+      {
+        "method": "google.logging.v2.MetricsServiceV2/ListLogMetrics",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+        ]
+      },
+      {
+        "method": "google.logging.v2.MetricsServiceV2/UpdateLogMetric",
+        "status": "Verified",
+        "tests": [
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
         ]
       }
     ]

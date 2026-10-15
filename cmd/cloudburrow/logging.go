@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
+	"path/filepath"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +20,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -43,6 +46,18 @@ type loggingService struct {
 	// api is the one LoggingServiceV2 server: gRPC, JSON and the console's
 	// Delete log (#799) all call it.
 	api *logging.Server
+	// admin stores log-based metrics, sinks and exclusions (#1226), durable
+	// in persistent mode; set by Start.
+	admin *logging.Admin
+	db    store.Store
+}
+
+// Admin is the metrics, sinks and exclusions server, or nil before Start.
+func (s *loggingService) Admin() *logging.Admin {
+	if s == nil {
+		return nil
+	}
+	return s.admin
 }
 
 func newLoggingService(cfg config.Config) *loggingService {
@@ -151,6 +166,17 @@ func entryMessage(e *loggingpb.LogEntry) string {
 }
 
 func (s *loggingService) Start(ctx context.Context) error {
+	var db store.Store = store.NewMemory()
+	if s.cfg.Mode == config.ModePersistent {
+		durable, err := store.OpenDurable(filepath.Join(s.cfg.StateDir, s.cfg.Name, "logging"))
+		if err != nil {
+			return fmt.Errorf("open Cloud Logging state: %w", err)
+		}
+		db = durable
+	}
+	s.db = db
+	s.admin = logging.NewAdmin(db)
+	s.api.UseAdmin(s.admin)
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Logging))
 	s.server = grpctransport.New(addr)
 	s.server.Observe(s.calls)
@@ -162,7 +188,7 @@ func (s *loggingService) Start(ctx context.Context) error {
 	}
 	// One port for gRPC and JSON, as logging.googleapis.com (#591): the same
 	// server, transcoded, for REST clients and gcloud.
-	register := func(g grpc.ServiceRegistrar) { s.api.Register(g) }
+	register := func(g grpc.ServiceRegistrar) { s.api.Register(g); s.admin.Register(g) }
 	var jsonAPI http.Handler = logging.NewRESTHandler(register)
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
@@ -175,13 +201,20 @@ func (s *loggingService) Start(ctx context.Context) error {
 }
 
 func (s *loggingService) Stop(ctx context.Context) error {
-	if s.server == nil {
-		return nil
+	var err error
+	if s.server != nil {
+		err = s.server.Stop(ctx)
 	}
-	return s.server.Stop(ctx)
+	if s.db != nil {
+		if cerr := s.db.Close(); err == nil {
+			err = cerr
+		}
+		s.db = nil
+	}
+	return err
 }
 
-// loggingResetter clears every entry.
+// loggingResetter clears every entry, metric, sink and exclusion.
 type loggingResetter struct{ svc *loggingService }
 
 func (r *loggingResetter) Name() string { return "logging" }
@@ -191,5 +224,17 @@ func (r *loggingResetter) Reset(context.Context) error {
 		return errors.New("Cloud Logging is not enabled")
 	}
 	r.svc.store.Reset()
+	// And the metrics, sinks and exclusions (#1226).
+	if db := r.svc.db; db != nil {
+		keys, err := db.List("logging/")
+		if err != nil {
+			return err
+		}
+		for _, k := range keys {
+			if err := db.Delete(k); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
