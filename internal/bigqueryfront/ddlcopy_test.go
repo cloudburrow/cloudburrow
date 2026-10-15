@@ -366,7 +366,7 @@ func TestCreateFunctionOfAnExistingFunction(t *testing.T) {
 			}
 		}
 		for _, sql := range []string{
-			"SELECT 1; CREATE FUNCTION ds.f(x INT64) AS (x + 2)",
+			"DECLARE z INT64 DEFAULT 1; CREATE FUNCTION ds.f(x INT64) AS (x + 2)",
 			"CREATE OR REPLACE FUNCTION ds.f(x INT64) AS (x + 2); SELECT 1",
 			"CREATE FUNCTION ds.g(x INT64) AS (x + 2); CREATE FUNCTION ds.g(x INT64) AS (x + 3)",
 			"CREATE OR REPLACE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y); SELECT 1",
@@ -406,8 +406,8 @@ func TestDropSchema(t *testing.T) {
 			{"DROP SCHEMA IF EXISTS nope CASCADE", "", ""},
 			{"DROP SCHEMA full CASCADE; SELECT 1", "", "full"},
 			{"SELECT 1; DROP SCHEMA empty", "", "empty"},
-			{"SELECT 1; DROP SCHEMA full", "notImplemented", ""},
-			{"SELECT 1; DROP SCHEMA nope", "notImplemented", ""},
+			{"DECLARE z INT64 DEFAULT 1; DROP SCHEMA full", "notImplemented", ""},
+			{"DECLARE z INT64 DEFAULT 1; DROP SCHEMA nope", "notImplemented", ""},
 			{"CREATE TABLE full.u (a INT64); DROP SCHEMA full CASCADE", "notImplemented", ""},
 			{"DROP SCHEMA full CASCADE; SELECT * FROM full.t", "notImplemented", ""},
 			{"DROP SCHEMA full SOMETHING", "notImplemented", ""},

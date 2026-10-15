@@ -183,6 +183,17 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) {
+		if st, unsupported, ok := parseCloneDDL(q.Query); ok { // #1002, cloneddl.go
+			if unsupported != "" {
+				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+unsupported+
+					". Nothing was run.")
+				return
+			}
+			f.serveCloneDDL(w, r, q, insert, st)
+			return
+		}
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.refuseSnapshotQuery(w, r, q, insert) { // #1002, snapshots.go
 		return
 	}
@@ -209,6 +220,19 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if v.code != 0 {
 		f.serveQuery(w, r, q, insert)
 		return
+	}
+	if !txnRequest(r) { // #1249, scriptflow.go; after checkDDL, which refuses what runScript would
+		switch earlierQuery(q.Query) {
+		case scriptSplits:
+			f.runScript(w, r, q, insert)
+			return
+		case scriptKeepsTemp:
+			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a query before the "+
+				"last statement of a script with a TEMP table or function. The emulator does not raise such a statement's runtime "+
+				"error, which fails the script in BigQuery, and CloudBurrow cannot run the statements one at a time "+
+				"because a TEMP table or function lasts only for the request that made it. Nothing was run.")
+			return
+		}
 	}
 	if v.statements == 1 {
 		if _, ok := parseDML(q.Query); ok {

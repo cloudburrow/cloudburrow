@@ -156,8 +156,10 @@ func TestCreateSchemaNotCarriedOut(t *testing.T) {
 		{"CREATE SCHEMA fresh OPTIONS(description=CONCAT('a', 'b'))", "description"},
 		{"CREATE SCHEMA fresh OPTIONS(labels=[('k', 1)])", "labels"},
 		{"CREATE SCHEMA fresh OPTIONS(description=b'x')", "description"},
-		{"SELECT * FROM fresh.t; CREATE SCHEMA fresh", "name it"},
-		{"SELECT 1; RETURN; CREATE SCHEMA fresh", "RETURN"},
+		// A script whose earlier statement is a query is run statement by
+		// statement (#1249, earlierQuery), so these have DML first.
+		{"INSERT INTO fresh.t VALUES (1); CREATE SCHEMA fresh", "name it"},
+		{"INSERT INTO ds.t VALUES (1); RETURN; CREATE SCHEMA fresh", "RETURN"},
 		{"DROP SCHEMA taken CASCADE; CREATE SCHEMA taken", "DROP SCHEMA"},
 		{"CREATE SCHEMA fresh; DROP SCHEMA fresh; CREATE SCHEMA fresh", "DROP SCHEMA"},
 	} {

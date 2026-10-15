@@ -55,6 +55,8 @@ import (
 // keeps and tables.get answers (measured), as BigQuery's does for a clone,
 // a writable table (https://cloud.google.com/bigquery/docs/table-clones-intro).
 // SNAPSHOT and RESTORE (#1002) are carried out as snapshots.go describes.
+// The same through DDL, CREATE TABLE ... CLONE and CREATE SNAPSHOT TABLE,
+// is cloneddl.go's.
 // 501, and nothing is copied: a CLONE, SNAPSHOT or RESTORE of several
 // sources, a CLONE into a table that exists (BigQuery's documentation
 // implies a clone may overwrite one, "If the table clone overwrites an

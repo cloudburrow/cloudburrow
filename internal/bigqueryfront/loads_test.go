@@ -312,7 +312,7 @@ func TestCreateSchemaOfAnExistingDataset(t *testing.T) {
 		{"CREATE SCHEMA fresh", 200, ""},
 		{"CREATE SCHEMA other.taken", 200, ""},
 		{"DROP SCHEMA taken CASCADE; CREATE SCHEMA taken", 501, "notImplemented"}, // #951
-		{"SELECT 1; CREATE SCHEMA taken", 501, "notImplemented"},
+		{"DECLARE z INT64 DEFAULT 1; CREATE SCHEMA taken", 501, "notImplemented"},
 		{"CREATE SCHEMA fresh; CREATE SCHEMA fresh", 501, "notImplemented"},
 		{"CREATE SCHEMA fresh; CREATE SCHEMA IF NOT EXISTS fresh", 200, ""},
 		{"SELECT 'CREATE SCHEMA taken'", 200, ""},

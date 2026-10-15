@@ -126,6 +126,61 @@ func hasControlFlow(sql string) bool {
 	return false
 }
 
+// earlierQuery's verdicts on a script.
+const (
+	scriptAsIs      = iota // sent to the emulator as it is
+	scriptSplits           // carried out by the front, statement by statement (runScript)
+	scriptKeepsTemp        // 501: a TEMP table keeps it in one request
+)
+
+// earlierQuery is the verdict on sql, a script with no control flow, when a
+// statement before its last is a query (SELECT, WITH, a parenthesized
+// query) (#1249).
+//
+// The emulator reads the rows of a script's last statement only: measured
+// against the pinned image through the front, `INSERT INTO tx.t VALUES (5);
+// SELECT 1/0; INSERT INTO tx.t VALUES (6)` answered done and kept both
+// rows. (Its ASSERT does nothing at all, even ASSERT FALSE alone: #1253.)
+// BigQuery fails
+// the script at that statement, keeping what the statements before it did
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language).
+// So such a script is carried out by the front, as a script with control
+// flow is: each statement is a request of its own, whose error is seen, and
+// the script fails at the first that fails. A TEMP table lasts only for the
+// request that made it, so a script with one cannot be split: it is 501.
+// Any other script is sent on as it is.
+func earlierQuery(sql string) int {
+	upper := strings.ToUpper(sql)
+	if !strings.Contains(upper, "SELECT") {
+		return scriptAsIs
+	}
+	toks, ok := lex(sql)
+	if !ok {
+		return scriptAsIs
+	}
+	var stmts [][]token
+	for _, st := range splitStatements(toks) {
+		if len(st) > 0 && !(len(st) == 1 && st[0].punct(";")) {
+			stmts = append(stmts, st)
+		}
+	}
+	found := false
+	for _, st := range stmts[:max(len(stmts)-1, 0)] {
+		if st[0].is("SELECT") || st[0].is("WITH") || st[0].punct("(") {
+			found = true
+		}
+	}
+	if !found {
+		return scriptAsIs
+	}
+	for _, t := range toks {
+		if t.is("TEMP") || t.is("TEMPORARY") {
+			return scriptKeepsTemp
+		}
+	}
+	return scriptSplits
+}
+
 type scriptNodeKind int
 
 const (
@@ -475,6 +530,12 @@ type scriptRun struct {
 	txnOpen bool
 	// limit is the error a BigQuery limit failed the script with.
 	limit string
+	// plain: the script has no control flow, and is carried out here only
+	// so its earlier queries' errors are seen (earlierQuery, #1249). Its
+	// answer is then the one the emulator gave such a script: a DECLARE,
+	// SET or EXECUTE IMMEDIATE ... INTO after the last query leaves that
+	// query's rows the answer (#1037).
+	plain bool
 }
 
 // runScript carries out a script with control flow (above).
@@ -506,7 +567,8 @@ func (f front) runScript(w http.ResponseWriter, r *http.Request, q queryOptions,
 		writeError(w, v.code, v.reason, v.msg)
 		return
 	}
-	s := &scriptRun{f: f, r: r, q: q, sql: q.Query, scopes: []map[string]scriptVar{{}}, start: scriptNow()}
+	s := &scriptRun{f: f, r: r, q: q, sql: q.Query, scopes: []map[string]scriptVar{{}}, start: scriptNow(),
+		plain: !hasControlFlow(q.Query)}
 	flow := s.run(nodes)
 	if s.limit != "" {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: s.limit})
@@ -1006,13 +1068,18 @@ func (s *scriptRun) flush() *scriptFlow {
 	if s.pending == "" {
 		return nil
 	}
-	text := s.pending
+	text, dml := s.pending, s.pendingDML
 	s.pending, s.pendingDML = "", false
 	rec, flow := s.send(text)
 	if flow != nil {
 		return flow
 	}
 	s.last = rec
+	if s.plain && !dml {
+		// A query job is given its rows by running it again, should it
+		// stay the answer (plain).
+		s.lastQuery = text
+	}
 	return nil
 }
 
@@ -1345,6 +1412,9 @@ func (s *scriptRun) declare(toks []token) *scriptFlow {
 func (s *scriptRun) assigned() *scriptFlow {
 	if flow := s.flush(); flow != nil {
 		return flow
+	}
+	if s.plain {
+		return nil
 	}
 	s.last, s.lastQuery = nil, ""
 	return nil

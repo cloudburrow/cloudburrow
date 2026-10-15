@@ -100,7 +100,7 @@ func TestBigQueryCreateSchemaMakesTheDataset(t *testing.T) {
 	for what, sql := range map[string]string{
 		"an option the front does not apply":   "CREATE SCHEMA %s OPTIONS(default_table_expiration_days=1)",
 		"DEFAULT COLLATE":                      "CREATE SCHEMA %s DEFAULT COLLATE 'und:ci'",
-		"a dataset an earlier statement names": "SELECT * FROM %[1]s.t; CREATE SCHEMA %[1]s",
+		"a dataset an earlier statement names": "INSERT INTO %[1]s.t VALUES (1); CREATE SCHEMA %[1]s",
 	} {
 		ds := c.Dataset(prefix + "_refused")
 		sql = strings.ReplaceAll(strings.ReplaceAll(sql, "%[1]s", ds.DatasetID), "%s", ds.DatasetID)
