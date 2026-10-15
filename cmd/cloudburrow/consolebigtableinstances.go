@@ -148,13 +148,14 @@ func (p bigtableInstancesProvider) List(ctx context.Context, project string) (co
 	}
 	base.Total = len(base.Items)
 	base.Note = fmt.Sprintf("Instances are served by CloudBurrow's Bigtable front; clusters and nodes are stored, "+
-		"and every table is served by the one emulator. The Bigtable screen browses the tables of instance %q, "+
-		"which the emulator serves without it being created. Deleting an instance deletes its tables.", bigtableInstance)
+		"and every table is served by the one emulator. The Bigtable screen browses the tables of the instance its "+
+		"picker chooses: these, or %q, which the emulator serves without it being created. An instance's Tables tab "+
+		"links to its tables there. Deleting an instance deletes its tables.", bigtableInstance)
 	return base, nil
 }
 
-// Detail is an instance's page: its settings, and its Clusters and App
-// profiles tabs. The server adds the Permissions tab.
+// Detail is an instance's page: its settings, and its Clusters, App
+// profiles and Tables tabs. The server adds the Permissions tab.
 func (p bigtableInstancesProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
@@ -183,7 +184,43 @@ func (p bigtableInstancesProvider) Detail(ctx context.Context, project string, p
 	return console.Detail{Summary: summary, Sections: []console.Section{
 		{ID: "clusters", Label: "Clusters", Listing: clustersListing(path[0], clusters, cerr)},
 		{ID: "appprofiles", Label: "App profiles", Listing: p.profilesListing(ctx, c, path[0], clusters)},
+		{ID: "tables", Label: "Tables", Listing: p.tablesListing(ctx, project, path[0])},
 	}}, nil
+}
+
+// tablesListing is an instance's Tables tab: its tables, each a link to its
+// page on the Bigtable screen with the instance chosen there (#1360).
+func (p bigtableInstancesProvider) tablesListing(ctx context.Context, project, instance string) console.Listing {
+	list := console.Listing{Columns: []string{"Column families"}, NameColumn: "Table", Noun: "tables"}
+	admin, err := bigtable.NewAdminClient(ctx, project, instance, localOpts(p.endpoint)...)
+	if err != nil {
+		list.Unavailable = "cannot reach the Bigtable admin API: " + err.Error()
+		return list
+	}
+	defer admin.Close()
+	tables, err := admin.Tables(ctx)
+	if err != nil {
+		list.Unavailable = "listing tables: " + err.Error()
+		return list
+	}
+	sort.Strings(tables)
+	for _, t := range tables {
+		families := "—"
+		if info, err := admin.TableInfo(ctx, t); err == nil && len(info.FamilyInfos) > 0 {
+			names := make([]string, 0, len(info.FamilyInfos))
+			for _, f := range info.FamilyInfos {
+				names = append(names, f.Name)
+			}
+			sort.Strings(names)
+			families = strings.Join(names, ", ")
+		}
+		list.Items = append(list.Items, console.Resource{Name: t, Link: bigtableTablesHref(project, instance, t),
+			Fields: map[string]string{"Column families": families}})
+	}
+	list.Total = len(list.Items)
+	list.Note = fmt.Sprintf("Each table opens on the Bigtable screen, with instance %q chosen in its picker, "+
+		"where its rows, column families and actions are. Create table there makes one in this instance.", instance)
+	return list
 }
 
 func clustersListing(instance string, clusters []*bigtable.ClusterInfo, err error) console.Listing {

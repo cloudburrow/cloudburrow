@@ -303,6 +303,80 @@ let SERVICES = [];
 let DEFAULT_PROJECT = "";
 const capabilityOf = (id) => SERVICES.find((s) => s.id === id) || {};
 
+// --- scopes narrower than the project (#1360) ---------------------------
+//
+// A service whose screens address something inside the project — Bigtable's
+// tables live in an instance — names a query parameter (its capability's
+// scope), carried in the URL the way the project is. Every request made for
+// the service and every link within its screens keeps it, so a table's page,
+// its rows and its actions address the instance its list was read from.
+
+// scopeKeyOf is the service's scope parameter, or "" for one scoped by the
+// project alone.
+const scopeKeyOf = (service) => capabilityOf(service).scope || "";
+
+// carryScope copies the service's scope from the address onto url.
+function carryScope(url, service) {
+  const key = scopeKeyOf(service);
+  if (!key) return url;
+  const value = new URLSearchParams(location.search).get(key);
+  if (value && !url.searchParams.has(key)) url.searchParams.set(key, value);
+  return url;
+}
+
+// scopeServiceOfPath is the scoped service whose screens a console path is
+// on, or "".
+function scopeServiceOfPath(pathname) {
+  for (const s of SERVICES) {
+    if (!s.scope) continue;
+    const r = ROUTES.find((x) => x.service === s.id);
+    const base = r ? r.path : "/" + s.id;
+    if (pathname === base || pathname.startsWith(base + "/")) return s.id;
+  }
+  return "";
+}
+
+// scopedAPIPath adds the service's scope to an /api/<kind>/<service> request
+// made from that service's own screens, when the request does not name it. A
+// search, or another product's page reading the service, is not inside the
+// scope chosen there.
+function scopedAPIPath(path) {
+  if (typeof path !== "string" || !path.startsWith("/api/")) return path;
+  const url = new URL(path, location.origin);
+  const service = url.pathname.split("/")[3] || "";
+  if (!scopeKeyOf(service) || scopeServiceOfPath(location.pathname) !== service) return path;
+  carryScope(url, service);
+  return url.pathname + url.search;
+}
+
+// scopeSubtitle names the scope a scoped service's page is in, after its
+// project: " · instance archive".
+function scopeSubtitle(service) {
+  const key = scopeKeyOf(service);
+  const value = key ? new URLSearchParams(location.search).get(key) : "";
+  return value ? ` · ${key} ${value}` : "";
+}
+
+// scopePicker is a list screen's picker for its scope: choosing puts it in
+// the address (the default leaves it out) and redraws.
+function scopePicker(spec, reload) {
+  const id = `scope-${spec.key}`;
+  const select = el("select", { id, name: spec.key },
+    ...(spec.options || []).map((o) =>
+      el("option", { value: o.id, text: o.label || o.id, selected: o.id === spec.selected })));
+  select.addEventListener("change", () => {
+    const params = new URLSearchParams(location.search);
+    if (select.value && select.value !== spec.default) params.set(spec.key, select.value);
+    else params.delete(spec.key);
+    const qs = params.toString();
+    history.pushState(history.state, "", location.pathname + (qs ? `?${qs}` : ""));
+    reload();
+  });
+  return el("div", { class: "card server-filter scope-picker" },
+    el("label", { for: id, text: spec.label || spec.key }),
+    el("div", { class: "server-filter-row" }, select));
+}
+
 const el = (tag, attrs = {}, ...children) => {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -364,6 +438,7 @@ async function api(path, options = {}) {
     else outer.addEventListener("abort", onOuter, { once: true });
   }
 
+  path = scopedAPIPath(path);
   let res;
   try {
     res = await fetch(path, {
@@ -2423,6 +2498,7 @@ function detailHref(route, path) {
     location.origin);
   const project = new URLSearchParams(location.search).get("project");
   if (project) url.searchParams.set("project", project);
+  carryScope(url, route.service);
   return url.pathname + url.search;
 }
 
@@ -2437,6 +2513,7 @@ async function renderDetail(view, route, resourcePath) {
   const project = new URLSearchParams(location.search).get("project") || "";
   const back = new URL(route.path, location.origin);
   if (project) back.searchParams.set("project", project);
+  carryScope(back, route.service);
 
   // One crumb per level, built from the path rather than from two fixed
   // nodes. A database, a table and a column are three levels, and every one
@@ -2456,7 +2533,7 @@ async function renderDetail(view, route, resourcePath) {
     // button is a screen you are stuck in.
     el("nav", { class: "breadcrumb", "aria-label": "Breadcrumb" }, ...trail),
     el("h1", { text: name }),
-    el("p", { class: "subtitle", text: project ? `Project ${project}` : "All projects" }));
+    el("p", { class: "subtitle", text: (project ? `Project ${project}` : "All projects") + scopeSubtitle(route.service) }));
   const header = [crumb];
   // A provider-drawn trail, for a page whose path is not its hierarchy: an
   // object's crumbs are its bucket and folders (#790).
@@ -3575,6 +3652,7 @@ async function renderList(view, route) {
   // project's Cloud Storage service account over its HMAC keys (#792).
   header.push(...listingSummary(data));
   if (data.serverFilter) header.push(serverFilterBox(data.serverFilter, () => renderList(view, route)));
+  if (data.scope) header.push(scopePicker(data.scope, () => renderList(view, route)));
 
   // A screen that needs something from the user is not a broken screen. This
   // is rendered as a prompt rather than as an error, because a red failure
@@ -4690,6 +4768,7 @@ async function renderCreatePage(view, route) {
   const caps = capabilityOf(target.service);
   const back = new URL(target.path, location.origin);
   if (project) back.searchParams.set("project", project);
+  carryScope(back, target.service);
   const listHref = back.pathname + back.search;
 
   const header = [
@@ -5660,6 +5739,8 @@ function navigate(path) {
   const url = new URL(path, location.origin);
   const project = currentProject();
   if (project) url.searchParams.set("project", project);
+  const scoped = scopeServiceOfPath(url.pathname);
+  if (scoped && scopeServiceOfPath(location.pathname) === scoped) carryScope(url, scoped);
   history.pushState({}, "", url);
   // Focus lands on the main region first and the screen is drawn after, so a
   // screen that wants focus somewhere specific — a form's first field — is

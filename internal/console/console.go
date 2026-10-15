@@ -174,6 +174,9 @@ type Listing struct {
 	// drawn as headed cards above the table: the Cloud Storage Settings
 	// screen names the project's service account over its HMAC keys (#792).
 	Summary []PropertyGroup `json:"summary,omitempty"`
+	// Scope is the picker a Scoper's list screen draws above its rows: the
+	// Bigtable instance whose tables these are (#1360).
+	Scope *Scope `json:"scope,omitempty"`
 }
 
 // Provider reads live state for one service.
@@ -1090,7 +1093,7 @@ func (s *Server) Handler() http.Handler {
 
 	// The Host check runs first: sameOriginOnly compares Origin with Host,
 	// which proves nothing when both name a rebound attacker domain (#676).
-	return hostguard.Wrap(sameOriginOnly(noStore(mux)))
+	return hostguard.Wrap(sameOriginOnly(noStore(withScope(mux))))
 }
 
 func isAsset(path string) bool {
@@ -1201,7 +1204,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID(), "title": p.Title(),
 			"create": caps.Create, "delete": caps.Delete, "detail": caps.Detail,
 			"query": caps.Query, "edit": caps.Edit, "reveal": caps.Reveal,
-			"page": caps.Page,
+			"page": caps.Page, "scope": caps.Scope,
 		})
 	}
 	// The playground is advertised only when local AI is configured, so the
@@ -1392,6 +1395,9 @@ type capabilities struct {
 	// Page means a listing that reports more rows can be continued. Whether a
 	// particular listing can is said by that listing, with a cursor.
 	Page bool `json:"page,omitempty"`
+	// Scope is the query parameter a Scoper's screens carry on every request
+	// and link, empty for a service scoped by the project alone.
+	Scope string `json:"scope,omitempty"`
 }
 
 // QuerySpec is a query surface: either a statement box or a form.
@@ -1472,6 +1478,9 @@ func (s *Server) capabilitiesOf(p Provider) capabilities {
 	}
 	if _, ok := p.(Pager); ok {
 		c.Page = true
+	}
+	if sc, ok := p.(Scoper); ok {
+		c.Scope = sc.ScopeKey()
 	}
 	return c
 }
