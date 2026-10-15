@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,8 +37,9 @@ import (
 // records, so a project created in one is in the other. Only Projects is
 // served. Folders, Organizations, Liens and the tag services are not
 // registered at all, so the gRPC server answers them UNIMPLEMENTED; within
-// Projects, the IAM methods, MoveProject and UndeleteProject are
-// UNIMPLEMENTED too. v1, which gcloud and Terraform use, is not served.
+// Projects, the IAM methods and MoveProject are UNIMPLEMENTED too, each
+// saying why. A deleted project is kept for 30 days, and UndeleteProject
+// restores it.
 
 // ProjectsServer serves google.cloud.resourcemanager.v3.Projects.
 type ProjectsServer struct {
@@ -48,9 +50,17 @@ type ProjectsServer struct {
 // NewProjectsServer returns the gRPC service over reg.
 func NewProjectsServer(reg *Registry) *ProjectsServer { return &ProjectsServer{reg: reg} }
 
+// V3Name is a project's v3 resource name, "projects/{number}", as Google's
+// v3 reports it (#1211). The number is resource.ProjectNumber, the one v1's
+// projectNumber, the metadata server's numeric-project-id and the service
+// agents' emails carry. Requests may name a project either way.
+func V3Name(id string) string {
+	return "projects/" + strconv.FormatInt(projectNumber(id), 10)
+}
+
 func toProto(p Project) *rmpb.Project {
 	out := &rmpb.Project{
-		Name:        p.Name,
+		Name:        V3Name(p.ProjectID),
 		ProjectId:   p.ProjectID,
 		DisplayName: p.DisplayName,
 		Labels:      p.Labels,
@@ -69,13 +79,28 @@ func toProto(p Project) *rmpb.Project {
 	return out
 }
 
-// idFromName reads the project ID from "projects/{id}".
-func idFromName(name string) (string, error) {
+// idFromName reads the project ID from "projects/{id}" or
+// "projects/{number}". A project ID starts with a letter, so a name of digits
+// alone is a number, and it names the registered project whose number it is.
+func (s *ProjectsServer) idFromName(name string) (string, error) {
 	id, ok := strings.CutPrefix(name, "projects/")
 	if !ok || id == "" || strings.Contains(id, "/") {
-		return "", apierror.InvalidArgument("name %q must be projects/{project_id}", name)
+		return "", apierror.InvalidArgument("name %q must be projects/{project_id} or projects/{project_number}", name)
 	}
-	return id, nil
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return id, nil
+	}
+	projects, err := s.reg.List()
+	if err != nil {
+		return "", err
+	}
+	for _, p := range projects {
+		if projectNumber(p.ProjectID) == n {
+			return p.ProjectID, nil
+		}
+	}
+	return "", apierror.NotFound("project %s", name)
 }
 
 // doneOperation is a completed long-running operation carrying resp. Every
@@ -106,7 +131,7 @@ func checkParent(parent string) error {
 }
 
 func (s *ProjectsServer) GetProject(_ context.Context, req *rmpb.GetProjectRequest) (*rmpb.Project, error) {
-	id, err := idFromName(req.GetName())
+	id, err := s.idFromName(req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -135,7 +160,13 @@ func (s *ProjectsServer) SearchProjects(_ context.Context, req *rmpb.SearchProje
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	all, err := s.reg.List()
+	// A project pending deletion is found only by a query naming its state,
+	// as ListProjects returns one only with show_deleted (#1216).
+	list := s.reg.Active
+	if mentionsState(req.GetQuery()) {
+		list = s.reg.List
+	}
+	all, err := list()
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -158,6 +189,19 @@ func (s *ProjectsServer) SearchProjects(_ context.Context, req *rmpb.SearchProje
 		out.Projects = append(out.Projects, toProto(byID[id]))
 	}
 	return out, nil
+}
+
+// mentionsState reports whether a query or filter has a state term.
+func mentionsState(q string) bool {
+	for _, term := range strings.Fields(q) {
+		if i := strings.IndexAny(term, ":="); i > 0 {
+			switch strings.ToLower(term[:i]) {
+			case "state", "lifecyclestate":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // parseQuery compiles a SearchProjects query: space-separated terms, each
@@ -225,7 +269,7 @@ func (s *ProjectsServer) UpdateProject(_ context.Context, req *rmpb.UpdateProjec
 	if in == nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("project is required"))
 	}
-	id, err := idFromName(in.GetName())
+	id, err := s.idFromName(in.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -267,43 +311,56 @@ func applyMask(cur Project, in *rmpb.Project, mask *fieldmaskpb.FieldMask) (stri
 }
 
 func (s *ProjectsServer) DeleteProject(_ context.Context, req *rmpb.DeleteProjectRequest) (*longrunningpb.Operation, error) {
-	id, err := idFromName(req.GetName())
+	id, err := s.idFromName(req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	p, err := s.reg.Get(id)
+	// Kept in DELETE_REQUESTED for RetentionPeriod, as Google keeps it, so
+	// UndeleteProject can restore it (#1216).
+	p, err := s.reg.Delete(id)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	// Removed from the registry outright. Google keeps a deleted project in
-	// DELETE_REQUESTED for 30 days and allows undelete; there is nothing here
-	// to keep it for, so the response says DELETE_REQUESTED, which is what
-	// the API returns, and UndeleteProject is UNIMPLEMENTED.
-	if err := s.reg.Delete(id); err != nil {
-		return nil, apierror.Wrap(err)
-	}
-	p.State = StateDeleteRequested
 	return doneOperation("dp", id, toProto(p))
 }
 
-func (s *ProjectsServer) UndeleteProject(context.Context, *rmpb.UndeleteProjectRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("UndeleteProject: a deleted project is removed, not kept for 30 days"))
+// UndeleteProject restores a project deleted within RetentionPeriod. One
+// that is ACTIVE is FAILED_PRECONDITION; one purged is NOT_FOUND.
+func (s *ProjectsServer) UndeleteProject(_ context.Context, req *rmpb.UndeleteProjectRequest) (*longrunningpb.Operation, error) {
+	id, err := s.idFromName(req.GetName())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	p, err := s.reg.Undelete(id)
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	return doneOperation("up", id, toProto(p))
 }
 
+// MoveProject changes a project's parent, and the only parents are folders
+// and organizations, which CloudBurrow does not have (#298): every project
+// here is top-level, so there is nowhere to move one to.
 func (s *ProjectsServer) MoveProject(context.Context, *rmpb.MoveProjectRequest) (*longrunningpb.Operation, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("MoveProject: folders and organizations"))
+	return nil, apierror.Wrap(ErrNotImplemented("MoveProject: there are no folders or organizations to move a project to"))
 }
+
+// projectIAMRefusal is why a project's IAM methods stay UNIMPLEMENTED:
+// ADR-0006 adds policy storage to named resources only, and a project's
+// policy is the one Google's resources inherit, which nothing here does.
+const projectIAMRefusal = ": a project's IAM policy (ADR-0006 stores policies only on the resources it names, " +
+	"and project-level bindings, which Google's resources inherit, do not exist here)"
 
 func (s *ProjectsServer) GetIamPolicy(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("GetIamPolicy: IAM policies"))
+	return nil, apierror.Wrap(ErrNotImplemented("GetIamPolicy" + projectIAMRefusal))
 }
 
 func (s *ProjectsServer) SetIamPolicy(context.Context, *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("SetIamPolicy: IAM policies"))
+	return nil, apierror.Wrap(ErrNotImplemented("SetIamPolicy" + projectIAMRefusal))
 }
 
 func (s *ProjectsServer) TestIamPermissions(context.Context, *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("TestIamPermissions: IAM policies"))
+	return nil, apierror.Wrap(ErrNotImplemented("TestIamPermissions" + projectIAMRefusal))
 }
 
 // --- REST --------------------------------------------------------------
@@ -433,8 +490,8 @@ func (s *ProjectsServer) restDelete(w http.ResponseWriter, r *http.Request) erro
 	return writeProto(w, op)
 }
 
-// restVerb is POST /v3/projects/{project}:{verb}: IAM, move and undelete,
-// none of which is served.
+// restVerb is POST /v3/projects/{project}:{verb}: undelete, and IAM and
+// move, which are not served.
 func (s *ProjectsServer) restVerb(w http.ResponseWriter, r *http.Request) error {
 	raw, err := rest.PathValue(r, "project")
 	if err != nil {
@@ -443,11 +500,16 @@ func (s *ProjectsServer) restVerb(w http.ResponseWriter, r *http.Request) error 
 	_, verb, _ := strings.Cut(raw, ":")
 	switch verb {
 	case "getIamPolicy", "setIamPolicy", "testIamPermissions":
-		return ErrNotImplemented(verb + ": IAM policies")
+		return ErrNotImplemented(verb + projectIAMRefusal)
 	case "move":
-		return ErrNotImplemented("move: folders and organizations")
+		return ErrNotImplemented("move: there are no folders or organizations to move a project to")
 	case "undelete":
-		return ErrNotImplemented("undelete: a deleted project is removed, not kept for 30 days")
+		id, _, _ := strings.Cut(raw, ":")
+		op, err := s.UndeleteProject(r.Context(), &rmpb.UndeleteProjectRequest{Name: "projects/" + id})
+		if err != nil {
+			return err
+		}
+		return writeProto(w, op)
 	default:
 		return apierror.InvalidArgument("POST to a project requires a custom method")
 	}

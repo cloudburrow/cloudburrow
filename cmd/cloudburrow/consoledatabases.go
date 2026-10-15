@@ -1068,8 +1068,14 @@ func (p spannerProvider) Detail(ctx context.Context, project string, path []stri
 	case 1:
 		return p.instanceDetail(ctx, project, path[0])
 	case 2:
+		if isSpannerPartitionPath(path) {
+			return p.spannerPartitionsPage(ctx, project, path[0])
+		}
 		return p.databaseDetail(ctx, project, path[0], path[1])
 	case 3:
+		if isSpannerPartitionPath(path) {
+			return p.spannerPartitionDetail(ctx, project, path[0], path[2])
+		}
 		return p.spannerTableDetail(ctx, project, path[0], path[1], path[2])
 	}
 	return console.DeeperThan(3, path), nil
@@ -1131,6 +1137,22 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 	})
 	databases.Total = len(databases.Items)
 
+	partitions, operations, configs, configGroup := p.spannerInstanceSections(ctx, instAdmin, project, instanceID, inst.GetConfig())
+	groups := []console.PropertyGroup{{
+		Heading: "Instance",
+		Properties: []console.Property{
+			{Label: "Resource name", Value: inst.GetName()},
+			{Label: "Display name", Value: inst.GetDisplayName()},
+			{Label: "Configuration", Value: inst.GetConfig()},
+			{Label: "Node count", Value: fmt.Sprint(inst.GetNodeCount())},
+			{Label: "Processing units", Value: fmt.Sprint(inst.GetProcessingUnits())},
+			{Label: "State", Value: inst.GetState().String()},
+		},
+	}}
+	if configGroup != nil {
+		groups = append(groups, *configGroup)
+	}
+
 	return console.Detail{
 		Summary: []console.Property{
 			{Label: "State", Value: inst.GetState().String()},
@@ -1140,23 +1162,16 @@ func (p spannerProvider) instanceDetail(ctx context.Context, project, instanceID
 		},
 		Sections: []console.Section{
 			{ID: "databases", Label: "Databases", Listing: databases},
+			partitions,
+			operations,
 			{
 				ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
-				Groups: []console.PropertyGroup{{
-					Heading: "Instance",
-					Properties: []console.Property{
-						{Label: "Resource name", Value: inst.GetName()},
-						{Label: "Display name", Value: inst.GetDisplayName()},
-						{Label: "Configuration", Value: inst.GetConfig()},
-						{Label: "Node count", Value: fmt.Sprint(inst.GetNodeCount())},
-						{Label: "Processing units", Value: fmt.Sprint(inst.GetProcessingUnits())},
-						{Label: "State", Value: inst.GetState().String()},
-					},
-				}},
+				Groups: groups,
 				Note: "Read-only. The emulator accepts an instance's node count and " +
 					"does nothing with it: there is one process serving everything, " +
 					"so capacity is not a setting that has an effect here.",
 			},
+			configs,
 		},
 	}, nil
 }
@@ -1713,25 +1728,35 @@ func (p spannerProvider) DetailActions(_ context.Context, project string, path [
 	if project == "" {
 		return nil
 	}
+	if isSpannerPartitionPath(path) {
+		if len(path) == 3 {
+			return []console.Action{spannerDeletePartitionAction(true)}
+		}
+		return nil
+	}
 	switch len(path) {
 	case 1:
-		return []console.Action{{
+		return []console.Action{spannerCreatePartitionAction(), {
 			ID: "dropinstance", Label: "Delete instance", Destructive: true,
 		}}
 	case 2:
-		return []console.Action{{
+		return []console.Action{spannerDDLAction(path[0], path[1]), {
 			ID: "dropdatabase", Label: "Drop database", Destructive: true,
 		}}
 	}
 	return nil
 }
 
-func (p spannerProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
+func (p spannerProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	if project == "" {
 		return fmt.Errorf("choose a project first")
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
+
+	if handled, err := p.spannerAdminAct(ctx, project, path, action, values); handled {
+		return err
+	}
 
 	switch action {
 	case "dropdatabase":

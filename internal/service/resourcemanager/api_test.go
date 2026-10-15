@@ -3,6 +3,7 @@ package resourcemanager
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	grpcx "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 )
@@ -58,8 +60,17 @@ func TestProjectsLifecycleThroughTheOfficialClient(t *testing.T) {
 		t.Fatalf("CreateProject: %v", err)
 	}
 	p, err := op.Wait(ctx)
-	if err != nil || p.GetName() != "projects/api-made-1" || p.GetState() != rmpb.Project_ACTIVE {
-		t.Fatalf("created %v, %v", p, err)
+	// v3 names a project by its number, resource.ProjectNumber (#1211), and
+	// answers a request naming it either way.
+	number := fmt.Sprint(resource.ProjectNumber("api-made-1"))
+	if err != nil || p.GetName() != "projects/"+number || p.GetState() != rmpb.Project_ACTIVE {
+		t.Fatalf("created %v, %v; want the name projects/%s", p, err, number)
+	}
+	if g, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/" + number}); err != nil || g.GetProjectId() != "api-made-1" {
+		t.Errorf("GetProject(projects/%s) = %v, %v; want api-made-1", number, g, err)
+	}
+	if _, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/123"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetProject of a number no project has = %v, want NotFound", err)
 	}
 	if got, err := reg.Get("api-made-1"); err != nil || got.DisplayName != "API made" {
 		t.Errorf("the registry does not hold the API-created project: %+v %v", got, err)
@@ -115,11 +126,32 @@ func TestProjectsLifecycleThroughTheOfficialClient(t *testing.T) {
 	if dp, err := dop.Wait(ctx); err != nil || dp.GetState() != rmpb.Project_DELETE_REQUESTED {
 		t.Errorf("DeleteProject = %v, %v", dp, err)
 	}
-	if _, err := reg.Get("api-made-1"); err == nil {
-		t.Error("the deleted project is still in the registry")
+	// Kept in DELETE_REQUESTED for 30 days (#1216): read, not searched by
+	// default, found by a state query, and restored by UndeleteProject.
+	if p, err := reg.Get("api-made-1"); err != nil || p.State != StateDeleteRequested {
+		t.Errorf("registry after delete = %+v, %v; want DELETE_REQUESTED", p, err)
 	}
-	if _, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/api-made-1"}); status.Code(err) != codes.NotFound {
-		t.Errorf("GetProject after delete = %v, want NotFound", err)
+	if p, err := c.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/api-made-1"}); err != nil || p.GetState() != rmpb.Project_DELETE_REQUESTED {
+		t.Errorf("GetProject after delete = %v, %v; want DELETE_REQUESTED", p, err)
+	}
+	if p, err := c.SearchProjects(ctx, &rmpb.SearchProjectsRequest{Query: "id:api-made-1"}).Next(); err != iterator.Done {
+		t.Errorf("SearchProjects found a deleted project without a state term: %v, %v", p, err)
+	}
+	if p, err := c.SearchProjects(ctx, &rmpb.SearchProjectsRequest{Query: "id:api-made-1 state:DELETE_REQUESTED"}).Next(); err != nil || p.GetProjectId() != "api-made-1" {
+		t.Errorf("SearchProjects(state:DELETE_REQUESTED) = %v, %v", p, err)
+	}
+	undo, err := c.UndeleteProject(ctx, &rmpb.UndeleteProjectRequest{Name: "projects/api-made-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := undo.Wait(ctx); err != nil || p.GetState() != rmpb.Project_ACTIVE {
+		t.Errorf("UndeleteProject = %v, %v; want ACTIVE", p, err)
+	}
+	if _, err := c.UndeleteProject(ctx, &rmpb.UndeleteProjectRequest{Name: "projects/api-made-1"}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("UndeleteProject of an active project = %v, want FailedPrecondition", err)
+	}
+	if _, err := c.MoveProject(ctx, &rmpb.MoveProjectRequest{Name: "projects/api-made-1", DestinationParent: "folders/1"}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("MoveProject = %v, want Unimplemented", err)
 	}
 }
 

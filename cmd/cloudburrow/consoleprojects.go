@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
 
@@ -27,7 +29,7 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 	if err != nil {
 		return console.Listing{
 			NameColumn:  "ID",
-			Columns:     []string{"Name", "Created"},
+			Columns:     []string{"Name", "Number", "Created"},
 			Noun:        "projects",
 			Unavailable: err.Error(),
 		}, nil
@@ -44,6 +46,7 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 			Status: string(it.State),
 			Fields: map[string]string{
 				"Name":    it.DisplayName,
+				"Number":  projectNumberText(it.ProjectID),
 				"Created": created,
 			},
 		})
@@ -53,13 +56,21 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 		// The identifier is the ID, and the display name is a separate
 		// column: labelling both "Name" put the same header on two columns.
 		NameColumn: "ID",
-		Columns:    []string{"Name", "Created"},
+		Columns:    []string{"Name", "Number", "Created"},
 		Noun:       "projects",
 		Items:      out,
 		Total:      len(out),
-		Note: "Projects are a local registry. Deleting one removes the registration, " +
-			"not the resources created under it — those live in the services that own them.",
+		Note: "Projects are a local registry. Deleting one marks it DELETE_REQUESTED for 30 days, " +
+			"when Undelete project on its page restores it, and then removes the registration; " +
+			"never the resources created under it, which live in the services that own them.",
 	}, nil
+}
+
+// projectNumberText is a project's number, resource.ProjectNumber: the one
+// the metadata server, Resource Manager v1 and v3 and the service agents'
+// emails carry (#1211).
+func projectNumberText(id string) string {
+	return strconv.FormatInt(resource.ProjectNumber(id), 10)
 }
 
 // Detail implements console.Driller for one project.
@@ -87,7 +98,8 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 		Properties: []console.Property{
 			{Label: "Project ID", Value: project.ProjectID},
 			{Label: "Project name", Value: project.DisplayName},
-			{Label: "Resource name", Value: project.Name},
+			{Label: "Project number", Value: projectNumberText(project.ProjectID)},
+			{Label: "Resource name", Value: resourcemanager.V3Name(project.ProjectID)},
 			{Label: "State", Value: string(project.State)},
 			{Label: "Created", Value: created},
 		},
@@ -107,17 +119,20 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 			"Present: project identifiers, display names, labels, and the state " +
 			"every service uses to keep one project's resources apart from " +
 			"another's.\n\n" +
-			"Absent: organisations, folders, liens, IAM policies and billing. " +
-			"Each returns UNIMPLEMENTED rather than a plausible answer.\n\n" +
-			"Deleting this project removes the registration only. Resources " +
-			"created under the identifier live in the services that own them, " +
-			"and are not reached by a delete here.",
+			"Absent: organisations, folders (so a project cannot be moved), liens, " +
+			"IAM policies and billing. Each returns UNIMPLEMENTED rather than a " +
+			"plausible answer.\n\n" +
+			"Deleting this project marks it DELETE_REQUESTED for 30 days, as Google " +
+			"does, and Undelete project restores it until then. It changes the " +
+			"registration only: resources created under the identifier live in the " +
+			"services that own them, and are not reached by a delete here.",
 	}
 
 	return console.Detail{
 		Summary: []console.Property{
 			{Label: "Project ID", Value: project.ProjectID},
 			{Label: "Project name", Value: project.DisplayName},
+			{Label: "Project number", Value: projectNumberText(project.ProjectID)},
 			{Label: "State", Value: string(project.State)},
 			{Label: "Created", Value: created},
 		},
@@ -192,9 +207,37 @@ func (p projectsProvider) Create(ctx context.Context, project string, values map
 
 // Delete implements console.Deleter.
 func (p projectsProvider) Delete(ctx context.Context, project, name string) error {
-	return p.registry.Delete(name)
+	_, err := p.registry.Delete(name)
+	return err
 }
 
+// projectUndelete is the Undelete project action on a deleted project.
+const projectUndelete = "undelete"
+
+// DetailActions implements console.PathActor: Undelete project, on a project
+// pending deletion only (#1216).
+func (p projectsProvider) DetailActions(_ context.Context, _ string, path []string) []console.Action {
+	if len(path) != 1 {
+		return nil
+	}
+	project, err := p.registry.Get(path[0])
+	if err != nil || project.State != resourcemanager.StateDeleteRequested {
+		return nil
+	}
+	return []console.Action{{ID: projectUndelete, Label: "Undelete project"}}
+}
+
+// ActAt implements console.PathActor through the registry's Undelete, the
+// one UndeleteProject calls.
+func (p projectsProvider) ActAt(_ context.Context, _ string, path []string, action string, _ map[string]string) error {
+	if action != projectUndelete || len(path) != 1 {
+		return fmt.Errorf("unknown action %q", action)
+	}
+	_, err := p.registry.Undelete(path[0])
+	return err
+}
+
+var _ console.PathActor = projectsProvider{}
 var _ console.Creator = projectsProvider{}
 var _ console.Deleter = projectsProvider{}
 var _ console.Driller = projectsProvider{}
