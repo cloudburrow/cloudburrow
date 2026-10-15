@@ -4237,6 +4237,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetDatabase",
         "status": "Verified",
         "tests": [
+          "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
           "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
         ]
       },
@@ -4244,6 +4245,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetField",
         "status": "Verified",
         "tests": [
+          "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
           "test/compat/firestoreadmin_test.go:213 TestFirestoreAdminFields"
         ]
       },
@@ -4298,6 +4300,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListIndexes",
         "status": "Verified",
         "tests": [
+          "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
           "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
         ]
       },

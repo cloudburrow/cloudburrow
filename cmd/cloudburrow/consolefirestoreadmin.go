@@ -17,7 +17,8 @@ import (
 // project's databases, each with its composite indexes and field overrides,
 // read through the Firestore Admin API the Firestore pod's call front serves
 // (internal/firestoreadmin). Create database and Delete database go through
-// the same API.
+// the same API, and so do Edit database, Create index, Delete index and
+// the field override forms (#1343, consolefirestoreadminedit.go).
 //
 // Indexes and field overrides are stored and READY at once, and change
 // nothing about queries: the emulator answers any query without an index and
@@ -126,14 +127,14 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 		{Label: "Created", Value: db.CreateTime.AsTime().Format("2006-01-02 15:04:05 MST")},
 	}
 	return console.Detail{Summary: summary, Sections: []console.Section{
-		{ID: "indexes", Label: "Indexes", Listing: p.indexes(ctx, c, name)},
-		{ID: "fields", Label: "Field overrides", Listing: p.fields(ctx, c, name)},
+		{ID: "indexes", Label: "Indexes", Listing: p.indexes(ctx, c, name, path[0])},
+		{ID: "fields", Label: "Field overrides", Listing: p.fields(ctx, c, name, path[0])},
 	}}, nil
 }
 
 // indexes is a database's Indexes tab: its composite indexes, in every
 // collection group.
-func (p firestoreDatabasesProvider) indexes(ctx context.Context, c *admin.FirestoreAdminClient, db string) console.Listing {
+func (p firestoreDatabasesProvider) indexes(ctx context.Context, c *admin.FirestoreAdminClient, db, id string) console.Listing {
 	list := console.Listing{Columns: []string{"Collection group", "Fields", "Query scope", "State"}, NameColumn: "Index ID", Noun: "indexes"}
 	it := c.ListIndexes(ctx, &adminpb.ListIndexesRequest{Parent: db + "/collectionGroups/-"})
 	for {
@@ -151,7 +152,11 @@ func (p firestoreDatabasesProvider) indexes(ctx context.Context, c *admin.Firest
 			"Fields":           indexFields(x.Fields),
 			"Query scope":      enumWord(x.QueryScope, ""),
 			"State":            enumWord(x.State, ""),
-		}})
+		},
+			// Delete index (#1343), addressed by the collection group and ID.
+			Actions: indexActions(),
+			ActsOn:  []string{id, firestoreIndexesSegment, parts[len(parts)-3], parts[len(parts)-1]},
+		})
 	}
 	list.Total = len(list.Items)
 	list.Note = "Indexes are stored and READY at once, as the Admin API returns them, and change nothing about " +
@@ -178,7 +183,7 @@ func indexFields(fields []*adminpb.Index_IndexField) string {
 
 // fields is a database's Field overrides tab: the fields with index
 // settings or a TTL policy of their own.
-func (p firestoreDatabasesProvider) fields(ctx context.Context, c *admin.FirestoreAdminClient, db string) console.Listing {
+func (p firestoreDatabasesProvider) fields(ctx context.Context, c *admin.FirestoreAdminClient, db, id string) console.Listing {
 	list := console.Listing{Columns: []string{"Collection group", "Indexes", "TTL"}, NameColumn: "Field", Noun: "field overrides"}
 	seen := map[string]*adminpb.Field{}
 	for _, filter := range []string{"indexConfig.usesAncestorConfig:false", "ttlConfig:*"} {
@@ -220,7 +225,11 @@ func (p firestoreDatabasesProvider) fields(ctx context.Context, c *admin.Firesto
 		}
 		list.Items = append(list.Items, console.Resource{Name: parts[len(parts)-1], Fields: map[string]string{
 			"Collection group": parts[len(parts)-3], "Indexes": indexes, "TTL": ttl,
-		}})
+		},
+			// Edit field override and Delete field override (#1343).
+			Actions: fieldActions(f),
+			ActsOn:  []string{id, firestoreFieldsSegment, parts[len(parts)-3], parts[len(parts)-1]},
+		})
 	}
 	list.Total = len(list.Items)
 	list.Note = "Field overrides are stored as the Admin API returns them and change nothing: the emulator needs " +
