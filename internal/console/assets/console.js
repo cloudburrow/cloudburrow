@@ -7699,6 +7699,7 @@ const PLAYGROUND_HISTORY_LIMIT = 20;
 let PLAYGROUND_HISTORY = [];
 let PLAYGROUND_ABORT = null;
 let PLAYGROUND_STREAM = true;
+let PLAYGROUND_RAW = false;
 
 function stopGeneration() {
   if (PLAYGROUND_ABORT) { PLAYGROUND_ABORT.abort(); PLAYGROUND_ABORT = null; }
@@ -7755,6 +7756,14 @@ async function renderPlayground(view) {
   const streamLabel = el("label", { for: "pg-stream", title:
     "On: streamGenerateContent, shown as each chunk arrives. Off: generateContent, one answer." },
     stream, " Stream");
+  // Raw (#1284, #1285): the same body sent as RawPredict sends it, to
+  // :streamRawPredict (StreamRawPredict) or :rawPredict (RawPredict).
+  const raw = el("input", { type: "checkbox", id: "pg-raw" });
+  raw.checked = PLAYGROUND_RAW;
+  raw.addEventListener("change", () => { PLAYGROUND_RAW = raw.checked; });
+  const rawLabel = el("label", { for: "pg-raw", title:
+    "On: the body is sent as RawPredict sends it, to :streamRawPredict (Stream on) or :rawPredict (Stream off)." },
+    raw, " Raw");
   const timing = el("span", { class: "unavailable", text: "" });
   const output = el("pre", { class: "mono pg-output", id: "pg-output", "aria-live": "polite" });
   const historyBody = el("tbody");
@@ -7798,6 +7807,7 @@ async function renderPlayground(view) {
     cancel.disabled = false;
 
     const streaming = stream.checked;
+    const rawBody = raw.checked;
     const controller = new AbortController();
     PLAYGROUND_ABORT = controller;
     const started = performance.now();
@@ -7809,7 +7819,7 @@ async function renderPlayground(view) {
       const resp = await fetch("/api/ai/playground", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, stream: streaming }),
+        body: JSON.stringify({ prompt: text, stream: streaming, raw: rawBody }),
         signal: controller.signal,
       });
       if (!resp.ok) {
@@ -7870,7 +7880,7 @@ async function renderPlayground(view) {
       PLAYGROUND_ABORT = null;
 
       PLAYGROUND_HISTORY.unshift({
-        at: new Date().toLocaleTimeString(), prompt: text, method: streaming ? "Stream" : "Unary",
+        at: new Date().toLocaleTimeString(), prompt: text, method: (rawBody ? "Raw " : "") + (streaming ? "Stream" : "Unary"),
         ttft, total: `${Math.round(total)} ms`, ok, cancelled,
       });
       PLAYGROUND_HISTORY = PLAYGROUND_HISTORY.slice(0, PLAYGROUND_HISTORY_LIMIT);
@@ -7888,7 +7898,7 @@ async function renderPlayground(view) {
     refused,
     el("div", { class: "card" },
       prompt,
-      el("div", { class: "card-actions" }, send, cancel, streamLabel, timing),
+      el("div", { class: "card-actions" }, send, cancel, streamLabel, rawLabel, timing),
       output),
     el("div", { class: "card" },
       el("h2", { text: "This session" }),

@@ -15,7 +15,7 @@ Do not edit these files by hand.
 | [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 7 | 0 | 4 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 21 | 0 | 22 | 0 | 0 | 0 | 0 |
-| [Vertex AI PredictionService](vertexai.md) | 14 | 5 | 0 | 9 | 0 | 0 | 0 | 0 |
+| [Vertex AI PredictionService](vertexai.md) | 14 | 10 | 0 | 4 | 0 | 0 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 66 | 0 | 21 | 0 | 0 | 0 | 14 |
 | [Firestore](firestore.md) | 17 | 15 | 2 | 0 | 0 | 0 | 0 | 0 |

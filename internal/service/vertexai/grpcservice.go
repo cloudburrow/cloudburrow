@@ -24,8 +24,9 @@ import (
 // The official Go client, cloud.google.com/go/aiplatform's PredictionClient,
 // speaks gRPC only, so it could not reach the JSON routes above. This serves
 // the methods those routes implement — Predict, RawPredict (#1284), GenerateContent,
-// StreamGenerateContent (#1257) and EmbedContent (#1244) — on the same port, and every other method answers
-// UNIMPLEMENTED.
+// StreamGenerateContent (#1257) and EmbedContent (#1244) — on the same port,
+// with the streaming and direct predict methods (#1285, streampredict.go);
+// every other method answers UNIMPLEMENTED.
 //
 // Each method converts its request to the JSON the matching route reads and
 // calls the same function that route calls, so a request is validated,

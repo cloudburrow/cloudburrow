@@ -642,6 +642,21 @@ var parityRows = []parityRow{
 		Screen:  "/ai/playground", Offers: "Playground: Stream on (the default) sends streamGenerateContent, which StreamGenerateContent serves from the same code, and shows each chunk as it arrives (#1257)",
 		Tests: []string{"TestPlaygroundGeneratesThroughTheRealAPIPath", "TestPlaygroundStreamSwitchPicksTheMethod",
 			"TestStreamGenerateContentThroughThePredictionClient", "TestGRPCStreamGenerateContentEmitsOneMessagePerChunk"}},
+	// Streaming and direct predict (#1285) carry the same requests in another
+	// framing, served by the same code.
+	{Resource: "Vertex AI PredictionService: StreamRawPredict", Service: "vertexai",
+		Methods: []string{"PredictionService/StreamRawPredict"},
+		Screen:  "/ai/playground", Offers: "Playground: Raw with Stream on sends the body as :streamRawPredict, which StreamRawPredict serves from the same code, and shows each chunk as it arrives; Raw with Stream off sends :rawPredict (#1284, #1285)",
+		Tests: []string{"TestPlaygroundStreamSwitchPicksTheMethod", "TestStreamingPredictOnTheGenerationModel",
+			"TestGRPCStreamRawPredictStreamsGeneration", "TestStreamRawPredictREST"}},
+	{Resource: "Vertex AI PredictionService: tensor predict", Service: "vertexai",
+		Methods: []string{"PredictionService/DirectPredict", "PredictionService/ServerStreamingPredict",
+			"PredictionService/StreamingPredict", "PredictionService/StreamDirectPredict"},
+		Screen: "/ai/playground", Offers: "Playground sends the prompt these methods carry as the Model Garden text instance, " +
+			"and Embeddings the text-embedding instance, to the same local models through the same code; the tensor " +
+			"methods are that request in Tensor form (#1285)",
+		Tests: []string{"TestStreamingPredictOnTheGenerationModel", "TestStreamingPredictOnTheEmbeddingModel",
+			"TestGRPCServerStreamingPredictStreamsGeneration", "TestGRPCDirectPredictEmbedsLikePredict"}},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

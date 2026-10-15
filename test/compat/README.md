@@ -100,7 +100,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_BIGQUERY`, `CLOUDBURROW_TEST_BIGQUERY_STORAGE`, `CLOUDBURROW_TEST_BIGQUERY_PROJECT` | `CLOUDBURROW_BIGQUERY_ENDPOINT`, `CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT`, `GOOGLE_CLOUD_PROJECT` | BigQuery, whose emulator serves the instance's one project |
 | `CLOUDBURROW_TEST_LOCALAI` | the `local AI:` line of `up.log` | the generation tests; only with `--local-ai-model` |
 | `CLOUDBURROW_TEST_PREDICTION` | the `local AI:` line of `up.log` | `TestPredictionClientReachesACustomEndpoint`; any instance with Cloud Run, which starts the local AI endpoint for PredictionService (#1193) |
-| `CLOUDBURROW_TEST_EMBEDDINGS` | the `local AI:` line of `up.log` | `TestEmbeddingGemmaThroughTheOfficialSDK`, `TestEmbeddingGemmaThroughThePredictionClient`, `TestEmbedContentThroughThePredictionClient` and `TestRawPredictOnTheEmbeddingModel`; only from a `make build-onnx` binary started with `--local-ai-embeddings` and `ONNXRUNTIME_LIB` set (#41) |
+| `CLOUDBURROW_TEST_EMBEDDINGS` | the `local AI:` line of `up.log` | `TestEmbeddingGemmaThroughTheOfficialSDK`, `TestEmbeddingGemmaThroughThePredictionClient`, `TestEmbedContentThroughThePredictionClient`, `TestRawPredictOnTheEmbeddingModel` and `TestStreamingPredictOnTheEmbeddingModel`; only from a `make build-onnx` binary started with `--local-ai-embeddings` and `ONNXRUNTIME_LIB` set (#41) |
 | `CLOUDBURROW_TEST_GCLOUD` | `--gcloud`, else `gcloud` on PATH | the gcloud and gsutil tests |
 | `CLOUDBURROW_TEST_TOFU` | `--tofu`, else `tofu` on PATH | the `TestTofu*` tests |
 

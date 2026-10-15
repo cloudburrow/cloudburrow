@@ -170,6 +170,10 @@ type playgroundRequest struct {
 	// :streamGenerateContent, as StreamGenerateContent streams it, and false
 	// relays the unary :generateContent, as GenerateContent answers (#1257).
 	Stream *bool `json:"stream,omitempty"`
+	// Raw sends the same body as RawPredict on the publisher model: true
+	// relays :streamRawPredict (StreamRawPredict, #1285) when streaming and
+	// :rawPredict (RawPredict, #1284) otherwise.
+	Raw bool `json:"raw,omitempty"`
 }
 
 // maxRelayBytes bounds a relayed unary answer or refusal.
@@ -215,7 +219,12 @@ func (s *Server) handlePlaygroundGenerate(w http.ResponseWriter, r *http.Request
 
 	stream := body.Stream == nil || *body.Stream
 	target := p.generatePath("streamGenerateContent") + "?alt=sse"
-	if !stream {
+	switch {
+	case body.Raw && stream:
+		target = p.generatePath("streamRawPredict")
+	case body.Raw:
+		target = p.generatePath("rawPredict")
+	case !stream:
 		target = p.generatePath("generateContent")
 	}
 	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
