@@ -49,6 +49,14 @@ type Spec struct {
 	// server here does not change.
 	Settings        map[string]any `json:"settings,omitempty"`
 	SettingsVersion int            `json:"settingsVersion"`
+	// MasterInstanceName is a read replica's primary (#1330); MasterUp is
+	// whether it is a server `up` runs. ReplicationPassword is the
+	// primary's replication user's, never answered.
+	MasterInstanceName  string `json:"masterInstanceName,omitempty"`
+	MasterUp            bool   `json:"masterUp,omitempty"`
+	ReplicationPassword string `json:"replicationPassword,omitempty"`
+	// ReplicationStopped is set by stopReplica.
+	ReplicationStopped bool `json:"replicationStopped,omitempty"`
 }
 
 // MySQL reports whether the spec is a MySQL instance.
@@ -219,6 +227,8 @@ type instanceBody struct {
 	DatabaseVersion      string           `json:"databaseVersion"`
 	RootPassword         string           `json:"rootPassword"`
 	MasterInstanceName   string           `json:"masterInstanceName"`
+	InstanceType         string           `json:"instanceType"`
+	Region               string           `json:"region"`
 	ReplicaConfiguration *json.RawMessage `json:"replicaConfiguration"`
 	FailoverReplica      *json.RawMessage `json:"failoverReplica"`
 	Settings             *struct {
@@ -238,8 +248,8 @@ type instanceBody struct {
 }
 
 func (b instanceBody) unsupported() error {
-	if b.MasterInstanceName != "" || b.ReplicaConfiguration != nil || b.FailoverReplica != nil {
-		return unimplemented("read replicas and failover replicas", "a replica would be a second server replicating from the first, which CloudBurrow does not run")
+	if b.FailoverReplica != nil {
+		return unimplemented("failover replicas", "high availability needs a standby server and failover, which CloudBurrow does not run")
 	}
 	if b.Settings != nil {
 		if b.Settings.AvailabilityType == "REGIONAL" {
@@ -368,10 +378,14 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: instance name %q must be lowercase letters, digits and hyphens, "+
 			"start with a letter, not end with a hyphen, and be at most %d characters in CloudBurrow.", b.Name, maxInstanceName)
 	}
-	if b.DatabaseVersion == "" {
+	replica := b.MasterInstanceName != ""
+	if !replica && b.ReplicaConfiguration != nil {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: replicaConfiguration needs masterInstanceName.")
+	}
+	if b.DatabaseVersion == "" && !replica {
 		return nil, Errorf(http.StatusBadRequest, "Missing parameter: databaseVersion.")
 	}
-	if !SupportedVersions[b.DatabaseVersion] {
+	if b.DatabaseVersion != "" && !SupportedVersions[b.DatabaseVersion] {
 		if strings.HasPrefix(b.DatabaseVersion, "POSTGRES_") || strings.HasPrefix(b.DatabaseVersion, "MYSQL_") {
 			return nil, unimplemented("databaseVersion "+b.DatabaseVersion,
 				"a created instance runs the image `up` runs for its engine, PostgreSQL 17 (POSTGRES_17) or MySQL 8.4 (MYSQL_8_4)")
@@ -384,7 +398,18 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	if err := b.unsupported(); err != nil {
 		return nil, err
 	}
-	if b.Settings == nil || b.Settings.Tier == "" {
+	spec := Spec{Name: b.Name, Project: project, DatabaseVersion: b.DatabaseVersion, RootPassword: b.RootPassword,
+		CreateTime: time.Now().UTC().Format(time.RFC3339Nano), SettingsVersion: 1, AvailabilityType: "ZONAL"}
+	b.apply(&spec, false)
+	if replica {
+		if s.engine(b.Name) != nil {
+			return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
+		}
+		if err := s.prepareReplica(r.Context(), project, b, &spec); err != nil {
+			return nil, err
+		}
+		b.DatabaseVersion = spec.DatabaseVersion
+	} else if b.Settings == nil || b.Settings.Tier == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid request since instance settings are missing tier.")
 	}
 	if !s.engineServed(b.DatabaseVersion) {
@@ -395,9 +420,6 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		return nil, Errorf(http.StatusPreconditionFailed, "Invalid request: a %s instance runs the image of --services %s, "+
 			"which this instance was not started with; run `cloudburrow up --services ...,%s`.", b.DatabaseVersion, svc, svc)
 	}
-	spec := Spec{Name: b.Name, Project: project, DatabaseVersion: b.DatabaseVersion, RootPassword: b.RootPassword,
-		CreateTime: time.Now().UTC().Format(time.RFC3339Nano), SettingsVersion: 1, AvailabilityType: "ZONAL"}
-	b.apply(&spec, false)
 	if !spec.MySQL() {
 		// PostgreSQL's postgres user trusts every connection, as the server
 		// `up` runs does (docs/cloudsql.md): no password is kept.
@@ -528,6 +550,10 @@ func (s *Server) deleteInstance(base, project, name string) (any, error) {
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress.")
 	}
+	if rs := s.replicaNamesLocked(project, name); len(rs) > 0 {
+		s.emu.Unlock()
+		return nil, Errorf(http.StatusBadRequest, "The instance has read replicas (%s). Delete or promote the replicas first.", strings.Join(rs, ", "))
+	}
 	c.state = "PENDING_DELETE"
 	s.emu.Unlock()
 	op := s.pending(base, project, name, "DELETE")
@@ -618,6 +644,13 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	st["dataDiskSizeGb"] = "10"
 	st["dataDiskType"] = "PD_SSD"
 	st["replicationType"] = "SYNCHRONOUS"
+	if spec.MasterInstanceName != "" {
+		in["instanceType"] = "READ_REPLICA_INSTANCE"
+		in["masterInstanceName"] = spec.Project + ":" + spec.MasterInstanceName
+		in["replicaConfiguration"] = map[string]any{"kind": "sql#replicaConfiguration", "failoverTarget": false}
+		st["replicationType"] = "ASYNCHRONOUS"
+		st["databaseReplicationEnabled"] = !spec.ReplicationStopped
+	}
 	for k, v := range spec.Settings {
 		switch k {
 		case "kind", "settingsVersion", "tier", "userLabels", "databaseFlags", "deletionProtectionEnabled",

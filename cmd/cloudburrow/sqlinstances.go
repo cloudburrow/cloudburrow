@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"path/filepath"
 	"strings"
@@ -96,8 +97,24 @@ func (p *sqlProvisioner) Engine(spec sqladmin.Spec) sqladmin.Engine {
 		return &sqladmin.MySQL{Name: spec.Name, Version: spec.DatabaseVersion,
 			RootPassword: spec.RootPassword, HostAddr: p.hostAddr(spec.Name)}
 	}
+	user := "postgres"
+	if spec.MasterUp {
+		// A replica of `up`'s server has its data, and its superuser.
+		user = components.CloudSQLUser
+	}
 	return &sqladmin.Postgres{Name: spec.Name, Version: spec.DatabaseVersion,
-		User: "postgres", Database: "postgres", HostAddr: p.hostAddr(spec.Name)}
+		User: user, Database: user, HostAddr: p.hostAddr(spec.Name)}
+}
+
+// primaryHost is the Service a replica's server replicates from.
+func primaryHost(spec sqladmin.Spec) string {
+	switch {
+	case !spec.MasterUp:
+		return components.SQLInstancePrefix + spec.MasterInstanceName
+	case spec.MySQL():
+		return string(config.ServiceCloudSQLMySQL)
+	}
+	return string(config.ServiceCloudSQL)
 }
 
 func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
@@ -105,8 +122,31 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 	for _, f := range spec.Flags {
 		flags = append(flags, components.SQLInstanceFlag{Name: f.Name, Value: f.Value})
 	}
-	return components.CloudSQLInstanceBackend(spec.Name, spec.MySQL(), p.persistent, spec.RootPassword, flags)
+	b := components.CloudSQLInstanceBackend(spec.Name, spec.MySQL(), p.persistent, spec.RootPassword, flags)
+	if spec.MasterInstanceName != "" {
+		b = components.CloudSQLReplicaBackend(b, spec.MySQL(), components.SQLReplicaSource{
+			Host: primaryHost(spec), Password: spec.ReplicationPassword, ServerID: 2 + crc32.ChecksumIEEE([]byte(spec.Name))%1000000})
+	}
+	return b
 }
+
+// mysqlReplicaSetup gives a MySQL replica its primary's databases, with
+// the primary's GTIDs as purged, and starts GTID replication from it, once:
+// a replica that has a source already is left as it is.
+const mysqlReplicaSetup = `set -e
+export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"
+if [ -n "$(mysql -uroot -N -e 'SHOW REPLICA STATUS')" ]; then exit 0; fi
+src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" -h "$CLOUDSQL_PRIMARY_HOST" -u ` + components.SQLReplicaUser + `; }
+dbs=$(src mysql -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
+mysql -uroot -e 'RESET BINARY LOGS AND GTIDS'
+if [ -n "$dbs" ]; then
+  src mysqldump --single-transaction --set-gtid-purged=ON --routines --triggers --events --databases $dbs | mysql -uroot
+else
+  mysql -uroot -e "SET GLOBAL gtid_purged = '$(src mysql -N -e 'SELECT @@GLOBAL.gtid_executed')'"
+fi
+mysql -uroot -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRIMARY_HOST', SOURCE_PORT = 3306, SOURCE_USER = '` +
+	components.SQLReplicaUser + `', SOURCE_PASSWORD = '$CLOUDSQL_REPLICATION_PASSWORD', SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1; START REPLICA; SET PERSIST super_read_only = ON"
+`
 
 func (p *sqlProvisioner) rollout(ctx context.Context, name string) error {
 	_, err := p.inst.Kubectl(ctx, "-n", p.inst.Namespace, "rollout", "status",
@@ -141,6 +181,12 @@ func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
 	}
 	if err := p.rollout(ctx, spec.Name); err != nil {
 		return err
+	}
+	if spec.MasterInstanceName != "" && spec.MySQL() {
+		var out strings.Builder
+		if err := podExec(p.cfg, components.SQLInstancePrefix+spec.Name)(ctx, nil, &out, "sh", "-c", mysqlReplicaSetup); err != nil {
+			return fmt.Errorf("start replication of %s from %s: %w", spec.Name, spec.MasterInstanceName, err)
+		}
 	}
 	f := p.forwarder(spec)
 	p.mu.Lock()

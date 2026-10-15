@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 )
@@ -498,4 +499,65 @@ func CloudSQLInstanceBackend(name string, mysql, persistent bool, rootPassword s
 	}
 	b.Name = SQLInstancePrefix + name
 	return b
+}
+
+// SQLReplicaSource is the primary a read replica replicates from: its
+// Service in the namespace and the password of its replication user,
+// cloudsqlreplica, as Cloud SQL names it.
+type SQLReplicaSource struct {
+	Host     string
+	Password string
+	// ServerID is the replica's MySQL server_id, which must differ from
+	// its primary's.
+	ServerID uint32
+}
+
+// SQLReplicaUser is the replication user a replica connects to its
+// primary as.
+const SQLReplicaUser = "cloudsqlreplica"
+
+// CloudSQLReplicaBackend makes b, a created instance's server, a read
+// replica of src (#1330). A PostgreSQL replica's data directory is a
+// pg_basebackup of the primary, taken once, written with -R so the server
+// starts as a hot standby streaming from it. A MySQL replica runs with
+// GTIDs and read_only; it is given the primary's data and its replication
+// source once it serves (cmd/cloudburrow's provisioner), as MySQL's own
+// GTID replication setup does.
+func CloudSQLReplicaBackend(b Backend, mysql bool, src SQLReplicaSource) Backend {
+	b.Env = copyEnv(b.Env)
+	b.Env["CLOUDSQL_REPLICATION_PASSWORD"] = src.Password
+	b.Env["CLOUDSQL_PRIMARY_HOST"] = src.Host
+	if mysql {
+		b.Args = append(append([]string{}, b.Args...), fmt.Sprintf("--server-id=%d", src.ServerID),
+			"--gtid-mode=ON", "--enforce-gtid-consistency=ON", "--read-only=ON")
+		return b
+	}
+	args := b.Args
+	if len(args) == 0 {
+		args = []string{"postgres"}
+	}
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	b.Command = []string{"sh", "-c", `set -e
+if [ ! -s "$PGDATA/PG_VERSION" ]; then
+  mkdir -p "$PGDATA" && chown -R postgres:postgres "$(dirname "$PGDATA")" && chmod 700 "$PGDATA"
+  asuser=$(command -v su-exec || command -v gosu)
+  until PGPASSWORD="$CLOUDSQL_REPLICATION_PASSWORD" "$asuser" postgres pg_basebackup -h "$CLOUDSQL_PRIMARY_HOST" -p ` +
+		fmt.Sprint(CloudSQLPort) + ` -U ` + SQLReplicaUser + ` -D "$PGDATA" -R -X stream -c fast; do
+    echo "waiting for the primary $CLOUDSQL_PRIMARY_HOST"; rm -rf "$PGDATA"/* ; sleep 2
+  done
+fi
+exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+	b.Args = nil
+	return b
+}
+
+func copyEnv(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m)+2)
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }

@@ -101,7 +101,8 @@ func TestInstanceWritesThroughTheGoClient(t *testing.T) {
 	for _, bad := range []*sqladmin.DatabaseInstance{
 		{Name: "xy", DatabaseVersion: "POSTGRES_15", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
 		{Name: "xy", DatabaseVersion: "SQLSERVER_2019_STANDARD", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
-		{Name: "xy", DatabaseVersion: "POSTGRES_17", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}, MasterInstanceName: "pg"},
+		{Name: "xy", DatabaseVersion: "POSTGRES_17", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}, MasterInstanceName: "pg",
+			ReplicaConfiguration: &sqladmin.ReplicaConfiguration{FailoverTarget: true}},
 		{Name: "xy", DatabaseVersion: "POSTGRES_17", Settings: &sqladmin.Settings{Tier: "t",
 			DatabaseFlags: []*sqladmin.DatabaseFlags{{Name: "cloudsql.iam_authentication", Value: "on"}}}},
 	} {
