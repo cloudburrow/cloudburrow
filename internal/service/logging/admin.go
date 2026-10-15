@@ -78,6 +78,7 @@ type Admin struct {
 	mu  sync.Mutex
 	db  store.Store
 	now func() time.Time
+	ops int // operations answered, for unique names (#1292)
 }
 
 // NewAdmin returns the admin services over db.

@@ -1613,8 +1613,8 @@
     "Key": "logging",
     "Title": "Cloud Logging",
     "counts": {
-      "Unimplemented": 11,
-      "Verified": 32
+      "Unimplemented": 1,
+      "Verified": 42
     },
     "rows": [
       {
@@ -1631,8 +1631,10 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/CreateBucketAsync",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/CreateExclusion",
@@ -1644,8 +1646,10 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/CreateLink",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/CreateSink",
@@ -1679,8 +1683,10 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/DeleteLink",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/DeleteSink",
@@ -1706,8 +1712,10 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetCmekSettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetExclusion",
@@ -1719,13 +1727,17 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetLink",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetSettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetSink",
@@ -1758,8 +1770,10 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/ListLinks",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/ListSinks",
@@ -1791,13 +1805,17 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UpdateBucketAsync",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UpdateCmekSettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UpdateExclusion",
@@ -1809,8 +1827,10 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UpdateSettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UpdateSink",
