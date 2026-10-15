@@ -4522,7 +4522,7 @@
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
-          "test/compat/bigquerysilent_test.go:501 TestBigQueryTableUpdateAddsColumns",
+          "test/compat/bigquerysilent_test.go:505 TestBigQueryTableUpdateAddsColumns",
           "test/compat/consolebigquerywrites_test.go:190 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
@@ -4545,7 +4545,7 @@
         "method": "bigquery.tables.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerysilent_test.go:501 TestBigQueryTableUpdateAddsColumns"
+          "test/compat/bigquerysilent_test.go:505 TestBigQueryTableUpdateAddsColumns"
         ]
       }
     ]
