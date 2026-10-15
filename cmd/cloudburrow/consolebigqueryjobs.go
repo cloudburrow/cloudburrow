@@ -381,11 +381,37 @@ func bigqueryCopyFields() []console.Field {
 		{Name: "tableId", Label: "Destination table", Type: "text", Required: true, Pattern: bigqueryTableIDPattern},
 		{Name: "writeDisposition", Label: "If the destination exists", Type: "select", Options: bigqueryCopyWrites,
 			Help: "WRITE_EMPTY refuses a destination that has rows."},
+		{Name: "moreSources", Label: "More source tables", Type: "textarea",
+			Help: "Optional: dataset.table, one per line, copied with this one into the destination (a multi-source copy). Every source must have the same schema."},
 	}
 }
 
-// copyJob copies datasetID.tableID to the destination the form names and
-// waits for the job.
+// copySources reads Copy table's More source tables: dataset.table, one per
+// line, each named once and none the destination.
+func copySources(raw string) ([][2]string, error) {
+	var out [][2]string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		ds, tbl, ok := strings.Cut(line, ".")
+		if !ok || ds == "" || tbl == "" || strings.Contains(tbl, ".") {
+			return nil, fmt.Errorf("a source table is dataset.table, not %q", line)
+		}
+		if seen[line] {
+			return nil, fmt.Errorf("%s is named twice", line)
+		}
+		seen[line] = true
+		out = append(out, [2]string{ds, tbl})
+	}
+	return out, nil
+}
+
+// copyJob copies datasetID.tableID, and the More source tables with it (one
+// copy job with several sourceTables, which the front appends in order), to
+// the destination the form names and waits for the job.
 func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, tableID string, values map[string]string) (*console.Listing, error) {
 	dstDataset, dstTable := strings.TrimSpace(values["datasetId"]), strings.TrimSpace(values["tableId"])
 	if dstDataset == "" || dstTable == "" {
@@ -401,6 +427,18 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 	if !slices.Contains(bigqueryCopyWrites, write) {
 		return nil, fmt.Errorf("the write preference is WRITE_EMPTY, WRITE_TRUNCATE or WRITE_APPEND, not %q", write)
 	}
+	more, err := copySources(values["moreSources"])
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range more {
+		switch {
+		case s == [2]string{datasetID, tableID}:
+			return nil, fmt.Errorf("%s.%s is this table, already a source", datasetID, tableID)
+		case s == [2]string{dstDataset, dstTable}:
+			return nil, errors.New("a source is the destination")
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, bigqueryJobTimeout)
 	defer cancel()
 	c, err := p.client(ctx)
@@ -408,7 +446,11 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 		return nil, err
 	}
 	defer c.Close()
-	copier := c.Dataset(dstDataset).Table(dstTable).CopierFrom(c.Dataset(datasetID).Table(tableID))
+	sources := []*bigquery.Table{c.Dataset(datasetID).Table(tableID)}
+	for _, s := range more {
+		sources = append(sources, c.Dataset(s[0]).Table(s[1]))
+	}
+	copier := c.Dataset(dstDataset).Table(dstTable).CopierFrom(sources...)
 	copier.WriteDisposition = bigquery.TableWriteDisposition(write)
 	job, err := copier.Run(ctx)
 	if err != nil {

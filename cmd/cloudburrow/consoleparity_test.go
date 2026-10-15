@@ -366,14 +366,22 @@ var parityRows = []parityRow{
 			"TestBigQueryWriteReportSendsJobsQuery", "TestBigQueryReadWriteEditorThroughTheForms"}},
 	{Resource: "BigQuery load and export jobs", Service: "bigquery",
 		Methods:  []string{"bigquery.jobs.insert"},
-		Provider: "bigquery", Offers: "Load from Cloud Storage on a dataset's and a table's page (gs:// URIs; CSV, JSON or Parquet; write preference; schema or auto-detect; the CSV options the front serves) and Export to Cloud Storage on a table's page (one URI; CSV, JSON or Avro; GZIP, DEFLATE or SNAPPY; delimiter; header), each answered with its job, linked to Job history, and refused in the API's words (#993); Copy table on a table's page (a copy job to a destination dataset and table, with a write preference, answered with its job, #782); Load from a file on the same pages, the same options with a file chosen in the browser, streamed to the front as a multipart or resumable upload under the console's upload limit (#999)",
-		Tests: []string{"TestConsoleBigQueryLoadExportAndJobHistory", "TestBigQueryLoadFormBecomesTheLoadsSource", "TestBigQueryCopyTableFormRunsACopyJob", "TestBigQueryLoadExportAndJobHistoryThroughTheForms",
+		Provider: "bigquery", Offers: "Load from Cloud Storage on a dataset's and a table's page (gs:// URIs; CSV, JSON or Parquet; write preference; schema or auto-detect; the CSV options the front serves) and Export to Cloud Storage on a table's page (one URI; CSV, JSON or Avro; GZIP, DEFLATE or SNAPPY; delimiter; header), each answered with its job, linked to Job history, and refused in the API's words (#993); Copy table on a table's page (a copy job to a destination dataset and table, with a write preference, and More source tables for a multi-source copy, answered with its job, #782); Load from a file on the same pages, the same options with a file chosen in the browser, streamed to the front as a multipart or resumable upload under the console's upload limit (#999)",
+		Tests: []string{"TestConsoleBigQueryLoadExportAndJobHistory", "TestBigQueryLoadFormBecomesTheLoadsSource", "TestBigQueryCopyTableFormRunsACopyJob", "TestBigQueryCopyTableSendsEveryMoreSource", "TestConsoleBigQueryCopyTablesAndAvroExport", "TestBigQueryCopyTableAndAvroExportThroughTheForms", "TestBigQueryLoadExportAndJobHistoryThroughTheForms",
 			"TestConsoleBigQueryLoadFromAFile", "TestBigQueryLoadFromAFileSendsTheFileAsTheLoadsData", "TestActionUploadStreamsTheFileToAnOfferedAction", "TestBigQueryLoadFromAFileThroughTheForm"}},
 	{Resource: "BigQuery job history", Service: "bigquery",
 		Methods:  []string{"bigquery.jobs.get", "bigquery.jobs.list", "bigquery.jobs.cancel", "bigquery.jobs.delete"},
 		Provider: "bigquery-jobs", Offers: "Job history page (/bigquery-jobs): the project's jobs from jobs.list, newest first, with type, state, creation time and error; a job's page (jobs.get) with its state, times, errorResult, configuration, load statistics (output rows, bad records, input files and bytes, each only when reported) and status.errors; a query job's statement type and DML rows (affected, inserted, updated, deleted, each only when reported, #1041); Delete job on the page and the row; Cancel job only on a job that is not DONE (#993)",
 		Tests: []string{"TestConsoleBigQueryLoadExportAndJobHistory", "TestBigQueryJobPageShowsWhatTheJobReported", "TestBigQueryJobActionsFollowTheJobsState", "TestBigQueryLoadExportAndJobHistoryThroughTheForms",
 			"TestConsoleBigQueryJobPageShowsDMLRows", "TestBigQueryJobPageShowsAQueryJobsDMLRows"}},
+
+	{Resource: "BigQuery routines (functions and table functions)", Service: "bigquery",
+		Methods: []string{"bigquery.routines.insert"},
+		Issue:   1177},
+	// The Storage Read and Write APIs (gRPC, google.cloud.bigquery.storage.v1)
+	// have no coverage page; this row writes the exclusion down (#782).
+	{Resource: "BigQuery Storage Read and Write APIs", Service: "bigquery",
+		Excluded: "a client's read and write transport (Arrow and Avro read sessions, managedwriter default, COMMITTED, PENDING and BUFFERED streams, Verified in docs/compatibility.md); a table's Preview reads its rows and Insert rows and the load forms write them, the console's equivalents"},
 
 	// The CLI and the admin API.
 	{Resource: "Instance status",
