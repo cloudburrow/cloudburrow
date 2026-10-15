@@ -43,9 +43,9 @@ Already tracked: none open. ACLs and object IAM are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `objects.bulkRestore`: restoring soft-deleted objects in bulk (a long-running bucket operation) is 501 | not built yet | M |
-| `buckets.operations.list` with a `filter` is 501 | not built yet | S |
-| `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) | not built yet | M |
+| `objects.bulkRestore`: restoring soft-deleted objects in bulk (a long-running bucket operation) is 501 (#1279) | not built yet | M |
+| `buckets.operations.list` with a `filter` is 501 (#1280) | not built yet | S |
+| `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) (#1281) | not built yet | M |
 | XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |
 | gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
@@ -75,7 +75,7 @@ Cloud Scheduler jobs (#1243), `ListQueues` filters on any Queue field (#1255), a
 
 | Gap | Why open | Size |
 |---|---|---|
-| A queue-level `http_target` on `UpdateQueue` is refused | not built yet | M |
+| A queue-level `http_target` on `UpdateQueue` is refused (#1282) | not built yet | M |
 | App Engine targets and `app_engine_routing_override` | no emulator support (no App Engine) | L |
 
 ## Cloud Run
@@ -155,8 +155,8 @@ Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
 | `PredictionService.StreamGenerateContent` over gRPC is `UNIMPLEMENTED`; `GenerateContent` over gRPC is served with no official-SDK test (#1257) | not built yet | M |
-| Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` | not built yet | M |
-| `RawPredict` on a publisher model | not built yet | S |
+| Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` (#1285) | not built yet | M |
+| `RawPredict` on a publisher model (#1284) | not built yet | S |
 | `Explain` | no emulator support | L |
 
 ## BigQuery
