@@ -2,6 +2,7 @@ package buildpacks
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -134,5 +135,39 @@ func TestMissingSourceOrImageIsRejected(t *testing.T) {
 	}
 	if _, err := Args(Request{Source: "./src", Registry: "reg:5000"}); err == nil {
 		t.Error("missing image was accepted")
+	}
+}
+
+// A PHP function is built with Google's PHP functions builder (#1319): the
+// general builder has no PHP Functions Framework buildpack and would build
+// a web application that runs index.php without the framework's router. A
+// PHP application, and a function in any other language, keep the general
+// builder.
+func TestPHPFunctionUsesThePHPFunctionsBuilder(t *testing.T) {
+	t.Parallel()
+	php := filepath.Join("..", "..", "testdata", "function-php")
+	node := filepath.Join("..", "..", "testdata", "function-nodejs")
+	for _, tc := range []struct {
+		name string
+		req  Request
+		want string
+	}{
+		{"php function", Request{Source: php, FunctionTarget: "hello"}, PHPFunctionBuilderImage},
+		{"php application", Request{Source: php}, BuilderImage},
+		{"nodejs function", Request{Source: node, FunctionTarget: "Hello"}, BuilderImage},
+		{"GOOGLE_RUNTIME php function", Request{Source: node, FunctionTarget: "hello",
+			Env: map[string]string{EnvRuntime: "php83"}}, PHPFunctionBuilderImage},
+	} {
+		tc.req.Image, tc.req.Registry = "reg:5000/fn:v1", "reg:5000"
+		args, err := Args(tc.req)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if !hasFlag(args, "--builder", tc.want) {
+			t.Errorf("%s: --builder %s missing from %v", tc.name, tc.want, args)
+		}
+	}
+	if !strings.Contains(PHPFunctionBuilderImage, "@sha256:") {
+		t.Error("the PHP functions builder must be pinned by digest, not a tag")
 	}
 }

@@ -450,6 +450,20 @@
         ],
         "notes": "Published for amd64 only; on arm64 it runs under emulation and produces an amd64 image."
       },
+      "buildpacksPHPFunctionBuilder": {
+        "image": "us-docker.pkg.dev/serverless-runtimes/google-22-full/builder/php",
+        "version": "latest",
+        "digest": "sha256:f516aa793106906d32a8eb800f733becbc3456cefbbdaa732fda4bc273282a73",
+        "license": "Apache-2.0",
+        "redistribution": "pull-only",
+        "updateFeed": "gcr-tag-list",
+        "skipDiscovery": "Artifact Registry tag list; depcheck only discovers GitHub-sourced components. latest is a moving tag, so an update appears as a new digest: re-resolve it with `docker buildx imagetools inspect`.",
+        "verification": "image-digest",
+        "platforms": [
+          "linux/amd64"
+        ],
+        "notes": "Google's per-language PHP builder for Cloud Run functions; builds PHP functions only (#1319), because the general builder has no PHP Functions Framework buildpack. Run image gcr.io/gae-runtimes/buildpacks/stacks/google-gae-22/run."
+      },
       "packCli": {
         "version": "0.40.9",
         "source": "https://github.com/buildpacks/pack",

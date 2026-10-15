@@ -23,6 +23,18 @@ const (
 	// It is published for linux/amd64 only, which is the constraint that
 	// shapes everything below.
 	BuilderImage = "gcr.io/buildpacks/builder@sha256:12b6bbdd6890685a2a75ac59c2abe7868432bde292275ea92b20711c2432b429"
+	// PHPFunctionBuilderImage is Google's PHP builder for Cloud Run
+	// functions, pinned by digest, which builds a PHP function (#1319).
+	//
+	// The general builder has no PHP Functions Framework buildpack: given
+	// GOOGLE_FUNCTION_TARGET it still builds a PHP web application, nginx and
+	// php-fpm running index.php directly, so the framework's router and
+	// autoloader never load. Google builds PHP functions with this
+	// per-language builder ("App Engine and Cloud Function Builders" in
+	// github.com/GoogleCloudPlatform/buildpacks), whose google.php.functions-
+	// framework and google.php.cloudfunctions buildpacks serve
+	// vendor/google/cloud-functions-framework/router.php. Also amd64 only.
+	PHPFunctionBuilderImage = "us-docker.pkg.dev/serverless-runtimes/google-22-full/builder/php@sha256:f516aa793106906d32a8eb800f733becbc3456cefbbdaa732fda4bc273282a73"
 	// BuilderPlatform is the only platform the builder provides.
 	BuilderPlatform = "linux/amd64"
 )
@@ -132,7 +144,7 @@ func Args(req Request) ([]string, error) {
 		"--publish",
 		"--platform", BuilderPlatform,
 		"--path", req.Source,
-		"--builder", BuilderImage,
+		"--builder", builderFor(req),
 	}
 	if req.Network != "" {
 		args = append(args, "--network", req.Network)
@@ -154,6 +166,19 @@ func Args(req Request) ([]string, error) {
 		args = append(args, "--env", k+"="+req.Env[k])
 	}
 	return args, nil
+}
+
+// builderFor picks the builder: the PHP functions builder for a PHP function,
+// the general builder for everything else. A source Detect cannot read gets
+// the general builder; Build refuses it with Detect's reason.
+func builderFor(req Request) string {
+	if req.FunctionTarget == "" {
+		return BuilderImage
+	}
+	if det, err := Detect(req.Source, req.Env); err == nil && det.Runtime == "php" {
+		return PHPFunctionBuilderImage
+	}
+	return BuilderImage
 }
 
 // Build runs the build.
