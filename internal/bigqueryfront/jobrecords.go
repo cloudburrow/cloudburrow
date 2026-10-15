@@ -83,6 +83,11 @@ type jobRecords struct {
 	timeOrder     []string
 	internal      map[string]bool
 	internalOrder []string
+	// children are the child jobs of scripts, parents each parent's
+	// count of them (scriptjobs.go).
+	children   map[string]childInfo
+	childOrder []string
+	parents    map[string]int
 	// now is the clock, for tests; nil is time.Now.
 	now func() time.Time
 }
@@ -329,10 +334,11 @@ func (j *jobRecords) patch(job map[string]any, project string) bool {
 	if p == "" {
 		p = project
 	}
+	script := j.patchScript(job, p)
 	if t, ok := j.time(p, id); ok {
-		return patchTimes(job, &t)
+		return patchTimes(job, &t) || script
 	}
-	return patchTimes(job, nil)
+	return patchTimes(job, nil) || script
 }
 
 // listedJob is an entry of jobs.list with what serveJobList sorts and
@@ -423,8 +429,9 @@ func (j *jobRecords) serveJobList(w http.ResponseWriter, r *http.Request, projec
 		if j.isInternal(p, id) {
 			continue
 		}
+		j.patch(job, p)
 		stats, _ := job["statistics"].(map[string]any)
-		if parentOf, _ := stats["parentJobId"].(string); parentOf != parent {
+		if parentOf, _ := stats["parentJobId"].(string); parentOf != parent && !(parent == "" && allJobLevels(r)) {
 			continue
 		}
 		if len(states) > 0 {
@@ -436,8 +443,6 @@ func (j *jobRecords) serveJobList(w http.ResponseWriter, r *http.Request, projec
 				continue
 			}
 		}
-		j.patch(job, p)
-		stats, _ = job["statistics"].(map[string]any)
 		created, timed := msValue(stats["creationTime"])
 		if (hasMin || hasMax) && !timed {
 			continue
