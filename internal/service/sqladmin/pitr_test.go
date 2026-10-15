@@ -186,3 +186,27 @@ func TestPITRRetentionAndFailedBase(t *testing.T) {
 		t.Errorf("REGIONAL: %v, want 501 saying why", err)
 	}
 }
+
+func TestRetentionFloor(t *testing.T) {
+	s := NewServer("")
+	day := 24 * time.Hour
+	if f := s.retentionFloor(7 * day); time.Since(f) < 7*day-time.Minute || time.Since(f) > 7*day+time.Minute {
+		t.Errorf("floor with no advance: %s ago, want 7 days", time.Since(f))
+	}
+	before := time.Now()
+	if _, err := s.Advance(day); err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now()
+	// A day's retention: what was there at the advance is a day old.
+	if f := s.retentionFloor(day); f.Before(before) || f.After(after) {
+		t.Errorf("one day's floor after a day's advance: %s, want the advance (%s to %s)", f, before, after)
+	}
+	// Seven days': six more days of the past are kept.
+	if d := before.Sub(s.retentionFloor(7 * day)); d < 6*day-time.Minute || d > 6*day+time.Minute {
+		t.Errorf("seven days' floor after a day's advance: %s before the advance, want 6 days", d)
+	}
+	if got := s.Clock(); got.Sub(time.Now()) < day-time.Minute {
+		t.Errorf("Clock: %s, want a day ahead", got)
+	}
+}

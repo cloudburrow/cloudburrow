@@ -28,7 +28,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -112,9 +111,9 @@ type Server struct {
 	// backups are the backup runs, nil unless EnableBackups was called.
 	backups  *backupStore
 	stopAuto chan struct{}
-	// clockOffset is how far Advance has moved the retention clock past
-	// the real one, in nanoseconds.
-	clockOffset atomic.Int64
+	// advances are the retention clock's Advances (#1330), oldest first.
+	clockMu  sync.Mutex
+	advances []clockAdvance
 	// Observe, if set, is called once per request with the method name and
 	// the answer's status.
 	Observe func(method string, code int)

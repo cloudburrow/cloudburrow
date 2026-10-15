@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -213,5 +214,153 @@ func TestGcloudSQLPointInTimeClone(t *testing.T) {
 	defer g.run(nil, "sql", "instances", "delete", clone, "--project", g.project, "--quiet")
 	if rows := sqlBackupRows(t, h, c, g.project+":us-central1:"+clone); !reflect.DeepEqual(rows, []string{"1=a"}) {
 		t.Errorf("rows in the gcloud clone at %s: %v, want [1=a]", at.Format(time.RFC3339Nano), rows)
+	}
+}
+
+// advanceSQLClock moves Cloud SQL's retention clock forward (#1330), a
+// CloudBurrow extension: the log already kept is d older.
+func advanceSQLClock(t *testing.T, h *Harness, d time.Duration) {
+	t.Helper()
+	res, err := http.Post("http://"+h.Endpoint(EnvSQLAdmin)+"/cloudburrow/v1/clock:advance", "application/json",
+		strings.NewReader(fmt.Sprintf(`{"duration":"%ds"}`, int64(d/time.Second))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("advance the Cloud SQL clock: HTTP %d", res.StatusCode)
+	}
+}
+
+// TestCloudSQLPointInTimeRetention (#1330): through the official Go client
+// and connector, on both engines: transactionLogRetentionDays and
+// backupRetentionSettings out of Cloud SQL's ranges are refused, and are
+// returned as set; a backup takes a second base; once a day has passed on
+// the retention clock, the base and log before the window are dropped,
+// earliestRecoveryTime moves past the first rows, a clone to then is
+// refused, and a clone to a time inside the window recovers from the
+// backup's base.
+// covers: sql.instances.insert, sql.instances.get, sql.backupRuns.insert, sql.backupRuns.list, sql.projects.instances.getLatestRecoveryTime, sql.instances.clone, sql.instances.failover
+func TestCloudSQLPointInTimeRetention(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" && os.Getenv(EnvMySQL) == "" {
+		t.Skip("needs --services cloudsql or cloudsql-mysql")
+	}
+	svc := sqlAdminService(t, h)
+	project := h.Project()
+	suffix := fmt.Sprint(time.Now().UnixNano() % 1e6)
+	var cases []sqlBackupCase
+	if os.Getenv(EnvCloudSQL) != "" {
+		cases = append(cases, sqlBackupCase{name: "postgres", version: "POSTGRES_17", instance: "ret-pg-" + suffix, created: true,
+			table: "ret_rows", dsn: func(_, conn string) string {
+				return fmt.Sprintf("host=%s user=postgres dbname=postgres sslmode=disable", conn)
+			}, register: pgRegister})
+	}
+	if os.Getenv(EnvMySQL) != "" {
+		cases = append(cases, sqlBackupCase{name: "mysql", version: "MYSQL_8_4", instance: "ret-my-" + suffix, created: true,
+			table: "ret.ret_rows", setup: "CREATE DATABASE IF NOT EXISTS ret", dsn: func(drv, conn string) string {
+				return fmt.Sprintf("root:Root-pass1@%s(%s)/mysql", drv, conn)
+			}, register: mysqlRegister})
+	}
+	// Out of range: refused before anything is created.
+	for _, bc := range []*sqladmin.BackupConfiguration{
+		{TransactionLogRetentionDays: 8},
+		{BackupRetentionSettings: &sqladmin.BackupRetentionSettings{RetentionUnit: "COUNT", RetainedBackups: 366}},
+	} {
+		_, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "ret-bad-" + suffix, DatabaseVersion: "POSTGRES_17",
+			RootPassword: "Root-pass1", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", Edition: "ENTERPRISE", BackupConfiguration: bc}}).Do()
+		wantHTTP(t, fmt.Sprintf("an insert with %+v", bc), err, http.StatusBadRequest)
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bc := &sqladmin.BackupConfiguration{Enabled: true, StartTime: "03:00", TransactionLogRetentionDays: 1,
+				BackupRetentionSettings: &sqladmin.BackupRetentionSettings{RetentionUnit: "COUNT", RetainedBackups: 2}}
+			if c.version == "POSTGRES_17" {
+				bc.PointInTimeRecoveryEnabled = true
+			} else {
+				bc.BinaryLogEnabled = true
+			}
+			op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: c.instance, DatabaseVersion: c.version,
+				RootPassword: "Root-pass1", Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", BackupConfiguration: bc}}).Do()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if d, err := svc.Instances.Delete(project, c.instance).Do(); err == nil {
+					waitSQLOp(t, svc, project, d)
+				}
+			}()
+			waitSQLOp(t, svc, project, op)
+			in, err := svc.Instances.Get(project, c.instance).Do()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := in.Settings.BackupConfiguration; got == nil || got.TransactionLogRetentionDays != 1 ||
+				got.BackupRetentionSettings == nil || got.BackupRetentionSettings.RetainedBackups != 2 {
+				t.Errorf("backupConfiguration: %+v", got)
+			}
+			first := waitRecoverable(t, svc, project, c.instance)
+
+			conn := project + ":us-central1:" + c.instance
+			var stmts []string
+			if c.setup != "" {
+				stmts = append(stmts, c.setup)
+			}
+			stmts = append(stmts, "CREATE TABLE "+c.table+" (id INT PRIMARY KEY, name VARCHAR(20))",
+				"INSERT INTO "+c.table+" VALUES (1, 'a')")
+			sqlBackupRows(t, h, c, conn, stmts...)
+			early := sqlServerTime(t, h, c, conn)
+
+			op, err = svc.BackupRuns.Insert(project, c.instance, &sqladmin.BackupRun{Description: "base"}).Do()
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitSQLOp(t, svc, project, op)
+			runs, err := svc.BackupRuns.List(project, c.instance).Do()
+			if err != nil || len(runs.Items) != 1 || runs.Items[0].Status != "SUCCESSFUL" {
+				t.Fatalf("backup runs: %v %+v", err, runs)
+			}
+
+			advanceSQLClock(t, h, 24*time.Hour)
+			win, err := svc.Projects.Instances.GetLatestRecoveryTime(project, c.instance).Do()
+			if err != nil {
+				t.Fatal(err)
+			}
+			e0, _ := time.Parse(time.RFC3339Nano, first.EarliestRecoveryTime)
+			e1, _ := time.Parse(time.RFC3339Nano, win.EarliestRecoveryTime)
+			if !e1.After(e0) || !e1.After(early) {
+				t.Errorf("earliestRecoveryTime a day later: %s, was %s; the first rows were at %s", e1, e0, early)
+			}
+			_, err = svc.Instances.Clone(project, c.instance, &sqladmin.InstancesCloneRequest{CloneContext: &sqladmin.CloneContext{
+				DestinationInstanceName: c.instance + "-old", PointInTime: early.Format(time.RFC3339Nano)}}).Do()
+			wantHTTP(t, "a clone to a time the retention window has passed", err, http.StatusBadRequest)
+
+			time.Sleep(time.Second)
+			sqlBackupRows(t, h, c, conn, "INSERT INTO "+c.table+" VALUES (2, 'b')")
+			at := sqlServerTime(t, h, c, conn)
+			sqlBackupRows(t, h, c, conn, "INSERT INTO "+c.table+" VALUES (3, 'c')")
+			clone := c.instance + "-pit"
+			op, err = svc.Instances.Clone(project, c.instance, &sqladmin.InstancesCloneRequest{CloneContext: &sqladmin.CloneContext{
+				DestinationInstanceName: clone, PointInTime: at.Format(time.RFC3339Nano)}}).Do()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if d, err := svc.Instances.Delete(project, clone).Do(); err == nil {
+					waitSQLOp(t, svc, project, d)
+				}
+			}()
+			waitSQLOp(t, svc, project, op)
+			if op, err = svc.Operations.Get(project, op.Name).Do(); err != nil || op.Error != nil {
+				t.Fatalf("the clone's operation: %v %+v", err, op.Error)
+			}
+			if rows := sqlBackupRows(t, h, c, project+":us-central1:"+clone); !reflect.DeepEqual(rows, []string{"1=a", "2=b"}) {
+				t.Errorf("rows in the clone at %s: %v, want [1=a 2=b]", at.Format(time.RFC3339Nano), rows)
+			}
+
+			// High availability stays 501, saying why.
+			_, err = svc.Instances.Failover(project, c.instance, &sqladmin.InstancesFailoverRequest{}).Do()
+			wantHTTP(t, "instances.failover", err, http.StatusNotImplemented)
+		})
 	}
 }

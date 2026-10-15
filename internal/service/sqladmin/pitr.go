@@ -182,22 +182,69 @@ func (s *Server) copyAt(src, dst DumpTarget, at time.Time) error {
 // advanced) drops every base older than the newest one complete by the
 // window's start, and the WAL or binary log only those needed.
 
-// Clock is the retention clock: the time now, advanced by Advance.
+// Clock is the retention clock: the time now, plus every Advance.
 func (s *Server) Clock() time.Time {
-	return time.Now().Add(time.Duration(s.clockOffset.Load()))
+	s.clockMu.Lock()
+	defer s.clockMu.Unlock()
+	now := time.Now()
+	for _, a := range s.advances {
+		now = now.Add(a.by)
+	}
+	return now
 }
 
-// Advance moves the retention clock forward by d, so the log already kept
-// is d older, sweeps, and returns the new time. It is a CloudBurrow
-// extension (ClockPath), for tests that cannot wait days; the servers'
-// own clocks, which their log is stamped by, do not move.
+// clockAdvance is one Advance: at a real time, by how much.
+type clockAdvance struct {
+	at time.Time
+	by time.Duration
+}
+
+// Advance ages the log already kept by d, as if d had passed, sweeps, and
+// returns the retention clock's new time. It is a CloudBurrow extension
+// (ClockPath), for tests that cannot wait days. The servers' own clocks,
+// which their log is stamped by and a pointInTime is read on, do not move:
+// what was written before the advance is d older, what is written after
+// ages from when it was written.
 func (s *Server) Advance(d time.Duration) (time.Time, error) {
 	if d < 0 {
 		return time.Time{}, Errorf(http.StatusBadRequest, "Invalid request: the clock only moves forward: %s.", d)
 	}
-	s.clockOffset.Add(int64(d))
+	s.clockMu.Lock()
+	s.advances = append(s.advances, clockAdvance{time.Now(), d})
+	s.clockMu.Unlock()
 	s.sweepRetention()
 	return s.Clock(), nil
+}
+
+// retentionFloor is the earliest server time whose log is no older than
+// keep, now: a record written at T is now-T old, plus every advance made
+// after T.
+func (s *Server) retentionFloor(keep time.Duration) time.Time {
+	s.clockMu.Lock()
+	advs := append([]clockAdvance(nil), s.advances...)
+	s.clockMu.Unlock()
+	now := time.Now()
+	var lower time.Time
+	for j := 0; j <= len(advs); j++ {
+		// Records in [lower, upper] are aged by the advances from j on.
+		var aged time.Duration
+		for _, a := range advs[j:] {
+			aged += a.by
+		}
+		upper := now
+		if j < len(advs) {
+			upper = advs[j].at
+		}
+		t := now.Add(aged - keep)
+		if !lower.IsZero() && t.Before(lower) {
+			t = lower
+		}
+		if !t.After(upper) {
+			return t
+		}
+		lower = upper
+	}
+	return now
 }
 
 // ClockPath advances the retention clock: POST {"duration": "86400s"}
@@ -266,9 +313,10 @@ func intSetting(v any) int {
 	return 0
 }
 
-// retentionStart is the start of spec's retention window on the clock.
+// retentionStart is the start of spec's retention window, on the
+// servers' clock.
 func (s *Server) retentionStart(spec Spec) time.Time {
-	return s.Clock().Add(-time.Duration(transactionLogDays(spec)) * 24 * time.Hour)
+	return s.retentionFloor(time.Duration(transactionLogDays(spec)) * 24 * time.Hour)
 }
 
 // recoveryWindow is the dumper's window, starting no earlier than the
