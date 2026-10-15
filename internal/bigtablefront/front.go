@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 )
@@ -75,6 +76,9 @@ type Front struct {
 	upstream *grpc.ClientConn
 	addr     string
 	logf     func(format string, args ...any)
+	// calls is the call log the CLI reads into its metrics, request log
+	// and traces (internal/calllog, #1267).
+	calls calllog.Ring
 }
 
 // New returns a front for the emulator at upstream (host:port). The
@@ -101,6 +105,7 @@ func (f *Front) Server() *grpc.Server {
 	return grpc.NewServer(
 		grpc.ForceServerCodec(rawCodec{}),
 		grpc.UnknownServiceHandler(f.handle),
+		grpc.StreamInterceptor(calllog.StreamInterceptor(&f.calls, firstName, streaming)),
 		grpc.MaxRecvMsgSize(math.MaxInt32), grpc.MaxSendMsgSize(math.MaxInt32),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 10 * time.Second, PermitWithoutStream: true}),
 	)
@@ -112,7 +117,7 @@ func (f *Front) Server() *grpc.Server {
 func (f *Front) Serve(ctx context.Context, l net.Listener) error {
 	grpcSrv := f.Server()
 	srv := &http.Server{
-		Handler:           frontready.Wrap(http.NotFoundHandler(), f.addr),
+		Handler:           frontready.Wrap(f.httpHandler(), f.addr),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	grpcL, httpL := pubsubfront.Split(l)
@@ -264,3 +269,36 @@ func (rawCodec) Unmarshal(data []byte, v any) error {
 }
 
 func (rawCodec) Name() string { return "proto" }
+
+// Calls returns the calls numbered after seq, oldest first.
+func (f *Front) Calls(after uint64) []calllog.Call { return f.calls.After(after) }
+
+// httpHandler answers calllog.Path, and nothing else, on the connections
+// that are not gRPC.
+func (f *Front) httpHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == calllog.Path && r.Method == http.MethodGet {
+			f.calls.ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+}
+
+// firstName reads the table, instance or parent a request names.
+func firstName(m any) string {
+	if fr, ok := m.(*frame); ok {
+		return calllog.FirstName(*fr)
+	}
+	return ""
+}
+
+// streaming reports Bigtable's server-streaming methods.
+func streaming(method string) bool {
+	switch method {
+	case data + "ReadRows", data + "MutateRows", data + "SampleRowKeys", data + "ReadChangeStream",
+		data + "GenerateInitialChangeStreamPartitions", data + "ExecuteQuery":
+		return true
+	}
+	return false
+}

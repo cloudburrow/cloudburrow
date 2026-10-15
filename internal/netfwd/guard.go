@@ -65,6 +65,12 @@ type guardProxy struct {
 // startGuard listens on addr and proxies every request whose Host passes
 // hostguard to upstream, kubectl's own listener.
 func startGuard(addr, upstream string, logf func(string, ...any)) (*guardProxy, error) {
+	return startObservedGuard(addr, upstream, logf, nil)
+}
+
+// startObservedGuard is startGuard, telling observe about each request
+// (observe.go, #1267) when it is not nil.
+func startObservedGuard(addr, upstream string, logf func(string, ...any), observe func(Call)) (*guardProxy, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -77,7 +83,7 @@ func startGuard(addr, upstream string, logf func(string, ...any)) (*guardProxy, 
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 	srv := &http.Server{
-		Handler:   guardHandler(upstream, logf),
+		Handler:   observeGuard(guardHandler(upstream, logf), observe),
 		Protocols: &protocols,
 		// grpc-java, the server behind the Java emulators, sets no stream
 		// limit; the Go default of 250 per connection could leave a

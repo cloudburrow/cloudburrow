@@ -20,8 +20,8 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 9 | 3 | 5 | 1 | 0 |
-| Pub/Sub | 4 | 1 | 2 | 1 | 0 |
+| Cloud Storage | 10 | 3 | 6 | 1 | 0 |
+| Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 9 | 6 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
@@ -29,21 +29,22 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud KMS | 7 | 1 | 3 | 2 | 1 |
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 2 | 2 | 0 | 0 | 0 |
-| Vertex AI | 5 | 3 | 2 | 0 | 0 |
-| BigQuery | 28 | 11 | 14 | 3 | 0 |
+| Vertex AI | 4 | 2 | 2 | 0 | 0 |
+| BigQuery | 27 | 9 | 15 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 3 | 3 | 0 | 0 | 0 |
-| **Total** | **81** | **35** | **34** | **7** | **5** |
+| **Total** | **79** | **31** | **36** | **7** | **5** |
 
 ## Cloud Storage
 
 Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `objects.bulkRestore`
-(#1279) and `buckets.operations.list` filters (#1280).
+(#1279), `buckets.operations.list` filters (#1280) and channel delivery on an `up` instance (#1290).
 
 | Gap | Why open | Size |
 |---|---|---|
+| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
 | `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) (#1281) | not built yet | M |
 | XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |
 | gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |
@@ -60,7 +61,6 @@ Already tracked: #982 (Google's message for an invalid label is not measured).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Request-rate, latency and resource metrics, the request log and tracing do not see Pub/Sub, which is a raw port-forward (#1266) | not built yet | M |
 | `DetachSubscription`, `UpdateSnapshot` are refused `UNIMPLEMENTED` by Google's emulator | no emulator support | M |
 | Protocol Buffer schemas: `ValidateSchema` of `PROTOCOL_BUFFER` is `UNIMPLEMENTED` | no emulator support | M |
 | 4 UNVERIFIED error codes: subscription expiration, exactly-once and label refusals ([pubsub.md](coverage/pubsub.md)) | not documented by Google | S |
@@ -85,7 +85,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 |---|---|---|
 | Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity | not built yet | L |
 | Logs are not served through the Cloud Run API | not built yet | M |
-| `Builds.SubmitBuild` is not served (#1268) | not built yet | M |
+| `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
 | `Instances.*` is not served | not built yet | L |
 | `WorkerPools.*` is not served | not built yet | L |
 | `gcloud run services list` / `describe` use the v1 (Knative-shaped) API, which is not served | not built yet | L |
@@ -152,10 +152,11 @@ Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1
 
 | Gap | Why open | Size |
 |---|---|---|
-| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
-| `PredictionService.StreamGenerateContent` over gRPC is `UNIMPLEMENTED`; `GenerateContent` over gRPC is served with no official-SDK test (#1257) | not built yet | M |
 | Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` (#1285) | not built yet | M |
 | `RawPredict` on a publisher model (#1284) | not built yet | S |
+Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244); `PredictionService.StreamGenerateContent` over gRPC, and an official-SDK test of `GenerateContent` over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`, `DirectPredict`, `ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285).
+| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
+| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served (#1285) | no gRPC model server | M |
 | `Explain` | no emulator support | L |
 
 ## BigQuery
@@ -169,18 +170,17 @@ access policies and table and routine IAM (#1218), infinite FLOAT64 in UNNEST (#
 |---|---|---|
 | `ALTER TABLE` `RENAME TO`, `RENAME COLUMN`, `DROP COLUMN`, `ALTER COLUMN SET DATA TYPE`, `SET DEFAULT` / `DROP DEFAULT`, keys and constraints are 501 (`ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` are carried out since #1227) | not built yet | M |
 | A view's column list inside a multi-statement script, and a column's `OPTIONS` in the list (a lone `CREATE VIEW v (c, d) AS …` is carried out, #1240) | not built yet | S |
-| `CREATE VIEW … OPTIONS(description = …)` keeps no description (the emulator drops it, #1251) | not built yet | S |
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |
 | Storage Write API `arrow_rows` | not built yet | M |
-| Partition decorators (`` `t$20240101` ``) in queries, `tabledata.list`, loads and query-job destinations: "Table not found" (#1273) | not built yet | M |
+| Partition decorators: `tabledata.list` and `tables.get` of a partition, a partition as a load, copy or query destination, and a partition of an ingestion-time partitioned table are 501 (a query's read and `tables.delete` of one are built, #1273) | not built yet | M |
 | `INFORMATION_SCHEMA` `ROUTINES`, `PARAMETERS`, `PARTITIONS`, `COLUMN_FIELD_PATHS`, `TABLE_STORAGE`: "Table not found"; `TABLE_OPTIONS` empty (#1286) | not built yet | M |
 | Region-qualified `INFORMATION_SCHEMA.JOBS`, `JOBS_BY_PROJECT`, `JOBS_BY_USER`: "Table not found" (#1275) | not built yet | M |
-| `_PARTITIONTIME` and `_PARTITIONDATE` answer the insert time on any table, not the partition's start on an ingestion-time partitioned one (#1277) | not built yet | S |
+| `_PARTITIONTIME` and `_PARTITIONDATE` of an ingestion-time partitioned table that holds rows are 501: the emulator keeps no row's ingestion time (on any other table they fail 400 as in BigQuery, #1277) | no emulator support | M |
 | Materialized views (`CREATE` / `DROP MATERIALIZED VIEW`) | no emulator support | L |
 | `datasets.undelete`: the emulator keeps nothing of a deleted dataset | no emulator support | M |
-| `FOR SYSTEM_TIME AS OF` (time travel): the emulator refuses it 400 and keeps no history (#1276) | no emulator support | M |
+| `FOR SYSTEM_TIME AS OF` a past time inside the time travel window is 501: the emulator keeps no history (`AS OF CURRENT_TIMESTAMP()` reads the table, and a time before the window fails 400 as in BigQuery, #1276) | no emulator support | L |
 | A failed script after a statement that wrote: the emulator does not roll back | no emulator support | L |
 | `MERGE` from a subquery inside a multi-statement script; DML with a `FROM` of several items | no emulator support | M |
 | `CREATE OR REPLACE TABLE`, `CREATE OR REPLACE [TEMP] TABLE`, `CREATE SCHEMA` of an existing dataset, and `DROP TABLE` of a script's temp table, later in a multi-statement script | no emulator support | M |
@@ -225,7 +225,7 @@ Closed by this sweep: Test permissions on the Permissions tab (#1242).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured"; #1267) | not built yet | M |
+| Request metrics, the request log and traces for Spanner (raw tunnel, no front; still "not measured"), and for Firestore's and Datastore's calls from pods, which bypass the host tunnel's guard (#1288; Pub/Sub, Bigtable and the host's Firestore and Datastore calls since #1266, #1267) | not built yet | M |
 | Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |
 

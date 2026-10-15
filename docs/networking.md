@@ -153,6 +153,24 @@ among them. Kubernetes probes a container at the pod's IP, so each emulator's re
 its front, which dials the emulator on loopback (`/cloudburrow/backend-ready`).
 `TestEmulatorsBehindAFrontRefuseOtherPods` dials each port from another pod.
 
+### Calls a pod makes to your machine: Cloud Storage channels
+
+An object change notification channel (`objects.watchAll`) names a receiver the server POSTs to,
+usually one on your machine (`http://127.0.0.1:PORT/...`). The in-cluster storage server does not
+make those POSTs (#1290). Its NetworkPolicy allows egress only to Pub/Sub and DNS, and a pod
+reaches your machine through `host.docker.internal` on Docker Desktop only; the relay on Docker
+Engine forwards only the CLI's own service ports. So `up` starts the server with
+`--relay-channels`: it keeps each message in its outbox, and the CLI takes them through the
+storage tunnel (`/_cloudburrow/channels/outbox`), POSTs each from your machine, and reports the
+answer back, so each channel's order, retries and giving up stay the server's. This works the same
+on every engine, and opens nothing in the cluster.
+
+The address is resolved on your machine, as the client that registered it sees it, so an
+in-cluster name is not reachable. The CLI, like a host `cloudburrow storage-server`, POSTs only to
+loopback, private (RFC 1918, RFC 4193) and link-local addresses, checked on the address it dials
+after resolution, uses no proxy and follows no redirect. Any other address is a failed delivery:
+CloudBurrow never calls outside.
+
 ### Which engines this works on
 
 Only two engines have been run with pods reaching the CLI; the full table, with the evidence for

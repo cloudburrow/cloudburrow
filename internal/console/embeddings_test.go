@@ -50,7 +50,8 @@ func TestEmbeddingsScreenSendsBothMethods(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &st); code != 200 || err != nil {
 		t.Fatalf("status %d: %s", code, body)
 	}
-	if strings.Join(st.Methods, ",") != "predict,embedContent" || !strings.HasSuffix(st.Endpoints["embedContent"], ":embedContent") {
+	if strings.Join(st.Methods, ",") != "predict,embedContent,rawPredict" || !strings.HasSuffix(st.Endpoints["embedContent"], ":embedContent") ||
+		!strings.HasSuffix(st.Endpoints["rawPredict"], ":rawPredict") {
 		t.Fatalf("status lists %v, %v", st.Methods, st.Endpoints)
 	}
 
@@ -66,6 +67,12 @@ func TestEmbeddingsScreenSendsBothMethods(t *testing.T) {
 		`{"instances":[{"content":"a"},{"content":"b"}],"parameters":{"outputDimensionality":128}}`)
 	if resp.StatusCode != 200 || strings.Count(out, `"values"`) != 2 {
 		t.Fatalf("predict: %d %s", resp.StatusCode, out)
+	}
+	// rawPredict (#1284): the :predict body, unwrapped, the same answer.
+	resp, out = postJSON(t, srv, "/api/ai/embeddings?method=rawPredict",
+		`{"instances":[{"content":"a"}],"parameters":{"outputDimensionality":128}}`)
+	if resp.StatusCode != 200 || strings.Count(out, `"values"`) != 1 {
+		t.Fatalf("rawPredict: %d %s", resp.StatusCode, out)
 	}
 	// The API's refusal, verbatim.
 	resp, out = postJSON(t, srv, "/api/ai/embeddings?method=embedContent",

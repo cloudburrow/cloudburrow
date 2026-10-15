@@ -167,6 +167,9 @@ type Listing struct {
 	// line, in the order they were checked. The server checks the action
 	// against the page's DetailActions like any other.
 	SelectActions []Action `json:"selectActions,omitempty"`
+	// Actions are the list screen's own actions, on no existing resource,
+	// drawn beside Create (ListActor, #1289). The server sets them.
+	Actions []Action `json:"actions,omitempty"`
 	// Summary is what a list screen says about its scope before its rows,
 	// drawn as headed cards above the table: the Cloud Storage Settings
 	// screen names the project's service account over its HMAC keys (#792).
@@ -1274,6 +1277,7 @@ func (s *Server) handleResources(w http.ResponseWriter, r *http.Request) {
 			listing.Items[i].Actions = actor.Actions(listing.Items[i])
 		}
 	}
+	listing.Actions = listActions(ctx, p, project)
 	writeJSON(w, http.StatusOK, listing)
 }
 

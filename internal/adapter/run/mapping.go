@@ -295,7 +295,7 @@ func secretEnvRefs(containers []*runpb.Container) map[string]secretEnvRef {
 // localisation, env, secretKeyRef and resources are mapped once.
 func renderContainers(b *strings.Builder, containers []*runpb.Container, o containerRender) error {
 	for i, c := range containers {
-		image := images.Localise(c.GetImage())
+		image := containerImage(c.GetImage())
 		if err := images.RequireTagged(image); err != nil {
 			return apierror.InvalidArgument("%v", err)
 		}
@@ -458,7 +458,11 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 
 	injected := injectedNames(tann)
 	for _, c := range k.Spec.Template.Spec.Containers {
-		container := &runpb.Container{Image: c.Image, WorkingDir: c.WorkingDir,
+		image := c.Image
+		if uri, ok := localBuilds.original(image); ok {
+			image = uri // built by SubmitBuild: read back as the image_uri deployed
+		}
+		container := &runpb.Container{Image: image, WorkingDir: c.WorkingDir,
 			StartupProbe: c.StartupProbe.toProbe(), LivenessProbe: c.LivenessProbe.toProbe(),
 			Command: c.Command, Args: c.Args}
 		// Read back what ToKnative renders, so a masked update (#1260) that

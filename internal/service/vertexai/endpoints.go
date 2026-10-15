@@ -222,7 +222,7 @@ func (s *Server) endpointPredict(ctx context.Context, project, location, endpoin
 
 // handleEndpoint serves the JSON routes for custom endpoints:
 // POST /v1/projects/{p}/locations/{l}/endpoints/{endpoint}:predict and
-// :rawPredict.
+// :rawPredict, and :streamRawPredict (#1285).
 func (s *Server) handleEndpoint(w http.ResponseWriter, r *http.Request) {
 	endpoint, verb, ok := strings.Cut(r.PathValue("endpoint"), ":")
 	if !ok {
@@ -259,8 +259,11 @@ func (s *Server) handleEndpoint(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(a.status)
 		_, _ = w.Write(a.body)
+	case "streamRawPredict":
+		// The container's contract has no streaming route: its one answer (#1285).
+		s.streamRawPredictREST(w, r, target{project: project, location: location, endpoint: endpoint}, body)
 	default:
 		apierror.WriteJSON(w, apierror.Unimplemented(
-			"method %q is not implemented for endpoints; only :predict and :rawPredict are served", verb))
+			"method %q is not implemented for endpoints; only :predict, :rawPredict and :streamRawPredict are served", verb))
 	}
 }

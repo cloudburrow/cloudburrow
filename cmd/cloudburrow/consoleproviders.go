@@ -556,6 +556,9 @@ type runProvider struct {
 	runAddr        func() string
 	defaultProject string
 	region         string
+	// storageAddr is this instance's Cloud Storage base URL, or "" when it
+	// is not served; Deploy from source uploads its archive there (#1268).
+	storageAddr string
 }
 
 func (runProvider) ID() string    { return "run" }
@@ -3320,6 +3323,8 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 		notifications, create := p.notificationsSection(ctx, project, bucket)
 		sections = append(sections, notifications)
 		actions = append(actions, create...)
+		// Its object change notification channels (#1281).
+		sections = append(sections, p.channelsSection(ctx, bucket))
 	}
 
 	summary := []console.Property{{Label: "Bucket", Value: bucket}}

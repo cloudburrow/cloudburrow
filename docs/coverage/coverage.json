@@ -347,14 +347,17 @@
     "Key": "run",
     "Title": "Cloud Run v2",
     "counts": {
-      "Not served": 15,
-      "Verified": 26
+      "Not served": 14,
+      "Verified": 27
     },
     "rows": [
       {
         "method": "google.cloud.run.v2.Builds/SubmitBuild",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runbuilds_test.go:138 TestRunSubmitBuildDockerDeploys",
+          "test/compat/runbuilds_test.go:217 TestFunctionsSubmitBuildBuildpacks"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Executions/CancelExecution",
@@ -1903,14 +1906,17 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Unimplemented": 9,
-      "Verified": 5
+      "Unimplemented": 4,
+      "Verified": 10
     },
     "rows": [
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/streampredict_test.go:180 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectRawPredict",
@@ -1947,18 +1953,25 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/RawPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/predictiongrpc_test.go:59 TestPredictionClientReachesACustomEndpoint"
+          "test/compat/predictiongrpc_test.go:59 TestPredictionClientReachesACustomEndpoint",
+          "test/compat/rawpredict_test.go:26 TestRawPredictOnTheEmbeddingModel",
+          "test/compat/rawpredict_test.go:70 TestRawPredictOnTheGenerationModel"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/ServerStreamingPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/streampredict_test.go:180 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamDirectPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamDirectRawPredict",
@@ -1974,13 +1987,18 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamRawPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/streampredict_test.go:180 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamingPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamingRawPredict",
@@ -2363,8 +2381,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 20,
-      "Verified": 67
+      "Unimplemented": 19,
+      "Verified": 68
     },
     "rows": [
       {
@@ -2627,8 +2645,10 @@
       },
       {
         "method": "storage.channels.stop",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagechannels_test.go:38 TestStorageObjectChangeChannels"
+        ]
       },
       {
         "method": "storage.defaultObjectAccessControls.delete",
@@ -4356,6 +4376,9 @@
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
+          "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
+          "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
+          "test/compat/bigquerypartitionreads_test.go:76 TestBigQueryPartitionDecorators",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -4390,6 +4413,9 @@
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
+          "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
+          "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
+          "test/compat/bigquerypartitionreads_test.go:76 TestBigQueryPartitionDecorators",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -4585,6 +4611,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerypartitionreads_test.go:76 TestBigQueryPartitionDecorators",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },

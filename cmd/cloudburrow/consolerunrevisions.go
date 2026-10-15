@@ -85,7 +85,7 @@ func (p runProvider) DetailActions(ctx context.Context, _ string, path []string)
 		return nil
 	}
 	if len(path) == 1 {
-		return p.trafficAction(svc)
+		return append(p.trafficAction(svc), p.sourceActions()...)
 	}
 	return p.revisionActions(svc, path[1])
 }
@@ -93,6 +93,11 @@ func (p runProvider) DetailActions(ctx context.Context, _ string, path []string)
 // ActAt implements console.PathActor through the adapter's UpdateService
 // (Manage traffic) and DeleteRevision.
 func (p runProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if action == runDeploySource {
+		// Its file is not in a JSON action: the form sends both to the
+		// upload route, which calls ActAtFile.
+		return errors.New("Deploy from source is sent with its file, to /api/actions/run/upload")
+	}
 	if action == runManageTraffic && len(path) == 1 {
 		if p.runEndpoint() == "" {
 			return errors.New("the Cloud Run adapter is not running")

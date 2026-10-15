@@ -103,9 +103,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.HasPrefix(r.URL.Path, "/v1/") && verb != "predict" && verb != "embedContent" {
+	if strings.HasPrefix(r.URL.Path, "/v1/") && verb != "predict" && verb != "embedContent" && verb != "rawPredict" && verb != "streamRawPredict" {
 		apierror.WriteJSON(w, apierror.Unimplemented(
-			"only :predict and :embedContent are served under /v1; generation is served under /%s", APIVersion))
+			"only :predict, :embedContent, :rawPredict and :streamRawPredict are served under /v1; generation is served under /%s", APIVersion))
 		return
 	}
 
@@ -126,6 +126,24 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.embedContentREST(w, r, model)
+	case "rawPredict":
+		if r.PathValue("project") == "" {
+			apierror.WriteJSON(w, apierror.Unimplemented(":rawPredict is served only on the Vertex path"))
+			return
+		}
+		s.rawPredictREST(w, r, model)
+	case "streamRawPredict":
+		if r.PathValue("project") == "" {
+			apierror.WriteJSON(w, apierror.Unimplemented(":streamRawPredict is served only on the Vertex path"))
+			return
+		}
+		body, err := readBody(r)
+		if err != nil {
+			apierror.WriteJSON(w, err)
+			return
+		}
+		s.streamRawPredictREST(w, r, target{project: r.PathValue("project"), location: r.PathValue("location"),
+			publisher: "google", model: model}, body)
 	case "countTokens":
 		// Refused rather than estimated. See the package doc.
 		apierror.WriteJSON(w, apierror.Unimplemented(

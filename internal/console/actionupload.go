@@ -49,6 +49,43 @@ type FileActor interface {
 	ActAtFile(ctx context.Context, project string, path []string, action string, values map[string]string, file UploadedFile) (*Listing, error)
 }
 
+// ListActor is a provider with actions on its list screen itself, on no
+// existing resource (#1289): Cloud Run's Create service from source. The
+// list screen draws them beside Create, and each is sent with an empty path.
+// They are offered only through the upload route, so every one must take a
+// file; one that does not is not drawn.
+type ListActor interface {
+	FileActor
+	// ListActions returns what the list screen offers for a project.
+	ListActions(ctx context.Context, project string) []Action
+}
+
+// takesFile reports whether an action's form holds a file.
+func takesFile(a Action) bool {
+	for _, f := range a.Fields {
+		if f.Type == FileFieldType {
+			return true
+		}
+	}
+	return false
+}
+
+// listActions are a provider's list-screen actions that take a file, or
+// none when it has no ListActor.
+func listActions(ctx context.Context, p Provider, project string) []Action {
+	la, ok := p.(ListActor)
+	if !ok {
+		return nil
+	}
+	var out []Action
+	for _, a := range la.ListActions(ctx, project) {
+		if takesFile(a) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // actionUploadBudget bounds one action with a file, as an object upload's
 // thirty minutes do.
 const actionUploadBudget = 30 * time.Minute
@@ -94,16 +131,22 @@ func (s *Server) handleActionUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the action's request: " + err.Error()})
 		return
 	}
-	if req.Action == "" || len(req.Path) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action and path are required"})
+	// An empty path is the list screen's own action (ListActor), on no
+	// existing resource (#1289).
+	if req.Action == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action is required"})
 		return
 	}
 	project := r.URL.Query().Get("project")
 	ctx, cancel := context.WithTimeout(r.Context(), actionUploadBudget)
 	defer cancel()
 
+	offers := listActions(ctx, p, project)
+	if len(req.Path) > 0 {
+		offers = actor.DetailActions(ctx, project, req.Path)
+	}
 	var offered *Action
-	for _, a := range actor.DetailActions(ctx, project, req.Path) {
+	for _, a := range offers {
 		if a.ID == req.Action {
 			a := a
 			offered = &a
@@ -114,11 +157,7 @@ func (s *Server) handleActionUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": req.Action + " is not available on this resource"})
 		return
 	}
-	takesFile := false
-	for _, f := range offered.Fields {
-		takesFile = takesFile || f.Type == FileFieldType
-	}
-	if !takesFile {
+	if !takesFile(*offered) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": offered.Label + " takes no file; it is sent to /api/actions"})
 		return
 	}
@@ -135,6 +174,9 @@ func (s *Server) handleActionUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := strings.Join(req.Path, "/")
+	if name == "" {
+		name = p.Title()
+	}
 	opID := s.logs.StartOperation(req.Action, name, project)
 	capped := &cappedReader{r: part, limit: limit}
 	result, err := actor.ActAtFile(ctx, project, req.Path, req.Action, req.Values, UploadedFile{

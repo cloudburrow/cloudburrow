@@ -243,7 +243,7 @@ func TestStorageEveryUnbuiltMethodIsNotImplemented(t *testing.T) {
 			t.Errorf("%s %s (%s) = %d %s; want 501 naming %s", m.Verb, m.Path, m.ID, resp.StatusCode, b, m.ID)
 		}
 	}
-	if n < 20 {
+	if n < 19 {
 		t.Errorf("only %d unbuilt methods were checked", n)
 	}
 }

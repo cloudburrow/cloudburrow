@@ -2377,6 +2377,7 @@ function renderTableInto(view, header, data, noun, reload, route, opts = {}) {
             ? el("button", { class: "primary", text: caps.create.label,
                 onclick: () => startCreate(route, caps.create, refresh) })
             : null,
+          ...listActionButtons(route, data, refresh),
           selectable ? bulk : null,
           selectionLabel,
           refreshButton,
@@ -3012,7 +3013,7 @@ function openActionForm(route, segments, action, onDone, title = null) {
           "POST", { Path: segments, Action: action.id, Values: values });
       op.succeeded("", res.operation);
       submitting = false;
-      notify(`${action.label} applied to ${name}`);
+      notify(segments.length ? `${action.label} applied to ${name}` : `${action.label} done`);
       onDone();
       // An action that answers with rows — a pull — keeps its dialog open to
       // show them. Closing it would be the pull done and its messages thrown
@@ -3038,11 +3039,22 @@ function openActionForm(route, segments, action, onDone, title = null) {
   };
 
   dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
-    el("h2", { id: "action-title", text: `${action.label} for ${name}` }),
+    el("h2", { id: "action-title", text: segments.length ? `${action.label} for ${name}` : action.label }),
     error,
     ...fields.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
   fields.focusFirst();
+}
+
+// listActionButtons are the list screen's own actions (#1289), on no
+// existing resource: Cloud Run's Create service from source. Each opens its
+// form and is sent with an empty path, which the upload route checks against
+// the listing's actions.
+function listActionButtons(route, data, onDone) {
+  return (data.actions || []).map((a) => el("button", {
+    type: "button", class: "secondary", id: `list-action-${a.id}`, text: a.label,
+    onclick: () => openActionForm(route, [], a, onDone, data.noun || route.title),
+  }));
 }
 
 // sendActionWithFile performs an action whose form holds a file (#999):
@@ -3586,6 +3598,7 @@ async function renderList(view, route) {
       empty.append(el("button", { class: "primary", text: caps.create.label,
         onclick: () => startCreate(route, caps.create, () => renderList(view, route)) }));
     }
+    empty.append(...listActionButtons(route, data, () => renderList(view, route)));
     setChildren(view, ...header,
       data.note ? el("p", { class: "unavailable", text: data.note }) : null,
       empty);
@@ -7047,7 +7060,7 @@ async function renderMonitoring(view) {
           foot: `Kubelet node filesystem · ${foot}`,
         })),
       await productActivity(),
-      await requestCharts(),
+      await requestCharts(samples),
       // Absence, stated. The alternative is a reader assuming these charts
       // are missing rather than impossible.
       el("div", { class: "card" },
@@ -7702,6 +7715,7 @@ const PLAYGROUND_HISTORY_LIMIT = 20;
 let PLAYGROUND_HISTORY = [];
 let PLAYGROUND_ABORT = null;
 let PLAYGROUND_STREAM = true;
+let PLAYGROUND_RAW = false;
 
 function stopGeneration() {
   if (PLAYGROUND_ABORT) { PLAYGROUND_ABORT.abort(); PLAYGROUND_ABORT = null; }
@@ -7758,6 +7772,14 @@ async function renderPlayground(view) {
   const streamLabel = el("label", { for: "pg-stream", title:
     "On: streamGenerateContent, shown as each chunk arrives. Off: generateContent, one answer." },
     stream, " Stream");
+  // Raw (#1284, #1285): the same body sent as RawPredict sends it, to
+  // :streamRawPredict (StreamRawPredict) or :rawPredict (RawPredict).
+  const raw = el("input", { type: "checkbox", id: "pg-raw" });
+  raw.checked = PLAYGROUND_RAW;
+  raw.addEventListener("change", () => { PLAYGROUND_RAW = raw.checked; });
+  const rawLabel = el("label", { for: "pg-raw", title:
+    "On: the body is sent as RawPredict sends it, to :streamRawPredict (Stream on) or :rawPredict (Stream off)." },
+    raw, " Raw");
   const timing = el("span", { class: "unavailable", text: "" });
   const output = el("pre", { class: "mono pg-output", id: "pg-output", "aria-live": "polite" });
   const historyBody = el("tbody");
@@ -7801,6 +7823,7 @@ async function renderPlayground(view) {
     cancel.disabled = false;
 
     const streaming = stream.checked;
+    const rawBody = raw.checked;
     const controller = new AbortController();
     PLAYGROUND_ABORT = controller;
     const started = performance.now();
@@ -7812,7 +7835,7 @@ async function renderPlayground(view) {
       const resp = await fetch("/api/ai/playground", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, stream: streaming }),
+        body: JSON.stringify({ prompt: text, stream: streaming, raw: rawBody }),
         signal: controller.signal,
       });
       if (!resp.ok) {
@@ -7873,7 +7896,7 @@ async function renderPlayground(view) {
       PLAYGROUND_ABORT = null;
 
       PLAYGROUND_HISTORY.unshift({
-        at: new Date().toLocaleTimeString(), prompt: text, method: streaming ? "Stream" : "Unary",
+        at: new Date().toLocaleTimeString(), prompt: text, method: (rawBody ? "Raw " : "") + (streaming ? "Stream" : "Unary"),
         ttft, total: `${Math.round(total)} ms`, ok, cancelled,
       });
       PLAYGROUND_HISTORY = PLAYGROUND_HISTORY.slice(0, PLAYGROUND_HISTORY_LIMIT);
@@ -7891,7 +7914,7 @@ async function renderPlayground(view) {
     refused,
     el("div", { class: "card" },
       prompt,
-      el("div", { class: "card-actions" }, send, cancel, streamLabel, timing),
+      el("div", { class: "card-actions" }, send, cancel, streamLabel, rawLabel, timing),
       output),
     el("div", { class: "card" },
       el("h2", { text: "This session" }),
@@ -7936,13 +7959,14 @@ function stopPrediction() {
   if (PREDICT_ABORT) { PREDICT_ABORT.abort(); PREDICT_ABORT = null; }
 }
 
-// Embeddings (#41) sends text-embedding :predict, or EmbedContent's
-// :embedContent (#1244), for the one embedding model served, a community ONNX
+// Embeddings (#41) sends text-embedding :predict, EmbedContent's
+// :embedContent (#1244), or :rawPredict with the :predict body (#1284), for
+// the one embedding model served, a community ONNX
 // conversion of EmbeddingGemma. The provenance banner is on the screen that
 // shows the vectors, not only in the documentation.
 async function renderEmbeddings(view) {
   const title = "Embeddings";
-  const subtitle = "Text-embedding :predict and :embedContent against the local endpoint";
+  const subtitle = "Text-embedding :predict, :embedContent and :rawPredict against the local endpoint";
   setChildren(view, pageHeader(title, subtitle), loadingState(3));
   let status;
   try {
@@ -7973,7 +7997,8 @@ async function renderEmbeddings(view) {
   const methods = status.methods || ["predict"];
   const method = el("select", { id: "emb-method", "aria-label": "API method" },
     ...methods.map((m) => el("option", { value: m,
-      text: m === "embedContent" ? "EmbedContent (:embedContent, one request per text)" : "Predict (:predict, one batch)" })));
+      text: m === "embedContent" ? "EmbedContent (:embedContent, one request per text)"
+        : m === "rawPredict" ? "RawPredict (:rawPredict, the :predict body unwrapped)" : "Predict (:predict, one batch)" })));
   method.addEventListener("change", () => {
     const ep = document.getElementById("emb-endpoint");
     if (ep && status.endpoints) ep.textContent = status.endpoints[method.value] || status.endpoint;
@@ -8011,7 +8036,8 @@ async function renderEmbeddings(view) {
         }
         displayName = "EmbedContent: " + status.model + " — " + status.note;
       } else {
-        const data = await post("predict", {
+        // RawPredict sends the same body unwrapped, and gets the same answer.
+        const data = await post(method.value === "rawPredict" ? "rawPredict" : "predict", {
           instances: lines.map((content) => ({ content, task_type: task.value })),
           parameters: { outputDimensionality: Number(dim.value) },
         });
@@ -8671,11 +8697,33 @@ function openFaultForm(data, onDone) {
   controls.service.focus();
 }
 
-// Request charts on /monitoring (#292): calls CloudBurrow served itself, from
-// the counters /metrics exposes, sampled on the server's own tick. A service
-// reached by direct port-forward is named as not measured, never charted at
-// zero, which would read as "nobody called it".
-async function requestCharts() {
+// Request charts on /monitoring (#292): calls CloudBurrow served itself or
+// saw pass, from the counters /metrics exposes, sampled on the server's own
+// tick: Pub/Sub's and Bigtable's through their fronts, Firestore's and
+// Datastore's from the host through the tunnel's guard (#1266, #1267). A
+// service reached by a raw port-forward (Spanner) is named as not measured,
+// never charted at zero, which would read as "nobody called it".
+//
+// Beside them, each in-cluster emulator's container CPU and memory, from the
+// kubelet's per-pod readings the node charts above come from (#1267).
+const EMULATOR_PODS = ["pubsub", "firestore", "datastore", "bigtable", "spanner"];
+
+// emulatorPodSeries picks, per emulator, its pod's readings out of the
+// series: a Deployment's pod is named <service>-<hash>-<id>.
+function emulatorPodSeries(samples) {
+  const out = new Map();
+  for (const svc of EMULATOR_PODS) {
+    const match = new RegExp(`^${svc}-[a-z0-9]+-[a-z0-9]+$`);
+    const points = samples.map((s) => {
+      const pod = (s.pods || []).find((p) => match.test(p.name));
+      return pod ? { at: s.at, cpu: pod.cpuUsedCores, memory: pod.memoryWorkingSetBytes } : { at: s.at };
+    });
+    if (points.some((p) => p.cpu !== undefined)) out.set(svc, points);
+  }
+  return out;
+}
+
+async function requestCharts(samples = []) {
   let data;
   try {
     data = await api("/api/metrics/requests");
@@ -8705,13 +8753,31 @@ async function requestCharts() {
         foot: "p95 estimated from the histogram, as histogram_quantile does",
       }));
   }
+  const containers = [];
+  for (const [svc, pts] of emulatorPodSeries(samples)) {
+    const last = [...pts].reverse().find((p) => p.cpu !== undefined);
+    containers.push(
+      chartCard(`${svc}: container CPU`, pts.map((p) => ({ at: p.at, value: p.cpu === undefined ? null : p.cpu })), {
+        label: `${svc} pod CPU cores used`,
+        current: last ? `${last.cpu.toFixed(3)} vCPU` : "",
+        foot: "Kubelet instantaneous usage of the emulator's pod",
+      }),
+      chartCard(`${svc}: container memory`, pts.map((p) => ({ at: p.at, value: p.memory === undefined ? null : p.memory })), {
+        label: `${svc} pod memory working set`,
+        current: last ? formatBytes(last.memory) : "",
+        foot: "Kubelet working set of the emulator's pod",
+      }));
+  }
   const unmeasured = data.unmeasured || [];
   return el("div", { class: "card", id: "request-metrics" },
     el("h2", { text: "API requests" }),
     cards.length
       ? el("div", { class: "charts" }, ...cards)
       : el("p", { class: "unavailable", text: data.unavailable ||
-          "No calls to Cloud Tasks, Secret Manager or Cloud Run yet. Charts appear once there are." }),
+          "No API calls yet. Charts appear once there are." }),
+    containers.length
+      ? el("div", { class: "charts", id: "emulator-containers" }, ...containers)
+      : null,
     unmeasured.length
       ? el("ul", { class: "unmeasured" }, ...unmeasured.map((s) =>
           el("li", { text: `${s}: ${data.unmeasured_label}` })))
