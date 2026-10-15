@@ -92,12 +92,13 @@ func TestStorageErrorEnvelopeShapes(t *testing.T) {
 		e.Error.Errors[0].Domain != "global" || e.Error.Errors[0].Reason == "" || e.Error.Errors[0].Message == "" {
 		t.Errorf("JSON error body = %s (%v)", b, err)
 	}
-	// A POST without x-goog-resumable (a form upload) and a bucket PUT are
-	// not built.
+	// An object POST without x-goog-resumable and a bucket PUT of a
+	// subresource (?logging) are not built; a bucket PUT that creates is
+	// (#1258).
 	for name, c := range map[string]struct{ method, path, host, names string }{
 		"path-style":     {"POST", "/my-bucket/dir/obj.txt", "", "my-bucket/dir/obj.txt"},
 		"virtual-hosted": {"POST", "/dir/obj.txt", "my-bucket.storage.localhost", "my-bucket/dir/obj.txt"},
-		"bucket":         {"PUT", "/my-bucket", "", "bucket my-bucket"},
+		"bucket":         {"PUT", "/my-bucket?logging", "", "bucket my-bucket"},
 	} {
 		resp, b := do(t, c.method, h.URL+c.path, c.host)
 		var xe xmlError

@@ -7698,6 +7698,7 @@ const PLAYGROUND_SUBTITLE = "Real inference through the same HTTP API the offici
 const PLAYGROUND_HISTORY_LIMIT = 20;
 let PLAYGROUND_HISTORY = [];
 let PLAYGROUND_ABORT = null;
+let PLAYGROUND_STREAM = true;
 
 function stopGeneration() {
   if (PLAYGROUND_ABORT) { PLAYGROUND_ABORT.abort(); PLAYGROUND_ABORT = null; }
@@ -7745,6 +7746,15 @@ async function renderPlayground(view) {
     placeholder: "Ask the local model something…", "aria-label": "Prompt" });
   const send = el("button", { text: "Run" });
   const cancel = el("button", { class: "secondary", text: "Cancel", disabled: "disabled" });
+  // Stream (#1257): on, the answer arrives as streamGenerateContent sends it
+  // (StreamGenerateContent over gRPC); off, it is one generateContent answer
+  // (GenerateContent). Kept for the page's lifetime, as the history is.
+  const stream = el("input", { type: "checkbox", id: "pg-stream" });
+  stream.checked = PLAYGROUND_STREAM;
+  stream.addEventListener("change", () => { PLAYGROUND_STREAM = stream.checked; });
+  const streamLabel = el("label", { for: "pg-stream", title:
+    "On: streamGenerateContent, shown as each chunk arrives. Off: generateContent, one answer." },
+    stream, " Stream");
   const timing = el("span", { class: "unavailable", text: "" });
   const output = el("pre", { class: "mono pg-output", id: "pg-output", "aria-live": "polite" });
   const historyBody = el("tbody");
@@ -7763,6 +7773,7 @@ async function renderPlayground(view) {
       historyBody.append(el("tr", {},
         el("td", { class: "mono", text: h.at }),
         el("td", { text: h.prompt.length > 60 ? h.prompt.slice(0, 60) + "…" : h.prompt }),
+        el("td", { text: h.method }),
         el("td", { class: "mono", text: h.ttft }),
         el("td", { class: "mono", text: h.total }),
         el("td", {}, el("span", {
@@ -7772,7 +7783,7 @@ async function renderPlayground(view) {
     }
     if (!PLAYGROUND_HISTORY.length) {
       historyBody.append(el("tr", {},
-        el("td", { colspan: "5", class: "unavailable", text: "No requests yet this session." })));
+        el("td", { colspan: "6", class: "unavailable", text: "No requests yet this session." })));
     }
   };
 
@@ -7786,6 +7797,7 @@ async function renderPlayground(view) {
     send.disabled = true;
     cancel.disabled = false;
 
+    const streaming = stream.checked;
     const controller = new AbortController();
     PLAYGROUND_ABORT = controller;
     const started = performance.now();
@@ -7797,12 +7809,19 @@ async function renderPlayground(view) {
       const resp = await fetch("/api/ai/playground", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text }),
+        body: JSON.stringify({ prompt: text, stream: streaming }),
         signal: controller.signal,
       });
       if (!resp.ok) {
         const body = await resp.text();
         throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
+      }
+      if (!streaming) {
+        // One GenerateContentResponse: its first token is the whole answer.
+        const answer = await resp.json();
+        firstAt = performance.now();
+        output.textContent = (answer.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+        return;
       }
 
       const reader = resp.body.getReader();
@@ -7851,7 +7870,7 @@ async function renderPlayground(view) {
       PLAYGROUND_ABORT = null;
 
       PLAYGROUND_HISTORY.unshift({
-        at: new Date().toLocaleTimeString(), prompt: text,
+        at: new Date().toLocaleTimeString(), prompt: text, method: streaming ? "Stream" : "Unary",
         ttft, total: `${Math.round(total)} ms`, ok, cancelled,
       });
       PLAYGROUND_HISTORY = PLAYGROUND_HISTORY.slice(0, PLAYGROUND_HISTORY_LIMIT);
@@ -7869,7 +7888,7 @@ async function renderPlayground(view) {
     refused,
     el("div", { class: "card" },
       prompt,
-      el("div", { class: "card-actions" }, send, cancel, timing),
+      el("div", { class: "card-actions" }, send, cancel, streamLabel, timing),
       output),
     el("div", { class: "card" },
       el("h2", { text: "This session" }),
@@ -7878,7 +7897,7 @@ async function renderPlayground(view) {
         "Nothing is written to storage and nothing leaves the browser." }),
       el("table", {},
         el("thead", {}, el("tr", {},
-          ["Time", "Prompt", "First token", "Total", "Result"].map((c) =>
+          ["Time", "Prompt", "Method", "First token", "Total", "Result"].map((c) =>
             el("th", { scope: "col", text: c })))),
         historyBody)));
 }
