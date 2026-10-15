@@ -51,6 +51,9 @@ import (
 
 	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	bqv2 "google.golang.org/api/bigquery/v2"
+	runv1 "google.golang.org/api/run/v1"
+
+	sqladminsvc "github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -64,6 +67,7 @@ import (
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	_ "cloud.google.com/go/redis/apiv1/redispb"
 	_ "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	_ "cloud.google.com/go/run/apiv2/runpb"
 	_ "cloud.google.com/go/scheduler/apiv1/schedulerpb"
@@ -93,12 +97,16 @@ var areas = []area{
 	{Key: "tasks", Title: "Cloud Tasks", Own: true, Services: []string{"google.cloud.tasks.v2.CloudTasks"}},
 	{Key: "secretmanager", Title: "Secret Manager", Own: true, Services: []string{"google.cloud.secretmanager.v1.SecretManagerService"}},
 	{Key: "run", Title: "Cloud Run v2", Own: true, Package: "google.cloud.run.v2"},
+	// The v1 (Knative-shaped) API gcloud run calls (#1293): no proto, so
+	// its methods are the official generated client's, and a method is
+	// Verified only by an annotated official-client test.
+	{Key: "runv1", Title: "Cloud Run v1 (Knative API)", Methods: discoveryMethods("run", reflect.TypeOf(runv1.APIService{}))},
 	// google.iam.v1.IAMPolicy is the mixin cloudkms.googleapis.com serves
 	// (#428). Mixin keys are global, so only one area may list it.
 	// google.cloud.location.Locations too (#1291); Cloud Scheduler lists it
 	// as well, and both serve it, so the one registry status is true of both.
 	{Key: "kms", Title: "Cloud KMS", Own: true, Services: []string{"google.cloud.kms.v1.KeyManagementService", "google.iam.v1.IAMPolicy", "google.cloud.location.Locations"}},
-	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects"}},
+	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects", "google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations"}},
 	// google.cloud.location.Locations is the mixin cloudscheduler.googleapis.com
 	// serves (#1237); Cloud KMS serves it too (#1291).
 	{Key: "scheduler", Title: "Cloud Scheduler", Own: true, Services: []string{"google.cloud.scheduler.v1.CloudScheduler", "google.cloud.location.Locations"}},
@@ -108,6 +116,9 @@ var areas = []area{
 	{Key: "logging", Title: "Cloud Logging", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2", "google.logging.v2.MetricsServiceV2", "google.logging.v2.ConfigServiceV2"}},
 	// The local AI endpoint's PredictionService (#1193).
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService"}},
+	// The Memorystore for Redis admin API (#1302), over the one Valkey
+	// server --services memorystore runs.
+	{Key: "memorystore", Title: "Memorystore for Redis", Own: true, Services: []string{"google.cloud.redis.v1.CloudRedis"}},
 	{Key: "pubsub", Title: "Pub/Sub", Services: []string{"google.pubsub.v1.Publisher", "google.pubsub.v1.Subscriber", "google.pubsub.v1.SchemaService"}},
 	{Key: "storage", Title: "Cloud Storage (JSON API)", Own: true, Methods: storageMethods()},
 	// The opt-in emulators (#717) are Google's, like Pub/Sub's: a method is
@@ -122,6 +133,20 @@ var areas = []area{
 	// validating front, classified by annotations alone, as the other
 	// opt-in emulators are.
 	{Key: "bigquery", Title: "BigQuery (REST API v2)", Methods: bigqueryMethods()},
+	// The Cloud SQL Admin API (#1301): CloudBurrow's own, over the
+	// PostgreSQL and MySQL servers it runs. Its methods are the discovery
+	// document's, which the server's own table is (internal/service/sqladmin).
+	{Key: "sqladmin", Title: "Cloud SQL Admin API (v1)", Own: true, Methods: sqladminMethods()},
+}
+
+// sqladminMethods is every method of the sqladmin v1 discovery document.
+func sqladminMethods() []string {
+	var out []string
+	for id := range sqladminsvc.MethodStatuses() {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // bigqueryMethods is every method of the official generated BigQuery client,
@@ -141,6 +166,31 @@ func bigqueryMethods() []string {
 			out = append(out, "bigquery."+lower(f.Name)+"."+lower(f.Type.Method(j).Name))
 		}
 	}
+	sort.Strings(out)
+	return out
+}
+
+// discoveryMethods is every method of a generated google.golang.org/api
+// client, as its discovery ID: <api>.<resource>[.<resource>...].<method>,
+// such as run.namespaces.services.list. Resources nest as *XService fields.
+func discoveryMethods(api string, svc reflect.Type) []string {
+	lower := func(s string) string { return strings.ToLower(s[:1]) + s[1:] }
+	var out []string
+	var walk func(prefix string, t reflect.Type)
+	walk = func(prefix string, t reflect.Type) {
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			if !f.IsExported() || f.Type.Kind() != reflect.Pointer || !strings.HasSuffix(f.Type.Elem().Name(), "Service") {
+				continue
+			}
+			p := prefix + "." + lower(f.Name)
+			for j := 0; j < f.Type.NumMethod(); j++ {
+				out = append(out, p+"."+lower(f.Type.Method(j).Name))
+			}
+			walk(p, f.Type.Elem())
+		}
+	}
+	walk(api, svc)
 	sort.Strings(out)
 	return out
 }
@@ -422,6 +472,14 @@ func loadRegistry(root string) (map[string]string, error) {
 	// Storage's registry is the server's own method table, so a method moves
 	// to implemented in the same change that builds it.
 	for id, isBuilt := range gcs.MethodStatuses() {
+		if isBuilt {
+			r[id] = regImplemented
+		} else {
+			r[id] = regUnimplemented
+		}
+	}
+	// The Cloud SQL Admin API's too (#1301).
+	for id, isBuilt := range sqladminsvc.MethodStatuses() {
 		if isBuilt {
 			r[id] = regImplemented
 		} else {

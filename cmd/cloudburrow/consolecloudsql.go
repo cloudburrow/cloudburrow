@@ -45,9 +45,9 @@ func (p cloudSQLProvider) connect(ctx context.Context, database string) (*pgx.Co
 	return pgx.Connect(ctx, url)
 }
 
-const cloudSQLNote = "A real PostgreSQL, not the Cloud SQL Admin API. " +
-	"Google publishes no Cloud SQL emulator, so instances, connection names, " +
-	"IAM database authentication, backups and replicas do not exist here."
+const cloudSQLNote = "A real PostgreSQL: Google publishes no Cloud SQL emulator. " +
+	"The Cloud SQL Admin API serves it as the instance postgres, with its databases " +
+	"and users; creating instances, IAM database authentication, backups and replicas do not exist here."
 
 func (p cloudSQLProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	base := console.Listing{
@@ -382,8 +382,8 @@ func (p cloudSQLProvider) usersSection(ctx context.Context, database string) con
 		      WHERE rolcanlogin
 		      ORDER BY rolname`,
 		status: noStatus,
-		note: "Read from pg_roles, which holds no password material. Users cannot " +
-			"be created from here: this is not the Cloud SQL Admin API.",
+		note: "Read from pg_roles, which holds no password material. Add user and " +
+			"Delete user run what the Cloud SQL Admin API's users methods run (#1301).",
 	})
 }
 

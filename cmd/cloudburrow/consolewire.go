@@ -83,6 +83,7 @@ func buildConsole(d consoleDeps) *console.Server {
 	srv := console.New(addr, consoleStatus(d), providers...)
 	srv.SetPlayground(playgroundFor(d))
 	srv.SetPrediction(predictionFor(d))
+	srv.SetLocalModels(localModelsFor(d.cfg, d.localAI))
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how
@@ -110,7 +111,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Resource Manager first: it is where the projects every other screen is
 	// scoped to come from.
 	if d.projects != nil {
-		providers = append(providers, projectsProvider{registry: d.projects})
+		providers = append(providers, projectsProvider{registry: d.projects}, hierarchyProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
 		// Three screens of one product: buckets, the project's soft-deleted
@@ -190,6 +191,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceSpanner, func(a string) console.Provider { return spannerProvider{endpoint: a} }},
 		{config.ServiceCloudSQL, func(a string) console.Provider { return cloudSQLProvider{endpoint: a} }},
 		{config.ServiceCloudSQLMySQL, func(a string) console.Provider { return newCloudSQLMySQLProvider(a, d.mysql) }},
+		// Memorystore's Instances page, through the admin API (#1302).
+		{config.ServiceMemorystore, func(a string) console.Provider { return newMemorystoreProvider(d.cfg, a) }},
 		// The emulator serves the instance's default project and no other, so
 		// the screen is told which one that is (#698).
 		{config.ServiceBigQuery, func(a string) console.Provider {

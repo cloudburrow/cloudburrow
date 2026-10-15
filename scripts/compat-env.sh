@@ -56,7 +56,7 @@ ALL=(
   CREDENTIALS KUBECONFIG CLUSTER CONTROL METADATA CONSOLE ADMIN_TOKEN CLI CLI_ARGS
   STORAGE CORS_ORIGIN PUBSUB TASKS SECRETS SCHEDULER RUN KMS LOGGING RESOURCEMANAGER
   RUN_STORAGE RUN_PUBSUB RUN_KMS RUN_SCHEDULER RUN_LOGGING RUN_BIGQUERY TASKS_LOGGING
-  SPANNER DATASTORE FIRESTORE BIGTABLE MEMORYSTORE MYSQL MYSQL_PASSWORD CLOUDSQL
+  SPANNER DATASTORE FIRESTORE BIGTABLE MEMORYSTORE MEMORYSTORE_ADMIN MEMORYSTORE_PROJECT MYSQL MYSQL_PASSWORD CLOUDSQL SQLADMIN
   BIGQUERY BIGQUERY_STORAGE BIGQUERY_PROJECT
   LOCALAI PREDICTION GCLOUD TOFU
 )
@@ -283,9 +283,14 @@ value() {
     # Memorystore, Cloud SQL for MySQL and Cloud SQL for PostgreSQL from the
     # host and port variables env exports for each (#296, #297, #584).
     MEMORYSTORE) from_env 'if .REDIS_HOST and .REDIS_PORT then "\(.REDIS_HOST):\(.REDIS_PORT)" else empty end' ;;
+    # The admin API (#1302), and the project its one instance is in.
+    MEMORYSTORE_ADMIN) from_env '.CLOUDBURROW_MEMORYSTORE_ENDPOINT // empty' ;;
+    MEMORYSTORE_PROJECT) from_env '.GOOGLE_CLOUD_PROJECT // empty' ;;
     MYSQL) from_env 'if .MYSQL_HOST and .MYSQL_PORT then "\(.MYSQL_HOST):\(.MYSQL_PORT)" else empty end' ;;
     MYSQL_PASSWORD) from_env '.MYSQL_PASSWORD // empty' ;;
     CLOUDSQL) from_env 'if .PGHOST and .PGPORT then "\(.PGHOST):\(.PGPORT)" else empty end' ;;
+    # The Cloud SQL Admin API over both servers (#1301).
+    SQLADMIN) from_env '.CLOUDBURROW_SQLADMIN_ENDPOINT // empty' ;;
     # BigQuery has no emulator variable in any client library; the project
     # is the instance's, the one project the emulator serves (#277).
     BIGQUERY|RUN_BIGQUERY) from_env '.CLOUDBURROW_BIGQUERY_ENDPOINT // empty' ;;

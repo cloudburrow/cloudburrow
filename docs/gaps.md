@@ -23,7 +23,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Storage | 10 | 3 | 6 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 15 | 12 | 1 | 0 | 2 |
+| Cloud Run | 16 | 13 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 0 | 0 | 0 | 0 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
@@ -32,10 +32,10 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Vertex AI | 4 | 2 | 2 | 0 | 0 |
 | BigQuery | 30 | 11 | 16 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
-| Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
+| Cloud SQL, Memorystore | 4 | 4 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
-| Console | 5 | 5 | 0 | 0 | 0 |
-| **Total** | **87** | **38** | **37** | **7** | **5** |
+| Console | 1 | 1 | 0 | 0 | 0 |
+| **Total** | **86** | **37** | **37** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -95,6 +95,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 | `Instances.*` is not served (#1299) | not built yet | L |
 | `WorkerPools.*` is not served (#1300) | not built yet | L |
 | `gcloud run services list` / `describe` use the v1 (Knative-shaped) API, which is not served (#1293) | not built yet | L |
+| `gcloud run deploy` through the v1 (Knative) API, served since #1293 for services, revisions, routes and configurations, is not verified: its default `startupProbe` and other v1 fields are refused as not mapped, and `projects.locations.list` and the rest of v1 (domain mappings, jobs, IAM) are 501 | not built yet | M |
 | `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
 | `CancelExecution`'s result | needs live GCP | S |
@@ -146,7 +147,7 @@ Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by 
 
 | Gap | Why open | Size |
 |---|---|---|
-| Folders, Organizations (#1294), Liens, TagKeys, TagValues, TagBindings (#1295) are not served (and `ListProjects` under a folder or organization is `UNIMPLEMENTED`) | not built yet | L |
+| Liens, TagKeys, TagValues, TagBindings (#1295) are not served (Folders and Organizations are, #1294) | not built yet | L |
 
 ## Vertex AI
 
@@ -219,6 +220,8 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 |---|---|---|
 | The Cloud SQL Admin API: instances, connection names, IAM database authentication, backups, replicas, the Auth Proxy path (#1301) | not built yet | L |
 | The Memorystore admin API (`redis.googleapis.com`) (#1302) | not built yet | L |
+| The Cloud SQL Admin API beyond instance reads, databases, users and operations (served since #1301): creating or changing instances, IAM database authentication, backups, replicas, the Auth Proxy and connector path (`connectSettings`, `generateEphemeralCert`) | not built yet | L |
+| The rest of the Memorystore admin API: `ListInstances`, `GetInstance` and `GetInstanceAuthString` are served over the one Valkey server (#1302); creating, updating, upgrading, deleting, importing, exporting and failing over an instance are UNIMPLEMENTED, and the gcloud and Terraform endpoint overrides are not exported until a test drives them | not built yet | M |
 
 ## Functions, credentials, tooling
 
@@ -233,11 +236,7 @@ Closed by this sweep: Test permissions on the Permissions tab (#1242).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Embedding playground | not built yet | M |
-| Model download, load and unload from the playground | not built yet | M |
 | Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured"; #1267) | not built yet | M |
-| Embedding playground (#1305) | not built yet | M |
-| Model download, load and unload from the playground (#1306) | not built yet | M |
 
 ## Excluded on purpose
 

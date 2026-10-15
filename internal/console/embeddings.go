@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -28,9 +29,27 @@ func (p *Playground) predictPath() string { return p.embeddingPath("predict") }
 // (text-embedding :predict, a batch), embedContent (#1244, one content) or
 // rawPredict (#1284, the :predict body sent unwrapped).
 func (p *Playground) embeddingPath(method string) string {
-	return fmt.Sprintf("/v1/projects/console/locations/us-central1/publishers/google/models/%s:%s",
-		p.EmbeddingModel, method)
+	return p.embeddingPathFor(p.EmbeddingModel, method)
 }
+
+// embeddingPathFor is embeddingPath for a model the user named (#1305).
+func (p *Playground) embeddingPathFor(model, method string) string {
+	return fmt.Sprintf("/v1/projects/console/locations/us-central1/publishers/google/models/%s:%s",
+		model, method)
+}
+
+// notServedEmbeddingModels are the Vertex embedding models a user is likely
+// to type (#1305). The screen offers them so that what happens is visible:
+// the API answers 404 for each, naming the one model served, and never
+// substitutes it.
+var notServedEmbeddingModels = []string{
+	"text-embedding-005", "text-embedding-004", "text-multilingual-embedding-002",
+	"textembedding-gecko@003", "gemini-embedding-001",
+}
+
+// embeddingModelName is the shape of a publisher model ID, so a typed name
+// can only ever change the last path segment.
+var embeddingModelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$`)
 
 // embeddingMethods are the methods the screen can send.
 var embeddingMethods = []string{"predict", "embedContent", "rawPredict"}
@@ -58,6 +77,8 @@ func (s *Server) handleEmbeddingsStatus(w http.ResponseWriter, _ *http.Request) 
 		"taskTypes": []string{"RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT", "SEMANTIC_SIMILARITY",
 			"CLASSIFICATION", "CLUSTERING", "QUESTION_ANSWERING", "FACT_VERIFICATION", "CODE_RETRIEVAL_QUERY"},
 		"dimensions": []int{768, 512, 256, 128},
+		// Names to try; the API refuses each with 404 and no substitution.
+		"notServed": notServedEmbeddingModels,
 	})
 }
 
@@ -81,13 +102,25 @@ func (s *Server) handleEmbeddingsPredict(w http.ResponseWriter, r *http.Request)
 			"error": fmt.Sprintf("method %q is not one of %v", method, embeddingMethods)})
 		return
 	}
+	// ?model= sends the request for another model ID (#1305), so that the
+	// API's own 404 for text-embedding-005 or textembedding-gecko is what the
+	// screen shows; nothing is substituted here either.
+	model := r.URL.Query().Get("model")
+	if model == "" {
+		model = p.EmbeddingModel
+	}
+	if !embeddingModelName.MatchString(model) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("model %q is not a publisher model ID", model)})
+		return
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil || !json.Valid(body) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the request body must be JSON"})
 		return
 	}
 	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
-		"http://"+p.endpoint()+p.embeddingPath(method), strings.NewReader(string(body)))
+		"http://"+p.endpoint()+p.embeddingPathFor(model, method), strings.NewReader(string(body)))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

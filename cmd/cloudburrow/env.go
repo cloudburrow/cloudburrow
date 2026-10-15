@@ -308,6 +308,13 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"gRPC, plaintext; read by no client library: give it to a channel in code"})
 		}
 	}
+	// The Memorystore admin API (#1302), not the RESP port: named here, not
+	// by cliEndpointVar, whose "memorystore" pods would read as the RESP
+	// address.
+	if serviceEnabled(cfg, config.ServiceMemorystore) && cfg.Endpoints.MemorystoreAdmin > 0 {
+		vars = append(vars, envVar{"CLOUDBURROW_MEMORYSTORE_ENDPOINT", addr(cfg.Endpoints.MemorystoreAdmin),
+			"Memorystore admin API (google.cloud.redis.v1), gRPC plaintext and JSON; read by no client library"})
+	}
 	// gcloud kms (#426), gcloud secrets and gcloud tasks (#590, #591), gcloud
 	// scheduler and gcloud logging (#591), which go through each service's
 	// JSON API on its gRPC port. The CLOUDSDK_API_ENDPOINT_OVERRIDES_* policy:
@@ -399,6 +406,17 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{"PGSSLMODE", "disable", "the local server has no TLS"},
 			envVar{"CLOUDBURROW_CLOUDSQL_URL", cloudSQLURL(addr(cfg.Endpoints.CloudSQL)),
 				"the same, as one connection string"})
+	}
+
+	// The Cloud SQL Admin API (#1301). gcloud sql calls v1beta4 under
+	// sql/, which the override's path keeps; the Go client calls v1 and
+	// needs the endpoint in client options.
+	if sqlAdminEnabled(cfg) && cfg.Endpoints.SQLAdmin != 0 {
+		sa := addr(cfg.Endpoints.SQLAdmin)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL", "http://" + sa + "/", "gcloud sql (databases, users, instances list and describe)"},
+			envVar{cliEndpointVar("sqladmin"), sa,
+				"the Cloud SQL Admin API, REST, plaintext; read by no client library: pass http://" + sa + "/ to option.WithEndpoint"})
 	}
 
 	// Resource Manager (#298). gcloud reads the override; the client
@@ -515,6 +533,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
 		"spanner": &e.Spanner, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
 		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL, "cloudsql": &e.CloudSQL, "resourcemanager": &e.ResourceManager,
+		"sqladmin": &e.SQLAdmin,
 		// The ingress gateway, which kind publishes where `up` configured
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).

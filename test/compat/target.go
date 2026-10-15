@@ -80,6 +80,7 @@ var targetEndpoints = []targetEndpoint{
 	{"MEMORYSTORE", hostPort("REDIS_HOST", "REDIS_PORT")},
 	{"MYSQL", hostPort("MYSQL_HOST", "MYSQL_PORT")},
 	{"CLOUDSQL", hostPort("PGHOST", "PGPORT")},
+	{"SQLADMIN", envKey("CLOUDBURROW_SQLADMIN_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that
@@ -97,6 +98,9 @@ func normalizeEndpoint(s string) string {
 	host, port, err := net.SplitHostPort(s)
 	if err != nil {
 		return s
+	}
+	if strings.HasSuffix(host, ".localhost") {
+		host = "localhost" // RFC 6761: loopback, as gcloud-setup writes run's
 	}
 	switch host {
 	case "localhost", "127.0.0.1", "::1", "0.0.0.0", "::", "":
@@ -177,6 +181,8 @@ var gcloudOverrides = []struct{ property, harness string }{
 	{"cloudscheduler", "SCHEDULER"},
 	{"logging", "LOGGING"},
 	{"cloudresourcemanager", "RESOURCEMANAGER"},
+	{"run", "RUN"},
+	{"sql", "SQLADMIN"},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`

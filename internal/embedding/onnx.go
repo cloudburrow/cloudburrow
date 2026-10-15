@@ -48,11 +48,21 @@ type onnxEmbedder struct {
 	mu   sync.Mutex
 	tok  *tokenizers.Tokenizer
 	sess *ort.DynamicAdvancedSession
+	// closed is set by Close, under mu, so an Embed in flight when the
+	// console unloads the model (#1306) finishes before the session goes,
+	// and one after it is refused rather than touching freed memory.
+	closed bool
 }
 
 func (e *onnxEmbedder) Model() string { return e.id }
 
 func (e *onnxEmbedder) Close() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil
+	}
+	e.closed = true
 	e.tok.Close()
 	return e.sess.Destroy()
 }
@@ -65,6 +75,9 @@ func (e *onnxEmbedder) Embed(ctx context.Context, in []Input, dim int, autoTrunc
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.closed {
+		return nil, fmt.Errorf("%s was unloaded", e.id)
+	}
 	out := make([]Output, 0, len(in))
 	for i, x := range in {
 		if err := ctx.Err(); err != nil {

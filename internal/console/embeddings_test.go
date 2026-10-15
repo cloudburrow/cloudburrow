@@ -90,3 +90,39 @@ func TestEmbeddingsScreenSendsBothMethods(t *testing.T) {
 		t.Fatalf("no runtime: %d %s", resp.StatusCode, out)
 	}
 }
+
+// TestEmbeddingsScreenSendsTheNamedModel (#1305): ?model= sends the request
+// for the model the user typed, and the API's 404 for a Vertex model that is
+// not served comes back verbatim, naming the one that is; a name that is not
+// a model ID is refused before anything is sent.
+func TestEmbeddingsScreenSendsTheNamedModel(t *testing.T) {
+	api := vertexai.NewServer(nil)
+	api.SetEmbedder(unitEmbedder{}, nil)
+	apiSrv := httptest.NewServer(api.Handler())
+	defer apiSrv.Close()
+	addr := strings.TrimPrefix(apiSrv.URL, "http://")
+	srv := newPlaygroundServer(t, &Playground{Addr: func() string { return addr }, Model: "m",
+		EmbeddingModel: localai.EmbeddingGemmaONNXID})
+
+	code, body := getJSON(t, srv, "/api/ai/embeddings")
+	if code != 200 || !strings.Contains(body, `"textembedding-gecko@003"`) || !strings.Contains(body, `"text-embedding-005"`) {
+		t.Fatalf("status lacks the not-served names: %d %s", code, body)
+	}
+	for _, m := range []string{"text-embedding-005", "textembedding-gecko@003"} {
+		resp, out := postJSON(t, srv, "/api/ai/embeddings?model="+m, `{"instances":[{"content":"a"}]}`)
+		if resp.StatusCode != http.StatusNotFound || !strings.Contains(out, localai.EmbeddingGemmaONNXID) ||
+			!strings.Contains(out, "No substitution") {
+			t.Fatalf("%s: %d %s", m, resp.StatusCode, out)
+		}
+	}
+	resp, out := postJSON(t, srv, "/api/ai/embeddings?model="+localai.EmbeddingGemmaONNXID,
+		`{"instances":[{"content":"a"}],"parameters":{"outputDimensionality":768}}`)
+	if resp.StatusCode != 200 || strings.Count(out, `"values"`) != 1 {
+		t.Fatalf("served model: %d %s", resp.StatusCode, out)
+	}
+	for _, bad := range []string{"..%2Fx", "a%3Apredict%3Fx", "a%2Fb"} {
+		if resp, _ := postJSON(t, srv, "/api/ai/embeddings?model="+bad, `{}`); resp.StatusCode != 400 {
+			t.Fatalf("%s relayed: %d", bad, resp.StatusCode)
+		}
+	}
+}

@@ -89,7 +89,7 @@ func ScopeNoteFor(service string) string {
 			"connect with an ordinary driver; there is no sqladmin endpoint"
 	case "memorystore":
 		return "a real Valkey (Redis-compatible) server, not the Memorystore admin API — " +
-			"connect with any Redis client; there is no redis.googleapis.com endpoint"
+			"connect with any Redis client; the admin API is CLOUDBURROW_MEMORYSTORE_ENDPOINT"
 	default:
 		return ""
 	}

@@ -584,9 +584,11 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--port-bigquery` | `CLOUDBURROW_PORT_BIGQUERY` | `endpoints.bigquery` | `9014` | BigQuery emulator REST host endpoint (`--services bigquery`). |
 | `--port-bigquery-storage` | `CLOUDBURROW_PORT_BIGQUERY_STORAGE` | `endpoints.bigqueryStorage` | `9015` | BigQuery Storage Read API gRPC host endpoint (`--services bigquery`). |
 | `--port-memorystore` | `CLOUDBURROW_PORT_MEMORYSTORE` | `endpoints.memorystore` | `9016` | Memorystore (Valkey, RESP) host endpoint (`--services memorystore`). |
+| `--port-memorystore-admin` | `CLOUDBURROW_PORT_MEMORYSTORE_ADMIN` | `endpoints.memorystoreAdmin` | `9021` | Memorystore for Redis admin API (`google.cloud.redis.v1`, gRPC and JSON) over that server (`--services memorystore`, #1302); exported as `CLOUDBURROW_MEMORYSTORE_ENDPOINT`. |
 | `--port-cloudsql-mysql` | `CLOUDBURROW_PORT_CLOUDSQL_MYSQL` | `endpoints.cloudsqlMySQL` | `9017` | Cloud SQL for MySQL host endpoint (`--services cloudsql-mysql`). |
 | `--port-kms` | `CLOUDBURROW_PORT_KMS` | `endpoints.kms` | `9018` | Cloud KMS host endpoint (`--services kms`). See [Cloud KMS](#cloud-kms). |
 | `--port-cloudsql` | `CLOUDBURROW_PORT_CLOUDSQL` | `endpoints.cloudsql` | `9019` | Cloud SQL for PostgreSQL host endpoint (`--services cloudsql`). `0` = OS-assigned: `env` then exports `PGPORT` only from a running instance. Moves with `--port-base`. See [cloudsql.md](cloudsql.md). |
+| `--port-sqladmin` | `CLOUDBURROW_PORT_SQLADMIN` | `endpoints.sqladmin` | `9020` | The Cloud SQL Admin API (`sqladmin` v1 and v1beta4, #1301), bound when `cloudsql` or `cloudsql-mysql` is enabled. Moves with `--port-base`. See [cloudsql.md](cloudsql.md). |
 | `--port-ingress` | `CLOUDBURROW_PORT_INGRESS` | `endpoints.ingress` | `9080` | Host port of the cluster ingress gateway. **Fixed when the cluster is created**; `0` publishes nothing. See [Cluster ingress](#cluster-ingress). |
 | `--port-console` | `CLOUDBURROW_PORT_CONSOLE` | `endpoints.console` | `9090` | The web console. See [Console](#console). |
 | `--cluster-provider` | `CLOUDBURROW_CLUSTER_PROVIDER` | `cluster.provider` | `kind` | Only `kind` is supported (ADR-0005). |

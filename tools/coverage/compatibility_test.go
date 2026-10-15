@@ -16,16 +16,20 @@ import (
 // and executions, ...) are part of it. A page with no entry here fails the
 // test, so a new generated page cannot go unchecked.
 var compatSections = map[string]string{
-	"storage":         "## Cloud Storage — JSON API v1",
-	"pubsub":          "## Pub/Sub — `google.pubsub.v1`",
-	"tasks":           "## Cloud Tasks — `google.cloud.tasks.v2`",
-	"run":             "## Cloud Run — `google.cloud.run.v2`",
+	"storage": "## Cloud Storage — JSON API v1",
+	"pubsub":  "## Pub/Sub — `google.pubsub.v1`",
+	"tasks":   "## Cloud Tasks — `google.cloud.tasks.v2`",
+	"run":     "## Cloud Run — `google.cloud.run.v2`",
+	// The v1 (Knative) API (#1293) is a row of the Cloud Run section, which
+	// names each Verified method by its whole discovery ID.
+	"runv1":           "## Cloud Run — `google.cloud.run.v2`",
 	"scheduler":       "## Cloud Scheduler — `google.cloud.scheduler.v1`",
 	"logging":         "## Cloud Logging — `google.logging.v2`",
 	"kms":             "## Cloud KMS — `google.cloud.kms.v1`",
 	"secretmanager":   "## Secret Manager — `google.cloud.secretmanager.v1`",
 	"resourcemanager": "## Resource Manager — `google.cloud.resourcemanager.v3`",
 	"vertexai":        "## Vertex AI PredictionService — `google.cloud.aiplatform.v1`",
+	"memorystore":     "## Memorystore for Redis — `google.cloud.redis.v1`",
 	// The opt-in emulators share one section (#717). Its per-service rows
 	// only link their pages, so the section also has a table whose rows name
 	// each Verified RPC as Service.Method: the qualifier keeps Firestore's
@@ -39,6 +43,9 @@ var compatSections = map[string]string{
 	// whole discovery ID (`bigquery.jobs.insert`), so the section's other
 	// rows, which mention `jobs.insert` in passing, name none.
 	"bigquery": "## Optional services",
+	// The Cloud SQL Admin API (#1301), in Cloud SQL's subsection, named by
+	// whole discovery ID (`sql.databases.insert`) as BigQuery's are.
+	"sqladmin": "## Optional services",
 }
 
 // acceptedStatuses maps a status cell of docs/compatibility.md to the
@@ -126,7 +133,9 @@ var (
 // a bare gRPC name two services of the page share is an error, so the row
 // must qualify it.
 func namedMethods(key, op string, report map[string]string) (ids, ambiguous []string) {
-	if key == "bigquery" {
+	// Discovery-ID pages: BigQuery, the Cloud Run v1 API (#1293) and the
+	// Cloud SQL Admin API (#1301).
+	if key == "bigquery" || key == "runv1" || key == "sqladmin" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {
 				ids = append(ids, tok[1])

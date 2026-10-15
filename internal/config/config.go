@@ -83,7 +83,8 @@ const (
 	// Like Cloud SQL it is a real data plane and not an emulator: Google
 	// publishes no Memorystore emulator, and what runs is an open-source
 	// server of the kind Memorystore for Valkey and for Redis runs. None of
-	// the Memorystore admin API (redis.googleapis.com) is served.
+	// the Memorystore admin API (redis.googleapis.com) is served except its
+	// reads, which describe this one server (#1302).
 	ServiceMemorystore Service = "memorystore"
 	// ServiceCloudSQLMySQL runs a real MySQL in the cluster (#297), the
 	// second Cloud SQL engine beside PostgreSQL, on the same terms: a real
@@ -277,6 +278,9 @@ type Endpoints struct {
 	BigQueryStorage int `json:"bigqueryStorage"`
 	// Memorystore is the host port of the Valkey (RESP) endpoint.
 	Memorystore int `json:"memorystore"`
+	// MemorystoreAdmin is the Memorystore for Redis admin API
+	// (redis.googleapis.com, #1302): gRPC and JSON on one port.
+	MemorystoreAdmin int `json:"memorystoreAdmin"`
 	// CloudSQLMySQL is the host port of the MySQL endpoint. Fixed so
 	// `cloudburrow env` can export MYSQL_PORT without a running instance.
 	CloudSQLMySQL int `json:"cloudsqlMySQL"`
@@ -286,6 +290,10 @@ type Endpoints struct {
 	// restart (#584). Fixed for the same reason MySQL's is: `env` can then
 	// export PGHOST/PGPORT without a running instance.
 	CloudSQL int `json:"cloudsql"`
+	// SQLAdmin is the host port of the Cloud SQL Admin API (#1301), served
+	// in process over the PostgreSQL and MySQL servers above. Bound only
+	// when one of them is enabled.
+	SQLAdmin int `json:"sqladmin"`
 }
 
 // NamedPort is one host endpoint and the name its --port-<name> flag uses.
@@ -336,8 +344,10 @@ func (e *Endpoints) fields() []endpointField {
 		{"bigquery", &e.BigQuery},
 		{"bigquery-storage", &e.BigQueryStorage},
 		{"memorystore", &e.Memorystore},
+		{"memorystore-admin", &e.MemorystoreAdmin},
 		{"cloudsql-mysql", &e.CloudSQLMySQL},
 		{"cloudsql", &e.CloudSQL},
+		{"sqladmin", &e.SQLAdmin},
 	}
 }
 
@@ -633,9 +643,13 @@ func Default() Config {
 			// The Storage Read API: a second port for the same service.
 			BigQueryStorage: 9015,
 			Memorystore:     9016,
-			CloudSQLMySQL:   9017,
+			// The admin API, served in-process over that server (#1302).
+			MemorystoreAdmin: 9021,
+			CloudSQLMySQL:    9017,
 			// After KMS's 9018: the next free port in the block.
 			CloudSQL: 9019,
+			// The Cloud SQL Admin API (#1301), over the two servers above.
+			SQLAdmin: 9020,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

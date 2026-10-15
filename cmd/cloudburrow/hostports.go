@@ -51,9 +51,16 @@ func hostPorts(cfg config.Config) map[string]int {
 		case config.ServiceBigQuery:
 			ports["bigquery"] = e.BigQuery
 			ports["bigquery-storage"] = e.BigQueryStorage
+		case config.ServiceMemorystore:
+			// The admin API (#1302) is bound beside the server it describes.
+			ports["memorystore"] = e.Memorystore
+			ports["memorystore-admin"] = e.MemorystoreAdmin
 		default:
 			ports[string(s)] = e.OptionalPort(s)
 		}
+	}
+	if sqlAdminEnabled(cfg) {
+		ports["sqladmin"] = e.SQLAdmin
 	}
 	for name, port := range ports {
 		// 0 is OS-assigned; a negative console port disables the console.
