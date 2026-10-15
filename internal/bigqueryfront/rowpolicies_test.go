@@ -129,3 +129,27 @@ func TestFilterQuery(t *testing.T) {
 		t.Errorf("stale policies applied: %q", got)
 	}
 }
+
+// A table deleted with its policies (its dataset deleted with contents, as
+// a test's cleanup does) leaves the project with none: a table function and
+// a legacy SQL query are no longer refused for it (#1218).
+func TestPoliciesOfADeletedTableNoLongerRefuseTheProject(t *testing.T) {
+	p := &rowPolicies{}
+	f := front{next: policyTables("t"), base: "/bigquery/v2/projects/p", policies: p}
+	r := httptest.NewRequest("GET", "/", nil)
+	pol := rowPolicy{Filter: "TRUE", Grantees: []string{"allUsers"}}
+	pol.Ref.ProjectID, pol.Ref.DatasetID, pol.Ref.TableID, pol.Ref.PolicyID = "p", "ds", "t", "all"
+	if _, err := p.put(pol, "1", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, why := f.filterQuery(r, "SELECT * FROM other.fn(1)"); why == "" {
+		t.Fatal("a table function with the table there: not refused")
+	}
+	f.next = policyTables() // the table is gone
+	if got, _, why := f.filterQuery(r, "SELECT * FROM other.fn(1)"); why != "" || got != "SELECT * FROM other.fn(1)" {
+		t.Errorf("a table function after the table was deleted: %q (%s)", got, why)
+	}
+	if f.policiesInProject(r, "p") || len(p.projectKeys("p")) != 0 {
+		t.Errorf("the deleted table's policies were kept: %v", p.projectKeys("p"))
+	}
+}
