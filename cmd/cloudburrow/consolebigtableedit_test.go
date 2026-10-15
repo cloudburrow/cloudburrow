@@ -223,7 +223,7 @@ func TestBigtableFamilyAndRowActionsThroughTheOfficialClients(t *testing.T) {
 		}
 	}
 	for _, c := range rowPage.Sections[0].Listing.Items {
-		if ids := strings.Join(actionIDs(c.Actions), ","); ids != "deletecells" {
+		if ids := strings.Join(actionIDs(c.Actions), ","); ids != "increment,append,deletecells" {
 			t.Errorf("cell %s offers %s", c.Name, ids)
 		}
 	}
@@ -278,8 +278,8 @@ func TestBigtableActionsAreOfferedWhereTheyApply(t *testing.T) {
 	if err := admin.DeleteColumnFamily(ctx, table, "cf"); err != nil {
 		t.Fatal(err)
 	}
-	if ids := strings.Join(actionIDs(bigtableDetail(t, srv, table).Actions), ","); ids != "addfamily" {
-		t.Errorf("a table without families offers %s, want addfamily alone", ids)
+	if ids := strings.Join(actionIDs(bigtableDetail(t, srv, table).Actions), ","); ids != "addfamily,deleteprefix,deleteallrows,protection" {
+		t.Errorf("a table without families offers %s, want no write", ids)
 	}
 	code, out := bigtableAct(t, srv, []string{table}, "writecell", map[string]string{"row": "r", "family": "cf"})
 	if code != http.StatusBadRequest || !strings.Contains(out, "not available") {
@@ -288,7 +288,7 @@ func TestBigtableActionsAreOfferedWhereTheyApply(t *testing.T) {
 	if code, out := bigtableAct(t, srv, []string{table}, "addfamily", map[string]string{"family": "cf"}); code != http.StatusOK {
 		t.Fatalf("addfamily = %d: %s", code, out)
 	}
-	if ids := strings.Join(actionIDs(bigtableDetail(t, srv, table).Actions), ","); ids != "addfamily,writecell" {
+	if ids := strings.Join(actionIDs(bigtableDetail(t, srv, table).Actions), ","); ids != "addfamily,writecell,deleteprefix,deleteallrows,protection" {
 		t.Errorf("a table with a family offers %s", ids)
 	}
 
@@ -366,4 +366,133 @@ func normalisePolicy(s string) string {
 		}
 	}
 	return s
+}
+
+// TestBigtableTableAndCellActionsThroughTheOfficialClients (#1198).
+//
+// Delete rows by prefix and Delete all rows (DropRowRange) delete what they
+// name and nothing else; Edit deletion protection (UpdateTable) is prefilled
+// from the table and read back by TableInfo; Increment and Append value
+// (ReadModifyWriteRow) change the cell's latest value; Delete row and Delete
+// cells (CheckAndMutateRow) refuse a row or a column that holds nothing.
+func TestBigtableTableAndCellActionsThroughTheOfficialClients(t *testing.T) {
+	const table = "upkeep"
+	srv, admin, client := bigtableConsole(t, table)
+	ctx := context.Background()
+	tbl := client.Open(table)
+	write := func(row, col, value string) {
+		t.Helper()
+		mut := bigtable.NewMutation()
+		mut.Set("cf", col, bigtable.Now(), []byte(value))
+		if err := tbl.Apply(ctx, row, mut); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys := func() string {
+		t.Helper()
+		var out []string
+		if err := tbl.ReadRows(ctx, bigtable.InfiniteRange(""), func(r bigtable.Row) bool {
+			out = append(out, r.Key())
+			return true
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(out, ",")
+	}
+	for _, k := range []string{"user#1", "user#2", "order#1"} {
+		write(k, "v", "x")
+	}
+
+	// Delete rows by prefix needs a prefix, and deletes only those rows.
+	if code, out := bigtableAct(t, srv, []string{table}, "deleteprefix", map[string]string{"prefix": ""}); code != http.StatusBadRequest || !strings.Contains(out, "prefix is required") {
+		t.Errorf("deleteprefix with no prefix = %d: %s", code, out)
+	}
+	if code, out := bigtableAct(t, srv, []string{table}, "deleteprefix", map[string]string{"prefix": "user#"}); code != http.StatusOK {
+		t.Fatalf("deleteprefix = %d: %s", code, out)
+	}
+	if got := keys(); got != "order#1" {
+		t.Errorf("after Delete rows by prefix the table holds %q, want order#1", got)
+	}
+
+	// Increment and Append value on a cell, read back by ReadRow.
+	counter := make([]byte, 8)
+	counter[7] = 5
+	mut := bigtable.NewMutation()
+	mut.Set("cf", "n", bigtable.Now(), counter)
+	if err := tbl.Apply(ctx, "order#1", mut); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := bigtableAct(t, srv, []string{table, "order#1", "cf:n"}, "increment", map[string]string{"amount": "-2"}); code != http.StatusOK {
+		t.Fatalf("increment = %d: %s", code, out)
+	}
+	if code, out := bigtableAct(t, srv, []string{table, "order#1", "cf:v"}, "append", map[string]string{"value": "yz"}); code != http.StatusOK {
+		t.Fatalf("append = %d: %s", code, out)
+	}
+	row, err := tbl.ReadRow(ctx, "order#1", bigtable.RowFilter(bigtable.LatestNFilter(1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range row["cf"] {
+		switch item.Column {
+		case "cf:n":
+			if want := []byte{0, 0, 0, 0, 0, 0, 0, 3}; string(item.Value) != string(want) {
+				t.Errorf("after Increment by -2 the counter is %v, want %v", item.Value, want)
+			}
+		case "cf:v":
+			if string(item.Value) != "xyz" {
+				t.Errorf("after Append value the cell is %q, want xyz", item.Value)
+			}
+		}
+	}
+	if code, out := bigtableAct(t, srv, []string{table, "order#1", "cf:n"}, "increment", map[string]string{"amount": "1.5"}); code != http.StatusBadRequest || !strings.Contains(out, "whole number") {
+		t.Errorf("a fractional increment = %d: %s", code, out)
+	}
+
+	// A column whose name is a pattern matches only itself.
+	write("order#1", "a.c", "x")
+	if code, out := bigtableAct(t, srv, []string{table, "order#1", "cf:a.*"}, "deletecells", nil); code != http.StatusBadRequest || !strings.Contains(out, "no cells") {
+		t.Errorf("deletecells on a column holding nothing = %d: %s", code, out)
+	}
+	if row, _ := tbl.ReadRow(ctx, "order#1", bigtable.RowFilter(bigtable.LatestNFilter(1))); len(row["cf"]) != 3 {
+		t.Errorf("a refused Delete cells changed the row to %+v", row)
+	}
+
+	// Edit deletion protection, prefilled; a protected table is not deleted.
+	protection := func() string {
+		for _, a := range bigtableDetail(t, srv, table).Actions {
+			if a.ID == "protection" {
+				return a.Fields[0].Default
+			}
+		}
+		return "absent"
+	}
+	if got := protection(); got != "false" {
+		t.Errorf("Edit deletion protection is prefilled with %s, want false", got)
+	}
+	if code, out := bigtableAct(t, srv, []string{table}, "protection", map[string]string{"protected": "true"}); code != http.StatusOK {
+		t.Fatalf("protection on = %d: %s", code, out)
+	}
+	if info, err := admin.TableInfo(ctx, table); err != nil || info.DeletionProtection != bigtable.Protected {
+		t.Errorf("TableInfo after protection on = %+v, %v", info, err)
+	}
+	if got := protection(); got != "true" {
+		t.Errorf("Edit deletion protection is prefilled with %s, want true", got)
+	}
+	if code, out := bigtableAct(t, srv, []string{table}, "protection", map[string]string{"protected": "false"}); code != http.StatusOK {
+		t.Fatalf("protection off = %d: %s", code, out)
+	}
+	if info, err := admin.TableInfo(ctx, table); err != nil || info.DeletionProtection != bigtable.Unprotected {
+		t.Errorf("TableInfo after protection off = %+v, %v", info, err)
+	}
+
+	// Delete all rows.
+	if code, out := bigtableAct(t, srv, []string{table}, "deleteallrows", nil); code != http.StatusOK {
+		t.Fatalf("deleteallrows = %d: %s", code, out)
+	}
+	if got := keys(); got != "" {
+		t.Errorf("after Delete all rows the table holds %q", got)
+	}
+	if _, ok := familyPolicy(t, admin, table, "cf"); !ok {
+		t.Error("Delete all rows deleted the column family")
+	}
 }

@@ -32,13 +32,14 @@ func storageEmbedResult(cfg config.Config, nodeArch string) doctor.Result {
 }
 
 // needsStorageImage reports whether `up` builds the cloudburrow-storage
-// image: for Cloud Storage's server, and for the fronts of BigQuery (#902)
-// and Pub/Sub (#873), which run in their emulators' pods.
+// image: for Cloud Storage's server, and for the fronts of BigQuery (#902),
+// Pub/Sub (#873) and Bigtable (#1206), which run in their emulators' pods.
 func needsStorageImage(cfg config.Config) bool {
-	return serviceEnabled(cfg, config.ServiceStorage) || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServicePubSub)
+	return serviceEnabled(cfg, config.ServiceStorage) || serviceEnabled(cfg, config.ServiceBigQuery) ||
+		serviceEnabled(cfg, config.ServicePubSub) || serviceEnabled(cfg, config.ServiceBigtable)
 }
 
-// preflightStorage refuses `up` with Cloud Storage, BigQuery or Pub/Sub enabled from a CLI that
+// preflightStorage refuses `up` with Cloud Storage, BigQuery, Pub/Sub or Bigtable enabled from a CLI that
 // has no storage server for the node's architecture, before anything is
 // created. Found by the storage-image component instead, it failed after
 // kind had spent minutes creating a cluster it then left behind.
@@ -47,11 +48,11 @@ func preflightStorage(cfg config.Config, nodeArch string, stderr io.Writer) erro
 	if res.Level != doctor.LevelFail {
 		return nil
 	}
-	fmt.Fprintf(stderr, "cloudburrow up: this CLI cannot start Cloud Storage, BigQuery or Pub/Sub; nothing was created\n\n")
+	fmt.Fprintf(stderr, "cloudburrow up: this CLI cannot start Cloud Storage, BigQuery, Pub/Sub or Bigtable; nothing was created\n\n")
 	doctor.Report{Results: []doctor.Result{res}}.Write(stderr)
 	_, err := storageimage.Binary(nodeArch)
 	if err == nil {
 		err = storageimage.ErrNotEmbedded
 	}
-	return fmt.Errorf("Cloud Storage, BigQuery or Pub/Sub is enabled, but %w; or pass --services without storage, bigquery and pubsub. Nothing was created", err)
+	return fmt.Errorf("Cloud Storage, BigQuery, Pub/Sub or Bigtable is enabled, but %w; or pass --services without storage, bigquery, pubsub and bigtable. Nothing was created", err)
 }
