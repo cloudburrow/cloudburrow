@@ -263,42 +263,51 @@ func (s *Server) objectsRestore(w http.ResponseWriter, r *http.Request) {
 		if err := pre.check(cur, exists, false); err != nil {
 			return err
 		}
-		vs, err := getSoftDeleted(tx, bucket, name)
-		if err != nil {
-			return err
-		}
-		kept := vs[:0]
-		for _, v := range vs {
-			if v.Generation != soft.Generation || v.BucketGeneration != soft.BucketGeneration {
-				kept = append(kept, v)
-			}
-		}
-		if err := putSoftDeleted(tx, bucket, name, kept); err != nil {
-			return err
-		}
-		o = soft
-		fresh(&o)
-		// copySourceAcl keeps the soft-deleted version's ACL; without it
-		// the restored object takes the bucket's default object ACL
-		// (objects.restore reference; #1233).
-		if q.Get("copySourceAcl") != "true" || uniformAccess(b) {
-			o.ACL = nil
-		}
-		if err := checkNewObject(b, &o); err != nil {
-			return err
-		}
-		o.Generation, o.Metageneration, o.Created, o.Updated = s.nextGeneration(), 1, now, now
-		o.Deleted, o.SoftDeleted, o.HardDelete, o.BucketGeneration = time.Time{}, time.Time{}, time.Time{}, 0
-		if err := retireLive(tx, b, name, now, o.Generation); err != nil {
-			return err
-		}
-		return finalized(tx, o, cur, exists, now)
+		o, err = s.restoreSoft(tx, b, soft, cur, exists, q.Get("copySourceAcl") == "true", now)
+		return err
 	})
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	writeResponse(w, r, http.StatusOK, s.objectJSON(r, o))
+}
+
+// restoreSoft makes the soft-deleted version soft the live one of its name,
+// as a new generation with metageneration 1; cur, when exists, is the live
+// version it replaces, retired as any overwrite is. It is objects.restore's
+// and objects.bulkRestore's restore of one version.
+func (s *Server) restoreSoft(tx Tx, b bucketRecord, soft, cur objectRecord, exists, copyACL bool, now time.Time) (objectRecord, error) {
+	o := soft
+	fresh(&o)
+	// copySourceAcl keeps the soft-deleted version's ACL; without it the
+	// restored object takes the bucket's default object ACL
+	// (objects.restore reference; #1233).
+	if !copyACL || uniformAccess(b) {
+		o.ACL = nil
+	}
+	if err := checkNewObject(b, &o); err != nil {
+		return o, err
+	}
+	vs, err := getSoftDeleted(tx, b.Name, soft.Name)
+	if err != nil {
+		return o, err
+	}
+	kept := vs[:0]
+	for _, v := range vs {
+		if v.Generation != soft.Generation || v.BucketGeneration != soft.BucketGeneration {
+			kept = append(kept, v)
+		}
+	}
+	if err := putSoftDeleted(tx, b.Name, soft.Name, kept); err != nil {
+		return o, err
+	}
+	o.Generation, o.Metageneration, o.Created, o.Updated = s.nextGeneration(), 1, now, now
+	o.Deleted, o.SoftDeleted, o.HardDelete, o.BucketGeneration = time.Time{}, time.Time{}, time.Time{}, 0
+	if err := retireLive(tx, b, soft.Name, now, o.Generation); err != nil {
+		return o, err
+	}
+	return o, finalized(tx, o, cur, exists, now)
 }
 
 // softDeleteBucket keeps a deleted bucket under its own policy.

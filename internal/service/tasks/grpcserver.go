@@ -82,6 +82,7 @@ func toProtoQueue(q Queue) *taskspb.Queue {
 			}
 			return &taskspb.StackdriverLoggingConfig{SamplingRatio: q.Logging.SamplingRatio}
 		}(),
+		HttpTarget: queueHTTPTarget(q),
 	}
 }
 
@@ -92,6 +93,9 @@ func checkQueue(p *taskspb.Queue) error {
 		return err
 	}
 	if err := checkAppEngineRouting(p); err != nil {
+		return err
+	}
+	if err := checkHTTPTarget(p); err != nil {
 		return err
 	}
 	if err := checkRateLimits(p, ""); err != nil {
@@ -178,6 +182,7 @@ func fromProtoQueue(p *taskspb.Queue) Queue {
 	if c := p.GetStackdriverLoggingConfig(); c != nil {
 		q.Logging = &LoggingConfig{SamplingRatio: c.GetSamplingRatio()}
 	}
+	q.HTTPTarget = httpTargetJSON(p.GetHttpTarget())
 	if rc := p.GetRetryConfig(); rc != nil {
 		q.RetryConfig = RetryConfig{
 			MaxAttempts:      int(rc.GetMaxAttempts()),
@@ -319,7 +324,7 @@ func (g *GRPCServer) CreateQueue(_ context.Context, req *taskspb.CreateQueueRequ
 // updatableQueuePaths are the fields an empty update_mask replaces: every
 // Queue field that is neither the name nor output only. A field left out of
 // the request is cleared, then defaulted as on create.
-var updatableQueuePaths = []string{"app_engine_routing_override", "rate_limits", "retry_config", "stackdriver_logging_config"}
+var updatableQueuePaths = []string{"app_engine_routing_override", "http_target", "rate_limits", "retry_config", "stackdriver_logging_config"}
 
 // UpdateQueue replaces the fields its mask names, or with an empty mask
 // every settable field, as the API documents; it creates a queue that does
@@ -364,12 +369,11 @@ func (g *GRPCServer) UpdateQueue(_ context.Context, req *taskspb.UpdateQueueRequ
 				set = func(q *Queue) { q.Logging = logging }
 			}
 		case "http_target":
-			// Newer than the contract this server is built from, which has
-			// no such field, so the value never reaches it: refused rather
-			// than dropped. It would rewrite every task's URL, method and
-			// headers and mint their tokens.
-			err = apierror.Unimplemented("update_mask path %q is not implemented: each task is dispatched with its own "+
-				"httpRequest; set the URL, method and headers there", p)
+			// The whole message (#1282); a path under it replaces it too.
+			if err = checkHTTPTarget(in); err == nil {
+				target := want.HTTPTarget
+				set = func(q *Queue) { q.HTTPTarget = target }
+			}
 		case "app_engine_routing_override":
 			err = checkAppEngineRouting(in)
 		case "name":

@@ -20,9 +20,9 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 11 | 5 | 5 | 1 | 0 |
+| Cloud Storage | 9 | 3 | 5 | 1 | 0 |
 | Pub/Sub | 4 | 1 | 2 | 1 | 0 |
-| Cloud Tasks | 2 | 1 | 1 | 0 | 0 |
+| Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 12 | 9 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 1 | 0 | 0 | 0 |
@@ -35,17 +35,16 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **83** | **39** | **32** | **7** | **5** |
+| **Total** | **80** | **36** | **32** | **7** | **5** |
 
 ## Cloud Storage
 
-Already tracked: none open. ACLs and object IAM are excluded (below).
+Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `objects.bulkRestore`
+(#1279) and `buckets.operations.list` filters (#1280).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `objects.bulkRestore`: restoring soft-deleted objects in bulk (a long-running bucket operation) is 501 | not built yet | M |
-| `buckets.operations.list` with a `filter` is 501 | not built yet | S |
-| `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) | not built yet | M |
+| `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) (#1281) | not built yet | M |
 | XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |
 | gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
@@ -71,11 +70,11 @@ Already tracked: #982 (Google's message for an invalid label is not measured).
 Queue IAM conditions are excluded (below). Closed: `RunTask`, `BatchCreateTasks`,
 `BatchDeleteTasks` and the CMEK config (#1215), `oidcToken` / `oauthToken` on HTTP tasks and
 Cloud Scheduler jobs (#1243), `ListQueues` filters on any Queue field (#1255), and
-`stackdriver_logging_config`, with each sampled dispatch written to Cloud Logging (#1256).
+`stackdriver_logging_config`, with each sampled dispatch written to Cloud Logging (#1256), and a
+queue-level `http_target` (#1282).
 
 | Gap | Why open | Size |
 |---|---|---|
-| A queue-level `http_target` on `UpdateQueue` is refused | not built yet | M |
 | App Engine targets and `app_engine_routing_override` | no emulator support (no App Engine) | L |
 
 ## Cloud Run
@@ -155,8 +154,8 @@ Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
 | `PredictionService.StreamGenerateContent` over gRPC is `UNIMPLEMENTED`; `GenerateContent` over gRPC is served with no official-SDK test (#1257) | not built yet | M |
-| Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` | not built yet | M |
-| `RawPredict` on a publisher model | not built yet | S |
+| Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` (#1285) | not built yet | M |
+| `RawPredict` on a publisher model (#1284) | not built yet | S |
 | `Explain` | no emulator support | L |
 
 ## BigQuery

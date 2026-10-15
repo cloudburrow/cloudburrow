@@ -26,6 +26,7 @@
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
+          "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
@@ -74,6 +75,7 @@
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
+          "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
       },
@@ -161,6 +163,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
+          "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
           "test/compat/tasksupdate_test.go:27 TestTasksUpdateQueue"
         ]
@@ -2360,8 +2363,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 21,
-      "Verified": 66
+      "Unimplemented": 20,
+      "Verified": 67
     },
     "rows": [
       {
@@ -2549,7 +2552,8 @@
         "method": "storage.buckets.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/storageoperationsfilter_test.go:23 TestStorageOperationsListFilter"
         ]
       },
       {
@@ -2891,8 +2895,10 @@
       },
       {
         "method": "storage.objects.bulkRestore",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagebulkrestore_test.go:33 TestStorageBulkRestore"
+        ]
       },
       {
         "method": "storage.objects.compose",

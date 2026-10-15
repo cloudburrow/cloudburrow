@@ -137,7 +137,16 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 			trace.WithAttributes(attribute.String("cloud_tasks.task", task.Name), attribute.Int("cloud_tasks.retry_count", task.DispatchCount)))
 		defer span.End()
 	}
-	req, err := d.buildRequest(ctx, task)
+	// The queue's http_target, as the queue is now (#1282), on a copy: the
+	// task keeps its own httpRequest.
+	sent := task
+	if task.HTTPRequest != nil {
+		if q, err := d.store.GetQueue(task.Queue); err == nil && len(q.HTTPTarget) > 0 {
+			hr := withQueueTarget(*task.HTTPRequest, q)
+			sent.HTTPRequest = &hr
+		}
+	}
+	req, err := d.buildRequest(ctx, sent)
 	if err != nil {
 		return err
 	}
