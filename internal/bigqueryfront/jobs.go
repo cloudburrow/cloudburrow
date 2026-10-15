@@ -137,6 +137,9 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		legacyLoadTypes(r, c.Load.Schema) // #1034, typenames.go
 		reason = "invalid"
 		msg = check(c.Load.DestinationTable)
+		if d := c.Load.DestinationTable; msg == "" && d != nil && f.refuseSnapshotWrite(w, r, d.DatasetID, d.TableID, "a load job") { // #1002
+			return
+		}
 		if msg == "" && !f.parquetSchema(w, r, &job) { // #970
 			return
 		}
@@ -191,6 +194,9 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		if msg = check(c.Query.DestinationTable); msg != "" {
 			reason = "invalid"
 			break
+		}
+		if d := c.Query.DestinationTable; d != nil && f.refuseSnapshotWrite(w, r, d.DatasetID, d.TableID, "a query job's destinationTable") { // #1002
+			return
 		}
 		qf := &queryFailures{} // #1109, queryfailures.go
 		f.next = qf.watch(f.next)

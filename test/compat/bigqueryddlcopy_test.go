@@ -417,11 +417,7 @@ func TestBigQueryCopyJobs(t *testing.T) {
 	}
 	_, err = copyTo("none", nil, "v")
 	wantJobReason("a view as the source", err, "invalid")
-	_, err = copyTo("snap", func(cp *bigquery.Copier) { cp.OperationType = bigquery.SnapshotOperation }, "a")
 	var ge *googleapi.Error
-	if !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented {
-		t.Errorf("a snapshot: %v, want 501", err)
-	}
 
 	// CLONE (#1002): a writable copy whose tables.get gives its
 	// cloneDefinition: the source, and when it was cloned.
@@ -449,14 +445,189 @@ func TestBigQueryCopyJobs(t *testing.T) {
 	if n := len(rows("a")); n != 2 {
 		t.Errorf("the clone's INSERT changed its base: %d rows", n)
 	}
-	for name, set := range map[string]func(*bigquery.Copier){
-		"a CLONE into a table that exists": func(cp *bigquery.Copier) { cp.OperationType = bigquery.CloneOperation },
-		"a RESTORE":                        func(cp *bigquery.Copier) { cp.OperationType = bigquery.RestoreOperation },
-	} {
-		_, err := copyTo("full", set, "a")
-		if !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented {
-			t.Errorf("%s: %v, want 501", name, err)
+	if _, err := copyTo("full", func(cp *bigquery.Copier) { cp.OperationType = bigquery.CloneOperation }, "a"); !errors.As(err, &ge) ||
+		ge.Code != http.StatusNotImplemented {
+		t.Errorf("a CLONE into a table that exists: %v, want 501", err)
+	}
+}
+
+// TestBigQuerySnapshotAndRestore (#1002), through the official Go
+// client: a copy job with operationType SNAPSHOT makes a read-only
+// snapshot, which tables.get and tables.list answer type SNAPSHOT with its
+// snapshotDefinition, and every write to which is refused while it keeps
+// its rows; RESTORE copies it into a standard, writable table. Measured
+// first: the emulator keeps a table's snapshotDefinition but answers it
+// type TABLE, writable.
+func TestBigQuerySnapshotAndRestore(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	d := ds.DatasetID
+	schema := bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType}, {Name: "name", Type: bigquery.StringFieldType}}
+	if err := ds.Table("base").Create(ctx, &bigquery.TableMetadata{Schema: schema}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bqRun(ctx, c, "INSERT INTO "+d+".base VALUES (1, 'one'), (2, 'two')", false); err != nil {
+		t.Fatal(err)
+	}
+	copyTo := func(dst string, op bigquery.TableCopyOperationType, write bigquery.TableWriteDisposition, src string) error {
+		cp := ds.Table(dst).CopierFrom(ds.Table(src))
+		cp.OperationType, cp.WriteDisposition = op, write
+		job, err := cp.Run(ctx)
+		if err != nil {
+			return err
 		}
+		st, err := job.Wait(ctx)
+		if err == nil {
+			err = st.Err()
+		}
+		return err
+	}
+	count := func(table string) int {
+		t.Helper()
+		it, err := c.Query("SELECT COUNT(*) FROM " + d + "." + table).Read(ctx)
+		if err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		var row []bigquery.Value
+		if err := it.Next(&row); err != nil {
+			t.Fatal(err)
+		}
+		return int(row[0].(int64))
+	}
+
+	before := time.Now().Add(-time.Minute)
+	if err := copyTo("snap", bigquery.SnapshotOperation, "", "base"); err != nil {
+		t.Fatalf("SNAPSHOT: %v", err)
+	}
+	md, err := ds.Table("snap").Metadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Type != bigquery.Snapshot {
+		t.Errorf("the snapshot's type is %q, want SNAPSHOT", md.Type)
+	}
+	if sd := md.SnapshotDefinition; sd == nil || sd.BaseTableReference == nil || sd.BaseTableReference.TableID != "base" ||
+		sd.SnapshotTime.Before(before) || sd.SnapshotTime.After(time.Now().Add(time.Minute)) {
+		t.Errorf("the snapshotDefinition: %+v", md.SnapshotDefinition)
+	}
+	if schemaText(md.Schema) != schemaText(schema) {
+		t.Errorf("the snapshot's schema: %s", schemaText(md.Schema))
+	}
+	listed := ""
+	for it := ds.Tables(ctx); ; {
+		tb, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tb.TableID == "snap" {
+			m, err := tb.Metadata(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			listed = string(m.Type)
+		}
+	}
+	if listed != string(bigquery.Snapshot) {
+		t.Errorf("tables.list gives the snapshot type %q", listed)
+	}
+	if n := count("snap"); n != 2 {
+		t.Errorf("the snapshot holds %d rows, want 2", n)
+	}
+	// It is read-only.
+	refused := func(what string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Errorf("%s into the snapshot succeeded, want it refused", what)
+			return
+		}
+		if !strings.Contains(err.Error(), "read-only") {
+			t.Errorf("%s into the snapshot: %v, want the read-only refusal", what, err)
+		}
+	}
+	for _, sql := range []string{
+		"INSERT INTO " + d + ".snap VALUES (3, 'three')",
+		"UPDATE " + d + ".snap SET name = 'x' WHERE TRUE",
+		"DELETE FROM " + d + ".snap WHERE id = 1",
+		"TRUNCATE TABLE " + d + ".snap",
+		"MERGE " + d + ".snap s USING " + d + ".base b ON s.id = b.id WHEN MATCHED THEN DELETE",
+		"ALTER TABLE " + d + ".snap ADD COLUMN extra STRING",
+		"SELECT 1; INSERT INTO " + d + ".snap VALUES (4, 'four')",
+	} {
+		refused(sql, bqRun(ctx, c, sql, false))
+		refused(sql+" (query job)", bqRun(ctx, c, sql, true))
+	}
+	refused("tabledata.insertAll", ds.Table("snap").Inserter().Put(ctx, []*bigquery.ValuesSaver{
+		{Schema: schema, Row: []bigquery.Value{int64(5), "five"}}}))
+	q := c.Query("SELECT 6 AS id, 'six' AS name")
+	q.Dst, q.WriteDisposition = ds.Table("snap"), bigquery.WriteAppend
+	_, err = q.Run(ctx)
+	refused("a query job's destinationTable", err)
+	src := bigquery.NewReaderSource(strings.NewReader("7,seven\n"))
+	ld := ds.Table("snap").LoaderFrom(src)
+	ld.WriteDisposition = bigquery.WriteAppend
+	_, err = ld.Run(ctx)
+	refused("a load", err)
+	refused("a copy", copyTo("snap", bigquery.CopyOperation, bigquery.WriteAppend, "base"))
+	_, err = ds.Table("snap").Update(ctx, bigquery.TableMetadataToUpdate{
+		Schema: append(bigquery.Schema{}, append(schema, &bigquery.FieldSchema{Name: "extra", Type: bigquery.StringFieldType})...)}, "")
+	refused("a schema update", err)
+	if _, err := ds.Table("snap").Update(ctx, bigquery.TableMetadataToUpdate{Description: "kept"}, ""); err != nil {
+		t.Errorf("a description update of the snapshot: %v", err)
+	}
+	if n := count("snap"); n != 2 {
+		t.Errorf("after the refused writes the snapshot holds %d rows, want 2", n)
+	}
+	// The base stays writable, and the snapshot does not follow it.
+	if err := bqRun(ctx, c, "INSERT INTO "+d+".base VALUES (3, 'three')", false); err != nil {
+		t.Fatal(err)
+	}
+	if n := count("snap"); n != 2 {
+		t.Errorf("the base's INSERT changed the snapshot: %d rows", n)
+	}
+
+	// SNAPSHOT of a snapshot, and over a table that exists, fail.
+	if err := copyTo("snap2", bigquery.SnapshotOperation, "", "snap"); errReason(err) != "invalid" {
+		t.Errorf("a SNAPSHOT of a snapshot: %v, want invalid", err)
+	}
+	if err := copyTo("base", bigquery.SnapshotOperation, "", "snap"); err == nil {
+		t.Errorf("a SNAPSHOT over a table that exists succeeded")
+	}
+	// RESTORE: a standard table with the snapshot's rows, writable.
+	if err := copyTo("restored", bigquery.RestoreOperation, "", "snap"); err != nil {
+		t.Fatalf("RESTORE: %v", err)
+	}
+	md, err = ds.Table("restored").Metadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Type != bigquery.RegularTable || md.SnapshotDefinition != nil {
+		t.Errorf("the restored table is a %q with %+v", md.Type, md.SnapshotDefinition)
+	}
+	if n := count("restored"); n != 2 {
+		t.Errorf("the restored table holds %d rows, want 2", n)
+	}
+	if err := bqRun(ctx, c, "INSERT INTO "+d+".restored VALUES (9, 'nine')", false); err != nil {
+		t.Errorf("an INSERT into the restored table: %v", err)
+	}
+	// RESTORE over the base, WRITE_TRUNCATE, takes it back.
+	if err := copyTo("base", bigquery.RestoreOperation, bigquery.WriteTruncate, "snap"); err != nil {
+		t.Fatalf("RESTORE over the base: %v", err)
+	}
+	if n := count("base"); n != 2 {
+		t.Errorf("the base restored holds %d rows, want 2", n)
+	}
+	// RESTORE of a table that is not a snapshot fails.
+	if err := copyTo("other", bigquery.RestoreOperation, "", "base"); errReason(err) != "invalid" {
+		t.Errorf("a RESTORE of a table: %v, want invalid", err)
+	}
+	// A snapshot can be deleted.
+	if err := ds.Table("snap").Delete(ctx); err != nil {
+		t.Errorf("delete the snapshot: %v", err)
 	}
 }
 
