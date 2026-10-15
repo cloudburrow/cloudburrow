@@ -48,7 +48,8 @@
         "patches/googlesqlite/0015-nan-sort-order.patch",
         "patches/googlesqlite/0016-free-parser-options.patch",
         "patches/googlesqlite/0017-collect-before-catalog-rebuild.patch",
-        "patches/googlesqlite/0018-naive-timestamps-utc.patch"
+        "patches/googlesqlite/0018-naive-timestamps-utc.patch",
+        "patches/googlesqlite/0019-default-time-zone-utc.patch"
       ]
     },
     {
@@ -58,7 +59,8 @@
       "commit": "eb229fca73e7dca3fc9e8e8be733d14a565f912c",
       "dir": "build/go-googlesql",
       "patches": [
-        "patches/go-googlesql/0001-unsigned-wasm-addresses.patch"
+        "patches/go-googlesql/0001-unsigned-wasm-addresses.patch",
+        "patches/go-googlesql/0002-utc-time-zone.patch"
       ]
     }
   ],

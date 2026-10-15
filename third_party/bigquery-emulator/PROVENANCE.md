@@ -10,8 +10,8 @@ of the emulator or its dependencies is committed here, only the pins and the pat
 | Module | Version | Commit the tag names | Licence | Changed |
 |---|---|---|---|---|
 | [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | eight patches |
-| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT (one file Apache-2.0, below) | thirteen patches |
-| [`github.com/goccy/go-googlesql`](https://github.com/goccy/go-googlesql) | v0.3.0 | `eb229fca73e7dca3fc9e8e8be733d14a565f912c` | MIT | one patch |
+| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT (one file Apache-2.0, below) | nineteen patches |
+| [`github.com/goccy/go-googlesql`](https://github.com/goccy/go-googlesql) | v0.3.0 | `eb229fca73e7dca3fc9e8e8be733d14a565f912c` | MIT | two patches |
 | every other module the emulator links | v0.8.1's `go.sum` | | each its own | no |
 
 The three MIT licence texts are in [licenses/](licenses/). Each version is v0.8.1's own choice:
@@ -91,7 +91,9 @@ GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy github.com/goccy/bigq
 | [googlesqlite 0016](patches/googlesqlite/0016-free-parser-options.patch) | Every statement parsed leaked its parse tree in the engine's WebAssembly memory (parser options made with no finalizer), so the emulator grew with every query job and request: 159 to 989 MiB over 3,500 small queries, flat at about 300 MiB with the patch (#1133, #1057, #1103) | CloudBurrow's, MIT |
 | [googlesqlite 0017](patches/googlesqlite/0017-collect-before-catalog-rebuild.patch) | Each DROP rebuilds the root catalog with every builtin function, and the catalog it replaced was freed only by a finalizer after a Go collection, which the engine's large WebAssembly memory put off, so the memory grew at every DROP: 120 CREATE+DROP pairs, 237 to 603 MiB. A collection now runs before each rebuild: 169 to 171 MiB (#1057, #1103) | CloudBurrow's, MIT |
 | [googlesqlite 0018](patches/googlesqlite/0018-naive-timestamps-utc.patch) | A TIMESTAMP with no time zone was read in America/Los_Angeles, the analyzer's default, not UTC as BigQuery reads it: TIMESTAMP '2020-01-01', CAST('2020-01-01' AS TIMESTAMP) and RANGE<TIMESTAMP> literal bounds. A date alone, RANGE<TIMESTAMP> bounds and CAST('...' AS TIMESTAMP) strings with no zone now get the UTC offset; a CAST of a DATE, DATETIME or TIMESTAMP literal is still folded in the default zone (#1188, #1189) | CloudBurrow's, MIT
+| [googlesqlite 0019](patches/googlesqlite/0019-default-time-zone-utc.patch) | The analyzer folded a CAST of a literal, and coerced a literal, in its default zone, America/Los_Angeles, not BigQuery's UTC: CAST(DATE/DATETIME literal AS TIMESTAMP), CAST(TIMESTAMP literal AS STRING/DATE/DATETIME/TIME), TIMESTAMP = '<string>'. Its default zone is now UTC (with go-googlesql 0002). A TIMESTAMP column cast to STRING was RFC 3339, STRING(ts, zone) always said "+00", and a STRING with a named zone could not be cast to TIMESTAMP at run time (#1189) | CloudBurrow's, MIT |
 | [go-googlesql 0001](patches/go-googlesql/0001-unsigned-wasm-addresses.patch) | Once the engine's WebAssembly heap passed 2 GiB, every call panicked "slice bounds out of range", addressing it with signed 32-bit offsets (#989) | CloudBurrow's, MIT |
+| [go-googlesql 0002](patches/go-googlesql/0002-utc-time-zone.patch) | The bindings could not build a TimeZone, so the analyzer's default zone could not be set; adds UTCTimeZone() (#1189) | CloudBurrow's, MIT |
 
 Nothing here has been filed or proposed upstream; whether to is the maintainer's decision (#974).
 When an upstream release carries a fix, drop its patch and bump the pin in sources.json, go.mod,
