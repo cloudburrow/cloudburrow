@@ -10,7 +10,6 @@ import (
 	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -25,9 +24,7 @@ func TestCreateSecretRefusesFieldsItWouldDrop(t *testing.T) {
 	g, s := newGRPC(t)
 	ctx := context.Background()
 	cases := map[string]*secretmanagerpb.Secret{
-		"rotation":            {Replication: automatic(), Rotation: &secretmanagerpb.Rotation{RotationPeriod: durationpb.New(86400e9)}},
-		"version_aliases":     {Replication: automatic(), VersionAliases: map[string]int64{"current": 1}},
-		"version_destroy_ttl": {Replication: automatic(), VersionDestroyTtl: durationpb.New(86400e9)},
+		"version_aliases": {Replication: automatic(), VersionAliases: map[string]int64{"current": 1}},
 	}
 	for field, sec := range cases {
 		_, err := g.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: "projects/demo", SecretId: "s-" + strings.ReplaceAll(field, "_", "-"), Secret: sec})
@@ -50,8 +47,9 @@ func TestRESTCreateAgreesWithGRPC(t *testing.T) {
 	t.Parallel()
 	srv, _ := newREST(t)
 	code, body := do(t, srv, "POST", "/v1/projects/demo/secrets?secretId=rot", `{"replication":{"automatic":{}},"rotation":{"rotationPeriod":"86400s"}}`)
-	if code != http.StatusNotImplemented || !strings.Contains(body, "rotation") {
-		t.Errorf("REST create with rotation = %d %s; want 501 naming rotation", code, body)
+	// A rotation_period with no next_rotation_time is refused alike (#1278).
+	if code != http.StatusBadRequest || !strings.Contains(body, "next_rotation_time") {
+		t.Errorf("REST create with rotation_period alone = %d %s; want 400 naming next_rotation_time", code, body)
 	}
 	if code, body := do(t, srv, "POST", "/v1/projects/demo/secrets?secretId=ok", `{"replication":{"automatic":{}},"labels":{"env":"dev"}}`); code != http.StatusOK || !strings.Contains(body, `"env":"dev"`) {
 		t.Errorf("REST create = %d %s", code, body)

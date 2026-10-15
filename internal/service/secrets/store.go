@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
@@ -83,6 +84,18 @@ type Secret struct {
 	// Topics are the Pub/Sub topics, named in full, that the secret's
 	// event notifications are published to (#1259).
 	Topics []string `json:"topics,omitempty"`
+	// NextRotation is rotation.next_rotation_time and RotationPeriod
+	// rotation.rotation_period (#1278); zero is unset. At NextRotation a
+	// SECRET_ROTATE notification goes to Topics, and NextRotation advances
+	// by RotationPeriod, or is cleared when there is none.
+	NextRotation   time.Time     `json:"nextRotationTime,omitempty"`
+	RotationPeriod time.Duration `json:"rotationPeriod,omitempty"`
+	// VersionDestroyTTL is version_destroy_ttl (#1278): with it, destroying
+	// a version disables it and schedules its destruction this much later.
+	VersionDestroyTTL time.Duration `json:"versionDestroyTtl,omitempty"`
+	// ScheduledDestroys maps a version number to its scheduled_destroy_time,
+	// so the sweep finds the versions due without reading every version.
+	ScheduledDestroys map[string]time.Time `json:"scheduledDestroys,omitempty"`
 }
 
 // Expired reports whether the secret's expire_time has come at now.
@@ -97,6 +110,9 @@ type Version struct {
 	State     VersionState `json:"state"`
 	Created   time.Time    `json:"created"`
 	Destroyed time.Time    `json:"destroyed,omitempty"`
+	// ScheduledDestroy is scheduled_destroy_time: a version destroyed on a
+	// secret with a version_destroy_ttl is DISABLED until then (#1278).
+	ScheduledDestroy time.Time `json:"scheduledDestroyTime,omitempty"`
 	// Payload is the stored bytes. It is cleared on destroy rather than
 	// marked, so a destroyed version cannot leak what it held.
 	Payload []byte `json:"payload,omitempty"`
@@ -122,6 +138,9 @@ type Store struct {
 	rearm chan struct{}
 	// publish delivers event notifications (#1259); nil refuses topics.
 	publish Publisher
+	// offset is how far Advance has moved the store's clock past its base
+	// clock, in nanoseconds (#1278).
+	offset atomic.Int64
 }
 
 // NewStore returns a store backed by db.
@@ -132,13 +151,19 @@ func NewStore(db store.Store) *Store {
 // NewStoreWithClock returns a store with an injected clock, so tests can
 // assert on creation and destruction times without sleeping.
 func NewStoreWithClock(db store.Store, now func() time.Time) *Store {
-	return &Store{db: db, now: now, clock: funcClock(now), rearm: make(chan struct{}, 1)}
+	return newStore(db, funcClock(now))
 }
 
 // NewStoreOnClock returns a store on clock, so a test can advance time past
 // an expire_time and watch Run delete the secret.
 func NewStoreOnClock(db store.Store, clock sched.Clock) *Store {
-	return &Store{db: db, now: clock.Now, clock: clock, rearm: make(chan struct{}, 1)}
+	return newStore(db, clock)
+}
+
+func newStore(db store.Store, clock sched.Clock) *Store {
+	s := &Store{db: db, clock: clock, rearm: make(chan struct{}, 1)}
+	s.now = func() time.Time { return clock.Now().Add(time.Duration(s.offset.Load())) }
+	return s
 }
 
 // funcClock is a clock reading now, with real-time timers.
@@ -315,6 +340,18 @@ func (s *Store) CreateSecretExpiring(project, id string, labels, annotations map
 // its event notifications go to (#1259). Each is sent TOPIC_CONFIGURED
 // before the secret is stored, and a failed publish fails the create.
 func (s *Store) CreateSecretWithTopics(project, id string, labels, annotations map[string]string, expire time.Time, topics []string, replication string, locations ...string) (Secret, error) {
+	return s.CreateSecretScheduled(project, id, labels, annotations, expire, topics, Schedule{}, replication, locations...)
+}
+
+// CreateSecretScheduled is CreateSecretWithTopics with a rotation schedule
+// and a version_destroy_ttl (#1278).
+func (s *Store) CreateSecretScheduled(project, id string, labels, annotations map[string]string, expire time.Time, topics []string, sch Schedule, replication string, locations ...string) (Secret, error) {
+	if err := sch.check(s.now(), true, true); err != nil {
+		return Secret{}, err
+	}
+	if !sch.NextRotation.IsZero() && len(topics) == 0 {
+		return Secret{}, errRotationTopics
+	}
 	if !expire.IsZero() && !expire.After(s.now()) {
 		return Secret{}, apierror.InvalidArgument("expire_time %s is not in the future", expire.UTC().Format(time.RFC3339Nano))
 	}
@@ -379,11 +416,15 @@ func (s *Store) CreateSecretWithTopics(project, id string, labels, annotations m
 	if !expire.IsZero() {
 		sec.Expire = expire.UTC()
 	}
+	if !sch.NextRotation.IsZero() {
+		sec.NextRotation = sch.NextRotation.UTC()
+	}
+	sec.RotationPeriod, sec.VersionDestroyTTL = sch.RotationPeriod, sch.VersionDestroyTTL
 	if err := s.put(key, sec); err != nil {
 		return Secret{}, err
 	}
 	s.notify(sec, EventSecretCreate, nil, "")
-	if !sec.Expire.IsZero() {
+	if !sec.Expire.IsZero() || !sec.NextRotation.IsZero() {
 		s.wake()
 	}
 	return sec, nil
@@ -438,12 +479,20 @@ type SecretUpdate struct {
 	// them (#1259).
 	Topics       []string
 	UpdateTopics bool
+	// Schedule holds the new rotation and version_destroy_ttl; each Update
+	// flag names the part of it that applies (#1278). A zero value clears.
+	Schedule                                 Schedule
+	UpdateNextRotation, UpdateRotationPeriod bool
+	UpdateVersionDestroyTTL                  bool
 }
 
 // UpdateSecretFields applies u to a secret.
 func (s *Store) UpdateSecretFields(project, id string, u SecretUpdate) (Secret, error) {
 	if u.UpdateExpire && !u.Expire.IsZero() && !u.Expire.After(s.now()) {
 		return Secret{}, apierror.InvalidArgument("expire_time %s is not in the future", u.Expire.UTC().Format(time.RFC3339Nano))
+	}
+	if err := u.Schedule.check(s.now(), u.UpdateNextRotation, u.UpdateVersionDestroyTTL); err != nil {
+		return Secret{}, err
 	}
 	labels, annotations, updateLabels, updateAnnotations := u.Labels, u.Annotations, u.UpdateLabels, u.UpdateAnnotations
 	s.mu.Lock()
@@ -452,6 +501,23 @@ func (s *Store) UpdateSecretFields(project, id string, u SecretUpdate) (Secret, 
 	sec, err := s.getSecret(project, id)
 	if err != nil {
 		return Secret{}, err
+	}
+	next, period := sec.NextRotation, sec.RotationPeriod
+	if u.UpdateNextRotation {
+		next = u.Schedule.NextRotation.UTC()
+	}
+	if u.UpdateRotationPeriod {
+		period = u.Schedule.RotationPeriod
+	}
+	if period > 0 && next.IsZero() {
+		return Secret{}, errPeriodNeedsNext
+	}
+	topics := sec.Topics
+	if u.UpdateTopics {
+		topics = u.Topics
+	}
+	if !next.IsZero() && len(topics) == 0 {
+		return Secret{}, errRotationTopics
 	}
 	if u.UpdateTopics {
 		if err := s.validateTopics(u.Topics); err != nil {
@@ -473,6 +539,18 @@ func (s *Store) UpdateSecretFields(project, id string, u SecretUpdate) (Secret, 
 			sec.Expire = time.Time{}
 		}
 		defer s.wake()
+	}
+	if u.UpdateNextRotation || u.UpdateRotationPeriod {
+		if next.IsZero() {
+			next = time.Time{}
+		}
+		sec.NextRotation, sec.RotationPeriod = next, period
+		defer s.wake()
+	}
+	if u.UpdateVersionDestroyTTL {
+		// Versions already scheduled keep their schedule, as Google
+		// documents; the new ttl applies to later destroys.
+		sec.VersionDestroyTTL = u.Schedule.VersionDestroyTTL
 	}
 	if updateLabels {
 		sec.Labels = labels
@@ -786,8 +864,17 @@ func (s *Store) SetVersionState(project, id, version string, state VersionState)
 	}
 	v.State = state
 	v.Etag = s.etag()
+	// Enabling or disabling a version scheduled for destruction cancels
+	// the destruction, as Google documents (#1278).
+	cancelled := !v.ScheduledDestroy.IsZero()
+	v.ScheduledDestroy = time.Time{}
 	if err := s.put(versionKey(project, id, number), v); err != nil {
 		return Version{}, err
+	}
+	if cancelled {
+		if err := s.unschedule(project, id, number); err != nil {
+			return Version{}, err
+		}
 	}
 	event := EventSecretVersionEnable
 	if state == StateDisabled {
@@ -813,14 +900,26 @@ func (s *Store) DestroyVersion(project, id, version string) (Version, error) {
 	if v.State == StateDestroyed {
 		return Version{}, apierror.FailedPrecondition("secret version %s is already destroyed", v.Name)
 	}
+	if !v.ScheduledDestroy.IsZero() {
+		return Version{}, apierror.FailedPrecondition("secret version %s is already scheduled for destruction at %s; "+
+			"enable or disable it to cancel that", v.Name, v.ScheduledDestroy.UTC().Format(time.RFC3339Nano))
+	}
+	sec, err := s.getSecret(project, id)
+	if err != nil {
+		return Version{}, err
+	}
+	if sec.VersionDestroyTTL > 0 {
+		return s.scheduleDestroy(sec, v)
+	}
+	return s.destroyNow(project, id, v)
+}
 
-	v.State = StateDestroyed
-	v.Destroyed = s.now().UTC()
+// destroyNow destroys v at once. The caller holds s.mu.
+func (s *Store) destroyNow(project, id string, v Version) (Version, error) {
 	// The payload is cleared, not flagged. A destroyed version that still
 	// held its bytes would leak them to anything reading storage directly.
-	v.Payload = nil
-	v.Etag = s.etag()
-	if err := s.put(versionKey(project, id, number), v); err != nil {
+	v, err := s.destroyNowQuiet(project, id, v)
+	if err != nil {
 		return Version{}, err
 	}
 	s.notifyVersion(project, id, EventSecretVersionDestroy, v)

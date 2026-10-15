@@ -14,10 +14,11 @@ package secrets
 //     midnight UTC); durations are seconds such as 259200s.
 //
 // Fields are a secret's name, labels.KEY, annotations.KEY, create_time,
-// expire_time, replication.automatic and
-// replication.user_managed.replicas.location, plus the documented ones no
-// secret here can carry (rotation, customer-managed encryption, topics,
-// version aliases), which are never set; and a version's name, state,
+// expire_time, replication.automatic,
+// replication.user_managed.replicas.location, topics, rotation,
+// rotation.next_rotation_time, rotation.rotation_period and
+// version_destroy_ttl (#1278), plus the documented ones no secret here can
+// carry (customer-managed encryption, version aliases), which are never set; and a version's name, state,
 // create_time and destroy_time. Anything else, including gcloud's "~"
 // regular expressions, which the API itself does not take, is refused
 // UNIMPLEMENTED naming it, never ignored: an ignored filter would return
@@ -181,17 +182,13 @@ func parseFilterDuration(s string) (time.Duration, error) {
 // unsetSecretFields are documented filter fields of a Secret that this
 // service refuses to create (checkCreatable), so no secret ever has them.
 var unsetSecretFields = map[string]bool{
-	"rotation":                    true,
-	"rotation.next_rotation_time": true,
-	"rotation.rotation_period":    true,
 	"replication.user_managed.replicas.customerManagedEncryption":                true,
 	"replication.user_managed.replicas.customerManagedEncryption.kmsKeyName":     true,
 	"replication.user_managed.replicas.customer_managed_encryption":              true,
 	"replication.user_managed.replicas.customer_managed_encryption.kms_key_name": true,
 	"replication.automatic.customerManagedEncryption":                            true,
 	"replication.automatic.customer_managed_encryption":                          true,
-	"version_aliases":     true,
-	"version_destroy_ttl": true,
+	"version_aliases": true,
 }
 
 // secretFieldKind is the value kind of a field, for validating a value
@@ -202,8 +199,10 @@ func secretFieldKind(field string) (byte, bool) {
 		strings.HasPrefix(field, "labels."), strings.HasPrefix(field, "annotations."),
 		field == "labels", field == "annotations", field == "topics", field == "topics.name":
 		return 's', true
-	case field == "create_time", field == "expire_time":
+	case field == "create_time", field == "expire_time", field == "rotation.next_rotation_time":
 		return 't', true
+	case field == "rotation":
+		return 's', true
 	case field == "rotation.rotation_period", field == "version_destroy_ttl":
 		return 'd', true
 	case unsetSecretFields[field]:
@@ -268,6 +267,18 @@ func secretField(r any, field string) (filterValue, bool) {
 		return strValue(s.ReplicaLocations...), true
 	case field == "topics" || field == "topics.name":
 		return strValue(s.Topics...), true
+	// The rotation and the destruction delay (#1278).
+	case field == "rotation":
+		if s.NextRotation.IsZero() && s.RotationPeriod == 0 {
+			return filterValue{kind: 's'}, true
+		}
+		return filterValue{set: true, strs: []string{""}, kind: 's'}, true
+	case field == "rotation.next_rotation_time":
+		return timeValue(s.NextRotation), true
+	case field == "rotation.rotation_period":
+		return filterValue{set: s.RotationPeriod > 0, d: s.RotationPeriod, kind: 'd'}, true
+	case field == "version_destroy_ttl":
+		return filterValue{set: s.VersionDestroyTTL > 0, d: s.VersionDestroyTTL, kind: 'd'}, true
 	}
 	return filterValue{}, unsetSecretFields[field]
 }

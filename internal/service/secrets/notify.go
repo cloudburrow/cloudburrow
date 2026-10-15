@@ -30,8 +30,8 @@ import (
 // documents. A publish that fails after the change was made is logged, as
 // Google logs it to the secret, and the change stands.
 //
-// Not sent: SECRET_ROTATE, because `rotation` is refused, and
-// SECRET_VERSION_DESTROY_SCHEDULED, because `version_destroy_ttl` is.
+// SECRET_ROTATE and SECRET_VERSION_DESTROY_SCHEDULED are sent by the
+// rotation schedule and the delayed destruction of schedule.go (#1278).
 
 // Publisher publishes one message to a Pub/Sub topic, named in full. The
 // instance supplies one that publishes to its local Pub/Sub; it is the same

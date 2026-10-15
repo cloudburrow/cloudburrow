@@ -10,6 +10,7 @@ import (
 	"cloud.google.com/go/iam/apiv1/iampb"
 	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -36,6 +37,7 @@ func NewGRPCServer(s *Store) *GRPCServer { return &GRPCServer{store: s} }
 // Register adds this service to a gRPC server.
 func (g *GRPCServer) Register(s *grpc.Server) {
 	secretmanagerpb.RegisterSecretManagerServiceServer(s, g)
+	s.RegisterService(&clockServiceDesc, g)
 }
 
 // descendingKey renders a version number so that ascending string order is
@@ -63,6 +65,18 @@ func toProtoSecret(s Secret) *secretmanagerpb.Secret {
 	for _, t := range s.Topics {
 		out.Topics = append(out.Topics, &secretmanagerpb.Topic{Name: t})
 	}
+	if !s.NextRotation.IsZero() || s.RotationPeriod > 0 {
+		out.Rotation = &secretmanagerpb.Rotation{}
+		if !s.NextRotation.IsZero() {
+			out.Rotation.NextRotationTime = timestamppb.New(s.NextRotation)
+		}
+		if s.RotationPeriod > 0 {
+			out.Rotation.RotationPeriod = durationpb.New(s.RotationPeriod)
+		}
+	}
+	if s.VersionDestroyTTL > 0 {
+		out.VersionDestroyTtl = durationpb.New(s.VersionDestroyTTL)
+	}
 	// Replication is a required field of the resource, so it is always
 	// present in a response even when the caller did not set one.
 	out.Replication = toProtoReplication(s)
@@ -88,6 +102,9 @@ func toProtoVersion(v Version) *secretmanagerpb.SecretVersion {
 	}
 	if !v.Destroyed.IsZero() {
 		out.DestroyTime = timestamppb.New(v.Destroyed)
+	}
+	if !v.ScheduledDestroy.IsZero() {
+		out.ScheduledDestroyTime = timestamppb.New(v.ScheduledDestroy)
 	}
 	return out
 }
@@ -151,9 +168,13 @@ func (g *GRPCServer) CreateSecret(_ context.Context, req *secretmanagerpb.Create
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	sch, err := scheduleOf(sec)
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	kind, locations := replicationOf(sec.GetReplication())
-	created, err := g.store.CreateSecretWithTopics(project, req.GetSecretId(),
-		sec.GetLabels(), sec.GetAnnotations(), expire, topicNames(sec), kind, locations...)
+	created, err := g.store.CreateSecretScheduled(project, req.GetSecretId(),
+		sec.GetLabels(), sec.GetAnnotations(), expire, topicNames(sec), sch, kind, locations...)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -189,8 +210,18 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 	}
 
 	var updateLabels, updateAnnotations, checkReplication, updateExpire, updateTopics bool
+	var updateNext, updatePeriod, updateTTL bool
 	for _, p := range paths {
 		switch {
+		case p == "rotation":
+			// The whole message: a mask naming it with no rotation clears it.
+			updateNext, updatePeriod = true, true
+		case p == "rotation.next_rotation_time" || p == "rotation.nextRotationTime":
+			updateNext = true
+		case p == "rotation.rotation_period" || p == "rotation.rotationPeriod":
+			updatePeriod = true
+		case p == "version_destroy_ttl" || p == "versionDestroyTtl":
+			updateTTL = true
 		case p == "labels":
 			updateLabels = true
 		case p == "annotations":
@@ -205,7 +236,7 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			checkReplication = true
 		default:
 			return nil, apierror.Wrap(apierror.InvalidArgument(
-				"update_mask path %q is not supported; only labels, annotations, expire_time, ttl and topics are mutable", p))
+				"update_mask path %q is not supported; only labels, annotations, expire_time, ttl, topics, rotation and version_destroy_ttl are mutable", p))
 		}
 	}
 	if err := g.secretEtag(project, id, sec.GetEtag()); err != nil {
@@ -222,8 +253,14 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			return nil, apierror.Wrap(err)
 		}
 	}
+	sch, err := scheduleOf(sec)
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	updated, err := g.store.UpdateSecretFields(project, id, SecretUpdate{
-		Labels: sec.GetLabels(), Annotations: sec.GetAnnotations(),
+		Schedule: sch, UpdateNextRotation: updateNext, UpdateRotationPeriod: updatePeriod,
+		UpdateVersionDestroyTTL: updateTTL,
+		Labels:                  sec.GetLabels(), Annotations: sec.GetAnnotations(),
 		UpdateLabels: updateLabels, UpdateAnnotations: updateAnnotations,
 		Expire: expire, UpdateExpire: updateExpire,
 		Topics: topicNames(sec), UpdateTopics: updateTopics,
@@ -232,6 +269,30 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 		return nil, apierror.Wrap(err)
 	}
 	return toProtoSecret(updated), nil
+}
+
+// scheduleOf is a request Secret's rotation and version_destroy_ttl.
+func scheduleOf(sec *secretmanagerpb.Secret) (Schedule, error) {
+	var sch Schedule
+	if t := sec.GetRotation().GetNextRotationTime(); t != nil {
+		if err := t.CheckValid(); err != nil {
+			return Schedule{}, apierror.InvalidArgument("rotation.next_rotation_time is not a valid timestamp: %v", err)
+		}
+		sch.NextRotation = t.AsTime().UTC()
+	}
+	if d := sec.GetRotation().GetRotationPeriod(); d != nil {
+		if err := d.CheckValid(); err != nil || d.AsDuration() <= 0 {
+			return Schedule{}, apierror.InvalidArgument("rotation.rotation_period must be a positive duration")
+		}
+		sch.RotationPeriod = d.AsDuration()
+	}
+	if d := sec.GetVersionDestroyTtl(); d != nil {
+		if err := d.CheckValid(); err != nil || d.AsDuration() < 0 {
+			return Schedule{}, apierror.InvalidArgument("version_destroy_ttl must be a duration that is not negative")
+		}
+		sch.VersionDestroyTTL = d.AsDuration()
+	}
+	return sch, nil
 }
 
 // topicNames are a Secret's topics by name.

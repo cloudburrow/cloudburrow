@@ -10,7 +10,7 @@ import (
 )
 
 // Request fields Google honours that this server does not, refused by name
-// rather than accepted and dropped (#580): rotation that never fires, would let code pass locally
+// rather than accepted and dropped (#580): a field kept but never acted on would let code pass locally
 // that behaves differently on Google. Both transports call these, so a body
 // gets the same answer over gRPC and REST.
 
@@ -20,9 +20,7 @@ func checkCreatable(sec *secretmanagerpb.Secret) error {
 		field string
 		set   bool
 	}{
-		{"rotation", sec.GetRotation() != nil},
 		{"version_aliases", len(sec.GetVersionAliases()) > 0},
-		{"version_destroy_ttl", sec.GetVersionDestroyTtl() != nil},
 		{"customer_managed_encryption", sec.GetCustomerManagedEncryption() != nil},
 		{"tags", len(sec.GetTags()) > 0},
 		{"replication.automatic.customer_managed_encryption", sec.GetReplication().GetAutomatic().GetCustomerManagedEncryption() != nil},

@@ -61,8 +61,9 @@ func secretParts(name string) (project, id string) {
 	return parts[1], parts[3]
 }
 
-// Sweep deletes every secret whose expire_time has come and returns the
-// earliest expire_time still to come, zero if none.
+// Sweep deletes every secret whose expire_time has come, sends the
+// rotations and runs the version destructions that are due (#1278), and
+// returns the earliest of those times still to come, zero if none.
 func (s *Store) Sweep() (time.Time, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -78,7 +79,10 @@ func (s *Store) Sweep() (time.Time, error) {
 			continue
 		}
 		var sec Secret
-		if err := json.Unmarshal(raw, &sec); err != nil || sec.Expire.IsZero() {
+		if err := json.Unmarshal(raw, &sec); err != nil {
+			continue
+		}
+		if sec.Expire.IsZero() && sec.NextRotation.IsZero() && len(sec.ScheduledDestroys) == 0 {
 			continue
 		}
 		if sec.Expired(now) {
@@ -89,8 +93,15 @@ func (s *Store) Sweep() (time.Time, error) {
 			s.notify(sec, EventSecretDelete, nil, deleteExpiration)
 			continue
 		}
-		if next.IsZero() || sec.Expire.Before(next) {
-			next = sec.Expire
+		// Rotations and scheduled destructions (#1278).
+		later, err := s.due(sec, now)
+		if err != nil {
+			return time.Time{}, err
+		}
+		for _, t := range []time.Time{sec.Expire, later} {
+			if !t.IsZero() && (next.IsZero() || t.Before(next)) {
+				next = t
+			}
 		}
 	}
 	return next, nil

@@ -131,7 +131,8 @@ methods (#1212), and their console (#1219).
 
 IAM conditions are excluded (below). Closed: `RotateSecret`, `EnableManagedRotation` and
 `Secret.rotation` (#1215), `Secret.expire_time` / `ttl` (#1225), and `ListSecrets` /
-`ListSecretVersions` filters (#1228), and `Secret.topics` event notifications to Pub/Sub (#1259).
+`ListSecretVersions` filters (#1228), `Secret.topics` event notifications to Pub/Sub (#1259), and
+`Secret.rotation` schedules and `version_destroy_ttl` delayed destruction (#1278).
 
 | Gap | Why open | Size |
 |---|---|---|
