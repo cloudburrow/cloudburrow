@@ -221,7 +221,7 @@ func TestSpannerPartitionedQueryAndRead(t *testing.T) {
 	}
 	s := sess.GetName()
 	if _, err := c.Commit(ctx, &spannerpb.CommitRequest{
-		Session: s,
+		Session:     s,
 		Transaction: &spannerpb.CommitRequest_SingleUseTransaction{SingleUseTransaction: spannerReadWrite()},
 		Mutations:   []*spannerpb.Mutation{spannerInsert("1", "a"), spannerInsert("2", "b"), spannerInsert("3", "c")},
 	}); err != nil {

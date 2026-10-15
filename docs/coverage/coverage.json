@@ -2880,26 +2880,41 @@
     "Key": "spanner",
     "Title": "Spanner",
     "counts": {
-      "Refused": 1,
-      "Unknown": 43,
-      "Verified": 21
+      "Refused": 32,
+      "Verified": 33
     },
     "rows": [
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackupSchedule",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateDatabase",
@@ -2912,23 +2927,42 @@
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackupSchedule",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DropDatabase",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:217 TestSpannerDatabaseAdminSchemaListAndDrop"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackupSchedule",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabase",
@@ -2947,63 +2981,121 @@
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/InternalUpdateGraphOperation",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupOperations",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupSchedules",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackups",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseOperations",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseRoles",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabases",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:217 TestSpannerDatabaseAdminSchemaListAndDrop"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/RestoreDatabase",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/SetIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/TestIamPermissions",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackupSchedule",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabase",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabaseDdl",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:217 TestSpannerDatabaseAdminSchemaListAndDrop"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstance",
@@ -3016,27 +3108,48 @@
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstanceConfig",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstancePartition",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstance",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstanceConfig",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstancePartition",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstance",
@@ -3047,55 +3160,101 @@
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstanceConfig",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstancePartition",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigOperations",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigs",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstancePartitionOperations",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstancePartitions",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstances",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/MoveInstance",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/SetIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/TestIamPermissions",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstance",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstanceConfig",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstancePartition",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.v1.Spanner/BatchCreateSessions",

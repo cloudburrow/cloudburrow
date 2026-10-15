@@ -20,7 +20,7 @@ Do not edit these files by hand.
 | [Firestore](firestore.md) | 17 | 6 | 0 | 0 | 0 | 0 | 11 | 0 |
 | [Datastore](datastore.md) | 8 | 4 | 0 | 0 | 0 | 0 | 4 | 0 |
 | [Bigtable](bigtable.md) | 50 | 6 | 0 | 0 | 0 | 0 | 44 | 0 |
-| [Spanner](spanner.md) | 65 | 21 | 1 | 0 | 0 | 0 | 43 | 0 |
+| [Spanner](spanner.md) | 65 | 33 | 32 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 22 | 0 | 0 | 0 | 0 | 25 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
