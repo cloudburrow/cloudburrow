@@ -171,3 +171,50 @@ func itemsOf(body map[string]any) []any {
 	items, _ := body["items"].([]any)
 	return items
 }
+
+// gcloud's empty spec.template.spec.sandboxes is dropped; one with
+// templates is refused; any other unknown field is still refused.
+func TestV1DecodeServiceSandboxes(t *testing.T) {
+	decode := func(body string) error {
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		var s runv1.Service
+		return v1DecodeService(r, &s)
+	}
+	if err := decode(`{"spec":{"template":{"spec":{"sandboxes":{},"containers":[{"image":"a:1"}]}}}}`); err != nil {
+		t.Errorf("empty sandboxes = %v", err)
+	}
+	if err := decode(`{"spec":{"template":{"spec":{"sandboxes":{"templates":[{"image":"a:1"}]}}}}}`); status.Code(err) != codes.Unimplemented {
+		t.Errorf("sandboxes with templates = %v", err)
+	}
+	if err := decode(`{"spec":{"template":{"spec":{"bogus":1}}}}`); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("unknown field = %v", err)
+	}
+}
+
+// The body `gcloud run deploy --image` (587.0.0) sends converts and passes
+// the v2 checks: its client annotations become client and clientVersion,
+// startup-cpu-boost the containers' startupCpuBoost, and its empty
+// sandboxes and nodeSelector are dropped (#1297). Another
+// run.googleapis.com annotation is 501 naming it.
+func TestV1AcceptsGcloudDeploy(t *testing.T) {
+	body := `{"apiVersion": "serving.knative.dev/v1", "kind": "Service", "metadata": {"annotations": {"run.googleapis.com/client-name": "gcloud", "run.googleapis.com/client-version": "587.0.0"}, "labels": {}, "name": "d", "namespace": "p"}, "spec": {"template": {"metadata": {"annotations": {"run.googleapis.com/client-name": "gcloud", "run.googleapis.com/client-version": "587.0.0", "run.googleapis.com/startup-cpu-boost": "True"}, "labels": {"client.knative.dev/nonce": "x"}}, "spec": {"containers": [{"env": [{"name": "TARGET", "value": "gcloud"}], "image": "ghcr.io/x/y:1", "name": ""}], "nodeSelector": {}, "sandboxes": {}}}}, "status": {"address": {}}}`
+	var in runv1.Service
+	if err := v1DecodeService(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)), &in); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := fromV1Service(&in, "projects/p/locations/us-central1/services/d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Unsupported(svc); err != nil {
+		t.Fatal(err)
+	}
+	if svc.GetClient() != "gcloud" || svc.GetClientVersion() != "587.0.0" || len(svc.GetAnnotations()) != 0 ||
+		len(svc.GetTemplate().GetAnnotations()) != 0 || !svc.GetTemplate().GetContainers()[0].GetResources().GetStartupCpuBoost() {
+		t.Errorf("gcloud's service = %v", svc)
+	}
+	in.Metadata.Annotations = map[string]string{"run.googleapis.com/ingress": "internal"}
+	if _, err := fromV1Service(&in, svc.GetName()); status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "ingress") {
+		t.Errorf("ingress annotation = %v", err)
+	}
+}

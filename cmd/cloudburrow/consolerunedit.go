@@ -161,20 +161,25 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 		}
 		return fmt.Sprint(n)
 	}
+	pod := runadapter.ReadPodConfig(tmpl.Metadata.Annotations, 1)
+	secretFiles, memoryVolumes := runVolumeDefaults(pod.GetVolumes(), pod.GetContainers()[0].GetVolumeMounts())
 	defaults := map[string]string{
-		"name":         service,
-		"image":        c.Image,
-		"port":         port,
-		"command":      strings.Join(c.Command, " "),
-		"args":         strings.Join(c.Args, " "),
-		"env":          console.FormatMap(plain),
-		"secretEnv":    console.FormatMap(secret),
-		"cpu":          c.Resources.Limits["cpu"],
-		"memory":       c.Resources.Limits["memory"],
-		"minInstances": tmpl.Metadata.Annotations["autoscaling.knative.dev/min-scale"],
-		"maxInstances": tmpl.Metadata.Annotations["autoscaling.knative.dev/max-scale"],
-		"concurrency":  positive(tmpl.Spec.ContainerConcurrency),
-		"timeout":      positive(tmpl.Spec.TimeoutSeconds),
+		"serviceAccount": pod.GetServiceAccount(),
+		"secretFiles":    secretFiles,
+		"memoryVolumes":  memoryVolumes,
+		"name":           service,
+		"image":          c.Image,
+		"port":           port,
+		"command":        strings.Join(c.Command, " "),
+		"args":           strings.Join(c.Args, " "),
+		"env":            console.FormatMap(plain),
+		"secretEnv":      console.FormatMap(secret),
+		"cpu":            c.Resources.Limits["cpu"],
+		"memory":         c.Resources.Limits["memory"],
+		"minInstances":   tmpl.Metadata.Annotations["autoscaling.knative.dev/min-scale"],
+		"maxInstances":   tmpl.Metadata.Annotations["autoscaling.knative.dev/max-scale"],
+		"concurrency":    positive(tmpl.Spec.ContainerConcurrency),
+		"timeout":        positive(tmpl.Spec.TimeoutSeconds),
 	}
 
 	_, fields := runProvider{}.CreateForm()
@@ -246,6 +251,9 @@ func (p runProvider) Edit(ctx context.Context, project string, path []string, va
 	}
 	_, sentSecrets := values["secretEnv"]
 	if err := applyRunForm(svc, form, !sentSecrets); err != nil {
+		return err
+	}
+	if err := applyRunVolumes(podFields{&svc.Template.ServiceAccount, &svc.Template.Volumes}, svc.Template.Containers[0], values); err != nil {
 		return err
 	}
 	labels, ok, err := runLabels(values)

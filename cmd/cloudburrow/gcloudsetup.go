@@ -122,7 +122,10 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		resourceManagerService: cfg.Endpoints.ResourceManager, config.ServiceRun: cfg.Endpoints.Run}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
-	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\n", cfg.DefaultProject())
+	// should_prompt_to_enable_api is off because gcloud would otherwise ask
+	// Service Usage, which is not served, whether an API is enabled before
+	// commands such as `run deploy` (#1297); every served API is enabled.
+	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\nshould_prompt_to_enable_api = false\n", cfg.DefaultProject())
 	b.WriteString("\n[api_endpoint_overrides]\n")
 	for _, v := range gcloudVerified {
 		if (v.always || serviceEnabled(cfg, v.service)) && ports[v.service] != 0 {

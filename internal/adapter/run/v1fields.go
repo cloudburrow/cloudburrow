@@ -1,9 +1,52 @@
 package run
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	runv1 "google.golang.org/api/run/v1"
+
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
+
+// v1DecodeService decodes a v1 Service body as rest.DecodeJSON does,
+// refusing unknown fields, except spec.template.spec.sandboxes: newer
+// gcloud releases send it (Cloud Run's sandbox CLI templates), which the
+// generated Go client this adapter is built on does not know. An empty one
+// is dropped; one that sets templates is 501, as there is no sandbox CLI
+// locally.
+func v1DecodeService(r *http.Request, dst *runv1.Service) error {
+	if r.Body == nil {
+		return apierror.InvalidArgument("request body is required")
+	}
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return apierror.InvalidArgument("request body: %v", err)
+	}
+	var doc map[string]any
+	if json.Unmarshal(raw, &doc) == nil {
+		spec, _ := doc["spec"].(map[string]any)
+		tmpl, _ := spec["template"].(map[string]any)
+		ts, _ := tmpl["spec"].(map[string]any)
+		if sb, ok := ts["sandboxes"]; ok {
+			if m, _ := sb.(map[string]any); sb != nil && len(m) > 0 {
+				if t, _ := m["templates"].([]any); len(t) > 0 || len(m) > 1 {
+					return apierror.Unimplemented("unsupported Cloud Run v1 configuration: spec.template.spec.sandboxes: not mapped")
+				}
+			}
+			delete(ts, "sandboxes")
+			if raw, err = json.Marshal(doc); err != nil {
+				return apierror.Internal(err, "re-encode the request")
+			}
+		}
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	return rest.DecodeJSON(r, dst)
+}
 
 // The v1 counterparts of the v2 volumes, mounts and probes (#1297). v1 and
 // v2 share one mapping, so each is converted to v2's shape and checked and
@@ -112,23 +155,34 @@ func toV1Mounts(in []*runpb.VolumeMount, volumes []*runpb.Volume) []*runv1.Volum
 	return out
 }
 
-func toV1Probe(p *runpb.Probe) *runv1.Probe {
+// toV1Probe renders a probe as v1 reports it: on the serving port when it
+// names none, as Cloud Run fills it in and as the probe was rendered.
+func toV1Probe(p *runpb.Probe, serving int32) *runv1.Probe {
 	if p == nil {
 		return nil
+	}
+	if serving == 0 {
+		serving = 8080
+	}
+	port := func(n int32) int64 {
+		if n == 0 {
+			return int64(serving)
+		}
+		return int64(n)
 	}
 	out := &runv1.Probe{InitialDelaySeconds: int64(p.GetInitialDelaySeconds()), TimeoutSeconds: int64(p.GetTimeoutSeconds()),
 		PeriodSeconds: int64(p.GetPeriodSeconds()), FailureThreshold: int64(p.GetFailureThreshold())}
 	switch {
 	case p.GetHttpGet() != nil:
 		h := p.GetHttpGet()
-		out.HttpGet = &runv1.HTTPGetAction{Path: h.GetPath(), Port: int64(h.GetPort())}
+		out.HttpGet = &runv1.HTTPGetAction{Path: h.GetPath(), Port: port(h.GetPort())}
 		for _, hh := range h.GetHttpHeaders() {
 			out.HttpGet.HttpHeaders = append(out.HttpGet.HttpHeaders, &runv1.HTTPHeader{Name: hh.GetName(), Value: hh.GetValue()})
 		}
 	case p.GetTcpSocket() != nil:
-		out.TcpSocket = &runv1.TCPSocketAction{Port: int64(p.GetTcpSocket().GetPort())}
+		out.TcpSocket = &runv1.TCPSocketAction{Port: port(p.GetTcpSocket().GetPort())}
 	case p.GetGrpc() != nil:
-		out.Grpc = &runv1.GRPCAction{Port: int64(p.GetGrpc().GetPort()), Service: p.GetGrpc().GetService()}
+		out.Grpc = &runv1.GRPCAction{Port: port(p.GetGrpc().GetPort()), Service: p.GetGrpc().GetService()}
 	}
 	return out
 }

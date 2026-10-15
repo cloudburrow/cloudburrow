@@ -106,9 +106,10 @@ var parityRows = []parityRow{
 	// Cloud Run
 	{Resource: "Cloud Run services", Service: "run",
 		Methods:  []string{"Services/CreateService", "Services/DeleteService", "Services/GetService", "Services/ListServices", "Services/UpdateService"},
-		Provider: "run", Offers: "Services list, service detail, Deploy container and Edit and deploy new revision (with labels and variables from Secret Manager, #852), Manage traffic (splits, LATEST, pinned revisions, tags; #1224; sent as an update_mask of traffic, #1260), Delete",
+		Provider: "run", Offers: "Services list, service detail, Deploy container and Edit and deploy new revision (with labels and variables from Secret Manager, #852; the service account, files from Secret Manager and in-memory volumes, #1297), Manage traffic (splits, LATEST, pinned revisions, tags; #1224; sent as an update_mask of traffic, #1260), Delete",
 		Tests: []string{"TestConsoleRunEditAndDeployNewRevision", "TestRunEditDeploysTheFormThroughUpdateService", "TestCloudRunEditFormIsPrefilledAndGivesFocusBack",
 			"TestConsoleRunServiceLabelsAndSecrets", "TestRunEditSetsLabelsAndSecretBackedVariables",
+			"TestConsoleRunVolumesAndServiceAccount", "TestRunVolumeFieldsRoundTrip",
 			"TestTrafficLinesRoundTrip", "TestTrafficListingShowsTags", "TestRunManageTrafficSendsATrafficMask", "TestCloudRunManageTrafficThroughTheBrowser"}},
 	// The v1 (Knative) API (#1293) is the same services and revisions, read
 	// from the same Knative objects through the same mapping: the console's
@@ -130,9 +131,10 @@ var parityRows = []parityRow{
 		Tests: []string{"TestNoDetailShowsABlankProperty", "TestCloudRunRowSaysWhatIsServingAndWhyNot"}},
 	{Resource: "Cloud Run jobs", Service: "run",
 		Methods:  []string{"Jobs/CreateJob", "Jobs/DeleteJob", "Jobs/GetJob", "Jobs/ListJobs", "Jobs/RunJob", "Jobs/UpdateJob"},
-		Provider: "run-jobs", Offers: "Jobs page (/run/jobs): jobs list, job detail with executions and configuration, Create job, Edit job, Execute, Delete (#785); labels and variables from Secret Manager on Create job and Edit job, and Execute with overrides (arguments, variables, task count, timeout) on a job's page (#852)",
+		Provider: "run-jobs", Offers: "Jobs page (/run/jobs): jobs list, job detail with executions and configuration, Create job, Edit job, Execute, Delete (#785); labels and variables from Secret Manager on Create job and Edit job, and Execute with overrides (arguments, variables, task count, timeout) on a job's page (#852); the service account, files from Secret Manager and in-memory volumes on Create job and Edit job (#1297)",
 		Tests: []string{"TestConsoleRunJobsCreateExecuteAndCancel", "TestRunJobsCreateExecuteCancelAndDeleteThroughTheAPI", "TestRunJobEditKeepsWhatTheFormDoesNotShow", "TestCloudRunJobCreatedExecutedAndDeletedInTheBrowser",
-			"TestConsoleRunJobLabelsSecretsAndOverrides", "TestRunJobLabelsSecretsAndExecuteWithOverrides", "TestCloudRunJobExecuteWithOverridesThroughTheForm"}},
+			"TestConsoleRunJobLabelsSecretsAndOverrides", "TestRunJobLabelsSecretsAndExecuteWithOverrides", "TestCloudRunJobExecuteWithOverridesThroughTheForm",
+			"TestConsoleRunVolumesAndServiceAccount", "TestRunVolumeFieldsRoundTrip"}},
 	{Resource: "Cloud Run executions", Service: "run",
 		Methods:  []string{"Executions/CancelExecution", "Executions/DeleteExecution", "Executions/GetExecution", "Executions/ListExecutions"},
 		Provider: "run-jobs", Offers: "Executions section on a job's page, execution detail (status, task counts, conditions, failure message, Logs), Cancel while running, Delete when finished (#785)",

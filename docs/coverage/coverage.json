@@ -421,7 +421,8 @@
         "method": "google.cloud.run.v2.Jobs/CreateJob",
         "status": "Verified",
         "tests": [
-          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
         ]
       },
       {
@@ -443,7 +444,8 @@
         "method": "google.cloud.run.v2.Jobs/GetJob",
         "status": "Verified",
         "tests": [
-          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
         ]
       },
       {
@@ -457,7 +459,8 @@
         "method": "google.cloud.run.v2.Jobs/RunJob",
         "status": "Verified",
         "tests": [
-          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
         ]
       },
       {
@@ -522,7 +525,8 @@
         "method": "google.cloud.run.v2.Services/CreateService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:58 TestRunServiceLifecycle"
+          "test/compat/run_test.go:58 TestRunServiceLifecycle",
+          "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount"
         ]
       },
       {
@@ -545,7 +549,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
-          "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
+          "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
+          "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount"
         ]
       },
       {
@@ -797,21 +802,26 @@
         "method": "run.namespaces.services.create",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
+          "test/compat/runvolumes_test.go:165 TestRunV1VolumesProbesAndServiceAccount",
+          "test/compat/runvolumes_test.go:210 TestGcloudRunDeployImage"
         ]
       },
       {
         "method": "run.namespaces.services.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
+          "test/compat/runvolumes_test.go:210 TestGcloudRunDeployImage"
         ]
       },
       {
         "method": "run.namespaces.services.get",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
+          "test/compat/runvolumes_test.go:165 TestRunV1VolumesProbesAndServiceAccount",
+          "test/compat/runvolumes_test.go:210 TestGcloudRunDeployImage"
         ]
       },
       {
@@ -825,7 +835,8 @@
         "method": "run.namespaces.services.replaceService",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
+          "test/compat/runvolumes_test.go:210 TestGcloudRunDeployImage"
         ]
       },
       {
