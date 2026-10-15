@@ -46,7 +46,7 @@ Already tracked: none open. ACLs and object IAM are excluded (below).
 | `objects.bulkRestore`: restoring soft-deleted objects in bulk (a long-running bucket operation) is 501 | not built yet | M |
 | `buckets.operations.list` with a `filter` is 501 | not built yet | S |
 | `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) | not built yet | M |
-| XML API: bucket `PUT`, service `GET` and form `POST` are 501 | not built yet | M |
+| XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |
 | gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |
@@ -73,9 +73,9 @@ conditions are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `ListQueues` with a `filter` other than on `state` is `UNIMPLEMENTED` (a `state` filter is honoured since #1222) | not built yet | S |
+| `ListQueues` with a `filter` other than on `state` is `UNIMPLEMENTED` (a `state` filter is honoured since #1222; #1255) | not built yet | S |
 | `oidcToken` / `oauthToken` on an HTTP task are refused `UNIMPLEMENTED` (#1243, with Cloud Scheduler's) | not built yet | M |
-| `stackdriver_logging_config` is refused: no dispatch is written to Cloud Logging | not built yet | M |
+| `stackdriver_logging_config` is refused: no dispatch is written to Cloud Logging (#1256) | not built yet | M |
 | A queue-level `http_target` on `UpdateQueue` is refused | not built yet | M |
 | App Engine targets and `app_engine_routing_override` | no emulator support (no App Engine) | L |
 
@@ -86,7 +86,7 @@ Already tracked: #1216 (IAM policy methods on Services and Jobs).
 | Gap | Why open | Size |
 |---|---|---|
 | `Operations.ListOperations` with a `filter` is `UNIMPLEMENTED` (listing and `WaitOperation` are served since #1229) | not built yet | S |
-| `UpdateService` with a partial `update_mask` is `UNIMPLEMENTED` | not built yet | S |
+| `UpdateService` with a partial `update_mask` is `UNIMPLEMENTED` (#1260) | not built yet | S |
 | Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity | not built yet | L |
 | Logs are not served through the Cloud Run API | not built yet | M |
 | `Builds.SubmitBuild` is not served | not built yet | M |
@@ -141,7 +141,7 @@ IAM conditions are excluded (below).
 |---|---|---|
 | `Secret.expire_time` / `ttl` are refused `UNIMPLEMENTED` (#1225) | not built yet | S |
 | `ListSecrets`, `ListSecretVersions` with a `filter` are `UNIMPLEMENTED` (#1228) | not built yet | M |
-| `Secret.topics`: event notifications to Pub/Sub are refused | not built yet | M |
+| `Secret.topics`: event notifications to Pub/Sub are refused (#1259) | not built yet | M |
 | `customer_managed_encryption` on a replica or the automatic policy | no emulator support (needs KMS-backed CMEK) | M |
 | Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) | needs live GCP | S |
 
@@ -161,7 +161,7 @@ Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1
 | Gap | Why open | Size |
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
-| `PredictionService.StreamGenerateContent` over gRPC is `UNIMPLEMENTED`; `GenerateContent` over gRPC is served with no official-SDK test | not built yet | M |
+| `PredictionService.StreamGenerateContent` over gRPC is `UNIMPLEMENTED`; `GenerateContent` over gRPC is served with no official-SDK test (#1257) | not built yet | M |
 | Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` | not built yet | M |
 | `RawPredict` on a publisher model | not built yet | S |
 | `Explain` | no emulator support | L |
