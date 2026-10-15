@@ -110,7 +110,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Resource Manager first: it is where the projects every other screen is
 	// scoped to come from.
 	if d.projects != nil {
-		providers = append(providers, projectsProvider{registry: d.projects}, hierarchyProvider{registry: d.projects})
+		providers = append(providers, projectsProvider{registry: d.projects}, hierarchyProvider{registry: d.projects}, tagsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
 		// Three screens of one product: buckets, the project's soft-deleted

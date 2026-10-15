@@ -1422,10 +1422,10 @@
   },
   {
     "Key": "resourcemanager",
-    "Title": "Resource Manager v3 (Projects, Folders, Organizations)",
+    "Title": "Resource Manager v3 (Projects, Folders, Organizations, Tags)",
     "counts": {
-      "Unimplemented": 9,
-      "Verified": 18
+      "Unimplemented": 15,
+      "Verified": 37
     },
     "rows": [
       {
@@ -1630,6 +1630,187 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagBindings/CreateTagBinding",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagBindings/DeleteTagBinding",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagBindings/ListEffectiveTags",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagBindings/ListTagBindings",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagHolds/CreateTagHold",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagHolds/DeleteTagHold",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagHolds/ListTagHolds",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagKeys/CreateTagKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagKeys/DeleteTagKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagKeys/GetIamPolicy",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagKeys/GetNamespacedTagKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagKeys/GetTagKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagKeys/ListTagKeys",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagKeys/SetIamPolicy",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagKeys/TestIamPermissions",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagKeys/UpdateTagKey",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagValues/CreateTagValue",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagValues/DeleteTagValue",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagValues/GetIamPolicy",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagValues/GetNamespacedTagValue",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagValues/GetTagValue",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagValues/ListTagValues",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ]
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagValues/SetIamPolicy",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagValues/TestIamPermissions",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.resourcemanager.v3.TagValues/UpdateTagValue",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
         ]
       }
     ]

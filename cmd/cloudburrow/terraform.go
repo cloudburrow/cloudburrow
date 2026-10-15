@@ -77,6 +77,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// google_folder (#1294): Resource Manager v3 Folders, on the same port,
 	// in TestTerraformGoogleFolder.
 	{resourceManagerEndpoint, "resource_manager_v3_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_V3_CUSTOM_ENDPOINT", "/v3/", true},
+	// google_tags_tag_key, _tag_value and _tag_binding (#1295): the tags
+	// services are Resource Manager v3, which the provider reaches through
+	// its own tags_ endpoint, in TestTerraformTagsAndLien.
+	{resourceManagerEndpoint, "tags_custom_endpoint", "GOOGLE_TAGS_CUSTOM_ENDPOINT", "/v3/", true},
 }
 
 // resourceManagerEndpoint keys the Resource Manager rows. It is not a

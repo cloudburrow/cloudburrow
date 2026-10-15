@@ -12,7 +12,7 @@ Do not edit these files by hand.
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
 | [Cloud Run v2](run.md) | 41 | 26 | 0 | 0 | 0 | 15 | 0 | 4 |
 | [Cloud KMS](kms.md) | 40 | 38 | 0 | 2 | 0 | 0 | 0 | 82 |
-| [Resource Manager v3 (Projects, Folders, Organizations)](resourcemanager.md) | 27 | 18 | 0 | 9 | 0 | 0 | 0 | 0 |
+| [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 37 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 42 | 0 | 1 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 14 | 5 | 0 | 9 | 0 | 0 | 0 | 0 |

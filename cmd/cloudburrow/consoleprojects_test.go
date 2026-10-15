@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -57,7 +59,7 @@ func TestConsoleProjectOrgPolicies(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := []string{"policy-proj"}
-	if a := p.DetailActions(ctx, "", path); len(a) != 2 || a[0].ID != projectMove || a[1].ID != projectSetPolicy {
+	if a := p.DetailActions(ctx, "", path); len(a) < 2 || a[0].ID != projectMove || a[1].ID != projectSetPolicy {
 		t.Fatalf("a project with no policies offers %+v; want Set organization policy", a)
 	}
 	if err := p.ActAt(ctx, "", path, projectSetPolicy, map[string]string{"constraint": "constraints/storage.uniformBucketLevelAccess", "enforced": "true"}); err != nil {
@@ -75,7 +77,7 @@ func TestConsoleProjectOrgPolicies(t *testing.T) {
 		t.Fatalf("the Organization policies section = %+v", l.Items)
 	}
 	a := p.DetailActions(ctx, "", path)
-	if len(a) != 3 || a[2].ID != projectClearPolicy {
+	if len(a) < 3 || a[2].ID != projectClearPolicy { // then the lien and tag actions (#1295)
 		t.Fatalf("actions = %+v; want Move, Set and Clear", a)
 	}
 	if err := p.ActAt(ctx, "", path, projectClearPolicy, map[string]string{"constraint": "constraints/storage.uniformBucketLevelAccess"}); err != nil {
@@ -151,5 +153,134 @@ func TestConsoleResourceHierarchy(t *testing.T) {
 	}
 	if f, err := reg.Folder(team); err != nil || f.State != resourcemanager.StateActive || f.DisplayName != "Team B" || f.Parent != resourcemanager.OrganizationName {
 		t.Errorf("Team B after undelete = %+v, %v", f, err)
+	}
+}
+
+// TestConsoleTagsAndLiens (#1295): Create tag key under the organization and
+// a project, Create tag value, Edit description, Bind tag on a folder and a
+// project, the project's Tags showing the inherited one, Unbind tag, Delete
+// refused while bound, then Delete tag value and Delete; Add lien, Delete
+// project refused FAILED_PRECONDITION, Remove lien, Delete project.
+func TestConsoleTagsAndLiens(t *testing.T) {
+	ctx := context.Background()
+	reg := resourcemanager.New(store.NewMemory())
+	tg := tagsProvider{registry: reg}
+	h := hierarchyProvider{registry: reg}
+	p := projectsProvider{registry: reg}
+	eng, err := h.Create(ctx, "", map[string]string{"displayName": "Engineering", "parent": resourcemanager.OrganizationName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Create(ctx, "", map[string]string{"projectId": "tagged-proj", "parent": "folders/" + eng}); err != nil {
+		t.Fatal(err)
+	}
+	if _, fields := tg.CreateForm(); len(fields[0].Options) != 2 {
+		t.Errorf("Create tag key's parents = %v; want the organization and the project", fields[0].Options)
+	}
+	env, err := tg.Create(ctx, "", map[string]string{"parent": resourcemanager.OrganizationName, "shortName": "env", "description": "Environment"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tg.Create(ctx, "", map[string]string{"parent": "projects/tagged-proj", "shortName": "team"}); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := tg.List(ctx, ""); l.Total != 2 {
+		t.Fatalf("tag keys = %+v", l.Items)
+	}
+	for _, v := range []string{"prod", "dev"} {
+		if err := tg.ActAt(ctx, "", []string{env}, tagCreateValue, map[string]string{"shortName": v}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tg.Edit(ctx, "", []string{env}, map[string]string{"description": "Deployment environment"}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := tg.Detail(ctx, "", []string{env})
+	if d.Sections[0].Listing.Total != 2 {
+		t.Fatalf("env's values = %+v", d.Sections[0].Listing.Items)
+	}
+	prod := d.Sections[0].Listing.Items[1].Name
+	if d.Sections[0].Listing.Items[1].Fields["Short name"] != "prod" {
+		prod = d.Sections[0].Listing.Items[0].Name
+	}
+	if err := tg.Edit(ctx, "", []string{env, prod}, map[string]string{"description": "Production"}); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := reg.TagValue("tagValues/" + prod); v.GetDescription() != "Production" {
+		t.Errorf("prod's description = %q", v.GetDescription())
+	}
+
+	// Bind env/prod on the folder; the project inherits it.
+	ns := resourcemanager.OrganizationNumber + "/env/prod"
+	if err := h.ActAt(ctx, "", []string{eng}, tagBind, map[string]string{"value": ns}); err != nil {
+		t.Fatal(err)
+	}
+	pd, _ := p.Detail(ctx, "", []string{"tagged-proj"})
+	var tags, liens console.Section
+	for _, s := range pd.Sections {
+		switch s.ID {
+		case "tags":
+			tags = s
+		case "liens":
+			liens = s
+		}
+	}
+	if tags.Listing.Total != 1 || tags.Listing.Items[0].Fields["Source"] != "Inherited" {
+		t.Errorf("the project's tags = %+v; want env/prod inherited", tags.Listing.Items)
+	}
+	// Bound on the project, dev replaces the inherited prod.
+	if err := p.ActAt(ctx, "", []string{"tagged-proj"}, tagBind, map[string]string{"value": resourcemanager.OrganizationNumber + "/env/dev"}); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := reg.EffectiveTags(projectTarget("tagged-proj")); len(all) != 1 || all[0].GetInherited() || all[0].GetNamespacedTagValue() != resourcemanager.OrganizationNumber+"/env/dev" {
+		t.Errorf("effective tags after binding dev = %+v", all)
+	}
+	if err := tg.ActAt(ctx, "", []string{env}, tagDeleteValue, map[string]string{"value": "prod"}); err == nil {
+		t.Error("a bound tag value was deleted")
+	}
+	if err := h.ActAt(ctx, "", []string{eng}, tagUnbind, map[string]string{"value": ns}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ActAt(ctx, "", []string{"tagged-proj"}, tagUnbind, map[string]string{"value": resourcemanager.OrganizationNumber + "/env/dev"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tg.Delete(ctx, "", env); err == nil {
+		t.Error("a tag key with values was deleted")
+	}
+	if err := tg.ActAt(ctx, "", []string{env}, tagDeleteValue, map[string]string{"value": "prod"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tg.ActAt(ctx, "", []string{env}, tagDeleteValue, map[string]string{"value": "dev"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tg.Delete(ctx, "", env); err != nil {
+		t.Fatal(err)
+	}
+
+	// Liens.
+	if liens.Listing.Total != 0 {
+		t.Errorf("liens before any = %+v", liens.Listing.Items)
+	}
+	if err := p.ActAt(ctx, "", []string{"tagged-proj"}, lienAdd, map[string]string{
+		"restrictions": resourcemanager.ProjectDeleteRestriction, "reason": "production", "origin": "cloudburrow-console"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Delete(ctx, "", "tagged-proj"); err == nil || !strings.Contains(err.Error(), "lien") {
+		t.Fatalf("Delete with a lien = %v; want the lien's FAILED_PRECONDITION", err)
+	}
+	var remove *console.Action
+	for _, a := range p.DetailActions(ctx, "", []string{"tagged-proj"}) {
+		if a.ID == lienRemove {
+			remove = &a
+		}
+	}
+	if remove == nil {
+		t.Fatal("no Remove lien on a project with a lien")
+	}
+	if err := p.ActAt(ctx, "", []string{"tagged-proj"}, lienRemove, map[string]string{"lien": remove.Fields[0].Default}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Delete(ctx, "", "tagged-proj"); err != nil {
+		t.Fatal(err)
 	}
 }
