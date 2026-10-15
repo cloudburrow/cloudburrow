@@ -186,15 +186,22 @@ func firestoreBackend(project string) Backend {
 // Ephemeral mode keeps the gcloud wrapper with --no-store-on-disk, because
 // writing to a directory nothing preserves only slows startup.
 //
+// Ephemeral mode runs the call front (#1288) before the emulator, so a
+// pod's calls are measured. Persistent mode does not yet: with the front in
+// the pod, an entity written shortly before the pod was deleted was missing
+// from the next pod in two of three restarts (TestDatastoreSurvivesAPodRestart,
+// measured; it passes without the front), so its calls are measured from the
+// host alone, by the tunnel's guard (#1267), until that is understood (#1307).
+//
 // Both modes run as Firestore in Datastore mode (#371), which is what a
 // Datastore database in Google Cloud is today, and which is strongly
 // consistent. Without it the emulator defaults to --consistency=0.9: about
 // one query in ten missed an entity written just before it (19 of 200,
 // measured).
 func datastoreBackend(project string, persistent bool) Backend {
-	b := Backend{Name: "datastore", Image: PubSubImage, Port: DatastorePort,
-		Front: callFront(DatastorePort, DatastoreEmulatorPort)}
+	b := Backend{Name: "datastore", Image: PubSubImage, Port: DatastorePort}
 	if !persistent {
+		b.Front = callFront(DatastorePort, DatastoreEmulatorPort)
 		b.Command = []string{"gcloud", "beta", "emulators", "datastore", "start",
 			"--project=" + project,
 			fmt.Sprintf("--host-port=127.0.0.1:%d", DatastoreEmulatorPort),
@@ -205,8 +212,8 @@ func datastoreBackend(project string, persistent bool) Backend {
 	b.Command = []string{"sh", "-c", fmt.Sprintf(
 		`d=/data/datastore; if [ -z "$(ls -A "$d" 2>/dev/null)" ]; then %s/cloud_datastore_emulator create --project_id=%s "$d"; fi; `+
 			`exec java -cp %s/CloudDatastore.jar com.google.cloud.datastore.emulator.CloudDatastore start `+
-			`--host=127.0.0.1 --port=%d --store_on_disk=true --allow_remote_shutdown --firestore_in_datastore_mode "$d"`,
-		emu, project, emu, DatastoreEmulatorPort)}
+			`--host=0.0.0.0 --port=%d --store_on_disk=true --allow_remote_shutdown --firestore_in_datastore_mode "$d"`,
+		emu, project, emu, DatastorePort)}
 	b.Persistent, b.MountPath, b.OwnsClaim = true, "/data", true
 	return b
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 )
 
@@ -205,5 +206,40 @@ func TestCallFrontCallsAreMeasured(t *testing.T) {
 	}
 	if events := rec.Events("firestore", 10); len(events) != 2 {
 		t.Fatalf("events = %+v, want 2", events)
+	}
+}
+
+// A guarded tunnel's calls (#1267) are counted and recorded under their
+// service as a front's are, gRPC by canonical code and REST by status.
+func TestTunnelCallsAreMeasured(t *testing.T) {
+	rec := admin.NewRecorder(100, time.Now)
+	reg := metrics.New("firestore", "spanner")
+	observe := tunnelCalls(rec, reg, nil, "firestore")
+	if got := reg.Unmeasured(); len(got) != 1 || got[0] != "spanner" {
+		t.Fatalf("unmeasured = %v, want spanner alone", got)
+	}
+	observe(netfwd.Call{Method: "/google.firestore.v1.Firestore/GetDocument", GRPC: true, Code: 5,
+		Resource: "projects/fs/databases/(default)", Time: time.Now(), Duration: time.Millisecond})
+	observe(netfwd.Call{Method: "GET /v1/projects/fs/databases/(default)/documents/c/d", Code: 200,
+		Time: time.Now(), Duration: time.Millisecond})
+	var b strings.Builder
+	_ = reg.Write(&b)
+	fams := parseMetrics(t, b.String())
+	for _, want := range []map[string]string{
+		{"service": "firestore", "method": "GetDocument", "code": "NOT_FOUND"},
+		{"service": "firestore", "method": "JSON GET", "code": "200"},
+	} {
+		if v, ok := counter(fams, "cloudburrow_requests_total", want); !ok || v != 1 {
+			t.Errorf("%v = %v (found %v), want 1", want, v, ok)
+		}
+	}
+	events := rec.Events("firestore", 10)
+	if len(events) != 2 {
+		t.Fatalf("events = %+v, want 2", events)
+	}
+	for _, e := range events {
+		if e.Detail["project"] != "fs" {
+			t.Errorf("event %s has project %q, want fs", e.Target, e.Detail["project"])
+		}
 	}
 }

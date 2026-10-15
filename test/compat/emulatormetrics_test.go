@@ -199,7 +199,9 @@ func TestAPodsFirestoreCallsReachMetricsAndTheRequestLog(t *testing.T) {
 		t.Skipf("%s is not set", envKubeconfig)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
+	// A cleanup, not a defer: runPod deletes its pod with ctx in a cleanup
+	// of its own, which runs first.
+	t.Cleanup(cancel)
 	loadEnvProbe(ctx, t)
 	since := time.Now().Add(-time.Second)
 	project := fmt.Sprintf("podfs-%d", time.Now().UnixNano()%1e9)
