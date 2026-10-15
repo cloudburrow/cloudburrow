@@ -417,6 +417,19 @@ var parityRows = []parityRow{
 			"PredictionService and batch prediction named as not served (#869)",
 		Tests: []string{"TestConsoleOnlinePredictionThroughTheConsoleAPI", "TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser",
 			"TestPredictRelaysThroughTheIngressAndShowsTheAnswerVerbatim", "TestPredictRefusesWhatItCannotSend"}},
+	// PredictionService over gRPC (#1193) is a protocol for the requests
+	// these screens already send, through the same handlers.
+	{Resource: "Vertex AI PredictionService: Predict and RawPredict", Service: "vertexai",
+		Methods: []string{"PredictionService/Predict", "PredictionService/RawPredict"},
+		Screen:  "/ai/predict", Offers: "Online prediction sends a deployed container the request Predict relays " +
+			"(instances and parameters, the container's answer verbatim); Embeddings sends the text-embedding :predict " +
+			"a Predict on the publisher model runs",
+		Tests: []string{"TestConsoleOnlinePredictionThroughTheConsoleAPI", "TestPredictionClientReachesACustomEndpoint",
+			"TestGRPCPredictEmbedsLikeTheJSONRoute"}},
+	{Resource: "Vertex AI PredictionService: GenerateContent", Service: "vertexai",
+		Methods: []string{"PredictionService/GenerateContent"},
+		Screen:  "/ai/playground", Offers: "Playground: the generateContent subset GenerateContent serves, through the same API path",
+		Tests: []string{"TestPlaygroundGeneratesThroughTheRealAPIPath", "TestGRPCGenerateContentMatchesTheJSONRoute"}},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

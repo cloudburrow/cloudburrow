@@ -217,7 +217,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 // local AI is running. An empty one is not an error state: the screen is
 // simply not offered, and the rest of the console is unaffected.
 func playgroundFor(d consoleDeps) *console.Playground {
-	if d.localAI == nil {
+	// An endpoint started only for custom prediction (#1193) has no model to
+	// try, so it offers no playground.
+	if d.localAI == nil || (d.localAI.Model() == "" && !d.cfg.LocalAI.Embeddings) {
 		return nil
 	}
 	p := &console.Playground{
