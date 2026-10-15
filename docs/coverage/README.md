@@ -22,7 +22,7 @@ Do not edit these files by hand.
 | [Datastore](datastore.md) | 8 | 7 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Bigtable](bigtable.md) | 50 | 16 | 34 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 33 | 32 | 0 | 0 | 0 | 0 | 0 |
-| [BigQuery (REST API v2)](bigquery.md) | 47 | 31 | 16 | 0 | 0 | 0 | 0 | 0 |
+| [BigQuery (REST API v2)](bigquery.md) | 47 | 37 | 10 | 0 | 0 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven
