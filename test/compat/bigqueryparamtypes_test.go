@@ -164,3 +164,34 @@ func schemaTypes(s bigquery.Schema) []bigquery.FieldType {
 	}
 	return out
 }
+
+// TestBigQueryRangeParameters (#1111), through the official Go client: a
+// RANGE query parameter, at the top level, in an ARRAY or in a STRUCT, is
+// 501 before anything runs. Measured first through the front on the
+// pinned image: SELECT @r of a top-level RANGE<DATE> read back a NULL
+// INTEGER, and a query's RANGE value (SELECT RANGE(DATE ..., DATE ...))
+// came back with a schema field of no type, at the top level and in a
+// STRUCT.
+func TestBigQueryRangeParameters(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ctx := h.Context()
+	r := &bigquery.RangeValue{Start: civil.Date{Year: 2020, Month: 1, Day: 1}, End: civil.Date{Year: 2020, Month: 2, Day: 1}}
+	rangeType := &bigquery.StandardSQLDataType{TypeKind: "RANGE", RangeElementType: &bigquery.StandardSQLDataType{TypeKind: "DATE"}}
+	for name, p := range map[string]bigquery.QueryParameter{
+		"a top-level RANGE": {Name: "p", Value: &bigquery.QueryParameterValue{
+			Type:  bigquery.StandardSQLDataType{TypeKind: "RANGE", RangeElementType: &bigquery.StandardSQLDataType{TypeKind: "DATE"}},
+			Value: r,
+		}},
+		"a RANGE in a STRUCT": {Name: "p", Value: &bigquery.QueryParameterValue{
+			Type: bigquery.StandardSQLDataType{TypeKind: "STRUCT", StructType: &bigquery.StandardSQLStructType{
+				Fields: []*bigquery.StandardSQLField{{Name: "r", Type: rangeType}}}},
+			StructValue: map[string]bigquery.QueryParameterValue{"r": {Type: *rangeType, Value: r}},
+		}},
+	} {
+		q := c.Query("SELECT @p")
+		q.Parameters = []bigquery.QueryParameter{p}
+		_, err := q.Read(ctx)
+		wantReason(t, name, err, 501, "notImplemented")
+	}
+}

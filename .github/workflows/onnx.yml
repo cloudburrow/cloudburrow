@@ -1,0 +1,40 @@
+name: ONNX build
+
+# Builds the CLI with -tags onnx (#41): the local embeddings path, the
+# community ONNX EmbeddingGemma conversion (docs/embeddings.md), which the
+# default build leaves out and no other job compiles. `make onnx-compile`
+# fetches the pinned libtokenizers.a (checked by SHA-256, Makefile) and
+# builds and vets the onnx-tagged CLI; no model is downloaded and ONNX
+# Runtime is not needed to build. On a push to main, nightly and by hand,
+# never on pull requests: report-red-runs.yml reports a red run.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # No job may reach Google Cloud.
+  GOOGLE_APPLICATION_CREDENTIALS: ""
+
+concurrency:
+  group: onnx-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  onnx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+      - name: Build and vet the onnx-tagged CLI
+        run: make onnx-compile
+      - name: The binary runs
+        run: ./bin/cloudburrow-onnx version

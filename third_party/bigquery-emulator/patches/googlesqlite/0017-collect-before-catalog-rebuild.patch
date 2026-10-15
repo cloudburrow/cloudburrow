@@ -1,0 +1,51 @@
+CloudBurrow patch 17 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1057, #1103).
+
+The bug: each DROP of a table, view or function rebuilds the root catalog
+with every builtin function (resetCatalog), and the catalog it replaces is
+freed in the engine's WebAssembly memory only by its finalizer, after a Go
+collection. The emulator's Go heap is mostly that WebAssembly memory, one
+large []byte, so a collection waits for the heap to double past it; the
+retired catalogs piled up between collections and the memory grew at
+every DROP. Measured natively on an Apple silicon Mac, with patches 0001
+to 0016: 120 CREATE TABLE + DROP TABLE pairs in one dataset took the
+emulator from 237 to 603 MiB RSS (6 collections in all).
+
+The patch collects (runtime.GC) at the start of each rebuild, so the
+finalizers of the catalogs earlier rebuilds retired free them and their
+memory is reused. The same 120 pairs: 169 to 171 MiB, flat from the 20th;
+a pair took 33-40 ms after the first 20 (66 ms each over those), against
+30-34 ms before.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -5,6 +5,7 @@
+ 	"database/sql"
+ 	"encoding/binary"
+ 	"fmt"
++	"runtime"
+ 	"strings"
+ 	"sync"
+ 	"time"
+@@ -2086,6 +2087,15 @@
+ }
+ 
+ func (c *Catalog) resetCatalog(tables []*TableSpec, functions []*FunctionSpec, tvfs []*TVFSpec) error {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1057): the catalogs an
++	// earlier rebuild retired, each with every builtin function, are freed
++	// in the engine's WebAssembly memory only by their finalizers, which
++	// run after a Go collection, and the emulator's heap is mostly that
++	// memory, so a collection waits for it to double: under DDL the
++	// retired catalogs piled up and the memory grew at each DROP. Collect
++	// first, so their finalizers free them, and that memory is reused for
++	// the new catalog.
++	runtime.GC()
+ 	c.catalog = newSimpleCatalog(catalogName)
+ 	if c.catalog == nil {
+ 		return fmt.Errorf("failed to create catalog")

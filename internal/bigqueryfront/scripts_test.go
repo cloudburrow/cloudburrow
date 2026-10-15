@@ -492,6 +492,7 @@ func TestExtractJobs(t *testing.T) {
 		tablesBase + "v":      `{"type":"VIEW","schema":{"fields":[{"name":"a","type":"INTEGER"}]}}`,
 		tablesBase + "nested": `{"type":"TABLE","numRows":"1","schema":{"fields":[{"name":"a","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"b","type":"INTEGER"}]}]}}`,
 		tablesBase + "ts":     `{"type":"TABLE","numRows":"1","schema":{"fields":[{"name":"at","type":"TIMESTAMP"}]}}`,
+		tablesBase + "tm":     `{"type":"TABLE","numRows":"1","schema":{"fields":[{"name":"at","type":"TIME"}]}}`,
 	}
 	job := func(extract string) string {
 		return `{"jobReference":{"jobId":"x1"},"configuration":{"extract":{"sourceTable":{"projectId":"p","datasetId":"ds","tableId":` + extract + `}}}`
@@ -511,10 +512,13 @@ func TestExtractJobs(t *testing.T) {
 		{"destinationUri", `"t"},"destinationUri":"gs://b/out.csv"`, 200, "out.csv", nil},
 		{"printHeader true", `"t"},"destinationUris":["gs://b/out.csv"],"printHeader":true`, 200, "out.csv", nil},
 		{"no header, empty", `"empty"},"destinationUris":["gs://b/out.csv"],"printHeader":false`, 200, "out.csv", nil},
-		{"AVRO of a DATE", `"t"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO"`, 501, "", nil},
+		{"AVRO of a DATE", `"t"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO"`, 200, "out.avro", nil},
+		{"AVRO of a TIME", `"tm"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO"`, 501, "", nil},
 		{"AVRO with GZIP", `"empty"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO","compression":"GZIP"`, 501, "", nil},
 		{"AVRO", `"empty"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO","compression":"SNAPPY"`, 200, "out.avro", nil},
-		{"PARQUET", `"t"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET"`, 501, "", nil},
+		{"PARQUET", `"t"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET"`, 200, "out", nil},
+		{"PARQUET with LZ4", `"t"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET","compression":"LZ4"`, 501, "", nil},
+		{"PARQUET of a RECORD", `"nested"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET"`, 200, "out", nil},
 		{"JSON of a DATE", `"t"},"destinationUris":["gs://b/out.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`, 501, "", nil},
 		{"DEFLATE", `"t"},"destinationUris":["gs://b/out.csv"],"compression":"DEFLATE"`, 501, "", nil},
 		{"a delimiter of two", `"t"},"destinationUris":["gs://b/out.csv"],"fieldDelimiter":"||"`, 501, "", nil},

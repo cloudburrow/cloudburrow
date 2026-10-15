@@ -55,10 +55,27 @@ Original frontend code. No assumption is made that Google publishes the console 
 because it does not.
 
 Where a published, permissively licensed Google asset exists it may be used and must be
-recorded here with its licence.
+recorded here and in the licence table of `internal/console/assets/icons/PROVENANCE.md`,
+with its licence.
 
-**As built, no Google asset is shipped.** The icons are original SVGs authored for
-CloudBurrow, and **no web font is loaded at all** — a font fetched at runtime would break the
+**As built, no Google asset is shipped.** Every icon the console draws — each product in the
+navigation, the dashboard and the product catalogue, and each category heading — is a
+CloudBurrow line drawing authored in `console.js` (`ICONS` and `CATEGORY_ICONS`) and rendered
+as inline SVG. Google's published product and category icons were vendored for a while and
+were removed on 2026-09-27 (#684), because no terms for redistributing them were ever found;
+`internal/console/assets/icons/PROVENANCE.md` records what was removed and why.
+`TestProductIconsAreVendoredAndSelfContained` fails if any file but PROVENANCE.md returns to that
+directory or a screen points at one, and `TestCategoryIconsExistForEveryCategory` and
+`TestConsoleKeepsItsOwnFallbackMarks` hold every navigation entry and category to a drawing of
+its own. The category *names* are Google's product taxonomy; a name describes the product being
+emulated and is not artwork.
+
+The record of third-party assets is the licence table in that PROVENANCE.md. It is empty.
+`TestEveryEmbeddedAssetIsOwnOrLicensed` fails when any file embedded from
+`internal/console/assets` is neither on its list of CloudBurrow's own files nor in that table
+with a source, a licence and the date the licence was checked.
+
+**No web font is loaded at all** — a font fetched at runtime would break the
 offline requirement, and one vendored into the repository would add a binary asset and a
 licence obligation for decoration. System font stacks are used instead.
 
@@ -85,7 +102,8 @@ gets the family resemblance honestly; it does not make the result a replica.
 CloudBurrow branding, not Google's. Specifically:
 
 - The product name in the toolbar is **CloudBurrow**, never "Google Cloud".
-- No Google logo, wordmark or product logo is used anywhere.
+- No Google logo, wordmark, product icon or category icon is used anywhere. Product and
+  category marks are CloudBurrow's own line drawings (§1).
 - A **persistent `LOCAL` indicator** is visible in the toolbar on every screen, at every
   viewport size, and is never dismissible. `TestViewportsDrawerBadgeAndTableScroll` reads it from the rendered pixels at each width in §5.
 
@@ -164,7 +182,7 @@ none of them state pixel metrics.
 ### 4.2 Resource list screens
 
 - [x] Page title matching the documented console page name: **Buckets**, **Topics**, **Subscriptions**, **Queues**, **Services**, **Secrets**, **Workloads**.
-- [x] A primary **create** action labelled as the documentation labels it — **Create**, **Create topic**, **Create queue**, **Deploy container** — from `Creator.CreateForm`, so the label comes from the provider that will perform it. The `add_box` icon is **not** used: the icon set here is the published product icon set plus line fallbacks, and CloudBurrow does not ship Material Symbols.
+- [x] A primary **create** action labelled as the documentation labels it — **Create**, **Create topic**, **Create queue**, **Deploy container** — from `Creator.CreateForm`, so the label comes from the provider that will perform it. The `add_box` icon is **not** used: the icons here are CloudBurrow's own line drawings (§1), and CloudBurrow does not ship Material Symbols.
 - [x] A table with a header row, sortable by any column, with a filter input above it.
 - [x] Pagination, with the page size selectable — and, where a provider can continue a read, a control that fetches the rows past the backend's own bound rather than a note saying they exist.
 - [x] Row selection, and a delete action that is disabled until something is selected.
@@ -551,8 +569,10 @@ but not yet exercised from the console. Which opt-in services have a screen at a
 | BigQuery tables and rows | `bigquery.tables.insert`, `bigquery.tables.get`, `bigquery.tables.list`, `bigquery.tables.patch`, `bigquery.tables.delete`, `bigquery.tabledata.insertAll`, `bigquery.tabledata.list` | `bigquery` screen: Tables on a dataset's page; a table's page with its schema, details and Preview (tabledata.list); Create table with the schema editor, RECORD fields to 15 levels and flexible field names included, or a view with its query; Insert rows (tabledata.insertAll) with Skip invalid rows and Ignore unknown values; Edit table's description and labels (tables.patch: a label set, changed or removed, the description changed or cleared, #1025; adding fields waits on #1013); Delete table (#698, #854, #874, #994) | `TestConsoleBigQueryDatasetsSchemaAndQuery`, `TestConsoleBigQueryDatasetTableAndRowWrites`, `TestConsoleBigQueryEditTableViewsAndInsertOptions`, `TestBigQueryCreateViewAndEditTable`, `TestBigQueryInsertRowsOptions`, `TestBigQueryFieldNamesAreFlexible`, `TestBigQueryCreateTableInsertRowsAndDeleteThroughTheForms`, `TestBigQueryRecordColumnsThroughTheSchemaEditor`, `TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms` |
 | BigQuery table update (tables.update) | `bigquery.tables.update` | `bigquery` screen: Edit table on a table's page, which sends tables.patch, not tables.update: the front carries out both on one path (#1054), so the description and labels Edit table changes are what a tables.update of them changes; adding fields in Edit table is #1013 (#1048) | `TestConsoleBigQueryEditTableViewsAndInsertOptions`, `TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms` |
 | BigQuery queries | `bigquery.jobs.query` | `bigquery` screen: The query editor on every dataset and table page, run with jobs.query: read-only by default, one SELECT or WITH … SELECT, at most 200 rows (#698); an opt-in, confirmed Read-write mode for DDL and scripts with DECLARE (#994), and a DML statement of its own (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE) answered with the rows it changed (#1024); DML inside a script (#1028) and UPDATE … FROM (#1027) refused with the reason | `TestConsoleBigQueryDatasetsSchemaAndQuery`, `TestTheBigQueryEditorRunsOnlyOneSelect`, `TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts`, `TestConsoleBigQueryReadWriteEditorRunsDML`, `TestTheBigQueryReadWriteEditorScreensStatements`, `TestBigQueryDMLAnswerSaysWhatChanged`, `TestBigQueryWriteReportSendsJobsQuery`, `TestBigQueryReadWriteEditorThroughTheForms` |
-| BigQuery load and export jobs | `bigquery.jobs.insert` | `bigquery` screen: Load from Cloud Storage on a dataset's and a table's page (gs:// URIs; CSV, JSON or Parquet; write preference; schema or auto-detect; the CSV options the front serves) and Export to Cloud Storage on a table's page (one URI; CSV, JSON or Avro; GZIP, DEFLATE or SNAPPY; delimiter; header), each answered with its job, linked to Job history, and refused in the API's words (#993); Copy table on a table's page (a copy job to a destination dataset and table, with a write preference, answered with its job, #782); Load from a file on the same pages, the same options with a file chosen in the browser, streamed to the front as a multipart or resumable upload under the console's upload limit (#999) | `TestConsoleBigQueryLoadExportAndJobHistory`, `TestBigQueryLoadFormBecomesTheLoadsSource`, `TestBigQueryCopyTableFormRunsACopyJob`, `TestBigQueryLoadExportAndJobHistoryThroughTheForms`, `TestConsoleBigQueryLoadFromAFile`, `TestBigQueryLoadFromAFileSendsTheFileAsTheLoadsData`, `TestActionUploadStreamsTheFileToAnOfferedAction`, `TestBigQueryLoadFromAFileThroughTheForm` |
+| BigQuery load and export jobs | `bigquery.jobs.insert` | `bigquery` screen: Load from Cloud Storage on a dataset's and a table's page (gs:// URIs; CSV, JSON or Parquet; write preference; schema or auto-detect; the CSV options the front serves) and Export to Cloud Storage on a table's page (one URI; CSV, JSON or Avro; GZIP, DEFLATE or SNAPPY; delimiter; header), each answered with its job, linked to Job history, and refused in the API's words (#993); Copy table on a table's page (a copy job to a destination dataset and table, with a write preference, and More source tables for a multi-source copy, answered with its job, #782); Load from a file on the same pages, the same options with a file chosen in the browser, streamed to the front as a multipart or resumable upload under the console's upload limit (#999) | `TestConsoleBigQueryLoadExportAndJobHistory`, `TestBigQueryLoadFormBecomesTheLoadsSource`, `TestBigQueryCopyTableFormRunsACopyJob`, `TestBigQueryCopyTableSendsEveryMoreSource`, `TestConsoleBigQueryCopyTablesAndAvroExport`, `TestBigQueryCopyTableAndAvroExportThroughTheForms`, `TestBigQueryLoadExportAndJobHistoryThroughTheForms`, `TestConsoleBigQueryLoadFromAFile`, `TestBigQueryLoadFromAFileSendsTheFileAsTheLoadsData`, `TestActionUploadStreamsTheFileToAnOfferedAction`, `TestBigQueryLoadFromAFileThroughTheForm` |
 | BigQuery job history | `bigquery.jobs.get`, `bigquery.jobs.list`, `bigquery.jobs.cancel`, `bigquery.jobs.delete` | `bigquery-jobs` screen: Job history page (/bigquery-jobs): the project's jobs from jobs.list, newest first, with type, state, creation time and error; a job's page (jobs.get) with its state, times, errorResult, configuration, load statistics (output rows, bad records, input files and bytes, each only when reported) and status.errors; a query job's statement type and DML rows (affected, inserted, updated, deleted, each only when reported, #1041); Delete job on the page and the row; Cancel job only on a job that is not DONE (#993) | `TestConsoleBigQueryLoadExportAndJobHistory`, `TestBigQueryJobPageShowsWhatTheJobReported`, `TestBigQueryJobActionsFollowTheJobsState`, `TestBigQueryLoadExportAndJobHistoryThroughTheForms`, `TestConsoleBigQueryJobPageShowsDMLRows`, `TestBigQueryJobPageShowsAQueryJobsDMLRows` |
+| BigQuery routines (functions and table functions) | `bigquery.routines.insert` | **Gap:** [#1177](https://github.com/cloudburrow/cloudburrow/issues/1177) |  |
+| BigQuery Storage Read and Write APIs |  | **Excluded:** a client's read and write transport (Arrow and Avro read sessions, managedwriter default, COMMITTED, PENDING and BUFFERED streams, Verified in docs/compatibility.md); a table's Preview reads its rows and Insert rows and the load forms write them, the console's equivalents |  |
 
 | Feature | Commands and admin routes | Console | Tests |
 |---|---|---|---|

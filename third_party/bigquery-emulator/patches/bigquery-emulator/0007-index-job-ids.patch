@@ -1,0 +1,123 @@
+CloudBurrow patch 7 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1103); needs patch 0002.
+
+The bug: each new job, jobs.query's and jobs.insert's, first checked that
+its ID was not in the jobs table (Project.AddJob, Repository.jobExists),
+and googlesqlite compiles each WHERE comparison into a function call that
+SQLite cannot answer from the table's primary key, so the check visited
+every job the emulator kept, one Go call per row. Each query was slower
+than the last: measured natively on an Apple silicon Mac, with every other
+patch applied, 500 jobs.query calls of SELECT x, s, i FROM a 3-row table
+took 3.6 s for the first 500 jobs and 5.7 s for jobs 2,500-3,000; jobExists
+was 26% of the CPU profile.
+
+The patch keeps which jobs the table holds in memory (Repository.jobKeys),
+read once when the repository opens and kept by AddJob and DeleteJob, and
+jobExists reads the table only to confirm a job jobKeys holds. The same
+500 queries take 3.0-3.5 s at every point up to 3,000 jobs.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/metadata/repository.go
++++ b/internal/metadata/repository.go
+@@ -90,8 +90,18 @@
+ 	// jobSeq is the last cloudburrow_job_order sequence number used.
+ 	jobSeqMu sync.Mutex
+ 	jobSeq   int64
++	// jobKeys are the jobs the jobs table holds, so that jobExists need
++	// not scan it: googlesqlite compiles each WHERE comparison to a
++	// function call, which SQLite cannot answer from the primary key, so
++	// every keyed read of the jobs table visits every row, and AddJob's
++	// check made each job slower than the last. CloudBurrow patch
++	// (cloudburrow/cloudburrow#1103).
++	jobKeysMu sync.Mutex
++	jobKeys   map[jobKey]struct{}
+ }
+ 
++type jobKey struct{ projectID, jobID string }
++
+ func NewRepository(db *sql.DB) (*Repository, error) {
+ 	tx, err := db.Begin()
+ 	if err != nil {
+@@ -104,8 +114,13 @@
+ 		}
+ 	}
+ 	r := &Repository{
+-		db: db,
++		db:      db,
++		jobKeys: map[jobKey]struct{}{},
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1103).
++	if err := r.loadJobKeys(context.Background(), tx); err != nil {
++		return nil, err
++	}
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1086).
+ 	if err := r.migrateJobOrder(context.Background(), tx); err != nil {
+ 		return nil, err
+@@ -424,6 +439,7 @@
+ 	); err != nil {
+ 		return err
+ 	}
++	r.setJobKey(job.ProjectID, job.ID, true)
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1086).
+ 	if err := r.addJobOrder(ctx, tx, job.ProjectID, job.ID); err != nil {
+ 		return err
+@@ -474,6 +490,7 @@
+ 	); err != nil {
+ 		return err
+ 	}
++	r.setJobKey(job.ProjectID, job.ID, false)
+ 	r.forgetResult(job.ProjectID, job.ID)
+ 	return nil
+ }
+@@ -547,8 +564,45 @@
+ 	return err
+ }
+ 
+-// jobExists reports whether the jobs table has the job.
++// loadJobKeys reads which jobs the jobs table holds, once, into jobKeys.
++// CloudBurrow patch (cloudburrow/cloudburrow#1103).
++func (r *Repository) loadJobKeys(ctx context.Context, tx *sql.Tx) error {
++	rows, err := tx.QueryContext(ctx, "SELECT projectID, id FROM jobs")
++	if err != nil {
++		return fmt.Errorf("failed to read the jobs: %w", err)
++	}
++	defer rows.Close()
++	for rows.Next() {
++		var k jobKey
++		if err := rows.Scan(&k.projectID, &k.jobID); err != nil {
++			return err
++		}
++		r.jobKeys[k] = struct{}{}
++	}
++	return rows.Err()
++}
++
++func (r *Repository) setJobKey(projectID, jobID string, present bool) {
++	r.jobKeysMu.Lock()
++	defer r.jobKeysMu.Unlock()
++	if present {
++		r.jobKeys[jobKey{projectID, jobID}] = struct{}{}
++	} else {
++		delete(r.jobKeys, jobKey{projectID, jobID})
++	}
++}
++
++// jobExists reports whether the jobs table has the job. CloudBurrow patch
++// (cloudburrow/cloudburrow#1103): a job jobKeys does not hold was never
++// added, or was deleted, so the table is not read for it, and it is read
++// only to confirm one jobKeys holds, whose INSERT may have been rolled back.
+ func (r *Repository) jobExists(ctx context.Context, tx *sql.Tx, projectID, jobID string) (bool, error) {
++	r.jobKeysMu.Lock()
++	_, known := r.jobKeys[jobKey{projectID, jobID}]
++	r.jobKeysMu.Unlock()
++	if !known {
++		return false, nil
++	}
+ 	rows, err := tx.QueryContext(ctx, "SELECT id FROM jobs WHERE projectID = @projectID AND id = @id",
+ 		sql.Named("projectID", projectID), sql.Named("id", jobID))
+ 	if err != nil {

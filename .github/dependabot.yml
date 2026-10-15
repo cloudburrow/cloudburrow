@@ -18,6 +18,12 @@ updates:
           - "cloud.google.com/go*"
           - "google.golang.org/*"
           - "github.com/googleapis/*"
+    # grpc v1.84.0 has GO-2026-6443, reachable through Secret Manager's
+    # grpc.Server.ServeHTTP (#264). Without this the google-sdks group
+    # proposes it every week; a later release that fixes it is not ignored.
+    ignore:
+      - dependency-name: "google.golang.org/grpc"
+        versions: ["1.84.0"]
 
   - package-ecosystem: github-actions
     directory: /

@@ -7,8 +7,8 @@ name: Report red runs
 # builds the CLI from source (it was red on main unseen once, #623), the two
 # nightly differential oracles, the nightly dependency discovery, and the
 # CLI integration (push to main) and Offline (nightly) workflows of #685, the
-# linux/arm64 nightly (#689), and Functions build (#678), which runs only by
-# hand.
+# linux/arm64 nightly (#689), Functions build (#678), which runs only by
+# hand, and ONNX build (#41, push to main and nightly).
 #
 # This workflow watches them by their `name:` and, for a run on main (a push,
 # or a run dispatched by hand on main, the only way Functions build runs) or
@@ -36,6 +36,7 @@ on:
       - Offline
       - linux/arm64 nightly
       - Functions build
+      - ONNX build
     types: [completed]
 
 permissions: {}

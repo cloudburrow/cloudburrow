@@ -345,3 +345,55 @@ func TestBigQueryCopyTableFormRunsACopyJob(t *testing.T) {
 		t.Error("a copy of a table onto itself was sent")
 	}
 }
+
+// TestBigQueryCopyTableSendsEveryMoreSource (#782): Copy table's More source
+// tables are sent as one copy job's sourceTables, this table first; a
+// source named twice, one that is this table or the destination, or one
+// that is not dataset.table is refused before anything is sent.
+func TestBigQueryCopyTableSendsEveryMoreSource(t *testing.T) {
+	var sent []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/jobs") {
+			b, _ := io.ReadAll(r.Body)
+			sent = append(sent, string(b))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jobReference":{"projectId":"p","jobId":"c1","location":"US"},"status":{"state":"DONE"}}`)
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	ctx := context.Background()
+	if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, actCopyTable, map[string]string{
+		"datasetId": "d2", "tableId": "all", "moreSources": "d.u\n\n  e.v  \n"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("%d jobs sent, want one", len(sent))
+	}
+	var job struct {
+		Configuration struct {
+			Copy struct {
+				SourceTables []struct{ DatasetID, TableID string } `json:"sourceTables"`
+			} `json:"copy"`
+		} `json:"configuration"`
+	}
+	if err := json.Unmarshal([]byte(sent[0]), &job); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, s := range job.Configuration.Copy.SourceTables {
+		got = append(got, s.DatasetID+"."+s.TableID)
+	}
+	if strings.Join(got, " ") != "d.t d.u e.v" {
+		t.Errorf("the copy job's sourceTables = %v, want d.t d.u e.v: %s", got, sent[0])
+	}
+	for _, more := range []string{"d.u\nd.u", "d.t", "d2.all", "nodot", "a.b.c", ".x"} {
+		if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, actCopyTable, map[string]string{
+			"datasetId": "d2", "tableId": "all", "moreSources": more}); err == nil {
+			t.Errorf("More source tables %q was sent", more)
+		}
+	}
+	if len(sent) != 1 {
+		t.Errorf("a refused copy was sent: %v", sent[1:])
+	}
+}

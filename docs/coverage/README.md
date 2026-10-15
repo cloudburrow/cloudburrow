@@ -8,7 +8,7 @@ Do not edit these files by hand.
 
 | Service | RPCs | Verified | Refused | Unimplemented | Implemented | Not served | Unknown | Unverified codes |
 |---|---|---|---|---|---|---|---|---|
-| [Cloud Tasks](tasks.md) | 16 | 15 | 0 | 1 | 0 | 0 | 0 | 0 |
+| [Cloud Tasks](tasks.md) | 20 | 15 | 0 | 5 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 1 |
 | [Cloud Run v2](run.md) | 41 | 18 | 0 | 6 | 0 | 17 | 0 | 0 |
 | [Cloud KMS](kms.md) | 38 | 19 | 0 | 19 | 0 | 0 | 0 | 72 |
@@ -21,7 +21,7 @@ Do not edit these files by hand.
 | [Datastore](datastore.md) | 8 | 4 | 0 | 0 | 0 | 0 | 4 | 0 |
 | [Bigtable](bigtable.md) | 50 | 6 | 0 | 0 | 0 | 0 | 44 | 0 |
 | [Spanner](spanner.md) | 65 | 10 | 0 | 0 | 0 | 0 | 55 | 0 |
-| [BigQuery (REST API v2)](bigquery.md) | 47 | 18 | 0 | 0 | 0 | 0 | 29 | 0 |
+| [BigQuery (REST API v2)](bigquery.md) | 47 | 19 | 0 | 0 | 0 | 0 | 28 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven

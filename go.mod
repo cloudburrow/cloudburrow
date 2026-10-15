@@ -4,30 +4,30 @@ go 1.26.0
 
 require (
 	cloud.google.com/go v0.123.0
-	cloud.google.com/go/auth v0.23.3
+	cloud.google.com/go/auth v0.24.1
 	cloud.google.com/go/bigquery v1.85.0
-	cloud.google.com/go/bigtable v1.57.0
-	cloud.google.com/go/cloudtasks v1.19.0
-	cloud.google.com/go/datastore v1.26.0
-	cloud.google.com/go/firestore v1.25.0
-	cloud.google.com/go/iam v1.13.0
+	cloud.google.com/go/bigtable v1.58.0
+	cloud.google.com/go/cloudtasks v1.20.0
+	cloud.google.com/go/datastore v1.27.0
+	cloud.google.com/go/firestore v1.26.0
+	cloud.google.com/go/iam v1.14.0
 	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/logging v1.20.0
-	cloud.google.com/go/longrunning v1.2.0
+	cloud.google.com/go/longrunning v1.3.0
 	cloud.google.com/go/pubsub/v2 v2.7.0
 	cloud.google.com/go/resourcemanager v1.17.0
-	cloud.google.com/go/run v1.22.0
+	cloud.google.com/go/run v1.23.0
 	cloud.google.com/go/scheduler v1.17.0
-	cloud.google.com/go/secretmanager v1.21.0
-	cloud.google.com/go/spanner v1.95.1
-	cloud.google.com/go/storage v1.68.0
+	cloud.google.com/go/secretmanager v1.22.0
+	cloud.google.com/go/spanner v1.96.1
+	cloud.google.com/go/storage v1.69.0
 	github.com/apache/arrow/go/v15 v15.0.2
 	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
 	github.com/chromedp/chromedp v0.16.0
 	github.com/creack/pty v1.1.24
 	github.com/daulet/tokenizers v1.27.0
 	github.com/go-sql-driver/mysql v1.10.1
-	github.com/googleapis/gax-go/v2 v2.24.0
+	github.com/googleapis/gax-go/v2 v2.26.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/linkedin/goavro/v2 v2.15.0
 	github.com/prometheus/client_model v0.6.3
@@ -49,10 +49,10 @@ require (
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sys v0.49.0
 	google.golang.org/api v0.298.0
-	google.golang.org/genai v1.71.0
+	google.golang.org/genai v1.73.0
 	google.golang.org/genproto v0.0.0-20260715232425-e75dac1f907d
-	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260921155816-b14227669459
+	google.golang.org/genproto/googleapis/api v0.0.0-20260928230214-8a89bd6388cc
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 )
@@ -64,7 +64,7 @@ require (
 	cloud.google.com/go/monitoring v1.30.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp v1.6.0 // indirect
-	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.33.0 // indirect
+	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.35.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.57.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.57.0 // indirect
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
@@ -108,7 +108,7 @@ require (
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/contrib/detectors/gcp v1.44.0 // indirect
+	go.opentelemetry.io/contrib/detectors/gcp v1.45.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.46.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
