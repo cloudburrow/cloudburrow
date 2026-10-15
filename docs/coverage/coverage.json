@@ -1897,7 +1897,9 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/RawPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/predictiongrpc_test.go:59 TestPredictionClientReachesACustomEndpoint"
+          "test/compat/predictiongrpc_test.go:59 TestPredictionClientReachesACustomEndpoint",
+          "test/compat/rawpredict_test.go:26 TestRawPredictOnTheEmbeddingModel",
+          "test/compat/rawpredict_test.go:70 TestRawPredictOnTheGenerationModel"
         ]
       },
       {

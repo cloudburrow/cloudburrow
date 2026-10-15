@@ -200,11 +200,13 @@ func TestGRPCRawPredictPassesTheBodyThrough(t *testing.T) {
 	if !strings.Contains(string(resp.GetData()), `"predictions":[10]`) || !strings.HasPrefix(resp.GetContentType(), "application/json") {
 		t.Errorf("RawPredict = %s %s", resp.GetContentType(), resp.GetData())
 	}
+	// Without an embedding runtime, a publisher model gets the 501 :predict gives.
 	_, err = c.RawPredict(context.Background(), &aiplatformpb.RawPredictRequest{
 		Endpoint: "projects/p/locations/l/publishers/google/models/" + localai.EmbeddingGemmaONNXID,
+		HttpBody: &httpbody.HttpBody{ContentType: "application/json", Data: []byte(`{"instances":[{"content":"x"}]}`)},
 	})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("RawPredict on a publisher model: %v, want UNIMPLEMENTED", err)
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "embeddings are unavailable") {
+		t.Errorf("RawPredict on a publisher model without embeddings: %v, want the :predict 501", err)
 	}
 }
 

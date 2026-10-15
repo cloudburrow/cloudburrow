@@ -7933,13 +7933,14 @@ function stopPrediction() {
   if (PREDICT_ABORT) { PREDICT_ABORT.abort(); PREDICT_ABORT = null; }
 }
 
-// Embeddings (#41) sends text-embedding :predict, or EmbedContent's
-// :embedContent (#1244), for the one embedding model served, a community ONNX
+// Embeddings (#41) sends text-embedding :predict, EmbedContent's
+// :embedContent (#1244), or :rawPredict with the :predict body (#1284), for
+// the one embedding model served, a community ONNX
 // conversion of EmbeddingGemma. The provenance banner is on the screen that
 // shows the vectors, not only in the documentation.
 async function renderEmbeddings(view) {
   const title = "Embeddings";
-  const subtitle = "Text-embedding :predict and :embedContent against the local endpoint";
+  const subtitle = "Text-embedding :predict, :embedContent and :rawPredict against the local endpoint";
   setChildren(view, pageHeader(title, subtitle), loadingState(3));
   let status;
   try {
@@ -7970,7 +7971,8 @@ async function renderEmbeddings(view) {
   const methods = status.methods || ["predict"];
   const method = el("select", { id: "emb-method", "aria-label": "API method" },
     ...methods.map((m) => el("option", { value: m,
-      text: m === "embedContent" ? "EmbedContent (:embedContent, one request per text)" : "Predict (:predict, one batch)" })));
+      text: m === "embedContent" ? "EmbedContent (:embedContent, one request per text)"
+        : m === "rawPredict" ? "RawPredict (:rawPredict, the :predict body unwrapped)" : "Predict (:predict, one batch)" })));
   method.addEventListener("change", () => {
     const ep = document.getElementById("emb-endpoint");
     if (ep && status.endpoints) ep.textContent = status.endpoints[method.value] || status.endpoint;
@@ -8008,7 +8010,8 @@ async function renderEmbeddings(view) {
         }
         displayName = "EmbedContent: " + status.model + " — " + status.note;
       } else {
-        const data = await post("predict", {
+        // RawPredict sends the same body unwrapped, and gets the same answer.
+        const data = await post(method.value === "rawPredict" ? "rawPredict" : "predict", {
           instances: lines.map((content) => ({ content, task_type: task.value })),
           parameters: { outputDimensionality: Number(dim.value) },
         });

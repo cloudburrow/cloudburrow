@@ -103,9 +103,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.HasPrefix(r.URL.Path, "/v1/") && verb != "predict" && verb != "embedContent" {
+	if strings.HasPrefix(r.URL.Path, "/v1/") && verb != "predict" && verb != "embedContent" && verb != "rawPredict" {
 		apierror.WriteJSON(w, apierror.Unimplemented(
-			"only :predict and :embedContent are served under /v1; generation is served under /%s", APIVersion))
+			"only :predict, :embedContent and :rawPredict are served under /v1; generation is served under /%s", APIVersion))
 		return
 	}
 
@@ -126,6 +126,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.embedContentREST(w, r, model)
+	case "rawPredict":
+		if r.PathValue("project") == "" {
+			apierror.WriteJSON(w, apierror.Unimplemented(":rawPredict is served only on the Vertex path"))
+			return
+		}
+		s.rawPredictREST(w, r, model)
 	case "countTokens":
 		// Refused rather than estimated. See the package doc.
 		apierror.WriteJSON(w, apierror.Unimplemented(

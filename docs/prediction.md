@@ -186,8 +186,9 @@ resp, err := c.Predict(ctx, &aiplatformpb.PredictRequest{
 ```
 
 `Predict` checks the contract's one-prediction-per-instance rule and returns the container's
-own refusals in its words; `RawPredict` relays the body unchanged. Every other method is
-`UNIMPLEMENTED`.
+own refusals in its words; `RawPredict` relays the body unchanged. On a publisher model,
+`RawPredict` takes the local model's native body instead (#1284; see
+[compatibility.md](compatibility.md#vertex-ai-predictionservice--googlecloudaiplatformv1)).
 
 | Vertex surface | Status |
 |---|---|

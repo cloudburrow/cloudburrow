@@ -10,7 +10,6 @@ import (
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	"google.golang.org/genproto/googleapis/api/httpbody"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -24,7 +23,7 @@ import (
 //
 // The official Go client, cloud.google.com/go/aiplatform's PredictionClient,
 // speaks gRPC only, so it could not reach the JSON routes above. This serves
-// the methods those routes implement — Predict, RawPredict, GenerateContent,
+// the methods those routes implement — Predict, RawPredict (#1284), GenerateContent,
 // StreamGenerateContent (#1257) and EmbedContent (#1244) — on the same port, and every other method answers
 // UNIMPLEMENTED.
 //
@@ -167,18 +166,28 @@ func (p *predictionService) Predict(ctx context.Context, req *aiplatformpb.Predi
 	return resp, nil
 }
 
-// RawPredict relays an arbitrary body to a custom endpoint's predict route.
-// Publisher models have no rawPredict route here, so they are UNIMPLEMENTED.
+// RawPredict relays an arbitrary body to a custom endpoint's predict route,
+// and on a publisher model answers the model's native body (#1284; see
+// rawpredict.go).
 func (p *predictionService) RawPredict(ctx context.Context, req *aiplatformpb.RawPredictRequest) (*httpbody.HttpBody, error) {
 	t, err := parseTarget("endpoint", req.GetEndpoint())
 	if err != nil {
 		return nil, grpcError(err)
 	}
-	if t.endpoint == "" {
-		return nil, status.Errorf(codes.Unimplemented,
-			"RawPredict is served only on custom prediction endpoints (projects/{p}/locations/{l}/endpoints/{e}), not on publisher models")
-	}
 	hb := req.GetHttpBody()
+	if t.model != "" {
+		if err := t.checkPublisher(); err != nil {
+			return nil, grpcError(err)
+		}
+		out, embedded, err := p.s.publisherRawPredict(ctx, t.model, hb.GetData(), hb.GetContentType())
+		if err != nil {
+			return nil, grpcError(err)
+		}
+		if embedded {
+			_ = grpc.SetHeader(ctx, metadata.Pairs(strings.ToLower(ProvenanceHeader), provenanceValue))
+		}
+		return &httpbody.HttpBody{ContentType: "application/json", Data: out}, nil
+	}
 	a, err := p.s.relay(ctx, t.project, t.location, t.endpoint, hb.GetData(), hb.GetContentType())
 	if err != nil {
 		return nil, grpcError(err)

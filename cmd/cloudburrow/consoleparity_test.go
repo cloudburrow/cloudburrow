@@ -621,9 +621,11 @@ var parityRows = []parityRow{
 		Methods: []string{"PredictionService/Predict", "PredictionService/RawPredict"},
 		Screen:  "/ai/predict", Offers: "Online prediction sends a deployed container the request Predict relays " +
 			"(instances and parameters, the container's answer verbatim); Embeddings sends the text-embedding :predict " +
-			"a Predict on the publisher model runs",
+			"a Predict on the publisher model runs, and Method RawPredict the same body unwrapped as the :rawPredict " +
+			"a RawPredict on the publisher model runs (#1284)",
 		Tests: []string{"TestConsoleOnlinePredictionThroughTheConsoleAPI", "TestPredictionClientReachesACustomEndpoint",
-			"TestGRPCPredictEmbedsLikeTheJSONRoute"}},
+			"TestGRPCPredictEmbedsLikeTheJSONRoute", "TestEmbeddingsScreenSendsBothMethods", "TestRawPredictOnTheEmbeddingModel",
+			"TestGRPCRawPredictOnTheEmbeddingModel", "TestRawPredictREST"}},
 	{Resource: "Vertex AI PredictionService: EmbedContent", Service: "vertexai",
 		Methods: []string{"PredictionService/EmbedContent"},
 		Screen:  "/ai/embeddings", Offers: "Embeddings: Method EmbedContent sends each text as the :embedContent " +
