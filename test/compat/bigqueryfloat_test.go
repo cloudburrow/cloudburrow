@@ -200,6 +200,8 @@ func TestBigQueryFloatColumnsTakeFloat64(t *testing.T) {
 // counted it for RESTRICT nor dropped it for CASCADE (the front knew only
 // the functions CREATE FUNCTION statements made). Now RESTRICT fails
 // resourceInUse, and CASCADE drops the dataset and the function.
+//
+// covers: bigquery.routines.insert
 func TestBigQueryDropSchemaDropsRoutinesInsertFunctions(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)

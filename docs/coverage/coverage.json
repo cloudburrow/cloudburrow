@@ -3174,8 +3174,8 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Unknown": 29,
-      "Verified": 18
+      "Unknown": 28,
+      "Verified": 19
     },
     "rows": [
       {
@@ -3319,7 +3319,10 @@
       },
       {
         "method": "bigquery.routines.insert",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigqueryfloat_test.go:205 TestBigQueryDropSchemaDropsRoutinesInsertFunctions"
+        ]
       },
       {
         "method": "bigquery.routines.list",
