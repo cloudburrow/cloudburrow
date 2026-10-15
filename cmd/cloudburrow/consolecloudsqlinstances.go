@@ -204,6 +204,8 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		{Label: "Labels", Value: formatPairs(st.UserLabels)}, {Label: "Database flags", Value: formatFlags(st.DatabaseFlags)},
 		{Label: "Deletion protection", Value: protect}, {Label: "Automated backups", Value: backups},
 		{Label: "Backup start time (UTC)", Value: start},
+		{Label: "Instance type", Value: in.InstanceType}, {Label: "Primary instance", Value: in.MasterInstanceName},
+		{Label: "Read replicas", Value: strings.Join(in.ReplicaNames, ", ")},
 	} {
 		if pr.Value != "" {
 			d.Summary = append(d.Summary, pr)
@@ -226,7 +228,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		runs.Total = len(runs.Items)
 	}
 	d.Sections = []console.Section{{ID: "backups", Label: "Backups", Kind: console.KindListing, Listing: runs}}
-	d.Actions = p.backupActions(ids)
+	d.Actions = append(p.backupActions(ids), replicaActions(in)...)
 	if !upSQLInstance(name) {
 		d.Edit = &console.EditForm{Label: "Edit instance", Fields: []console.Field{
 			{Name: "tier", Label: "Machine type (tier)", Type: "text", Required: true, Default: st.Tier,
@@ -315,6 +317,23 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 	return nil
 }
 
+// replicaActions are Create read replica on a primary, and Promote, Stop
+// replication and Start replication on a read replica (#1330).
+func replicaActions(in *sqladminapi.DatabaseInstance) []console.Action {
+	if in.MasterInstanceName == "" {
+		return []console.Action{{ID: "create-replica", Label: "Create read replica", Fields: []console.Field{{Name: "replica",
+			Label: "Replica instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
+			Help: "A new instance replicating from this one by the engine's own replication; it takes no writes."}}}}
+	}
+	acts := []console.Action{{ID: "promote-replica", Label: "Promote", Destructive: true,
+		Confirm: "Promoting stops replication from the primary for good: the replica becomes a standalone primary that takes writes."}}
+	if st := in.Settings; st != nil && !st.DatabaseReplicationEnabled {
+		return append(acts, console.Action{ID: "start-replica", Label: "Start replication"})
+	}
+	return append(acts, console.Action{ID: "stop-replica", Label: "Stop replication",
+		Confirm: "The replica stops applying the primary's changes until replication is started again."})
+}
+
 func (p cloudSQLInstancesProvider) backupActions(ids []string) []console.Action {
 	acts := []console.Action{{ID: "create-backup", Label: "Create backup",
 		Fields: []console.Field{{Name: "description", Label: "Description", Type: "text"}}},
@@ -341,8 +360,9 @@ func (p cloudSQLInstancesProvider) DetailActions(ctx context.Context, project st
 }
 
 // ActAt implements console.PathActor: the backup actions, through
-// backupRuns.insert, instances.restoreBackup and backupRuns.delete, and
-// Clone, through instances.clone.
+// backupRuns.insert, instances.restoreBackup and backupRuns.delete, Clone,
+// through instances.clone, and the replica actions, through
+// instances.insert, promoteReplica, stopReplica and startReplica.
 func (p cloudSQLInstancesProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
 	if len(path) != 1 {
 		return fmt.Errorf("%s", console.DeeperThan(1, path).Unavailable)
@@ -369,6 +389,15 @@ func (p cloudSQLInstancesProvider) ActAt(ctx context.Context, project string, pa
 			CloneContext: &sqladminapi.CloneContext{DestinationInstanceName: strings.TrimSpace(v["destination"])}}).Context(ctx).Do()
 	case "delete-backup":
 		_, err = svc.BackupRuns.Delete(project, name, id).Context(ctx).Do()
+	case "create-replica":
+		_, err = svc.Instances.Insert(project, &sqladminapi.DatabaseInstance{Name: strings.TrimSpace(v["replica"]),
+			MasterInstanceName: name, InstanceType: "READ_REPLICA_INSTANCE"}).Context(ctx).Do()
+	case "promote-replica":
+		_, err = svc.Instances.PromoteReplica(project, name).Context(ctx).Do()
+	case "stop-replica":
+		_, err = svc.Instances.StopReplica(project, name).Context(ctx).Do()
+	case "start-replica":
+		_, err = svc.Instances.StartReplica(project, name).Context(ctx).Do()
 	default:
 		return fmt.Errorf("unknown action %q", action)
 	}

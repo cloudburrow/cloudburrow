@@ -261,8 +261,8 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 // verbWhy is why an instance method other than restart is not served.
 func verbWhy(verb string) string {
 	switch verb {
-	case "failover", "promoteReplica", "demoteMaster", "demote", "switchover", "startReplica", "stopReplica":
-		return "replicas and failover need a second server replicating from the first, which CloudBurrow does not run"
+	case "failover", "demoteMaster", "demote", "switchover", "reencrypt":
+		return "failover replicas, high availability and external primaries are not served; read replicas are (docs/cloudsql.md)"
 	case "pointInTimeRestore":
 		return "point-in-time recovery needs write-ahead or binary logs archived, which CloudBurrow does not keep; restore a backup run with restoreBackup"
 	case "import", "export":
@@ -328,10 +328,17 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		out, err := s.generateEphemeralCert(r, project, e)
 		return "sql.connect.generateEphemeral", out, err
 	}
-	if len(rest) == 3 && r.Method == http.MethodPost && (rest[2] == "restoreBackup" || rest[2] == "clone") {
+	if len(rest) == 3 && r.Method == http.MethodPost && (rest[2] == "restoreBackup" || rest[2] == "clone" ||
+		rest[2] == "promoteReplica" || rest[2] == "stopReplica" || rest[2] == "startReplica") {
 		verb = rest[2]
 	}
 	switch verb {
+	case "promoteReplica", "stopReplica", "startReplica":
+		if r.Method != http.MethodPost {
+			break
+		}
+		out, err := s.replicaVerb(base, project, name, verb)
+		return "sql.instances." + verb, out, err
 	case "restoreBackup":
 		out, err := s.restoreBackup(r, base, project, e)
 		return "sql.instances.restoreBackup", out, err
@@ -469,6 +476,12 @@ func (s *Server) instance(ctx context.Context, base, project string, e Engine) (
 	}
 	if installed != "" {
 		in["databaseInstalledVersion"] = installed
+	}
+	s.emu.RLock()
+	rs := s.replicaNamesLocked(project, e.Instance())
+	s.emu.RUnlock()
+	if len(rs) > 0 {
+		in["replicaNames"] = rs
 	}
 	return in, nil
 }

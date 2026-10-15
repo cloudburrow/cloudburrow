@@ -105,8 +105,8 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication, point-in-time recovery, replicas
-and failover, the project-level Backups API, imports and exports, and SSL certificates. See
+What answers 501, saying why: IAM database authentication, point-in-time recovery, failover
+replicas and high availability, cascading, cross-region and external-primary replicas, the project-level Backups API, imports and exports, and SSL certificates. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
 ### Creating instances (#1330)
@@ -126,11 +126,44 @@ connectors reach through 3307.
 | `settings.tier` | Required, recorded and answered. The server is not sized by it. |
 | `settings.databaseFlags` | Passed to the server: `-c name=value` to `postgres`, `--name=value` to `mysqld`. A patch that changes them starts the server again with them; a flag the server rejects fails the operation with its words. `cloudsql.*` flags (IAM authentication, Cloud SQL's extensions) are 501. |
 | `settings.userLabels`, `deletionProtectionEnabled`, other settings | Recorded and answered. `delete` of a protected instance is 400, as on Cloud SQL. |
-| `masterInstanceName`, `replicaConfiguration`, `availabilityType: REGIONAL` | 501: no replicas or standby. |
+| `masterInstanceName` | A read replica: see [Read replicas](#read-replicas-1330). |
+| `replicaConfiguration.failoverTarget`, `failoverReplica`, `availabilityType: REGIONAL` | 501: no standby or failover. |
 
 The operation `insert` returns is `RUNNING` until the server serves through its tunnel, then
 `DONE` (or `DONE` with the server's error, and the instance `FAILED`). `delete` removes the
 server, its Service and its volume. `restart` restarts its pod.
+
+### Read replicas (#1330)
+
+`instances.insert` with `masterInstanceName` (and `instanceType: READ_REPLICA_INSTANCE`, which
+may be left out) creates a replica: a server of its own, as above, replicating from its primary
+by the engine's own replication. `databaseVersion` and `tier` default to the primary's.
+
+- **PostgreSQL:** the primary gets a replication role, `cloudsqlreplica`, and a `replication`
+  line for it in `pg_hba.conf`; the replica's data directory is a `pg_basebackup -R -X stream`
+  of the primary, taken once, so it starts as a hot standby streaming from it. A write on it is
+  refused by the server (`cannot execute INSERT in a read-only transaction`).
+- **MySQL:** the primary's GTIDs are turned on by MySQL's online procedure (`SET PERSIST
+  gtid_mode`, as every Cloud SQL for MySQL instance has them) and it gets a `cloudsqlreplica`
+  user; the replica, with its own `server_id`, loads the primary's databases with
+  `mysqldump --set-gtid-purged=ON` and replicates with `SOURCE_AUTO_POSITION`, with
+  `super_read_only` on, so a write is refused by the server. Its `root` is the primary's.
+
+The replica answers `instanceType: READ_REPLICA_INSTANCE`, `masterInstanceName`
+(`{project}:{primary}`), `replicaConfiguration` and `settings.databaseReplicationEnabled`; the
+primary answers `replicaNames`, and `delete` of a primary with replicas is 400 until they are
+deleted or promoted. `stopReplica` and `startReplica` pause and resume replication
+(`pg_wal_replay_pause` and `resume`; `STOP REPLICA` and `START REPLICA`). `promoteReplica`
+makes it a standalone primary (`pg_promote()`; `STOP REPLICA`, `RESET REPLICA ALL` and
+`read_only` off, persisted). The connector reaches a replica like any instance. On the console, an
+instance's page offers **Create read replica**, and a replica's **Promote**, **Stop replication**
+and **Start replication**.
+
+The primary may be a created instance or a server `up` runs (`postgres` or `mysql`): their
+config allows it (PostgreSQL's `wal_level` is `replica` by default; MySQL's binary log is on,
+and GTIDs are turned on online, persisted in the server's data directory). A replica of a
+replica, of another project's or region's instance, or a failover replica is 501.
+Point-in-time recovery stays 501: it needs WAL and binary logs archived, which is not built.
 
 **The instances `up` runs stay as they are:** `postgres` and `mysql` cannot be patched,
 restarted or deleted through the API; each answers 400 naming the `--services` flag that

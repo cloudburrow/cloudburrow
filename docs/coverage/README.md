@@ -28,7 +28,7 @@ Do not edit these files by hand.
 | [Bigtable](bigtable.md) | 50 | 16 | 34 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 33 | 32 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 46 | 1 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 28 | 0 | 52 | 0 | 0 | 0 | 0 |
+| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 31 | 0 | 49 | 0 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven

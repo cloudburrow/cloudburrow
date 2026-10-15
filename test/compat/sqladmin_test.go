@@ -119,8 +119,9 @@ func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	_, err = svc.Instances.Failover(p, inst, &sqladmin.InstancesFailoverRequest{}).Do()
 	wantHTTP(t, "instances.failover", err, 501)
 	_, err = svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: "replica", DatabaseVersion: "POSTGRES_17",
-		MasterInstanceName: inst, Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
-	wantHTTP(t, "instances.insert of a read replica", err, 501)
+		MasterInstanceName: inst, ReplicaConfiguration: &sqladmin.ReplicaConfiguration{FailoverTarget: true},
+		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
+	wantHTTP(t, "instances.insert of a failover replica", err, 501)
 	_, err = svc.Connect.GenerateEphemeralCert(p, inst, &sqladmin.GenerateEphemeralCertRequest{PublicKey: "x", AccessToken: "iam"}).Do()
 	wantHTTP(t, "connect.generateEphemeralCert with an access token (IAM database authentication)", err, 501)
 	_, err = svc.Tiers.List(p).Do()
