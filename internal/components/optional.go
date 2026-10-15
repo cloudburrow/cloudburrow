@@ -174,8 +174,17 @@ func firestoreBackend(project string) Backend {
 		Port:  FirestorePort,
 		Command: []string{"gcloud", "beta", "emulators", "firestore", "start",
 			fmt.Sprintf("--host-port=127.0.0.1:%d", FirestoreEmulatorPort)},
-		Front: callFront(FirestorePort, FirestoreEmulatorPort),
+		Front: firestoreFront(),
 	}
+}
+
+// firestoreFront is the call front, serving the Firestore Admin API itself
+// (internal/firestoreadmin, #1331): the emulator serves the documents API
+// alone.
+func firestoreFront() *Front {
+	f := callFront(FirestorePort, FirestoreEmulatorPort)
+	f.Args = append(f.Args, "--firestore-admin")
+	return f
 }
 
 // DatastoreLockFile is the file on persistent Datastore's volume whose lock
