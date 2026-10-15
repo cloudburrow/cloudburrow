@@ -1278,6 +1278,7 @@
         "method": "google.cloud.resourcemanager.v3.Projects/GetProject",
         "status": "Verified",
         "tests": [
+          "test/compat/projectnumber_test.go:34 TestOneProjectNumberEverywhere",
           "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
         ]
       },
@@ -3061,7 +3062,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
-          "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML"
+          "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML",
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions"
         ]
       },
       {
@@ -3247,6 +3249,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstanceConfig",
         "status": "Verified",
         "tests": [
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
           "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
         ]
       },
@@ -3254,6 +3257,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstancePartition",
         "status": "Verified",
         "tests": [
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
           "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
         ]
       },
@@ -3269,6 +3273,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigs",
         "status": "Verified",
         "tests": [
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
           "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
         ]
       },
@@ -3276,6 +3281,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstancePartitionOperations",
         "status": "Verified",
         "tests": [
+          "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
           "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
         ]
       },

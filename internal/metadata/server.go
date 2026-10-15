@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // cryptoSHA256 is referenced from credentials.go; named here so that file does
@@ -69,6 +71,11 @@ func (s *Server) Addr() string {
 	return s.ln.Addr().String()
 }
 
+// projectNumber is the served project's number, as every service reports it.
+func (s *Server) projectNumber() string {
+	return strconv.FormatInt(resource.ProjectNumber(s.project), 10)
+}
+
 // Handler builds the route table.
 //
 // It is exported so tests can drive every route through an httptest server
@@ -92,8 +99,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/computeMetadata/v1/project/project-id", func(w http.ResponseWriter, r *http.Request) {
 		s.text(w, s.project)
 	})
+	// The project number is resource.ProjectNumber, the one Resource Manager
+	// v1 and v3 report and the service agents' emails carry (#1211): a client
+	// that reads it here and compares it with any of those finds it equal.
 	mux.HandleFunc("/computeMetadata/v1/project/numeric-project-id", func(w http.ResponseWriter, r *http.Request) {
-		s.text(w, "000000000000")
+		s.text(w, s.projectNumber())
 	})
 
 	mux.HandleFunc("/computeMetadata/v1/instance/id", func(w http.ResponseWriter, r *http.Request) {
@@ -105,10 +115,10 @@ func (s *Server) Handler() http.Handler {
 	// Zone is returned in its fully qualified form, because clients parse the
 	// last path segment out of it and a bare zone name breaks that.
 	mux.HandleFunc("/computeMetadata/v1/instance/zone", func(w http.ResponseWriter, r *http.Request) {
-		s.text(w, fmt.Sprintf("projects/000000000000/zones/%s", DefaultZone))
+		s.text(w, fmt.Sprintf("projects/%s/zones/%s", s.projectNumber(), DefaultZone))
 	})
 	mux.HandleFunc("/computeMetadata/v1/instance/machine-type", func(w http.ResponseWriter, r *http.Request) {
-		s.text(w, "projects/000000000000/machineTypes/cloudburrow-local")
+		s.text(w, "projects/"+s.projectNumber()+"/machineTypes/cloudburrow-local")
 	})
 
 	mux.HandleFunc("/computeMetadata/v1/instance/service-accounts/", s.serviceAccounts)
