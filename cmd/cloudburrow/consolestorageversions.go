@@ -469,6 +469,10 @@ func (p storageProvider) ActAtResult(ctx context.Context, project string, path [
 		}
 		return p.runLifecycle(ctx)
 	}
+	// Filter operations answers with the operations kept (#1280).
+	if action == "filteroperations" {
+		return p.filterOperations(ctx, path, values["filter"])
+	}
 	// Bulk restore answers with its operation and counts (#1279).
 	if action == "bulkrestore" {
 		return p.bulkRestore(ctx, path, values)

@@ -213,7 +213,7 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 			if err == nil {
 				actions = append(actions, lockRetentionAction(b)...)
 				actions = append(actions, bucketACLActions(b)...)
-				actions = append(actions, bulkRestoreAction())
+				actions = append(actions, bulkRestoreAction(), filterOperationsAction())
 			}
 			actions = append(actions, p.bucketNotificationActions(ctx, project, path[0])...)
 		}
@@ -248,7 +248,7 @@ func (p storageProvider) ActAt(ctx context.Context, project string, path []strin
 			return errors.New("a retention policy is locked on its bucket's page")
 		}
 		return lockRetention(ctx, c, path[0])
-	case "runlifecycle", "bulkrestore":
+	case "runlifecycle", "bulkrestore", "filteroperations":
 		_, err := p.ActAtResult(ctx, project, path, action, values)
 		return err
 	case "restore":

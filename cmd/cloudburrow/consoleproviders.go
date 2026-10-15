@@ -3309,7 +3309,7 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 			actions = append(actions, bucketACLActions(meta)...)
 			edit = bucketEditForm(meta)
 			actions = append(actions, lockRetentionAction(meta)...)
-			actions = append(actions, bulkRestoreAction())
+			actions = append(actions, bulkRestoreAction(), filterOperationsAction())
 			// The Operations tab, on an HNS bucket always, and on any
 			// other once it has an operation, a bulk restore (#1279).
 			if ops := p.operationsSection(ctx, bucket); hns || len(ops.Listing.Items) > 0 || ops.Listing.Unavailable != "" {

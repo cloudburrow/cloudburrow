@@ -2516,7 +2516,8 @@
         "method": "storage.buckets.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/storageoperationsfilter_test.go:23 TestStorageOperationsListFilter"
         ]
       },
       {

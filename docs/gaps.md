@@ -43,7 +43,6 @@ Already tracked: none open. ACLs and object IAM are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `buckets.operations.list` with a `filter` is 501 (#1280) | not built yet | S |
 | `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) (#1281) | not built yet | M |
 | XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |
 | gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |

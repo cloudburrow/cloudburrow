@@ -319,10 +319,41 @@ func operationResult(op *storagev1.GoogleLongrunningOperation) *console.Listing 
 		Items: items, Total: len(items)}
 }
 
+// filterOperationsAction is Filter operations, on the page of a bucket with
+// an Operations tab: buckets.operations.list with an AIP-160 filter (#1280),
+// answering with the operations it keeps.
+func filterOperationsAction() console.Action {
+	return console.Action{
+		ID: "filteroperations", Label: "Filter operations",
+		Fields: []console.Field{{Name: "filter", Label: "Filter", Type: "text", Required: true,
+			Default: `metadata.commonMetadata.type = "RENAME_FOLDER"`,
+			Help: "AIP-160, on the Operation's fields: name, done, error.code, and anything under metadata " +
+				"(metadata.commonMetadata.type, metadata.commonMetadata.createTime > \"2026-01-01T00:00:00Z\"); AND, OR, NOT and parentheses combine."}},
+	}
+}
+
+// filterOperations is Filter operations: the operations the filter keeps.
+func (p storageProvider) filterOperations(ctx context.Context, path []string, filter string) (*console.Listing, error) {
+	if len(path) != 1 || strings.HasPrefix(path[0], "_") {
+		return nil, errors.New("operations are filtered on a bucket's page")
+	}
+	sec := p.operationsSectionFiltered(ctx, path[0], strings.TrimSpace(filter))
+	if sec.Listing.Unavailable != "" {
+		return nil, errors.New(sec.Listing.Unavailable)
+	}
+	return &sec.Listing, nil
+}
+
 // operationsSection is the Operations tab of a bucket's page, from
 // buckets.operations.list: an HNS bucket's folder operations and any
 // bucket's bulk restores (#1279).
 func (p storageProvider) operationsSection(ctx context.Context, bucket string) console.Section {
+	return p.operationsSectionFiltered(ctx, bucket, "")
+}
+
+// operationsSectionFiltered is the Operations tab's listing, of the
+// operations a buckets.operations.list filter keeps.
+func (p storageProvider) operationsSectionFiltered(ctx context.Context, bucket, filter string) console.Section {
 	sec := console.Section{ID: "operations", Label: "Operations", Listing: console.Listing{
 		Columns: []string{"Type", "State", "Folder", "Destination", "Created", "Ended"}, NameColumn: "Operation",
 		Noun: "operations", Items: []console.Resource{},
@@ -333,7 +364,7 @@ func (p storageProvider) operationsSection(ctx context.Context, bucket string) c
 		return sec
 	}
 	errFull := errors.New("full")
-	err = s.Operations.List(bucket).Context(ctx).Pages(ctx, func(page *storagev1.GoogleLongrunningListOperationsResponse) error {
+	err = s.Operations.List(bucket).Filter(filter).Context(ctx).Pages(ctx, func(page *storagev1.GoogleLongrunningListOperationsResponse) error {
 		for _, op := range page.Operations {
 			if len(sec.Listing.Items) == operationsLimit {
 				sec.Listing.Note = fmt.Sprintf("The first %d operations are listed; list the rest with buckets.operations.list.", operationsLimit)

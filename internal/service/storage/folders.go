@@ -616,13 +616,14 @@ func (s *Server) operationsGet(w http.ResponseWriter, r *http.Request) {
 	writeResponse(w, r, http.StatusOK, s.operationJSON(r, op))
 }
 
-// operationsList lists a bucket's operations by ID. A filter is refused by
-// name, since none is evaluated (UNVERIFIED).
+// operationsList lists a bucket's operations by ID, those the filter keeps
+// (opfilter.go, #1280).
 func (s *Server) operationsList(w http.ResponseWriter, r *http.Request) {
 	bucket := pathVar(r, jsonPrefix, 1)
 	q := r.URL.Query()
-	if q.Get("filter") != "" {
-		writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "filter is not implemented for storage.buckets.operations.list"))
+	keep, err := operationFilter(q.Get("filter"))
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 	max := 1000
@@ -639,7 +640,7 @@ func (s *Server) operationsList(w http.ResponseWriter, r *http.Request) {
 	after := q.Get("pageToken")
 	var items []any
 	next := ""
-	err := s.meta.View(func(tx Tx) error {
+	err = s.meta.View(func(tx Tx) error {
 		if _, ok, err := s.getBucket(tx, bucket); err != nil {
 			return err
 		} else if !ok {
@@ -660,7 +661,9 @@ func (s *Server) operationsList(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(raw, &op); err != nil {
 				return err
 			}
-			items, last = append(items, s.operationJSON(r, op)), id
+			if j := s.operationJSON(r, op); keep(j) {
+				items, last = append(items, j), id
+			}
 		}
 		return nil
 	})
