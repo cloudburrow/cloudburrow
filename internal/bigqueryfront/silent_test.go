@@ -410,9 +410,9 @@ func TestSchemaUpdates(t *testing.T) {
 				"invalid", "Field r.x is missing in new schema", 400},
 			{schema(`,{"name":"g","type":"STRING","mode":"REQUIRED"}`), "invalid", "Cannot add required fields", 400},
 			{`{"schema":{"fields":[{"name":"g","type":"STRING"},{"name":"id","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"}]}]}}`,
-				"notImplemented", "gives the new field g before the table's columns", 501},
+				"conditionNotMet", "Precondition Failed", 412},
 			{`{"schema":{"fields":[{"name":"id","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"y","type":"STRING"},{"name":"x","type":"STRING"}]}]}}`,
-				"notImplemented", "gives the new field r.y before the fields of the RECORD r", 501},
+				"conditionNotMet", "Precondition Failed", 412},
 			{`{"schema":{"fields":[{"name":"ID","type":"INTEGER"},{"name":"r","type":"RECORD","fields":[{"name":"x","type":"STRING"}]}]}}`,
 				"notImplemented", "renames the column id to ID", 501},
 		} {

@@ -809,6 +809,7 @@ func writeError(w http.ResponseWriter, code int, reason, message string) {
 		http.StatusBadRequest:          "INVALID_ARGUMENT",
 		http.StatusConflict:            "ALREADY_EXISTS",
 		http.StatusNotFound:            "NOT_FOUND",
+		http.StatusPreconditionFailed:  "FAILED_PRECONDITION",
 		http.StatusNotImplemented:      "UNIMPLEMENTED",
 		http.StatusInternalServerError: "INTERNAL",
 		http.StatusServiceUnavailable:  "UNAVAILABLE",

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -354,6 +355,14 @@ func TestBigQueryEditTableSchema(t *testing.T) {
 	}
 	if !old[0].Required || old[0].Description != "the id" {
 		t.Error("editedSchema changed the table's own schema")
+	}
+	// The added fields follow the table's own, in the order given: BigQuery
+	// refuses a new column before one the table has (#1111).
+	if names := []string{got[0].Name, got[1].Name, got[2].Name, got[3].Name}; !slices.Equal(names, []string{"id", "note", "tags", "s"}) {
+		t.Errorf("editedSchema's order is %v, want the table's columns, then the added ones", names)
+	}
+	if !strings.Contains(bigqueryEditFields(&bigquery.TableMetadata{Schema: old})[4].Help, "only after the table's own") {
+		t.Error("Add fields' help does not say BigQuery adds a column only after the table's own")
 	}
 	if _, changed, err := editedSchema(old, map[string]string{"columnDescriptions": `{"id":"the id"}`}); err != nil || changed {
 		t.Errorf("an unchanged form changed the schema: %v %v", changed, err)

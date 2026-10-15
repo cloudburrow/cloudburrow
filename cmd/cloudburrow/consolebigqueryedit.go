@@ -350,7 +350,8 @@ func bigqueryEditFields(md *bigquery.TableMetadata) []console.Field {
 		{Name: "addFields", Label: "Add fields", Type: "schema", Options: bigqueryColumnTypes,
 			Pattern: bigqueryFieldNamePattern,
 			Help: "Fields added at the end of the schema (ALTER TABLE ADD COLUMN): NULLABLE or REPEATED, a RECORD " +
-				"with its fields. The table's rows read NULL in them. " + bigqueryFieldNameHelp},
+				"with its fields. The table's rows read NULL in them. BigQuery adds a column only after the table's " +
+				"own, never between them. " + bigqueryFieldNameHelp},
 		{Name: "columnDescriptions", Label: "Column descriptions", Type: "map", Default: columnDescs,
 			Help: "One column=description per line, for the table's top-level columns. A column removed from " +
 				"the list has its description cleared."},
@@ -597,7 +598,10 @@ func (p bigqueryProvider) editTable(ctx context.Context, datasetID, tableID stri
 }
 
 // editedSchema is the table's schema, old, with Edit table's changes
-// (bigqueryEditFields): fields added at its end, column descriptions set or
+// (bigqueryEditFields): fields added at its end, after every column the
+// table has, as BigQuery adds them (a schema update with a new column
+// before one the table has is refused, 412 "Precondition Failed", #1111),
+// column descriptions set or
 // cleared, and REQUIRED columns relaxed to NULLABLE. changed is false when
 // the form changes none of it. What BigQuery refuses (a REQUIRED field
 // added, a name taken) is the API's to refuse.

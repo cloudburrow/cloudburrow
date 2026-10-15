@@ -93,6 +93,9 @@ func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 			case code == http.StatusBadRequest:
 				writeError(w, code, "invalid", msg)
 				return
+			case code == http.StatusPreconditionFailed:
+				writeError(w, code, "conditionNotMet", msg)
+				return
 			case code != 0:
 				writeError(w, code, "notImplemented", msg)
 				return

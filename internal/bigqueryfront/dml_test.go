@@ -247,10 +247,10 @@ func TestSchemaChange(t *testing.T) {
 		{"moded", []field{have[0], have[1], {Name: "tags", Type: "STRING"}}, 400, refused + "Field tags has changed mode from REPEATED to NULLABLE", false},
 		{"required added", []field{have[0], have[1], have[2], {Name: "m", Type: "STRING", Mode: "REQUIRED"}}, 400,
 			refused + "Cannot add required fields to an existing schema. (field: m)", false},
-		// Refused before the 501 for a new column before the table's own.
+		// Refused 400 before the 412 for a new column before the table's own.
 		{"required added first", []field{{Name: "m", Type: "STRING", Mode: "REQUIRED"}, have[0], have[1], have[2]}, 400,
 			refused + "Cannot add required fields to an existing schema. (field: m)", false},
-		// Refused before the 501 for a field added to a RECORD.
+		// Refused 400 before the 412 for a field added before a RECORD's.
 		{"required added to a RECORD", []field{have[0], {Name: "r", Type: "RECORD", Fields: []field{{Name: "x", Type: "STRING"}, {Name: "y", Type: "STRING", Mode: "REQUIRED"}}}, have[2]},
 			400, refused + "Cannot add required fields to an existing schema. (field: r.y)", false},
 		{"nested dropped", []field{have[0], {Name: "r", Type: "RECORD"}, have[2]}, 400, refused + "Field r.x is missing in new schema", false},
@@ -260,13 +260,21 @@ func TestSchemaChange(t *testing.T) {
 			0, "", true},
 		{"columns in another order", []field{have[2], have[0], have[1]}, 0, "", false},
 		{"in another order, one added at the end", []field{have[1], have[0], have[2], {Name: "n", Type: "STRING"}}, 0, "", true},
-		{"a new column before the table's", []field{have[0], {Name: "n", Type: "STRING"}, have[1], have[2]}, 501,
-			"gives the new field n before the table's columns", false},
+		// #1111: BigQuery refuses a new column or field given before one the
+		// table has, "Precondition Failed".
+		{"a new column before the table's", []field{have[0], {Name: "n", Type: "STRING"}, have[1], have[2]}, 412,
+			"Precondition Failed", false},
+		{"a new column first", []field{{Name: "n", Type: "STRING"}, have[0], have[1], have[2]}, 412, "Precondition Failed", false},
 		{"a new field before a RECORD's", []field{have[0], {Name: "r", Type: "RECORD", Fields: []field{{Name: "y", Type: "STRING"}, {Name: "x", Type: "STRING"}}}, have[2]},
-			501, "gives the new field r.y before the fields of the RECORD r", false},
+			412, "Precondition Failed", false},
+		{"a new column before the table's, in another case", []field{have[0], {Name: "N", Type: "STRING"}, {Name: "R", Type: "RECORD", Fields: have[1].Fields}, have[2]},
+			412, "Precondition Failed", false},
+		// Refused 412 before the 501 for a column renamed in another case.
+		{"a new column first and one renamed", []field{{Name: "n", Type: "STRING"}, {Name: "ID", Type: "INTEGER", Mode: "REQUIRED"}, have[1], have[2]},
+			412, "Precondition Failed", false},
 	} {
 		adds, code, msg := schemaChange("p:ds.t", have, c.want)
-		if code != c.code || adds != c.adds || (c.code == 400 && msg != c.msg) || !strings.Contains(msg, c.msg) {
+		if code != c.code || adds != c.adds || (c.code != 501 && msg != c.msg) || !strings.Contains(msg, c.msg) {
 			t.Errorf("%s: %d %q, adds %v; want %d %q, adds %v", c.name, code, msg, adds, c.code, c.msg, c.adds)
 		}
 	}
