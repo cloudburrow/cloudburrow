@@ -59,7 +59,7 @@ jobs:
         with:
           # Exact patch, so the compiler that builds a release is recorded:
           # dependencies.json toolchain.goRelease (#695).
-          go-version: "1.27.1"
+          go-version: "1.27.2"
 
       # A release must not ship something the checks would have rejected.
       - run: make check
@@ -247,7 +247,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # The release's Go: dependencies.json toolchain.goRelease (#695).
-          go-version: "1.27.1"
+          go-version: "1.27.2"
           cache: false
       - name: Build the emulator
         run: go run ./tools/bqengine -out internal/bigqueryimage/bin -force
@@ -295,7 +295,7 @@ jobs:
         with:
           # Exact patch, so the compiler that builds a release is recorded:
           # dependencies.json toolchain.goRelease (#695).
-          go-version: "1.27.1"
+          go-version: "1.27.2"
 
       # The emulator the bigquery-emulator job built, each file checked
       # against the sums it reported (#1087).
