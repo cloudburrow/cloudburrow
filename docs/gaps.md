@@ -179,7 +179,7 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |
 | Storage Write API `arrow_rows` | not built yet | M |
-| Partition decorators: `tabledata.list` and `tables.get` of a partition, a partition as a load, copy or query destination, and a partition of an ingestion-time partitioned table are 501 (a query's read and `tables.delete` of one are built, #1273) | not built yet | M |
+| Partition decorators of an ingestion-time partitioned table are 501: the emulator keeps no row's ingestion time (reads, `tabledata.list`, `tables.get`, `tables.delete` and load, copy and query destinations of a column-partitioned table's partition are built, #1273) | no emulator support | M |
 | `INFORMATION_SCHEMA` `ROUTINES`, `PARAMETERS`, `PARTITIONS`, `COLUMN_FIELD_PATHS`, `TABLE_STORAGE`: "Table not found"; `TABLE_OPTIONS` empty (#1286) | not built yet | M |
 | Region-qualified `INFORMATION_SCHEMA.JOBS`, `JOBS_BY_PROJECT`, `JOBS_BY_USER`: "Table not found" (#1275) | not built yet | M |
 | `_PARTITIONTIME` and `_PARTITIONDATE` of an ingestion-time partitioned table that holds rows are 501: the emulator keeps no row's ingestion time (on any other table they fail 400 as in BigQuery, #1277) | no emulator support | M |
