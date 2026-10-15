@@ -366,6 +366,12 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	ran := "projects/" + blankProject + "/locations/us-central1/jobs/blank-ran"
 	jobs.executions[ran+"/executions/blank-ran-x1"] = &runpb.Execution{Name: ran + "/executions/blank-ran-x1", Job: ran}
 	jobs.order = append(jobs.order, ran+"/executions/blank-ran-x1")
+	// Worker pools and instances (#1300, #1299): the sparsest each returns.
+	pool := "projects/" + blankProject + "/locations/us-central1/workerPools/blank-pool"
+	jobs.pools.pools = map[string]*runpb.WorkerPool{pool: {Name: pool, Template: &runpb.WorkerPoolRevisionTemplate{
+		Containers: []*runpb.Container{{Image: "example.invalid/pool:1"}}}}}
+	inst := "projects/" + blankProject + "/locations/us-central1/instances/blank-instance"
+	jobs.instances.instances = map[string]*runpb.Instance{inst: {Name: inst}}
 
 	// Cloud Run and the cluster screens read through kubectl, so a kubectl
 	// that answers from fixtures stands in for the cluster.

@@ -202,6 +202,10 @@ func (s *Server) Revisions() *RevisionsServer { return &RevisionsServer{s: s} }
 func (r *RevisionsServer) Register(g grpc.ServiceRegistrar) { runpb.RegisterRevisionsServer(g, r) }
 
 func (r *RevisionsServer) GetRevision(ctx context.Context, req *runpb.GetRevisionRequest) (*runpb.Revision, error) {
+	if isWorkerPoolPath(req.GetName()) {
+		rev, _, _, _, err := r.s.workerPoolRevision(ctx, req.GetName())
+		return rev, err
+	}
 	serviceName, service, revision, err := parseRevisionName(req.GetName())
 	if err != nil {
 		return nil, err
@@ -214,6 +218,9 @@ func (r *RevisionsServer) GetRevision(ctx context.Context, req *runpb.GetRevisio
 }
 
 func (r *RevisionsServer) ListRevisions(ctx context.Context, req *runpb.ListRevisionsRequest) (*runpb.ListRevisionsResponse, error) {
+	if isWorkerPoolPath(req.GetParent()) {
+		return r.s.listWorkerPoolRevisions(ctx, req)
+	}
 	service, err := ServiceID(req.GetParent())
 	if err != nil {
 		return nil, err
@@ -255,6 +262,9 @@ func (r *RevisionsServer) ListRevisions(ctx context.Context, req *runpb.ListRevi
 // deleting it would take the service down, and the way to retire it is to
 // move traffic first.
 func (r *RevisionsServer) DeleteRevision(ctx context.Context, req *runpb.DeleteRevisionRequest) (*longrunningpb.Operation, error) {
+	if isWorkerPoolPath(req.GetName()) {
+		return r.s.deleteWorkerPoolRevision(ctx, req)
+	}
 	serviceName, service, revision, err := parseRevisionName(req.GetName())
 	if err != nil {
 		return nil, err

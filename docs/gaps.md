@@ -23,7 +23,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Storage | 7 | 1 | 5 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 7 | 4 | 1 | 0 | 2 |
+| Cloud Run | 9 | 6 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 0 | 0 | 0 | 0 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 3 | 3 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 3 | 3 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **69** | **21** | **36** | **7** | **5** |
+| **Total** | **71** | **23** | **36** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -84,6 +84,8 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 | `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
 | `Instances.*` is not served (#1299) | not built yet | L |
 | `WorkerPools.*` is not served (#1300) | not built yet | L |
+| Worker pool and standalone instance operations complete when written, not when their instances are ready; an instance gets no URL (`ingress` refused); a worker pool's `update_mask` and instance splits across revisions are refused (served since #1300 and #1299) | not built yet | M |
+| `gcloud run deploy` through the v1 (Knative) API, served since #1293 for services, revisions, routes and configurations, is not verified: its default `startupProbe` and other v1 fields are refused as not mapped, and `projects.locations.list` and the rest of v1 (domain mappings, jobs, IAM) are 501 | not built yet | M |
 | `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
 | `CancelExecution`'s result | needs live GCP | S |
