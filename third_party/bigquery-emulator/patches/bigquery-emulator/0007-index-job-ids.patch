@@ -6,14 +6,15 @@ its ID was not in the jobs table (Project.AddJob, Repository.jobExists),
 and googlesqlite compiles each WHERE comparison into a function call that
 SQLite cannot answer from the table's primary key, so the check visited
 every job the emulator kept, one Go call per row. Each query was slower
-than the last: measured natively on an Apple silicon Mac, 500 queries of
-SELECT x, s, i FROM a 3-row table took 3.95 s for the first 500 jobs and
-6.2-6.8 s for jobs 2,000-3,000, jobExists 26% of the CPU profile.
+than the last: measured natively on an Apple silicon Mac, with every other
+patch applied, 500 jobs.query calls of SELECT x, s, i FROM a 3-row table
+took 3.6 s for the first 500 jobs and 5.7 s for jobs 2,500-3,000; jobExists
+was 26% of the CPU profile.
 
 The patch keeps which jobs the table holds in memory (Repository.jobKeys),
 read once when the repository opens and kept by AddJob and DeleteJob, and
 jobExists reads the table only to confirm a job jobKeys holds. The same
-500 queries take 3.1 s at every point up to 3,000 jobs.
+500 queries take 3.0-3.5 s at every point up to 3,000 jobs.
 
 Licence: a modification of goccy/bigquery-emulator, which is under the MIT
 License, Copyright (c) 2022 Masaaki Goshima
