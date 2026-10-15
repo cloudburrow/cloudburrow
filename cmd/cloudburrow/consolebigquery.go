@@ -142,8 +142,8 @@ func countTables(ctx context.Context, ds *bigquery.Dataset) (int, error) {
 	}
 }
 
-// Detail opens a dataset (its tables) or a table (its schema, details and
-// first rows).
+// Detail opens a dataset (its tables and routines), a table (its schema,
+// details and first rows) or a routine (consolebigqueryroutines.go).
 func (p bigqueryProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	if prompt := p.scope(project); prompt != "" {
 		return console.Detail{Prompt: prompt}, nil
@@ -153,6 +153,10 @@ func (p bigqueryProvider) Detail(ctx context.Context, project string, path []str
 		return p.datasetDetail(ctx, path[0])
 	case 2:
 		return p.tableDetail(ctx, path[0], path[1])
+	case 3:
+		if isRoutinePath(path) {
+			return p.routineDetail(ctx, path[0], path[2])
+		}
 	}
 	return console.DeeperThan(2, path), nil
 }
@@ -219,6 +223,7 @@ func (p bigqueryProvider) datasetDetail(ctx context.Context, datasetID string) (
 		},
 		Sections: []console.Section{
 			{ID: "tables", Label: "Tables", Listing: tables},
+			p.routinesSection(ctx, ds),
 			{
 				ID: "details", Label: "Details", Kind: console.KindProperties,
 				Groups: []console.PropertyGroup{{Heading: "Dataset", Properties: props}},

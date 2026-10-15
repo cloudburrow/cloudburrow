@@ -218,6 +218,10 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 			console.Action{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
 			console.Action{ID: actCopyTable, Label: "Copy table", Fields: bigqueryCopyFields()},
 			deleteTable)
+	case 3:
+		if isRoutinePath(path) {
+			return []console.Action{deleteRoutineAction()}
+		}
 	}
 	return nil
 }
@@ -342,6 +346,8 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 		return err
 	case action == "edittable" && len(path) == 2:
 		return p.editTable(ctx, path[0], path[1], values)
+	case action == actDeleteRoutine && isRoutinePath(path):
+		return p.deleteRoutine(ctx, path[0], path[2])
 	case action == "deletetable" && len(path) == 2:
 		ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 		defer cancel()
