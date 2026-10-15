@@ -80,7 +80,9 @@ func TestBigQueryCreateFunctionOfAnExistingFunction(t *testing.T) {
 		t.Errorf("after the failed CREATE OR REPLACE, h(1) = %s, want [12]", got)
 	}
 	for _, sql := range []string{
-		"SELECT 1; CREATE FUNCTION " + d + ".h(x INT64) AS (x + 3)",
+		// A DECLARE, not a query, first: a script whose earlier statement is a
+		// query is run statement by statement (#1249).
+		"DECLARE z INT64 DEFAULT 1; CREATE FUNCTION " + d + ".h(x INT64) AS (x + 3)",
 		"CREATE OR REPLACE FUNCTION " + d + ".h(x INT64) AS (x + 3); SELECT 1",
 	} {
 		for _, insert := range []bool{false, true} {

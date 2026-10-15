@@ -89,10 +89,13 @@ func TestBigQueryScriptVariablesEndWithTheScript(t *testing.T) {
 // statements of a failed script did before the failing one; the emulator
 // rolls a script given to jobs.query back whole (measured: `CREATE TABLE
 // ds.e1 AS SELECT 1 AS a; SELECT * FROM nope.nope; ...` failed 400 and
-// ds.e1 did not exist). So such a script is 501 through jobs.query, naming
+// ds.e1 did not exist). So such a script was 501 through jobs.query, naming
 // the emulator's error. (#955) A query job the emulator commits up to the
 // failing statement, as BigQuery keeps it: it fails with the emulator's
-// error, and ds.e1 exists. A failed script that changes nothing kept, and
+// error, and ds.e1 exists. (#1249) Since its failing statement is a query
+// before the last, the front now runs that script statement by statement,
+// so through jobs.query too it fails at the SELECT and ds.e1 is kept, as in
+// BigQuery; a script whose failing statement is its last is still 501. A failed script that changes nothing kept, and
 // a syntax error, which fails a script before anything runs, are answered
 // 400 as before.
 func TestBigQueryFailedScriptThatWroteIs501(t *testing.T) {
@@ -112,21 +115,18 @@ func TestBigQueryFailedScriptThatWroteIs501(t *testing.T) {
 			if be == nil || be.Reason == "notImplemented" || !strings.Contains(be.Message, "Table not found: nope.nope") {
 				t.Errorf("jobs.insert: %v, want the job failed with the emulator's error", be)
 			}
-			if !tableExists(t, ctx, ds.Table(e1)) {
-				t.Errorf("%s does not exist after the failed query job", e1)
-			}
-			if tableExists(t, ctx, ds.Table("e2")) {
-				t.Error("e2, after the failing statement, exists")
-			}
 		} else {
+			// #1249: run statement by statement, it fails at the SELECT.
 			err := bqRun(ctx, c, script, false)
-			wantReason(t, "jobs.query", err, 501, "notImplemented")
-			if err == nil || !strings.Contains(err.Error(), "Table not found: nope.nope") {
-				t.Errorf("jobs.query: %v, want the emulator's error named", err)
+			if err == nil || strings.Contains(err.Error(), "notImplemented") || !strings.Contains(err.Error(), "Table not found: nope.nope") {
+				t.Errorf("jobs.query: %v, want it failed with the emulator's error", err)
 			}
 		}
-		if !insert && tableExists(t, ctx, ds.Table(e1)) {
-			t.Errorf("%s exists after the failed script", e1)
+		if !tableExists(t, ctx, ds.Table(e1)) {
+			t.Errorf("%s does not exist after the failed script (query job %v)", e1, insert)
+		}
+		if tableExists(t, ctx, ds.Table("e2")) {
+			t.Error("e2, after the failing statement, exists")
 		}
 		for _, sql := range []string{
 			"SELECT 1; SELECT * FROM nope.nope",

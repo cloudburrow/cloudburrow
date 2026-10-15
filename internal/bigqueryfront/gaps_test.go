@@ -182,7 +182,7 @@ func TestCreateOrReplaceExistingTable(t *testing.T) {
 	}
 
 	emu = &scriptEmulator{tables: map[string]string{tablesBase + "t": `{"type":"TABLE"}`}}
-	code, got = do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "SELECT 1; CREATE OR REPLACE TABLE ds.t (a INT64)"))
+	code, got = do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "DECLARE z INT64 DEFAULT 1; CREATE OR REPLACE TABLE ds.t (a INT64)"))
 	if code != 501 || errorReason(got) != "notImplemented" || len(emu.tables) != 1 {
 		t.Errorf("a replacement inside a script: %d %v", code, got)
 	}
