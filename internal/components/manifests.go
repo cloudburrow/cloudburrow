@@ -321,6 +321,20 @@ metadata:
 `, namespace, instance)
 }
 
+// strategy is the Deployment's update strategy. A persistent backend's one
+// pod has its volume ReadWriteOnce, and its emulator may save only when it
+// exits (Datastore, #1307, whose next emulator waits on a lock the old one
+// holds until then): a rolling update would start the new pod while the old
+// one still runs, and keep the old one until the new one is ready, which it
+// never is. Recreate ends the old pod first. Main run 38783742220: after
+// stop/up a changed Datastore spec rolled out and waited 5m on the old pod.
+func (b Backend) strategy() string {
+	if !b.Persistent {
+		return ""
+	}
+	return "  strategy:\n    type: Recreate\n"
+}
+
 // Manifest renders the Deployment, Service and optional PVC for a backend.
 func (b Backend) Manifest(namespace, instance string) string {
 	var sb strings.Builder
@@ -353,7 +367,7 @@ metadata:
     cloudburrow.dev/instance: %q
 spec:
   replicas: 1
-  selector:
+%s  selector:
     matchLabels:
       app: %s
   template:
@@ -361,7 +375,7 @@ spec:
       labels:
         app: %s
         cloudburrow.dev/owned: "true"
-`, b.Name, namespace, instance, b.Name, b.Name)
+`, b.Name, namespace, instance, b.strategy(), b.Name, b.Name)
 	// The backend's own container, the one kubectl logs and exec pick when
 	// none is named, whatever stands in front of it.
 	containerPort := b.Port
