@@ -174,9 +174,9 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 
 | Gap | Why open | Size |
 |---|---|---|
-| `ALTER TABLE` (`ADD COLUMN`, `SET OPTIONS`, `RENAME TO`, …) is 501, though `tables.patch` already does the same changes (#1227) | not built yet | M |
+| `ALTER TABLE` `RENAME TO`, `RENAME COLUMN`, `DROP COLUMN`, `SET DATA TYPE`, defaults and constraints are 501 (`ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN … SET OPTIONS` are carried out, #1227) | not built yet | M |
 | A view's column list inside a multi-statement script, and a column's `OPTIONS` in the list (a lone `CREATE VIEW v (c, d) AS …` is carried out, #1240) | not built yet | S |
-| `CREATE VIEW … OPTIONS(description = …)` keeps no description (the emulator drops it, #1251) | not built yet | S |
+| `CREATE TABLE`/`VIEW` and `ALTER VIEW` `OPTIONS` in a multi-statement script (the emulator drops them; a lone `CREATE TABLE`/`VIEW` or `ALTER VIEW … SET OPTIONS` sets `description`, `friendly_name`, `labels` and `expiration_timestamp`, #1251), and other table options (`partition_expiration_days`, `require_partition_filter`, `kms_key_name`, `max_staleness`, …: 501) | not built yet | M |
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |

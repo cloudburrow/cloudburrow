@@ -4265,6 +4265,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerycorrectness_test.go:320 TestBigQueryCreateTableLikeAndCopy",
+          "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
@@ -4290,6 +4291,7 @@
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerycorrectness_test.go:320 TestBigQueryCreateTableLikeAndCopy",
+          "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
@@ -4490,6 +4492,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
