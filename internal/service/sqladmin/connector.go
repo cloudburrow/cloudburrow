@@ -159,6 +159,39 @@ type connector struct {
 
 	mu    sync.Mutex
 	certs map[string]*tls.Certificate // server certificates, by DNS name
+
+	// podHost is the address pods reach this listener at (#1346), or nil.
+	podHost func() string
+}
+
+// ConnectorAddr is the connector listener's address, or "" when it is not
+// serving.
+func (s *Server) ConnectorAddr() string {
+	if s.conn == nil || s.conn.ln == nil {
+		return ""
+	}
+	return s.conn.ln.Addr().String()
+}
+
+// SetPodConnectorHost publishes the connector to pods (#1346): a
+// connectSettings request that reached this server through the cluster
+// name pods use (hostguard.ClusterHostService) is answered with host, the
+// address the cluster reaches this machine at, so a Cloud SQL Auth Proxy in
+// a pod dials the listener rather than its own loopback. TLS is unchanged:
+// the server name is still the instance's DNS name.
+func (s *Server) SetPodConnectorHost(host func() string) {
+	if s.conn != nil {
+		s.conn.podHost = host
+	}
+}
+
+// fromPod reports whether r came through the cluster name pods use.
+func fromPod(r *http.Request) bool {
+	h := r.Host
+	if hh, _, err := net.SplitHostPort(h); err == nil {
+		h = hh
+	}
+	return h == "cloudburrow-host" || strings.HasPrefix(h, "cloudburrow-host.")
 }
 
 // EnableConnector serves the connector path: connectSettings and
@@ -344,13 +377,18 @@ func sslCertJSON(project, instance string, cert *x509.Certificate, certPEM strin
 }
 
 // connectSettings is connect.get.
-func (s *Server) connectSettings(project string, e Engine) (any, error) {
+func (s *Server) connectSettings(r *http.Request, project string, e Engine) (any, error) {
 	if err := s.connectorReady(); err != nil {
 		return nil, err
 	}
 	host, _, _ := net.SplitHostPort(s.conn.addr)
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
+	}
+	if s.conn.podHost != nil && fromPod(r) {
+		if h := s.conn.podHost(); h != "" {
+			host = h
+		}
 	}
 	ca := s.conn.cas[e.Instance()]
 	return map[string]any{
@@ -422,4 +460,13 @@ func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine
 	cert, _ := x509.ParseCertificate(der)
 	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 	return map[string]any{"ephemeralCert": sslCertJSON(project, e.Instance(), cert, certPEM)}, nil
+}
+
+// Instances are the instance IDs served, in every project.
+func (s *Server) Instances() []string {
+	out := make([]string, 0, len(s.engines))
+	for _, e := range s.engines {
+		out = append(out, e.Instance())
+	}
+	return out
 }
