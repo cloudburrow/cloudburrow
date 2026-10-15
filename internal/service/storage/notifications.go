@@ -419,7 +419,7 @@ func (s *Server) DispatchNotifications(ctx context.Context) (int, error) {
 		}
 		var data []byte
 		if e.Object != nil {
-			data, _ = json.Marshal(s.objectJSONWith(nil, *e.Object, 0))
+			data, _ = json.Marshal(s.objectJSONWith(nil, *e.Object, bucketRecord{}))
 		}
 		perr := s.publisher.Publish(ctx, e.Topic, data, e.Attributes)
 		_ = s.meta.Update(func(tx Tx) error {

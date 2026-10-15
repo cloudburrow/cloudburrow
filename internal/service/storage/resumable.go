@@ -91,11 +91,9 @@ func putSession(tx Tx, u uploadSession) error {
 // resumableStart begins a session.
 func (s *Server) resumableStart(w http.ResponseWriter, r *http.Request, bucket string) {
 	q := r.URL.Query()
-	for _, p := range []string{"predefinedAcl", "kmsKeyName"} {
-		if q.Get(p) != "" {
-			writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "%s is not implemented", p))
-			return
-		}
+	if q.Get("kmsKeyName") != "" {
+		writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "kmsKeyName is not implemented"))
+		return
 	}
 	if _, err := parseObjectPreconditions(q, "if"); err != nil {
 		writeError(w, err)
@@ -125,6 +123,7 @@ func (s *Server) resumableStart(w http.ResponseWriter, r *http.Request, bucket s
 	if meta.ContentType == "" {
 		meta.ContentType = r.Header.Get("X-Upload-Content-Type")
 	}
+	meta.PredefinedACL = q.Get("predefinedAcl")
 	if err := s.bucketExists(bucket); err != nil {
 		writeError(w, err)
 		return

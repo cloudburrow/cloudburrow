@@ -150,7 +150,8 @@ failing at once.
 | `buckets.relocate`, `buckets.operations.advanceRelocateBucket` | **Unimplemented** | 501 naming the method: there is one location, so relocation has nothing to move. |
 | `anywhereCaches.*`, `rapidCaches.*` | **Unimplemented** | 501 naming the method: there is no cache tier to provision; a stored cache with no effect would let a client believe reads are zonally cached. |
 | `channels.stop`, `objects.watchAll` | **Unimplemented** | 501 naming the method: object change notification channels (webhooks) are not built; use Pub/Sub notifications. `channels.stop` alone has nothing to stop. |
-| bucket, object and default object ACLs (`bucketAccessControls.*`, `objectAccessControls.*`, `defaultObjectAccessControls.*`), object IAM | **Unimplemented, on purpose** | 501 naming the method (`TestStorageACLNotImplemented`), never an empty policy or list: [ADR-0006](adr/0006-iam-policy-surface.md) as amended by #504 records that "every ACL method (bucket, object and default object) stay[s] **501 naming the method**". It stays so until the maintainer amends that decision. |
+| `bucketAccessControls.get`, `bucketAccessControls.list`, `bucketAccessControls.insert`, `bucketAccessControls.patch`, `bucketAccessControls.update`, `bucketAccessControls.delete`, `defaultObjectAccessControls.get`, `defaultObjectAccessControls.list`, `defaultObjectAccessControls.insert`, `defaultObjectAccessControls.patch`, `defaultObjectAccessControls.update`, `defaultObjectAccessControls.delete`, `objectAccessControls.get`, `objectAccessControls.list`, `objectAccessControls.insert`, `objectAccessControls.patch`, `objectAccessControls.update`, `objectAccessControls.delete` | **Verified**, *stored, not enforced* | [ADR-0006](adr/0006-iam-policy-surface.md) as amended 2026-10-15 (#1233): ACLs are stored and returned, and nothing reads them, since CloudBurrow authenticates no caller. Entities `user-`, `group-`, `domain-`, `project-<team>-<number>` (a project ID is stored as its number), `allUsers`, `allAuthenticatedUsers`; roles OWNER, READER, and WRITER on a bucket's own ACL only. A new bucket's ACLs are `projectPrivate`'s; a new object, a copy and a restore take the bucket's default object ACL (`copySourceAcl` keeps a restored version's). Under uniform bucket-level access every ACL call is 400 (its message is UNVERIFIED) and a full projection has empty ACLs. The "object owner" of predefined object ACLs is the project owners: there is no caller identity. `TestStorageBucketACL`, `TestStorageObjectACL`, `TestStoragePredefinedACL`, `TestStorageACLUniformAccess`, `TestStorageACLMethods` (get, insert and patch on the JSON API), `TestGcloudStorageACL`. |
+| object IAM (`objects.getIamPolicy`, `setIamPolicy`, `testIamPermissions`) | **Unimplemented** | 501 naming the method. |
 | `objects.bulkRestore` | **Unimplemented** | 501 naming the method. |
 
 ### Data plane
@@ -257,13 +258,13 @@ Every settable Bucket property of the discovery document (#503). *Kept* fields a
 | `logging` | Stored, no effect: no usage logs are written | #503 |
 | `encryption` (`defaultKmsKeyName`) | Stored, no effect: objects are not encrypted with the key | #503 |
 | `billing` (`requesterPays`) | Stored, no effect: nothing is billed, and `userProject` is accepted and ignored | #503 |
-| `iamConfiguration` (`uniformBucketLevelAccess`, `publicAccessPrevention`) | Stored. There are no ACLs, so access is uniform anyway; `uniformBucketLevelAccess.enabled` (or the legacy `bucketPolicyOnly.enabled`) is what `managedFolders.insert` requires, as Google does (`TestStorageManagedFolderLifecycle`, #828) | #503 |
+| `iamConfiguration` (`uniformBucketLevelAccess`, `publicAccessPrevention`) | Stored. Nothing is enforced either way; uniform access refuses the ACL methods with 400 (#1233), and `uniformBucketLevelAccess.enabled` (or the legacy `bucketPolicyOnly.enabled`) is what `managedFolders.insert` requires, as Google does (`TestStorageManagedFolderLifecycle`, #828) | #503 |
 | `rpo` (`DEFAULT` or `ASYNC_TURBO`) | Stored, no effect: there is no replication | #503 |
 | `autoclass` | Stored, no effect: classes move only by rewrite or lifecycle | #503 |
 | `customPlacementConfig` | Stored, no effect: there is one location | #503 |
 | `hierarchicalNamespace` | Kept: set only at creation (a later change is 400 naming it), it needs `uniformBucketLevelAccess` and excludes `versioning` (400, UNVERIFIED), and it enables folders (`TestStorageFoldersControl`) | #503, #1203 |
 | `ipFilter` | Refused, 400 naming it | — |
-| `acl`, `defaultObjectAcl` | Refused, 400 naming them: ACL methods are not implemented | — |
+| `acl`, `defaultObjectAcl`, `predefinedAcl`, `predefinedDefaultObjectAcl` | Stored, not enforced: returned under `projection=full`; a predefined ACL overrides the body's; a body that leaves an ACL out keeps it (`TestStoragePredefinedACL`) | #1233 |
 
 ### UNVERIFIED choices
 

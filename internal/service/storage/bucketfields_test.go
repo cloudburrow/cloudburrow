@@ -77,7 +77,7 @@ func TestStorageBucketFieldsNeverSilentlyDropped(t *testing.T) {
 			extra = `,"iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true}}`
 		}
 		code, resp := raw(t, "POST", h.URL+"/storage/v1/b?project=p&prettyPrint=false", fmt.Sprintf(`{"name":%q,%q:%s%s}`, name, k, sample, extra))
-		refused := how != "kept" && how != "stored"
+		refused := how != "kept" && how != "stored" && how != "acl"
 		switch {
 		case refused && (code != 400 || !strings.Contains(resp, k)):
 			t.Errorf("%s (%s): create = %d %s; want 400 naming it", k, how, code, resp)
@@ -88,7 +88,7 @@ func TestStorageBucketFieldsNeverSilentlyDropped(t *testing.T) {
 			continue
 		}
 		raw(t, "POST", h.URL+"/storage/v1/b?project=p", fmt.Sprintf(`{"name":"%s-p"}`, name))
-		code, resp = raw(t, "PATCH", h.URL+"/storage/v1/b/"+name+"-p?prettyPrint=false", fmt.Sprintf(`{%q:%s}`, k, sample))
+		code, resp = raw(t, "PATCH", h.URL+"/storage/v1/b/"+name+"-p?prettyPrint=false&projection=full", fmt.Sprintf(`{%q:%s}`, k, sample))
 		// A bucket's location is fixed at creation; a change is refused by
 		// name, which is not a silent drop either.
 		// So is hierarchical namespace (#1203).

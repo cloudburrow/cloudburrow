@@ -57,6 +57,9 @@ type objectRecord struct {
 	// ClassUpdated is when a lifecycle rule last changed the storage
 	// class (#501); zero means Created.
 	ClassUpdated time.Time `json:"classUpdated,omitempty"`
+	// ACL is stored and never enforced (#1233); nil reads as the bucket's
+	// default object ACL (acl.go).
+	ACL []aclEntry `json:"acl"`
 }
 
 func objectKey(bucket, name string) string { return objectPrefix + bucket + "/" + name }
@@ -101,18 +104,20 @@ func crcBase64(c uint32) string {
 // objectJSON renders o, reading its bucket's retention period; inside a
 // transaction use objectJSONWith.
 func (s *Server) objectJSON(r *http.Request, o objectRecord) map[string]any {
-	var period time.Duration
+	var b bucketRecord
 	_ = s.meta.View(func(tx Tx) error {
-		if b, ok, err := s.getBucket(tx, o.Bucket); err == nil && ok {
-			period = retentionPeriod(b)
+		if got, ok, err := s.getBucket(tx, o.Bucket); err == nil && ok {
+			b = got
 		}
 		return nil
 	})
-	return s.objectJSONWith(r, o, period)
+	return s.objectJSONWith(r, o, b)
 }
 
-// objectJSONWith renders o under a bucket retention period.
-func (s *Server) objectJSONWith(r *http.Request, o objectRecord, period time.Duration) map[string]any {
+// objectJSONWith renders o in bucket b: b's retention period, and, under a
+// full projection, the ACL (#1233).
+func (s *Server) objectJSONWith(r *http.Request, o objectRecord, b bucketRecord) map[string]any {
+	period := retentionPeriod(b)
 	gen := strconv.FormatInt(o.Generation, 10)
 	out := map[string]any{
 		"kind":           "storage#object",
@@ -162,6 +167,9 @@ func (s *Server) objectJSONWith(r *http.Request, o objectRecord, period time.Dur
 		out["softDeleteTime"], out["hardDeleteTime"] = rfc3339(o.SoftDeleted), rfc3339(o.HardDelete)
 	}
 	protectionJSON(out, o, period)
+	if fullProjection(r, false) && b.Name != "" {
+		objectACLFields(r, out, b, o)
+	}
 	return out
 }
 
@@ -242,6 +250,10 @@ type uploadMeta struct {
 	CRC32C             string            `json:"crc32c"`
 	StorageClass       string            `json:"storageClass"`
 	CustomTime         string            `json:"customTime"`
+	// ACL is the metadata's acl, and PredefinedACL the request's
+	// predefinedAcl (#1233); both persist with a resumable session.
+	ACL           json.RawMessage `json:"acl,omitempty"`
+	PredefinedACL string          `json:"predefinedAcl,omitempty"`
 	// protection is the body's holds and retention, for applyProtection.
 	protection map[string]any
 }
@@ -257,7 +269,7 @@ var uploadFields = map[string]string{
 	"timeCreated": "output", "updated": "output", "timeStorageClassUpdated": "output", "timeFinalized": "output",
 	"componentCount": "output", "timeDeleted": "output", "softDeleteTime": "output", "hardDeleteTime": "output",
 	"restoreToken": "output",
-	"acl":          "ACL methods are not implemented", "owner": "output",
+	"acl":          "kept", "owner": "output",
 	"temporaryHold": "kept", "eventBasedHold": "kept", "retention": "kept", "retentionExpirationTime": "output",
 	"customTime": "kept", "kmsKeyName": "customer-managed keys are not implemented",
 	"customerEncryption": "customer-supplied keys are not implemented", "contexts": "#492",
@@ -358,11 +370,13 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.EscapedPath(), resumablePrefix) {
 		bucket = pathVar(r, resumablePrefix, 1)
 	}
-	for _, p := range []string{"predefinedAcl", "kmsKeyName"} {
-		if q.Get(p) != "" {
-			writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "%s is not implemented", p))
-			return
-		}
+	if q.Get("kmsKeyName") != "" {
+		writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "kmsKeyName is not implemented"))
+		return
+	}
+	if err := checkProjection(r); err != nil {
+		writeError(w, err)
+		return
 	}
 	pre, err := parseObjectPreconditions(q, "if")
 	if err != nil {
@@ -420,6 +434,7 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	meta.PredefinedACL = q.Get("predefinedAcl")
 	wantMD5, wantCRC, err := expectedHashes(r, meta)
 	if err != nil {
 		writeError(w, err)
@@ -499,6 +514,9 @@ func (s *Server) finalizeObject(bucket string, meta uploadMeta, blob Blob, pre o
 			o.StorageClass, _ = b.Fields["storageClass"].(string)
 		}
 		if err := checkNewObject(b, &o); err != nil {
+			return err
+		}
+		if err := setUploadACL(b, &o, meta); err != nil {
 			return err
 		}
 		cur, exists, err := getObject(tx, bucket, meta.Name)

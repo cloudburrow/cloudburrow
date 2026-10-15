@@ -254,6 +254,9 @@ func retentionChange(old, next *objectRetention, override bool) error {
 // checkNewObject applies the bucket to a new version: its default
 // event-based hold, and object retention only where enabled.
 func checkNewObject(b bucketRecord, o *objectRecord) error {
+	if o.ACL == nil {
+		o.ACL = newObjectACL(b)
+	}
 	if defaultEventBasedHold(b) {
 		o.EventBasedHold = true
 	}

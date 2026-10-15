@@ -169,9 +169,11 @@ func indentJSON(items []json.RawMessage) string {
 // bucketEditForm is Edit bucket, prefilled from the bucket.
 //
 // Only what buckets.patch keeps on this instance, and nothing it refuses:
-// the location is shown and cannot change; ACLs, IP filtering and object
+// the location is shown and cannot change; IP filtering and object
 // retention's enablement are refused by the API or set only at creation, so
-// they are not on the form.
+// they are not on the form. The default object ACL is offered as a
+// predefined one while uniform access is off (#1233); single ACL entries
+// are on the Access control tab.
 func bucketEditForm(b bucketMeta) *console.EditForm {
 	const class, protection, rules = "Default storage class", "Protection", "Lifecycle and CORS"
 	retentionHelp := "Optional. Seconds an object must be kept before it can be deleted or replaced, 1 to 3155760000; empty removes the policy."
@@ -180,7 +182,7 @@ func bucketEditForm(b bucketMeta) *console.EditForm {
 	}
 	return &console.EditForm{
 		Label: "Edit bucket",
-		Fields: []console.Field{
+		Fields: append([]console.Field{
 			{Name: "location", Label: "Location", Type: "text", Immutable: true, Default: b.Location,
 				Help: "A bucket's location is fixed when it is created."},
 			{Name: "labels", Label: "Labels", Type: "map", Default: console.FormatMap(b.Labels),
@@ -202,6 +204,7 @@ func bucketEditForm(b bucketMeta) *console.EditForm {
 			{Name: "defaultEventBasedHold", Label: "Default event-based hold", Type: "checkbox", Section: protection,
 				Default: strconv.FormatBool(b.DefaultEventBasedHold),
 				Help:    "On, every new object is held until the hold is released, and cannot be deleted or replaced while it is."},
+		}, append(defaultObjectACLField(b), []console.Field{
 			{Name: "lifecycle", Label: "Lifecycle rules", Type: "textarea", Section: rules,
 				Default: indentJSON(b.Lifecycle.Rule),
 				Help: `Optional. The lifecycle "rule" array as the JSON API takes it, such as ` +
@@ -210,7 +213,7 @@ func bucketEditForm(b bucketMeta) *console.EditForm {
 				Default: indentJSON(b.CORS),
 				Help: `Optional. The "cors" array as the JSON API takes it, such as ` +
 					`[{"origin":["http://localhost:8080"],"method":["GET"],"maxAgeSeconds":3600}]; empty removes it.`},
-		},
+		}...)...),
 		Note: "Saved through buckets.patch against the metageneration just read, so a change made " +
 			"meanwhile is refused rather than overwritten. The location cannot be changed, and a " +
 			"retention policy is locked with Lock retention policy, on this page.",
@@ -315,8 +318,11 @@ func (p storageProvider) Edit(ctx context.Context, _ string, path []string, valu
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPatch,
-		p.bucketURL(bucket)+"?ifMetagenerationMatch="+urlpkg.QueryEscape(cur.Metageneration), bytes.NewReader(raw))
+	q := urlpkg.Values{"ifMetagenerationMatch": {cur.Metageneration}}
+	if v := strings.TrimSpace(values["predefinedDefaultObjectAcl"]); v != "" && v != aclKeep {
+		q.Set("predefinedDefaultObjectAcl", v)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, p.bucketURL(bucket)+"?"+q.Encode(), bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}

@@ -239,8 +239,8 @@ func TestStorageBucketUnkeptFieldRefused(t *testing.T) {
 	if code, resp := raw(t, "PATCH", b+"/web", `{"ipFilter":null,"acl":null,"lifecycle":{"rule":[]}}`); code != 200 {
 		t.Errorf("patch with nulls for unkept fields = %d %s", code, resp)
 	}
-	if code, resp := raw(t, "POST", b+"?project=p&predefinedAcl=publicRead", `{"name":"acl"}`); code != 501 || !strings.Contains(resp, "predefinedAcl") {
-		t.Errorf("predefinedAcl = %d %s; want 501 naming it", code, resp)
+	if code, resp := raw(t, "POST", b+"?project=p&predefinedAcl=bogus", `{"name":"acl"}`); code != 400 || !strings.Contains(resp, "predefinedAcl") {
+		t.Errorf("predefinedAcl=bogus = %d %s; want 400 naming it", code, resp)
 	}
 }
 

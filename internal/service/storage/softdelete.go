@@ -223,10 +223,6 @@ func (s *Server) objectsRestore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, required("generation"))
 		return
 	}
-	if q.Get("copySourceAcl") == "true" {
-		writeError(w, badRequest("copySourceAcl is not supported by CloudBurrow: ACL methods are not implemented; it is refused rather than ignored"))
-		return
-	}
 	if q.Get("restoreToken") != "" {
 		writeError(w, badRequest("restoreToken is not supported by CloudBurrow: hierarchical namespace buckets are not implemented (#503)"))
 		return
@@ -282,6 +278,12 @@ func (s *Server) objectsRestore(w http.ResponseWriter, r *http.Request) {
 		}
 		o = soft
 		fresh(&o)
+		// copySourceAcl keeps the soft-deleted version's ACL; without it
+		// the restored object takes the bucket's default object ACL
+		// (objects.restore reference; #1233).
+		if q.Get("copySourceAcl") != "true" || uniformAccess(b) {
+			o.ACL = nil
+		}
 		if err := checkNewObject(b, &o); err != nil {
 			return err
 		}
