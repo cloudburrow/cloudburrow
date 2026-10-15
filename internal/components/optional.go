@@ -173,6 +173,10 @@ func firestoreBackend(project string) Backend {
 	}
 }
 
+// DatastoreLockFile is the file on persistent Datastore's volume whose lock
+// the running emulator holds (#1307).
+const DatastoreLockFile = "/data/datastore.lock"
+
 // datastoreBackend runs the Datastore emulator.
 //
 // In persistent mode its on-disk store is on a volume (#307), and the
@@ -183,15 +187,21 @@ func firestoreBackend(project string) Backend {
 // in CI). The data directory is created as gcloud's own wrapper does, when it
 // is empty, and the JVM is exec'd so it receives the signal.
 //
+// The emulator loads the store when it starts and saves it when it shuts
+// down, and a deleted pod's replacement, which the ReplicaSet creates at
+// once on the same volume, could start before the old pod's JVM had even
+// been sent SIGTERM: it then loaded the store without the last writes, and
+// served and later saved that (#1307, measured with the call front in the
+// pod: the new JVM loaded at 26.69 s, the old one was signalled at 27.33 s
+// and saved in 3 ms, and TestDatastoreSurvivesAPodRestart lost the entity
+// in three runs of three). So the JVM holds an exclusive flock(1) on a file
+// in the volume for as long as it runs, an inherited descriptor that exec
+// keeps open, and the next pod's emulator waits for it: the old JVM's lock
+// goes only when it has exited, after its save, or when it is killed. A
+// ReadWriteOnce volume is on one node, so both pods share its kernel's locks.
+//
 // Ephemeral mode keeps the gcloud wrapper with --no-store-on-disk, because
 // writing to a directory nothing preserves only slows startup.
-//
-// Ephemeral mode runs the call front (#1288) before the emulator, so a
-// pod's calls are measured. Persistent mode does not yet: with the front in
-// the pod, an entity written shortly before the pod was deleted was missing
-// from the next pod in two of three restarts (TestDatastoreSurvivesAPodRestart,
-// measured; it passes without the front), so its calls are measured from the
-// host alone, by the tunnel's guard (#1267), until that is understood (#1307).
 //
 // Both modes run as Firestore in Datastore mode (#371), which is what a
 // Datastore database in Google Cloud is today, and which is strongly
@@ -199,9 +209,9 @@ func firestoreBackend(project string) Backend {
 // one query in ten missed an entity written just before it (19 of 200,
 // measured).
 func datastoreBackend(project string, persistent bool) Backend {
-	b := Backend{Name: "datastore", Image: PubSubImage, Port: DatastorePort}
+	b := Backend{Name: "datastore", Image: PubSubImage, Port: DatastorePort,
+		Front: callFront(DatastorePort, DatastoreEmulatorPort)}
 	if !persistent {
-		b.Front = callFront(DatastorePort, DatastoreEmulatorPort)
 		b.Command = []string{"gcloud", "beta", "emulators", "datastore", "start",
 			"--project=" + project,
 			fmt.Sprintf("--host-port=127.0.0.1:%d", DatastoreEmulatorPort),
@@ -210,10 +220,11 @@ func datastoreBackend(project string, persistent bool) Backend {
 	}
 	const emu = "/google-cloud-sdk/platform/cloud-datastore-emulator"
 	b.Command = []string{"sh", "-c", fmt.Sprintf(
-		`d=/data/datastore; if [ -z "$(ls -A "$d" 2>/dev/null)" ]; then %s/cloud_datastore_emulator create --project_id=%s "$d"; fi; `+
+		`exec 9>`+DatastoreLockFile+`; if ! flock -n 9; then echo "waiting for the previous emulator to save /data/datastore"; flock 9; fi; `+
+			`d=/data/datastore; if [ -z "$(ls -A "$d" 2>/dev/null)" ]; then %s/cloud_datastore_emulator create --project_id=%s "$d"; fi; `+
 			`exec java -cp %s/CloudDatastore.jar com.google.cloud.datastore.emulator.CloudDatastore start `+
-			`--host=0.0.0.0 --port=%d --store_on_disk=true --allow_remote_shutdown --firestore_in_datastore_mode "$d"`,
-		emu, project, emu, DatastorePort)}
+			`--host=127.0.0.1 --port=%d --store_on_disk=true --allow_remote_shutdown --firestore_in_datastore_mode "$d"`,
+		emu, project, emu, DatastoreEmulatorPort)}
 	b.Persistent, b.MountPath, b.OwnsClaim = true, "/data", true
 	return b
 }

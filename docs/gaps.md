@@ -34,8 +34,8 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
-| Console | 6 | 6 | 0 | 0 | 0 |
-| **Total** | **85** | **37** | **36** | **7** | **5** |
+| Console | 5 | 5 | 0 | 0 | 0 |
+| **Total** | **84** | **36** | **36** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -230,7 +230,6 @@ Closed by this sweep: Test permissions on the Permissions tab (#1242).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Request metrics, the request log and traces for persistent Datastore's calls from pods: its pod runs no call front yet, since with it an entity written shortly before a pod restart was lost (#1307; Spanner, Firestore and ephemeral Datastore since #1288) | not built yet | S |
 | Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |
 | Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured"; #1267) | not built yet | M |

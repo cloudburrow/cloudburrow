@@ -330,3 +330,39 @@ func TestBigQueryManifestRunsTheLocallyBuiltEmulator(t *testing.T) {
 		t.Errorf("the manifest names upstream's image:\n%s", m)
 	}
 }
+
+// Persistent Datastore runs behind its call front (#1288) as ephemeral
+// Datastore does, and its emulator holds the volume's lock before it loads
+// the store (#1307): a deleted pod's replacement started on the same volume
+// before the old JVM had saved, and loaded the store without its last
+// writes.
+func TestPersistentDatastoreIsFrontedAndWaitsForTheOldEmulator(t *testing.T) {
+	b, ok := OptionalBackend(config.ServiceDatastore, "p", true)
+	if !ok {
+		t.Fatal("no Datastore backend")
+	}
+	if b.Front == nil || b.Front.UpstreamPort != DatastoreEmulatorPort {
+		t.Fatalf("front = %+v, want the call front on upstream %d", b.Front, DatastoreEmulatorPort)
+	}
+	if len(b.Command) != 3 || b.Command[0] != "sh" {
+		t.Fatalf("command = %q, want a sh -c script", b.Command)
+	}
+	script := b.Command[2]
+	lock := strings.Index(script, "exec 9>"+DatastoreLockFile+";")
+	wait := strings.Index(script, "flock 9;")
+	create := strings.Index(script, "cloud_datastore_emulator create")
+	java := strings.Index(script, "exec java ")
+	if lock < 0 || wait < lock || create < wait || java < create {
+		t.Errorf("script %q does not open the lock, wait on it, then create and exec the JVM, in that order", script)
+	}
+	if !strings.HasPrefix(DatastoreLockFile, b.MountPath+"/") {
+		t.Errorf("lock %s is not on the volume mounted at %s", DatastoreLockFile, b.MountPath)
+	}
+	if !strings.Contains(script, "--host=127.0.0.1 ") || strings.Contains(script, "0.0.0.0") {
+		t.Errorf("script %q does not bind the emulator to the pod's loopback alone", script)
+	}
+	m := b.Manifest("ns", "i")
+	if !strings.Contains(m, "name: front") || !strings.Contains(m, "persistentVolumeClaim") {
+		t.Errorf("manifest has no front or no volume:\n%s", m)
+	}
+}
