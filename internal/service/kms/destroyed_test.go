@@ -99,11 +99,17 @@ func (f *recordingKubectl) Run(_ context.Context, stdin string, args ...string) 
 		}
 		return "", errNotFoundKubectl(name)
 	case strings.Contains(joined, "get secrets"):
-		var keys []string
+		// Scan asks for the key and its value, List for the key alone.
+		withValue := strings.Contains(joined, ".data.value")
+		var lines []string
 		for _, v := range f.secrets {
-			keys = append(keys, strings.SplitN(v, "|", 2)[1])
+			value, key, _ := strings.Cut(v, "|")
+			if withValue {
+				key += "\t" + value
+			}
+			lines = append(lines, key)
 		}
-		return strings.Join(keys, "\n"), nil
+		return strings.Join(lines, "\n"), nil
 	}
 	return "", nil
 }

@@ -96,56 +96,43 @@ func advance(next time.Time, period time.Duration, now time.Time) time.Time {
 	return next
 }
 
-// rotateDue rotates every key whose next_rotation_time is at or before now:
-// a new ENABLED version from the key's template, made primary, and
-// next_rotation_time advanced. It returns the earliest next_rotation_time
-// still to come (zero if none). The caller holds s.mu.
-func (s *Server) rotateDue(now time.Time) (time.Time, error) {
-	keys, err := s.db.List(keyPrefix)
+// rotateDue rotates one key the sweep found due, under s.mu: a new ENABLED
+// version from the key's template, made primary, and next_rotation_time
+// advanced. The key is read again first, so a schedule changed or cleared, or
+// a key deleted, since the sweep read it is what counts. It returns the key's
+// next_rotation_time still to come (zero if none).
+func (s *Server) rotateDue(key string, now time.Time) (time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, err := s.db.Get(key)
+	if errors.Is(err, store.ErrNotFound) {
+		return time.Time{}, nil
+	}
 	if err != nil {
-		return time.Time{}, fmt.Errorf("list keys: %w", err)
+		return time.Time{}, fmt.Errorf("read %s: %w", key, err)
 	}
-	var next time.Time
-	for _, key := range keys {
-		b, err := s.db.Get(key)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return time.Time{}, fmt.Errorf("read %s: %w", key, err)
-		}
-		var k cryptoKey
-		if err := json.Unmarshal(b, &k); err != nil {
-			return time.Time{}, fmt.Errorf("decode %s: %w", key, err)
-		}
-		if k.NextRotation.IsZero() {
-			continue
-		}
-		if now.Before(k.NextRotation) {
-			if next.IsZero() || k.NextRotation.Before(next) {
-				next = k.NextRotation
-			}
-			continue
-		}
-		mat, err := newMaterial(k)
-		if err != nil {
-			return time.Time{}, err
-		}
-		n := k.Next
-		v := keyVersion{Name: versionName(k.Name, n), Created: now.UTC(), Material: mat, Algorithm: k.Algorithm}
-		// The version is written before the key names it, so a failure
-		// between leaves an extra version, never a primary that is missing.
-		if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
-			return time.Time{}, err
-		}
-		k.Next, k.Primary = n+1, n
-		k.NextRotation = advance(k.NextRotation, k.RotationPeriod, now).UTC()
-		if err := s.put(key, k); err != nil {
-			return time.Time{}, err
-		}
-		if !k.NextRotation.IsZero() && (next.IsZero() || k.NextRotation.Before(next)) {
-			next = k.NextRotation
-		}
+	var k cryptoKey
+	if err := json.Unmarshal(b, &k); err != nil {
+		return time.Time{}, fmt.Errorf("decode %s: %w", key, err)
 	}
-	return next, nil
+	if k.NextRotation.IsZero() || now.Before(k.NextRotation) {
+		return k.NextRotation, nil
+	}
+	mat, err := newMaterial(k)
+	if err != nil {
+		return time.Time{}, err
+	}
+	n := k.Next
+	v := keyVersion{Name: versionName(k.Name, n), Created: now.UTC(), Material: mat, Algorithm: k.Algorithm}
+	// The version is written before the key names it, so a failure
+	// between leaves an extra version, never a primary that is missing.
+	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
+		return time.Time{}, err
+	}
+	k.Next, k.Primary = n+1, n
+	k.NextRotation = advance(k.NextRotation, k.RotationPeriod, now).UTC()
+	if err := s.put(key, k); err != nil {
+		return time.Time{}, err
+	}
+	return k.NextRotation, nil
 }

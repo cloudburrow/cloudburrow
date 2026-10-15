@@ -879,48 +879,137 @@ func (s *Server) wake() {
 // if none). Reads of versions never wait for it: they compute the effective
 // state themselves. A rotation creates a version, so it happens here and not
 // on a read.
+//
+// It reads every record without holding s.mu, with one request per prefix
+// where the store can (scan), and takes s.mu only to write one record that is
+// due, re-reading it first so a change made meanwhile (a restore, a schedule
+// cleared, a reset) wins. Holding s.mu across one kubectl read per record made
+// requests wait behind the sweep past their deadline once earlier runs had
+// left a few hundred records (#1232). A change made meanwhile that moves what
+// is due calls wake, so Run sweeps again.
 func (s *Server) Sweep() (time.Time, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	keys, err := s.db.List(versionPrefix)
+	versions, err := s.scan(versionPrefix)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("list versions: %w", err)
 	}
+	keys, err := s.scan(keyPrefix)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("list keys: %w", err)
+	}
 	now := s.now()
 	var next time.Time
+	earliest := func(t time.Time) {
+		if !t.IsZero() && (next.IsZero() || t.Before(next)) {
+			next = t
+		}
+	}
+	for _, r := range versions {
+		var stored keyVersion
+		if err := json.Unmarshal(r.value, &stored); err != nil {
+			return time.Time{}, fmt.Errorf("decode %s: %w", r.key, err)
+		}
+		if stored.state() != kmspb.CryptoKeyVersion_DESTROY_SCHEDULED {
+			continue
+		}
+		if stored.effective(now).state() != kmspb.CryptoKeyVersion_DESTROYED {
+			earliest(stored.DestroyTime)
+			continue
+		}
+		if err := s.destroyDue(r.key, now); err != nil {
+			return time.Time{}, err
+		}
+	}
+	for _, r := range keys {
+		var k cryptoKey
+		if err := json.Unmarshal(r.value, &k); err != nil {
+			return time.Time{}, fmt.Errorf("decode %s: %w", r.key, err)
+		}
+		if k.NextRotation.IsZero() {
+			continue
+		}
+		if now.Before(k.NextRotation) {
+			earliest(k.NextRotation)
+			continue
+		}
+		rotation, err := s.rotateDue(r.key, now)
+		if err != nil {
+			return time.Time{}, err
+		}
+		earliest(rotation)
+	}
+	return next, nil
+}
+
+// destroyDue writes DESTROYED for one version the sweep found due, under
+// s.mu, if the stored record still is: it is read again, so a version
+// restored or deleted since the sweep read it is left as it now is.
+func (s *Server) destroyDue(key string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, err := s.db.Get(key)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read %s: %w", key, err)
+	}
+	var stored keyVersion
+	if err := json.Unmarshal(b, &stored); err != nil {
+		return fmt.Errorf("decode %s: %w", key, err)
+	}
+	if stored.state() != kmspb.CryptoKeyVersion_DESTROY_SCHEDULED {
+		return nil
+	}
+	if eff := stored.effective(now); eff.state() == kmspb.CryptoKeyVersion_DESTROYED {
+		return s.put(key, eff)
+	}
+	return nil
+}
+
+// record is one stored record a scan read.
+type record struct {
+	key   string
+	value []byte
+}
+
+// scanner is a store that reads every record under a prefix with one
+// request; KubeStore does, with one kubectl list.
+type scanner interface {
+	Scan(prefix string) (map[string][]byte, error)
+}
+
+// scan returns the records under prefix, sorted by key, with one request
+// when the store is a scanner and with List and a Get per record otherwise
+// (the in-process stores, where a Get costs nothing). A record deleted
+// between the List and its Get is left out.
+func (s *Server) scan(prefix string) ([]record, error) {
+	var out []record
+	if sc, ok := s.db.(scanner); ok {
+		all, err := sc.Scan(prefix)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range all {
+			out = append(out, record{k, v})
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].key < out[j].key })
+		return out, nil
+	}
+	keys, err := s.db.List(prefix)
+	if err != nil {
+		return nil, err
+	}
 	for _, key := range keys {
 		b, err := s.db.Get(key)
 		if errors.Is(err, store.ErrNotFound) {
 			continue
 		}
 		if err != nil {
-			return time.Time{}, fmt.Errorf("read %s: %w", key, err)
+			return nil, fmt.Errorf("read %s: %w", key, err)
 		}
-		var stored keyVersion
-		if err := json.Unmarshal(b, &stored); err != nil {
-			return time.Time{}, fmt.Errorf("decode %s: %w", key, err)
-		}
-		if stored.state() != kmspb.CryptoKeyVersion_DESTROY_SCHEDULED {
-			continue
-		}
-		if eff := stored.effective(now); eff.state() == kmspb.CryptoKeyVersion_DESTROYED {
-			if err := s.put(key, eff); err != nil {
-				return time.Time{}, err
-			}
-			continue
-		}
-		if next.IsZero() || stored.DestroyTime.Before(next) {
-			next = stored.DestroyTime
-		}
+		out = append(out, record{key, b})
 	}
-	rotation, err := s.rotateDue(now)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if !rotation.IsZero() && (next.IsZero() || rotation.Before(next)) {
-		next = rotation
-	}
-	return next, nil
+	return out, nil
 }
 
 // Run sweeps now, so versions that fell due while nothing was running are

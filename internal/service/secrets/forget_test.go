@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -54,11 +55,30 @@ func TestForgetFollowsTheMode(t *testing.T) {
 		if err := k.Forget(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if got, want := r.calls[len(r.calls)-1], "-n default delete secrets -l "+c.selector; got != want {
+		// One DeleteCollection, which the API server carries out itself, not
+		// `kubectl delete -l`, which sends a DELETE per Secret (#1232).
+		if got, want := r.calls[len(r.calls)-1], "-n default delete --raw /api/v1/namespaces/default/secrets?labelSelector="+url.QueryEscape(c.selector); got != want {
 			t.Errorf("epoch %q: Forget ran %q, want %q", c.epoch, got, want)
 		}
 	}
 	if err := NewKubeStore(k8s.NewWith(&forgetRunner{}, "", "", "default"), "").Forget(ctx); err == nil {
 		t.Error("Forget without an instance selected every instance's Secrets")
+	}
+}
+
+// Store.Reset over Kubernetes, which /admin/reset runs, is one
+// DeleteCollection of every Secret Manager Secret List reads, not a delete
+// per key, each a read and a rewrite of its Secret, under the store's lock
+// (#1232).
+func TestResetIsOneDeleteCollection(t *testing.T) {
+	r := &forgetRunner{}
+	st := NewStore(NewKubeStore(k8s.NewWith(r, "", "", "default"), "inst"))
+	if err := st.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	want := "-n default delete --raw /api/v1/namespaces/default/secrets?labelSelector=" +
+		url.QueryEscape("cloudburrow.dev/owned=true,cloudburrow.dev/service=secretmanager")
+	if len(r.calls) != 1 || r.calls[0] != want {
+		t.Errorf("Reset ran %q, want only %q", r.calls, want)
 	}
 }

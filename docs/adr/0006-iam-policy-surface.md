@@ -243,7 +243,10 @@ this amends the ADR in place as #421 and #504 did.
    resource's own object it would change the resource's `etag` and make the caller's next
    update ABORTED. Cloud Run is neither reset nor captured by `state save`, so neither is
    its policy.
-5. Every compatibility.md row for these methods reads ***Stored, not enforced***.
+5. **Required tests:** official-SDK compat tests of each resource's policy, and
+   `TestTerraformRunIAM` (#1236): `google_cloud_run_v2_service_iam_*` and
+   `google_cloud_run_v2_job_iam_*` member, binding and policy through `cloudburrow terraform`.
+6. Every compatibility.md row for these methods reads ***Stored, not enforced***.
 
 **Project IAM stays UNIMPLEMENTED.** A project's policy is the one Google's resources
 inherit, and the Cloud Storage amendment above records that project-level bindings do not
@@ -292,8 +295,10 @@ it in place, as #421 and #504 did.
    emulator restart, which empties BigQuery, drops every policy. BigQuery is not captured by
    `state save`, so neither are its policies.
 6. **Required tests:** official-SDK compat tests (`Table.IAM` of the Go client, and the
-   generated client for routines and row access policies) and the console's Permissions tab.
-   A Terraform `google_bigquery_table_iam_member` apply and destroy is a follow-up (#1236).
+   generated client for routines and row access policies), the console's Permissions tab,
+   and `TestTerraformBigQueryIAM` (#1236): `google_bigquery_table_iam_member`, `_binding` and
+   `_policy` on a table and a view, and `google_bigquery_routine_iam_*` on a routine, through
+   `cloudburrow terraform`, which sets `big_query_custom_endpoint` for it.
 7. Every compatibility.md row for these methods reads ***Stored, not enforced***.
 
 Every service other than these six (Secret Manager, Cloud Tasks, Cloud KMS, Cloud

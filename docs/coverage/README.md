@@ -14,7 +14,7 @@ Do not edit these files by hand.
 | [Cloud KMS](kms.md) | 38 | 36 | 0 | 2 | 0 | 0 | 0 | 82 |
 | [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 7 | 0 | 4 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud Logging (write and read)](logging.md) | 6 | 6 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Cloud Logging](logging.md) | 43 | 21 | 0 | 22 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 14 | 2 | 0 | 11 | 1 | 0 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 66 | 0 | 21 | 0 | 0 | 0 | 14 |
