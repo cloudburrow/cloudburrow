@@ -445,4 +445,16 @@ func TestPlaygroundStreamSwitchPicksTheMethod(t *testing.T) {
 		got.Candidates[0].FinishReason != "STOP" || got.ModelVersion != model {
 		t.Errorf("unary answer = %s", body)
 	}
+
+	// Raw (#1284, #1285): :streamRawPredict streams the same events,
+	// :rawPredict answers the same one response.
+	resp, body = postJSON(t, srv, "/api/ai/playground", `{"prompt":"hello there","stream":true,"raw":true}`)
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") ||
+		strings.Count(body, "data: ") != 3 {
+		t.Fatalf("raw stream = %d: %s", resp.StatusCode, body)
+	}
+	resp, body = postJSON(t, srv, "/api/ai/playground", `{"prompt":"hello there","stream":false,"raw":true}`)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"HELLO THERE"`) || !strings.Contains(body, `"STOP"`) {
+		t.Fatalf("raw unary = %d: %s", resp.StatusCode, body)
+	}
 }

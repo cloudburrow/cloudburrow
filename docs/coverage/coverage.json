@@ -1906,14 +1906,17 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Unimplemented": 9,
-      "Verified": 5
+      "Unimplemented": 4,
+      "Verified": 10
     },
     "rows": [
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/streampredict_test.go:180 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectRawPredict",
@@ -1950,18 +1953,25 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/RawPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/predictiongrpc_test.go:59 TestPredictionClientReachesACustomEndpoint"
+          "test/compat/predictiongrpc_test.go:59 TestPredictionClientReachesACustomEndpoint",
+          "test/compat/rawpredict_test.go:26 TestRawPredictOnTheEmbeddingModel",
+          "test/compat/rawpredict_test.go:70 TestRawPredictOnTheGenerationModel"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/ServerStreamingPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/streampredict_test.go:180 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamDirectPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamDirectRawPredict",
@@ -1977,13 +1987,18 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamRawPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/streampredict_test.go:180 TestStreamingPredictOnTheEmbeddingModel",
+          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamingPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/streampredict_test.go:48 TestStreamingPredictOnTheGenerationModel"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamingRawPredict",

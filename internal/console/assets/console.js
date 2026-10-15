@@ -7702,6 +7702,7 @@ const PLAYGROUND_HISTORY_LIMIT = 20;
 let PLAYGROUND_HISTORY = [];
 let PLAYGROUND_ABORT = null;
 let PLAYGROUND_STREAM = true;
+let PLAYGROUND_RAW = false;
 
 function stopGeneration() {
   if (PLAYGROUND_ABORT) { PLAYGROUND_ABORT.abort(); PLAYGROUND_ABORT = null; }
@@ -7758,6 +7759,14 @@ async function renderPlayground(view) {
   const streamLabel = el("label", { for: "pg-stream", title:
     "On: streamGenerateContent, shown as each chunk arrives. Off: generateContent, one answer." },
     stream, " Stream");
+  // Raw (#1284, #1285): the same body sent as RawPredict sends it, to
+  // :streamRawPredict (StreamRawPredict) or :rawPredict (RawPredict).
+  const raw = el("input", { type: "checkbox", id: "pg-raw" });
+  raw.checked = PLAYGROUND_RAW;
+  raw.addEventListener("change", () => { PLAYGROUND_RAW = raw.checked; });
+  const rawLabel = el("label", { for: "pg-raw", title:
+    "On: the body is sent as RawPredict sends it, to :streamRawPredict (Stream on) or :rawPredict (Stream off)." },
+    raw, " Raw");
   const timing = el("span", { class: "unavailable", text: "" });
   const output = el("pre", { class: "mono pg-output", id: "pg-output", "aria-live": "polite" });
   const historyBody = el("tbody");
@@ -7801,6 +7810,7 @@ async function renderPlayground(view) {
     cancel.disabled = false;
 
     const streaming = stream.checked;
+    const rawBody = raw.checked;
     const controller = new AbortController();
     PLAYGROUND_ABORT = controller;
     const started = performance.now();
@@ -7812,7 +7822,7 @@ async function renderPlayground(view) {
       const resp = await fetch("/api/ai/playground", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, stream: streaming }),
+        body: JSON.stringify({ prompt: text, stream: streaming, raw: rawBody }),
         signal: controller.signal,
       });
       if (!resp.ok) {
@@ -7873,7 +7883,7 @@ async function renderPlayground(view) {
       PLAYGROUND_ABORT = null;
 
       PLAYGROUND_HISTORY.unshift({
-        at: new Date().toLocaleTimeString(), prompt: text, method: streaming ? "Stream" : "Unary",
+        at: new Date().toLocaleTimeString(), prompt: text, method: (rawBody ? "Raw " : "") + (streaming ? "Stream" : "Unary"),
         ttft, total: `${Math.round(total)} ms`, ok, cancelled,
       });
       PLAYGROUND_HISTORY = PLAYGROUND_HISTORY.slice(0, PLAYGROUND_HISTORY_LIMIT);
@@ -7891,7 +7901,7 @@ async function renderPlayground(view) {
     refused,
     el("div", { class: "card" },
       prompt,
-      el("div", { class: "card-actions" }, send, cancel, streamLabel, timing),
+      el("div", { class: "card-actions" }, send, cancel, streamLabel, rawLabel, timing),
       output),
     el("div", { class: "card" },
       el("h2", { text: "This session" }),
@@ -7936,13 +7946,14 @@ function stopPrediction() {
   if (PREDICT_ABORT) { PREDICT_ABORT.abort(); PREDICT_ABORT = null; }
 }
 
-// Embeddings (#41) sends text-embedding :predict, or EmbedContent's
-// :embedContent (#1244), for the one embedding model served, a community ONNX
+// Embeddings (#41) sends text-embedding :predict, EmbedContent's
+// :embedContent (#1244), or :rawPredict with the :predict body (#1284), for
+// the one embedding model served, a community ONNX
 // conversion of EmbeddingGemma. The provenance banner is on the screen that
 // shows the vectors, not only in the documentation.
 async function renderEmbeddings(view) {
   const title = "Embeddings";
-  const subtitle = "Text-embedding :predict and :embedContent against the local endpoint";
+  const subtitle = "Text-embedding :predict, :embedContent and :rawPredict against the local endpoint";
   setChildren(view, pageHeader(title, subtitle), loadingState(3));
   let status;
   try {
@@ -7973,7 +7984,8 @@ async function renderEmbeddings(view) {
   const methods = status.methods || ["predict"];
   const method = el("select", { id: "emb-method", "aria-label": "API method" },
     ...methods.map((m) => el("option", { value: m,
-      text: m === "embedContent" ? "EmbedContent (:embedContent, one request per text)" : "Predict (:predict, one batch)" })));
+      text: m === "embedContent" ? "EmbedContent (:embedContent, one request per text)"
+        : m === "rawPredict" ? "RawPredict (:rawPredict, the :predict body unwrapped)" : "Predict (:predict, one batch)" })));
   method.addEventListener("change", () => {
     const ep = document.getElementById("emb-endpoint");
     if (ep && status.endpoints) ep.textContent = status.endpoints[method.value] || status.endpoint;
@@ -8011,7 +8023,8 @@ async function renderEmbeddings(view) {
         }
         displayName = "EmbedContent: " + status.model + " — " + status.note;
       } else {
-        const data = await post("predict", {
+        // RawPredict sends the same body unwrapped, and gets the same answer.
+        const data = await post(method.value === "rawPredict" ? "rawPredict" : "predict", {
           instances: lines.map((content) => ({ content, task_type: task.value })),
           parameters: { outputDimensionality: Number(dim.value) },
         });

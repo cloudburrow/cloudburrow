@@ -29,13 +29,13 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud KMS | 7 | 1 | 3 | 2 | 1 |
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 2 | 2 | 0 | 0 | 0 |
-| Vertex AI | 3 | 2 | 1 | 0 | 0 |
+| Vertex AI | 4 | 2 | 2 | 0 | 0 |
 | BigQuery | 27 | 10 | 14 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 3 | 3 | 0 | 0 | 0 |
-| **Total** | **77** | **31** | **34** | **7** | **5** |
+| **Total** | **78** | **31** | **35** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -153,6 +153,9 @@ Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1
 |---|---|---|
 | Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` (#1285) | not built yet | M |
 | `RawPredict` on a publisher model (#1284) | not built yet | S |
+Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244); `PredictionService.StreamGenerateContent` over gRPC, and an official-SDK test of `GenerateContent` over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`, `DirectPredict`, `ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285).
+| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
+| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served (#1285) | no gRPC model server | M |
 | `Explain` | no emulator support | L |
 
 ## BigQuery

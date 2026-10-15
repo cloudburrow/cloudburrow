@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -24,14 +25,15 @@ func (p *Playground) embeddingsConfigured() bool {
 func (p *Playground) predictPath() string { return p.embeddingPath("predict") }
 
 // embeddingPath is the real Vertex path of one embedding method: predict
-// (text-embedding :predict, a batch) or embedContent (#1244, one content).
+// (text-embedding :predict, a batch), embedContent (#1244, one content) or
+// rawPredict (#1284, the :predict body sent unwrapped).
 func (p *Playground) embeddingPath(method string) string {
 	return fmt.Sprintf("/v1/projects/console/locations/us-central1/publishers/google/models/%s:%s",
 		p.EmbeddingModel, method)
 }
 
 // embeddingMethods are the methods the screen can send.
-var embeddingMethods = []string{"predict", "embedContent"}
+var embeddingMethods = []string{"predict", "embedContent", "rawPredict"}
 
 // handleEmbeddingsStatus reports what the screen needs.
 func (s *Server) handleEmbeddingsStatus(w http.ResponseWriter, _ *http.Request) {
@@ -49,6 +51,7 @@ func (s *Server) handleEmbeddingsStatus(w http.ResponseWriter, _ *http.Request) 
 		"endpoints": map[string]string{
 			"predict":      "http://" + p.endpoint() + p.embeddingPath("predict"),
 			"embedContent": "http://" + p.endpoint() + p.embeddingPath("embedContent"),
+			"rawPredict":   "http://" + p.endpoint() + p.embeddingPath("rawPredict"),
 		},
 		"official": false,
 		"note":     EmbeddingsNote,
@@ -59,7 +62,8 @@ func (s *Server) handleEmbeddingsStatus(w http.ResponseWriter, _ *http.Request) 
 }
 
 // handleEmbeddingsPredict relays the screen's request to the real :predict,
-// or to :embedContent with ?method=embedContent (#1244), the same path and
+// to :embedContent with ?method=embedContent (#1244), or to :rawPredict with
+// ?method=rawPredict (#1284), the same path and
 // body a Vertex client sends, and returns the API's status and body
 // unchanged — its 501 when the runtime is not compiled in included.
 func (s *Server) handleEmbeddingsPredict(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +76,7 @@ func (s *Server) handleEmbeddingsPredict(w http.ResponseWriter, r *http.Request)
 	if method == "" {
 		method = "predict"
 	}
-	if method != "predict" && method != "embedContent" {
+	if !slices.Contains(embeddingMethods, method) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": fmt.Sprintf("method %q is not one of %v", method, embeddingMethods)})
 		return
