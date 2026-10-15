@@ -1,0 +1,225 @@
+CloudBurrow patch 8 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1103, #1057); needs patch 0002 and googlesqlite
+patch 0018.
+
+The bug: jobs.get (Project.Job, findJobsMetadata), jobs.getQueryResults
+(Repository.FindJob) and Job.Wait, which calls FindJob every 100 ms until
+the job is done, read a job with a GoogleSQL WHERE on the jobs table's
+primary key, and googlesqlite compiles each WHERE comparison to a
+function call that SQLite cannot answer from the key, so each read
+visited every job the emulator kept. Patch 0007 did this for AddJob's
+check that an ID is free.
+
+The patch reads one job by its key as SQLite SQL (googlesqlite's
+Conn.QueryRawContext, with the key encoded as googlesqlite stores a
+STRING), where SQLite uses the primary key's index, and decodes the
+row's columns as googlesqlite would. jobs.list, which reads every job
+of a project, is unchanged.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/metadata/repository.go
++++ b/internal/metadata/repository.go
+@@ -351,22 +351,94 @@
+ 		return nil, err
+ 	}
+ 	defer conn.Close()
+-	tx, err := conn.BeginTx(ctx, nil)
++	// CloudBurrow patch (cloudburrow/cloudburrow#1103): read by the
++	// primary key (findJobRow), not by a GoogleSQL WHERE, which visited
++	// every job.
++	row, err := r.findJobRow(ctx, conn, projectID, jobID, true)
++	if err != nil || row == nil {
++		return nil, err
++	}
++	var content bigqueryv2.Job
++	if len(row.metadata) > 0 {
++		if err := json.Unmarshal([]byte(row.metadata), &content); err != nil {
++			return nil, fmt.Errorf("failed to decode metadata content %s: %w", row.metadata, err)
++		}
++	}
++	var response internaltypes.QueryResponse
++	expired := row.result == expiredResult
++	if len(row.result) > 0 && !expired {
++		if err := json.Unmarshal([]byte(row.result), &response); err != nil {
++			return nil, fmt.Errorf("failed to decode job response %s: %w", row.result, err)
++		}
++	}
++	var resErr error
++	if row.err != "" {
++		resErr = errors.New(row.err)
++	}
++	job := NewJob(r, projectID, jobID, &content, &response, resErr)
++	job.expired = expired
++	return job, nil
++}
++
++// jobRow is a row of the jobs table, as findJobRow reads it.
++type jobRow struct{ metadata, result, err string }
++
++// findJobRow reads the row of the jobs table with the primary key
++// (projectID, jobID), its result too if withResult, or nil if there is
++// none. CloudBurrow patch (cloudburrow/cloudburrow#1103): googlesqlite
++// compiles each GoogleSQL WHERE comparison to a function call, which SQLite
++// cannot answer from the primary key, so jobs.get, jobs.getQueryResults and
++// Job.Wait's poll each visited every job the emulator kept, and each was
++// slower than the last. This reads the table as SQLite SQL instead
++// (googlesqlite patch 0018), where SQLite uses the primary key's index.
++func (r *Repository) findJobRow(ctx context.Context, conn *sql.Conn, projectID, jobID string, withResult bool) (*jobRow, error) {
++	encProject, err := googlesqlite.EncodeString(projectID)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	defer tx.Commit()
+-	jobs, err := r.findJobs(ctx, tx, projectID, []string{jobID})
++	encID, err := googlesqlite.EncodeString(jobID)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	if len(jobs) != 1 {
+-		return nil, nil
++	resultColumn := "NULL"
++	if withResult {
++		resultColumn = "`result`"
+ 	}
+-	if jobs[0].ID != jobID {
+-		return nil, nil
++	var row *jobRow
++	err = conn.Raw(func(c interface{}) error {
++		gsqlConn, ok := c.(*googlesqlite.Conn)
++		if !ok {
++			return fmt.Errorf("failed to get *googlesqlite.Conn from %T", c)
++		}
++		rows, err := gsqlConn.QueryRawContext(ctx,
++			"SELECT `metadata`, "+resultColumn+", `error` FROM `jobs` WHERE `projectID` = ? AND `id` = ?",
++			encProject, encID)
++		if err != nil {
++			return fmt.Errorf("failed to read job %s: %w", jobID, err)
++		}
++		defer rows.Close()
++		if !rows.Next() {
++			return rows.Err()
++		}
++		var cols [3]any
++		if err := rows.Scan(&cols[0], &cols[1], &cols[2]); err != nil {
++			return err
++		}
++		var dec [3]string
++		for i, v := range cols {
++			s, _, err := googlesqlite.DecodeString(v)
++			if err != nil {
++				return fmt.Errorf("failed to decode job %s: %w", jobID, err)
++			}
++			dec[i] = s
++		}
++		row = &jobRow{metadata: dec[0], result: dec[1], err: dec[2]}
++		return rows.Err()
++	})
++	if err != nil {
++		return nil, err
+ 	}
+-	return jobs[0], nil
++	return row, nil
+ }
+ 
+ func (r *Repository) findJobs(ctx context.Context, tx *sql.Tx, projectID string, jobIDs []string) ([]*Job, error) {
+@@ -658,6 +730,25 @@
+ 		return nil, err
+ 	}
+ 	defer conn.Close()
++	// CloudBurrow patch (cloudburrow/cloudburrow#1103): one job is read by
++	// the primary key (findJobRow).
++	if len(jobIDs) == 1 {
++		row, err := r.findJobRow(ctx, conn, projectID, jobIDs[0], false)
++		if err != nil || row == nil {
++			return nil, err
++		}
++		var content bigqueryv2.Job
++		if len(row.metadata) > 0 {
++			if err := json.Unmarshal([]byte(row.metadata), &content); err != nil {
++				return nil, fmt.Errorf("failed to decode metadata content %s: %w", row.metadata, err)
++			}
++		}
++		var resErr error
++		if row.err != "" {
++			resErr = errors.New(row.err)
++		}
++		return []*Job{NewJob(r, projectID, jobIDs[0], &content, nil, resErr)}, nil
++	}
+ 	tx, err := conn.BeginTx(ctx, nil)
+ 	if err != nil {
+ 		return nil, err
+--- /dev/null
++++ b/internal/metadata/job_lookup_test.go
+@@ -0,0 +1,67 @@
++package metadata
++
++import (
++	"context"
++	"database/sql"
++	"errors"
++	"testing"
++)
++
++// CloudBurrow regression test (cloudburrow/cloudburrow#1103): a job is read
++// by its primary key, as SQLite SQL, and still found as it was: its
++// metadata, result and error, only in its own project, and not at all
++// once deleted.
++func TestFindJobByKey(t *testing.T) {
++	r, _ := testRepository(t)
++	ctx := context.Background()
++	failed := queryJob(r, "failed", 0)
++	failed.err = errors.New("it 'failed'")
++	addJobs(t, r, queryJob(r, "a", 3), queryJob(r, "a2", 4), queryJob(r, "ä 'quoted\"", 2), failed)
++	// The same ID in another project.
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error {
++		other := NewProject(r, "q", nil, nil)
++		if err := other.Insert(ctx, tx); err != nil {
++			return err
++		}
++		j := queryJob(r, "a", 7)
++		j.ProjectID = "q"
++		return other.AddJob(ctx, tx, j)
++	})
++
++	for id, rows := range map[string]int{"a": 3, "a2": 4, "ä 'quoted\"": 2} {
++		job, err := r.FindJob(ctx, "p", id)
++		if err != nil || job == nil {
++			t.Fatalf("FindJob(p, %q) = %v, %v", id, job, err)
++		}
++		if job.ID != id || len(job.response.Rows) != rows || job.content.JobReference.JobId != id {
++			t.Errorf("FindJob(p, %q): job %q, %d rows, metadata %q; want %d rows", id, job.ID, len(job.response.Rows), job.content.JobReference.JobId, rows)
++		}
++		metas, err := r.findJobsMetadata(ctx, "p", []string{id})
++		if err != nil || len(metas) != 1 || metas[0].content.JobReference.JobId != id || metas[0].response != nil {
++			t.Errorf("findJobsMetadata(p, %q) = %v, %v; want the job without its result", id, metas, err)
++		}
++	}
++	if job, err := r.FindJob(ctx, "q", "a"); err != nil || job == nil || len(job.response.Rows) != 7 {
++		t.Errorf("FindJob(q, a) = %v, %v; want project q's job of 7 rows", job, err)
++	}
++	if job, err := r.FindJob(ctx, "p", "failed"); err != nil || job == nil || job.err == nil || job.err.Error() != "it 'failed'" {
++		t.Errorf("FindJob(p, failed) = %v, %v; want its error", job, err)
++	}
++	for _, key := range [][2]string{{"p", "missing"}, {"q", "a2"}, {"r", "a"}, {"p", "A"}} {
++		if job, err := r.FindJob(ctx, key[0], key[1]); err != nil || job != nil {
++			t.Errorf("FindJob(%s, %s) = %v, %v; want none", key[0], key[1], job, err)
++		}
++		if metas, err := r.findJobsMetadata(ctx, key[0], []string{key[1]}); err != nil || len(metas) != 0 {
++			t.Errorf("findJobsMetadata(%s, %s) = %v, %v; want none", key[0], key[1], metas, err)
++		}
++	}
++
++	project, err := r.FindProject(ctx, "p")
++	if err != nil {
++		t.Fatal(err)
++	}
++	inTx(t, r, func(ctx context.Context, tx *sql.Tx) error { return project.DeleteJob(ctx, tx, "a") })
++	if job, err := r.FindJob(ctx, "p", "a"); err != nil || job != nil {
++		t.Errorf("FindJob(p, a) after its deletion = %v, %v; want none", job, err)
++	}
++}
