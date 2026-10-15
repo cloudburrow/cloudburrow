@@ -50,7 +50,8 @@
         "patches/googlesqlite/0017-collect-before-catalog-rebuild.patch",
         "patches/googlesqlite/0018-naive-timestamps-utc.patch",
         "patches/googlesqlite/0019-default-time-zone-utc.patch",
-        "patches/googlesqlite/0020-cast-format.patch"
+        "patches/googlesqlite/0020-cast-format.patch",
+        "patches/googlesqlite/0021-cast-to-string-forms.patch"
       ]
     },
     {

@@ -1,0 +1,277 @@
+CloudBurrow patch 21 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1202). Applies after patch 0020.
+
+The bug: a column cast to STRING at run time was written with the value's
+ToString, which is the wire form, not BigQuery's CAST form. The analyzer
+folds a cast of a literal with BigQuery's own code, so a literal and a
+column of the same value gave different strings. Measured with patches
+0001 to 0020, column against literal:
+- DATETIME: "2018-12-03T15:30:00" against "2018-12-03 15:30:00", and
+  sub-second digits "...00.5" against "...00.500";
+- TIME: "15:30:00.5" against "15:30:00.500";
+- FLOAT64: "NaN", "+Inf", "-Inf" against "nan", "inf", "-inf";
+- BYTES: base64, "YWJj", against the bytes read as UTF-8, "abc";
+- INTERVAL: "1-2 3 4:5:6.5" against "1-2 3 4:5:6.500".
+DATE, BOOL, INT64, other FLOAT64s, NUMERIC, BIGNUMERIC and RANGE agreed.
+
+The patch writes those five in BigQuery's form when CAST's target is
+STRING; ToString, the wire form, is unchanged. BYTES that are not UTF-8
+are an error, and NULL with SAFE_CAST. Tests that held the old forms are
+updated: five datetime specs and TestRegression_WindowOrderByNulls (a T),
+and patch 0009's TestIntervalSignAndSubSecondParts ("1.5" is "1.500").
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/cast_to_string_test.go
+@@ -0,0 +1,72 @@
++package googlesqlite_test
++
++import (
++	"database/sql"
++	"fmt"
++	"testing"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1202): a column cast to
++// STRING at run time gives the string the analyzer gives when it folds the
++// cast of the same literal, which is BigQuery's.
++func TestCastColumnToString(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=cast_to_string")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	for i, c := range []struct{ lit, want string }{
++		{"DATETIME '2018-12-03 15:30:00'", "2018-12-03 15:30:00"},
++		{"DATETIME '2018-12-03 15:30:00.5'", "2018-12-03 15:30:00.500"},
++		{"DATETIME '2018-12-03 15:30:00.123456'", "2018-12-03 15:30:00.123456"},
++		{"DATETIME '0001-01-01 00:00:00'", "0001-01-01 00:00:00"},
++		{"TIME '15:30:00'", "15:30:00"},
++		{"TIME '15:30:00.5'", "15:30:00.500"},
++		{"TIME '15:30:00.1234'", "15:30:00.123400"},
++		{"DATE '2018-12-03'", "2018-12-03"},
++		{"TRUE", "true"},
++		{"-5", "-5"},
++		{"1.0", "1"},
++		{"1e20", "1e+20"},
++		{"CAST('nan' AS FLOAT64)", "nan"},
++		{"CAST('inf' AS FLOAT64)", "inf"},
++		{"CAST('-inf' AS FLOAT64)", "-inf"},
++		{"NUMERIC '1.50'", "1.5"},
++		{"BIGNUMERIC '1.5000'", "1.5"},
++		{"b'abc'", "abc"},
++		{"b'\\xc3\\xa9'", "é"},
++		{"INTERVAL 5 DAY", "0-0 5 0:0:0"},
++		{"INTERVAL '1-2 3 4:5:6.5' YEAR TO SECOND", "1-2 3 4:5:6.500"},
++		{"INTERVAL '0:0:1.1234' HOUR TO SECOND", "0-0 0 0:0:1.123400"},
++		{"RANGE<DATE> '[2020-01-01, 2020-02-01)'", "[2020-01-01, 2020-02-01)"},
++	} {
++		var folded, col string
++		if err := db.QueryRow("SELECT CAST(" + c.lit + " AS STRING)").Scan(&folded); err != nil {
++			t.Errorf("%s folded: %v", c.lit, err)
++			continue
++		}
++		table := fmt.Sprintf("cast_to_string_%d", i)
++		if _, err := db.Exec("CREATE TABLE " + table + " AS SELECT " + c.lit + " AS c"); err != nil {
++			t.Errorf("%s: %v", c.lit, err)
++			continue
++		}
++		if err := db.QueryRow("SELECT CAST(c AS STRING) FROM " + table).Scan(&col); err != nil {
++			t.Errorf("%s column: %v", c.lit, err)
++			continue
++		}
++		if folded != c.want || col != c.want {
++			t.Errorf("CAST(%s AS STRING): folded %q, column %q, want %q", c.lit, folded, col, c.want)
++		}
++	}
++	// BYTES that are not UTF-8: CAST fails, SAFE_CAST is NULL.
++	if _, err := db.Exec("CREATE TABLE cast_to_string_bad AS SELECT b'\\xff' AS c"); err != nil {
++		t.Fatal(err)
++	}
++	var s sql.NullString
++	if err := db.QueryRow("SELECT CAST(c AS STRING) FROM cast_to_string_bad").Scan(&s); err == nil {
++		t.Errorf("CAST(b'\\xff' AS STRING) = %q, want an error", s.String)
++	}
++	if err := db.QueryRow("SELECT SAFE_CAST(c AS STRING) FROM cast_to_string_bad").Scan(&s); err != nil || s.Valid {
++		t.Errorf("SAFE_CAST(b'\\xff' AS STRING) = %v, %v; want NULL", s, err)
++	}
++}
+--- a/interval_sign_test.go
++++ b/interval_sign_test.go
+@@ -25,7 +25,7 @@
+ 		{"INTERVAL -1 MONTH", "-0-1 0 0:0:0"},
+ 		{"INTERVAL -13 MONTH", "-1-1 0 0:0:0"},
+ 		{"INTERVAL -5 DAY", "0-0 -5 0:0:0"},
+-		{"INTERVAL 1500 MILLISECOND", "0-0 0 0:0:1.5"},
++		{"INTERVAL 1500 MILLISECOND", "0-0 0 0:0:1.500"}, // groups of three digits (#1202)
+ 		{"INTERVAL -2 MICROSECOND", "0-0 0 -0:0:0.000002"},
+ 	} {
+ 		var got string
+--- a/regression_test.go
++++ b/regression_test.go
+@@ -2107,8 +2107,8 @@
+ 	// After ORDER BY 3 (string ascending): the dates come first, then
+ 	// the literal 'null' string.
+ 	want := []triple{
+-		{rn1: 3, rn2: 2, v: "2024-01-01T00:00:00"},
+-		{rn1: 2, rn2: 1, v: "2024-01-07T00:00:00"},
++		{rn1: 3, rn2: 2, v: "2024-01-01 00:00:00"},
++		{rn1: 2, rn2: 1, v: "2024-01-07 00:00:00"},
+ 		{rn1: 1, rn2: 3, v: "null"},
+ 	}
+ 	if len(got) != len(want) {
+--- a/testdata/specs/googlesql/functions/datetime/datetime.yaml
++++ b/testdata/specs/googlesql/functions/datetime/datetime.yaml
+@@ -5,4 +5,4 @@
+     sql: SELECT CAST(DATETIME(2024, 3, 15, 12, 30, 45) AS STRING)
+     expected:
+       rows:
+-        - ["2024-03-15T12:30:45"]
++        - ["2024-03-15 12:30:45"]
+--- a/testdata/specs/googlesql/functions/datetime/datetime_add.yaml
++++ b/testdata/specs/googlesql/functions/datetime/datetime_add.yaml
+@@ -5,4 +5,4 @@
+     sql: SELECT CAST(DATETIME_ADD(DATETIME "2024-03-15T12:00:00", INTERVAL 1 DAY) AS STRING)
+     expected:
+       rows:
+-        - ["2024-03-16T12:00:00"]
++        - ["2024-03-16 12:00:00"]
+--- a/testdata/specs/googlesql/functions/datetime/datetime_sub.yaml
++++ b/testdata/specs/googlesql/functions/datetime/datetime_sub.yaml
+@@ -5,4 +5,4 @@
+     sql: SELECT CAST(DATETIME_SUB(DATETIME "2024-03-15T12:00:00", INTERVAL 1 HOUR) AS STRING)
+     expected:
+       rows:
+-        - ["2024-03-15T11:00:00"]
++        - ["2024-03-15 11:00:00"]
+--- a/testdata/specs/googlesql/functions/datetime/datetime_trunc.yaml
++++ b/testdata/specs/googlesql/functions/datetime/datetime_trunc.yaml
+@@ -5,4 +5,4 @@
+     sql: SELECT CAST(DATETIME_TRUNC(DATETIME "2024-03-15T12:30:45", HOUR) AS STRING)
+     expected:
+       rows:
+-        - ["2024-03-15T12:00:00"]
++        - ["2024-03-15 12:00:00"]
+--- a/testdata/specs/googlesql/functions/datetime/parse_datetime.yaml
++++ b/testdata/specs/googlesql/functions/datetime/parse_datetime.yaml
+@@ -5,4 +5,4 @@
+     sql: SELECT CAST(PARSE_DATETIME("%Y-%m-%dT%H:%M:%S", "2024-03-15T12:30:45") AS STRING)
+     expected:
+       rows:
+-        - ["2024-03-15T12:30:45"]
++        - ["2024-03-15 12:30:45"]
+--- a/internal/cast.go
++++ b/internal/cast.go
+@@ -4,7 +4,9 @@
+ 	"fmt"
+ 	"math"
+ 	"math/big"
++	"strings"
+ 	"time"
++	"unicode/utf8"
+ 
+ 	googlesql "github.com/goccy/go-googlesql"
+ 	"github.com/goccy/go-json"
+@@ -36,6 +38,20 @@
+ 	if ts, ok := fromValue.(value.TimestampValue); ok && m1(to.Kind()) == googlesql.TypeKindTypeString {
+ 		return value.StringValue(value.FormatTimestamp(time.Time(ts), time.UTC)), nil
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1202): the other casts
++	// to STRING at run time, in BigQuery's forms, as the analyzer folds a
++	// literal's.
++	if hasStringForm(fromValue) && m1(to.Kind()) == googlesql.TypeKindTypeString {
++		if s, ok, err := castToStringForm(fromValue); ok || err != nil {
++			if err != nil {
++				if isSafeCast {
++					return nil, nil
++				}
++				return nil, err
++			}
++			return value.StringValue(s), nil
++		}
++	}
+ 	casted, err := CastValue(to, fromValue)
+ 	if err != nil {
+ 		if isSafeCast {
+@@ -237,4 +253,76 @@
+ 		return value.TimestampValue(t), nil
+ 	}
+ 	return nil, unsupported()
++}
++
++// castToStringForm writes the values whose run-time form, their
++// ToString, is not the form BigQuery's CAST to STRING gives
++// (cloudburrow/cloudburrow#1202). ok is false for the others, which
++// CastValue writes. ToString itself is kept: it is also the wire form,
++// where a DATETIME is "2018-12-03T15:30:00".
++func castToStringForm(v value.Value) (s string, ok bool, err error) {
++	switch v := v.(type) {
++	case value.DatetimeValue:
++		// "2018-12-03 15:30:00", where ToString writes a T.
++		t := time.Time(v)
++		return t.Format("2006-01-02 15:04:05") + subSecondDigits(t.Nanosecond()), true, nil
++	case value.TimeValue:
++		// "15:30:00.500": sub-second digits in groups of three.
++		t := time.Time(v)
++		return t.Format("15:04:05") + subSecondDigits(t.Nanosecond()), true, nil
++	case value.FloatValue:
++		// "nan", "inf" and "-inf", where Go writes NaN, +Inf and -Inf.
++		f := float64(v)
++		switch {
++		case math.IsNaN(f):
++			return "nan", true, nil
++		case math.IsInf(f, 1):
++			return "inf", true, nil
++		case math.IsInf(f, -1):
++			return "-inf", true, nil
++		}
++		return "", false, nil
++	case value.BytesValue:
++		// The bytes read as UTF-8, where ToString writes base64.
++		if !utf8.Valid([]byte(v)) {
++			return "", false, fmt.Errorf("Invalid cast from BYTES to STRING: the bytes are not valid UTF-8")
++		}
++		return string(v), true, nil
++	case *value.IntervalValue:
++		// "1-2 3 4:5:6.500": sub-second digits in groups of three.
++		s := v.String()
++		i := strings.LastIndexByte(s, '.')
++		if i < 0 {
++			return s, true, nil
++		}
++		frac := s[i+1:]
++		for len(frac)%3 != 0 {
++			frac += "0"
++		}
++		return s[:i+1] + frac, true, nil
++	}
++	return "", false, nil
+ }
++
++// hasStringForm is whether castToStringForm may write v.
++func hasStringForm(v value.Value) bool {
++	switch v.(type) {
++	case value.DatetimeValue, value.TimeValue, value.FloatValue, value.BytesValue, *value.IntervalValue:
++		return true
++	}
++	return false
++}
++
++// subSecondDigits is ".500", ".123456" or ".123456789" for ns, in
++// BigQuery's groups of three digits, and "" for none.
++func subSecondDigits(ns int) string {
++	switch {
++	case ns == 0:
++		return ""
++	case ns%1000000 == 0:
++		return fmt.Sprintf(".%03d", ns/1000000)
++	case ns%1000 == 0:
++		return fmt.Sprintf(".%06d", ns/1000)
++	}
++	return fmt.Sprintf(".%09d", ns)
++}
