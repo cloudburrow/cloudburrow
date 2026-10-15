@@ -163,6 +163,13 @@ func namedMethods(key, op string, report map[string]string) (ids, ambiguous []st
 		}
 		return ids, nil
 	}
+	// A gRPC page's methods named by a discovery ID, such as Pub/Sub's IAM
+	// (#1367), are named whole.
+	for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
+		if _, ok := report[tok[1]]; ok && !strings.Contains(tok[1], "/") {
+			ids = append(ids, tok[1])
+		}
+	}
 	for _, tok := range grpcToken.FindAllStringSubmatch(op, -1) {
 		svc, method := tok[1], tok[2]
 		var match []string

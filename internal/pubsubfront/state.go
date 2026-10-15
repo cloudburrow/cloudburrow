@@ -2,8 +2,8 @@ package pubsubfront
 
 // The front's own state, kept in a file (#898). What the front knows and the
 // emulator does not (the expiration policies and labels updates set, the
-// clock's offset, when each subscription was last active, and the projects
-// calls have named) would otherwise live only in the front's memory, so a
+// IAM policies (iam.go, #1367), the clock's offset, when each subscription
+// was last active, and the projects calls have named) would otherwise live only in the front's memory, so a
 // restart of the front's container alone, with the emulator still running
 // and holding every subscription, would give the subscriptions and topics
 // back their emulator-stored policy and labels, forget how long they had been idle, and stop
@@ -31,6 +31,8 @@ import (
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
 // flushInterval is how often activity is written to the state file.
@@ -51,6 +53,9 @@ type savedState struct {
 	LastActive map[string]time.Time `json:"lastActive,omitempty"`
 	// Projects is every project a call has named.
 	Projects []string `json:"projects,omitempty"`
+	// IAMPolicies are the stored IAM policies (iam.go, #1367), by topic,
+	// subscription, snapshot or schema name.
+	IAMPolicies map[string]iampolicy.Stored `json:"iamPolicies,omitempty"`
 }
 
 // KeepState restores the front's state from path, when the file exists, and
@@ -109,6 +114,9 @@ func (f *Front) restore(b []byte) error {
 	}
 	for _, p := range s.Projects {
 		f.projects[p] = true
+	}
+	for name, p := range s.IAMPolicies {
+		f.iam[name] = p
 	}
 	return nil
 }
@@ -174,6 +182,12 @@ func (f *Front) save() error {
 	}
 	for p := range f.projects {
 		s.Projects = append(s.Projects, p)
+	}
+	if len(f.iam) > 0 {
+		s.IAMPolicies = make(map[string]iampolicy.Stored, len(f.iam))
+	}
+	for name, p := range f.iam {
+		s.IAMPolicies[name] = p
 	}
 	f.mu.Unlock()
 	sort.Strings(s.Projects)

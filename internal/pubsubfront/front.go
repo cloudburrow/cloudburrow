@@ -100,6 +100,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
 const (
@@ -203,6 +204,12 @@ type Front struct {
 	// the emulator refuses to store (#949, labels.go), by topic or
 	// subscription name.
 	labels map[string]map[string]string
+	// iam are the IAM policies set on topics, subscriptions, snapshots and
+	// schemas (iam.go, #1367), by resource name: stored, never enforced.
+	iam map[string]iampolicy.Stored
+	// exists, when set, replaces the emulator lookup iam.go makes to check
+	// a policy's resource exists (tests).
+	exists func(ctx context.Context, kind, name string) error
 	// sweeping serialises sweeps, so an advance and the ticker never race
 	// to delete one subscription.
 	sweeping sync.Mutex
@@ -241,7 +248,8 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	return &Front{upstream: conn, rest: upstream, admin: pubsubpb.NewSubscriberClient(conn),
 		topics: pubsubpb.NewPublisherClient(conn), clock: &OffsetClock{}, logf: logf,
 		pushClient: &http.Client{}, subs: map[string]*subState{}, projects: map[string]bool{},
-		policies: map[string]*pubsubpb.ExpirationPolicy{}, labels: map[string]map[string]string{}}, nil
+		policies: map[string]*pubsubpb.ExpirationPolicy{}, labels: map[string]map[string]string{},
+		iam: map[string]iampolicy.Stored{}}, nil
 }
 
 // Close releases the connection to the emulator.
@@ -399,12 +407,13 @@ func (f *Front) stream(name string, delta int) {
 	f.markDirty()
 }
 
-// forget drops a subscription that was deleted, or a topic.
+// forget drops a subscription that was deleted, or a topic, snapshot or
+// schema, with whatever the front keeps for it.
 func (f *Front) forget(name string) {
 	f.mu.Lock()
 	_, kept := f.policies[name]
 	_, keptLabels := f.labels[name]
-	kept = kept || keptLabels
+	kept = f.dropIAMLocked(name) || kept || keptLabels
 	delete(f.subs, name)
 	delete(f.policies, name)
 	delete(f.labels, name)
@@ -424,14 +433,14 @@ func (f *Front) setPolicy(name string, p *pubsubpb.ExpirationPolicy) {
 	f.persist()
 }
 
-// dropKept forgets the policy and labels updates set: the subscription or
-// topic is gone, or was created again with a policy and labels of its own,
-// which the emulator keeps.
+// dropKept forgets the policy and labels updates set, and the IAM policy
+// (iam.go): the subscription or topic is gone, or was created again with a
+// policy and labels of its own, which the emulator keeps, and no IAM policy.
 func (f *Front) dropKept(name string) {
 	f.mu.Lock()
 	_, kept := f.policies[name]
 	_, keptLabels := f.labels[name]
-	kept = kept || keptLabels
+	kept = f.dropIAMLocked(name) || kept || keptLabels
 	delete(f.policies, name)
 	delete(f.labels, name)
 	f.mu.Unlock()
@@ -611,6 +620,10 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 	defer cancel()
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		ctx = metadata.NewOutgoingContext(ctx, forwardable(md))
+	}
+	if strings.HasPrefix(method, iamService) {
+		// The emulator serves no IAM; the front stores policies (iam.go).
+		return f.handleIAM(ctx, ss, method)
 	}
 	if method == subscriber+"UpdateSubscription" || method == publisher+"UpdateTopic" {
 		return f.handleUpdate(ctx, ss, method)
@@ -828,6 +841,24 @@ func (o *observed) request(fr frame) (frame, error) {
 			o.resource = r.GetTopic()
 		}
 		return fr, nil
+	case subscriber + "DeleteSnapshot":
+		var r pubsubpb.DeleteSnapshotRequest
+		if proto.Unmarshal(fr, &r) == nil {
+			o.resource = r.GetSnapshot()
+		}
+		return fr, nil
+	case schemaService + "DeleteSchema":
+		var r pubsubpb.DeleteSchemaRequest
+		if proto.Unmarshal(fr, &r) == nil {
+			o.resource = r.GetName()
+		}
+		return fr, nil
+	case schemaService + "CreateSchema":
+		var r pubsubpb.CreateSchemaRequest
+		if proto.Unmarshal(fr, &r) == nil && r.GetSchemaId() != "" {
+			o.resource = r.GetParent() + "/schemas/" + r.GetSchemaId()
+		}
+		return fr, nil
 	}
 	if !strings.HasPrefix(o.method, subscriber) {
 		return fr, nil
@@ -917,6 +948,12 @@ func (o *observed) request(fr frame) (frame, error) {
 		return fr, nil
 	default:
 		o.sub = subscriptionOf(o.method[len(subscriber):], fr)
+		if o.method == subscriber+"CreateSnapshot" {
+			var r pubsubpb.CreateSnapshotRequest
+			if proto.Unmarshal(fr, &r) == nil {
+				o.resource = r.GetName()
+			}
+		}
 		if !isAdminRead(o.method) {
 			o.f.touch(o.sub)
 		}
@@ -1155,8 +1192,16 @@ func (o *observed) topicResponse(fr frame) frame {
 
 // done records a call's outcome once the emulator has answered.
 func (o *observed) done(err error) {
-	if o.method == publisher+"DeleteTopic" && err == nil && o.resource != "" {
-		o.f.forget(o.resource)
+	switch o.method {
+	case publisher + "DeleteTopic", subscriber + "DeleteSnapshot", schemaService + "DeleteSchema":
+		if err == nil && o.resource != "" {
+			o.f.forget(o.resource)
+		}
+	case schemaService + "CreateSchema", subscriber + "CreateSnapshot":
+		// Made again: a new resource has no IAM policy.
+		if err == nil {
+			o.f.dropIAM(o.resource)
+		}
 	}
 	if o.sub == "" {
 		return

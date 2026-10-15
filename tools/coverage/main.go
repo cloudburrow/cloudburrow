@@ -96,6 +96,9 @@ type area struct {
 	Package  string
 	// Methods, for an area with no proto (Storage's JSON API).
 	Methods []string
+	// Extra are methods beside its Services' that an area serves under
+	// another name, such as a mixin another area lists.
+	Extra []string
 }
 
 var areas = []area{
@@ -141,7 +144,12 @@ var areas = []area{
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
 	// server --services memorystore runs.
 	{Key: "memorystore", Title: "Memorystore for Redis", Own: true, Services: []string{"google.cloud.redis.v1.CloudRedis"}},
-	{Key: "pubsub", Title: "Pub/Sub", Services: []string{"google.pubsub.v1.Publisher", "google.pubsub.v1.Subscriber", "google.pubsub.v1.SchemaService"}},
+	// Pub/Sub's IAM (#1367) is the google.iam.v1.IAMPolicy mixin, which the
+	// kms area lists (mixin keys are global), served by the Pub/Sub front
+	// over gRPC and REST: its rows are named by the REST methods' discovery
+	// IDs, one per resource kind.
+	{Key: "pubsub", Title: "Pub/Sub", Services: []string{"google.pubsub.v1.Publisher", "google.pubsub.v1.Subscriber", "google.pubsub.v1.SchemaService"},
+		Extra: pubsubIAMMethods()},
 	{Key: "storage", Title: "Cloud Storage (JSON API)", Own: true, Methods: storageMethods()},
 	// The gRPC API (#1321), served from the JSON API's handlers. Its proto
 	// is registered under CloudBurrow's own name, since the CLI links the Go
@@ -173,6 +181,18 @@ var areas = []area{
 	// official generated client's.
 	{Key: "serviceusage", Title: "Service Usage API (v1)", Own: true,
 		Methods: serviceusageMethods()},
+}
+
+// pubsubIAMMethods are Pub/Sub's IAM methods, as discovery IDs:
+// pubsub.projects.topics.getIamPolicy and so on.
+func pubsubIAMMethods() []string {
+	var out []string
+	for _, kind := range []string{"schemas", "snapshots", "subscriptions", "topics"} {
+		for _, m := range []string{"getIamPolicy", "setIamPolicy", "testIamPermissions"} {
+			out = append(out, "pubsub.projects."+kind+"."+m)
+		}
+	}
+	return out
 }
 
 // serviceusageMethods is every method of the serviceusage v1 discovery
@@ -339,7 +359,7 @@ func methodsOf(a area) ([]string, error) {
 			return true
 		})
 	}
-	var out []string
+	out := append([]string(nil), a.Extra...)
 	for _, sd := range sds {
 		for i := 0; i < sd.Methods().Len(); i++ {
 			out = append(out, string(sd.FullName())+"/"+string(sd.Methods().Get(i).Name()))
