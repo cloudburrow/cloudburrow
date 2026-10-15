@@ -146,7 +146,7 @@ jobs:
       - name: Install kubectl
         run: |
           command -v jq >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq jq; }
-          curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/arm64/kubectl"
+          curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/arm64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
       # The action picks the kind binary for the runner's architecture.

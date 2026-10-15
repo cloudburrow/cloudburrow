@@ -400,7 +400,7 @@ jobs:
       - name: Install kubectl
         run: |
           KUBECTL_VERSION=v1.36.4
-          curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
       - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
@@ -473,7 +473,7 @@ jobs:
 
       - name: Install kubectl
         run: |
-          curl -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
+          curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
       # The Google Cloud CLI the gcloud, gsutil and bq tests run (#694, #696),
@@ -486,7 +486,7 @@ jobs:
       - name: Install the Google Cloud CLI
         if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators'
         run: |
-          curl -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
+          curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
           echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/gcloud.tar.gz" -C "$RUNNER_TEMP" && rm "$RUNNER_TEMP/gcloud.tar.gz"
           # No update check: it would reach Google from every fresh
@@ -529,7 +529,7 @@ jobs:
       - name: Install OpenTofu
         if: matrix.shard == 'storage'
         run: |
-          curl -fsSLo "$RUNNER_TEMP/tofu.tar.gz" https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.tar.gz
+          curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/tofu.tar.gz" https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.tar.gz
           echo "50a6106fa4de523d09c87af85f3db1dd47535fc005727fdca6852146476b88ec  $RUNNER_TEMP/tofu.tar.gz" | sha256sum -c -
           sudo tar -xzf "$RUNNER_TEMP/tofu.tar.gz" -C /usr/local/bin tofu
           tofu version
@@ -829,7 +829,7 @@ jobs:
           if [ -z "$CHROME" ]; then
             CFT=154.0.8037.57
             echo "no google-chrome on this runner; installing Chrome for Testing $CFT"
-            curl -fsSLo "$RUNNER_TEMP/chrome.zip" "https://storage.googleapis.com/chrome-for-testing-public/$CFT/linux64/chrome-linux64.zip"
+            curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/chrome.zip" "https://storage.googleapis.com/chrome-for-testing-public/$CFT/linux64/chrome-linux64.zip"
             unzip -q "$RUNNER_TEMP/chrome.zip" -d "$RUNNER_TEMP"
             CHROME="$RUNNER_TEMP/chrome-linux64/chrome"
           fi
