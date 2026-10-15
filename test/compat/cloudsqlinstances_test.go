@@ -37,6 +37,12 @@ func waitSQLOp(t *testing.T, svc *sqladmin.Service, project string, op *sqladmin
 	}
 }
 
+// sqlProtection is a patch that sets deletion protection alone.
+func sqlProtection(on bool) *sqladmin.DatabaseInstance {
+	return &sqladmin.DatabaseInstance{Settings: &sqladmin.Settings{
+		DeletionProtectionEnabled: on, ForceSendFields: []string{"DeletionProtectionEnabled"}}}
+}
+
 // TestCloudSQLInstanceWrites (#1330): through the official Go client
 // (sqladmin/v1), an instance is created on each engine, served by a server
 // of its own: the operation finishes once the server serves, and the

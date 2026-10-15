@@ -40,13 +40,13 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceDatastore:     {Providers: []string{"datastore"}},
 	config.ServiceBigtable:      {Providers: []string{"bigtable"}},
 	config.ServiceSpanner:       {Providers: []string{"spanner"}},
-	config.ServiceCloudSQL:      {Providers: []string{"cloudsql"}},
+	config.ServiceCloudSQL:      {Providers: []string{"cloudsql", "cloudsql-instances"}},
 	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
 	config.ServiceKMS:           {Providers: []string{"kms"}},
 	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings"}, Screen: "/logs"},
 	config.ServiceMemorystore:   {Providers: []string{"memorystore"}},
-	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql"}},
+	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
