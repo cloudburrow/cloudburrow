@@ -51,6 +51,7 @@ import (
 
 	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	bqv2 "google.golang.org/api/bigquery/v2"
+	runv1 "google.golang.org/api/run/v1"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -93,6 +94,10 @@ var areas = []area{
 	{Key: "tasks", Title: "Cloud Tasks", Own: true, Services: []string{"google.cloud.tasks.v2.CloudTasks"}},
 	{Key: "secretmanager", Title: "Secret Manager", Own: true, Services: []string{"google.cloud.secretmanager.v1.SecretManagerService"}},
 	{Key: "run", Title: "Cloud Run v2", Own: true, Package: "google.cloud.run.v2"},
+	// The v1 (Knative-shaped) API gcloud run calls (#1293): no proto, so
+	// its methods are the official generated client's, and a method is
+	// Verified only by an annotated official-client test.
+	{Key: "runv1", Title: "Cloud Run v1 (Knative API)", Methods: discoveryMethods("run", reflect.TypeOf(runv1.APIService{}))},
 	// google.iam.v1.IAMPolicy is the mixin cloudkms.googleapis.com serves
 	// (#428). Mixin keys are global, so only one area may list it.
 	{Key: "kms", Title: "Cloud KMS", Own: true, Services: []string{"google.cloud.kms.v1.KeyManagementService", "google.iam.v1.IAMPolicy"}},
@@ -139,6 +144,31 @@ func bigqueryMethods() []string {
 			out = append(out, "bigquery."+lower(f.Name)+"."+lower(f.Type.Method(j).Name))
 		}
 	}
+	sort.Strings(out)
+	return out
+}
+
+// discoveryMethods is every method of a generated google.golang.org/api
+// client, as its discovery ID: <api>.<resource>[.<resource>...].<method>,
+// such as run.namespaces.services.list. Resources nest as *XService fields.
+func discoveryMethods(api string, svc reflect.Type) []string {
+	lower := func(s string) string { return strings.ToLower(s[:1]) + s[1:] }
+	var out []string
+	var walk func(prefix string, t reflect.Type)
+	walk = func(prefix string, t reflect.Type) {
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			if !f.IsExported() || f.Type.Kind() != reflect.Pointer || !strings.HasSuffix(f.Type.Elem().Name(), "Service") {
+				continue
+			}
+			p := prefix + "." + lower(f.Name)
+			for j := 0; j < f.Type.NumMethod(); j++ {
+				out = append(out, p+"."+lower(f.Type.Method(j).Name))
+			}
+			walk(p, f.Type.Elem())
+		}
+	}
+	walk(api, svc)
 	sort.Strings(out)
 	return out
 }

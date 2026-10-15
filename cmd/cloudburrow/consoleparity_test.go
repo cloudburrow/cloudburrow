@@ -110,6 +110,20 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleRunEditAndDeployNewRevision", "TestRunEditDeploysTheFormThroughUpdateService", "TestCloudRunEditFormIsPrefilledAndGivesFocusBack",
 			"TestConsoleRunServiceLabelsAndSecrets", "TestRunEditSetsLabelsAndSecretBackedVariables",
 			"TestTrafficLinesRoundTrip", "TestTrafficListingShowsTags", "TestRunManageTrafficSendsATrafficMask", "TestCloudRunManageTrafficThroughTheBrowser"}},
+	// The v1 (Knative) API (#1293) is the same services and revisions, read
+	// from the same Knative objects through the same mapping: the console's
+	// Cloud Run pages already reach every one, so nothing new is offered.
+	{Resource: "Cloud Run v1 services", Service: "runv1",
+		Methods: []string{"run.namespaces.services.create", "run.namespaces.services.get", "run.namespaces.services.list",
+			"run.namespaces.services.replaceService", "run.namespaces.services.delete",
+			"run.projects.locations.services.list", "run.projects.locations.services.get"},
+		Provider: "run", Offers: "The v2 services surface above: Services list, service detail, Deploy container, Edit and deploy new revision, Delete; v1 is the same services in Knative's shape (#1293)",
+		Tests: []string{"TestConsoleRunEditAndDeployNewRevision", "TestNoDetailShowsABlankProperty"}},
+	{Resource: "Cloud Run v1 revisions, routes and configurations", Service: "runv1",
+		Methods: []string{"run.namespaces.revisions.list", "run.namespaces.revisions.get", "run.namespaces.routes.list",
+			"run.namespaces.routes.get", "run.namespaces.configurations.list", "run.namespaces.configurations.get"},
+		Provider: "run", Offers: "Revision history, revision detail and the Traffic section on a service's page: a v1 route is a service's traffic and a configuration its template (#1293)",
+		Tests: []string{"TestNoDetailShowsABlankProperty", "TestCloudRunRowSaysWhatIsServingAndWhyNot"}},
 	{Resource: "Cloud Run revisions", Service: "run",
 		Methods:  []string{"Revisions/GetRevision", "Revisions/ListRevisions"},
 		Provider: "run", Offers: "Revision history and Traffic sections on the service page (each tag and its URL, #1224), revision detail",

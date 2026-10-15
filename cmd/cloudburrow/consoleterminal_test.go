@@ -26,6 +26,7 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		"logging":         "cloudburrow-host.cloudburrow.svc.cluster.local:9007",
 		"resourcemanager": "cloudburrow-host.cloudburrow.svc.cluster.local:9008",
 		"metadata":        "cloudburrow-host.cloudburrow.svc.cluster.local:9009",
+		"run":             "cloudburrow-host.cloudburrow.svc.cluster.local:9010",
 	}
 	env := terminalEnv(addrs)
 	for name, want := range map[string]string{
@@ -33,6 +34,7 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_PUBSUB":               "http://pubsub.cloudburrow.svc.cluster.local:8085/",
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDKMS":             "http://cloudburrow-host.cloudburrow.svc.cluster.local:9005/",
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER": "http://cloudburrow-host.cloudburrow.svc.cluster.local:9008/",
+		"CLOUDSDK_API_ENDPOINT_OVERRIDES_RUN":                  "http://cloudburrow-host.cloudburrow.svc.cluster.local:9010/",
 		"CLOUDSDK_AUTH_DISABLE_CREDENTIALS":                    "true",
 		"STORAGE_EMULATOR_HOST":                                "http://storage.cloudburrow.svc.cluster.local:4443",
 		"PUBSUB_EMULATOR_HOST":                                 "pubsub.cloudburrow.svc.cluster.local:8085",

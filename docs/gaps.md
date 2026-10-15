@@ -88,7 +88,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 | `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
 | `Instances.*` is not served | not built yet | L |
 | `WorkerPools.*` is not served | not built yet | L |
-| `gcloud run services list` / `describe` use the v1 (Knative-shaped) API, which is not served | not built yet | L |
+| `gcloud run deploy` through the v1 (Knative) API, served since #1293 for services, revisions, routes and configurations, is not verified: its default `startupProbe` and other v1 fields are refused as not mapped, and `projects.locations.list` and the rest of v1 (domain mappings, jobs, IAM) are 501 | not built yet | M |
 | `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
 | `CancelExecution`'s result | needs live GCP | S |

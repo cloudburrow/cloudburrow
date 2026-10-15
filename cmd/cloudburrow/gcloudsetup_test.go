@@ -82,9 +82,9 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 	}
 	conf := string(b)
 	sections := parseGcloudConfig(t, conf)
-	// Exactly the Verified gcloud endpoints: Cloud Run is enabled and not
-	// written, since gcloud run calls the v1 API (#591); Resource Manager is
-	// always served, so written whatever --services selects (#682).
+	// Exactly the Verified gcloud endpoints: Cloud Run's v1 API (#1293) at
+	// run.localhost, so gcloud's {region}- host still resolves; Resource
+	// Manager is always served, so written whatever --services selects (#682).
 	wantOverrides := map[string]string{
 		"storage":              "http://127.0.0.1:9001/storage/v1/",
 		"pubsub":               "http://127.0.0.1:9002/",
@@ -92,6 +92,7 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		"secretmanager":        "http://127.0.0.1:9006/",
 		"cloudresourcemanager": "http://127.0.0.1:9007/",
 		"cloudscheduler":       "http://127.0.0.1:9008/",
+		"run":                  "http://run.localhost:9004/",
 	}
 	if got := sections["api_endpoint_overrides"]; !reflect.DeepEqual(got, wantOverrides) {
 		t.Errorf("api_endpoint_overrides = %v, want %v:\n%s", got, wantOverrides, conf)

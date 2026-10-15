@@ -66,6 +66,13 @@ var gcloudVerified = []struct {
 	// TestGcloudProjectsThroughGcloudSetup drives list, create, describe and
 	// delete through this override alone.
 	{resourceManagerService, "cloudresourcemanager", "/", true},
+	// Cloud Run (#1293): gcloud run calls the v1 (Knative) API, served on
+	// the Run port beside v2. A command given --region calls
+	// {region}-{host}, which gcloud derives from this override, so on
+	// loopback the host is run.localhost, whose {region}-run.localhost
+	// still resolves to loopback (RFC 6761). TestGcloudRunServicesList
+	// drives services list, describe and revisions list.
+	{config.ServiceRun, "run", "/", false},
 }
 
 // gcloudFamilies is the gcloud-setup help's list of what it writes, from
@@ -112,14 +119,18 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 	ports := map[config.Service]int{config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub,
 		config.ServiceKMS: cfg.Endpoints.KMS, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceTasks: cfg.Endpoints.Tasks,
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
-		resourceManagerService: cfg.Endpoints.ResourceManager}
+		resourceManagerService: cfg.Endpoints.ResourceManager, config.ServiceRun: cfg.Endpoints.Run}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\n", cfg.DefaultProject())
 	b.WriteString("\n[api_endpoint_overrides]\n")
 	for _, v := range gcloudVerified {
 		if (v.always || serviceEnabled(cfg, v.service)) && ports[v.service] != 0 {
-			fmt.Fprintf(&b, "%s = http://%s%s\n", v.property, host(ports[v.service]), v.path)
+			addr := host(ports[v.service])
+			if ip := net.ParseIP(cfg.BindAddress); v.service == config.ServiceRun && ip != nil && ip.IsLoopback() {
+				addr = net.JoinHostPort("run.localhost", strconv.Itoa(ports[v.service]))
+			}
+			fmt.Fprintf(&b, "%s = http://%s%s\n", v.property, addr, v.path)
 		}
 	}
 	// No credential is sent: CloudBurrow authenticates nothing. The ADC
