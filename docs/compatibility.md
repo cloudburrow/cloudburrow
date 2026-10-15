@@ -313,7 +313,7 @@ gRPC changes.
 | `ReadObject`, `BidiReadObject` | **Verified** | Same test: whole and ranged reads, 2 MiB messages each with its CRC32C, the object's checksums on a whole read, `read_handle` pinning the generation. A stale generation is `FAILED_PRECONDITION`, a missing object `NOT_FOUND`, an offset past the end `OUT_OF_RANGE`. |
 | `GetObject`, `ListObjects` | **Verified** | Same test: prefix and delimiter, versions, soft-deleted, offsets and `match_glob` as the JSON API takes them. `ListObjects.filter` is `UNIMPLEMENTED`. |
 | `UpdateObject` | **Verified** | Same test. Mask paths `content_type`, `content_encoding`, `content_disposition`, `cache_control`, `content_language`, `metadata` (and `metadata.<key>`), `custom_time`, `temporary_hold`, `event_based_hold`, `retention` and `*`; others, and the `acl` field, are `UNIMPLEMENTED`. |
-| `ComposeObject`, `RewriteObject`, `MoveObject`, `DeleteObject`, `RestoreObject` | **Verified** | Same test. `delete_source_objects` on compose is `UNIMPLEMENTED`. |
+| `ComposeObject`, `RewriteObject`, `MoveObject`, `DeleteObject`, `RestoreObject` | **Verified** | Same test. `delete_source_objects` on compose deletes the sources once the composite is written, as the JSON API's `deleteSourceObjects` does (#1345, `TestStorageGRPCComposeDeletesSources`, official Go client's `Composer.DeleteSourceObjects` over gRPC, the sources read back gone through JSON). |
 | Customer-supplied encryption keys | Not supported | `common_object_request_params` with a key, and a rewrite's `copy_source_encryption_*`, are `UNIMPLEMENTED`, as the JSON API does not serve them. |
 
 ---
