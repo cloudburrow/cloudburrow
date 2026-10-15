@@ -149,16 +149,32 @@ func (r *runService) Start(ctx context.Context) error {
 		builds.Register(g)
 		ops.Register(g)
 	}
+	// Artifact Registry's repositories and Cloud Build's builds (#1347),
+	// which `gcloud run deploy --source` calls, on the same port: gRPC
+	// beside Cloud Run's, JSON at their own v1 paths.
+	sourceDeploy := func(g grpc.ServiceRegistrar) {
+		adapter.ArtifactRegistry().Register(g)
+		adapter.CloudBuild().Register(g)
+		ops.Register(g)
+	}
+	if r.cfg.Endpoints.Console != 0 {
+		runadapter.BuildLogURLBase = "http://" + net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Console))
+	}
 	// One port for gRPC and JSON, as run.googleapis.com (#591): the same
 	// servers, transcoded, for REST clients and Terraform's provider.
 	// The v1 (Knative-shaped) API gcloud run calls (#1293), on the same
 	// port and over the same adapter.
-	var jsonAPI http.Handler = adapter.V1Handler(runadapter.NewRESTHandler(register))
+	var jsonAPI http.Handler = runadapter.SourceDeployHandler(sourceDeploy,
+		adapter.V1Handler(runadapter.NewRESTHandler(register)))
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}
 	r.server.ServeHTTP(jsonAPI)
-	if err := r.server.Register(func(g *grpc.Server) { register(g) }); err != nil {
+	if err := r.server.Register(func(g *grpc.Server) {
+		register(g)
+		adapter.ArtifactRegistry().Register(g)
+		adapter.CloudBuild().Register(g)
+	}); err != nil {
 		return err
 	}
 	return r.server.Start(ctx)

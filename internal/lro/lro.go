@@ -94,6 +94,17 @@ func (s *Store) Create(parent, target string) *Operation {
 	return cloneOp(op)
 }
 
+// CreateNamed registers a pending operation under a name the caller chose,
+// for an API whose operation name is derived from the resource: a Cloud
+// Build operation is named after its build's ID, which gcloud reconstructs.
+func (s *Store) CreateNamed(name, target string) *Operation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	op := &Operation{Name: name, Target: target, State: StatePending, Created: s.now(), Updated: s.now()}
+	s.ops[name] = op
+	return cloneOp(op)
+}
+
 // Succeed marks an operation completed.
 func (s *Store) Succeed(name string, response any) error {
 	return s.finish(name, StateSucceeded, response, nil)

@@ -73,6 +73,12 @@ var gcloudVerified = []struct {
 	// still resolves to loopback (RFC 6761). TestGcloudRunServicesList
 	// drives services list, describe and revisions list.
 	{config.ServiceRun, "run", "/", false},
+	// Artifact Registry and Cloud Build (#1347), served on the Run port
+	// for `gcloud run deploy --source`, which creates the
+	// cloud-run-source-deploy repository and polls the build's Cloud
+	// Build operation. TestGcloudRunDeploySource drives it.
+	{config.ServiceRun, "artifactregistry", "/", false},
+	{config.ServiceRun, "cloudbuild", "/", false},
 	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.
@@ -136,7 +142,7 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		on := v.always || serviceEnabled(cfg, v.service) || (v.service == sqlAdminEndpoint && sqlAdminEnabled(cfg))
 		if on && ports[v.service] != 0 {
 			addr := host(ports[v.service])
-			if ip := net.ParseIP(cfg.BindAddress); v.service == config.ServiceRun && ip != nil && ip.IsLoopback() {
+			if ip := net.ParseIP(cfg.BindAddress); v.service == config.ServiceRun && v.property == "run" && ip != nil && ip.IsLoopback() {
 				addr = net.JoinHostPort("run.localhost", strconv.Itoa(ports[v.service]))
 			}
 			fmt.Fprintf(&b, "%s = http://%s%s\n", v.property, addr, v.path)

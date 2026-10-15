@@ -2,6 +2,9 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
+	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"fmt"
@@ -90,7 +93,7 @@ func (b *localImageBuilder) Build(ctx context.Context, spec runadapter.BuildSpec
 		return err
 	}
 	defer os.RemoveAll(dir)
-	if err := untarGz(spec.Archive, dir); err != nil {
+	if err := unpackSource(spec.Archive, dir); err != nil {
 		return fmt.Errorf("unpack the source archive: %w", err)
 	}
 	switch spec.Kind {
@@ -191,6 +194,70 @@ func (b *localImageBuilder) pack(ctx context.Context, spec runadapter.BuildSpec,
 
 // maxSourceBytes bounds what a source archive may unpack to.
 const maxSourceBytes = 2 << 30
+
+// unpackSource unpacks a source archive into dir: a zip, which gcloud 586's
+// `run deploy --source` uploads (#1347), or a gzipped tarball, which
+// SubmitBuild's other callers and Cloud Build's own builds use.
+func unpackSource(r io.Reader, dir string) error {
+	br := bufio.NewReader(r)
+	if magic, _ := br.Peek(4); !bytes.Equal(magic, []byte("PK\x03\x04")) {
+		return untarGz(br, dir)
+	}
+	// A zip's directory is at its end, so it is read whole, bounded.
+	data, err := io.ReadAll(io.LimitReader(br, maxSourceBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > maxSourceBytes {
+		return fmt.Errorf("the source archive is more than %d bytes", int64(maxSourceBytes))
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return fmt.Errorf("the source is not a zip archive: %w", err)
+	}
+	var total int64
+	for _, f := range zr.File {
+		clean := filepath.Clean(f.Name)
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("entry %q escapes the source directory", f.Name)
+		}
+		target := filepath.Join(dir, clean)
+		switch {
+		case f.FileInfo().IsDir():
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case f.Mode().IsRegular():
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			mode := os.FileMode(0o644)
+			if f.Mode()&0o111 != 0 {
+				mode = 0o755
+			}
+			src, err := f.Open()
+			if err != nil {
+				return err
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+			if err != nil {
+				src.Close()
+				return err
+			}
+			n, err := io.Copy(out, io.LimitReader(src, maxSourceBytes-total+1))
+			out.Close()
+			src.Close()
+			if err != nil {
+				return err
+			}
+			if total += n; total > maxSourceBytes {
+				return fmt.Errorf("the source unpacks to more than %d bytes", int64(maxSourceBytes))
+			}
+		}
+		// Links and devices are skipped, as in a tarball.
+	}
+	return nil
+}
 
 // untarGz unpacks a gzipped tarball into dir, refusing any entry that would
 // land outside it.

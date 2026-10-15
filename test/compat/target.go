@@ -184,7 +184,9 @@ var gcloudOverrides = []struct {
 	property string
 	harness  []string
 }{
-	{"storage", []string{"STORAGE"}},
+	// RUN_STORAGE too, for the same reason as RUN_LOGGING: `gcloud run
+	// deploy --source` uploads its source in the run shard (#1347).
+	{"storage", []string{"STORAGE", "RUN_STORAGE"}},
 	{"pubsub", []string{"PUBSUB"}},
 	{"cloudkms", []string{"KMS"}},
 	{"secretmanager", []string{"SECRETS"}},
@@ -193,6 +195,9 @@ var gcloudOverrides = []struct {
 	{"logging", []string{"LOGGING", "RUN_LOGGING"}},
 	{"cloudresourcemanager", []string{"RESOURCEMANAGER"}},
 	{"run", []string{"RUN"}},
+	// Served on the Run port (#1347).
+	{"artifactregistry", []string{"RUN"}},
+	{"cloudbuild", []string{"RUN"}},
 	{"sql", []string{"SQLADMIN"}},
 }
 
