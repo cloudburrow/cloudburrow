@@ -8,11 +8,13 @@ import (
 	"time"
 
 	schedulerpb "cloud.google.com/go/scheduler/apiv1/schedulerpb"
+	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/grpc/codes"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // schedulerProvider is the Cloud Scheduler screen (#593).
@@ -313,8 +315,9 @@ func (schedulerProvider) CreateForm() (string, []console.Field) {
 	return "Create job", []console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true,
 			Help: "Letters, numbers, hyphens and underscores.", Pattern: `^[A-Za-z0-9_\-]{1,500}$`},
-		{Name: "location", Label: "Region", Type: "text", Required: true, Default: "us-central1",
-			Help: "Any location string; CloudBurrow does not place resources geographically."},
+		{Name: "location", Label: "Region", Type: "select", Required: true, Default: "us-central1", Options: schedulerRegions(),
+			Help: "The regions Locations.ListLocations lists (#1237); CloudBurrow does not place resources geographically. " +
+				"An SDK may name any other location."},
 		{Name: "description", Label: "Description", Type: "text"},
 		{Name: "schedule", Label: "Frequency", Type: "text", Required: true, Default: "*/5 * * * *",
 			Help: "unix-cron format, e.g. \"0 9 * * 1\" for 09:00 every Monday."},
@@ -372,4 +375,19 @@ func (p schedulerProvider) Create(ctx context.Context, project string, values ma
 		return "", err
 	}
 	return created.GetName(), nil
+}
+
+// schedulerRegions is what the Create job form offers as its Region: what the
+// service's own ListLocations answers for a project with no jobs (#1237).
+func schedulerRegions() []string {
+	resp, err := scheduler.NewLocationsServer(scheduler.NewStore(store.NewMemory())).ListLocations(
+		context.Background(), &locationpb.ListLocationsRequest{Name: "projects/console-regions", PageSize: 1000})
+	if err != nil {
+		return []string{"us-central1"}
+	}
+	out := make([]string, 0, len(resp.GetLocations()))
+	for _, l := range resp.GetLocations() {
+		out = append(out, l.GetLocationId())
+	}
+	return out
 }

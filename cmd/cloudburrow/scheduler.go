@@ -136,7 +136,9 @@ func (s *schedulerService) Start(ctx context.Context) error {
 	s.api = scheduler.NewGRPCServer(s.store, s.runner, clock)
 	// One port for gRPC and JSON, as cloudscheduler.googleapis.com (#591):
 	// the same server, transcoded, for REST clients, Terraform and gcloud.
-	register := func(g grpc.ServiceRegistrar) { s.api.Register(g) }
+	// The Locations mixin too (#1237), on both transports.
+	locations := scheduler.NewLocationsServer(s.store)
+	register := func(g grpc.ServiceRegistrar) { s.api.Register(g); locations.Register(g) }
 	var jsonAPI http.Handler = scheduler.NewRESTHandler(register)
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)

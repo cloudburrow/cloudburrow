@@ -29,7 +29,8 @@ func restServer(t *testing.T) *httptest.Server {
 	clock := sched.NewFakeClock(time.Date(2026, 9, 24, 10, 0, 30, 0, time.UTC))
 	st := NewStore(store.NewMemory())
 	api := NewGRPCServer(st, NewRunner(st, nil, clock, (&published{}).publish, time.Second), clock)
-	srv := httptest.NewServer(NewRESTHandler(func(g grpc.ServiceRegistrar) { api.Register(g) }))
+	loc := NewLocationsServer(st)
+	srv := httptest.NewServer(NewRESTHandler(func(g grpc.ServiceRegistrar) { api.Register(g); loc.Register(g) }))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -132,8 +133,8 @@ func httpCode(err error) int {
 }
 
 // The wire: the Terraform provider's resume of the job it just created and
-// its camelCase updateMask, an unknown query parameter, the unimplemented
-// Locations mixin and an unbound path.
+// its camelCase updateMask, an unknown query parameter, the Locations mixin
+// (#1237) and an unbound path.
 func TestRESTWire(t *testing.T) {
 	t.Parallel()
 	srv := restServer(t)
@@ -166,8 +167,10 @@ func TestRESTWire(t *testing.T) {
 		{"GET", job + "?noSuchParameter=1", "", 400, "noSuchParameter"},
 		{"POST", jobs, `{"name":"` + parent + `/jobs/x","noSuchField":1}`, 400, "INVALID_ARGUMENT"},
 		{"POST", job + ":pause", "", 200, `"state":"PAUSED"`},
-		{"GET", "/v1/projects/demo-project/locations", "", 501, "UNIMPLEMENTED"},
-		{"GET", "/v1/projects/demo-project/locations/us-central1", "", 501, "UNIMPLEMENTED"},
+		{"GET", "/v1/projects/demo-project/locations", "", 200, `"locationId":"us-central1"`},
+		{"GET", "/v1/projects/demo-project/locations?pageSize=1", "", 200, `"nextPageToken"`},
+		{"GET", "/v1/projects/demo-project/locations/us-central1", "", 200, `"name":"projects/demo-project/locations/us-central1"`},
+		{"GET", "/v1/projects/demo-project/locations/no-such-region", "", 404, "NOT_FOUND"},
 		{"GET", "/v1/projects/demo-project/jobs", "", 404, "NOT_FOUND"},
 		{"DELETE", job, "", 200, "{}"},
 		{"GET", job, "", 404, "NOT_FOUND"},

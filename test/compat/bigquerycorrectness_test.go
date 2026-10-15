@@ -273,12 +273,13 @@ func TestBigQueryCreateIfNotExistsOfAnExistingOne(t *testing.T) {
 }
 
 // TestBigQueryCreateTableLikeCopyCloneNotImplemented (#937): CREATE TABLE
-// ... LIKE, COPY and CLONE and CREATE SNAPSHOT TABLE are 501
-// notImplemented, naming the statement, through jobs.query and
-// jobs.insert, and make nothing. Measured first: the emulator answered
-// each 400 "CREATE TABLE LIKE is not supported" (COPY, CLONE, with or
-// without OR REPLACE) or "Statement not supported:
-// CreateSnapshotTableStatement".
+// ... CLONE and CREATE SNAPSHOT TABLE are 501 notImplemented, naming the
+// statement, through jobs.query and jobs.insert, and make nothing; so are
+// LIKE and COPY inside a multi-statement script. Measured first: the
+// emulator answered each 400 "CREATE TABLE LIKE is not supported" (COPY,
+// CLONE, with or without OR REPLACE) or "Statement not supported:
+// CreateSnapshotTableStatement". A lone LIKE or COPY is carried out since
+// #1239 (TestBigQueryCreateTableLikeAndCopy).
 func TestBigQueryCreateTableLikeCopyCloneNotImplemented(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -290,8 +291,8 @@ func TestBigQueryCreateTableLikeCopyCloneNotImplemented(t *testing.T) {
 	}
 	for _, insert := range []bool{false, true} {
 		for table, sql := range map[string]string{
-			"like":  "CREATE TABLE " + path("like") + " LIKE " + path("src"),
-			"copy":  "CREATE TABLE " + path("copy") + " COPY " + path("src"),
+			"like":  "SELECT 1; CREATE TABLE " + path("like") + " LIKE " + path("src"),
+			"copy":  "SELECT 1; CREATE TABLE " + path("copy") + " COPY " + path("src"),
 			"clone": "CREATE OR REPLACE TABLE " + path("clone") + " CLONE " + path("src"),
 			"snap":  "CREATE SNAPSHOT TABLE " + path("snap") + " CLONE " + path("src"),
 		} {
@@ -305,5 +306,50 @@ func TestBigQueryCreateTableLikeCopyCloneNotImplemented(t *testing.T) {
 				t.Errorf("the refused %s made %s", sql, table)
 			}
 		}
+	}
+}
+
+// covers: bigquery.jobs.query, bigquery.jobs.insert
+//
+// TestBigQueryCreateTableLikeAndCopy (#1239): a lone CREATE TABLE ... LIKE
+// makes an empty table with the source's columns, and CREATE TABLE ... COPY
+// one with its columns and rows, through jobs.query and jobs.insert, read
+// back by Table.Metadata and a query; OPTIONS after the source are accepted
+// (the emulator's CREATE TABLE AS SELECT keeps no description, measured),
+// and IF NOT EXISTS of a table that exists changes nothing.
+func TestBigQueryCreateTableLikeAndCopy(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	path := func(table string) string { return "`" + ds.DatasetID + "." + table + "`" }
+	if err := bqRun(ctx, c, "CREATE TABLE "+path("src")+" AS SELECT 1 AS a, 'x' AS b UNION ALL SELECT 2, 'y'", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, insert := range []bool{false, true} {
+		suffix := fmt.Sprint(insert)
+		if err := bqRun(ctx, c, "CREATE TABLE "+path("like_"+suffix)+" LIKE "+path("src")+" OPTIONS(description='liked')", insert); err != nil {
+			t.Fatalf("LIKE (insert %v): %v", insert, err)
+		}
+		if err := bqRun(ctx, c, "CREATE OR REPLACE TABLE "+path("copy_"+suffix)+" COPY "+path("src")+";", insert); err != nil {
+			t.Fatalf("COPY (insert %v): %v", insert, err)
+		}
+		md, err := ds.Table("like_" + suffix).Metadata(ctx)
+		if err != nil || len(md.Schema) != 2 || md.Schema[0].Name != "a" || md.Schema[0].Type != bigquery.IntegerFieldType ||
+			md.Schema[1].Name != "b" || md.Schema[1].Type != bigquery.StringFieldType {
+			t.Errorf("the LIKE table = %+v, %v", md, err)
+		}
+		if got := fmt.Sprint(rows(t, ctx, c, "SELECT COUNT(*) FROM "+path("like_"+suffix))); got != "[[0]]" {
+			t.Errorf("the LIKE table holds %s rows, want [[0]]", got)
+		}
+		if got := fmt.Sprint(rows(t, ctx, c, "SELECT a, b FROM "+path("copy_"+suffix)+" ORDER BY a")); got != "[[1 x] [2 y]]" {
+			t.Errorf("the COPY table holds %s, want [[1 x] [2 y]]", got)
+		}
+	}
+	if err := bqRun(ctx, c, "CREATE TABLE IF NOT EXISTS "+path("copy_false")+" LIKE "+path("src"), false); err != nil {
+		t.Fatalf("IF NOT EXISTS: %v", err)
+	}
+	if got := fmt.Sprint(rows(t, ctx, c, "SELECT COUNT(*) FROM "+path("copy_false"))); got != "[[2]]" {
+		t.Errorf("after IF NOT EXISTS the table holds %s rows, want [[2]]", got)
 	}
 }

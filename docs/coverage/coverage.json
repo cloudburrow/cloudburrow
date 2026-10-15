@@ -1460,9 +1460,23 @@
     "Key": "scheduler",
     "Title": "Cloud Scheduler",
     "counts": {
-      "Verified": 8
+      "Verified": 10
     },
     "rows": [
+      {
+        "method": "google.cloud.location.Locations/GetLocation",
+        "status": "Verified",
+        "tests": [
+          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
+        ]
+      },
+      {
+        "method": "google.cloud.location.Locations/ListLocations",
+        "status": "Verified",
+        "tests": [
+          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
+        ]
+      },
       {
         "method": "google.cloud.scheduler.v1.CloudScheduler/CreateJob",
         "status": "Verified",
@@ -1561,7 +1575,8 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1573,7 +1588,8 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1590,7 +1606,8 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1602,7 +1619,8 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1624,7 +1642,8 @@
         "method": "google.logging.v2.ConfigServiceV2/GetExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1641,7 +1660,8 @@
         "method": "google.logging.v2.ConfigServiceV2/GetSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1702,7 +1722,8 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateExclusion",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1714,7 +1735,8 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateSink",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1774,21 +1796,24 @@
         "method": "google.logging.v2.MetricsServiceV2/CreateLogMetric",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
         "method": "google.logging.v2.MetricsServiceV2/DeleteLogMetric",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
         "method": "google.logging.v2.MetricsServiceV2/GetLogMetric",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
       {
@@ -1802,7 +1827,8 @@
         "method": "google.logging.v2.MetricsServiceV2/UpdateLogMetric",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
+          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
+          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       }
     ]
@@ -4135,8 +4161,8 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Refused": 2,
-      "Verified": 45
+      "Refused": 1,
+      "Verified": 46
     },
     "rows": [
       {
@@ -4231,6 +4257,7 @@
         "method": "bigquery.jobs.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerycorrectness_test.go:320 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
@@ -4251,6 +4278,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerycorrectness_test.go:320 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
@@ -4359,11 +4387,10 @@
       },
       {
         "method": "bigquery.routines.update",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:410 TestBigQueryRoutineUpdateIsRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigquerymethods_test.go:413 TestBigQueryRoutineUpdate"
+        ]
       },
       {
         "method": "bigquery.rowAccessPolicies.batchDelete",

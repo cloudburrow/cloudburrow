@@ -229,6 +229,11 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 			deleteTable)
 	case 3:
 		if isRoutinePath(path) {
+			// Edit routine's form is drawn from the routine (#1238), so it
+			// is left out when the routine cannot be read.
+			if md, err := p.routineMetadata(ctx, path[0], path[2]); err == nil {
+				return []console.Action{editRoutineAction(md), deleteRoutineAction()}
+			}
 			return []console.Action{deleteRoutineAction()}
 		}
 	case 4:
@@ -406,6 +411,8 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 		return p.deleteAllRowPolicies(ctx, path[0], path[1])
 	case action == actDeleteRowPolicy && isRowPolicyPath(path):
 		return p.deleteRowPolicy(ctx, path[0], path[1], path[3])
+	case action == actEditRoutine && isRoutinePath(path):
+		return p.editRoutine(ctx, path[0], path[2], values)
 	case action == actDeleteRoutine && isRoutinePath(path):
 		return p.deleteRoutine(ctx, path[0], path[2])
 	case action == "deletetable" && len(path) == 2:

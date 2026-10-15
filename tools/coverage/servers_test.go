@@ -50,6 +50,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(resourcemanager.New(store.NewMemory())))
 	schedStore := scheduler.NewStore(store.NewMemory())
 	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)
+	scheduler.NewLocationsServer(schedStore).Register(srv)
 	logging.NewServer(logging.NewStore(10)).Register(srv)
 	vertexai.NewServer(nil).RegisterGRPC(srv)
 	logging.NewAdmin(store.NewMemory()).Register(srv)
