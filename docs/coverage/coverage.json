@@ -5584,8 +5584,8 @@
     "Key": "sqladmin",
     "Title": "Cloud SQL Admin API (v1)",
     "counts": {
-      "Unimplemented": 65,
-      "Verified": 15
+      "Unimplemented": 63,
+      "Verified": 17
     },
     "rows": [
       {
@@ -5632,7 +5632,7 @@
         "method": "sql.backupRuns.list",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -5663,19 +5663,17 @@
       },
       {
         "method": "sql.connect.generateEphemeral",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/cloudsqlconnector_test.go:36 TestCloudSQLConnectorDialsBothServers"
+        ]
       },
       {
         "method": "sql.connect.get",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/cloudsqlconnector_test.go:36 TestCloudSQLConnectorDialsBothServers"
+        ]
       },
       {
         "method": "sql.connect.resolve",
@@ -5686,8 +5684,8 @@
         "method": "sql.databases.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -5695,7 +5693,7 @@
         "method": "sql.databases.get",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -5703,8 +5701,8 @@
         "method": "sql.databases.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -5712,29 +5710,29 @@
         "method": "sql.databases.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:415 TestGcloudSQL"
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:414 TestGcloudSQL"
         ]
       },
       {
         "method": "sql.databases.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.databases.update",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.flags.list",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -5787,7 +5785,7 @@
         "method": "sql.instances.delete",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -5820,7 +5818,7 @@
         "method": "sql.instances.get",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
         ]
       },
@@ -5833,7 +5831,7 @@
         "method": "sql.instances.insert",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -5841,7 +5839,7 @@
         "method": "sql.instances.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
         ]
       },
@@ -5854,7 +5852,7 @@
         "method": "sql.instances.patch",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -5892,7 +5890,7 @@
         "method": "sql.instances.restart",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -5940,8 +5938,8 @@
         "method": "sql.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -5949,7 +5947,7 @@
         "method": "sql.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -6016,7 +6014,7 @@
         "method": "sql.tiers.list",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6024,8 +6022,8 @@
         "method": "sql.users.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6033,15 +6031,15 @@
         "method": "sql.users.get",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.users.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6049,8 +6047,8 @@
         "method": "sql.users.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6058,7 +6056,7 @@
         "method": "sql.users.update",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       }
