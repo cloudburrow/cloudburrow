@@ -20,7 +20,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 11 | 5 | 5 | 1 | 0 |
+| Cloud Storage | 10 | 4 | 5 | 1 | 0 |
 | Pub/Sub | 4 | 1 | 2 | 1 | 0 |
 | Cloud Tasks | 5 | 4 | 1 | 0 | 0 |
 | Cloud Run | 13 | 10 | 1 | 0 | 2 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **91** | **47** | **32** | **7** | **5** |
+| **Total** | **90** | **46** | **32** | **7** | **5** |
 
 ## Cloud Storage
 
