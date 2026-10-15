@@ -291,7 +291,7 @@
         "skipDiscovery": "The go.mod minimum, raised deliberately rather than tracked against the newest release; the compiler releases are built with is goRelease."
       },
       "goRelease": {
-        "version": "1.27.1",
+        "version": "1.27.2",
         "source": "https://go.dev/dl/",
         "license": "BSD-3-Clause",
         "redistribution": "not-redistributed",

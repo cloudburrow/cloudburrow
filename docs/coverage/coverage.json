@@ -3,10 +3,20 @@
     "Key": "tasks",
     "Title": "Cloud Tasks",
     "counts": {
-      "Unimplemented": 1,
+      "Unimplemented": 5,
       "Verified": 15
     },
     "rows": [
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/BatchCreateTasks",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/BatchDeleteTasks",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/CreateQueue",
         "status": "Verified",
@@ -37,6 +47,11 @@
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:146 TestTasksTaskLifecycle"
         ]
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/GetCmekConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/GetIamPolicy",
@@ -120,6 +135,11 @@
         "tests": [
           "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced"
         ]
+      },
+      {
+        "method": "google.cloud.tasks.v2.CloudTasks/UpdateCmekConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/UpdateQueue",
@@ -3429,7 +3449,7 @@
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
-          "test/compat/bigquerysilent_test.go:434 TestBigQueryTableUpdateAddsColumns",
+          "test/compat/bigquerysilent_test.go:444 TestBigQueryTableUpdateAddsColumns",
           "test/compat/consolebigquerywrites_test.go:182 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
@@ -3445,7 +3465,7 @@
         "method": "bigquery.tables.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerysilent_test.go:434 TestBigQueryTableUpdateAddsColumns"
+          "test/compat/bigquerysilent_test.go:444 TestBigQueryTableUpdateAddsColumns"
         ]
       }
     ]
