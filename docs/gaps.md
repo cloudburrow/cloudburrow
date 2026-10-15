@@ -33,9 +33,9 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | BigQuery | 40 | 18 | 18 | 4 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 6 | 6 | 0 | 0 | 0 |
-| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **93** | **40** | **40** | **8** | **5** |
+| **Total** | **92** | **39** | **40** | **8** | **5** |
 
 ## Cloud Storage
 
