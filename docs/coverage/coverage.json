@@ -653,7 +653,7 @@
     "Title": "Cloud KMS",
     "counts": {
       "Unimplemented": 2,
-      "Verified": 36
+      "Verified": 38
     },
     "rows": [
       {
@@ -1360,6 +1360,22 @@
         ]
       },
       {
+        "method": "google.cloud.location.Locations/GetLocation",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kmslocations_test.go:24 TestKMSLocations",
+          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
+        ]
+      },
+      {
+        "method": "google.cloud.location.Locations/ListLocations",
+        "status": "Verified",
+        "tests": [
+          "test/compat/kmslocations_test.go:24 TestKMSLocations",
+          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
+        ]
+      },
+      {
         "method": "google.iam.v1.IAMPolicy/GetIamPolicy",
         "status": "Verified",
         "tests": [
@@ -1507,6 +1523,7 @@
         "method": "google.cloud.location.Locations/GetLocation",
         "status": "Verified",
         "tests": [
+          "test/compat/kmslocations_test.go:24 TestKMSLocations",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
         ]
       },
@@ -1514,6 +1531,7 @@
         "method": "google.cloud.location.Locations/ListLocations",
         "status": "Verified",
         "tests": [
+          "test/compat/kmslocations_test.go:24 TestKMSLocations",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
         ]
       },

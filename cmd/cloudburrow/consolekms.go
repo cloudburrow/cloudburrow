@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
+	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
 // kmsProvider is the Cloud KMS screen (#593).
@@ -368,9 +370,26 @@ func (kmsProvider) CreateForm() (string, []console.Field) {
 		{Name: "keyRingId", Label: "Key ring name", Type: "text", Required: true,
 			Help:    "1-63 letters, digits, hyphens and underscores. Cannot be deleted or renamed.",
 			Pattern: `^[A-Za-z0-9_\-]{1,63}$`},
-		{Name: "location", Label: "Location", Type: "text", Required: true, Default: "global",
-			Help: "Any location name; CloudBurrow does not place keys geographically."},
+		{Name: "location", Label: "Location", Type: "select", Required: true, Default: "global", Options: kmsLocations(),
+			Help: "The locations Locations.ListLocations lists (#1291); CloudBurrow does not place keys geographically. " +
+				"An SDK may name any other location."},
 	}
+}
+
+// kmsLocations is what the Create key ring form offers as its Location: what
+// the service's own ListLocations answers for a project with no key rings
+// (#1291).
+func kmsLocations() []string {
+	resp, err := kms.NewServer(store.NewMemory()).Locations().ListLocations(
+		context.Background(), &locationpb.ListLocationsRequest{Name: "projects/console-regions", PageSize: 1000})
+	if err != nil {
+		return []string{"global"}
+	}
+	out := make([]string, 0, len(resp.GetLocations()))
+	for _, l := range resp.GetLocations() {
+		out = append(out, l.GetLocationId())
+	}
+	return out
 }
 
 func (p kmsProvider) Create(ctx context.Context, project string, values map[string]string) (string, error) {

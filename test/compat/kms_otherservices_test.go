@@ -11,7 +11,6 @@ import (
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/api/option"
-	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,8 +18,9 @@ import (
 )
 
 // TestKMSOtherServicesAreUnimplemented: cloudkms.googleapis.com also serves
-// the Locations mixin, EkmService, Autokey, AutokeyAdmin and HsmManagement.
-// CloudBurrow serves none of them, and each answers UNIMPLEMENTED through its
+// EkmService, Autokey, AutokeyAdmin and HsmManagement (and the Locations
+// mixin, served since #1291: TestKMSLocations). CloudBurrow serves none of
+// them, and each answers UNIMPLEMENTED through its
 // official client (#397). The IAMPolicy mixin stores policies on key rings and
 // crypto keys (#428, TestKMSIamPolicyIsStoredNotEnforced); on an import job,
 // which CloudBurrow does not serve, it is UNIMPLEMENTED, never an empty
@@ -70,14 +70,6 @@ func TestKMSOtherServicesAreUnimplemented(t *testing.T) {
 	}
 	calls["TestIamPermissions on an import job"] = func(ctx context.Context) error {
 		_, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: job, Permissions: []string{"cloudkms.importJobs.get"}})
-		return err
-	}
-	calls["ListLocations"] = func(ctx context.Context) error {
-		_, err := c.ListLocations(ctx, &locationpb.ListLocationsRequest{Name: "projects/" + h.Project()}).Next()
-		return err
-	}
-	calls["GetLocation"] = func(ctx context.Context) error {
-		_, err := c.GetLocation(ctx, &locationpb.GetLocationRequest{Name: loc})
 		return err
 	}
 	calls["EkmService/ListEkmConnections"] = func(ctx context.Context) error {

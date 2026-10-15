@@ -11,7 +11,7 @@ Do not edit these files by hand.
 | [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
 | [Cloud Run v2](run.md) | 41 | 26 | 0 | 0 | 0 | 15 | 0 | 4 |
-| [Cloud KMS](kms.md) | 38 | 36 | 0 | 2 | 0 | 0 | 0 | 82 |
+| [Cloud KMS](kms.md) | 40 | 38 | 0 | 2 | 0 | 0 | 0 | 82 |
 | [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 7 | 0 | 4 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 32 | 0 | 11 | 0 | 0 | 0 | 0 |

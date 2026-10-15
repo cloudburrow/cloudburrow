@@ -33,8 +33,8 @@ func TestRESTAnswersGoogleBindingsAndNothingElse(t *testing.T) {
 		// exist; import jobs stay 501.
 		{"GET", "/v1/projects/demo-project/locations/global/keyRings/absent:getIamPolicy", 404},
 		{"POST", kr + "/importJobs/j:setIamPolicy", 501},
-		{"GET", "/v1/projects/p/locations", 501},
-		{"GET", "/v1/projects/p/locations/global", 501},
+		// Locations is served since #1291; TestLocationsOverREST lists them.
+		{"GET", "/v1/projects/demo-project/locations/no-such-region", 404},
 		{"GET", "/v1/projects/p/locations/global/operations/o", 501},
 		{"DELETE", kr, 501},
 		{"POST", kr + "/cryptoKeys/k/cryptoKeyVersions/1:decrypt", 404}, // decrypt binds cryptoKeys/* only
