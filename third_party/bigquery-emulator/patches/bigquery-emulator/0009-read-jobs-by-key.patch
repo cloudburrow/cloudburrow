@@ -1,4 +1,4 @@
-CloudBurrow patch 8 to github.com/goccy/bigquery-emulator v0.8.1
+CloudBurrow patch 9 to github.com/goccy/bigquery-emulator v0.8.1
 (cloudburrow/cloudburrow#1103, #1057); needs patch 0002 and googlesqlite
 patch 0018.
 

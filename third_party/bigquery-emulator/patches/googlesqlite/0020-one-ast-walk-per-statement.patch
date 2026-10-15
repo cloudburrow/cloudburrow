@@ -1,4 +1,4 @@
-CloudBurrow patch 18 to github.com/goccy/googlesqlite v0.3.1
+CloudBurrow patch 20 to github.com/goccy/googlesqlite v0.3.1
 (cloudburrow/cloudburrow#1070).
 
 The cost: Analyzer.Analyze (internal/analyzer.go) walked each statement's
@@ -405,7 +405,7 @@ Authors.
  				return nil, err
 --- a/internal/catalog.go
 +++ b/internal/catalog.go
-@@ -1716,7 +1716,7 @@
+@@ -1743,7 +1743,7 @@
  // registerWildcardTableByPath pre-creates a wildcard table for `path`
  // and installs it into the googlesql catalog so the analyzer can
  // resolve the reference. Called from the analyzer before a statement

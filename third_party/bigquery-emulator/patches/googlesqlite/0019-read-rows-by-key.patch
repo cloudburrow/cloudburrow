@@ -1,4 +1,4 @@
-CloudBurrow patch 18 to github.com/goccy/googlesqlite v0.3.1
+CloudBurrow patch 19 to github.com/goccy/googlesqlite v0.3.1
 (cloudburrow/cloudburrow#1103, #1057).
 
 The bug: googlesqlite compiles each GoogleSQL WHERE comparison, and the
