@@ -39,8 +39,10 @@ func writeStateDir(dir string) string {
 
 // savedFunctions is the functions file's content.
 type savedFunctions struct {
-	Funcs   map[string]map[string][]string `json:"funcs,omitempty"`
-	Scanned map[string]bool                `json:"scanned,omitempty"`
+	Funcs map[string]map[string][]string `json:"funcs,omitempty"`
+	// Defs are the functions' definitions (#1177).
+	Defs    map[string]map[string]json.RawMessage `json:"defs,omitempty"`
+	Scanned map[string]bool                       `json:"scanned,omitempty"`
 	// Started is when the front that scanned started, Unix milliseconds.
 	Started int64 `json:"started"`
 }
@@ -66,7 +68,7 @@ func (k *knownFunctions) keep(path string, logf func(string, ...any)) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if s.Funcs != nil || s.Scanned != nil {
-		k.funcs, k.scanned, k.started = s.Funcs, s.Scanned, s.Started
+		k.funcs, k.defs, k.scanned, k.started = s.Funcs, s.Defs, s.Scanned, s.Started
 		logf("bigquery front: restored the functions it knew from %s", path)
 	}
 	k.path, k.logf = path, logf
@@ -81,7 +83,7 @@ func (k *knownFunctions) saveLocked() {
 	if k == nil || k.path == "" {
 		return
 	}
-	b, err := json.Marshal(savedFunctions{Funcs: k.funcs, Scanned: k.scanned, Started: k.started})
+	b, err := json.Marshal(savedFunctions{Funcs: k.funcs, Defs: k.defs, Scanned: k.scanned, Started: k.started})
 	if err == nil {
 		err = writeFileAtomic(k.path, b)
 	}

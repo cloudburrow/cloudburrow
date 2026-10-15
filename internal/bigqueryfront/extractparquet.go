@@ -26,14 +26,13 @@ import (
 // FIXED_LEN_BYTE_ARRAY DECIMAL (38, 9) and (76, 38); DATE as INT32 DATE;
 // DATETIME and TIMESTAMP as INT64 TIMESTAMP (isAdjustedToUTC false,
 // MICROS); TIME as INT64 TIME (isAdjustedToUTC true, MICROS); a RECORD as
-// a group ("represents nested data as a group"); a REQUIRED column
-// required, any other optional; compressed with SNAPPY, GZIP or ZSTD, as
-// the job names, or not. 501 for the rest: FLOAT64 (the documentation
-// gives Parquet FLOAT, a 32-bit type that cannot hold a FLOAT64, so its
-// form is unclear), GEOGRAPHY and JSON (the form of their bytes is not
-// given), INTERVAL and RANGE (not in the table), a REPEATED column
-// ("repeated records as repeated groups", which Parquet's LIST structure,
-// the one the writer has, is not given to be), and a parameterized
+// a group ("represents nested data as a group"); JSON as a STRING ("it is
+// exported as a STRING field"); FLOAT64 as DOUBLE (parquetExportType);
+// a REPEATED column in Parquet's LIST form (parquetNodes); a REQUIRED
+// column required, any other optional; compressed with SNAPPY, GZIP or
+// ZSTD, as the job names, or not. 501 for the rest: GEOGRAPHY (BYTE_ARRAY
+// GEOGRAPHY with GeoParquet metadata, whose bytes the documentation does
+// not give), INTERVAL and RANGE (not in the table), and a parameterized
 // NUMERIC. The file's writer metadata, page and row group sizes and
 // encodings are the writer's, not BigQuery's (UNVERIFIED): a Parquet
 // reader reads the same rows and types, not the same bytes.
@@ -56,8 +55,17 @@ func parquetExportType(typ string) (parquetLeaf, bool) {
 		return parquetLeaf{phys: parquet.Types.Int64, logical: pqschema.NoLogicalType{}}, true
 	case "BOOLEAN", "BOOL":
 		return parquetLeaf{phys: parquet.Types.Boolean, logical: pqschema.NoLogicalType{}}, true
-	case "STRING":
+	case "STRING", "JSON":
+		// "When you export a JSON column to Parquet format, it is exported
+		// as a STRING field."
 		return parquetLeaf{phys: parquet.Types.ByteArray, logical: pqschema.StringLogicalType{}}, true
+	case "FLOAT", "FLOAT64":
+		// The table gives "FLOAT", but a Parquet FLOAT (32 bits) cannot
+		// hold a FLOAT64, and BigQuery's names for FLOAT64 include FLOAT
+		// (the legacy and REST name): DOUBLE, the 64-bit type, which
+		// BigQuery's Parquet load also reads as FLOAT64. UNVERIFIED
+		// against a file BigQuery exported.
+		return parquetLeaf{phys: parquet.Types.Double, logical: pqschema.NoLogicalType{}}, true
 	case "BYTES":
 		return parquetLeaf{phys: parquet.Types.ByteArray, logical: pqschema.NoLogicalType{}}, true
 	case "NUMERIC":
@@ -80,9 +88,6 @@ func parquetExportType(typ string) (parquetLeaf, bool) {
 func parquetUnwritten(fields []field, prefix string) (string, string) {
 	for _, fl := range fields {
 		typ := strings.ToUpper(fl.Type)
-		if strings.EqualFold(fl.Mode, "REPEATED") {
-			return prefix + fl.Name, "REPEATED " + typ
-		}
 		if typ == "RECORD" || typ == "STRUCT" {
 			if loc, t := parquetUnwritten(fl.Fields, prefix+fl.Name+"."); loc != "" {
 				return loc, t
@@ -96,93 +101,173 @@ func parquetUnwritten(fields []field, prefix string) (string, string) {
 	return "", ""
 }
 
-// parquetColumn is one leaf column of the file: the fields on its path
-// from the root, its type, and its values and definition levels.
+// parquetColumn is one leaf column of the file: its type, and its values
+// and definition and repetition levels.
 type parquetColumn struct {
-	path   []field
+	name   string
+	typ    string
 	leaf   parquetLeaf
+	maxRep int16
 	values []any
 	defs   []int16
+	reps   []int16
+}
+
+// parquetNode is a BigQuery field as the front writes it: a leaf column,
+// or a RECORD's fields.
+type parquetNode struct {
+	fl   field
+	col  *parquetColumn
+	kids []*parquetNode
+}
+
+// columns is every leaf column below n.
+func (n *parquetNode) columns() []*parquetColumn {
+	if n.col != nil {
+		return []*parquetColumn{n.col}
+	}
+	var out []*parquetColumn
+	for _, k := range n.kids {
+		out = append(out, k.columns()...)
+	}
+	return out
 }
 
 // parquetNodes is the Parquet schema nodes of fields, and appends their
-// leaf columns, in order, to cols.
-func parquetNodes(fields []field, parent []field, cols *[]*parquetColumn) (pqschema.FieldList, error) {
+// leaf columns, in order, to cols. rep is the number of repeated nodes
+// above. A REPEATED field is written in Parquet's LIST form, an optional
+// group (LIST) holding a repeated group "list" of one required field
+// "element": BigQuery writes "repeated records as repeated groups", and a
+// file it exported, loaded back without list inference, adds a field
+// <column>.list (googleapis/google-cloud-php#6308), which is that form.
+// The names "list" and "element" are Parquet's (LogicalTypes.md); the
+// element's and the outer group's repetitions are UNVERIFIED against
+// BigQuery.
+func parquetNodes(fields []field, rep int16, cols *[]*parquetColumn) (pqschema.FieldList, []*parquetNode, error) {
 	var out pqschema.FieldList
+	var nodes []*parquetNode
 	for _, fl := range fields {
-		rep := parquet.Repetitions.Optional
-		if strings.EqualFold(fl.Mode, "REQUIRED") {
-			rep = parquet.Repetitions.Required
+		repeated := strings.EqualFold(fl.Mode, "REPEATED")
+		r := parquet.Repetitions.Optional
+		if strings.EqualFold(fl.Mode, "REQUIRED") || repeated {
+			r = parquet.Repetitions.Required
 		}
-		path := append(append([]field{}, parent...), fl)
+		name := fl.Name
+		elemRep := rep
+		if repeated {
+			name = "element"
+			elemRep++
+		}
+		n := &parquetNode{fl: fl}
+		var pn pqschema.Node
 		if t := strings.ToUpper(fl.Type); t == "RECORD" || t == "STRUCT" {
-			kids, err := parquetNodes(fl.Fields, path, cols)
+			kids, kn, err := parquetNodes(fl.Fields, elemRep, cols)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			g, err := pqschema.NewGroupNode(fl.Name, rep, kids, -1)
+			n.kids = kn
+			g, err := pqschema.NewGroupNode(name, r, kids, -1)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			out = append(out, g)
-			continue
+			pn = g
+		} else {
+			leaf, _ := parquetExportType(fl.Type)
+			prim, err := pqschema.NewPrimitiveNodeLogical(name, r, leaf.logical, leaf.phys, leaf.length, -1)
+			if err != nil {
+				return nil, nil, err
+			}
+			pn = prim
+			n.col = &parquetColumn{name: fl.Name, typ: fl.Type, leaf: leaf, maxRep: elemRep}
+			*cols = append(*cols, n.col)
 		}
-		leaf, _ := parquetExportType(fl.Type)
-		n, err := pqschema.NewPrimitiveNodeLogical(fl.Name, rep, leaf.logical, leaf.phys, leaf.length, -1)
-		if err != nil {
-			return nil, err
+		if repeated {
+			list, err := pqschema.NewGroupNode("list", parquet.Repetitions.Repeated, pqschema.FieldList{pn}, -1)
+			if err != nil {
+				return nil, nil, err
+			}
+			outer, err := pqschema.NewGroupNodeLogical(fl.Name, parquet.Repetitions.Optional, pqschema.FieldList{list}, pqschema.ListLogicalType{}, -1)
+			if err != nil {
+				return nil, nil, err
+			}
+			pn = outer
 		}
-		out = append(out, n)
-		*cols = append(*cols, &parquetColumn{path: path, leaf: leaf})
+		out = append(out, pn)
+		nodes = append(nodes, n)
 	}
-	return out, nil
+	return out, nodes, nil
 }
 
-// add appends a row's value of c, from its top-level cell v: the leaf's
-// value and its definition level, the number of optional fields on the
-// path that are not NULL.
-func (c *parquetColumn) add(v any) error {
-	var def int16
-	for i, fl := range c.path {
-		if v == nil {
-			if strings.EqualFold(fl.Mode, "REQUIRED") {
-				return fmt.Errorf("a NULL in the REQUIRED field %s", fl.Name)
+// shred adds a row's value v of n, as tabledata.list gives it, to n's
+// columns: def is the definition level so far, rep the repetition level
+// of its first leaf value and depth the number of repeated nodes above.
+func (n *parquetNode) shred(v any, def, rep, depth int16) error {
+	if strings.EqualFold(n.fl.Mode, "REPEATED") {
+		items, _ := v.([]any)
+		if len(items) == 0 { // the outer group, defined; no element
+			for _, c := range n.columns() {
+				c.defs = append(c.defs, def+1)
+				c.reps = append(c.reps, rep)
 			}
-			c.defs = append(c.defs, def)
 			return nil
 		}
-		if !strings.EqualFold(fl.Mode, "REQUIRED") {
-			def++
+		for i, it := range items {
+			r := rep
+			if i > 0 {
+				r = depth + 1
+			}
+			if err := n.shredOne(cellValue(it), def+2, r, depth+1, true); err != nil {
+				return err
+			}
 		}
-		if i == len(c.path)-1 {
-			break
+		return nil
+	}
+	return n.shredOne(v, def, rep, depth, strings.EqualFold(n.fl.Mode, "REQUIRED"))
+}
+
+// shredOne adds one value (not an array) of n.
+func (n *parquetNode) shredOne(v any, def, rep, depth int16, required bool) error {
+	if v == nil {
+		if required {
+			return fmt.Errorf("a NULL in the REQUIRED field %s", n.fl.Name)
 		}
+		for _, c := range n.columns() {
+			c.defs = append(c.defs, def)
+			c.reps = append(c.reps, rep)
+		}
+		return nil
+	}
+	if !required {
+		def++
+	}
+	if n.col == nil {
 		cells, err := recordCells(v) // storagerows.go
 		if err != nil {
 			return err
 		}
-		next := c.path[i+1]
-		idx := -1
-		for j, kid := range fl.Fields {
-			if kid.Name == next.Name {
-				idx = j
+		for j, k := range n.kids {
+			var kv any
+			if j < len(cells) {
+				kv = cellValue(cells[j])
+			}
+			if err := k.shred(kv, def, rep, depth); err != nil {
+				return err
 			}
 		}
-		if idx < 0 || idx >= len(cells) {
-			return fmt.Errorf("a RECORD %s without its field %s", fl.Name, next.Name)
-		}
-		v = cellValue(cells[idx])
+		return nil
 	}
 	s, ok := v.(string)
 	if !ok {
 		return fmt.Errorf("a value of %T", v)
 	}
-	val, err := parquetValue(c.path[len(c.path)-1].Type, c.leaf, s)
+	val, err := parquetValue(n.col.typ, n.col.leaf, s)
 	if err != nil {
 		return err
 	}
+	c := n.col
 	c.values = append(c.values, val)
 	c.defs = append(c.defs, def)
+	c.reps = append(c.reps, rep)
 	return nil
 }
 
@@ -194,8 +279,16 @@ func parquetValue(typ string, leaf parquetLeaf, s string) (any, error) {
 		return strconv.ParseInt(s, 10, 64)
 	case "BOOLEAN", "BOOL":
 		return strconv.ParseBool(s)
-	case "STRING":
+	case "STRING", "JSON":
 		return parquet.ByteArray(s), nil
+	case "FLOAT", "FLOAT64":
+		switch s {
+		case "Infinity":
+			s = "+Inf"
+		case "-Infinity":
+			s = "-Inf"
+		}
+		return strconv.ParseFloat(s, 64)
 	case "BYTES":
 		b, err := base64.StdEncoding.DecodeString(s)
 		return parquet.ByteArray(b), err
@@ -239,7 +332,7 @@ func twosComplementBytes(n *big.Int, size int) []byte {
 // written, or "".
 func encodeParquetExtract(x writtenExtract, rows [][]any) ([]byte, string) {
 	var cols []*parquetColumn
-	kids, err := parquetNodes(x.fields, nil, &cols)
+	kids, nodes, err := parquetNodes(x.fields, 0, &cols)
 	if err != nil {
 		return nil, "its schema: " + err.Error()
 	}
@@ -248,19 +341,13 @@ func encodeParquetExtract(x writtenExtract, rows [][]any) ([]byte, string) {
 		return nil, "its schema: " + err.Error()
 	}
 	for i, row := range rows {
-		for _, c := range cols {
-			top := -1
-			for j, fl := range x.fields {
-				if fl.Name == c.path[0].Name {
-					top = j
-				}
-			}
+		for j, n := range nodes {
 			var v any
-			if top < len(row) {
-				v = row[top]
+			if j < len(row) {
+				v = row[j]
 			}
-			if err := c.add(v); err != nil {
-				return nil, fmt.Sprintf("row %d, column %s: %v", i+1, c.path[0].Name, err)
+			if err := n.shred(v, 0, 0, 0); err != nil {
+				return nil, fmt.Sprintf("row %d, column %s: %v", i+1, n.fl.Name, err)
 			}
 		}
 	}
@@ -281,39 +368,49 @@ func encodeParquetExtract(x writtenExtract, rows [][]any) ([]byte, string) {
 		if err != nil {
 			return nil, err.Error()
 		}
+		reps := c.reps
+		if c.maxRep == 0 {
+			reps = nil
+		}
 		switch w := cw.(type) {
 		case *file.Int64ColumnChunkWriter:
 			vals := make([]int64, len(c.values))
 			for i, v := range c.values {
 				vals[i] = v.(int64)
 			}
-			_, err = w.WriteBatch(vals, c.defs, nil)
+			_, err = w.WriteBatch(vals, c.defs, reps)
+		case *file.Float64ColumnChunkWriter:
+			vals := make([]float64, len(c.values))
+			for i, v := range c.values {
+				vals[i] = v.(float64)
+			}
+			_, err = w.WriteBatch(vals, c.defs, reps)
 		case *file.Int32ColumnChunkWriter:
 			vals := make([]int32, len(c.values))
 			for i, v := range c.values {
 				vals[i] = v.(int32)
 			}
-			_, err = w.WriteBatch(vals, c.defs, nil)
+			_, err = w.WriteBatch(vals, c.defs, reps)
 		case *file.BooleanColumnChunkWriter:
 			vals := make([]bool, len(c.values))
 			for i, v := range c.values {
 				vals[i] = v.(bool)
 			}
-			_, err = w.WriteBatch(vals, c.defs, nil)
+			_, err = w.WriteBatch(vals, c.defs, reps)
 		case *file.ByteArrayColumnChunkWriter:
 			vals := make([]parquet.ByteArray, len(c.values))
 			for i, v := range c.values {
 				vals[i] = v.(parquet.ByteArray)
 			}
-			_, err = w.WriteBatch(vals, c.defs, nil)
+			_, err = w.WriteBatch(vals, c.defs, reps)
 		case *file.FixedLenByteArrayColumnChunkWriter:
 			vals := make([]parquet.FixedLenByteArray, len(c.values))
 			for i, v := range c.values {
 				vals[i] = v.(parquet.FixedLenByteArray)
 			}
-			_, err = w.WriteBatch(vals, c.defs, nil)
+			_, err = w.WriteBatch(vals, c.defs, reps)
 		default:
-			err = fmt.Errorf("no writer for the column %s", c.path[len(c.path)-1].Name)
+			err = fmt.Errorf("no writer for the column %s", c.name)
 		}
 		if err == nil {
 			err = cw.Close()

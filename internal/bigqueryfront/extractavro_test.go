@@ -107,3 +107,40 @@ func TestAvroExtractLogicalAndNested(t *testing.T) {
 		}
 	}
 }
+
+// TestAvroExtractOfDatetimeJSONGeography (#957): DATETIME is a string, a
+// string with logicalType datetime under useAvroLogicalTypes, and JSON and
+// GEOGRAPHY strings annotated with their sqlType.
+func TestAvroExtractOfDatetimeJSONGeography(t *testing.T) {
+	fields := []field{{Name: "dt", Type: "DATETIME"}, {Name: "j", Type: "JSON"}, {Name: "g", Type: "GEOGRAPHY", Mode: "REQUIRED"}}
+	rows := [][]any{{"2020-01-02T03:04:05.123456", `{"a":1}`, "POINT(1 2)"}, {nil, nil, "POINT(3 4)"}}
+	for _, logical := range []bool{false, true} {
+		data, msg := encodeExtract(writtenExtract{avro: true, avroLogical: logical, fields: fields}, rows)
+		if msg != "" {
+			t.Fatalf("logical %v: %s", logical, msg)
+		}
+		r, err := goavro.NewOCFReader(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []any
+		for r.Scan() {
+			v, err := r.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, v)
+		}
+		want := []any{
+			map[string]any{"dt": map[string]any{"string": "2020-01-02T03:04:05.123456"}, "j": map[string]any{"string": `{"a":1}`}, "g": "POINT(1 2)"},
+			map[string]any{"dt": nil, "j": nil, "g": "POINT(3 4)"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("logical %v: %v, want %v", logical, got, want)
+		}
+		schema := r.Codec().Schema()
+		if logical != bytes.Contains([]byte(schema), []byte(`"logicalType":"datetime"`)) || !bytes.Contains([]byte(schema), []byte(`"sqlType":"GEOGRAPHY"`)) {
+			t.Errorf("logical %v: schema %s", logical, schema)
+		}
+	}
+}

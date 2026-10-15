@@ -3194,8 +3194,8 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Unknown": 28,
-      "Verified": 19
+      "Unknown": 25,
+      "Verified": 22
     },
     "rows": [
       {
@@ -3327,11 +3327,19 @@
       },
       {
         "method": "bigquery.routines.delete",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
+          "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete"
+        ]
       },
       {
         "method": "bigquery.routines.get",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
+          "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete"
+        ]
       },
       {
         "method": "bigquery.routines.getIamPolicy",
@@ -3346,7 +3354,11 @@
       },
       {
         "method": "bigquery.routines.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
+          "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete"
+        ]
       },
       {
         "method": "bigquery.routines.setIamPolicy",
@@ -3449,7 +3461,7 @@
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
-          "test/compat/bigquerysilent_test.go:444 TestBigQueryTableUpdateAddsColumns",
+          "test/compat/bigquerysilent_test.go:461 TestBigQueryTableUpdateAddsColumns",
           "test/compat/consolebigquerywrites_test.go:182 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
@@ -3465,7 +3477,7 @@
         "method": "bigquery.tables.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerysilent_test.go:444 TestBigQueryTableUpdateAddsColumns"
+          "test/compat/bigquerysilent_test.go:461 TestBigQueryTableUpdateAddsColumns"
         ]
       }
     ]

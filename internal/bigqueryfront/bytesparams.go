@@ -124,9 +124,8 @@ func bytesParameters(q queryOptions) (out queryOptions, changed bool, code int, 
 			}
 			return q, false, http.StatusNotImplemented, "Not implemented here: the query parameter " + label + ", " +
 				"whose type is or has a RANGE (#1111). The emulator behind CloudBurrow reads a RANGE parameter as a NULL " +
-				"INTEGER, and gives a RANGE value in a query's result no type, at the top level or in a STRUCT (measured: " +
-				"SELECT RANGE(DATE '2020-01-01', DATE '2020-02-01') answered the value with a schema field of no type), " +
-				"which the client cannot read, so CloudBurrow cannot return a RANGE as BigQuery does. Nothing was run."
+				"INTEGER (measured), so it would answer the query wrongly. A RANGE value the query itself builds, such as " +
+				"RANGE(DATE '2020-01-01', DATE '2020-02-01'), is answered as BigQuery does. Nothing was run."
 		}
 		kind := bytesKind(ptype)
 		if kind == "" {
