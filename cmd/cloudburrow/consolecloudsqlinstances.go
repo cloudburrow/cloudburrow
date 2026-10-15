@@ -97,7 +97,27 @@ func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
 		{Name: "rootPassword", Label: "Root password (MySQL)", Type: "password",
 			Help: "MySQL's root password. Empty leaves root without one, as Cloud SQL does. PostgreSQL's postgres user is trusted locally."},
 		{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox"},
+		{Name: "pitr", Label: "Point-in-time recovery", Type: "checkbox",
+			Help: "Keeps the transaction log, PostgreSQL's archived WAL or MySQL's binary log, so a clone can be restored to any time since the instance started."},
 	}
+}
+
+// pitrConfig sets bc's point-in-time recovery switch, which Cloud SQL
+// names by engine: pointInTimeRecoveryEnabled for PostgreSQL,
+// binaryLogEnabled for MySQL.
+func pitrConfig(bc *sqladminapi.BackupConfiguration, version string, on bool) {
+	if strings.HasPrefix(version, "MYSQL_") {
+		bc.BinaryLogEnabled = on
+		bc.ForceSendFields = append(bc.ForceSendFields, "BinaryLogEnabled")
+		return
+	}
+	bc.PointInTimeRecoveryEnabled = on
+	bc.ForceSendFields = append(bc.ForceSendFields, "PointInTimeRecoveryEnabled")
+}
+
+func pitrOn(st *sqladminapi.Settings) bool {
+	return st != nil && st.BackupConfiguration != nil &&
+		(st.BackupConfiguration.PointInTimeRecoveryEnabled || st.BackupConfiguration.BinaryLogEnabled)
 }
 
 // Create implements console.Creator. It returns once the API has accepted
@@ -108,9 +128,13 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 		return "", err
 	}
 	name := strings.TrimSpace(v["name"])
+	st := &sqladminapi.Settings{Tier: strings.TrimSpace(v["tier"]), DeletionProtectionEnabled: v["deletionProtection"] == "true"}
+	if v["pitr"] == "true" {
+		st.BackupConfiguration = &sqladminapi.BackupConfiguration{Enabled: true}
+		pitrConfig(st.BackupConfiguration, v["databaseVersion"], true)
+	}
 	_, err = svc.Instances.Insert(project, &sqladminapi.DatabaseInstance{
-		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: "us-central1",
-		Settings: &sqladminapi.Settings{Tier: strings.TrimSpace(v["tier"]), DeletionProtectionEnabled: v["deletionProtection"] == "true"},
+		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: "us-central1", Settings: st,
 	}).Context(ctx).Do()
 	if err != nil {
 		return "", sqlAPIError(err)
@@ -196,6 +220,13 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		}
 		start = bc.StartTime
 	}
+	pitr, earliest, latest := "Off", "", ""
+	if pitrOn(st) {
+		pitr = "On"
+		if r, err := svc.Projects.Instances.GetLatestRecoveryTime(project, name).Context(ctx).Do(); err == nil {
+			earliest, latest = r.EarliestRecoveryTime, r.LatestRecoveryTime
+		}
+	}
 	d := console.Detail{Title: name}
 	// A setting the instance does not have is left out, not shown blank.
 	for _, pr := range []console.Property{
@@ -203,7 +234,8 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		{Label: "Version", Value: in.DatabaseVersion}, {Label: "Tier", Value: st.Tier},
 		{Label: "Labels", Value: formatPairs(st.UserLabels)}, {Label: "Database flags", Value: formatFlags(st.DatabaseFlags)},
 		{Label: "Deletion protection", Value: protect}, {Label: "Automated backups", Value: backups},
-		{Label: "Backup start time (UTC)", Value: start},
+		{Label: "Backup start time (UTC)", Value: start}, {Label: "Point-in-time recovery", Value: pitr},
+		{Label: "Earliest recovery time", Value: earliest}, {Label: "Latest recovery time", Value: latest},
 		{Label: "Instance type", Value: in.InstanceType}, {Label: "Primary instance", Value: in.MasterInstanceName},
 		{Label: "Read replicas", Value: strings.Join(in.ReplicaNames, ", ")},
 	} {
@@ -229,6 +261,13 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	}
 	d.Sections = []console.Section{{ID: "backups", Label: "Backups", Kind: console.KindListing, Listing: runs}}
 	d.Actions = append(p.backupActions(ids), replicaActions(in)...)
+	if pitr == "On" {
+		d.Actions = append(d.Actions, console.Action{ID: "pitr-restore", Label: "Point-in-time restore", Fields: []console.Field{
+			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
+				Help: "A new instance with this instance's settings and its databases as they were at the time below."},
+			{Name: "pointInTime", Label: "Point in time (UTC, RFC 3339)", Type: "text", Required: true, Default: latest,
+				Help: "Between the earliest recovery time, " + earliest + ", and now, to the microsecond."}}})
+	}
 	if !upSQLInstance(name) {
 		d.Edit = &console.EditForm{Label: "Edit instance", Fields: []console.Field{
 			{Name: "tier", Label: "Machine type (tier)", Type: "text", Required: true, Default: st.Tier,
@@ -240,7 +279,9 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 			{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox", Default: strconv.FormatBool(st.DeletionProtectionEnabled)},
 			{Name: "backupsEnabled", Label: "Automated backups", Type: "checkbox", Default: strconv.FormatBool(backups == "On")},
 			{Name: "backupStartTime", Label: "Backup start time (UTC, HH:MM)", Type: "text", Default: start, Pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
-		}, Note: "The database version and the instance ID cannot be changed. Point-in-time recovery is not offered."}
+			{Name: "pitr", Label: "Point-in-time recovery", Type: "checkbox", Default: strconv.FormatBool(pitr == "On"),
+				Help: "PostgreSQL's server restarts to archive its WAL; recovery reaches back to the first base taken after it is on."},
+		}, Note: "The database version and the instance ID cannot be changed."}
 	}
 	return d, nil
 }
@@ -311,6 +352,11 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 	if err != nil {
 		return err
 	}
+	in, err := svc.Instances.Get(project, path[0]).Context(ctx).Do()
+	if err != nil {
+		return sqlAPIError(err)
+	}
+	pitrConfig(st.BackupConfiguration, in.DatabaseVersion, v["pitr"] == "true")
 	if _, err := svc.Instances.Patch(project, path[0], &sqladminapi.DatabaseInstance{Settings: st}).Context(ctx).Do(); err != nil {
 		return sqlAPIError(err)
 	}
@@ -361,7 +407,8 @@ func (p cloudSQLInstancesProvider) DetailActions(ctx context.Context, project st
 
 // ActAt implements console.PathActor: the backup actions, through
 // backupRuns.insert, instances.restoreBackup and backupRuns.delete, Clone,
-// through instances.clone, and the replica actions, through
+// through instances.clone, Point-in-time restore, through instances.clone
+// with cloneContext.pointInTime, and the replica actions, through
 // instances.insert, promoteReplica, stopReplica and startReplica.
 func (p cloudSQLInstancesProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
 	if len(path) != 1 {
@@ -387,6 +434,10 @@ func (p cloudSQLInstancesProvider) ActAt(ctx context.Context, project string, pa
 	case "clone":
 		_, err = svc.Instances.Clone(project, name, &sqladminapi.InstancesCloneRequest{
 			CloneContext: &sqladminapi.CloneContext{DestinationInstanceName: strings.TrimSpace(v["destination"])}}).Context(ctx).Do()
+	case "pitr-restore":
+		_, err = svc.Instances.Clone(project, name, &sqladminapi.InstancesCloneRequest{
+			CloneContext: &sqladminapi.CloneContext{DestinationInstanceName: strings.TrimSpace(v["destination"]),
+				PointInTime: strings.TrimSpace(v["pointInTime"])}}).Context(ctx).Do()
 	case "delete-backup":
 		_, err = svc.BackupRuns.Delete(project, name, id).Context(ctx).Do()
 	case "create-replica":
