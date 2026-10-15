@@ -298,6 +298,11 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 				projectOf(f.base), ref.region, strings.ToUpper(location)))
 			return
 		}
+		if ref.view == "OBJECT_PRIVILEGES" && !namesObjectName(q.Query) { // #1355, infoschemaprivileges.go
+			f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery",
+				Message: "Queries of INFORMATION_SCHEMA.OBJECT_PRIVILEGES must filter on object_name (and object_schema for a table or view)"})
+			return
+		}
 		key := ref.view
 		if jobsViews[key] {
 			key = "JOBS"

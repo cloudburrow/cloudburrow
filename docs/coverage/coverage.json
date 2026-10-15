@@ -5582,7 +5582,8 @@
         "method": "bigquery.datasets.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:170 TestBigQueryDatasetUpdatesAreSaved"
+          "test/compat/bigquerymethods_test.go:170 TestBigQueryDatasetUpdatesAreSaved",
+          "test/compat/bigqueryobjectprivileges_test.go:25 TestBigQueryObjectPrivilegesAndSchemataLinks"
         ]
       },
       {
@@ -5652,6 +5653,7 @@
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
+          "test/compat/bigqueryobjectprivileges_test.go:25 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionreads_test.go:140 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
@@ -5702,6 +5704,7 @@
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
+          "test/compat/bigqueryobjectprivileges_test.go:25 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionreads_test.go:140 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
@@ -5987,6 +5990,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryiam_test.go:40 TestBigQueryTableIAMIsStoredNotEnforced",
+          "test/compat/bigqueryobjectprivileges_test.go:25 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },

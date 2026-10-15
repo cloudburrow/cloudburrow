@@ -320,7 +320,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
-				listJobs: listJobs}
+				listJobs: listJobs, iam: iam}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -440,6 +440,9 @@ type front struct {
 	// records INFORMATION_SCHEMA.JOBS reads (infoschemajobs.go, #1275),
 	// or is nil.
 	listJobs func(http.ResponseWriter, *http.Request)
+	// iam are the tables' and routines' IAM policies (iam.go, #1231),
+	// which OBJECT_PRIVILEGES reads (#1355), or nil.
+	iam *iamPolicies
 }
 
 // Option is an option of Wrap.

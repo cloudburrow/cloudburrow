@@ -42,7 +42,7 @@ import (
 // (CREATE SEARCH INDEX and CREATE VECTOR INDEX fail in the engine).
 //
 // MATERIALIZED_VIEWS and SCHEMATA_OPTIONS: infoschemaschemata.go (#1351).
-// Not built (501): OBJECT_PRIVILEGES, SCHEMATA_LINKS.
+// OBJECT_PRIVILEGES and SCHEMATA_LINKS, region-qualified: infoschemaprivileges.go (#1355).
 
 func init() {
 	for k, v := range map[string]func(front, *http.Request, string, *datasetMeta) (string, int, string){
