@@ -293,6 +293,12 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 		}
 		props = append(props, console.Property{Label: "Partitioning", Value: v})
 	}
+	if rp := md.RangePartitioning; rp != nil && rp.Range != nil {
+		// Integer-range partitioning, as CREATE TABLE ... PARTITION BY
+		// RANGE_BUCKET makes it (#1272).
+		props = append(props, console.Property{Label: "Partitioning", Value: fmt.Sprintf(
+			"RANGE_BUCKET on %s: %d to %d, interval %d", rp.Field, rp.Range.Start, rp.Range.End, rp.Range.Interval)})
+	}
 	if cl := md.Clustering; cl != nil && len(cl.Fields) > 0 {
 		props = append(props, console.Property{Label: "Clustered by", Value: strings.Join(cl.Fields, ", ")})
 	}

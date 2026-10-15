@@ -4347,7 +4347,9 @@
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
+          "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -4379,7 +4381,9 @@
           "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
+          "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -4588,6 +4592,7 @@
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
+          "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
