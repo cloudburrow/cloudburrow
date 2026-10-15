@@ -302,9 +302,10 @@ func (p loggingBucketsProvider) links(ctx context.Context, bucket string) consol
 
 const linkNote = "A link names the BigQuery dataset Google would make for the bucket; no dataset is made locally (#1292)."
 
-// DetailActions offers Create link on an active bucket with Log Analytics
-// on, and Delete link on one with links (#1292).
-func (p loggingBucketsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+// linkActions offers Create link on an active bucket with Log Analytics
+// on, and Delete link on one with links (#1292). DetailActions
+// (consoleloggingviews.go) adds them to a bucket's page.
+func (p loggingBucketsProvider) linkActions(ctx context.Context, project string, path []string) []console.Action {
 	if len(path) != 1 {
 		return nil
 	}
@@ -328,8 +329,9 @@ func (p loggingBucketsProvider) DetailActions(ctx context.Context, project strin
 	return out
 }
 
-// ActAt creates or deletes a link through CreateLink and DeleteLink.
-func (p loggingBucketsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+// actOnLink creates or deletes a link through CreateLink and DeleteLink;
+// ActAt (consoleloggingviews.go) sends it the link actions.
+func (p loggingBucketsProvider) actOnLink(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	if len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
 	}

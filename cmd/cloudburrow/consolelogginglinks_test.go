@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/cloudburrow/cloudburrow/internal/console"
+
 	"context"
 	"fmt"
 	"strings"
@@ -23,13 +25,24 @@ func TestConsoleLoggingLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if acts := p.DetailActions(ctx, project, []string{name}); len(acts) != 0 {
+	// The bucket's page also offers Create view (#1283); these are the
+	// link actions alone.
+	links := func() []console.Action {
+		var out []console.Action
+		for _, a := range p.DetailActions(ctx, project, []string{name}) {
+			if strings.HasSuffix(a.ID, "-link") {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
+	if acts := links(); len(acts) != 0 {
 		t.Errorf("a bucket without Log Analytics offers %+v", acts)
 	}
 	if err := p.Edit(ctx, project, []string{name}, map[string]string{"retention": "30", "analytics": "true"}); err != nil {
 		t.Fatal(err)
 	}
-	acts := p.DetailActions(ctx, project, []string{name})
+	acts := links()
 	if len(acts) != 1 || acts[0].ID != "create-link" {
 		t.Fatalf("actions = %+v; want Create link", acts)
 	}
@@ -44,7 +57,7 @@ func TestConsoleLoggingLinks(t *testing.T) {
 	if err != nil || !strings.Contains(fmt.Sprint(d.Sections), "my_link") {
 		t.Errorf("the bucket page = %+v, %v; want the link's dataset", d.Sections, err)
 	}
-	acts = p.DetailActions(ctx, project, []string{name})
+	acts = links()
 	if len(acts) != 2 || acts[1].ID != "delete-link" || acts[1].Fields[0].Options[0] != "my-link" {
 		t.Fatalf("actions = %+v; want Create link and Delete link", acts)
 	}

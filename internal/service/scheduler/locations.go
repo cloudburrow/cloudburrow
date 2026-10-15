@@ -11,7 +11,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
-	"github.com/cloudburrow/cloudburrow/internal/service/locations"
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 )
 
 // Regions are the locations ListLocations answers for every project (#1237):

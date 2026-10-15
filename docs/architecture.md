@@ -138,6 +138,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/lifecycle/` | Startup ordering, readiness, bounded shutdown, ownership of background workers, and the narrow interfaces by which one service reaches another. |
 | `internal/localai/` | Acquisition of local AI model artifacts, kept apart from their execution. |
 | `internal/localhost/` | Dials any name under `.localhost` on loopback without a DNS lookup, for the dispatchers the CLI runs (#714). |
+| `internal/locations/` | The `google.cloud.location.Locations` mixin Cloud KMS and Cloud Scheduler serve (#1237, #1291). |
 | `internal/lro/` | Long-running operations: pending, completed and failed. |
 | `internal/metadata/` | A local GCE metadata server and the fixture credentials that point Google tooling at CloudBurrow. |
 | `internal/metrics/` | Counts the calls CloudBurrow serves itself, in the Prometheus text format (#292). |
@@ -151,7 +152,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/resource/` | Google resource-name parsing and formatting, project and location scoping. |
 | `internal/sched/` | Cancellable background work, due-time scheduling, retry and backoff over an injected clock. |
 | `internal/service/kms/` | Cloud KMS, built by us (#309). |
-| `internal/service/locations/` | The `google.cloud.location.Locations` mixin's gRPC registration, shared by Cloud Scheduler and Cloud KMS (#1237, #1291). |
+| `internal/locations/` | The `google.cloud.location.Locations` mixin's gRPC registration, shared by Cloud Scheduler and Cloud KMS (#1237, #1291). |
 | `internal/service/logging/` | Cloud Logging write and read (`LoggingServiceV2`), built by us (#304). |
 | `internal/service/resourcemanager/` | The project registry, and the Resource Manager v3 and v1 Projects APIs over it (#298, #301). |
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |

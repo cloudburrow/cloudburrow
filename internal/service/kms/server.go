@@ -38,7 +38,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
-	"github.com/cloudburrow/cloudburrow/internal/service/locations"
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 

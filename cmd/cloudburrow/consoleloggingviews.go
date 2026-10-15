@@ -59,18 +59,26 @@ func viewRowActions(v *loggingpb.LogView) []console.Action {
 	}
 }
 
-// DetailActions implements console.PathActor: Create view on a bucket's
-// page, and Edit and Delete on a view.
+// DetailActions implements console.PathActor: Create view and the link
+// actions (#1292, consoleloggingbuckets.go) on a bucket's page, and Edit and
+// Delete on a view.
 func (p loggingBucketsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if len(path) < 1 || len(path) > 2 {
 		return nil
 	}
 	b, err := p.get(ctx, project, path[0])
-	if err != nil || !viewsChangeable(b) {
+	if err != nil {
 		return nil
 	}
 	if len(path) == 1 {
-		return []console.Action{createViewAction()}
+		var out []console.Action
+		if viewsChangeable(b) {
+			out = append(out, createViewAction())
+		}
+		return append(out, p.linkActions(ctx, project, path)...)
+	}
+	if !viewsChangeable(b) {
+		return nil
 	}
 	if !viewChangeable(b, path[1]) {
 		return nil
@@ -94,10 +102,13 @@ func (p loggingBucketsProvider) view(ctx context.Context, name string) (*logging
 }
 
 // ActAt implements console.PathActor through CreateView, UpdateView and
-// DeleteView.
+// DeleteView, and CreateLink and DeleteLink (#1292).
 func (p loggingBucketsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	if len(path) == 0 {
 		return errors.New("no bucket named")
+	}
+	if action == "create-link" || action == "delete-link" {
+		return p.actOnLink(ctx, project, path, action, values)
 	}
 	if err := bucketOfProject(project, path[0]); err != nil {
 		return err
