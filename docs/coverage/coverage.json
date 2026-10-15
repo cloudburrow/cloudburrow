@@ -1566,8 +1566,8 @@
     "Key": "logging",
     "Title": "Cloud Logging",
     "counts": {
-      "Unimplemented": 22,
-      "Verified": 21
+      "Unimplemented": 11,
+      "Verified": 32
     },
     "rows": [
       {
@@ -1577,8 +1577,10 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/CreateBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/CreateBucketAsync",
@@ -1608,13 +1610,17 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/CreateView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/DeleteBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/DeleteExclusion",
@@ -1639,13 +1645,17 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/DeleteView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetCmekSettings",
@@ -1680,13 +1690,17 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/GetView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/ListBuckets",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/ListExclusions",
@@ -1709,18 +1723,24 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/ListViews",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UndeleteBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UpdateBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UpdateBucketAsync",
@@ -1755,8 +1775,10 @@
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/UpdateView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+        ]
       },
       {
         "method": "google.logging.v2.LoggingServiceV2/DeleteLog",

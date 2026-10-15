@@ -20,7 +20,8 @@ package logging
 // filter the store could not evaluate is INVALID_ARGUMENT naming the term,
 // rather than stored and silently never matching.
 //
-// Every other ConfigServiceV2 method (buckets, views, links, settings, CMEK)
+// Buckets and views are in buckets.go (#1264). Every other ConfigServiceV2
+// method (the Async bucket calls, links, settings, CMEK)
 // stays UNIMPLEMENTED, as does a sink or exclusion of an organization, folder
 // or billing account.
 

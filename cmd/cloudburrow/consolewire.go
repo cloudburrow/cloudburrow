@@ -167,7 +167,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
 	if enabled[config.ServiceLogging] && d.logging != nil {
 		screen := loggingAdminScreen{svc: d.logging, faults: d.faults}
-		providers = append(providers, loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen})
+		providers = append(providers, loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen})
 	}
 	// The opt-in databases. Each had a working backend and no screen, which
 	// reads as "not implemented" to anyone looking at the console. The

@@ -114,7 +114,7 @@ Already tracked: #1215 (`TailLogEntries`, `ListMonitoredResourceDescriptors`).
 | Gap | Why open | Size |
 |---|---|---|
 | `MetricsServiceV2`: log-based metrics (`gcloud logging metrics`, Terraform `google_logging_metric`) are not served (#1226) | not built yet | M |
-| `ConfigServiceV2`: buckets and views are not served (#1264); sinks and exclusions are served since #1226 | not built yet | L |
+| `ConfigServiceV2`: the Async bucket calls, links and settings are not served (buckets and views since #1264, sinks and exclusions since #1226) | not built yet | M |
 
 ## Cloud KMS
 

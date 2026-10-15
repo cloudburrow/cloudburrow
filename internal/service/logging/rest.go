@@ -14,7 +14,7 @@ import (
 // generated descriptors. The shared transcoder calls the same Server gRPC
 // does, so REST has no logic of its own. LoggingServiceV2, MetricsServiceV2
 // and ConfigServiceV2 are registered (#1226); the ConfigServiceV2 methods
-// Admin does not implement (buckets, views, links, settings) answer 501
+// Admin does not implement (the Async bucket calls, links, settings) answer 501
 // UNIMPLEMENTED, as TailLogEntries does: the transcoder serves unary calls,
 // and the tail, a bidirectional stream, is served over gRPC only (#1215). A path Google does not bind answers 404.
 // logging_v2.yaml's Locations and Operations mixins are not bound.

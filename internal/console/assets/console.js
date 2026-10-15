@@ -137,6 +137,8 @@ const ROUTES = [
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/exclusions", service: "logging-exclusions", icon: "logs", title: "Exclusions",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/storage",    service: "logging-buckets",    icon: "logs", title: "Logs Storage",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
@@ -4894,6 +4896,7 @@ const DELETE_DETAIL = {
   "logging-metrics": "The metric's definition is deleted. No log entry is removed.",
   "logging-sinks": "The sink's definition is deleted. It delivered nothing, so nothing downstream changes.",
   "logging-exclusions": "Entries it matches are stored again from now on. Entries it dropped are not brought back.",
+  "logging-buckets": "The bucket is kept as Delete requested for 7 days and can be undeleted until then. No log entry is removed.",
   "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
             "schema settings, which then name _deleted-schema_.",
   projects: "This removes the project's registration only. Buckets, topics, " +
