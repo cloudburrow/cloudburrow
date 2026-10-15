@@ -140,6 +140,7 @@ type jsonSecret struct {
 	Labels      map[string]string `json:"labels,omitempty"`
 	Annotations map[string]string `json:"annotations,omitempty"`
 	Etag        string            `json:"etag,omitempty"`
+	ExpireTime  string            `json:"expireTime,omitempty"`
 }
 
 type jsonVersion struct {
@@ -161,7 +162,7 @@ func renderSecret(s Secret) jsonSecret {
 		}
 		repl = map[string]any{"userManaged": map[string]any{"replicas": replicas}}
 	}
-	return jsonSecret{
+	out := jsonSecret{
 		Name:        s.Name,
 		Replication: repl,
 		CreateTime:  s.Created.UTC().Format(time.RFC3339Nano),
@@ -169,6 +170,10 @@ func renderSecret(s Secret) jsonSecret {
 		Annotations: s.Annotations,
 		Etag:        s.Etag,
 	}
+	if !s.Expire.IsZero() {
+		out.ExpireTime = s.Expire.UTC().Format(time.RFC3339Nano)
+	}
+	return out
 }
 
 func renderVersion(v Version) jsonVersion {
@@ -214,8 +219,8 @@ func (h *RESTServer) createSecret(w http.ResponseWriter, r *http.Request) error 
 
 	// The body is a Secret resource, decoded as the proto so that every
 	// field Google defines is recognised and the gRPC path's refusals apply
-	// unchanged (#580): a ttl is UNIMPLEMENTED over both transports, not a
-	// 400 over one and a silent drop over the other. An absent body is
+	// unchanged (#580): a refused field is UNIMPLEMENTED over both
+	// transports, not a 400 over one and a silent drop over the other. An absent body is
 	// legitimate: replication defaults to automatic.
 	sec := &secretmanagerpb.Secret{}
 	if err := decodeProto(r, sec); err != nil {
@@ -279,7 +284,8 @@ func (h *RESTServer) patchSecret(w http.ResponseWriter, r *http.Request) error {
 	}
 	if _, err := NewGRPCServer(h.store).UpdateSecret(r.Context(), &secretmanagerpb.UpdateSecretRequest{
 		Secret: &secretmanagerpb.Secret{Name: SecretName(project, secret), Labels: body.GetLabels(),
-			Annotations: body.GetAnnotations(), Etag: body.GetEtag(), Replication: body.GetReplication()},
+			Annotations: body.GetAnnotations(), Etag: body.GetEtag(), Replication: body.GetReplication(),
+			Expiration: body.GetExpiration()},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: paths},
 	}); err != nil {
 		return err
@@ -308,19 +314,21 @@ func (h *RESTServer) listSecrets(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := checkNoFilter(r.URL.Query().Get("filter")); err != nil {
+	filter, err := parseSecretFilter(r.URL.Query().Get("filter"))
+	if err != nil {
 		return err
 	}
 	all, err := h.store.ListSecrets(project)
 	if err != nil {
 		return err
 	}
+	all = filterList(all, filter)
 	out := make([]jsonSecret, 0, len(all))
 	for _, s := range all {
 		out = append(out, renderSecret(s))
 	}
 	return rest.WriteJSON(w, http.StatusOK, map[string]any{
-		"secrets": out, "totalSize": len(all),
+		"secrets": out, "totalSize": listTotal(len(all), filter),
 	})
 }
 
@@ -422,19 +430,21 @@ func (h *RESTServer) listVersions(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	if err := checkNoFilter(r.URL.Query().Get("filter")); err != nil {
+	filter, err := parseVersionFilter(r.URL.Query().Get("filter"))
+	if err != nil {
 		return err
 	}
 	all, err := h.store.ListVersions(project, secret)
 	if err != nil {
 		return err
 	}
+	all = filterList(all, filter)
 	out := make([]jsonVersion, 0, len(all))
 	for _, v := range all {
 		out = append(out, renderVersion(v))
 	}
 	return rest.WriteJSON(w, http.StatusOK, map[string]any{
-		"versions": out, "totalSize": len(all),
+		"versions": out, "totalSize": listTotal(len(all), filter),
 	})
 }
 

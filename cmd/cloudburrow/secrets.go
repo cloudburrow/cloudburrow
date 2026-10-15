@@ -42,6 +42,9 @@ type secretsService struct {
 	interpose []grpc.UnaryServerInterceptor
 	db        store.Store
 	store     *secrets.Store
+	// stopSweep ends the expiry sweep (#1225); swept closes when it has.
+	stopSweep context.CancelFunc
+	swept     chan struct{}
 }
 
 // Store returns the Secret Manager store, available after Start.
@@ -162,12 +165,29 @@ func (s *secretsService) Start(ctx context.Context) error {
 		_ = db.Close()
 		return err
 	}
+	// Secrets are deleted at their expire_time (#1225). Reads already treat
+	// an expired secret as gone; the sweep deletes it from storage, the
+	// Kubernetes Secret with it. Before the cluster exists a sweep fails
+	// and Run retries.
+	sweepCtx, cancel := context.WithCancel(context.Background())
+	s.stopSweep, s.swept = cancel, make(chan struct{})
+	go func() {
+		defer close(s.swept)
+		st.Run(sweepCtx)
+	}()
 	return nil
 }
 
 // Stop closes the listener and releases the state directory, so a restart can
 // claim it again.
 func (s *secretsService) Stop(ctx context.Context) error {
+	if s.stopSweep != nil {
+		s.stopSweep()
+		select {
+		case <-s.swept:
+		case <-ctx.Done():
+		}
+	}
 	var err error
 	if s.server != nil {
 		err = s.server.Stop(ctx)

@@ -12,7 +12,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func automatic() *secretmanagerpb.Replication {
@@ -26,8 +25,6 @@ func TestCreateSecretRefusesFieldsItWouldDrop(t *testing.T) {
 	g, s := newGRPC(t)
 	ctx := context.Background()
 	cases := map[string]*secretmanagerpb.Secret{
-		"ttl":                 {Replication: automatic(), Expiration: &secretmanagerpb.Secret_Ttl{Ttl: durationpb.New(3600e9)}},
-		"expire_time":         {Replication: automatic(), Expiration: &secretmanagerpb.Secret_ExpireTime{ExpireTime: timestamppb.Now()}},
 		"rotation":            {Replication: automatic(), Rotation: &secretmanagerpb.Rotation{RotationPeriod: durationpb.New(86400e9)}},
 		"topics":              {Replication: automatic(), Topics: []*secretmanagerpb.Topic{{Name: "projects/demo/topics/t"}}},
 		"version_aliases":     {Replication: automatic(), VersionAliases: map[string]int64{"current": 1}},
@@ -53,9 +50,9 @@ func TestCreateSecretRefusesFieldsItWouldDrop(t *testing.T) {
 func TestRESTCreateAgreesWithGRPC(t *testing.T) {
 	t.Parallel()
 	srv, _ := newREST(t)
-	code, body := do(t, srv, "POST", "/v1/projects/demo/secrets?secretId=ttl", `{"replication":{"automatic":{}},"expireTime":"2030-01-01T00:00:00Z"}`)
-	if code != http.StatusNotImplemented || !strings.Contains(body, "expire_time") {
-		t.Errorf("REST create with expireTime = %d %s; want 501 naming expire_time", code, body)
+	code, body := do(t, srv, "POST", "/v1/projects/demo/secrets?secretId=rot", `{"replication":{"automatic":{}},"rotation":{"rotationPeriod":"86400s"}}`)
+	if code != http.StatusNotImplemented || !strings.Contains(body, "rotation") {
+		t.Errorf("REST create with rotation = %d %s; want 501 naming rotation", code, body)
 	}
 	if code, body := do(t, srv, "POST", "/v1/projects/demo/secrets?secretId=ok", `{"replication":{"automatic":{}},"labels":{"env":"dev"}}`); code != http.StatusOK || !strings.Contains(body, `"env":"dev"`) {
 		t.Errorf("REST create = %d %s", code, body)
@@ -65,20 +62,23 @@ func TestRESTCreateAgreesWithGRPC(t *testing.T) {
 	}
 }
 
-// A filter was ignored and every secret returned, which reads as a filter
-// that matched them all.
-func TestListFiltersAreRefusedNotIgnored(t *testing.T) {
+// A filter outside the documented grammar is refused, never ignored: an
+// ignored filter returns everything, which reads as a filter that matched
+// them all (#1228).
+func TestUndocumentedListFiltersAreRefusedNotIgnored(t *testing.T) {
 	t.Parallel()
 	g, s := newGRPC(t)
 	seed(t, s, "demo", "a", "x")
-	_, err := g.ListSecrets(context.Background(), &secretmanagerpb.ListSecretsRequest{Parent: "projects/demo", Filter: "labels.env=prod"})
+	_, err := g.ListSecrets(context.Background(), &secretmanagerpb.ListSecretsRequest{Parent: "projects/demo", Filter: `name ~ "a.*"`})
 	wantGRPCCode(t, err, codes.Unimplemented)
-	_, err = g.ListSecretVersions(context.Background(), &secretmanagerpb.ListSecretVersionsRequest{Parent: "projects/demo/secrets/a", Filter: "state:ENABLED"})
+	_, err = g.ListSecrets(context.Background(), &secretmanagerpb.ListSecretsRequest{Parent: "projects/demo", Filter: "owner=me"})
+	wantGRPCCode(t, err, codes.Unimplemented)
+	_, err = g.ListSecretVersions(context.Background(), &secretmanagerpb.ListSecretVersionsRequest{Parent: "projects/demo/secrets/a", Filter: "labels.env=prod"})
 	wantGRPCCode(t, err, codes.Unimplemented)
 	srv, rs := newREST(t)
 	seed(t, rs, "demo", "a", "x")
-	if code, _ := do(t, srv, "GET", "/v1/projects/demo/secrets?filter=labels.env%3Dprod", ""); code != http.StatusNotImplemented {
-		t.Errorf("REST list with a filter = %d; want 501", code)
+	if code, _ := do(t, srv, "GET", "/v1/projects/demo/secrets?filter=owner%3Dme", ""); code != http.StatusNotImplemented {
+		t.Errorf("REST list with an undocumented filter = %d; want 501", code)
 	}
 }
 
