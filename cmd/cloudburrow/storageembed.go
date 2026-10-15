@@ -33,13 +33,19 @@ func storageEmbedResult(cfg config.Config, nodeArch string) doctor.Result {
 
 // needsStorageImage reports whether `up` builds the cloudburrow-storage
 // image: for Cloud Storage's server, and for the fronts of BigQuery (#902),
-// Pub/Sub (#873) and Bigtable (#1206), which run in their emulators' pods.
+// Pub/Sub (#873), Bigtable (#1206) and Spanner, Firestore and Datastore
+// (the call fronts, #1288), which run in their emulators' pods.
 func needsStorageImage(cfg config.Config) bool {
-	return serviceEnabled(cfg, config.ServiceStorage) || serviceEnabled(cfg, config.ServiceBigQuery) ||
-		serviceEnabled(cfg, config.ServicePubSub) || serviceEnabled(cfg, config.ServiceBigtable)
+	for _, s := range []config.Service{config.ServiceStorage, config.ServiceBigQuery, config.ServicePubSub,
+		config.ServiceBigtable, config.ServiceSpanner, config.ServiceFirestore, config.ServiceDatastore} {
+		if serviceEnabled(cfg, s) {
+			return true
+		}
+	}
+	return false
 }
 
-// preflightStorage refuses `up` with Cloud Storage, BigQuery, Pub/Sub or Bigtable enabled from a CLI that
+// preflightStorage refuses `up` with Cloud Storage or an emulator with a front enabled from a CLI that
 // has no storage server for the node's architecture, before anything is
 // created. Found by the storage-image component instead, it failed after
 // kind had spent minutes creating a cluster it then left behind.
@@ -48,11 +54,11 @@ func preflightStorage(cfg config.Config, nodeArch string, stderr io.Writer) erro
 	if res.Level != doctor.LevelFail {
 		return nil
 	}
-	fmt.Fprintf(stderr, "cloudburrow up: this CLI cannot start Cloud Storage, BigQuery, Pub/Sub or Bigtable; nothing was created\n\n")
+	fmt.Fprintf(stderr, "cloudburrow up: this CLI cannot start Cloud Storage, BigQuery, Pub/Sub, Bigtable, Spanner, Firestore or Datastore; nothing was created\n\n")
 	doctor.Report{Results: []doctor.Result{res}}.Write(stderr)
 	_, err := storageimage.Binary(nodeArch)
 	if err == nil {
 		err = storageimage.ErrNotEmbedded
 	}
-	return fmt.Errorf("Cloud Storage, BigQuery, Pub/Sub or Bigtable is enabled, but %w; or pass --services without storage, bigquery, pubsub and bigtable. Nothing was created", err)
+	return fmt.Errorf("Cloud Storage, BigQuery, Pub/Sub, Bigtable, Spanner, Firestore or Datastore is enabled, but %w; or pass --services without storage, bigquery, pubsub, bigtable, spanner, firestore and datastore. Nothing was created", err)
 }

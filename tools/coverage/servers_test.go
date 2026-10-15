@@ -50,7 +50,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(resourcemanager.New(store.NewMemory())))
 	schedStore := scheduler.NewStore(store.NewMemory())
 	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)
-	scheduler.NewLocationsServer(schedStore).Register(srv)
+	// The Locations mixin is registered once, by KMS above (#1291): Cloud
+	// Scheduler serves it too, on its own port, and the registry key is global.
 	logging.NewServer(logging.NewStore(10)).Register(srv)
 	vertexai.NewServer(nil).RegisterGRPC(srv)
 	logging.NewAdmin(store.NewMemory()).Register(srv)

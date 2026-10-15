@@ -20,7 +20,8 @@ package logging
 // bucket's retention and a view's filter change nothing that is read. They are
 // configuration, kept in the Admin's store (durable in persistent mode).
 //
-// The Async variants, links, settings and CMEK stay UNIMPLEMENTED. Where
+// The Async variants, links and settings are in links.go (#1292); a bucket's
+// cmek_settings stays UNIMPLEMENTED. Where
 // Google documents no code for a refusal it is FAILED_PRECONDITION
 // (UNVERIFIED).
 

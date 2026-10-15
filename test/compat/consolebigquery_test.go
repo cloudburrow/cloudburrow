@@ -23,6 +23,7 @@ type consoleListing struct {
 	Items       []struct {
 		Name   string            `json:"name"`
 		Fields map[string]string `json:"fields"`
+		Opens  []string          `json:"opens"`
 	} `json:"items"`
 }
 

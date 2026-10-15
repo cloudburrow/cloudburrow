@@ -118,20 +118,21 @@ func fillCache(t *testing.T, cfg config.Config) []prefetch.Artifact {
 // With a complete cache, `up --offline` passes its check, loads the node
 // image into Docker, imports the backend image into the node, and never
 // pulls: no `docker pull`, no pull inside the node, no curl or wget.
-// (Without Cloud Run, storage, Pub/Sub and Bigtable, so the stand-in cache
-// needs no real Knative YAML and no embedded storage server, which the
-// Pub/Sub (#873) and Bigtable (#1206) fronts run from too; the YAML path is
+// (Memorystore alone, without Cloud Run or an emulator with a front, so the
+// stand-in cache needs no real Knative YAML and no embedded storage server,
+// which the Pub/Sub (#873), Bigtable (#1206) and Spanner, Firestore and
+// Datastore (#1288) fronts run from too; the YAML path is
 // TestUpReadsKnativeFromTheCache.)
 func TestUpOfflineNeverPullsOrDownloads(t *testing.T) {
 	log := fakeTools(t)
 	cfg, err := config.Load(config.Options{Args: []string{"--state-dir", t.TempDir(), "--name", "offline-cached",
-		"--services", "firestore"}, Output: io.Discard})
+		"--services", "memorystore"}, Output: io.Discard})
 	if err != nil {
 		t.Fatal(err)
 	}
 	arts := fillCache(t, cfg)
 	if len(arts) != 3 || arts[2].Ref != terminal.Image || !arts[2].Optional {
-		t.Fatalf("artifacts = %+v, want the node image, the Cloud SDK emulators image and the optional terminal image", arts)
+		t.Fatalf("artifacts = %+v, want the node image, the Memorystore image and the optional terminal image", arts)
 	}
 
 	ctx := context.Background()

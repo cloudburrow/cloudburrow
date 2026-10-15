@@ -162,6 +162,10 @@ func (d dmlCounts) patch(obj map[string]any) {
 // else through serveQuery.
 func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
 	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
+		if refs := informationSchemaJobs(q.Query); len(refs) > 0 { // #1275, infoschemajobs.go
+			f.withInformationSchemaJobs(w, r, q, refs, insert)
+			return
+		}
 		if refs := informationSchemaViews(q.Query); len(refs) > 0 { // #1274, infoschemaviews.go
 			f.withInformationSchemaViews(w, r, q, refs, insert)
 			return

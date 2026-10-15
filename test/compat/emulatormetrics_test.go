@@ -3,15 +3,20 @@
 package compat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/bigtable"
 	"cloud.google.com/go/firestore"
+	"cloud.google.com/go/spanner"
+	"google.golang.org/api/iterator"
 )
 
 // waitEvents polls /admin/events until every method in want is recorded for
@@ -69,8 +74,8 @@ func measuredInConsole(t *testing.T, h *Harness, service string, series ...strin
 }
 
 // TestFirestoreCallsReachMetricsAndTheRequestLog: Firestore's calls from
-// the host pass through the tunnel's guard, which now records each one
-// (#1267): a write and a read of a missing document with the official
+// the host are recorded (#1267), now by the call front in the emulator's
+// pod (#1288): a write and a read of a missing document with the official
 // client are counted in /metrics by method and code and recorded in
 // /admin/events with their database and duration.
 func TestFirestoreCallsReachMetricsAndTheRequestLog(t *testing.T) {
@@ -137,4 +142,91 @@ func TestBigtableCallsReachMetricsAndTheRequestLog(t *testing.T) {
 		t.Errorf("no UNIMPLEMENTED ListBackups in /admin/events: %.500s", raw)
 	}
 	measuredInConsole(t, h, "bigtable", `cloudburrow_requests_total{service="bigtable",method="MutateRow",code="OK"}`)
+}
+
+// TestSpannerCallsReachMetricsAndTheRequestLog: Spanner's tunnel is raw and
+// it had no front, so none of its calls were seen; the call front in its pod
+// (#1288) records each one, so the official client's are counted in /metrics
+// by method and code and recorded in /admin/events with their database and
+// duration, the failed query among them.
+func TestSpannerCallsReachMetricsAndTheRequestLog(t *testing.T) {
+	h := New(t)
+	addr := h.Endpoint(EnvSpanner)
+	t.Setenv("SPANNER_EMULATOR_HOST", addr)
+	ctx := h.Context()
+	since := time.Now().Add(-time.Second)
+	db := spannerDatabase(t, ctx, addr, h.Project(), "cb-metrics", fmt.Sprintf("m%d", time.Now().UnixNano()%1e9),
+		`CREATE TABLE T (Id INT64 NOT NULL) PRIMARY KEY (Id)`)
+	c, err := spanner.NewClient(ctx, db, spannerOpts(addr)...)
+	if err != nil {
+		t.Fatalf("spanner.NewClient: %v", err)
+	}
+	defer c.Close()
+	if _, err := c.Apply(ctx, []*spanner.Mutation{spanner.Insert("T", []string{"Id"}, []any{int64(1)})}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	it := c.Single().Query(ctx, spanner.Statement{SQL: "SELECT Id FROM Absent"})
+	_, err = it.Next()
+	it.Stop()
+	if err == nil || err == iterator.Done {
+		t.Fatalf("a query of a missing table = %v, want an error", err)
+	}
+	ev := waitEvents(t, h, "spanner", since, "CreateDatabase", "Commit", "ExecuteStreamingSql")
+	if e := ev["CreateDatabase"]; e.Detail["code"] != "OK" || e.Detail["transport"] != "grpc" || e.Detail["duration_ms"] == "" {
+		t.Errorf("CreateDatabase recorded %v; want OK over grpc with a duration", e.Detail)
+	}
+	if e := ev["Commit"]; e.Detail["code"] != "OK" || !strings.HasPrefix(e.Detail["resource"], db) {
+		t.Errorf("Commit recorded %v; want OK on %s", e.Detail, db)
+	}
+	if e := ev["ExecuteStreamingSql"]; e.Detail["code"] != "INVALID_ARGUMENT" && e.Detail["code"] != "NOT_FOUND" {
+		t.Errorf("the failed query recorded %v; want its error code", e.Detail)
+	}
+	measuredInConsole(t, h, "spanner", `cloudburrow_requests_total{service="spanner",method="Commit",code="OK"}`)
+}
+
+// TestAPodsFirestoreCallsReachMetricsAndTheRequestLog: a pod's Firestore
+// calls reach the emulator's Service directly, never the host tunnel, so
+// they were not counted (#1288). A one-off pod writes and reads a document
+// with the official client at firestore.<namespace>.svc.cluster.local:8080,
+// in a project of its own, and its Commit and BatchGetDocuments are in
+// /admin/events with that project's database and in /metrics: the call
+// front serves that port in the emulator's pod.
+func TestAPodsFirestoreCallsReachMetricsAndTheRequestLog(t *testing.T) {
+	h := New(t)
+	_ = h.Endpoint(EnvFirestore)
+	kubeconfig := strings.TrimSpace(os.Getenv(envKubeconfig))
+	if kubeconfig == "" {
+		t.Skipf("%s is not set", envKubeconfig)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	// A cleanup, not a defer: runPod deletes its pod with ctx in a cleanup
+	// of its own, which runs first.
+	t.Cleanup(cancel)
+	loadEnvProbe(ctx, t)
+	since := time.Now().Add(-time.Second)
+	project := fmt.Sprintf("podfs-%d", time.Now().UnixNano()%1e9)
+	endpoint := "firestore." + testNamespace() + ".svc.cluster.local:8080"
+	q := url.Values{"endpoint": {endpoint}, "project": {project}, "collection": {"metrics1288"}, "doc": {"d"},
+		"traceparent": {"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}}
+	body := runPod(t, ctx, kubeconfig, "compat-fspod-"+project, envProbeImage, nil, "firestore", q.Encode())
+	if !strings.Contains(body, "FIRESTORE PROBE: OK endpoint="+endpoint+" from=pod") {
+		t.Fatalf("the pod's probe: %s", body)
+	}
+	db := "projects/" + project + "/databases/(default)"
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		u := fmt.Sprintf("http://%s/admin/events?service=firestore&kind=request&limit=1000&since=%s",
+			h.Endpoint(EnvControl), since.UTC().Format(time.RFC3339Nano))
+		_, raw := adminDo(t, http.MethodGet, u, "", nil)
+		if strings.Contains(raw, `"target":"/google.firestore.v1.Firestore/Commit"`) &&
+			strings.Contains(raw, `"target":"/google.firestore.v1.Firestore/BatchGetDocuments"`) &&
+			strings.Contains(raw, db) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the pod's Commit and BatchGetDocuments on %s are not in /admin/events: %.1500s", db, raw)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	measuredInConsole(t, h, "firestore", `cloudburrow_requests_total{service="firestore",method="BatchGetDocuments",code="OK"}`)
 }

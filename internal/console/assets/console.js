@@ -8699,10 +8699,11 @@ function openFaultForm(data, onDone) {
 
 // Request charts on /monitoring (#292): calls CloudBurrow served itself or
 // saw pass, from the counters /metrics exposes, sampled on the server's own
-// tick: Pub/Sub's and Bigtable's through their fronts, Firestore's and
-// Datastore's from the host through the tunnel's guard (#1266, #1267). A
-// service reached by a raw port-forward (Spanner) is named as not measured,
-// never charted at zero, which would read as "nobody called it".
+// tick: Pub/Sub's and Bigtable's through their fronts (#1266, #1267), and
+// Spanner's, Firestore's and Datastore's through the call fronts in their
+// pods, a pod's calls as well as the host's (#1288). A service reached by a
+// raw port-forward with no front is named as not measured, never charted at
+// zero, which would read as "nobody called it".
 //
 // Beside them, each in-cluster emulator's container CPU and memory, from the
 // kubelet's per-pod readings the node charts above come from (#1267).

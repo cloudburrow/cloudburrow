@@ -130,24 +130,24 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		}
 		return checkTableID(ref.TableID)
 	}
-	var dests []*tableRef
-	if c.Load != nil {
-		dests = append(dests, c.Load.DestinationTable)
-	}
-	if c.Query != nil {
-		dests = append(dests, c.Query.DestinationTable)
-	}
-	if c.Copy != nil {
-		dests = append(dests, c.Copy.DestinationTable)
-	}
-	if msg := decoratedDestination(dests...); msg != "" { // #1273, partitionreads.go
-		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
-		return
-	}
 	var msg, reason string
 	var afterLoad func() // #1000, loadFloat
 	switch {
 	case c.Load != nil:
+		if d := c.Load.DestinationTable; d != nil && strings.Index(d.TableID, "$") > 0 { // a partition, #1273
+			if msg := checkTableID(d.TableID[:strings.Index(d.TableID, "$")]); msg != "" {
+				writeError(w, http.StatusBadRequest, "invalid", msg)
+				return
+			}
+			finish, ok := f.partitionLoad(w, r, &job) // partitionwrites.go
+			if !ok {
+				return
+			}
+			c = job.Configuration
+			out, rec := w, newRecorder()
+			w = rec
+			defer finish(out, rec)
+		}
 		legacyLoadTypes(r, c.Load.Schema) // #1034, typenames.go
 		reason = "invalid"
 		msg = check(c.Load.DestinationTable)
@@ -197,7 +197,13 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			return
 		}
 	case c.Copy != nil:
-		if reason, msg = "invalid", check(c.Copy.DestinationTable); msg == "" {
+		d := c.Copy.DestinationTable
+		if d != nil && strings.Index(d.TableID, "$") > 0 { // a partition, #1273
+			reason, msg = "invalid", checkTableID(d.TableID[:strings.Index(d.TableID, "$")])
+		} else {
+			reason, msg = "invalid", check(d)
+		}
+		if msg == "" {
 			f.copyJob(w, r, c.Copy) // #987
 			return
 		}
@@ -205,7 +211,12 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		f.extractJob(w, r, c.Extract)
 		return
 	case c.Query != nil:
-		if msg = check(c.Query.DestinationTable); msg != "" {
+		if d := c.Query.DestinationTable; d != nil && strings.Index(d.TableID, "$") > 0 { // a partition, #1273
+			msg = checkTableID(d.TableID[:strings.Index(d.TableID, "$")])
+		} else {
+			msg = check(c.Query.DestinationTable)
+		}
+		if msg != "" {
 			reason = "invalid"
 			break
 		}
@@ -215,7 +226,7 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		qf := &queryFailures{} // #1109, queryfailures.go
 		f.next = qf.watch(f.next)
 		rec := newRecorder()
-		if !f.queryWrite(rec, r, job) { // #1067, #1080, querywrite.go
+		if !f.partitionQueryWrite(rec, r, job) && !f.queryWrite(rec, r, job) { // #1273, partitionwrites.go // #1067, #1080, querywrite.go
 			f.runQuery(rec, r, c.Query.queryOptions, true) // #1008, #1014
 		}
 		noRetry(w, rec, qf)

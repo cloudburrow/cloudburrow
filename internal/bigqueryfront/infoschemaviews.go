@@ -28,23 +28,30 @@ import (
 // Not built: the region-qualified form (`region-us`.INFORMATION_SCHEMA.VIEWS),
 // and the other views #1274 lists.
 
-// viewsRef is a reference to a dataset's INFORMATION_SCHEMA.VIEWS in a
+// viewsRef is a reference to a dataset's INFORMATION_SCHEMA view in a
 // query's text.
 type viewsRef struct {
 	pos, end int
 	dataset  string
+	// view is the view's name, upper case (VIEWS, TABLES, ...).
+	view string
 	// alias is whether a name or AS follows it, so the subquery needs
 	// none of its own.
 	alias bool
 }
 
 // informationSchemaViews returns sql's references to
-// [project.]dataset.INFORMATION_SCHEMA.VIEWS.
+// [project.]dataset.INFORMATION_SCHEMA.<view> of the views the front
+// answers (infoschema.go, #1286) or refuses 501 (unbuiltInfoSchema). A
+// script's references to the views the engine serves itself (TABLES,
+// COLUMNS, TABLE_OPTIONS) are left to it, which reads its catalog as each
+// statement runs.
 func informationSchemaViews(sql string) []viewsRef {
 	t, ok := lex(sql)
 	if !ok {
 		return nil
 	}
+	script := len(splitStatements(trimSemicolons(t))) > 1
 	var refs []viewsRef
 	for i := 0; i < len(t); i++ {
 		if t[i].kind != tokWord && t[i].kind != tokQuoted || i > 0 && t[i-1].punct(".") {
@@ -52,11 +59,16 @@ func informationSchemaViews(sql string) []viewsRef {
 		}
 		parts, next := path(t, i)
 		n := len(parts)
-		if n < 3 || n > 4 || !strings.EqualFold(parts[n-2], "INFORMATION_SCHEMA") || !strings.EqualFold(parts[n-1], "VIEWS") {
+		if n < 3 || n > 4 || !strings.EqualFold(parts[n-2], "INFORMATION_SCHEMA") || strings.HasPrefix(strings.ToLower(parts[n-3]), "region-") {
 			i = next - 1
 			continue
 		}
-		ref := viewsRef{pos: t[i].pos, end: t[next-1].end, dataset: parts[n-3]}
+		view := strings.ToUpper(parts[n-1])
+		if _, ok := infoSchemaBuilders[view]; !ok && !unbuiltInfoSchema[view] || script && engineInfoSchema[view] {
+			i = next - 1
+			continue
+		}
+		ref := viewsRef{pos: t[i].pos, end: t[next-1].end, dataset: parts[n-3], view: view}
 		if next < len(t) && (t[next].is("AS") || t[next].kind == tokQuoted ||
 			t[next].kind == tokWord && !reservedWords[strings.ToUpper(t[next].text)]) {
 			ref.alias = true
@@ -67,13 +79,21 @@ func informationSchemaViews(sql string) []viewsRef {
 	return refs
 }
 
+// trimSemicolons drops a script's trailing semicolons.
+func trimSemicolons(t []token) []token {
+	for len(t) > 0 && t[len(t)-1].punct(";") {
+		t = t[:len(t)-1]
+	}
+	return t
+}
+
 // viewsColumns is the subquery's row type.
 const viewsColumns = "STRUCT<table_catalog STRING, table_schema STRING, table_name STRING, view_definition STRING, " +
 	"check_option STRING, use_standard_sql STRING>"
 
 // viewsRows returns the subquery of dataset's views, or the status and
 // message of why it cannot.
-func (f front) viewsRows(r *http.Request, dataset string) (string, int, string) {
+func (f front) viewsRows(r *http.Request, dataset string, _ *datasetMeta) (string, int, string) {
 	project := projectOf(f.base)
 	if st, _ := f.get(r, "/datasets/"+url.PathEscape(dataset)); st == http.StatusNotFound {
 		return "", http.StatusNotFound, fmt.Sprintf("Not found: Dataset %s:%s", project, dataset)
@@ -141,20 +161,34 @@ func (f front) viewsRows(r *http.Request, dataset string) (string, int, string) 
 func (f front) withInformationSchemaViews(w http.ResponseWriter, r *http.Request, q queryOptions, refs []viewsRef, insert bool) {
 	var b strings.Builder
 	last := 0
+	subs := map[string]string{}
+	meta := &datasetMeta{}
 	for _, ref := range refs {
-		sub, status, msg := f.viewsRows(r, ref.dataset)
-		if status != 0 {
-			reason := "notFound"
-			if status != http.StatusNotFound {
-				reason = "internalError"
-			}
-			writeError(w, status, reason, msg)
+		if unbuiltInfoSchema[ref.view] {
+			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: INFORMATION_SCHEMA."+ref.view+
+				" is not built (docs/compatibility.md), so nothing was run.")
 			return
+		}
+		key := ref.dataset + "\x00" + ref.view
+		sub, ok := subs[key]
+		if !ok {
+			var status int
+			var msg string
+			sub, status, msg = infoSchemaBuilders[ref.view](f, r, ref.dataset, meta)
+			if status != 0 {
+				reason := "notFound"
+				if status != http.StatusNotFound {
+					reason = "internalError"
+				}
+				writeError(w, status, reason, msg)
+				return
+			}
+			subs[key] = sub
 		}
 		b.WriteString(q.Query[last:ref.pos])
 		b.WriteString(sub)
 		if !ref.alias {
-			b.WriteString(" AS VIEWS")
+			b.WriteString(" AS " + ref.view)
 		}
 		last = ref.end
 	}

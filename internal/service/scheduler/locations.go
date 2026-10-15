@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 )
 
@@ -50,39 +51,7 @@ type LocationsServer struct {
 func NewLocationsServer(st *Store) *LocationsServer { return &LocationsServer{store: st} }
 
 // Register adds the mixin to a gRPC server, or to the JSON transcoder.
-// genproto's RegisterLocationsServer takes only a *grpc.Server, and its
-// service description is unexported, so the description is written here.
-func (l *LocationsServer) Register(s grpc.ServiceRegistrar) {
-	s.RegisterService(&locationsDesc, l)
-}
-
-func unary[Req any, Resp any](method string, call func(*LocationsServer, context.Context, *Req) (Resp, error)) grpc.MethodDesc {
-	return grpc.MethodDesc{
-		MethodName: method,
-		Handler: func(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-			in := new(Req)
-			if err := dec(in); err != nil {
-				return nil, err
-			}
-			l := srv.(*LocationsServer)
-			if interceptor == nil {
-				return call(l, ctx, in)
-			}
-			info := &grpc.UnaryServerInfo{Server: srv, FullMethod: "/google.cloud.location.Locations/" + method}
-			return interceptor(ctx, in, info, func(ctx context.Context, req any) (any, error) { return call(l, ctx, req.(*Req)) })
-		},
-	}
-}
-
-var locationsDesc = grpc.ServiceDesc{
-	ServiceName: "google.cloud.location.Locations",
-	HandlerType: (*locationpb.LocationsServer)(nil),
-	Methods: []grpc.MethodDesc{
-		unary("ListLocations", (*LocationsServer).ListLocations),
-		unary("GetLocation", (*LocationsServer).GetLocation),
-	},
-	Metadata: "google/cloud/location/locations.proto",
-}
+func (l *LocationsServer) Register(s grpc.ServiceRegistrar) { locations.Register(s, l) }
 
 // locations is every location of project: the regions, and each location
 // holding one of its jobs, sorted.

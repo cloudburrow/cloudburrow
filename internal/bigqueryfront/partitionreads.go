@@ -33,9 +33,11 @@ import (
 // subquery of the partition's rows, and deletes a partition
 // (tables.delete of the decorated name) with a DELETE of its rows. A
 // decorator on a table that is not partitioned is refused 400 (wording
-// UNVERIFIED). Not built (501): an ingestion-time partition (no row's
-// ingestion time is kept), tabledata.list and tables.get of a partition,
-// and a decorated destination of a load, copy or query job.
+// UNVERIFIED). tabledata.list and tables.get of a partition and a query job
+// into one are
+// in partitionwrites.go. Not built (501): an ingestion-time partition (no
+// row's ingestion time is kept) and a decorated destination of a load or
+// copy job.
 //
 // FOR SYSTEM_TIME AS OF failed 400 "FOR SYSTEM_TIME AS OF is not
 // supported", the emulator keeps no history. The front reads the time
@@ -373,10 +375,7 @@ func (f front) systemTime(r *http.Request, q queryOptions, dataset, ref string, 
 	current := compact == "CURRENT_TIMESTAMP()" || compact == "CURRENT_TIMESTAMP" || ts == now
 	tsMs, nowMs := ts/1000, now/1000
 	earliest := nowMs - hours*int64(time.Hour/time.Millisecond)
-	c, err := strconv.ParseInt(m.Created, 10, 64)
-	if err == nil && c < 1e11 {
-		c *= 1000 // the emulator's creationTime is in seconds (measured)
-	}
+	c, err := strconv.ParseInt(m.Created, 10, 64) // milliseconds (#1310)
 	if err == nil && c > earliest {
 		earliest = c
 	}
@@ -478,8 +477,9 @@ func partitionFilter(m partitionMeta, dec, name string) (string, int, string) {
 }
 
 // servePartition answers a request for a decorated table, dataset.table
-// (#1273, above): tables.delete deletes the partition's rows; tabledata.list
-// and tables.get of a partition are 501; any request of a table that is
+// (#1273, above): tables.delete deletes the partition's rows;
+// tabledata.list and tables.get read them (partitionwrites.go); any other
+// request of a partition is 501; any request of a table that is
 // not partitioned is refused.
 func (f front) servePartition(w http.ResponseWriter, r *http.Request, dataset, table, sub string) {
 	i := strings.Index(table, "$")
@@ -505,22 +505,17 @@ func (f front) servePartition(w http.ResponseWriter, r *http.Request, dataset, t
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+r.Method+" of a partition ("+
-		name+"). CloudBurrow reads a partition in a query (SELECT * FROM `"+dataset+"."+table+"`) and deletes one "+
-		"(tables.delete); tabledata.list and tables.get of one are not built (docs/compatibility.md).")
-}
-
-// decoratedDestination returns a 501 message when a job writes to a
-// partition decorator (#1273, above), or "".
-func decoratedDestination(refs ...*tableRef) string {
-	for _, ref := range refs {
-		if ref != nil && strings.Contains(ref.TableID, "$") {
-			return "Not implemented here: a job whose destination is a partition (" + ref.TableID + "). CloudBurrow " +
-				"does not write one partition of a table; write the table, or DELETE the partition's rows first " +
-				"(docs/compatibility.md). Nothing was run."
-		}
+	if r.Method == http.MethodGet && sub == "data" {
+		f.partitionRows(w, r, dataset, base, filter, m) // partitionwrites.go
+		return
 	}
-	return ""
+	if r.Method == http.MethodGet && sub == "" {
+		f.partitionTable(w, r, dataset, base, table, filter) // partitionwrites.go
+		return
+	}
+	writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+r.Method+" of a partition ("+
+		name+"). CloudBurrow reads a partition in a query (SELECT * FROM `"+dataset+"."+table+"`) and with "+
+		"tabledata.list and tables.get, and deletes one (tables.delete); nothing else is built (docs/compatibility.md).")
 }
 
 // reasonOf is the ErrorProto reason of a refusal of code: bad for a 400.

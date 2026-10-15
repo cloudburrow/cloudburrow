@@ -121,7 +121,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/bigqueryimage/` | Builds the in-cluster BigQuery emulator's image from the patched goccy/bigquery-emulator builds the CLI embeds (#1061), and says which architectures a CLI embeds. |
 | `internal/bigqueryimage/bigqueryimagetest/` | Tests only: stand-in embedded emulator builds, present or missing (#1061). |
 | `internal/buildpacks/` | Turns source into a runnable image with Google Buildpacks and `pack`. |
-| `internal/calllog/` | The call log the Pub/Sub and Bigtable fronts keep in their pods (#1266, #1267): each call's method, resource, code, duration and `traceparent`, never a payload, in a bounded ring at `/_cloudburrow/calls?after=N` that the CLI reads through the tunnel into `/metrics`, `/admin/events` and traces. |
+| `internal/calllog/` | The call log the Pub/Sub, Bigtable and call fronts keep in their pods (#1266, #1267, #1288): each call's method, resource, code, duration and `traceparent`, never a payload, in a bounded ring at `/_cloudburrow/calls?after=N` that the CLI reads through the tunnel into `/metrics`, `/admin/events` and traces. |
 | `internal/cluster/` | The local kind cluster: create, discover, stop, start, delete, with an explicit kubeconfig. |
 | `internal/components/` | Installs and manages the in-cluster backends and Knative Serving from pinned manifests. |
 | `internal/config/` | Configuration model, precedence (flags over environment over file over defaults), validation. |
@@ -138,6 +138,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/lifecycle/` | Startup ordering, readiness, bounded shutdown, ownership of background workers, and the narrow interfaces by which one service reaches another. |
 | `internal/localai/` | Acquisition of local AI model artifacts, kept apart from their execution. |
 | `internal/localhost/` | Dials any name under `.localhost` on loopback without a DNS lookup, for the dispatchers the CLI runs (#714). |
+| `internal/locations/` | The `google.cloud.location.Locations` mixin Cloud KMS and Cloud Scheduler serve (#1237, #1291). |
 | `internal/lro/` | Long-running operations: pending, completed and failed. |
 | `internal/metadata/` | A local GCE metadata server and the fixture credentials that point Google tooling at CloudBurrow. |
 | `internal/metrics/` | Counts the calls CloudBurrow serves itself, in the Prometheus text format (#292). |
@@ -146,10 +147,12 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/prediction/` | The Vertex AI custom prediction container contract. |
 | `internal/prefetch/` | Offline cache of the node, backend and Knative artifacts a first `up` downloads (#604). |
 | `internal/bigtablefront/` | The front the Bigtable pod runs before Google's emulator (`cloudburrow-storage bigtable-front`): answers `UNIMPLEMENTED` the fifteen RPCs the emulator has no implementation of and would panic on, losing every table (backups, schema bundles, `UndeleteTable`, change streams), and passes every other call through undecoded (#1206); serves the emulator's readiness path on the same port. |
+| `internal/callfront/` | The call front the Spanner, Firestore and Datastore pods run before Google's emulators (`cloudburrow-storage call-front`, #1288): serves the Service's port, the emulator on the pod's loopback behind it, passes every request through unread (`netfwd.PassThrough`: gRPC over h2c, REST over HTTP/1.1) and keeps each call in an `internal/calllog` ring, so the CLI measures every client's calls, a pod's included. |
 | `internal/pubsubfront/` | The front the Pub/Sub pod runs before Google's emulator (`cloudburrow-storage pubsub-front`), for gRPC and the REST API on one port: passes every call through, and enforces subscription expiration, which the emulator stores and never acts on (#873); relays the emulator's pushes so a successful one counts as activity, refuses exactly-once delivery on a push subscription, and reads and restores the expiration clocks and the projects named for `cloudburrow state` (#880), over REST as over gRPC (#908), routing each connection by its first request, gRPC to grpc-go's own transport and anything else to net/http, which routes each request by its content type, so REST over h2c is served (#909, #950); applies the labels updates the emulator refuses (#949); keeps what the emulator does not store in a file on the pod's emptyDir, so a restart of the front alone loses nothing (#898). |
 | `internal/resource/` | Google resource-name parsing and formatting, project and location scoping. |
 | `internal/sched/` | Cancellable background work, due-time scheduling, retry and backoff over an injected clock. |
 | `internal/service/kms/` | Cloud KMS, built by us (#309). |
+| `internal/locations/` | The `google.cloud.location.Locations` mixin's gRPC registration, shared by Cloud Scheduler and Cloud KMS (#1237, #1291). |
 | `internal/service/logging/` | Cloud Logging write and read (`LoggingServiceV2`), built by us (#304). |
 | `internal/service/resourcemanager/` | The project registry, and the Resource Manager v3 and v1 Projects APIs over it (#298, #301). |
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |

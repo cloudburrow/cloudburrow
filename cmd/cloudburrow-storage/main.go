@@ -9,7 +9,9 @@
 // `cloudburrow-storage pubsub-front` the front the Pub/Sub pod runs beside
 // Google's emulator (internal/pubsubfront, #873), and `cloudburrow-storage
 // bigtable-front` the front the Bigtable pod runs beside Google's emulator
-// (internal/bigtablefront, #1206), all from the same image, so the cluster
+// (internal/bigtablefront, #1206), and `cloudburrow-storage call-front` the
+// call front the Spanner, Firestore and Datastore pods run beside theirs
+// (internal/callfront, #1288), all from the same image, so the cluster
 // needs no second locally built image.
 //
 // `cloudburrow-storage supervise [flags] -- command...` runs a backend's
@@ -29,6 +31,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/bigqueryfront"
 	"github.com/cloudburrow/cloudburrow/internal/bigtablefront"
+	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 	"github.com/cloudburrow/cloudburrow/internal/storageserver"
 	"github.com/cloudburrow/cloudburrow/internal/supervisor"
@@ -70,6 +73,15 @@ func main() {
 		if err := bigtablefront.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			if !errors.Is(err, bigtablefront.ErrUsage) {
 				fmt.Fprintln(os.Stderr, "cloudburrow-storage bigtable-front:", err)
+			}
+			os.Exit(2)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "call-front" {
+		if err := callfront.Run(ctx, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			if !errors.Is(err, callfront.ErrUsage) {
+				fmt.Fprintln(os.Stderr, "cloudburrow-storage call-front:", err)
 			}
 			os.Exit(2)
 		}

@@ -68,11 +68,13 @@ func TestBigQueryPartitionPseudoColumns(t *testing.T) {
 // TestBigQueryPartitionDecorators (#1273): a query reads one partition of a
 // day-, month- or integer-range-partitioned table by its decorator, and
 // $__NULL__ / $__UNPARTITIONED__; tables.delete of a decorated name
-// deletes that partition only. A decorator on a table that is not
-// partitioned is 400, and a job whose destination is a partition is 501.
+// deletes that partition only, and tables.get of one reads the table with
+// the partition's numRows. A decorator on a table that is not
+// partitioned is 400. A partition as a job's destination is
+// TestBigQueryPartitionDestinations.
 // Measured first: every decorated name was 400 "Table not found".
 //
-// covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.delete
+// covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.delete, bigquery.tables.get
 func TestBigQueryPartitionDecorators(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
@@ -113,12 +115,6 @@ func TestBigQueryPartitionDecorators(t *testing.T) {
 		wantAPIError(t, "bad decorator", bqRun(ctx, c, "SELECT n FROM "+p("byday$2024"), insert),
 			http.StatusBadRequest, "Invalid partition decorator")
 	}
-	// A partition as a job's destination.
-	q := c.Query("SELECT 1 AS n, DATE '2024-01-01' AS d")
-	q.Dst = ds.Table("byday$20240101")
-	_, err := q.Run(ctx)
-	wantAPIError(t, "destination", err, http.StatusNotImplemented, "destination is a partition")
-
 	// tables.delete of a partition deletes its rows only.
 	if err := ds.Table("byday$20240101").Delete(ctx); err != nil {
 		t.Fatalf("delete partition: %v", err)
@@ -126,8 +122,10 @@ func TestBigQueryPartitionDecorators(t *testing.T) {
 	if got := queryRows(t, ctx, c, "", "", "SELECT n FROM "+p("byday")); !reflect.DeepEqual(got, []string{"3", "4"}) {
 		t.Errorf("after deleting the partition: %v, want [3 4]", got)
 	}
-	_, err = ds.Table("byday$20240102").Metadata(ctx)
-	wantAPIError(t, "tables.get of a partition", err, http.StatusNotImplemented, "Not implemented here")
+	md, err := ds.Table("byday$20240102").Metadata(ctx)
+	if err != nil || md.NumRows != 1 || md.TimePartitioning == nil || len(md.Schema) != 2 {
+		t.Errorf("tables.get of a partition: %+v, %v; want 1 row, the table's partitioning and schema", md, err)
+	}
 	wantAPIError(t, "delete of plain$", ds.Table("plain$20240101").Delete(ctx), http.StatusBadRequest, "not partitioned")
 }
 

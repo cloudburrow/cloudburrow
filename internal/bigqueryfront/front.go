@@ -238,6 +238,23 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			iam.reset()
 		})
 	}
+	// listJobs serves jobs.list, r a GET of a project's jobs: here, and
+	// for a query of INFORMATION_SCHEMA.JOBS (infoschemajobs.go, #1275).
+	listJobs := func(w http.ResponseWriter, r *http.Request) {
+		j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath())
+		if j == nil {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: not a jobs.list path")
+			return
+		}
+		base := j[1] + "/projects/" + j[2]
+		texts.serveJobList(w, func(w http.ResponseWriter) {
+			configs.serveJobList(w, r, next, base, func(w http.ResponseWriter) {
+				records.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) {
+					own.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) { failed.listJobs(next, w, r) })
+				})
+			})
+		})
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if serveUnserved(w, r) { // unserved.go, #1200
 			return
@@ -279,14 +296,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// configurations before paging read every job of the project,
 			// the front's own check queries too, and outlasted a client
 			// (landing run 36437541734).
-			base := j[1] + "/projects/" + j[2]
-			texts.serveJobList(w, func(w http.ResponseWriter) {
-				configs.serveJobList(w, r, next, base, func(w http.ResponseWriter) {
-					records.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) {
-						own.serveJobList(w, r, projectOf("/"+j[2]), func(w http.ResponseWriter) { failed.listJobs(next, w, r) })
-					})
-				})
-			})
+			listJobs(w, r)
 			return
 		}
 		if j := jobActionRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil {
@@ -309,7 +319,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodPost {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
-				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies}
+				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
+				listJobs: listJobs}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -425,6 +436,10 @@ type front struct {
 	// policies are the tables' row access policies (rowpolicies.go,
 	// #1218), or nil.
 	policies *rowPolicies
+	// listJobs serves jobs.list for a GET of a project's jobs, the
+	// records INFORMATION_SCHEMA.JOBS reads (infoschemajobs.go, #1275),
+	// or is nil.
+	listJobs func(http.ResponseWriter, *http.Request)
 }
 
 // Option is an option of Wrap.

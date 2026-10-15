@@ -29,12 +29,14 @@ import (
 	"time"
 
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	locationpb "google.golang.org/genproto/googleapis/cloud/location"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -159,10 +161,11 @@ func (s *Server) now() time.Time { return s.clock.Now() }
 
 // Register adds the service to a gRPC server, or to the JSON transcoder,
 // with the IAMPolicy mixin cloudkms.googleapis.com serves beside it
-// (cloudkms_v1.yaml:13).
+// (cloudkms_v1.yaml:13), and the Locations mixin (#1291).
 func (s *Server) Register(g grpc.ServiceRegistrar) {
 	kmspb.RegisterKeyManagementServiceServer(g, s)
 	iampb.RegisterIAMPolicyServer(g, s.IAMPolicy())
+	locations.Register(g, s.Locations())
 }
 
 func (s *Server) put(key string, v any) error {
@@ -317,9 +320,8 @@ func (s *Server) ListKeyRings(_ context.Context, req *kmspb.ListKeyRingsRequest)
 
 // KeyRingsInProject returns every key ring in project, in every location,
 // ordered by name, for the console (#593). ListKeyRings takes one location,
-// and Locations is not served, so a screen listing a project's rings through
-// it would have to guess which locations to ask about and would miss the
-// rest. The records are the ones ListKeyRings reads.
+// so a screen listing a project's rings through it would have to ask about
+// every location ListLocations lists. The records are the ones ListKeyRings reads.
 func (s *Server) KeyRingsInProject(project string) ([]*kmspb.KeyRing, error) {
 	if err := parseLocation("project", "projects/"+project+"/locations/global"); err != nil {
 		return nil, apierror.Wrap(err)
@@ -1273,3 +1275,6 @@ var (
 	keyFilterFields     = fieldSupport{"name": {"=", "!=", ":"}, "labels.": {"=", ":"}}
 	versionFilterFields = fieldSupport{"state": {"=", "!="}}
 )
+
+// Locations returns the Locations mixin over s's key rings (#1291).
+func (s *Server) Locations() locationpb.LocationsServer { return locationsServer{s: s} }
