@@ -23,6 +23,10 @@ import (
 // has a value for them: each is a test-mode switch or a fixture a job makes
 // for itself. Each must still be listed in test/compat/README.md.
 var compatEnvExceptions = map[string]string{
+	// The local embeddings model (#41) is a 330 MB download no instance
+	// fetches unless asked (`up -local-ai-embeddings`); set it to run
+	// TestEmbeddingGemmaThroughTheOfficialSDK where the model is present.
+	"CLOUDBURROW_TEST_EMBEDDINGS": "opt-in switch: needs the downloaded embeddings model and an onnx build",
 	// Restart probes: which half of a probe a run is, and where the probe
 	// keeps what it wrote. ci.yml sets them around a stop and an up.
 	"CLOUDBURROW_TEST_KMS_PROBE":                "restart probe fixture file",
