@@ -1,0 +1,1768 @@
+CloudBurrow patch 20 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1194, #1195). Applies after patch 0019.
+
+The bug: CAST's FORMAT clause, and its AT TIME ZONE, were dropped when a
+cast was turned into SQLite: the formatter wrote
+googlesqlite_cast(expr, from, to, safe) and never read the ResolvedCast's
+format and time_zone fields (go-googlesql already exposes them). So
+CAST(TIMESTAMP '2020-01-01 05:00:00+00' AS STRING FORMAT 'YYYY') was
+"2020-01-01 05:00:00+00", CAST(12.5 AS STRING FORMAT '999.99') was
+"12.5", and CAST('2020' AS TIMESTAMP FORMAT 'YYYY') failed ("failed to
+convert 2020 to time.Time type").
+
+The patch:
+- writes a cast with a FORMAT clause as googlesqlite_cast_format(expr,
+  from, to, safe, format, zone), zone NULL when there is no AT TIME ZONE;
+- adds internal/castformat, BigQuery's documented format elements
+  (standard-sql/format-elements):
+  - BYTES to and from STRING: HEX, BASE2, BASE8, BASE16, BASE32, BASE64,
+    BASE64M, ASCII, UTF-8, UTF8;
+  - DATE, DATETIME, TIME and TIMESTAMP to STRING: YYYY, YYY, YY, Y,
+    Y,YYY, RRRR, RR, MM, MON, MONTH, DAY, DY, D, DD, DDD, HH, HH12, HH24,
+    MI, SS, SSSSS, FF1-FF9, A.M., P.M., AM, PM, TZH, TZM, literals and
+    "text", with case matching; a TIMESTAMP is written in the AT TIME
+    ZONE zone, else UTC;
+  - STRING to DATE, DATETIME, TIME and TIMESTAMP with the same elements
+    and the format model rules (one of each part, DDD without a month,
+    HH24 without a 12-hour element or meridian, a 12-hour element with a
+    meridian, SSSSS alone, no element the target type lacks), missing
+    parts defaulting to the current year and month, day 1 and midnight;
+    a TIMESTAMP with no TZH is read in the AT TIME ZONE zone, else UTC;
+  - INT64, FLOAT64, NUMERIC and BIGNUMERIC to STRING: 0, 9, X, x, ., D,
+    ',', G, S, MI, PR, $, C, c, L, B, EEEE, FM, RN, V.
+  Any other element, or a cast the FORMAT clause does not take, is an
+  error (NULL with SAFE_CAST).
+
+Tests: internal/castformat/castformat_test.go (the reference's
+examples) and cast_format_test.go (through database/sql, literals and
+columns).
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/cast_format_test.go
+@@ -0,0 +1,68 @@
++package googlesqlite_test
++
++import (
++	"database/sql"
++	"testing"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1194, #1195): CAST's FORMAT
++// clause, and AT TIME ZONE, for literals and for columns.
++func TestCastFormat(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=cast_format")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	for _, q := range []string{
++		"CREATE TABLE t (ts TIMESTAMP, s STRING, b BYTES, n NUMERIC, i INT64, f FLOAT64)",
++		"INSERT INTO t VALUES (TIMESTAMP '2008-12-25 05:30:00+00', '2020.06.03 00:00:53+00', b'\\xde\\xad\\xbe\\xef', NUMERIC '-12345.678', 43981, 12.5)",
++	} {
++		if _, err := db.Exec(q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	for _, c := range []struct{ expr, want string }{
++		{"CAST(DATE '2018-01-30' AS STRING FORMAT 'MONTH DD, YYYY')", "JANUARY 30, 2018"},
++		{"CAST(DATETIME '2018-01-30 21:30:00' AS STRING FORMAT 'YYYY-MM-DD HH12:MI A.M.')", "2018-01-30 09:30 P.M."},
++		{"CAST(TIME '21:30:25.16' AS STRING FORMAT 'HH24:MI:SS.FF2')", "21:30:25.16"},
++		{"CAST(TIMESTAMP '2008-12-25 00:00:00+00:00' AS STRING FORMAT 'TZH')", "+00"},
++		{"CAST(TIMESTAMP '2008-12-25 00:00:00+00:00' AS STRING FORMAT 'TZH:TZM' AT TIME ZONE 'Asia/Kolkata')", "+05:30"},
++		{"(SELECT CAST(ts AS STRING FORMAT 'YYYY-MM-DD HH24:MI TZH' AT TIME ZONE 'America/New_York') FROM t)", "2008-12-25 00:30 -05"},
++		{"(SELECT CAST(ts AS STRING FORMAT 'Day, DD Mon YYYY') FROM t)", "Thursday , 25 Dec 2008"},
++		{"CAST(CAST('DEC 03, 2018' AS DATE FORMAT 'MON DD, YYYY') AS STRING)", "2018-12-03"},
++		{"CAST(CAST('03:30 P.M.' AS TIME FORMAT 'HH:MI A.M.') AS STRING)", "15:30:00"},
++		{"CAST(CAST('2018-12-03 15:30' AS DATETIME FORMAT 'YYYY-MM-DD HH24:MI') AS STRING FORMAT 'YYYY-MM-DD HH24:MI:SS')", "2018-12-03 15:30:00"},
++		{"(SELECT CAST(CAST(s AS TIMESTAMP FORMAT 'YYYY.MM.DD HH24:MI:SSTZH') AS STRING) FROM t)", "2020-06-03 00:00:53+00"},
++		{"CAST(CAST('2020-01-01 00:00' AS TIMESTAMP FORMAT 'YYYY-MM-DD HH24:MI' AT TIME ZONE 'America/New_York') AS STRING)", "2020-01-01 05:00:00+00"},
++		{"CAST(b'\\x48\\x65\\x6c\\x6c\\x6f' AS STRING FORMAT 'ASCII')", "Hello"},
++		{"(SELECT CAST(b AS STRING FORMAT 'HEX') FROM t)", "deadbeef"},
++		{"TO_HEX(CAST('3q2+7w==' AS BYTES FORMAT 'BASE64'))", "deadbeef"},
++		{"(SELECT CAST(n AS STRING FORMAT '$999,999.999') FROM t)", " -$12,345.678"},
++		{"(SELECT CAST(i AS STRING FORMAT 'xxxx') FROM t)", " abcd"},
++		{"(SELECT CAST(f AS STRING FORMAT '999999.000FM') FROM t)", "12.5"},
++		{"CAST(2021 AS STRING FORMAT 'RN')", "          MMXXI"},
++		{"CAST(-12 AS STRING FORMAT '9999PR')", "  <12>"},
++		{"CAST(CAST(NULL AS DATE) AS STRING FORMAT 'YYYY') IS NULL", "true"},
++		{"SAFE_CAST('nope' AS DATE FORMAT 'YYYY-MM-DD') IS NULL", "true"},
++	} {
++		var got string
++		if err := db.QueryRow("SELECT CAST((" + c.expr + ") AS STRING)").Scan(&got); err != nil {
++			t.Errorf("%s: %v", c.expr, err)
++			continue
++		}
++		if got != c.want {
++			t.Errorf("%s = %q, want %q", c.expr, got, c.want)
++		}
++	}
++	for _, expr := range []string{
++		"CAST('nope' AS DATE FORMAT 'YYYY-MM-DD')",
++		"CAST(DATE '2018-01-30' AS STRING FORMAT 'HH24')",
++		"CAST(b'\\xff' AS STRING FORMAT 'ASCII')",
++		"CAST(12 AS STRING FORMAT 'TM9')",
++	} {
++		var got sql.NullString
++		if err := db.QueryRow("SELECT " + expr).Scan(&got); err == nil {
++			t.Errorf("%s = %v, want an error", expr, got)
++		}
++	}
++}
+--- a/internal/cast.go
++++ b/internal/cast.go
+@@ -2,11 +2,14 @@ package internal
+ 
+ import (
+ 	"fmt"
++	"math"
++	"math/big"
+ 	"time"
+ 
+ 	googlesql "github.com/goccy/go-googlesql"
+ 	"github.com/goccy/go-json"
+ 
++	"github.com/goccy/googlesqlite/internal/castformat"
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+ 
+@@ -69,3 +72,169 @@ func bindCast(args ...value.Value) (value.Value, error) {
+ 	}
+ 	return CAST(args[0], &fromType, &toType, isSafeCast)
+ }
++
++// bindCastFormat is CAST(x AS type FORMAT format [AT TIME ZONE zone]).
++//
++// CloudBurrow patch (cloudburrow/cloudburrow#1194, #1195): BigQuery's
++// format elements, in castformat, for each cast the FORMAT clause takes.
++func bindCastFormat(args ...value.Value) (value.Value, error) {
++	if len(args) != 6 {
++		return nil, fmt.Errorf("CAST: invalid number of arguments: got %d, want 6", len(args))
++	}
++	var fromType, toType Type
++	for i, t := range []*Type{&fromType, &toType} {
++		s, err := args[i+1].ToString()
++		if err != nil {
++			return nil, err
++		}
++		if err := json.Unmarshal([]byte(s), t); err != nil {
++			return nil, err
++		}
++	}
++	isSafeCast, err := args[3].ToBool()
++	if err != nil {
++		return nil, err
++	}
++	if args[0] == nil || args[4] == nil {
++		return nil, nil
++	}
++	format, err := args[4].ToString()
++	if err != nil {
++		return nil, err
++	}
++	loc := time.UTC
++	if args[5] != nil {
++		zone, err := args[5].ToString()
++		if err != nil {
++			return nil, err
++		}
++		if loc, err = value.ToLocation(zone); err != nil {
++			return nil, fmt.Errorf("CAST: invalid time zone %q: %w", zone, err)
++		}
++	}
++	v, err := castFormat(args[0], &fromType, &toType, format, loc)
++	if err != nil {
++		if isSafeCast {
++			return nil, nil
++		}
++		return nil, err
++	}
++	return v, nil
++}
++
++func castKind(k googlesql.TypeKind) (castformat.Kind, bool) {
++	switch k {
++	case googlesql.TypeKindTypeDate:
++		return castformat.Date, true
++	case googlesql.TypeKindTypeDatetime:
++		return castformat.Datetime, true
++	case googlesql.TypeKindTypeTime:
++		return castformat.Time, true
++	case googlesql.TypeKindTypeTimestamp:
++		return castformat.Timestamp, true
++	}
++	return 0, false
++}
++
++func castFormat(expr value.Value, fromType, toType *Type, format string, loc *time.Location) (value.Value, error) {
++	from, err := fromType.ToGoogleSQLType()
++	if err != nil {
++		return nil, err
++	}
++	to, err := toType.ToGoogleSQLType()
++	if err != nil {
++		return nil, err
++	}
++	fromKind, toKind := m1(from.Kind()), m1(to.Kind())
++	fromValue, err := CastValue(from, expr)
++	if err != nil {
++		return nil, err
++	}
++	unsupported := func() error {
++		return fmt.Errorf("CAST from %v to %v does not support a FORMAT clause", fromKind, toKind)
++	}
++	switch {
++	case fromKind == googlesql.TypeKindTypeBytes && toKind == googlesql.TypeKindTypeString:
++		b, err := fromValue.ToBytes()
++		if err != nil {
++			return nil, err
++		}
++		s, err := castformat.FormatBytes(b, format)
++		if err != nil {
++			return nil, err
++		}
++		return value.StringValue(s), nil
++	case fromKind == googlesql.TypeKindTypeString && toKind == googlesql.TypeKindTypeBytes:
++		s, err := fromValue.ToString()
++		if err != nil {
++			return nil, err
++		}
++		b, err := castformat.ParseBytes(s, format)
++		if err != nil {
++			return nil, err
++		}
++		return value.BytesValue(b), nil
++	case toKind == googlesql.TypeKindTypeString:
++		if k, ok := castKind(fromKind); ok {
++			t, err := fromValue.ToTime()
++			if err != nil {
++				return nil, err
++			}
++			s, err := castformat.FormatDatetime(t, k, format, loc)
++			if err != nil {
++				return nil, err
++			}
++			return value.StringValue(s), nil
++		}
++		var r *big.Rat
++		special := ""
++		switch v := fromValue.(type) {
++		case value.IntValue:
++			r = new(big.Rat).SetInt64(int64(v))
++		case value.FloatValue:
++			f := float64(v)
++			switch {
++			case math.IsNaN(f):
++				special = "NaN"
++			case math.IsInf(f, 1):
++				special = "+Inf"
++			case math.IsInf(f, -1):
++				special = "-Inf"
++			default:
++				r = new(big.Rat).SetFloat64(f)
++			}
++		case *value.NumericValue:
++			r = v.Rat
++		default:
++			return nil, unsupported()
++		}
++		s, err := castformat.FormatNumber(r, special, format)
++		if err != nil {
++			return nil, err
++		}
++		return value.StringValue(s), nil
++	case fromKind == googlesql.TypeKindTypeString:
++		k, ok := castKind(toKind)
++		if !ok {
++			return nil, unsupported()
++		}
++		s, err := fromValue.ToString()
++		if err != nil {
++			return nil, err
++		}
++		t, err := castformat.ParseDatetime(s, k, format, loc, time.Now())
++		if err != nil {
++			return nil, err
++		}
++		switch k {
++		case castformat.Date:
++			return value.DateValue(t), nil
++		case castformat.Datetime:
++			return value.DatetimeValue(t), nil
++		case castformat.Time:
++			return value.TimeValue(t), nil
++		}
++		return value.TimestampValue(t), nil
++	}
++	return nil, unsupported()
++}
+--- /dev/null
++++ b/internal/castformat/bytes.go
+@@ -0,0 +1,157 @@
++package castformat
++
++import (
++	"encoding/base32"
++	"encoding/base64"
++	"encoding/hex"
++	"fmt"
++	"strings"
++	"unicode"
++	"unicode/utf8"
++)
++
++func bytesFormat(f string) (string, error) {
++	switch u := strings.ToUpper(strings.TrimSpace(f)); u {
++	case "HEX", "BASE16":
++		return "BASE16", nil
++	case "BASE2", "BASE8", "BASE32", "BASE64", "BASE64M", "ASCII":
++		return u, nil
++	case "UTF-8", "UTF8":
++		return "UTF8", nil
++	}
++	return "", fmt.Errorf("unsupported format %q for a cast between BYTES and STRING", f)
++}
++
++// FormatBytes formats b as a string.
++func FormatBytes(b []byte, format string) (string, error) {
++	f, err := bytesFormat(format)
++	if err != nil {
++		return "", err
++	}
++	switch f {
++	case "BASE16":
++		return hex.EncodeToString(b), nil
++	case "BASE2":
++		return bitsEncode(b, 1), nil
++	case "BASE8":
++		return bitsEncode(b, 3), nil
++	case "BASE32":
++		return base32.StdEncoding.EncodeToString(b), nil
++	case "BASE64":
++		return base64.StdEncoding.EncodeToString(b), nil
++	case "BASE64M":
++		s := base64.StdEncoding.EncodeToString(b)
++		var sb strings.Builder
++		for len(s) > 76 {
++			sb.WriteString(s[:76])
++			sb.WriteByte('\n')
++			s = s[76:]
++		}
++		sb.WriteString(s)
++		return sb.String(), nil
++	case "ASCII":
++		for _, c := range b {
++			if c >= 0x80 {
++				return "", fmt.Errorf("bytes are not valid ASCII")
++			}
++		}
++		return string(b), nil
++	}
++	if !utf8.Valid(b) {
++		return "", fmt.Errorf("bytes are not valid UTF-8")
++	}
++	return string(b), nil
++}
++
++// ParseBytes parses s, formatted as format, as bytes.
++func ParseBytes(s, format string) ([]byte, error) {
++	f, err := bytesFormat(format)
++	if err != nil {
++		return nil, err
++	}
++	switch f {
++	case "BASE16":
++		if len(s)%2 == 1 {
++			s = "0" + s
++		}
++		b, err := hex.DecodeString(s)
++		if err != nil {
++			return nil, fmt.Errorf("%q is not valid HEX: %w", s, err)
++		}
++		return b, nil
++	case "BASE2":
++		return bitsDecode(s, 1)
++	case "BASE8":
++		return bitsDecode(s, 3)
++	case "BASE32":
++		b, err := base32.StdEncoding.DecodeString(strings.ToUpper(s))
++		if err != nil {
++			return nil, fmt.Errorf("%q is not valid BASE32: %w", s, err)
++		}
++		return b, nil
++	case "BASE64", "BASE64M":
++		s = strings.Map(func(r rune) rune {
++			if unicode.IsSpace(r) {
++				return -1
++			}
++			return r
++		}, s)
++		b, err := base64.StdEncoding.DecodeString(s)
++		if err != nil {
++			if b2, err2 := base64.RawStdEncoding.DecodeString(s); err2 == nil {
++				return b2, nil
++			}
++			return nil, fmt.Errorf("%q is not valid BASE64: %w", s, err)
++		}
++		return b, nil
++	case "ASCII":
++		for i := 0; i < len(s); i++ {
++			if s[i] >= 0x80 {
++				return nil, fmt.Errorf("%q has characters that are not ASCII", s)
++			}
++		}
++	}
++	return []byte(s), nil
++}
++
++// bitsEncode writes b as digits of bits bits each, most significant
++// first, the last digit padded with zero bits.
++func bitsEncode(b []byte, bits int) string {
++	var sb strings.Builder
++	acc, n := 0, 0
++	for _, c := range b {
++		acc = acc<<8 | int(c)
++		n += 8
++		for n >= bits {
++			n -= bits
++			sb.WriteByte(byte('0' + (acc>>n)&(1<<bits-1)))
++		}
++		acc &= 1<<n - 1
++	}
++	if n > 0 {
++		sb.WriteByte(byte('0' + (acc<<(bits-n))&(1<<bits-1)))
++	}
++	return sb.String()
++}
++
++func bitsDecode(s string, bits int) ([]byte, error) {
++	var out []byte
++	acc, n := 0, 0
++	for i := 0; i < len(s); i++ {
++		d := int(s[i]) - '0'
++		if d < 0 || d >= 1<<bits {
++			return nil, fmt.Errorf("%q is not valid BASE%d", s, 1<<bits)
++		}
++		acc = acc<<bits | d
++		n += bits
++		if n >= 8 {
++			n -= 8
++			out = append(out, byte(acc>>n))
++			acc &= 1<<n - 1
++		}
++	}
++	if acc != 0 {
++		return nil, fmt.Errorf("%q is not valid BASE%d: trailing bits", s, 1<<bits)
++	}
++	return out, nil
++}
+--- /dev/null
++++ b/internal/castformat/castformat_test.go
+@@ -0,0 +1,244 @@
++package castformat
++
++import (
++	"math/big"
++	"testing"
++	"time"
++)
++
++// The examples of BigQuery's format-elements reference.
++
++func TestFormatNumber(t *testing.T) {
++	for _, c := range []struct{ in, format, want string }{
++		{"1.2", "$999,999.999", "       $1.200"},
++		{"1234.56", "$999,999.999", "    $1,234.560"[1:]},
++		{"-12345.678", "$999,999.999", "  -$12,345.678"[1:]},
++		{"1234567.89", "$999,999.999", " $###,###.###"},
++		{"12", "99", " 12"},
++		{"12", "000", " 012"},
++		{"12", "000.000", " 012.000"},
++		{"-12", "000.000", "-012.000"},
++		{"12", "999", "  12"},
++		{"12", "999.999", "  12.000"},
++		{"-12", "999", " -12"},
++		{"43981", "XXXX", " ABCD"},
++		{"43981", "xxxx", " abcd"},
++		{"43981", "0X0x", " ABcd"},
++		{"43981", "0000000X", " 0000ABCD"},
++		{"123.58", "999.999", " 123.580"},
++		{"123.58", "999D999", " 123.580"},
++		{"12.5", "99.99", " 12.50"},
++		{"-12", "S9999", "  -12"},
++		{"-12", "9999S", "  12-"},
++		{"12", "S99", "+12"},
++		{"-12", "S99", "-12"},
++		{"12", "9999MI", "  12 "},
++		{"-12", "9999MI", "  12-"},
++		{"12", "9999PR", "   12 "},
++		{"-12", "9999PR", "  <12>"},
++		{"-12", "$999", " -$12"},
++		{"-12", "C999", " -USD12"},
++		{"-12", "c999", " -usd12"},
++		{"-12", "L999", " -$12"},
++		{"12", "$99", " $12"},
++		{"12345", "999,999", "  12,345"},
++		{"12345", "999G999", "  12,345"},
++		{"1234", "999,999", "   1,234"},
++		{"0.23", "B99.999S", "       "},
++		{"1.23", "B99.999S", " 1.230+"},
++		{"299792458", "S9.999EEEE", "+2.998E+08"},
++		{"-123456", "9.999EEEE", "-1.235E+05"},
++		{"12.5", "999999.000FM", "12.5"},
++		{"2021", "RN", "          MMXXI"},
++		{"2021", "FMrn", "mmxxi"},
++		{"23.5", "S000V00", "+02350"},
++		{"0", "999", "   0"},
++	} {
++		r, _ := new(big.Rat).SetString(c.in)
++		got, err := FormatNumber(r, "", c.format)
++		if err != nil {
++			t.Errorf("%s FORMAT %q: %v", c.in, c.format, err)
++			continue
++		}
++		if got != c.want {
++			t.Errorf("%s FORMAT %q = %q, want %q", c.in, c.format, got, c.want)
++		}
++	}
++	for _, f := range []string{"99.9.9", "TM9", "9MI9", "RN9", "X.X", "Q"} {
++		if _, err := FormatNumber(big.NewRat(1, 1), "", f); err == nil {
++			t.Errorf("FORMAT %q: want an error", f)
++		}
++	}
++}
++
++func TestBytes(t *testing.T) {
++	for _, c := range []struct {
++		in     []byte
++		format string
++		want   string
++	}{
++		{[]byte{0, 1, 0xef, 0xff}, "HEX", "0001efff"},
++		{[]byte{0x02, 0x11, 0x3b}, "BASE8", "00410473"},
++		{[]byte{0x02, 0x11, 0x3b}, "base2", "000000100001000100111011"},
++		{[]byte{0xde, 0xad, 0xbe, 0xef}, "BASE64M", "3q2+7w=="},
++		{[]byte{0xde, 0xad, 0xbe, 0xef}, "BASE64", "3q2+7w=="},
++		{[]byte{0xde, 0xad, 0xbe, 0xef}, "BASE32", "32W353Y="},
++		{[]byte("Hello"), "ASCII", "Hello"},
++		{[]byte("$"), "UTF-8", "$"},
++		{[]byte("$"), "utf8", "$"},
++	} {
++		got, err := FormatBytes(c.in, c.format)
++		if err != nil || got != c.want {
++			t.Errorf("FormatBytes(%x, %q) = %q, %v; want %q", c.in, c.format, got, err, c.want)
++		}
++		back, err := ParseBytes(c.want, c.format)
++		if err != nil || string(back) != string(c.in) {
++			t.Errorf("ParseBytes(%q, %q) = %x, %v; want %x", c.want, c.format, back, err, c.in)
++		}
++	}
++	if b, err := ParseBytes("3q2+\n7w==", "BASE64"); err != nil || string(b) != "\xde\xad\xbe\xef" {
++		t.Errorf("BASE64 with a newline: %x, %v", b, err)
++	}
++	if _, err := FormatBytes([]byte{0xff}, "ASCII"); err == nil {
++		t.Error("non-ASCII bytes: want an error")
++	}
++	if _, err := ParseBytes("zz", "HEX"); err == nil {
++		t.Error("bad HEX: want an error")
++	}
++	if _, err := FormatBytes(nil, "BASE7"); err == nil {
++		t.Error("BASE7: want an error")
++	}
++}
++
++func TestFormatDatetime(t *testing.T) {
++	d := time.Date(2018, 1, 30, 0, 0, 0, 0, time.UTC)
++	tm := time.Date(0, 1, 1, 21, 30, 25, 160000000, time.UTC)
++	ts := time.Date(2008, 12, 25, 0, 0, 0, 0, time.UTC)
++	ny, _ := time.LoadLocation("America/New_York")
++	kol, _ := time.LoadLocation("Asia/Kolkata")
++	for _, c := range []struct {
++		v      time.Time
++		k      Kind
++		format string
++		loc    *time.Location
++		want   string
++	}{
++		{d, Date, "YYYY", nil, "2018"},
++		{time.Date(76, 1, 30, 0, 0, 0, 0, time.UTC), Date, "YYYY", nil, "0076"},
++		{d, Date, "YYY", nil, "018"},
++		{d, Date, "YY", nil, "18"},
++		{d, Date, "Y", nil, "8"},
++		{d, Date, "RRRR-RR", nil, "2018-18"},
++		{d, Date, "MM", nil, "01"},
++		{d, Date, "MON Mon mon", nil, "JAN Jan jan"},
++		{d, Date, "MONTH", nil, "JANUARY"},
++		{time.Date(2020, 12, 31, 0, 0, 0, 0, time.UTC), Date, "DAY/Day/DY/D", nil, "THURSDAY /Thursday /THU/5"},
++		{time.Date(2018, 12, 2, 0, 0, 0, 0, time.UTC), Date, "DD", nil, "02"},
++		{time.Date(2018, 2, 3, 0, 0, 0, 0, time.UTC), Date, "DDD", nil, "034"},
++		{tm, Time, "HH HH12 HH24:MI:SS", nil, "09 09 21:30:25"},
++		{time.Date(0, 1, 1, 1, 2, 3, 0, time.UTC), Time, "SSSSS", nil, "03723"},
++		{tm, Time, "FF1 FF2 FF3", nil, "1 16 160"},
++		{tm, Time, "AM am A.M. a.m. PM", nil, "PM pm P.M. p.m. PM"},
++		{time.Date(0, 1, 1, 1, 2, 3, 0, time.UTC), Time, "aM", nil, "am"},
++		{ts, Timestamp, "TZH:TZM", kol, "+05:30"},
++		{ts, Timestamp, "TZH", nil, "+00"},
++		{time.Date(2020, 1, 1, 5, 0, 0, 0, time.UTC), Timestamp, "YYYY-MM-DD HH24:MI TZH", ny, "2020-01-01 00:00 -05"},
++		{d, Date, `"year" YYYY "a\"b\\c"`, nil, `year 2018 a"b\c`},
++		{d, Date, "", nil, ""},
++		{d, Datetime, "YYYY-MM-DD HH24:MI:SS", nil, "2018-01-30 00:00:00"},
++	} {
++		got, err := FormatDatetime(c.v, c.k, c.format, c.loc)
++		if err != nil || got != c.want {
++			t.Errorf("FormatDatetime(%v, %s, %q) = %q, %v; want %q", c.v, c.k, c.format, got, err, c.want)
++		}
++	}
++	for _, c := range []struct {
++		k      Kind
++		format string
++	}{{Date, "HH24"}, {Time, "YYYY"}, {Date, "YYYY\tMM"}, {Date, "QQ"}} {
++		if _, err := FormatDatetime(d, c.k, c.format, nil); err == nil {
++			t.Errorf("FormatDatetime(%s, %q): want an error", c.k, c.format)
++		}
++	}
++}
++
++func TestParseDatetime(t *testing.T) {
++	now := time.Date(2021, 3, 23, 10, 0, 0, 0, time.UTC)
++	for _, c := range []struct {
++		in, format string
++		k          Kind
++		want       string
++	}{
++		{"03-12-2018", "DD-MM-YYYY", Date, "2018-12-03"},
++		{"10000-1203", "YYYY-MMDD", Date, "10000-12-03"},
++		{"18", "YYYY", Date, "2018-03-01"},
++		{"018-12-03", "YYY-MM-DD", Date, "2018-12-03"},
++		{"18-12-03", "YY-MM-DD", Date, "2018-12-03"},
++		{"8-12-03", "Y-MM-DD", Date, "2028-12-03"},
++		{"2,018-12-03", "Y,YYY-MM-DD", Date, "2018-12-03"},
++		{"18-12-03", "RR-MM-DD", Date, "2018-12-03"},
++		{"50-12-03", "RR-MM-DD", Date, "1950-12-03"},
++		{"DEC 03, 2018", "MON DD, YYYY", Date, "2018-12-03"},
++		{"DECEMBER 03, 2018", "MONTH DD, YYYY", Date, "2018-12-03"},
++		{"december   03, 2018", "MONTH DD, YYYY", Date, "2018-12-03"},
++		{"2018-034", "YYYY-DDD", Date, "2018-02-03"},
++		{"03:30 P.M.", "HH:MI P.M.", Time, "15:30:00"},
++		{"03:30 A.M.", "HH:MI P.M.", Time, "03:30:00"},
++		{"03:30 p.m.", "HH:MI A.M.", Time, "15:30:00"},
++		{"12:30 AM", "HH12:MI AM", Time, "00:30:00"},
++		{"15:30", "HH24:MI", Time, "15:30:00"},
++		{"03:30:02 P.M.", "HH:MI:SS P.M.", Time, "15:30:02"},
++		{"03723", "SSSSS", Time, "01:02:03"},
++		{"01:05:07.16", "HH24:MI:SS.FF1", Time, "01:05:07.200000"},
++		{"01:05:07.16", "HH24:MI:SS.FF2", Time, "01:05:07.160000"},
++		{"2008-12-25 05:30:00-08", "YYYY-MM-DD HH24:MI:SSTZH", Timestamp, "2008-12-25 13:30:00.000000"},
++		{"2008-12-25 05:30:00+0530", "YYYY-MM-DD HH24:MI:SSTZHTZM", Timestamp, "2008-12-25 00:00:00.000000"},
++		{"2020.06.03 00:00:53+00", "YYYY.MM.DD HH24:MI:SSTZH", Timestamp, "2020-06-03 00:00:53.000000"},
++		{"2020-06-03 10:11:12", "YYYY-MM-DD HH24:MI:SS", Datetime, "2020-06-03 10:11:12.000000"},
++		{"year 2020", `"year" YYYY`, Date, "2020-03-01"},
++	} {
++		got, err := ParseDatetime(c.in, c.k, c.format, nil, now)
++		if err != nil {
++			t.Errorf("ParseDatetime(%q, %s, %q): %v", c.in, c.k, c.format, err)
++			continue
++		}
++		var s string
++		switch c.k {
++		case Date:
++			s = got.Format("2006-01-02")
++		case Time:
++			s = got.Format("15:04:05")
++			if got.Nanosecond() != 0 {
++				s = got.Format("15:04:05.000000")
++			}
++		default:
++			s = got.UTC().Format("2006-01-02 15:04:05.000000")
++		}
++		if s != c.want {
++			t.Errorf("ParseDatetime(%q, %s, %q) = %s, want %s", c.in, c.k, c.format, s, c.want)
++		}
++	}
++	ny, _ := time.LoadLocation("America/New_York")
++	got, err := ParseDatetime("2020-01-01 00:00", Timestamp, "YYYY-MM-DD HH24:MI", ny, now)
++	if err != nil || !got.Equal(time.Date(2020, 1, 1, 5, 0, 0, 0, time.UTC)) {
++		t.Errorf("AT TIME ZONE America/New_York: %v, %v", got, err)
++	}
++	for _, c := range []struct {
++		in, format string
++		k          Kind
++	}{
++		{"2018-12-03", "YYYY-MM-DD HH24", Date},
++		{"12:00", "HH:MI", Time},
++		{"12:00 AM", "HH24:MI AM", Time},
++		{"034-12", "DDD-MM", Date},
++		{"2018-2018", "YYYY-YYYY", Date},
++		{"2018-02-30", "YYYY-MM-DD", Date},
++		{"2018-02-03x", "YYYY-MM-DD", Date},
++		{"2018/02/03", "YYYY-MM-DD", Date},
++		{"12:00", "HH24:MI", Date},
++	} {
++		if _, err := ParseDatetime(c.in, c.k, c.format, nil, now); err == nil {
++			t.Errorf("ParseDatetime(%q, %s, %q): want an error", c.in, c.k, c.format)
++		}
++	}
++}
+--- /dev/null
++++ b/internal/castformat/datetime.go
+@@ -0,0 +1,661 @@
++// Package castformat implements the FORMAT clause of CAST: BigQuery's
++// format elements (cloud.google.com/bigquery/docs/reference/standard-sql/
++// format-elements) for BYTES to and from STRING, DATE, DATETIME, TIME and
++// TIMESTAMP to and from STRING, and numeric types to STRING.
++//
++// CloudBurrow patch (cloudburrow/cloudburrow#1194, #1195).
++package castformat
++
++import (
++	"fmt"
++	"math/big"
++	"strconv"
++	"strings"
++	"time"
++	"unicode"
++)
++
++// Kind is the date and time type on one side of a cast.
++type Kind int
++
++const (
++	Date Kind = iota
++	Datetime
++	Time
++	Timestamp
++)
++
++func (k Kind) String() string {
++	switch k {
++	case Date:
++		return "DATE"
++	case Datetime:
++		return "DATETIME"
++	case Time:
++		return "TIME"
++	}
++	return "TIMESTAMP"
++}
++
++func (k Kind) hasDate() bool { return k != Time }
++func (k Kind) hasTime() bool { return k != Date }
++
++type elemKind int
++
++const (
++	eLiteral elemKind = iota
++	eSpace
++	eYYYY
++	eYYY
++	eYY
++	eY
++	eYcommaYYY
++	eRRRR
++	eRR
++	eMM
++	eMON
++	eMONTH
++	eDAY
++	eDY
++	eD
++	eDD
++	eDDD
++	eHH
++	eHH12
++	eHH24
++	eMI
++	eSS
++	eSSSSS
++	eFF
++	eAMdot // A.M. or P.M.
++	eAM    // AM or PM
++	eTZH
++	eTZM
++)
++
++type elem struct {
++	kind elemKind
++	text string // the element as written, or the literal text
++	n    int    // FFn digits
++}
++
++// keywords, longest first where one is a prefix of another.
++var dtKeywords = []struct {
++	word string
++	kind elemKind
++}{
++	{"Y,YYY", eYcommaYYY},
++	{"YYYY", eYYYY}, {"YYY", eYYY}, {"YY", eYY}, {"Y", eY},
++	{"RRRR", eRRRR}, {"RR", eRR},
++	{"MONTH", eMONTH}, {"MON", eMON}, {"MM", eMM}, {"MI", eMI},
++	{"DAY", eDAY}, {"DDD", eDDD}, {"DD", eDD}, {"DY", eDY}, {"D", eD},
++	{"HH24", eHH24}, {"HH12", eHH12}, {"HH", eHH},
++	{"SSSSS", eSSSSS}, {"SS", eSS},
++	{"A.M.", eAMdot}, {"P.M.", eAMdot}, {"AM", eAM}, {"PM", eAM},
++	{"TZH", eTZH}, {"TZM", eTZM},
++}
++
++func parseDatetimeFormat(f string) ([]elem, error) {
++	var out []elem
++	for i := 0; i < len(f); {
++		c := f[i]
++		switch {
++		case c == ' ':
++			j := i
++			for j < len(f) && f[j] == ' ' {
++				j++
++			}
++			out = append(out, elem{kind: eSpace, text: f[i:j]})
++			i = j
++			continue
++		case strings.IndexByte("-./,';:", c) >= 0:
++			// "." starts "A.M." only after A or P, handled below; a
++			// literal "," never starts "Y,YYY".
++			out = append(out, elem{kind: eLiteral, text: string(c)})
++			i++
++			continue
++		case c == '"':
++			var sb strings.Builder
++			j := i + 1
++			for ; j < len(f) && f[j] != '"'; j++ {
++				if f[j] == '\\' {
++					if j+1 < len(f) && (f[j+1] == '"' || f[j+1] == '\\') {
++						j++
++					} else {
++						return nil, fmt.Errorf("unsupported escape sequence in format string %q", f)
++					}
++				}
++				sb.WriteByte(f[j])
++			}
++			if j >= len(f) {
++				return nil, fmt.Errorf("unterminated literal in format string %q", f)
++			}
++			out = append(out, elem{kind: eLiteral, text: sb.String()})
++			i = j + 1
++			continue
++		case unicode.IsSpace(rune(c)):
++			return nil, fmt.Errorf("whitespace other than a space is not allowed in format string %q", f)
++		}
++		up := strings.ToUpper(f[i:])
++		if strings.HasPrefix(up, "FF") && len(up) > 2 && up[2] >= '1' && up[2] <= '9' {
++			out = append(out, elem{kind: eFF, text: f[i : i+3], n: int(up[2] - '0')})
++			i += 3
++			continue
++		}
++		matched := false
++		for _, k := range dtKeywords {
++			if strings.HasPrefix(up, k.word) {
++				out = append(out, elem{kind: k.kind, text: f[i : i+len(k.word)]})
++				i += len(k.word)
++				matched = true
++				break
++			}
++		}
++		if !matched {
++			return nil, fmt.Errorf("unsupported format element %q in format string %q", f[i:], f)
++		}
++	}
++	return out, nil
++}
++
++func needsDate(k elemKind) bool {
++	switch k {
++	case eYYYY, eYYY, eYY, eY, eYcommaYYY, eRRRR, eRR, eMM, eMON, eMONTH, eDAY, eDY, eD, eDD, eDDD:
++		return true
++	}
++	return false
++}
++
++func needsTime(k elemKind) bool {
++	switch k {
++	case eHH, eHH12, eHH24, eMI, eSS, eSSSSS, eFF, eAMdot, eAM:
++		return true
++	}
++	return false
++}
++
++// caseMatch writes word (upper case) in the letter case of the element.
++func caseMatch(elemText, word string) string {
++	if len(elemText) >= 2 && unicode.IsUpper(rune(elemText[0])) && unicode.IsUpper(rune(elemText[1])) {
++		return strings.ToUpper(word)
++	}
++	if len(elemText) >= 1 && unicode.IsUpper(rune(elemText[0])) {
++		return strings.ToUpper(word[:1]) + strings.ToLower(word[1:])
++	}
++	return strings.ToLower(word)
++}
++
++func pad(n, width int) string {
++	s := strconv.Itoa(n)
++	for len(s) < width {
++		s = "0" + s
++	}
++	return s
++}
++
++// FormatDatetime formats t, a value of kind k, as a string. A TIMESTAMP is
++// written in loc.
++func FormatDatetime(t time.Time, k Kind, format string, loc *time.Location) (string, error) {
++	elems, err := parseDatetimeFormat(format)
++	if err != nil {
++		return "", err
++	}
++	if k == Timestamp {
++		if loc == nil {
++			loc = time.UTC
++		}
++		t = t.In(loc)
++	}
++	var sb strings.Builder
++	for _, e := range elems {
++		if needsDate(e.kind) && !k.hasDate() {
++			return "", fmt.Errorf("format element %q is not allowed for %s", e.text, k)
++		}
++		if needsTime(e.kind) && !k.hasTime() {
++			return "", fmt.Errorf("format element %q is not allowed for %s", e.text, k)
++		}
++		y := t.Year()
++		ay := y
++		if ay < 0 {
++			ay = -ay
++		}
++		switch e.kind {
++		case eLiteral, eSpace:
++			sb.WriteString(e.text)
++		case eYYYY, eRRRR:
++			sb.WriteString(pad(y, 4))
++		case eYcommaYYY:
++			sb.WriteString(strconv.Itoa(ay/1000) + "," + pad(ay%1000, 3))
++		case eYYY:
++			sb.WriteString(pad(ay%1000, 3))
++		case eYY, eRR:
++			sb.WriteString(pad(ay%100, 2))
++		case eY:
++			sb.WriteString(strconv.Itoa(ay % 10))
++		case eMM:
++			sb.WriteString(pad(int(t.Month()), 2))
++		case eMON:
++			sb.WriteString(caseMatch(e.text, t.Month().String()[:3]))
++		case eMONTH:
++			sb.WriteString(caseMatch(e.text, t.Month().String()))
++		case eDAY:
++			sb.WriteString(caseMatch(e.text, fmt.Sprintf("%-9s", t.Weekday().String())))
++		case eDY:
++			sb.WriteString(caseMatch(e.text, t.Weekday().String()[:3]))
++		case eD:
++			sb.WriteString(strconv.Itoa(int(t.Weekday()) + 1))
++		case eDD:
++			sb.WriteString(pad(t.Day(), 2))
++		case eDDD:
++			sb.WriteString(pad(t.YearDay(), 3))
++		case eHH, eHH12:
++			h := t.Hour() % 12
++			if h == 0 {
++				h = 12
++			}
++			sb.WriteString(pad(h, 2))
++		case eHH24:
++			sb.WriteString(pad(t.Hour(), 2))
++		case eMI:
++			sb.WriteString(pad(t.Minute(), 2))
++		case eSS:
++			sb.WriteString(pad(t.Second(), 2))
++		case eSSSSS:
++			sb.WriteString(pad(t.Hour()*3600+t.Minute()*60+t.Second(), 5))
++		case eFF:
++			sb.WriteString(pad(t.Nanosecond(), 9)[:e.n])
++		case eAMdot, eAM:
++			word := "AM"
++			if t.Hour() >= 12 {
++				word = "PM"
++			}
++			if e.kind == eAMdot {
++				word = word[:1] + "." + word[1:] + "."
++			}
++			if unicode.IsLower(rune(e.text[0])) {
++				word = strings.ToLower(word)
++			}
++			sb.WriteString(word)
++		case eTZH, eTZM:
++			_, off := t.Zone()
++			sign := "+"
++			if off < 0 {
++				sign = "-"
++				off = -off
++			}
++			if e.kind == eTZH {
++				sb.WriteString(sign + pad(off/3600, 2))
++			} else {
++				sb.WriteString(pad(off%3600/60, 2))
++			}
++		}
++	}
++	return sb.String(), nil
++}
++
++// ParseDatetime parses s, formatted as format, as a value of kind k. A
++// TIMESTAMP with no TZH is read in loc; parts that are missing default to
++// the current year and month (in loc), day 1, and midnight.
++func ParseDatetime(s string, k Kind, format string, loc *time.Location, now time.Time) (time.Time, error) {
++	elems, err := parseDatetimeFormat(format)
++	if err != nil {
++		return time.Time{}, err
++	}
++	if loc == nil {
++		loc = time.UTC
++	}
++	if err := validateParseModel(elems, k); err != nil {
++		return time.Time{}, err
++	}
++	now = now.In(loc)
++	year, month, day := now.Year(), int(now.Month()), 1
++	yday := 0
++	hour, minute, sec, nsec := 0, 0, 0, 0
++	hour12, pm, hasMeridian := -1, false, false
++	tzSet, tzNeg, tzh, tzm := false, false, 0, 0
++
++	in := strings.TrimSpace(s)
++	pos := 0
++	errAt := func(e elem) error {
++		return fmt.Errorf("could not parse %q with format %q: mismatch at element %q", s, format, e.text)
++	}
++	// digits reads at most max digits, at least one; exact when the next
++	// element also reads digits with no delimiter between.
++	digits := func(i, width, max int) (int, int, bool) {
++		if i+1 < len(elems) && readsDigits(elems[i+1].kind) {
++			max = width
++		}
++		j := pos
++		for j < len(in) && j-pos < max && in[j] >= '0' && in[j] <= '9' {
++			j++
++		}
++		if j == pos {
++			return 0, 0, false
++		}
++		n, _ := strconv.Atoi(in[pos:j])
++		w := j - pos
++		pos = j
++		return n, w, true
++	}
++	replaceLast := func(n, pow int) int {
++		return year - year%pow + n
++	}
++	for i, e := range elems {
++		switch e.kind {
++		case eLiteral:
++			if !strings.HasPrefix(in[pos:], e.text) {
++				return time.Time{}, errAt(e)
++			}
++			pos += len(e.text)
++		case eSpace:
++			j := pos
++			for j < len(in) {
++				r := rune(in[j])
++				if !unicode.IsSpace(r) {
++					break
++				}
++				j++
++			}
++			if j == pos {
++				return time.Time{}, errAt(e)
++			}
++			pos = j
++		case eYYYY, eRRRR:
++			n, w, ok := digits(i, 4, 5)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			if w <= 2 {
++				year = replaceLast(n, 100)
++			} else {
++				year = n
++			}
++		case eYcommaYYY:
++			hi, _, ok := digits(i, 2, 2)
++			if !ok || pos >= len(in) || in[pos] != ',' {
++				return time.Time{}, errAt(e)
++			}
++			pos++
++			lo, w, ok := digits(i, 3, 3)
++			if !ok || w != 3 {
++				return time.Time{}, errAt(e)
++			}
++			year = hi*1000 + lo
++		case eYYY:
++			n, _, ok := digits(i, 3, 3)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			year = replaceLast(n, 1000)
++		case eYY:
++			n, _, ok := digits(i, 2, 2)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			year = replaceLast(n, 100)
++		case eY:
++			n, _, ok := digits(i, 1, 1)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			year = replaceLast(n, 10)
++		case eRR:
++			n, _, ok := digits(i, 2, 2)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			cur := now.Year()
++			century, last := cur/100, cur%100
++			switch {
++			case n < 50 && last >= 50:
++				century++
++			case n >= 50 && last < 50:
++				century--
++			}
++			year = century*100 + n
++		case eMM:
++			n, _, ok := digits(i, 2, 2)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			month = n
++		case eMON, eMONTH:
++			m := 0
++			for c := time.January; c <= time.December; c++ {
++				name := c.String()
++				if e.kind == eMON {
++					name = name[:3]
++				}
++				if len(in)-pos >= len(name) && strings.EqualFold(in[pos:pos+len(name)], name) {
++					m = int(c)
++					pos += len(name)
++					break
++				}
++			}
++			if m == 0 {
++				return time.Time{}, errAt(e)
++			}
++			month = m
++		case eDD:
++			n, _, ok := digits(i, 2, 2)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			day = n
++		case eDDD:
++			n, _, ok := digits(i, 3, 3)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			yday = n
++		case eHH, eHH12:
++			n, _, ok := digits(i, 2, 2)
++			if !ok || n < 1 || n > 12 {
++				return time.Time{}, errAt(e)
++			}
++			hour12 = n % 12
++		case eHH24:
++			n, _, ok := digits(i, 2, 2)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			hour = n
++		case eMI:
++			n, _, ok := digits(i, 2, 2)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			minute = n
++		case eSS:
++			n, _, ok := digits(i, 2, 2)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			sec = n
++		case eSSSSS:
++			n, _, ok := digits(i, 5, 5)
++			if !ok || n >= 86400 {
++				return time.Time{}, errAt(e)
++			}
++			hour, minute, sec = n/3600, n%3600/60, n%60
++		case eFF:
++			j := pos
++			for j < len(in) && in[j] >= '0' && in[j] <= '9' {
++				j++
++			}
++			if j == pos {
++				return time.Time{}, errAt(e)
++			}
++			frac := in[pos:j]
++			pos = j
++			// Round the matched fraction to n digits.
++			r, _ := new(big.Rat).SetString("0." + frac)
++			scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(e.n)), nil)
++			r.Mul(r, new(big.Rat).SetInt(scale))
++			q := roundHalfAway(r)
++			if q.Cmp(scale) >= 0 {
++				q.Sub(q, scale)
++				sec++
++			}
++			nsec = int(q.Int64())
++			for k := e.n; k < 9; k++ {
++				nsec *= 10
++			}
++		case eAMdot, eAM:
++			want := 2
++			if e.kind == eAMdot {
++				want = 4
++			}
++			if len(in)-pos < want {
++				return time.Time{}, errAt(e)
++			}
++			word := strings.ToUpper(in[pos : pos+want])
++			switch word {
++			case "AM", "A.M.":
++			case "PM", "P.M.":
++				pm = true
++			default:
++				return time.Time{}, errAt(e)
++			}
++			hasMeridian = true
++			pos += want
++		case eTZH:
++			if pos >= len(in) || strings.IndexByte("+- ", in[pos]) < 0 {
++				return time.Time{}, errAt(e)
++			}
++			tzNeg = in[pos] == '-'
++			pos++
++			n, _, ok := digits(i, 2, 2)
++			if !ok {
++				return time.Time{}, errAt(e)
++			}
++			tzh, tzSet = n, true
++		case eTZM:
++			n, _, ok := digits(i, 2, 2)
++			if !ok || n > 59 {
++				return time.Time{}, errAt(e)
++			}
++			tzm, tzSet = n, true
++		default:
++			return time.Time{}, fmt.Errorf("format element %q is not supported when casting a string to %s", e.text, k)
++		}
++	}
++	if pos != len(in) {
++		return time.Time{}, fmt.Errorf("could not parse %q with format %q: trailing characters %q", s, format, in[pos:])
++	}
++	if hasMeridian {
++		hour = hour12
++		if pm {
++			hour += 12
++		}
++	}
++	if month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || sec > 60 {
++		return time.Time{}, fmt.Errorf("could not parse %q with format %q: a part is out of range", s, format)
++	}
++	if yday > 0 {
++		month, day = 1, yday
++		if yday > time.Date(year, 12, 31, 0, 0, 0, 0, time.UTC).YearDay() {
++			return time.Time{}, fmt.Errorf("could not parse %q with format %q: day of year out of range", s, format)
++		}
++	} else if time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC).Day() != day {
++		return time.Time{}, fmt.Errorf("could not parse %q with format %q: day out of range for its month", s, format)
++	}
++	switch k {
++	case Date:
++		return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC), nil
++	case Datetime:
++		return time.Date(year, time.Month(month), day, hour, minute, sec, nsec, time.UTC), nil
++	case Time:
++		return time.Date(0, 1, 1, hour, minute, sec, nsec, time.UTC), nil
++	}
++	zone := loc
++	if tzSet {
++		off := tzh*3600 + tzm*60
++		if tzNeg {
++			off = -off
++		}
++		zone = time.FixedZone("", off)
++	}
++	return time.Date(year, time.Month(month), day, hour, minute, sec, nsec, zone), nil
++}
++
++func readsDigits(k elemKind) bool {
++	switch k {
++	case eYYYY, eYYY, eYY, eY, eYcommaYYY, eRRRR, eRR, eMM, eDD, eDDD, eHH, eHH12, eHH24, eMI, eSS, eSSSSS, eFF, eTZM:
++		return true
++	}
++	return false
++}
++
++// validateParseModel checks the documented format model rules.
++func validateParseModel(elems []elem, k Kind) error {
++	seen := map[elemKind]string{}
++	parts := map[string]string{}
++	part := func(e elem) string {
++		switch e.kind {
++		case eYYYY, eYYY, eYY, eY, eYcommaYYY, eRRRR, eRR:
++			return "year"
++		case eMM, eMON, eMONTH:
++			return "month"
++		case eDD, eDDD, eD, eDAY, eDY:
++			return "day"
++		case eHH, eHH12, eHH24:
++			return "hour"
++		case eAMdot, eAM:
++			return "meridian indicator"
++		}
++		return ""
++	}
++	for _, e := range elems {
++		if e.kind == eLiteral || e.kind == eSpace {
++			continue
++		}
++		if needsDate(e.kind) && !k.hasDate() || needsTime(e.kind) && !k.hasTime() {
++			return fmt.Errorf("format element %q is not allowed when casting a string to %s", e.text, k)
++		}
++		if _, dup := seen[e.kind]; dup {
++			return fmt.Errorf("format element %q appears more than once", e.text)
++		}
++		seen[e.kind] = e.text
++		if p := part(e); p != "" {
++			if prev, dup := parts[p]; dup {
++				return fmt.Errorf("format elements %q and %q both set the %s", prev, e.text, p)
++			}
++			parts[p] = e.text
++		}
++	}
++	has := func(ks ...elemKind) bool {
++		for _, k := range ks {
++			if _, ok := seen[k]; ok {
++				return true
++			}
++		}
++		return false
++	}
++	switch {
++	case has(eDDD) && has(eMM, eMON, eMONTH):
++		return fmt.Errorf("format element DDD cannot be used with a month element")
++	case has(eHH24) && has(eHH, eHH12, eAMdot, eAM):
++		return fmt.Errorf("format element HH24 cannot be used with a 12-hour element or a meridian indicator")
++	case has(eHH, eHH12) && !has(eAMdot, eAM):
++		return fmt.Errorf("a 12-hour format element requires a meridian indicator")
++	case has(eAMdot, eAM) && !has(eHH, eHH12):
++		return fmt.Errorf("a meridian indicator requires a 12-hour format element")
++	case has(eSSSSS) && has(eHH, eHH12, eHH24, eMI, eSS, eAMdot, eAM):
++		return fmt.Errorf("format element SSSSS cannot be used with hour, minute, second or meridian elements")
++	}
++	return nil
++}
++
++func roundHalfAway(r *big.Rat) *big.Int {
++	num := new(big.Int).Abs(r.Num())
++	den := r.Denom()
++	q, m := new(big.Int).QuoRem(num, den, new(big.Int))
++	if new(big.Int).Mul(m, big.NewInt(2)).Cmp(den) >= 0 {
++		q.Add(q, big.NewInt(1))
++	}
++	if r.Sign() < 0 {
++		q.Neg(q)
++	}
++	return q
++}
+--- /dev/null
++++ b/internal/castformat/numeric.go
+@@ -0,0 +1,353 @@
++package castformat
++
++import (
++	"fmt"
++	"math/big"
++	"strings"
++)
++
++type numFormat struct {
++	fm, blank bool
++	// intSlots are the digit ('0', '9', 'X', 'x') and group separator
++	// (',') elements before the decimal point; with V, the digits after V
++	// are integer slots too.
++	intSlots   []byte
++	fracDigits int
++	vDigits    int
++	decimal    bool
++	exponent   bool
++	hex        bool
++	roman      string // "RN" or "rn"
++	sign       string // "", "S", "MI", "PR"
++	signLead   bool
++	currency   string
++}
++
++func parseNumFormat(f string) (*numFormat, error) {
++	nf := &numFormat{}
++	bad := func(msg string) error {
++		return fmt.Errorf("invalid numeric format %q: %s", f, msg)
++	}
++	afterDecimal, afterV, sawDigit := false, false, false
++	for i := 0; i < len(f); {
++		up := strings.ToUpper(f[i:])
++		c := f[i]
++		switch {
++		case strings.HasPrefix(up, "FM"):
++			nf.fm = true
++			i += 2
++		case strings.HasPrefix(up, "EEEE"):
++			if nf.exponent {
++				return nil, bad("EEEE appears more than once")
++			}
++			nf.exponent = true
++			i += 4
++		case strings.HasPrefix(up, "RN"):
++			nf.roman = f[i : i+2]
++			i += 2
++		case strings.HasPrefix(up, "MI"), strings.HasPrefix(up, "PR"):
++			if nf.sign != "" {
++				return nil, bad("more than one sign element")
++			}
++			nf.sign = up[:2]
++			i += 2
++			if strings.TrimSpace(strings.ToUpper(f[i:])) != "" && strings.ToUpper(f[i:]) != "FM" {
++				return nil, bad(nf.sign + " must be the last element")
++			}
++		case c == 'S' || c == 's':
++			if nf.sign != "" {
++				return nil, bad("more than one sign element")
++			}
++			nf.sign = "S"
++			nf.signLead = !sawDigit && !nf.decimal
++			i++
++		case c == 'B' || c == 'b':
++			nf.blank = true
++			i++
++		case c == '0' || c == '9':
++			sawDigit = true
++			if afterDecimal {
++				nf.fracDigits++
++			} else {
++				if afterV {
++					nf.vDigits++
++				}
++				nf.intSlots = append(nf.intSlots, c)
++			}
++			i++
++		case c == 'X' || c == 'x':
++			sawDigit = true
++			nf.hex = true
++			nf.intSlots = append(nf.intSlots, c)
++			i++
++		case c == '.' || c == 'D' || c == 'd':
++			if nf.decimal {
++				return nil, bad("more than one decimal point")
++			}
++			nf.decimal, afterDecimal = true, true
++			i++
++		case c == ',' || c == 'G' || c == 'g':
++			if afterDecimal {
++				return nil, bad("group separator after the decimal point")
++			}
++			nf.intSlots = append(nf.intSlots, ',')
++			i++
++		case c == '$' || c == 'L' || c == 'l' || c == 'C' || c == 'c':
++			if nf.currency != "" {
++				return nil, bad("more than one currency element")
++			}
++			switch c {
++			case 'C':
++				nf.currency = "USD"
++			case 'c':
++				nf.currency = "usd"
++			default:
++				nf.currency = "$"
++			}
++			i++
++		case c == 'V' || c == 'v':
++			if afterV {
++				return nil, bad("V appears more than once")
++			}
++			afterV = true
++			i++
++		default:
++			return nil, bad(fmt.Sprintf("unsupported format element %q", f[i:]))
++		}
++	}
++	switch {
++	case nf.roman != "" && (len(nf.intSlots) > 0 || nf.decimal || nf.exponent || nf.sign != "" || nf.currency != "" || nf.blank || afterV):
++		return nil, bad("RN can only be used with FM")
++	case afterV && (nf.decimal || nf.exponent):
++		return nil, bad("V cannot be used with a decimal point or EEEE")
++	case nf.hex && (nf.decimal || nf.exponent || nf.currency != "" || nf.blank || afterV || strings.ContainsAny(string(nf.intSlots), "9,")):
++		return nil, bad("X can only be used with 0, FM and sign elements")
++	case nf.hex && len(nf.intSlots) > 16:
++		return nil, bad("more than 16 hexadecimal digits")
++	}
++	return nf, nil
++}
++
++// FormatNumber formats r, an INT64, FLOAT64, NUMERIC or BIGNUMERIC value,
++// as a string. special is "NaN", "+Inf" or "-Inf" for a FLOAT64 that has
++// no rational value, and "" otherwise.
++func FormatNumber(r *big.Rat, special, format string) (string, error) {
++	nf, err := parseNumFormat(format)
++	if err != nil {
++		return "", err
++	}
++	if format == "" {
++		return "", nil
++	}
++	if nf.roman != "" {
++		return formatRoman(r, special, nf)
++	}
++	neg := special == "-Inf" || (r != nil && r.Sign() < 0)
++	abs := new(big.Rat)
++	if r != nil {
++		abs.Abs(r)
++	}
++	overflow := special != ""
++	var intStr, fracStr, expStr string
++	if nf.hex {
++		q := roundHalfAway(abs)
++		intStr = strings.ToUpper(q.Text(16))
++		if q.Sign() == 0 {
++			intStr = ""
++		}
++	} else {
++		if nf.vDigits > 0 {
++			abs.Mul(abs, new(big.Rat).SetInt(pow10(nf.vDigits)))
++		}
++		exp := 0
++		if nf.exponent && abs.Sign() != 0 {
++			for abs.Cmp(big.NewRat(10, 1)) >= 0 {
++				abs.Quo(abs, big.NewRat(10, 1))
++				exp++
++			}
++			for abs.Cmp(big.NewRat(1, 1)) < 0 {
++				abs.Mul(abs, big.NewRat(10, 1))
++				exp--
++			}
++		}
++		scale := pow10(nf.fracDigits)
++		q := roundHalfAway(new(big.Rat).Mul(abs, new(big.Rat).SetInt(scale)))
++		if nf.exponent && q.Cmp(new(big.Int).Mul(scale, big.NewInt(10))) >= 0 {
++			q.Quo(q, big.NewInt(10))
++			exp++
++		}
++		ds := q.String()
++		for len(ds) <= nf.fracDigits {
++			ds = "0" + ds
++		}
++		intStr, fracStr = strings.TrimLeft(ds[:len(ds)-nf.fracDigits], "0"), ds[len(ds)-nf.fracDigits:]
++		if nf.exponent {
++			sign := "+"
++			if exp < 0 {
++				sign, exp = "-", -exp
++			}
++			expStr = fmt.Sprintf("E%s%02d", sign, exp)
++		}
++	}
++	nDigits := 0
++	for _, s := range nf.intSlots {
++		if s != ',' {
++			nDigits++
++		}
++	}
++	if len(intStr) > nDigits {
++		overflow = true
++	}
++	// Assign the integer digits right-aligned to the digit slots.
++	out := make([]byte, len(nf.intSlots))
++	firstZero := -1
++	for i, s := range nf.intSlots {
++		if s == '0' {
++			firstZero = i
++			break
++		}
++	}
++	di := len(intStr) - 1
++	for i := len(nf.intSlots) - 1; i >= 0; i-- {
++		s := nf.intSlots[i]
++		if s == ',' {
++			continue
++		}
++		switch {
++		case overflow:
++			out[i] = '#'
++		case di >= 0:
++			out[i] = intStr[di]
++			di--
++		case firstZero >= 0 && i >= firstZero:
++			out[i] = '0'
++		default:
++			out[i] = ' '
++		}
++		if nf.hex && out[i] != ' ' && out[i] != '#' {
++			lower := s == 'x'
++			if s == '0' {
++				lower = false
++				for _, t := range nf.intSlots[i+1:] {
++					if t == 'X' || t == 'x' {
++						lower = t == 'x'
++						break
++					}
++				}
++			}
++			if lower {
++				out[i] = strings.ToLower(string(out[i]))[0]
++			}
++		}
++	}
++	// With no integer digit printed and no fraction, print one zero.
++	if !overflow && intStr == "" && nDigits > 0 && !nf.decimal && !nf.exponent && firstZero < 0 {
++		for i := len(nf.intSlots) - 1; i >= 0; i-- {
++			if nf.intSlots[i] != ',' {
++				out[i] = '0'
++				break
++			}
++		}
++	}
++	printed := false
++	for i, s := range nf.intSlots {
++		if s == ',' {
++			if printed {
++				out[i] = ','
++			} else {
++				out[i] = ' '
++			}
++		} else if out[i] != ' ' {
++			printed = true
++		}
++	}
++	body := string(out)
++	if nf.decimal {
++		if overflow {
++			fracStr = strings.Repeat("#", nf.fracDigits)
++		} else if nf.fm {
++			fracStr = strings.TrimRight(fracStr, "0")
++		}
++		body += "." + fracStr
++	}
++	if overflow && nf.exponent {
++		expStr = "E+##"
++	}
++	body += expStr
++	core := strings.TrimLeft(body, " ")
++	lead := strings.Repeat(" ", len(body)-len(core))
++	zero := !overflow && intStr == "" && strings.Trim(fracStr, "0") == ""
++	var res string
++	switch nf.sign {
++	case "":
++		s := " "
++		if neg && !zero {
++			s = "-"
++		}
++		res = lead + s + nf.currency + core
++	case "S":
++		s := "+"
++		if neg {
++			s = "-"
++		}
++		if zero || special == "NaN" {
++			s = " "
++		}
++		if nf.signLead {
++			res = lead + s + nf.currency + core
++		} else {
++			res = lead + nf.currency + core + s
++		}
++	case "MI":
++		s := " "
++		if neg && !zero {
++			s = "-"
++		}
++		res = lead + nf.currency + core + s
++	case "PR":
++		if neg && !zero {
++			res = lead + "<" + nf.currency + core + ">"
++		} else {
++			res = " " + lead + nf.currency + core + " "
++		}
++	}
++	if nf.blank && intStr == "" && !overflow {
++		res = strings.Repeat(" ", len(res))
++	}
++	if nf.fm {
++		res = strings.ReplaceAll(res, " ", "")
++	}
++	return res, nil
++}
++
++func pow10(n int) *big.Int {
++	return new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(n)), nil)
++}
++
++func formatRoman(r *big.Rat, special string, nf *numFormat) (string, error) {
++	if special != "" {
++		return "", fmt.Errorf("%s cannot be formatted as a Roman numeral", special)
++	}
++	q := roundHalfAway(r)
++	if !q.IsInt64() || q.Int64() < 1 || q.Int64() > 3999 {
++		return "", fmt.Errorf("RN requires a value between 1 and 3999, got %s", q)
++	}
++	n := int(q.Int64())
++	vals := []int{1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1}
++	syms := []string{"M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"}
++	var sb strings.Builder
++	for i, v := range vals {
++		for n >= v {
++			sb.WriteString(syms[i])
++			n -= v
++		}
++	}
++	s := sb.String()
++	if nf.roman == "rn" {
++		s = strings.ToLower(s)
++	}
++	if nf.fm {
++		return s, nil
++	}
++	return fmt.Sprintf("%15s", s), nil
++}
+--- a/internal/formatter.go
++++ b/internal/formatter.go
+@@ -1155,6 +1155,25 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
+ 	if err != nil {
+ 		return "", err
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1194, #1195): a FORMAT
++	// clause, and its AT TIME ZONE, were dropped, so the cast ignored
++	// them; pass them to googlesqlite_cast_format.
++	if format := m1(n.node.Format()); format != nil {
++		formatSQL, err := newNode(format).FormatSQL(ctx)
++		if err != nil {
++			return "", err
++		}
++		tzSQL := "NULL"
++		if tz := m1(n.node.TimeZone()); tz != nil {
++			if tzSQL, err = newNode(tz).FormatSQL(ctx); err != nil {
++				return "", err
++			}
++		}
++		return fmt.Sprintf(
++			"googlesqlite_cast_format(%s, '%s', '%s', %t, %s, %s)",
++			expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()), formatSQL, tzSQL,
++		), nil
++	}
+ 	return fmt.Sprintf(
+ 		"googlesqlite_cast(%s, '%s', '%s', %t)",
+ 		expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()),
+--- a/internal/function_register_normal.go
++++ b/internal/function_register_normal.go
+@@ -180,6 +180,7 @@ var normalFuncs = []*funcInfo{
+ 	{Name: "nullif", BindFunc: conditional.BindNullIf},
+ 	{Name: "length", BindFunc: str.BindLength},
+ 	{Name: "cast", BindFunc: bindCast},
++	{Name: "cast_format", BindFunc: bindCastFormat},
+ 
+ 	// interval functions
+ 	{Name: "interval", BindFunc: interval.BindInterval},
