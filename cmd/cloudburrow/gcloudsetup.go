@@ -86,6 +86,13 @@ var gcloudVerified = []struct {
 	// loopback the host is run.localhost. TestGcloudRunServicesList drives
 	// services list, describe and revisions list.
 	{config.ServiceRun, "run", "/", false, true},
+	// Artifact Registry and Cloud Build (#1347), served on the Run port
+	// for `gcloud run deploy --source`, which creates the
+	// cloud-run-source-deploy repository and polls the build's Cloud
+	// Build operation, and for `gcloud builds submit`.
+	// TestGcloudRunDeploySource and TestGcloudBuildsSubmit drive them.
+	{config.ServiceRun, "artifactregistry", "/", false, false},
+	{config.ServiceRun, "cloudbuild", "/", false, false},
 	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.

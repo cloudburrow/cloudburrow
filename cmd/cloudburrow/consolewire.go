@@ -175,7 +175,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
 			readyTimeout:   time.Duration(d.cfg.ReadyTimeout),
-		})
+		}, runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)},
+			// Artifact Registry's repositories are served on the Run port (#1347).
+			artifactRegistryProvider{defaultProject: d.cfg.DefaultProject()})
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
 		providers = append(providers, secretsProvider{svc: d.secrets, faults: d.faults})

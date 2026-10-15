@@ -39,6 +39,11 @@ const ROUTES = [
     product: "run", productTitle: "Cloud Run" },
   { path: "/run/instances", service: "run-instances", title: "Instances", section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
+  // Source builds and the repositories `gcloud run deploy --source` creates (#1347).
+  { path: "/run/builds", service: "run-builds", title: "Build history", section: "Serverless computing",
+    product: "run", productTitle: "Cloud Run" },
+  { path: "/artifact-registry", service: "artifact-registry", title: "Repositories", section: "CI/CD",
+    product: "artifact-registry", productTitle: "Artifact Registry" },
 
   // Kubernetes Engine is one product with five pages, not five products.
   //
@@ -216,6 +221,9 @@ const ICONS = {
   "run-jobs": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-instances": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-worker-pools": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+  "run-builds": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+  // Artifact Registry: stacked boxes.
+  "artifact-registry": '<rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="16" height="6" rx="1"/>',
   // Cloud Storage: a bucket.
   storage:   '<path d="M4 7h16l-1.6 11.2a2 2 0 0 1-2 1.8H7.6a2 2 0 0 1-2-1.8z"/><path d="M3 7h18"/><path d="M9 4h6l1 3H8z"/>',
   // Pub/Sub: one publisher, many subscribers.

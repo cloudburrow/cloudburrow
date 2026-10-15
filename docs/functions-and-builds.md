@@ -1,11 +1,62 @@
 # Functions and source builds
 
 Two optional capabilities, both reusing Google-published components. Neither implies any
-Cloud Functions or Cloud Build **API** parity: nothing here serves a Google API, and no build
-or function is addressable as a Cloud resource. The one Google API that builds through them is
-Cloud Run's `Builds.SubmitBuild` (#1268), which builds a source archive from the instance's
-Cloud Storage with Docker or this pack path; see the Cloud Run section of
-[compatibility.md](compatibility.md). Cloud Build itself is not served.
+Cloud Functions API parity, and the functions are not addressable as Cloud resources. The
+Google API that builds through them is Cloud Run's `Builds.SubmitBuild` (#1268), which builds
+a source archive from the instance's Cloud Storage with Docker or this pack path; see the
+Cloud Run section of [compatibility.md](compatibility.md).
+
+**`gcloud run deploy --source` (#1347).** gcloud 586 creates the `cloud-run-source-deploy`
+Artifact Registry repository, uploads the source (a zip) to `run-sources-{project}-{region}`,
+calls SubmitBuild and polls Cloud Build's operation for the build. Each build SubmitBuild runs
+is a Cloud Build `Build` (`GetBuild`, `ListBuilds`, its operation at
+`projects/*/locations/*/operations/{build id}`), and the repository is Artifact Registry
+metadata (`GetRepository`, `CreateRepository`, `ListRepositories`), both served on the Run port
+and reached through `gcloud-setup`'s `cloudbuild` and `artifactregistry` overrides. The build
+itself stays local: Docker for a Dockerfile, pack for a source without one. **No image is
+pushed**, and a repository is not a registry a docker client can push to or pull from: the
+image is loaded into the cluster as `dev.local/<image URI>`, and a service naming the image
+under the repository's URL, by tag or by the digest the build reports, runs it. The console
+shows the repositories (Artifact Registry) and the builds (Cloud Run, Build history), each
+build's page with its steps' status and timing and its log.
+
+**Cloud Build `builds.create` and `gcloud builds submit` (#1347).** `CreateBuild` (global and
+regional) and `CancelBuild` are served on the Run port. A build's source is
+`source.storageSource`, a tar.gz or zip in the instance's Cloud Storage. Its steps run in
+order, through the same local builder as SubmitBuild:
+
+- `gcr.io/cloud-builders/docker` `build` (`-t`, `-f`, `--build-arg`, a context directory;
+  `--network`, `--cache-from`, `--no-cache` and `--pull` change nothing here) builds with the
+  host's Docker for the nodes' architecture and loads the image as `dev.local/<tag>`;
+- `gcr.io/cloud-builders/gcb-internal` with `docker build …` as its args, the step
+  `gcloud builds submit --tag` sends, is the same docker build;
+- `docker push` of a tag an earlier step built succeeds without a registry: the image is
+  already in the cluster. Each of `images` gets a digest, and a service naming it by tag or
+  digest runs it;
+- `gcr.io/k8s-skaffold/pack` `build IMAGE` (`--builder gcr.io/buildpacks/builder…`, `--env`,
+  `--path`) builds with pack, gated as the Functions tests are.
+
+Built-in (`$PROJECT_ID`, `$PROJECT_NUMBER`, `$BUILD_ID`, `$LOCATION`) and user (`$_NAME`)
+substitutions apply, as do a step's `dir`, `id`, `waitFor` (any earlier step, or `-`: steps
+run one after another, which satisfies every such graph) and `timeout`, and the build's
+`timeout` (default ten minutes). Status goes `QUEUED`, `WORKING`, then `SUCCESS`, `FAILURE`,
+`TIMEOUT` or `CANCELLED`, with each step's status and timing; the operation answers with the
+Build, or fails (`UNKNOWN`, `CANCELLED`, `DEADLINE_EXCEEDED`). The log is written as Google
+writes it, `log-{build id}.txt` in `logsBucket`, or in the default
+`{project number}.cloudbuild-logs.googleusercontent.com` bucket, made in the instance's Cloud
+Storage on the first log; `options.logging` `NONE` or `CLOUD_LOGGING_ONLY` writes none.
+`gcloud builds submit` without `--async` tails that log from `storage.googleapis.com`
+directly, ignoring the `storage` endpoint override, so use `--async` and
+`gcloud builds describe`, or `gsutil cat` the log.
+
+**Refused, with the reason** (`UNIMPLEMENTED`): any other step container, and `docker` other
+than build and push. Cloud Build runs every step on one VM, with the Docker socket, the
+`cloudbuild` network and a `/workspace` volume each step mounts in turn; a step run as a
+Kubernetes Job in the instance's cluster has none of those, so a build that works on Google
+would fail or differ here. Also refused: a step's `env` (outside pack), `secretEnv`,
+`volumes`, `script`, `allowFailure`; the build's `secrets`, `availableSecrets`, `artifacts`,
+`serviceAccount`, worker pools, machine types and other `options`; and sources other than
+`storageSource`. Triggers, worker pools, `RetryBuild` and `ApproveBuild` are not served.
 
 ## Functions Framework (#32)
 

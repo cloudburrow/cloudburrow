@@ -391,7 +391,7 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 		meta.ContentType = r.Header.Get("Content-Type")
 		media = r.Body
 	case "multipart":
-		mt, params, perr := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		mt, params, perr := parseMultipartType(r.Header.Get("Content-Type"))
 		if perr != nil || !strings.HasPrefix(mt, "multipart/") || params["boundary"] == "" {
 			writeError(w, badRequest("A multipart upload needs a multipart/related body with a boundary"))
 			return
@@ -800,4 +800,24 @@ func parseRange(h string, size int64) (start, end int64, partial, ok bool) {
 func (s *Server) metadataOnlyInsert(w http.ResponseWriter, r *http.Request) {
 	writeError(w, errorf(http.StatusBadRequest, "wrongUrlForUpload",
 		"Upload requests must include an uploadType URL parameter and a URL path beginning with /upload/"))
+}
+
+// parseMultipartType is mime.ParseMediaType, also accepting a boundary in
+// single quotes, which gcloud's apitools uploads send (Python's email
+// package quotes a boundary of "=" signs that way; seen from gcloud 586's
+// `run deploy --source`, #1347) and Cloud Storage accepts.
+func parseMultipartType(v string) (string, map[string]string, error) {
+	mt, params, err := mime.ParseMediaType(v)
+	if err == nil {
+		return mt, params, nil
+	}
+	head, b, ok := strings.Cut(v, "boundary='")
+	if !ok {
+		return mt, params, err
+	}
+	b, rest, ok := strings.Cut(b, "'")
+	if !ok || strings.ContainsAny(b, "\"\\") {
+		return mt, params, err
+	}
+	return mime.ParseMediaType(head + `boundary="` + b + `"` + rest)
 }

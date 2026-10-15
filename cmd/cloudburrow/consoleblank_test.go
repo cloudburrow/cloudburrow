@@ -1,7 +1,11 @@
 package main
 
 import (
+	"time"
+
+	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"context"
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -376,6 +380,13 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		Containers: []*runpb.Container{{Image: "example.invalid/pool:1"}}}}}
 	inst := "projects/" + blankProject + "/locations/us-central1/instances/blank-instance"
 	jobs.instances.instances = map[string]*runpb.Instance{inst: {Name: inst}}
+	// A Cloud Build build (#1347), the sparsest CreateBuild runs: one
+	// push step, which fails, and no source.
+	if _, err := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute).Builds(stubSource{}, stubBuilder{}).CloudBuild().
+		CreateBuild(ctx, &cbpb.CreateBuildRequest{ProjectId: blankProject, Build: &cbpb.Build{
+			Steps: []*cbpb.BuildStep{{Name: "gcr.io/cloud-builders/docker", Args: []string{"push", "example.invalid/never"}}}}}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Cloud Run and the cluster screens read through kubectl, so a kubectl
 	// that answers from fixtures stands in for the cluster.

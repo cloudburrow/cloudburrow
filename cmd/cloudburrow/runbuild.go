@@ -2,6 +2,9 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
+	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"fmt"
@@ -73,6 +76,47 @@ func (f storageSourceFetcher) Fetch(ctx context.Context, bucket, object string, 
 	}
 }
 
+// Put writes a Cloud Build log to this instance's Cloud Storage (#1347).
+// With create, a missing bucket is made first in project: the build's
+// default logs bucket, which Google owns and here is the instance's.
+func (f storageSourceFetcher) Put(ctx context.Context, project, bucket, object string, data []byte, create bool) error {
+	put := func() (int, string, error) {
+		u := f.base() + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=media&name=" + url.QueryEscape(object)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
+		if err != nil {
+			return 0, "", err
+		}
+		req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+		resp, err := f.client.Do(req)
+		if err != nil {
+			return 0, "", err
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return resp.StatusCode, strings.TrimSpace(string(b)), nil
+	}
+	code, msg, err := put()
+	if err == nil && code == http.StatusNotFound && create {
+		body := fmt.Sprintf(`{"name":%q}`, bucket)
+		req, rerr := http.NewRequestWithContext(ctx, http.MethodPost, f.base()+"/storage/v1/b?project="+url.QueryEscape(project), strings.NewReader(body))
+		if rerr != nil {
+			return rerr
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if resp, rerr := f.client.Do(req); rerr == nil {
+			resp.Body.Close()
+		}
+		code, msg, err = put()
+	}
+	if err != nil {
+		return fmt.Errorf("write gs://%s/%s: %v", bucket, object, err)
+	}
+	if code != http.StatusOK {
+		return fmt.Errorf("write gs://%s/%s: HTTP %d %s", bucket, object, code, msg)
+	}
+	return nil
+}
+
 // localImageBuilder builds SubmitBuild's source with the host's Docker, or
 // pack for buildpacks, and loads the image into the instance's kind cluster.
 type localImageBuilder struct {
@@ -90,7 +134,7 @@ func (b *localImageBuilder) Build(ctx context.Context, spec runadapter.BuildSpec
 		return err
 	}
 	defer os.RemoveAll(dir)
-	if err := untarGz(spec.Archive, dir); err != nil {
+	if err := unpackSource(spec.Archive, dir); err != nil {
 		return fmt.Errorf("unpack the source archive: %w", err)
 	}
 	switch spec.Kind {
@@ -114,17 +158,30 @@ func (b *localImageBuilder) docker(ctx context.Context, spec runadapter.BuildSpe
 	if _, err := exec.LookPath("docker"); err != nil {
 		return fmt.Errorf("docker is not installed")
 	}
-	if _, err := os.Stat(filepath.Join(dir, spec.Dockerfile)); err != nil {
-		return fmt.Errorf("the source has no %s at its root", spec.Dockerfile)
+	dockerfile, context := filepath.Join(dir, spec.Dockerfile), filepath.Join(dir, spec.Context)
+	if _, err := os.Stat(dockerfile); err != nil {
+		if spec.Dockerfile == "Dockerfile" {
+			return fmt.Errorf("the source has no Dockerfile at its root")
+		}
+		return fmt.Errorf("the source has no %s", spec.Dockerfile)
 	}
 	arch, err := b.loader.NodeArchitecture(ctx, b.cfg.KubeconfigPath())
 	if err != nil {
 		return fmt.Errorf("read the cluster's node architecture: %w", err)
 	}
-	out, err := exec.CommandContext(ctx, "docker", "build", "--platform", "linux/"+arch,
-		"-t", spec.LocalImage, "-f", filepath.Join(dir, spec.Dockerfile), dir).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("docker build: %v\n%s", err, tailLines(string(out), 25))
+	args := []string{"build", "--platform", "linux/" + arch, "-t", spec.LocalImage, "-f", dockerfile}
+	for _, a := range spec.BuildArgs {
+		args = append(args, "--build-arg", a)
+	}
+	var out bytes.Buffer
+	cmd := exec.CommandContext(ctx, "docker", append(args, context)...)
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if spec.Log != nil {
+		cmd.Stdout = io.MultiWriter(&out, spec.Log)
+		cmd.Stderr = cmd.Stdout
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker build: %v\n%s", err, tailLines(out.String(), 25))
 	}
 	return nil
 }
@@ -172,7 +229,7 @@ func (b *localImageBuilder) pack(ctx context.Context, spec runadapter.BuildSpec,
 	}
 	repo := "build-" + suffix + ":latest"
 	err = (&buildpacks.Builder{}).Build(ctx, buildpacks.Request{
-		Source: dir, Image: name + ":5000/" + repo, Registry: name + ":5000", Network: network,
+		Source: filepath.Join(dir, spec.Context), Image: name + ":5000/" + repo, Registry: name + ":5000", Network: network,
 		Insecure: true, FunctionTarget: spec.FunctionTarget, Env: spec.Env,
 	})
 	if err != nil {
@@ -191,6 +248,70 @@ func (b *localImageBuilder) pack(ctx context.Context, spec runadapter.BuildSpec,
 
 // maxSourceBytes bounds what a source archive may unpack to.
 const maxSourceBytes = 2 << 30
+
+// unpackSource unpacks a source archive into dir: a zip, which gcloud 586's
+// `run deploy --source` uploads (#1347), or a gzipped tarball, which
+// SubmitBuild's other callers and Cloud Build's own builds use.
+func unpackSource(r io.Reader, dir string) error {
+	br := bufio.NewReader(r)
+	if magic, _ := br.Peek(4); !bytes.Equal(magic, []byte("PK\x03\x04")) {
+		return untarGz(br, dir)
+	}
+	// A zip's directory is at its end, so it is read whole, bounded.
+	data, err := io.ReadAll(io.LimitReader(br, maxSourceBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > maxSourceBytes {
+		return fmt.Errorf("the source archive is more than %d bytes", int64(maxSourceBytes))
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return fmt.Errorf("the source is not a zip archive: %w", err)
+	}
+	var total int64
+	for _, f := range zr.File {
+		clean := filepath.Clean(f.Name)
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("entry %q escapes the source directory", f.Name)
+		}
+		target := filepath.Join(dir, clean)
+		switch {
+		case f.FileInfo().IsDir():
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+		case f.Mode().IsRegular():
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			mode := os.FileMode(0o644)
+			if f.Mode()&0o111 != 0 {
+				mode = 0o755
+			}
+			src, err := f.Open()
+			if err != nil {
+				return err
+			}
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+			if err != nil {
+				src.Close()
+				return err
+			}
+			n, err := io.Copy(out, io.LimitReader(src, maxSourceBytes-total+1))
+			out.Close()
+			src.Close()
+			if err != nil {
+				return err
+			}
+			if total += n; total > maxSourceBytes {
+				return fmt.Errorf("the source unpacks to more than %d bytes", int64(maxSourceBytes))
+			}
+		}
+		// Links and devices are skipped, as in a tarball.
+	}
+	return nil
+}
 
 // untarGz unpacks a gzipped tarball into dir, refusing any entry that would
 // land outside it.

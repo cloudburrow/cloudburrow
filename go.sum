@@ -5,6 +5,8 @@ cloud.google.com/go v0.123.0 h1:2NAUJwPR47q+E35uaJeYoNhuNEM9kM8SjgRgdeOJUSE=
 cloud.google.com/go v0.123.0/go.mod h1:xBoMV08QcqUGuPW65Qfm1o9Y4zKZBpGS+7bImXLTAZU=
 cloud.google.com/go/aiplatform v1.127.0 h1:3Uqc0p/Kalpm8KeFEzNd06wXFvgGonZUFbVZ+6mhyVY=
 cloud.google.com/go/aiplatform v1.127.0/go.mod h1:kfb8xcl3pMoS5vkH8cX1XT3x818YuIHK29wLpa28B6Y=
+cloud.google.com/go/artifactregistry v1.27.0 h1:EBgdk9sXNAVyWJ3hnTmWRdlmKhGDKCjkJbLoF3EsyWE=
+cloud.google.com/go/artifactregistry v1.27.0/go.mod h1:r0rZgbNmn5ppdqwUMF182yc7EFH6vabJMbXM+PlfW9A=
 cloud.google.com/go/auth v0.24.1 h1:NTmd2iJb4DsGIav0KiqFMYI88nMshA2wnFMBatRmoCs=
 cloud.google.com/go/auth v0.24.1/go.mod h1:1dmBXa9xfBvBr39ZnDUDkaaA91ccq9CcqENDgJA4d7c=
 cloud.google.com/go/auth/oauth2adapt v0.2.8 h1:keo8NaayQZ6wimpNSmW5OPc283g65QNIiLpZnkHRbnc=
@@ -13,6 +15,8 @@ cloud.google.com/go/bigquery v1.85.0 h1:zsFsa8jOVkU4c7CWE1cbrfsemtNbM3YRUmtFRYXY
 cloud.google.com/go/bigquery v1.85.0/go.mod h1:oBma1P5/b1Jtd8xRLKoyTeNIMlACGHbSMLudzxHGHgc=
 cloud.google.com/go/bigtable v1.58.0 h1:fkf7bI0DBkKN85uRrfEEpkbufSc48b4PVIZCRud3xRk=
 cloud.google.com/go/bigtable v1.58.0/go.mod h1:fZ/QM3mBog9JYJ5KV1z2xqv2+vfHGvoazGJllGQClds=
+cloud.google.com/go/cloudbuild v1.35.0 h1:D4qZsyuOPqMkdnsh6jgOJBi8IN0NZOXVi1I/2EnYVVM=
+cloud.google.com/go/cloudbuild v1.35.0/go.mod h1:l61dO9wnjSWD2HZMMTXwxL5bWKBhN/yXaDaHCX5+stY=
 cloud.google.com/go/cloudsqlconn v1.24.0 h1:rMna5Tk00O10QY/9vgOcuzk1dXvRKCUS49AgQhbwYJ4=
 cloud.google.com/go/cloudsqlconn v1.24.0/go.mod h1:NS1CEi6zVhrSSK1ZQ1AYqWqrzoYR89jhSaElU9JHaNI=
 cloud.google.com/go/cloudtasks v1.20.0 h1:v0xfHn7t84PVRr2LrflMVqunBG/keh0CmcWpGYICftA=

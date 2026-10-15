@@ -52,6 +52,14 @@ const (
 	// sets. Locally no CPU is throttled at startup, so the boost holds.
 	v1StartupCPUBoost = "run.googleapis.com/startup-cpu-boost"
 	v1MaxScale        = "autoscaling.knative.dev/maxScale"
+	// The source build `gcloud run deploy --source` deployed (#1347).
+	v1BuildImageURI       = "run.googleapis.com/build-image-uri"
+	v1BuildName           = "run.googleapis.com/build-name"
+	v1BuildSourceLocation = "run.googleapis.com/build-source-location"
+	v1BuildAutoUpdates    = "run.googleapis.com/build-enable-automatic-updates"
+	v1BuildID             = "run.googleapis.com/build-id"
+	v1BuildFunctionTarget = "run.googleapis.com/build-function-target"
+	v1BuildBaseImage      = "run.googleapis.com/build-base-image"
 )
 
 // regionalHostRE is a regional endpoint's host, {region}-{host}: gcloud
@@ -830,6 +838,11 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 				svc.Client = v
 			case v1ClientVersion:
 				svc.ClientVersion = v
+			case v1BuildImageURI, v1BuildName, v1BuildSourceLocation, v1BuildAutoUpdates, v1BuildID,
+				v1BuildFunctionTarget, v1BuildBaseImage:
+				// Which build produced the image, which `gcloud run deploy
+				// --source` records (#1347): v2's build_config. Accepted
+				// and not read back; the build is in Cloud Build's history.
 			default:
 				gap(strings.HasPrefix(k, "run.googleapis.com/"), "metadata.annotations["+k+"]")
 				ann[k] = v

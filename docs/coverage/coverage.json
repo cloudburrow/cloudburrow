@@ -694,6 +694,390 @@
     ]
   },
   {
+    "Key": "artifactregistry",
+    "Title": "Artifact Registry",
+    "counts": {
+      "Unimplemented": 47,
+      "Verified": 3
+    },
+    "rows": [
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/BatchDeleteVersions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateAttachment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
+        ]
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateTag",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteAttachment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteFile",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeletePackage",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRepository",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteTag",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ExportArtifact",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetAttachment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetDockerImage",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetFile",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetMavenArtifact",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetNpmPackage",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetPackage",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetProjectSettings",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetPythonPackage",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
+        ]
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetTag",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetVPCSCConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportAptArtifacts",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportYumArtifacts",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListAttachments",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListDockerImages",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListFiles",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListMavenArtifacts",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListNpmPackages",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListPackages",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListPythonPackages",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListRepositories",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
+        ]
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListRules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListTags",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListVersions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/SetIamPolicy",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/TestIamPermissions",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateFile",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdatePackage",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateProjectSettings",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateRepository",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateTag",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateVPCSCConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateVersion",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      }
+    ]
+  },
+  {
+    "Key": "cloudbuild",
+    "Title": "Cloud Build",
+    "counts": {
+      "Unimplemented": 14,
+      "Verified": 5
+    },
+    "rows": [
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/ApproveBuild",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/CancelBuild",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateBuild",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildcreate_test.go:181 TestGcloudBuildsSubmit",
+          "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateBuildTrigger",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateWorkerPool",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/DeleteBuildTrigger",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/DeleteWorkerPool",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/GetBuild",
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildcreate_test.go:181 TestGcloudBuildsSubmit",
+          "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
+          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/GetBuildTrigger",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/GetDefaultServiceAccount",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/GetWorkerPool",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuildTriggers",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuilds",
+        "status": "Verified",
+        "tests": [
+          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
+        ]
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/ListWorkerPools",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/ReceiveTriggerWebhook",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/RetryBuild",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/RunBuildTrigger",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateBuildTrigger",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateWorkerPool",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      }
+    ]
+  },
+  {
     "Key": "runv1",
     "Title": "Cloud Run v1 (Knative API)",
     "counts": {
@@ -839,6 +1223,7 @@
         "method": "run.namespaces.services.create",
         "status": "Verified",
         "tests": [
+          "test/compat/gclouddeploysource_test.go:53 TestGcloudRunDeploySource",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:165 TestRunV1VolumesProbesAndServiceAccount",
           "test/compat/runvolumes_test.go:210 TestGcloudRunDeployImage"
@@ -856,6 +1241,7 @@
         "method": "run.namespaces.services.get",
         "status": "Verified",
         "tests": [
+          "test/compat/gclouddeploysource_test.go:53 TestGcloudRunDeploySource",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:165 TestRunV1VolumesProbesAndServiceAccount",
           "test/compat/runvolumes_test.go:210 TestGcloudRunDeployImage"

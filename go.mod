@@ -5,9 +5,11 @@ go 1.26.0
 require (
 	cloud.google.com/go v0.123.0
 	cloud.google.com/go/aiplatform v1.127.0
+	cloud.google.com/go/artifactregistry v1.27.0
 	cloud.google.com/go/auth v0.24.1
 	cloud.google.com/go/bigquery v1.85.0
 	cloud.google.com/go/bigtable v1.58.0
+	cloud.google.com/go/cloudbuild v1.35.0
 	cloud.google.com/go/cloudsqlconn v1.24.0
 	cloud.google.com/go/cloudtasks v1.20.0
 	cloud.google.com/go/compute/metadata v0.9.0
