@@ -14,11 +14,12 @@ package main
 //     wildcard included; WRITE_APPEND or WRITE_TRUNCATE; a schema, autodetect
 //     or neither (a table that exists keeps its own); for CSV,
 //     skipLeadingRows, fieldDelimiter, quote, allowJaggedRows, nullMarker,
-//     nullMarkers, allowQuotedNewlines, encoding (UTF-8 or ISO-8859-1),
-//     maxBadRecords, ignoreUnknownValues, preserveAsciiControlCharacters and
-//     sourceColumnMatch. timeZone and the date and time formats are 501 from
-//     the front, so they are not offered; WRITE_EMPTY and Avro or ORC are not
-//     either, as nothing tests them.
+//     nullMarkers, allowQuotedNewlines, encoding (UTF-8, ISO-8859-1,
+//     UTF-16BE, UTF-16LE, UTF-32BE or UTF-32LE, #1325), maxBadRecords,
+//     ignoreUnknownValues, preserveAsciiControlCharacters,
+//     sourceColumnMatch, timeZone and the date, datetime, time and
+//     timestamp formats (#1325). WRITE_EMPTY and Avro or ORC are not
+//     offered, as nothing tests them.
 //   - an export: a URI and More URIs (the front shares the rows out
 //     between them), CSV, NEWLINE_DELIMITED_JSON, AVRO or PARQUET (the front
 //     writes the Avro object container and Parquet files,
@@ -69,7 +70,7 @@ import (
 var (
 	bigqueryLoadFormats   = []string{"CSV", "NEWLINE_DELIMITED_JSON", "PARQUET"}
 	bigqueryWriteModes    = []string{"WRITE_APPEND", "WRITE_TRUNCATE"}
-	bigqueryEncodings     = []string{"UTF-8", "ISO-8859-1"}
+	bigqueryEncodings     = []string{"UTF-8", "ISO-8859-1", "UTF-16BE", "UTF-16LE", "UTF-32BE", "UTF-32LE"}
 	bigqueryColumnMatches = []string{"POSITION", "NAME"}
 	bigqueryExportFormats = []string{"CSV", "NEWLINE_DELIMITED_JSON", "AVRO", "PARQUET"}
 	bigqueryCompressions  = []string{"NONE", "GZIP", "DEFLATE", "SNAPPY", "ZSTD"}
@@ -142,6 +143,17 @@ func bigqueryLoadFields(withTable bool) []console.Field {
 			Section: "CSV options",
 			Help: "CSV only: POSITION puts each value in the column at its place; NAME in the column its header " +
 				"names, with one header row to skip."},
+		console.Field{Name: "timeZone", Label: "Time zone", Type: "text", Section: "CSV options",
+			Help: "CSV only: the zone of a TIMESTAMP value that names none, such as America/Los_Angeles or -08:00. " +
+				"Empty is UTC."},
+		console.Field{Name: "dateFormat", Label: "Date format", Type: "text", Section: "CSV options",
+			Help: "CSV only: SQL-style format elements DATE values are written in, such as MM/DD/YYYY."},
+		console.Field{Name: "datetimeFormat", Label: "Datetime format", Type: "text", Section: "CSV options",
+			Help: "CSV only: the format of DATETIME values, such as MM/DD/YYYY HH24:MI:SS.FF3."},
+		console.Field{Name: "timeFormat", Label: "Time format", Type: "text", Section: "CSV options",
+			Help: "CSV only: the format of TIME values, such as HH24:MI:SS.FF3."},
+		console.Field{Name: "timestampFormat", Label: "Timestamp format", Type: "text", Section: "CSV options",
+			Help: "CSV only: the format of TIMESTAMP values, such as YYYY-MM-DD HH24:MI:SS TZH:TZM."},
 		console.Field{Name: "allowJaggedRows", Label: "Allow jagged rows", Type: "checkbox", Section: "CSV options",
 			Help: "CSV only: a row missing trailing columns loads them as NULL."},
 		console.Field{Name: "allowQuotedNewlines", Label: "Allow quoted newlines", Type: "checkbox", Section: "CSV options",
@@ -178,6 +190,7 @@ func bigqueryExportFields() []console.Field {
 var bigqueryCSVOnly = map[string]string{
 	"skipLeadingRows": "", "fieldDelimiter": ",", "quote": `"`, "nullMarker": "", "nullMarkers": "",
 	"encoding": "UTF-8", "sourceColumnMatch": "POSITION", "allowJaggedRows": "false",
+	"timeZone": "", "dateFormat": "", "datetimeFormat": "", "timeFormat": "", "timestampFormat": "",
 	"allowQuotedNewlines": "false", "preserveAsciiControlCharacters": "false",
 }
 
@@ -280,7 +293,7 @@ func loadFileConfig(values map[string]string) (*bigquery.FileConfig, error) {
 	}
 	if e := values["encoding"]; e != "" {
 		if !slices.Contains(bigqueryEncodings, e) {
-			return nil, fmt.Errorf("the encoding is UTF-8 or ISO-8859-1, not %q", e)
+			return nil, fmt.Errorf("the encoding is one of %s, not %q", strings.Join(bigqueryEncodings, ", "), e)
 		}
 		if e != "UTF-8" {
 			src.Encoding = bigquery.Encoding(e)
@@ -294,6 +307,11 @@ func loadFileConfig(values map[string]string) (*bigquery.FileConfig, error) {
 			src.SourceColumnMatch = bigquery.SourceColumnMatch(m)
 		}
 	}
+	src.TimeZone = strings.TrimSpace(values["timeZone"]) // #1325
+	src.DateFormat = strings.TrimSpace(values["dateFormat"])
+	src.DatetimeFormat = strings.TrimSpace(values["datetimeFormat"])
+	src.TimeFormat = strings.TrimSpace(values["timeFormat"])
+	src.TimestampFormat = strings.TrimSpace(values["timestampFormat"])
 	src.AllowJaggedRows = checked(values, "allowJaggedRows")
 	src.AllowQuotedNewlines = checked(values, "allowQuotedNewlines")
 	src.PreserveASCIIControlCharacters = checked(values, "preserveAsciiControlCharacters")
