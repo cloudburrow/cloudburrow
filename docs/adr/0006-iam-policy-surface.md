@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -174,6 +174,8 @@ this amends the ADR in place as #421 did.
    Object IAM, managed-folder IAM and every ACL method (bucket, object and default object)
    stay **501 naming the method**; they are never an empty policy or list. fake-gcs-server
    serves none of them, and its calls keep failing until the cut-over (#519).
+   *Amended by #828:* managed-folder IAM is built. *Amended 2026-10-15 by #1233:* the ACL
+   methods are built, stored and not enforced (below). Object IAM stays 501.
 2. **Rules 1-5 apply.**
    - Nothing reads a stored policy (rule 1).
    - A set returns a new `etag`, and a set carrying a stale one is refused (rule 2). The
@@ -190,6 +192,33 @@ this amends the ADR in place as #421 did.
    here, so a new bucket's policy has no bindings, where Google's shows the project's
    convenience bindings.
 4. Every compatibility.md row for these methods reads ***Stored, not enforced***.
+
+### Cloud Storage ACLs (amended 2026-10-15 by #1233)
+
+The maintainer decided on 2026-10-15 that Cloud Storage's access control lists are
+**stored and returned, not enforced**, reversing the #504 amendment's "every ACL method stays
+501". The decision is still option (b): CloudBurrow does no authentication (ADR-0004), so it
+has no caller an ACL could allow or refuse, and an ACL is data like a policy. This amends the
+ADR in place, as #421 and #504 did.
+
+1. **Which methods.** `bucketAccessControls`, `defaultObjectAccessControls` and
+   `objectAccessControls`: `get`, `list`, `insert`, `patch`, `update` and `delete`; the
+   `acl` and `defaultObjectAcl` fields of a bucket and the `acl` field of an object, returned
+   under `projection=full`; `predefinedAcl` and `predefinedDefaultObjectAcl` on bucket insert,
+   patch and update, and `predefinedAcl` on object insert, patch and update.
+2. **As Google documents them.** Entities are `user-`, `group-`, `domain-`,
+   `project-<team>-<number>` (a project ID is stored as its number, `resource.ProjectNumber`,
+   #1211), `allUsers` and `allAuthenticatedUsers`; roles are OWNER, READER and, on a bucket's
+   own ACL only, WRITER. A new bucket's ACLs are `projectPrivate`'s, and a new object takes its
+   bucket's default object ACL. Under uniform bucket-level access every ACL method fails
+   **400**, and a full projection carries empty ACL lists. The 400's message, and the messages
+   of invalid entities and roles, are UNVERIFIED.
+3. **No identity.** CloudBurrow has no caller, so the "object owner" that Google's predefined
+   object ACLs grant OWNER is the bucket's project owners, `project-owners-<number>`.
+4. **Rules 1 and 5 apply.** Nothing reads a stored ACL, and ACLs live on the bucket and object
+   records, so they follow persistence, reset and state capture. Each ACL change advances the
+   metageneration of the bucket or object it belongs to, as Google's does.
+5. Every compatibility.md row for these methods reads ***Stored, not enforced***.
 
 Every service other than these four (Secret Manager, Cloud Tasks, Cloud KMS and Cloud
 Storage's buckets) keeps its current behaviour, Pub/Sub and Cloud Run included. Pub/Sub's IAM

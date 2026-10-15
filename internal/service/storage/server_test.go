@@ -66,7 +66,7 @@ func TestStorageUnknownMethodIsNotImplemented(t *testing.T) {
 		t.Errorf("GET anywhereCaches = %d %s; want 501 notImplemented naming storage.anywhereCaches.list", resp.StatusCode, b)
 	}
 	for _, c := range []struct{ method, path, names string }{
-		{"GET", "/storage/v1/b/x/o/dir%2Fobj/acl", "storage.objectAccessControls.list"},
+		{"GET", "/storage/v1/b/x/o/dir%2Fobj/iam", "storage.objects.getIamPolicy"},
 	} {
 		resp, b := do(t, c.method, h.URL+c.path, "")
 		if resp.StatusCode != 501 || !strings.Contains(string(b), c.names) {
@@ -242,7 +242,7 @@ func TestStorageEveryUnbuiltMethodIsNotImplemented(t *testing.T) {
 			t.Errorf("%s %s (%s) = %d %s; want 501 naming %s", m.Verb, m.Path, m.ID, resp.StatusCode, b, m.ID)
 		}
 	}
-	if n < 30 {
+	if n < 20 {
 		t.Errorf("only %d unbuilt methods were checked", n)
 	}
 }

@@ -81,17 +81,10 @@ func TestStorageBucketIAMConditionUnimplementedInProcess(t *testing.T) {
 	}
 }
 
-// ACL methods stay 501 by name.
-func TestStorageACLNotImplementedInProcess(t *testing.T) {
+// Object IAM stays 501 by name; the ACL methods are built (acl_test.go).
+func TestStorageObjectIAMNotImplementedInProcess(t *testing.T) {
 	_, _, h := sdkBucket(t, "acl-bucket")
-	for path, method := range map[string]string{
-		"/storage/v1/b/acl-bucket/acl":              "storage.bucketAccessControls.list",
-		"/storage/v1/b/acl-bucket/defaultObjectAcl": "storage.defaultObjectAccessControls.list",
-		"/storage/v1/b/acl-bucket/o/x/acl":          "storage.objectAccessControls.list",
-		"/storage/v1/b/acl-bucket/o/x/iam":          "storage.objects.getIamPolicy",
-	} {
-		if code, body := raw(t, "GET", h.URL+path, ""); code != http.StatusNotImplemented || !strings.Contains(body, method) {
-			t.Errorf("GET %s = %d %s; want 501 naming %s", path, code, body, method)
-		}
+	if code, body := raw(t, "GET", h.URL+"/storage/v1/b/acl-bucket/o/x/iam", ""); code != http.StatusNotImplemented || !strings.Contains(body, "storage.objects.getIamPolicy") {
+		t.Errorf("GET o/x/iam = %d %s; want 501 naming storage.objects.getIamPolicy", code, body)
 	}
 }
