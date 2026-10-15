@@ -103,10 +103,18 @@ func (f *Front) serveTopic(w http.ResponseWriter, r *http.Request, name, verb st
 
 // restPatchTopic applies the labels of a PATCH of a topic, as gRPC's
 // UpdateTopic is, and reports whether it answered the request itself;
-// otherwise r is to be forwarded as it now is.
+// otherwise r is to be forwarded as it now is, its mask in the body in
+// snake_case whatever it names.
 func (f *Front) restPatchTopic(w http.ResponseWriter, r *http.Request, name string, body []byte) bool {
 	o, key, paths, ok := restUpdateMask(r, body)
-	if !ok || !masks(paths, "labels") {
+	if !ok || len(paths) == 0 {
+		return false
+	}
+	if !masks(paths, "labels") {
+		// Any other mask is the emulator's to apply, in the body and in
+		// snake_case: the provider's ?updateMask=schemaSettings (#1304) is
+		// otherwise refused as "schemaSettings is not a known Topic field".
+		forwardMask(r, o, key, paths)
 		return false
 	}
 	var t pubsubpb.Topic

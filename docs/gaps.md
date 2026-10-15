@@ -33,9 +33,9 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | BigQuery | 30 | 11 | 16 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 4 | 4 | 0 | 0 | 0 |
-| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 3 | 3 | 0 | 0 | 0 |
 | Console | 1 | 1 | 0 | 0 | 0 |
-| **Total** | **86** | **37** | **37** | **7** | **5** |
+| **Total** | **87** | **38** | **37** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -229,6 +229,8 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 |---|---|---|
 | Functions in Java, Ruby, PHP and .NET, and a dated run of the Node.js and Python tests (#1319) | not built yet | M |
 | Terraform resources beyond the verified set (#1304) | not built yet | L |
+| Functions in languages other than Go (#1303) | not built yet | L |
+| Terraform resources beyond the verified set (#1304): Firestore and Bigtable admin resources (`google_firestore_database`, `_index`, `google_bigtable_instance`: the emulators serve no admin API for them) and Spanner resources (refused by the wrapper: the emulator's admin REST port is not published, #1331), Logging bucket config and linked dataset (#1332) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, BigQuery dataset access and row access policies, Firestore documents, Bigtable tables) | L |
 
 ## Console
 

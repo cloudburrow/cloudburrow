@@ -24,7 +24,8 @@ import (
 // the remaining arguments, and removes the file however the run ends. Only
 // services whose Terraform support is Verified in docs/compatibility.md get
 // an endpoint; the rest are named in a warning rather than silently sent to
-// real Google.
+// real Google. A module declaring resources it cannot point here at all
+// (unpointedResources, #1331) is refused outright.
 
 // terraformEndpoint is one provider endpoint attribute.
 type terraformEndpoint struct {
@@ -76,6 +77,12 @@ var terraformEndpoints = []terraformEndpoint{
 	// google_sql_user on an instance `up` runs apply, plan clean and destroy
 	// in TestTerraformSQLDatabaseAndUser. The provider calls v1beta4.
 	{sqlAdminEndpoint, "sql_custom_endpoint", "GOOGLE_SQL_CUSTOM_ENDPOINT", "/sql/v1beta4/", true},
+	// Firestore (#1331): google_firestore_document applies, plans clean,
+	// updates its fields and destroys in TestTerraformFirestoreDocument,
+	// over the documents REST API the emulator serves on its port. The
+	// Firestore Admin API (google_firestore_database, _index, _field,
+	// _backup_schedule) is not served: those fail locally, never at Google.
+	{config.ServiceFirestore, "firestore_custom_endpoint", "GOOGLE_FIRESTORE_CUSTOM_ENDPOINT", "/v1/", true},
 	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
 	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true},
 	// google_folder (#1294): Resource Manager v3 Folders, on the same port,
@@ -96,9 +103,14 @@ const resourceManagerEndpoint config.Service = "resourcemanager"
 const sqlAdminEndpoint config.Service = "sqladmin"
 
 // terraformAccessToken is what the provider presents. CloudBurrow
-// authenticates nothing, so any token works; a fixed, obviously local one
+// authenticates nothing, so any token works for its own APIs; a fixed one
 // keeps the provider from looking for credentials of its own.
-const terraformAccessToken = "cloudburrow-local-not-a-credential"
+//
+// It is "owner" (#1331) because the Firestore emulator does read the token:
+// any other bearer must be a JWT, or it answers 400 "invalid jwt". "owner"
+// is the emulator's documented admin token, the one the official clients
+// send it when FIRESTORE_EMULATOR_HOST is set. It is no Google credential.
+const terraformAccessToken = "owner"
 
 // generatedMarker heads every file this writes, so one left by a killed run
 // is recognised as ours and a user's file of the same name never is.
@@ -121,6 +133,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceKMS: cfg.Endpoints.KMS, resourceManagerEndpoint: cfg.Endpoints.ResourceManager,
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
 		config.ServiceBigQuery: cfg.Endpoints.BigQuery, sqlAdminEndpoint: cfg.Endpoints.SQLAdmin,
+		config.ServiceFirestore: cfg.Endpoints.Firestore,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, sqlAdminEndpoint: sqlAdminEnabled(cfg)}
 	for _, s := range cfg.EnabledServices() {
@@ -160,6 +173,90 @@ func terraformProvider(cfg config.Config, override bool) (string, []config.Servi
 	}
 	b.WriteString("}\n")
 	return b.String(), skipped
+}
+
+// unpointedPrefix is a family of the provider's resources and data sources
+// the wrapper cannot point at the instance (#1331).
+type unpointedPrefix struct{ prefix, why string }
+
+// unpointedResources are the families the provider would send to real
+// Google for this instance, whatever is enabled, so the wrapper refuses to
+// run a module that declares one rather than warn and let it through.
+//
+// Spanner always: the provider uses the instance and database admin REST
+// APIs, which the emulator serves only on a port its pod keeps to itself;
+// the published port is gRPC alone. Firestore and Bigtable when the
+// instance does not serve them, since nothing then points them here.
+func unpointedResources(cfg config.Config) []unpointedPrefix {
+	out := []unpointedPrefix{{"google_spanner_",
+		"Spanner's admin REST API is not published by the instance; the published port is gRPC alone"}}
+	set, _ := terraformSettings(cfg)
+	firestore := false
+	for _, e := range set {
+		firestore = firestore || e.service == config.ServiceFirestore
+	}
+	if !firestore {
+		out = append(out, unpointedPrefix{"google_firestore_", "this instance does not serve Firestore"})
+	}
+	if bigtableHost(cfg) == "" {
+		out = append(out, unpointedPrefix{"google_bigtable_", "this instance does not serve Bigtable"})
+	}
+	return out
+}
+
+// bigtableHost is the address the provider's Bigtable clients are given, or
+// "" when the instance does not serve Bigtable. The provider's admin and
+// data clients are the Go bigtable clients, which read
+// BIGTABLE_EMULATOR_HOST and then dial it in plaintext, without
+// credentials, as they dial the emulator for any program; the wrapper sets
+// it for the binary it runs.
+func bigtableHost(cfg config.Config) string {
+	for _, s := range cfg.EnabledServices() {
+		if s == config.ServiceBigtable && cfg.Endpoints.Bigtable != 0 {
+			return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Bigtable))
+		}
+	}
+	return ""
+}
+
+var declaredResource = regexp.MustCompile(`(?m)^\s*(?:resource|data)\s+"(google_[a-z0-9_]+)"`)
+
+// unpointed names the resources and data sources in the module's *.tf files
+// that would reach real Google, each with the reason.
+func unpointed(dir string, families []unpointedPrefix) []string {
+	files, _ := filepath.Glob(filepath.Join(dir, "*.tf"))
+	seen := map[string]bool{}
+	var out []string
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		for _, m := range declaredResource.FindAllSubmatch(b, -1) {
+			typ := string(m[1])
+			for _, u := range families {
+				if strings.HasPrefix(typ, u.prefix) && !seen[typ] {
+					seen[typ] = true
+					out = append(out, typ+" ("+u.why+")")
+				}
+			}
+		}
+	}
+	return out
+}
+
+// offlineSubcommands never call a provider's API, so a module with an
+// unpointed resource may still run them.
+var offlineSubcommands = map[string]bool{"init": true, "fmt": true, "validate": true, "version": true, "providers": true, "get": true}
+
+// subcommand is the first argument that is not a global flag.
+func subcommand(theirs []string) string {
+	for _, a := range theirs {
+		if !strings.HasPrefix(a, "-") {
+			return a
+		}
+	}
+	return ""
 }
 
 var googleProviderBlock = regexp.MustCompile(`(?m)^\s*provider\s+"google"\s*\{`)
@@ -237,6 +334,10 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 	}
 
 	dir := moduleDir(theirs)
+	if bad := unpointed(dir, unpointedResources(cfg)); len(bad) != 0 && !offlineSubcommands[subcommand(theirs)] {
+		return fmt.Errorf("refusing to run %s %s: the module declares resources cloudburrow cannot point at this instance, "+
+			"which the provider would send to real Google:\n  %s", binary, subcommand(theirs), strings.Join(bad, "\n  "))
+	}
 	override := moduleDeclaresGoogle(dir)
 	name := "cloudburrow_providers.tf"
 	if override {
@@ -258,6 +359,9 @@ func runTerraform(args []string, stdout, stderr io.Writer) error {
 
 	cmd := exec.Command(binary, theirs...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
+	if h := bigtableHost(cfg); h != "" {
+		cmd.Env = append(os.Environ(), "BIGTABLE_EMULATOR_HOST="+h)
+	}
 	// Terraform handles Ctrl-C itself: the terminal delivers SIGINT to it
 	// directly, and it stops cleanly and saves state. This process only has
 	// to outlive it, so the file is removed afterwards rather than under a
