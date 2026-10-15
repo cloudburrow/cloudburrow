@@ -486,6 +486,9 @@ func (s *Server) Run(ctx context.Context, clock sched.Clock) {
 	if s.notify != nil {
 		go s.runNotifier(ctx)
 	}
+	if !s.relayChannels {
+		go s.runChannels(ctx)
+	}
 	retry := time.Second
 	for {
 		_, lerr := s.ApplyLifecycle()

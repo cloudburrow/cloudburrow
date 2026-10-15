@@ -193,6 +193,9 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 	if actions, ok := p.notificationActions(ctx, path); ok {
 		return actions
 	}
+	if actions, ok := p.channelActions(path); ok {
+		return actions
+	}
 	if actions, ok := aclEntryActions(path); ok {
 		return actions
 	}
@@ -226,6 +229,9 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 // ActAt implements console.PathActor.
 func (p storageProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
 	if handled, err := p.actOnNotifications(ctx, project, path, action, values); handled {
+		return err
+	}
+	if handled, err := p.actOnChannels(ctx, path, action); handled {
 		return err
 	}
 	if handled, err := p.actOnACL(ctx, path, action, values); handled {

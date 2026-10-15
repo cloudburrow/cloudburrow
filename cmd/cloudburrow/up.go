@@ -353,6 +353,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if f := forwarderFor(forwarders, "storage"); f != nil {
 		coord.Register(newStorageEventScraper(f, recorder, requestMetrics))
+		coord.Register(newStorageChannelRelay(f, stdout))
 	}
 	for _, svc := range []config.Service{config.ServicePubSub, config.ServiceBigtable} {
 		// Every call the Pub/Sub (#1266) and Bigtable (#1267) fronts served.

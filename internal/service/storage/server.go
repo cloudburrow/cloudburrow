@@ -49,6 +49,11 @@ type Server struct {
 	// allowOrigins are the origins, beyond loopback, whose browser requests
 	// are served (#677).
 	allowOrigins map[string]bool
+	// chans delivers object change notification channels (#1281).
+	chans channelDispatch
+	// relayChannels hands channel messages to a relay (#1290) instead of
+	// POSTing them.
+	relayChannels bool
 }
 
 // Options configure a Server.
@@ -78,6 +83,11 @@ type Options struct {
 	// browser requests are served (#677); any other Origin is refused with
 	// 403. Each is scheme://host[:port], as hostguard.ParseOrigin accepts.
 	CORSAllowOrigins []string
+	// RelayChannels hands object change notification messages to a relay at
+	// ChannelOutboxPath instead of POSTing them (#1290): in the cluster, the
+	// CLI delivers them on the developer's machine, so the pod needs no
+	// egress.
+	RelayChannels bool
 }
 
 // NewServer returns the server.
@@ -88,6 +98,7 @@ func NewServer(o Options) (*Server, error) {
 	}
 	s := &Server{methods: ms, handlers: map[string]http.HandlerFunc{}, hosts: o.Hosts, meta: o.Meta, blobs: o.Blobs, now: o.Now}
 	s.signingKeys, s.observe, s.faults = o.SigningKeys, o.Observe, o.Faults
+	s.relayChannels = o.RelayChannels
 	s.allowOrigins = map[string]bool{}
 	for _, v := range o.CORSAllowOrigins {
 		origin, err := hostguard.ParseOrigin(v)
@@ -157,6 +168,7 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.notifications.get"] = s.notificationsGet
 	s.handlers["storage.notifications.list"] = s.notificationsList
 	s.handlers["storage.notifications.delete"] = s.notificationsDelete
+	s.handlers["storage.channels.stop"] = s.channelsStop
 	s.registerACL()
 	for id := range s.handlers {
 		if methodStatus[id] != built {
@@ -179,6 +191,7 @@ const (
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer s.wakeNotifier()
+	defer s.wakeChannels()
 	s.observed(w, r, s.route)
 }
 
@@ -230,6 +243,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.serveReset(w, r)
 	case path == statePath:
 		s.serveState(w, r)
+	case path == ChannelsPath:
+		s.serveChannels(w, r)
+	case path == ChannelOutboxPath:
+		s.serveChannelOutbox(w, r)
 	case path == eventsPath:
 		s.serveEvents(w, r)
 	default:
@@ -240,6 +257,11 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 // serveJSON routes a JSON API request by the discovery document. upload
 // restricts the match to methods that take media.
 func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, upload bool) {
+	// objects.watchAll is no longer in the discovery document (channels.go).
+	if !upload && r.Method == http.MethodPost && watchAllRE.MatchString(rest) {
+		s.objectsWatchAll(w, r)
+		return
+	}
 	for _, m := range s.methods {
 		if m.Verb != r.Method || !m.re.MatchString(rest) || (upload && !m.Upload) {
 			continue

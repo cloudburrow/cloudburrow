@@ -240,7 +240,7 @@ func PubSubBackend(project, frontImage string) Backend {
 // process: no second Deployment and no Host-binding workaround (#268). image is the locally built, kind-loaded image
 // (internal/storageimage); it is never pulled. Readiness is a real request.
 // The server may reach only the Pub/Sub emulator, for notifications, and
-// DNS. In persistent mode it keeps its store on the storage PVC; in
+// DNS; object change notification channels are relayed by the CLI (#1290). In persistent mode it keeps its store on the storage PVC; in
 // ephemeral mode it has no volume and starts empty, whatever claim exists
 // (the #481 lesson).
 //
@@ -258,7 +258,11 @@ func BuiltinStorageBackend(namespace, image string, persistent, pubsub bool, sig
 		// Virtual-hosted XML requests: in-cluster by Service name, and from the
 		// host as <bucket>.localhost or <bucket>.storage.localhost, both of
 		// which resolve to loopback (RFC 6761).
-		"--host", "storage." + namespace + ".svc.cluster.local,storage.localhost,localhost"}
+		"--host", "storage." + namespace + ".svc.cluster.local,storage.localhost,localhost",
+		// Object change notification channels are delivered by the CLI on
+		// the developer's machine, which takes them through the tunnel
+		// (#1290), so the pod keeps its egress to Pub/Sub and DNS alone.
+		"--relay-channels"}
 	if persistent {
 		args = append(args, "--data-dir", "/data")
 	}

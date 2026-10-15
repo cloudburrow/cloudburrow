@@ -20,7 +20,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 9 | 2 | 6 | 1 | 0 |
+| Cloud Storage | 10 | 3 | 6 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 9 | 6 | 1 | 0 | 2 |
@@ -30,22 +30,23 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 2 | 2 | 0 | 0 | 0 |
 | Vertex AI | 4 | 2 | 2 | 0 | 0 |
-| BigQuery | 27 | 10 | 14 | 3 | 0 |
+| BigQuery | 27 | 9 | 15 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 3 | 3 | 0 | 0 | 0 |
-| **Total** | **78** | **31** | **35** | **7** | **5** |
+| **Total** | **79** | **31** | **36** | **7** | **5** |
 
 ## Cloud Storage
 
 Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `objects.bulkRestore`
-(#1279) and `buckets.operations.list` filters (#1280).
+(#1279), `buckets.operations.list` filters (#1280) and channel delivery on an `up` instance (#1290).
 
 | Gap | Why open | Size |
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
 | `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) (#1281) | not built yet | M |
+| XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |
 | gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |

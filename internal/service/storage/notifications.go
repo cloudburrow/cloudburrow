@@ -309,6 +309,9 @@ type outboxEntry struct {
 // emit writes ev to the outbox for every configuration of its bucket that
 // matches, in the caller's transaction.
 func emit(tx Tx, ev objectEvent) error {
+	if err := emitChannels(tx, ev); err != nil {
+		return err
+	}
 	cs, err := notificationsOf(tx, ev.Object.Bucket)
 	if err != nil || len(cs) == 0 {
 		return err
