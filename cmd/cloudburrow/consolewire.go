@@ -111,7 +111,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Resource Manager first: it is where the projects every other screen is
 	// scoped to come from.
 	if d.projects != nil {
-		providers = append(providers, projectsProvider{registry: d.projects}, hierarchyProvider{registry: d.projects})
+		providers = append(providers, projectsProvider{registry: d.projects}, hierarchyProvider{registry: d.projects}, tagsProvider{registry: d.projects})
 	}
 	if enabled[config.ServiceStorage] && storageAddr != "" {
 		// Three screens of one product: buckets, the project's soft-deleted
@@ -159,6 +159,12 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			namespace:      runadapter.WorkloadNamespace,
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
+		}, runWorkerPoolsProvider{
+			runAddr:        runAddrOf(d.run),
+			defaultProject: d.cfg.DefaultProject(),
+		}, runInstancesProvider{
+			runAddr:        runAddrOf(d.run),
+			defaultProject: d.cfg.DefaultProject(),
 		})
 	}
 	if enabled[config.ServiceSecrets] && d.secrets != nil {
@@ -175,7 +181,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
 	if enabled[config.ServiceLogging] && d.logging != nil {
 		screen := loggingAdminScreen{svc: d.logging, faults: d.faults}
-		providers = append(providers, loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen})
+		providers = append(providers, loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
+			loggingSettingsProvider{screen})
 	}
 	// The opt-in databases. Each had a working backend and no screen, which
 	// reads as "not implemented" to anyone looking at the console. The

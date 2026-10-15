@@ -44,8 +44,8 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 				}
 			}
 			// The Resource Manager rows are always set: the project registry
-			// always runs, whichever services are enabled: v1, Cloud Billing and v3.
-			if set+len(skipped) != len(services)+3 {
+			// always runs, whichever services are enabled: v1, Cloud Billing, v3 and tags.
+			if set+len(skipped) != len(services)+4 {
 				t.Errorf("%v: %d set and %d named as skipped, want every enabled service accounted for", services, set, len(skipped))
 			}
 			if override != strings.Contains(body, "credentials  = null") {
@@ -208,4 +208,58 @@ func (l *lockedBuffer) String() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.b.String()
+}
+
+// TestTerraformRefusesWhatItCannotPoint (#1331): Firestore, Spanner and
+// Bigtable resources are refused only when the instance does not serve them
+// (for Spanner, its REST port), and Bigtable's address is given only when
+// it does.
+func TestTerraformRefusesWhatItCannotPoint(t *testing.T) {
+	dir := t.TempDir()
+	module := `resource "google_spanner_database" "db" {}
+data "google_firestore_document" "d" {}
+  resource "google_bigtable_table" "t" {}
+resource "google_storage_bucket" "b" {}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	none := config.Default()
+	none.Services = []config.Service{config.ServiceStorage}
+	if got := unpointed(dir, unpointedResources(none)); len(got) != 3 ||
+		!strings.HasPrefix(got[0], "google_spanner_database ") || !strings.HasPrefix(got[1], "google_firestore_document ") ||
+		!strings.HasPrefix(got[2], "google_bigtable_table ") {
+		t.Errorf("without the emulators: unpointed = %q", got)
+	}
+	if h := bigtableHost(none); h != "" {
+		t.Errorf("bigtableHost without Bigtable = %q", h)
+	}
+	all := config.Default()
+	all.Services = []config.Service{config.ServiceStorage, config.ServiceFirestore, config.ServiceBigtable, config.ServiceSpanner}
+	if got := unpointed(dir, unpointedResources(all)); len(got) != 0 {
+		t.Errorf("with the emulators: unpointed = %q, want none", got)
+	}
+	noREST := all
+	noREST.Endpoints.SpannerREST = 0
+	if got := unpointed(dir, unpointedResources(noREST)); len(got) != 1 || !strings.HasPrefix(got[0], "google_spanner_database ") {
+		t.Errorf("without Spanner's REST port: unpointed = %q, want Spanner alone", got)
+	}
+	if h := bigtableHost(all); h != "127.0.0.1:9012" {
+		t.Errorf("bigtableHost = %q", h)
+	}
+	body, _ := terraformProvider(all, false)
+	if !strings.Contains(body, `firestore_custom_endpoint = "http://127.0.0.1:9010/v1/"`) {
+		t.Errorf("provider lacks the Firestore endpoint:\n%s", body)
+	}
+	if !strings.Contains(body, `spanner_custom_endpoint = "http://127.0.0.1:9022/v1/"`) {
+		t.Errorf("provider lacks Spanner's REST endpoint:\n%s", body)
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{{[]string{"-chdir=x", "plan"}, "plan"}, {[]string{"init"}, "init"}, {nil, ""}} {
+		if got := subcommand(c.args); got != c.want {
+			t.Errorf("subcommand(%q) = %q, want %q", c.args, got, c.want)
+		}
+	}
 }

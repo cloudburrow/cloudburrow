@@ -35,6 +35,10 @@ const ROUTES = [
     product: "run", productTitle: "Cloud Run" },
   { path: "/run/jobs", service: "run-jobs", title: "Jobs",     section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
+  { path: "/run/worker-pools", service: "run-worker-pools", title: "Worker pools", section: "Serverless computing",
+    product: "run", productTitle: "Cloud Run" },
+  { path: "/run/instances", service: "run-instances", title: "Instances", section: "Serverless computing",
+    product: "run", productTitle: "Cloud Run" },
 
   // Kubernetes Engine is one product with five pages, not five products.
   //
@@ -144,6 +148,9 @@ const ROUTES = [
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/logs/storage",    service: "logging-buckets",    icon: "logs", title: "Logs Storage",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  // Logs Storage's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
+  { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Logs Storage settings",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
@@ -200,6 +207,8 @@ const ICONS = {
   run:       '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   // Cloud Run jobs: the same mark, since it is the same product.
   "run-jobs": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+  "run-instances": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+  "run-worker-pools": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   // Cloud Storage: a bucket.
   storage:   '<path d="M4 7h16l-1.6 11.2a2 2 0 0 1-2 1.8H7.6a2 2 0 0 1-2-1.8z"/><path d="M3 7h18"/><path d="M9 4h6l1 3H8z"/>',
   // Pub/Sub: one publisher, many subscribers.
@@ -4907,6 +4916,8 @@ const DELETE_DETAIL = {
                    "Nothing the job wrote is deleted.",
   "run-jobs": "Every execution of the job is deleted with it, a running one included, " +
               "and its tasks are stopped.",
+  "run-instances": "The instance's container is stopped and its configuration deleted.",
+  "run-worker-pools": "Every revision of the worker pool is deleted with it, and its instances are stopped.",
   "pubsub-subscriptions": "Messages waiting on this subscription are discarded with it. " +
             "The topic, and its other subscriptions, are not affected.",
   "pubsub-snapshots": "Subscriptions can no longer seek to this snapshot. " +

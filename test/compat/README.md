@@ -92,6 +92,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_TASKS_LOGGING` | as `LOGGING` | the Cloud Tasks dispatch log (#1256), in the storage shard, so the Logging tests stay in served |
 | `CLOUDBURROW_TEST_RUN_BIGQUERY` | as `BIGQUERY` | the Cloud Run revision refused by the BigQuery front (#874); see below |
 | `CLOUDBURROW_TEST_SPANNER` | `SPANNER_EMULATOR_HOST` | Spanner |
+| `CLOUDBURROW_TEST_SPANNER_REST` | `CLOUDBURROW_SPANNER_REST_ENDPOINT` | Spanner's REST API, the Terraform provider's `spanner_custom_endpoint` (#1331) |
 | `CLOUDBURROW_TEST_DATASTORE` | `DATASTORE_EMULATOR_HOST` | Datastore |
 | `CLOUDBURROW_TEST_FIRESTORE` | `FIRESTORE_EMULATOR_HOST` | Firestore |
 | `CLOUDBURROW_TEST_BIGTABLE` | `BIGTABLE_EMULATOR_HOST` | Bigtable |

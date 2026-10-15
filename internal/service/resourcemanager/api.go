@@ -35,9 +35,9 @@ import (
 //
 // One store: the console's project list and this API read and write the same
 // records, so a project created in one is in the other. Projects, Folders and
-// Organizations (#1294, hierarchy_api.go) are served; Liens and the tag
-// services are not registered at all, so the gRPC server answers them
-// UNIMPLEMENTED; the IAM methods are UNIMPLEMENTED too, each saying why. A
+// Organizations (#1294, hierarchy_api.go), and Liens and the tag services
+// (#1295, tags_api.go) are served; the IAM methods are UNIMPLEMENTED, each
+// saying why. A
 // deleted project is kept for 30 days, and UndeleteProject restores it.
 
 // ProjectsServer serves google.cloud.resourcemanager.v3.Projects.
@@ -560,6 +560,7 @@ type Server struct {
 	addr     string
 	projects *ProjectsServer
 	folders  *FoldersServer
+	tags     *tagServers
 
 	calls     grpcx.Observer
 	requests  func(rest.Request)
@@ -581,7 +582,7 @@ type Server struct {
 
 // NewServer returns a Resource Manager server over reg, bound to addr.
 func NewServer(addr string, reg *Registry) *Server {
-	return &Server{addr: addr, projects: NewProjectsServer(reg), folders: NewFoldersServer(reg)}
+	return &Server{addr: addr, projects: NewProjectsServer(reg), folders: NewFoldersServer(reg), tags: newTagServers(reg)}
 }
 
 // Observe sets who is told about completed calls. It must be set before Start.
@@ -627,6 +628,10 @@ func (s *Server) Start(ctx context.Context) error {
 	rmpb.RegisterProjectsServer(g, s.projects)
 	rmpb.RegisterFoldersServer(g, s.folders)
 	rmpb.RegisterOrganizationsServer(g, OrganizationsServer{})
+	rmpb.RegisterTagKeysServer(g, s.tags.keys)
+	rmpb.RegisterTagValuesServer(g, s.tags.values)
+	rmpb.RegisterTagBindingsServer(g, s.tags.bindings)
+	rmpb.RegisterTagHoldsServer(g, s.tags.holds)
 	longrunningpb.RegisterOperationsServer(g, OperationsServer{})
 
 	router := rest.NewRouter()
@@ -636,6 +641,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.projects.v1OrgRoutes(router)
 	s.folders.restRoutes(router, OrganizationsServer{}, ops)
 	s.folders.v2Routes(router, ops)
+	s.tags.restRoutes(router)
 	var jsonAPI http.Handler = router
 	if s.requests != nil {
 		jsonAPI = rest.Observe(router, s.requests)

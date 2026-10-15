@@ -28,6 +28,9 @@ const (
 	EnvDatastore = "CLOUDBURROW_TEST_DATASTORE"
 	EnvBigtable  = "CLOUDBURROW_TEST_BIGTABLE"
 	EnvSpanner   = "CLOUDBURROW_TEST_SPANNER"
+	// EnvSpannerREST is Spanner's REST API, the Terraform provider's
+	// spanner_custom_endpoint (#1331).
+	EnvSpannerREST = "CLOUDBURROW_TEST_SPANNER_REST"
 )
 
 // TestFirestoreDocumentCRUD covers documents, queries and a transaction

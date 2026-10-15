@@ -141,7 +141,7 @@ func metricFields(m *loggingpb.LogMetric) []console.Field {
 			Help:    "Up to 100 of A-Z a-z 0-9 _-.,+!*',()%/, not starting with /."},
 		{Name: "description", Label: "Description", Type: "text", Default: m.GetDescription()},
 		{Name: "filter", Label: "Filter", Type: "textarea", Required: true, Default: m.GetFilter(),
-			Help: "ANDed logName, severity, resource.type and timestamp terms, as the Logs Explorer's query takes them."},
+			Help: "ANDed logName, severity, resource.type, timestamp, resource.labels.* and labels.* terms, as the Logs Explorer's query takes them."},
 		{Name: "type", Label: "Type", Type: "select", Options: []string{"Counter", "Distribution"}, Default: metricKindWord(m),
 			Immutable: m.GetName() != "", Help: "A counter counts matching entries; a distribution records the values its value extractor takes from them."},
 		{Name: "unit", Label: "Unit", Type: "text", Default: m.GetMetricDescriptor().GetUnit(), Help: "Optional; 1 when empty."},

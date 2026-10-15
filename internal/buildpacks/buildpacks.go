@@ -67,7 +67,9 @@ type Request struct {
 	FunctionTarget string
 	// Signature selects the function signature. Ignored without a target.
 	Signature Signature
-	// Env are additional build environment variables.
+	// Env are additional build environment variables. GOOGLE_RUNTIME here
+	// forces the runtime, as on Google; without it the builder detects one
+	// from the source (see Detect).
 	Env map[string]string
 }
 
@@ -156,12 +158,22 @@ func Args(req Request) ([]string, error) {
 
 // Build runs the build.
 func (b *Builder) Build(ctx context.Context, req Request) error {
-	if ok, note := SupportedHere(); !ok {
-		return fmt.Errorf("%w: %s", ErrPackMissing, note)
-	}
 	args, err := Args(req)
 	if err != nil {
 		return err
+	}
+	// The runtime is the builder's to choose (Detect); a source it would
+	// refuse for want of any language is refused here, before minutes of
+	// pulling, with the reason.
+	det, err := Detect(req.Source, req.Env)
+	if err != nil {
+		if errors.Is(err, ErrBuildFailed) {
+			return err
+		}
+		return fmt.Errorf("%w: %w", ErrBuildFailed, err)
+	}
+	if ok, note := SupportedHere(); !ok {
+		return fmt.Errorf("%w: %s", ErrPackMissing, note)
 	}
 	r := b.Runner
 	if r == nil {
@@ -171,7 +183,7 @@ func (b *Builder) Build(ctx context.Context, req Request) error {
 	if err != nil {
 		// Surface the tail of the build log: a buildpack failure is
 		// self-explanatory, but only if the caller can see it.
-		return fmt.Errorf("%w: %v\n%s", ErrBuildFailed, err, tail(out, 25))
+		return fmt.Errorf("%w: %v (%s)\n%s", ErrBuildFailed, err, det, tail(out, 25))
 	}
 	return nil
 }

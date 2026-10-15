@@ -1,0 +1,10 @@
+{
+  "name": "cloudburrow-function-nodejs",
+  "version": "1.0.0",
+  "description": "An ordinary Node.js Functions Framework function, the fixture for the Functions tests (#1303).",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "@google-cloud/functions-framework": "5.0.5"
+  }
+}

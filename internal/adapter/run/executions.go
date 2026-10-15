@@ -86,7 +86,6 @@ metadata:
 		secs := int64(t.AsDuration().Seconds())
 		fmt.Fprintf(&b, "      activeDeadlineSeconds: %d\n", max(secs, 1))
 	}
-	b.WriteString("      containers:\n")
 	// Cloud Run's task environment, where Kubernetes has a counterpart.
 	// CLOUD_RUN_TASK_ATTEMPT has none: no pod field counts its retries.
 	injected := []injectedEnv{
@@ -97,8 +96,13 @@ metadata:
 	}
 	// Then CloudBurrow's endpoints and project (#576), as a revision gets.
 	injected = append(injected, runtime...)
-	if err := renderContainers(&b, tt.GetContainers(), containerRender{
-		project: projectOf(spec.GetName()), secrets: secrets, batch: true, injected: injected}); err != nil {
+	o := containerRender{project: projectOf(spec.GetName()), secrets: secrets, batch: true, injected: injected,
+		volumes: tt.GetVolumes()}
+	if err := renderVolumes(&b, tt.GetVolumes(), o); err != nil {
+		return "", err
+	}
+	b.WriteString("      containers:\n")
+	if err := renderContainers(&b, tt.GetContainers(), o); err != nil {
 		return "", err
 	}
 	return b.String(), nil

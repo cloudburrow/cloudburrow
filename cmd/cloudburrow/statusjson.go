@@ -124,6 +124,8 @@ func componentsOf(s config.Service) []string {
 		return []string{"components", "run"}
 	case config.ServiceBigQuery:
 		return []string{"components", "forward:bigquery", "forward:bigquery-storage"}
+	case config.ServiceSpanner:
+		return []string{"components", "forward:spanner", "forward:spanner-rest"}
 	default:
 		return []string{"components", "forward:" + string(s)}
 	}

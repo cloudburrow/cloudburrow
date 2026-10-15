@@ -93,8 +93,8 @@ func TestFunctionsFrameworkBuiltWithBuildpacks(t *testing.T) {
 	reg := functionsRegistry(ctx, t)
 	fixture := filepath.Join(moduleRoot(t), "testdata", "function")
 
-	httpImage := buildFunction(ctx, t, loader, kubeconfig, before, reg, fixture, "Hello", buildpacks.SignatureHTTP)
-	eventImage := buildFunction(ctx, t, loader, kubeconfig, before, reg, fixture, "Event", buildpacks.SignatureCloudEvent)
+	httpImage := buildFunction(ctx, t, loader, kubeconfig, before, reg, fixture, string(buildpacks.SignatureHTTP), "Hello", buildpacks.SignatureHTTP)
+	eventImage := buildFunction(ctx, t, loader, kubeconfig, before, reg, fixture, string(buildpacks.SignatureCloudEvent), "Event", buildpacks.SignatureCloudEvent)
 
 	base := ingress(t)
 
@@ -195,11 +195,12 @@ func functionsRegistry(ctx context.Context, t *testing.T) localRegistry {
 // buildFunction builds the fixture for one signature through
 // internal/buildpacks, pulls the result from the local registry, and loads it
 // into the cluster under a dev.local/ name, which Knative runs without
-// resolving it against a registry.
+// resolving it against a registry. name tells the image apart from the
+// other builds of the run.
 func buildFunction(ctx context.Context, t *testing.T, loader *images.Loader, kubeconfig string, before map[string]bool,
-	reg localRegistry, fixture, target string, sig buildpacks.Signature) string {
+	reg localRegistry, fixture, name, target string, sig buildpacks.Signature) string {
 	t.Helper()
-	repo := "cloudburrow-function-" + string(sig) + ":compat"
+	repo := "cloudburrow-function-" + name + ":compat"
 	start := time.Now()
 	err := (&buildpacks.Builder{}).Build(ctx, buildpacks.Request{
 		Source:         fixture,

@@ -406,15 +406,15 @@ func TestRunUnsupportedConfigurationIsReported(t *testing.T) {
 		ServiceId: "unsupported-svc",
 		Service: &runpb.Service{
 			Template: &runpb.RevisionTemplate{
-				ServiceAccount: "sa@project.iam.gserviceaccount.com",
-				Containers:     []*runpb.Container{{Image: "gcr.io/p/app:v1"}},
+				VpcAccess:  &runpb.VpcAccess{Connector: "projects/p/locations/us-central1/connectors/c"},
+				Containers: []*runpb.Container{{Image: "gcr.io/p/app:v1"}},
 			},
 		},
 	})
 	if status.Code(err) != codes.Unimplemented {
-		t.Fatalf("serviceAccount = %v, want Unimplemented", status.Code(err))
+		t.Fatalf("vpcAccess = %v, want Unimplemented", status.Code(err))
 	}
-	if !strings.Contains(err.Error(), "serviceAccount") {
+	if !strings.Contains(err.Error(), "vpcAccess") {
 		t.Errorf("error should name the field, got: %v", err)
 	}
 }

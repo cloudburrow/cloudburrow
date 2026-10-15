@@ -68,6 +68,10 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 	}, nil
 }
 
+// projectTarget is a project's full resource name, as a tag binding names
+// it.
+func projectTarget(id string) string { return resourcemanager.CRMPrefix + resourcemanager.V3Name(id) }
+
 // projectNumberText is a project's number, resource.ProjectNumber: the one
 // the metadata server, Resource Manager v1 and v3 and the service agents'
 // emails carry (#1211).
@@ -125,7 +129,10 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 			"One fixed organization, " + resourcemanager.OrganizationName + ", and the " +
 			"folders under it (Resource hierarchy), which a project can be moved into " +
 			"with Move project.\n\n" +
-			"Absent: liens, IAM policies and billing. Each returns UNIMPLEMENTED " +
+			"Tags (Tags screen; bound and inherited ones under Tags here) and " +
+			"liens: a lien restricting resourcemanager.projects.delete makes " +
+			"deleting this project fail, as on Google. Tags are stored, not enforced.\n\n" +
+			"Absent: IAM policies and billing. Each returns UNIMPLEMENTED " +
 			"rather than a plausible answer.\n\n" +
 			"Deleting this project marks it DELETE_REQUESTED for 30 days, as Google " +
 			"does, and Undelete project restores it until then. It changes the " +
@@ -144,6 +151,8 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 		Sections: []console.Section{
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: groups},
 			{ID: "org-policies", Label: "Organization policies", Listing: p.orgPolicies(path[0])},
+			tagSection(p.registry, projectTarget(project.ProjectID)),
+			lienSection(p.registry, project.ProjectID),
 			scope,
 		},
 		Edit: &console.EditForm{
@@ -282,7 +291,9 @@ func (p projectsProvider) DetailActions(_ context.Context, _ string, path []stri
 		out = append(out, console.Action{ID: projectClearPolicy, Label: "Clear organization policy", Destructive: true,
 			Fields: []console.Field{{Name: "constraint", Label: "Constraint", Type: "select", Required: true, Options: ids, Default: ids[0]}}})
 	}
-	return out
+	// Tags and liens (#1295).
+	out = append(out, tagActions(p.registry, projectTarget(project.ProjectID))...)
+	return append(out, lienActions(p.registry, project.ProjectID)...)
 }
 
 const (
@@ -337,6 +348,12 @@ func orgPolicyText(op *crmv1.OrgPolicy) string {
 func (p projectsProvider) ActAt(_ context.Context, _ string, path []string, action string, values map[string]string) error {
 	if len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
+	}
+	if ok, err := tagAct(p.registry, projectTarget(path[0]), action, values); ok {
+		return err
+	}
+	if ok, err := lienAct(p.registry, path[0], action, values); ok {
+		return err
 	}
 	switch action {
 	case projectUndelete:

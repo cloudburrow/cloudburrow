@@ -284,6 +284,13 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		}
 		vars = append(vars, envVar{name, netfwd.EnvValueFor(string(s), addr(port)),
 			"read by the official " + string(s) + " clients"})
+		// Spanner's REST API, a second port of the same emulator (#1331):
+		// the Terraform provider's instance and database admin calls use
+		// it, as spanner_custom_endpoint. The client libraries do not.
+		if s == config.ServiceSpanner && cfg.Endpoints.SpannerREST != 0 {
+			vars = append(vars, envVar{"CLOUDBURROW_SPANNER_REST_ENDPOINT", "http://" + addr(cfg.Endpoints.SpannerREST),
+				"Spanner's REST API; read by no client library: the Terraform provider's spanner_custom_endpoint"})
+		}
 	}
 
 	// Cloud Tasks and Secret Manager have no emulator variable in any official
@@ -531,7 +538,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"secretmanager": &e.Secrets, "scheduler": &e.Scheduler, "logging": &e.Logging, "kms": &e.KMS,
 		"metadata": &e.Metadata, "control": &e.Control,
 		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
-		"spanner": &e.Spanner, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
+		"spanner": &e.Spanner, "spanner-rest": &e.SpannerREST, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
 		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL, "cloudsql": &e.CloudSQL, "resourcemanager": &e.ResourceManager,
 		"sqladmin": &e.SQLAdmin,
 		// The ingress gateway, which kind publishes where `up` configured

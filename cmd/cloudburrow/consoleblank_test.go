@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/bigtable"
 	"cloud.google.com/go/bigtable/bttest"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -206,6 +207,18 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	if _, err := d.projects.CreateFolder(resourcemanager.OrganizationName, "Blank folder"); err != nil {
 		t.Fatal(err)
 	}
+	// Tags (#1295): a key with a value, bound to the project.
+	tk, err := d.projects.CreateTagKey(&rmpb.TagKey{Parent: resourcemanager.OrganizationName, ShortName: "blank-key", Description: "Blank key"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tv, err := d.projects.CreateTagValue(&rmpb.TagValue{Parent: tk.GetName(), ShortName: "blank-value", Description: "Blank value"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreateTagBinding(&rmpb.TagBinding{Parent: projectTarget(blankProject), TagValue: tv.GetName()}, false); err != nil {
+		t.Fatal(err)
+	}
 
 	// Cloud Storage: the built-in server, a bucket, and an object under a
 	// prefix so the folder level opens too.
@@ -353,6 +366,12 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	ran := "projects/" + blankProject + "/locations/us-central1/jobs/blank-ran"
 	jobs.executions[ran+"/executions/blank-ran-x1"] = &runpb.Execution{Name: ran + "/executions/blank-ran-x1", Job: ran}
 	jobs.order = append(jobs.order, ran+"/executions/blank-ran-x1")
+	// Worker pools and instances (#1300, #1299): the sparsest each returns.
+	pool := "projects/" + blankProject + "/locations/us-central1/workerPools/blank-pool"
+	jobs.pools.pools = map[string]*runpb.WorkerPool{pool: {Name: pool, Template: &runpb.WorkerPoolRevisionTemplate{
+		Containers: []*runpb.Container{{Image: "example.invalid/pool:1"}}}}}
+	inst := "projects/" + blankProject + "/locations/us-central1/instances/blank-instance"
+	jobs.instances.instances = map[string]*runpb.Instance{inst: {Name: inst}}
 
 	// Cloud Run and the cluster screens read through kubectl, so a kubectl
 	// that answers from fixtures stands in for the cluster.

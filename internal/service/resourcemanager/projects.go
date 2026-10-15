@@ -317,6 +317,11 @@ func (r *Registry) Delete(id string) (Project, error) {
 	if p.State == StateDeleteRequested {
 		return Project{}, apierror.FailedPrecondition("project %q is already pending deletion", id)
 	}
+	// A lien restricting resourcemanager.projects.delete refuses it, as on
+	// Google (#1295): a data rule, not authorization (ADR-0006).
+	if err := r.checkDeleteLiensLocked(p.ProjectID); err != nil {
+		return Project{}, err
+	}
 	p.State = StateDeleteRequested
 	p.DeleteTime = r.now().UTC().Format(time.RFC3339)
 	return p, r.put(p)
@@ -364,5 +369,5 @@ func (r *Registry) Move(id, parent string) (Project, error) {
 func ErrNotImplemented(what string) error {
 	return apierror.Unimplemented(
 		"%s is not implemented: this is a local project registry, not Resource Manager. "+
-			"Liens, IAM policies and billing are out of scope", what)
+			"IAM policies and billing are out of scope", what)
 }

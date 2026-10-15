@@ -156,3 +156,74 @@ func TestGRPCPassesThroughAndAddedLatency(t *testing.T) {
 	m1, m0 := median(front), median(direct)
 	t.Logf("unary GetTopic, median of %d: %v through the front, %v direct, %v added", n, m1, m0, m1-m0)
 }
+
+// freeAddr is a loopback address nothing listens on, for Run's flags.
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close()
+	return addr
+}
+
+// Run with --rest-listen fronts a second port of the emulator, Spanner's
+// REST API (#1331), into the same call log: a call on either port is
+// listed by the log either port serves.
+func TestRunFrontsASecondPortIntoTheSameLog(t *testing.T) {
+	upstream := func(name string) *httptest.Server {
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, name)
+		}))
+		t.Cleanup(s.Close)
+		return s
+	}
+	grpcUp, restUp := upstream("grpc-port"), upstream("rest-port")
+	listen, restListen := freeAddr(t), freeAddr(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, []string{"--listen", listen, "--upstream", strings.TrimPrefix(grpcUp.URL, "http://"),
+			"--rest-listen", restListen, "--rest-upstream", strings.TrimPrefix(restUp.URL, "http://")}, io.Discard, io.Discard)
+	}()
+	get := func(addr, path string) string {
+		t.Helper()
+		var err error
+		for range 50 {
+			var resp *http.Response
+			if resp, err = http.Get("http://" + addr + path); err == nil {
+				b, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				return string(b)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("GET %s%s: %v", addr, path, err)
+		return ""
+	}
+	if got := get(listen, "/v1/projects/p/instances"); got != "grpc-port" {
+		t.Errorf("the first port answered %q", got)
+	}
+	if got := get(restListen, "/v1/projects/p/instanceConfigs"); got != "rest-port" {
+		t.Errorf("the second port answered %q", got)
+	}
+	for _, addr := range []string{listen, restListen} {
+		var paths []string
+		for _, c := range calls(t, addr) {
+			paths = append(paths, c.Method)
+		}
+		sort.Strings(paths)
+		if len(paths) != 2 || !strings.Contains(paths[0], "instanceConfigs") || !strings.Contains(paths[1], "/instances") {
+			t.Errorf("the log at %s = %q, want both ports' calls", addr, paths)
+		}
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("Run = %v", err)
+	}
+	if err := Run(context.Background(), []string{"--listen", listen, "--upstream", "x", "--rest-listen", restListen}, io.Discard, io.Discard); err != ErrUsage {
+		t.Errorf("--rest-listen without --rest-upstream = %v, want ErrUsage", err)
+	}
+}

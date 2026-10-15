@@ -422,6 +422,7 @@ func (runJobsProvider) CreateForm() (string, []console.Field) {
 			Section: "Container",
 		},
 		runSecretEnvField("Container"),
+		runVolumeFields("Container")[0], runVolumeFields("Container")[1], runVolumeFields("Container")[2],
 		{
 			Name: "taskCount", Label: "Number of tasks", Type: "text", Default: "1",
 			Help:    "How many tasks each execution runs. Each task gets its own CLOUD_RUN_TASK_INDEX.",
@@ -549,6 +550,9 @@ func runJobFormTemplate(values map[string]string) (*runpb.ExecutionTemplate, err
 		return nil, err
 	}
 	tt := &runpb.TaskTemplate{Containers: []*runpb.Container{c}}
+	if err := applyRunVolumes(podFields{&tt.ServiceAccount, &tt.Volumes}, c, values); err != nil {
+		return nil, err
+	}
 	if v := strings.TrimSpace(values["maxRetries"]); v != "" {
 		n, err := optionalInt(v, "maximum retries")
 		if err != nil {
@@ -592,6 +596,10 @@ func (p runJobsProvider) Edit(ctx context.Context, project string, path []string
 		}
 		_, sentSecrets := values["secretEnv"]
 		if err := applyRunJobForm(job, form, !sentSecrets); err != nil {
+			return err
+		}
+		tt := job.GetTemplate().GetTemplate()
+		if err := applyRunVolumes(podFields{&tt.ServiceAccount, &tt.Volumes}, tt.Containers[0], values); err != nil {
 			return err
 		}
 		if labels, ok, err := runLabels(values); err != nil {
@@ -663,7 +671,9 @@ func runJobEditForm(job *runpb.Job) *console.EditForm {
 		}
 	}
 	secretEnv, unknown := secretEnvLines(c.GetEnv())
+	secretFiles, memoryVolumes := runVolumeDefaults(tt.GetVolumes(), c.GetVolumeMounts())
 	prefill := map[string]string{
+		"serviceAccount": tt.GetServiceAccount(), "secretFiles": secretFiles, "memoryVolumes": memoryVolumes,
 		"name": lastSegment(job.GetName()), "image": c.GetImage(),
 		"command": shellJoin(c.GetCommand()), "args": shellJoin(c.GetArgs()),
 		"env":        console.FormatMap(env),

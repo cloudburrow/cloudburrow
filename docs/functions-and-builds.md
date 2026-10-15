@@ -10,27 +10,54 @@ Cloud Storage with Docker or this pack path; see the Cloud Run section of
 ## Functions Framework (#32)
 
 An ordinary [Functions Framework](https://github.com/GoogleCloudPlatform/functions-framework-go)
-function runs unchanged. The fixture in `testdata/function` contains no CloudBurrow-specific
-code — that is the point.
+function runs unchanged. The fixtures in `testdata/function` (Go), `testdata/function-nodejs`
+(Node.js) and `testdata/function-python` (Python) contain no CloudBurrow-specific code — that
+is the point.
 
-**Tested language subset: Go only.** Other runtimes are published by Google and would
-plausibly work, but untested is untested, so nothing else is claimed.
+**Languages.** Go is Verified. Node.js and Python (#1303) have fixtures and gated tests,
+`TestFunctionsNodejsBuiltWithBuildpacks` and `TestFunctionsPythonBuiltWithBuildpacks`, that
+build them with the pinned builder and deploy them through the Cloud Run v2 client, but **no
+run has passed yet** (they need amd64 nodes), so they are Implemented, not Verified. Java,
+Ruby, PHP and .NET have buildpacks from Google but no fixture or test, so nothing is claimed
+for them.
 
 | Signature | Status | Evidence |
 |---|---|---|
 | `http` | **Verified** | `TestFunctionsFrameworkBuiltWithBuildpacks`: `POST /` returns the handler's JSON; a body-less request still answers. Verified by a dated CI run (2026-09-27, run 36357529139, amd64); gated |
 | `cloudevent` | **Verified** | `TestFunctionsFrameworkBuiltWithBuildpacks`: a Google-schema CloudEvent in binary mode reaches the handler, which logs its type, subject and data. Verified by the same run; gated |
 | Errors | **Verified** | `TestFunctionsFrameworkBuiltWithBuildpacks`: a request without `ce-*` headers to a CloudEvent function returns **HTTP 400**. Verified by the same run; gated |
+| Node.js and Python, `http` and `cloudevent` | **Implemented, not yet run** | `TestFunctionsNodejsBuiltWithBuildpacks` and `TestFunctionsPythonBuiltWithBuildpacks` assert what the Go test does for `http` (the greeting, a body-less 200) and `cloudevent` (the handler logs the event's type, subject and data). Only the Python test asserts the HTTP 400 for a request with no `ce-*` headers: the Node.js framework (5.0.5) hands such a body to the function as a structured-mode event instead. Gated; no run has passed |
 
-The test is in `test/compat` and runs only with `CLOUDBURROW_TEST_FUNCTIONS=1`, against an
-instance whose cluster nodes are amd64, with `pack` and Docker installed. It is too slow for
-every merge, so no CI shard runs it; see
-[compatibility.md](compatibility.md#what-ci-does-not-run-and-why). It runs on demand in
-[`functions.yml`](../.github/workflows/functions.yml) (`workflow_dispatch` only). These rows are
+The tests are in `test/compat` and run only with `CLOUDBURROW_TEST_FUNCTIONS=1`, against an
+instance whose cluster nodes are amd64, with `pack` and Docker installed. They are too slow for
+every merge, so no CI shard runs them; see
+[compatibility.md](compatibility.md#what-ci-does-not-run-and-why). They run on demand in
+[`functions.yml`](../.github/workflows/functions.yml) (`workflow_dispatch` only). The Go rows are
 Verified by one dated run: 2026-09-27, [run 36357529139](https://github.com/cloudburrow/cloudburrow/actions/runs/36357529139) of `functions.yml` on main, `ubuntu-latest` amd64 runner, pack 0.40.9; the test passed in 136s, building `Hello` (`http`) in 58s and
 `Event` (`cloudevent`) in 39s. Nothing re-runs it on merge.
 
 Built images deploy through the established Knative path, like any other image.
+
+### How the runtime is chosen
+
+As on Google, the builder chooses: `GOOGLE_RUNTIME` in the build's environment (`--env` to
+pack, or `buildpack_build.environment_variables` in `SubmitBuild`) forces a runtime, such as
+`nodejs` or `python`; without it the builder detects one from the source. Before pack runs,
+`buildpacks.Detect` reads the same signals:
+
+- `GOOGLE_RUNTIME`, which wins and reaches pack unchanged (a version suffix, as in `nodejs22`, is
+  kept apart in the report);
+- a manifest at the root: `go.mod`, `package.json`, `requirements.txt`, `pyproject.toml`,
+  `setup.py`, `pom.xml`, `build.gradle(.kts)`, `Gemfile`, `composer.json`;
+- otherwise a source file anywhere in the tree (`.go`, `.js`, `.py`, `.jar`, `.rb`, `.php`,
+  `.csproj`), skipping `node_modules`, `.git` and virtualenvs.
+
+CloudBurrow never sets `GOOGLE_RUNTIME` itself, so a source that matches several runtimes is
+built as the builder's own order decides. A source with no marker at all is refused before
+any image is pulled, with `build failed: no runtime detected` naming the files looked for and
+`GOOGLE_RUNTIME`. A failed build names the runtime it was built as, such as
+`build failed: exit status 1 (runtime nodejs, detected from package.json)`, followed by the
+tail of pack's log. `SubmitBuild`'s `buildpack_build.runtime` stays `UNIMPLEMENTED`.
 
 **Not supported, and not implied by a working handler:**
 
@@ -85,6 +112,7 @@ The registry must share a Docker network with the build, because the buildpack l
 
 | Behaviour | Status |
 |---|---|
+| Build Node.js and Python source with no Dockerfile | **Implemented, not yet run** — `TestFunctionsNodejsBuiltWithBuildpacks` and `TestFunctionsPythonBuiltWithBuildpacks` build `testdata/function-nodejs` and `testdata/function-python`; gated, and no run has passed |
 | Build Go source with no Dockerfile | **Verified** — `TestFunctionsFrameworkBuiltWithBuildpacks` builds `testdata/function` through `internal/buildpacks`; Verified by a dated CI run (2026-09-27, run 36357529139, amd64); gated |
 | Resulting image runs and answers | **Verified** — the same test deploys it through the Cloud Run v2 client and expects `{"greeting":"hello CloudBurrow"}`; Verified by the same run; gated |
 | Cache reuse on rebuild | **Verified** — `TestFunctionsRebuildReusesLayers` rebuilds unchanged source and asserts pack's log reports reused layers (`Reusing layer '…'`), and that the first build reported none; Verified by a dated run (2026-09-27, macOS/arm64 Docker Desktop, emulated amd64 builder, pack 0.40.9), the rebuild reusing 6 layers, and passed again in the dated CI run (2026-09-27, run 36357529139, amd64), again reusing 6 layers; gated, not run on merge |
@@ -100,6 +128,6 @@ Docker Desktop (emulated amd64 builder, pack 0.40.9), and 2026-09-27, [run 36357
 
 ### Not covered
 
-Languages other than Go · the emulated arm64 build path, which only a run by hand has
+A passing run of the Node.js and Python tests · Java, Ruby, PHP and .NET · the emulated arm64 build path, which only a run by hand has
 exercised (the gated test needs amd64 nodes) · fully offline builds, since the first build
 must fetch the builder.

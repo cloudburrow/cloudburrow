@@ -14,9 +14,9 @@ import (
 // google.api.http bindings of every google.cloud.run.v2 service, read from
 // the generated descriptors, plus the Operations mixin run_v2.yaml binds.
 // The shared transcoder calls the same servers gRPC does, so REST has no
-// logic of its own. Services, Revisions, Jobs, Executions, Tasks and
-// Operations are registered; a bound path of Builds, Instances or WorkerPools answers
-// 501 UNIMPLEMENTED, and a path Google does not bind answers 404.
+// logic of its own. Services, Revisions, Jobs, Executions, Tasks, Builds,
+// WorkerPools, Instances and Operations are registered; a path Google does not
+// bind answers 404.
 
 // mixins are the bindings run_v2.yaml adds (googleapis
 // run_v2.yaml@5b03e5ec:29-39), which no runpb descriptor carries. It lists

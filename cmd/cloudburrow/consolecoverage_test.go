@@ -34,7 +34,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceStorage:       {Providers: []string{"storage", "storage-deleted", "storage-settings"}},
 	config.ServicePubSub:        {Providers: []string{"pubsub", "pubsub-subscriptions", "pubsub-snapshots", "pubsub-schemas"}},
 	config.ServiceTasks:         {Providers: []string{"tasks"}},
-	config.ServiceRun:           {Providers: []string{"run", "run-jobs"}},
+	config.ServiceRun:           {Providers: []string{"run", "run-jobs", "run-worker-pools", "run-instances"}},
 	config.ServiceSecrets:       {Providers: []string{"secrets"}},
 	config.ServiceFirestore:     {Providers: []string{"firestore"}},
 	config.ServiceDatastore:     {Providers: []string{"datastore"}},
@@ -44,7 +44,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs"}},
 	config.ServiceScheduler:     {Providers: []string{"scheduler"}},
 	config.ServiceKMS:           {Providers: []string{"kms"}},
-	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets"}, Screen: "/logs"},
+	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings"}, Screen: "/logs"},
 	config.ServiceMemorystore:   {Providers: []string{"memorystore"}},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql"}},
 }
@@ -52,7 +52,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 // clusterScreens are the registry's screens that belong to no selectable
 // service: Resource Manager, the AI catalogue and CloudBurrow's own cluster.
 var clusterScreens = []string{
-	"projects", "hierarchy", "ai",
+	"projects", "hierarchy", "tags", "ai",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",
 }
 

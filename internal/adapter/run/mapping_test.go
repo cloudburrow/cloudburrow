@@ -78,15 +78,19 @@ func TestUnsupportedConfigurationIsReported(t *testing.T) {
 		mutate func(*runpb.Service)
 		want   string
 	}{
-		{"service account", func(s *runpb.Service) {
-			s.Template.ServiceAccount = "sa@project.iam.gserviceaccount.com"
-		}, "serviceAccount"},
 		{"vpc access", func(s *runpb.Service) {
 			s.Template.VpcAccess = &runpb.VpcAccess{Connector: "conn"}
 		}, "vpcAccess"},
 		{"volumes", func(s *runpb.Service) {
-			s.Template.Volumes = []*runpb.Volume{{Name: "v"}}
-		}, "volumes"},
+			s.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_CloudSqlInstance{
+				CloudSqlInstance: &runpb.CloudSqlInstance{Instances: []string{"p:r:i"}}}}}
+		}, "volumes.cloudSqlInstance"},
+		{"gcs volume", func(s *runpb.Service) {
+			s.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_Gcs{Gcs: &runpb.GCSVolumeSource{Bucket: "b"}}}}
+		}, "volumes.gcs"},
+		{"nfs volume", func(s *runpb.Service) {
+			s.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_Nfs{Nfs: &runpb.NFSVolumeSource{Server: "s"}}}}
+		}, "volumes.nfs"},
 		{"encryption key", func(s *runpb.Service) {
 			s.Template.EncryptionKey = "projects/p/locations/l/keyRings/r/cryptoKeys/k"
 		}, "encryptionKey"},
@@ -706,5 +710,72 @@ func TestExecutionsAreGivenTheInjectedEnvironment(t *testing.T) {
 	}
 	if strings.Count(m, "- name: PUBSUB_EMULATOR_HOST") != 1 {
 		t.Errorf("PUBSUB_EMULATOR_HOST is rendered more than once, or the caller's lost:\n%s", m)
+	}
+}
+
+// Secret and in-memory volumes render onto the pod, mounts are read-only
+// for a secret, and the service account, volumes and mounts read back as
+// set (#1297).
+func TestVolumesAndServiceAccountRender(t *testing.T) {
+	t.Parallel()
+	s := svc("app", &runpb.Container{Image: "gcr.io/p/app:v1", VolumeMounts: []*runpb.VolumeMount{
+		{Name: "creds", MountPath: "/secrets"}, {Name: "scratch", MountPath: "/scratch"}}})
+	s.Template.ServiceAccount = "sa@p.iam.gserviceaccount.com"
+	s.Template.Volumes = []*runpb.Volume{
+		{Name: "creds", VolumeType: &runpb.Volume_Secret{Secret: &runpb.SecretVolumeSource{Secret: "db-pass",
+			Items: []*runpb.VersionToPath{{Path: "pass", Version: "2", Mode: 0o400}}}}},
+		{Name: "scratch", VolumeType: &runpb.Volume_EmptyDir{EmptyDir: &runpb.EmptyDirVolumeSource{
+			Medium: runpb.EmptyDirVolumeSource_MEMORY, SizeLimit: "64Mi"}}},
+	}
+	y, err := ToKnative(s, "default", "test", fakeSecrets{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"secretName: k8s-secret", "- key: 2\n                path: \"pass\"\n                mode: 256",
+		"medium: Memory", `sizeLimit: "64Mi"`, "mountPath: \"/secrets\"\n              readOnly: true",
+		"mountPath: \"/scratch\"\n"} {
+		if !strings.Contains(y, want) {
+			t.Errorf("manifest lacks %q:\n%s", want, y)
+		}
+	}
+	if strings.Contains(y, "serviceAccountName") {
+		t.Errorf("the service account must not name a Kubernetes ServiceAccount:\n%s", y)
+	}
+	// Without Secret Manager, a secret volume is refused, not dropped.
+	if _, err := ToKnative(s, "default", "test", nil); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("secret volume without Secret Manager = %v", err)
+	}
+	// A mount naming no volume is the caller's mistake.
+	bad := svc("app", &runpb.Container{Image: "gcr.io/p/app:v1", VolumeMounts: []*runpb.VolumeMount{{Name: "x", MountPath: "/x"}}})
+	if _, err := ToKnative(bad, "default", "test", fakeSecrets{}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("undeclared mount = %v", err)
+	}
+
+	var k ksvc
+	k.Spec.Template.Metadata.Annotations = map[string]string{annPodConfig: podConfigAnnotation(s.Template)}
+	k.Spec.Template.Spec.Containers = make([]struct {
+		Image      string   `json:"image"`
+		WorkingDir string   `json:"workingDir"`
+		Command    []string `json:"command"`
+		Args       []string `json:"args"`
+		Resources  struct {
+			Limits map[string]string `json:"limits"`
+		} `json:"resources"`
+		StartupProbe  *kprobe `json:"startupProbe"`
+		LivenessProbe *kprobe `json:"livenessProbe"`
+		Env           []struct {
+			Name      string    `json:"name"`
+			Value     string    `json:"value"`
+			ValueFrom *struct{} `json:"valueFrom"`
+		} `json:"env"`
+		Ports []struct {
+			ContainerPort int `json:"containerPort"`
+		} `json:"ports"`
+	}, 1)
+	back := FromKnative(k, parent).GetTemplate()
+	if back.GetServiceAccount() != s.Template.ServiceAccount || len(back.GetVolumes()) != 2 ||
+		back.GetVolumes()[0].GetSecret().GetItems()[0].GetVersion() != "2" ||
+		back.GetVolumes()[1].GetEmptyDir().GetSizeLimit() != "64Mi" || len(back.GetContainers()[0].GetVolumeMounts()) != 2 {
+		t.Errorf("read back = %v", back)
 	}
 }

@@ -42,7 +42,14 @@ const v1LocationLabel = "cloud.googleapis.com/location"
 // v1Autoscaling are the template annotations v1 carries scaling in.
 const (
 	v1MinScale = "autoscaling.knative.dev/minScale"
-	v1MaxScale = "autoscaling.knative.dev/maxScale"
+	// The tool and version that wrote a service, which gcloud sets on the
+	// service and on each revision; v2's client and client_version.
+	v1ClientName    = "run.googleapis.com/client-name"
+	v1ClientVersion = "run.googleapis.com/client-version"
+	// v2's container resources.startup_cpu_boost, which gcloud run deploy
+	// sets. Locally no CPU is throttled at startup, so the boost holds.
+	v1StartupCPUBoost = "run.googleapis.com/startup-cpu-boost"
+	v1MaxScale        = "autoscaling.knative.dev/maxScale"
 )
 
 // regionalHostRE is a regional endpoint's host, {region}-{host}: gcloud
@@ -268,7 +275,7 @@ func (s *Server) v1GetService(w http.ResponseWriter, r *http.Request) {
 func (s *Server) v1CreateService(w http.ResponseWriter, r *http.Request) {
 	sc := scopeOf(r)
 	var in runv1.Service
-	if err := rest.DecodeJSON(r, &in); err != nil {
+	if err := v1DecodeService(r, &in); err != nil {
 		v1Write(w, err, nil)
 		return
 	}
@@ -354,7 +361,7 @@ func (s *Server) v1ReplaceService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in runv1.Service
-	if err := rest.DecodeJSON(r, &in); err != nil {
+	if err := v1DecodeService(r, &in); err != nil {
 		v1Write(w, err, nil)
 		return
 	}
@@ -643,16 +650,19 @@ func toV1Template(svc *runpb.Service) *runv1.RevisionTemplate {
 		Spec: &runv1.RevisionSpec{
 			ContainerConcurrency: int64(tmpl.GetMaxInstanceRequestConcurrency()),
 			TimeoutSeconds:       tmpl.GetTimeout().GetSeconds(),
-			Containers:           toV1Containers(tmpl.GetContainers()),
+			Containers:           toV1Containers(tmpl.GetContainers(), tmpl.GetVolumes()),
+			ServiceAccountName:   tmpl.GetServiceAccount(),
+			Volumes:              toV1Volumes(tmpl.GetVolumes()),
 		},
 	}
 }
 
-func toV1Containers(cs []*runpb.Container) []*runv1.Container {
+func toV1Containers(cs []*runpb.Container, volumes []*runpb.Volume) []*runv1.Container {
 	var out []*runv1.Container
 	for _, c := range cs {
 		v := &runv1.Container{Name: c.GetName(), Image: c.GetImage(), Command: c.GetCommand(), Args: c.GetArgs(),
-			WorkingDir: c.GetWorkingDir()}
+			WorkingDir: c.GetWorkingDir(), StartupProbe: toV1Probe(c.GetStartupProbe(), servingPort(c)), LivenessProbe: toV1Probe(c.GetLivenessProbe(), servingPort(c)),
+			VolumeMounts: toV1Mounts(c.GetVolumeMounts(), volumes)}
 		if l := c.GetResources().GetLimits(); len(l) > 0 {
 			v.Resources = &runv1.ResourceRequirements{Limits: l}
 		}
@@ -759,7 +769,8 @@ func toV1Revision(rev *runpb.Revision, kr krev) *runv1.Revision {
 	return &runv1.Revision{
 		ApiVersion: "serving.knative.dev/v1", Kind: "Revision", Metadata: m,
 		Spec: &runv1.RevisionSpec{ContainerConcurrency: int64(rev.GetMaxInstanceRequestConcurrency()),
-			Containers: toV1Containers(rev.GetContainers())},
+			Containers: toV1Containers(rev.GetContainers(), rev.GetVolumes()), ServiceAccountName: rev.GetServiceAccount(),
+			Volumes: toV1Volumes(rev.GetVolumes())},
 		Status: &runv1.RevisionStatus{ObservedGeneration: rev.GetObservedGeneration(), ServiceName: id,
 			Conditions: v1Conditions(kr.Status.Conditions)},
 	}
@@ -787,7 +798,21 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 		if len(labels) > 0 {
 			svc.Labels = labels
 		}
-		svc.Annotations = m.Annotations
+		ann := map[string]string{}
+		for k, v := range m.Annotations {
+			switch k {
+			case v1ClientName:
+				svc.Client = v
+			case v1ClientVersion:
+				svc.ClientVersion = v
+			default:
+				gap(strings.HasPrefix(k, "run.googleapis.com/"), "metadata.annotations["+k+"]")
+				ann[k] = v
+			}
+		}
+		if len(ann) > 0 {
+			svc.Annotations = ann
+		}
 		gap(m.GenerateName != "", "metadata.generateName")
 		gap(len(m.Finalizers) > 0, "metadata.finalizers")
 		gap(len(m.OwnerReferences) > 0, "metadata.ownerReferences")
@@ -796,6 +821,7 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 	if spec == nil || spec.Template == nil || spec.Template.Spec == nil {
 		return nil, apierror.InvalidArgument("spec.template.spec.containers is required")
 	}
+	boost := false
 	if tm := spec.Template.Metadata; tm != nil {
 		svc.Template.Labels = tm.Labels
 		svc.Template.Revision = tm.Name
@@ -813,7 +839,12 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 				} else {
 					scaling.MaxInstanceCount = int32(n)
 				}
+			case v1ClientName, v1ClientVersion:
+				// Which tool deployed the revision: informational.
+			case v1StartupCPUBoost:
+				boost = v == "true" || v == "True"
 			default:
+				gap(strings.HasPrefix(k, "run.googleapis.com/"), "spec.template.metadata.annotations["+k+"]")
 				ann[k] = v
 			}
 		}
@@ -829,8 +860,8 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 	if ts.TimeoutSeconds > 0 {
 		svc.Template.Timeout = durationpb.New(time.Duration(ts.TimeoutSeconds) * time.Second)
 	}
-	svc.Template.ServiceAccount = ts.ServiceAccountName // refused by the v2 mapping
-	gap(len(ts.Volumes) > 0, "spec.template.spec.volumes")
+	svc.Template.ServiceAccount = ts.ServiceAccountName
+	svc.Template.Volumes = fromV1Volumes(ts.Volumes, gap)
 	gap(len(ts.ImagePullSecrets) > 0, "spec.template.spec.imagePullSecrets")
 	gap(len(ts.NodeSelector) > 0, "spec.template.spec.nodeSelector")
 	gap(ts.RuntimeClassName != "", "spec.template.spec.runtimeClassName")
@@ -842,6 +873,12 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 			if len(c.Resources.Limits) > 0 {
 				out.Resources = &runpb.ResourceRequirements{Limits: c.Resources.Limits}
 			}
+		}
+		if boost {
+			if out.Resources == nil {
+				out.Resources = &runpb.ResourceRequirements{}
+			}
+			out.Resources.StartupCpuBoost = true
 		}
 		for _, p := range c.Ports {
 			gap(p.Protocol != "" && p.Protocol != "TCP", "container.ports.protocol")
@@ -859,11 +896,11 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 			out.Env = append(out.Env, ev)
 		}
 		gap(len(c.EnvFrom) > 0, "container.envFrom")
-		gap(c.LivenessProbe != nil, "container.livenessProbe")
-		gap(c.StartupProbe != nil, "container.startupProbe")
+		out.LivenessProbe = fromV1Probe(c.LivenessProbe, "container.livenessProbe", gap)
+		out.StartupProbe = fromV1Probe(c.StartupProbe, "container.startupProbe", gap)
+		out.VolumeMounts = fromV1Mounts(c.VolumeMounts)
 		gap(c.ReadinessProbe != nil, "container.readinessProbe")
-		gap(c.SecurityContext != nil, "container.securityContext")
-		gap(len(c.VolumeMounts) > 0, "container.volumeMounts")
+		gap(c.SecurityContext != nil && c.SecurityContext.RunAsUser != 0, "container.securityContext.runAsUser")
 		gap(c.ImagePullPolicy != "", "container.imagePullPolicy")
 		gap(c.TerminationMessagePath != "" || c.TerminationMessagePolicy != "", "container.terminationMessage")
 		svc.Template.Containers = append(svc.Template.Containers, out)
@@ -883,4 +920,12 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 		return nil, apierror.Unimplemented("unsupported Cloud Run v1 configuration: %s: not mapped", strings.Join(gaps, ", "))
 	}
 	return svc, nil
+}
+
+// servingPort is a container's first port, or 0.
+func servingPort(c *runpb.Container) int32 {
+	if ps := c.GetPorts(); len(ps) > 0 {
+		return ps[0].GetContainerPort()
+	}
+	return 0
 }
