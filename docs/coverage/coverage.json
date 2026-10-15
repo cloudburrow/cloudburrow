@@ -2490,8 +2490,8 @@
     "Key": "firestore",
     "Title": "Firestore",
     "counts": {
-      "Unknown": 11,
-      "Verified": 6
+      "Refused": 2,
+      "Verified": 15
     },
     "rows": [
       {
@@ -2505,7 +2505,10 @@
       },
       {
         "method": "google.firestore.v1.Firestore/BatchWrite",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoremethods_test.go:211 TestFirestoreBulkWriter"
+        ]
       },
       {
         "method": "google.firestore.v1.Firestore/BeginTransaction",
@@ -2525,19 +2528,32 @@
       },
       {
         "method": "google.firestore.v1.Firestore/CreateDocument",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoremethods_test.go:57 TestFirestoreDocumentRPCs"
+        ]
       },
       {
         "method": "google.firestore.v1.Firestore/DeleteDocument",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoremethods_test.go:57 TestFirestoreDocumentRPCs"
+        ]
       },
       {
         "method": "google.firestore.v1.Firestore/ExecutePipeline",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/firestoremethods_test.go:337 TestFirestorePipelineIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.firestore.v1.Firestore/GetDocument",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoremethods_test.go:57 TestFirestoreDocumentRPCs"
+        ]
       },
       {
         "method": "google.firestore.v1.Firestore/ListCollectionIds",
@@ -2556,19 +2572,32 @@
       },
       {
         "method": "google.firestore.v1.Firestore/Listen",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoremethods_test.go:245 TestFirestoreSnapshotListener"
+        ]
       },
       {
         "method": "google.firestore.v1.Firestore/PartitionQuery",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/firestoremethods_test.go:316 TestFirestorePartitionQueryIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.firestore.v1.Firestore/Rollback",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoremethods_test.go:180 TestFirestoreRollback"
+        ]
       },
       {
         "method": "google.firestore.v1.Firestore/RunAggregationQuery",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoremethods_test.go:276 TestFirestoreCountAggregation"
+        ]
       },
       {
         "method": "google.firestore.v1.Firestore/RunQuery",
@@ -2580,11 +2609,17 @@
       },
       {
         "method": "google.firestore.v1.Firestore/UpdateDocument",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoremethods_test.go:57 TestFirestoreDocumentRPCs"
+        ]
       },
       {
         "method": "google.firestore.v1.Firestore/Write",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoremethods_test.go:126 TestFirestoreWriteStream"
+        ]
       }
     ]
   },
@@ -2592,13 +2627,16 @@
     "Key": "datastore",
     "Title": "Datastore",
     "counts": {
-      "Unknown": 4,
-      "Verified": 4
+      "Refused": 1,
+      "Verified": 7
     },
     "rows": [
       {
         "method": "google.datastore.v1.Datastore/AllocateIds",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datastoremethods_test.go:19 TestDatastoreAllocateAndReserveIDs"
+        ]
       },
       {
         "method": "google.datastore.v1.Datastore/BeginTransaction",
@@ -2625,15 +2663,25 @@
       },
       {
         "method": "google.datastore.v1.Datastore/ReserveIds",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datastoremethods_test.go:19 TestDatastoreAllocateAndReserveIDs"
+        ]
       },
       {
         "method": "google.datastore.v1.Datastore/Rollback",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/datastoremethods_test.go:54 TestDatastoreRollback"
+        ]
       },
       {
         "method": "google.datastore.v1.Datastore/RunAggregationQuery",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/datastoremethods_test.go:84 TestDatastoreAggregationIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.datastore.v1.Datastore/RunQuery",
