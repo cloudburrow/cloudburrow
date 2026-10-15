@@ -20,22 +20,16 @@ import (
 // BigQuery's: YYYYMMDD, YYYYMMDDHH, YYYYMM or YYYY by the time unit, an
 // integer range's start, __NULL__ and __UNPARTITIONED__
 // (https://cloud.google.com/bigquery/docs/managing-partitioned-table-data).
-// They are read with one query of the table. An ingestion-time
-// partitioned table's partitions are not listed: the emulator keeps no
-// row's ingestion time.
+// They are read with one query of the table; an ingestion-time
+// partitioned table's by its rows' _PARTITIONTIME (#1277).
 func (p bigqueryProvider) partitionsSection(ctx context.Context, c *bigquery.Client, datasetID, tableID string,
 	md *bigquery.TableMetadata) (console.Section, bool) {
 	sec := console.Section{ID: "partitions", Label: "Partitions"}
 	out := console.Listing{Columns: []string{"Rows"}, NameColumn: "Partition", Noun: "partitions"}
-	id, ok := partitionIDExpr(md)
-	switch {
-	case md.TimePartitioning == nil && md.RangePartitioning == nil:
+	if md.TimePartitioning == nil && md.RangePartitioning == nil {
 		return sec, false
-	case !ok:
-		out.Unavailable = "The partitions of an ingestion-time partitioned table are not listed: the emulator behind CloudBurrow keeps no row's ingestion time."
-		sec.Listing = out
-		return sec, true
 	}
+	id := partitionIDExpr(md)
 	q := c.Query(fmt.Sprintf("SELECT %s AS id, COUNT(*) AS n FROM `%s.%s.%s` GROUP BY id ORDER BY id",
 		id, p.project, datasetID, tableID))
 	it, err := q.Read(ctx)
@@ -74,18 +68,15 @@ func (p bigqueryProvider) partitionsSection(ctx context.Context, c *bigquery.Cli
 }
 
 // partitionIDExpr is the GoogleSQL expression of a row's partition ID in
-// a column-partitioned table, or false for an ingestion-time one.
-func partitionIDExpr(md *bigquery.TableMetadata) (string, bool) {
+// a partitioned table.
+func partitionIDExpr(md *bigquery.TableMetadata) string {
 	if rp := md.RangePartitioning; rp != nil && rp.Range != nil {
 		col := "`" + rp.Field + "`"
 		r := rp.Range
 		return fmt.Sprintf("CASE WHEN %[1]s IS NULL THEN '__NULL__' WHEN %[1]s < %[2]d OR %[1]s >= %[3]d THEN '__UNPARTITIONED__' "+
-			"ELSE CAST(%[2]d + DIV(%[1]s - %[2]d, %[4]d) * %[4]d AS STRING) END", col, r.Start, r.End, r.Interval), true
+			"ELSE CAST(%[2]d + DIV(%[1]s - %[2]d, %[4]d) * %[4]d AS STRING) END", col, r.Start, r.End, r.Interval)
 	}
 	tp := md.TimePartitioning
-	if tp == nil || tp.Field == "" {
-		return "", false
-	}
 	col := "`" + tp.Field + "`"
 	expr := col
 	for _, f := range md.Schema {
@@ -102,6 +93,10 @@ func partitionIDExpr(md *bigquery.TableMetadata) (string, bool) {
 	case bigquery.YearPartitioningType:
 		format, unit = "%Y", "YEAR"
 	}
+	if tp.Field == "" {
+		return fmt.Sprintf("CASE WHEN _PARTITIONTIME IS NULL THEN '__UNPARTITIONED__' "+
+			"ELSE FORMAT_TIMESTAMP('%s', _PARTITIONTIME, 'UTC') END", format)
+	}
 	return fmt.Sprintf("CASE WHEN %[1]s IS NULL THEN '__NULL__' WHEN %[2]s < TIMESTAMP '1960-01-01' OR %[2]s >= TIMESTAMP '2160-01-01' "+
-		"THEN '__UNPARTITIONED__' ELSE FORMAT_TIMESTAMP('%[3]s', TIMESTAMP_TRUNC(%[2]s, %[4]s), 'UTC') END", col, expr, format, unit), true
+		"THEN '__UNPARTITIONED__' ELSE FORMAT_TIMESTAMP('%[3]s', TIMESTAMP_TRUNC(%[2]s, %[4]s), 'UTC') END", col, expr, format, unit)
 }

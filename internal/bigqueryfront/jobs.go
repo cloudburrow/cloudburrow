@@ -58,6 +58,10 @@ type jobBody struct {
 			Quote           *string `json:"quote"`
 			AllowJaggedRows bool    `json:"allowJaggedRows"`
 			NullMarker      *string `json:"nullMarker"`
+			// IgnoreUnknownValues and MaxBadRecords, for a JSON load's
+			// fields outside its columns (#1339, jsonunknown.go).
+			IgnoreUnknownValues bool            `json:"ignoreUnknownValues"`
+			MaxBadRecords       json.RawMessage `json:"maxBadRecords"`
 			// detected is whether the front detected Schema (#1324,
 			// jsondetect.go).
 			detected bool
@@ -153,6 +157,9 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		}
 		legacyLoadTypes(r, c.Load.Schema)                                      // #1034, typenames.go
 		if check(c.Load.DestinationTable) == "" && !f.jsonDetect(w, r, &job) { // #1324, jsondetect.go
+			return
+		}
+		if check(c.Load.DestinationTable) == "" && !f.csvDetect(w, r, &job) { // #1338, csvdetect.go
 			return
 		}
 		reason = "invalid"

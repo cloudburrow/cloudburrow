@@ -79,9 +79,12 @@ var terraformEndpoints = []terraformEndpoint{
 	{sqlAdminEndpoint, "sql_custom_endpoint", "GOOGLE_SQL_CUSTOM_ENDPOINT", "/sql/v1beta4/", true},
 	// Firestore (#1331): google_firestore_document applies, plans clean,
 	// updates its fields and destroys in TestTerraformFirestoreDocument,
-	// over the documents REST API the emulator serves on its port. The
-	// Firestore Admin API (google_firestore_database, _index, _field,
-	// _backup_schedule) is not served: those fail locally, never at Google.
+	// over the documents REST API the emulator serves on its port. On the
+	// same port the call front serves the Firestore Admin API itself
+	// (internal/firestoreadmin): google_firestore_database, _index and
+	// _field apply, plan clean, update and destroy in
+	// TestTerraformFirestoreDatabaseIndexAndField; _backup_schedule answers
+	// 501, locally, never at Google.
 	{config.ServiceFirestore, "firestore_custom_endpoint", "GOOGLE_FIRESTORE_CUSTOM_ENDPOINT", "/v1/", true},
 	// Spanner (#1331): google_spanner_instance and _database apply, read
 	// back through the official admin clients, plan clean, update in place

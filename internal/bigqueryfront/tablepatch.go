@@ -73,7 +73,12 @@ func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 		f.next.ServeHTTP(w, r) // the emulator's own answer
 		return
 	}
-	if schema != nil && snapshotDefinitionOf(got) != nil && !sameSchema(meta.Schema.Fields, schema.Fields) {
+	var defaults bool
+	var refused string
+	if schema != nil {
+		defaults, refused = defaultChange(meta.Schema.Fields, schema.Fields) // #1340, columndefaults.go
+	}
+	if schema != nil && snapshotDefinitionOf(got) != nil && (!sameSchema(meta.Schema.Fields, schema.Fields) || defaults || refused != "") {
 		// A snapshot's metadata only is updated (#1002, snapshots.go).
 		writeError(w, http.StatusBadRequest, "invalid", snapshotWriteMessage(projectOf(f.base), dataset, table,
 			"a change of its schema"))
@@ -90,6 +95,9 @@ func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 			}
 		} else {
 			adds, code, msg := schemaChange(name, meta.Schema.Fields, schema.Fields)
+			if code == 0 && refused != "" {
+				code, msg = http.StatusBadRequest, refused
+			}
 			switch {
 			case code == http.StatusBadRequest:
 				writeError(w, code, "invalid", msg)
@@ -108,7 +116,7 @@ func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 					setBody(r, b)
 				}
 			}
-			if adds && !f.addColumns(w, r, dataset, table, got, meta.Schema.Fields, patch["schema"]) {
+			if (adds || defaults) && !f.addColumns(w, r, dataset, table, got, meta.Schema.Fields, patch["schema"]) {
 				return
 			}
 		}

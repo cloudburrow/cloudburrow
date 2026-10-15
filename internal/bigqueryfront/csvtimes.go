@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cloudburrow/cloudburrow/internal/bigqueryfront/castformat"
+	"github.com/cloudburrow/cloudburrow/internal/bigqueryfront/strftime"
 )
 
 // A CSV load's timeZone, dateFormat, datetimeFormat, timeFormat and
@@ -35,9 +36,17 @@ import (
 //     (format-elements), which the front reads with the code the engine's
 //     CAST ... FORMAT does (castformat, a copy of the engine patch's). A
 //     format those elements cannot parse with is 400 invalid. The official
-//     Go client's FileConfig says each "Supports C-style and SQL-style
-//     values": a C-style one (holding %) is 501, as the front reads only
-//     the SQL-style elements.
+//     Go client's FileConfig, and the REST discovery document it is made
+//     from, say each "Supports C-style and SQL-style values"; the REST
+//     reference does not say which C-style elements. A C-style format
+//     (one holding %, #1338) is read with GoogleSQL's format elements for
+//     PARSE_DATE, PARSE_DATETIME, PARSE_TIME and PARSE_TIMESTAMP (%Y, %m,
+//     %d, %H, %M, %S, %Ez, ...: format-elements#format_elements_date_time),
+//     by the engine's own parser (strftime, a copy of googlesqlite's, with
+//     each literal character held to the value's). An element the type
+//     does not take (%H in a dateFormat) or that is not one is 400
+//     invalid. A TIMESTAMP whose format reads no zone (%z, %Z, %Ez or %s)
+//     is in timeZone, or UTC.
 //   - encoding: "The supported values are UTF-8, ISO-8859-1, UTF-16BE,
 //     UTF-16LE, UTF-32BE, and UTF-32LE." ... "If BigQuery can't convert a
 //     character ..., BigQuery converts the character to the standard
@@ -63,9 +72,11 @@ import (
 // cannot be meant byte for byte for these encodings, whose comma is two or
 // four bytes.
 //
-// With autodetect and no columns given, any of the five is 501: BigQuery's
-// detection "will also decide DATE column type based on this format", and
-// the emulator detects the columns by its own rules.
+// With autodetect and no columns given, BigQuery's detection "will also
+// decide DATE column type based on this format", and the emulator detects
+// the columns by its own rules: the front detects them instead (#1338,
+// csvdetect.go), so a load reaching csvTimesOf with detected columns is
+// one it did not detect (into another project's table), which is 501.
 
 // csvTimes are a CSV load's timeZone and formats.
 type csvTimes struct {
@@ -83,22 +94,22 @@ func csvTimesOf(o csvOptions, detected bool) (*csvTimes, int, string) {
 	for _, f := range []struct {
 		name, value, typ string
 		kind             castformat.Kind
+		cKind            strftime.Kind
 	}{
-		{"dateFormat", o.DateFormat, "DATE", castformat.Date},
-		{"datetimeFormat", o.DatetimeFormat, "DATETIME", castformat.Datetime},
-		{"timeFormat", o.TimeFormat, "TIME", castformat.Time},
-		{"timestampFormat", o.TimestampFormat, "TIMESTAMP", castformat.Timestamp},
+		{"dateFormat", o.DateFormat, "DATE", castformat.Date, strftime.Date},
+		{"datetimeFormat", o.DatetimeFormat, "DATETIME", castformat.Datetime, strftime.Datetime},
+		{"timeFormat", o.TimeFormat, "TIME", castformat.Time, strftime.Time},
+		{"timestampFormat", o.TimestampFormat, "TIMESTAMP", castformat.Timestamp, strftime.Timestamp},
 	} {
 		if f.value == "" {
 			continue
 		}
 		set = append(set, f.name)
-		if strings.Contains(f.value, "%") {
-			return nil, http.StatusNotImplemented, fmt.Sprintf("%s %q, a C-style format. BigQuery reads C-style formats "+
-				"(%%Y-%%m-%%d) as well as SQL-style ones (YYYY-MM-DD), but CloudBurrow reads only SQL-style format "+
-				"elements. Give the format in those", f.name, f.value)
-		}
-		if err := castformat.ValidateParse(f.value, f.kind); err != nil {
+		if strftime.IsCStyle(f.value) { // #1338, strftime
+			if err := strftime.Validate(f.value, f.cKind); err != nil {
+				return nil, http.StatusBadRequest, fmt.Sprintf("Invalid %s %q: %v.", f.name, f.value, err)
+			}
+		} else if err := castformat.ValidateParse(f.value, f.kind); err != nil {
 			return nil, http.StatusBadRequest, fmt.Sprintf("Invalid %s %q: %v.", f.name, f.value, err)
 		}
 		t.formats[f.typ] = f.value
@@ -196,7 +207,13 @@ func (t *csvTimes) convert(rec []string, cols []field) string {
 		case "TIMESTAMP":
 			kind, layout = castformat.Timestamp, emulatorTimestamp
 		}
-		got, err := castformat.ParseDatetime(strings.TrimSpace(v), kind, format, t.loc, now)
+		var got time.Time
+		var err error
+		if strftime.IsCStyle(format) { // #1338
+			got, err = strftime.Parse(format, strings.TrimSpace(v), cKinds[kind], t.loc)
+		} else {
+			got, err = castformat.ParseDatetime(strings.TrimSpace(v), kind, format, t.loc, now)
+		}
 		if err != nil {
 			return fmt.Sprintf("the value %q of the %s column %s does not match its format %q (%v)", v, typ,
 				cols[i].Name, format, err)
@@ -208,6 +225,10 @@ func (t *csvTimes) convert(rec []string, cols []field) string {
 	}
 	return ""
 }
+
+// cKinds are the strftime kinds of castformat's.
+var cKinds = map[castformat.Kind]strftime.Kind{castformat.Date: strftime.Date, castformat.Datetime: strftime.Datetime,
+	castformat.Time: strftime.Time, castformat.Timestamp: strftime.Timestamp}
 
 // zonedTimestamp writes v, a TIMESTAMP in a default form with no zone, as
 // a time in loc; ok is false for any other v, which is sent as it was.

@@ -27,7 +27,8 @@ import (
 // documents ("the partition ID specified in the decorator must match the
 // data being written. Otherwise, an error occurs"). Load and copy jobs
 // into a partition do the same, and a copy job reads a partition as its
-// source. A partition of an ingestion-time partitioned table is 501.
+// source. A partition of an ingestion-time partitioned table is its rows
+// of that _PARTITIONTIME (TestBigQueryIngestionTime).
 // Measured first: every decorated name was "Table not found".
 //
 // covers: bigquery.tabledata.list, bigquery.tables.get, bigquery.jobs.insert, bigquery.jobs.get
@@ -92,9 +93,9 @@ func TestBigQueryPartitionDestinations(t *testing.T) {
 	if got := read("byday$20240105", 0); len(got) != 0 {
 		t.Errorf("an empty partition: %v", got)
 	}
-	it := ds.Table("ingest$20240101").Read(ctx)
-	var row []bigquery.Value
-	wantAPIError(t, "ingestion-time partition", it.Next(&row), http.StatusNotImplemented, "ingestion-time")
+	if got := read("ingest$20240101", 0); len(got) != 0 {
+		t.Errorf("an empty ingestion-time partition: %v", got)
+	}
 
 	run := func(sql, dst, write string) error {
 		q := c.Query(sql)
@@ -148,9 +149,13 @@ func TestBigQueryPartitionDestinations(t *testing.T) {
 	if got, want := read("byrange", 0), []string{"11z", "150d", "5a"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("byrange after truncate: %v, want %v", got, want)
 	}
-	// An ingestion-time partition is not built.
-	wantAPIError(t, "ingestion-time destination", run("SELECT 1 AS n", "ingest$20240101", "WRITE_APPEND"),
-		http.StatusNotImplemented, "ingestion-time")
+	// An ingestion-time partition takes any row (#1277).
+	if err := run("SELECT 1 AS n", "ingest$20240101", "WRITE_APPEND"); err != nil {
+		t.Fatalf("ingestion-time destination: %v", err)
+	}
+	if got := read("ingest$20240101", 0); !reflect.DeepEqual(got, []string{"1"}) {
+		t.Errorf("ingest$20240101: %v, want [1]", got)
+	}
 
 	// Load jobs into a partition (an upload, a CSV with the table's schema).
 	load := func(csv, dst, write string) error {
@@ -251,7 +256,8 @@ func wantJobError(t *testing.T, what string, err error, reason, want string) {
 // TestConsoleBigQueryPartitions (#1273): a partitioned table's console
 // page lists its partitions with their rows, and each opens the table's
 // page by the partition's decorated name, whose Preview (tabledata.list)
-// shows that partition's rows only.
+// shows that partition's rows only; an ingestion-time partitioned
+// table's partitions too (#1277).
 //
 // covers: bigquery.tabledata.list, bigquery.tables.get, bigquery.jobs.query
 func TestConsoleBigQueryPartitions(t *testing.T) {
@@ -266,6 +272,8 @@ func TestConsoleBigQueryPartitions(t *testing.T) {
 		"INSERT INTO " + p("byday") + " (n, d) VALUES (1, DATE '2024-01-01'), (2, DATE '2024-01-01'), (3, DATE '2024-01-02'), (4, NULL)",
 		"CREATE TABLE " + p("byrange") + " (n INT64) PARTITION BY RANGE_BUCKET(n, GENERATE_ARRAY(0, 100, 10))",
 		"INSERT INTO " + p("byrange") + " (n) VALUES (5), (15), (19), (150)",
+		"CREATE TABLE " + p("ingest") + " (n INT64) PARTITION BY _PARTITIONDATE",
+		"INSERT INTO " + p("ingest") + " (_PARTITIONTIME, n) VALUES (TIMESTAMP '2024-01-01', 1), (TIMESTAMP '2024-01-03', 2)",
 	} {
 		if err := bqRun(ctx, c, sql, false); err != nil {
 			t.Fatalf("%s: %v", sql, err)
@@ -283,6 +291,7 @@ func TestConsoleBigQueryPartitions(t *testing.T) {
 	for table, want := range map[string][]string{
 		"byday":   {"20240101:2", "20240102:1", "__NULL__:1"},
 		"byrange": {"0:1", "10:2", "__UNPARTITIONED__:1"},
+		"ingest":  {"20240101:1", "20240103:1"}, // #1277
 	} {
 		var got []string
 		for _, it := range page(table).section(t, "partitions").Items {

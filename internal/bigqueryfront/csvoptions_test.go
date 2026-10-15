@@ -82,8 +82,10 @@ func TestCSVLoadOptionsRefused(t *testing.T) {
 		{"encoding unknown", loadJob(`,"encoding":"UTF-7"`), "1,x\n", 400, "invalid", false},
 		{"timeZone unknown", loadJob(`,"timeZone":"Mars/Olympus"`), "1,x\n", 400, "invalid", false},
 		{"dateFormat with a time", loadJob(`,"dateFormat":"MM/DD/YYYY HH24"`), "1,x\n", 400, "invalid", false},
-		{"timeZone with autodetect", `{"configuration":{"load":{"sourceFormat":"CSV","autodetect":true,"timeZone":"UTC",` +
-			`"destinationTable":{"projectId":"p","datasetId":"d","tableId":"t"}}}}`, "a\n1\n", 501, "notImplemented", false},
+		// #1338: detected by the front, which cannot tell a header over
+		// columns that are all STRING.
+		{"timeZone with autodetect, all strings", `{"configuration":{"load":{"sourceFormat":"CSV","autodetect":true,"timeZone":"UTC",` +
+			`"destinationTable":{"projectId":"p","datasetId":"d","tableId":"t"}}}}`, "a\nx\n", 501, "notImplemented", false},
 		{"maxBadRecords negative", loadJob(`,"maxBadRecords":-1`), "1,x\n", 400, "invalid", false},
 	} {
 		emu := &csvEmulator{}

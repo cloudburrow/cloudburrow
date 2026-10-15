@@ -412,7 +412,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	coord.Register(rmSrv)
 
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
-	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds)
+	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
 		coord.Register(sqlAdminSrv)
 	}

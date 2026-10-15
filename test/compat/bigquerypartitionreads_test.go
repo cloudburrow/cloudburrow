@@ -26,8 +26,8 @@ func wantAPIError(t *testing.T, what string, err error, code int, want string) {
 // _PARTITIONDATE exist only on an ingestion-time partitioned table. On any
 // other the query fails 400 "Unrecognized name", as BigQuery fails it
 // (measured first: the emulator answered the time of the query); on an
-// ingestion-time partitioned table with rows it is 501, the emulator keeps
-// no row's ingestion time; on an empty one the query runs.
+// ingestion-time partitioned table they read each row's partition
+// (TestBigQueryIngestionTime).
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
 func TestBigQueryPartitionPseudoColumns(t *testing.T) {
@@ -53,8 +53,10 @@ func TestBigQueryPartitionPseudoColumns(t *testing.T) {
 			http.StatusBadRequest, "Unrecognized name: _PARTITIONTIME at [1:8]")
 		wantAPIError(t, "bycol", bqRun(ctx, c, "SELECT n FROM "+p("bycol")+" WHERE _PARTITIONDATE = CURRENT_DATE()", insert),
 			http.StatusBadRequest, "Unrecognized name: _PARTITIONDATE")
-		wantAPIError(t, "ingestrows", bqRun(ctx, c, "SELECT _PARTITIONTIME FROM "+p("ingestrows"), insert),
-			http.StatusNotImplemented, "ingestion time")
+		if got := queryRows(t, ctx, c, "", "", "SELECT COUNT(*) FROM "+p("ingestrows")+
+			" WHERE _PARTITIONTIME = TIMESTAMP(CURRENT_DATE())"); !reflect.DeepEqual(got, []string{"1"}) {
+			t.Errorf("ingestion-time table with rows: %v, want [1]", got)
+		}
 		if err := bqRun(ctx, c, "SELECT n, _PARTITIONTIME FROM "+p("ingest")+" WHERE _PARTITIONDATE = CURRENT_DATE()", insert); err != nil {
 			t.Errorf("empty ingestion-time table: %v", err)
 		}

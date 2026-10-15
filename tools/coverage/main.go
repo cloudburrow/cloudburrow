@@ -63,6 +63,7 @@ import (
 	_ "cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
+	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
@@ -145,6 +146,10 @@ var areas = []area{
 	// otherwise. Bigtable's instance admin service is not listed: nothing
 	// here claims instance or cluster administration.
 	{Key: "firestore", Title: "Firestore", Services: []string{"google.firestore.v1.Firestore"}},
+	// The Firestore Admin API (#1331) is CloudBurrow's own, served by the
+	// Firestore pod's call front (internal/firestoreadmin): the emulator
+	// serves the documents API alone.
+	{Key: "firestoreadmin", Title: "Firestore Admin API", Own: true, Services: []string{"google.firestore.admin.v1.FirestoreAdmin"}},
 	{Key: "datastore", Title: "Datastore", Services: []string{"google.datastore.v1.Datastore"}},
 	{Key: "bigtable", Title: "Bigtable", Services: []string{"google.bigtable.v2.Bigtable", "google.bigtable.admin.v2.BigtableTableAdmin"}},
 	{Key: "spanner", Title: "Spanner", Services: []string{"google.spanner.v1.Spanner", "google.spanner.admin.database.v1.DatabaseAdmin", "google.spanner.admin.instance.v1.InstanceAdmin"}},

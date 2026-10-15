@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
+	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 )
@@ -41,9 +42,34 @@ import (
 // ErrUsage means the arguments were refused; the reason has been written.
 var ErrUsage = errors.New("usage")
 
+// Intercept answers some calls itself instead of the emulator: the
+// Firestore Admin API (internal/firestoreadmin, #1331), which the Firestore
+// emulator does not serve.
+type Intercept interface {
+	http.Handler
+	Claims(r *http.Request) bool
+}
+
 // Handler is the front for the emulator at upstream, recording into ring.
 func Handler(upstream string, ring *calllog.Ring, logf func(string, ...any)) http.Handler {
-	proxy := netfwd.Observed(netfwd.PassThrough(upstream, logf), func(c netfwd.Call) {
+	return HandlerWith(upstream, ring, logf, nil)
+}
+
+// HandlerWith is Handler, with the calls icpt claims answered by it rather
+// than the emulator, and recorded in the same call log.
+func HandlerWith(upstream string, ring *calllog.Ring, logf func(string, ...any), icpt Intercept) http.Handler {
+	var next http.Handler = netfwd.PassThrough(upstream, logf)
+	if icpt != nil {
+		pass := next
+		next = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if icpt.Claims(r) {
+				icpt.ServeHTTP(w, r)
+				return
+			}
+			pass.ServeHTTP(w, r)
+		})
+	}
+	proxy := netfwd.Observed(next, func(c netfwd.Call) {
 		transport := "http"
 		if c.GRPC {
 			transport = "grpc"
@@ -99,6 +125,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Spanner's admin REST API, which the Terraform provider uses (#1331).
 	restListen := fs.String("rest-listen", "", "address the front serves the emulator's second (REST) port on")
 	restUpstream := fs.String("rest-upstream", "", "the emulator's second (REST) address, on the pod's loopback")
+	// The Firestore Admin API, served by the front itself (#1331).
+	firestoreAdmin := fs.Bool("firestore-admin", false, "serve the Firestore Admin API in front of the Firestore emulator")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -114,7 +142,11 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	var servers []*http.Server
 	var listeners []net.Listener
-	for _, p := range pairs {
+	var icpt Intercept
+	if *firestoreAdmin {
+		icpt = firestoreadmin.New(*upstream)
+	}
+	for i, p := range pairs {
 		l, err := net.Listen("tcp", p[0])
 		if err != nil {
 			for _, l := range listeners {
@@ -123,7 +155,13 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("listen on %s: %w", p[0], err)
 		}
 		listeners = append(listeners, l)
-		servers = append(servers, Server(Handler(p[1], ring, logger.Printf), logger.Printf))
+		var h http.Handler
+		if i == 0 {
+			h = HandlerWith(p[1], ring, logger.Printf, icpt)
+		} else {
+			h = Handler(p[1], ring, logger.Printf)
+		}
+		servers = append(servers, Server(h, logger.Printf))
 		logger.Printf("call front: serving %s for the emulator at %s", l.Addr(), p[1])
 	}
 	go func() {
