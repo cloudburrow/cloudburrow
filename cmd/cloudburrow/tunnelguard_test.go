@@ -21,6 +21,7 @@ func TestWhichTunnelsAreGuarded(t *testing.T) {
 		"bigquery":         true, // REST on 9050
 		"bigquery-storage": false,
 		"spanner":          false,
+		"spanner-rest":     true, // Spanner's REST API on 9020 (#1331)
 		"bigtable":         false,
 		"storage":          false,
 		"cloudsql":         false,

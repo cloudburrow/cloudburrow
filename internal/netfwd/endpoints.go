@@ -84,6 +84,8 @@ func ScopeNoteFor(service string) string {
 			"project only, and keeps nothing across a restart"
 	case "bigquery-storage":
 		return "the BigQuery Storage Read API (gRPC) for the endpoint above"
+	case "spanner-rest":
+		return "the Spanner emulator's REST API for the endpoint above; Terraform's spanner_custom_endpoint"
 	case "cloudsql-mysql":
 		return "a local MySQL 8.4, not the Cloud SQL Admin API — " +
 			"connect with an ordinary driver; there is no sqladmin endpoint"

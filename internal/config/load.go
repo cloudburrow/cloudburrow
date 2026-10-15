@@ -196,6 +196,7 @@ type rawFlags struct {
 	datastore       int
 	bigtable        int
 	spanner         int
+	spannerREST     int
 	bigquery        int
 	bigqueryStorage int
 	memorystore     int
@@ -265,6 +266,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.datastore, "port-datastore", 0, "Datastore emulator host port (0 = OS-assigned; default 9011)")
 	fs.IntVar(&r.bigtable, "port-bigtable", 0, "Bigtable emulator host port (0 = OS-assigned; default 9012)")
 	fs.IntVar(&r.spanner, "port-spanner", 0, "Spanner emulator host port (0 = OS-assigned; default 9013)")
+	fs.IntVar(&r.spannerREST, "port-spanner-rest", 0, "Spanner emulator REST API host port, which Terraform uses (0 = OS-assigned; default 9022)")
 	fs.IntVar(&r.bigquery, "port-bigquery", 0, "BigQuery emulator REST host port (0 = OS-assigned; default 9014)")
 	fs.IntVar(&r.bigqueryStorage, "port-bigquery-storage", 0, "BigQuery Storage Read API gRPC host port (0 = OS-assigned; default 9015)")
 	fs.IntVar(&r.memorystore, "port-memorystore", 0, "Memorystore (Valkey, RESP) host port (0 = OS-assigned; default 9016)")
@@ -450,6 +452,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_DATASTORE", &cfg.Endpoints.Datastore},
 		{"PORT_BIGTABLE", &cfg.Endpoints.Bigtable},
 		{"PORT_SPANNER", &cfg.Endpoints.Spanner},
+		{"PORT_SPANNER_REST", &cfg.Endpoints.SpannerREST},
 		{"PORT_BIGQUERY", &cfg.Endpoints.BigQuery},
 		{"PORT_BIGQUERY_STORAGE", &cfg.Endpoints.BigQueryStorage},
 		{"PORT_MEMORYSTORE", &cfg.Endpoints.Memorystore},
@@ -547,6 +550,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-datastore", raw.datastore, &cfg.Endpoints.Datastore},
 		{"port-bigtable", raw.bigtable, &cfg.Endpoints.Bigtable},
 		{"port-spanner", raw.spanner, &cfg.Endpoints.Spanner},
+		{"port-spanner-rest", raw.spannerREST, &cfg.Endpoints.SpannerREST},
 		{"port-bigquery", raw.bigquery, &cfg.Endpoints.BigQuery},
 		{"port-bigquery-storage", raw.bigqueryStorage, &cfg.Endpoints.BigQueryStorage},
 		{"port-memorystore", raw.memorystore, &cfg.Endpoints.Memorystore},

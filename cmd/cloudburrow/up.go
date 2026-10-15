@@ -687,6 +687,21 @@ func forwardTargets(cfg config.Config, s config.Service) []netfwd.Target {
 		HostPort:    hostPort,
 		Guarded:     guardedTunnel(s),
 	}}
+	if s == config.ServiceSpanner {
+		// Spanner's REST API (#1331), the same Service on a second port,
+		// which the call front in the pod serves (#1288) into the same
+		// call log as the gRPC port. Its own tunnel, labelled apart: the
+		// Terraform provider reaches it as spanner_custom_endpoint. It is
+		// REST over HTTP/1.1, which a browser can send, so it is guarded.
+		out = append(out, netfwd.Target{
+			Name:        string(s),
+			Label:       "spanner-rest",
+			Namespace:   cfg.Cluster.Namespace,
+			ServicePort: components.SpannerRESTPort,
+			HostPort:    cfg.Endpoints.SpannerREST,
+			Guarded:     true,
+		})
+	}
 	if s == config.ServiceBigQuery {
 		// The tunnel needs no front of its own: the validating front
 		// (internal/bigqueryfront, #861) serves the Service's REST port in
@@ -958,6 +973,8 @@ func configuredEndpoints(cfg config.Config, s config.Service) []configuredEndpoi
 		return []configuredEndpoint{{"kms", e.KMS}}
 	case config.ServiceBigQuery:
 		return []configuredEndpoint{{"bigquery", e.BigQuery}, {"bigquery-storage", e.BigQueryStorage}}
+	case config.ServiceSpanner:
+		return []configuredEndpoint{{"spanner", e.Spanner}, {"spanner-rest", e.SpannerREST}}
 	default:
 		return []configuredEndpoint{{string(s), e.OptionalPort(s)}}
 	}

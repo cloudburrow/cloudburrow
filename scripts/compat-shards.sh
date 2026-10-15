@@ -132,7 +132,8 @@ compat_shard() {
       # dials both emulators from a pod; PUBSUB is not exported, so the
       # Pub/Sub tests stay in the storage shard.
       SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql,storage,pubsub
-      # Datastore (#307), Firestore and Bigtable (#346), Memorystore
+      # Spanner with its REST API for Terraform (#1331), Datastore (#307),
+      # Firestore and Bigtable (#346), Memorystore
       # (#296), Cloud SQL for MySQL with its generated password (#297),
       # Cloud SQL for PostgreSQL (#311, #584), and BigQuery with the one
       # project its emulator serves (#277); the pod that dials its Service
@@ -140,7 +141,7 @@ compat_shard() {
       # Storage runs for BigQuery's loads from gs:// URIs (#919), whose
       # test finds its endpoint with `cloudburrow env`; STORAGE is not
       # exported, so the Cloud Storage tests stay in the storage shard.
-      TEST_VARS+=,SPANNER,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MYSQL,MYSQL_PASSWORD,CLOUDSQL,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT
+      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MYSQL,MYSQL_PASSWORD,CLOUDSQL,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       PROBE_TESTS="TestMemorystoreAcrossRestart TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart TestDatastoreAcrossRestart"

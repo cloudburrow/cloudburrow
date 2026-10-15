@@ -51,6 +51,9 @@ func hostPorts(cfg config.Config) map[string]int {
 		case config.ServiceBigQuery:
 			ports["bigquery"] = e.BigQuery
 			ports["bigquery-storage"] = e.BigQueryStorage
+		case config.ServiceSpanner:
+			ports["spanner"] = e.Spanner
+			ports["spanner-rest"] = e.SpannerREST
 		default:
 			ports[string(s)] = e.OptionalPort(s)
 		}

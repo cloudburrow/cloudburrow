@@ -89,6 +89,8 @@ Flags:
     	Secret Manager host port (0 = OS-assigned)
   -port-spanner int
     	Spanner emulator host port (0 = OS-assigned; default 9013)
+  -port-spanner-rest int
+    	Spanner emulator REST API host port, which Terraform uses (0 = OS-assigned; default 9022)
   -port-storage int
     	Cloud Storage host port (0 = OS-assigned)
   -port-tasks int

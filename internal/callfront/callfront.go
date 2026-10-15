@@ -95,28 +95,58 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	listen := fs.String("listen", "", "address the front serves the emulator's port on")
 	upstream := fs.String("upstream", "", "the emulator's address, on the pod's loopback")
+	// A second port of the same emulator, fronted into the same call log:
+	// Spanner's admin REST API, which the Terraform provider uses (#1331).
+	restListen := fs.String("rest-listen", "", "address the front serves the emulator's second (REST) port on")
+	restUpstream := fs.String("rest-upstream", "", "the emulator's second (REST) address, on the pod's loopback")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
-	if fs.NArg() > 0 || *listen == "" || *upstream == "" {
-		fmt.Fprintln(stderr, "call-front: --listen and --upstream are required, and nothing else")
+	if fs.NArg() > 0 || *listen == "" || *upstream == "" || (*restListen == "") != (*restUpstream == "") {
+		fmt.Fprintln(stderr, "call-front: --listen and --upstream are required, --rest-listen and --rest-upstream go together, and nothing else")
 		return ErrUsage
 	}
 	logger := log.New(stdout, "", log.LstdFlags|log.LUTC)
-	l, err := net.Listen("tcp", *listen)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", *listen, err)
+	ring := &calllog.Ring{}
+	pairs := [][2]string{{*listen, *upstream}}
+	if *restListen != "" {
+		pairs = append(pairs, [2]string{*restListen, *restUpstream})
 	}
-	srv := Server(Handler(*upstream, &calllog.Ring{}, logger.Printf), logger.Printf)
-	logger.Printf("call front: serving %s for the emulator at %s", l.Addr(), *upstream)
+	var servers []*http.Server
+	var listeners []net.Listener
+	for _, p := range pairs {
+		l, err := net.Listen("tcp", p[0])
+		if err != nil {
+			for _, l := range listeners {
+				_ = l.Close()
+			}
+			return fmt.Errorf("listen on %s: %w", p[0], err)
+		}
+		listeners = append(listeners, l)
+		servers = append(servers, Server(Handler(p[1], ring, logger.Printf), logger.Printf))
+		logger.Printf("call front: serving %s for the emulator at %s", l.Addr(), p[1])
+	}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(sctx)
+		for _, srv := range servers {
+			_ = srv.Shutdown(sctx)
+		}
 	}()
-	if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
+	errs := make(chan error, len(servers))
+	for i, srv := range servers {
+		go func() { errs <- srv.Serve(listeners[i]) }()
+	}
+	// One port failing fails the front, so the pod restarts it whole
+	// rather than serve one port of two.
+	for range servers {
+		if err := <-errs; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			for _, srv := range servers {
+				_ = srv.Close()
+			}
+			return err
+		}
 	}
 	return nil
 }

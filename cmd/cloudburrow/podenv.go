@@ -67,6 +67,9 @@ func podEnvVars(inCluster map[string]string) []envVar {
 		case service == "bigquery":
 			vars = append(vars, envVar{"CLOUDBURROW_BIGQUERY_ENDPOINT", "http://" + addr,
 				"read by no client library: pass it to option.WithEndpoint"})
+		case service == "spanner-rest":
+			vars = append(vars, envVar{"CLOUDBURROW_SPANNER_REST_ENDPOINT", "http://" + addr,
+				"Spanner's REST API; read by no client library: the Terraform provider's spanner_custom_endpoint"})
 		case service == "bigquery-storage":
 			vars = append(vars, envVar{"CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT", addr,
 				"the Storage Read API (gRPC); read by no client library"})

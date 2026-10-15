@@ -22,9 +22,11 @@ const (
 	// BigtableEmulatorPort is the Bigtable emulator's own port, on its
 	// pod's loopback alone: its front serves BigtablePort (#1206).
 	BigtableEmulatorPort = 8096
-	// SpannerPort is the gRPC port; the emulator also serves REST on 9020,
-	// which the official clients do not use.
-	SpannerPort = 9010
+	// SpannerPort is the gRPC port the official clients use. SpannerRESTPort
+	// is the emulator's REST API (instance and database admin among it),
+	// which the Terraform provider uses (#1331); the call front serves both.
+	SpannerPort     = 9010
+	SpannerRESTPort = 9020
 
 	// The emulators' own ports behind their call fronts
 	// (internal/callfront, #1288), on their pods' loopback alone: the
@@ -32,6 +34,9 @@ const (
 	FirestoreEmulatorPort = 8090
 	DatastoreEmulatorPort = 8091
 	SpannerEmulatorPort   = 9011
+	// SpannerEmulatorRESTPort is the emulator's own REST port, behind the
+	// front's SpannerRESTPort.
+	SpannerEmulatorRESTPort = 9021
 
 	// CloudSQLImage is PostgreSQL 17.11, pinned by digest.
 	//
@@ -270,16 +275,22 @@ func bigtableBackend(project string) Backend {
 }
 
 // spannerBackend runs the image's gateway on the pod's loopback, its gRPC
-// port behind the call front (#1288); the REST port, which the official
-// clients do not use, stays unpublished.
+// port behind the call front (#1288). Its REST port is behind the same
+// front (#1331), on a second Service port, so the calls the Terraform
+// provider makes over REST are in the same call log as the clients' gRPC.
 func spannerBackend() Backend {
+	front := callFront(SpannerPort, SpannerEmulatorPort)
+	front.Args = append(front.Args, "--rest-listen", fmt.Sprintf("0.0.0.0:%d", SpannerRESTPort),
+		"--rest-upstream", fmt.Sprintf("127.0.0.1:%d", SpannerEmulatorRESTPort))
+	front.Extra = []FrontPort{{Port: SpannerRESTPort, Upstream: SpannerEmulatorRESTPort}}
 	return Backend{
 		Name:  "spanner",
 		Image: SpannerImage,
 		Port:  SpannerPort,
 		Command: []string{"./gateway_main", "--hostname", "127.0.0.1",
-			"--grpc_port", fmt.Sprint(SpannerEmulatorPort), "--http_port", "9020"},
-		Front: callFront(SpannerPort, SpannerEmulatorPort),
+			"--grpc_port", fmt.Sprint(SpannerEmulatorPort), "--http_port", fmt.Sprint(SpannerEmulatorRESTPort)},
+		ExtraPorts: []NamedPort{{Name: "rest", Port: SpannerRESTPort}},
+		Front:      front,
 	}
 }
 

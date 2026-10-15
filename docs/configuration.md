@@ -398,7 +398,7 @@ with Cloud KMS can run locally. Never use it to protect real data. See
 ## Console
 
 `--port-firestore` (default `9010`), `--port-datastore` (`9011`), `--port-bigtable` (`9012`) and
-`--port-spanner` (`9013`), `--port-bigquery` (`9014`), `--port-bigquery-storage` (`9015`) and
+`--port-spanner` (`9013`, and `--port-spanner-rest` `9022` for its REST API), `--port-bigquery` (`9014`), `--port-bigquery-storage` (`9015`) and
 `--port-memorystore` (`9016`), `--port-cloudsql-mysql` (`9017`) and `--port-cloudsql` (`9019`) —
 with `CLOUDBURROW_PORT_FIRESTORE` and so on, and config keys `endpoints.firestore` etc. — are the
 host ports of the opt-in emulators. They are fixed so that
@@ -581,6 +581,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--port-datastore` | `CLOUDBURROW_PORT_DATASTORE` | `endpoints.datastore` | `9011` | Datastore emulator host endpoint (`--services datastore`). |
 | `--port-bigtable` | `CLOUDBURROW_PORT_BIGTABLE` | `endpoints.bigtable` | `9012` | Bigtable emulator host endpoint (`--services bigtable`). |
 | `--port-spanner` | `CLOUDBURROW_PORT_SPANNER` | `endpoints.spanner` | `9013` | Spanner emulator host endpoint (`--services spanner`). |
+| `--port-spanner-rest` | `CLOUDBURROW_PORT_SPANNER_REST` | `endpoints.spannerREST` | `9022` | Spanner emulator REST API host endpoint (`--services spanner`), exported as `CLOUDBURROW_SPANNER_REST_ENDPOINT`. The client libraries use `--port-spanner`'s gRPC; this is the port `cloudburrow terraform` gives the provider as `spanner_custom_endpoint` (#1331). Served by the call front in the emulator's pod, so its calls are in the same request log. Moves with `--port-base`. |
 | `--port-bigquery` | `CLOUDBURROW_PORT_BIGQUERY` | `endpoints.bigquery` | `9014` | BigQuery emulator REST host endpoint (`--services bigquery`). |
 | `--port-bigquery-storage` | `CLOUDBURROW_PORT_BIGQUERY_STORAGE` | `endpoints.bigqueryStorage` | `9015` | BigQuery Storage Read API gRPC host endpoint (`--services bigquery`). |
 | `--port-memorystore` | `CLOUDBURROW_PORT_MEMORYSTORE` | `endpoints.memorystore` | `9016` | Memorystore (Valkey, RESP) host endpoint (`--services memorystore`). |

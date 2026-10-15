@@ -271,6 +271,10 @@ type Endpoints struct {
 	Datastore int `json:"datastore"`
 	Bigtable  int `json:"bigtable"`
 	Spanner   int `json:"spanner"`
+	// SpannerREST is the Spanner emulator's REST API, instance and database
+	// admin among it, which the Terraform provider uses (#1331); the official
+	// client libraries use Spanner's gRPC port.
+	SpannerREST int `json:"spannerREST"`
 	// BigQuery is the REST API; BigQueryStorage the gRPC Storage Read API,
 	// which the Go client's result iterator uses for large reads.
 	BigQuery        int `json:"bigquery"`
@@ -333,6 +337,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"datastore", &e.Datastore},
 		{"bigtable", &e.Bigtable},
 		{"spanner", &e.Spanner},
+		{"spanner-rest", &e.SpannerREST},
 		{"bigquery", &e.BigQuery},
 		{"bigquery-storage", &e.BigQueryStorage},
 		{"memorystore", &e.Memorystore},
@@ -636,6 +641,9 @@ func Default() Config {
 			CloudSQLMySQL:   9017,
 			// After KMS's 9018: the next free port in the block.
 			CloudSQL: 9019,
+			// Spanner's second port, its REST API (#1331). 9020 and 9021
+			// are Cloud SQL Admin's and Memorystore's admin APIs.
+			SpannerREST: 9022,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with
