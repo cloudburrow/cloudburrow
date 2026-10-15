@@ -276,7 +276,7 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 		{"EXECUTE IMMEDIATE 'SELECT ?, @a' USING 1 AS a", "", 400},
 		{"EXECUTE IMMEDIATE ''", "", 400},
 	} {
-		got, changed, code, msg := expandExecuteImmediate(c.sql)
+		got, changed, code, msg := expandExecuteImmediate(c.sql, nil)
 		want := c.want
 		if want == "" {
 			want = c.sql
