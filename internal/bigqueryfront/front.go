@@ -297,10 +297,25 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			withInfinities(w, r, serve) // jobs.getQueryResults, #1077, #1101
 			return
 		}
-		if m := routinesRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil && r.Method == http.MethodPost {
-			f := front{next: next, base: m[1] + "/projects/" + m[2], functions: functions}
-			f.insertRoutine(w, r, projectOf(f.base)) // #1001
-			return
+		if m := routinesRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil && (r.Method == http.MethodPost || r.Method == http.MethodGet) {
+			f := front{next: next, base: m[1] + "/projects/" + m[2], functions: functions, records: records, configs: configs}
+			if r.Method == http.MethodPost {
+				f.insertRoutine(w, r, projectOf(f.base)) // #1001
+				return
+			}
+			if ds, err := url.PathUnescape(m[3]); err == nil {
+				f.listRoutines(w, r, projectOf(f.base), ds) // #1177
+				return
+			}
+		}
+		if m := routineRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil {
+			f := front{next: next, base: m[1] + "/projects/" + m[2], functions: functions, records: records, configs: configs}
+			ds, err1 := url.PathUnescape(m[3])
+			id, err2 := url.PathUnescape(m[4])
+			if err1 == nil && err2 == nil {
+				f.serveRoutine(w, r, projectOf(f.base), ds, id) // #1177
+				return
+			}
 		}
 		m := route.FindStringSubmatch(r.URL.EscapedPath())
 		if m == nil {
@@ -744,6 +759,7 @@ func writeError(w http.ResponseWriter, code int, reason, message string) {
 	status := map[int]string{
 		http.StatusBadRequest:          "INVALID_ARGUMENT",
 		http.StatusConflict:            "ALREADY_EXISTS",
+		http.StatusNotFound:            "NOT_FOUND",
 		http.StatusNotImplemented:      "UNIMPLEMENTED",
 		http.StatusInternalServerError: "INTERNAL",
 		http.StatusServiceUnavailable:  "UNAVAILABLE",

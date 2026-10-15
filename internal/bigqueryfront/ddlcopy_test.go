@@ -159,7 +159,7 @@ func (e *stateEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		writeJSON(w, 200, map[string]any{"tables": list})
-	case parts[0] == "datasets" && len(parts) == 3 && r.Method == http.MethodPost:
+	case parts[0] == "datasets" && len(parts) == 3 && r.Method == http.MethodPost && parts[2] != "routines":
 		var t struct {
 			TableReference tableRef        `json:"tableReference"`
 			Schema         json.RawMessage `json:"schema"`

@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // CREATE FUNCTION of a function that exists (#986).
@@ -225,6 +227,9 @@ func (f front) failBeforeRun(w http.ResponseWriter, r *http.Request, q queryOpti
 type knownFunctions struct {
 	mu    sync.Mutex
 	funcs map[string]map[string][]string // project/dataset, lower-case name -> path
+	// defs are their definitions, as bigquery Routine resources, by
+	// project/dataset and lower-case name (routinedefs.go, #1177).
+	defs map[string]map[string]json.RawMessage
 	// started is when the front started, in Unix milliseconds; scanned,
 	// the projects whose jobs from before it were read (scan).
 	started int64
@@ -265,6 +270,7 @@ func (k *knownFunctions) note(project string, q queryOptions, v ddlVerdict) {
 		}
 		k.add(project, full[len(full)-2:])
 	}
+	k.noteDefs(project, q, v) // #1177
 }
 
 // in returns the functions known in a dataset.
@@ -289,6 +295,7 @@ func (k *knownFunctions) forget(project, dataset string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	delete(k.funcs, project+"/"+dataset)
+	delete(k.defs, project+"/"+dataset)
 	k.saveLocked()
 }
 
@@ -436,6 +443,22 @@ func (f front) insertRoutine(w http.ResponseWriter, r *http.Request, project str
 	if rec.status == http.StatusOK && json.Unmarshal(rec.body.Bytes(), &made) == nil &&
 		made.RoutineReference.DatasetID != "" && made.RoutineReference.RoutineID != "" {
 		f.functions.add(project, []string{made.RoutineReference.DatasetID, made.RoutineReference.RoutineID})
+		var def map[string]any
+		if json.Unmarshal(rec.body.Bytes(), &def) == nil { // #1177: routines.get
+			now := strconv.FormatInt(time.Now().UnixMilli(), 10)
+			if ref, ok := def["routineReference"].(map[string]any); ok && ref["projectId"] == nil {
+				ref["projectId"] = project
+			}
+			for _, k := range []string{"creationTime", "lastModifiedTime"} {
+				if def[k] == nil {
+					def[k] = now
+				}
+			}
+			if def["etag"] == nil {
+				def["etag"] = etagOf(now)
+			}
+			f.functions.setDef(project, []string{made.RoutineReference.DatasetID, made.RoutineReference.RoutineID}, def)
+		}
 	}
 	rec.copyTo(w)
 }
