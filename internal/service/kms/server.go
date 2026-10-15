@@ -4,12 +4,13 @@
 // It is built to Google's spec rather than reused: Google publishes no Cloud
 // KMS emulator, and each third-party one departs from Google's documented
 // behaviour (docs/upstream-evaluation.md, the Cloud KMS amendment). It manages key rings,
-// symmetric encryption keys and their versions — the resources an
-// application or Terraform creates before it encrypts anything. Encrypt and
-// Decrypt are served too. IAM policies on key rings and crypto keys are stored
-// and never enforced (iam.go, ADR-0006 as amended by #421). Asymmetric and MAC
-// purposes, import jobs, HSM and EKM protection and IAM on anything else are
-// UNIMPLEMENTED. Automatic rotation (rotation_period, next_rotation_time) is
+// keys and their versions — the resources an application or Terraform
+// creates before it encrypts anything — and serves the cryptographic methods:
+// Encrypt and Decrypt (crypto.go); the asymmetric, MAC, raw and ML-KEM
+// purposes (purposes.go, ops.go); key deletion (delete.go); and import jobs
+// (import.go). IAM policies on key rings and crypto keys are stored and never
+// enforced (iam.go, ADR-0006 as amended by #421). HSM and EKM protection,
+// trusted key wrapping and IAM on anything else are UNIMPLEMENTED. Automatic rotation (rotation_period, next_rotation_time) is
 // served on the Server's clock (rotation.go, #816).
 package kms
 
@@ -17,7 +18,6 @@ import (
 	"context"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,6 +66,11 @@ type cryptoKey struct {
 	// stored reads as a key that does not rotate.
 	RotationPeriod time.Duration `json:"rotationPeriod,omitempty"`
 	NextRotation   time.Time     `json:"nextRotationTime,omitempty"`
+	// Purpose and Algorithm (the version template's) are empty for
+	// ENCRYPT_DECRYPT and GOOGLE_SYMMETRIC_ENCRYPTION (#1212), so records
+	// written before other purposes existed read unchanged.
+	Purpose   string `json:"purpose,omitempty"`
+	Algorithm string `json:"algorithm,omitempty"`
 }
 
 // Destroy scheduling (resources.proto destroy_scheduled_duration; the range
@@ -86,9 +91,15 @@ func (k cryptoKey) destroyScheduled() time.Duration {
 type keyVersion struct {
 	Name    string    `json:"name"`
 	Created time.Time `json:"created"`
-	// Material is the 256-bit AES key. It never leaves the store through
-	// this API: no RPC returns it.
+	// Material is the key: AES or HMAC bytes, or a PKCS #8 DER private key
+	// (purposes.go). It never leaves the store through this API: no RPC
+	// returns it.
 	Material []byte `json:"material"`
+	// Algorithm is empty for GOOGLE_SYMMETRIC_ENCRYPTION (#1212).
+	Algorithm string `json:"algorithm,omitempty"`
+	// ImportJob and Imported are set on an imported version (import.go).
+	ImportJob string    `json:"importJob,omitempty"`
+	Imported  time.Time `json:"importTime,omitempty"`
 	// State is the version's lifecycle state (#398). Empty reads as
 	// ENABLED, so records written before states were stored stay readable.
 	State string `json:"state,omitempty"`
@@ -338,9 +349,13 @@ func (s *Server) toVersion(v keyVersion) *kmspb.CryptoKeyVersion {
 		Name:            v.Name,
 		State:           v.state(),
 		ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
-		Algorithm:       kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION,
+		Algorithm:       v.algorithm(),
 		CreateTime:      timestamppb.New(v.Created),
 		GenerateTime:    timestamppb.New(v.Created),
+	}
+	if v.ImportJob != "" {
+		out.ImportJob = v.ImportJob
+		out.ImportTime = timestamppb.New(v.Imported)
 	}
 	// As the proto says: destroy_time only while DESTROY_SCHEDULED,
 	// destroy_event_time only once DESTROYED.
@@ -359,7 +374,7 @@ func (s *Server) toVersion(v keyVersion) *kmspb.CryptoKeyVersion {
 func (s *Server) toKey(k cryptoKey) (*kmspb.CryptoKey, error) {
 	out := &kmspb.CryptoKey{
 		Name:       k.Name,
-		Purpose:    kmspb.CryptoKey_ENCRYPT_DECRYPT,
+		Purpose:    k.purpose(),
 		CreateTime: timestamppb.New(k.Created),
 		Labels:     k.Labels,
 		// Echoed even when defaulted; whether Google echoes the default is
@@ -367,7 +382,7 @@ func (s *Server) toKey(k cryptoKey) (*kmspb.CryptoKey, error) {
 		DestroyScheduledDuration: durationpb.New(k.destroyScheduled()),
 		VersionTemplate: &kmspb.CryptoKeyVersionTemplate{
 			ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
-			Algorithm:       kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION,
+			Algorithm:       k.algorithm(),
 		},
 	}
 	if k.RotationPeriod > 0 {
@@ -399,14 +414,10 @@ func unsupportedKey(k *kmspb.CryptoKey) error {
 		// Required (service.proto); the code is UNVERIFIED.
 		return apierror.InvalidArgument("crypto_key.purpose is required")
 	}
-	if p := k.GetPurpose(); p != kmspb.CryptoKey_ENCRYPT_DECRYPT {
-		return apierror.Unimplemented("crypto_key.purpose %s is not implemented: only ENCRYPT_DECRYPT (symmetric) keys are", p)
+	if p := k.GetPurpose(); !purposes[p] {
+		return apierror.Unimplemented("crypto_key.purpose %s is not implemented", p)
 	}
 	if t := k.GetVersionTemplate(); t != nil {
-		if a := t.GetAlgorithm(); a != kmspb.CryptoKeyVersion_CRYPTO_KEY_VERSION_ALGORITHM_UNSPECIFIED &&
-			a != kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION {
-			return apierror.Unimplemented("crypto_key.version_template.algorithm %s is not implemented: only GOOGLE_SYMMETRIC_ENCRYPTION is", a)
-		}
 		if pl := t.GetProtectionLevel(); pl != kmspb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED && pl != kmspb.ProtectionLevel_SOFTWARE {
 			return apierror.Unimplemented("crypto_key.version_template.protection_level %s is not implemented: only SOFTWARE keys exist locally", pl)
 		}
@@ -438,13 +449,8 @@ func destroyScheduledOf(k *kmspb.CryptoKey) (time.Duration, error) {
 	return v, nil
 }
 
-func newMaterial() ([]byte, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return nil, apierror.Internal(err, "generate key material")
-	}
-	return b, nil
-}
+// newMaterial makes the material of a new version of k.
+func newMaterial(k cryptoKey) ([]byte, error) { return generate(k.algorithm()) }
 
 func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRequest) (*kmspb.CryptoKey, error) {
 	if err := parseKeyRing("parent", req.GetParent()); err != nil {
@@ -460,13 +466,14 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	if err := unsupportedKey(in); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	alg, err := keyAlgorithm(in.GetPurpose(), in.GetVersionTemplate().GetAlgorithm())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	destroyAfter, err := destroyScheduledOf(in)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	// unsupportedKey has refused every purpose but ENCRYPT_DECRYPT, the one
-	// that supports automatic rotation (resources.proto), so a schedule here
-	// is on a key that can rotate.
 	period, err := rotationPeriodOf(in)
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -474,6 +481,11 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	nextRotation, err := nextRotationOf(in)
 	if err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	// Only ENCRYPT_DECRYPT keys rotate automatically (resources.proto
+	// rotation_period); the code for a schedule on another is UNVERIFIED.
+	if (period > 0 || !nextRotation.IsZero()) && in.GetPurpose() != kmspb.CryptoKey_ENCRYPT_DECRYPT {
+		return nil, apierror.Wrap(apierror.InvalidArgument("automatic rotation is only supported for ENCRYPT_DECRYPT keys, not %s", in.GetPurpose()))
 	}
 	if err := checkSchedule(period, nextRotation); err != nil {
 		return nil, apierror.Wrap(err)
@@ -494,17 +506,30 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 		return nil, apierror.Wrap(apierror.AlreadyExists("CryptoKey %s already exists", name))
 	}
 	now := s.now().UTC()
+	if retired, err := s.isRetired(name); err != nil {
+		return nil, err
+	} else if retired {
+		// RetiredResources "prevent the reuse of these resource names after
+		// deletion" (resources.proto); the code is UNVERIFIED.
+		return nil, apierror.Wrap(apierror.AlreadyExists("CryptoKey %s was deleted, and its name cannot be reused", name))
+	}
 	k := cryptoKey{Name: name, Created: now, Labels: in.GetLabels(), Next: 1, DestroyScheduled: destroyAfter,
-		RotationPeriod: period, NextRotation: nextRotation}
+		RotationPeriod: period, NextRotation: nextRotation,
+		Purpose: storedPurpose(in.GetPurpose()), Algorithm: storedAlgorithm(alg)}
 	if !req.GetSkipInitialVersionCreation() {
-		mat, err := newMaterial()
+		mat, err := newMaterial(k)
 		if err != nil {
 			return nil, apierror.Wrap(err)
 		}
-		if err := s.put(dbKey(versionPrefix, versionName(name, 1)), keyVersion{Name: versionName(name, 1), Created: now, Material: mat}); err != nil {
+		if err := s.put(dbKey(versionPrefix, versionName(name, 1)), keyVersion{Name: versionName(name, 1), Created: now, Material: mat, Algorithm: k.Algorithm}); err != nil {
 			return nil, apierror.Wrap(err)
 		}
-		k.Primary, k.Next = 1, 2
+		k.Next = 2
+		// Only an ENCRYPT_DECRYPT key has a primary (resources.proto
+		// primary).
+		if k.purpose() == kmspb.CryptoKey_ENCRYPT_DECRYPT {
+			k.Primary = 1
+		}
 	}
 	if err := s.put(dbKey(keyPrefix, name), k); err != nil {
 		return nil, apierror.Wrap(err)
@@ -616,12 +641,12 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 	if err := s.load(dbKey(keyPrefix, req.GetParent()), &k, "CryptoKey", req.GetParent()); err != nil {
 		return nil, err
 	}
-	mat, err := newMaterial()
+	mat, err := newMaterial(k)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	n := k.Next
-	v := keyVersion{Name: versionName(k.Name, n), Created: s.now().UTC(), Material: mat, State: initial.String()}
+	v := keyVersion{Name: versionName(k.Name, n), Created: s.now().UTC(), Material: mat, State: initial.String(), Algorithm: k.Algorithm}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -724,6 +749,11 @@ func (s *Server) UpdateCryptoKeyPrimaryVersion(_ context.Context, req *kmspb.Upd
 	if err := s.load(dbKey(keyPrefix, req.GetName()), &k, "CryptoKey", req.GetName()); err != nil {
 		return nil, err
 	}
+	// service.proto: this "returns an error if called on a key whose purpose
+	// is not ENCRYPT_DECRYPT". The code is UNVERIFIED.
+	if p := k.purpose(); p != kmspb.CryptoKey_ENCRYPT_DECRYPT {
+		return nil, apierror.Wrap(apierror.FailedPrecondition("CryptoKey %s is %s: only an ENCRYPT_DECRYPT key has a primary version", k.Name, p))
+	}
 	var v keyVersion
 	if err := s.load(dbKey(versionPrefix, versionName(k.Name, n)), &v, "CryptoKeyVersion", versionName(k.Name, n)); err != nil {
 		return nil, err
@@ -735,10 +765,6 @@ func (s *Server) UpdateCryptoKeyPrimaryVersion(_ context.Context, req *kmspb.Upd
 		return nil, apierror.Wrap(apierror.FailedPrecondition(
 			"CryptoKeyVersion %s is %s: only an ENABLED version can be made primary", v.Name, st))
 	}
-	// service.proto: this "returns an error if called on a key whose purpose
-	// is not ENCRYPT_DECRYPT". Every key here is ENCRYPT_DECRYPT, because
-	// CreateCryptoKey refuses every other purpose (unsupportedKey), so the
-	// check cannot be reached. It belongs here with the first other purpose.
 	k.Primary = n
 	if err := s.put(dbKey(keyPrefix, k.Name), k); err != nil {
 		return nil, apierror.Wrap(err)
@@ -826,6 +852,16 @@ func (s *Server) DestroyCryptoKeyVersion(_ context.Context, req *kmspb.DestroyCr
 	}
 	s.wake()
 	return s.toVersion(v), nil
+}
+
+// Exclusive runs fn while no request or sweep holds the server: /admin/reset
+// deletes the store's records through it. Without it a sweep or a write in
+// flight, holding a record it read before the delete, writes it back after,
+// and the reset leaves it behind.
+func (s *Server) Exclusive(fn func() error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fn()
 }
 
 // wake re-arms Run after a change to what is due.
@@ -986,7 +1022,8 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 	if len(paths) == 0 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("update_mask is required"))
 	}
-	var setLabels, setPeriod, setNext bool
+	var setLabels, setPeriod, setNext, setTemplate bool
+	var templateAlg algo
 	var period time.Duration
 	var nextRotation time.Time
 	for _, p := range paths {
@@ -998,8 +1035,8 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 			setLabels = true
 		case "version_template", "version_template.algorithm", "version_template.protection_level":
 			t := in.GetVersionTemplate()
-			if a := t.GetAlgorithm(); p != "version_template.protection_level" && a != kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION {
-				return nil, apierror.Wrap(apierror.Unimplemented("version_template.algorithm %s is not implemented: only GOOGLE_SYMMETRIC_ENCRYPTION is", a))
+			if p != "version_template.protection_level" {
+				templateAlg, setTemplate = t.GetAlgorithm(), true
 			}
 			if pl := t.GetProtectionLevel(); p != "version_template.algorithm" && pl != kmspb.ProtectionLevel_SOFTWARE &&
 				pl != kmspb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED {
@@ -1045,6 +1082,19 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 	}
 	if setNext {
 		k.NextRotation = nextRotation
+	}
+	if setTemplate {
+		// A template names an algorithm of the key's own purpose; new
+		// versions get it, existing ones keep theirs (resources.proto
+		// version_template). The codes are UNVERIFIED.
+		a, err := keyAlgorithm(k.purpose(), templateAlg)
+		if err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		k.Algorithm = storedAlgorithm(a)
+	}
+	if (k.RotationPeriod > 0 || !k.NextRotation.IsZero()) && k.purpose() != kmspb.CryptoKey_ENCRYPT_DECRYPT {
+		return nil, apierror.Wrap(apierror.InvalidArgument("automatic rotation is only supported for ENCRYPT_DECRYPT keys, not %s", k.purpose()))
 	}
 	// The schedule is checked as it will be stored, so a period set on a key
 	// that already has a next_rotation_time needs no second path, and
