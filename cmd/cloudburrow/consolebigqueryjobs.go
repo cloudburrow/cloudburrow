@@ -19,11 +19,15 @@ package main
 //     sourceColumnMatch. timeZone and the date and time formats are 501 from
 //     the front, so they are not offered; WRITE_EMPTY and Avro or ORC are not
 //     either, as nothing tests them.
-//   - an export: one URI (several are 501), CSV, NEWLINE_DELIMITED_JSON or
-//     AVRO (the front writes an Avro object container file,
-//     internal/bigqueryfront/extractavro.go), GZIP or none for CSV and JSON,
-//     DEFLATE, SNAPPY or none for Avro, a one-character delimiter and the
-//     header row. Parquet is 501, so it is not offered.
+//   - an export: a URI and More URIs (the front shares the rows out
+//     between them), CSV, NEWLINE_DELIMITED_JSON, AVRO or PARQUET (the front
+//     writes the Avro object container and Parquet files,
+//     internal/bigqueryfront/extractavro.go and extractparquet.go), each
+//     with the compressions BigQuery's export documentation lists for it
+//     (GZIP for CSV and JSON; DEFLATE or SNAPPY for Avro; SNAPPY, GZIP or
+//     ZSTD for Parquet), useAvroLogicalTypes for Avro, a one-character
+//     delimiter and the header row for CSV. nativeGeographyExportEnabled is
+//     not offered: the official Go client has no field for it.
 //
 // A combination the front refuses (a JSON autodetect load into a new table,
 // a Parquet load whose file has a column the table lacks, a JSON export of a NULL, a
@@ -67,9 +71,19 @@ var (
 	bigqueryWriteModes    = []string{"WRITE_APPEND", "WRITE_TRUNCATE"}
 	bigqueryEncodings     = []string{"UTF-8", "ISO-8859-1"}
 	bigqueryColumnMatches = []string{"POSITION", "NAME"}
-	bigqueryExportFormats = []string{"CSV", "NEWLINE_DELIMITED_JSON", "AVRO"}
-	bigqueryCompressions  = []string{"NONE", "GZIP", "DEFLATE", "SNAPPY"}
+	bigqueryExportFormats = []string{"CSV", "NEWLINE_DELIMITED_JSON", "AVRO", "PARQUET"}
+	bigqueryCompressions  = []string{"NONE", "GZIP", "DEFLATE", "SNAPPY", "ZSTD"}
 )
+
+// bigqueryExportCompressions are the compressions BigQuery's export
+// documentation lists for each export format, besides NONE ("Export formats
+// and compression types", exporting-data), as the front serves them.
+var bigqueryExportCompressions = map[string][]string{
+	"CSV":                    {"GZIP"},
+	"NEWLINE_DELIMITED_JSON": {"GZIP"},
+	"AVRO":                   {"DEFLATE", "SNAPPY"},
+	"PARQUET":                {"SNAPPY", "GZIP", "ZSTD"},
+}
 
 // bigqueryURIPattern is a Cloud Storage URI: gs://, a bucket, a slash and an
 // object name, which may hold one * wildcard.
@@ -144,9 +158,13 @@ func bigqueryExportFields() []console.Field {
 		{Name: "uri", Label: "Destination URI", Type: "text", Required: true, Pattern: bigqueryURIPattern,
 			Help: "One gs:// URI in this instance's Cloud Storage, in a bucket that exists. A * wildcard is " +
 				"written as 000000000000."},
+		{Name: "moreUris", Label: "More destination URIs", Type: "textarea",
+			Help: "Optional: more gs:// URIs, one per line; the rows are shared out between all the URIs."},
 		{Name: "format", Label: "Export format", Type: "select", Options: bigqueryExportFormats},
 		{Name: "compression", Label: "Compression", Type: "select", Options: bigqueryCompressions,
-			Help: "GZIP for CSV and JSON; DEFLATE or SNAPPY for Avro."},
+			Help: "GZIP for CSV and JSON; DEFLATE or SNAPPY for Avro; SNAPPY, GZIP or ZSTD for Parquet."},
+		{Name: "useAvroLogicalTypes", Label: "Use Avro logical types", Type: "checkbox",
+			Help: "Avro only: DATE, TIME and DATETIME as Avro logical types rather than strings."},
 		{Name: "fieldDelimiter", Label: "Field delimiter", Type: "text", Default: ",",
 			Help: "CSV only: one printable ASCII character, or \\t for a tab."},
 		{Name: "header", Label: "Print header", Type: "checkbox", Default: "true",
@@ -315,30 +333,38 @@ func (p bigqueryProvider) loadJob(ctx context.Context, project, datasetID, table
 // exportJob runs Export to Cloud Storage of datasetID.tableID and waits for
 // it.
 func (p bigqueryProvider) exportJob(ctx context.Context, project, datasetID, tableID string, values map[string]string) (*console.Listing, error) {
-	uri := strings.TrimSpace(values["uri"])
-	if !strings.HasPrefix(uri, "gs://") {
-		return nil, errors.New("the destination is a gs:// URI")
+	uris := []string{strings.TrimSpace(values["uri"])}
+	for _, line := range strings.Split(values["moreUris"], "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			uris = append(uris, line)
+		}
+	}
+	for _, uri := range uris {
+		if !strings.HasPrefix(uri, "gs://") {
+			return nil, fmt.Errorf("each destination is a gs:// URI, not %q", uri)
+		}
 	}
 	format := values["format"]
 	if format == "" {
 		format = "CSV"
 	}
 	if !slices.Contains(bigqueryExportFormats, format) {
-		return nil, fmt.Errorf("the export format is CSV, NEWLINE_DELIMITED_JSON or AVRO, not %q", format)
+		return nil, fmt.Errorf("the export format is CSV, NEWLINE_DELIMITED_JSON, AVRO or PARQUET, not %q", format)
 	}
 	compression := values["compression"]
 	if compression == "" {
 		compression = "NONE"
 	}
 	if !slices.Contains(bigqueryCompressions, compression) {
-		return nil, fmt.Errorf("the compression is NONE, GZIP, DEFLATE or SNAPPY, not %q", compression)
+		return nil, fmt.Errorf("the compression is NONE, GZIP, DEFLATE, SNAPPY or ZSTD, not %q", compression)
 	}
-	if avro, block := format == "AVRO", compression == "DEFLATE" || compression == "SNAPPY"; avro && compression == "GZIP" {
-		return nil, errors.New("an Avro export is compressed with DEFLATE or SNAPPY, not GZIP")
-	} else if !avro && block {
-		return nil, fmt.Errorf("%s compression is for Avro exports only, and this export is %s", compression, format)
+	if allowed := bigqueryExportCompressions[format]; compression != "NONE" && !slices.Contains(allowed, compression) {
+		return nil, fmt.Errorf("a %s export is compressed with %s or not at all, not %s", format, strings.Join(allowed, " or "), compression)
 	}
-	dst := bigquery.NewGCSReference(uri)
+	if checked(values, "useAvroLogicalTypes") && format != "AVRO" {
+		return nil, fmt.Errorf("Avro logical types apply to Avro only, and this export is %s", format)
+	}
+	dst := bigquery.NewGCSReference(uris...)
 	dst.DestinationFormat = bigquery.DataFormat(format)
 	dst.Compression = bigquery.Compression(compression)
 	header := values["header"] != "false"
@@ -358,6 +384,7 @@ func (p bigqueryProvider) exportJob(ctx context.Context, project, datasetID, tab
 	defer c.Close()
 	extractor := c.Dataset(datasetID).Table(tableID).ExtractorTo(dst)
 	extractor.DisableHeader = format == "CSV" && !header
+	extractor.UseAvroLogicalTypes = checked(values, "useAvroLogicalTypes")
 	job, err := extractor.Run(ctx)
 	if err != nil {
 		return nil, bigqueryRefusal(err)

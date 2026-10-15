@@ -63,7 +63,6 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:208 TestConsolePermissionsOnAQueue",
           "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced"
         ]
       },
@@ -134,7 +133,6 @@
         "method": "google.cloud.tasks.v2.CloudTasks/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:208 TestConsolePermissionsOnAQueue",
           "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced"
         ]
       },
@@ -142,7 +140,6 @@
         "method": "google.cloud.tasks.v2.CloudTasks/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:208 TestConsolePermissionsOnAQueue",
           "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced"
         ]
       },
@@ -234,7 +231,6 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
         ]
       },
@@ -290,7 +286,6 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
         ]
       },
@@ -298,7 +293,6 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
         ]
       },
@@ -1334,7 +1328,6 @@
         "method": "google.iam.v1.IAMPolicy/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
           "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
         ],
         "unverified": [
@@ -1354,7 +1347,6 @@
         "method": "google.iam.v1.IAMPolicy/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
           "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
         ],
         "unverified": [
@@ -1369,7 +1361,6 @@
         "method": "google.iam.v1.IAMPolicy/TestIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
           "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
         ]
       }
@@ -1852,8 +1843,8 @@
     "Title": "Vertex AI PredictionService",
     "counts": {
       "Implemented": 1,
-      "Unimplemented": 10,
-      "Verified": 3
+      "Unimplemented": 11,
+      "Verified": 2
     },
     "rows": [
       {
@@ -1868,10 +1859,8 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/EmbedContent",
-        "status": "Verified",
-        "tests": [
-          "test/compat/embedcontent_test.go:34 TestEmbedContentThroughThePredictionClient"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/Explain",
@@ -2436,7 +2425,6 @@
         "method": "storage.buckets.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnABucket",
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
@@ -2534,7 +2522,6 @@
         "method": "storage.buckets.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnABucket",
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
           "test/compat/storageiam_test.go:59 TestStorageBucketIAMStaleEtag",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -2556,7 +2543,6 @@
         "method": "storage.buckets.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnABucket",
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip"
         ]
       },
@@ -2707,7 +2693,6 @@
         "method": "storage.managedFolders.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:340 TestConsolePermissionsOnAManagedFolder",
           "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
         ]
       },
@@ -2737,7 +2722,6 @@
         "method": "storage.managedFolders.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:340 TestConsolePermissionsOnAManagedFolder",
           "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
         ],
         "unverified": [
@@ -2752,7 +2736,6 @@
         "method": "storage.managedFolders.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:340 TestConsolePermissionsOnAManagedFolder",
           "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
         ]
       },
@@ -4262,10 +4245,8 @@
         "method": "bigquery.jobs.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
-          "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
-          "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
+          "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:200 TestConsoleBigQueryJobPageShowsDMLRows",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
@@ -4283,16 +4264,14 @@
         "method": "bigquery.jobs.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
-          "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
+          "test/compat/bigquerycorrectness_test.go:320 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
+          "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
+          "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
-          "test/compat/bigqueryscripterrors_test.go:21 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigquerytransactions_test.go:111 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
-          "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
-          "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
         ]
@@ -4310,18 +4289,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
-          "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
+          "test/compat/bigquerycorrectness_test.go:320 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
-          "test/compat/bigqueryscripterrors_test.go:21 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigquerytransactions_test.go:111 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
-          "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
-          "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
-          "test/compat/consolebigquerywrites_test.go:383 TestConsoleBigQueryReadWriteEditorRunsDML"
+          "test/compat/consolebigquerywrites_test.go:377 TestConsoleBigQueryReadWriteEditorRunsDML"
         ]
       },
       {
@@ -4515,10 +4490,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
-          "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
+          "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
@@ -4553,7 +4527,7 @@
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
           "test/compat/bigquerysilent_test.go:505 TestBigQueryTableUpdateAddsColumns",
-          "test/compat/consolebigquerywrites_test.go:196 TestConsoleBigQueryEditTableViewsAndInsertOptions"
+          "test/compat/consolebigquerywrites_test.go:190 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
       {
