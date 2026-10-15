@@ -247,6 +247,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if (front{next: next, records: records, policies: policies, functions: functions, configs: configs}).serveIAM(w, r, iam) { // iam.go, #1231
 			return
 		}
+		if r.Method == http.MethodDelete {
+			w = &noContentWriter{ResponseWriter: w} // nocontent.go, #1236
+		}
 		if key := deletedIAMKey(r); key != "" {
 			// A table's or routine's policy goes with it (iam.go, #1231).
 			sw := &statusWriter{ResponseWriter: w}
