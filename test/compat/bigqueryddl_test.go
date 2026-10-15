@@ -194,7 +194,7 @@ func TestBigQueryScriptBlocks(t *testing.T) {
 // refuses fails as BigQuery fails it under columnNameCharacterMap STRICT,
 // the default: the job is done with an "invalid" errorResult, which
 // Job.Wait's status and a later Job.Status report, and there is no table.
-// Under V2, which would rename the column, it is 501. A header BigQuery
+// Under V2, a reserved name it cannot rename is 501. A header BigQuery
 // takes loads its row. A NEWLINE_DELIMITED_JSON load with autodetect into a
 // new table, which the emulator fails with a 500, is 501.
 func TestBigQueryAutodetectLoadNames(t *testing.T) {
@@ -236,8 +236,10 @@ func TestBigQueryAutodetectLoadNames(t *testing.T) {
 		t.Error("the failed load left its table")
 	}
 
-	_, err = load("v2_header", "a!,c\n1,x\n", bigquery.CSV, bigquery.V2ColumnNameCharacterMap)
-	wantHTTPStatus(t, "an autodetect load under V2 with a header BigQuery would rename", err, http.StatusNotImplemented)
+	// V2 renames "a!" (#1326, TestBigQueryColumnNameCharacterMap); a
+	// reserved name it cannot rename stays 501.
+	_, err = load("v2_header", "_TABLE_a!,c\n1,x\n", bigquery.CSV, bigquery.V2ColumnNameCharacterMap)
+	wantHTTPStatus(t, "an autodetect load under V2 with a header it cannot rename", err, http.StatusNotImplemented)
 	if tableExists(t, ctx, ds.Table("v2_header")) {
 		t.Error("the refused V2 load left its table")
 	}
