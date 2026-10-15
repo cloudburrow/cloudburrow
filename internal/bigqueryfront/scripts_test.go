@@ -513,8 +513,8 @@ func TestExtractJobs(t *testing.T) {
 		{"printHeader true", `"t"},"destinationUris":["gs://b/out.csv"],"printHeader":true`, 200, "out.csv", nil},
 		{"no header, empty", `"empty"},"destinationUris":["gs://b/out.csv"],"printHeader":false`, 200, "out.csv", nil},
 		{"AVRO of a DATE", `"t"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO"`, 200, "out.avro", nil},
-		{"AVRO of a TIME", `"tm"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO"`, 501, "", nil},
-		{"AVRO with GZIP", `"empty"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO","compression":"GZIP"`, 501, "", nil},
+		{"AVRO of a TIME", `"tm"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO"`, 200, "out.avro", nil},                 // a string: "in extract jobs, it's a string by default"
+		{"AVRO with GZIP", `"empty"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO","compression":"GZIP"`, 400, "", nil}, // documented: "can't be used in combination with GZIP"
 		{"AVRO", `"empty"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO","compression":"SNAPPY"`, 200, "out.avro", nil},
 		{"PARQUET", `"t"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET"`, 200, "out", nil},
 		{"PARQUET with LZ4", `"t"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET","compression":"LZ4"`, 501, "", nil},
