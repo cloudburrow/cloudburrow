@@ -140,18 +140,21 @@ const (
 // The emulator reads the rows of a script's last statement only: measured
 // against the pinned image through the front, `INSERT INTO tx.t VALUES (5);
 // SELECT 1/0; INSERT INTO tx.t VALUES (6)` answered done and kept both
-// rows. (Its ASSERT does nothing at all, even ASSERT FALSE alone: #1253.)
-// BigQuery fails
+// rows. BigQuery fails
 // the script at that statement, keeping what the statements before it did
 // (https://cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language).
 // So such a script is carried out by the front, as a script with control
 // flow is: each statement is a request of its own, whose error is seen, and
 // the script fails at the first that fails. A TEMP table lasts only for the
 // request that made it, so a script with one cannot be split: it is 501.
+//
+// The emulator's ASSERT does nothing at all, even ASSERT FALSE alone
+// (measured, #1253), so a script with an ASSERT anywhere, or a lone ASSERT,
+// is carried out by the front too, which checks it (assert).
 // Any other script is sent on as it is.
 func earlierQuery(sql string) int {
 	upper := strings.ToUpper(sql)
-	if !strings.Contains(upper, "SELECT") {
+	if !strings.Contains(upper, "SELECT") && !strings.Contains(upper, "ASSERT") {
 		return scriptAsIs
 	}
 	toks, ok := lex(sql)
@@ -165,20 +168,35 @@ func earlierQuery(sql string) int {
 		}
 	}
 	found := false
-	for _, st := range stmts[:max(len(stmts)-1, 0)] {
-		if st[0].is("SELECT") || st[0].is("WITH") || st[0].punct("(") {
+	for i, st := range stmts {
+		if st[0].is("ASSERT") || i < len(stmts)-1 && (st[0].is("SELECT") || st[0].is("WITH") || st[0].punct("(")) {
 			found = true
 		}
 	}
 	if !found {
 		return scriptAsIs
 	}
-	for _, t := range toks {
-		if t.is("TEMP") || t.is("TEMPORARY") {
-			return scriptKeepsTemp
-		}
+	if tokensHaveTemp(toks) {
+		return scriptKeepsTemp
 	}
 	return scriptSplits
+}
+
+// hasTemp reports whether sql names TEMP or TEMPORARY: a TEMP table or
+// function lasts only for the request that made it, so such a script is
+// not run a statement at a time.
+func hasTemp(sql string) bool {
+	toks, ok := lex(sql)
+	return !ok || tokensHaveTemp(toks)
+}
+
+func tokensHaveTemp(toks []token) bool {
+	for _, t := range toks {
+		if t.is("TEMP") || t.is("TEMPORARY") {
+			return true
+		}
+	}
+	return false
 }
 
 type scriptNodeKind int
@@ -674,6 +692,11 @@ func checkStatements(sql string, nodes []scriptNode) ddlVerdict {
 			if what := alterUnsupported(n.toks); what != "" {
 				return ddlVerdict{code: http.StatusNotImplemented, reason: "notImplemented", msg: alterNotImplemented(what)}
 			}
+		} else if n.kind == nodeStmt && len(n.toks) > 0 && n.toks[0].is("ASSERT") {
+			// Carried out by the front (#1253, assert).
+			if _, _, _, msg := assertParts(n.toks); msg != "" {
+				return ddlVerdict{code: http.StatusBadRequest, reason: "invalidQuery", msg: msg}
+			}
 		} else if n.kind == nodeStmt && len(n.toks) > 0 && !n.toks[0].is("RAISE") {
 			if v := checkDDL(sql[n.toks[0].pos:n.toks[len(n.toks)-1].end]); v.code != 0 {
 				return v
@@ -861,6 +884,9 @@ func (s *scriptRun) runNode(n scriptNode) *scriptFlow {
 		}
 		if n.toks[0].is("RAISE") {
 			return s.raise(n.toks)
+		}
+		if n.toks[0].is("ASSERT") {
+			return s.assert(n.toks)
 		}
 		if isTxnNode(n, "COMMIT") || isTxnNode(n, "ROLLBACK") {
 			return s.endTransaction(n) // transactions.go
@@ -1604,6 +1630,27 @@ func (s *scriptRun) executeImmediate(toks []token) *scriptFlow {
 				names = append(names, t.text)
 			}
 		}
+		// BigQuery documents INTO of a query's row only: "If this returns
+		// a value, the INTO clause must contain values of the same type",
+		// assigned "by position". INTO of another statement, or of a
+		// number of variables other than the query's columns, is not
+		// documented (#1037).
+		bt, _ := lex(bound)
+		first := 0
+		for first < len(bt) && bt[first].punct("(") {
+			first++
+		}
+		if first >= len(bt) || !bt[first].is("SELECT") && !bt[first].is("WITH") {
+			s.notImpl = "Not implemented here: EXECUTE IMMEDIATE ... INTO of " + statementText(bound, bt) + ", which is " +
+				"not a query (SELECT or WITH); BigQuery documents INTO of a query's row only. What the statements before it did was kept."
+			return &scriptFlow{}
+		}
+		if cols, known := selectItemCount(bound); known && cols != len(names) {
+			s.notImpl = fmt.Sprintf("Not implemented here: EXECUTE IMMEDIATE ... INTO %d variables of a query of %d columns. "+
+				"BigQuery's documentation assigns the columns to the variables by position, and does not say what it does "+
+				"when their numbers differ. What the statements before it did was kept.", len(names), cols)
+			return &scriptFlow{}
+		}
 		return s.setColumns(names, bound, stmt)
 	}
 	return s.runText(bound)
@@ -1790,6 +1837,72 @@ func (s *scriptRun) raise(toks []token) *scriptFlow {
 	body, _ := json.Marshal(map[string]any{"error": map[string]any{"code": http.StatusBadRequest, "message": msg,
 		"errors": []map[string]string{{"message": msg, "domain": "global", "reason": "invalidQuery"}}, "status": "INVALID_ARGUMENT"}})
 	return &scriptFlow{failed: true, status: http.StatusBadRequest, body: body, msg: msg, text: text}
+}
+
+// assert carries out ASSERT expression [AS description] (#1253): the
+// emulator's ASSERT does nothing. As BigQuery documents it
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/debugging-statements#assert),
+// expression is run as the query SELECT expression; TRUE goes on, FALSE or
+// NULL fails the script with "Assertion failed: " and the description, or
+// the expression's text with none, and a runtime error in expression fails
+// it with that error. expression must be a BOOL and description a STRING
+// literal. A handler may catch the failure, as it may a RAISE.
+func (s *scriptRun) assert(toks []token) *scriptFlow {
+	stmt := s.sql[toks[0].pos:toks[len(toks)-1].end]
+	body, desc, hasDesc, msg := assertParts(toks)
+	if msg != "" {
+		return assertFailure(stmt, msg)
+	}
+	// What is held back runs first, in its turn.
+	if flow := s.flush(); flow != nil {
+		return flow
+	}
+	if !s.step() || s.notImpl != "" {
+		return &scriptFlow{}
+	}
+	expr := s.text(body)
+	if s.notImpl != "" {
+		return &scriptFlow{}
+	}
+	v, flow := s.evaluate(expr, "")
+	if flow != nil {
+		return flow
+	}
+	if v.typ != "BOOL" {
+		return assertFailure(stmt, "ASSERT expression must be of type BOOL, but is of type "+v.typ)
+	}
+	if v.lit != "TRUE" {
+		if !hasDesc {
+			desc = s.sql[body[0].pos:body[len(body)-1].end]
+		}
+		return assertFailure(stmt, "Assertion failed: "+desc)
+	}
+	// It has no result: the answer stays as after a SET.
+	return s.assigned()
+}
+
+// assertParts reads ASSERT expression [AS description]: expression's
+// tokens and the description, or the error refusing the statement.
+func assertParts(toks []token) (body []token, desc string, hasDesc bool, msg string) {
+	body = toks[1:]
+	if n := len(body); n >= 2 && body[n-2].is("AS") {
+		lit, ok := stringLiteral(body[n-1])
+		if !ok {
+			return nil, "", false, "ASSERT description must be a STRING literal"
+		}
+		desc, hasDesc, body = lit, true, body[:n-2]
+	}
+	if len(body) == 0 {
+		return nil, "", false, "Syntax error: ASSERT has no expression"
+	}
+	return body, desc, hasDesc, ""
+}
+
+// assertFailure is an ASSERT's failure with msg, a 400 invalidQuery.
+func assertFailure(stmt, msg string) *scriptFlow {
+	body, _ := json.Marshal(map[string]any{"error": map[string]any{"code": http.StatusBadRequest, "message": msg,
+		"errors": []map[string]string{{"message": msg, "domain": "global", "reason": "invalidQuery"}}, "status": "INVALID_ARGUMENT"}})
+	return &scriptFlow{failed: true, status: http.StatusBadRequest, body: body, msg: msg, text: stmt}
 }
 
 // unquoteRaised reads back a STRING literal sqlString wrote; NULL is "".

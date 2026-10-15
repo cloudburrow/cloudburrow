@@ -85,7 +85,10 @@ func TestBigQueryScriptVariablesEndWithTheScript(t *testing.T) {
 	}
 }
 
-// TestBigQueryFailedScriptThatWroteIs501 (#935): BigQuery keeps what the
+// TestBigQueryFailedScriptKeepsItsTable (#935; named
+// TestBigQueryFailedScriptThatWroteIs501 until #1253): it now checks that
+// such a script fails 400 and keeps the table made before the failing
+// statement, through jobs.query and as a query job. BigQuery keeps what the
 // statements of a failed script did before the failing one; the emulator
 // rolls a script given to jobs.query back whole (measured: `CREATE TABLE
 // ds.e1 AS SELECT 1 AS a; SELECT * FROM nope.nope; ...` failed 400 and
@@ -98,7 +101,7 @@ func TestBigQueryScriptVariablesEndWithTheScript(t *testing.T) {
 // BigQuery; a script whose failing statement is its last is still 501. A failed script that changes nothing kept, and
 // a syntax error, which fails a script before anything runs, are answered
 // 400 as before.
-func TestBigQueryFailedScriptThatWroteIs501(t *testing.T) {
+func TestBigQueryFailedScriptKeepsItsTable(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
 	ds := validationDataset(t, h, c)

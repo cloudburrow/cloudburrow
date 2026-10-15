@@ -261,15 +261,15 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 		{"DECLARE n INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT @v' USING n AS v", "DECLARE n INT64 DEFAULT 1; SELECT (n)", 0},
 		{"SELECT 'EXECUTE IMMEDIATE x'", "", 0},
 		{"EXECUTE IMMEDIATE CONCAT('SELECT ', '1')", "SELECT 1", 0}, // #1037
-		{"EXECUTE IMMEDIATE CONCAT('SELECT ', CAST(1 AS STRING))", "", 501},
+		{"EXECUTE IMMEDIATE CONCAT('SELECT ', CAST(1 AS STRING))", "", immediateInTurn},
 		{"EXECUTE IMMEDIATE 'UPDATE ds.t SET x = 1 WHERE TRUE' INTO x", "", 501},
 		{"DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, '1'); EXECUTE IMMEDIATE s", "DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, '1'); SELECT 21", 0},
-		{"DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, UPPER('1')); EXECUTE IMMEDIATE s", "", 501},
-		{"DECLARE s STRING DEFAULT (SELECT 'x'); EXECUTE IMMEDIATE s", "", 501},
-		{"EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a", "", 501},
+		{"DECLARE s STRING DEFAULT 'SELECT 2'; SET s = CONCAT(s, UPPER('1')); EXECUTE IMMEDIATE s", "", immediateInTurn},
+		{"DECLARE s STRING DEFAULT (SELECT 'x'); EXECUTE IMMEDIATE s", "", immediateInTurn},
+		{"EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a", "", immediateInTurn},
 		{"EXECUTE IMMEDIATE 'SELECT 1; SELECT 2'", "", 501},
 		{"EXECUTE IMMEDIATE \"EXECUTE IMMEDIATE 'SELECT 1'\"", "", 501},
-		{"EXECUTE IMMEDIATE b'SELECT 1'", "", 501},
+		{"EXECUTE IMMEDIATE b'SELECT 1'", "", immediateInTurn},
 		{"EXECUTE IMMEDIATE 'SELECT @b' USING 1 AS a", "", 400},
 		{"EXECUTE IMMEDIATE 'SELECT ?, ?' USING 1", "", 400},
 		{"EXECUTE IMMEDIATE 'SELECT ?' USING 1, 2", "", 400},
@@ -287,7 +287,9 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 	}
 
 	// Through the front: the statement is run, 501s run nothing, and the
-	// job shows the client's text.
+	// job shows the client's text. Computed SQL that reads a table after
+	// DDL is carried out in turn, a statement at a time, unless a TEMP
+	// table keeps the script in one request: 501 (#1037).
 	emu := &jobsEmulator{}
 	h := Wrap(emu)
 	code, got := do(t, h, "POST", base+"/jobs", `{"jobReference":{"jobId":"e1"},"configuration":{"query":{"query":"EXECUTE IMMEDIATE 'CREATE TABLE ds.t (x INT64)'"}}}`)
@@ -297,7 +299,7 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 	}
 	n := len(emu.log)
 	for _, path := range []string{"/queries", "/jobs"} {
-		body := `{"query":"CREATE TABLE ds.u (x INT64); EXECUTE IMMEDIATE (SELECT 'SELECT 1' FROM ds.u)"}`
+		body := `{"query":"CREATE TEMP TABLE u (x INT64); EXECUTE IMMEDIATE (SELECT 'SELECT 1' FROM u)"}`
 		if path == "/jobs" {
 			body = `{"configuration":{"query":` + body + `}}`
 		}

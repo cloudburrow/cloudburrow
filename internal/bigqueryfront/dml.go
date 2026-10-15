@@ -240,8 +240,8 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		case scriptKeepsTemp:
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a query before the "+
-				"last statement of a script with a TEMP table or function. The emulator does not raise such a statement's runtime "+
-				"error, which fails the script in BigQuery, and CloudBurrow cannot run the statements one at a time "+
+				"last statement, or an ASSERT, in a script with a TEMP table or function. The emulator does not raise such a query's runtime "+
+				"error, which fails the script in BigQuery, nor check an ASSERT, and CloudBurrow cannot run the statements one at a time "+
 				"because a TEMP table or function lasts only for the request that made it. Nothing was run.")
 			return
 		}
