@@ -40,7 +40,11 @@ func TestConsolePermissionsOnARunServiceAndJob(t *testing.T) {
 			_, err := sc.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: svc, Policy: p})
 			return err
 		},
-	}, "roles/run.invoker")
+		test: func(ctx context.Context, perms []string) ([]string, error) {
+			r, err := sc.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: svc, Permissions: perms})
+			return r.GetPermissions(), err
+		},
+	}, "roles/run.invoker", "run.services.get")
 
 	jobID := "console-perms-job"
 	job := runParent(h) + "/jobs/" + jobID
@@ -60,5 +64,9 @@ func TestConsolePermissionsOnARunServiceAndJob(t *testing.T) {
 			_, err := jc.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: job, Policy: p})
 			return err
 		},
-	}, "roles/run.developer")
+		test: func(ctx context.Context, perms []string) ([]string, error) {
+			r, err := jc.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: job, Permissions: perms})
+			return r.GetPermissions(), err
+		},
+	}, "roles/run.developer", "run.jobs.get")
 }

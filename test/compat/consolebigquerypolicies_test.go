@@ -62,7 +62,7 @@ func TestConsoleBigQueryRowAccessPolicies(t *testing.T) {
 	if sec.Unavailable != "" || len(sec.Items) != 1 || sec.Items[0].Name != "eu" || sec.Items[0].Fields["Filter"] != "region = 'us'" {
 		t.Errorf("the Row access policies tab = %+v", sec)
 	}
-	consolePermissionsRoundTripIn(t, h, addr, "bigquery", project, path, handleOf(tbl.IAM()), "roles/bigquery.dataViewer")
+	consolePermissionsRoundTripIn(t, h, addr, "bigquery", project, path, handleOf(tbl.IAM()), "roles/bigquery.dataViewer", "bigquery.tables.getData")
 
 	act([]string{d, tb, "rowAccessPolicies", "eu"}, "deleterowpolicy", nil)
 	if list, err := svc.RowAccessPolicies.List(project, d, tb).Context(ctx).Do(); err != nil || len(list.RowAccessPolicies) != 0 {
@@ -79,7 +79,7 @@ func TestConsoleBigQueryRowAccessPolicies(t *testing.T) {
 		t.Fatalf("CREATE FUNCTION: %v", err)
 	}
 	consolePermissionsRoundTripIn(t, h, addr, "bigquery", project, []string{d, "routines", "plus_one"},
-		routineHandle(svc, "projects/"+project+"/datasets/"+d+"/routines/plus_one"), "roles/bigquery.dataViewer")
+		routineHandle(svc, "projects/"+project+"/datasets/"+d+"/routines/plus_one"), "roles/bigquery.dataViewer", "bigquery.routines.get")
 }
 
 // routineHandle is a routine's IAM through the official generated client,
@@ -109,6 +109,13 @@ func routineHandle(svc *bq.Service, resource string) policyHandle {
 			}
 			_, err := svc.Routines.SetIamPolicy(resource, &bq.SetIamPolicyRequest{Policy: in}).Context(ctx).Do()
 			return err
+		},
+		test: func(ctx context.Context, perms []string) ([]string, error) {
+			r, err := svc.Routines.TestIamPermissions(resource, &bq.TestIamPermissionsRequest{Permissions: perms}).Context(ctx).Do()
+			if err != nil {
+				return nil, err
+			}
+			return r.Permissions, nil
 		},
 	}
 }

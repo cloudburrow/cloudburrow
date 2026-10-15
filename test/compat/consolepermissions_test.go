@@ -129,12 +129,12 @@ func holders(p *iampb.Policy, role string) []string {
 // consolePermissionsRoundTrip is the acceptance for one resource.
 func consolePermissionsRoundTrip(t *testing.T, h *Harness, addr, service string, path []string, c policyHandle, role, perm string) {
 	t.Helper()
-	consolePermissionsRoundTripIn(t, h, addr, service, h.Project(), path, c, role)
+	consolePermissionsRoundTripIn(t, h, addr, service, h.Project(), path, c, role, perm)
 }
 
 // consolePermissionsRoundTripIn is consolePermissionsRoundTrip in project,
 // for a service that serves one project of its own, as BigQuery does.
-func consolePermissionsRoundTripIn(t *testing.T, h *Harness, addr, service, project string, path []string, c policyHandle, role string) {
+func consolePermissionsRoundTripIn(t *testing.T, h *Harness, addr, service, project string, path []string, c policyHandle, role, perm string) {
 	t.Helper()
 	ctx := h.Context()
 	ada := "user:ada@example.com"
