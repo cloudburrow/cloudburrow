@@ -2456,6 +2456,7 @@
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
+          "test/compat/storagexmlpost_test.go:33 TestStorageXMLBucketPutAndServiceGet",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
@@ -2463,7 +2464,8 @@
         "method": "storage.buckets.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storage_test.go:297 TestStorageBucketsList"
+          "test/compat/storage_test.go:297 TestStorageBucketsList",
+          "test/compat/storagexmlpost_test.go:33 TestStorageXMLBucketPutAndServiceGet"
         ]
       },
       {
@@ -2897,6 +2899,7 @@
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
+          "test/compat/storagexmlpost_test.go:120 TestStorageXMLFormPostPolicyV4",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ],
         "unverified": [
