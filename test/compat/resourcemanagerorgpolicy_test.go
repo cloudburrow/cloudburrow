@@ -11,8 +11,9 @@ import (
 	"google.golang.org/api/googleapi"
 )
 
-// TestResourceManagerV1OrgPolicy (#1296; v1 has no coverage page, as
-// TestResourceManagerV1Projects), through google.golang.org/api/
+// covers: cloudresourcemanager.projects.listAvailableOrgPolicyConstraints, cloudresourcemanager.projects.getOrgPolicy, cloudresourcemanager.projects.setOrgPolicy, cloudresourcemanager.projects.listOrgPolicies, cloudresourcemanager.projects.getEffectiveOrgPolicy, cloudresourcemanager.projects.clearOrgPolicy
+//
+// TestResourceManagerV1OrgPolicy (#1296), through google.golang.org/api/
 // cloudresourcemanager/v1, as Terraform's google_project_organization_policy
 // calls it: a project lists the available constraints; an unset policy
 // reads back with only its constraint and an etag; a boolean and a list

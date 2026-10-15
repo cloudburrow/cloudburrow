@@ -1,0 +1,16 @@
+<!--
+  The .NET fixture used to verify Google Functions Framework and Buildpacks
+  support (#1319): an ordinary project on Google.Cloud.Functions.Hosting. The
+  pinned Google builder detects .NET from this file and runs the class
+  GOOGLE_FUNCTION_TARGET names.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Google.Cloud.Functions.Hosting" Version="3.0.1" />
+  </ItemGroup>
+</Project>

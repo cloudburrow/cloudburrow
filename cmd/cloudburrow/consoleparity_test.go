@@ -273,6 +273,24 @@ var parityRows = []parityRow{
 	{Resource: "Resource Manager tag holds", Service: "resourcemanager",
 		Methods:  []string{"TagHolds/CreateTagHold", "TagHolds/DeleteTagHold", "TagHolds/ListTagHolds"},
 		Excluded: "a hold is placed by the service that uses a value, not by a person; Delete tag value names the holds that block it"},
+	// v1 REST and liens (#301, #1296, #1295), the JSON-only surface: the
+	// same registry the v3 methods and the console's pages use.
+	{Resource: "Resource Manager v1 projects", Service: "resourcemanagerv1",
+		Methods:  []string{"cloudresourcemanager.projects.list", "cloudresourcemanager.projects.get", "cloudresourcemanager.projects.create", "cloudresourcemanager.projects.update", "cloudresourcemanager.projects.delete", "cloudresourcemanager.projects.undelete"},
+		Provider: "projects", Offers: "The v3 projects surface above: Project registry list, project detail, Create project, Edit labels, Delete, Undelete project; v1 is the same registry in v1's shape (#301)",
+		Tests: []string{"TestResourceManagerV1Projects", "TestProjectUndeleteIsOfferedOnlyWhenDeleted", "TestNoDetailShowsABlankProperty"}},
+	{Resource: "Resource Manager v1 organization and ancestry", Service: "resourcemanagerv1",
+		Methods:  []string{"cloudresourcemanager.organizations.get", "cloudresourcemanager.organizations.search", "cloudresourcemanager.projects.getAncestry"},
+		Provider: "hierarchy", Offers: "Resource hierarchy names the local organization, every folder's path starts at it, and a project's page shows its Parent, the first step of the ancestry getAncestry returns (#1294)",
+		Tests: []string{"TestConsoleResourceHierarchy", "TestGcloudFoldersAndOrganizations"}},
+	{Resource: "Resource Manager organization policies", Service: "resourcemanagerv1",
+		Methods:  []string{"cloudresourcemanager.projects.listOrgPolicies", "cloudresourcemanager.projects.getOrgPolicy", "cloudresourcemanager.projects.getEffectiveOrgPolicy", "cloudresourcemanager.projects.setOrgPolicy", "cloudresourcemanager.projects.clearOrgPolicy", "cloudresourcemanager.projects.listAvailableOrgPolicyConstraints"},
+		Provider: "projects", Offers: "Organization policies on a project's page, each constraint's policy as listOrgPolicies lists it (a project's effective policy is its own: it has no organization policy above it); Set organization policy, a constraint from the set listAvailableOrgPolicyConstraints answers, Enforce for a boolean one, Allowed values or Deny all for a list one; Clear organization policy (#1296)",
+		Tests: []string{"TestConsoleProjectOrgPolicies", "TestResourceManagerV1OrgPolicy"}},
+	{Resource: "Resource Manager liens", Service: "resourcemanagerv1",
+		Methods:  []string{"cloudresourcemanager.liens.create", "cloudresourcemanager.liens.get", "cloudresourcemanager.liens.list", "cloudresourcemanager.liens.delete"},
+		Provider: "projects", Offers: "Liens on a project's page, Add lien (restrictions, reason, origin), Remove lien; Delete project is refused while a lien restricts it (#1295)",
+		Tests: []string{"TestConsoleTagsAndLiens", "TestResourceManagerLiens"}},
 
 	// Memorystore for Redis (#1302)
 	{Resource: "Memorystore instances", Service: "memorystore",

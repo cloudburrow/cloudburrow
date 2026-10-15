@@ -28,8 +28,12 @@ var compatSections = map[string]string{
 	"kms":             "## Cloud KMS — `google.cloud.kms.v1`",
 	"secretmanager":   "## Secret Manager — `google.cloud.secretmanager.v1`",
 	"resourcemanager": "## Resource Manager — `google.cloud.resourcemanager.v3`",
-	"vertexai":        "## Vertex AI PredictionService — `google.cloud.aiplatform.v1`",
-	"memorystore":     "## Memorystore for Redis — `google.cloud.redis.v1`",
+	// v1 REST and liens (#1296, #1295): rows of the same section, naming
+	// each Verified method by its whole discovery ID
+	// (`cloudresourcemanager.projects.getOrgPolicy`).
+	"resourcemanagerv1": "## Resource Manager — `google.cloud.resourcemanager.v3`",
+	"vertexai":          "## Vertex AI PredictionService — `google.cloud.aiplatform.v1`",
+	"memorystore":       "## Memorystore for Redis — `google.cloud.redis.v1`",
 	// The opt-in emulators share one section (#717). Its per-service rows
 	// only link their pages, so the section also has a table whose rows name
 	// each Verified RPC as Service.Method: the qualifier keeps Firestore's
@@ -133,9 +137,9 @@ var (
 // a bare gRPC name two services of the page share is an error, so the row
 // must qualify it.
 func namedMethods(key, op string, report map[string]string) (ids, ambiguous []string) {
-	// Discovery-ID pages: BigQuery, the Cloud Run v1 API (#1293) and the
-	// Cloud SQL Admin API (#1301).
-	if key == "bigquery" || key == "runv1" || key == "sqladmin" {
+	// Discovery-ID pages: BigQuery, the Cloud Run v1 API (#1293), the
+	// Cloud SQL Admin API (#1301) and Resource Manager v1 REST (#1296).
+	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {
 				ids = append(ids, tok[1])

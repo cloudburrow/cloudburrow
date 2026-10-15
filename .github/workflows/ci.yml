@@ -964,11 +964,12 @@ jobs:
           # local model CI does not download, and the
           # signed-URL and versioning probes run in the check job against the
           # standalone storage server, not here; the three Functions
-          # tests, SubmitBuild's buildpacks test (#1268) and the Node.js and
-          # Python Functions tests (#1303) pull Google's builder and build from source, too slow for
+          # tests, SubmitBuild's buildpacks test (#1268) and the Node.js,
+          # Python (#1303), Java, Ruby, PHP and .NET (#1319) Functions tests
+          # pull Google's builder and build from source, too slow for
           # every merge, so they run only when CLOUDBURROW_TEST_FUNCTIONS is
           # set (#678).
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks)$'
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

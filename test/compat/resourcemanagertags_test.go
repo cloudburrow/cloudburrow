@@ -347,6 +347,8 @@ func TestResourceManagerV3Tags(t *testing.T) {
 	}
 }
 
+// covers: cloudresourcemanager.liens.create, cloudresourcemanager.liens.get, cloudresourcemanager.liens.list, cloudresourcemanager.liens.delete
+//
 // TestResourceManagerLiens (#1295): Liens, which Google publishes over JSON
 // only (cloud.google.com/go/resourcemanager/apiv3 has no LiensClient), through
 // google.golang.org/api/cloudresourcemanager/v3 and v1: create, get, list and

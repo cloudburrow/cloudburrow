@@ -109,7 +109,7 @@ func TestResourceManagerV3Organizations(t *testing.T) {
 	}
 }
 
-// covers: google.cloud.resourcemanager.v3.Folders/CreateFolder, google.cloud.resourcemanager.v3.Folders/GetFolder, google.cloud.resourcemanager.v3.Folders/ListFolders, google.cloud.resourcemanager.v3.Folders/SearchFolders, google.cloud.resourcemanager.v3.Folders/UpdateFolder, google.cloud.resourcemanager.v3.Folders/MoveFolder, google.cloud.resourcemanager.v3.Folders/DeleteFolder, google.cloud.resourcemanager.v3.Folders/UndeleteFolder, google.cloud.resourcemanager.v3.Projects/MoveProject, google.cloud.resourcemanager.v3.Projects/ListProjects
+// covers: google.cloud.resourcemanager.v3.Folders/CreateFolder, google.cloud.resourcemanager.v3.Folders/GetFolder, google.cloud.resourcemanager.v3.Folders/ListFolders, google.cloud.resourcemanager.v3.Folders/SearchFolders, google.cloud.resourcemanager.v3.Folders/UpdateFolder, google.cloud.resourcemanager.v3.Folders/MoveFolder, google.cloud.resourcemanager.v3.Folders/DeleteFolder, google.cloud.resourcemanager.v3.Folders/UndeleteFolder, google.cloud.resourcemanager.v3.Projects/MoveProject, google.cloud.resourcemanager.v3.Projects/ListProjects, cloudresourcemanager.projects.getAncestry
 //
 // TestResourceManagerV3Folders (#1294): folders through
 // cloud.google.com/go/resourcemanager/apiv3 FoldersClient, each change a
@@ -321,6 +321,8 @@ resource "google_project" "p" {
 	}
 }
 
+// covers: cloudresourcemanager.organizations.get, cloudresourcemanager.organizations.search, cloudresourcemanager.projects.getAncestry
+//
 // TestGcloudFoldersAndOrganizations (#1294): gcloud, configured by
 // `cloudburrow gcloud-setup` alone, lists and describes the local
 // organization (Resource Manager v1), creates, lists, describes and deletes
