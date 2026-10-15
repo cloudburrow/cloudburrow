@@ -1,0 +1,346 @@
+CloudBurrow patch 28 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1277). Applies after patch 0027.
+
+The bug: the SQL pre-rewriter (applyIngestionPartitionRewrite) wrote
+every `_PARTITIONTIME` as CURRENT_TIMESTAMP() and every `_PARTITIONDATE`
+as CURRENT_DATE(), on any table, so every row of an ingestion-time
+partitioned table read as ingested at the time of the query, not at the
+start of its partition, and a table that is not partitioned by ingestion
+time had the pseudo-columns too. BigQuery keeps each row's ingestion
+time, truncated to the table's partitioning unit (DAY, HOUR, MONTH or
+YEAR), has the pseudo-columns only on an ingestion-time partitioned
+table, and _PARTITIONDATE only on one partitioned by day; SELECT * does
+not read them, and an INSERT may give _PARTITIONTIME
+(https://cloud.google.com/bigquery/docs/querying-partitioned-tables).
+
+The patch gives a CREATE TABLE with a column list and PARTITION BY
+_PARTITIONDATE, DATE(_PARTITIONTIME) or TIMESTAMP_TRUNC(_PARTITIONTIME,
+unit) the columns _PARTITIONTIME TIMESTAMP (and, by day, _PARTITIONDATE
+DATE), whose DEFAULT is the insert's time truncated to the unit (patch
+0027 applies it to INSERT ... VALUES and INSERT ... SELECT); the catalog
+makes them pseudo-columns, which SELECT * leaves out; and references are
+no longer rewritten, so a table without them fails "Unrecognized name".
+ingestion_partition_test.go fails without the patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/ingestion_partition_test.go
+@@ -0,0 +1,77 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++	"time"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestIngestionPartitionPseudoColumns is CloudBurrow's regression test of
++// its patch 0028 (cloudburrow/cloudburrow#1277): an ingestion-time
++// partitioned table keeps each row's ingestion time, truncated to the
++// partitioning unit, in _PARTITIONTIME (and, by day, _PARTITIONDATE);
++// SELECT * leaves them out; an INSERT may give them; and a table that is
++// not ingestion-time partitioned has neither.
++func TestIngestionPartitionPseudoColumns(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	exec := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	exec(`CREATE TABLE ing_day (id INT64) PARTITION BY _PARTITIONDATE`)
++	exec(`CREATE TABLE ing_hour (id INT64) PARTITION BY TIMESTAMP_TRUNC(_PARTITIONTIME, HOUR)`)
++	exec(`CREATE TABLE plain (id INT64)`)
++	exec(`INSERT INTO ing_day (id) VALUES (1)`)
++	exec(`INSERT INTO ing_day (_PARTITIONTIME, id) VALUES (TIMESTAMP '2024-01-01', 2)`)
++	exec(`INSERT INTO ing_day (id) SELECT 3`)
++	exec(`INSERT INTO ing_hour (id) VALUES (1)`)
++
++	rows, err := db.QueryContext(ctx, `SELECT * FROM ing_day ORDER BY id`)
++	if err != nil {
++		t.Fatal(err)
++	}
++	cols, _ := rows.Columns()
++	rows.Close()
++	if strings.Join(cols, ",") != "id" {
++		t.Errorf("SELECT * columns = %v, want [id]", cols)
++	}
++
++	now := time.Now().UTC()
++	day := now.Truncate(24 * time.Hour)
++	const ts = "2006-01-02 15:04:05"
++	var got, date string
++	if err := db.QueryRowContext(ctx, `SELECT FORMAT_TIMESTAMP('%F %T', _PARTITIONTIME), CAST(_PARTITIONDATE AS STRING) FROM ing_day WHERE id = 1`).Scan(&got, &date); err != nil {
++		t.Fatal(err)
++	}
++	if got != day.Format(ts) || date != day.Format("2006-01-02") {
++		t.Errorf("id 1: _PARTITIONTIME %v, _PARTITIONDATE %s; want %v", got, date, day)
++	}
++	if err := db.QueryRowContext(ctx, `SELECT FORMAT_TIMESTAMP('%F %T', _PARTITIONTIME) FROM ing_day WHERE id = 3`).Scan(&got); err != nil || got != day.Format(ts) {
++		t.Errorf("INSERT ... SELECT: _PARTITIONTIME %v (%v), want %v", got, err, day)
++	}
++	var n int64
++	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ing_day WHERE _PARTITIONTIME = TIMESTAMP('2024-01-01')`).Scan(&n); err != nil || n != 1 {
++		t.Errorf("rows of 2024-01-01: %d (%v), want 1", n, err)
++	}
++	if err := db.QueryRowContext(ctx, `SELECT FORMAT_TIMESTAMP('%F %T', _PARTITIONTIME) FROM ing_hour`).Scan(&got); err != nil ||
++		got != now.Truncate(time.Hour).Format(ts) && got != time.Now().UTC().Truncate(time.Hour).Format(ts) {
++		t.Errorf("hour: _PARTITIONTIME %v (%v), want %v", got, err, now.Truncate(time.Hour))
++	}
++	if _, err := db.QueryContext(ctx, `SELECT _PARTITIONDATE FROM ing_hour`); err == nil {
++		t.Error("_PARTITIONDATE of an hour-partitioned table: no error")
++	}
++	if _, err := db.QueryContext(ctx, `SELECT _PARTITIONTIME FROM plain`); err == nil {
++		t.Error("_PARTITIONTIME of a table that is not partitioned: no error")
++	}
++}
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -510,83 +510,106 @@
+ 	return a.namePath.addPath(path)
+ }
+ 
+-// applyIngestionPartitionRewrite makes ingestion-time partition
+-// references (`_PARTITIONTIME`, `_PARTITIONDATE`) acceptable to the
+-// upstream analyzer, which would otherwise reject them as
+-// "Unrecognized name". BigQuery exposes these as pseudo columns on
+-// tables created with `PARTITION BY DATE(_PARTITIONTIME)`.
++// applyIngestionPartitionRewrite makes ingestion-time partitioned
++// tables (`PARTITION BY _PARTITIONDATE`, `DATE(_PARTITIONTIME)` or
++// `TIMESTAMP_TRUNC(_PARTITIONTIME, unit)`) acceptable to the upstream
++// analyzer and gives them their pseudo-columns.
+ //
+-// Two-pass rewrite:
++// It strips `PARTITION BY <expr>` from CREATE TABLE statements:
++// googlesqlite does not physically partition (SQLite is the storage
++// layer), and the upstream analyzer rejects a PARTITION BY of a name
++// the table does not have.
+ //
+-//  1. Strip `PARTITION BY <expr>` from CREATE TABLE statements.
+-//     googlesqlite does not physically partition (SQLite is the
+-//     storage layer); the clause is metadata-only and the upstream
+-//     analyzer rejects `PARTITION BY DATE(CURRENT_TIMESTAMP())` as
+-//     "PARTITION BY expression must not be constant" if we tried to
+-//     rewrite the inner reference.
+-//  2. Replace bare `_PARTITIONTIME` / `_PARTITIONDATE` references
+-//     elsewhere (SELECT, WHERE, ...) with CURRENT_TIMESTAMP() /
+-//     CURRENT_DATE(). Driver-side semantics: every row looks like
+-//     it was ingested "now"; consumers that need per-row ingestion
+-//     time should track it themselves.
+-//
+-// String literals and backtick-quoted identifiers are skipped so
+-// embedded tokens (`'... _PARTITIONTIME ...'`) remain untouched.
++// CloudBurrow patch (cloudburrow/cloudburrow#1277): upstream also wrote
++// every other `_PARTITIONTIME` / `_PARTITIONDATE` as CURRENT_TIMESTAMP()
++// / CURRENT_DATE(), on any table, so every row read as ingested "now"
++// and a table that is not ingestion-time partitioned had them too.
++// BigQuery keeps each row's ingestion time, truncated to the table's
++// partitioning unit, and has the pseudo-columns only on an
++// ingestion-time partitioned table, `_PARTITIONDATE` only when it is
++// partitioned by day
++// (https://cloud.google.com/bigquery/docs/querying-partitioned-tables).
++// So a CREATE TABLE with a column list that is partitioned by
++// ingestion time gets the columns `_PARTITIONTIME TIMESTAMP` (and, by
++// day, `_PARTITIONDATE DATE`), whose DEFAULT is the time of the insert
++// truncated to the unit; the catalog makes them pseudo-columns
++// (isIngestionPseudoColumn), which SELECT * leaves out and a query,
++// or an INSERT that gives them, names. References are no longer
++// rewritten.
+ func applyIngestionPartitionRewrite(query string) string {
+-	if strings.Contains(query, "PARTITION") || strings.Contains(query, "partition") {
+-		query = stripPartitionByClause(query)
+-	}
+-	if !strings.Contains(query, "_PARTITION") {
++	if !strings.Contains(query, "PARTITION") && !strings.Contains(query, "partition") {
+ 		return query
+ 	}
+-	var b strings.Builder
+-	b.Grow(len(query))
+-	i := 0
+-	for i < len(query) {
+-		c := query[i]
+-		if c == '\'' || c == '"' {
+-			end := scanStringLiteral(query, i)
+-			b.WriteString(query[i:end])
+-			i = end
+-			continue
+-		}
+-		if c == '`' {
+-			end := i + 1
+-			for end < len(query) && query[end] != '`' {
+-				end++
+-			}
+-			if end < len(query) {
+-				end++
+-			}
+-			b.WriteString(query[i:end])
+-			i = end
+-			continue
+-		}
+-		if isIdentStart(c) {
+-			j := i + 1
+-			for j < len(query) && isIdentCont(query[j]) {
+-				j++
+-			}
+-			word := query[i:j]
+-			switch strings.ToUpper(word) {
+-			case "_PARTITIONTIME":
+-				b.WriteString("CURRENT_TIMESTAMP()")
+-			case "_PARTITIONDATE":
+-				b.WriteString("CURRENT_DATE()")
+-			default:
+-				b.WriteString(word)
+-			}
+-			i = j
+-			continue
++	query, strips := stripPartitionByClauseAt(query)
++	for i := len(strips) - 1; i >= 0; i-- {
++		query = addIngestionPseudoColumns(query, strips[i].pos, strips[i].expr)
++	}
++	return query
++}
++
++// isIngestionPseudoColumn reports whether a table column named name is
++// one of the pseudo-columns applyIngestionPartitionRewrite gives an
++// ingestion-time partitioned table (CloudBurrow patch,
++// cloudburrow/cloudburrow#1277).
++func isIngestionPseudoColumn(name string) bool {
++	return strings.EqualFold(name, "_PARTITIONTIME") || strings.EqualFold(name, "_PARTITIONDATE")
++}
++
++// ingestionPartitionUnit returns the partitioning unit of a PARTITION
++// BY expression of ingestion time, or "" when expr is not one.
++func ingestionPartitionUnit(expr string) string {
++	e := strings.ToUpper(strings.Join(strings.Fields(expr), ""))
++	switch e {
++	case "_PARTITIONDATE", "DATE(_PARTITIONTIME)":
++		return "DAY"
++	}
++	for _, unit := range []string{"DAY", "HOUR", "MONTH", "YEAR"} {
++		if e == "TIMESTAMP_TRUNC(_PARTITIONTIME,"+unit+")" {
++			return unit
+ 		}
+-		b.WriteByte(c)
+-		i++
+ 	}
+-	return b.String()
++	return ""
++}
++
++// addIngestionPseudoColumns adds the pseudo-column definitions of an
++// ingestion-time partitioning expr to the column list of the CREATE
++// TABLE statement whose PARTITION BY was stripped at pos of query: the
++// list is the `( ... )` that ends just before pos. A statement without
++// one (CREATE TABLE ... AS SELECT) is left as it is.
++func addIngestionPseudoColumns(query string, pos int, expr string) string {
++	unit := ingestionPartitionUnit(expr)
++	if unit == "" {
++		return query
++	}
++	k := pos
++	for k > 0 && (query[k-1] == ' ' || query[k-1] == '\t' || query[k-1] == '\n' || query[k-1] == '\r') {
++		k--
++	}
++	if k == 0 || query[k-1] != ')' {
++		return query
++	}
++	start := strings.LastIndexByte(query[:k], ';') + 1
++	head := strings.ToUpper(query[start:k])
++	if !strings.Contains(head, "CREATE") || !strings.Contains(head, "TABLE") ||
++		strings.Contains(head, "_PARTITIONTIME") {
++		return query
++	}
++	cols := ", `_PARTITIONTIME` TIMESTAMP DEFAULT TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), " + unit + ")"
++	if unit == "DAY" {
++		cols += ", `_PARTITIONDATE` DATE DEFAULT CURRENT_DATE()"
++	}
++	return query[:k-1] + cols + query[k-1:]
+ }
+ 
+-// stripPartitionByClause removes a top-level `PARTITION BY <expr>`
+-// clause from the SQL. The clause is metadata-only for googlesqlite
++// partitionStrip is one PARTITION BY clause stripPartitionByClauseAt
++// removed: its expression, and where it was in the result.
++type partitionStrip struct {
++	pos  int
++	expr string
++}
++
++// stripPartitionByClauseAt removes each top-level `PARTITION BY <expr>`
++// clause from the SQL, and returns where each was and its expression. The clause is metadata-only for googlesqlite
+ // (no physical partitioning), and the inner expression often
+ // contains pseudo-references (`_PARTITIONTIME`) that the upstream
+ // analyzer would otherwise reject.
+@@ -594,8 +617,9 @@
+ // Detects the clause by an outer-paren depth scan: matches PARTITION
+ // BY only at depth 0 so a `WITH t(x) AS (... PARTITION BY ...)`
+ // inside an OVER clause is left alone.
+-func stripPartitionByClause(query string) string {
++func stripPartitionByClauseAt(query string) (string, []partitionStrip) {
+ 	upper := strings.ToUpper(query)
++	var strips []partitionStrip
+ 	var b strings.Builder
+ 	b.Grow(len(query))
+ 	i := 0
+@@ -644,6 +668,7 @@
+ 				// runs until the next top-level keyword (CLUSTER,
+ 				// OPTIONS, AS, ;) or end of statement.
+ 				k += 2
++				exprStart := k
+ 				exprDepth := 0
+ 				for k < len(query) {
+ 					ch := query[k]
+@@ -681,6 +706,7 @@
+ 					}
+ 					k++
+ 				}
++				strips = append(strips, partitionStrip{pos: b.Len(), expr: query[exprStart:k]})
+ 				i = k
+ 				continue
+ 			}
+@@ -688,7 +714,7 @@
+ 		b.WriteByte(c)
+ 		i++
+ 	}
+-	return b.String()
++	return b.String(), strips
+ }
+ 
+ // applyMixedParameterRewrite supports queries that combine positional
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -2460,7 +2460,10 @@
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		columns = append(columns, m1(googlesql.NewSimpleColumn(storageName, column.Name, typ, false, true)))
++		// CloudBurrow patch (cloudburrow/cloudburrow#1277): the
++		// ingestion-time pseudo-columns (applyIngestionPartitionRewrite)
++		// are pseudo-columns, which SELECT * leaves out.
++		columns = append(columns, m1(googlesql.NewSimpleColumn(storageName, column.Name, typ, isIngestionPseudoColumn(column.Name), true)))
+ 		colIndex[column.Name] = int32(i)
+ 	}
+ 	tbl := newSimpleTableWithColumns(storageName, columns)
+@@ -2513,7 +2516,7 @@
+ 			return nil, err
+ 		}
+ 		columns = append(columns, m1(googlesql.NewSimpleColumn(
+-			tableName, column.Name, typ, false, true,
++			tableName, column.Name, typ, isIngestionPseudoColumn(column.Name), true,
+ 		)))
+ 		colIndex[column.Name] = int32(i)
+ 	}

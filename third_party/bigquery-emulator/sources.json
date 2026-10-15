@@ -27,7 +27,8 @@
         "patches/bigquery-emulator/0011-save-dataset-updates.patch",
         "patches/bigquery-emulator/0012-query-error-without-scan-prefix.patch",
         "patches/bigquery-emulator/0013-times-in-milliseconds.patch",
-        "patches/bigquery-emulator/0014-column-defaults.patch"
+        "patches/bigquery-emulator/0014-column-defaults.patch",
+        "patches/bigquery-emulator/0015-ingestion-partition-time.patch"
       ]
     },
     {
@@ -63,7 +64,8 @@
         "patches/googlesqlite/0024-cast-to-string-forms.patch",
         "patches/googlesqlite/0025-unnest-infinity.patch",
         "patches/googlesqlite/0026-int-float-comparisons.patch",
-        "patches/googlesqlite/0027-column-defaults.patch"
+        "patches/googlesqlite/0027-column-defaults.patch",
+        "patches/googlesqlite/0028-ingestion-partition-time.patch"
       ]
     },
     {

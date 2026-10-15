@@ -19,11 +19,12 @@ import (
 // writes every bare _PARTITIONTIME as CURRENT_TIMESTAMP() and _PARTITIONDATE
 // as CURRENT_DATE(), on any table, where BigQuery has them only on an
 // ingestion-time partitioned table and fails "Unrecognized name" on any other
-// (https://cloud.google.com/bigquery/docs/querying-partitioned-tables). The
-// emulator keeps no row's ingestion time, so on an ingestion-time
-// partitioned table that holds rows the front cannot answer them: 501. On
-// an empty one it lets the query run (it reads no row); on a table that is
-// not ingestion-time partitioned it fails the query as BigQuery does.
+// (https://cloud.google.com/bigquery/docs/querying-partitioned-tables).
+// CloudBurrow's engine patches (googlesqlite 0028, bigquery-emulator 0015)
+// keep each row's ingestion time, truncated to the table's unit, as the
+// pseudo-columns of an ingestion-time partitioned table (_PARTITIONDATE by
+// day only), which SELECT * leaves out; the front fails a query of them
+// on any other table as BigQuery does, with the name's position.
 //
 // `p.d.t$20240101` failed 400 "Table not found". BigQuery reads one
 // partition so (https://cloud.google.com/bigquery/docs/managing-partitioned-table-data):
@@ -33,11 +34,11 @@ import (
 // subquery of the partition's rows, and deletes a partition
 // (tables.delete of the decorated name) with a DELETE of its rows. A
 // decorator on a table that is not partitioned is refused 400 (wording
-// UNVERIFIED). tabledata.list and tables.get of a partition and a query job
-// into one are
-// in partitionwrites.go. Not built (501): an ingestion-time partition (no
-// row's ingestion time is kept) and a decorated destination of a load or
-// copy job.
+// UNVERIFIED). tabledata.list and tables.get of a partition, and query,
+// load and copy jobs into one, are in partitionwrites.go. A partition of
+// an ingestion-time partitioned table is its rows whose _PARTITIONTIME is
+// the partition's start ($__UNPARTITIONED__: NULL; $__NULL__ is refused,
+// as such a table has none).
 //
 // FOR SYSTEM_TIME AS OF failed 400 "FOR SYSTEM_TIME AS OF is not
 // supported", the emulator keeps no history. The front reads the time
@@ -178,7 +179,8 @@ func (f front) partitionReads(w http.ResponseWriter, r *http.Request, q queryOpt
 		if pseudo == nil {
 			continue
 		}
-		found, ingestion, rows := false, false, false
+		// _PARTITIONDATE is a day-partitioned table's only.
+		found, ingestion := false, false
 		for _, tr := range reads {
 			if len(tr.stmt) == 0 || &tr.stmt[0] != &stmt[0] {
 				continue
@@ -188,11 +190,8 @@ func (f front) partitionReads(w http.ResponseWriter, r *http.Request, q queryOpt
 				continue
 			}
 			found = true
-			if m.ingestion() {
+			if m.ingestion() && (pseudo.is("_PARTITIONTIME") || m.ingestionUnit() == "DAY") {
 				ingestion = true
-				if n, _ := strconv.Atoi(m.NumRows); n > 0 {
-					rows = true
-				}
 			}
 		}
 		switch {
@@ -200,12 +199,6 @@ func (f front) partitionReads(w http.ResponseWriter, r *http.Request, q queryOpt
 		case !ingestion:
 			writeError(w, http.StatusBadRequest, "invalidQuery", "Unrecognized name: "+strings.ToUpper(pseudo.text)+
 				" at "+lineCol(q.Query, pseudo.pos))
-			return true
-		case rows:
-			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+strings.ToUpper(pseudo.text)+
-				" of an ingestion-time partitioned table that holds rows. The emulator behind CloudBurrow keeps no row's "+
-				"ingestion time, so it cannot answer the pseudo-column. Partition the table by a column instead "+
-				"(docs/compatibility.md). Nothing was run.")
 			return true
 		}
 	}
@@ -436,9 +429,19 @@ func partitionFilter(m partitionMeta, dec, name string) (string, int, string) {
 	case m.TimePartitioning == nil:
 		return "", http.StatusBadRequest, "Cannot read partition information from a table that is not partitioned: " + name // UNVERIFIED wording
 	case m.ingestion():
-		return "", http.StatusNotImplemented, "Not implemented here: a partition decorator of an ingestion-time partitioned " +
-			"table. The emulator behind CloudBurrow keeps no row's ingestion time, so it cannot tell a partition's rows. " +
-			"Partition the table by a column instead (docs/compatibility.md). Nothing was run."
+		// The engine keeps each row's _PARTITIONTIME, the start of its
+		// partition (#1277).
+		switch dec {
+		case "__NULL__":
+			return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording
+		case "__UNPARTITIONED__":
+			return "_PARTITIONTIME IS NULL", 0, ""
+		}
+		from, _, ok := partitionBounds(m.TimePartitioning.Type, dec)
+		if !ok {
+			return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording
+		}
+		return "_PARTITIONTIME = TIMESTAMP '" + from.Format(sqlTimestamp) + "'", 0, ""
 	}
 	tp := m.TimePartitioning
 	col := quoteName(tp.Field)
@@ -452,28 +455,71 @@ func partitionFilter(m partitionMeta, dec, name string) (string, int, string) {
 	case "__UNPARTITIONED__":
 		return "(" + expr + " < TIMESTAMP '1960-01-01' OR " + expr + " >= TIMESTAMP '2160-01-01')", 0, ""
 	}
-	layout, unit := map[string][2]string{"DAY": {"20060102", "day"}, "HOUR": {"2006010215", "hour"},
-		"MONTH": {"200601", "month"}, "YEAR": {"2006", "year"}}[strings.ToUpper(tp.Type)], ""
-	if layout[0] == "" {
-		layout = [2]string{"20060102", "day"}
-	}
-	from, err := time.Parse(layout[0], dec)
-	if err != nil || len(dec) != len(layout[0]) {
+	from, to, ok := partitionBounds(tp.Type, dec)
+	if !ok {
 		return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording
 	}
-	var to time.Time
-	switch unit = layout[1]; unit {
-	case "hour":
+	return fmt.Sprintf("(%s >= TIMESTAMP '%s' AND %s < TIMESTAMP '%s')", expr, from.Format(sqlTimestamp), expr,
+		to.Format(sqlTimestamp)), 0, ""
+}
+
+const sqlTimestamp = "2006-01-02 15:04:05"
+
+// partitionBounds returns the start and end of the partition dec of a
+// table partitioned by the time unit typ (DAY when empty): YYYYMMDD,
+// YYYYMMDDHH, YYYYMM or YYYY.
+func partitionBounds(typ, dec string) (from, to time.Time, ok bool) {
+	layout := map[string]string{"DAY": "20060102", "HOUR": "2006010215", "MONTH": "200601", "YEAR": "2006"}[strings.ToUpper(typ)]
+	if layout == "" {
+		layout = "20060102"
+	}
+	from, err := time.Parse(layout, dec)
+	if err != nil || len(dec) != len(layout) {
+		return from, to, false
+	}
+	switch strings.ToUpper(typ) {
+	case "HOUR":
 		to = from.Add(time.Hour)
-	case "month":
+	case "MONTH":
 		to = from.AddDate(0, 1, 0)
-	case "year":
+	case "YEAR":
 		to = from.AddDate(1, 0, 0)
 	default:
 		to = from.AddDate(0, 0, 1)
 	}
-	const ts = "2006-01-02 15:04:05"
-	return fmt.Sprintf("(%s >= TIMESTAMP '%s' AND %s < TIMESTAMP '%s')", expr, from.Format(ts), expr, to.Format(ts)), 0, ""
+	return from, to, true
+}
+
+// ingestionUnit is the partitioning unit of an ingestion-time
+// partitioned table: DAY, HOUR, MONTH or YEAR.
+func (m partitionMeta) ingestionUnit() string {
+	switch u := strings.ToUpper(m.TimePartitioning.Type); u {
+	case "HOUR", "MONTH", "YEAR":
+		return u
+	}
+	return "DAY"
+}
+
+// ingestionColumns returns what an INSERT into the ingestion-time
+// partitioned table m adds to its column list and to each row to write
+// the rows into partition dec, or, with dec "", to keep the
+// _PARTITIONTIME of rows read from another ingestion-time partitioned
+// table (#1277): ", _PARTITIONTIME[, _PARTITIONDATE]" and their values.
+// Both are "" for a table that is not ingestion-time partitioned.
+func ingestionColumns(m partitionMeta, dec string) (cols, vals string) {
+	if !m.ingestion() {
+		return "", ""
+	}
+	unit := m.ingestionUnit()
+	t := "TIMESTAMP_TRUNC(_PARTITIONTIME, " + unit + ")"
+	if from, _, ok := partitionBounds(unit, dec); ok {
+		t = "TIMESTAMP '" + from.Format(sqlTimestamp) + "'"
+	}
+	cols, vals = ", _PARTITIONTIME", ", "+t
+	if unit == "DAY" {
+		cols, vals = cols+", _PARTITIONDATE", vals+", DATE("+t+")"
+	}
+	return cols, vals
 }
 
 // servePartition answers a request for a decorated table, dataset.table

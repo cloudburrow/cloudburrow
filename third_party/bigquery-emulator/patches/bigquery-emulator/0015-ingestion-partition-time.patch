@@ -1,0 +1,174 @@
+CloudBurrow patch 15 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1277). Needs googlesqlite patch 0028.
+
+The bug: a table made by tables.insert with timePartitioning and no
+field (an ingestion-time partitioned table) was made in the engine as
+any other table (contentdata's CreateTable), so it kept no row's
+ingestion time and _PARTITIONTIME and _PARTITIONDATE could not be read
+from it. Measured through CloudBurrow's front, 2026-10-15.
+
+BigQuery keeps each row's ingestion time, truncated to the partitioning
+unit, whatever writes it (DML, tabledata.insertAll, a load, the Storage
+Write API) (https://cloud.google.com/bigquery/docs/querying-partitioned-tables).
+The patch makes such a table with PARTITION BY
+TIMESTAMP_TRUNC(_PARTITIONTIME, <its type>), which gives it the
+pseudo-columns (googlesqlite patch 0028); every write leaves them out of
+its INSERT, so the engine fills them in. It also leaves the
+pseudo-columns out of the schema of a table made by CREATE TABLE ...
+PARTITION BY _PARTITIONDATE (addTableMetadata).
+server/ingestion_partition_test.go fails without the patch and passes
+with it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -131,6 +131,19 @@
+ 		return err
+ 	}
+ 	query := fmt.Sprintf("CREATE TABLE `%s` (%s)", tablePath, strings.Join(fields, ","))
++	if tp := table.TimePartitioning; tp != nil && tp.Field == "" {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1277): an
++		// ingestion-time partitioned table is made as CREATE TABLE ...
++		// PARTITION BY ingestion time would make it, so the engine keeps
++		// each row's _PARTITIONTIME (googlesqlite patch 0028).
++		unit := strings.ToUpper(tp.Type)
++		switch unit {
++		case "HOUR", "MONTH", "YEAR":
++		default:
++			unit = "DAY"
++		}
++		query += " PARTITION BY TIMESTAMP_TRUNC(_PARTITIONTIME, " + unit + ")"
++	}
+ 	if _, err := tx.Tx().ExecContext(ctx, query); err != nil {
+ 		return fmt.Errorf("failed to create table %s: %w", query, err)
+ 	}
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1859,6 +1859,12 @@
+ 	}
+ 	fields := make([]*bigqueryv2.TableFieldSchema, 0, len(spec.Columns))
+ 	for _, column := range spec.Columns {
++		if strings.EqualFold(column.Name, "_PARTITIONTIME") || strings.EqualFold(column.Name, "_PARTITIONDATE") {
++			// CloudBurrow patch (cloudburrow/cloudburrow#1277): the
++			// pseudo-columns of an ingestion-time partitioned table are
++			// not in its schema.
++			continue
++		}
+ 		field := types.TableFieldSchemaFromColumnType(column.Name, column.Type)
+ 		// CloudBurrow patch (cloudburrow/cloudburrow#1340): a CREATE
+ 		// TABLE column's DEFAULT reads back as its defaultValueExpression.
+--- /dev/null
++++ b/server/ingestion_partition_test.go
+@@ -0,0 +1,107 @@
++package server_test
++
++import (
++	"context"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/iterator"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestIngestionPartitionTime is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1277): a table made by tables.insert with
++// timePartitioning and no field kept no row's ingestion time, so
++// _PARTITIONTIME read the time of the query; and the pseudo-columns of a
++// table made by CREATE TABLE ... PARTITION BY _PARTITIONDATE are not in
++// its schema.
++func TestIngestionPartitionTime(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test", types.NewDataset("ds")))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	ds := client.Dataset("ds")
++	run := func(q string) {
++		t.Helper()
++		job, err := client.Query(q).Run(ctx)
++		if err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		if status, err := job.Wait(ctx); err != nil || status.Err() != nil {
++			t.Fatalf("%s: %v, %v", q, err, status.Err())
++		}
++	}
++	count := func(q string) int64 {
++		t.Helper()
++		it, err := client.Query(q).Read(ctx)
++		if err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		var row []bigquery.Value
++		if err := it.Next(&row); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		return row[0].(int64)
++	}
++
++	ing := ds.Table("ing")
++	if err := ing.Create(ctx, &bigquery.TableMetadata{
++		Schema:           bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType}},
++		TimePartitioning: &bigquery.TimePartitioning{Type: bigquery.DayPartitioningType},
++	}); err != nil {
++		t.Fatal(err)
++	}
++	type row struct {
++		ID int64 `bigquery:"id"`
++	}
++	if err := ing.Inserter().Put(ctx, []row{{1}, {2}}); err != nil {
++		t.Fatal(err)
++	}
++	run("INSERT INTO ds.ing (_PARTITIONTIME, id) VALUES (TIMESTAMP '2024-01-01', 3)")
++	if n := count("SELECT COUNT(*) FROM ds.ing WHERE _PARTITIONTIME = TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), DAY) AND _PARTITIONDATE = CURRENT_DATE()"); n != 2 {
++		t.Errorf("rows of today: %d, want 2", n)
++	}
++	if n := count("SELECT COUNT(*) FROM ds.ing WHERE _PARTITIONTIME = TIMESTAMP('2024-01-01')"); n != 1 {
++		t.Errorf("rows of 2024-01-01: %d, want 1", n)
++	}
++	it := ing.Read(ctx)
++	for {
++		var vals []bigquery.Value
++		if err := it.Next(&vals); err == iterator.Done {
++			break
++		} else if err != nil {
++			t.Fatal(err)
++		}
++		if len(vals) != 1 {
++			t.Errorf("tabledata.list row %v, want only id", vals)
++		}
++	}
++
++	run("CREATE TABLE ds.ddl (id INT64) PARTITION BY _PARTITIONDATE")
++	md, err := ds.Table("ddl").Metadata(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(md.Schema) != 1 || md.Schema[0].Name != "id" {
++		t.Errorf("schema of ddl: %v, want only id", md.Schema)
++	}
++}
