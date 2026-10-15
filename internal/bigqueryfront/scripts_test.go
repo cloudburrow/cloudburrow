@@ -307,7 +307,9 @@ func TestFailedScriptThatWroteIs501(t *testing.T) {
 		sql  string
 		want int
 	}{
-		{"CREATE TABLE ds.e1 AS SELECT 1 AS a; SELECT * FROM nope.nope; CREATE TABLE ds.e2 AS SELECT 1 AS a", 501},
+		// Run statement by statement (#1249, earlierQuery): it fails at the
+		// SELECT, keeping ds.e1, as BigQuery does.
+		{"CREATE TABLE ds.e1 AS SELECT 1 AS a; SELECT * FROM nope.nope; CREATE TABLE ds.e2 AS SELECT 1 AS a", 400},
 		{"INSERT INTO ds.t VALUES (1); SELECT * FROM nope.nope", 501},
 		{"DROP TABLE ds.t; SELECT * FROM nope.nope", 501},
 		{"BEGIN TRANSACTION; CREATE TEMP TABLE tt AS SELECT 1 AS a; INSERT INTO ds.t VALUES (1); COMMIT TRANSACTION; SELECT * FROM nope.nope", 501},
@@ -946,5 +948,49 @@ func TestJobListReadsConfigurationsOfThePageOnly(t *testing.T) {
 	}
 	if got := gets.Load(); got != page {
 		t.Errorf("jobs.get was sent %d times for a page of %d out of %d jobs", got, page, n)
+	}
+}
+
+// TestEarlierQuery (#1249): a script with a query before its last
+// statement is carried out statement by statement, or 501 with a TEMP
+// table or function; any other is sent as it is.
+func TestEarlierQuery(t *testing.T) {
+	for sql, want := range map[string]int{
+		"SELECT 1":  scriptAsIs,
+		"SELECT 1;": scriptAsIs,
+		"INSERT INTO ds.t VALUES (1); SELECT 1/0":                         scriptAsIs,
+		"INSERT INTO ds.t SELECT 1; DELETE ds.t WHERE TRUE":               scriptAsIs,
+		"SELECT 1/0; INSERT INTO ds.t VALUES (1)":                         scriptSplits,
+		"WITH a AS (SELECT 1) SELECT * FROM a; SELECT 2":                  scriptSplits,
+		"(SELECT 1); SELECT 2;":                                           scriptSplits,
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; SELECT * FROM t; SELECT 2": scriptKeepsTemp,
+		"CREATE TEMP FUNCTION f() AS (1); SELECT f(); SELECT 2":           scriptKeepsTemp,
+	} {
+		if got := earlierQuery(sql); got != want {
+			t.Errorf("%q: %d, want %d", sql, got, want)
+		}
+	}
+	// Carried out statement by statement, the earlier query's error fails
+	// the script, and the statement after it is not sent.
+	var sent []string
+	emu := &jobsEmulator{run: func(q string) (int, string) {
+		sent = append(sent, q)
+		if strings.Contains(q, "1/0") {
+			return 400, `{"error":{"code":400,"message":"zero divided error","errors":[{"reason":"jobInternalError"}]}}`
+		}
+		return 200, `{"jobComplete":true}`
+	}}
+	code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "INSERT INTO ds.t VALUES (5); SELECT 1/0; INSERT INTO ds.t VALUES (6)"))
+	if code != 400 {
+		t.Errorf("the failing script: %d, want 400", code)
+	}
+	for _, q := range sent {
+		if strings.Contains(q, "VALUES (6)") {
+			t.Errorf("sent %q after the failing statement", q)
+		}
+	}
+	code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE TEMP TABLE x AS SELECT 1 AS a; SELECT * FROM x; SELECT 2"))
+	if code != 501 || errorReason(got) != "notImplemented" {
+		t.Errorf("a TEMP table: %d %v, want 501", code, got)
 	}
 }

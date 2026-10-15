@@ -39,6 +39,7 @@ func TestTheBigQueryReadWriteEditorScreensStatements(t *testing.T) {
 		"ALTER TABLE t ADD COLUMN c STRING": "",
 		"CREATE TABLE t AS SELECT 'INSERT INTO u' AS s -- ; DELETE FROM u":         "",
 		"BEGIN TRANSACTION; COMMIT TRANSACTION":                                    "",
+		"BEGIN TRANSACTION; SELECT 1; COMMIT TRANSACTION":                          "",
 		"SELECT 'unterminated":                                                     "",
 		"INSERT INTO t (x) VALUES (1)":                                             "INSERT",
 		"update t set x = 1 where true;":                                           "UPDATE",
@@ -57,14 +58,17 @@ func TestTheBigQueryReadWriteEditorScreensStatements(t *testing.T) {
 		"INSERT INTO t (x) VALUES (1); SELECT 1":                                       "INSERT is DML inside a script",
 		"BEGIN\n  DELETE FROM t WHERE true;\nEND":                                      "DELETE is DML inside a script",
 		"BEGIN SELECT 1; EXCEPTION WHEN ERROR THEN UPDATE t SET x = 1 WHERE true; END": "UPDATE is DML inside a script",
-		"UPDATE t SET x = s.x FROM s WHERE t.id = s.id":                                "Update with joins not supported",
-		"update t set x = 1 from s where true":                                         "(#1027)",
-		"SELECT * FROM t":                                                              "switch the editor to Read-only",
-		"WITH a AS (SELECT 1) SELECT * FROM a;":                                        "switch the editor to Read-only",
-		"(SELECT 1)":                                                                   "switch the editor to Read-only",
-		"":                                                                             "a statement is required",
-		"-- nothing":                                                                   "a statement is required",
-		strings.Repeat("-", maxBigQueryScriptBytes+1):                                  "at most",
+		// A transaction (#1201) is a script: its DML is refused as any
+		// DML in a script is, since the rows are not reported (#1028).
+		"BEGIN TRANSACTION; INSERT INTO t (x) VALUES (1); COMMIT TRANSACTION": "INSERT is DML inside a script",
+		"UPDATE t SET x = s.x FROM s WHERE t.id = s.id":                       "Update with joins not supported",
+		"update t set x = 1 from s where true":                                "(#1027)",
+		"SELECT * FROM t":                                                     "switch the editor to Read-only",
+		"WITH a AS (SELECT 1) SELECT * FROM a;":                               "switch the editor to Read-only",
+		"(SELECT 1)":                                                          "switch the editor to Read-only",
+		"":                                                                    "a statement is required",
+		"-- nothing":                                                          "a statement is required",
+		strings.Repeat("-", maxBigQueryScriptBytes+1):                         "at most",
 	} {
 		if _, err := writableBigQuery(stmt); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%.40q = %v, want a refusal naming %q", stmt, err, want)
