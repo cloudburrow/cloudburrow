@@ -153,7 +153,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleRunWorkerPoolDeployEditScaleDelete", "TestNoDetailShowsABlankProperty"}},
 	{Resource: "Cloud Run instances", Service: "run",
 		Methods:  []string{"Instances/CreateInstance", "Instances/DeleteInstance", "Instances/GetInstance", "Instances/ListInstances", "Instances/StartInstance", "Instances/StopInstance"},
-		Provider: "run-instances", Offers: "Instances page (/run/instances): instances list, an instance's page with its status and configuration, Create instance, Stop, Start, Delete (#1299)",
+		Provider: "run-instances", Offers: "Instances page (/run/instances): instances list, an instance's page with its status, URL and configuration, Create instance, Stop, Start, Delete (#1299; the URL and operations that wait for the instance, #1348)",
 		Tests: []string{"TestConsoleRunInstanceCreateStopStartDelete", "TestNoDetailShowsABlankProperty"}},
 	{Resource: "Cloud Run builds", Service: "run",
 		Methods:  []string{"Builds/SubmitBuild"},

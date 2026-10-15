@@ -211,8 +211,8 @@ func (s *Server) readWorkerPool(ctx context.Context, w workload, cm kconfigMap) 
 }
 
 // CreateWorkerPool stores a pool and starts its instances. The operation
-// completes once the pool is written; GetWorkerPool reports the instances
-// coming up as reconciling.
+// completes once every instance is ready (#1348); until then GetWorkerPool
+// reports the pool as reconciling.
 func (p *WorkerPoolsServer) CreateWorkerPool(ctx context.Context, req *runpb.CreateWorkerPoolRequest) (*longrunningpb.Operation, error) {
 	s := p.s
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
@@ -252,15 +252,18 @@ func (p *WorkerPoolsServer) CreateWorkerPool(ctx context.Context, req *runpb.Cre
 	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "create"); err != nil {
 		return nil, err
 	}
-	cm, err := s.loadSpec(ctx, w)
-	if err != nil {
-		return nil, apierror.Internal(err, "read back worker pool %s", wp.Name)
+	return s.workloadOperation(ctx, req.GetParent(), w, s.workerPoolReady(w))
+}
+
+// workerPoolReady reads a pool for awaitWorkload.
+func (s *Server) workerPoolReady(w workload) func(context.Context, kconfigMap) (proto.Message, *runpb.Condition, error) {
+	return func(ctx context.Context, cm kconfigMap) (proto.Message, *runpb.Condition, error) {
+		wp, err := s.readWorkerPool(ctx, w, cm)
+		if err != nil {
+			return nil, nil, err
+		}
+		return wp, wp.GetTerminalCondition(), nil
 	}
-	out, err := s.readWorkerPool(ctx, w, cm)
-	if err != nil {
-		return nil, err
-	}
-	return s.doneOperation(req.GetParent(), wp.Name, out)
 }
 
 // GetWorkerPool reads a pool.
@@ -383,15 +386,7 @@ func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.Upd
 	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "replace"); err != nil {
 		return nil, err
 	}
-	updated, err := s.loadSpec(ctx, w)
-	if err != nil {
-		return nil, apierror.Internal(err, "read back worker pool %s", name)
-	}
-	out, err := s.readWorkerPool(ctx, w, updated)
-	if err != nil {
-		return nil, err
-	}
-	return s.doneOperation(parent, name, out)
+	return s.workloadOperation(ctx, parent, w, s.workerPoolReady(w))
 }
 
 // DeleteWorkerPool removes a pool, its revisions and its instances.
