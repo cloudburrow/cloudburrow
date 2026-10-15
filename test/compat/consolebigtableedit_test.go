@@ -35,6 +35,7 @@ type bigtableAction struct {
 	ID          string
 	Destructive bool
 	Leaves      bool
+	Confirm     string
 	Fields      []struct{ Name, Default string }
 }
 
