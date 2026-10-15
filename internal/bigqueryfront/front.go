@@ -366,6 +366,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies}
 		switch {
+		case m[4] != "" && strings.Contains(table, "$") && strings.Index(table, "$") > 0 && (m[5] == "" || m[5] == "data"):
+			f.servePartition(w, r, dataset, table, m[5]) // #1273, partitionreads.go
 		case r.Method == http.MethodPost && m[3] == "":
 			f.insertDataset(w, r)
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":

@@ -179,13 +179,13 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |
 | Storage Write API `arrow_rows` | not built yet | M |
-| Partition decorators (`` `t$20240101` ``) in queries, `tabledata.list`, loads and query-job destinations: "Table not found" (#1273) | not built yet | M |
+| Partition decorators: `tabledata.list` and `tables.get` of a partition, a partition as a load, copy or query destination, and a partition of an ingestion-time partitioned table are 501 (a query's read and `tables.delete` of one are built, #1273) | not built yet | M |
 | `INFORMATION_SCHEMA` `ROUTINES`, `PARAMETERS`, `PARTITIONS`, `COLUMN_FIELD_PATHS`, `TABLE_STORAGE`: "Table not found"; `TABLE_OPTIONS` empty (#1286) | not built yet | M |
 | Region-qualified `INFORMATION_SCHEMA.JOBS`, `JOBS_BY_PROJECT`, `JOBS_BY_USER`: "Table not found" (#1275) | not built yet | M |
-| `_PARTITIONTIME` and `_PARTITIONDATE` answer the insert time on any table, not the partition's start on an ingestion-time partitioned one (#1277) | not built yet | S |
+| `_PARTITIONTIME` and `_PARTITIONDATE` of an ingestion-time partitioned table that holds rows are 501: the emulator keeps no row's ingestion time (on any other table they fail 400 as in BigQuery, #1277) | no emulator support | M |
 | Materialized views (`CREATE` / `DROP MATERIALIZED VIEW`) | no emulator support | L |
 | `datasets.undelete`: the emulator keeps nothing of a deleted dataset | no emulator support | M |
-| `FOR SYSTEM_TIME AS OF` (time travel): the emulator refuses it 400 and keeps no history (#1276) | no emulator support | M |
+| `FOR SYSTEM_TIME AS OF` a past time inside the time travel window is 501: the emulator keeps no history (`AS OF CURRENT_TIMESTAMP()` reads the table, and a time before the window fails 400 as in BigQuery, #1276) | no emulator support | L |
 | A failed script after a statement that wrote: the emulator does not roll back | no emulator support | L |
 | `MERGE` from a subquery inside a multi-statement script; DML with a `FROM` of several items | no emulator support | M |
 | `CREATE OR REPLACE TABLE`, `CREATE OR REPLACE [TEMP] TABLE`, `CREATE SCHEMA` of an existing dataset, and `DROP TABLE` of a script's temp table, later in a multi-statement script | no emulator support | M |

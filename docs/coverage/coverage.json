@@ -4297,6 +4297,9 @@
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
+          "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
+          "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
+          "test/compat/bigquerypartitionreads_test.go:76 TestBigQueryPartitionDecorators",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -4331,6 +4334,9 @@
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
+          "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
+          "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
+          "test/compat/bigquerypartitionreads_test.go:76 TestBigQueryPartitionDecorators",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -4525,6 +4531,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerypartitionreads_test.go:76 TestBigQueryPartitionDecorators",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },

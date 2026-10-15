@@ -31,7 +31,7 @@ import (
 //
 // Not carried out: what partitioning does to queries (partition pruning,
 // require_partition_filter, partition_expiration_days: 501 as options),
-// and _PARTITIONTIME of an ingestion-time partitioned table (#1277).
+// and partition decorators and _PARTITIONTIME (partitionreads.go, #1273, #1277).
 
 // partitionSpec is the metadata a statement's PARTITION BY and CLUSTER BY
 // give its table: tables.get's timePartitioning, rangePartitioning and
