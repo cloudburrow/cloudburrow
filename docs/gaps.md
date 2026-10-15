@@ -226,7 +226,7 @@ Closed by this sweep: Test permissions on the Permissions tab (#1242).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured"; #1267) | not built yet | M |
+| Request metrics, the request log and traces for Spanner (raw tunnel, no front; still "not measured"), and for Firestore's and Datastore's calls from pods, which bypass the host tunnel's guard (#1288; Pub/Sub, Bigtable and the host's Firestore and Datastore calls since #1266, #1267) | not built yet | M |
 | Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |
 

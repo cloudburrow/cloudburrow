@@ -100,6 +100,10 @@ type Forwarder struct {
 	// Logf, when set, receives one line per exit and re-establishment, so a
 	// diagnose bundle says what the tunnel did (#526).
 	Logf func(format string, args ...any)
+	// Observe, when set before Start, is told about each request a Guarded
+	// tunnel carries (observe.go, #1267). An unguarded tunnel copies bytes
+	// and sees no request.
+	Observe func(Call)
 }
 
 // New returns a Forwarder for one target.
@@ -207,7 +211,7 @@ func (f *Forwarder) Start(ctx context.Context) error {
 		public := net.JoinHostPort(f.bindAddr, strconv.Itoa(f.hostPort))
 		kube := net.JoinHostPort(kubeBind, strconv.Itoa(f.kubePort))
 		f.mu.Unlock()
-		g, err := startGuard(public, kube, f.logf)
+		g, err := startObservedGuard(public, kube, f.logf, f.Observe)
 		if err != nil {
 			f.stopProcess(context.Background())
 			return fmt.Errorf("%w: listen on %s: %w", ErrForwardFailed, public, err)

@@ -16,28 +16,26 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
-	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
-// pubsubCallScraper feeds the calls the in-cluster Pub/Sub front served
-// (internal/pubsubfront/calls.go, #1266) into /metrics, /admin/events (the
+// frontCallScraper feeds the calls an in-cluster front served
+// (internal/calllog): Pub/Sub's (#1266) and Bigtable's (#1267), into /metrics, /admin/events (the
 // console's request log) and, with tracing on, one span each, as the
 // storage scraper does for the builtin storage server (#513): the front
-// keeps its last calls at pubsubfront.CallsPath, and the CLI polls it through
+// keeps its last calls at calllog.Path, and the CLI polls it through
 // the tunnel, since a pod cannot reach the CLI, which binds loopback
-// (ADR-0004). Every client's calls are seen, the host's, a workload's in the
-// cluster and the storage server's notifications alike, since they all
-// reach the emulator through the front.
-type pubsubCallScraper struct {
-	addr     func() string
-	grpcCall grpctransport.Observer
-	restCall func(rest.Request)
-	tracer   trace.Tracer
+// (ADR-0004). Every client's calls are seen, the host's and a workload's in
+// the cluster alike (and for Pub/Sub the storage server's notifications),
+// since they all reach the emulator through the front.
+type frontCallScraper struct {
+	addr func() string
+	*frontCalls
 	interval time.Duration
 
 	mu     sync.Mutex
@@ -46,29 +44,58 @@ type pubsubCallScraper struct {
 	done   chan struct{}
 }
 
-// newPubSubCallScraper reads the front through tunnel. Building it marks
-// pubsub measured in reg.
-func newPubSubCallScraper(tunnel *netfwd.Forwarder, rec *admin.Recorder, reg *metrics.Registry, tracing *telemetry.Tracing) *pubsubCallScraper {
-	s := &pubsubCallScraper{
+// newFrontCallScraper reads service's front through tunnel: Pub/Sub's
+// (#1266) or Bigtable's (#1267). Building it marks service measured in reg.
+func newFrontCallScraper(service string, tunnel *netfwd.Forwarder, rec *admin.Recorder, reg *metrics.Registry, tracing *telemetry.Tracing) *frontCallScraper {
+	s := &frontCallScraper{
 		addr: func() string {
 			if tunnel == nil {
 				return ""
 			}
 			return tunnel.HostAddr()
 		},
-		grpcCall: callEvents(rec, reg, "pubsub"),
-		restCall: requestEvents(rec, reg, "pubsub"),
-		interval: 2 * time.Second,
-	}
-	if tracing != nil && tracing.Enabled() {
-		s.tracer = tracing.Provider().Tracer("github.com/cloudburrow/cloudburrow/pubsub")
+		frontCalls: newFrontCalls(rec, reg, tracing, service),
+		interval:   2 * time.Second,
 	}
 	return s
 }
 
-func (s *pubsubCallScraper) Name() string { return "pubsub-calls" }
+// frontCalls records the calls a front or a guarded tunnel saw, which
+// CloudBurrow did not serve itself, as callEvents and requestEvents record
+// the ones it serves: /metrics, /admin/events and, with tracing on, a span.
+type frontCalls struct {
+	service  string
+	grpcCall grpctransport.Observer
+	restCall func(rest.Request)
+	tracer   trace.Tracer
+}
 
-func (s *pubsubCallScraper) Start(context.Context) error {
+// newFrontCalls marks service measured in reg.
+func newFrontCalls(rec *admin.Recorder, reg *metrics.Registry, tracing *telemetry.Tracing, service string) *frontCalls {
+	f := &frontCalls{service: service, grpcCall: callEvents(rec, reg, service), restCall: requestEvents(rec, reg, service)}
+	if tracing != nil && tracing.Enabled() {
+		f.tracer = tracing.Provider().Tracer("github.com/cloudburrow/cloudburrow/" + service)
+	}
+	return f
+}
+
+// tunnelCalls records each request a guarded tunnel carried (#1267):
+// Firestore's and Datastore's calls from the host.
+func tunnelCalls(rec *admin.Recorder, reg *metrics.Registry, tracing *telemetry.Tracing, service string) func(netfwd.Call) {
+	f := newFrontCalls(rec, reg, tracing, service)
+	return func(c netfwd.Call) {
+		transport := "http"
+		if c.GRPC {
+			transport = "grpc"
+		}
+		f.record(calllog.Call{Method: c.Method, Transport: transport, Code: c.Code, Resource: c.Resource,
+			Time: c.Time, Duration: c.Duration, TraceParent: c.TraceParent})
+	}
+}
+
+func (s *frontCallScraper) Name() string { return s.service + "-calls" }
+
+func (s *frontCallScraper) Start(context.Context) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel, s.done = cancel, make(chan struct{})
 	go func() {
@@ -87,7 +114,7 @@ func (s *pubsubCallScraper) Start(context.Context) error {
 	return nil
 }
 
-func (s *pubsubCallScraper) Stop(ctx context.Context) error {
+func (s *frontCallScraper) Stop(ctx context.Context) error {
 	if s.cancel == nil {
 		return nil
 	}
@@ -102,7 +129,7 @@ func (s *pubsubCallScraper) Stop(ctx context.Context) error {
 }
 
 // page reads the front's calls after a sequence number.
-func (s *pubsubCallScraper) page(ctx context.Context, after uint64) ([]pubsubfront.Call, bool) {
+func (s *frontCallScraper) page(ctx context.Context, after uint64) ([]calllog.Call, bool) {
 	addr := s.addr()
 	if addr == "" {
 		return nil, false
@@ -110,7 +137,7 @@ func (s *pubsubCallScraper) page(ctx context.Context, after uint64) ([]pubsubfro
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"http://"+addr+pubsubfront.CallsPath+"?after="+strconv.FormatUint(after, 10), nil)
+		"http://"+addr+calllog.Path+"?after="+strconv.FormatUint(after, 10), nil)
 	if err != nil {
 		return nil, false
 	}
@@ -120,7 +147,7 @@ func (s *pubsubCallScraper) page(ctx context.Context, after uint64) ([]pubsubfro
 	}
 	defer resp.Body.Close()
 	var page struct {
-		Calls []pubsubfront.Call `json:"calls"`
+		Calls []calllog.Call `json:"calls"`
 	}
 	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&page) != nil {
 		return nil, false
@@ -130,7 +157,7 @@ func (s *pubsubCallScraper) page(ctx context.Context, after uint64) ([]pubsubfro
 
 // scrape records the calls after the last one seen. A front that restarted
 // numbers from 1 again, so a sequence that went back resets the cursor.
-func (s *pubsubCallScraper) scrape(ctx context.Context) {
+func (s *frontCallScraper) scrape(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	calls, ok := s.page(ctx, s.after)
@@ -150,7 +177,7 @@ func (s *pubsubCallScraper) scrape(ctx context.Context) {
 	}
 }
 
-func (s *pubsubCallScraper) record(c pubsubfront.Call) {
+func (s *frontCalls) record(c calllog.Call) {
 	switch c.Transport {
 	case "grpc":
 		if s.grpcCall != nil {
@@ -170,7 +197,7 @@ func (s *pubsubCallScraper) record(c pubsubfront.Call) {
 
 // span records the call as a server span, at the time the front served it,
 // continuing the trace its traceparent named.
-func (s *pubsubCallScraper) span(c pubsubfront.Call) {
+func (s *frontCalls) span(c calllog.Call) {
 	if s.tracer == nil {
 		return
 	}
@@ -179,7 +206,7 @@ func (s *pubsubCallScraper) span(c pubsubfront.Call) {
 		ctx = telemetry.Propagator.Extract(ctx, propagation.MapCarrier{"traceparent": c.TraceParent})
 	}
 	name := strings.TrimPrefix(c.Method, "/")
-	attrs := []attribute.KeyValue{attribute.String("cloudburrow.service", "pubsub")}
+	attrs := []attribute.KeyValue{attribute.String("cloudburrow.service", s.service)}
 	failed := false
 	if c.Transport == "grpc" {
 		svc, method, _ := strings.Cut(name, "/")

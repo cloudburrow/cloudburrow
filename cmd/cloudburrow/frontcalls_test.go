@@ -19,6 +19,7 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 )
 
@@ -57,7 +58,7 @@ func TestPubSubCallsAreMeasured(t *testing.T) {
 	addr, client := pubsubFront(t)
 	rec := admin.NewRecorder(100, time.Now)
 	reg := metrics.New("pubsub")
-	s := newPubSubCallScraper(nil, rec, reg, nil)
+	s := newFrontCallScraper("pubsub", nil, rec, reg, nil)
 	if got := reg.Unmeasured(); len(got) != 0 {
 		t.Fatalf("unmeasured = %v, want none once the scraper is built", got)
 	}
@@ -138,7 +139,7 @@ func TestPubSubCallsAreMeasured(t *testing.T) {
 func TestPubSubCallsAfterAFrontRestart(t *testing.T) {
 	addr, client := pubsubFront(t)
 	reg := metrics.New("pubsub")
-	s := newPubSubCallScraper(nil, nil, reg, nil)
+	s := newFrontCallScraper("pubsub", nil, nil, reg, nil)
 	s.addr = func() string { return addr }
 	s.after = 1 << 20
 	if _, err := client.TopicAdminClient.CreateTopic(context.Background(), &pubsubpb.Topic{Name: "projects/calls-test/topics/again"}); err != nil {
@@ -150,5 +151,40 @@ func TestPubSubCallsAfterAFrontRestart(t *testing.T) {
 	if v, ok := counter(parseMetrics(t, b.String()), "cloudburrow_requests_total",
 		map[string]string{"service": "pubsub", "method": "CreateTopic", "code": "OK"}); !ok || v != 1 {
 		t.Errorf("CreateTopic after a restart = %v (found %v), want 1", v, ok)
+	}
+}
+
+// A guarded tunnel's calls (#1267) are counted and recorded under their
+// service as a front's are, gRPC by canonical code and REST by status.
+func TestTunnelCallsAreMeasured(t *testing.T) {
+	rec := admin.NewRecorder(100, time.Now)
+	reg := metrics.New("firestore", "spanner")
+	observe := tunnelCalls(rec, reg, nil, "firestore")
+	if got := reg.Unmeasured(); len(got) != 1 || got[0] != "spanner" {
+		t.Fatalf("unmeasured = %v, want spanner alone", got)
+	}
+	observe(netfwd.Call{Method: "/google.firestore.v1.Firestore/GetDocument", GRPC: true, Code: 5,
+		Resource: "projects/fs/databases/(default)", Time: time.Now(), Duration: time.Millisecond})
+	observe(netfwd.Call{Method: "GET /v1/projects/fs/databases/(default)/documents/c/d", Code: 200,
+		Time: time.Now(), Duration: time.Millisecond})
+	var b strings.Builder
+	_ = reg.Write(&b)
+	fams := parseMetrics(t, b.String())
+	for _, want := range []map[string]string{
+		{"service": "firestore", "method": "GetDocument", "code": "NOT_FOUND"},
+		{"service": "firestore", "method": "JSON GET", "code": "200"},
+	} {
+		if v, ok := counter(fams, "cloudburrow_requests_total", want); !ok || v != 1 {
+			t.Errorf("%v = %v (found %v), want 1", want, v, ok)
+		}
+	}
+	events := rec.Events("firestore", 10)
+	if len(events) != 2 {
+		t.Fatalf("events = %+v, want 2", events)
+	}
+	for _, e := range events {
+		if e.Detail["project"] != "fs" {
+			t.Errorf("event %s has project %q, want fs", e.Target, e.Detail["project"])
+		}
 	}
 }

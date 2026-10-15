@@ -254,7 +254,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		_ = tracing.Shutdown(sctx)
 	}()
 	if tracing.Enabled() {
-		fmt.Fprintln(stderr, "tracing: exporting spans for tasks, run, secretmanager, kms, scheduler, logging, resourcemanager and pubsub to the configured OTLP endpoint")
+		fmt.Fprintln(stderr, "tracing: exporting spans for tasks, run, secretmanager, kms, scheduler, logging, resourcemanager, pubsub, bigtable, firestore and datastore to the configured OTLP endpoint")
 	}
 	if tasksSvc != nil {
 		tasksSvc.tracing = tracing
@@ -334,9 +334,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if f := forwarderFor(forwarders, "storage"); f != nil {
 		coord.Register(newStorageEventScraper(f, recorder, requestMetrics))
 	}
-	if f := forwarderFor(forwarders, "pubsub"); f != nil {
-		// Every call the Pub/Sub front served (#1266).
-		coord.Register(newPubSubCallScraper(f, recorder, requestMetrics, tracing))
+	for _, svc := range []config.Service{config.ServicePubSub, config.ServiceBigtable} {
+		// Every call the Pub/Sub (#1266) and Bigtable (#1267) fronts served.
+		if f := forwarderFor(forwarders, string(svc)); f != nil {
+			coord.Register(newFrontCallScraper(string(svc), f, recorder, requestMetrics, tracing))
+		}
+	}
+	for _, svc := range []config.Service{config.ServiceFirestore, config.ServiceDatastore} {
+		// The host's calls, which pass through the tunnel's guard (#1267).
+		if f := forwarderFor(forwarders, string(svc)); f != nil {
+			f.Observe = tunnelCalls(recorder, requestMetrics, tracing, string(svc))
+		}
 	}
 
 	// The project registry, opened before the console because the console

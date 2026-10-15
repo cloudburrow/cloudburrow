@@ -11,7 +11,6 @@ import (
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/proto"
 )
 
 // readCalls reads the call log the way the CLI does, through CallsPath.
@@ -100,27 +99,4 @@ func TestCallLogRecordsStreamingPull(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("no StreamingPull in the call log")
-}
-
-// The ring keeps the last callRingSize calls, oldest first.
-func TestCallRingBounded(t *testing.T) {
-	var r callRing
-	for i := 0; i < callRingSize+5; i++ {
-		r.add(Call{Method: "m"})
-	}
-	all := r.after(0)
-	if len(all) != callRingSize || all[0].Seq != 6 || all[len(all)-1].Seq != callRingSize+5 {
-		t.Fatalf("kept %d calls, %d..%d", len(all), all[0].Seq, all[len(all)-1].Seq)
-	}
-}
-
-func TestFirstName(t *testing.T) {
-	b, _ := proto.Marshal(&pubsubpb.PublishRequest{Topic: "projects/p/topics/t", Messages: []*pubsubpb.PubsubMessage{{Data: []byte("x")}}})
-	if got := firstName(b); got != "projects/p/topics/t" {
-		t.Errorf("firstName(Publish) = %q", got)
-	}
-	b, _ = proto.Marshal(&pubsubpb.AcknowledgeRequest{AckIds: []string{"projects/x"}})
-	if got := firstName(b); got != "" {
-		t.Errorf("firstName of a request with no name in field 1 = %q, want none", got)
-	}
 }

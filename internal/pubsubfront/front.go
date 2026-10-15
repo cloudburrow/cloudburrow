@@ -98,6 +98,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 )
 
@@ -215,7 +216,7 @@ type Front struct {
 	dirty atomic.Bool
 
 	// calls is the call log the CLI reads (calls.go, #1266).
-	calls callRing
+	calls calllog.Ring
 }
 
 // subscriptionAdmin is the part of the emulator's Subscriber service a sweep
@@ -256,7 +257,7 @@ func (f *Front) Server() *grpc.Server {
 		grpc.UnknownServiceHandler(f.handle),
 		// Every call is recorded for the CLI's metrics, request log and
 		// traces (calls.go, #1266).
-		grpc.StreamInterceptor(f.streamRecorder),
+		grpc.StreamInterceptor(calllog.StreamInterceptor(&f.calls, firstName, isStreamingPull)),
 		grpc.MaxRecvMsgSize(math.MaxInt32), grpc.MaxSendMsgSize(math.MaxInt32),
 		// The official clients ping streaming pulls; the server's default
 		// policy would answer a ping more often than every five minutes by
