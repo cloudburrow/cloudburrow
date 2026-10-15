@@ -1916,8 +1916,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 39,
-      "Verified": 48
+      "Unimplemented": 21,
+      "Verified": 66
     },
     "rows": [
       {
@@ -1957,33 +1957,47 @@
       },
       {
         "method": "storage.bucketAccessControls.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:40 TestStorageBucketACL"
+        ]
       },
       {
         "method": "storage.bucketAccessControls.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+        ]
       },
       {
         "method": "storage.bucketAccessControls.insert",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:163 TestStorageACLUniformAccess",
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+        ]
       },
       {
         "method": "storage.bucketAccessControls.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:163 TestStorageACLUniformAccess",
+          "test/compat/storageacl_test.go:40 TestStorageBucketACL"
+        ]
       },
       {
         "method": "storage.bucketAccessControls.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+        ]
       },
       {
         "method": "storage.bucketAccessControls.update",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:40 TestStorageBucketACL"
+        ]
       },
       {
         "method": "storage.buckets.delete",
@@ -2018,6 +2032,7 @@
         "tests": [
           "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
+          "test/compat/storageacl_test.go:40 TestStorageBucketACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
@@ -2045,6 +2060,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
+          "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -2097,6 +2113,8 @@
           "test/compat/remaining_test.go:33 TestBucketUpdateChangesMetadata",
           "test/compat/storage_test.go:441 TestStorageBucketPatchKeepsOmittedFields",
           "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
+          "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
+          "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
@@ -2161,33 +2179,46 @@
       },
       {
         "method": "storage.defaultObjectAccessControls.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
+        ]
       },
       {
         "method": "storage.defaultObjectAccessControls.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+        ]
       },
       {
         "method": "storage.defaultObjectAccessControls.insert",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+        ]
       },
       {
         "method": "storage.defaultObjectAccessControls.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:163 TestStorageACLUniformAccess",
+          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
+        ]
       },
       {
         "method": "storage.defaultObjectAccessControls.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+        ]
       },
       {
         "method": "storage.defaultObjectAccessControls.update",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
+        ]
       },
       {
         "method": "storage.folders.delete",
@@ -2366,33 +2397,45 @@
       },
       {
         "method": "storage.objectAccessControls.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
+        ]
       },
       {
         "method": "storage.objectAccessControls.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+        ]
       },
       {
         "method": "storage.objectAccessControls.insert",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+        ]
       },
       {
         "method": "storage.objectAccessControls.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
+        ]
       },
       {
         "method": "storage.objectAccessControls.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+        ]
       },
       {
         "method": "storage.objectAccessControls.update",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
+        ]
       },
       {
         "method": "storage.objects.bulkRestore",
@@ -2453,6 +2496,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
+          "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -2496,6 +2540,7 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:238 TestGcloudStorageClearLabels",
           "test/compat/remaining_test.go:163 TestObjectMetadataUpdate",
+          "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
           "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"

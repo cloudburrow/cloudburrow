@@ -218,7 +218,7 @@ ADR in place, as #421 and #504 did.
 4. **Rules 1 and 5 apply.** Nothing reads a stored ACL, and ACLs live on the bucket and object
    records, so they follow persistence, reset and state capture. Each ACL change advances the
    metageneration of the bucket or object it belongs to, as Google's does.
-5. Every compatibility.md row for these methods reads ***Stored, not enforced***.
+5. Every compatibility.md row for these methods reads **Verified**, *stored, not enforced*.
 
 Every service other than these four (Secret Manager, Cloud Tasks, Cloud KMS and Cloud
 Storage's buckets) keeps its current behaviour, Pub/Sub and Cloud Run included. Pub/Sub's IAM

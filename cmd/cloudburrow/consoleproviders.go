@@ -3235,6 +3235,11 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	if prefix == "" {
 		if metaErr == nil {
 			sections = append(sections, bucketConfigSection(meta), p.deletedObjects(ctx, meta))
+			// Its ACLs, while uniform access is off (#1233).
+			if acl, ok := p.bucketACLSection(ctx, meta); ok {
+				sections = append(sections, acl)
+			}
+			actions = append(actions, bucketACLActions(meta)...)
 			edit = bucketEditForm(meta)
 			actions = append(actions, lockRetentionAction(meta)...)
 			if hns {

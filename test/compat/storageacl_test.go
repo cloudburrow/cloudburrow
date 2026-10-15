@@ -210,3 +210,40 @@ func TestGcloudStorageACL(t *testing.T) {
 		t.Errorf("objects describe does not show the ACL:\n%s", out)
 	}
 }
+
+// TestStorageACLMethods: get, insert and patch of each ACL resource on the
+// JSON API, which the Go client's ACLHandle does not send.
+// covers: storage.bucketAccessControls.get, storage.bucketAccessControls.insert, storage.bucketAccessControls.patch, storage.defaultObjectAccessControls.get, storage.defaultObjectAccessControls.insert, storage.defaultObjectAccessControls.patch, storage.objectAccessControls.get, storage.objectAccessControls.insert, storage.objectAccessControls.patch
+func TestStorageACLMethods(t *testing.T) {
+	h := New(t)
+	c := storageClient(t, h)
+	ctx := h.Context()
+	bh := c.Bucket(h.Project() + "-racl")
+	if err := bh.Create(ctx, h.Project(), nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bh.Object("o").Delete(context.Background()); _ = bh.Delete(context.Background()) })
+	if err := writeObject(h, c, bh.BucketName(), "o", "x"); err != nil {
+		t.Fatal(err)
+	}
+	base := "/storage/v1/b/" + bh.BucketName()
+	for _, res := range []struct{ path, kind string }{
+		{base + "/acl", "storage#bucketAccessControl"},
+		{base + "/defaultObjectAcl", "storage#objectAccessControl"},
+		{base + "/o/o/acl", "storage#objectAccessControl"},
+	} {
+		code, body := rawStorage(t, h, "POST", res.path, `{"entity":"domain-example.com","role":"READER"}`)
+		if code != http.StatusOK || !strings.Contains(body, res.kind) || !strings.Contains(body, `"domain": "example.com"`) {
+			t.Errorf("insert %s = %d %s", res.path, code, body)
+		}
+		if code, body = rawStorage(t, h, "PATCH", res.path+"/domain-example.com", `{"role":"OWNER"}`); code != http.StatusOK || !strings.Contains(body, `"OWNER"`) {
+			t.Errorf("patch %s = %d %s", res.path, code, body)
+		}
+		if code, body = rawStorage(t, h, "GET", res.path+"/domain-example.com", ""); code != http.StatusOK || !strings.Contains(body, `"OWNER"`) {
+			t.Errorf("get %s = %d %s", res.path, code, body)
+		}
+		if code, body = rawStorage(t, h, "GET", res.path+"/allUsers", ""); code != http.StatusNotFound {
+			t.Errorf("get of a missing entry at %s = %d %s; want 404", res.path, code, body)
+		}
+	}
+}
