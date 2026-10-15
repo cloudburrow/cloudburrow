@@ -121,7 +121,7 @@ jobs:
           cd "$RUNNER_TEMP/bigquery-emulator"
           sha256sum bigquery-emulator-* | tee SHA256SUMS
           echo "sums=$(sha256sum SHA256SUMS | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bigquery-emulator
           path: ${{ runner.temp }}/bigquery-emulator
@@ -409,7 +409,7 @@ jobs:
           done
           find diagnostics -type f -size +1M -delete || true
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: integration-diagnostics
@@ -862,7 +862,7 @@ jobs:
           [ "$rc" = 0 ] || { echo "the console browser suite did not pass"; exit 1; }
           echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure() && (matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators')
         with:
           name: browser-screenshots-${{ matrix.shard }}
@@ -873,7 +873,7 @@ jobs:
           if-no-files-found: ignore
 
       # The shard's test logs, for compat-coverage.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: compat-log-${{ matrix.shard }}
@@ -895,7 +895,7 @@ jobs:
           # and it records what it could not collect rather than failing.
           ./bin/cloudburrow diagnose -o diagnostics/bundle.tar.gz --name ci --state-dir "$RUNNER_TEMP/cb" || true
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: compat-diagnostics-${{ matrix.shard }}
