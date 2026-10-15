@@ -72,8 +72,29 @@ func TestV1ProjectsThroughTheOfficialClient(t *testing.T) {
 	if _, err := c.Projects.GetIamPolicy("v1-made-one", &crmv1.GetIamPolicyRequest{}).Context(ctx).Do(); code(err) != http.StatusNotImplemented {
 		t.Errorf("v1 getIamPolicy = %v, want 501", err)
 	}
-	if _, err := c.Projects.Update("v1-made-one", &crmv1.Project{Name: "x"}).Context(ctx).Do(); code(err) != http.StatusNotImplemented {
-		t.Errorf("v1 update = %v, want 501", err)
+	// projects.update (#1265): name and labels replaced, the rest kept.
+	before, _ := c.Projects.Get("v1-made-one").Context(ctx).Do()
+	up, err := c.Projects.Update("v1-made-one", &crmv1.Project{ProjectId: "v1-made-one", Name: "Renamed",
+		Labels: map[string]string{"env": "dev"}}).Context(ctx).Do()
+	if err != nil || up.Name != "Renamed" || up.Labels["env"] != "dev" || len(up.Labels) != 1 ||
+		up.ProjectNumber != before.ProjectNumber || up.CreateTime != before.CreateTime || up.LifecycleState != "ACTIVE" {
+		t.Errorf("v1 update = %+v, %v; want the name and labels replaced and the rest kept", up, err)
+	}
+	if g, err := v3.GetProject(ctx, &rmpb.GetProjectRequest{Name: "projects/v1-made-one"}); err != nil || g.GetDisplayName() != "Renamed" || g.GetLabels()["env"] != "dev" {
+		t.Errorf("v3 after the v1 update = %v, %v", g, err)
+	}
+	for _, c2 := range []struct {
+		id   string
+		p    *crmv1.Project
+		want int
+	}{
+		{"v1-made-one", &crmv1.Project{ProjectId: "another-one", Name: "x"}, http.StatusBadRequest},
+		{"v1-made-one", &crmv1.Project{Name: "x", Parent: &crmv1.ResourceId{Type: "folder", Id: "1"}}, http.StatusNotImplemented},
+		{"no-such-project", &crmv1.Project{Name: "x"}, http.StatusNotFound},
+	} {
+		if _, err := c.Projects.Update(c2.id, c2.p).Context(ctx).Do(); code(err) != c2.want {
+			t.Errorf("v1 update(%s, %+v) = %v, want %d", c2.id, c2.p, err, c2.want)
+		}
 	}
 	if _, err := c.Organizations.Get("organizations/1").Context(ctx).Do(); code(err) != http.StatusNotImplemented {
 		t.Errorf("v1 organizations.get = %v, want 501", err)

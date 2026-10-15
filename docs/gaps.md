@@ -61,7 +61,7 @@ Already tracked: #982 (Google's message for an invalid label is not measured).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Request-rate, latency and resource metrics, the request log and tracing do not see Pub/Sub, which is a raw port-forward | not built yet | M |
+| Request-rate, latency and resource metrics, the request log and tracing do not see Pub/Sub, which is a raw port-forward (#1266) | not built yet | M |
 | `DetachSubscription`, `UpdateSnapshot` are refused `UNIMPLEMENTED` by Google's emulator | no emulator support | M |
 | Protocol Buffer schemas: `ValidateSchema` of `PROTOCOL_BUFFER` is `UNIMPLEMENTED` | no emulator support | M |
 | 4 UNVERIFIED error codes: subscription expiration, exactly-once and label refusals ([pubsub.md](coverage/pubsub.md)) | not documented by Google | S |
@@ -84,10 +84,9 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 
 | Gap | Why open | Size |
 |---|---|---|
-| `Operations.ListOperations` with a `filter` is `UNIMPLEMENTED` (listing and `WaitOperation` are served since #1229) | not built yet | S |
 | Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity | not built yet | L |
 | Logs are not served through the Cloud Run API | not built yet | M |
-| `Builds.SubmitBuild` is not served | not built yet | M |
+| `Builds.SubmitBuild` is not served (#1268) | not built yet | M |
 | `Instances.*` is not served | not built yet | L |
 | `WorkerPools.*` is not served | not built yet | L |
 | `gcloud run services list` / `describe` use the v1 (Knative-shaped) API, which is not served | not built yet | L |
@@ -110,7 +109,7 @@ Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-ba
 
 | Gap | Why open | Size |
 |---|---|---|
-| `ConfigServiceV2`: sinks, exclusions, buckets and views are not served | not built yet | L |
+| `ConfigServiceV2`: the Async bucket calls, links and settings are not served (buckets and views since #1264, sinks and exclusions since #1226) | not built yet | M |
 
 ## Cloud KMS
 
@@ -146,7 +145,7 @@ Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216).
 | Gap | Why open | Size |
 |---|---|---|
 | Folders, Organizations, Liens, TagKeys, TagValues, TagBindings are not served (and `ListProjects` under a folder or organization is `UNIMPLEMENTED`) | not built yet | L |
-| The v1 API beyond what is served (`update`, org policy) | not built yet | M |
+| The v1 API beyond what is served: org policy (`projects.update` is served since #1265) | not built yet | M |
 
 ## Vertex AI
 
@@ -223,7 +222,7 @@ Closed by this sweep: Test permissions on the Permissions tab (#1242).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured") | not built yet | M |
+| Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured"; #1267) | not built yet | M |
 | Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |
 
