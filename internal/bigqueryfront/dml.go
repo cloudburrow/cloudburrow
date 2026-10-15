@@ -161,6 +161,18 @@ func (d dmlCounts) patch(obj map[string]any) {
 // 501, a query with CREATE VIEW through keepViewTexts (#1014), anything
 // else through serveQuery.
 func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && r.Context().Value(optionsKey{}) == nil && !dryRun(r, insert) {
+		if d, msg, ok := parseDDLOptions(q.Query); ok { // #1251, ddloptions.go
+			if msg != "" {
+				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+msg+", so nothing was run.")
+				return
+			}
+			if d.sets() {
+				f.ddlWithOptions(w, r, q, d, insert)
+				return
+			}
+		}
+	}
 	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
 		if sql, ok := rewriteTableLikeCopy(q.Query); ok { // #1239, tablelikecopy.go
 			// Sent on as CREATE TABLE AS SELECT; the job keeps the
