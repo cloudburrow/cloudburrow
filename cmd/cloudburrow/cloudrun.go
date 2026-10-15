@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"net"
 	"net/http"
 	"strconv"
@@ -33,6 +34,9 @@ type runService struct {
 	requests func(rest.Request)
 	cfg      config.Config
 	server   *grpctransport.Server
+	// storage is the Cloud Storage tunnel SubmitBuild reads its source
+	// through (#1268); nil without Cloud Storage.
+	storage func() *netfwd.Forwarder
 	// secrets resolves secretKeyRef environment variables. It is nil when
 	// Secret Manager is not enabled, and the adapter then refuses a
 	// reference rather than dropping it.
@@ -118,7 +122,16 @@ func (r *runService) Start(ctx context.Context) error {
 	// so without storage SubmitBuild says so rather than going unserved.
 	var fetch runadapter.SourceFetcher
 	if serviceEnabled(r.cfg, config.ServiceStorage) {
-		fetch = storageSourceFetcher{cfg: r.cfg, client: &http.Client{Timeout: 10 * time.Minute}}
+		sf := storageSourceFetcher{cfg: r.cfg, client: &http.Client{Timeout: 10 * time.Minute}}
+		if r.storage != nil {
+			sf.addr = func() string {
+				if f := r.storage(); f != nil {
+					return f.HostAddr()
+				}
+				return ""
+			}
+		}
+		fetch = sf
 	}
 	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg))
 	register := func(g grpc.ServiceRegistrar) {

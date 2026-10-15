@@ -28,9 +28,18 @@ import (
 type storageSourceFetcher struct {
 	cfg    config.Config
 	client *http.Client
+	// addr is the storage tunnel's bound host address, read at each fetch:
+	// with an OS-assigned port (--port-storage 0) the configured port is 0
+	// and only the tunnel knows the real one.
+	addr func() string
 }
 
 func (f storageSourceFetcher) base() string {
+	if f.addr != nil {
+		if a := f.addr(); a != "" {
+			return hostURL(a)
+		}
+	}
 	host := f.cfg.BindAddress
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
@@ -242,4 +251,17 @@ func tailLines(s string, n int) string {
 		parts = parts[len(parts)-n:]
 	}
 	return strings.Join(parts, "\n")
+}
+
+// hostURL is http:// and a tunnel's host address, with a wildcard bind
+// address dialled on loopback.
+func hostURL(hostPort string) string {
+	host, port, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return "http://" + hostPort
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
