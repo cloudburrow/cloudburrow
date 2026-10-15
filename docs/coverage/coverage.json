@@ -294,8 +294,8 @@
     "Key": "run",
     "Title": "Cloud Run v2",
     "counts": {
-      "Not served": 17,
-      "Verified": 24
+      "Not served": 15,
+      "Verified": 26
     },
     "rows": [
       {
@@ -485,7 +485,8 @@
         "method": "google.cloud.run.v2.Services/GetService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:57 TestRunServiceLifecycle"
+          "test/compat/run_test.go:57 TestRunServiceLifecycle",
+          "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
         ]
       },
       {
@@ -529,18 +530,23 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
-          "test/compat/run_test.go:226 TestRunUpdateService"
+          "test/compat/run_test.go:226 TestRunUpdateService",
+          "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
         ]
       },
       {
         "method": "google.cloud.run.v2.Tasks/GetTask",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runtasks_test.go:24 TestRunTasksAreAnExecutionsPods"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Tasks/ListTasks",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runtasks_test.go:24 TestRunTasksAreAnExecutionsPods"
+        ]
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",

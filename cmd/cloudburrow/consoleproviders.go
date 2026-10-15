@@ -988,16 +988,26 @@ func (p runProvider) revisions(ctx context.Context, service string, svc *ksvcSta
 	return out
 }
 
-// trafficListing shows where requests actually go.
+// knTraffic is one Knative traffic target, in spec or status.
+type knTraffic struct {
+	RevisionName   string `json:"revisionName"`
+	Percent        int    `json:"percent"`
+	LatestRevision *bool  `json:"latestRevision"`
+	Tag            string `json:"tag"`
+	URL            string `json:"url"`
+}
+
+// trafficListing shows where requests actually go: each target's revision,
+// its share, whether it follows the latest revision, and a tag's own URL.
 func trafficListing(svc *ksvcStatus) console.Listing {
 	out := console.Listing{
-		Columns:    []string{"Percent", "Latest"},
+		Columns:    []string{"Percent", "Latest", "Tag", "Tag URL"},
 		NameColumn: "Revision",
 		Noun:       "traffic targets",
 	}
 	for _, t := range svc.Status.Traffic {
 		latest := "no"
-		if t.LatestRevision {
+		if t.LatestRevision != nil && *t.LatestRevision {
 			latest = "yes"
 		}
 		out.Items = append(out.Items, console.Resource{
@@ -1005,6 +1015,8 @@ func trafficListing(svc *ksvcStatus) console.Listing {
 			Fields: map[string]string{
 				"Percent": fmt.Sprintf("%d%%", t.Percent),
 				"Latest":  latest,
+				"Tag":     orDash(t.Tag),
+				"Tag URL": orDash(t.URL),
 			},
 		})
 	}
@@ -1039,14 +1051,13 @@ type ksvcStatus struct {
 		Conditions                []struct {
 			Type, Status, Reason, Message string
 		} `json:"conditions"`
-		Traffic []struct {
-			RevisionName   string `json:"revisionName"`
-			Percent        int    `json:"percent"`
-			LatestRevision bool   `json:"latestRevision"`
-		} `json:"traffic"`
+		Traffic []knTraffic `json:"traffic"`
 	} `json:"status"`
 	Spec struct {
 		Template knTemplate `json:"template"`
+		// Traffic is the routing asked for (#1224); Status.Traffic is
+		// where Knative sends requests.
+		Traffic []knTraffic `json:"traffic"`
 	} `json:"spec"`
 }
 

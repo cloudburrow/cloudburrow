@@ -23,21 +23,7 @@ import (
 func Unsupported(svc *runpb.Service) error {
 	var gaps []string
 
-	if len(svc.GetTraffic()) > 1 {
-		// Knative supports traffic splitting, but the mapping is not
-		// implemented or tested, so it is not claimed. See #30.
-		gaps = append(gaps, "traffic: splitting across multiple revisions is not mapped")
-	} else if len(svc.GetTraffic()) == 1 {
-		// One target is accepted only when it is what the adapter does
-		// anyway: all traffic to the latest revision. Pinning a named
-		// revision, or sending less than 100%, would be accepted and ignored.
-		t := svc.GetTraffic()[0]
-		latest := t.GetType() == runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST ||
-			(t.GetType() == runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_UNSPECIFIED && t.GetRevision() == "")
-		if !latest || (t.GetPercent() != 0 && t.GetPercent() != 100) || t.GetTag() != "" {
-			gaps = append(gaps, "traffic: only 100% to the latest revision is mapped")
-		}
-	}
+	// traffic is mapped (#1224) and checked by validateTraffic.
 	if tmpl := svc.GetTemplate(); tmpl != nil {
 		gaps = append(gaps, podTemplateGaps("template", tmpl)...)
 		if tmpl.GetSessionAffinity() {
@@ -189,6 +175,9 @@ func renderService(svc *runpb.Service, namespace, instance string, secrets Secre
 	if err := Unsupported(svc); err != nil {
 		return "", err
 	}
+	if err := validateTraffic(svc.GetTraffic()); err != nil {
+		return "", err
+	}
 	id, err := ServiceID(svc.GetName())
 	if err != nil {
 		return "", err
@@ -261,6 +250,7 @@ metadata:
 		project: projectOf(svc.GetName()), secrets: secrets, injected: injected}); err != nil {
 		return "", err
 	}
+	renderTraffic(&b, svc.GetTraffic())
 	return b.String(), nil
 }
 
@@ -506,6 +496,7 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 		cond.Message = reason
 	}
 	svc.TerminalCondition = cond
+	svc.Traffic, svc.TrafficStatuses = fromKnativeTraffic(k)
 	return svc
 }
 

@@ -78,20 +78,25 @@ func TestUpdateServiceRefusals(t *testing.T) {
 	if _, err := s.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: missing}); status.Code(err) != codes.NotFound {
 		t.Errorf("update of a missing service = %v, want NotFound", err)
 	}
+	// Traffic is mapped (#1224); what cannot be routed is the caller's
+	// mistake, refused before anything is applied.
+	latest := runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST
+	revision := runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION
 	for _, traffic := range [][]*runpb.TrafficTarget{
-		{{Type: runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST, Percent: 50}},
-		{{Type: runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION, Revision: "hello-00001", Percent: 100}},
-		{{Type: runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST, Percent: 50},
-			{Type: runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION, Revision: "hello-00001", Percent: 50}},
+		{{Type: latest, Percent: 50}},
+		{{Type: revision, Revision: "hello-00009", Percent: 100}},
+		{{Type: latest, Percent: 50}, {Type: revision, Revision: "hello-00009", Percent: 50}},
+		{{Type: revision, Percent: 100}},
+		{{Type: latest, Percent: 100, Tag: "Bad_Tag"}},
 	} {
 		svc := updated(img, "v2")
 		svc.Traffic = traffic
-		if _, err := s.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: svc}); status.Code(err) != codes.Unimplemented ||
+		if _, err := s.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: svc}); status.Code(err) != codes.InvalidArgument ||
 			!strings.Contains(err.Error(), "traffic") {
-			t.Errorf("update with traffic %v = %v, want Unimplemented naming traffic", traffic, err)
+			t.Errorf("update with traffic %v = %v, want InvalidArgument naming traffic", traffic, err)
 		}
 	}
-	// 100% to latest is what the adapter does anyway, so it is accepted.
+	// 100% to latest is Knative's default, and is accepted.
 	svc := updated(img, "v2")
 	svc.Traffic = []*runpb.TrafficTarget{{Type: runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST, Percent: 100}}
 	if _, err := s.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: svc}); err != nil {

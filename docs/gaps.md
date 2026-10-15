@@ -86,8 +86,6 @@ Already tracked: #1216 (IAM policy methods on Services and Jobs).
 | Gap | Why open | Size |
 |---|---|---|
 | `Operations.ListOperations` with a `filter` is `UNIMPLEMENTED` (listing and `WaitOperation` are served since #1229) | not built yet | S |
-| `Tasks.GetTask`, `Tasks.ListTasks`: a job execution's tasks are not served (#1223) | not built yet | M |
-| Traffic: a split, a pinned revision, a percentage below 100 or a tag is `UNIMPLEMENTED` (#1224) | not built yet | M |
 | `UpdateService` with a partial `update_mask` is `UNIMPLEMENTED` | not built yet | S |
 | Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity | not built yet | L |
 | Logs are not served through the Cloud Run API | not built yet | M |
