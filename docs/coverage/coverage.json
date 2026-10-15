@@ -319,14 +319,17 @@
     "Key": "run",
     "Title": "Cloud Run v2",
     "counts": {
-      "Not served": 15,
-      "Verified": 26
+      "Not served": 14,
+      "Verified": 27
     },
     "rows": [
       {
         "method": "google.cloud.run.v2.Builds/SubmitBuild",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runbuilds_test.go:114 TestRunSubmitBuildDockerDeploys",
+          "test/compat/runbuilds_test.go:209 TestFunctionsSubmitBuildBuildpacks"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Executions/CancelExecution",

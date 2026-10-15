@@ -114,15 +114,23 @@ func (r *runService) Start(ctx context.Context) error {
 	// create through google.longrunning.Operations, and without it every
 	// deployment appears to hang.
 	ops := runadapter.NewOperationsServer(adapter)
+	// Builds (#1268) reads its source from this instance's Cloud Storage,
+	// so without storage SubmitBuild says so rather than going unserved.
+	var fetch runadapter.SourceFetcher
+	if serviceEnabled(r.cfg, config.ServiceStorage) {
+		fetch = storageSourceFetcher{cfg: r.cfg, client: &http.Client{Timeout: 10 * time.Minute}}
+	}
+	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg))
 	register := func(g grpc.ServiceRegistrar) {
 		adapter.Register(g)
 		adapter.Revisions().Register(g)
 		// Jobs and Executions (#582) share the adapter's operations, and
-		// Tasks (#1223) reads the executions' pods. Instances, Builds and
-		// WorkerPools stay unregistered.
+		// Tasks (#1223) reads the executions' pods; Builds (#1268) builds
+		// source locally. Instances and WorkerPools stay unregistered.
 		adapter.Jobs().Register(g)
 		adapter.Executions().Register(g)
 		adapter.Tasks().Register(g)
+		builds.Register(g)
 		ops.Register(g)
 	}
 	// One port for gRPC and JSON, as run.googleapis.com (#591): the same

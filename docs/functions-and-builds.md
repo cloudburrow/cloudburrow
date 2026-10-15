@@ -2,7 +2,10 @@
 
 Two optional capabilities, both reusing Google-published components. Neither implies any
 Cloud Functions or Cloud Build **API** parity: nothing here serves a Google API, and no build
-or function is addressable as a Cloud resource.
+or function is addressable as a Cloud resource. The one Google API that builds through them is
+Cloud Run's `Builds.SubmitBuild` (#1268), which builds a source archive from the instance's
+Cloud Storage with Docker or this pack path; see the Cloud Run section of
+[compatibility.md](compatibility.md). Cloud Build itself is not served.
 
 ## Functions Framework (#32)
 
