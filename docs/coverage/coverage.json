@@ -5806,6 +5806,8 @@
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
+          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
         ]
       },
@@ -5845,6 +5847,8 @@
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
+          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/sqladmin_test.go:424 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
@@ -5862,6 +5866,8 @@
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
+          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
         ]
       },
@@ -5905,6 +5911,7 @@
         "method": "sql.instances.promoteReplica",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
         ]
       },

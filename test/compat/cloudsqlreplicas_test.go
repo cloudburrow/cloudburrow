@@ -193,3 +193,101 @@ func TestCloudSQLReadReplicas(t *testing.T) {
 		})
 	}
 }
+
+// TestCloudSQLReplicaOfUpsServer (#1330): the servers `up` runs can be a
+// replica's primary: a replica of `postgres` or `mysql` becomes RUNNABLE,
+// is listed in the primary's replicaNames, and (PostgreSQL, whose
+// superuser the test knows) serves the primary's data read-only through the
+// connector; deleting it leaves the primary with none.
+// covers: sql.instances.insert, sql.instances.get, sql.instances.delete
+func TestCloudSQLReplicaOfUpsServer(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" && os.Getenv(EnvMySQL) == "" {
+		t.Skip("needs --services cloudsql or cloudsql-mysql")
+	}
+	svc := sqlAdminService(t, h)
+	project := h.Project()
+	suffix := fmt.Sprint(time.Now().UnixNano() % 1e6)
+	var ups []string
+	if os.Getenv(EnvCloudSQL) != "" {
+		ups = append(ups, "postgres")
+	}
+	if os.Getenv(EnvMySQL) != "" {
+		ups = append(ups, "mysql")
+	}
+	for _, up := range ups {
+		t.Run(up, func(t *testing.T) {
+			name := up + "-upr-" + suffix
+			op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, MasterInstanceName: up}).Do()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if d, err := svc.Instances.Delete(project, name).Do(); err == nil {
+					waitSQLOp(t, svc, project, d)
+				}
+				if p, err := svc.Instances.Get(project, up).Do(); err != nil || len(p.ReplicaNames) != 0 {
+					t.Errorf("after the replica's delete %s lists %v (%v)", up, p.ReplicaNames, err)
+				}
+			}()
+			waitSQLOp(t, svc, project, op)
+			r, err := svc.Instances.Get(project, name).Do()
+			if err != nil || r.State != "RUNNABLE" || r.InstanceType != "READ_REPLICA_INSTANCE" || r.MasterInstanceName != project+":"+up {
+				t.Fatalf("replica: %+v %v", r, err)
+			}
+			if p, err := svc.Instances.Get(project, up).Do(); err != nil || len(p.ReplicaNames) != 1 || p.ReplicaNames[0] != name {
+				t.Errorf("%s's replicaNames: %v (%v)", up, p.ReplicaNames, err)
+			}
+			if up != "postgres" {
+				return
+			}
+			drv := "cloudsql-upr-" + suffix
+			cleanup, err := pgxv5.RegisterDriver(drv, connectorOptions(h)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cleanup()
+			db, err := sql.Open(drv, fmt.Sprintf("host=%s user=cloudburrow dbname=cloudburrow sslmode=disable", r.ConnectionName))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			var inRecovery bool
+			if err := db.QueryRow("SELECT pg_is_in_recovery()").Scan(&inRecovery); err != nil || !inRecovery {
+				t.Errorf("the replica of %s is not a standby: %v %v", up, inRecovery, err)
+			}
+		})
+	}
+}
+
+// TestGcloudSQLReadReplica (#1330): `gcloud sql instances create
+// --master-instance-name` makes a read replica, which describe shows as
+// such and the primary lists; `gcloud sql instances promote-replica`
+// promotes it.
+// covers: sql.instances.insert, sql.instances.get, sql.instances.promoteReplica, sql.instances.delete
+func TestGcloudSQLReadReplica(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" {
+		t.Skip("needs --services cloudsql")
+	}
+	g := newGcloudSession(t, h)
+	n := time.Now().UnixNano() % 1e6
+	primary, replica := fmt.Sprintf("gcloud-pgp-%d", n), fmt.Sprintf("gcloud-pgr-%d", n)
+	g.must("sql", "instances", "create", primary, "--project", g.project, "--database-version=POSTGRES_17",
+		"--tier=db-custom-1-3840", "--region=us-central1", "--no-backup", "--quiet")
+	defer g.run(nil, "sql", "instances", "delete", primary, "--project", g.project, "--quiet")
+	g.must("sql", "instances", "create", replica, "--project", g.project, "--master-instance-name="+primary,
+		"--tier=db-custom-1-3840", "--region=us-central1", "--quiet")
+	defer g.run(nil, "sql", "instances", "delete", replica, "--project", g.project, "--quiet")
+	out := g.must("sql", "instances", "describe", replica, "--project", g.project, "--format=value(state,instanceType,masterInstanceName)")
+	if !strings.Contains(out, "RUNNABLE") || !strings.Contains(out, "READ_REPLICA_INSTANCE") || !strings.Contains(out, primary) {
+		t.Errorf("describe of the replica: %s", out)
+	}
+	if out := g.must("sql", "instances", "describe", primary, "--project", g.project, "--format=value(replicaNames)"); !strings.Contains(out, replica) {
+		t.Errorf("the primary's replicaNames: %s", out)
+	}
+	g.must("sql", "instances", "promote-replica", replica, "--project", g.project, "--quiet")
+	if out := g.must("sql", "instances", "describe", replica, "--project", g.project, "--format=value(instanceType)"); !strings.Contains(out, "CLOUD_SQL_INSTANCE") {
+		t.Errorf("after promote-replica: %s", out)
+	}
+}

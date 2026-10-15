@@ -211,3 +211,75 @@ func TestConsoleCloudSQLInstanceEditAndBackups(t *testing.T) {
 	_, err = svc.BackupRuns.Get(project, name, id).Do()
 	wantHTTP(t, "backupRuns.get after the console's delete", err, http.StatusNotFound)
 }
+
+// TestConsoleCloudSQLReadReplica (#1330): Create read replica on a
+// primary's page makes a replica the official client reads as one; the
+// replica's page shows its primary and offers Promote and Stop
+// replication; Stop replication and then Start replication are read back as
+// databaseReplicationEnabled, and Promote leaves a standalone primary.
+func TestConsoleCloudSQLReadReplica(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" {
+		t.Skip("needs --services cloudsql")
+	}
+	addr := consoleAddr(t, h)
+	svc := sqlAdminService(t, h)
+	project := h.Project()
+	name := fmt.Sprintf("console-rp-%d", time.Now().UnixNano()%1e6)
+	replica := name + "-r"
+	op, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name, DatabaseVersion: "POSTGRES_17",
+		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, n := range []string{replica, name} {
+			if d, err := svc.Instances.Delete(project, n).Do(); err == nil {
+				waitSQLOp(t, svc, project, d)
+			}
+		}
+	})
+	waitSQLOp(t, svc, project, op)
+	act := func(on, action string, values map[string]string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"Path": []string{on}, "Action": action, "Values": values})
+		if code, out := consoleDo(t, addr, http.MethodPost, "/api/actions/cloudsql-instances?project="+project, string(body)); code != http.StatusOK {
+			t.Fatalf("console %s = %d: %s", action, code, out)
+		}
+	}
+	get := func(want func(*sqladmin.DatabaseInstance) bool) *sqladmin.DatabaseInstance {
+		t.Helper()
+		var in *sqladmin.DatabaseInstance
+		for i := 0; i < 180; i++ {
+			if in, err = svc.Instances.Get(project, replica).Do(); err == nil && in.State == "RUNNABLE" && want(in) {
+				return in
+			}
+			time.Sleep(time.Second)
+		}
+		t.Fatalf("replica: %+v %v", in, err)
+		return nil
+	}
+	if d := consoleDetailOf(t, addr, "cloudsql-instances", project, name); !d.offers("create-replica") || d.offers("promote-replica") {
+		t.Errorf("a primary's page offers %+v", d.Actions)
+	}
+	act(name, "create-replica", map[string]string{"replica": replica})
+	get(func(in *sqladmin.DatabaseInstance) bool {
+		return in.InstanceType == "READ_REPLICA_INSTANCE" && in.MasterInstanceName == project+":"+name
+	})
+	d := consoleDetailOf(t, addr, "cloudsql-instances", project, replica)
+	if !d.offers("promote-replica") || !d.offers("stop-replica") || d.offers("create-replica") ||
+		d.summary("Primary instance") != project+":"+name {
+		t.Errorf("the replica's page: %+v", d)
+	}
+	if p := consoleDetailOf(t, addr, "cloudsql-instances", project, name); p.summary("Read replicas") != replica {
+		t.Errorf("the primary's page lists replicas %q", p.summary("Read replicas"))
+	}
+	act(replica, "stop-replica", nil)
+	get(func(in *sqladmin.DatabaseInstance) bool { return !in.Settings.DatabaseReplicationEnabled })
+	act(replica, "start-replica", nil)
+	get(func(in *sqladmin.DatabaseInstance) bool { return in.Settings.DatabaseReplicationEnabled })
+	act(replica, "promote-replica", nil)
+	get(func(in *sqladmin.DatabaseInstance) bool {
+		return in.InstanceType == "CLOUD_SQL_INSTANCE" && in.MasterInstanceName == ""
+	})
+}

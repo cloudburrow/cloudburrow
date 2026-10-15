@@ -155,7 +155,9 @@ primary answers `replicaNames`, and `delete` of a primary with replicas is 400 u
 deleted or promoted. `stopReplica` and `startReplica` pause and resume replication
 (`pg_wal_replay_pause` and `resume`; `STOP REPLICA` and `START REPLICA`). `promoteReplica`
 makes it a standalone primary (`pg_promote()`; `STOP REPLICA`, `RESET REPLICA ALL` and
-`read_only` off, persisted). The connector reaches a replica like any instance.
+`read_only` off, persisted). The connector reaches a replica like any instance. On the console, an
+instance's page offers **Create read replica**, and a replica's **Promote**, **Stop replication**
+and **Start replication**.
 
 The primary may be a created instance or a server `up` runs (`postgres` or `mysql`): their
 config allows it (PostgreSQL's `wal_level` is `replica` by default; MySQL's binary log is on,
