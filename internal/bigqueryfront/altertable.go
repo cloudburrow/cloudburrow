@@ -58,9 +58,10 @@ type alterStmt struct {
 
 // alterAction is one action of an ALTER TABLE.
 type alterAction struct {
-	kind        string // "add", "options", "column options", "drop not null"
+	kind        string // "add", "options", "column options", "drop not null", "rename table", "rename column", "drop column"
 	ifExists    bool   // ADD COLUMN IF NOT EXISTS, ALTER COLUMN IF EXISTS
 	column      string
+	newName     string         // RENAME TO's table, RENAME COLUMN's new name
 	field       map[string]any // ADD COLUMN's TableFieldSchema
 	options     []alterOption
 	description *alterOption // ADD COLUMN's OPTIONS(description)
@@ -89,8 +90,8 @@ func alterUnsupported(t []token) string {
 func alterNotImplemented(what string) string {
 	return "Not implemented here: ALTER TABLE " + what + ". BigQuery runs it, but the emulator behind CloudBurrow " +
 		"reports ALTER TABLE done and leaves the table unchanged (measured), and CloudBurrow carries out only ADD COLUMN, " +
-		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp), ALTER COLUMN SET OPTIONS (description) " +
-		"and ALTER COLUMN DROP NOT NULL, so nothing of the statement was run."
+		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp), ALTER COLUMN SET OPTIONS (description), " +
+		"ALTER COLUMN DROP NOT NULL, RENAME TO, RENAME COLUMN and DROP COLUMN, so nothing of the statement was run."
 }
 
 // parseAlter reads an ALTER TABLE statement. unsupported names what the
@@ -193,11 +194,46 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 				return st, "ALTER COLUMN as written", ""
 			}
 		case len(a) > 1 && a[0].is("RENAME") && a[1].is("TO"):
-			return st, "RENAME TO, which needs the table moved with its rows, jobs and metadata", ""
+			to, next := path(a, 2)
+			switch {
+			case len(to) == 0 || next != len(a):
+				return st, "", "Syntax error: RENAME TO without a table name"
+			case len(to) > 1:
+				return st, "RENAME TO a name with a dataset", ""
+			}
+			act.kind, act.newName = "rename table", to[0]
 		case len(a) > 1 && a[0].is("RENAME") && a[1].is("COLUMN"):
-			return st, "RENAME COLUMN, which needs the table remade with its rows", ""
+			j := 2
+			if j+1 < len(a) && a[j].is("IF") && a[j+1].is("EXISTS") {
+				act.ifExists = true
+				j += 2
+			}
+			if j+2 >= len(a) || !isName(a[j]) || !a[j+1].is("TO") || !isName(a[j+2]) {
+				if j+1 < len(a) && a[j+1].punct(".") {
+					return st, "RENAME COLUMN of a nested field", ""
+				}
+				return st, "", "Syntax error: RENAME COLUMN takes a column name, TO and a new name"
+			}
+			if j+3 != len(a) {
+				return st, "", fmt.Sprintf("Syntax error: unexpected %q after RENAME COLUMN", a[j+3].text)
+			}
+			act.kind, act.column, act.newName = "rename column", a[j].text, a[j+2].text
 		case len(a) > 1 && a[0].is("DROP") && a[1].is("COLUMN"):
-			return st, "DROP COLUMN, which needs the table remade with its rows", ""
+			j := 2
+			if j+1 < len(a) && a[j].is("IF") && a[j+1].is("EXISTS") {
+				act.ifExists = true
+				j += 2
+			}
+			if j >= len(a) || !isName(a[j]) {
+				return st, "", "Syntax error: DROP COLUMN without a column name"
+			}
+			if j+1 != len(a) {
+				if a[j+1].punct(".") {
+					return st, "DROP COLUMN of a nested field", ""
+				}
+				return st, "", fmt.Sprintf("Syntax error: unexpected %q after DROP COLUMN", a[j+1].text)
+			}
+			act.kind, act.column = "drop column", a[j].text
 		case len(a) > 0 && (a[0].is("ADD") || a[0].is("DROP")):
 			return st, strings.ToUpper(a[0].text) + " of a constraint or key", ""
 		case len(a) > 0:
@@ -209,8 +245,28 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 			i++
 		}
 	}
+	remakes, others, renames := 0, 0, 0
+	for _, a := range st.actions {
+		switch a.kind {
+		case "rename table":
+			renames++
+		case "rename column", "drop column":
+			remakes++
+		default:
+			others++
+		}
+	}
+	switch {
+	case renames > 0 && len(st.actions) > 1:
+		return st, "RENAME TO with other actions in the same statement", ""
+	case remakes > 0 && others > 0:
+		return st, "RENAME COLUMN or DROP COLUMN with ADD COLUMN, SET OPTIONS or ALTER COLUMN in the same statement", ""
+	}
 	return st, "", ""
 }
+
+// isName reports whether t can be a column or table name.
+func isName(t token) bool { return t.kind == tokWord || t.kind == tokQuoted }
 
 // readOptions reads OPTIONS(name = value, ...) at t[0]; t is the list and
 // nothing after it.
@@ -421,6 +477,10 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 	if current.Type != "" && !strings.EqualFold(current.Type, "TABLE") {
 		return failWith(http.StatusBadRequest, "invalidQuery", "ALTER TABLE is not supported for "+name+
 			", a "+current.Type+".", text)
+	}
+	switch st.actions[0].kind {
+	case "rename table", "rename column", "drop column": // alone, parseAlter
+		return s.remakeTable(st, ds, table, name, got, text)
 	}
 	fields := current.Schema.Fields
 	schemaChanged := false

@@ -30,8 +30,9 @@ import (
 // anything is sent, with the reason and #1028, and so is UPDATE … FROM, with
 // the emulator's reason and #1027, and they change no row (a DML statement of
 // its own is TestConsoleBigQueryReadWriteEditorRunsDML); a lone SELECT is sent back to
-// Read-only; ALTER TABLE ADD COLUMN and SET OPTIONS run (#1227), and RENAME
-// TO is refused in the API's own words (the front's 501),
+// Read-only; ALTER TABLE ADD COLUMN and SET OPTIONS run (#1227), RENAME
+// COLUMN and DROP COLUMN too (#1322), and ALTER COLUMN SET DATA TYPE is
+// refused in the API's own words (the front's 501),
 // without the client library's envelope. Read-only mode still refuses a DDL
 // statement and says where it runs.
 func TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts(t *testing.T) {
@@ -161,7 +162,18 @@ func TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts(t *testing.T) {
 		md.Schema[len(md.Schema)-1].Name != "note" || md.Schema[len(md.Schema)-1].Description != "a note" {
 		t.Errorf("ALTER TABLE from the editor left %+v, %v", md, err)
 	}
-	refused("read-write", "ALTER TABLE orders RENAME TO renamed", "Not implemented here: ALTER TABLE RENAME TO")
+	// RENAME COLUMN and DROP COLUMN (#1322) too.
+	write("ALTER TABLE orders RENAME COLUMN note TO remark")
+	write("ALTER TABLE orders DROP COLUMN remark")
+	if md, err := ds.Table("orders").Metadata(ctx); err != nil || md.Description != "altered" ||
+		slices.ContainsFunc(md.Schema, func(f *bigquery.FieldSchema) bool { return f.Name == "note" || f.Name == "remark" }) {
+		t.Errorf("RENAME COLUMN and DROP COLUMN from the editor left %+v, %v", md, err)
+	}
+	if n := countRows(t, h, orders); n != 4 {
+		t.Errorf("after DROP COLUMN the table has %d rows, want 4", n)
+	}
+	refused("read-write", "ALTER TABLE orders ALTER COLUMN id SET DATA TYPE NUMERIC",
+		"Not implemented here: ALTER TABLE ALTER COLUMN SET DATA TYPE")
 	refused("", "CREATE TABLE never AS SELECT 1 AS a", "Switch it to Read-write")
 	if _, err := ds.Table("never").Metadata(ctx); !isNotFound(err) {
 		t.Errorf("a CREATE refused in Read-only made the table: %v", err)
