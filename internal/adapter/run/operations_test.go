@@ -11,8 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-// ListOperations lists one location's operations, in pages, and refuses a
-// filter rather than ignoring it.
+// ListOperations lists one location's operations, in pages.
 func TestListOperations(t *testing.T) {
 	t.Parallel()
 	s := NewServer(&Knative{}, "inst", time.Second)
@@ -44,12 +43,65 @@ func TestListOperations(t *testing.T) {
 		req  *longrunningpb.ListOperationsRequest
 		code codes.Code
 	}{
-		{&longrunningpb.ListOperationsRequest{Name: jobParent, Filter: "done=true"}, codes.Unimplemented},
+		{&longrunningpb.ListOperationsRequest{Name: jobParent, Filter: "metadata.target=x"}, codes.InvalidArgument},
 		{&longrunningpb.ListOperationsRequest{Name: "projects/p"}, codes.InvalidArgument},
 		{&longrunningpb.ListOperationsRequest{Name: jobParent, PageToken: "bogus"}, codes.InvalidArgument},
 	} {
 		if _, err := ops.ListOperations(ctx, c.req); status.Code(err) != c.code {
 			t.Errorf("ListOperations(%v) = %v; want %v", c.req, err, c.code)
+		}
+	}
+}
+
+// A ListOperations filter keeps only the operations it matches, before
+// paging, and refuses what it cannot evaluate.
+func TestListOperationsFilter(t *testing.T) {
+	t.Parallel()
+	s := NewServer(&Knative{}, "inst", time.Second)
+	ops := NewOperationsServer(s)
+	a := s.ops.Create(jobParent, "t")
+	b := s.ops.Create(jobParent, "t")
+	c := s.ops.Create(jobParent, "t")
+	if err := s.ops.Succeed(a.Name, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ops.Fail(c.Name, status.Error(codes.Internal, "boom")); err != nil {
+		t.Fatal(err)
+	}
+	_ = b
+	ctx := context.Background()
+	count := func(filter string) int {
+		t.Helper()
+		n, token := 0, ""
+		for {
+			resp, err := ops.ListOperations(ctx, &longrunningpb.ListOperationsRequest{Name: jobParent, Filter: filter, PageSize: 1, PageToken: token})
+			if err != nil {
+				t.Fatalf("filter %q: %v", filter, err)
+			}
+			n += len(resp.GetOperations())
+			if token = resp.GetNextPageToken(); token == "" {
+				return n
+			}
+		}
+	}
+	for filter, want := range map[string]int{
+		"done=true":                           2,
+		"done = false":                        1,
+		"NOT done=true":                       1,
+		"-done=true":                          1,
+		`name="` + a.Name + `"`:               1,
+		`name:"operations/" AND done=false`:   1,
+		`name="` + a.Name + `" OR done=false`: 2,
+		"error.code != 0":                     3,
+		"error.code = 13":                     1,
+	} {
+		if got := count(filter); got != want {
+			t.Errorf("filter %q listed %d; want %d", filter, got, want)
+		}
+	}
+	for _, f := range []string{"done=maybe", "done:true", "labels.x=1", "(done=true", "done=", "error.code=x"} {
+		if _, err := ops.ListOperations(ctx, &longrunningpb.ListOperationsRequest{Name: jobParent, Filter: f}); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("filter %q = %v; want InvalidArgument", f, err)
 		}
 	}
 }

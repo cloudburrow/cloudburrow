@@ -53,32 +53,38 @@ func (o *OperationsServer) CancelOperation(context.Context, *longrunningpb.Cance
 }
 
 // ListOperations lists the operations under projects/*/locations/*, the
-// collection run_v2.yaml binds, in name order and paged. A filter is refused
-// rather than ignored: ignoring it would return operations it excludes.
+// collection run_v2.yaml binds, in name order and paged. A filter (#1263) is
+// applied before paging, so a page holds only matching operations; one it
+// cannot evaluate is INVALID_ARGUMENT, never ignored (opfilter.go).
 func (o *OperationsServer) ListOperations(_ context.Context, req *longrunningpb.ListOperationsRequest) (*longrunningpb.ListOperationsResponse, error) {
 	parent := req.GetName()
 	if p := strings.Split(parent, "/"); len(p) != 4 || p[0] != "projects" || p[2] != "locations" || p[1] == "" || p[3] == "" {
 		return nil, apierror.InvalidArgument("name %q must be projects/{project}/locations/{location}", parent)
 	}
-	if req.GetFilter() != "" {
-		return nil, apierror.Unimplemented("filter is not supported on ListOperations")
+	filter, err := parseOpFilter(req.GetFilter())
+	if err != nil {
+		return nil, err
 	}
-	ops := o.adapter.ops.List(parent + "/operations/")
-	names := make([]string, 0, len(ops))
-	for _, op := range ops {
+	byName := map[string]*longrunningpb.Operation{}
+	var names []string
+	for _, op := range o.adapter.ops.List(parent + "/operations/") {
+		p, err := o.adapter.toProtoOperation(op.Name)
+		if err != nil {
+			continue // forgotten between the listing and now
+		}
+		if filter != nil && !filter.match(p) {
+			continue
+		}
+		byName[op.Name] = p
 		names = append(names, op.Name)
 	}
-	page, next, err := paging.Page("run-operations:"+parent, names, req.GetPageToken(), int(req.GetPageSize()))
+	page, next, err := paging.Page("run-operations:"+parent+"?"+req.GetFilter(), names, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
 	resp := &longrunningpb.ListOperationsResponse{NextPageToken: next}
 	for _, n := range page {
-		op, err := o.adapter.toProtoOperation(n)
-		if err != nil {
-			continue // forgotten between the listing and now
-		}
-		resp.Operations = append(resp.Operations, op)
+		resp.Operations = append(resp.Operations, byName[n])
 	}
 	return resp, nil
 }
