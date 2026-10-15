@@ -171,7 +171,7 @@ Already tracked: #1216 (IAM policy methods, `MoveProject`, `UndeleteProject`).
 Already tracked: #1217 (procedures, script transactions, RANGE variables), #1218 (row access
 policies, table and routine IAM), #1201 (scripting blocks), #1111 (a new column before the
 table's, RANGE in a STRUCT parameter), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs,
-snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), and a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501).
+snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -180,7 +180,6 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |
-| A `STRUCT` query parameter with a `BYTES` field (#1241) | not built yet | S |
 | Storage Write API `arrow_rows` | not built yet | M |
 | Materialized views (`CREATE` / `DROP MATERIALIZED VIEW`) | no emulator support | L |
 | `datasets.undelete`: the emulator keeps nothing of a deleted dataset | no emulator support | M |

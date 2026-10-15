@@ -3832,6 +3832,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
+          "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:200 TestConsoleBigQueryJobPageShowsDMLRows",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
@@ -3852,6 +3853,7 @@
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
         ]
@@ -3874,6 +3876,7 @@
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigquerywrites_test.go:355 TestConsoleBigQueryReadWriteEditorRunsDML"
         ]
       },
