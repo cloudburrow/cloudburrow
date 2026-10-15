@@ -267,9 +267,66 @@ func TestTasksRefusesWhatItWouldDrop(t *testing.T) {
 		StackdriverLoggingConfig: &taskspb.StackdriverLoggingConfig{SamplingRatio: 1}}}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("CreateQueue with stackdriver_logging_config = %v; want Unimplemented", err)
 	}
-	it := c.ListQueues(ctx, &taskspb.ListQueuesRequest{Parent: location(h), Filter: "name: compat"})
+	it := c.ListQueues(ctx, &taskspb.ListQueuesRequest{Parent: location(h), Filter: `name =~ "compat.*"`})
 	if _, err := it.Next(); status.Code(err) != codes.Unimplemented {
-		t.Errorf("ListQueues with a filter on name = %v; want Unimplemented", err)
+		t.Errorf("ListQueues with a regular expression = %v; want Unimplemented", err)
+	}
+}
+
+// TestTasksListQueuesFiltersOnQueueFields (#1255): ListQueues filters on
+// any Queue field, as the reference documents, combined with AND, OR and
+// NOT, through the official client; a filter naming no Queue field, or a
+// value its field cannot hold, is INVALID_ARGUMENT.
+// covers: google.cloud.tasks.v2.CloudTasks/ListQueues
+func TestTasksListQueuesFiltersOnQueueFields(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c := tasksClient(t, h)
+	fast := location(h) + "/queues/filter-fast"
+	slow := location(h) + "/queues/filter-slow"
+	for _, q := range []*taskspb.Queue{
+		{Name: fast, RateLimits: &taskspb.RateLimits{MaxDispatchesPerSecond: 50},
+			RetryConfig: &taskspb.RetryConfig{MaxAttempts: 3, MinBackoff: durationpb.New(time.Second)}},
+		{Name: slow, RateLimits: &taskspb.RateLimits{MaxDispatchesPerSecond: 1},
+			RetryConfig: &taskspb.RetryConfig{MaxAttempts: 10, MinBackoff: durationpb.New(30 * time.Second)}},
+	} {
+		if _, err := c.CreateQueue(ctx, &taskspb.CreateQueueRequest{Parent: location(h), Queue: q}); err != nil {
+			t.Fatal(err)
+		}
+		name := q.GetName()
+		t.Cleanup(func() { _ = c.DeleteQueue(h.Context(), &taskspb.DeleteQueueRequest{Name: name}) })
+	}
+	if _, err := c.PauseQueue(ctx, &taskspb.PauseQueueRequest{Name: slow}); err != nil {
+		t.Fatal(err)
+	}
+	for filter, want := range map[string]string{
+		"name: filter-slow":                                    slow,
+		"rate_limits.max_dispatches_per_second > 10":           fast,
+		"retry_config.max_attempts >= 5 AND state: PAUSED":     slow,
+		"retry_config.min_backoff < 10s":                       fast,
+		"NOT name: filter-fast":                                slow,
+		"(name: nothing OR name: filter-fast) state = RUNNING": fast,
+	} {
+		var got []string
+		for it := c.ListQueues(ctx, &taskspb.ListQueuesRequest{Parent: location(h), Filter: filter}); ; {
+			q, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				t.Fatalf("ListQueues %q: %v", filter, err)
+			}
+			got = append(got, q.GetName())
+		}
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("ListQueues %q = %v; want %s alone", filter, got, want)
+		}
+	}
+	for _, filter := range []string{"labels.a = b", "state: SLEEPING", "rate_limits.max_burst_size = many"} {
+		it := c.ListQueues(ctx, &taskspb.ListQueuesRequest{Parent: location(h), Filter: filter})
+		if _, err := it.Next(); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("ListQueues %q = %v; want InvalidArgument", filter, err)
+		}
 	}
 }
 

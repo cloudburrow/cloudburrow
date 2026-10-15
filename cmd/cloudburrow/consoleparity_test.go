@@ -72,8 +72,8 @@ var parityRows = []parityRow{
 	// Cloud Tasks
 	{Resource: "Cloud Tasks queues", Service: "tasks",
 		Methods:  []string{"CloudTasks/CreateQueue", "CloudTasks/DeleteQueue", "CloudTasks/GetQueue", "CloudTasks/ListQueues", "CloudTasks/PauseQueue", "CloudTasks/ResumeQueue", "CloudTasks/PurgeQueue"},
-		Provider: "tasks", Offers: "Queues list, queue detail with configuration, Create queue, Delete, Pause / Resume, Purge",
-		Tests: []string{"TestConsoleQueueActionsFollowState", "TestNoDetailShowsABlankProperty", "TestRowMenuClosesOnEscapeAndGivesFocusBack"}},
+		Provider: "tasks", Offers: "Queues list (with a filter box in ListQueues' own syntax, #1255), queue detail with configuration, Create queue, Delete, Pause / Resume, Purge",
+		Tests: []string{"TestConsoleQueueActionsFollowState", "TestConsoleQueueListFilter", "TestNoDetailShowsABlankProperty", "TestRowMenuClosesOnEscapeAndGivesFocusBack"}},
 	{Resource: "Cloud Tasks tasks", Service: "tasks",
 		Methods:  []string{"CloudTasks/GetTask", "CloudTasks/ListTasks", "CloudTasks/DeleteTask"},
 		Provider: "tasks", Offers: "Tasks section on the queue page, task detail (request, headers redacted, body), Delete task",
@@ -106,10 +106,10 @@ var parityRows = []parityRow{
 	// Cloud Run
 	{Resource: "Cloud Run services", Service: "run",
 		Methods:  []string{"Services/CreateService", "Services/DeleteService", "Services/GetService", "Services/ListServices", "Services/UpdateService"},
-		Provider: "run", Offers: "Services list, service detail, Deploy container and Edit and deploy new revision (with labels and variables from Secret Manager, #852), Manage traffic (splits, LATEST, pinned revisions, tags; #1224), Delete",
+		Provider: "run", Offers: "Services list, service detail, Deploy container and Edit and deploy new revision (with labels and variables from Secret Manager, #852), Manage traffic (splits, LATEST, pinned revisions, tags; #1224; sent as an update_mask of traffic, #1260), Delete",
 		Tests: []string{"TestConsoleRunEditAndDeployNewRevision", "TestRunEditDeploysTheFormThroughUpdateService", "TestCloudRunEditFormIsPrefilledAndGivesFocusBack",
 			"TestConsoleRunServiceLabelsAndSecrets", "TestRunEditSetsLabelsAndSecretBackedVariables",
-			"TestTrafficLinesRoundTrip", "TestTrafficListingShowsTags", "TestCloudRunManageTrafficThroughTheBrowser"}},
+			"TestTrafficLinesRoundTrip", "TestTrafficListingShowsTags", "TestRunManageTrafficSendsATrafficMask", "TestCloudRunManageTrafficThroughTheBrowser"}},
 	{Resource: "Cloud Run revisions", Service: "run",
 		Methods:  []string{"Revisions/GetRevision", "Revisions/ListRevisions"},
 		Provider: "run", Offers: "Revision history and Traffic sections on the service page (each tag and its URL, #1224), revision detail",

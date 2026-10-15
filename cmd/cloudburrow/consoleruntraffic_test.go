@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -55,5 +56,32 @@ func TestTrafficListingShowsTags(t *testing.T) {
 	}
 	if !svc.servingRevisions()["hello-00001"] || !svc.servingRevisions()["hello-00002"] {
 		t.Errorf("servingRevisions = %v, want both halves of the split", svc.servingRevisions())
+	}
+}
+
+// TestRunManageTrafficSendsATrafficMask (#1260): Manage traffic sends the
+// service's name and traffic alone, with an update_mask of traffic, so the
+// adapter changes nothing else.
+func TestRunManageTrafficSendsATrafficMask(t *testing.T) {
+	fake := &fakeRunServices{service: deployedService()}
+	p := fake.serve(t)
+	if err := p.manageTraffic(context.Background(), "demo", "api",
+		map[string]string{runTrafficField: "LATEST 60\napi-00001 40 old"}); err != nil {
+		t.Fatalf("manageTraffic: %v", err)
+	}
+	if len(fake.updates) != 1 {
+		t.Fatalf("%d UpdateService calls, want 1", len(fake.updates))
+	}
+	req := fake.updates[0]
+	if paths := req.GetUpdateMask().GetPaths(); len(paths) != 1 || paths[0] != "traffic" {
+		t.Errorf("update mask = %v, want [traffic]", paths)
+	}
+	svc := req.GetService()
+	if svc.GetName() != editedServiceName || svc.GetTemplate() != nil || len(svc.GetLabels()) != 0 || svc.GetEtag() != "" {
+		t.Errorf("sent %v; want only the name and the traffic", svc)
+	}
+	tr := svc.GetTraffic()
+	if len(tr) != 2 || tr[0].GetPercent() != 60 || tr[1].GetRevision() != "api-00001" || tr[1].GetTag() != "old" {
+		t.Errorf("traffic = %v", tr)
 	}
 }
