@@ -27,7 +27,7 @@ import (
 // tabledata.list of `t$P` is answered from the engine: the partition's
 // rows (partitionFilter) are read by a query of the table, in the table's
 // order, a page at a time (startIndex, maxResults, pageToken), with the
-// columns selectedFields names (top-level only; a nested one is 501).
+// columns selectedFields names (a nested one too, selectedfields.go).
 //
 // tables.get of `t$P` answers the table's resource, which `bq head` and
 // the client libraries read the schema of before tabledata.list, with the
@@ -50,9 +50,15 @@ import (
 // `$__UNPARTITIONED__` of a column- or range-partitioned table take the
 // rows of that partition only. 501: `$__UNPARTITIONED__` of an
 // ingestion-time partitioned table (its streaming buffer,
-// streamingbuffer.go), a query that
-// is not one SELECT, a destination of another project or that does not
-// exist. Into a partition of an ingestion-time partitioned table, the
+// streamingbuffer.go; BigQuery documents no write to it), a destination
+// of another project or that does not exist. A query that is not one
+// SELECT is refused, as BigQuery refuses a destination for a DML statement
+// ("You cannot specify a destination table for the query",
+// https://cloud.google.com/bigquery/docs/updating-data) or a script
+// (destination_table "cannot be set for a multi-statement query",
+// https://cloud.google.com/bigquery/docs/multi-statement-queries); the
+// wording of both errors is UNVERIFIED. A dry run is the query's own,
+// without its destination (partitionDryRun). Into a partition of an ingestion-time partitioned table, the
 // rows are not checked: they are written with the partition's
 // _PARTITIONTIME (and _PARTITIONDATE), as a load or a copy into one
 // writes them (ingestionColumns, #1277).
@@ -61,29 +67,14 @@ import (
 // rows hold filter.
 func (f front) partitionRows(w http.ResponseWriter, r *http.Request, dataset, base, filter string, m partitionMeta) {
 	q := r.URL.Query()
+	// The partition's columns, all of them, kept to those selectedFields
+	// names (a.b for a nested field) as tabledata.list of a table keeps
+	// them (#1038, selectedfields.go).
 	cols := "*"
-	if sel := q.Get("selectedFields"); sel != "" {
-		var names []string
-		for _, n := range strings.Split(sel, ",") {
-			n = strings.TrimSpace(n)
-			if strings.Contains(n, ".") {
-				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: tabledata.list of a "+
-					"partition with a nested field in selectedFields ("+n+"). Name top-level columns (docs/compatibility.md).")
-				return
-			}
-			known := false
-			for _, fl := range m.Schema.Fields {
-				if strings.EqualFold(fl.Name, n) {
-					known, n = true, fl.Name
-				}
-			}
-			if !known {
-				writeError(w, http.StatusBadRequest, "invalid", "Field "+n+" not found in table schema") // UNVERIFIED wording
-				return
-			}
-			names = append(names, quoteName(n))
-		}
-		cols = strings.Join(names, ", ")
+	sel, err := parseSelectedFields(m.Schema.Fields, q.Get("selectedFields"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid", err.Error())
+		return
 	}
 	start := int64(0)
 	for _, key := range []string{"startIndex", "pageToken"} {
@@ -125,7 +116,7 @@ func (f front) partitionRows(w http.ResponseWriter, r *http.Request, dataset, ba
 	}
 	out := map[string]any{"kind": "bigquery#tableDataList", "totalRows": strconv.FormatInt(total, 10)}
 	if res.Rows != nil {
-		out["rows"] = res.Rows
+		out["rows"] = selectRows(m.Schema.Fields, sel, res.Rows)
 	}
 	if next := start + int64(len(res.Rows)); next < total && len(res.Rows) > 0 {
 		out["pageToken"] = strconv.FormatInt(next, 10)
@@ -213,9 +204,6 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 	if dest.ProjectID != "" && dest.ProjectID != project {
 		return notImplemented("of another project")
 	}
-	if dryRun(r, true) {
-		return notImplemented("as a dry run")
-	}
 	m, ok := f.partitionMetaOf(r, dest.DatasetID, base)
 	if !ok {
 		return notImplemented("of a table that does not exist")
@@ -233,8 +221,13 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 		return notImplemented("$__UNPARTITIONED__ of an ingestion-time partitioned table, which holds its streaming buffer")
 	case write != "" && write != "WRITE_EMPTY" && write != "WRITE_APPEND" && write != "WRITE_TRUNCATE":
 		return notImplemented("with writeDisposition " + write)
-	case !isLoneQuery(c.Query):
-		return notImplemented("whose query is not one SELECT statement")
+	}
+	if why := notOneQuery(c.Query); why != "" {
+		writeError(w, http.StatusBadRequest, "invalid", why)
+		return true
+	}
+	if dryRun(r, true) {
+		return f.partitionDryRun(w, r, c.queryOptions, c.WriteDisposition, dest)
 	}
 	lq, _, _, _ := bytesParameters(c.queryOptions) // as runQuery sends them (#1078)
 	opts := c.SchemaUpdateOptions
@@ -244,8 +237,6 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 	if result, status, _ := f.lone(r, lq, lq.Query); status == http.StatusOK && !sameSchema(result, m.Schema.Fields) {
 		if _, _, _, why := partitionSchema(m.Schema.Fields, result, opts, name); why != "" {
 			return notImplemented(why)
-		} else if m.ingestion() {
-			return notImplemented("whose result's columns are not the table's, of an ingestion-time partitioned table")
 		}
 	}
 	scratch := tableRef{ProjectID: project, DatasetID: dest.DatasetID, TableID: scratchTable()}
@@ -298,7 +289,7 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 		var invalid, why string
 		target, changed, invalid, why = partitionSchema(m.Schema.Fields, fields.Fields, opts, name)
 		switch {
-		case why != "" || m.ingestion():
+		case why != "":
 			e.Reason, e.Message = "notImplemented", "Not implemented here: a query job whose destination is the partition "+
 				dest.DatasetID+"."+dest.TableID+", whose result's columns are not the table's. The table was not changed."
 		case invalid != "":
@@ -607,11 +598,8 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 		}
 		var why string
 		target, changed, invalid, why = partitionSchema(m.Schema.Fields, l.Schema.Fields, opts, name)
-		switch {
-		case why != "":
+		if why != "" {
 			return nil, notImplemented(why)
-		case m.ingestion():
-			return nil, notImplemented("with a schema other than the table's, of an ingestion-time partitioned table")
 		}
 		next = l.Schema.Fields
 	}
@@ -720,9 +708,11 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 // REQUIRED column the rows give as NULLABLE. Without the option, the job
 // fails, reason invalid, the table unchanged. The table's columns, in its
 // order, must come first; anything else (a column left out, retyped, given
-// in another order, a RECORD's fields changed) stays 501, as does a schema
-// update of an ingestion-time partitioned table, whose rows' times the
-// table's remaking (schemaupdate.go's addColumns) would not keep.
+// in another order, a RECORD's fields changed) stays 501; a column
+// retyped fails, reason invalid, as "changing a column's data type" is not
+// a schema update BigQuery makes through a write. An ingestion-time
+// partitioned table's rows keep their _PARTITIONTIME through the table's
+// remaking (schemaupdate.go's addColumns).
 
 // partitionSchema compares the rows' columns, next, with the table's,
 // old. It returns the table's schema after the write, whether it changes,
@@ -734,7 +724,13 @@ func partitionSchema(old, next []field, opts []string, name string) (target []fi
 	target = make([]field, 0, len(next))
 	for i, o := range old {
 		n := next[i]
-		if !strings.EqualFold(o.Name, n.Name) || canonicalType(o.Type) != canonicalType(n.Type) || !sameSchema(o.Fields, n.Fields) {
+		if strings.EqualFold(o.Name, n.Name) && canonicalType(o.Type) != canonicalType(n.Type) {
+			// "Changing a column's data type" is not a schema update
+			// BigQuery makes through a write (managing-table-schemas).
+			return nil, false, "Provided Schema does not match Table " + name + ". Field " + o.Name +
+				" has changed type from " + canonicalType(o.Type) + " to " + canonicalType(n.Type), "" // UNVERIFIED wording
+		}
+		if !strings.EqualFold(o.Name, n.Name) || !sameSchema(o.Fields, n.Fields) {
 			return nil, false, "", "whose columns are not the table's (" + n.Name + ")"
 		}
 		t := o
@@ -822,4 +818,79 @@ func (f front) updatePartitionedSchema(r *http.Request, dataset, table string, o
 		return errorMessage(got, status)
 	}
 	return ""
+}
+
+// notOneQuery answers why BigQuery refuses a query job whose
+// destinationTable is set and whose query is not one query statement: a
+// script, a DML or a DDL statement (#1273), or "" when it is one.
+func notOneQuery(sql string) string {
+	if isLoneQuery(sql) {
+		return ""
+	}
+	toks, ok := lex(sql)
+	if !ok {
+		return "" // the emulator's syntax error, as without a destination
+	}
+	var stmts [][]token
+	for _, s := range splitStatements(toks) {
+		if len(s) > 0 {
+			stmts = append(stmts, s)
+		}
+	}
+	switch {
+	case len(stmts) > 1:
+		return "configuration.query.destinationTable cannot be set for scripts" // UNVERIFIED wording
+	case len(stmts) == 1 && (stmts[0][0].is("INSERT") || stmts[0][0].is("UPDATE") || stmts[0][0].is("DELETE") ||
+		stmts[0][0].is("MERGE") || stmts[0][0].is("TRUNCATE")):
+		return "Cannot set destination table in jobs with DML statements" // UNVERIFIED wording
+	case len(stmts) == 1:
+		return "Cannot set destination table in jobs with DDL statements" // UNVERIFIED wording
+	}
+	return ""
+}
+
+// partitionDryRun answers a dry run of a query job whose destination is
+// the partition dest (#1273): the query is dry run without its
+// destination, which the job BigQuery answers names, with its statistics
+// (totalBytesProcessed, and the result's schema, which the front reads with
+// lone, as the emulator answers none). Nothing is written, so the
+// rows are not checked against the partition.
+func (f front) partitionDryRun(w http.ResponseWriter, r *http.Request, q queryOptions, write string, dest *tableRef) bool {
+	if !editJob(r, func(job map[string]any) bool {
+		conf, _ := job["configuration"].(map[string]any)
+		q, _ := conf["query"].(map[string]any)
+		if q == nil {
+			return false
+		}
+		delete(q, "destinationTable")
+		delete(q, "writeDisposition")
+		delete(q, "createDisposition")
+		delete(q, "schemaUpdateOptions")
+		return true
+	}) {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a dry run whose destination "+
+			"is the partition "+dest.DatasetID+"."+dest.TableID+", which CloudBurrow could not send (docs/compatibility.md).")
+		return true
+	}
+	rec := newRecorder()
+	f.runQuery(rec, r, q, true)
+	// BigQuery's dry run gives "the schema of the results"
+	// (statistics.query.schema), which the emulator leaves out.
+	var resp map[string]any
+	if rec.status == 0 || rec.status == http.StatusOK {
+		if json.Unmarshal(rec.body.Bytes(), &resp) == nil {
+			st, _ := resp["statistics"].(map[string]any)
+			qs, _ := st["query"].(map[string]any)
+			lq, _, _, _ := bytesParameters(q) // as runQuery sends them (#1078)
+			if fields, status, _ := f.lone(r, lq, lq.Query); qs != nil && qs["schema"] == nil && status == http.StatusOK {
+				qs["schema"] = map[string]any{"fields": fields}
+				if b, err := json.Marshal(resp); err == nil {
+					rec.body.Reset()
+					rec.body.Write(b)
+				}
+			}
+		}
+	}
+	f.clientJob(w, rec, jobText{dest: dest, queryWrite: write})
+	return true
 }
