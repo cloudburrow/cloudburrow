@@ -705,6 +705,11 @@ which no page lists.
 | `Spanner.CreateSession`, `Spanner.BeginTransaction`, `Spanner.Commit`, `Spanner.StreamingRead`, `InstanceAdmin.CreateInstance`, `DatabaseAdmin.CreateDatabase` | **Verified** | `TestSpannerSchemaAndQuery`, `TestSpannerReadWriteTransactionIsAtomic`, `TestSpannerDatabasesAreIsolated` (a `StreamingRead` answering `NOT_FOUND` across databases) |
 | `Spanner.ExecuteStreamingSql` | **Verified** | `TestSpannerSchemaAndQuery` |
 | `InstanceAdmin.GetInstance`, `DatabaseAdmin.GetDatabase`, `DatabaseAdmin.GetDatabaseDdl` | **Verified** | `TestConsoleSpannerCreateAndDropDatabase`, including `NOT_FOUND` after the console's drops |
+| `Spanner.BatchCreateSessions`, `Spanner.GetSession`, `Spanner.ListSessions`, `Spanner.DeleteSession` | **Verified** | `TestSpannerSessionLifecycle` (#1199), through the generated `spanner/apiv1` client: two sessions, each got and listed, and `GetSession` `NOT_FOUND` after the delete |
+| `Spanner.ExecuteSql`, `Spanner.Read`, `Spanner.ExecuteBatchDml`, `Spanner.Rollback` | **Verified** | `TestSpannerUnaryQueryDMLAndRollback` (#1199): an `ExecuteSql` INSERT with an inline begin, committed and read back by `ExecuteSql` and `Read`; two `ExecuteBatchDml` inserts of one row each, rolled back, leave nothing |
+| `Spanner.PartitionQuery`, `Spanner.PartitionRead` | **Verified** | `TestSpannerPartitionedQueryAndRead` (#1199): the query's partitions, each run with its token, return every row once; `PartitionRead` returns partitions with tokens |
+| `Spanner.BatchWrite` | **Verified** | `TestSpannerBatchWrite` (#1199): two mutation groups, both answered OK and read back |
+| `Spanner.FetchCacheUpdate` | **Refused** | `TestSpannerFetchCacheUpdateIsRefused` (#1199): the emulator answers `UNIMPLEMENTED`, with an empty message |
 
 **All four are in-memory.** CloudBurrow provisions no volume for them and `status` lists them
 as never surviving a restart. Nothing here is persistent, whatever `--mode` says.

@@ -2880,8 +2880,9 @@
     "Key": "spanner",
     "Title": "Spanner",
     "counts": {
-      "Unknown": 55,
-      "Verified": 10
+      "Refused": 1,
+      "Unknown": 43,
+      "Verified": 21
     },
     "rows": [
       {
@@ -3098,11 +3099,17 @@
       },
       {
         "method": "google.spanner.v1.Spanner/BatchCreateSessions",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/BatchWrite",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:293 TestSpannerBatchWrite"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/BeginTransaction",
@@ -3133,15 +3140,24 @@
       },
       {
         "method": "google.spanner.v1.Spanner/DeleteSession",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/ExecuteBatchDml",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/ExecuteSql",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/ExecuteStreamingSql",
@@ -3152,31 +3168,53 @@
       },
       {
         "method": "google.spanner.v1.Spanner/FetchCacheUpdate",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spannerdata_test.go:340 TestSpannerFetchCacheUpdateIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.v1.Spanner/GetSession",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/ListSessions",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/PartitionQuery",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:216 TestSpannerPartitionedQueryAndRead"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/PartitionRead",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:216 TestSpannerPartitionedQueryAndRead"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/Read",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/Rollback",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/StreamingRead",
