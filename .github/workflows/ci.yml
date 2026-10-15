@@ -353,11 +353,13 @@ jobs:
           go-version: "1.27"
 
       # A dirty go.mod/go.sum after tidy means the committed dependency set is
-      # not what the code actually needs.
+      # not what the code actually needs. The fakekms oracle module replaces the
+      # root module, so a root bump must re-tidy it too (#1181).
       - name: go mod tidy leaves no diff
         run: |
           go mod tidy
-          git diff --exit-code go.mod go.sum
+          (cd test/oracle/fakekms && go mod tidy)
+          git diff --exit-code go.mod go.sum test/oracle/fakekms/go.mod test/oracle/fakekms/go.sum
 
       - name: go mod verify
         run: go mod verify
