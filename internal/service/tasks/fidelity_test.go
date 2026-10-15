@@ -84,8 +84,41 @@ func TestQueueFieldsAreRefusedOrKept(t *testing.T) {
 	if q.GetRetryConfig().GetMaxRetryDuration().AsDuration() != 90*time.Second {
 		t.Errorf("max_retry_duration = %v; want 90s", q.GetRetryConfig().GetMaxRetryDuration())
 	}
-	_, err = c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: "state: PAUSED"})
-	wantCodeNaming(t, err, codes.Unimplemented, "filter")
+	for _, f := range []string{"name: q", "state < PAUSED", "state: SLEEPING", "state: PAUSED AND name: q", "labels.a = b"} {
+		_, err = c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: f})
+		wantCodeNaming(t, err, codes.Unimplemented, "filter")
+	}
+}
+
+// A state filter is honoured, as Google's sample "state: PAUSED" (#1222).
+func TestListQueuesFiltersByState(t *testing.T) {
+	t.Parallel()
+	c := serve(t)
+	cc := ctx(t)
+	for _, n := range []string{queueA, loc + "/queues/b"} {
+		if _, err := c.CreateQueue(cc, &taskspb.CreateQueueRequest{Parent: loc, Queue: &taskspb.Queue{Name: n}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.PauseQueue(cc, &taskspb.PauseQueueRequest{Name: queueA}); err != nil {
+		t.Fatal(err)
+	}
+	for f, want := range map[string]string{
+		"state: PAUSED": queueA, "state=PAUSED": queueA, `state = "PAUSED"`: queueA,
+		"state != PAUSED": loc + "/queues/b", "state: RUNNING": loc + "/queues/b",
+	} {
+		resp, err := c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: f})
+		if err != nil {
+			t.Fatalf("filter %q: %v", f, err)
+		}
+		if len(resp.GetQueues()) != 1 || resp.GetQueues()[0].GetName() != want {
+			t.Errorf("filter %q listed %v; want %s alone", f, resp.GetQueues(), want)
+		}
+	}
+	resp, err := c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: "state: DISABLED"})
+	if err != nil || len(resp.GetQueues()) != 0 {
+		t.Errorf("state: DISABLED = %v, %v; want none", resp.GetQueues(), err)
+	}
 }
 
 // With max_retry_duration set, a task is retried past max_attempts until

@@ -1,0 +1,247 @@
+# Remaining gaps
+
+Every place [compatibility.md](compatibility.md) or [docs/coverage](coverage/README.md) says
+something is not implemented (501, `UNIMPLEMENTED`, Unimplemented, Not served, Refused), was not
+measured, or rests on an UNVERIFIED choice, swept on 2026-10-15. Left out: what an open issue
+already tracks (listed per service), and what an ADR or a recorded maintainer decision excludes
+on purpose (the last section). The per-operation detail stays in compatibility.md; this page
+is the to-do view of it. Gaps filed by the sweep carry their issue number.
+
+**Why it is open:**
+
+- *not built yet*: nothing stops it but work;
+- *no emulator support*: the upstream emulator refuses it, or there is nothing local for it to act on;
+- *not documented by Google*: CloudBurrow had to choose a code, a message or a rule (`UNVERIFIED`);
+- *needs live GCP*: only an observation of Google would settle it, and nothing here calls Google.
+
+**Size:** S is a day or less, M a few days, L a new subsystem.
+
+## Counts
+
+| Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
+|---|---|---|---|---|---|
+| Cloud Storage | 11 | 5 | 5 | 1 | 0 |
+| Pub/Sub | 4 | 1 | 2 | 1 | 0 |
+| Cloud Tasks | 5 | 4 | 1 | 0 | 0 |
+| Cloud Run | 13 | 10 | 1 | 0 | 2 |
+| Cloud Scheduler | 3 | 1 | 1 | 0 | 1 |
+| Cloud Logging | 2 | 2 | 0 | 0 | 0 |
+| Cloud KMS | 7 | 1 | 3 | 2 | 1 |
+| Secret Manager | 5 | 3 | 1 | 0 | 1 |
+| Resource Manager | 2 | 2 | 0 | 0 | 0 |
+| Vertex AI | 5 | 4 | 1 | 0 | 0 |
+| BigQuery | 25 | 9 | 13 | 3 | 0 |
+| Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
+| Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
+| Console | 4 | 4 | 0 | 0 | 0 |
+| **Total** | **94** | **50** | **32** | **7** | **5** |
+
+## Cloud Storage
+
+Already tracked: none open. ACLs and object IAM are excluded (below).
+
+| Gap | Why open | Size |
+|---|---|---|
+| `objects.bulkRestore`: restoring soft-deleted objects in bulk (a long-running bucket operation) is 501 | not built yet | M |
+| `buckets.operations.list` with a `filter` is 501 | not built yet | S |
+| `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) | not built yet | M |
+| XML API: bucket `PUT`, service `GET` and form `POST` are 501 | not built yet | M |
+| gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |
+| `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
+| `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |
+| `buckets.relocate`, `buckets.operations.advanceRelocateBucket` | no emulator support (one location) | M |
+| `buckets.operations.cancel`: every operation is done when returned | no emulator support | S |
+| Notifications: the server with no Pub/Sub refuses a configuration (501) | no emulator support (needs Pub/Sub) | S |
+| 14 UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints and others; [storage.md](coverage/storage.md)) | not documented by Google | S |
+
+## Pub/Sub
+
+Already tracked: #982 (Google's message for an invalid label is not measured).
+
+| Gap | Why open | Size |
+|---|---|---|
+| Request-rate, latency and resource metrics, the request log and tracing do not see Pub/Sub, which is a raw port-forward | not built yet | M |
+| `DetachSubscription`, `UpdateSnapshot` are refused `UNIMPLEMENTED` by Google's emulator | no emulator support | M |
+| Protocol Buffer schemas: `ValidateSchema` of `PROTOCOL_BUFFER` is `UNIMPLEMENTED` | no emulator support | M |
+| 4 UNVERIFIED error codes: subscription expiration, exactly-once and label refusals ([pubsub.md](coverage/pubsub.md)) | not documented by Google | S |
+
+## Cloud Tasks
+
+Already tracked: #1215 (`RunTask`, `BatchCreateTasks`, `BatchDeleteTasks`, CMEK config). Queue IAM
+conditions are excluded (below).
+
+| Gap | Why open | Size |
+|---|---|---|
+| `ListQueues` with a `filter` other than on `state` is `UNIMPLEMENTED` (a `state` filter is honoured since #1222) | not built yet | S |
+| `oidcToken` / `oauthToken` on an HTTP task are refused `UNIMPLEMENTED` | not built yet | M |
+| `stackdriver_logging_config` is refused: no dispatch is written to Cloud Logging | not built yet | M |
+| A queue-level `http_target` on `UpdateQueue` is refused | not built yet | M |
+| App Engine targets and `app_engine_routing_override` | no emulator support (no App Engine) | L |
+
+## Cloud Run
+
+Already tracked: #1216 (IAM policy methods on Services and Jobs).
+
+| Gap | Why open | Size |
+|---|---|---|
+| `Operations.ListOperations` with a `filter` is `UNIMPLEMENTED` (listing and `WaitOperation` are served since #1229) | not built yet | S |
+| `Tasks.GetTask`, `Tasks.ListTasks`: a job execution's tasks are not served (#1223) | not built yet | M |
+| Traffic: a split, a pinned revision, a percentage below 100 or a tag is `UNIMPLEMENTED` (#1224) | not built yet | M |
+| `UpdateService` with a partial `update_mask` is `UNIMPLEMENTED` | not built yet | S |
+| Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity | not built yet | L |
+| Logs are not served through the Cloud Run API | not built yet | M |
+| `Builds.SubmitBuild` is not served | not built yet | M |
+| `Instances.*` is not served | not built yet | L |
+| `WorkerPools.*` is not served | not built yet | L |
+| `gcloud run services list` / `describe` use the v1 (Knative-shaped) API, which is not served | not built yet | L |
+| `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
+| A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
+| `CancelExecution`'s result | needs live GCP | S |
+
+## Cloud Scheduler
+
+| Gap | Why open | Size |
+|---|---|---|
+| `Locations.ListLocations`, `GetLocation` are 501 over REST and unregistered over gRPC | not built yet | S |
+| App Engine targets | no emulator support (no App Engine) | L |
+| `ResumeJob` on an enabled job and the default `retry_config` are inferred from the Terraform provider | needs live GCP | S |
+
+OAuth and OIDC tokens on HTTP targets share the Cloud Tasks row above.
+
+## Cloud Logging
+
+Already tracked: #1215 (`TailLogEntries`, `ListMonitoredResourceDescriptors`).
+
+| Gap | Why open | Size |
+|---|---|---|
+| `MetricsServiceV2`: log-based metrics (`gcloud logging metrics`, Terraform `google_logging_metric`) are not served (#1226) | not built yet | M |
+| `ConfigServiceV2`: sinks, exclusions, buckets and views are not served | not built yet | L |
+
+## Cloud KMS
+
+Already tracked: #1212 (asymmetric, MAC and raw keys, random bytes, deletion, import jobs: the 19
+Unimplemented methods) and #1219 (console). Not filed here: KMS is being worked on.
+
+| Gap | Why open | Size |
+|---|---|---|
+| `Locations.ListLocations`, `GetLocation` are `UNIMPLEMENTED` | not built yet | S |
+| HSM, EXTERNAL and EXTERNAL_VPC protection levels, `crypto_key_backend`, `external_protection_level_options` | no emulator support | L |
+| EKM, Autokey, AutokeyAdmin and HSM management services | no emulator support | L |
+| `key_access_justifications_policy` on `UpdateCryptoKey` | no emulator support | S |
+| REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` | not documented by Google | S |
+| 72 UNVERIFIED error codes ([kms.md](coverage/kms.md)) | not documented by Google | S |
+| Project-number parents are refused; whether Google accepts them, and whether an empty key ring can be deleted | needs live GCP | S |
+
+## Secret Manager
+
+Already tracked: #1215 (`RotateSecret`, `EnableManagedRotation`, and with them `Secret.rotation`).
+IAM conditions are excluded (below).
+
+| Gap | Why open | Size |
+|---|---|---|
+| `Secret.expire_time` / `ttl` are refused `UNIMPLEMENTED` (#1225) | not built yet | S |
+| `ListSecrets`, `ListSecretVersions` with a `filter` are `UNIMPLEMENTED` (#1228) | not built yet | M |
+| `Secret.topics`: event notifications to Pub/Sub are refused | not built yet | M |
+| `customer_managed_encryption` on a replica or the automatic policy | no emulator support (needs KMS-backed CMEK) | M |
+| Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) | needs live GCP | S |
+
+## Resource Manager
+
+Already tracked: #1216 (IAM policy methods, `MoveProject`, `UndeleteProject`).
+
+| Gap | Why open | Size |
+|---|---|---|
+| Folders, Organizations, Liens, TagKeys, TagValues, TagBindings are not served (and `ListProjects` under a folder or organization is `UNIMPLEMENTED`) | not built yet | L |
+| The v1 API beyond what is served (`update`, org policy) | not built yet | M |
+
+## Vertex AI
+
+| Gap | Why open | Size |
+|---|---|---|
+| `PredictionService.EmbedContent` is `UNIMPLEMENTED` (local embeddings answer only `:predict`) | not built yet | M |
+| `PredictionService.StreamGenerateContent` over gRPC is `UNIMPLEMENTED`; `GenerateContent` over gRPC is served with no official-SDK test | not built yet | M |
+| Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` | not built yet | M |
+| `RawPredict` on a publisher model | not built yet | S |
+| `Explain` | no emulator support | L |
+
+## BigQuery
+
+Already tracked: #1217 (procedures, script transactions, RANGE variables), #1218 (row access
+policies, table and routine IAM), #1201 (scripting blocks), #1111 (a new column before the
+table's, RANGE in a STRUCT parameter), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs,
+snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST).
+
+| Gap | Why open | Size |
+|---|---|---|
+| `ALTER TABLE` (`ADD COLUMN`, `SET OPTIONS`, `RENAME TO`, …) is 501, though `tables.patch` already does the same changes (#1227) | not built yet | M |
+| `routines.update` (`Routine.Update`) is 501 | not built yet | S |
+| A view's column list (`CREATE VIEW v (c, d) AS …`) is 501 | not built yet | S |
+| `CREATE TABLE … LIKE` and `CREATE TABLE … COPY` are 501 | not built yet | S |
+| `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) | not built yet | M |
+| CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
+| `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |
+| A `STRUCT` query parameter with a `BYTES` field | not built yet | S |
+| Storage Write API `arrow_rows` | not built yet | M |
+| Materialized views (`CREATE` / `DROP MATERIALIZED VIEW`) | no emulator support | L |
+| `datasets.undelete`: the emulator keeps nothing of a deleted dataset | no emulator support | M |
+| A failed script after a statement that wrote: the emulator does not roll back | no emulator support | L |
+| `MERGE` from a subquery inside a multi-statement script; DML with a `FROM` of several items | no emulator support | M |
+| `CREATE OR REPLACE TABLE`, `CREATE OR REPLACE [TEMP] TABLE`, `CREATE SCHEMA` of an existing dataset, and `DROP TABLE` of a script's temp table, later in a multi-statement script | no emulator support | M |
+| `CREATE [OR REPLACE] [TABLE] FUNCTION` of one that exists, and `DROP [TABLE] FUNCTION`, inside multi-statement scripts | no emulator support | M |
+| `DROP SCHEMA` where the script's other statements see the dataset | no emulator support | M |
+| `CREATE SCHEMA` options other than the supported strings, and `DEFAULT COLLATE` | no emulator support | M |
+| `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that does | no emulator support | S |
+| CSV: a multi-character or non-ASCII delimiter or quote, an empty `STRING` with a `nullMarker`, a `maxBadRecords` load the emulator fails | no emulator support | M |
+| Parquet loads with a NaN, and the other refused Parquet columns | no emulator support | S |
+| Storage Read API: `SplitReadStream`, and `ReadRows` of a stream made before the front last started | no emulator support | S |
+| A load of several Cloud Storage objects when the front was given no Cloud Storage | no emulator support | S |
+| Script variable named as an alias, a column or a table; `WRITE_TRUNCATE_DATA` of a result of another type | not documented by Google | S |
+| CSV header detection when every column reads as `STRING` | not documented by Google | S |
+| BigQuery's wording of every front refusal (UNVERIFIED throughout the BigQuery rows) | not documented by Google | S |
+
+## Spanner, Bigtable, Firestore, Datastore
+
+| Gap | Why open | Size |
+|---|---|---|
+| Spanner: 32 RPCs refused (backups, backup schedules, IAM, instance configurations, instance and partition updates, `FetchCacheUpdate`; [spanner.md](coverage/spanner.md)) | no emulator support | L |
+| Bigtable: 34 RPCs refused (authorized views, snapshots, backups, IAM, `ExecuteQuery`, …; [bigtable.md](coverage/bigtable.md)) | no emulator support | L |
+| Firestore `PartitionQuery` (`GetPartitionedQueries`) | no emulator support | M |
+| Datastore `RunAggregationQuery` (count, sum, avg) | no emulator support | M |
+
+## Cloud SQL, Memorystore
+
+| Gap | Why open | Size |
+|---|---|---|
+| The Cloud SQL Admin API: instances, connection names, IAM database authentication, backups, replicas, the Auth Proxy path | not built yet | L |
+| The Memorystore admin API (`redis.googleapis.com`) | not built yet | L |
+
+## Functions, credentials, tooling
+
+| Gap | Why open | Size |
+|---|---|---|
+| Functions in languages other than Go | not built yet | L |
+| Terraform resources beyond the verified set | not built yet | L |
+
+## Console
+
+| Gap | Why open | Size |
+|---|---|---|
+| `TestIamPermissions` has no console surface on the Permissions tab | not built yet | S |
+| Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured") | not built yet | M |
+| Embedding playground | not built yet | M |
+| Model download, load and unload from the playground | not built yet | M |
+
+## Excluded on purpose
+
+Not gaps to close; each stays until its decision is amended.
+
+- **Cloud Storage ACLs and object IAM** (`bucketAccessControls.*`, `objectAccessControls.*`,
+  `defaultObjectAccessControls.*`, `objects.*IamPolicy`): 501 by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #504.
+- **IAM Conditions and audit configs** on every policy (Tasks, Secret Manager, KMS, Storage, the
+  console): refused by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #365.
+- **IAM enforcement**: [ADR-0006](adr/0006-iam-policy-surface.md) stores policies, never enforces them.
+- **IAM Credentials `signBlob`**: refused because a local signature makes signed URLs no Google
+  service accepts ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).
+- **Local AI and embeddings in per-PR CI**, and the default build's embeddings answering 501:
+  maintainer decisions recorded in compatibility.md (§What CI does not run, §Local AI, #41).

@@ -98,7 +98,8 @@ linux/arm64 a Tier 2 platform. The cluster and SDK subset runs on linux/arm64 ni
 
 ## What will not work, and why
 
-Worth reading before you hit these:
+Worth reading before you hit these. Every remaining gap, grouped by service with why it is open
+and a rough size, is in [gaps.md](gaps.md).
 
 - **No IAM enforcement, anywhere.** No policy evaluation, no service-account identity. Google's
   Pub/Sub emulator returns `Unimplemented` for IAM methods and we do not paper over it.
