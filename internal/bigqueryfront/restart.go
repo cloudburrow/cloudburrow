@@ -33,8 +33,9 @@ import (
 // back (a request between the two failed: the emulator was not there).
 //
 // The connection is idle: the front sends nothing on it, and closes and
-// dials it again every idle, shorter than the emulator's ReadTimeout (15 s,
-// server/server.go), after which the emulator would close it itself.
+// dials it again every idle, shorter than the 15 s the emulator gives a
+// connection to send a request's headers (ReadHeaderTimeout,
+// server/server.go, patch 0009), after which it would close it itself.
 //
 // Resumable upload sessions (resumable.go) are kept: they hold the client's
 // data, not the emulator's, and the load their last chunk sends is then

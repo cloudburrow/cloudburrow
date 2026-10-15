@@ -64,7 +64,10 @@ bigquery-patch-tests:
 	go run ./tools/bqengine -prepare-only
 	# googlesqlite's own CLI (cmd/googlesqlite, internal/cli) is not built into
 	# the emulator, and its dependencies are not in this module's go.sum.
-	cd third_party/bigquery-emulator && GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy \
+	# TZ=UTC: googlesqlite's TestBindDateFromUnixDate and
+	# TestParseTimeFormatRoundtrip/unixsec (internal/functions/date, helper)
+	# expect UTC and fail in any other local zone, as on a developer's machine.
+	cd third_party/bigquery-emulator && TZ=UTC GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy \
 		$$(GOFLAGS=-mod=readonly GOWORK=off go list -e -tags http2legacy $(BQ_PATCH_TEST_PKGS) | grep -v -e '/googlesqlite/cmd/googlesqlite$$' -e '/googlesqlite/internal/cli$$')
 
 ## build: Build the binary into bin/, with the Linux storage server and BigQuery emulator embedded

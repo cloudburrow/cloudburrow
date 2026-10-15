@@ -22,7 +22,8 @@
         "patches/bigquery-emulator/0006-wkt-number-form.patch",
         "patches/bigquery-emulator/0007-index-job-ids.patch",
         "patches/bigquery-emulator/0008-range-schema-and-values.patch",
-        "patches/bigquery-emulator/0009-read-jobs-by-key.patch"
+        "patches/bigquery-emulator/0009-read-jobs-by-key.patch",
+        "patches/bigquery-emulator/0010-no-read-timeout-on-the-body.patch"
       ]
     },
     {
