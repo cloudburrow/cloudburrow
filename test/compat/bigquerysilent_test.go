@@ -402,6 +402,8 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 			"DECLARE a INT64; DECLARE b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2, 3' INTO a, b",
 			"EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a",
 			"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64); EXECUTE IMMEDIATE FORMAT('SELECT %d', 1)",
+			// BigQuery hides the script's variables from the statement.
+			"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT x'",
 		} {
 			err := runIn(ctx, c, project, "", sql, insert)
 			if code, reason := apiError(err); code != http.StatusNotImplemented || reason != "notImplemented" {
