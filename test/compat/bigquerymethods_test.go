@@ -402,12 +402,15 @@ func isCode(err error, code int) bool {
 	return errors.As(err, &e) && e.Code == code
 }
 
-// TestBigQueryRoutineUpdateIsRefused records that the front refuses
-// routines.update, which the emulator does not have; the routine is
-// unchanged.
+// TestBigQueryRoutineUpdate (#1238): Routine.Update (routines.update)
+// replaces a function CREATE FUNCTION made. The new body, description and
+// return type read back, a query calls the new body, and the creation time is
+// kept. A stale etag is 412 and leaves the routine as it was; an update that
+// gives only a body, which the client's comment says routines.update does
+// not take as partial, is 400 and leaves it as it was too.
 //
-// covers: bigquery.routines.update (unimplemented)
-func TestBigQueryRoutineUpdateIsRefused(t *testing.T) {
+// covers: bigquery.routines.update
+func TestBigQueryRoutineUpdate(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
 	ds, _ := seedOrders(t, h, c)
@@ -421,9 +424,39 @@ func TestBigQueryRoutineUpdateIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Routine.Metadata: %v", err)
 	}
-	_, err = r.Update(ctx, &bigquery.RoutineMetadataToUpdate{Body: "x + 2"}, md.ETag)
-	wantNotImplemented(t, "routines.update", err)
-	if md, err = r.Metadata(ctx); err != nil || md.Body != "x + 1" {
-		t.Errorf("after the refusal: body %q, %v; want %q", md.Body, err, "x + 1")
+	full := &bigquery.RoutineMetadataToUpdate{
+		Type: "SCALAR_FUNCTION", Language: "SQL", Body: "x + 2", Description: "plus two",
+		Arguments:  []*bigquery.RoutineArgument{{Name: "x", DataType: &bigquery.StandardSQLDataType{TypeKind: "INT64"}}},
+		ReturnType: &bigquery.StandardSQLDataType{TypeKind: "INT64"},
+	}
+	got, err := r.Update(ctx, full, md.ETag)
+	if err != nil {
+		t.Fatalf("Routine.Update: %v", err)
+	}
+	if got.Body != "x + 2" || got.ETag == md.ETag {
+		t.Errorf("Routine.Update = %+v", got)
+	}
+	after, err := r.Metadata(ctx)
+	if err != nil || after.Body != "x + 2" || after.Description != "plus two" || after.ReturnType == nil ||
+		after.ReturnType.TypeKind != "INT64" || !after.CreationTime.Equal(md.CreationTime) {
+		t.Errorf("after the update: %+v, %v (created %v)", after, err, md.CreationTime)
+	}
+	var row []bigquery.Value
+	it, err := c.Query("SELECT `" + project + "." + ds.DatasetID + ".plus_one`(1)").Read(ctx)
+	if err != nil || it.Next(&row) != nil || len(row) != 1 || row[0] != int64(3) {
+		t.Errorf("calling the updated function = %v, %v; want 3", row, err)
+	}
+
+	stale := *full
+	stale.Body = "x + 3"
+	var e *googleapi.Error
+	if _, err := r.Update(ctx, &stale, md.ETag); !errors.As(err, &e) || e.Code != http.StatusPreconditionFailed {
+		t.Errorf("Routine.Update with a stale etag = %v; want 412", err)
+	}
+	if _, err := r.Update(ctx, &bigquery.RoutineMetadataToUpdate{Body: "x + 4"}, ""); !errors.As(err, &e) || e.Code != http.StatusBadRequest {
+		t.Errorf("Routine.Update with only a body = %v; want 400", err)
+	}
+	if md, err := r.Metadata(ctx); err != nil || md.Body != "x + 2" {
+		t.Errorf("after the refusals: %+v, %v; want body %q", md, err, "x + 2")
 	}
 }

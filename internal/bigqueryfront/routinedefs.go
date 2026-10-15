@@ -35,12 +35,24 @@ package bigqueryfront
 // A stored procedure the front keeps itself (procedures.go, #1217) is
 // listed, read and deleted too.
 //
+// routines.update (PUT, #1238) replaces a routine the front knows of: the
+// emulator has no update, so the front drops the function in the engine and
+// sends the new definition on as a routines.insert, keeping the creation
+// time. A definition the engine refuses puts the old one back. An If-Match
+// etag that is not the routine's is 412 conditionNotMet (UNVERIFIED: the
+// wording is CloudBurrow's), and a body routineReference naming another
+// routine, or one with no routineType or definitionBody, 400 invalid
+// (UNVERIFIED wording).
+//
 // Not served: a function routines.insert made before the front started,
-// which the front does not know; routines.update, 501.
+// which the front does not know; routines.update of a procedure; a PATCH of
+// a routine, 501.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -563,11 +575,99 @@ func (f front) serveRoutine(w http.ResponseWriter, r *http.Request, project, dat
 		}
 		f.functions.dropDef(project, []string{dataset, id})
 		w.WriteHeader(http.StatusNoContent)
-	case http.MethodPut, http.MethodPatch:
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: routines.update. "+
-			"The emulator behind CloudBurrow has no routines.update; CREATE OR REPLACE FUNCTION, run as a query of its own, "+
-			"replaces a function.")
+	case http.MethodPut:
+		f.updateRoutine(w, r, project, dataset, id) // #1238
+	case http.MethodPatch:
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a PATCH of a routine. "+
+			"routines.update (PUT) replaces it.")
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "invalid", "method not allowed")
 	}
+}
+
+// updateRoutine serves routines.update (#1238) as a drop and an insert.
+func (f front) updateRoutine(w http.ResponseWriter, r *http.Request, project, dataset, id string) {
+	old, ok := f.knownRoutine(r, project, dataset, id)
+	if !ok {
+		routineNotFound(w, project, dataset, id)
+		return
+	}
+	if m := r.Header.Get("If-Match"); m != "" && m != "*" && m != old["etag"] {
+		writeError(w, http.StatusPreconditionFailed, "conditionNotMet",
+			fmt.Sprintf("Precondition check failed: routine %s:%s.%s has etag %v, not %s", project, dataset, id, old["etag"], m))
+		return
+	}
+	var def map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&def); err != nil || def == nil {
+		writeError(w, http.StatusBadRequest, "invalid", "The routines.update body is not a Routine resource.")
+		return
+	}
+	want := map[string]any{"projectId": project, "datasetId": dataset, "routineId": id}
+	if ref, ok := def["routineReference"].(map[string]any); ok {
+		for k, v := range want {
+			if got, set := ref[k]; set && got != v {
+				writeError(w, http.StatusBadRequest, "invalid",
+					fmt.Sprintf("Invalid routineReference: %s %v does not match the request's %v", k, got, v))
+				return
+			}
+		}
+	}
+	// routines.update replaces the whole routine, so its type and body are
+	// required, as on routines.insert; the emulator answers 500 "invalid
+	// routine type" without one, which a client retries to its deadline.
+	if t, _ := def["routineType"].(string); t == "" {
+		writeError(w, http.StatusBadRequest, "invalid", "Routine type is required: routines.update replaces the whole routine.")
+		return
+	}
+	if b, _ := def["definitionBody"].(string); b == "" {
+		writeError(w, http.StatusBadRequest, "invalid", "Routine definitionBody is required: routines.update replaces the whole routine.")
+		return
+	}
+	def["routineReference"] = want
+	for _, k := range []string{"etag", "creationTime", "lastModifiedTime"} {
+		delete(def, k)
+	}
+
+	insert := func(d map[string]any) *recorder {
+		body, _ := json.Marshal(d)
+		req := r.Clone(r.Context())
+		req.Method = http.MethodPost
+		req.URL.Path = strings.TrimSuffix(req.URL.Path, "/"+id)
+		req.URL.RawPath = ""
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		req.ContentLength = int64(len(body))
+		req.Header.Del("If-Match")
+		rec := newRecorder()
+		f.next.ServeHTTP(rec, req)
+		return rec
+	}
+	f.sendDDL(r, dropFunction(old["routineType"] == "TABLE_VALUED_FUNCTION")+" IF EXISTS "+functionName([]string{dataset, id}))
+	rec := insert(def)
+	if rec.status != http.StatusOK {
+		restore := map[string]any{}
+		for k, v := range old {
+			restore[k] = v
+		}
+		for _, k := range []string{"etag", "creationTime", "lastModifiedTime"} {
+			delete(restore, k)
+		}
+		insert(restore)
+		rec.copyTo(w)
+		return
+	}
+	var made map[string]any
+	if err := json.Unmarshal(rec.body.Bytes(), &made); err != nil {
+		rec.copyTo(w)
+		return
+	}
+	now := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	if ref, ok := made["routineReference"].(map[string]any); ok && ref["projectId"] == nil {
+		ref["projectId"] = project
+	}
+	made["creationTime"] = old["creationTime"]
+	made["lastModifiedTime"] = now
+	made["etag"] = etagOf(now + id)
+	f.functions.add(project, []string{dataset, id})
+	f.functions.setDef(project, []string{dataset, id}, made)
+	writeJSON(w, http.StatusOK, made)
 }

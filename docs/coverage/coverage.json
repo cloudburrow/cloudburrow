@@ -3,22 +3,19 @@
     "Key": "tasks",
     "Title": "Cloud Tasks",
     "counts": {
-      "Verified": 20
+      "Unimplemented": 5,
+      "Verified": 15
     },
     "rows": [
       {
         "method": "google.cloud.tasks.v2.CloudTasks/BatchCreateTasks",
-        "status": "Verified",
-        "tests": [
-          "test/compat/tasks1215_test.go:67 TestTasksBatchCreateAndDelete"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/BatchDeleteTasks",
-        "status": "Verified",
-        "tests": [
-          "test/compat/tasks1215_test.go:67 TestTasksBatchCreateAndDelete"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/CreateQueue",
@@ -53,10 +50,8 @@
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/GetCmekConfig",
-        "status": "Verified",
-        "tests": [
-          "test/compat/tasks1215_test.go:127 TestTasksCmekConfig"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/GetIamPolicy",
@@ -86,7 +81,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:291 TestTasksListQueuesFiltersByState",
+          "test/compat/tasks_test.go:296 TestTasksListQueuesFiltersByState",
           "test/compat/tasks_test.go:93 TestTasksListQueues"
         ]
       },
@@ -109,7 +104,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/PurgeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:326 TestTasksPurgeQueue"
+          "test/compat/tasks_test.go:331 TestTasksPurgeQueue"
         ]
       },
       {
@@ -122,10 +117,11 @@
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/RunTask",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/tasks1215_test.go:24 TestTasksRunTaskDispatchesNow"
-        ]
+          "test/compat/tasks_test.go:213 TestTasksUnsupportedOperationsAreHonest"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/SetIamPolicy",
@@ -143,10 +139,8 @@
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/UpdateCmekConfig",
-        "status": "Verified",
-        "tests": [
-          "test/compat/tasks1215_test.go:127 TestTasksCmekConfig"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.tasks.v2.CloudTasks/UpdateQueue",
@@ -184,7 +178,6 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
@@ -213,9 +206,6 @@
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/EnableManagedRotation",
         "status": "Unimplemented",
-        "tests": [
-          "test/compat/secretsrotation1215_test.go:19 TestSecretsManagedRotationIsUnimplemented"
-        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -236,7 +226,6 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ],
@@ -259,7 +248,6 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecretVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:94 TestSecretManagerListFilters",
           "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
         ]
       },
@@ -267,7 +255,6 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:94 TestSecretManagerListFilters",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
@@ -275,9 +262,6 @@
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/RotateSecret",
         "status": "Unimplemented",
-        "tests": [
-          "test/compat/secretsrotation1215_test.go:19 TestSecretsManagedRotationIsUnimplemented"
-        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -299,9 +283,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:361 TestSecretUpdateAppliesOnlyTheMask",
+          "test/compat/secrets_test.go:362 TestSecretUpdateAppliesOnlyTheMask",
           "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace"
         ]
       }
@@ -311,8 +294,9 @@
     "Key": "run",
     "Title": "Cloud Run v2",
     "counts": {
-      "Not served": 15,
-      "Verified": 26
+      "Not served": 17,
+      "Unimplemented": 6,
+      "Verified": 18
     },
     "rows": [
       {
@@ -394,11 +378,8 @@
       },
       {
         "method": "google.cloud.run.v2.Jobs/GetIamPolicy",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced",
-          "test/compat/terraform_iam_test.go:256 TestTerraformRunIAM"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.run.v2.Jobs/GetJob",
@@ -423,32 +404,13 @@
       },
       {
         "method": "google.cloud.run.v2.Jobs/SetIamPolicy",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced",
-          "test/compat/terraform_iam_test.go:256 TestTerraformRunIAM"
-        ],
-        "unverified": [
-          {
-            "code": "ABORTED",
-            "case": "a stale etag, ADR-0006 rule 2",
-            "test": "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
-          }
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.run.v2.Jobs/TestIamPermissions",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
-        ],
-        "unverified": [
-          {
-            "code": "OK",
-            "case": "an empty set on a missing job, as iam_policy.proto documents",
-            "test": "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
-          }
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.run.v2.Jobs/UpdateJob",
@@ -495,18 +457,14 @@
       },
       {
         "method": "google.cloud.run.v2.Services/GetIamPolicy",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced",
-          "test/compat/terraform_iam_test.go:256 TestTerraformRunIAM"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.run.v2.Services/GetService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:57 TestRunServiceLifecycle",
-          "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
+          "test/compat/run_test.go:57 TestRunServiceLifecycle"
         ]
       },
       {
@@ -519,55 +477,31 @@
       },
       {
         "method": "google.cloud.run.v2.Services/SetIamPolicy",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced",
-          "test/compat/terraform_iam_test.go:256 TestTerraformRunIAM"
-        ],
-        "unverified": [
-          {
-            "code": "ABORTED",
-            "case": "a stale etag, ADR-0006 rule 2",
-            "test": "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
-          }
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.run.v2.Services/TestIamPermissions",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
-        ],
-        "unverified": [
-          {
-            "code": "OK",
-            "case": "an empty set on a missing service, as iam_policy.proto documents",
-            "test": "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
-          }
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.run.v2.Services/UpdateService",
         "status": "Verified",
         "tests": [
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
-          "test/compat/run_test.go:226 TestRunUpdateService",
-          "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
+          "test/compat/run_test.go:226 TestRunUpdateService"
         ]
       },
       {
         "method": "google.cloud.run.v2.Tasks/GetTask",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runtasks_test.go:24 TestRunTasksAreAnExecutionsPods"
-        ]
+        "status": "Not served",
+        "note": "the service is not registered on any port"
       },
       {
         "method": "google.cloud.run.v2.Tasks/ListTasks",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runtasks_test.go:24 TestRunTasksAreAnExecutionsPods"
-        ]
+        "status": "Not served",
+        "note": "the service is not registered on any port"
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
@@ -615,62 +549,34 @@
     "Key": "kms",
     "Title": "Cloud KMS",
     "counts": {
-      "Unimplemented": 2,
-      "Verified": 36
+      "Unimplemented": 19,
+      "Verified": 19
     },
     "rows": [
       {
         "method": "google.cloud.kms.v1.KeyManagementService/AsymmetricDecrypt",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_purposes_test.go:154 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
-        "unverified": [
-          {
-            "code": "INVALID_ARGUMENT",
-            "case": "a ciphertext that does not decrypt",
-            "test": "test/compat/kms_purposes_test.go:154 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted"
-          }
-        ]
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/AsymmetricSign",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
-        "unverified": [
-          {
-            "code": "FAILED_PRECONDITION",
-            "case": "a key of another purpose",
-            "test": "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
-          },
-          {
-            "code": "INVALID_ARGUMENT",
-            "case": "a digest of the wrong hash, or a data_crc32c that does not match",
-            "test": "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
-          }
-        ]
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/CreateCryptoKey",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
           "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
-          {
-            "code": "ALREADY_EXISTS",
-            "case": "the name of a deleted key",
-            "test": "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
-          },
-          {
-            "code": "INVALID_ARGUMENT",
-            "case": "ASYMMETRIC_SIGN with no version_template.algorithm",
-            "test": "test/compat/kms_test.go:366 TestKMSCreateCryptoKeyFields"
-          },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed parent",
@@ -699,7 +605,7 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "purpose CRYPTO_KEY_PURPOSE_UNSPECIFIED",
-            "test": "test/compat/kms_test.go:366 TestKMSCreateCryptoKeyFields"
+            "test": "test/compat/kms_test.go:367 TestKMSCreateCryptoKeyFields"
           },
           {
             "code": "NOT_FOUND",
@@ -712,7 +618,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
+          "test/compat/kms_test.go:223 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
@@ -735,10 +641,11 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/CreateImportJob",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys"
-        ]
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/CreateKeyRing",
@@ -756,17 +663,18 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/Decapsulate",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_import_test.go:127 TestKMSDecapsulateMLKEM"
-        ]
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/Decrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:614 TestKMSDecrypt",
-          "test/compat/kms_test.go:713 TestKMSDecryptFollowsTheVersionLifecycle"
+          "test/compat/kms_test.go:613 TestKMSDecrypt",
+          "test/compat/kms_test.go:712 TestKMSDecryptFollowsTheVersionLifecycle"
         ],
         "unverified": [
           {
@@ -782,12 +690,12 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED or DESTROY_SCHEDULED version",
-            "test": "test/compat/kms_test.go:713 TestKMSDecryptFollowsTheVersionLifecycle"
+            "test": "test/compat/kms_test.go:712 TestKMSDecryptFollowsTheVersionLifecycle"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a CryptoKeyVersion name, or an empty ciphertext",
-            "test": "test/compat/kms_test.go:614 TestKMSDecrypt"
+            "test": "test/compat/kms_test.go:613 TestKMSDecrypt"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -797,43 +705,31 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "a wrong AAD, a tampered ciphertext, or another key's ciphertext",
-            "test": "test/compat/kms_test.go:614 TestKMSDecrypt"
+            "test": "test/compat/kms_test.go:613 TestKMSDecrypt"
           }
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
-        "unverified": [
-          {
-            "code": "FAILED_PRECONDITION",
-            "case": "a key that still has versions",
-            "test": "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
-          }
-        ]
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/DeleteCryptoKeyVersion",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
-        "unverified": [
-          {
-            "code": "FAILED_PRECONDITION",
-            "case": "a version that is not DESTROYED",
-            "test": "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
-          }
-        ]
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:415 TestKMSDestroyCryptoKeyVersion"
+          "test/compat/kms_test.go:414 TestKMSDestroyCryptoKeyVersion"
         ],
         "unverified": [
           {
@@ -844,7 +740,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a version already DESTROY_SCHEDULED",
-            "test": "test/compat/kms_test.go:415 TestKMSDestroyCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:414 TestKMSDestroyCryptoKeyVersion"
           },
           {
             "code": "FAILED_PRECONDITION",
@@ -857,13 +753,13 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Encrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:495 TestKMSEncrypt"
+          "test/compat/kms_test.go:494 TestKMSEncrypt"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DESTROY_SCHEDULED named version",
-            "test": "test/compat/kms_test.go:713 TestKMSDecryptFollowsTheVersionLifecycle"
+            "test": "test/compat/kms_test.go:712 TestKMSDecryptFollowsTheVersionLifecycle"
           },
           {
             "code": "FAILED_PRECONDITION",
@@ -873,22 +769,22 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED primary, a DISABLED named version, or a key with no primary",
-            "test": "test/compat/kms_test.go:495 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:494 TestKMSEncrypt"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name",
-            "test": "test/compat/kms_test.go:495 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:494 TestKMSEncrypt"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "empty plaintext, or plaintext or AAD over 64KiB",
-            "test": "test/compat/kms_test.go:495 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:494 TestKMSEncrypt"
           },
           {
             "code": "NOT_FOUND",
             "case": "a key that does not exist",
-            "test": "test/compat/kms_test.go:495 TestKMSEncrypt"
+            "test": "test/compat/kms_test.go:494 TestKMSEncrypt"
           }
         ]
       },
@@ -896,38 +792,32 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:31 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_purposes_test.go:258 TestKMSGenerateRandomBytes"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
-        "unverified": [
-          {
-            "code": "INVALID_ARGUMENT",
-            "case": "a length outside 8 to 1024, or a protection level other than HSM",
-            "test": "test/compat/kms_purposes_test.go:258 TestKMSGenerateRandomBytes"
-          }
-        ]
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKey",
         "status": "Verified",
         "tests": [
           "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
-          "test/compat/kms_test.go:199 TestKMSNamesAreValidatedBeforeLookup",
-          "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
+          "test/compat/kms_test.go:201 TestKMSNamesAreValidatedBeforeLookup",
+          "test/compat/kms_test.go:223 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
           {
             "code": "INVALID_ARGUMENT",
             "case": "a malformed name (wrong collection)",
-            "test": "test/compat/kms_test.go:199 TestKMSNamesAreValidatedBeforeLookup"
+            "test": "test/compat/kms_test.go:201 TestKMSNamesAreValidatedBeforeLookup"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -942,7 +832,7 @@
           {
             "code": "NOT_FOUND",
             "case": "a well-formed name that does not exist",
-            "test": "test/compat/kms_test.go:199 TestKMSNamesAreValidatedBeforeLookup"
+            "test": "test/compat/kms_test.go:201 TestKMSNamesAreValidatedBeforeLookup"
           }
         ]
       },
@@ -950,8 +840,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:1139 TestKMSGetCryptoKeyVersion",
-          "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled"
+          "test/compat/kms_test.go:1138 TestKMSGetCryptoKeyVersion",
+          "test/compat/kms_test.go:223 TestKMSVersionCanStartDisabled"
         ],
         "unverified": [
           {
@@ -967,7 +857,7 @@
           {
             "code": "NOT_FOUND",
             "case": "a version number the key does not have",
-            "test": "test/compat/kms_test.go:1139 TestKMSGetCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:1138 TestKMSGetCryptoKeyVersion"
           },
           {
             "code": "NOT_FOUND",
@@ -978,10 +868,11 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GetImportJob",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys"
-        ]
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GetKeyRing",
@@ -1003,7 +894,7 @@
           {
             "code": "NOT_FOUND",
             "case": "a key ring removed by a project-scoped /admin/reset",
-            "test": "test/compat/kms_test.go:1107 TestKMSProjectResetClearsOnlyThatProject"
+            "test": "test/compat/kms_test.go:1106 TestKMSProjectResetClearsOnlyThatProject"
           },
           {
             "code": "NOT_FOUND",
@@ -1024,39 +915,33 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GetPublicKey",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_import_test.go:127 TestKMSDecapsulateMLKEM",
-          "test/compat/kms_purposes_test.go:154 TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted",
-          "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM"
-        ]
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GetRetiredResource",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
-        ]
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ImportCryptoKeyVersion",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
-        "unverified": [
-          {
-            "code": "INVALID_ARGUMENT",
-            "case": "a wrapped key that does not unwrap, or a key of the wrong length",
-            "test": "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys"
-          }
-        ]
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_unimplemented_test.go:31 TestKMSUnimplementedContract"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -1064,9 +949,9 @@
         "method": "google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
+          "test/compat/kms_test.go:223 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources",
-          "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys"
+          "test/compat/kms_test.go:928 TestKMSFullViewAddsNothingForSoftwareKeys"
         ],
         "unverified": [
           {
@@ -1096,7 +981,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:46 TestKMSResources",
-          "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys"
+          "test/compat/kms_test.go:928 TestKMSFullViewAddsNothingForSoftwareKeys"
         ],
         "unverified": [
           {
@@ -1123,10 +1008,11 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ListImportJobs",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys"
-        ]
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ListKeyRings",
@@ -1154,51 +1040,49 @@
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/ListRetiredResources",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_purposes_test.go:286 TestKMSDeleteCryptoKeyLeavesARetiredResource"
-        ]
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/MacSign",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_purposes_test.go:179 TestKMSMacSignAndVerify"
-        ]
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/MacVerify",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_purposes_test.go:179 TestKMSMacSignAndVerify"
-        ]
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/RawDecrypt",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_purposes_test.go:210 TestKMSRawEncryptAndDecrypt"
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
         ],
-        "unverified": [
-          {
-            "code": "INVALID_ARGUMENT",
-            "case": "AES-GCM with the wrong additional authenticated data",
-            "test": "test/compat/kms_purposes_test.go:210 TestKMSRawEncryptAndDecrypt"
-          }
-        ]
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/RawEncrypt",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/kms_purposes_test.go:210 TestKMSRawEncryptAndDecrypt"
-        ]
+          "test/compat/kms_unimplemented_test.go:48 TestKMSUnimplementedContract"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:451 TestKMSRestoreCryptoKeyVersion"
+          "test/compat/kms_test.go:450 TestKMSRestoreCryptoKeyVersion"
         ],
         "unverified": [
           {
@@ -1209,7 +1093,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "an ENABLED version",
-            "test": "test/compat/kms_test.go:451 TestKMSRestoreCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:450 TestKMSRestoreCryptoKeyVersion"
           }
         ]
       },
@@ -1218,7 +1102,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
-          "test/compat/kms_test.go:884 TestKMSUpdateCryptoKey"
+          "test/compat/kms_test.go:883 TestKMSUpdateCryptoKey"
         ],
         "unverified": [
           {
@@ -1244,7 +1128,7 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "the immutable destroy_scheduled_duration in the mask",
-            "test": "test/compat/kms_test.go:884 TestKMSUpdateCryptoKey"
+            "test": "test/compat/kms_test.go:883 TestKMSUpdateCryptoKey"
           },
           {
             "code": "NOT_FOUND",
@@ -1257,7 +1141,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyPrimaryVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:322 TestKMSPrimaryMustBeEnabled",
+          "test/compat/kms_test.go:324 TestKMSPrimaryMustBeEnabled",
           "test/compat/kms_test.go:46 TestKMSResources"
         ],
         "unverified": [
@@ -1269,7 +1153,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "a DISABLED target version",
-            "test": "test/compat/kms_test.go:322 TestKMSPrimaryMustBeEnabled"
+            "test": "test/compat/kms_test.go:324 TestKMSPrimaryMustBeEnabled"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -1287,7 +1171,7 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion"
+          "test/compat/kms_test.go:279 TestKMSUpdateCryptoKeyVersion"
         ],
         "unverified": [
           {
@@ -1308,12 +1192,12 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "a target state of DESTROYED",
-            "test": "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:279 TestKMSUpdateCryptoKeyVersion"
           },
           {
             "code": "INVALID_ARGUMENT",
             "case": "an update_mask without state",
-            "test": "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion"
+            "test": "test/compat/kms_test.go:279 TestKMSUpdateCryptoKeyVersion"
           },
           {
             "code": "NOT_FOUND",
@@ -1368,8 +1252,8 @@
     "Key": "resourcemanager",
     "Title": "Resource Manager v3 (Projects)",
     "counts": {
-      "Unimplemented": 4,
-      "Verified": 7
+      "Unimplemented": 5,
+      "Verified": 6
     },
     "rows": [
       {
@@ -1389,9 +1273,6 @@
       {
         "method": "google.cloud.resourcemanager.v3.Projects/GetIamPolicy",
         "status": "Unimplemented",
-        "tests": [
-          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
-        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -1406,15 +1287,12 @@
         "method": "google.cloud.resourcemanager.v3.Projects/ListProjects",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:260 TestResourceManagerV3ListProjects"
+          "test/compat/resourcemanager_test.go:175 TestResourceManagerV3ListProjects"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/MoveProject",
         "status": "Unimplemented",
-        "tests": [
-          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
-        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -1427,25 +1305,17 @@
       {
         "method": "google.cloud.resourcemanager.v3.Projects/SetIamPolicy",
         "status": "Unimplemented",
-        "tests": [
-          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
-        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/TestIamPermissions",
         "status": "Unimplemented",
-        "tests": [
-          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
-        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/UndeleteProject",
-        "status": "Verified",
-        "tests": [
-          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/UpdateProject",
@@ -1460,9 +1330,23 @@
     "Key": "scheduler",
     "Title": "Cloud Scheduler",
     "counts": {
-      "Verified": 8
+      "Verified": 10
     },
     "rows": [
+      {
+        "method": "google.cloud.location.Locations/GetLocation",
+        "status": "Verified",
+        "tests": [
+          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
+        ]
+      },
+      {
+        "method": "google.cloud.location.Locations/ListLocations",
+        "status": "Verified",
+        "tests": [
+          "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
+        ]
+      },
       {
         "method": "google.cloud.scheduler.v1.CloudScheduler/CreateJob",
         "status": "Verified",
@@ -1536,192 +1420,12 @@
   },
   {
     "Key": "logging",
-    "Title": "Cloud Logging",
+    "Title": "Cloud Logging (write and read)",
     "counts": {
-      "Unimplemented": 22,
-      "Verified": 21
+      "Unimplemented": 2,
+      "Verified": 4
     },
     "rows": [
-      {
-        "method": "google.logging.v2.ConfigServiceV2/CopyLogEntries",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/CreateBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/CreateBucketAsync",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/CreateExclusion",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
-        ]
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/CreateLink",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/CreateSink",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
-        ]
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/CreateView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/DeleteBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/DeleteExclusion",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
-        ]
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/DeleteLink",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/DeleteSink",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
-        ]
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/DeleteView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/GetBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/GetCmekSettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/GetExclusion",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
-        ]
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/GetLink",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/GetSettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/GetSink",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
-        ]
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/GetView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/ListBuckets",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/ListExclusions",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
-        ]
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/ListLinks",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/ListSinks",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
-        ]
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/ListViews",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/UndeleteBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/UpdateBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/UpdateBucketAsync",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/UpdateCmekSettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/UpdateExclusion",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
-        ]
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/UpdateSettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/UpdateSink",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
-        ]
-      },
-      {
-        "method": "google.logging.v2.ConfigServiceV2/UpdateView",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
-      },
       {
         "method": "google.logging.v2.LoggingServiceV2/DeleteLog",
         "status": "Verified",
@@ -1749,17 +1453,13 @@
       },
       {
         "method": "google.logging.v2.LoggingServiceV2/ListMonitoredResourceDescriptors",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1215_test.go:91 TestLoggingListMonitoredResourceDescriptors"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.logging.v2.LoggingServiceV2/TailLogEntries",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1215_test.go:40 TestLoggingTailLogEntries"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.logging.v2.LoggingServiceV2/WriteLogEntries",
@@ -1768,41 +1468,6 @@
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
-        ]
-      },
-      {
-        "method": "google.logging.v2.MetricsServiceV2/CreateLogMetric",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
-        ]
-      },
-      {
-        "method": "google.logging.v2.MetricsServiceV2/DeleteLogMetric",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
-        ]
-      },
-      {
-        "method": "google.logging.v2.MetricsServiceV2/GetLogMetric",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
-        ]
-      },
-      {
-        "method": "google.logging.v2.MetricsServiceV2/ListLogMetrics",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
-        ]
-      },
-      {
-        "method": "google.logging.v2.MetricsServiceV2/UpdateLogMetric",
-        "status": "Verified",
-        "tests": [
-          "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics"
         ]
       }
     ]
@@ -2266,8 +1931,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 21,
-      "Verified": 66
+      "Unimplemented": 39,
+      "Verified": 48
     },
     "rows": [
       {
@@ -2307,47 +1972,33 @@
       },
       {
         "method": "storage.bucketAccessControls.delete",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:40 TestStorageBucketACL"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.bucketAccessControls.get",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.bucketAccessControls.insert",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:163 TestStorageACLUniformAccess",
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.bucketAccessControls.list",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:163 TestStorageACLUniformAccess",
-          "test/compat/storageacl_test.go:40 TestStorageBucketACL"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.bucketAccessControls.patch",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.bucketAccessControls.update",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:40 TestStorageBucketACL"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.buckets.delete",
@@ -2382,7 +2033,6 @@
         "tests": [
           "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
-          "test/compat/storageacl_test.go:40 TestStorageBucketACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
@@ -2410,7 +2060,6 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
-          "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -2463,8 +2112,6 @@
           "test/compat/remaining_test.go:33 TestBucketUpdateChangesMetadata",
           "test/compat/storage_test.go:441 TestStorageBucketPatchKeepsOmittedFields",
           "test/compat/storage_test.go:473 TestStorageBucketMetagenerationPreconditions",
-          "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
-          "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
@@ -2529,46 +2176,33 @@
       },
       {
         "method": "storage.defaultObjectAccessControls.delete",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.defaultObjectAccessControls.get",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.defaultObjectAccessControls.insert",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.defaultObjectAccessControls.list",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:163 TestStorageACLUniformAccess",
-          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.defaultObjectAccessControls.patch",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.defaultObjectAccessControls.update",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.folders.delete",
@@ -2747,45 +2381,33 @@
       },
       {
         "method": "storage.objectAccessControls.delete",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.objectAccessControls.get",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.objectAccessControls.insert",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.objectAccessControls.list",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.objectAccessControls.patch",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.objectAccessControls.update",
-        "status": "Verified",
-        "tests": [
-          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
-        ]
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "storage.objects.bulkRestore",
@@ -2846,7 +2468,6 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
-          "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -2890,7 +2511,6 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:238 TestGcloudStorageClearLabels",
           "test/compat/remaining_test.go:163 TestObjectMetadataUpdate",
-          "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
           "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -4135,16 +3755,15 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Refused": 2,
-      "Verified": 45
+      "Refused": 15,
+      "Verified": 32
     },
     "rows": [
       {
         "method": "bigquery.datasets.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
         ]
       },
       {
@@ -4152,8 +3771,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
+          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly"
         ]
       },
       {
@@ -4161,8 +3779,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
+          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly"
         ]
       },
       {
@@ -4178,14 +3795,14 @@
         "method": "bigquery.datasets.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:170 TestBigQueryDatasetUpdatesAreSaved"
+          "test/compat/bigquerymethods_test.go:168 TestBigQueryDatasetUpdatesAreSaved"
         ]
       },
       {
         "method": "bigquery.datasets.undelete",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:170 TestBigQueryDatasetUpdatesAreSaved"
+          "test/compat/bigquerymethods_test.go:168 TestBigQueryDatasetUpdatesAreSaved"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -4193,7 +3810,7 @@
         "method": "bigquery.datasets.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:170 TestBigQueryDatasetUpdatesAreSaved"
+          "test/compat/bigquerymethods_test.go:168 TestBigQueryDatasetUpdatesAreSaved"
         ]
       },
       {
@@ -4224,13 +3841,14 @@
         "method": "bigquery.jobs.getQueryResults",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:52 TestBigQueryGetQueryResultsPages"
+          "test/compat/bigquerymethods_test.go:50 TestBigQueryGetQueryResultsPages"
         ]
       },
       {
         "method": "bigquery.jobs.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerycorrectness_test.go:320 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
@@ -4251,53 +3869,54 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerycorrectness_test.go:320 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
-          "test/compat/consolebigquerywrites_test.go:377 TestConsoleBigQueryReadWriteEditorRunsDML"
+          "test/compat/consolebigquerywrites_test.go:355 TestConsoleBigQueryReadWriteEditorRunsDML"
         ]
       },
       {
         "method": "bigquery.models.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.models.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.models.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.models.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.projects.getServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:248 TestBigQueryServiceAccount"
+          "test/compat/bigquerymethods_test.go:246 TestBigQueryServiceAccount"
         ]
       },
       {
         "method": "bigquery.projects.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:124 TestBigQueryProjectsListNamesTheInstancesProject"
+          "test/compat/bigquerymethods_test.go:122 TestBigQueryProjectsListNamesTheInstancesProject"
         ]
       },
       {
@@ -4305,8 +3924,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
-          "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
+          "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete"
         ]
       },
       {
@@ -4314,24 +3932,22 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
-          "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
+          "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete"
         ]
       },
       {
         "method": "bigquery.routines.getIamPolicy",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigqueryiam_test.go:124 TestBigQueryRoutineIAMIsStoredNotEnforced",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
-        ]
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.routines.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryfloat_test.go:205 TestBigQueryDropSchemaDropsRoutinesInsertFunctions",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
+          "test/compat/bigqueryfloat_test.go:205 TestBigQueryDropSchemaDropsRoutinesInsertFunctions"
         ]
       },
       {
@@ -4344,82 +3960,90 @@
       },
       {
         "method": "bigquery.routines.setIamPolicy",
-        "status": "Verified",
-        "tests": [
-          "test/compat/bigqueryiam_test.go:124 TestBigQueryRoutineIAMIsStoredNotEnforced",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
-        ]
-      },
-      {
-        "method": "bigquery.routines.testIamPermissions",
-        "status": "Verified",
-        "tests": [
-          "test/compat/bigqueryiam_test.go:124 TestBigQueryRoutineIAMIsStoredNotEnforced"
-        ]
-      },
-      {
-        "method": "bigquery.routines.update",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:410 TestBigQueryRoutineUpdateIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
       {
-        "method": "bigquery.rowAccessPolicies.batchDelete",
+        "method": "bigquery.routines.testIamPermissions",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "bigquery.routines.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies"
+          "test/compat/bigquerymethods_test.go:342 TestBigQueryRoutineUpdate"
         ]
+      },
+      {
+        "method": "bigquery.rowAccessPolicies.batchDelete",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.delete",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.get",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.getIamPolicy",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigqueryiam_test.go:191 TestBigQueryRowAccessPolicyIAMIsItsGrantees"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.insert",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.list",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.testIamPermissions",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigqueryiam_test.go:191 TestBigQueryRowAccessPolicyIAMIsItsGrantees"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.update",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.tabledata.insertAll",
@@ -4441,8 +4065,7 @@
         "method": "bigquery.tables.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
         ]
       },
       {
@@ -4451,24 +4074,22 @@
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
-          "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
+          "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten"
         ]
       },
       {
         "method": "bigquery.tables.getIamPolicy",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigqueryiam_test.go:40 TestBigQueryTableIAMIsStoredNotEnforced",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
-        ]
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.tables.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
         ]
       },
       {
@@ -4486,23 +4107,24 @@
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
           "test/compat/bigquerysilent_test.go:501 TestBigQueryTableUpdateAddsColumns",
-          "test/compat/consolebigquerywrites_test.go:190 TestConsoleBigQueryEditTableViewsAndInsertOptions"
+          "test/compat/consolebigquerywrites_test.go:182 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
       {
         "method": "bigquery.tables.setIamPolicy",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigqueryiam_test.go:40 TestBigQueryTableIAMIsStoredNotEnforced",
-          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
-        ]
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.tables.testIamPermissions",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigqueryiam_test.go:40 TestBigQueryTableIAMIsStoredNotEnforced"
-        ]
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.tables.update",

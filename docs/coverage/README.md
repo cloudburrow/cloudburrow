@@ -8,21 +8,21 @@ Do not edit these files by hand.
 
 | Service | RPCs | Verified | Refused | Unimplemented | Implemented | Not served | Unknown | Unverified codes |
 |---|---|---|---|---|---|---|---|---|
-| [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Cloud Tasks](tasks.md) | 20 | 15 | 0 | 5 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 1 |
-| [Cloud Run v2](run.md) | 41 | 26 | 0 | 0 | 0 | 15 | 0 | 4 |
-| [Cloud KMS](kms.md) | 38 | 36 | 0 | 2 | 0 | 0 | 0 | 82 |
-| [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 7 | 0 | 4 | 0 | 0 | 0 | 0 |
-| [Cloud Scheduler](scheduler.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud Logging](logging.md) | 43 | 21 | 0 | 22 | 0 | 0 | 0 | 0 |
+| [Cloud Run v2](run.md) | 41 | 18 | 0 | 6 | 0 | 17 | 0 | 0 |
+| [Cloud KMS](kms.md) | 38 | 19 | 0 | 19 | 0 | 0 | 0 | 72 |
+| [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 6 | 0 | 5 | 0 | 0 | 0 | 0 |
+| [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Cloud Logging (write and read)](logging.md) | 6 | 4 | 0 | 2 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 14 | 2 | 0 | 11 | 1 | 0 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 4 |
-| [Cloud Storage (JSON API)](storage.md) | 87 | 66 | 0 | 21 | 0 | 0 | 0 | 14 |
+| [Cloud Storage (JSON API)](storage.md) | 87 | 48 | 0 | 39 | 0 | 0 | 0 | 14 |
 | [Firestore](firestore.md) | 17 | 15 | 2 | 0 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 7 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Bigtable](bigtable.md) | 50 | 16 | 34 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 33 | 32 | 0 | 0 | 0 | 0 | 0 |
-| [BigQuery (REST API v2)](bigquery.md) | 47 | 45 | 2 | 0 | 0 | 0 | 0 | 0 |
+| [BigQuery (REST API v2)](bigquery.md) | 47 | 32 | 15 | 0 | 0 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven
