@@ -185,7 +185,7 @@ func masterName(project, v string) (string, error) {
 // spec from it: the replica runs the primary's version, with its root.
 func (s *Server) prepareReplica(ctx context.Context, project string, b instanceBody, spec *Spec) error {
 	if b.FailoverReplica != nil {
-		return unimplemented("failover replicas", "high availability needs a standby and failover, which CloudBurrow does not run")
+		return unimplemented("failover replicas", haWhy)
 	}
 	if b.ReplicaConfiguration != nil {
 		var rc struct {
@@ -195,7 +195,7 @@ func (s *Server) prepareReplica(ctx context.Context, project string, b instanceB
 		}
 		_ = json.Unmarshal(*b.ReplicaConfiguration, &rc)
 		if rc.FailoverTarget {
-			return unimplemented("failover replicas", "high availability needs a standby and failover, which CloudBurrow does not run")
+			return unimplemented("failover replicas", haWhy)
 		}
 		if rc.Cascadable {
 			return unimplemented("cascadable replicas", "a replica of a replica is not served")

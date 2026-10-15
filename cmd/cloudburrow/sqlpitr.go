@@ -52,6 +52,8 @@ func pgPITRArgs() []string {
 		"archive_command=mkdir -p " + pgPITRDir + "/wal && test ! -f " + pgPITRDir + "/wal/%f && cp %p " + pgPITRDir + "/wal/%f"}
 }
 
+var _ sqladmin.PITRDumper = (*sqlDumper)(nil)
+
 // pitrLocks serialises the bases and recoveries of each server.
 var pitrLocks sync.Map
 
@@ -151,6 +153,33 @@ func (d *sqlDumper) RecoveryWindow(ctx context.Context, t sqladmin.DumpTarget) (
 		return time.Time{}, time.Time{}, false, err
 	}
 	return time.Unix(ids[0], 0), now, true, nil
+}
+
+// Prune drops the bases older than the newest one complete by before, and
+// the log only they needed: PostgreSQL's archived WAL segments before the
+// kept base's start (pg_archivecleanup, with its backup_label), MySQL's
+// binary logs before the kept base's file (PURGE BINARY LOGS TO).
+func (d *sqlDumper) Prune(ctx context.Context, t sqladmin.DumpTarget, before time.Time) error {
+	defer pitrLock(d.deployment(t))()
+	ids, _, err := d.bases(ctx, t)
+	if err != nil {
+		return err
+	}
+	keep, ok := baseFor(ids, before)
+	if !ok || keep == ids[0] {
+		return nil
+	}
+	id := strconv.FormatInt(keep, 10)
+	if t.MySQL {
+		return d.sh(ctx, t, nil, io.Discard, mysqlPITRPrelude+`cd "$R/base"
+for b in *.sql; do n=${b%.sql}; [ "$n" -lt "$1" ] 2>/dev/null && rm -f "$b"; done
+f=$(sed -n "s/.*SOURCE_LOG_FILE='\([^']*\)'.*/\1/p" "$1.sql" | head -1)
+[ -z "$f" ] || mysql -uroot -e "PURGE BINARY LOGS TO '$f'"`, id)
+	}
+	return d.sh(ctx, t, nil, io.Discard, pgPITRPrelude+`cd "$R/base"
+for b in *; do [ "$b" -lt "$1" ] 2>/dev/null && rm -rf "$b"; done
+seg=$(sed -n 's/^START WAL LOCATION: .*(file \([0-9A-F]*\))$/\1/p' "$1/backup_label")
+[ -z "$seg" ] || pg_archivecleanup "$R/wal" "$seg"`, id)
 }
 
 // baseFor is the newest base complete by at.

@@ -169,3 +169,4 @@ func (d *fakeDumper) RecoveryWindow(context.Context, DumpTarget) (time.Time, tim
 func (d *fakeDumper) CopyAt(context.Context, DumpTarget, DumpTarget, time.Time, string) error {
 	return errors.New("the fake keeps no log")
 }
+func (d *fakeDumper) Prune(context.Context, DumpTarget, time.Time) error { return nil }

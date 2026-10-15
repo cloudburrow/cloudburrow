@@ -105,7 +105,7 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication, `pointInTimeRestore` (a Backup and DR datasource), failover
+What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource), failover
 replicas and high availability, cascading, cross-region and external-primary replicas, the project-level Backups API, imports and exports, and SSL certificates. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
@@ -127,7 +127,7 @@ connectors reach through 3307.
 | `settings.databaseFlags` | Passed to the server: `-c name=value` to `postgres`, `--name=value` to `mysqld`. A patch that changes them starts the server again with them; a flag the server rejects fails the operation with its words. `cloudsql.*` flags (IAM authentication, Cloud SQL's extensions) are 501. |
 | `settings.userLabels`, `deletionProtectionEnabled`, other settings | Recorded and answered. `delete` of a protected instance is 400, as on Cloud SQL. |
 | `masterInstanceName` | A read replica: see [Read replicas](#read-replicas-1330). |
-| `replicaConfiguration.failoverTarget`, `failoverReplica`, `availabilityType: REGIONAL` | 501: no standby or failover. |
+| `replicaConfiguration.failoverTarget`, `failoverReplica`, `availabilityType: REGIONAL`, `instances.failover` | 501, saying why (below). |
 
 The operation `insert` returns is `RUNNING` until the server serves through its tunnel, then
 `DONE` (or `DONE` with the server's error, and the instance `FAILED`). `delete` removes the
@@ -204,7 +204,9 @@ flags, deletion protection, automated backups and their start time, sent as one
 - **`settings.backupConfiguration`** (`enabled`, `startTime`, `backupRetentionSettings`) is
   recorded and answered. **An automated backup is taken at `startTime` (UTC) only if
   CloudBurrow is running then**; a start time that passes while it is stopped is not made up
-  afterwards. The newest `retainedBackups` automated backups (7 by default) are kept.
+  afterwards. The newest `retainedBackups` automated backups (7 by default) are kept;
+  `backupRetentionSettings.retentionUnit` other than `COUNT`, or `retainedBackups` outside 1 to
+  365, is 400, as on Cloud SQL. On-demand backups are kept until they are deleted.
   `pointInTimeRecoveryEnabled` and `binaryLogEnabled` turn on point-in-time recovery (next
   section).
 - **Persistence follows the instance's mode**: in persistent mode the dumps and their records
@@ -246,21 +248,50 @@ instance holding the source's databases as they were at that time, to the micros
   after the base are replayed too, as they are part of the binary log.
 - **Bases are taken** when the instance's server first serves with recovery on, and with each
   of its backups (on demand or automated). A base's time is the first whole second after it
-  was complete, by the server's clock.
+  was complete, by the server's clock. **A base that fails fails its backup**: the backup run
+  is `FAILED`, with the error, and its operation fails.
 - **The recovery window** is reported by `projects.instances.getLatestRecoveryTime` as
   Google documents it: `earliestRecoveryTime` is the oldest base's time, and
   `latestRecoveryTime` is the server's clock now. A `pointInTime` outside it is 400, naming the
-  window. Bases are not pruned yet (`transactionLogRetentionDays` is recorded, not applied);
-  the log lives on the server's volume, so deleting the instance deletes it, and in ephemeral
-  mode a restart of the server's pod loses it with the data.
+  window. The log lives on the server's volume, so deleting the instance deletes it, and in
+  ephemeral mode a restart of the server's pod loses it with the data.
+- **Retention:** `transactionLogRetentionDays` is applied as Google documents it: 1 to 7 days
+  on the Enterprise edition, 1 to 35 on Enterprise Plus (out of range is 400), 7 or 14 days
+  by default, and returned with the default when it is not set. A sweep, each minute, after
+  each base and after the clock is advanced, drops every base older than the newest one
+  complete by the window's start, with the log only those needed: PostgreSQL's archived WAL
+  segments before the kept base's start (`pg_archivecleanup` with its `backup_label`), MySQL's
+  binary logs before the kept base's file (`PURGE BINARY LOGS TO`). `earliestRecoveryTime` is
+  then the later of the oldest base and the window's start.
+- **The retention clock** is a CloudBurrow extension, so a test need not wait days, as Secret
+  Manager's clock is (#1278): `POST /cloudburrow/v1/clock:advance` on the Cloud SQL Admin
+  endpoint, with `{"duration": "86400s"}`, ages the log already kept by that much, sweeps, and
+  answers `{"now": …}`. The servers' own clocks do not move, so a `pointInTime` is still read on
+  them: log written before the advance is a day older, log written after it ages from when it
+  was written. The clock only moves forward, and starts again at the real time on `up`.
 - **What is not recovered to a time:** the servers `up` runs (`postgres`, `mysql`) keep no
   log, and a clone to a time of one is 400 saying so; a read replica takes no base.
   `instances.pointInTimeRestore` is 501: it restores from a Backup and DR Service datasource
   (`projects/…/backupVaults/…/dataSources/…`), which is not served.
 
+### High availability is 501 (#1330)
+
+On Cloud SQL, `availabilityType: REGIONAL` makes an instance a primary and a standby in a second
+zone of the region, its disk replicated synchronously to the standby, so a transaction is
+committed only once both have it; `instances.failover` (and an outage) moves the instance to the
+standby, which keeps the connection name and the IP address, with no committed transaction
+lost. A standby built from CloudBurrow's read replicas would not be that: they replicate
+asynchronously (streaming replication, GTID binary log replication), so a failover could lose
+the transactions not yet replicated, and they run in one zone of one kind cluster, with their
+own names. So `availabilityType: REGIONAL`, `failoverReplica`,
+`replicaConfiguration.failoverTarget` and `instances.failover` are 501 and say this; use a
+`ZONAL` instance and, to read elsewhere, read replicas.
+
 The console's instance page shows **Point-in-time recovery**, the earliest and latest recovery
 times, and a **Point-in-time restore** action (a new instance ID and a time); **Create
-instance** and **Edit instance** have a **Point-in-time recovery** checkbox.
+instance** and **Edit instance** have a **Point-in-time recovery** checkbox, and **Edit
+instance** has **Retained automated backups** and **Transaction log retention (days)**, sent in
+the same `instances.patch` and refused, in the API's words, out of range.
 
 ### The Cloud SQL connectors (#1330)
 
@@ -342,7 +373,9 @@ while it serves) and the setting that moves it.
 
 Verified with `cloud.google.com/go/cloudsqlconn` on both servers. The Auth Proxy
 (`cloud-sql-proxy`) is built on the same connector, but no pinned proxy binary is tested yet.
-IAM database authentication (`WithIAMAuthN`, an `access_token` in `generateEphemeralCert`) is 501.
+IAM database authentication (`WithIAMAuthN`, an `access_token` in `generateEphemeralCert`, users
+of type `CLOUD_IAM_USER` and the like) is 501: it signs a database user in as a Google identity,
+and CloudBurrow has no identities ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).
 Connecting to the server directly, as above, still works and needs none of this.
 
 ## 4. Authentication is trust, on purpose
