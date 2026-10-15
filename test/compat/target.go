@@ -98,6 +98,9 @@ func normalizeEndpoint(s string) string {
 	if err != nil {
 		return s
 	}
+	if strings.HasSuffix(host, ".localhost") {
+		host = "localhost" // RFC 6761: loopback, as gcloud-setup writes run's
+	}
 	switch host {
 	case "localhost", "127.0.0.1", "::1", "0.0.0.0", "::", "":
 		host = "127.0.0.1"
@@ -177,6 +180,7 @@ var gcloudOverrides = []struct{ property, harness string }{
 	{"cloudscheduler", "SCHEDULER"},
 	{"logging", "LOGGING"},
 	{"cloudresourcemanager", "RESOURCEMANAGER"},
+	{"run", "RUN"},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`

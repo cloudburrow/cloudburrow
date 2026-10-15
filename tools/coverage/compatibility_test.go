@@ -16,10 +16,13 @@ import (
 // and executions, ...) are part of it. A page with no entry here fails the
 // test, so a new generated page cannot go unchecked.
 var compatSections = map[string]string{
-	"storage":         "## Cloud Storage — JSON API v1",
-	"pubsub":          "## Pub/Sub — `google.pubsub.v1`",
-	"tasks":           "## Cloud Tasks — `google.cloud.tasks.v2`",
-	"run":             "## Cloud Run — `google.cloud.run.v2`",
+	"storage": "## Cloud Storage — JSON API v1",
+	"pubsub":  "## Pub/Sub — `google.pubsub.v1`",
+	"tasks":   "## Cloud Tasks — `google.cloud.tasks.v2`",
+	"run":     "## Cloud Run — `google.cloud.run.v2`",
+	// The v1 (Knative) API (#1293) is a row of the Cloud Run section, which
+	// names each Verified method by its whole discovery ID.
+	"runv1":           "## Cloud Run — `google.cloud.run.v2`",
 	"scheduler":       "## Cloud Scheduler — `google.cloud.scheduler.v1`",
 	"logging":         "## Cloud Logging — `google.logging.v2`",
 	"kms":             "## Cloud KMS — `google.cloud.kms.v1`",
@@ -126,7 +129,8 @@ var (
 // a bare gRPC name two services of the page share is an error, so the row
 // must qualify it.
 func namedMethods(key, op string, report map[string]string) (ids, ambiguous []string) {
-	if key == "bigquery" {
+	// Discovery-ID pages: BigQuery and the Cloud Run v1 API (#1293).
+	if key == "bigquery" || key == "runv1" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {
 				ids = append(ids, tok[1])

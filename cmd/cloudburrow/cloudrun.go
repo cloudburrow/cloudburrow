@@ -148,7 +148,9 @@ func (r *runService) Start(ctx context.Context) error {
 	}
 	// One port for gRPC and JSON, as run.googleapis.com (#591): the same
 	// servers, transcoded, for REST clients and Terraform's provider.
-	var jsonAPI http.Handler = runadapter.NewRESTHandler(register)
+	// The v1 (Knative-shaped) API gcloud run calls (#1293), on the same
+	// port and over the same adapter.
+	var jsonAPI http.Handler = adapter.V1Handler(runadapter.NewRESTHandler(register))
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}

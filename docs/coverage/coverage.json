@@ -652,6 +652,359 @@
     ]
   },
   {
+    "Key": "runv1",
+    "Title": "Cloud Run v1 (Knative API)",
+    "counts": {
+      "Unknown": 63,
+      "Verified": 13
+    },
+    "rows": [
+      {
+        "method": "run.namespaces.authorizeddomains.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.configurations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.namespaces.configurations.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.namespaces.domainmappings.create",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.domainmappings.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.domainmappings.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.domainmappings.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.executions.cancel",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.executions.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.executions.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.executions.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.instances.create",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.instances.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.instances.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.instances.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.instances.replaceInstance",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.instances.start",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.instances.stop",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.jobs.create",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.jobs.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.jobs.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.jobs.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.jobs.replaceJob",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.jobs.run",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.revisions.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.revisions.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.namespaces.revisions.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.namespaces.routes.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.namespaces.routes.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.namespaces.services.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.namespaces.services.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.namespaces.services.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.namespaces.services.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.namespaces.services.replaceService",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.namespaces.tasks.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.tasks.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.workerpools.create",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.workerpools.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.workerpools.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.workerpools.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.namespaces.workerpools.replaceWorkerPool",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.authorizeddomains.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.authorizeddomains.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.configurations.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.configurations.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.domainmappings.create",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.domainmappings.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.domainmappings.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.domainmappings.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.instances.getIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.instances.setIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.instances.testIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.jobs.getIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.jobs.setIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.jobs.testIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.operations.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.operations.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.operations.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.operations.wait",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.revisions.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.revisions.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.revisions.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.routes.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.routes.list",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.services.create",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.services.delete",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.services.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.projects.locations.services.getIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.services.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1_test.go:59 TestRunV1KnativeAPI"
+        ]
+      },
+      {
+        "method": "run.projects.locations.services.replaceService",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.services.setIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.services.testIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.workerpools.getIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.workerpools.setIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "run.projects.locations.workerpools.testIamPermissions",
+        "status": "Unknown"
+      }
+    ]
+  },
+  {
     "Key": "kms",
     "Title": "Cloud KMS",
     "counts": {
