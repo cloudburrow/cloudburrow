@@ -28,14 +28,14 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Logging | 0 | 0 | 0 | 0 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
-| Resource Manager | 2 | 2 | 0 | 0 | 0 |
+| Resource Manager | 1 | 1 | 0 | 0 | 0 |
 | Vertex AI | 5 | 3 | 2 | 0 | 0 |
 | BigQuery | 28 | 11 | 14 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 3 | 3 | 0 | 0 | 0 |
-| **Total** | **79** | **33** | **34** | **7** | **5** |
+| **Total** | **78** | **32** | **34** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -136,12 +136,11 @@ IAM conditions are excluded (below). Closed: `RotateSecret`, `EnableManagedRotat
 
 ## Resource Manager
 
-Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216).
+Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296).
 
 | Gap | Why open | Size |
 |---|---|---|
 | Folders, Organizations (#1294), Liens, TagKeys, TagValues, TagBindings (#1295) are not served (and `ListProjects` under a folder or organization is `UNIMPLEMENTED`) | not built yet | L |
-| The v1 API beyond what is served: org policy (`projects.update` is served since #1265; #1296) | not built yet | M |
 
 ## Vertex AI
 

@@ -19,10 +19,11 @@ import (
 // Resource Manager v1 REST (#301), for `gcloud projects` and Terraform's
 // google_project, which call v1 rather than v3.
 //
-// Only projects.list, get, create, update (#1265), delete and undelete, and
-// operations.get for the operations create returns, over the same Registry
-// the v3 API and the console use. Every other v1 method — the IAM methods,
-// org policies, liens, folders, organizations — answers UNIMPLEMENTED.
+// Only projects.list, get, create, update (#1265), delete and undelete, the
+// org policy methods (#1296, orgpolicy.go), and operations.get for the
+// operations create returns, over the same Registry the v3 API and the
+// console use. Every other v1 method — the IAM methods, liens, folders,
+// organizations — answers UNIMPLEMENTED.
 //
 // Also served, because google_project reads it on every refresh: a Cloud
 // Billing projects.getBillingInfo that says billing is disabled. There is no
@@ -264,8 +265,8 @@ func (s *ProjectsServer) v1Delete(w http.ResponseWriter, r *http.Request) error 
 	return rest.WriteJSON(w, http.StatusOK, struct{}{})
 }
 
-// v1Verb is POST /v1/projects/{project}:{verb}: undelete, and IAM, org
-// policy and ancestry, which are not served.
+// v1Verb is POST /v1/projects/{project}:{verb}: undelete, the org policy
+// verbs (#1296), and IAM and ancestry, which are not served.
 func (s *ProjectsServer) v1Verb(w http.ResponseWriter, r *http.Request) error {
 	raw, err := rest.PathValue(r, "project")
 	if err != nil {
@@ -282,7 +283,7 @@ func (s *ProjectsServer) v1Verb(w http.ResponseWriter, r *http.Request) error {
 		}
 		return rest.WriteJSON(w, http.StatusOK, struct{}{})
 	}
-	return ErrNotImplemented("v1 projects." + verb)
+	return s.v1OrgPolicy(w, r, id, verb)
 }
 
 // billingInfo is Cloud Billing's projects.getBillingInfo. Billing is never
