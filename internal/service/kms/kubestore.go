@@ -213,6 +213,33 @@ func (k *KubeStore) List(prefix string) ([]string, error) {
 	return keys, nil
 }
 
+// Scan returns every record under prefix, values included, with one kubectl
+// list, so the sweep's cost does not grow by a request per record (#1232).
+// A key and its base64 value carry no tab or newline, so each line is one
+// record.
+func (k *KubeStore) Scan(prefix string) (map[string][]byte, error) {
+	ctx, cancel := k.ctx()
+	defer cancel()
+	out, err := k.kube.List(ctx, "secrets", serviceLabel+","+k8s.InstanceLabel+"="+k.instance,
+		`jsonpath={range .items[*]}{.metadata.annotations.cloudburrow\.dev/kms-key}{"\t"}{.data.value}{"\n"}{end}`)
+	if err != nil {
+		return nil, fmt.Errorf("list KMS records: %w", err)
+	}
+	recs := map[string][]byte{}
+	for _, line := range strings.Split(out, "\n") {
+		key, enc, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok || key == "" || !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(enc))
+		if err != nil {
+			return nil, fmt.Errorf("decode %s: %w", key, err)
+		}
+		recs[key] = b
+	}
+	return recs, nil
+}
+
 // Commit applies the writes in order. Kubernetes has no multi-object
 // transaction, so a failure part-way leaves the earlier writes applied; KMS
 // only commits one record at a time.

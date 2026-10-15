@@ -485,16 +485,12 @@ func (s *Store) ListSecrets(project string) ([]Secret, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	keys, err := s.db.List("secret/" + project + "/")
+	values, err := s.scan("secret/" + project + "/")
 	if err != nil {
 		return nil, apierror.Internal(err, "list secrets")
 	}
-	out := make([]Secret, 0, len(keys))
-	for _, k := range keys {
-		raw, err := s.db.Get(k)
-		if err != nil {
-			continue
-		}
+	out := make([]Secret, 0, len(values))
+	for _, raw := range values {
 		var sec Secret
 		if err := json.Unmarshal(raw, &sec); err != nil {
 			continue
@@ -702,16 +698,12 @@ func (s *Store) ListVersions(project, id string) ([]Version, error) {
 }
 
 func (s *Store) listVersions(project, id string) ([]Version, error) {
-	keys, err := s.db.List(fmt.Sprintf("version/%s/%s/", project, id))
+	values, err := s.scan(fmt.Sprintf("version/%s/%s/", project, id))
 	if err != nil {
 		return nil, apierror.Internal(err, "list versions")
 	}
-	out := make([]Version, 0, len(keys))
-	for _, k := range keys {
-		raw, err := s.db.Get(k)
-		if err != nil {
-			continue
-		}
+	out := make([]Version, 0, len(values))
+	for _, raw := range values {
 		var v Version
 		if err := json.Unmarshal(raw, &v); err != nil {
 			continue
@@ -781,11 +773,52 @@ func (s *Store) DestroyVersion(project, id, version string) (Version, error) {
 	return v, nil
 }
 
+// scanner is a store that reads every value under a prefix with one
+// request; KubeStore does, with one kubectl list.
+type scanner interface {
+	Scan(prefix string) (map[string][]byte, error)
+}
+
+// scan returns the values under prefix: with one request when the store is
+// a scanner, and otherwise with List and a Get per key (the file and memory
+// stores, where a Get costs nothing), leaving out a key a Get fails on. The
+// caller orders what it decodes.
+func (s *Store) scan(prefix string) (map[string][]byte, error) {
+	if sc, ok := s.db.(scanner); ok {
+		return sc.Scan(prefix)
+	}
+	keys, err := s.db.List(prefix)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]byte, len(keys))
+	for _, k := range keys {
+		if raw, err := s.db.Get(k); err == nil {
+			out[k] = raw
+		}
+	}
+	return out, nil
+}
+
+// bulkDeleter is a store that removes every record with one request;
+// KubeStore does, with one DeleteCollection.
+type bulkDeleter interface{ DeleteAll() error }
+
 // Reset removes every secret in every project.
+//
+// Over Kubernetes it is one DeleteCollection. Listing every key and deleting
+// each, a version's delete a read and a rewrite of its Secret, held s.mu
+// across requests whose number grew with what earlier runs left (#1232).
 func (s *Store) Reset() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if bd, ok := s.db.(bulkDeleter); ok {
+		if err := bd.DeleteAll(); err != nil {
+			return apierror.Internal(err, "delete every secret")
+		}
+		return nil
+	}
 	for _, prefix := range []string{"secret/", "version/"} {
 		keys, err := s.db.List(prefix)
 		if err != nil {
