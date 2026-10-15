@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
-	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
+	"github.com/cloudburrow/cloudburrow/internal/paging"
 )
 
 // Regions are the locations ListLocations answers for every project (#1237):
