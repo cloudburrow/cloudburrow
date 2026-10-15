@@ -353,13 +353,25 @@ jobs:
           go-version: "1.27"
 
       # A dirty go.mod/go.sum after tidy means the committed dependency set is
-      # not what the code actually needs. The fakekms oracle module replaces the
-      # root module, so a root bump must re-tidy it too (#1181).
+      # not what the code actually needs. Every separate module is tidied too:
+      # the fakekms oracle module replaces the root module, so a root bump must
+      # re-tidy it (#1181), and the testdata fixtures (the acceptance worker,
+      # the Functions Framework source) are built only by workflows a pull
+      # request does not run. third_party is bqengine's and is left alone.
       - name: go mod tidy leaves no diff
         run: |
-          go mod tidy
-          (cd test/oracle/fakekms && go mod tidy)
-          git diff --exit-code go.mod go.sum test/oracle/fakekms/go.mod test/oracle/fakekms/go.sum
+          MODULES=(. test/oracle/fakekms testdata/worker testdata/function)
+          files=()
+          for m in "${MODULES[@]}"; do
+            (cd "$m" && go mod tidy && go mod verify)
+            files+=("$m/go.mod" "$m/go.sum")
+          done
+          # A go.mod outside third_party that this list does not name fails
+          # here, so a new module cannot escape the check.
+          found=$(git ls-files '*go.mod' ':!:third_party/**' | xargs -n1 dirname | sort)
+          listed=$(printf '%s\n' "${MODULES[@]}" | sort)
+          [ "$found" = "$listed" ] || { echo "go modules not in MODULES:"; comm -23 <(echo "$found") <(echo "$listed"); exit 1; }
+          git diff --exit-code -- "${files[@]}"
 
       - name: go mod verify
         run: go mod verify
