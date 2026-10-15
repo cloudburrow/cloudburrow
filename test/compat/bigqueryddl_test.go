@@ -196,7 +196,8 @@ func TestBigQueryScriptBlocks(t *testing.T) {
 // Job.Wait's status and a later Job.Status report, and there is no table.
 // Under V2, a reserved name it cannot rename is 501. A header BigQuery
 // takes loads its row. A NEWLINE_DELIMITED_JSON load with autodetect into a
-// new table, which the emulator fails with a 500, is 501.
+// new table is held to the same rule on the names the front detects
+// (#1324): one BigQuery refuses fails the load.
 func TestBigQueryAutodetectLoadNames(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -244,8 +245,11 @@ func TestBigQueryAutodetectLoadNames(t *testing.T) {
 		t.Error("the refused V2 load left its table")
 	}
 
-	_, err = load("json_new", `{"a":1}`+"\n", bigquery.JSON, "")
-	wantHTTPStatus(t, "an autodetect JSON load into a new table", err, http.StatusNotImplemented)
+	_, err = load("json_bad_name", `{"a b!":1}`+"\n", bigquery.JSON, "")
+	wantHTTPStatus(t, "an autodetect JSON load whose detected name BigQuery refuses", err, http.StatusBadRequest)
+	if tableExists(t, ctx, ds.Table("json_bad_name")) {
+		t.Error("the refused JSON load left its table")
+	}
 
 	job, err = load("good_header", "first name,n\nbob,3\n", bigquery.CSV, "")
 	if err != nil {

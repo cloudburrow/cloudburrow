@@ -30,12 +30,12 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 1 | 1 | 0 | 0 | 0 |
 | Vertex AI | 2 | 0 | 2 | 0 | 0 |
-| BigQuery | 28 | 9 | 16 | 3 | 0 |
+| BigQuery | 31 | 12 | 16 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 3 | 3 | 0 | 0 | 0 |
-| Functions, credentials, tooling | 3 | 3 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **71** | **23** | **36** | **7** | **5** |
+| **Total** | **73** | **25** | **36** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -157,7 +157,7 @@ access policies and table and routine IAM (#1218), infinite FLOAT64 in UNNEST (#
 `ALTER TABLE` `ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` (#1227). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501). Since then #1111, #1272 and #1274 are built: a schema update with a new column or field before the table's is refused 412 "Precondition Failed", as BigQuery refuses it, `CREATE TABLE … PARTITION BY … CLUSTER BY …` keeps its partitioning and clustering, and a dataset's `INFORMATION_SCHEMA.VIEWS` lists its views.
 Already tracked: #1217 (procedures, script transactions, RANGE variables), #1218 (row access
 policies, table and routine IAM), #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs,
-snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501). Since then #1111 is built: a RANGE in a STRUCT parameter is sent built as `RANGE(start, end)`, and a schema update with a new column or field before the table's is refused 412 "Precondition Failed", as BigQuery refuses it. Since then #1272 and #1274 are built: `CREATE TABLE … PARTITION BY … CLUSTER BY …` keeps its partitioning and clustering, and a dataset's `INFORMATION_SCHEMA.VIEWS` lists its views. Since then #1286 and #1275 are built: a dataset's `TABLES`, `COLUMNS`, `COLUMN_FIELD_PATHS`, `TABLE_OPTIONS`, `ROUTINES` and `PARAMETERS`, and `` `region-us`.INFORMATION_SCHEMA.JOBS ``, have BigQuery's columns.
+snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501). Since then #1111 is built: a RANGE in a STRUCT parameter is sent built as `RANGE(start, end)`, and a schema update with a new column or field before the table's is refused 412 "Precondition Failed", as BigQuery refuses it. Since then #1272 and #1274 are built: `CREATE TABLE … PARTITION BY … CLUSTER BY …` keeps its partitioning and clustering, and a dataset's `INFORMATION_SCHEMA.VIEWS` lists its views. Since then #1286 and #1275 are built: a dataset's `TABLES`, `COLUMNS`, `COLUMN_FIELD_PATHS`, `TABLE_OPTIONS`, `ROUTINES` and `PARAMETERS`, and `` `region-us`.INFORMATION_SCHEMA.JOBS ``, have BigQuery's columns. Since then #1324 is built: a `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table has its schema detected by the front, and #1325: a CSV load's `timeZone`, SQL-style date and time formats and UTF-16 and UTF-32 encodings are carried out.
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -166,6 +166,9 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) (#1324) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 (#1325) | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix), names the same once replaced, and a load that is not CSV, are 501 (renaming by replacing characters is built since #1326) (#1336) | not built yet | S |
+| A view's column list inside a multi-statement script, and a column's `OPTIONS` in the list (a lone `CREATE VIEW v (c, d) AS …` is carried out, #1240) (#1323) | not built yet | S |
+| CSV loads: a C-style (`%m/%d/%Y`) date or time format, and `timeZone` or a format with `autodetect` and no schema (SQL-style formats, `timeZone` and the UTF-16 and UTF-32 encodings are built, #1325) (#1338) | not built yet | S |
+| `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming (#1326) | not built yet | S |
 | Storage Write API `arrow_rows` (#1327) | not built yet | M |
 | Partition decorators: `tabledata.list` and `tables.get` of a partition, a partition as a load, copy or query destination, and a partition of an ingestion-time partitioned table are 501 (a query's read and `tables.delete` of one are built, #1273) | not built yet | M |
 | `INFORMATION_SCHEMA` `PARTITIONS` and the other dataset views but `VIEWS`, `TABLES`, `COLUMNS`, `COLUMN_FIELD_PATHS`, `TABLE_OPTIONS`, `ROUTINES` and `PARAMETERS` (built, #1274, #1286) are 501; `COLUMNS` has no `async_generation_status` (#1286) (#1328) | not built yet | M |

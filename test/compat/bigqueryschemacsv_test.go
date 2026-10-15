@@ -118,9 +118,9 @@ func TestBigQueryCreateSchemaMakesTheDataset(t *testing.T) {
 // encoding ISO-8859-1, maxBadRecords, ignoreUnknownValues, nullMarkers,
 // preserveAsciiControlCharacters and sourceColumnMatch NAME are honoured,
 // and a REQUIRED column is held to having a value; what the front cannot
-// carry out (another encoding, timeZone and the formats, a control
-// character without preserveAsciiControlCharacters) is 501 and loads
-// nothing. Measured first: the emulator used none of these options; it
+// carry out (a control character without preserveAsciiControlCharacters)
+// is 501 and loads nothing. The other encodings, timeZone and the formats
+// are TestBigQueryCSVLoadTimeFormatsAndEncodings's (#1325). Measured first: the emulator used none of these options; it
 // loaded a quoted newline whatever allowQuotedNewlines said, stored 0xE9
 // as U+FFFD under ISO-8859-1, failed the load on the first bad record
 // whatever maxBadRecords or ignoreUnknownValues said, loaded the values of
@@ -185,9 +185,6 @@ func TestBigQueryCSVLoadOtherOptions(t *testing.T) {
 		{"no_quoted_newlines", "1,\"x\ny\"\n", loadSchema, func(*bigquery.ReaderSource) {}, http.StatusBadRequest, "invalid"},
 		{"too_many_bad", "1\n2\n3,x\n", loadSchema, func(s *bigquery.ReaderSource) { s.MaxBadRecords = 1 }, http.StatusBadRequest, "invalid"},
 		{"required_empty", "1,\n", required, func(*bigquery.ReaderSource) {}, http.StatusBadRequest, "invalid"},
-		{"utf16", "1,x\n", loadSchema, func(s *bigquery.ReaderSource) { s.Encoding = "UTF-16LE" }, http.StatusNotImplemented, "notImplemented"},
-		{"time_zone", "1,x\n", loadSchema, func(s *bigquery.ReaderSource) { s.TimeZone = "America/Los_Angeles" }, http.StatusNotImplemented, "notImplemented"},
-		{"date_format", "1,x\n", loadSchema, func(s *bigquery.ReaderSource) { s.DateFormat = "MM/DD/YYYY" }, http.StatusNotImplemented, "notImplemented"},
 		{"control", "1,a\x01b\n", loadSchema, func(*bigquery.ReaderSource) {}, http.StatusNotImplemented, "notImplemented"},
 		{"bad_value_max_bad", "x,y\n", loadSchema, func(s *bigquery.ReaderSource) { s.MaxBadRecords = 1 }, http.StatusNotImplemented, "notImplemented"},
 	} {
