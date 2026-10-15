@@ -13,7 +13,9 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/civil"
+	bq "google.golang.org/api/bigquery/v2"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 )
 
 // TestBigQueryScalarParameterTypes (#1108): a top-level query parameter of
@@ -234,6 +236,89 @@ func TestBigQueryRangeResults(t *testing.T) {
 	}
 	if !reflect.DeepEqual(row, want) {
 		t.Errorf("RANGE values %v, want %v", fmtRanges(row), fmtRanges(want))
+	}
+}
+
+// TestBigQueryRangeInAStruct (#1111): a RANGE inside a STRUCT has its
+// TIMESTAMP bounds as int64 microseconds and its DATETIME bounds with a
+// "T", BigQuery's REST form, which the emulator left as its engine's text.
+// The official Go client's row reader does not read a RANGE below the top
+// level ("unrecognized type: RANGE", its convertNestedRecord), so the rows
+// are read with Google's REST client (google.golang.org/api/bigquery/v2).
+func TestBigQueryRangeInAStruct(t *testing.T) {
+	h := New(t)
+	_, project := bigqueryClient(t, h)
+	ctx := h.Context()
+	svc, err := bq.NewService(ctx, option.WithEndpoint(h.Endpoint(EnvBigQuery)), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatalf("bigquery/v2 NewService: %v", err)
+	}
+	f := false
+	for _, int64ts := range []bool{false, true} {
+		resp, err := svc.Jobs.Query(project, &bq.QueryRequest{UseLegacySql: &f,
+			FormatOptions: &bq.DataFormatOptions{UseInt64Timestamp: int64ts},
+			Query: "SELECT STRUCT(RANGE(TIMESTAMP '2020-01-01 00:00:00 UTC', TIMESTAMP '2020-01-02 00:00:00.5 UTC') AS ts, " +
+				"RANGE(DATETIME '2020-01-01 03:04:05', NULL) AS dt, RANGE(DATE '2020-01-01', DATE '2020-02-01') AS d, " +
+				"[RANGE(TIMESTAMP '2020-01-01 00:00:00 UTC', NULL)] AS a, CAST(NULL AS RANGE<TIMESTAMP>) AS n) AS s"}).Context(ctx).Do()
+		if err != nil {
+			t.Fatalf("jobs.query of a STRUCT of RANGEs: %v", err)
+		}
+		if len(resp.Rows) != 1 {
+			t.Fatalf("%d rows, want 1", len(resp.Rows))
+		}
+		s, _ := resp.Rows[0].F[0].V.(map[string]any)
+		cells, _ := s["f"].([]any)
+		var got []any
+		for _, c := range cells {
+			got = append(got, c.(map[string]any)["v"])
+		}
+		want := []any{"[1577836800000000, 1577923200500000)", "[2020-01-01T03:04:05, UNBOUNDED)", "[2020-01-01, 2020-02-01)",
+			[]any{map[string]any{"v": "[1577836800000000, UNBOUNDED)"}}, nil}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("useInt64Timestamp %v: STRUCT of RANGEs %#v, want %#v", int64ts, got, want)
+		}
+		if fl := resp.Schema.Fields[0].Fields[0]; fl.Type != "RANGE" || fl.RangeElementType == nil || fl.RangeElementType.Type != "TIMESTAMP" {
+			t.Errorf("schema of s.ts: %+v", fl)
+		}
+	}
+}
+
+// TestBigQueryTimestampsWithNoZoneAreUTC (#1188): BigQuery reads a
+// TIMESTAMP with no time zone in UTC ("If no time zone is specified, the
+// default time zone, UTC, is used"); the emulator's analyzer read
+// TIMESTAMP '2020-01-01', a CAST of a string literal and RANGE<TIMESTAMP>
+// literal bounds in America/Los_Angeles.
+func TestBigQueryTimestampsWithNoZoneAreUTC(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ctx := h.Context()
+	it, err := c.Query("SELECT TIMESTAMP '2020-01-01' AS lit, TIMESTAMP '2020-01-01 10:00:00' AS littime, " +
+		"CAST('2020-01-01' AS TIMESTAMP) AS casted, SAFE_CAST('2020-01-01 10:00:00' AS TIMESTAMP) AS safecasted, " +
+		"CAST(s AS TIMESTAMP) AS col, TIMESTAMP '2020-01-01 00:00:00-05' AS withoffset, " +
+		"CAST('2020-01-01 00:00:00 America/New_York' AS TIMESTAMP) AS named, " +
+		"RANGE<TIMESTAMP> '[2020-01-01, 2020-02-01 12:00:00)' AS r, RANGE<TIMESTAMP> '[UNBOUNDED, 2020-02-01)' AS ru " +
+		"FROM UNNEST(['2020-01-01']) AS s").Read(ctx)
+	if err != nil {
+		t.Fatalf("a query of TIMESTAMPs with no zone: %v", err)
+	}
+	var row []bigquery.Value
+	if err := it.Next(&row); err != nil {
+		t.Fatalf("read the TIMESTAMPs: %v", err)
+	}
+	day := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	ten := day.Add(10 * time.Hour)
+	five := day.Add(5 * time.Hour)
+	want := []bigquery.Value{day, ten, day, ten, day, five, five,
+		&bigquery.RangeValue{Start: day, End: time.Date(2020, 2, 1, 12, 0, 0, 0, time.UTC)},
+		&bigquery.RangeValue{End: time.Date(2020, 2, 1, 0, 0, 0, 0, time.UTC)},
+	}
+	if len(row) != len(want) {
+		t.Fatalf("%d columns, want %d", len(row), len(want))
+	}
+	for i := range want {
+		if !reflect.DeepEqual(row[i], want[i]) {
+			t.Errorf("%s: %v, want %v", it.Schema[i].Name, fmtRanges(row[i:i+1]), fmtRanges(want[i:i+1]))
+		}
 	}
 }
 

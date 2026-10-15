@@ -215,7 +215,8 @@ func infinityValue(fl field, cell map[string]any) bool {
 // (nestedtimestamps.go, #1101).
 func infinityAnswer(w http.ResponseWriter, rec *recorder, int64Timestamp bool) {
 	body := rec.body.Bytes()
-	if rec.status != http.StatusOK && rec.status != 0 || !bytes.Contains(body, []byte(`Inf"`)) && !bytes.Contains(body, timestampRowsText) {
+	if rec.status != http.StatusOK && rec.status != 0 || !bytes.Contains(body, []byte(`Inf"`)) && !bytes.Contains(body, timestampRowsText) &&
+		!bytes.Contains(body, []byte(`"RANGE"`)) {
 		rec.copyTo(w)
 		return
 	}
@@ -273,8 +274,9 @@ func infinityTableRows(table []byte, rows []json.RawMessage, int64Timestamp bool
 	if json.Unmarshal(table, &meta) != nil {
 		return rows
 	}
+	ranges := nestedRange(meta.Schema.Fields, false)
 	for i, raw := range rows {
-		if !bytes.Contains(raw, []byte(`Inf"`)) && !bytes.Contains(raw, timestampRowsText) {
+		if !bytes.Contains(raw, []byte(`Inf"`)) && !bytes.Contains(raw, timestampRowsText) && !ranges {
 			continue
 		}
 		var row any
