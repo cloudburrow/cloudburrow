@@ -112,8 +112,10 @@ compat_shard() {
       # (#576): a revision uses them through the injected variables. KMS,
       # Scheduler and Logging for the revision that calls them at the
       # injected CLOUDBURROW_*_ENDPOINT (#681). BigQuery for the revisions
-      # refused by the front in its pod (#874, #902).
-      SERVICES=run,secretmanager,tasks,storage,pubsub,kms,scheduler,logging,bigquery
+      # refused by the front in its pod (#874, #902). Cloud SQL for the
+      # revision and task that query PostgreSQL through a Cloud SQL volume
+      # (#1346).
+      SERVICES=run,secretmanager,tasks,storage,pubsub,kms,scheduler,logging,bigquery,cloudsql
       # Cloud Run (#336). For the revisions that reach Storage and Pub/Sub
       # with no client options (#576) and call KMS, Scheduler and Logging
       # (#681), the RUN_* names, so those suites do not run a second time
@@ -122,7 +124,9 @@ compat_shard() {
       # RUN_BIGQUERY, with the one project its emulator serves.
       # PREDICTION: the local AI endpoint, which Cloud Run starts, serving
       # PredictionService for the custom prediction containers (#1193).
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,BIGQUERY_PROJECT,PREDICTION ;;
+      # RUN_SQLADMIN: the Cloud SQL volume tests (#1346), without the
+      # Cloud SQL suite, which the emulators shard runs.
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,BIGQUERY_PROJECT,PREDICTION ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.

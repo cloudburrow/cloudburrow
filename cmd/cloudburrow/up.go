@@ -562,9 +562,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	})
 	// Cloud SQL volumes (#1346): the Auth Proxy beside a revision asks the
 	// Admin API, through cloudburrow-host, and is told to dial the
-	// connector at the address the cluster reaches this machine at.
-	if sqlAdminSrv != nil {
-		sqlAdminSrv.SetPodConnectorHost(hostComp.Address)
+	// connector at that Service's cluster IP, port 3307, which forwards to
+	// the pods' own connector listener.
+	// Pods have a connector listener of their own, on any port: the
+	// Service maps 3307 to it, so a Cloud SQL volume works even while
+	// another instance on this machine holds 3307.
+	if sqlAdminSrv != nil && hostComp != nil {
+		sqlAdminSrv.ServeConnectorToPods(net.JoinHostPort(cfg.BindAddress, "0"), hostComp.ClusterIP)
 		runSvc.useCloudSQL(cloudSQLForPods(sqlAdminSrv, hostComp))
 	}
 	// The console's terminal (#781) runs in a pod given the same addresses,

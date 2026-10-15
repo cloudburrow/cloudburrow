@@ -54,7 +54,8 @@ func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds compon
 func cloudSQLForPods(srv *sqladmin.Server, host *clusterHost) runadapter.CloudSQL {
 	return func() *runadapter.CloudSQLConfig {
 		api := host.InCluster("sqladmin")
-		if api == "" || host.InCluster("cloudsql-connector") == "" {
+		ip := host.ClusterIP()
+		if api == "" || host.InCluster("cloudsql-connector") == "" || ip == "" {
 			return nil
 		}
 		return &runadapter.CloudSQLConfig{Endpoint: "http://" + api, Region: sqladmin.Region, Instances: srv.Instances()}

@@ -423,6 +423,7 @@ func (runJobsProvider) CreateForm() (string, []console.Field) {
 		},
 		runSecretEnvField("Container"),
 		runVolumeFields("Container")[0], runVolumeFields("Container")[1], runVolumeFields("Container")[2],
+		runVolumeFields("Container")[3],
 		runSettingsFields("Settings", false)[0], runSettingsFields("Settings", false)[1], runSettingsFields("Settings", false)[2],
 		runSettingsFields("Settings", false)[3],
 		{
@@ -682,7 +683,8 @@ func runJobEditForm(job *runpb.Job) *console.EditForm {
 	secretFiles, memoryVolumes := runVolumeDefaults(tt.GetVolumes(), c.GetVolumeMounts())
 	prefill := map[string]string{
 		"serviceAccount": tt.GetServiceAccount(), "secretFiles": secretFiles, "memoryVolumes": memoryVolumes,
-		"name": lastSegment(job.GetName()), "image": c.GetImage(),
+		"cloudSqlInstances": runCloudSQLDefault(tt.GetVolumes()),
+		"name":              lastSegment(job.GetName()), "image": c.GetImage(),
 		"command": shellJoin(c.GetCommand()), "args": shellJoin(c.GetArgs()),
 		"env":        console.FormatMap(env),
 		"secretEnv":  secretEnv,
