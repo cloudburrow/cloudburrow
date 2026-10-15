@@ -440,6 +440,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
         ]
       },
@@ -463,6 +464,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
         ]
       },
@@ -478,6 +480,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
         ]
       },
@@ -529,7 +532,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
-          "test/compat/run_test.go:149 TestRunRevisions"
+          "test/compat/run_test.go:149 TestRunRevisions",
+          "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath"
         ]
       },
       {
@@ -544,6 +548,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
+          "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount"
         ]
       },
@@ -567,6 +572,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
+          "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
           "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount"
         ]

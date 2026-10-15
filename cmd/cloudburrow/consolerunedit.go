@@ -181,6 +181,9 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 		"concurrency":    positive(tmpl.Spec.ContainerConcurrency),
 		"timeout":        positive(tmpl.Spec.TimeoutSeconds),
 	}
+	for k, v := range runSettingsDefaults(pod.GetExecutionEnvironment(), pod.GetVpcAccess(), pod.GetEncryptionKey(), pod.GetSessionAffinity()) {
+		defaults[k] = v
+	}
 
 	_, fields := runProvider{}.CreateForm()
 	for i := range fields {
@@ -254,6 +257,10 @@ func (p runProvider) Edit(ctx context.Context, project string, path []string, va
 		return err
 	}
 	if err := applyRunVolumes(podFields{&svc.Template.ServiceAccount, &svc.Template.Volumes}, svc.Template.Containers[0], values); err != nil {
+		return err
+	}
+	t := svc.Template
+	if err := applyRunSettings(runSettings{&t.ExecutionEnvironment, &t.VpcAccess, &t.EncryptionKey, &t.SessionAffinity}, values); err != nil {
 		return err
 	}
 	labels, ok, err := runLabels(values)

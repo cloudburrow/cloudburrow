@@ -84,7 +84,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 
 | Gap | Why open | Size |
 |---|---|---|
-| Refused service and job fields: VPC access, Cloud SQL, Cloud Storage FUSE and NFS volumes, `subPath`, encryption keys, binary authorization, execution environment, session affinity; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297) | not built yet | L |
+| Refused service and job fields (#1346): Cloud SQL volumes (needs a Cloud SQL Auth Proxy sidecar and the 3307 connector published to pods), Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346) | not built yet | M |
 | `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
 | `Instances.*` is not served (#1299) | not built yet | L |
 | `WorkerPools.*` is not served (#1300) | not built yet | L |
