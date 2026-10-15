@@ -160,6 +160,13 @@ func TestDetectTheFunctionFixtures(t *testing.T) {
 		{"function", "go", "go.mod"},
 		{"function-nodejs", "nodejs", "package.json"},
 		{"function-python", "python", "requirements.txt"},
+		// #1319: the Java, Ruby, PHP and .NET fixtures. The builder makes
+		// amd64 images only, so their gated compat tests cannot run on arm64
+		// nodes; this is what is checked everywhere.
+		{"function-java", "java", "pom.xml"},
+		{"function-ruby", "ruby", "Gemfile"},
+		{"function-php", "php", "composer.json"},
+		{"function-dotnet", "dotnet", "Function.csproj"},
 	} {
 		d, err := Detect(filepath.Join("..", "..", "testdata", tc.dir), nil)
 		if err != nil || d.Runtime != tc.runtime || d.From != tc.from {

@@ -11,7 +11,7 @@ func TestViewColumnList(t *testing.T) {
 	v, ok := parseViewColumnList("CREATE OR REPLACE VIEW IF NOT EXISTS `p.ds.v` (c, `d e`) OPTIONS(description = 'AS') AS SELECT a, b FROM ds.t;")
 	if !ok || strings.Join(v.path, ".") != "p.ds.v" || strings.Join(v.columns, "|") != "c|d e" || !v.ifNotExists ||
 		v.options != " OPTIONS(description = 'AS')" || v.query != "SELECT a, b FROM ds.t" ||
-		v.head != "CREATE OR REPLACE VIEW IF NOT EXISTS `p.ds.v` " || v.columnOptions {
+		v.head != "CREATE OR REPLACE VIEW IF NOT EXISTS `p.ds.v` " || v.badOption != "" || v.hasDescriptions() {
 		t.Fatalf("parsed %+v, %v", v, ok)
 	}
 	got, msg := v.aliasedQuery([]field{{Name: "a", Type: "INTEGER"}, {Name: "b", Type: "STRING"}})
@@ -33,9 +33,19 @@ func TestViewColumnList(t *testing.T) {
 			t.Errorf("%s was not refused", sql)
 		}
 	}
-	if v, ok := parseViewColumnList("CREATE VIEW ds.v (c OPTIONS(description='x'), d) AS SELECT 1, 2"); !ok || !v.columnOptions ||
-		strings.Join(v.columns, "|") != "c|d" {
+	// A column's description is read (#1323); another option is not set.
+	if v, ok := parseViewColumnList("CREATE VIEW ds.v (c OPTIONS(description='x'), d) AS SELECT 1, 2"); !ok || v.badOption != "" ||
+		strings.Join(v.columns, "|") != "c|d" || len(v.descriptions) != 2 || v.descriptions[0] == nil ||
+		*v.descriptions[0] != "x" || v.descriptions[1] != nil || v.withoutList() != "CREATE VIEW ds.v  AS SELECT 1, 2" {
 		t.Errorf("a column's OPTIONS: %+v %v", v, ok)
+	}
+	for _, sql := range []string{
+		"CREATE VIEW ds.v (c OPTIONS(rounding_mode='x')) AS SELECT 1",
+		"CREATE VIEW ds.v (c OPTIONS(description=CONCAT('a', 'b'))) AS SELECT 1",
+	} {
+		if v, ok := parseViewColumnList(sql); !ok || v.badOption == "" {
+			t.Errorf("%s: %+v %v, want an option not set", sql, v, ok)
+		}
 	}
 	for _, sql := range []string{
 		"CREATE VIEW ds.v AS SELECT 1 AS a",
@@ -46,6 +56,35 @@ func TestViewColumnList(t *testing.T) {
 	} {
 		if _, ok := parseViewColumnList(sql); ok {
 			t.Errorf("%q was read as a lone CREATE VIEW with a column list", sql)
+		}
+	}
+}
+
+// A script with a view's column list is carried out a statement at a time
+// (#1323), unless a TEMP table keeps it in one request, and its listed
+// names are checked before anything runs.
+func TestViewColumnListInAScript(t *testing.T) {
+	for sql, want := range map[string]bool{
+		"SELECT 1; CREATE VIEW ds.v (c, d) AS SELECT 1, 2":                       true,
+		"CREATE VIEW ds.v (c) AS SELECT 1; SELECT * FROM ds.v":                   true,
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; CREATE VIEW ds.v (c) AS SELECT 1": false,
+		"SELECT 1; CREATE VIEW ds.v AS SELECT 1 AS c":                            false,
+		"SELECT 'VIEW'; SELECT 2":                                                false,
+	} {
+		if got := hasControlFlow(sql); got != want {
+			t.Errorf("hasControlFlow(%q) = %v, want %v", sql, got, want)
+		}
+	}
+	for sql, code := range map[string]int{
+		"SELECT 1; CREATE VIEW ds.v (c, d) AS SELECT 1, 2": 0,
+		"SELECT 1; CREATE VIEW ds.v (c, C) AS SELECT 1, 2": 400,
+		"SELECT 1; CREATE VIEW ds.v (`c!`) AS SELECT 1":    400,
+	} {
+		toks, _ := lex(sql)
+		p := &scriptParser{toks: toks}
+		nodes := p.block()
+		if v := checkStatements(sql, nodes); v.code != code {
+			t.Errorf("checkStatements(%q) = %d %s, want %d", sql, v.code, v.msg, code)
 		}
 	}
 }

@@ -31,7 +31,7 @@ import (
 // the emulator's reason and #1027, and they change no row (a DML statement of
 // its own is TestConsoleBigQueryReadWriteEditorRunsDML); a lone SELECT is sent back to
 // Read-only; ALTER TABLE ADD COLUMN and SET OPTIONS run (#1227), RENAME
-// COLUMN and DROP COLUMN too (#1322), and ALTER COLUMN SET DATA TYPE is
+// COLUMN and DROP COLUMN too (#1322), and ALTER COLUMN SET DEFAULT is
 // refused in the API's own words (the front's 501),
 // without the client library's envelope. Read-only mode still refuses a DDL
 // statement and says where it runs.
@@ -131,6 +131,12 @@ func TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts(t *testing.T) {
 	if got := columns("listed"); got != "order_id:INTEGER,where_to:STRING" {
 		t.Errorf("CREATE VIEW with a column list made columns %s", got)
 	}
+	// And in a script, with a column's description (#1323).
+	write("DECLARE k INT64 DEFAULT 1;\nCREATE VIEW scripted (order_id OPTIONS(description = 'the order')) AS SELECT id FROM `" + project + "." + ds.DatasetID + ".orders`;")
+	if md, err := ds.Table("scripted").Metadata(ctx); err != nil || len(md.Schema) != 1 || md.Schema[0].Name != "order_id" ||
+		md.Schema[0].Description != "the order" {
+		t.Errorf("the script's CREATE VIEW with a column list reads %+v (%v)", md, err)
+	}
 	write("CREATE OR REPLACE TABLE totals AS SELECT 1 AS n")
 	if got := columns("totals"); got != "n:INTEGER" {
 		t.Errorf("CREATE OR REPLACE TABLE left columns %s, want n:INTEGER", got)
@@ -172,8 +178,8 @@ func TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts(t *testing.T) {
 	if n := countRows(t, h, orders); n != 4 {
 		t.Errorf("after DROP COLUMN the table has %d rows, want 4", n)
 	}
-	refused("read-write", "ALTER TABLE orders ALTER COLUMN id SET DATA TYPE NUMERIC",
-		"Not implemented here: ALTER TABLE ALTER COLUMN SET DATA TYPE")
+	refused("read-write", "ALTER TABLE orders ALTER COLUMN id SET DEFAULT 1",
+		"Not implemented here: ALTER TABLE ALTER COLUMN SET DEFAULT")
 	refused("", "CREATE TABLE never AS SELECT 1 AS a", "Switch it to Read-write")
 	if _, err := ds.Table("never").Metadata(ctx); !isNotFound(err) {
 		t.Errorf("a CREATE refused in Read-only made the table: %v", err)

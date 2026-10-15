@@ -30,6 +30,7 @@ func TestBigQueryLoadFormBecomesTheLoadsSource(t *testing.T) {
 		"skipLeadingRows": "", "fieldDelimiter": ",", "quote": `"`, "nullMarker": "", "nullMarkers": "",
 		"encoding": "UTF-8", "sourceColumnMatch": "POSITION", "allowJaggedRows": "false",
 		"allowQuotedNewlines": "false", "preserveAsciiControlCharacters": "false",
+		"timeZone": "", "dateFormat": "", "datetimeFormat": "", "timeFormat": "", "timestampFormat": "",
 	}
 	with := func(changes map[string]string) map[string]string {
 		v := map[string]string{}
@@ -57,6 +58,8 @@ func TestBigQueryLoadFormBecomesTheLoadsSource(t *testing.T) {
 		"maxBadRecords": "3", "ignoreUnknownValues": "true", "skipLeadingRows": "1", "fieldDelimiter": `\t`,
 		"quote": "", "nullMarkers": "NA\n\\N\n", "encoding": "ISO-8859-1", "sourceColumnMatch": "NAME",
 		"allowJaggedRows": "true", "allowQuotedNewlines": "true", "preserveAsciiControlCharacters": "true",
+		"timeZone": " America/New_York ", "dateFormat": "MM/DD/YYYY", "datetimeFormat": "DD.MM.YYYY HH24:MI",
+		"timeFormat": "HH24:MI", "timestampFormat": "YYYY-MM-DD HH24:MI:SS TZH",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +69,9 @@ func TestBigQueryLoadFormBecomesTheLoadsSource(t *testing.T) {
 		got.FieldDelimiter != `\t` || got.Quote != "" || !got.ForceZeroQuote ||
 		!reflect.DeepEqual(got.NullMarkers, []string{"NA", `\N`}) || got.Encoding != bigquery.ISO_8859_1 ||
 		got.SourceColumnMatch != "NAME" || !got.AllowJaggedRows || !got.AllowQuotedNewlines ||
-		!got.PreserveASCIIControlCharacters || len(got.Schema) != 1 || !got.Schema[0].Required {
+		!got.PreserveASCIIControlCharacters || len(got.Schema) != 1 || !got.Schema[0].Required ||
+		got.TimeZone != "America/New_York" || got.DateFormat != "MM/DD/YYYY" || got.DatetimeFormat != "DD.MM.YYYY HH24:MI" ||
+		got.TimeFormat != "HH24:MI" || got.TimestampFormat != "YYYY-MM-DD HH24:MI:SS TZH" {
 		t.Errorf("every option set gives %+v", got)
 	}
 
@@ -79,7 +84,8 @@ func TestBigQueryLoadFormBecomesTheLoadsSource(t *testing.T) {
 		ptr(with(map[string]string{"format": "AVRO"})):                                                                     `not "AVRO"`,
 		ptr(with(map[string]string{"skipLeadingRows": "-1"})):                                                              "whole number",
 		ptr(with(map[string]string{"maxBadRecords": "two"})):                                                               "whole number",
-		ptr(with(map[string]string{"encoding": "UTF-16BE"})):                                                               `not "UTF-16BE"`,
+		ptr(with(map[string]string{"encoding": "UTF-7"})):                                                                  `not "UTF-7"`,
+		ptr(with(map[string]string{"format": "PARQUET", "timeZone": "UTC"})):                                               "timeZone applies to CSV only",
 		ptr(with(map[string]string{"uris": " \n "})):                                                                       "at least one gs:// URI",
 		ptr(with(map[string]string{"schema": "not json"})):                                                                 "JSON array",
 		ptr(with(map[string]string{"sourceColumnMatch": "WHATEVER"})):                                                      `not "WHATEVER"`,

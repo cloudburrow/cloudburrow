@@ -92,7 +92,8 @@ func hasControlFlow(sql string) bool {
 	if !strings.Contains(upper, "IF") && !strings.Contains(upper, "LOOP") && !strings.Contains(upper, "WHILE") &&
 		!strings.Contains(upper, "REPEAT") && !strings.Contains(upper, "FOR") && !strings.Contains(upper, "CASE") &&
 		!strings.Contains(upper, "EXCEPTION") && !strings.Contains(upper, "RAISE") && !strings.Contains(upper, "PROCEDURE") &&
-		!strings.Contains(upper, "CALL") && !strings.Contains(upper, "ALTER") && !strings.Contains(upper, "TRAN") {
+		!strings.Contains(upper, "CALL") && !strings.Contains(upper, "ALTER") && !strings.Contains(upper, "TRAN") &&
+		!strings.Contains(upper, "VIEW") {
 		return false
 	}
 	toks, ok := lex(sql)
@@ -119,9 +120,11 @@ func hasControlFlow(sql string) bool {
 			return true
 		}
 	}
+	temp := tokensHaveTemp(toks)
 	for _, stmt := range splitStatements(toks) {
 		if body, block, handler := stripControlFlow(stmt); block != "" || handler || len(body) > 0 && body[0].is("RAISE") ||
-			isProcedureStatement(body) || isAlterTable(body) { // #1217, procedures.go; #1227, altertable.go
+			isProcedureStatement(body) || isAlterTable(body) || // #1217, procedures.go; #1227, altertable.go
+			!temp && isViewColumnList(sql, body) { // #1323, viewcolumns.go
 			return true
 		}
 	}
@@ -706,6 +709,16 @@ func checkStatements(sql string, nodes []scriptNode) ddlVerdict {
 			if _, _, _, msg := assertParts(n.toks); msg != "" {
 				return ddlVerdict{code: http.StatusBadRequest, reason: "invalidQuery", msg: msg}
 			}
+		} else if vc, ok := scriptViewColumnList(sql, n); ok {
+			// Carried out alone in its turn (#1323, viewcolumns.go): its
+			// listed names are checked here, and the rest of it as a
+			// CREATE VIEW without the list.
+			if msg := vc.checkNames(); msg != "" {
+				return ddlVerdict{code: http.StatusBadRequest, reason: "invalidQuery", msg: msg}
+			}
+			if v := checkDDL(vc.withoutList()); v.code != 0 {
+				return v
+			}
 		} else if n.kind == nodeStmt && len(n.toks) > 0 && !n.toks[0].is("RAISE") {
 			if v := checkDDL(sql[n.toks[0].pos:n.toks[len(n.toks)-1].end]); v.code != 0 {
 				return v
@@ -718,6 +731,15 @@ func checkStatements(sql string, nodes []scriptNode) ddlVerdict {
 		}
 	}
 	return ddlVerdict{}
+}
+
+// scriptViewColumnList reads n, a statement of the script sql, as a CREATE
+// VIEW with a column list.
+func scriptViewColumnList(sql string, n scriptNode) (viewColumnList, bool) {
+	if n.kind != nodeStmt || len(n.toks) < 8 || !n.toks[0].is("CREATE") {
+		return viewColumnList{}, false
+	}
+	return parseViewColumnList(sql[n.toks[0].pos:n.toks[len(n.toks)-1].end])
 }
 
 // step reports whether the script may go on: not past BigQuery's time

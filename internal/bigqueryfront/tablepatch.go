@@ -57,7 +57,8 @@ func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 	_, hasDesc := patch["description"]
 	_, hasName := patch["friendlyName"]
 	_, hasExpiry := patch["expirationTime"]
-	patching := r.Method == http.MethodPatch && (hasLabels || hasDesc || hasName || hasExpiry)
+	_, hasKeys := patch["tableConstraints"] // replaced whole; null clears them (#1334, alterkeys.go)
+	patching := r.Method == http.MethodPatch && (hasLabels || hasDesc || hasName || hasExpiry || hasKeys)
 	if schema == nil && !patching {
 		f.next.ServeHTTP(w, r)
 		return

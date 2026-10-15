@@ -133,7 +133,13 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	hs := &http.Server{Handler: hostguard.Wrap(srv, AllowedHosts(names)...), ReadHeaderTimeout: 30 * time.Second}
+	// HTTP/1.1 for the JSON and XML APIs, and h2c for the gRPC API on the
+	// same port (#1321), as STORAGE_EMULATOR_HOST names one address for
+	// both.
+	var protocols http.Protocols
+	protocols.SetHTTP1(true)
+	protocols.SetUnencryptedHTTP2(true)
+	hs := &http.Server{Handler: hostguard.Wrap(srv, AllowedHosts(names)...), ReadHeaderTimeout: 30 * time.Second, Protocols: &protocols}
 	fmt.Fprintf(stdout, "Cloud Storage (builtin, in development) listening on http://%s\n", ln.Addr())
 	errc := make(chan error, 1)
 	go func() { errc <- hs.Serve(ln) }()

@@ -35,8 +35,23 @@ import (
 // column, or one listed twice. After the view is made, tables.get answers
 // the client's query as view.query and useExplicitColumnNames true
 // (viewTexts), and the job keeps the client's text. OR REPLACE, IF NOT
-// EXISTS and OPTIONS(...) are kept. A column's own OPTIONS in the list,
-// and a column list inside a multi-statement script, stay 501 (checkDDL).
+// EXISTS and OPTIONS(...) are kept.
+//
+// A column's OPTIONS in the list (#1323): the one option BigQuery's CREATE
+// VIEW reference lists for a view's column is description (same page,
+// view_column_name_list). The emulator keeps no column description from DDL, so
+// once the view is made its schema is read, each listed column given its
+// description literal, and written back with the emulator's tables.update,
+// which keeps a view's field descriptions (measured). Another option, or a
+// description that is not a string literal, is 501, nothing run.
+//
+// A column list inside a multi-statement script (#1323) is carried out by
+// the front's run of the script (scriptflow.go, hasControlFlow): each
+// statement is a request of its own, so such a CREATE VIEW is one alone,
+// carried out as above. Its listed names are checked, with the script's
+// other statements, before anything runs (checkStatements). A script with
+// a TEMP table or function cannot be split, as a TEMP table lasts only
+// for the request that made it: its column list stays 501 (checkDDL).
 
 // viewColumnList is a lone CREATE VIEW statement with a column list.
 type viewColumnList struct {
@@ -47,8 +62,44 @@ type viewColumnList struct {
 	path                 []string
 	columns              []string
 	ifNotExists          bool
-	// columnOptions is whether a listed column has OPTIONS(...).
-	columnOptions bool
+	// descriptions are the listed columns' OPTIONS(description = ...), by
+	// position (nil for none); badOption names a column option the front
+	// does not set.
+	descriptions []*string
+	badOption    string
+}
+
+// isViewColumnList reports whether body, one statement of a script, is a
+// CREATE VIEW with a column list.
+func isViewColumnList(sql string, body []token) bool {
+	if len(body) < 8 || !body[0].is("CREATE") {
+		return false
+	}
+	_, ok := parseViewColumnList(sql[body[0].pos:body[len(body)-1].end])
+	return ok
+}
+
+// checkNames is why BigQuery refuses the listed names before running the
+// statement, or "".
+func (v viewColumnList) checkNames() string {
+	seen := map[string]bool{}
+	for _, c := range v.columns {
+		if msg := checkColumnName(c); msg != "" {
+			return msg
+		}
+		key := strings.ToLower(c)
+		if seen[key] {
+			return fmt.Sprintf("Duplicate column name %s in the column list of CREATE VIEW", c)
+		}
+		seen[key] = true
+	}
+	return ""
+}
+
+// withoutList is the statement without its column list, for the checks
+// of the rest of it.
+func (v viewColumnList) withoutList() string {
+	return v.head + v.options + " AS " + v.query
 }
 
 // parseViewColumnList reads a query that is one CREATE VIEW statement with
@@ -101,20 +152,32 @@ func parseViewColumnList(sql string) (viewColumnList, bool) {
 			return v, false
 		}
 		v.columns = append(v.columns, t[i].text)
+		v.descriptions = append(v.descriptions, nil)
 		i++
 		if i < end && t[i].is("OPTIONS") {
-			v.columnOptions = true
-			depth := 0
-			for i++; i < end; i++ {
-				if t[i].punct("(") {
-					depth++
-				} else if t[i].punct(")") {
-					if depth--; depth == 0 {
-						i++
-						break
-					}
+			close := -1
+			if i+1 < end && t[i+1].punct("(") {
+				close = closing(t[:end], i+1)
+			}
+			if close < 0 {
+				return v, false
+			}
+			opts, ok := readOptions(t[i : close+1])
+			if !ok && v.badOption == "" {
+				v.badOption = "OPTIONS as written"
+			}
+			for _, o := range opts {
+				s, lit := stringLiteral(singleToken(o.val))
+				switch {
+				case o.name != "description" && v.badOption == "":
+					v.badOption = "the option " + o.name
+				case o.name == "description" && !lit && v.badOption == "":
+					v.badOption = "a description that is not a string literal"
+				case o.name == "description" && lit:
+					v.descriptions[len(v.descriptions)-1] = &s
 				}
 			}
+			i = close + 1
 		}
 		if i < end && t[i].punct(",") {
 			i++
@@ -155,16 +218,8 @@ func (v viewColumnList) aliasedQuery(fields []field) (string, string) {
 		return "", fmt.Sprintf("The number of columns in the column list (%d) does not match the number of columns in "+
 			"the query (%d)", len(v.columns), len(fields))
 	}
-	seen := map[string]bool{}
-	for _, c := range v.columns {
-		if msg := checkColumnName(c); msg != "" {
-			return "", msg
-		}
-		key := strings.ToLower(c)
-		if seen[key] {
-			return "", fmt.Sprintf("Duplicate column name %s in the column list of CREATE VIEW", c)
-		}
-		seen[key] = true
+	if msg := v.checkNames(); msg != "" {
+		return "", msg
 	}
 	named := true
 	names := map[string]bool{}
@@ -191,11 +246,10 @@ func (v viewColumnList) aliasedQuery(fields []field) (string, string) {
 
 // createViewWithColumns carries out v, the lone statement of q (above).
 func (f front) createViewWithColumns(w http.ResponseWriter, r *http.Request, q queryOptions, v viewColumnList, insert bool) {
-	if v.columnOptions {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: OPTIONS on a column in the "+
-			"column list of CREATE VIEW. CloudBurrow names a view's columns by its column list, but does not set a "+
-			"column's options from it, so nothing was run. Set a view column's description with tables.patch "+
-			"(Table.Update in the Go client).")
+	if v.badOption != "" {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+v.badOption+" on a column "+
+			"in the column list of CREATE VIEW. CloudBurrow sets a listed column's OPTIONS(description = 'literal'), "+
+			"the one column option BigQuery takes for a view, and nothing else, so nothing was run.")
 		return
 	}
 	ds, table, ok := tableOf(q, v.path)
@@ -228,7 +282,15 @@ func (f front) createViewWithColumns(w http.ResponseWriter, r *http.Request, q q
 	if insert && rec.status == http.StatusOK {
 		_ = json.Unmarshal(rec.body.Bytes(), &job)
 	}
-	if _, failed := queryFailure(rec, job); !failed && ok && !existed && f.views != nil {
+	_, failed := queryFailure(rec, job)
+	if !failed && ok && !existed && v.hasDescriptions() {
+		if msg := f.setViewDescriptions(r, ds, table, v.descriptions); msg != "" {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: the view was made, but its "+
+				"columns' descriptions could not be set: "+msg)
+			return
+		}
+	}
+	if !failed && ok && !existed && f.views != nil {
 		status, got := f.get(r, tablePath(ds, table))
 		var meta struct {
 			View *struct {
@@ -241,4 +303,48 @@ func (f front) createViewWithColumns(w http.ResponseWriter, r *http.Request, q q
 		}
 	}
 	f.clientText(w, rec, client)
+}
+
+func (v viewColumnList) hasDescriptions() bool {
+	for _, d := range v.descriptions {
+		if d != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// setViewDescriptions gives the view dataset.table's columns their
+// descriptions, by position, with the emulator's tables.update of the view
+// as it is, and returns why it could not, or "".
+func (f front) setViewDescriptions(r *http.Request, dataset, table string, descriptions []*string) string {
+	status, got := f.get(r, tablePath(dataset, table))
+	var meta map[string]json.RawMessage
+	if status != http.StatusOK || json.Unmarshal(got, &meta) != nil {
+		return errorMessage(got, status)
+	}
+	var schema struct {
+		Fields []map[string]any `json:"fields"`
+	}
+	if json.Unmarshal(meta["schema"], &schema) != nil || len(schema.Fields) != len(descriptions) {
+		return "the view's schema does not have the listed columns"
+	}
+	for i, d := range descriptions {
+		if d != nil {
+			schema.Fields[i]["description"] = *d
+		}
+	}
+	b, err := json.Marshal(schema)
+	if err != nil {
+		return err.Error()
+	}
+	meta["schema"] = b
+	body, err := json.Marshal(meta)
+	if err != nil {
+		return err.Error()
+	}
+	if status, got := f.send(r, http.MethodPut, tablePath(dataset, table), body); status != http.StatusOK {
+		return errorMessage(got, status)
+	}
+	return ""
 }

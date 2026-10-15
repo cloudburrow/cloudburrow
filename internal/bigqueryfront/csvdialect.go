@@ -113,10 +113,8 @@ import (
 //   - A newline inside a quoted value fails the load, 400 invalid, unless
 //     allowQuotedNewlines is true; with maxBadRecords set it is 501, as
 //     BigQuery's reading of the rest of such a file is not documented.
-//   - ISO-8859-1 data is decoded to the UTF-8 the emulator reads. The
-//     other encodings are 501: splitting their raw bytes at a one-byte
-//     delimiter, as the reference says BigQuery does before decoding, is
-//     not something the front can match with certainty.
+//   - ISO-8859-1 data is decoded to the UTF-8 the emulator reads, and so
+//     are UTF-16BE, UTF-16LE, UTF-32BE and UTF-32LE (#1325, csvtimes.go).
 //   - A record is bad when it is too short (without allowJaggedRows), too
 //     wide (without ignoreUnknownValues, which drops the trailing values
 //     instead), or when a REQUIRED column would get NULL. Up to
@@ -137,7 +135,9 @@ import (
 //     it names (case-insensitively); a header that does not name each
 //     column once is 501, as is NAME with another skipLeadingRows.
 //     POSITION is the default for a load with columns.
-//   - timeZone and the four formats are 501 before anything is read.
+//   - timeZone and the four formats are read as BigQuery reads them, and
+//     each value written in the form the emulator reads (#1325,
+//     csvtimes.go).
 //
 // An empty quoted value ("") in a REQUIRED STRING or BYTES column is 501:
 // the emulator loads it as NULL, and BigQuery may load it as an empty
@@ -158,6 +158,11 @@ type csvDialect struct {
 	quotedNewlines bool
 	// latin1 is encoding ISO-8859-1.
 	latin1 bool
+	// wide is encoding UTF-16BE, UTF-16LE, UTF-32BE or UTF-32LE (#1325).
+	wide string
+	// times are timeZone and the date and time formats (#1325,
+	// csvtimes.go), or nil.
+	times *csvTimes
 	// ignoreUnknown is ignoreUnknownValues.
 	ignoreUnknown bool
 	// maxBad is maxBadRecords.
@@ -182,7 +187,8 @@ type csvDialect struct {
 // one (#1065, #1075: its values are checked as base64).
 func (d csvDialect) plain() bool {
 	return d.delim == ',' && d.quote == '"' && !d.jagged && !d.nullIsSet && !d.markersSet && d.quotedNewlines &&
-		!d.latin1 && !d.ignoreUnknown && d.maxBad == 0 && d.keepControl && !d.byName && !d.required && !d.values
+		!d.latin1 && d.wide == "" && d.times == nil && !d.ignoreUnknown && d.maxBad == 0 && d.keepControl && !d.byName &&
+		!d.required && !d.values
 }
 
 // optionsSet reports whether d has any option the load set, beyond the
@@ -191,7 +197,7 @@ func (d csvDialect) plain() bool {
 // left without.
 func (d csvDialect) optionsSet() bool {
 	return !(d.delim == ',' && d.quote == '"' && !d.jagged && !d.nullIsSet && !d.markersSet && !d.latin1 &&
-		!d.ignoreUnknown && d.maxBad == 0 && !d.byName)
+		d.wide == "" && d.times == nil && !d.ignoreUnknown && d.maxBad == 0 && !d.byName)
 }
 
 // dialectOf returns the dialect a load's options give, or why it is 501.
@@ -252,16 +258,14 @@ func (d csvDialect) withOptions(o csvOptions, nullMarkerSet bool, cols []field, 
 	unimplemented := func(why string) (csvDialect, int, string, string) {
 		return d, http.StatusNotImplemented, "notImplemented", "Not implemented here: a CSV load with " + why + ". Nothing was loaded."
 	}
-	for _, f := range []struct{ name, value string }{
-		{"timeZone", o.TimeZone}, {"dateFormat", o.DateFormat}, {"datetimeFormat", o.DatetimeFormat},
-		{"timeFormat", o.TimeFormat}, {"timestampFormat", o.TimestampFormat},
-	} {
-		if f.value != "" {
-			return unimplemented(fmt.Sprintf("%s %q. BigQuery parses the data's values with it, but the emulator behind "+
-				"CloudBurrow ignores it (measured: a TIMESTAMP with no zone was stored as UTC whatever timeZone said, and "+
-				"a DATE in dateFormat MM/DD/YYYY failed the load)", f.name, f.value))
-		}
+	times, code, why := csvTimesOf(o, len(cols) == 0) // #1325, csvtimes.go
+	switch code {
+	case http.StatusNotImplemented:
+		return unimplemented(why)
+	case http.StatusBadRequest:
+		return d, code, "invalid", why
 	}
+	d.times = times
 	d.quotedNewlines = o.AllowQuotedNewlines
 	d.ignoreUnknown = o.IgnoreUnknownValues
 	d.keepControl = o.PreserveAsciiControlCharacters
@@ -269,10 +273,11 @@ func (d csvDialect) withOptions(o csvOptions, nullMarkerSet bool, cols []field, 
 	case "", "UTF-8", "UTF8":
 	case "ISO-8859-1":
 		d.latin1 = true
+	case "UTF-16BE", "UTF-16LE", "UTF-32BE", "UTF-32LE":
+		d.wide = strings.ToUpper(o.Encoding) // #1325, csvtimes.go
 	default:
-		return unimplemented(fmt.Sprintf("encoding %q. BigQuery decodes the data from it after splitting its raw bytes at "+
-			"the fieldDelimiter and quote, but the emulator behind CloudBurrow reads every load as UTF-8 (measured), and "+
-			"CloudBurrow decodes ISO-8859-1 only", o.Encoding))
+		return d, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid encoding %q: the supported values are UTF-8, "+
+			"ISO-8859-1, UTF-16BE, UTF-16LE, UTF-32BE and UTF-32LE.", o.Encoding)
 	}
 	if n, set := skipLeadingRows(o.MaxBadRecords); set {
 		if n < 0 {
@@ -479,6 +484,9 @@ func dialectRecords(cw *csv.Writer, data io.Reader, d csvDialect, cols []field, 
 	if d.latin1 {
 		data = &latin1Reader{r: bufio.NewReader(data)}
 	}
+	if d.wide != "" {
+		data = wideReader(data, d.wide) // #1325, csvtimes.go
+	}
 	rd := &csvRecords{r: bufio.NewReader(data), d: d}
 	var order []int // with byName, the column each position of a record goes to
 	for n := int64(0); ; n++ {
@@ -563,6 +571,9 @@ func dialectRecords(cw *csv.Writer, data io.Reader, d csvDialect, cols []field, 
 					cols[i].Name)}
 			}
 			bad = fmt.Sprintf("the REQUIRED column %s has no value", cols[i].Name)
+		}
+		if bad == "" && d.times != nil {
+			bad = d.times.convert(rec, cols) // #1325, csvtimes.go
 		}
 		if bad != "" {
 			st.bad++

@@ -45,14 +45,15 @@ import (
 func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, next http.Handler) (*http.Request, http.Handler, *dataFailure, bool) {
 	l := job.Configuration.Load
 	fields := f.jsonColumns(r, l.Schema, l.DestinationTable)
-	if !storedValues(fields) && (len(l.SourceURIs) == 0 || f.storage == nil && !severalObjects(l.SourceURIs)) {
+	stamps := l.detected && hasTimestamp(fields) // #1324, jsondetect.go
+	if !storedValues(fields) && !stamps && (len(l.SourceURIs) == 0 || f.storage == nil && !severalObjects(l.SourceURIs)) {
 		// #1079: a load from Cloud Storage is read here, as one.
 		return r, next, nil, true
 	}
 	fail := &dataFailure{}
 	out := r
 	if len(l.SourceURIs) > 0 {
-		if f.storage == nil && !storedValues(fields) {
+		if f.storage == nil && !storedValues(fields) && !stamps {
 			writeError(w, http.StatusNotImplemented, "notImplemented", severalObjectsMsg)
 			return r, next, nil, false
 		}
@@ -77,7 +78,7 @@ func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, nex
 		}
 		body, err := readBody(r)
 		if err == nil {
-			out, err = f.gcsUpload(r, body, jsonStream(srcs, locs, fields, fail))
+			out, err = f.gcsUpload(r, body, jsonStream(srcs, locs, fields, stamps, fail))
 		}
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid", "The load job could not be read: "+err.Error())
@@ -86,7 +87,7 @@ func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, nex
 	} else {
 		err := rewriteMedia(r, func(data io.Reader) io.ReadCloser {
 			return jsonStream([]func() (io.ReadCloser, error){func() (io.ReadCloser, error) { return io.NopCloser(data), nil }},
-				nil, fields, fail)
+				nil, fields, stamps, fail)
 		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid", "The load's multipart request is invalid: "+err.Error())
@@ -122,7 +123,7 @@ func (f front) jsonColumns(r *http.Request, schema *tableSchema, dest *tableRef)
 // it ends with is also kept in fail; when it ends without one, fail keeps
 // the sources and their bytes (the rows are counted in the table,
 // countLoad). locs are the sources' gs:// URIs, or nil for an upload.
-func jsonStream(srcs []func() (io.ReadCloser, error), locs []string, fields []field, fail *dataFailure) io.ReadCloser {
+func jsonStream(srcs []func() (io.ReadCloser, error), locs []string, fields []field, stamps bool, fail *dataFailure) io.ReadCloser {
 	return lazyPipe(func(pw io.Writer) error {
 		var inBytes int64
 		for i, open := range srcs {
@@ -136,7 +137,7 @@ func jsonStream(srcs []func() (io.ReadCloser, error), locs []string, fields []fi
 				loc = locs[i]
 			}
 			rc := &countingReader{ReadCloser: src, n: &inBytes}
-			err = jsonRecords(pw, bufio.NewReader(rc), fields, loc)
+			err = jsonRecords(pw, bufio.NewReader(rc), fields, stamps, loc)
 			rc.Close()
 			if err != nil {
 				var le *loadDataError
@@ -153,7 +154,7 @@ func jsonStream(srcs []func() (io.ReadCloser, error), locs []string, fields []fi
 
 // jsonRecords writes the records of br to w, one a line, changed by
 // fixValues. loc is the file's URI, or "" for an upload.
-func jsonRecords(w io.Writer, br *bufio.Reader, fields []field, loc string) error {
+func jsonRecords(w io.Writer, br *bufio.Reader, fields []field, stamps bool, loc string) error {
 	in := "the load's data"
 	if loc != "" {
 		in = loc
@@ -161,7 +162,7 @@ func jsonRecords(w io.Writer, br *bufio.Reader, fields []field, loc string) erro
 	for line := 1; ; line++ {
 		text, err := br.ReadBytes('\n')
 		if len(text) > 0 {
-			if werr := jsonRecord(w, text, fields, fmt.Sprintf("line %d of %s", line, in)); werr != nil {
+			if werr := jsonRecord(w, text, fields, stamps, fmt.Sprintf("line %d of %s", line, in)); werr != nil {
 				return werr
 			}
 		}
@@ -175,7 +176,9 @@ func jsonRecords(w io.Writer, br *bufio.Reader, fields []field, loc string) erro
 }
 
 // jsonRecord writes one line of a JSON load's data, where names it.
-func jsonRecord(w io.Writer, text []byte, fields []field, where string) error {
+// With stamps, each TIMESTAMP value is written as the emulator reads it
+// (#1324, detectedTimestamps).
+func jsonRecord(w io.Writer, text []byte, fields []field, stamps bool, where string) error {
 	if len(bytes.TrimSpace(text)) == 0 {
 		_, err := w.Write(text)
 		return err
@@ -200,6 +203,9 @@ func jsonRecord(w io.Writer, text []byte, fields []field, where string) error {
 		return p.loadError()
 	}
 	if infinityRecords(fields, obj) { // #1077, infinity.go
+		changed = true
+	}
+	if stamps && detectedTimestamps(fields, obj) {
 		changed = true
 	}
 	if !changed {

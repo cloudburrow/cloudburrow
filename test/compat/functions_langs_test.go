@@ -17,7 +17,7 @@ import (
 )
 
 // languageFunction is one Functions Framework fixture in a language other
-// than Go (#1303).
+// than Go (#1303; Java, Ruby, PHP and .NET since #1319).
 type languageFunction struct {
 	// runtime is what the builder detects the fixture as, and names its
 	// images and services.
@@ -60,6 +60,60 @@ func TestFunctionsPythonBuiltWithBuildpacks(t *testing.T) {
 	testLanguageFunction(t, languageFunction{
 		runtime: "python", dir: "function-python", httpTarget: "hello", eventTarget: "event",
 		marker: "requirements.txt", rejectsNonEvents: true,
+	})
+}
+
+// TestFunctionsJavaBuiltWithBuildpacks (#1319) builds the unmodified
+// testdata/function-java fixture (a Maven pom.xml on functions-framework-api
+// 1.1.4 and Gson, the classes functions.Hello and functions.Event) with the
+// pinned Google builder, which detects Java from pom.xml and runs the class
+// GOOGLE_FUNCTION_TARGET names with the framework's invoker; deploys it
+// through the official Cloud Run v2 client; and asserts the http and
+// cloudevent signatures as the Node.js test does. No 400 is asserted for a
+// request that is not a CloudEvent: nothing has measured the invoker's answer.
+func TestFunctionsJavaBuiltWithBuildpacks(t *testing.T) {
+	testLanguageFunction(t, languageFunction{
+		runtime: "java", dir: "function-java", httpTarget: "functions.Hello", eventTarget: "functions.Event",
+		marker: "pom.xml",
+	})
+}
+
+// TestFunctionsRubyBuiltWithBuildpacks (#1319) builds the unmodified
+// testdata/function-ruby fixture (a Gemfile and its lockfile pinning
+// functions_framework 1.7.0, app.rb) with the pinned Google builder, which
+// detects Ruby from the Gemfile; deploys it through the official Cloud Run v2
+// client; and asserts the http and cloudevent signatures.
+func TestFunctionsRubyBuiltWithBuildpacks(t *testing.T) {
+	testLanguageFunction(t, languageFunction{
+		runtime: "ruby", dir: "function-ruby", httpTarget: "hello", eventTarget: "event",
+		marker: "Gemfile",
+	})
+}
+
+// TestFunctionsPHPBuiltWithBuildpacks (#1319) builds the unmodified
+// testdata/function-php fixture (composer.json pinning
+// google/cloud-functions-framework 1.4.3, index.php) with the pinned Google
+// builder, which detects PHP from composer.json; deploys it through the
+// official Cloud Run v2 client; and asserts the http and cloudevent
+// signatures. The CloudEvent function logs to stderr: a PHP function's
+// standard output is its response.
+func TestFunctionsPHPBuiltWithBuildpacks(t *testing.T) {
+	testLanguageFunction(t, languageFunction{
+		runtime: "php", dir: "function-php", httpTarget: "hello", eventTarget: "event",
+		marker: "composer.json",
+	})
+}
+
+// TestFunctionsDotnetBuiltWithBuildpacks (#1319) builds the unmodified
+// testdata/function-dotnet fixture (Function.csproj on
+// Google.Cloud.Functions.Hosting 3.0.1 for net8.0, the classes Fixture.Hello
+// and Fixture.Event) with the pinned Google builder, which detects .NET from
+// the .csproj; deploys it through the official Cloud Run v2 client; and
+// asserts the http and cloudevent signatures.
+func TestFunctionsDotnetBuiltWithBuildpacks(t *testing.T) {
+	testLanguageFunction(t, languageFunction{
+		runtime: "dotnet", dir: "function-dotnet", httpTarget: "Fixture.Hello", eventTarget: "Fixture.Event",
+		marker: "Function.csproj",
 	})
 }
 

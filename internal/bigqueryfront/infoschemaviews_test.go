@@ -85,3 +85,45 @@ func TestInformationSchemaRows(t *testing.T) {
 		t.Errorf("PARAMETERS: %v", params)
 	}
 }
+
+// TestInformationSchemaMoreRows: #1328, the rows of the constraint,
+// snapshot and routine option views have one value per column.
+func TestInformationSchemaMoreRows(t *testing.T) {
+	var table infoTable
+	if err := json.Unmarshal([]byte(`{"tableId":"o","type":"TABLE","creationTime":"1700000000000",
+		"tableConstraints":{"primaryKey":{"columns":["id","k"]},"foreignKeys":[{"name":"fk1",
+		"referencedTable":{"projectId":"p","datasetId":"d","tableId":"c"},
+		"columnReferences":[{"referencingColumn":"cid","referencedColumn":"id"}]}]},
+		"snapshotDefinition":{"baseTableReference":{"projectId":"p","datasetId":"d","tableId":"b"},"snapshotTime":"2026-10-15T00:00:00Z"}}`), &table); err != nil {
+		t.Fatal(err)
+	}
+	count := func(columns string) int { return len(splitTop(mustLex(t, columns[len("STRUCT<"):len(columns)-1]))) }
+	check := func(name, columns string, rows [][]string, want int) {
+		t.Helper()
+		if len(rows) != want {
+			t.Fatalf("%s: %d rows, want %d: %v", name, len(rows), want, rows)
+		}
+		for _, r := range rows {
+			if len(r) != count(columns) {
+				t.Errorf("%s: %d values for %d columns: %v", name, len(r), count(columns), r)
+			}
+		}
+	}
+	check("TABLE_CONSTRAINTS", tableConstraintsColumns, tableConstraintsRows("p", "d", table), 2)
+	check("KEY_COLUMN_USAGE", keyColumnUsageColumns, keyColumnUsageRows("p", "d", table), 3)
+	check("CONSTRAINT_COLUMN_USAGE", constraintColumnUsageColumns, constraintColumnUsageRows("p", "d", table), 3)
+	check("TABLE_SNAPSHOTS", snapshotsColumns, snapshotsRows("p", "d", table), 1)
+	if r := tableConstraintsRows("p", "d", table)[0]; r[2] != "'o.pk$'" || r[6] != "'PRIMARY KEY'" {
+		t.Errorf("primary key row %v", r)
+	}
+	def := map[string]any{"routineReference": map[string]any{"routineId": "f"}, "description": "d",
+		"importedLibraries": []any{"gs://b/a.js"}}
+	rows := routineOptionsRows("p", "d", def)
+	check("ROUTINE_OPTIONS", routineOptionsColumns, rows, 2)
+	if rows[1][5] != `'["gs://b/a.js"]'` {
+		t.Errorf("library %v", rows[1])
+	}
+	if id, ok := partitionIDExpr(partitionMeta{}); !ok || id != "" {
+		t.Errorf("unpartitioned id %q", id)
+	}
+}

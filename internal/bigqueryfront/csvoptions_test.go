@@ -79,13 +79,11 @@ func TestCSVLoadOptionsRefused(t *testing.T) {
 		{"NAME without a header row", loadJob(`,"sourceColumnMatch":"NAME"`), "a,b\n1,x\n", 501, "notImplemented", false},
 		{"sourceColumnMatch unknown", loadJob(`,"sourceColumnMatch":"BEST"`), "1,x\n", 501, "notImplemented", false},
 		{"nullMarker and nullMarkers", loadJob(`,"nullMarker":"NA","nullMarkers":["-"]`), "1,x\n", 400, "invalid", false},
-		{"UTF-16LE", loadJob(`,"encoding":"UTF-16LE"`), "1,x\n", 501, "notImplemented", false},
-		{"UTF-32BE", loadJob(`,"encoding":"UTF-32BE"`), "1,x\n", 501, "notImplemented", false},
-		{"timeZone", loadJob(`,"timeZone":"America/Los_Angeles"`), "1,x\n", 501, "notImplemented", false},
-		{"dateFormat", loadJob(`,"dateFormat":"MM/DD/YYYY"`), "1,x\n", 501, "notImplemented", false},
-		{"datetimeFormat", loadJob(`,"datetimeFormat":"YYYY"`), "1,x\n", 501, "notImplemented", false},
-		{"timeFormat", loadJob(`,"timeFormat":"HH24"`), "1,x\n", 501, "notImplemented", false},
-		{"timestampFormat", loadJob(`,"timestampFormat":"YYYY"`), "1,x\n", 501, "notImplemented", false},
+		{"encoding unknown", loadJob(`,"encoding":"UTF-7"`), "1,x\n", 400, "invalid", false},
+		{"timeZone unknown", loadJob(`,"timeZone":"Mars/Olympus"`), "1,x\n", 400, "invalid", false},
+		{"dateFormat with a time", loadJob(`,"dateFormat":"MM/DD/YYYY HH24"`), "1,x\n", 400, "invalid", false},
+		{"timeZone with autodetect", `{"configuration":{"load":{"sourceFormat":"CSV","autodetect":true,"timeZone":"UTC",` +
+			`"destinationTable":{"projectId":"p","datasetId":"d","tableId":"t"}}}}`, "a\n1\n", 501, "notImplemented", false},
 		{"maxBadRecords negative", loadJob(`,"maxBadRecords":-1`), "1,x\n", 400, "invalid", false},
 	} {
 		emu := &csvEmulator{}

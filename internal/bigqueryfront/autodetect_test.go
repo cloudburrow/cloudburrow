@@ -53,14 +53,16 @@ func (e *loadEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // autodetect and no schema into a new table is checked after the emulator
 // ran it, against the table it made. A name the load's
 // columnNameCharacterMap refuses fails the job, as BigQuery fails it, and
-// the table is deleted; jobs.get reports the failure too. V1 and V2 would
-// rename the column, which the emulator does not do, so they are 501. A
+// the table is deleted; jobs.get reports the failure too. A name V1 or V2
+// cannot rename (#1326) is 501. A
 // NEWLINE_DELIMITED_JSON autodetect into a new table, which the emulator
 // fails with a 500, is 501 before it is sent. A load into an existing
 // table keeps that table's schema and is not checked.
 func TestAutodetectedNamesAreHeldToTheCharacterMap(t *testing.T) {
 	flexibleOnly := `{"fields":[{"name":"first name","type":"STRING"},{"name":"n","type":"INTEGER"}]}`
 	invalid := `{"fields":[{"name":"a b!","type":"INTEGER"},{"name":"c","type":"STRING"}]}`
+	reserved := `{"fields":[{"name":"_TABLE_x!","type":"INTEGER"},{"name":"c","type":"STRING"}]}`
+	digit := `{"fields":[{"name":"x y","type":"INTEGER"},{"name":"1c","type":"STRING"}]}`
 	for _, c := range []struct {
 		name, detected, extra string
 		existing              bool
@@ -70,9 +72,10 @@ func TestAutodetectedNamesAreHeldToTheCharacterMap(t *testing.T) {
 		{"valid", flexibleOnly, "", false, 200, ""},
 		{"strict", invalid, "", false, 200, "invalid"},
 		{"explicit strict", invalid, `,"columnNameCharacterMap":"STRICT"`, false, 200, "invalid"},
-		{"V2, invalid", invalid, `,"columnNameCharacterMap":"V2"`, false, 501, "notImplemented"},
+		// A name V1 or V2 cannot rename (#1326, charmap.go) stays 501.
+		{"V2, reserved", reserved, `,"columnNameCharacterMap":"V2"`, false, 501, "notImplemented"},
 		{"V2, flexible", flexibleOnly, `,"columnNameCharacterMap":"V2"`, false, 200, ""},
-		{"V1, flexible but not classic", flexibleOnly, `,"columnNameCharacterMap":"V1"`, false, 501, "notImplemented"},
+		{"V1, a leading digit", digit, `,"columnNameCharacterMap":"V1"`, false, 501, "notImplemented"},
 		// Into an existing table, BigQuery decides from the data whether
 		// the first row is a header unless skipLeadingRows says (#945).
 		{"existing table", invalid, "", true, 501, ""},
@@ -136,5 +139,40 @@ func TestJobFailuresAreBounded(t *testing.T) {
 	}
 	if _, ok := j.get("p", strings.Repeat("x", maxJobFailures+10)); !ok || len(j.errs) != maxJobFailures {
 		t.Errorf("kept %d, the newest present = %v", len(j.errs), ok)
+	}
+}
+
+// columnNameCharacterMap V1 and V2 replace each character their rule does
+// not take with "_" (#1326); a name still refused, or two the same once
+// replaced, are not renamed.
+func TestColumnNameCharacterMap(t *testing.T) {
+	for _, c := range []struct{ name, charMap, want string }{
+		{"a b!", "V2", "a b_"},
+		{"a b!", "V1", "a_b_"},
+		{"prix-€", "V2", "prix-_"},
+		{"naïve", "V2", "naïve"},
+		{"naïve", "V1", "na_ve"},
+		{"a.b/c", "V2", "a_b_c"},
+		{"ok_1", "V1", "ok_1"},
+	} {
+		if got := mapColumnName(c.name, c.charMap); got != c.want {
+			t.Errorf("%s under %s = %q, want %q", c.name, c.charMap, got, c.want)
+		}
+	}
+	names, changed, ok := mappedNames([]field{{Name: "a!"}, {Name: "b"}}, "V2", checkColumnName)
+	if !ok || !changed || strings.Join(names, ",") != "a_,b" {
+		t.Errorf("mappedNames: %v %v %v", names, changed, ok)
+	}
+	if _, changed, ok := mappedNames([]field{{Name: "a"}, {Name: "b c"}}, "V2", checkColumnName); !ok || changed {
+		t.Errorf("valid names were renamed: %v %v", changed, ok)
+	}
+	for _, fields := range [][]field{
+		{{Name: "a!"}, {Name: "A?"}},
+		{{Name: "1a"}},
+		{{Name: "_PARTITION!"}},
+	} {
+		if _, _, ok := mappedNames(fields, "V1", checkClassicColumnName); ok {
+			t.Errorf("%v was renamed", fields)
+		}
 	}
 }

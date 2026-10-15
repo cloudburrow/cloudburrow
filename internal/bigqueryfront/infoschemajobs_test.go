@@ -16,7 +16,10 @@ func TestInformationSchemaJobsReferencesAreFound(t *testing.T) {
 		{"SELECT * FROM `p.region-eu.INFORMATION_SCHEMA.JOBS_BY_USER`", []string{"JOBS_BY_USER"}},
 		{"SELECT * FROM `region-us`.INFORMATION_SCHEMA.JOBS_BY_ORGANIZATION", []string{"JOBS_BY_ORGANIZATION"}},
 		{"SELECT * FROM ds.INFORMATION_SCHEMA.JOBS", nil},
-		{"SELECT * FROM `region-us`.INFORMATION_SCHEMA.TABLES", nil},
+		// #1329: the region-qualified dataset views and TABLE_STORAGE.
+		{"SELECT * FROM `region-us`.INFORMATION_SCHEMA.TABLES", []string{"TABLES"}},
+		{"SELECT * FROM `region-us`.INFORMATION_SCHEMA.TABLE_STORAGE", []string{"TABLE_STORAGE"}},
+		{"SELECT * FROM `region-us`.INFORMATION_SCHEMA.KEY_COLUMN_USAGE", nil},
 		{"SELECT '`region-us`.INFORMATION_SCHEMA.JOBS'", nil},
 	} {
 		refs := informationSchemaJobs(c.sql)

@@ -33,6 +33,16 @@ import (
 // (wording UNVERIFIED), as BigQuery refuses a view of another region than
 // the job's. JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION are 501: an instance
 // has neither.
+//
+// The region-qualified forms of the dataset views (regionViews, #1329) are
+// the union of every dataset's rows, and region TABLE_STORAGE a row per
+// table but the counts the emulator keeps nothing faithful of
+// (storageColumns). Measured first: each was 400 "Table not found". The
+// JOBS columns jobsLeftOut stay left out: the INFORMATION_SCHEMA.JOBS page
+// gives them as RECORD with no field list, and the front knows none of
+// their contents (the emulator gives no query plan, timeline, session or
+// BI Engine statistics); destination_table, referenced_tables and labels
+// are read from the job record.
 
 // jobsLeftOut are JOBS columns the front does not give.
 var jobsLeftOut = []string{"bi_engine_statistics", "job_stages", "object_storage_stats", "session_info", "timeline",
@@ -71,7 +81,7 @@ func informationSchemaJobs(sql string) []jobsRef {
 			continue
 		}
 		view := strings.ToUpper(parts[n-1])
-		if _, ok := jobsViews[view]; !ok {
+		if _, ok := jobsViews[view]; !ok && !regionViews[view] && view != "TABLE_STORAGE" {
 			i = next - 1
 			continue
 		}
@@ -275,9 +285,10 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 	}
 	var b strings.Builder
 	last := 0
-	sub := ""
+	subs := map[string]string{}
+	meta := &datasetMeta{}
 	for _, ref := range refs {
-		if !jobsViews[ref.view] {
+		if _, jobs := jobsViews[ref.view]; jobs && !jobsViews[ref.view] {
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: INFORMATION_SCHEMA."+ref.view+
 				": an instance has no folder or organization, so nothing was run.")
 			return
@@ -287,13 +298,31 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 				projectOf(f.base), ref.region, strings.ToUpper(location)))
 			return
 		}
-		if sub == "" {
+		key := ref.view
+		if jobsViews[key] {
+			key = "JOBS"
+		}
+		sub, ok := subs[key]
+		if !ok {
 			var status int
 			var msg string
-			if sub, status, msg = f.jobsRows(r); status != 0 {
-				writeError(w, status, "internalError", msg)
+			switch {
+			case key == "JOBS":
+				sub, status, msg = f.jobsRows(r)
+			case key == "TABLE_STORAGE":
+				sub, status, msg = f.regionRows(r, meta, "TABLE_STORAGE", storageColumns, front.storageRows)
+			default:
+				sub, status, msg = f.regionRows(r, meta, key, "", infoSchemaBuilders[key])
+			}
+			if status != 0 {
+				reason := map[int]string{http.StatusNotFound: "notFound", http.StatusNotImplemented: "notImplemented"}[status]
+				if reason == "" {
+					reason = "internalError"
+				}
+				writeError(w, status, reason, msg)
 				return
 			}
+			subs[key] = sub
 		}
 		b.WriteString(q.Query[last:ref.pos])
 		b.WriteString(sub)
@@ -313,4 +342,118 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 	rec := newRecorder()
 	f.runQuery(rec, r, q, insert)
 	f.clientText(w, rec, client)
+}
+
+// regionViews are the dataset views BigQuery also answers region-qualified
+// (`region-us`.INFORMATION_SCHEMA.TABLES, #1329): the rows of every
+// dataset of the project, all of which are in the instance's one location.
+var regionViews = map[string]bool{"VIEWS": true, "TABLES": true, "COLUMNS": true, "COLUMN_FIELD_PATHS": true,
+	"TABLE_OPTIONS": true, "ROUTINES": true, "PARAMETERS": true, "ROUTINE_OPTIONS": true, "TABLE_SNAPSHOTS": true,
+	"SEARCH_INDEXES": true, "VECTOR_INDEXES": true}
+
+// regionColumns are the row types of regionViews, for a project with no
+// dataset.
+var regionColumns = map[string]string{"VIEWS": viewsColumns, "TABLES": tablesColumns, "COLUMNS": columnsColumns,
+	"COLUMN_FIELD_PATHS": fieldPathsColumns, "TABLE_OPTIONS": tableOptionsColumns, "ROUTINES": routinesColumns,
+	"PARAMETERS": parametersColumns, "ROUTINE_OPTIONS": routineOptionsColumns, "TABLE_SNAPSHOTS": snapshotsColumns,
+	"SEARCH_INDEXES": searchIndexesColumns, "VECTOR_INDEXES": vectorIndexesColumns}
+
+// datasetIDs lists the project's datasets.
+func (f front) datasetIDs(r *http.Request) ([]string, int, string) {
+	var out []string
+	token := ""
+	for {
+		p := "/datasets?all=true&maxResults=1000"
+		if token != "" {
+			p += "&pageToken=" + url.QueryEscape(token)
+		}
+		st, got := f.get(r, p)
+		var list struct {
+			Datasets []struct {
+				DatasetReference struct {
+					DatasetID string `json:"datasetId"`
+				} `json:"datasetReference"`
+			} `json:"datasets"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		if st != http.StatusOK || json.Unmarshal(got, &list) != nil {
+			return nil, http.StatusInternalServerError, "cloudburrow: could not list the datasets: " + errorMessage(got, st)
+		}
+		for _, d := range list.Datasets {
+			out = append(out, d.DatasetReference.DatasetID)
+		}
+		if list.NextPageToken == "" || list.NextPageToken == token {
+			break
+		}
+		token = list.NextPageToken
+	}
+	sort.Strings(out)
+	return out, 0, ""
+}
+
+// regionRows is the subquery of view's rows of every dataset.
+func (f front) regionRows(r *http.Request, meta *datasetMeta, view, columns string,
+	build func(front, *http.Request, string, *datasetMeta) (string, int, string)) (string, int, string) {
+	if columns == "" {
+		columns = regionColumns[view]
+	}
+	datasets, st, msg := f.datasetIDs(r)
+	if st != 0 {
+		return "", st, msg
+	}
+	var subs []string
+	for _, ds := range datasets {
+		sub, st, msg := build(f, r, ds, meta)
+		if st == http.StatusNotFound {
+			continue // deleted meanwhile
+		}
+		if st != 0 {
+			return "", st, msg
+		}
+		subs = append(subs, sub)
+	}
+	switch len(subs) {
+	case 0:
+		return rowsSubquery(columns, nil), 0, ""
+	case 1:
+		return subs[0], 0, ""
+	}
+	return "(SELECT * FROM (" + strings.Join(subs, " UNION ALL ") + "))", 0, ""
+}
+
+// storageColumns are region-qualified TABLE_STORAGE's columns
+// (https://cloud.google.com/bigquery/docs/information-schema-table-storage)
+// but those the emulator keeps no faithful count of, left out: every
+// *_bytes column, total_partitions and storage_last_modified_time (it
+// keeps no time of a table's last write apart from its metadata's).
+// project_number is NULL: an instance has none.
+const storageColumns = "STRUCT<project_id STRING, project_number INT64, table_catalog STRING, table_schema STRING, " +
+	"table_name STRING, creation_time TIMESTAMP, total_rows INT64, deleted BOOL, table_type STRING, " +
+	"managed_table_type STRING, last_metadata_index_refresh_time TIMESTAMP, table_deletion_reason STRING, " +
+	"table_deletion_time TIMESTAMP>"
+
+// storageRows are a dataset's TABLE_STORAGE rows: its tables, snapshots
+// and clones (no view), none deleted (the instance keeps none).
+func (f front) storageRows(r *http.Request, dataset string, m *datasetMeta) (string, int, string) {
+	tables, st, msg := f.tablesOf(r, dataset, m)
+	if st != 0 {
+		return "", st, msg
+	}
+	project := projectOf(f.base)
+	var rows [][]string
+	for _, t := range tables {
+		typ := str(t, "type")
+		if typ != "TABLE" && typ != "SNAPSHOT" && typ != "" {
+			continue
+		}
+		tt, managed := "BASE TABLE", sqlString("NATIVE")
+		if typ == "SNAPSHOT" || t["snapshotDefinition"] != nil {
+			tt, managed = "SNAPSHOT", "NULL"
+		} else if t["cloneDefinition"] != nil {
+			tt = "CLONE"
+		}
+		rows = append(rows, []string{sqlString(project), "NULL", sqlString(project), sqlString(dataset), sqlString(str(t, "tableId")),
+			millisTimestamp(t["creationTime"]), int64Or(t["numRows"]), "FALSE", sqlString(tt), managed, "NULL", "NULL", "NULL"})
+	}
+	return rowsSubquery(storageColumns, rows), 0, ""
 }

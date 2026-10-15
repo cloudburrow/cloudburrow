@@ -7,7 +7,8 @@
 //     and /resumable/upload/storage/v1/, and media under /download/storage/v1/;
 //   - the batch endpoint, /batch/storage/v1;
 //   - the XML API, path-style (/{bucket}/{object}) and virtual-hosted
-//     ({bucket}.<host>).
+//     ({bucket}.<host>);
+//   - the gRPC API, google.storage.v2.Storage, as h2c (grpc.go, #1321).
 //
 // Every JSON API method comes from Google's discovery document. One that is
 // not built yet answers 501 notImplemented naming it, never a stub.
@@ -54,6 +55,9 @@ type Server struct {
 	// relayChannels hands channel messages to a relay (#1290) instead of
 	// POSTing them.
 	relayChannels bool
+	// grpc serves google.storage.v2.Storage (#1321) on the same port, as
+	// h2c.
+	grpc http.Handler
 }
 
 // Options configure a Server.
@@ -170,6 +174,7 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.notifications.delete"] = s.notificationsDelete
 	s.handlers["storage.channels.stop"] = s.channelsStop
 	s.registerACL()
+	s.grpc = newGRPCServer(s)
 	for id := range s.handlers {
 		if methodStatus[id] != built {
 			return nil, fmt.Errorf("%s has a handler but methodStatus does not say it is built", id)
@@ -190,6 +195,10 @@ const (
 )
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if isGRPC(r) {
+		s.grpc.ServeHTTP(w, r)
+		return
+	}
 	defer s.wakeNotifier()
 	defer s.wakeChannels()
 	s.observed(w, r, s.route)
