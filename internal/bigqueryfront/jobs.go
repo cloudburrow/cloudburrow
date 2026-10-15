@@ -58,6 +58,10 @@ type jobBody struct {
 			Quote           *string `json:"quote"`
 			AllowJaggedRows bool    `json:"allowJaggedRows"`
 			NullMarker      *string `json:"nullMarker"`
+			// IgnoreUnknownValues and MaxBadRecords, for a JSON load's
+			// fields outside its columns (#1339, jsonunknown.go).
+			IgnoreUnknownValues bool            `json:"ignoreUnknownValues"`
+			MaxBadRecords       json.RawMessage `json:"maxBadRecords"`
 			// detected is whether the front detected Schema (#1324,
 			// jsondetect.go).
 			detected bool

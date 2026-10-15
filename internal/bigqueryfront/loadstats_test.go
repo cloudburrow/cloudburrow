@@ -319,7 +319,8 @@ func loadStats(t *testing.T, h http.Handler, inserted []byte) map[string]map[str
 // TestJSONLoadReportsCounts (#966): an upload whose records the front does
 // not read reports its rows, counted in the table before and after it
 // (all of them after a WRITE_TRUNCATE), and its data's bytes as one file,
-// and no badRecords, in the jobs.insert answer, jobs.get and jobs.list.
+// and, into a table whose columns it reads each record by for fields
+// outside them (#1339), badRecords 0, in the jobs.insert answer, jobs.get and jobs.list.
 // The body reaches the emulator as it was sent.
 func TestJSONLoadReportsCounts(t *testing.T) {
 	const data = "{\"a\":1}\n{\"a\":2}\n{\"a\":3}\n"
@@ -343,12 +344,17 @@ func TestJSONLoadReportsCounts(t *testing.T) {
 		}
 		for what, load := range loadStats(t, h, w.Body.Bytes()) {
 			want := map[string]any{"outputRows": c.rows, "inputFiles": "1", "inputFileBytes": fmt.Sprint(len(data))}
+			if c.exists { // the table's columns: its records are read
+				want["badRecords"] = "0"
+			} else if _, ok := load["badRecords"]; ok {
+				t.Errorf("%s: %s: statistics.load.badRecords reported: %v", c.name, what, load)
+			}
 			for k, v := range want {
 				if load[k] != v {
 					t.Errorf("%s: %s: statistics.load.%s = %v, want %v", c.name, what, k, load[k], v)
 				}
 			}
-			for _, k := range []string{"badRecords", "outputBytes"} {
+			for _, k := range []string{"outputBytes"} {
 				if _, ok := load[k]; ok {
 					t.Errorf("%s: %s: statistics.load.%s reported: %v", c.name, what, k, load)
 				}
@@ -402,9 +408,12 @@ func TestCloudStorageLoadReportsCounts(t *testing.T) {
 		files any
 		bytes any
 		read  bool
+		bad   any
 	}{
-		{"with Cloud Storage", []Option{WithStorage(srv.URL)}, `"gs://b/d/*.json","gs://b/x.json"`, "4", "3", fmt.Sprint(3 + 6 + 3), true},
-		{"without Cloud Storage", nil, `"gs://b/d/one.json"`, "4", nil, nil, false},
+		// Read, its records are checked for fields outside the schema
+		// (#1339): it reports badRecords.
+		{"with Cloud Storage", []Option{WithStorage(srv.URL)}, `"gs://b/d/*.json","gs://b/x.json"`, "4", "3", fmt.Sprint(3 + 6 + 3), true, "0"},
+		{"without Cloud Storage", nil, `"gs://b/d/one.json"`, "4", nil, nil, false, nil},
 	} {
 		emu := &rowsEmulator{rows: 1, exists: true, gsRows: 4}
 		h := Wrap(loadJobsEmulator(emu), c.opts...)
@@ -415,7 +424,7 @@ func TestCloudStorageLoadReportsCounts(t *testing.T) {
 			continue
 		}
 		for what, load := range loadStats(t, h, w.Body.Bytes()) {
-			if load["outputRows"] != c.rows || load["inputFiles"] != c.files || load["inputFileBytes"] != c.bytes || load["badRecords"] != nil {
+			if load["outputRows"] != c.rows || load["inputFiles"] != c.files || load["inputFileBytes"] != c.bytes || load["badRecords"] != c.bad {
 				t.Errorf("%s: %s: statistics.load %v, want %s rows, %v files of %v bytes", c.name, what, load, c.rows, c.files, c.bytes)
 			}
 		}

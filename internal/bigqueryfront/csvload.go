@@ -191,10 +191,11 @@ func (f front) reportFailure(req *http.Request, next http.Handler, job jobBody, 
 			_ = json.Unmarshal(rec.body.Bytes(), &got)
 			if msg, failed := queryFailure(rec, got); failed {
 				e = &loadDataError{code: http.StatusNotImplemented, reason: "notImplemented", msg: "Not implemented here: " +
-					"a CSV load with maxBadRecords that the emulator behind CloudBurrow failed (" + msg + "). BigQuery " +
+					"a load with maxBadRecords that the emulator behind CloudBurrow failed (" + msg + "). BigQuery " +
 					"leaves out up to maxBadRecords bad records, and the one the emulator failed on may be one of them, " +
 					"but the emulator fails a load on its first bad value (measured). CloudBurrow leaves out the records " +
-					"it can tell are bad (the wrong number of values, or no value for a REQUIRED column), not a value the " +
+					"it can tell are bad (a CSV record with the wrong number of values, or no value for a REQUIRED column; a " +
+					"JSON record with a field outside the schema, #1339), not a value the " +
 					"column's type refuses. Nothing was loaded."}
 			}
 		}
