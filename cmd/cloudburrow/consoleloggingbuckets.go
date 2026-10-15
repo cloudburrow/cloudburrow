@@ -160,8 +160,12 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 		}
 		for _, v := range resp.GetViews() {
 			id := v.GetName()[strings.LastIndex(v.GetName(), "/")+1:]
-			views.Items = append(views.Items, console.Resource{Name: id, Fields: map[string]string{
-				"Filter": orDash(v.GetFilter()), "Description": orDash(v.GetDescription())}})
+			row := console.Resource{Name: id, Fields: map[string]string{
+				"Filter": orDash(v.GetFilter()), "Description": orDash(v.GetDescription())}}
+			if viewChangeable(b, id) {
+				row.Actions = viewRowActions(v) // #1283
+			}
+			views.Items = append(views.Items, row)
 		}
 		views.Total = len(views.Items)
 	}
