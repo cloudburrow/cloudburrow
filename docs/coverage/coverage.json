@@ -182,7 +182,8 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
       {
@@ -190,7 +191,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
       {
@@ -201,7 +203,8 @@
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ],
         "unverified": [
           {
@@ -216,7 +219,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
       {
@@ -225,7 +229,8 @@
         "tests": [
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
       {
@@ -233,7 +238,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
       {
@@ -284,7 +290,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
-          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy"
+          "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
       {
@@ -1545,6 +1552,7 @@
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens",
+          "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1554,6 +1562,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1564,6 +1573,7 @@
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens",
+          "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -1607,6 +1617,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
+          "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       }
@@ -2060,7 +2071,8 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
-          "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules"
+          "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
+          "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
       },
       {
@@ -2068,7 +2080,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
-          "test/compat/pubsub_test.go:219 TestPubSubDeleteTopic"
+          "test/compat/pubsub_test.go:219 TestPubSubDeleteTopic",
+          "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
       },
       {
@@ -2085,7 +2098,8 @@
         "tests": [
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:89 TestPubSubRESTOverH2CUpgrade",
-          "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic"
+          "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic",
+          "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
       },
       {
@@ -2129,7 +2143,8 @@
         "tests": [
           "test/compat/pubsubadmin_test.go:72 TestPubSubUpdateTopic",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
-          "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels"
+          "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels",
+          "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
       },
       {
@@ -2146,14 +2161,16 @@
         "tests": [
           "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad",
-          "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas"
+          "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas",
+          "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/DeleteSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
+          "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
       },
       {
@@ -2169,7 +2186,8 @@
         "tests": [
           "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
           "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas",
-          "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic"
+          "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic",
+          "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ],
         "unverified": [
           {
@@ -2462,14 +2480,16 @@
         "method": "storage.bucketAccessControls.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:40 TestStorageBucketACL"
+          "test/compat/storageacl_test.go:40 TestStorageBucketACL",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
         "method": "storage.bucketAccessControls.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
@@ -2477,7 +2497,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageacl_test.go:163 TestStorageACLUniformAccess",
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
@@ -2492,7 +2513,8 @@
         "method": "storage.bucketAccessControls.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
@@ -2692,21 +2714,24 @@
         "method": "storage.defaultObjectAccessControls.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
+          "test/compat/storageacl_test.go:84 TestStorageObjectACL",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
         "method": "storage.defaultObjectAccessControls.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
         "method": "storage.defaultObjectAccessControls.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
@@ -2721,7 +2746,8 @@
         "method": "storage.defaultObjectAccessControls.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
@@ -2802,7 +2828,8 @@
         "method": "storage.managedFolders.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
         "unverified": [
           {
@@ -2816,7 +2843,8 @@
         "method": "storage.managedFolders.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
@@ -2824,14 +2852,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:340 TestConsolePermissionsOnAManagedFolder",
-          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
         "method": "storage.managedFolders.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
+          "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
         "unverified": [
           {
@@ -2854,7 +2884,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:340 TestConsolePermissionsOnAManagedFolder",
-          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
+          "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
         "unverified": [
           {
@@ -2913,21 +2944,24 @@
         "method": "storage.objectAccessControls.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
+          "test/compat/storageacl_test.go:84 TestStorageObjectACL",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
         "method": "storage.objectAccessControls.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
         "method": "storage.objectAccessControls.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {
@@ -2941,7 +2975,8 @@
         "method": "storage.objectAccessControls.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:217 TestStorageACLMethods"
+          "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
       {

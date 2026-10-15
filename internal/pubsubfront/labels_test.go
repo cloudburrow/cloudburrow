@@ -202,6 +202,28 @@ func TestRESTPatchSetsLabels(t *testing.T) {
 	}
 }
 
+// #1304: a PATCH of a topic naming no labels, its mask in the URL in
+// camelCase as Terraform's google provider sends it
+// (?updateMask=schemaSettings), reaches the emulator with the mask in the
+// body alone, in snake_case, which the emulator applies.
+func TestRESTPatchTopicSendsTheMaskInTheBody(t *testing.T) {
+	up := newRESTUpstream(t)
+	fx := newFixtureREST(t, up.addr())
+	fx.topic(t, "schema")
+	topicPath := "/v1/projects/" + project + "/topics/schema"
+	code, _ := fx.rest(t, http.MethodPatch, topicPath+"?alt=json&updateMask=schemaSettings",
+		`{"topic":{"labels":{"goog-terraform-provisioned":"true"},"schemaSettings":{"schema":"s","encoding":"BINARY"}}}`)
+	calls := up.calls()
+	var sent map[string]any
+	if len(calls) > 0 {
+		_ = json.Unmarshal(calls[len(calls)-1].body, &sent)
+	}
+	if code != http.StatusOK || len(calls) != 1 || calls[0].query != "alt=json" || sent["updateMask"] != "schema_settings" ||
+		!strings.Contains(string(calls[0].body), "BINARY") {
+		t.Errorf("PATCH schemaSettings = %d, sent %v; want schema_settings in the body and alt=json alone in the query", code, calls)
+	}
+}
+
 // #949: kept labels survive a restart of the front alone, and a deleted
 // resource's are dropped from the file.
 func TestStateKeepsLabels(t *testing.T) {

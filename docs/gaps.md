@@ -225,7 +225,7 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 | Gap | Why open | Size |
 |---|---|---|
 | Functions in languages other than Go (#1303) | not built yet | L |
-| Terraform resources beyond the verified set (#1304) | not built yet | L |
+| Terraform resources beyond the verified set (#1304): Firestore, Spanner and Bigtable resources (the wrapper sets no endpoint for them), Logging bucket config and linked dataset, BigQuery dataset access and row access policies | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets) | L |
 
 ## Console
 
