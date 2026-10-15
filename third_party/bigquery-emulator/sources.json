@@ -59,7 +59,8 @@
         "patches/googlesqlite/0022-default-time-zone-utc.patch",
         "patches/googlesqlite/0023-cast-format.patch",
         "patches/googlesqlite/0024-cast-to-string-forms.patch",
-        "patches/googlesqlite/0025-unnest-infinity.patch"
+        "patches/googlesqlite/0025-unnest-infinity.patch",
+        "patches/googlesqlite/0026-int-float-comparisons.patch"
       ]
     },
     {

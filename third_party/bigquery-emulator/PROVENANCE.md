@@ -9,8 +9,8 @@ of the emulator or its dependencies is committed here, only the pins and the pat
 
 | Module | Version | Commit the tag names | Licence | Changed |
 |---|---|---|---|---|
-| [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | eleven patches |
-| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT (one file Apache-2.0, below) | twenty-five patches |
+| [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | twelve patches |
+| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT (one file Apache-2.0, below) | twenty-six patches |
 | [`github.com/goccy/go-googlesql`](https://github.com/goccy/go-googlesql) | v0.3.0 | `eb229fca73e7dca3fc9e8e8be733d14a565f912c` | MIT | two patches |
 | every other module the emulator links | v0.8.1's `go.sum` | | each its own | no |
 
@@ -102,6 +102,7 @@ GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy github.com/goccy/bigq
 | [googlesqlite 0023](patches/googlesqlite/0023-cast-format.patch) | CAST's FORMAT clause and AT TIME ZONE were dropped: CAST(x AS STRING FORMAT '...') ignored the format and CAST('...' AS DATE/DATETIME/TIME/TIMESTAMP/BYTES FORMAT '...') failed or ignored it. BigQuery's documented format elements now work for BYTES to and from STRING, DATE/DATETIME/TIME/TIMESTAMP to and from STRING (a TIMESTAMP in the AT TIME ZONE zone, else UTC) and INT64/FLOAT64/NUMERIC/BIGNUMERIC to STRING; anything else is an error (#1194, #1195) | CloudBurrow's, MIT |
 | [googlesqlite 0024](patches/googlesqlite/0024-cast-to-string-forms.patch) | A column cast to STRING at run time used the wire form, not BigQuery's: DATETIME had a T ("2018-12-03T15:30:00"), DATETIME, TIME and INTERVAL sub-second digits were not in groups of three, FLOAT64 NaN and infinities were "NaN"/"+Inf"/"-Inf", and BYTES were base64. They now match the analyzer's folding of a literal, which is BigQuery's (#1202) | CloudBurrow's, MIT |
 | [googlesqlite 0025](patches/googlesqlite/0025-unnest-infinity.patch) | UNNEST of an array holding an infinite FLOAT64 failed "json: unsupported value: +Inf": googlesqlite_decode_array wrote the elements into JSON as bare doubles. An infinity now goes in the value envelope there too, as patch 0004 does inside an ARRAY or STRUCT (#1204) | CloudBurrow's, MIT |
+| [googlesqlite 0026](patches/googlesqlite/0026-int-float-comparisons.patch) | An INT64 compared with a FLOAT64 truncated the float to an int64: 2 = 2.5 was true, and an infinity became MinInt64 on amd64 and MaxInt64 on arm64, so MAX over an UNNEST of [+Inf, 2.0] answered 2 on amd64 (#1235). Compared as FLOAT64, as BigQuery does. | `value_int_float_compare_test.go`; `inf_unnest_test.go` on linux/amd64 |
 | [go-googlesql 0001](patches/go-googlesql/0001-unsigned-wasm-addresses.patch) | Once the engine's WebAssembly heap passed 2 GiB, every call panicked "slice bounds out of range", addressing it with signed 32-bit offsets (#989) | CloudBurrow's, MIT |
 | [go-googlesql 0002](patches/go-googlesql/0002-utc-time-zone.patch) | The bindings could not build a TimeZone, so the analyzer's default zone could not be set; adds UTCTimeZone() (#1189) | CloudBurrow's, MIT |
 
