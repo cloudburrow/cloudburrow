@@ -180,7 +180,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The Cloud Run adapter is ours even though the execution engine is the
 	// cluster's, so it also runs in this process.
 	runSvc := newRunService(cfg)
-	runSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+	if runSvc != nil { // nil without Cloud Run
+		runSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+	}
 	runSvc.register(coord)
 
 	// Secret Manager has no upstream emulator either, so it too is served
