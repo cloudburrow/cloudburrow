@@ -57,12 +57,13 @@ import (
 // The counts are exact as long as nothing else writes the table while the
 // statement runs: the emulator serves one instance's clients, and the
 // front does not lock the table. A DML statement inside a script is not
-// counted: its job reports what the emulator reports (#1028). BigQuery
-// runs a script as a SCRIPT parent job with a child job per statement,
-// each with its own statistics; the pinned emulator (v0.8.1,
+// counted when the emulator runs the script whole: its job reports what
+// the emulator reports (#1028), as the pinned emulator (v0.8.1,
 // server/handler.go) makes no child jobs and sets no parentJobId,
-// numChildJobs, numDmlAffectedRows or dmlStats, answering every query
-// job statementType SELECT, so there are no child statistics to report.
+// numChildJobs, numDmlAffectedRows or dmlStats. A script the front
+// carries out a statement at a time is a SCRIPT parent job whose
+// statements are child jobs, each DML one counted so (scriptjobs.go,
+// #1353).
 
 // dmlStmt is a lone DML statement.
 type dmlStmt struct {

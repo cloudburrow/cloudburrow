@@ -24,8 +24,8 @@ import (
 // (https://cloud.google.com/bigquery/docs/information-schema-jobs) but
 // those whose STRUCTs Google does not document (jobsLeftOut). Every user
 // is the instance's one, so JOBS_BY_USER is JOBS. The jobs are the
-// project's top-level ones (as jobs.list without parentJobId lists them),
-// and not the query reading the view, which has no record yet.
+// project's top-level ones and the child jobs of scripts (scriptjobs.go,
+// #1353), and not the query reading the view, which has no record yet.
 //
 // The instance's jobs are in one location, US (the emulator gives jobs and
 // datasets none; BigQuery's default). A region other than the query's
@@ -244,7 +244,7 @@ func (f front) jobsRows(r *http.Request) (string, int, string) {
 		if token != "" {
 			q.Set("pageToken", token)
 		}
-		req := r.Clone(r.Context())
+		req := r.Clone(withAllJobLevels(r.Context())) // children too (#1353)
 		u := *r.URL
 		u.Path, u.RawPath = "", ""
 		p := f.base + "/jobs"
@@ -296,6 +296,11 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 		if region := strings.ToLower(strings.TrimPrefix(strings.ToLower(ref.region), "region-")); region != location {
 			writeError(w, http.StatusNotFound, "notFound", fmt.Sprintf("Not found: Dataset %s:%s was not found in location %s",
 				projectOf(f.base), ref.region, strings.ToUpper(location)))
+			return
+		}
+		if ref.view == "OBJECT_PRIVILEGES" && !namesObjectName(q.Query) { // #1355, infoschemaprivileges.go
+			f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery",
+				Message: "Queries of INFORMATION_SCHEMA.OBJECT_PRIVILEGES must filter on object_name (and object_schema for a table or view)"})
 			return
 		}
 		key := ref.view

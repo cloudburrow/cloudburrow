@@ -24,7 +24,7 @@ import (
 // SQL, as TABLE_OPTIONS writes a table's. MATERIALIZED_VIEWS is always
 // empty: the engine makes no materialized view.
 //
-// Not built (501): OBJECT_PRIVILEGES, SCHEMATA_LINKS.
+// OBJECT_PRIVILEGES and SCHEMATA_LINKS, region-qualified: infoschemaprivileges.go (#1355).
 
 const schemataOptionsColumns = "STRUCT<catalog_name STRING, schema_name STRING, option_name STRING, " +
 	"option_type STRING, option_value STRING>"
