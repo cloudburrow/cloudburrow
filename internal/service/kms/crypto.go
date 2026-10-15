@@ -53,6 +53,9 @@ func (s *Server) encryptTarget(name string) (keyVersion, error) {
 	if err := s.load(dbKey(keyPrefix, keyName), &k, "CryptoKey", keyName); err != nil {
 		return keyVersion{}, err
 	}
+	if err := wantPurpose(k, kmspb.CryptoKey_ENCRYPT_DECRYPT); err != nil {
+		return keyVersion{}, err
+	}
 	if number == 0 {
 		if k.Primary == 0 {
 			return keyVersion{}, apierror.Wrap(apierror.FailedPrecondition("CryptoKey %s has no primary version to encrypt with", keyName))
@@ -144,6 +147,9 @@ func (s *Server) Decrypt(_ context.Context, req *kmspb.DecryptRequest) (*kmspb.D
 	}
 	var k cryptoKey
 	if err := s.load(dbKey(keyPrefix, req.GetName()), &k, "CryptoKey", req.GetName()); err != nil {
+		return nil, err
+	}
+	if err := wantPurpose(k, kmspb.CryptoKey_ENCRYPT_DECRYPT); err != nil {
 		return nil, err
 	}
 	number, err := parseVersion(ct)

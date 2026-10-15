@@ -191,3 +191,111 @@ func TestKMSEditKeyRotationThroughTheForm(t *testing.T) {
 		t.Errorf("the reopened dialog shows rotation period %q, next rotation time %q", pr, nr)
 	}
 }
+
+// TestKMSSignAndVerifyThroughTheForm (#1212): Create key on a ring's page
+// offers the purpose and algorithm; an EC signing key created there has a
+// version page offering Sign, Verify and Get public key, and the signature
+// Sign shows in its dialog is Valid to Verify, which checks it against the
+// public key with standard crypto.
+func TestKMSSignAndVerifyThroughTheForm(t *testing.T) {
+	needService(t, "kms")
+	p := open(t)
+	project := uniqueProject(t)
+	ring := "projects/" + project + "/locations/global/keyRings/browser-sign"
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/kms?project="+project,
+		`{"keyRingId":"browser-sign","location":"global"}`); code != http.StatusOK {
+		t.Fatalf("create a key ring through the console API = %d: %s", code, body)
+	}
+	p.navigate("/kms/keyrings?project=" + project)
+	p.clickText("#view tbody a", ring)
+	p.clickText("#view .page-actions button", "Create key")
+	p.waitFor(`document.querySelector(".modal.is-open #f-purpose") !== null`)
+	var purposes []string
+	p.eval(`[...document.querySelector(".modal.is-open #f-purpose").options].map((o) => o.value)`, &purposes)
+	if !strings.Contains(strings.Join(purposes, ","), "ASYMMETRIC_SIGN") {
+		t.Fatalf("Create key offers purposes %v", purposes)
+	}
+	setField(p, ".modal.is-open", "f-cryptoKeyId", "signer")
+	setField(p, ".modal.is-open", "f-purpose", "ASYMMETRIC_SIGN")
+	setField(p, ".modal.is-open", "f-algorithm", "EC_SIGN_P256_SHA256")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+
+	p.clickText("#view tbody a", "signer")
+	p.clickText("#view tbody a", "1")
+	sign := func(action string, values map[string]string) string {
+		p.waitFor(`document.querySelector(".modal") === null`)
+		p.clickText("#view .page-actions button", action)
+		p.waitFor(`document.querySelector(".modal.is-open button[type=\"submit\"]") !== null`)
+		for k, v := range values {
+			p.waitFor(fmt.Sprintf(`document.querySelector(".modal.is-open #f-%s") !== null`, k))
+			setField(p, ".modal.is-open", "f-"+k, v)
+		}
+		p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+		p.waitFor(`document.querySelector("#action-result-table") !== null`)
+		var cells []string
+		p.eval(`[...document.querySelectorAll("#action-result-table td")].map((c) => c.textContent)`, &cells)
+		p.run(chromedp.Click(`#action-result .modal-actions button`, chromedp.ByQuery))
+		if len(cells) < 2 {
+			t.Fatalf("%s answered %v", action, cells)
+		}
+		return cells[1]
+	}
+	sig := sign("Sign", map[string]string{"data": "hello"})
+	if got := sign("Verify", map[string]string{"data": "hello", "signature": sig}); got != "Valid" {
+		t.Errorf("Verify of the signature Sign showed = %q, want Valid", got)
+	}
+	if got := sign("Get public key", map[string]string{"format": "PEM"}); !strings.HasPrefix(got, "-----BEGIN PUBLIC KEY-----") {
+		t.Errorf("Get public key showed %q", got)
+	}
+}
+
+// TestKMSImportJobAndVersionThroughTheForm (#1219): Create import job on a
+// ring's page makes a job the Import jobs tab lists ACTIVE, whose page shows
+// the wrapping public key; Import version on a MAC key's page, given plain
+// key material as base64, wraps and imports it, and the key's page lists the
+// new version ENABLED.
+func TestKMSImportJobAndVersionThroughTheForm(t *testing.T) {
+	needService(t, "kms")
+	p := open(t)
+	project := uniqueProject(t)
+	ring := "projects/" + project + "/locations/global/keyRings/browser-import"
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/kms?project="+project,
+		`{"keyRingId":"browser-import","location":"global"}`); code != http.StatusOK {
+		t.Fatalf("create a key ring through the console API = %d: %s", code, body)
+	}
+	b, _ := json.Marshal(map[string]any{"Path": []string{ring}, "Action": "createkey",
+		"Values": map[string]string{"cryptoKeyId": "mac", "purpose": "MAC", "algorithm": "HMAC_SHA256"}})
+	if code, body := consoleDo(t, http.MethodPost, "/api/actions/kms?project="+project, string(b)); code != http.StatusOK {
+		t.Fatalf("create a MAC key through the console API = %d: %s", code, body)
+	}
+	p.navigate("/kms/keyrings?project=" + project)
+	p.clickText("#view tbody a", ring)
+	p.clickText("#view .page-actions button", "Create import job")
+	p.waitFor(`document.querySelector(".modal.is-open #f-importJobId") !== null`)
+	setField(p, ".modal.is-open", "f-importJobId", "job")
+	setField(p, ".modal.is-open", "f-importMethod", "RSA_OAEP_3072_SHA256_AES_256")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+
+	p.clickText("#view .tab-strip .tab", "Import jobs")
+	p.clickText("#view tbody a", "job")
+	p.clickText("#view .tab-strip .tab", "Wrapping public key")
+	p.waitFor(`document.querySelector("#view").textContent.includes("-----BEGIN PUBLIC KEY-----")`)
+
+	p.navigate("/kms/keyrings?project=" + project)
+	p.clickText("#view tbody a", ring)
+	p.clickText("#view tbody a", "mac")
+	p.clickText("#view .page-actions button", "Import version")
+	p.waitFor(`document.querySelector(".modal.is-open #f-material") !== null`)
+	var alg string
+	p.eval(`document.querySelector(".modal.is-open #f-algorithm").value`, &alg)
+	if alg != "HMAC_SHA256" {
+		t.Errorf("Import version's algorithm defaults to %q; want the key's HMAC_SHA256", alg)
+	}
+	setField(p, ".modal.is-open", "f-format", "PLAIN")
+	setField(p, ".modal.is-open", "f-material", "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("ENABLED") && r.querySelector("a") && r.querySelector("a").textContent === "2")`)
+}

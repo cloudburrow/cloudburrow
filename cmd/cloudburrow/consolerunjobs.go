@@ -64,10 +64,6 @@ const runJobNotOffered = "Not offered, because the Cloud Run adapter refuses or 
 	"service accounts, VPC access, " +
 	"volumes, binary authorization, and triggers."
 
-// runTasksNotOffered is the execution page's account of its task list.
-const runTasksNotOffered = "Not offered: google.cloud.run.v2.Tasks (GetTask, ListTasks) is not served " +
-	"by this instance. The counts above are the execution's own."
-
 func (p runJobsProvider) endpoint() string {
 	if p.runAddr == nil {
 		return ""
@@ -127,6 +123,19 @@ func (p runJobsProvider) clients(ctx context.Context) (*runclient.JobsClient, *r
 		return nil, nil, fmt.Errorf("connect to Cloud Run: %w", err)
 	}
 	return jc, xc, nil
+}
+
+// tasksClient dials the adapter's Tasks service (#1223).
+func (p runJobsProvider) tasksClient(ctx context.Context) (*runclient.TasksClient, error) {
+	if p.endpoint() == "" {
+		return nil, errors.New("the Cloud Run adapter is not running")
+	}
+	tc, err := runclient.NewTasksClient(ctx, option.WithEndpoint(p.endpoint()), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		return nil, fmt.Errorf("connect to Cloud Run: %w", err)
+	}
+	return tc, nil
 }
 
 // withClients runs fn with both clients and closes them after.
@@ -690,10 +699,11 @@ func runJobEditForm(job *runpb.Job) *console.EditForm {
 
 // --- detail pages -------------------------------------------------------
 
-// Detail implements console.Driller: a job, or one of its executions.
+// Detail implements console.Driller: a job, one of its executions, or one
+// of an execution's tasks.
 func (p runJobsProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
-	if len(path) > 2 {
-		return console.DeeperThan(2, path), nil
+	if len(path) > 3 {
+		return console.DeeperThan(3, path), nil
 	}
 	project = p.project(project)
 	if project == "" {
@@ -701,6 +711,20 @@ func (p runJobsProvider) Detail(ctx context.Context, project string, path []stri
 	}
 	var d console.Detail
 	err := p.withClients(ctx, func(jc *runclient.JobsClient, xc *runclient.ExecutionsClient) error {
+		if len(path) == 3 {
+			tc, err := p.tasksClient(ctx)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tc.Close() }()
+			task, err := tc.GetTask(ctx, &runpb.GetTaskRequest{
+				Name: p.executionName(project, path[0], path[1]) + "/tasks/" + path[2]})
+			if err != nil {
+				return err
+			}
+			d = p.taskDetail(ctx, task)
+			return nil
+		}
 		if len(path) == 2 {
 			e, err := xc.GetExecution(ctx, &runpb.GetExecutionRequest{Name: p.executionName(project, path[0], path[1])})
 			if err != nil {
@@ -857,7 +881,6 @@ func (p runJobsProvider) executionDetail(ctx context.Context, e *runpb.Execution
 	if c := completedCondition(e); c.GetState() == runpb.Condition_CONDITION_FAILED && c.GetMessage() != "" {
 		summary = append(summary, console.Property{Label: "Failure", Value: c.GetMessage()})
 	}
-	summary = append(summary, console.Property{Label: "Task list", Value: runTasksNotOffered})
 
 	conditions := console.Listing{
 		Columns: []string{"State", "Reason", "Message", "Changed"}, NameColumn: "Condition",
@@ -883,9 +906,10 @@ func (p runJobsProvider) executionDetail(ctx context.Context, e *runpb.Execution
 	return console.Detail{
 		Summary: summary,
 		Sections: []console.Section{
+			p.tasks(ctx, e),
 			{ID: "conditions", Label: "Conditions", Listing: conditions},
 			executionConfiguration(e),
-			p.executionLogs(ctx, e),
+			p.executionLogs(ctx, e, ""),
 		},
 	}
 }
@@ -991,7 +1015,10 @@ const runLogTail = 200
 // console reads Cloud Logging for this tab. The console's own log follower
 // does not serve here, since a task that finishes between two of its sweeps
 // is never followed.
-func (p runJobsProvider) executionLogs(ctx context.Context, e *runpb.Execution) console.Section {
+//
+// index, when set, keeps only the pods of the task with that index, as a
+// task's page shows them.
+func (p runJobsProvider) executionLogs(ctx context.Context, e *runpb.Execution, index string) console.Section {
 	sec := console.Section{ID: "logs", Label: "Logs", Kind: console.KindText,
 		Note: fmt.Sprintf("The last %d lines of each task's pod, read from the cluster with kubectl logs.", runLogTail)}
 	execID := lastSegment(e.GetName())
@@ -1026,6 +1053,9 @@ func (p runJobsProvider) executionLogs(ctx context.Context, e *runpb.Execution) 
 	var b strings.Builder
 	for _, pod := range list.Items {
 		task := unsetAs(pod.Metadata.Annotations["batch.kubernetes.io/job-completion-index"], "?")
+		if index != "" && task != index {
+			continue
+		}
 		fmt.Fprintf(&b, "── Task %s · pod %s · %s ──\n", task, pod.Metadata.Name, unsetAs(pod.Status.Phase, "Unknown"))
 		out, err := kubeRunner(p.kubeconfig, "").Do(ctx, "", "-n", p.namespace, "logs", pod.Metadata.Name,
 			"--all-containers", "--tail", fmt.Sprint(runLogTail))
@@ -1041,6 +1071,124 @@ func (p runJobsProvider) executionLogs(ctx context.Context, e *runpb.Execution) 
 	}
 	sec.Text = strings.TrimRight(b.String(), "\n")
 	return sec
+}
+
+// --- tasks (#1223) ---------------------------------------------------------
+
+// taskStatus is one word for where a task is.
+func taskStatus(t *runpb.Task) string {
+	var c *runpb.Condition
+	for _, x := range t.GetConditions() {
+		if x.GetType() == "Completed" {
+			c = x
+		}
+	}
+	switch {
+	case c.GetState() == runpb.Condition_CONDITION_SUCCEEDED:
+		return "Succeeded"
+	case c.GetState() == runpb.Condition_CONDITION_FAILED && c.GetExecutionReason() == runpb.Condition_CANCELLED:
+		return "Cancelled"
+	case c.GetState() == runpb.Condition_CONDITION_FAILED:
+		return "Failed"
+	case t.GetStartTime() != nil:
+		return "Running"
+	}
+	return "Pending"
+}
+
+// exitCodeText is a task's last attempt's exit code, or a dash before one
+// has finished.
+func exitCodeText(t *runpb.Task) string {
+	if t.GetLastAttemptResult() == nil {
+		return "-"
+	}
+	return fmt.Sprint(t.GetLastAttemptResult().GetExitCode())
+}
+
+// tasks is an execution's Tasks section, one row per task index, read
+// through google.cloud.run.v2.Tasks.
+func (p runJobsProvider) tasks(ctx context.Context, e *runpb.Execution) console.Section {
+	out := console.Listing{
+		Columns:    []string{"Index", "Retries", "Exit code", "Started", "Finished"},
+		NameColumn: "Task", Noun: "tasks", AlwaysStatus: true, RowsOpenable: true,
+	}
+	sec := console.Section{ID: "tasks", Label: "Tasks", Listing: out}
+	tc, err := p.tasksClient(ctx)
+	if err != nil {
+		sec.Listing.Unavailable = apiMessage(err)
+		return sec
+	}
+	defer func() { _ = tc.Close() }()
+	it := tc.ListTasks(ctx, &runpb.ListTasksRequest{Parent: e.GetName()})
+	for {
+		t, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			sec.Listing.Unavailable = apiMessage(err)
+			return sec
+		}
+		sec.Listing.Items = append(sec.Listing.Items, console.Resource{
+			Name: lastSegment(t.GetName()), Status: taskStatus(t),
+			Fields: map[string]string{
+				"Index": fmt.Sprint(t.GetIndex()), "Retries": fmt.Sprint(t.GetRetried()),
+				"Exit code": exitCodeText(t), "Started": stampAge(t.GetStartTime()), "Finished": stampAge(t.GetCompletionTime()),
+			},
+		})
+	}
+	sec.Listing.Total = len(sec.Listing.Items)
+	return sec
+}
+
+// taskDetail is one task's page: its state, attempts and last result, its
+// conditions, and its pods' logs.
+func (p runJobsProvider) taskDetail(ctx context.Context, t *runpb.Task) console.Detail {
+	res := t.GetLastAttemptResult()
+	summary := stored(
+		console.Property{Label: "Status", Value: taskStatus(t)},
+		console.Property{Label: "Execution", Value: lastSegment(t.GetExecution())},
+		console.Property{Label: "Job", Value: lastSegment(t.GetJob())},
+		console.Property{Label: "Index", Value: fmt.Sprint(t.GetIndex())},
+		console.Property{Label: "Retries", Value: fmt.Sprintf("%d of %d", t.GetRetried(), t.GetMaxRetries())},
+		console.Property{Label: "Exit code", Value: exitCodeText(t)},
+		console.Property{Label: "Scheduled", Value: unsetAs(stampText(t.GetScheduledTime()), "Not scheduled yet")},
+		console.Property{Label: "Started", Value: unsetAs(stampText(t.GetStartTime()), "Not started yet")},
+		console.Property{Label: "Finished", Value: unsetAs(stampText(t.GetCompletionTime()), "Not finished")},
+		console.Property{Label: "Timeout", Value: timeoutText(t.GetTimeout())},
+	)
+	if res.GetTermSignal() != 0 {
+		summary = append(summary, console.Property{Label: "Signal", Value: fmt.Sprint(res.GetTermSignal())})
+	}
+	if msg := res.GetStatus().GetMessage(); msg != "" {
+		summary = append(summary, console.Property{Label: "Failure", Value: msg})
+	}
+	conditions := console.Listing{
+		Columns: []string{"State", "Reason", "Message", "Changed"}, NameColumn: "Condition",
+		Noun: "conditions", AlwaysStatus: true,
+	}
+	for _, c := range t.GetConditions() {
+		reason := ""
+		if r := c.GetExecutionReason(); r != runpb.Condition_EXECUTION_REASON_UNDEFINED {
+			reason = r.String()
+		}
+		conditions.Items = append(conditions.Items, console.Resource{
+			Name: c.GetType(), Status: conditionState(c.GetState()),
+			Fields: map[string]string{
+				"State": conditionState(c.GetState()), "Reason": orDash(reason),
+				"Message": orDash(c.GetMessage()), "Changed": orDash(stampText(c.GetLastTransitionTime())),
+			},
+		})
+	}
+	conditions.Total = len(conditions.Items)
+	return console.Detail{
+		Summary: summary,
+		Sections: []console.Section{
+			{ID: "conditions", Label: "Conditions", Listing: conditions},
+			{ID: "containers", Label: "Containers", Kind: console.KindProperties, Groups: containerGroups(t.GetContainers())},
+			p.executionLogs(ctx, &runpb.Execution{Name: t.GetExecution()}, fmt.Sprint(t.GetIndex())),
+		},
+	}
 }
 
 // --- quoting ----------------------------------------------------------------

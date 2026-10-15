@@ -230,6 +230,9 @@ type knownFunctions struct {
 	// defs are their definitions, as bigquery Routine resources, by
 	// project/dataset and lower-case name (routinedefs.go, #1177).
 	defs map[string]map[string]json.RawMessage
+	// procs are the stored procedures, by project/dataset and name
+	// (procedures.go, #1217): the front alone keeps them.
+	procs map[string]map[string]json.RawMessage
 	// started is when the front started, in Unix milliseconds; scanned,
 	// the projects whose jobs from before it were read (scan).
 	started int64
@@ -296,6 +299,7 @@ func (k *knownFunctions) forget(project, dataset string) {
 	defer k.mu.Unlock()
 	delete(k.funcs, project+"/"+dataset)
 	delete(k.defs, project+"/"+dataset)
+	delete(k.procs, project+"/"+dataset)
 	k.saveLocked()
 }
 

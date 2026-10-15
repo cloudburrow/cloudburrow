@@ -52,9 +52,9 @@ func TestKMSCreatesOverREST(t *testing.T) {
 	var msgs []string
 	for _, variant := range []string{"grpc", "rest"} {
 		_, err := clients[variant].CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: loc + "/keyRings/tf-shape", CryptoKeyId: "sign",
-			CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN}})
+			CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_AES_WRAPPING}})
 		if kmsCode(variant, err) != codes.Unimplemented {
-			t.Errorf("%s: ASYMMETRIC_SIGN = %v, want UNIMPLEMENTED", variant, err)
+			t.Errorf("%s: AES_WRAPPING = %v, want UNIMPLEMENTED", variant, err)
 		}
 		msgs = append(msgs, status.Convert(err).Message())
 	}
@@ -93,10 +93,11 @@ func TestKMSLifecycleOverRESTWire(t *testing.T) {
 		{"PATCH", k + "/cryptoKeyVersions/1?updateMask=state", `{"state":"DISABLED"}`, 200},
 		{"POST", k + "/cryptoKeyVersions/1:destroy", ``, 200},
 		{"POST", k + "/cryptoKeyVersions/1:restore", `{}`, 200},
-		{"POST", k + "/cryptoKeyVersions/1:asymmetricSign", `{}`, 501},
+		{"POST", k + "/cryptoKeyVersions:importTrustedKeyWrappedCryptoKeyVersion", `{}`, 501},
+		{"POST", k + "/cryptoKeyVersions/1:asymmetricSign", `{}`, 400}, // a symmetric key (#1212)
 		{"POST", k + "/cryptoKeyVersions/1:nope", `{}`, 404},
-		{"DELETE", k, ``, 501},
-		{"DELETE", k + "/cryptoKeyVersions/1", ``, 501},
+		{"DELETE", k, ``, 400},                          // it still has a version
+		{"DELETE", k + "/cryptoKeyVersions/1", ``, 400}, // it is not DESTROYED
 	} {
 		var rd io.Reader
 		if c.body != "" {

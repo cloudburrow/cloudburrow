@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"net"
 	"reflect"
 	"strings"
@@ -30,10 +31,12 @@ type fakeRunJobs struct {
 	runpb.UnimplementedJobsServer
 	runpb.UnimplementedExecutionsServer
 	runpb.UnimplementedRevisionsServer
+	runpb.UnimplementedTasksServer
 
 	mu         sync.Mutex
 	jobs       map[string]*runpb.Job
 	executions map[string]*runpb.Execution
+	tasks      []*runpb.Task
 	order      []string // execution names, oldest first
 	creates    []*runpb.CreateJobRequest
 	updates    []*runpb.UpdateJobRequest
@@ -247,12 +250,36 @@ func (f *fakeRunJobs) serve(t *testing.T) string {
 	runpb.RegisterJobsServer(g, f)
 	runpb.RegisterExecutionsServer(g, f)
 	runpb.RegisterRevisionsServer(g, f)
+	runpb.RegisterTasksServer(g, f)
 	go func() { _ = g.Serve(ln) }()
 	t.Cleanup(g.Stop)
 	return ln.Addr().String()
 }
 
 const jobsParent = "projects/demo/locations/us-central1"
+
+func (f *fakeRunJobs) ListTasks(_ context.Context, req *runpb.ListTasksRequest) (*runpb.ListTasksResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	resp := &runpb.ListTasksResponse{}
+	for _, t := range f.tasks {
+		if t.GetExecution() == req.GetParent() {
+			resp.Tasks = append(resp.Tasks, t)
+		}
+	}
+	return resp, nil
+}
+
+func (f *fakeRunJobs) GetTask(_ context.Context, req *runpb.GetTaskRequest) (*runpb.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.tasks {
+		if t.GetName() == req.GetName() {
+			return t, nil
+		}
+	}
+	return nil, status.Errorf(codes.NotFound, "task %s not found", req.GetName())
+}
 
 func jobsProviderFor(addr string) runJobsProvider {
 	return runJobsProvider{runAddr: fixedAddr(addr), defaultProject: "demo", region: "us-central1",
@@ -487,8 +514,9 @@ func (k *routedKube) Run(_ context.Context, _ string, args ...string) (string, e
 
 // TestRunJobExecutionPageShowsTheFailureAndItsTasksLogs: a failed
 // execution's page says Failed with the pod's own message, lists its
-// conditions, says the task list is not offered and why, and its Logs tab is
-// each task pod's output, read with kubectl logs.
+// conditions and its tasks (#1223), and its Logs tab is each task pod's
+// output, read with kubectl logs. A task's row opens the task's page: its
+// retries, exit code, failure, conditions and its own pod's log.
 func TestRunJobExecutionPageShowsTheFailureAndItsTasksLogs(t *testing.T) {
 	ctx := context.Background()
 	f := newFakeRunJobs()
@@ -516,6 +544,12 @@ func TestRunJobExecutionPageShowsTheFailureAndItsTasksLogs(t *testing.T) {
 			{Type: "Started", State: runpb.Condition_CONDITION_SUCCEEDED},
 		}}
 	f.order = append(f.order, exec)
+	f.tasks = []*runpb.Task{{Name: exec + "/tasks/boom-abcde-task0", Execution: exec, Job: job, Index: 0,
+		Retried: 1, MaxRetries: 1, StartTime: timestamppb.Now(), CompletionTime: timestamppb.Now(),
+		LastAttemptResult: &runpb.TaskAttemptResult{ExitCode: 3, Status: &rpcstatus.Status{Code: 2, Message: msg}},
+		Containers:        []*runpb.Container{{Image: "busybox:1.36"}},
+		Conditions: []*runpb.Condition{{Type: "Completed", State: runpb.Condition_CONDITION_FAILED, Message: msg,
+			Reasons: &runpb.Condition_ExecutionReason_{ExecutionReason: runpb.Condition_NON_ZERO_EXIT_CODE}}}}}
 
 	d, err := p.Detail(ctx, "demo", []string{"boom", "boom-abcde"})
 	if err != nil || d.Unavailable != "" {
@@ -528,12 +562,30 @@ func TestRunJobExecutionPageShowsTheFailureAndItsTasksLogs(t *testing.T) {
 	if props["Status"] != "Failed" || props["Failure"] != msg || props["Failed"] != "1" {
 		t.Errorf("summary = %v", props)
 	}
-	if !strings.HasPrefix(props["Task list"], "Not offered:") {
-		t.Errorf("the task list is %q, want it said to be not offered", props["Task list"])
-	}
 	sections := map[string]console.Section{}
 	for _, s := range d.Sections {
 		sections[s.ID] = s
+	}
+	tasks := sections["tasks"].Listing
+	if len(tasks.Items) != 1 || !tasks.RowsOpenable || tasks.Items[0].Name != "boom-abcde-task0" ||
+		tasks.Items[0].Status != "Failed" || tasks.Items[0].Fields["Exit code"] != "3" || tasks.Items[0].Fields["Retries"] != "1" {
+		t.Errorf("tasks section = %+v", tasks)
+	}
+	td, err := p.Detail(ctx, "demo", []string{"boom", "boom-abcde", "boom-abcde-task0"})
+	if err != nil || td.Unavailable != "" {
+		t.Fatalf("task detail = %+v, %v", td, err)
+	}
+	tprops := map[string]string{}
+	for _, pr := range td.Summary {
+		tprops[pr.Label] = pr.Value
+	}
+	if tprops["Status"] != "Failed" || tprops["Exit code"] != "3" || tprops["Retries"] != "1 of 1" || tprops["Failure"] != msg {
+		t.Errorf("task summary = %v", tprops)
+	}
+	for _, s := range td.Sections {
+		if s.ID == "logs" && !strings.Contains(s.Text, "Task 0 · pod boom-abcde-0-x1") {
+			t.Errorf("the task's logs = %q", s.Text)
+		}
 	}
 	conds := sections["conditions"].Listing.Items
 	if len(conds) != 2 || conds[0].Status != "Failed" || conds[0].Fields["Reason"] != "NON_ZERO_EXIT_CODE" {
@@ -613,7 +665,9 @@ func TestRunRevisionDeleteIsOfferedOnlyWhereTheAPIAccepts(t *testing.T) {
 		{[]string{"api", "api-00001"}, []string{runDeleteRevision}},
 		{[]string{"api", "api-00002"}, nil},
 		{[]string{"foreign", "foreign-00001"}, nil},
-		{[]string{"api"}, nil},
+		// A service's page offers Manage traffic (#1224), on one CloudBurrow owns.
+		{[]string{"api"}, []string{runManageTraffic}},
+		{[]string{"foreign"}, nil},
 	} {
 		if got := actionIDs(p.DetailActions(ctx, "demo", c.path)); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%v offers %v, want %v", c.path, got, c.want)

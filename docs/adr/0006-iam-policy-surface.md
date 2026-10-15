@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1216 (Cloud Run)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -174,6 +174,8 @@ this amends the ADR in place as #421 did.
    Object IAM, managed-folder IAM and every ACL method (bucket, object and default object)
    stay **501 naming the method**; they are never an empty policy or list. fake-gcs-server
    serves none of them, and its calls keep failing until the cut-over (#519).
+   *Amended by #828:* managed-folder IAM is built. *Amended 2026-10-15 by #1233:* the ACL
+   methods are built, stored and not enforced (below). Object IAM stays 501.
 2. **Rules 1-5 apply.**
    - Nothing reads a stored policy (rule 1).
    - A set returns a new `etag`, and a set carrying a stale one is refused (rule 2). The
@@ -190,6 +192,33 @@ this amends the ADR in place as #421 did.
    here, so a new bucket's policy has no bindings, where Google's shows the project's
    convenience bindings.
 4. Every compatibility.md row for these methods reads ***Stored, not enforced***.
+
+### Cloud Storage ACLs (amended 2026-10-15 by #1233)
+
+The maintainer decided on 2026-10-15 that Cloud Storage's access control lists are
+**stored and returned, not enforced**, reversing the #504 amendment's "every ACL method stays
+501". The decision is still option (b): CloudBurrow does no authentication (ADR-0004), so it
+has no caller an ACL could allow or refuse, and an ACL is data like a policy. This amends the
+ADR in place, as #421 and #504 did.
+
+1. **Which methods.** `bucketAccessControls`, `defaultObjectAccessControls` and
+   `objectAccessControls`: `get`, `list`, `insert`, `patch`, `update` and `delete`; the
+   `acl` and `defaultObjectAcl` fields of a bucket and the `acl` field of an object, returned
+   under `projection=full`; `predefinedAcl` and `predefinedDefaultObjectAcl` on bucket insert,
+   patch and update, and `predefinedAcl` on object insert, patch and update.
+2. **As Google documents them.** Entities are `user-`, `group-`, `domain-`,
+   `project-<team>-<number>` (a project ID is stored as its number, `resource.ProjectNumber`,
+   #1211), `allUsers` and `allAuthenticatedUsers`; roles are OWNER, READER and, on a bucket's
+   own ACL only, WRITER. A new bucket's ACLs are `projectPrivate`'s, and a new object takes its
+   bucket's default object ACL. Under uniform bucket-level access every ACL method fails
+   **400**, and a full projection carries empty ACL lists. The 400's message, and the messages
+   of invalid entities and roles, are UNVERIFIED.
+3. **No identity.** CloudBurrow has no caller, so the "object owner" that Google's predefined
+   object ACLs grant OWNER is the bucket's project owners, `project-owners-<number>`.
+4. **Rules 1 and 5 apply.** Nothing reads a stored ACL, and ACLs live on the bucket and object
+   records, so they follow persistence, reset and state capture. Each ACL change advances the
+   metageneration of the bucket or object it belongs to, as Google's does.
+5. Every compatibility.md row for these methods reads **Verified**, *stored, not enforced*.
 
 ### Cloud Run (amended by #1216)
 
@@ -222,10 +251,55 @@ exist here. Nothing inherits, so a stored project policy would be read as the pr
 is not. `GetIamPolicy`, `SetIamPolicy` and `TestIamPermissions` on Resource Manager projects
 answer UNIMPLEMENTED citing this ADR, until an amendment decides otherwise.
 
-Every service other than these five (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
-Storage's buckets and Cloud Run's services and jobs) keeps its current behaviour, Pub/Sub
-and Resource Manager projects included. Pub/Sub's IAM belongs to the upstream emulator and
-is not interposed.
+### BigQuery (amended by #1231)
+
+**Decided by the maintainer on 2026-10-15** (#1231): BigQuery table, routine and row access
+policy IAM are stored and returned, **not enforced**, as on Secret Manager, Cloud Tasks, Cloud
+KMS, Cloud Storage and Cloud Run (#1216). The decision is unchanged: option (b), no
+enforcement. #1218 left these methods 501 because this ADR did not name BigQuery; this amends
+it in place, as #421 and #504 did.
+
+1. **Which methods.** `bigquery.tables.getIamPolicy`, `setIamPolicy` and `testIamPermissions`
+   (a view is a table), `bigquery.routines.getIamPolicy`, `setIamPolicy` and
+   `testIamPermissions`, and `bigquery.rowAccessPolicies.getIamPolicy` and
+   `testIamPermissions`, all answered by the BigQuery front (`internal/bigqueryfront/iam.go`),
+   since the emulator behind it has none of them. Dataset access stays the dataset's `access`
+   list, which `datasets.patch` already stores.
+2. **Rules 1-5 apply to tables and routines.** The shared `internal/iampolicy` gives the
+   same etag, version and condition handling as Secret Manager's: a set returns a new
+   `etag`; a stale one is refused **409** with `ABORTED`'s mapping, the JSON API's code for it
+   being unmeasured, which the test and its compatibility.md row say (tools/coverage's `// unverified:`
+   annotation has no form for a BigQuery REST method); a condition or audit
+   config is 501 naming the field; a version 3 policy without conditions is accepted.
+   `testIamPermissions` returns every requested permission on a resource that exists and, as
+   KMS does (its rule 4), an empty set on a well-formed name that does not, which
+   `iam_policy.proto` documents (UNVERIFIED, said the same way).
+3. **A row access policy's IAM policy is its grantees.** The API has no
+   `rowAccessPolicies.setIamPolicy`: `RowAccessPolicy.grantees` are the policy's members,
+   holding `roles/bigquery.filteredDataViewer`, and `rowAccessPolicies.update` changes them.
+   `getIamPolicy` answers that one binding from the grantees the front already keeps
+   (#1218). This is the one policy here that decides something: the front filters a table's
+   rows by its grantees, against the one identity it takes every caller to be (#1218). That
+   is row filtering, documented with the row access policies, not authorization; nothing
+   refuses a caller.
+4. **Nothing is enforced on tables and routines.** No query, read, write or routine call
+   consults a table's or a routine's policy.
+5. **Where it is kept, and for how long.** In the front's state directory
+   (`iampolicies.json`), beside the row access policies, so a restart of the front keeps it.
+   It is kept with the `creationTime` of the resource it was set on, and goes with the
+   resource: a `tables.delete` or `routines.delete` through the front drops it, and a
+   resource found gone or made again (a new `creationTime`) has none, as on Google. An
+   emulator restart, which empties BigQuery, drops every policy. BigQuery is not captured by
+   `state save`, so neither are its policies.
+6. **Required tests:** official-SDK compat tests (`Table.IAM` of the Go client, and the
+   generated client for routines and row access policies) and the console's Permissions tab.
+   A Terraform `google_bigquery_table_iam_member` apply and destroy is a follow-up (#1236).
+7. Every compatibility.md row for these methods reads ***Stored, not enforced***.
+
+Every service other than these six (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
+Storage's buckets and their ACLs, Cloud Run's services and jobs, and BigQuery's tables, routines and row
+access policies) keeps its current behaviour, Pub/Sub and Resource Manager projects included.
+Pub/Sub's IAM belongs to the upstream emulator and is not interposed.
 
 ## Consequences
 

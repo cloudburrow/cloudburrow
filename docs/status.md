@@ -98,7 +98,8 @@ linux/arm64 a Tier 2 platform. The cluster and SDK subset runs on linux/arm64 ni
 
 ## What will not work, and why
 
-Worth reading before you hit these:
+Worth reading before you hit these. Every remaining gap, grouped by service with why it is open
+and a rough size, is in [gaps.md](gaps.md).
 
 - **No IAM enforcement, anywhere.** No policy evaluation, no service-account identity. Google's
   Pub/Sub emulator returns `Unimplemented` for IAM methods and we do not paper over it.
@@ -116,9 +117,10 @@ Worth reading before you hit these:
   encryption only.
 - **Pub/Sub state does not survive a restart** — its emulator loses topics even with
   `--data-dir`. Measured, not assumed.
-- **Cloud Storage methods not built answer 501 `notImplemented`** naming the method — ACLs,
+- **Cloud Storage methods not built answer 501 `notImplemented`** naming the method —
   object IAM, `managedFolders.update`, folders, caches, `bulkRestore` and the
   gRPC `google.storage.v2` API — and the official Go client retries a 501 until its deadline.
+  ACLs are stored and returned, never enforced (#1233).
 - **Cloud Run configuration we cannot map is refused, not ignored** — service accounts, VPC
   access, volumes, encryption keys, binary authorization, execution environment, session
   affinity and traffic splitting all return `Unimplemented` naming the field. You will see an

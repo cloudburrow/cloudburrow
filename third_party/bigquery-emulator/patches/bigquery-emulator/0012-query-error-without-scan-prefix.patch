@@ -1,0 +1,32 @@
+CloudBurrow patch 12 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1230).
+
+The bug: a query that failed as it ran, such as SELECT ERROR('boom'),
+failed "failed to scan rows: boom": Repository.Query wrapped the error
+its rows gave (rows.Err) in its own words. BigQuery fails such a query
+with the error alone, "boom", in jobs.query's error, in a query job's
+status.errorResult and errors, and in a script's @@error.message
+(https://cloud.google.com/bigquery/docs/reference/standard-sql/debugging_functions#error).
+
+The patch returns the rows' error as it is.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -285,7 +285,10 @@
+ 		})
+ 	}
+ 	if err := rows.Err(); err != nil {
+-		return nil, fmt.Errorf("failed to scan rows: %w", err)
++		// The error a query fails with as it runs (ERROR(), a division by
++		// zero, a bad cast) is the query's own, as BigQuery reports it:
++		// no "failed to scan rows: " before it.
++		return nil, err
+ 	}
+ 	logger.Logger(ctx).Debug("query result", zap.Any("rows", result))
+ 	return &internaltypes.QueryResponse{

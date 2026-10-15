@@ -179,9 +179,10 @@ func TestTerraformGoogleProject(t *testing.T) {
 		t.Fatalf("the applied project is not in CloudBurrow: %+v, %v", p, err)
 	}
 	run("destroy", "-auto-approve", "-input=false", "-no-color")
-	var ge *googleapi.Error
-	if _, err := c.Projects.Get(id).Context(h.Context()).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotFound {
-		t.Errorf("the project survived destroy: %v", err)
+	// A deleted project stays DELETE_REQUESTED for 30 days, as on Google,
+	// and can be undeleted in that time (#1216).
+	if p, err := c.Projects.Get(id).Context(h.Context()).Do(); err != nil || p.LifecycleState != "DELETE_REQUESTED" {
+		t.Errorf("after destroy the project reads %+v, %v; want it DELETE_REQUESTED", p, err)
 	}
 }
 

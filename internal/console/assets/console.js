@@ -3439,6 +3439,11 @@ function openEditForm(route, segments, spec, onDone) {
 
 async function renderList(view, route) {
   const project = new URLSearchParams(location.search).get("project") || "";
+  // A filter the service evaluates (#1228), kept in the URL so a filtered
+  // screen can be reloaded and shared.
+  const serverFilter = new URLSearchParams(location.search).get("filter") || "";
+  const listURL = `/api/resources/${route.service}?project=${encodeURIComponent(project)}` +
+    (serverFilter ? `&filter=${encodeURIComponent(serverFilter)}` : "");
 
   const header = [
     el("div", { class: "page-header" },
@@ -3452,8 +3457,7 @@ async function renderList(view, route) {
 
   let data;
   try {
-    data = await api(`/api/resources/${route.service}?project=${encodeURIComponent(project)}`,
-      { signal: cancel.signal });
+    data = await api(listURL, { signal: cancel.signal });
   } catch (err) {
     setChildren(view, ...header,
       isCancelled(err)
@@ -3469,6 +3473,7 @@ async function renderList(view, route) {
   // What the screen says about its scope before its rows, such as the
   // project's Cloud Storage service account over its HMAC keys (#792).
   header.push(...listingSummary(data));
+  if (data.serverFilter) header.push(serverFilterBox(data.serverFilter, () => renderList(view, route)));
 
   // A screen that needs something from the user is not a broken screen. This
   // is rendered as a prompt rather than as an error, because a red failure
@@ -3498,6 +3503,12 @@ async function renderList(view, route) {
     // which is where a provider explains what the screen is and is not, was
     // dropped on the empty path: the one path where it is the only thing on the
     // page.
+    if (data.serverFilter && data.serverFilter.value) {
+      setChildren(view, ...header, data.serverFilter.error ? null :
+        emptyState(`No ${noun} match the filter`, "Change or clear the filter to see more."));
+      announce(data.serverFilter.error ? `Filter refused` : `No ${noun} match the filter`);
+      return;
+    }
     const empty = emptyState(`No ${noun} yet`,
       caps.create
         ? "Create one here, or with an SDK, the CLI or gcloud — it will appear either way."
@@ -3523,10 +3534,36 @@ async function renderList(view, route) {
                     // Lets the table reload its own rows without the screen
                     // being rebuilt around it, so sort, filter, page and
                     // scroll position survive a refresh.
-                    refetch: () => api(
-                      `/api/resources/${route.service}?project=${encodeURIComponent(project)}`),
+                    refetch: () => api(listURL),
                   });
   announce(`${data.items.length} ${noun} loaded`);
+}
+
+// serverFilterBox is a list screen's filter in the service's own syntax
+// (#1228): applying it puts it in the URL and lists again, and a refusal is
+// shown under the box rather than as a broken screen.
+function serverFilterBox(spec, reload) {
+  const input = el("input", { type: "search", id: "server-filter", name: "filter",
+    value: spec.value || "", placeholder: spec.placeholder || "",
+    "aria-describedby": "server-filter-help" + (spec.error ? " server-filter-error" : ""),
+    "aria-invalid": spec.error ? "true" : "false" });
+  const apply = (value) => {
+    const params = new URLSearchParams(location.search);
+    if (value) params.set("filter", value); else params.delete("filter");
+    const qs = params.toString();
+    history.replaceState(history.state, "", location.pathname + (qs ? `?${qs}` : ""));
+    reload();
+  };
+  return el("form", { class: "card server-filter", role: "search", "aria-label": "Filter",
+                      onsubmit: (e) => { e.preventDefault(); apply(input.value.trim()); } },
+    el("label", { for: "server-filter", text: "Filter" }),
+    el("div", { class: "server-filter-row" },
+      input,
+      el("button", { type: "submit", class: "secondary", id: "server-filter-apply", text: "Apply" }),
+      spec.value ? el("button", { type: "button", class: "secondary", id: "server-filter-clear",
+                                  text: "Clear", onclick: () => apply("") }) : null),
+    spec.help ? el("p", { class: "form-help", id: "server-filter-help", text: spec.help }) : null,
+    spec.error ? el("p", { class: "form-error", id: "server-filter-error", role: "alert", text: spec.error }) : null);
 }
 
 // listingSummary draws a listing's summary groups as the same property cards

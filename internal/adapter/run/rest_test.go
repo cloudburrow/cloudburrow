@@ -25,6 +25,7 @@ func restServer(t *testing.T) *httptest.Server {
 		s.Revisions().Register(g)
 		s.Jobs().Register(g)
 		s.Executions().Register(g)
+		s.Tasks().Register(g)
 		ops.Register(g)
 	}))
 	t.Cleanup(srv.Close)
@@ -143,9 +144,10 @@ func TestRESTUnservedPaths(t *testing.T) {
 		code         int
 	}{
 		{http.MethodGet, "/v2/" + jobParent + "/workerPools", http.StatusNotImplemented},
-		{http.MethodGet, "/v2/" + jobParent + "/jobs/j/executions/e/tasks", http.StatusNotImplemented},
-		{http.MethodGet, "/v2/" + jobParent + "/operations", http.StatusNotImplemented},
-		{http.MethodPost, "/v2/" + jobParent + "/operations/op-1:wait", http.StatusNotImplemented},
+		{http.MethodGet, "/v2/" + jobParent + "/jobs/j/executions/e/tasks", http.StatusNotFound},
+		{http.MethodGet, "/v2/" + jobParent + "/jobs/j/executions/e/tasks/e-task0", http.StatusNotFound},
+		{http.MethodGet, "/v2/" + jobParent + "/operations", http.StatusOK},
+		{http.MethodPost, "/v2/" + jobParent + "/operations/op-404:wait", http.StatusNotFound},
 		{http.MethodGet, "/v2/" + jobParent, http.StatusNotFound},
 		{http.MethodGet, "/v1/" + jobParent + "/services", http.StatusNotFound},
 		{http.MethodGet, "/v2/" + jobParent + "/services?bogus=1", http.StatusBadRequest},
