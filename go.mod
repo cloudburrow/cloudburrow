@@ -8,6 +8,7 @@ require (
 	cloud.google.com/go/auth v0.24.1
 	cloud.google.com/go/bigquery v1.85.0
 	cloud.google.com/go/bigtable v1.58.0
+	cloud.google.com/go/cloudsqlconn v1.24.0
 	cloud.google.com/go/cloudtasks v1.20.0
 	cloud.google.com/go/compute/metadata v0.9.0
 	cloud.google.com/go/datastore v1.27.0
@@ -58,6 +59,11 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
+)
+
+require (
+	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 )
 
 require (
