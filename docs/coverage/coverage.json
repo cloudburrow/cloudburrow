@@ -3977,7 +3977,7 @@
         "tests": [
           "test/compat/consoledocs_test.go:108 TestConsoleFirestoreDocumentCreateEditDelete",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
-          "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
+          "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
       {
@@ -3991,7 +3991,7 @@
         "method": "google.firestore.v1.Firestore/BeginTransaction",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
+          "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
       {
@@ -4000,7 +4000,7 @@
         "tests": [
           "test/compat/consolefirestoreforeignref_test.go:26 TestConsoleFirestoreEditFieldRefusesAForeignReference",
           "test/compat/consolefirestorenested_test.go:102 TestConsoleFirestoreEditValuesInsideMapsAndArrays",
-          "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
+          "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
       {
@@ -4082,7 +4082,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledocs_test.go:108 TestConsoleFirestoreDocumentCreateEditDelete",
-          "test/compat/optional_test.go:40 TestFirestoreDocumentCRUD"
+          "test/compat/optional_test.go:43 TestFirestoreDocumentCRUD"
         ]
       },
       {
@@ -4120,15 +4120,15 @@
         "method": "google.datastore.v1.Datastore/BeginTransaction",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:127 TestDatastoreEntityCRUD"
+          "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       },
       {
         "method": "google.datastore.v1.Datastore/Commit",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:102 TestDatastoreQueriesSeeAFreshWrite",
-          "test/compat/optional_test.go:127 TestDatastoreEntityCRUD"
+          "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
+          "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       },
       {
@@ -4136,7 +4136,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledocs_test.go:289 TestConsoleDatastoreEntityCreateEditDelete",
-          "test/compat/optional_test.go:127 TestDatastoreEntityCRUD"
+          "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       },
       {
@@ -4166,8 +4166,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledocs_test.go:289 TestConsoleDatastoreEntityCreateEditDelete",
-          "test/compat/optional_test.go:102 TestDatastoreQueriesSeeAFreshWrite",
-          "test/compat/optional_test.go:127 TestDatastoreEntityCRUD"
+          "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
+          "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
       }
     ]
@@ -4223,7 +4223,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateTable",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:194 TestBigtableTableAndRows"
+          "test/compat/optional_test.go:197 TestBigtableTableAndRows"
         ]
       },
       {
@@ -4379,7 +4379,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ModifyColumnFamilies",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:194 TestBigtableTableAndRows"
+          "test/compat/optional_test.go:197 TestBigtableTableAndRows"
         ]
       },
       {
@@ -4488,7 +4488,7 @@
         "method": "google.bigtable.v2.Bigtable/MutateRow",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:194 TestBigtableTableAndRows"
+          "test/compat/optional_test.go:197 TestBigtableTableAndRows"
         ]
       },
       {
@@ -4558,7 +4558,7 @@
         "tests": [
           "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
           "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
-          "test/compat/optional_test.go:194 TestBigtableTableAndRows"
+          "test/compat/optional_test.go:197 TestBigtableTableAndRows"
         ]
       },
       {
@@ -4614,7 +4614,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
         ]
@@ -4796,7 +4796,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
         ]
@@ -4973,7 +4973,7 @@
         "method": "google.spanner.v1.Spanner/BeginTransaction",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
         ]
@@ -4982,7 +4982,7 @@
         "method": "google.spanner.v1.Spanner/Commit",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
         ]
@@ -4991,7 +4991,7 @@
         "method": "google.spanner.v1.Spanner/CreateSession",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
         ]
@@ -5021,7 +5021,7 @@
         "method": "google.spanner.v1.Spanner/ExecuteStreamingSql",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery"
+          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery"
         ]
       },
       {
@@ -5079,7 +5079,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledatabases_test.go:208 TestConsoleSpannerDML",
-          "test/compat/optional_test.go:261 TestSpannerSchemaAndQuery",
+          "test/compat/optional_test.go:264 TestSpannerSchemaAndQuery",
           "test/compat/spanner_test.go:104 TestSpannerReadWriteTransactionIsAtomic",
           "test/compat/spanner_test.go:202 TestSpannerDatabasesAreIsolated"
         ]

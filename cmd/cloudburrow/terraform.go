@@ -83,6 +83,12 @@ var terraformEndpoints = []terraformEndpoint{
 	// Firestore Admin API (google_firestore_database, _index, _field,
 	// _backup_schedule) is not served: those fail locally, never at Google.
 	{config.ServiceFirestore, "firestore_custom_endpoint", "GOOGLE_FIRESTORE_CUSTOM_ENDPOINT", "/v1/", true},
+	// Spanner (#1331): google_spanner_instance and _database apply, read
+	// back through the official admin clients, plan clean, update in place
+	// and destroy in TestTerraformSpannerInstanceAndDatabase, over the
+	// emulator's REST API, Spanner's second port (Endpoints.SpannerREST),
+	// which the call front in its pod serves.
+	{config.ServiceSpanner, "spanner_custom_endpoint", "GOOGLE_SPANNER_CUSTOM_ENDPOINT", "/v1/", true},
 	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
 	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true},
 	// google_folder (#1294): Resource Manager v3 Folders, on the same port,
@@ -134,6 +140,9 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
 		config.ServiceBigQuery: cfg.Endpoints.BigQuery, sqlAdminEndpoint: cfg.Endpoints.SQLAdmin,
 		config.ServiceFirestore: cfg.Endpoints.Firestore,
+		// The REST port: the provider's Spanner resources use REST, the
+		// client libraries the gRPC one.
+		config.ServiceSpanner: cfg.Endpoints.SpannerREST,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, sqlAdminEndpoint: sqlAdminEnabled(cfg)}
 	for _, s := range cfg.EnabledServices() {
@@ -183,20 +192,21 @@ type unpointedPrefix struct{ prefix, why string }
 // Google for this instance, whatever is enabled, so the wrapper refuses to
 // run a module that declares one rather than warn and let it through.
 //
-// Spanner always: the provider uses the instance and database admin REST
-// APIs, which the emulator serves only on a port its pod keeps to itself;
-// the published port is gRPC alone. Firestore and Bigtable when the
-// instance does not serve them, since nothing then points them here.
+// Firestore, Spanner and Bigtable when the instance does not serve them
+// (Spanner's REST port among it), since nothing then points them here.
 func unpointedResources(cfg config.Config) []unpointedPrefix {
-	out := []unpointedPrefix{{"google_spanner_",
-		"Spanner's admin REST API is not published by the instance; the published port is gRPC alone"}}
+	var out []unpointedPrefix
 	set, _ := terraformSettings(cfg)
-	firestore := false
+	firestore, spanner := false, false
 	for _, e := range set {
 		firestore = firestore || e.service == config.ServiceFirestore
+		spanner = spanner || e.service == config.ServiceSpanner
 	}
 	if !firestore {
 		out = append(out, unpointedPrefix{"google_firestore_", "this instance does not serve Firestore"})
+	}
+	if !spanner {
+		out = append(out, unpointedPrefix{"google_spanner_", "this instance does not serve Spanner's REST API"})
 	}
 	if bigtableHost(cfg) == "" {
 		out = append(out, unpointedPrefix{"google_bigtable_", "this instance does not serve Bigtable"})

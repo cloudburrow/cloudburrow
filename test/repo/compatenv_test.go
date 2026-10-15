@@ -206,6 +206,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"CLOUDBURROW_LOGGING_ENDPOINT":          "127.0.0.1:9009",
 		"CLOUDBURROW_RESOURCEMANAGER_ENDPOINT":  "127.0.0.1:9007",
 		"SPANNER_EMULATOR_HOST":                 "127.0.0.1:9013",
+		"CLOUDBURROW_SPANNER_REST_ENDPOINT":     "http://127.0.0.1:9022",
 		"DATASTORE_EMULATOR_HOST":               "127.0.0.1:9011",
 		"FIRESTORE_EMULATOR_HOST":               "127.0.0.1:9010",
 		"BIGTABLE_EMULATOR_HOST":                "127.0.0.1:9012",
@@ -321,6 +322,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"PREDICTION":          "127.0.0.1:9020",
 		"GCLOUD":              "/opt/gcloud/bin/gcloud",
 		"TOFU":                "/opt/tofu",
+		"SPANNER_REST":        "http://127.0.0.1:9022",
 	}
 	list := compatEnvList(t)
 	if len(want) != len(list) {

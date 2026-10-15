@@ -12,6 +12,10 @@ import (
 	"testing"
 
 	"cloud.google.com/go/bigtable"
+	database "cloud.google.com/go/spanner/admin/database/apiv1"
+	databasepb "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
+	instance "cloud.google.com/go/spanner/admin/instance/apiv1"
+	instancepb "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -27,8 +31,8 @@ import (
 // the table over gRPC at BIGTABLE_EMULATOR_HOST, which the wrapper sets for
 // the provider. The admin resources the emulators do not serve
 // (google_firestore_database and _index, the Firestore Admin API;
-// google_bigtable_instance, the instance admin API) fail locally, and
-// google_spanner_* is refused by the wrapper: docs/compatibility.md.
+// google_bigtable_instance, the instance admin API) fail locally:
+// docs/compatibility.md. Spanner is TestTerraformSpannerInstanceAndDatabase.
 func TestTerraformFirestoreDocumentAndBigtableTable(t *testing.T) {
 	h := New(t)
 	if _, err := exec.LookPath("terraform"); err != nil {
@@ -153,11 +157,21 @@ resource "google_bigtable_table" "t" {
 	}
 }
 
-// TestTerraformRefusesSpanner (#1331): the wrapper cannot point the
-// provider's Spanner resources at the instance, so it refuses to plan a
-// module that declares one rather than let it reach Google, and leaves no
-// provider file behind. validate, which calls no API, still runs.
-func TestTerraformRefusesSpanner(t *testing.T) {
+// TestTerraformSpannerInstanceAndDatabase (#1331), in the emulators shard:
+// a google_spanner_instance and a google_spanner_database apply through
+// `cloudburrow terraform` with the official hashicorp/google provider, over
+// the emulator's REST API (spanner_custom_endpoint, Spanner's second port,
+// which the call front in its pod serves), read back through the official
+// Spanner admin clients over gRPC, plan clean, take an in-place update (a
+// second table in the database's DDL), plan clean again and destroy, all
+// with egress blocked.
+//
+// The emulator does not update instances: UpdateInstance answers
+// UNIMPLEMENTED, "Cloud Spanner Emulator does not support updating
+// instances", over REST as 501. So a change to the instance's display name
+// or node count is planned in place and fails at apply, locally, naming
+// that; the instance is left as it was and the old configuration plans clean.
+func TestTerraformSpannerInstanceAndDatabase(t *testing.T) {
 	h := New(t)
 	if _, err := exec.LookPath("terraform"); err != nil {
 		t.Skip("terraform is not on PATH")
@@ -166,26 +180,137 @@ func TestTerraformRefusesSpanner(t *testing.T) {
 	if cli == "" {
 		t.Skipf("%s is not set", EnvCLI)
 	}
+	if os.Getenv(EnvSpanner) == "" || os.Getenv(EnvSpannerREST) == "" {
+		t.Skipf("%s and %s must both be set", EnvSpanner, EnvSpannerREST)
+	}
+	addr := h.Endpoint(EnvSpanner)
+	ctx := h.Context()
+	ic, err := instance.NewInstanceAdminClient(ctx, spannerOpts(addr)...)
+	if err != nil {
+		t.Fatalf("NewInstanceAdminClient: %v", err)
+	}
+	t.Cleanup(func() { ic.Close() })
+	dc, err := database.NewDatabaseAdminClient(ctx, spannerOpts(addr)...)
+	if err != nil {
+		t.Fatalf("NewDatabaseAdminClient: %v", err)
+	}
+	t.Cleanup(func() { dc.Close() })
+	flags := cliArgs()
 	dir := t.TempDir()
-	module := googleProviderRequirement + fmt.Sprintf(`resource "google_spanner_instance" "i" {
+	const instanceID, dbID = "tf-spanner", "tfdb"
+	instanceName := fmt.Sprintf("projects/%s/instances/%s", h.Project(), instanceID)
+	dbName := instanceName + "/databases/" + dbID
+	ddl := []string{
+		"CREATE TABLE Items (\n  Id INT64 NOT NULL,\n  Name STRING(MAX),\n) PRIMARY KEY(Id)",
+		"CREATE TABLE Tags (\n  Id INT64 NOT NULL,\n) PRIMARY KEY(Id)",
+	}
+
+	write := func(display string, nodes int, statements int) {
+		t.Helper()
+		var d strings.Builder
+		for _, st := range ddl[:statements] {
+			fmt.Fprintf(&d, "    %q,\n", st)
+		}
+		module := googleProviderRequirement + fmt.Sprintf(`resource "google_spanner_instance" "i" {
   project      = %q
-  name         = "tf-spanner"
+  name         = %q
   config       = "emulator-config"
-  display_name = "tf"
-  num_nodes    = 1
+  display_name = %q
+  num_nodes    = %d
 }
-`, h.Project())
-	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o644); err != nil {
-		t.Fatal(err)
+resource "google_spanner_database" "d" {
+  project             = %q
+  instance            = google_spanner_instance.i.name
+  name                = %q
+  deletion_protection = false
+  ddl = [
+%s  ]
+}
+`, h.Project(), instanceID, display, nodes, h.Project(), dbID, d.String())
+		if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	cmd := exec.Command(cli, append(append(append([]string{"terraform"}, cliArgs()...), "--"), "plan", "-input=false", "-no-color")...)
-	cmd.Dir, cmd.Env = dir, noGoogleEgress()
-	out, err := cmd.CombinedOutput()
-	if err == nil || !strings.Contains(string(out), "refusing to run terraform plan") ||
-		!strings.Contains(string(out), "google_spanner_instance") {
-		t.Errorf("plan with a Spanner instance = %v:\n%s; want the wrapper's refusal naming it", err, lastLines(string(out), 20))
+	tf := func(args ...string) (string, error) {
+		t.Helper()
+		cmd := exec.Command(cli, append(append(append([]string{"terraform"}, flags...), "--"), args...)...)
+		cmd.Dir = dir
+		cmd.Env = os.Environ()
+		if args[0] != "init" {
+			cmd.Env = noGoogleEgress()
+		}
+		b, err := cmd.CombinedOutput()
+		if left, _ := filepath.Glob(filepath.Join(dir, "cloudburrow_providers*")); len(left) != 0 {
+			t.Fatalf("the wrapper left %v behind after %s", left, args[0])
+		}
+		return string(b), err
 	}
-	if left, _ := filepath.Glob(filepath.Join(dir, "cloudburrow_providers*")); len(left) != 0 {
-		t.Errorf("the refusal left %v behind", left)
+	run := func(args ...string) {
+		t.Helper()
+		out, err := tf(args...)
+		if err != nil {
+			t.Fatalf("cloudburrow terraform %s: %v\n%s", strings.Join(args, " "), err, lastLines(out, 30))
+		}
+		t.Logf("terraform %s:\n%s", args[0], lastLines(out, 6))
+	}
+	cleanPlan := func(when string) {
+		t.Helper()
+		if out, err := tf("plan", "-detailed-exitcode", "-input=false", "-no-color"); err != nil {
+			t.Errorf("plan %s is not clean (%v):\n%s", when, err, lastLines(out, 40))
+		}
+	}
+	check := func(when, display string, nodes int, statements int) {
+		t.Helper()
+		in, err := ic.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: instanceName})
+		if err != nil {
+			t.Fatalf("the instance %s: %v", when, err)
+		}
+		if in.GetDisplayName() != display || int(in.GetNodeCount()) != nodes {
+			t.Errorf("the instance %s = %q with %d nodes, want %q with %d", when, in.GetDisplayName(), in.GetNodeCount(), display, nodes)
+		}
+		if want := fmt.Sprintf("projects/%s/instanceConfigs/emulator-config", h.Project()); in.GetConfig() != want {
+			t.Errorf("the instance's config %s = %q, want %q", when, in.GetConfig(), want)
+		}
+		got, err := dc.GetDatabaseDdl(ctx, &databasepb.GetDatabaseDdlRequest{Database: dbName})
+		if err != nil {
+			t.Fatalf("the database %s: %v", when, err)
+		}
+		if strings.Join(got.GetStatements(), ";") != strings.Join(ddl[:statements], ";") {
+			t.Errorf("the database's DDL %s = %q, want %q", when, got.GetStatements(), ddl[:statements])
+		}
+	}
+
+	write("tf one", 1, 1)
+	useGoogleProviderLock(t, dir)
+	run("init", "-input=false", "-no-color")
+	run("apply", "-auto-approve", "-input=false", "-no-color")
+	check("after apply", "tf one", 1, 1)
+	cleanPlan("right after apply")
+
+	write("tf one", 1, 2)
+	out, err := tf("plan", "-input=false", "-no-color")
+	if err != nil || !strings.Contains(out, "0 to add, 1 to change, 0 to destroy") {
+		t.Errorf("the update is not planned in place (%v):\n%s", err, lastLines(out, 20))
+	}
+	run("apply", "-auto-approve", "-input=false", "-no-color")
+	check("after the update", "tf one", 1, 2)
+	cleanPlan("after the update")
+
+	// The emulator's refusal to update an instance, locally.
+	write("tf two", 2, 2)
+	out, err = tf("apply", "-auto-approve", "-input=false", "-no-color")
+	if err == nil || !strings.Contains(out, "does not support updating instances") {
+		t.Errorf("an instance update = %v, want the emulator's refusal:\n%s", err, lastLines(out, 20))
+	}
+	check("after the refused instance update", "tf one", 1, 2)
+	write("tf one", 1, 2)
+	cleanPlan("after the refused instance update")
+
+	run("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := dc.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: dbName}); status.Code(err) != codes.NotFound {
+		t.Errorf("the database after destroy: %v, want NotFound", err)
+	}
+	if _, err := ic.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: instanceName}); status.Code(err) != codes.NotFound {
+		t.Errorf("the instance after destroy: %v, want NotFound", err)
 	}
 }

@@ -55,6 +55,9 @@ func hostPorts(cfg config.Config) map[string]int {
 			// The admin API (#1302) is bound beside the server it describes.
 			ports["memorystore"] = e.Memorystore
 			ports["memorystore-admin"] = e.MemorystoreAdmin
+		case config.ServiceSpanner:
+			ports["spanner"] = e.Spanner
+			ports["spanner-rest"] = e.SpannerREST
 		default:
 			ports[string(s)] = e.OptionalPort(s)
 		}
