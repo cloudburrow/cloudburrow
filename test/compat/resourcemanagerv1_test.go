@@ -99,8 +99,8 @@ func TestResourceManagerV1Projects(t *testing.T) {
 	}
 
 	var ge *googleapi.Error
-	if _, err := c.Projects.Update(id, &crmv1.Project{Name: "x", Parent: &crmv1.ResourceId{Type: "folder", Id: "123"}}).Context(ctx).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented {
-		t.Errorf("v1 projects.update with a folder parent = %v, want 501 UNIMPLEMENTED", err)
+	if _, err := c.Projects.Update(id, &crmv1.Project{Name: "x", Parent: &crmv1.ResourceId{Type: "folder", Id: "123"}}).Context(ctx).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotFound {
+		t.Errorf("v1 projects.update with an absent folder parent = %v, want 404 (#1294)", err)
 	}
 	if _, err := c.Projects.Update(v1ID(h, "v1-none-"), &crmv1.Project{Name: "x"}).Context(ctx).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotFound {
 		t.Errorf("v1 projects.update of an unknown project = %v, want 404", err)

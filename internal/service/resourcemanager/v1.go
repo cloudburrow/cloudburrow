@@ -91,6 +91,11 @@ func (s *ProjectsServer) v1Routes(r *rest.Router, ops *v1Ops) {
 		name := "operations/" + req.PathValue("operation")
 		op, ok := ops.get(name)
 		if !ok {
+			// The v3 methods' operations, which google_folder polls here
+			// through the v1 base path (#1294).
+			if op3, ok := v3Operations.get(name); ok {
+				return writeProto(w, op3)
+			}
 			return apierror.NotFound("operation %s not found", name)
 		}
 		return rest.WriteJSON(w, http.StatusOK, op)

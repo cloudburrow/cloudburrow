@@ -581,7 +581,7 @@ type Server struct {
 
 // NewServer returns a Resource Manager server over reg, bound to addr.
 func NewServer(addr string, reg *Registry) *Server {
-	return &Server{addr: addr, projects: NewProjectsServer(reg), folders: &FoldersServer{reg: reg}}
+	return &Server{addr: addr, projects: NewProjectsServer(reg), folders: NewFoldersServer(reg)}
 }
 
 // Observe sets who is told about completed calls. It must be set before Start.
@@ -634,7 +634,7 @@ func (s *Server) Start(ctx context.Context) error {
 	ops := &v1Ops{}
 	s.projects.v1Routes(router, ops)
 	s.projects.v1OrgRoutes(router)
-	s.folders.restRoutes(router, OrganizationsServer{})
+	s.folders.restRoutes(router, OrganizationsServer{}, ops)
 	s.folders.v2Routes(router, ops)
 	var jsonAPI http.Handler = router
 	if s.requests != nil {

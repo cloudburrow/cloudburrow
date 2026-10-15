@@ -98,7 +98,7 @@ var areas = []area{
 	// google.cloud.location.Locations too (#1291); Cloud Scheduler lists it
 	// as well, and both serve it, so the one registry status is true of both.
 	{Key: "kms", Title: "Cloud KMS", Own: true, Services: []string{"google.cloud.kms.v1.KeyManagementService", "google.iam.v1.IAMPolicy", "google.cloud.location.Locations"}},
-	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects"}},
+	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects", "google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations"}},
 	// google.cloud.location.Locations is the mixin cloudscheduler.googleapis.com
 	// serves (#1237); Cloud KMS serves it too (#1291).
 	{Key: "scheduler", Title: "Cloud Scheduler", Own: true, Services: []string{"google.cloud.scheduler.v1.CloudScheduler", "google.cloud.location.Locations"}},

@@ -103,6 +103,9 @@ type FoldersServer struct {
 	reg *Registry
 }
 
+// NewFoldersServer returns the Folders service over reg.
+func NewFoldersServer(reg *Registry) *FoldersServer { return &FoldersServer{reg: reg} }
+
 func (s *FoldersServer) GetFolder(_ context.Context, req *rmpb.GetFolderRequest) (*rmpb.Folder, error) {
 	f, err := s.reg.Folder(req.GetName())
 	if err != nil {
@@ -154,6 +157,37 @@ func (s *FoldersServer) ListFolders(_ context.Context, req *rmpb.ListFoldersRequ
 	return &rmpb.ListFoldersResponse{Folders: folders, NextPageToken: next}, nil
 }
 
+// queryTerms splits a query at spaces outside double or single quotes, so
+// displayName="Team A" is one term.
+func queryTerms(q string) []string {
+	var out []string
+	var cur strings.Builder
+	var quote rune
+	for _, c := range q {
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+			cur.WriteRune(c)
+		case c == '"' || c == '\'':
+			quote = c
+			cur.WriteRune(c)
+		case c == ' ' || c == '\t':
+			if cur.Len() > 0 {
+				out = append(out, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(c)
+		}
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
+}
+
 // parseFolderQuery compiles a SearchFolders query: space-separated
 // key:value or key=value terms, all of which must match, over displayName
 // (a trailing * matches a prefix), state and parent. Any other key, OR, or
@@ -161,7 +195,7 @@ func (s *FoldersServer) ListFolders(_ context.Context, req *rmpb.ListFoldersRequ
 func parseFolderQuery(q string) (func(Folder) bool, bool, error) {
 	var preds []func(Folder) bool
 	state := false
-	for _, term := range strings.Fields(q) {
+	for _, term := range queryTerms(q) {
 		if term == "OR" || term == "AND" || strings.ContainsAny(term, "()") {
 			return nil, false, apierror.InvalidArgument("query %q: only space-separated key:value terms are supported", q)
 		}
@@ -229,11 +263,9 @@ func (s *FoldersServer) UpdateFolder(_ context.Context, req *rmpb.UpdateFolderRe
 	if in == nil {
 		return nil, apierror.Wrap(apierror.InvalidArgument("folder is required"))
 	}
-	paths := req.GetUpdateMask().GetPaths()
-	if len(paths) == 0 {
-		return nil, apierror.Wrap(apierror.InvalidArgument("update_mask is required; only display_name can be updated"))
-	}
-	for _, p := range paths {
+	// An absent mask updates display_name, the one field that can change:
+	// Terraform's google_folder sends none, and Google accepts that.
+	for _, p := range req.GetUpdateMask().GetPaths() {
 		if p != "display_name" && p != "displayName" {
 			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask path %q cannot be updated; only display_name, and MoveFolder changes the parent", p))
 		}
@@ -373,7 +405,7 @@ func (OrganizationsServer) TestIamPermissions(context.Context, *iampb.TestIamPer
 
 // --- v3 REST -----------------------------------------------------------
 
-func (s *FoldersServer) restRoutes(r *rest.Router, orgs OrganizationsServer) {
+func (s *FoldersServer) restRoutes(r *rest.Router, orgs OrganizationsServer, v1ops *v1Ops) {
 	r.Handle("GET /v3/folders", func(w http.ResponseWriter, req *http.Request) error {
 		size, err := rest.QueryInt(req, "pageSize", 0)
 		if err != nil {
@@ -515,6 +547,9 @@ func (s *FoldersServer) restRoutes(r *rest.Router, orgs OrganizationsServer) {
 		name := "operations/" + req.PathValue("operation")
 		op, ok := v3Operations.get(name)
 		if !ok {
+			if op1, ok := v1ops.get(name); ok {
+				return rest.WriteJSON(w, http.StatusOK, op1)
+			}
 			return apierror.NotFound("operation %s not found", name)
 		}
 		return writeProto(w, op)

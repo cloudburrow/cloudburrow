@@ -251,6 +251,9 @@ func TestHierarchyThroughTheOfficialClients(t *testing.T) {
 	if f, err := fc.SearchFolders(ctx, &rmpb.SearchFoldersRequest{Query: "displayName=Team*"}).Next(); err != nil || f.GetName() != team.GetName() {
 		t.Errorf("SearchFolders = %v, %v", f, err)
 	}
+	if f, err := fc.SearchFolders(ctx, &rmpb.SearchFoldersRequest{Query: `displayName="Team A" parent=` + eng.GetName()}).Next(); err != nil || f.GetName() != team.GetName() {
+		t.Errorf("SearchFolders with a quoted name = %v, %v", f, err)
+	}
 	up, err := fc.UpdateFolder(ctx, &rmpb.UpdateFolderRequest{Folder: &rmpb.Folder{Name: team.GetName(), DisplayName: "Team B"},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name"}}})
 	if err != nil {
