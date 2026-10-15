@@ -34,7 +34,7 @@ type replicator interface {
 }
 
 func newReplicationPassword() string {
-	b := make([]byte, 18)
+	b := make([]byte, 12) // MySQL takes at most 32 characters
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }

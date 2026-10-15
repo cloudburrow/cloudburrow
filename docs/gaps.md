@@ -204,7 +204,7 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 | Gap | Why open | Size |
 |---|---|---|
 | The Memorystore admin API (`redis.googleapis.com`) (#1302) | not built yet | L |
-| The Cloud SQL Admin API beyond instance reads and writes (a server per created instance, POSTGRES_17 and MYSQL_8_4), databases, users, operations (#1301), the connector path (`connectSettings`, `generateEphemeralCert` and TLS on 3307, served for the Go connector), and backups, restores and clones over real dumps, all #1330: IAM database authentication, point-in-time recovery, replicas and failover, other database versions, and a pinned Auth Proxy test (#1330) | not built yet | L |
+| The Cloud SQL Admin API beyond instance reads and writes (a server per created instance, POSTGRES_17 and MYSQL_8_4), databases, users, operations (#1301), the connector path (`connectSettings`, `generateEphemeralCert` and TLS on 3307, served for the Go connector), backups, restores and clones over real dumps, and read replicas (streaming and GTID replication, promote, stop and start), all #1330: IAM database authentication, point-in-time recovery, failover replicas and HA, cascading and cross-region replicas, other database versions, and a pinned Auth Proxy test (#1330) | not built yet | L |
 | The rest of the Memorystore admin API: `ListInstances`, `GetInstance` and `GetInstanceAuthString` are served over the one Valkey server (#1302); creating, updating, upgrading, deleting, importing, exporting and failing over an instance are UNIMPLEMENTED, and the gcloud and Terraform endpoint overrides are not exported until a test drives them | not built yet | M |
 
 ## Functions, credentials, tooling
