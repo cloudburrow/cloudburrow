@@ -183,6 +183,13 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 	if path[0] == managedFolderPage {
 		return p.managedFolderActions(ctx, path)
 	}
+	switch path[0] {
+	case folderPage:
+		return p.hnsFolderActions(ctx, path)
+	case operationPage:
+		// An operation is done when it is returned: nothing to do to it.
+		return nil
+	}
 	if actions, ok := p.notificationActions(ctx, path); ok {
 		return actions
 	}
@@ -192,10 +199,15 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 			prefix = strings.Join(path[1:], "/") + "/"
 		}
 		actions := []console.Action{composeAction(prefix), createManagedFolderAction(path[0], prefix)}
+		b, err := p.readBucket(ctx, path[0])
+		// Create folder, in a bucket with hierarchical namespace (#1203).
+		if err == nil && b.hierarchical() {
+			actions = append(actions, createFolderAction(path[0], prefix))
+		}
 		// A bucket's own page also offers Lock retention policy, while its
 		// policy is there and unlocked (#789), and Create notification (#791).
 		if len(path) == 1 {
-			if b, err := p.readBucket(ctx, path[0]); err == nil {
+			if err == nil {
 				actions = append(actions, lockRetentionAction(b)...)
 			}
 			actions = append(actions, p.bucketNotificationActions(ctx, project, path[0])...)
@@ -236,7 +248,16 @@ func (p storageProvider) ActAt(ctx context.Context, project string, path []strin
 	case "createmanagedfolder":
 		return p.createManagedFolder(ctx, path, values)
 	case "deletemanagedfolder":
+		if len(path) > 0 && path[0] == folderPage {
+			_, err := p.actOnFolder(ctx, path, action, values)
+			return err
+		}
 		return p.deleteManagedFolder(ctx, path)
+	case "createfolder":
+		return p.createFolder(ctx, path, values)
+	case "renamefolder", "deletefolder", "deletefolderrecursive":
+		_, err := p.actOnFolder(ctx, path, action, values)
+		return err
 	}
 	if handled, err := p.actOnObjectPage(ctx, c, path, action, values); handled {
 		return err
