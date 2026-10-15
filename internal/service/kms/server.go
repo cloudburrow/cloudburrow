@@ -854,6 +854,16 @@ func (s *Server) DestroyCryptoKeyVersion(_ context.Context, req *kmspb.DestroyCr
 	return s.toVersion(v), nil
 }
 
+// Exclusive runs fn while no request or sweep holds the server: /admin/reset
+// deletes the store's records through it. Without it a sweep or a write in
+// flight, holding a record it read before the delete, writes it back after,
+// and the reset leaves it behind.
+func (s *Server) Exclusive(fn func() error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fn()
+}
+
 // wake re-arms Run after a change to what is due.
 func (s *Server) wake() {
 	select {

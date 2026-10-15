@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/kms/apiv1/kmspb"
 
@@ -232,5 +233,31 @@ func TestConsoleKMSRetiredResources(t *testing.T) {
 	oid := kmsSection(t, od, "retired").Listing.Items[0].Name
 	if d, _ := p.Detail(ctx, "demo-proj", []string{ring, kmsRetiredSegment, oid}); d.Unavailable == "" {
 		t.Error("a ring's page opens another ring's retired resource")
+	}
+}
+
+// /admin/reset of Cloud KMS waits for the server: a sweep or a write in
+// flight holds a record it read before the delete and would write it back
+// after, leaving the reset incomplete (TestKMSResources).
+func TestKMSResetWaitsForTheServer(t *testing.T) {
+	p, _, _ := kmsConsole(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	go func() {
+		_ = p.api().Exclusive(func() error { close(entered); <-release; return nil })
+	}()
+	<-entered
+	done := make(chan error, 1)
+	go func() { done <- (&kmsResetter{svc: p.svc}).Reset(context.Background()) }()
+	select {
+	case err := <-done:
+		t.Fatalf("Reset ran while the server was held: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if rings, err := p.api().KeyRingsInProject("demo-proj"); err != nil || len(rings) != 0 {
+		t.Errorf("after Reset the project has rings %v (%v)", rings, err)
 	}
 }

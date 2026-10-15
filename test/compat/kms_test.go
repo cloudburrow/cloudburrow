@@ -166,8 +166,13 @@ func TestKMSResources(t *testing.T) {
 	// The material is in owned Secrets in the cluster.
 	kc := filepath.Join(instanceDirFrom(t, cliArgs()), "kubeconfig")
 	count := func() int {
-		out, _ := exec.Command("kubectl", "--kubeconfig", kc, "-n", "cloudburrow", "get", "secrets",
+		// A failed kubectl is a failure, not zero Secrets: an empty
+		// answer would pass the check after the reset.
+		out, err := exec.Command("kubectl", "--kubeconfig", kc, "-n", "cloudburrow", "get", "secrets",
 			"-l", "cloudburrow.dev/service=kms,cloudburrow.dev/owned=true", "-o", "name").Output()
+		if err != nil {
+			t.Fatalf("count the KMS Secrets: %v", err)
+		}
 		return len(strings.Fields(string(out)))
 	}
 	if n := count(); n < 4 {
