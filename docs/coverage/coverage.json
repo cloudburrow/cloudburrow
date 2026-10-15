@@ -3917,7 +3917,7 @@
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
-          "test/compat/consolebigquerywrites_test.go:355 TestConsoleBigQueryReadWriteEditorRunsDML"
+          "test/compat/consolebigquerywrites_test.go:377 TestConsoleBigQueryReadWriteEditorRunsDML"
         ]
       },
       {
@@ -4151,7 +4151,7 @@
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
           "test/compat/bigquerysilent_test.go:501 TestBigQueryTableUpdateAddsColumns",
-          "test/compat/consolebigquerywrites_test.go:182 TestConsoleBigQueryEditTableViewsAndInsertOptions"
+          "test/compat/consolebigquerywrites_test.go:190 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
       {

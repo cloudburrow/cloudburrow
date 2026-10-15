@@ -146,12 +146,13 @@ func TestCreateTableAsSelectColumnsAreChecked(t *testing.T) {
 // the verdicts are written with.
 func TestRefusalsReachTheClientAsBigQueryAnswers(t *testing.T) {
 	for sql, want := range map[string][2]any{
-		"ALTER TABLE ds.t ADD COLUMN ok STRING":                  {501, "notImplemented"},
-		"ALTER TABLE ds.t ADD COLUMN `a!` STRING":                {400, "invalidQuery"},
-		"IF TRUE THEN CALL ds.p(); END IF":                       {501, "notImplemented"},
-		"CALL ds.p()":                                            {501, "notImplemented"},
-		"CREATE OR REPLACE PROCEDURE ds.p() BEGIN SELECT 1; END": {501, "notImplemented"},
-		"SELECT 1; DROP PROCEDURE ds.p":                          {501, "notImplemented"},
+		"ALTER TABLE ds.t DROP COLUMN ok":                            {501, "notImplemented"},
+		"ALTER TABLE ds.t ADD COLUMN `a!` STRING":                    {400, "invalidQuery"},
+		"IF TRUE THEN BEGIN TRANSACTION; COMMIT TRANSACTION; END IF": {501, "notImplemented"},
+		"CALL ds.p()": {404, "notFound"},
+		"CREATE TEMP PROCEDURE ds.p() BEGIN SELECT 1; END":             {501, "notImplemented"},
+		"CREATE PROCEDURE ds.p() BEGIN BEGIN TRANSACTION; COMMIT; END": {501, "notImplemented"},
+		"DROP PROCEDURE ds.p": {404, "notFound"},
 	} {
 		emu := &fakeEmulator{}
 		b, _ := json.Marshal(map[string]string{"query": sql})

@@ -1,8 +1,8 @@
 package main
 
-// BigQuery routines on a dataset's page (#782): user-defined functions and
-// table functions, which CREATE FUNCTION, CREATE TABLE FUNCTION and
-// routines.insert make (the "Table functions" and CREATE FUNCTION rows of
+// BigQuery routines on a dataset's page (#782): user-defined functions,
+// table functions and stored procedures (#1217), which CREATE FUNCTION,
+// CREATE TABLE FUNCTION, CREATE PROCEDURE and routines.insert make (the "Table functions" and CREATE FUNCTION rows of
 // docs/compatibility.md). The dataset's page lists them (routines.list), a
 // routine's page shows its type, language, arguments, return type and body
 // (routines.get), and Delete routine drops it (routines.delete), each through
@@ -78,7 +78,7 @@ func (p bigqueryProvider) routinesSection(ctx context.Context, ds *bigquery.Data
 	sort.SliceStable(out.Items, func(i, j int) bool { return out.Items[i].Name < out.Items[j].Name })
 	out.Total = len(out.Items)
 	if out.Total == 0 && out.Unavailable == "" {
-		out.Note = "This dataset has no routines. CREATE FUNCTION or CREATE TABLE FUNCTION in the query editor's Read-write mode makes one."
+		out.Note = "This dataset has no routines. CREATE FUNCTION, CREATE TABLE FUNCTION or CREATE PROCEDURE in the query editor's Read-write mode makes one."
 	}
 	return console.Section{ID: "routines", Label: "Routines", Listing: out}
 }
@@ -201,11 +201,16 @@ func routineType(t string) string {
 	return orDash(t)
 }
 
-// routineArguments is a routine's signature: each argument's name and type.
+// routineArguments is a routine's signature: each argument's name and
+// type, after its mode when it is a procedure's OUT or INOUT one.
 func routineArguments(args []*bigquery.RoutineArgument) string {
 	parts := make([]string, 0, len(args))
 	for _, a := range args {
-		parts = append(parts, strings.TrimSpace(a.Name+" "+sqlType(a.DataType)))
+		mode := ""
+		if a.Mode == "OUT" || a.Mode == "INOUT" {
+			mode = a.Mode + " "
+		}
+		parts = append(parts, strings.TrimSpace(mode+a.Name+" "+sqlType(a.DataType)))
 	}
 	return strings.Join(parts, ", ")
 }

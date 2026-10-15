@@ -55,7 +55,9 @@ func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 	}
 	_, hasLabels := patch["labels"]
 	_, hasDesc := patch["description"]
-	patching := r.Method == http.MethodPatch && (hasLabels || hasDesc)
+	_, hasName := patch["friendlyName"]
+	_, hasExpiry := patch["expirationTime"]
+	patching := r.Method == http.MethodPatch && (hasLabels || hasDesc || hasName || hasExpiry)
 	if schema == nil && !patching {
 		f.next.ServeHTTP(w, r)
 		return

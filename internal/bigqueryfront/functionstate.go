@@ -43,6 +43,8 @@ type savedFunctions struct {
 	// Defs are the functions' definitions (#1177).
 	Defs    map[string]map[string]json.RawMessage `json:"defs,omitempty"`
 	Scanned map[string]bool                       `json:"scanned,omitempty"`
+	// Procs are the stored procedures (#1217).
+	Procs map[string]map[string]json.RawMessage `json:"procs,omitempty"`
 	// Started is when the front that scanned started, Unix milliseconds.
 	Started int64 `json:"started"`
 }
@@ -67,8 +69,8 @@ func (k *knownFunctions) keep(path string, logf func(string, ...any)) {
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	if s.Funcs != nil || s.Scanned != nil {
-		k.funcs, k.defs, k.scanned, k.started = s.Funcs, s.Defs, s.Scanned, s.Started
+	if s.Funcs != nil || s.Scanned != nil || s.Procs != nil {
+		k.funcs, k.defs, k.scanned, k.started, k.procs = s.Funcs, s.Defs, s.Scanned, s.Started, s.Procs
 		logf("bigquery front: restored the functions it knew from %s", path)
 	}
 	k.path, k.logf = path, logf
@@ -83,7 +85,7 @@ func (k *knownFunctions) saveLocked() {
 	if k == nil || k.path == "" {
 		return
 	}
-	b, err := json.Marshal(savedFunctions{Funcs: k.funcs, Defs: k.defs, Scanned: k.scanned, Started: k.started})
+	b, err := json.Marshal(savedFunctions{Funcs: k.funcs, Defs: k.defs, Scanned: k.scanned, Started: k.started, Procs: k.procs})
 	if err == nil {
 		err = writeFileAtomic(k.path, b)
 	}

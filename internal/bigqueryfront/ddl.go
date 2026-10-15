@@ -210,7 +210,9 @@ func checkDDL(sql string) ddlVerdict {
 			// #1201: measured through the front, CREATE PROCEDURE in a
 			// dataset that does not exist answered done, and CALL of a
 			// procedure whose body inserts a row answered done with no
-			// rows and inserted nothing.
+			// rows and inserted nothing. Since #1217 the front's script
+			// interpreter carries them out (procedures.go); what still
+			// reaches here (a dry run, legacy SQL) is 501.
 			if unsupported == "" {
 				unsupported = "procedure"
 			}
@@ -285,11 +287,10 @@ func checkDDL(sql string) ddlVerdict {
 				"does not run the statements inside IF, LOOP, WHILE, REPEAT, FOR or CASE blocks and still reports success "+
 				"(measured), so nothing was run. A BEGIN ... END block, and statements outside any block, are run.", flow)}
 	case alter != "":
-		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: ALTER TABLE. BigQuery runs it, " +
-			"but the emulator behind CloudBurrow reports ADD COLUMN, DROP COLUMN, RENAME TO and SET OPTIONS as done and " +
-			"leaves the table unchanged (measured), so nothing was run. Add columns to a table, relax a column to " +
-			"NULLABLE or change descriptions and options with tables.update or tables.patch (Table.Update in the Go " +
-			"client), which CloudBurrow carries out (#1010)."}
+		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: ALTER TABLE in a dry run or " +
+			"in legacy SQL. CloudBurrow carries out ALTER TABLE itself in a GoogleSQL query (#1227), since the emulator " +
+			"behind it reports ADD COLUMN, DROP COLUMN, RENAME TO and SET OPTIONS as done and leaves the table unchanged " +
+			"(measured), but not in a dry run, so nothing was run."}
 	case unsupported == "RAISE":
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: RAISE. BigQuery ends the script " +
 			"with the error it raises, but the emulator behind CloudBurrow ignores RAISE and reports the script done " +
@@ -297,8 +298,8 @@ func checkDDL(sql string) ddlVerdict {
 	case unsupported == "procedure":
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: stored procedures (CREATE " +
 			"PROCEDURE, CALL, DROP PROCEDURE). BigQuery stores a procedure and runs its body when it is called, but the " +
-			"emulator behind CloudBurrow reports CREATE PROCEDURE and CALL done and runs nothing (measured), and " +
-			"CloudBurrow does not store procedures, so nothing was run. Run the procedure's body as a script of its own."}
+			"emulator behind CloudBurrow reports CREATE PROCEDURE and CALL done and runs nothing (measured); CloudBurrow " +
+			"runs them itself in a GoogleSQL query, but not in a dry run, so nothing was run."}
 	case unsupported != "":
 		hint := "A view without a column list (CREATE VIEW ... AS SELECT a AS name) is supported."
 		switch unsupported {

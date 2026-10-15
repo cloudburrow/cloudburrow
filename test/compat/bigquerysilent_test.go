@@ -404,8 +404,8 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 			"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 5' INTO `select`",
 			// Evaluating the SQL first would not be faithful (#1037).
 			"EXECUTE IMMEDIATE FORMAT('SELECT %t', CURRENT_TIMESTAMP())",
-			"IF TRUE THEN EXECUTE IMMEDIATE FORMAT('SELECT %d', 1); END IF",
-			"DECLARE i INT64 DEFAULT 0; WHILE i < 2 DO SET i = i + 1; EXECUTE IMMEDIATE FORMAT('SELECT %d', i); END WHILE",
+			// Inside control flow the front's interpreter evaluates the SQL in
+			// its turn, so those run (#1201, TestBigQueryScriptControlFlowMore).
 			// After DML, an expression that reads a table (#1037).
 			"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64); EXECUTE IMMEDIATE (SELECT FORMAT('SELECT %d', COUNT(*)) FROM " + d + ".not_made_" + suffix + ")",
 			// The numbers of variables and columns differ, which BigQuery

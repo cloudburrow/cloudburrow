@@ -32,9 +32,11 @@ package bigqueryfront
 // unless readMask asks for more, each routine's etag, reference, type,
 // times and language (https://cloud.google.com/bigquery/docs/reference/rest/v2/routines/list).
 //
-// Not served: a function routines.insert made before the front started
-// and a procedure (CREATE PROCEDURE), which the front does not know;
-// routines.update, 501.
+// A stored procedure the front keeps itself (procedures.go, #1217) is
+// listed, read and deleted too.
+//
+// Not served: a function routines.insert made before the front started,
+// which the front does not know; routines.update, 501.
 
 import (
 	"encoding/json"
@@ -452,7 +454,20 @@ func (f front) listRoutines(w http.ResponseWriter, r *http.Request, project, dat
 		mask = listFields
 	}
 	var live []map[string]any
+	procs := f.functions.procsIn(project, dataset) // #1217, procedures.go
+	for n, p := range procs {
+		names = append(names, "\x00"+n)
+		defs["\x00"+n], _ = json.Marshal(p.Routine)
+	}
+	sort.Strings(names)
 	for _, n := range names {
+		if strings.HasPrefix(n, "\x00") {
+			var def map[string]any
+			if json.Unmarshal(defs[n], &def) == nil {
+				live = append(live, def)
+			}
+			continue
+		}
 		var def map[string]any
 		if json.Unmarshal(defs[n], &def) != nil {
 			continue
@@ -490,6 +505,9 @@ func (f front) listRoutines(w http.ResponseWriter, r *http.Request, project, dat
 // knownRoutine returns a routine's definition, when the front knows it and
 // the engine has the function.
 func (f front) knownRoutine(r *http.Request, project, dataset, id string) (map[string]any, bool) {
+	if p, ok := f.functions.proc(project, []string{dataset, id}); ok { // #1217
+		return p.Routine, true
+	}
 	f.functionsIn(r, project, dataset)
 	b, ok := f.functions.defsIn(project, dataset)[strings.ToLower(id)]
 	if !ok {
@@ -529,6 +547,11 @@ func (f front) serveRoutine(w http.ResponseWriter, r *http.Request, project, dat
 		def, ok := f.knownRoutine(r, project, dataset, id)
 		if !ok {
 			routineNotFound(w, project, dataset, id)
+			return
+		}
+		if def["routineType"] == "PROCEDURE" { // #1217
+			f.functions.dropProc(project, []string{dataset, id})
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		table := def["routineType"] == "TABLE_VALUED_FUNCTION"
