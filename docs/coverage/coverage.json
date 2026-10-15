@@ -397,42 +397,42 @@
         "method": "google.cloud.run.v2.Instances/CreateInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/DeleteInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/ListInstances",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/StartInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/StopInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
+          "test/compat/runworkerpools_test.go:212 TestRunInstanceLifecycle"
         ]
       },
       {
@@ -440,7 +440,6 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
-          "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
         ]
       },
@@ -464,7 +463,6 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
-          "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
         ]
       },
@@ -480,7 +478,6 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
-          "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
         ]
       },
@@ -532,8 +529,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
-          "test/compat/run_test.go:149 TestRunRevisions",
-          "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath"
+          "test/compat/run_test.go:149 TestRunRevisions"
         ]
       },
       {
@@ -548,7 +544,6 @@
         "status": "Verified",
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
-          "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount"
         ]
       },
@@ -572,7 +567,6 @@
         "status": "Verified",
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
-          "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
           "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount"
         ]
@@ -642,14 +636,14 @@
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/DeleteWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
         ]
       },
       {
@@ -657,21 +651,21 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerunworkerpools_test.go:26 TestConsoleRunWorkerPoolDeployEditScaleDelete",
-          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/GetWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/ListWorkerPools",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
         ]
       },
       {
@@ -679,7 +673,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerunworkerpools_test.go:26 TestConsoleRunWorkerPoolDeployEditScaleDelete",
-          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
         ]
       },
       {
@@ -687,14 +681,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerunworkerpools_test.go:26 TestConsoleRunWorkerPoolDeployEditScaleDelete",
-          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
         ]
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/UpdateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
         ]
       }
     ]
@@ -703,8 +697,8 @@
     "Key": "runv1",
     "Title": "Cloud Run v1 (Knative API)",
     "counts": {
-      "Unknown": 49,
-      "Verified": 27
+      "Unknown": 63,
+      "Verified": 13
     },
     "rows": [
       {
@@ -727,31 +721,19 @@
       },
       {
         "method": "run.namespaces.domainmappings.create",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:187 TestRunV1DomainMappings"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.namespaces.domainmappings.delete",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:187 TestRunV1DomainMappings"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.namespaces.domainmappings.get",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:187 TestRunV1DomainMappings"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.namespaces.domainmappings.list",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:187 TestRunV1DomainMappings"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.namespaces.executions.cancel",
@@ -799,31 +781,19 @@
       },
       {
         "method": "run.namespaces.jobs.create",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:117 TestRunV1Jobs"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.namespaces.jobs.delete",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:117 TestRunV1Jobs"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.namespaces.jobs.get",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:117 TestRunV1Jobs"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.namespaces.jobs.list",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:117 TestRunV1Jobs"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.namespaces.jobs.replaceJob",
@@ -936,10 +906,7 @@
       },
       {
         "method": "run.projects.authorizeddomains.list",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:238 TestGcloudRunDomainMappings"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.projects.locations.authorizeddomains.list",
@@ -967,10 +934,7 @@
       },
       {
         "method": "run.projects.locations.domainmappings.list",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:187 TestRunV1DomainMappings"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.projects.locations.instances.getIamPolicy",
@@ -998,10 +962,7 @@
       },
       {
         "method": "run.projects.locations.list",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:37 TestRunV1LocationsAndIAM"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.projects.locations.operations.delete",
@@ -1056,10 +1017,7 @@
       },
       {
         "method": "run.projects.locations.services.getIamPolicy",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:37 TestRunV1LocationsAndIAM"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.projects.locations.services.list",
@@ -1074,17 +1032,11 @@
       },
       {
         "method": "run.projects.locations.services.setIamPolicy",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:37 TestRunV1LocationsAndIAM"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.projects.locations.services.testIamPermissions",
-        "status": "Verified",
-        "tests": [
-          "test/compat/runv1global_test.go:37 TestRunV1LocationsAndIAM"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "run.projects.locations.workerpools.getIamPolicy",
@@ -2088,7 +2040,6 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/CreateTagBinding",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
         ]
       },
@@ -2096,7 +2047,6 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/DeleteTagBinding",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
         ]
       },
@@ -2104,7 +2054,6 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/ListEffectiveTags",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
         ]
       },
@@ -2112,7 +2061,6 @@
         "method": "google.cloud.resourcemanager.v3.TagBindings/ListTagBindings",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerregionaltags_test.go:54 TestResourceManagerRegionalTagBindings",
           "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
         ]
       },
@@ -4581,6 +4529,215 @@
     ]
   },
   {
+    "Key": "firestoreadmin",
+    "Title": "Firestore Admin API",
+    "counts": {
+      "Unimplemented": 20,
+      "Verified": 12
+    },
+    "rows": [
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/BulkDeleteDocuments",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/CloneDatabase",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/CreateBackupSchedule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/CreateDatabase",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/CreateIndex",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/CreateUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteBackup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteBackupSchedule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteDatabase",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteIndex",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/DisableUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/EnableUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ExportDocuments",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackupSchedule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetDatabase",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
+          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetField",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
+          "test/compat/firestoreadmin_test.go:213 TestFirestoreAdminFields"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetIndex",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/GetUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ImportDocuments",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackupSchedules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackups",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListDatabases",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListFields",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:213 TestFirestoreAdminFields"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListIndexes",
+        "status": "Verified",
+        "tests": [
+          "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
+          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ListUserCreds",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/ResetUserPassword",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/RestoreDatabase",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateBackupSchedule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateDatabase",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+        ]
+      },
+      {
+        "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateField",
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:213 TestFirestoreAdminFields"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "datastore",
     "Title": "Datastore",
     "counts": {
@@ -4655,10 +4812,266 @@
     "Key": "bigtable",
     "Title": "Bigtable",
     "counts": {
-      "Refused": 34,
-      "Verified": 16
+      "Refused": 48,
+      "Verified": 36
     },
     "rows": [
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateAppProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateLogicalView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateMaterializedView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteAppProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteLogicalView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteMaterializedView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetAppProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM",
+          "test/compat/consolebigtableinstances_test.go:74 TestConsoleBigtableInstanceAdmin"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
+          "test/compat/consolebigtableinstances_test.go:74 TestConsoleBigtableInstanceAdmin"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
+          "test/compat/consolebigtableinstances_test.go:74 TestConsoleBigtableInstanceAdmin"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetLogicalView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetMaterializedView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetMemoryLayer",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListAppProfiles",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListClusters",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
+          "test/compat/consolebigtableinstances_test.go:74 TestConsoleBigtableInstanceAdmin"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListHotTablets",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListInstances",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListLogicalViews",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListMaterializedViews",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListMemoryLayers",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/PartialUpdateCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/PartialUpdateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/SetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/TestIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateAppProfile",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:138 TestBigtableAppProfilesAndInstanceIAM"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateCluster",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters"
+        ]
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateLogicalView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateMaterializedView",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateMemoryLayer",
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CheckConsistency",
         "status": "Verified",
@@ -4812,6 +5225,7 @@
         "tests": [
           "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
           "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
+          "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
           "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
         ]
       },
@@ -4851,6 +5265,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListTables",
         "status": "Verified",
         "tests": [
+          "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
           "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
         ]
       },
@@ -5037,6 +5452,7 @@
         "tests": [
           "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
           "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
+          "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
           "test/compat/optional_test.go:197 TestBigtableTableAndRows"
         ]
       },
@@ -5656,11 +6072,12 @@
         "tests": [
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
-          "test/compat/bigquerycsvtimes_test.go:26 TestBigQueryCSVLoadTimeFormatsAndEncodings",
+          "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
+          "test/compat/bigqueryjsonunknown_test.go:27 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
-          "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
+          "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
@@ -5686,8 +6103,9 @@
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
+          "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
-          "test/compat/bigquerycsvtimes_test.go:26 TestBigQueryCSVLoadTimeFormatsAndEncodings",
+          "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
@@ -5698,13 +6116,15 @@
           "test/compat/bigqueryinfoschemamore_test.go:75 TestBigQueryInformationSchemaPartitionsAndConstraints",
           "test/compat/bigqueryinfoschemaregion_test.go:16 TestBigQueryInformationSchemaRegionViews",
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
+          "test/compat/bigqueryingestiontime_test.go:31 TestBigQueryIngestionTime",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigqueryjsonunknown_test.go:27 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
-          "test/compat/bigquerypartitionreads_test.go:140 TestBigQueryTimeTravelReads",
+          "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
-          "test/compat/bigquerypartitionreads_test.go:78 TestBigQueryPartitionDecorators",
-          "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
+          "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
+          "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -5735,8 +6155,9 @@
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
+          "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
-          "test/compat/bigquerycsvtimes_test.go:26 TestBigQueryCSVLoadTimeFormatsAndEncodings",
+          "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:160 TestBigQueryMergeFromASubqueryInAScript",
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
@@ -5746,13 +6167,15 @@
           "test/compat/bigqueryinfoschemamore_test.go:75 TestBigQueryInformationSchemaPartitionsAndConstraints",
           "test/compat/bigqueryinfoschemaregion_test.go:16 TestBigQueryInformationSchemaRegionViews",
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
+          "test/compat/bigqueryingestiontime_test.go:31 TestBigQueryIngestionTime",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigqueryjsonunknown_test.go:27 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
-          "test/compat/bigquerypartitionreads_test.go:140 TestBigQueryTimeTravelReads",
+          "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
-          "test/compat/bigquerypartitionreads_test.go:78 TestBigQueryPartitionDecorators",
-          "test/compat/bigquerypartitionwrites_test.go:257 TestConsoleBigQueryPartitions",
+          "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
+          "test/compat/bigquerypartitionwrites_test.go:263 TestConsoleBigQueryPartitions",
           "test/compat/bigqueryscripterrors_test.go:22 TestBigQueryScriptRuntimeErrorBeforeLast",
           "test/compat/bigqueryscripterrors_test.go:77 TestBigQueryAssert",
           "test/compat/bigquerysilent_test.go:503 TestBigQueryExecuteImmediateInTurn",
@@ -5939,6 +6362,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
+          "test/compat/bigqueryingestiontime_test.go:31 TestBigQueryIngestionTime",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows"
         ]
       },
@@ -5949,9 +6374,14 @@
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
-          "test/compat/bigquerypartitionwrites_test.go:257 TestConsoleBigQueryPartitions",
-          "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
+          "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
+          "test/compat/bigqueryingestiontime_test.go:31 TestBigQueryIngestionTime",
+          "test/compat/bigquerypartitionwrites_test.go:263 TestConsoleBigQueryPartitions",
+          "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
           "test/compat/bigquerysilent_test.go:123 TestBigQuerySameTableIDInTwoDatasets",
+          "test/compat/bigquerystoragewritearrow_test.go:162 TestBigQueryStorageWriteArrowRows",
+          "test/compat/bigquerystoragewritearrow_test.go:263 TestBigQueryStorageWriteArrowRefusesSchemas",
+          "test/compat/bigquerystoragewritearrow_test.go:306 TestBigQueryStorageWriteArrowIntervals",
           "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery"
         ]
       },
@@ -5960,7 +6390,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigquerypartitionreads_test.go:78 TestBigQueryPartitionDecorators",
+          "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
@@ -5974,15 +6404,18 @@
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
+          "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
+          "test/compat/bigqueryingestiontime_test.go:31 TestBigQueryIngestionTime",
+          "test/compat/bigqueryjsonunknown_test.go:27 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
-          "test/compat/bigquerypartitionreads_test.go:78 TestBigQueryPartitionDecorators",
-          "test/compat/bigquerypartitionwrites_test.go:257 TestConsoleBigQueryPartitions",
-          "test/compat/bigquerypartitionwrites_test.go:34 TestBigQueryPartitionDestinations",
+          "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
+          "test/compat/bigquerypartitionwrites_test.go:263 TestConsoleBigQueryPartitions",
+          "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigqueryviewcolumns_test.go:138 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
@@ -6003,7 +6436,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigquerycsvtimes_test.go:26 TestBigQueryCSVLoadTimeFormatsAndEncodings",
+          "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
+          "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
+          "test/compat/bigqueryingestiontime_test.go:31 TestBigQueryIngestionTime",
+          "test/compat/bigqueryjsonunknown_test.go:27 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
@@ -6020,6 +6456,7 @@
         "method": "bigquery.tables.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
@@ -6056,8 +6493,8 @@
     "Key": "sqladmin",
     "Title": "Cloud SQL Admin API (v1)",
     "counts": {
-      "Unimplemented": 63,
-      "Verified": 17
+      "Unimplemented": 58,
+      "Verified": 22
     },
     "rows": [
       {
@@ -6104,7 +6541,7 @@
         "method": "sql.backupRuns.list",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:98 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6137,14 +6574,16 @@
         "method": "sql.connect.generateEphemeral",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlconnector_test.go:36 TestCloudSQLConnectorDialsBothServers"
+          "test/compat/cloudsqlconnector_test.go:36 TestCloudSQLConnectorDialsBothServers",
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
         ]
       },
       {
         "method": "sql.connect.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlconnector_test.go:36 TestCloudSQLConnectorDialsBothServers"
+          "test/compat/cloudsqlconnector_test.go:36 TestCloudSQLConnectorDialsBothServers",
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
         ]
       },
       {
@@ -6156,8 +6595,9 @@
         "method": "sql.databases.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
+          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6165,7 +6605,8 @@
         "method": "sql.databases.get",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6173,8 +6614,9 @@
         "method": "sql.databases.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
+          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6182,29 +6624,29 @@
         "method": "sql.databases.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:414 TestGcloudSQL"
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:420 TestGcloudSQL"
         ]
       },
       {
         "method": "sql.databases.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.databases.update",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.flags.list",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:98 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6251,15 +6693,19 @@
       {
         "method": "sql.instances.clone",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:98 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.instances.delete",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/cloudsqlinstances_test.go:228 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
+        ]
       },
       {
         "method": "sql.instances.demote",
@@ -6284,13 +6730,19 @@
       {
         "method": "sql.instances.failover",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:98 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.instances.get",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
+          "test/compat/cloudsqlinstances_test.go:228 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
         ]
       },
@@ -6301,17 +6753,20 @@
       },
       {
         "method": "sql.instances.insert",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/cloudsqlinstances_test.go:228 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
+        ]
       },
       {
         "method": "sql.instances.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
+          "test/compat/cloudsqlinstances_test.go:228 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
         ]
       },
@@ -6322,11 +6777,11 @@
       },
       {
         "method": "sql.instances.patch",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
+        ]
       },
       {
         "method": "sql.instances.pointInTimeRestore",
@@ -6360,11 +6815,10 @@
       },
       {
         "method": "sql.instances.restart",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
+        ]
       },
       {
         "method": "sql.instances.restoreBackup",
@@ -6398,8 +6852,10 @@
       },
       {
         "method": "sql.instances.update",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
+        ]
       },
       {
         "method": "sql.operations.cancel",
@@ -6410,8 +6866,11 @@
         "method": "sql.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
+          "test/compat/cloudsqlinstances_test.go:228 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6419,7 +6878,7 @@
         "method": "sql.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -6486,7 +6945,7 @@
         "method": "sql.tiers.list",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:97 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:98 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6494,8 +6953,8 @@
         "method": "sql.users.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6503,15 +6962,15 @@
         "method": "sql.users.get",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.users.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6519,8 +6978,8 @@
         "method": "sql.users.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:414 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6528,7 +6987,7 @@
         "method": "sql.users.update",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:262 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       }

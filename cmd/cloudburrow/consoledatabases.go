@@ -260,12 +260,13 @@ type bigtableProvider struct{ endpoint string }
 func (bigtableProvider) ID() string    { return "bigtable" }
 func (bigtableProvider) Title() string { return "Bigtable" }
 
-// bigtableInstance is the instance the console reads.
+// bigtableInstance is the instance the Bigtable screen reads when its URL
+// names none.
 //
 // The emulator serves whatever instance a client asks for, created or not:
-// the console reads the one CloudBurrow's own tests use, and its note lists
-// the instances created through the instance admin API the front serves
-// (#1331).
+// the console defaults to the one CloudBurrow's own tests use, and its
+// picker offers it beside the instances created through the instance admin
+// API the front serves (#1331, #1360).
 const bigtableInstance = "cloudburrow"
 
 func (p bigtableProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -277,7 +278,9 @@ func (p bigtableProvider) List(ctx context.Context, project string) (console.Lis
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	admin, err := bigtable.NewAdminClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	base.Scope = p.scope(ctx, project)
+	instance := bigtableInstanceIn(ctx)
+	admin, err := p.newAdmin(ctx, project)
 	if err != nil {
 		base.Unavailable = "cannot reach Bigtable: " + err.Error()
 		return base, nil
@@ -310,14 +313,14 @@ func (p bigtableProvider) List(ctx context.Context, project string) (console.Lis
 		})
 	}
 	base.Items, base.Total = items, len(items)
-	base.Note = fmt.Sprintf("Instance %q. ", bigtableInstance) + p.instancesNote(ctx, project)
+	base.Note = fmt.Sprintf("Instance %q. ", instance) + p.instancesNote(ctx, project)
 	return base, nil
 }
 
 // instancesNote names the instances created through the instance admin API,
 // which CloudBurrow's Bigtable front serves (#1331). The tables listed are
-// the console's own instance's, which the emulator serves without it being
-// created, as it serves any instance name.
+// the chosen instance's; the default one, bigtableInstance, the emulator
+// serves without it being created, as it serves any instance name.
 func (p bigtableProvider) instancesNote(ctx context.Context, project string) string {
 	iac, err := bigtable.NewInstanceAdminClient(ctx, project, localOpts(p.endpoint)...)
 	if err != nil {
@@ -970,7 +973,7 @@ func (p bigtableProvider) familiesSection(ctx context.Context, project, table st
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	admin, err := bigtable.NewAdminClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	admin, err := p.newAdmin(ctx, project)
 	if err != nil {
 		out.Unavailable = "cannot reach the Bigtable admin API: " + err.Error()
 		sec.Listing = out
@@ -1036,7 +1039,7 @@ func (p bigtableProvider) rowsPage(ctx context.Context, project, name, after str
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	c, err := bigtable.NewClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	c, err := p.newData(ctx, project)
 	if err != nil {
 		out.Unavailable = "cannot reach Bigtable: " + err.Error()
 		return out, nil
@@ -1614,7 +1617,7 @@ func (p bigtableProvider) Create(ctx context.Context, project string, values map
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	admin, err := bigtable.NewAdminClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	admin, err := p.newAdmin(ctx, project)
 	if err != nil {
 		return "", fmt.Errorf("cannot reach Bigtable: %w", err)
 	}
@@ -1645,7 +1648,7 @@ func (p bigtableProvider) Delete(ctx context.Context, project, name string) erro
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
-	admin, err := bigtable.NewAdminClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	admin, err := p.newAdmin(ctx, project)
 	if err != nil {
 		return fmt.Errorf("cannot reach Bigtable: %w", err)
 	}
@@ -2444,7 +2447,7 @@ func (p bigtableProvider) rowDetail(ctx context.Context, project, table, rowKey 
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	c, err := bigtable.NewClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	c, err := p.newData(ctx, project)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot reach Bigtable: " + err.Error()}, nil
 	}
@@ -2542,7 +2545,7 @@ func (p bigtableProvider) Build(ctx context.Context, project string, path []stri
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
-	c, err := bigtable.NewClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	c, err := p.newData(ctx, project)
 	if err != nil {
 		out.Unavailable = "cannot reach Bigtable: " + err.Error()
 		return out, nil
