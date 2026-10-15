@@ -4255,7 +4255,8 @@
         "method": "bigquery.jobs.getQueryResults",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:52 TestBigQueryGetQueryResultsPages"
+          "test/compat/bigquerymethods_test.go:52 TestBigQueryGetQueryResultsPages",
+          "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions"
         ]
       },
       {
@@ -4266,6 +4267,8 @@
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigquerytransactions_test.go:111 TestBigQueryScriptRangeVariables",
+          "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
         ]
@@ -4288,6 +4291,8 @@
           "test/compat/bigquerydml_test.go:30 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigquerytransactions_test.go:111 TestBigQueryScriptRangeVariables",
+          "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
           "test/compat/consolebigquerywrites_test.go:377 TestConsoleBigQueryReadWriteEditorRunsDML"
         ]
       },
