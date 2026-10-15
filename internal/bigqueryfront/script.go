@@ -144,17 +144,17 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 // (renameVariables), and none outlives it; a probe whose variables cannot
 // be renamed so is 501.
 func (f front) immediateEval(r *http.Request, q queryOptions) immediateEval {
-	return func(probe string) (string, string, bool, int, string) {
+	return func(probe string) (string, string, string, bool, int, string) {
 		probe, _, why := renameVariables(probe, f.variableColumns(r, q, ddlVerdict{}))
 		if why != "" {
-			return "", "", false, http.StatusNotImplemented, "whose SQL CloudBurrow evaluates first, by running the " +
+			return "", "", "", false, http.StatusNotImplemented, "whose SQL CloudBurrow evaluates first, by running the " +
 				"statements before it, which it could not do here: " + why
 		}
 		legacy := false
 		req, err := json.Marshal(queryOptions{Query: probe, UseLegacySQL: &legacy, DefaultDataset: q.DefaultDataset,
 			ParameterMode: q.ParameterMode, QueryParameters: q.QueryParameters})
 		if err != nil {
-			return "", "", false, http.StatusInternalServerError, err.Error()
+			return "", "", "", false, http.StatusInternalServerError, err.Error()
 		}
 		status, got := f.send(r, http.MethodPost, "/queries", req)
 		var res struct {
@@ -175,17 +175,23 @@ func (f front) immediateEval(r *http.Request, q queryOptions) immediateEval {
 				why = fmt.Sprintf("HTTP %d", status)
 			}
 			if status >= 500 || status == 0 {
-				return "", "", false, http.StatusNotImplemented, "whose SQL CloudBurrow could not evaluate first (" + why + "). Nothing was run."
+				return "", "", "", false, http.StatusNotImplemented, "whose SQL CloudBurrow could not evaluate first (" + why + "). Nothing was run."
 			}
-			return "", "", false, http.StatusBadRequest, why
+			return "", "", "", false, http.StatusBadRequest, why
 		}
-		if res.JobComplete != nil && !*res.JobComplete || len(res.Schema.Fields) != 1 {
-			return "", "", false, http.StatusNotImplemented, "whose SQL CloudBurrow could not evaluate first (no answer of one column). Nothing was run."
+		complete := res.JobComplete == nil || *res.JobComplete
+		if complete && len(res.Schema.Fields) == 0 {
+			// No result: the probe did not reach the statement
+			// (evalImmediate).
+			return "", "", "", false, 0, ""
+		}
+		if !complete || len(res.Schema.Fields) != 1 {
+			return "", "", "", false, http.StatusNotImplemented, "whose SQL CloudBurrow could not evaluate first (no answer of one column). Nothing was run."
 		}
 		if len(res.Rows) == 0 || len(res.Rows[0].F) == 0 || res.Rows[0].F[0].V == nil {
-			return res.Schema.Fields[0].Type, "", true, 0, ""
+			return res.Schema.Fields[0].Name, res.Schema.Fields[0].Type, "", true, 0, ""
 		}
-		return res.Schema.Fields[0].Type, *res.Rows[0].F[0].V, false, 0, ""
+		return res.Schema.Fields[0].Name, res.Schema.Fields[0].Type, *res.Rows[0].F[0].V, false, 0, ""
 	}
 }
 
