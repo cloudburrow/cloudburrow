@@ -16,11 +16,15 @@ import (
 // Two volume types have a faithful Kubernetes counterpart and are rendered:
 // a Secret Manager secret, mounted from the Kubernetes Secret that holds its
 // versions (the one secretKeyRef env vars resolve to), and an in-memory
-// emptyDir. Cloud SQL, Cloud Storage FUSE and NFS volumes stay refused: no
-// Cloud SQL socket, FUSE driver or NFS server exists on the kind node.
+// emptyDir. A mount's subPath is Kubernetes' subPath (#1346). Cloud SQL,
+// Cloud Storage FUSE and NFS volumes stay refused: no Cloud SQL socket, FUSE
+// driver or NFS server exists on the kind node.
 //
 // The service account is stored and returned, not acted on: every workload
 // reaches the one metadata server, which names the instance's own account.
+// So are VPC access, the encryption key, the execution environment and
+// session affinity (#1346): Google documents each as a setting, and none has
+// an effect here, so each is stored and returned and nothing claims more.
 
 // annPodConfig records the Cloud Run volumes, each container's mounts and
 // the service account, as a RevisionTemplate's JSON, so they read back as
@@ -41,13 +45,6 @@ func volumeGaps(prefix string, tmpl podTemplate) []string {
 			gaps = append(gaps, prefix+".volumes.gcs: Cloud Storage FUSE is not mounted locally")
 		case v.GetNfs() != nil:
 			gaps = append(gaps, prefix+".volumes.nfs: no NFS server is reachable locally")
-		}
-	}
-	for _, c := range tmpl.GetContainers() {
-		for _, m := range c.GetVolumeMounts() {
-			if m.GetSubPath() != "" {
-				gaps = append(gaps, "container.volumeMounts.subPath: not mapped")
-			}
 		}
 	}
 	return gaps
@@ -80,6 +77,11 @@ func checkVolumes(tmpl podTemplate) error {
 			if !path.IsAbs(m.GetMountPath()) || path.Clean(m.GetMountPath()) == "/" {
 				return apierror.InvalidArgument("volumeMount %q: mountPath %q must be an absolute path other than /",
 					m.GetName(), m.GetMountPath())
+			}
+			if sp := m.GetSubPath(); sp != "" && (path.IsAbs(sp) || path.Clean(sp) != sp ||
+				sp == ".." || strings.HasPrefix(sp, "../")) {
+				return apierror.InvalidArgument("volumeMount %q: subPath %q must be a relative path inside the volume",
+					m.GetName(), sp)
 			}
 		}
 	}
@@ -161,6 +163,9 @@ func renderVolumeMounts(b *strings.Builder, mounts []*runpb.VolumeMount, volumes
 	b.WriteString("          volumeMounts:\n")
 	for _, m := range mounts {
 		fmt.Fprintf(b, "            - name: %s\n              mountPath: %q\n", m.GetName(), m.GetMountPath())
+		if sp := m.GetSubPath(); sp != "" {
+			fmt.Fprintf(b, "              subPath: %q\n", sp)
+		}
 		if secret[m.GetName()] {
 			b.WriteString("              readOnly: true\n")
 		}
@@ -170,8 +175,14 @@ func renderVolumeMounts(b *strings.Builder, mounts []*runpb.VolumeMount, volumes
 // podConfigAnnotation renders annPodConfig for a template, or "" when it
 // sets none of the fields.
 func podConfigAnnotation(tmpl podTemplate) string {
-	rec := &runpb.RevisionTemplate{ServiceAccount: tmpl.GetServiceAccount(), Volumes: tmpl.GetVolumes()}
-	set := rec.ServiceAccount != "" || len(rec.Volumes) > 0
+	rec := &runpb.RevisionTemplate{ServiceAccount: tmpl.GetServiceAccount(), Volumes: tmpl.GetVolumes(),
+		VpcAccess: tmpl.GetVpcAccess(), EncryptionKey: tmpl.GetEncryptionKey(),
+		ExecutionEnvironment: tmpl.GetExecutionEnvironment()}
+	if rt, ok := tmpl.(*runpb.RevisionTemplate); ok {
+		rec.SessionAffinity = rt.GetSessionAffinity()
+	}
+	set := rec.ServiceAccount != "" || len(rec.Volumes) > 0 || rec.VpcAccess != nil || rec.EncryptionKey != "" ||
+		rec.ExecutionEnvironment != runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_UNSPECIFIED || rec.SessionAffinity
 	for _, c := range tmpl.GetContainers() {
 		rec.Containers = append(rec.Containers, &runpb.Container{VolumeMounts: c.GetVolumeMounts()})
 		set = set || len(c.GetVolumeMounts()) > 0
@@ -195,6 +206,10 @@ func readPodConfig(ann map[string]string, into *runpb.RevisionTemplate) {
 	}
 	into.ServiceAccount = rec.GetServiceAccount()
 	into.Volumes = rec.GetVolumes()
+	into.VpcAccess = rec.GetVpcAccess()
+	into.EncryptionKey = rec.GetEncryptionKey()
+	into.ExecutionEnvironment = rec.GetExecutionEnvironment()
+	into.SessionAffinity = rec.GetSessionAffinity()
 	for i, c := range rec.GetContainers() {
 		if i < len(into.Containers) {
 			into.Containers[i].VolumeMounts = c.GetVolumeMounts()

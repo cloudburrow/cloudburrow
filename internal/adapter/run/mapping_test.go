@@ -78,9 +78,6 @@ func TestUnsupportedConfigurationIsReported(t *testing.T) {
 		mutate func(*runpb.Service)
 		want   string
 	}{
-		{"vpc access", func(s *runpb.Service) {
-			s.Template.VpcAccess = &runpb.VpcAccess{Connector: "conn"}
-		}, "vpcAccess"},
 		{"volumes", func(s *runpb.Service) {
 			s.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_CloudSqlInstance{
 				CloudSqlInstance: &runpb.CloudSqlInstance{Instances: []string{"p:r:i"}}}}}
@@ -91,9 +88,6 @@ func TestUnsupportedConfigurationIsReported(t *testing.T) {
 		{"nfs volume", func(s *runpb.Service) {
 			s.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_Nfs{Nfs: &runpb.NFSVolumeSource{Server: "s"}}}}
 		}, "volumes.nfs"},
-		{"encryption key", func(s *runpb.Service) {
-			s.Template.EncryptionKey = "projects/p/locations/l/keyRings/r/cryptoKeys/k"
-		}, "encryptionKey"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -436,28 +430,84 @@ func TestTimeoutReachesKnative(t *testing.T) {
 	}
 }
 
-// TestUnmappedTemplateFieldsAreRefused.
-//
-// Both were dropped in silence. A caller who asked for a second-generation
-// execution environment and saw a successful create would believe they got one.
-func TestUnmappedTemplateFieldsAreRefused(t *testing.T) {
-	for name, tmpl := range map[string]*runpb.RevisionTemplate{
-		"executionEnvironment": {
-			Containers:           []*runpb.Container{{Image: "example.com/api:v1"}},
-			ExecutionEnvironment: runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_GEN2,
-		},
-		"sessionAffinity": {
-			Containers:      []*runpb.Container{{Image: "example.com/api:v1"}},
-			SessionAffinity: true,
-		},
-	} {
-		err := Unsupported(&runpb.Service{Name: parent + "/services/api", Template: tmpl})
-		if err == nil {
-			t.Errorf("%s was accepted", name)
-			continue
+// The settings Google documents and nothing here acts on are stored and
+// returned as set (#1346), not refused and not dropped: VPC access and its
+// egress, the encryption key, the execution environment, session affinity
+// and binary authorization. None of them changes the manifest's pod.
+func TestStoredTemplateSettingsReadBack(t *testing.T) {
+	t.Parallel()
+	s := svc("app", &runpb.Container{Image: "gcr.io/p/app:v1"})
+	s.Template.VpcAccess = &runpb.VpcAccess{Connector: "projects/p/locations/us-central1/connectors/c",
+		Egress: runpb.VpcAccess_ALL_TRAFFIC}
+	s.Template.EncryptionKey = "projects/p/locations/us-central1/keyRings/r/cryptoKeys/k"
+	s.Template.ExecutionEnvironment = runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_GEN2
+	s.Template.SessionAffinity = true
+	s.BinaryAuthorization = &runpb.BinaryAuthorization{BinauthzMethod: &runpb.BinaryAuthorization_UseDefault{UseDefault: true}}
+	if err := Unsupported(s); err != nil {
+		t.Fatalf("stored settings refused: %v", err)
+	}
+	y, err := ToKnative(s, "default", "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var k ksvc
+	k.Metadata.Annotations = map[string]string{annBinaryAuthorization: annotationValue(t, y, annBinaryAuthorization)}
+	k.Spec.Template.Metadata.Annotations = map[string]string{annPodConfig: annotationValue(t, y, annPodConfig)}
+	back := FromKnative(k, parent)
+	bt := back.GetTemplate()
+	if bt.GetVpcAccess().GetConnector() != s.Template.VpcAccess.Connector || bt.GetVpcAccess().GetEgress() != runpb.VpcAccess_ALL_TRAFFIC ||
+		bt.GetEncryptionKey() != s.Template.EncryptionKey || bt.GetExecutionEnvironment() != runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_GEN2 ||
+		!bt.GetSessionAffinity() || !back.GetBinaryAuthorization().GetUseDefault() {
+		t.Errorf("read back = %v", back)
+	}
+	// A worker pool and an instance still refuse them.
+	wp := &runpb.WorkerPool{Template: &runpb.WorkerPoolRevisionTemplate{VpcAccess: &runpb.VpcAccess{Connector: "c"},
+		Containers: []*runpb.Container{{Image: "a:1"}}}}
+	if err := unsupportedWorkerPool(wp); status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "template.vpcAccess") {
+		t.Errorf("worker pool vpcAccess = %v", err)
+	}
+}
+
+// annotationValue reads one quoted annotation from a rendered manifest.
+func annotationValue(t *testing.T, manifest, key string) string {
+	t.Helper()
+	for _, line := range strings.Split(manifest, "\n") {
+		line = strings.TrimSpace(line)
+		if v, ok := strings.CutPrefix(line, key+": "); ok {
+			u, err := strconv.Unquote(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return u
 		}
-		if !strings.Contains(err.Error(), name) {
-			t.Errorf("%s: error does not name the field: %v", name, err)
+	}
+	t.Fatalf("manifest has no %s:\n%s", key, manifest)
+	return ""
+}
+
+// A mount's subPath is Kubernetes' subPath, and reads back as set; one that
+// leaves the volume is the caller's mistake (#1346).
+func TestVolumeMountSubPath(t *testing.T) {
+	t.Parallel()
+	mk := func(sub string) *runpb.Service {
+		s := svc("app", &runpb.Container{Image: "gcr.io/p/app:v1", VolumeMounts: []*runpb.VolumeMount{
+			{Name: "scratch", MountPath: "/data", SubPath: sub}}})
+		s.Template.Volumes = []*runpb.Volume{{Name: "scratch", VolumeType: &runpb.Volume_EmptyDir{EmptyDir: &runpb.EmptyDirVolumeSource{}}}}
+		return s
+	}
+	y, err := ToKnative(mk("app/cache"), "default", "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(y, "mountPath: \"/data\"\n              subPath: \"app/cache\"\n") {
+		t.Errorf("manifest lacks the subPath:\n%s", y)
+	}
+	if !strings.Contains(annotationValue(t, y, annPodConfig), `"subPath":"app/cache"`) {
+		t.Errorf("pod config does not record the subPath:\n%s", y)
+	}
+	for _, bad := range []string{"/abs", "../up", "..", "a/../../b", "a//b"} {
+		if _, err := ToKnative(mk(bad), "default", "test", nil); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("subPath %q = %v, want InvalidArgument", bad, err)
 		}
 	}
 }

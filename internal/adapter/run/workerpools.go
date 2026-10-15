@@ -80,6 +80,7 @@ func unsupportedWorkerPool(wp *runpb.WorkerPool) error {
 	}
 	t := wp.GetTemplate()
 	gaps = append(gaps, podTemplateGaps("template", noExecEnv{t})...)
+	gaps = append(gaps, storedSettingGaps("template", noExecEnv{t})...)
 	add(t.GetServiceMesh() != nil, "template.serviceMesh", "no service mesh exists locally")
 	add(t.GpuZonalRedundancyDisabled != nil, "template.gpuZonalRedundancyDisabled", "there is one kind node and no GPU")
 	add(t.GetEncryptionKeyRevocationAction() != runpb.EncryptionKeyRevocationAction_ENCRYPTION_KEY_REVOCATION_ACTION_UNSPECIFIED ||

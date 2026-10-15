@@ -97,7 +97,6 @@ func unsupportedJob(job *runpb.Job) error {
 			gaps = append(gaps, field+": "+why)
 		}
 	}
-	add(job.GetBinaryAuthorization() != nil, "binaryAuthorization", "not enforced locally")
 	add(job.GetStartExecutionToken() != "" || job.GetRunExecutionToken() != "", "startExecutionToken/runExecutionToken",
 		"an execution is started only by RunJob")
 	tt := job.GetTemplate().GetTemplate()
@@ -166,7 +165,8 @@ func jobSpec(job *runpb.Job, generation int64, updated time.Time) *runpb.Job {
 	return &runpb.Job{
 		Name: job.GetName(), Labels: job.GetLabels(), Annotations: job.GetAnnotations(),
 		Client: job.GetClient(), ClientVersion: job.GetClientVersion(), LaunchStage: job.GetLaunchStage(),
-		Template: et, Generation: generation, UpdateTime: timestamppb.New(updated),
+		BinaryAuthorization: job.GetBinaryAuthorization(),
+		Template:            et, Generation: generation, UpdateTime: timestamppb.New(updated),
 	}
 }
 

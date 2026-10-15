@@ -75,6 +75,7 @@ func checkInstance(in *runpb.Instance) error {
 	add(in.GetEncryptionKeyRevocationAction() != runpb.EncryptionKeyRevocationAction_ENCRYPTION_KEY_REVOCATION_ACTION_UNSPECIFIED ||
 		in.GetEncryptionKeyShutdownDuration() != nil, "encryptionKeyRevocationAction", "no encryption key is used")
 	gaps = append(gaps, podTemplateGaps("instance", noExecEnv{in})...)
+	gaps = append(gaps, storedSettingGaps("instance", noExecEnv{in})...)
 	if len(gaps) > 0 {
 		return apierror.Unimplemented("unsupported Cloud Run configuration: %s", strings.Join(gaps, "; "))
 	}
