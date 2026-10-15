@@ -355,8 +355,8 @@
         "method": "google.cloud.run.v2.Builds/SubmitBuild",
         "status": "Verified",
         "tests": [
-          "test/compat/runbuilds_test.go:114 TestRunSubmitBuildDockerDeploys",
-          "test/compat/runbuilds_test.go:209 TestFunctionsSubmitBuildBuildpacks"
+          "test/compat/runbuilds_test.go:138 TestRunSubmitBuildDockerDeploys",
+          "test/compat/runbuilds_test.go:217 TestFunctionsSubmitBuildBuildpacks"
         ]
       },
       {

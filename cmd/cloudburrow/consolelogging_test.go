@@ -238,3 +238,84 @@ func TestConsoleLoggingBuckets(t *testing.T) {
 		t.Errorf("deleting another project's bucket succeeded")
 	}
 }
+
+// TestConsoleLoggingViews (#1283): a bucket's page offers Create view, and a
+// view made there is what ConfigServiceV2 returns; its row offers Edit, which
+// changes the filter and description, and Delete, which removes it. _AllLogs
+// offers neither, _Required's page offers no Create view, and an action the
+// page does not offer, such as Delete on _Default's _AllLogs, is refused.
+func TestConsoleLoggingViews(t *testing.T) {
+	srv, svc := loggingConsole(t)
+	ctx := context.Background()
+	const project = "proj-1"
+	bucket := "projects/proj-1/locations/global/buckets/_Default"
+	detailURL := func(b string) string {
+		return srv.URL + "/api/detail/logging-buckets?project=" + project + "&name=" + url.QueryEscape(b)
+	}
+	acts := srv.URL + "/api/actions/logging-buckets?project=" + project
+	var d console.Detail
+	getJSON200(t, detailURL(bucket), &d)
+	if len(d.Actions) != 1 || d.Actions[0].ID != viewCreate {
+		t.Fatalf("_Default's page offers %+v; want Create view", d.Actions)
+	}
+	viewRow := func(d console.Detail, id string) *console.Resource {
+		for _, s := range d.Sections {
+			for i, r := range s.Listing.Items {
+				if s.ID == "views" && r.Name == id {
+					return &s.Listing.Items[i]
+				}
+			}
+		}
+		return nil
+	}
+	if r := viewRow(d, "_AllLogs"); r == nil || len(r.Actions) != 0 {
+		t.Errorf("_AllLogs row = %+v; want it listed with no actions", r)
+	}
+
+	if code, out := consolePost(t, acts, map[string]any{"Path": []string{bucket}, "Action": viewCreate,
+		"Values": map[string]string{"id": "errors", "filter": `severity>=ERROR`, "description": "just errors"}}); code != http.StatusOK {
+		t.Fatalf("create view = %d %s", code, out)
+	}
+	name := bucket + "/views/errors"
+	v, err := svc.admin.ConfigServer().GetView(ctx, &loggingpb.GetViewRequest{Name: name})
+	if err != nil || v.GetFilter() != "severity>=ERROR" || v.GetDescription() != "just errors" {
+		t.Fatalf("the API reads %v, %v", v, err)
+	}
+	d = console.Detail{}
+	getJSON200(t, detailURL(bucket), &d)
+	r := viewRow(d, "errors")
+	if r == nil || len(r.Actions) != 2 || r.Actions[0].ID != viewEdit || r.Actions[1].ID != viewDelete ||
+		r.Actions[0].Fields[0].Default != "severity>=ERROR" {
+		t.Fatalf("the new view's row = %+v; want Edit with its filter, and Delete", r)
+	}
+	if code, out := consolePost(t, acts, map[string]any{"Path": []string{bucket, "errors"}, "Action": viewEdit,
+		"Values": map[string]string{"filter": "severity>=WARNING", "description": "warnings"}}); code != http.StatusOK {
+		t.Fatalf("edit view = %d %s", code, out)
+	}
+	if v, _ := svc.admin.ConfigServer().GetView(ctx, &loggingpb.GetViewRequest{Name: name}); v.GetFilter() != "severity>=WARNING" || v.GetDescription() != "warnings" {
+		t.Errorf("after edit the API reads %v", v)
+	}
+	if code, out := consolePost(t, acts, map[string]any{"Path": []string{bucket, "errors"}, "Action": viewDelete}); code != http.StatusOK {
+		t.Fatalf("delete view = %d %s", code, out)
+	}
+	if _, err := svc.admin.ConfigServer().GetView(ctx, &loggingpb.GetViewRequest{Name: name}); err == nil {
+		t.Error("the deleted view still reads back")
+	}
+
+	if code, _ := consolePost(t, acts, map[string]any{"Path": []string{bucket, "_AllLogs"}, "Action": viewDelete}); code == http.StatusOK {
+		t.Error("deleting _Default's _AllLogs was accepted")
+	}
+	if code, out := consolePost(t, acts, map[string]any{"Path": []string{bucket}, "Action": viewCreate,
+		"Values": map[string]string{"id": "_mine"}}); code != http.StatusBadRequest || !strings.Contains(out, "reserved") {
+		t.Errorf("a reserved view ID = %d %s; want the API's refusal", code, out)
+	}
+	d = console.Detail{}
+	getJSON200(t, detailURL("projects/proj-1/locations/global/buckets/_Required"), &d)
+	if len(d.Actions) != 0 {
+		t.Errorf("_Required's page offers %+v; want nothing", d.Actions)
+	}
+	if code, _ := consolePost(t, acts, map[string]any{"Path": []string{"projects/other-1/locations/global/buckets/_Default"}, "Action": viewCreate,
+		"Values": map[string]string{"id": "x"}}); code == http.StatusOK {
+		t.Error("creating a view on another project's bucket was accepted")
+	}
+}

@@ -82,6 +82,30 @@ func uploadSource(ctx context.Context, t *testing.T, h *Harness, object string, 
 	return bh.BucketName()
 }
 
+// sourceBuildArchive is a source archive of a Dockerfile and a static server
+// built here from testdata/sourcebuild, which answers "built from source by
+// SubmitBuild".
+func sourceBuildArchive(ctx context.Context, t *testing.T) []byte {
+	t.Helper()
+	// The server, static, for the host's architecture, which is the kind
+	// nodes' architecture; the build targets the nodes' platform.
+	bin := filepath.Join(t.TempDir(), "server")
+	build := exec.CommandContext(ctx, "go", "build", "-o", bin, ".")
+	build.Dir = filepath.Join(moduleRoot(t), "testdata", "sourcebuild")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+runtime.GOARCH, "GOWORK=off")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build the fixture server: %v\n%s", err, out)
+	}
+	server, err := os.ReadFile(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sourceArchive(t, map[string][]byte{
+		"Dockerfile": []byte("FROM scratch\nCOPY server /server\nENTRYPOINT [\"/server\"]\n"),
+		"server":     server,
+	})
+}
+
 // waitBuild polls the build operation through the Builds client's own
 // Operations mixin until it is done.
 func waitBuild(ctx context.Context, t *testing.T, bc *run.BuildsClient, op *longrunningpb.Operation) *longrunningpb.Operation {
@@ -121,23 +145,7 @@ func TestRunSubmitBuildDockerDeploys(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	// The server, static, for the host's architecture, which is the kind
-	// nodes' architecture; the build targets the nodes' platform.
-	bin := filepath.Join(t.TempDir(), "server")
-	build := exec.CommandContext(ctx, "go", "build", "-o", bin, ".")
-	build.Dir = filepath.Join(moduleRoot(t), "testdata", "sourcebuild")
-	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+runtime.GOARCH, "GOWORK=off")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build the fixture server: %v\n%s", err, out)
-	}
-	server, err := os.ReadFile(bin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	archive := sourceArchive(t, map[string][]byte{
-		"Dockerfile": []byte("FROM scratch\nCOPY server /server\nENTRYPOINT [\"/server\"]\n"),
-		"server":     server,
-	})
+	archive := sourceBuildArchive(ctx, t)
 	bucketName := uploadSource(ctx, t, h, "source/compat-built.tgz", archive)
 
 	parent := runParent(h)

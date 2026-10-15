@@ -133,8 +133,8 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleRunEditAndDeployNewRevision", "TestRunRevisionDeleteIsOfferedOnlyWhereTheAPIAccepts"}},
 	{Resource: "Cloud Run builds", Service: "run",
 		Methods:  []string{"Builds/SubmitBuild"},
-		Provider: "run", Offers: "Deploy from source on a service's page: a .tar.gz uploaded to run-sources-{project}-{region} in this instance's Cloud Storage, built with its Dockerfile or Buildpacks through SubmitBuild, and deployed as a new revision (#1268)",
-		Tests: []string{"TestRunDeployFromSourceIsOfferedWithStorage"}},
+		Provider: "run", Offers: "Deploy from source on a service's page: a .tar.gz uploaded to run-sources-{project}-{region} in this instance's Cloud Storage, built with its Dockerfile or Buildpacks through SubmitBuild, and deployed as a new revision (#1268); Create service from source on the list screen: a service name, the region and the same archive and build, then CreateService with the image (#1289)",
+		Tests: []string{"TestRunDeployFromSourceIsOfferedWithStorage", "TestRunCreateServiceFromSourceIsAListAction", "TestConsoleRunCreateServiceFromSource"}},
 
 	// Cloud KMS
 	{Resource: "Cloud KMS key rings and keys", Service: "kms",
@@ -244,8 +244,9 @@ var parityRows = []parityRow{
 		Provider: "logging-buckets", Offers: "Views section on a bucket's page: each view's ID, filter and description (#1264)",
 		Tests: []string{"TestConsoleLoggingBuckets", "TestLoggingBucketsAndViews"}},
 	{Resource: "Cloud Logging view changes", Service: "logging",
-		Methods: []string{"ConfigServiceV2/CreateView", "ConfigServiceV2/DeleteView", "ConfigServiceV2/UpdateView"},
-		Issue:   1283},
+		Methods:  []string{"ConfigServiceV2/CreateView", "ConfigServiceV2/DeleteView", "ConfigServiceV2/UpdateView"},
+		Provider: "logging-buckets", Offers: "Create view (ID, filter, description) on a bucket's page, Edit (filter, description) and Delete on a view's row; not on _AllLogs or any of _Required's (#1283)",
+		Tests: []string{"TestConsoleLoggingViews", "TestLoggingViewsThroughTheBrowser", "TestLoggingBucketsAndViews"}},
 	{Resource: "Cloud Logging log delete", Service: "logging",
 		Methods: []string{"LoggingServiceV2/DeleteLog"},
 		Screen:  "/logs", Offers: "Delete log on a `logging/<log>` entry of the selected project, confirmed by typing the log ID; not offered on pod logs or CloudBurrow's own request log, which the Logging API does not hold (#799)",
