@@ -106,7 +106,7 @@ func TestViewsAreChecked(t *testing.T) {
 	}{
 		{"CREATE VIEW ds.`v!` AS SELECT 1 AS a", 400, `Invalid table ID "v!"`},
 		{"CREATE OR REPLACE VIEW IF NOT EXISTS ds.v (`c!`, d) AS SELECT 1, 2", 400, `Invalid field name "c!"`},
-		{"CREATE VIEW ds.v (c, d) AS SELECT 1, 2", 501, "CREATE VIEW with a column list"},
+		{"SELECT 1; CREATE VIEW ds.v (c, d) AS SELECT 1, 2", 501, "CREATE VIEW with a column list in a multi-statement script"},
 		{"CREATE MATERIALIZED VIEW ds.mv AS SELECT 1 AS a", 501, "CREATE MATERIALIZED VIEW"},
 		{"CREATE MATERIALIZED VIEW ds.`mv!` AS SELECT 1 AS a", 400, `Invalid table ID "mv!"`},
 		{"DROP MATERIALIZED VIEW ds.mv", 501, "DROP MATERIALIZED VIEW"},

@@ -21,7 +21,8 @@ import (
 // the official Go client. A dataset's page offers the mode, naming the
 // project and the default dataset a write changes. Through jobs.query it runs
 // CREATE SCHEMA with a description, CREATE TABLE … AS SELECT from the
-// dataset's own table by its unqualified name, CREATE VIEW, CREATE OR REPLACE
+// dataset's own table by its unqualified name, CREATE VIEW (with a column
+// list too, #1240), CREATE OR REPLACE
 // TABLE, a CREATE TABLE IF NOT EXISTS of a table that exists (which changes
 // nothing), a script with DECLARE whose CREATE TABLE … AS SELECT reads the
 // variable, and DROP TABLE; and no query leaves a job-named dataset behind.
@@ -123,6 +124,11 @@ func TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts(t *testing.T) {
 		if err := it.Next(&row); err != nil || len(row) != 1 || row[0] != int64(3) {
 			t.Errorf("the view counts %v (%v), want the 3 orders over 2", row, err)
 		}
+	}
+	// A view's column list (#1240) names its columns.
+	write("CREATE VIEW listed (order_id, where_to) AS SELECT id, region FROM `" + project + "." + ds.DatasetID + ".orders`")
+	if got := columns("listed"); got != "order_id:INTEGER,where_to:STRING" {
+		t.Errorf("CREATE VIEW with a column list made columns %s", got)
 	}
 	write("CREATE OR REPLACE TABLE totals AS SELECT 1 AS n")
 	if got := columns("totals"); got != "n:INTEGER" {

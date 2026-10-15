@@ -26,6 +26,8 @@ type savedViewText struct {
 	Key    string `json:"key"`
 	Engine string `json:"engine"`
 	Client string `json:"client"`
+	// Explicit is viewText.explicit (#1240).
+	Explicit bool `json:"explicit,omitempty"`
 }
 
 // keep restores the view texts from path, when it holds them, and from then
@@ -57,7 +59,7 @@ func (v *viewTexts) keep(path string, logf func(string, ...any)) {
 		if _, ok := v.texts[s.Key]; !ok {
 			v.order = append(v.order, s.Key)
 		}
-		v.texts[s.Key] = viewText{engine: s.Engine, client: s.Client}
+		v.texts[s.Key] = viewText{engine: s.Engine, client: s.Client, explicit: s.Explicit}
 	}
 	v.trimLocked()
 	if len(saved) > 0 {
@@ -78,7 +80,7 @@ func (v *viewTexts) saveLocked() {
 	saved := make([]savedViewText, 0, len(v.order))
 	for _, k := range v.order {
 		t := v.texts[k]
-		saved = append(saved, savedViewText{Key: k, Engine: t.engine, Client: t.client})
+		saved = append(saved, savedViewText{Key: k, Engine: t.engine, Client: t.client, Explicit: t.explicit})
 	}
 	b, err := json.Marshal(saved)
 	if err == nil {

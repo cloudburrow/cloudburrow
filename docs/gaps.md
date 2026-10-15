@@ -171,16 +171,16 @@ Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1
 Already tracked: #1217 (procedures, script transactions, RANGE variables), #1218 (row access
 policies, table and routine IAM), #1201 (scripting blocks), #1111 (a new column before the
 table's, RANGE in a STRUCT parameter), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs,
-snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), and a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501).
+snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501).
 
 | Gap | Why open | Size |
 |---|---|---|
 | `ALTER TABLE` (`ADD COLUMN`, `SET OPTIONS`, `RENAME TO`, …) is 501, though `tables.patch` already does the same changes (#1227) | not built yet | M |
-| A view's column list (`CREATE VIEW v (c, d) AS …`) is 501 (#1240) | not built yet | S |
+| A view's column list inside a multi-statement script, and a column's `OPTIONS` in the list (a lone `CREATE VIEW v (c, d) AS …` is carried out, #1240) | not built yet | S |
+| `CREATE VIEW … OPTIONS(description = …)` keeps no description (the emulator drops it, #1251) | not built yet | S |
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |
-| A `STRUCT` query parameter with a `BYTES` field (#1241) | not built yet | S |
 | Storage Write API `arrow_rows` | not built yet | M |
 | Materialized views (`CREATE` / `DROP MATERIALIZED VIEW`) | no emulator support | L |
 | `datasets.undelete`: the emulator keeps nothing of a deleted dataset | no emulator support | M |
@@ -224,9 +224,10 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 
 ## Console
 
+Closed by this sweep: Test permissions on the Permissions tab (#1242).
+
 | Gap | Why open | Size |
 |---|---|---|
-| `TestIamPermissions` has no console surface on the Permissions tab (#1242) | not built yet | S |
 | Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured") | not built yet | M |
 | Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |

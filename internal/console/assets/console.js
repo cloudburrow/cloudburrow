@@ -2753,6 +2753,12 @@ async function renderDetail(view, route, resourcePath) {
 
     const grant = el("button", { class: "primary", id: "grant-access", text: "Grant access",
       onclick: () => openGrantForm(view, name, change, reload) });
+    // Test permissions (#1242) is the service's TestIamPermissions: it
+    // changes nothing, so it needs no etag and records no operation.
+    const test = el("button", { class: "secondary", id: "test-permissions", text: "Test permissions",
+      onclick: () => openTestPermissionsForm(view, name, (perms) => send(
+        `/api/permissions/${route.service}?project=${encodeURIComponent(currentProject())}`,
+        "POST", { Path: segments, Test: { Permissions: perms } })) });
 
     const table = rows.length
       ? el("div", { class: "table-wrap" },
@@ -2773,7 +2779,7 @@ async function renderDetail(view, route, resourcePath) {
       : emptyState("No principals",
           `No principal holds a role on ${name}. Grant access adds one.`);
     setChildren(into, permissionsNote(view),
-      el("div", { class: "action-bar" }, grant), table);
+      el("div", { class: "action-bar" }, grant, test), table);
   };
 
   // Properties render as the same definition list the summary card uses, so a
@@ -3122,6 +3128,57 @@ function openGrantForm(view, name, change, onDone) {
     error,
     ...fields.nodes,
     el("div", { class: "modal-actions" }, cancel, primary)));
+  fields.focusFirst();
+}
+
+// openTestPermissionsForm is Test permissions (#1242): permissions in, and
+// for each the service's answer, held or not, as TestIamPermissions gives
+// it. The dialog stays open so another set can be tried.
+function openTestPermissionsForm(view, name, ask) {
+  const fields = buildCreateForm({ label: "Test permissions", fields: [
+    { name: "permissions", label: "Permissions", type: "textarea", required: true,
+      help: "One or more permissions, separated by commas or new lines, such as storage.buckets.get. " +
+        "The answer is the service's TestIamPermissions: which of them the caller holds." },
+  ] });
+  const error = el("p", { class: "form-error", role: "alert", hidden: true });
+  const results = el("div", { id: "test-permissions-result", "aria-live": "polite" });
+  let submitting = false;
+  const { dialog, close } = openModal({ labelledBy: "test-permissions-title", canClose: () => !submitting });
+  const primary = el("button", { type: "submit", class: "primary", text: "Test" });
+  const done = el("button", { type: "button", class: "secondary", text: "Close", onclick: () => close() });
+
+  const submit = async (e) => {
+    e.preventDefault();
+    error.hidden = true;
+    if (submitting || !fields.validate()) return;
+    const perms = fields.values().permissions.split(/[\s,]+/).map((p) => p.trim()).filter(Boolean);
+    submitting = true;
+    primary.disabled = true;
+    try {
+      const res = await ask(perms);
+      const held = new Set(res.permissions || []);
+      setChildren(results, el("table", { class: "table", id: "test-permissions-table" },
+        el("thead", {}, el("tr", {}, el("th", { text: "Permission" }), el("th", { text: "Result" }))),
+        el("tbody", {}, ...(res.asked || perms).map((p) => el("tr", {},
+          el("td", { class: "mono", text: p }),
+          el("td", { text: held.has(p) ? "Held" : "Not held" }))))));
+      announce(`${held.size} of ${(res.asked || perms).length} permissions held`);
+    } catch (err) {
+      setChildren(results);
+      error.textContent = err.message;
+      error.hidden = false;
+    }
+    submitting = false;
+    primary.disabled = false;
+  };
+
+  dialog.append(el("form", { class: "modal-body", novalidate: true, onsubmit: submit },
+    el("h2", { id: "test-permissions-title", text: `Test permissions on ${name}` }),
+    el("p", { class: "form-help", text: view.note || "" }),
+    error,
+    ...fields.nodes,
+    results,
+    el("div", { class: "modal-actions" }, done, primary)));
   fields.focusFirst();
 }
 
