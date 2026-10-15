@@ -57,7 +57,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The table IDs the REST front keeps (tableids.go, #1063), and its job
 	// records, which leave the Storage Read front's queries out of
 	// jobs.list (storagerows.go, #1095).
-	ids, records := &tableIDs{}, &jobRecords{}
+	ids, records, policies := &tableIDs{}, &jobRecords{}, &rowPolicies{}
 	go watch.run(ctx)
 	go results.expire(ctx) // #1059
 	var readL net.Listener
@@ -69,6 +69,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	handler := Wrap(results, WithStorage(*storage), func(o *options) {
 		o.restarts, o.ids, o.records, o.stateDir, o.logf = watch, ids, records, *stateDir, logger.Printf
+		o.policies = policies
 	})
 	// The emulator listens on the pod's loopback alone (#1114), so its
 	// container's readiness is asked of the front.
@@ -91,7 +92,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		go func() {
 			// The Write API writes through handler (#1102).
 			err := serveStorageRead(readCtx, readL, *readUpstream, results, records, handler,
-				&writeOptions{stateDir: writeStateDir(*stateDir), logf: logger.Printf})
+				&writeOptions{stateDir: writeStateDir(*stateDir), logf: logger.Printf, policies: policies})
 			if err == nil && readCtx.Err() == nil {
 				err = errors.New("the Storage Read API front stopped")
 			}

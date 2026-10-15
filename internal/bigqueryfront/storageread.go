@@ -97,6 +97,8 @@ type storageRead struct {
 	records *jobRecords
 	// write serves the Storage Write API (storagewrite.go).
 	write *storageWrite
+	// policies are the REST front's row access policies (#1218), or nil.
+	policies *rowPolicies
 
 	mu      sync.Mutex
 	streams map[string]*readStream
@@ -131,6 +133,8 @@ func ServeStorageRead(ctx context.Context, l net.Listener, upstream string, rest
 type writeOptions struct {
 	stateDir string
 	logf     func(string, ...any)
+	// policies are the REST front's row access policies (#1218).
+	policies *rowPolicies
 }
 
 // serveStorageRead is ServeStorageRead, with the REST front's job records
@@ -143,6 +147,9 @@ func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest
 		return err
 	}
 	defer s.upstream.Close()
+	if wo != nil {
+		s.policies = wo.policies
+	}
 	if front != nil {
 		s.write = newStorageWrite(front)
 		if wo != nil && wo.logf != nil {
@@ -285,6 +292,16 @@ func (s *storageRead) createSession(ss grpc.ServerStream, open func() (grpc.Clie
 	}
 	if err := s.tableExists(ss.Context(), t); err != nil {
 		return err
+	}
+	if s.policies != nil { // rowpolicies.go, #1218
+		r, err := http.NewRequestWithContext(ss.Context(), http.MethodGet, "http://bigquery/", nil)
+		if err != nil {
+			return status.Error(codes.Internal, err.Error())
+		}
+		f := front{next: s.rest, base: "/bigquery/v2/projects/" + url.PathEscape(t.project), policies: s.policies}
+		if why := f.protectedRead(r, t.project, t.dataset, t.table, "a Storage Read session"); why != "" {
+			return status.Error(codes.Unimplemented, why)
+		}
 	}
 	restriction := req.GetReadSession().GetReadOptions().GetRowRestriction()
 	cs, err := open()

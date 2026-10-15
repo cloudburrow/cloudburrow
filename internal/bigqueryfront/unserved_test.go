@@ -11,12 +11,12 @@ func TestUnservedMethods(t *testing.T) {
 	const tb = ds + "/tables/t"
 	for _, c := range []struct{ method, path, want string }{
 		{"POST", ds + ":undelete", "bigquery.datasets.undelete"},
-		{"GET", tb + "/rowAccessPolicies", "bigquery.rowAccessPolicies.list"},
-		{"POST", tb + "/rowAccessPolicies", "bigquery.rowAccessPolicies.insert"},
-		{"POST", tb + "/rowAccessPolicies:batchDelete", "bigquery.rowAccessPolicies.batchDelete"},
-		{"GET", tb + "/rowAccessPolicies/x", "bigquery.rowAccessPolicies.get"},
-		{"PUT", tb + "/rowAccessPolicies/x", "bigquery.rowAccessPolicies.update"},
-		{"DELETE", tb + "/rowAccessPolicies/x", "bigquery.rowAccessPolicies.delete"},
+		{"GET", tb + "/rowAccessPolicies", ""},              // rowpolicies.go, #1218
+		{"POST", tb + "/rowAccessPolicies", ""},             // rowpolicies.go, #1218
+		{"POST", tb + "/rowAccessPolicies:batchDelete", ""}, // rowpolicies.go, #1218
+		{"GET", tb + "/rowAccessPolicies/x", ""},            // rowpolicies.go, #1218
+		{"PUT", tb + "/rowAccessPolicies/x", ""},            // rowpolicies.go, #1218
+		{"DELETE", tb + "/rowAccessPolicies/x", ""},         // rowpolicies.go, #1218
 		{"POST", tb + "/rowAccessPolicies/x:getIamPolicy", "bigquery.rowAccessPolicies.getIamPolicy"},
 		{"POST", tb + "/rowAccessPolicies/x:testIamPermissions", "bigquery.rowAccessPolicies.testIamPermissions"},
 		{"POST", tb + ":getIamPolicy", "bigquery.tables.getIamPolicy"},

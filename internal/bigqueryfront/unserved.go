@@ -16,7 +16,8 @@ import (
 //   - datasets.undelete answered 400 "Table ID is required": the emulator
 //     deletes a dataset's tables and their rows with it and keeps nothing
 //     to restore within the time travel window;
-//   - every rowAccessPolicies method, and tables.getIamPolicy,
+//   - every rowAccessPolicies method (all but the two IAM ones are the
+//     front's since #1218, rowpolicies.go), and tables.getIamPolicy,
 //     tables.setIamPolicy and tables.testIamPermissions, answered 500
 //     ("unexpected request path", "unsupported bigquery.…"), which the Go
 //     client retries;
@@ -44,28 +45,10 @@ func unservedMethod(r *http.Request) string {
 		}
 		return ""
 	}
-	m := rowPoliciesRoute.FindStringSubmatch(p)
-	if m == nil {
-		return ""
-	}
-	batch, id, iam := m[1] != "", m[2] != "", m[3]
-	switch {
-	case batch && r.Method == http.MethodPost:
-		return "bigquery.rowAccessPolicies.batchDelete"
-	case iam != "" && r.Method == http.MethodPost:
-		return "bigquery.rowAccessPolicies." + iam
-	case iam != "" || batch:
-		return ""
-	case !id && r.Method == http.MethodGet:
-		return "bigquery.rowAccessPolicies.list"
-	case !id && r.Method == http.MethodPost:
-		return "bigquery.rowAccessPolicies.insert"
-	case id && r.Method == http.MethodGet:
-		return "bigquery.rowAccessPolicies.get"
-	case id && r.Method == http.MethodPut:
-		return "bigquery.rowAccessPolicies.update"
-	case id && r.Method == http.MethodDelete:
-		return "bigquery.rowAccessPolicies.delete"
+	// The other rowAccessPolicies methods are the front's since #1218
+	// (rowpolicies.go).
+	if m := rowPoliciesRoute.FindStringSubmatch(p); m != nil && m[3] != "" && r.Method == http.MethodPost {
+		return "bigquery.rowAccessPolicies." + m[3]
 	}
 	return ""
 }
@@ -81,7 +64,9 @@ func serveUnserved(w http.ResponseWriter, r *http.Request) bool {
 		"bigquery.datasets.undelete": "the emulator deletes a dataset's tables and rows with it and keeps no deleted datasets to restore.",
 	}[method]
 	if why == "" {
-		why = "the emulator has no row-level security or IAM policies on tables and routines."
+		why = "CloudBurrow stores no IAM policies on BigQuery tables, routines or row access policies: ADR-0006 " +
+			"(docs/adr/0006-iam-policy-surface.md) stores policies, never enforced, on Secret Manager, Cloud Tasks, " +
+			"Cloud KMS and Cloud Storage buckets only, and every other service keeps refusing them (#1218)."
 	}
 	writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+method+". "+why)
 	return true

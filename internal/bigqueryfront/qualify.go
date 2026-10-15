@@ -312,6 +312,10 @@ func qualifyTables(sql, dataset string) (text string, changed bool, msg string) 
 // The emulator ignores selectedFields (measured: every column came
 // back), so the front keeps the cells named itself (#1038).
 func (f front) listTableData(w http.ResponseWriter, r *http.Request, dataset, table string) {
+	if why := f.protectedRead(r, projectOf(f.base), dataset, table, "tabledata.list"); why != "" { // #1218
+		writeError(w, http.StatusNotImplemented, "notImplemented", why)
+		return
+	}
 	status, got := f.get(r, tablePath(dataset, table))
 	if status != http.StatusOK {
 		// Not found, or not readable: the emulator's own answer stands.
