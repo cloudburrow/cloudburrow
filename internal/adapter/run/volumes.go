@@ -16,8 +16,9 @@ import (
 // Two volume types have a faithful Kubernetes counterpart and are rendered:
 // a Secret Manager secret, mounted from the Kubernetes Secret that holds its
 // versions (the one secretKeyRef env vars resolve to), and an in-memory
-// emptyDir. A mount's subPath is Kubernetes' subPath (#1346). Cloud SQL,
-// Cloud Storage FUSE and NFS volumes stay refused: no Cloud SQL socket, FUSE
+// emptyDir. A mount's subPath is Kubernetes' subPath (#1346). A Cloud SQL
+// volume is an emptyDir the Cloud SQL Auth Proxy writes its sockets into
+// (cloudsql.go). Cloud Storage FUSE and NFS volumes stay refused: no FUSE
 // driver or NFS server exists on the kind node.
 //
 // The service account is stored and returned, not acted on: every workload
@@ -38,9 +39,7 @@ func volumeGaps(prefix string, tmpl podTemplate) []string {
 	for _, v := range tmpl.GetVolumes() {
 		names[v.GetName()] = true
 		switch {
-		case v.GetSecret() != nil, v.GetEmptyDir() != nil:
-		case v.GetCloudSqlInstance() != nil:
-			gaps = append(gaps, prefix+".volumes.cloudSqlInstance: no Cloud SQL socket is served locally")
+		case v.GetSecret() != nil, v.GetEmptyDir() != nil, v.GetCloudSqlInstance() != nil:
 		case v.GetGcs() != nil:
 			gaps = append(gaps, prefix+".volumes.gcs: Cloud Storage FUSE is not mounted locally")
 		case v.GetNfs() != nil:
@@ -94,9 +93,15 @@ func renderVolumes(b *strings.Builder, volumes []*runpb.Volume, o containerRende
 		return nil
 	}
 	b.WriteString("      volumes:\n")
-	for _, v := range volumes {
+	for i, v := range volumes {
 		fmt.Fprintf(b, "        - name: %s\n", v.GetName())
 		switch {
+		case v.GetCloudSqlInstance() != nil:
+			if err := checkCloudSQLVolume(fmt.Sprintf("volumes[%d]", i), v, o.cloudSQL); err != nil {
+				return err
+			}
+			// The proxy's sockets, shared with the containers that mount it.
+			b.WriteString("          emptyDir: {}\n")
 		case v.GetSecret() != nil:
 			s := v.GetSecret()
 			if o.secrets == nil {

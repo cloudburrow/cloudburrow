@@ -4,6 +4,7 @@ import (
 	"net"
 	"strconv"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
@@ -45,6 +46,19 @@ func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds compon
 	// the rest of the API serving, and connectSettings says why.
 	_ = srv.EnableConnector(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(sqladmin.ConnectorPort)), cfg.InstanceDir())
 	return srv
+}
+
+// cloudSQLForPods is what the Cloud Run adapter needs for Cloud SQL volumes
+// (#1346): the Admin API's in-cluster URL, once it and the connector are
+// published to pods, and the instance IDs it serves. Before that, nil.
+func cloudSQLForPods(srv *sqladmin.Server, host *clusterHost) runadapter.CloudSQL {
+	return func() *runadapter.CloudSQLConfig {
+		api := host.InCluster("sqladmin")
+		if api == "" || host.InCluster("cloudsql-connector") == "" {
+			return nil
+		}
+		return &runadapter.CloudSQLConfig{Endpoint: "http://" + api, Region: sqladmin.Region, Instances: srv.Instances()}
+	}
 }
 
 // sqlAdminEnabled is whether `up` binds the Admin API's port.

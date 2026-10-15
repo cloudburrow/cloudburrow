@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/bigqueryimage"
 	"github.com/cloudburrow/cloudburrow/internal/cluster"
 	"github.com/cloudburrow/cloudburrow/internal/components"
@@ -39,6 +40,11 @@ func offlinePlan(ctx context.Context, cfg config.Config, r prefetch.Runner) pref
 		if b.Image != "" && !images.IsLocal(b.Image) {
 			plan.Images[b.Image] = append(plan.Images[b.Image], b.Name)
 		}
+	}
+	// The Cloud SQL Auth Proxy a Cloud SQL volume runs beside a revision
+	// (#1346), pulled by the node as a backend's image is.
+	if serviceEnabled(cfg, config.ServiceRun) && sqlAdminEnabled(cfg) {
+		plan.Images[runadapter.CloudSQLProxyImage] = append(plan.Images[runadapter.CloudSQLProxyImage], "cloud-sql-proxy")
 	}
 	plan.Arch = daemonArch(ctx, r)
 	if needsStorageImage(cfg) {

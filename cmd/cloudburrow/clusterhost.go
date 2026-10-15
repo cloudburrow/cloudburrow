@@ -89,6 +89,16 @@ func (h *clusterHost) InCluster(service string) string {
 	return fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, h.cfg.Cluster.Namespace, port)
 }
 
+// Address is the address pods reach this machine at, or "" before Start.
+func (h *clusterHost) Address() string {
+	if h == nil {
+		return ""
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.address
+}
+
 // InClusterAll is every published service's in-cluster address.
 func (h *clusterHost) InClusterAll() map[string]string {
 	if h == nil {
