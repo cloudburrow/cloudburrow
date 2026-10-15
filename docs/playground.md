@@ -110,9 +110,9 @@ request refuses rather than producing anything.
   prediction** (§8), not a mode of the generation playground: the two call different things —
   this screen the generation API, that one a deployed contract container — and a single form for
   both would offer each one controls the other ignores.
-- **Vertex's prediction management surface.** No `Endpoint`, `DeployedModel`,
-  `PredictionService` (`Predict`, `RawPredict`, `StreamingPredict`, `Explain`), model upload or
-  batch prediction is served ([prediction.md](prediction.md#versus-vertex-ais-own-apis)), so
+- **Vertex's prediction management surface.** No `Endpoint`, `DeployedModel`, streaming or
+  `Explain` `PredictionService` method, model upload or batch prediction is served (`Predict` and
+  `RawPredict` are, over gRPC on the local AI endpoint, #1193) ([prediction.md](prediction.md#versus-vertex-ais-own-apis)), so
   §8's page offers none of them and lists them as not served.
 - **Pixel parity with the Vertex reference screens.** Structural parity only, for the reason
   in [console-verification.md](console-verification.md): no dated reference screenshots exist.

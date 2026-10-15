@@ -249,7 +249,9 @@ type Endpoints struct {
 	Metadata int `json:"metadata"`
 	// LocalAI is the host port the local generation endpoint binds.
 	//
-	// Unlike the others it is only bound when a model is configured. The
+	// Unlike the others it is only bound when a model is configured, or when
+	// Cloud Run is, for PredictionService on custom prediction containers
+	// (#1193). The
 	// runtime is a multi-gigabyte download and a from-source build, so
 	// starting it by default would impose that on every user of every other
 	// service. See docs/generation.md.

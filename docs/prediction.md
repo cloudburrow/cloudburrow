@@ -165,16 +165,36 @@ own log line.
 ## Versus Vertex AI's own APIs
 
 Nothing in the Vertex **management** plane is implemented. There is no model registry, no
-`Endpoint` resource, no `DeployedModel`, no online prediction service. Those calls do not
-reach CloudBurrow at all — they are not served, so a client pointed at CloudBurrow fails to
-connect rather than receiving a plausible stub.
+`Endpoint` resource, no `DeployedModel`. Those calls do not reach CloudBurrow at all — they are
+not served, so a client pointed at CloudBurrow fails to connect rather than receiving a
+plausible stub.
+
+Online prediction is served (#1193): with Cloud Run enabled, the local AI endpoint (the
+`local AI:` line `up` prints) serves `google.cloud.aiplatform.v1.PredictionService` over gRPC,
+and the same names as JSON under `/v1`. The endpoint ID is the Cloud Run service ID, and the
+request is relayed to the container's predict route through the cluster ingress:
+
+```go
+c, _ := aiplatform.NewPredictionClient(ctx,
+    option.WithEndpoint("127.0.0.1:<local AI port>"),
+    option.WithoutAuthentication(),
+    option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+resp, err := c.Predict(ctx, &aiplatformpb.PredictRequest{
+    Endpoint:  "projects/p/locations/us-central1/endpoints/predictor",
+    Instances: []*structpb.Value{structpb.NewNumberValue(1)},
+})
+```
+
+`Predict` checks the contract's one-prediction-per-instance rule and returns the container's
+own refusals in its words; `RawPredict` relays the body unchanged. Every other method is
+`UNIMPLEMENTED`.
 
 | Vertex surface | Status |
 |---|---|
 | Serving contract (`AIP_*`, `/predict`, `/health`) | **Verified** |
 | `aiplatform.Model` registry (upload, list, version) | **Not supported** |
 | `aiplatform.Endpoint` / `DeployedModel` | **Not supported** |
-| `PredictionService.Predict` / `RawPredict` API | **Not supported** — the container is called directly |
+| `PredictionService.Predict` / `RawPredict` | **Verified** over gRPC on the local AI endpoint, as `projects/{p}/locations/{l}/endpoints/{service}` (#1193); see [compatibility.md](compatibility.md#vertex-ai-predictionservice--googlecloudaiplatformv1) |
 | `LocalModel.build_cpr_model` | Available to you; CloudBurrow does not invoke it |
 | `LocalModel.deploy_to_local_endpoint` | **Declined by design** — see [The decision](#the-decision) |
 | Model Garden, tuning, batch prediction | **Not supported** |

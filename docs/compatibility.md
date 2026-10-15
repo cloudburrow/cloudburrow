@@ -742,7 +742,7 @@ not measured.
 It lists every RPC of [Cloud Tasks](coverage/tasks.md), [Secret Manager](coverage/secretmanager.md),
 [Cloud Run v2](coverage/run.md), [Cloud KMS](coverage/kms.md),
 [Resource Manager v3 Projects](coverage/resourcemanager.md), [Cloud Scheduler](coverage/scheduler.md),
-[Cloud Logging](coverage/logging.md), [Pub/Sub](coverage/pubsub.md), the
+[Cloud Logging](coverage/logging.md), [Vertex AI PredictionService](coverage/vertexai.md), [Pub/Sub](coverage/pubsub.md), the
 [Storage JSON API](coverage/storage.md) and the opt-in [Firestore](coverage/firestore.md),
 [Datastore](coverage/datastore.md), [Bigtable](coverage/bigtable.md) and
 [Spanner](coverage/spanner.md) emulators with its status, and every REST method of
@@ -1195,7 +1195,8 @@ Google's **serving contract**, on CloudBurrow's **own runtime**. See
 | `AIP_STORAGE_URI` artifact download | **Not supported** | Recognised as a contract variable; nothing fetches from GCS. The offline path downloads no artifacts and loads no credentials. |
 | `LocalModel.deploy_to_local_endpoint` | **Declined by design** | It runs `containers.run(detach=True)` outside the cluster — unowned by readiness, reset or delete. Execution goes through the owned runtime instead. |
 | `LocalModel.build_cpr_model` | Available, not invoked | CloudBurrow accepts any image honouring the contract; it does not build one for you. |
-| Vertex model registry, `Endpoint`, `DeployedModel`, `PredictionService` | **Not supported** | No Vertex management surface is served at all, so a client fails to connect rather than receiving a stub. |
+| Vertex model registry, `Endpoint` and `DeployedModel` resources | **Not supported** | No Vertex management surface is served, so a client fails to connect rather than receiving a stub. |
+| Prediction through `PredictionService` | See [below](#vertex-ai-predictionservice--googlecloudaiplatformv1) | The official `aiplatform` PredictionClient reaches a deployed container as `projects/{p}/locations/{l}/endpoints/{service}` (#1193). |
 | Model Garden, tuning, batch prediction | **Not supported** | Out of scope. |
 | Console: Online prediction | **Verified** | Vertex AI → Online prediction lists the Cloud Run services that set an `AIP_*` variable, read through `ListServices`, and sends `{"instances","parameters"}` to one's predict route through the cluster ingress; the container's status and body are shown verbatim, its own 400s included, and the console's refusals (not a JSON array, not deployed) are kept apart from them (`TestConsoleOnlinePredictionThroughTheConsoleAPI`, `TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser`). Needs the ingress published on a host port; see [playground.md](playground.md) §8. |
 | **GPU / accelerators** | **Not supported** | CPU only, on every platform. NVIDIA is untested and nothing configures it. On Apple Silicon a Linux container has no Metal device, so no configuration achieves it — **NVIDIA container flags do not establish Metal acceleration**. |
@@ -1204,6 +1205,29 @@ The host-advertised URI is the cluster ingress address and the Knative gateway i
 published on a host port, so a host-side caller reaches an endpoint through a port-forward
 with the service in the `Host` header. In-cluster callers use the cluster-local name
 directly. Both are documented in [prediction.md](prediction.md#reaching-the-endpoint).
+
+## Vertex AI PredictionService — `google.cloud.aiplatform.v1`
+
+The local AI endpoint serves `google.cloud.aiplatform.v1.PredictionService` over **gRPC** on the
+same port as its JSON routes, so `cloud.google.com/go/aiplatform`'s `PredictionClient`, which has
+no REST transport, reaches it (#1193). Each method converts its request to the JSON its route
+reads and calls the same function, so both protocols refuse and answer a request identically.
+The endpoint starts whenever Cloud Run is enabled, with or without a local model; its address is
+the `local AI:` line `up` prints. Two resource name shapes are served:
+`projects/{p}/locations/{l}/endpoints/{service}`, where `{service}` is the Cloud Run service ID of
+a deployed [custom prediction container](prediction.md), relayed to its `AIP_PREDICT_ROUTE`
+through the cluster ingress; and `projects/{p}/locations/{l}/publishers/google/models/{model}`,
+for the [embeddings](embeddings.md) and [generation](generation.md) subsets. The same endpoint
+names are served as JSON at `POST /v1/{endpoint}:predict` and `:rawPredict`.
+
+| Method | Status | Notes |
+|---|---|---|
+| `Predict` | **Verified** | `TestPredictionClientReachesACustomEndpoint`: the official `aiplatform` v1.127.0 PredictionClient against a deployed container on non-default `AIP_*` routes; one prediction per instance (a different count is `INTERNAL`, never a mis-attributed result), `deployedModelId`, `parameters` passed through, the container's own 400 as `INVALID_ARGUMENT` in its words, an endpoint not deployed `NOT_FOUND`. On a publisher model it is the text-embedding `:predict` subset, with provenance in `modelDisplayName` and the `x-cloudburrow-model-provenance` header: `TestEmbeddingGemmaThroughThePredictionClient` (needs the model, `CLOUDBURROW_TEST_EMBEDDINGS`; not run in CI) and unit tests comparing it to the JSON route. |
+| `RawPredict` | **Verified** | Same test: the body is relayed to the container's predict route and its answer returned as `HttpBody`. Custom endpoints only; on a publisher model it is `UNIMPLEMENTED`. |
+| `GenerateContent` | **Implemented** | The `generateContent` subset of [generation.md](generation.md), unary: the same refusals (every generation option, tools, multi-turn) and no substitution. Unit-tested against a scripted runtime; no official-client run against the real model yet. |
+| `StreamGenerateContent` | **Unimplemented** | Streaming is served over JSON (`:streamGenerateContent`), not yet over gRPC. |
+| `Explain`, `EmbedContent`, `DirectPredict`, `DirectRawPredict` | **Unimplemented** | `UNIMPLEMENTED`. |
+| `StreamRawPredict`, `StreamDirectPredict`, `StreamDirectRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict` | **Unimplemented** | `UNIMPLEMENTED`. |
 
 ## Credentials, metadata and external tooling
 
