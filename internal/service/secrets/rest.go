@@ -337,7 +337,10 @@ func (h *RESTServer) addVersion(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	// The body is the whole AddSecretVersionRequest (body: "*"), so the
+	// official REST client sends parent in it too.
 	var body struct {
+		Parent  string `json:"parent"`
 		Payload struct {
 			Data string `json:"data"`
 			// int64 is a string in the JSON mapping.
@@ -346,6 +349,9 @@ func (h *RESTServer) addVersion(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err := rest.DecodeJSON(r, &body); err != nil {
 		return err
+	}
+	if body.Parent != "" && body.Parent != SecretName(project, secret) {
+		return apierror.InvalidArgument("parent %q in the body does not match the URL's %s", body.Parent, SecretName(project, secret))
 	}
 	// The JSON API carries bytes as base64, so a client sending raw text
 	// would otherwise store the text of its own encoding mistake.
