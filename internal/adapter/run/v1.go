@@ -403,6 +403,7 @@ func (s *Server) v1ReplaceService(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
+	keepCloudSQLLayout(svc.GetTemplate(), existing.GetTemplate())
 	svc.Etag = in.Metadata.ResourceVersion
 	validateOnly := r.URL.Query().Get("dryRun") == "all"
 	if _, err := s.UpdateService(r.Context(), &runpb.UpdateServiceRequest{Service: svc, ValidateOnly: validateOnly}); err != nil {
@@ -667,6 +668,7 @@ func toV1Template(svc *runpb.Service) *runv1.RevisionTemplate {
 			ann[v1MaxScale] = strconv.Itoa(int(sc.GetMaxInstanceCount()))
 		}
 	}
+	ann = toV1CloudSQL(ann, tmpl.GetVolumes())
 	if len(ann) == 0 {
 		ann = nil
 	}
@@ -786,7 +788,8 @@ func toV1Revision(rev *runpb.Revision, kr krev) *runv1.Revision {
 		Name: kr.Metadata.Name, Namespace: projectOf(rev.GetService()), Uid: rev.GetUid(), Generation: kr.Metadata.Generation,
 		Labels: map[string]string{v1LocationLabel: locationOf(rev.GetService()), labelService: id,
 			"serving.knative.dev/configuration": id, labelConfigGen: strconv.FormatInt(rev.GetGeneration(), 10)},
-		SelfLink: fmt.Sprintf("/apis/serving.knative.dev/v1/namespaces/%s/revisions/%s", projectOf(rev.GetService()), kr.Metadata.Name),
+		SelfLink:    fmt.Sprintf("/apis/serving.knative.dev/v1/namespaces/%s/revisions/%s", projectOf(rev.GetService()), kr.Metadata.Name),
+		Annotations: toV1CloudSQL(nil, rev.GetVolumes()),
 	}
 	if !kr.Metadata.CreationTimestamp.IsZero() {
 		m.CreationTimestamp = kr.Metadata.CreationTimestamp.UTC().Format(time.RFC3339)
@@ -847,6 +850,7 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 		return nil, apierror.InvalidArgument("spec.template.spec.containers is required")
 	}
 	boost := false
+	sqlConns := ""
 	if tm := spec.Template.Metadata; tm != nil {
 		svc.Template.Labels = tm.Labels
 		svc.Template.Revision = tm.Name
@@ -868,6 +872,8 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 				// Which tool deployed the revision: informational.
 			case v1StartupCPUBoost:
 				boost = v == "true" || v == "True"
+			case v1CloudSQLInstances:
+				sqlConns = v
 			default:
 				gap(strings.HasPrefix(k, "run.googleapis.com/"), "spec.template.metadata.annotations["+k+"]")
 				ann[k] = v
@@ -941,6 +947,12 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 		}
 		svc.Traffic = append(svc.Traffic, out)
 	}
+	vols, err := fromV1CloudSQL("spec.template.metadata.annotations["+v1CloudSQLInstances+"]", sqlConns,
+		svc.Template.Volumes, svc.Template.Containers)
+	if err != nil {
+		return nil, err
+	}
+	svc.Template.Volumes = vols
 	if len(gaps) > 0 {
 		return nil, apierror.Unimplemented("unsupported Cloud Run v1 configuration: %s: not mapped", strings.Join(gaps, ", "))
 	}

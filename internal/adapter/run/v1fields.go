@@ -139,6 +139,10 @@ func fromV1Probe(p *runv1.Probe, field string, gap func(bool, string)) *runpb.Pr
 func toV1Volumes(in []*runpb.Volume) []*runv1.Volume {
 	var out []*runv1.Volume
 	for _, v := range in {
+		if v.GetCloudSqlInstance() != nil {
+			// v1's run.googleapis.com/cloudsql-instances annotation.
+			continue
+		}
 		o := &runv1.Volume{Name: v.GetName()}
 		switch {
 		case v.GetSecret() != nil:
@@ -159,12 +163,16 @@ func toV1Volumes(in []*runpb.Volume) []*runv1.Volume {
 }
 
 func toV1Mounts(in []*runpb.VolumeMount, volumes []*runpb.Volume) []*runv1.VolumeMount {
-	secret := map[string]bool{}
+	secret, sql := map[string]bool{}, map[string]bool{}
 	for _, v := range volumes {
 		secret[v.GetName()] = v.GetSecret() != nil
+		sql[v.GetName()] = v.GetCloudSqlInstance() != nil
 	}
 	var out []*runv1.VolumeMount
 	for _, m := range in {
+		if sql[m.GetName()] {
+			continue
+		}
 		out = append(out, &runv1.VolumeMount{Name: m.GetName(), MountPath: m.GetMountPath(), ReadOnly: secret[m.GetName()]})
 	}
 	return out
