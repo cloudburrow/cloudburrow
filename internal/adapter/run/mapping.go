@@ -220,6 +220,8 @@ metadata:
 	jsonAnnotation(&b, "        ", annSecretEnv, secretEnv, len(secretEnv) == 0)
 	record := injectedRecord(tmpl.GetContainers(), injected)
 	jsonAnnotation(&b, "        ", annInjectedEnv, record, len(record) == 0)
+	built := builtImagesOf(tmpl.GetContainers())
+	jsonAnnotation(&b, "        ", annBuiltImages, built, len(built) == 0)
 	if pc := podConfigAnnotation(tmpl); pc != "" {
 		fmt.Fprintf(&b, "        %s: %q\n", annPodConfig, pc)
 	}
@@ -470,10 +472,14 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 	}
 
 	injected := injectedNames(tann)
+	built := map[string]string{}
+	readJSONAnnotation(tann, annBuiltImages, &built)
 	for _, c := range k.Spec.Template.Spec.Containers {
 		image := c.Image
-		if uri, ok := localBuilds.original(image); ok {
-			image = uri // built by SubmitBuild: read back as the image_uri deployed
+		if uri, ok := built[image]; ok {
+			image = uri // built locally: read back as the reference deployed
+		} else if uri, ok := localBuilds.original(image); ok {
+			image = uri // a service rendered before annBuiltImages
 		}
 		container := &runpb.Container{Image: image, WorkingDir: c.WorkingDir,
 			StartupProbe: c.StartupProbe.toProbe(), LivenessProbe: c.LivenessProbe.toProbe(),

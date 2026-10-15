@@ -113,17 +113,37 @@ func (b *builtImages) resolve(uri string) (string, bool) {
 	return l, ok
 }
 
-// original returns the image_uri a local reference was built for, so a
-// service reads back with the image it was deployed with.
+// original returns the image_uri a local reference was built for. A build
+// is recorded under its tag and its digest, so the tag is preferred, and
+// among several the least, for an answer that does not depend on map order.
+// A service's own record (annBuiltImages) comes first; this serves services
+// rendered before it.
 func (b *builtImages) original(local string) (string, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	best := ""
 	for uri, l := range b.local {
-		if l == local {
-			return uri, true
+		if l != local {
+			continue
+		}
+		if best == "" || (strings.Contains(best, "@") && !strings.Contains(uri, "@")) ||
+			(strings.Contains(best, "@") == strings.Contains(uri, "@") && uri < best) {
+			best = uri
 		}
 	}
-	return "", false
+	return best, best != ""
+}
+
+// builtImagesOf maps each container's locally built image to the
+// reference the caller deployed, for annBuiltImages.
+func builtImagesOf(containers []*runpb.Container) map[string]string {
+	out := map[string]string{}
+	for _, c := range containers {
+		if l, ok := localBuilds.resolve(c.GetImage()); ok {
+			out[l] = c.GetImage()
+		}
+	}
+	return out
 }
 
 // containerImage is the reference a container runs: the locally built image
