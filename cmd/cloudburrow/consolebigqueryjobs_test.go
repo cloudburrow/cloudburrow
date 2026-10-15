@@ -283,11 +283,15 @@ func TestBigQueryJobPageShowsAQueryJobsDMLRows(t *testing.T) {
 	}
 }
 
-// The export form offers AVRO, which the front writes, and each compression
-// only with the formats it applies to.
-func TestBigQueryExportFormOffersAvro(t *testing.T) {
+// The export form offers AVRO and PARQUET, which the front writes, each
+// compression only with the formats BigQuery's export documentation lists
+// it for, Avro logical types for Avro only, and More destination URIs,
+// all sent in one extract job (#957).
+func TestBigQueryExportFormOffersAvroAndParquet(t *testing.T) {
 	var format, compression []string
+	names := map[string]bool{}
 	for _, f := range bigqueryExportFields() {
+		names[f.Name] = true
 		switch f.Name {
 		case "format":
 			format = f.Options
@@ -295,22 +299,57 @@ func TestBigQueryExportFormOffersAvro(t *testing.T) {
 			compression = f.Options
 		}
 	}
-	if !slices.Contains(format, "AVRO") || slices.Contains(format, "PARQUET") ||
-		!slices.Contains(compression, "DEFLATE") || !slices.Contains(compression, "SNAPPY") {
-		t.Errorf("the export form offers formats %v, compressions %v", format, compression)
+	if !slices.Contains(format, "AVRO") || !slices.Contains(format, "PARQUET") ||
+		!slices.Contains(compression, "DEFLATE") || !slices.Contains(compression, "SNAPPY") || !slices.Contains(compression, "ZSTD") ||
+		!names["useAvroLogicalTypes"] || !names["moreUris"] {
+		t.Errorf("the export form offers formats %v, compressions %v, fields %v", format, compression, names)
 	}
 	p := bigqueryProvider{endpoint: "127.0.0.1:1", project: "p"}
-	for _, c := range []struct{ format, compression, want string }{
-		{"AVRO", "GZIP", "DEFLATE or SNAPPY"},
-		{"CSV", "SNAPPY", "Avro exports only"},
-		{"NEWLINE_DELIMITED_JSON", "DEFLATE", "Avro exports only"},
-		{"PARQUET", "NONE", "CSV, NEWLINE_DELIMITED_JSON or AVRO"},
+	for _, c := range []struct{ format, compression, logical, want string }{
+		{"AVRO", "GZIP", "", "DEFLATE or SNAPPY or not at all"},
+		{"AVRO", "ZSTD", "", "DEFLATE or SNAPPY or not at all"},
+		{"CSV", "SNAPPY", "", "GZIP or not at all"},
+		{"NEWLINE_DELIMITED_JSON", "DEFLATE", "", "GZIP or not at all"},
+		{"PARQUET", "DEFLATE", "", "SNAPPY or GZIP or ZSTD"},
+		{"PARQUET", "NONE", "true", "Avro only"},
+		{"ORC", "NONE", "", "CSV, NEWLINE_DELIMITED_JSON, AVRO or PARQUET"},
 	} {
 		_, err := p.exportJob(context.Background(), "p", "d", "t",
-			map[string]string{"uri": "gs://b/o", "format": c.format, "compression": c.compression})
+			map[string]string{"uri": "gs://b/o", "format": c.format, "compression": c.compression, "useAvroLogicalTypes": c.logical})
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s with %s: %v, want %q", c.format, c.compression, err, c.want)
 		}
+	}
+
+	var sent []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/jobs") {
+			b, _ := io.ReadAll(r.Body)
+			sent = append(sent, string(b))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jobReference":{"projectId":"p","jobId":"e1","location":"US"},
+			"configuration":{"extract":{"sourceTable":{"projectId":"p","datasetId":"d","tableId":"t"},
+			"destinationUris":["gs://b/a-*.avro","gs://b/b-*.avro"]}},"status":{"state":"DONE"}}`)
+	}))
+	defer api.Close()
+	p = bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	if _, err := p.exportJob(context.Background(), "p", "d", "t", map[string]string{"uri": "gs://b/a-*.avro",
+		"moreUris": "gs://b/b-*.avro\n\n", "format": "AVRO", "compression": "SNAPPY", "useAvroLogicalTypes": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) == 0 {
+		t.Fatal("no extract job was sent")
+	}
+	for _, want := range []string{`"destinationUris":["gs://b/a-*.avro","gs://b/b-*.avro"]`, `"destinationFormat":"AVRO"`,
+		`"compression":"SNAPPY"`, `"useAvroLogicalTypes":true`} {
+		if !strings.Contains(sent[0], want) {
+			t.Errorf("the extract job sent %s; want %s in it", sent[0], want)
+		}
+	}
+	if _, err := p.exportJob(context.Background(), "p", "d", "t", map[string]string{"uri": "gs://b/o",
+		"moreUris": "b/o2", "format": "CSV"}); err == nil {
+		t.Error("a More destination URI that is not gs:// was sent")
 	}
 }
 

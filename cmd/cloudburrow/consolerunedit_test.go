@@ -333,7 +333,7 @@ func TestRunEditDeploysTheFormThroughUpdateService(t *testing.T) {
 	}
 	req := fake.updates[0]
 	if len(req.GetUpdateMask().GetPaths()) != 0 {
-		t.Errorf("update mask %v: the adapter refuses a mask, and the full service is sent", req.GetUpdateMask())
+		t.Errorf("update mask %v: Edit replaces the whole configuration, so the full service is sent with no mask", req.GetUpdateMask())
 	}
 	svc := req.GetService()
 	if svc.GetName() != editedServiceName {

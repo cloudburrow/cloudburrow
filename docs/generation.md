@@ -23,6 +23,15 @@ POST /v1beta/models/{model}:generateContent                    # Gemini API back
 POST /v1beta/models/{model}:streamGenerateContent?alt=sse
 ```
 
+The same subset is served over gRPC on the same port, as
+`google.cloud.aiplatform.v1.PredictionService` `GenerateContent` and `StreamGenerateContent`
+(#1193, #1257), for `cloud.google.com/go/aiplatform`'s PredictionClient, which speaks gRPC only.
+Each converts its request to the JSON above and runs the same code, so it is refused, resolved
+and answered identically: `StreamGenerateContent` sends one `GenerateContentResponse` per chunk
+as the runtime decodes it, with `STOP` on a final message of its own, as the SSE route does; a
+refusal before the first chunk is the unary call's status, and a failure after one ends the
+stream with `INTERNAL` naming it.
+
 `v1beta1` is the SDK's default API version for the Vertex backend and `v1beta` for the
 Gemini API backend. `{project}` and `{location}` are accepted and **not interpreted** —
 there is one local model, and pretending otherwise would imply a regional topology that

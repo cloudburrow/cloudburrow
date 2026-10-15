@@ -29,7 +29,8 @@ func writeXMLError(w http.ResponseWriter, status int, code, message string) {
 // serveXML is the XML API. Path-style requests name the bucket in the first
 // segment; virtual-hosted ones in the host. Object GET and HEAD are #491;
 // object PUT and DELETE, bucket GET (listing) and DELETE, and resumable
-// uploads are #507 (xmlops.go).
+// uploads are #507 (xmlops.go); service GET, bucket PUT and form POST are
+// #1258 (xmlpost.go).
 func (s *Server) serveXML(w http.ResponseWriter, r *http.Request) {
 	bucket, object := s.xmlTarget(r)
 	q := r.URL.Query()
@@ -96,6 +97,15 @@ func (s *Server) serveXML(w http.ResponseWriter, r *http.Request) {
 	case bucket != "" && object == "" && r.Method == http.MethodDelete:
 		s.viaJSON(w, r, s.bucketsDelete, jsonPrefix+"b/"+escape(bucket), url.Values{}, http.StatusNoContent)
 		return
+	case bucket == "" && r.Method == http.MethodGet && !hasSubresource(q):
+		s.xmlListBuckets(w, r)
+		return
+	case bucket != "" && object == "" && r.Method == http.MethodPut && !hasSubresource(q):
+		s.xmlCreateBucket(w, r, bucket)
+		return
+	case bucket != "" && object == "" && isFormPost(r) && !hasSubresource(q):
+		s.xmlFormPost(w, r, bucket)
+		return
 	}
 	what := "the XML API " + r.Method
 	switch {
@@ -107,6 +117,21 @@ func (s *Server) serveXML(w http.ResponseWriter, r *http.Request) {
 		what += " on " + bucket + "/" + object
 	}
 	writeXMLError(w, http.StatusNotImplemented, "NotImplemented", what+" is not implemented yet")
+}
+
+// hasSubresource reports whether a query names a subresource (?cors,
+// ?acl, ?lifecycle and the like), which the bucket-level handlers above do
+// not serve; a signed URL's own parameters do not count.
+func hasSubresource(q url.Values) bool {
+	for k := range q {
+		switch {
+		case strings.HasPrefix(k, "X-Goog-"), strings.HasPrefix(k, "X-Amz-"),
+			k == "GoogleAccessId", k == "Expires", k == "Signature":
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // xmlTarget reads the bucket and object an XML request names.

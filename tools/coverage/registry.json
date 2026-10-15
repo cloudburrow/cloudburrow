@@ -9,7 +9,7 @@
   "google.cloud.aiplatform.v1.PredictionService/ServerStreamingPredict": "unimplemented",
   "google.cloud.aiplatform.v1.PredictionService/StreamDirectPredict": "unimplemented",
   "google.cloud.aiplatform.v1.PredictionService/StreamDirectRawPredict": "unimplemented",
-  "google.cloud.aiplatform.v1.PredictionService/StreamGenerateContent": "unimplemented",
+  "google.cloud.aiplatform.v1.PredictionService/StreamGenerateContent": "implemented",
   "google.cloud.aiplatform.v1.PredictionService/StreamRawPredict": "unimplemented",
   "google.cloud.aiplatform.v1.PredictionService/StreamingPredict": "unimplemented",
   "google.cloud.aiplatform.v1.PredictionService/StreamingRawPredict": "unimplemented",

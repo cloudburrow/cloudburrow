@@ -123,10 +123,31 @@ func (p bigqueryProvider) List(ctx context.Context, project string) (console.Lis
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
 	base.Items, base.Total = items, len(items)
+	base.Summary = p.projectSummary(ctx, project)
 	if base.Note == "" {
 		base.Note = "In-memory: everything here is gone when the instance restarts."
 	}
 	return base, nil
+}
+
+// projectSummary is what the datasets list says about its project: the
+// project and the BigQuery service account projects.getServiceAccount names,
+// the account a customer-managed encryption key is granted to (#1270), as
+// Cloud Storage's Settings page names its own. A failed read says so in the
+// value rather than hiding the datasets.
+func (p bigqueryProvider) projectSummary(ctx context.Context, project string) []console.PropertyGroup {
+	email := ""
+	if svc, err := p.service(ctx); err != nil {
+		email = "unavailable: " + err.Error()
+	} else if sa, err := svc.Projects.GetServiceAccount(project).Context(ctx).Do(); err != nil {
+		email = "unavailable: " + bigqueryRefusal(err).Error()
+	} else {
+		email = sa.Email
+	}
+	return []console.PropertyGroup{{Heading: "Project", Properties: []console.Property{
+		{Label: "Project ID", Value: project},
+		{Label: "BigQuery service account", Value: email},
+	}}}
 }
 
 func countTables(ctx context.Context, ds *bigquery.Dataset) (int, error) {
@@ -271,6 +292,12 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 			v += " on " + tp.Field
 		}
 		props = append(props, console.Property{Label: "Partitioning", Value: v})
+	}
+	if rp := md.RangePartitioning; rp != nil && rp.Range != nil {
+		// Integer-range partitioning, as CREATE TABLE ... PARTITION BY
+		// RANGE_BUCKET makes it (#1272).
+		props = append(props, console.Property{Label: "Partitioning", Value: fmt.Sprintf(
+			"RANGE_BUCKET on %s: %d to %d, interval %d", rp.Field, rp.Range.Start, rp.Range.End, rp.Range.Interval)})
 	}
 	if cl := md.Clustering; cl != nil && len(cl.Fields) > 0 {
 		props = append(props, console.Property{Label: "Clustered by", Value: strings.Join(cl.Fields, ", ")})

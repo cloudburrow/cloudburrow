@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // runClient returns the official Cloud Run client pointed at the local adapter.
@@ -306,6 +307,80 @@ func TestRunUpdateService(t *testing.T) {
 	// does not sum to 100 is the caller's mistake.
 	if _, err := c.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: split}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("UpdateService with 50%% to latest = %v, want InvalidArgument", err)
+	}
+}
+
+// covers: google.cloud.run.v2.Services/UpdateService
+//
+// TestRunUpdateServiceWithAMask (#1260): an update_mask names the fields
+// to change and the rest of the service is kept, through the official
+// client: a mask of labels sent with no template keeps the container, and a
+// mask of template.containers keeps the labels the request also carried.
+// A path that is no field of Service is INVALID_ARGUMENT.
+func TestRunUpdateServiceWithAMask(t *testing.T) {
+	h := New(t)
+	c := runClient(t, h)
+	ctx := h.Context()
+	id := "compat-mask"
+	name := runParent(h) + "/services/" + id
+	env := func(v string) []*runpb.EnvVar {
+		return []*runpb.EnvVar{{Name: "TARGET", Values: &runpb.EnvVar_Value{Value: v}}}
+	}
+	op, err := c.CreateService(ctx, &runpb.CreateServiceRequest{Parent: runParent(h), ServiceId: id,
+		Service: &runpb.Service{Labels: map[string]string{"team": "a"}, Template: &runpb.RevisionTemplate{
+			Containers: []*runpb.Container{{Image: helloDigest, Env: env("first")}}}}})
+	if err != nil {
+		t.Fatalf("CreateService: %v", err)
+	}
+	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
+	if _, err := op.Wait(ctx); err != nil {
+		t.Fatalf("waiting for the service: %v", err)
+	}
+	update := func(svc *runpb.Service, paths ...string) *runpb.Service {
+		t.Helper()
+		svc.Name = name
+		uop, err := c.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: svc,
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: paths}})
+		if err != nil {
+			t.Fatalf("UpdateService mask %v: %v", paths, err)
+		}
+		got, err := uop.Wait(ctx)
+		if err != nil {
+			t.Fatalf("waiting for the update with mask %v: %v", paths, err)
+		}
+		return got
+	}
+	target := func(svc *runpb.Service) string {
+		if cs := svc.GetTemplate().GetContainers(); len(cs) == 1 && len(cs[0].GetEnv()) == 1 {
+			return cs[0].GetEnv()[0].GetValue()
+		}
+		return fmt.Sprintf("containers %v", svc.GetTemplate().GetContainers())
+	}
+
+	got := update(&runpb.Service{Labels: map[string]string{"team": "b"}}, "labels")
+	if got.GetLabels()["team"] != "b" || target(got) != "first" ||
+		!strings.Contains(got.GetTemplate().GetContainers()[0].GetImage(), "@sha256:a97656c5") {
+		t.Errorf("after a labels mask: labels %v, TARGET %s, image %q; want team=b and the container kept",
+			got.GetLabels(), target(got), got.GetTemplate().GetContainers()[0].GetImage())
+	}
+
+	got = update(&runpb.Service{Labels: map[string]string{"team": "z"}, Template: &runpb.RevisionTemplate{
+		Containers: []*runpb.Container{{Image: helloDigest, Env: env("second")}}}}, "template.containers")
+	if got.GetLabels()["team"] != "b" || target(got) != "second" {
+		t.Errorf("after a template.containers mask: labels %v, TARGET %s; want team=b kept and TARGET second",
+			got.GetLabels(), target(got))
+	}
+	read, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: name})
+	if err != nil {
+		t.Fatalf("GetService: %v", err)
+	}
+	if read.GetLabels()["team"] != "b" || target(read) != "second" {
+		t.Errorf("GetService: labels %v, TARGET %s", read.GetLabels(), target(read))
+	}
+
+	if _, err := c.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: &runpb.Service{Name: name},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"no_such_field"}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("UpdateService with an unknown mask path = %v, want InvalidArgument", err)
 	}
 }
 

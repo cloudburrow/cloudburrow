@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
+	"slices"
 	"strconv"
 
 	"google.golang.org/grpc"
@@ -15,6 +17,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
@@ -45,6 +48,10 @@ type secretsService struct {
 	// stopSweep ends the expiry sweep (#1225); swept closes when it has.
 	stopSweep context.CancelFunc
 	swept     chan struct{}
+	// pubsub is the tunnel to the instance's Pub/Sub, which a secret's
+	// event notifications are published to (#1259); nil when Pub/Sub is not
+	// enabled, and then a secret with topics is refused.
+	pubsub func() *netfwd.Forwarder
 }
 
 // Store returns the Secret Manager store, available after Start.
@@ -150,6 +157,15 @@ func (s *secretsService) Start(ctx context.Context) error {
 	s.db = db
 
 	st := secrets.NewStore(db)
+	if s.pubsub != nil && slices.Contains(s.cfg.EnabledServices(), config.ServicePubSub) {
+		st.SetPublisher(func(ctx context.Context, topic string, data []byte, attrs map[string]string) error {
+			f := s.pubsub()
+			if f == nil || f.HostAddr() == "" {
+				return errors.New("Pub/Sub has not started on this instance")
+			}
+			return publishLocal(ctx, f, topic, data, attrs)
+		})
+	}
 	s.store = st
 
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Secrets))

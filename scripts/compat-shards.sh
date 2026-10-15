@@ -14,7 +14,9 @@
 # follows the tests:
 #   storage:   storage, pubsub, and every service the reset, seed,
 #              Terraform-wrapper and scheduler tests reach in the same test
-#              (tasks, secretmanager, scheduler), plus the Python suite, the
+#              (tasks, secretmanager, scheduler), and logging for the
+#              Cloud Tasks dispatch log (#1256, as TASKS_LOGGING, so the
+#              Logging suite stays in served), plus the Python suite, the
 #              hooks and seed fixtures and the logs check, and the Secret
 #              Manager, Cloud Tasks, Cloud Scheduler and in-cluster Storage
 #              restart probes, and Resource Manager, which every instance
@@ -67,7 +69,7 @@ compat_shard() {
   TEST_VARS=CREDENTIALS,KUBECONFIG,CLUSTER,CONTROL,METADATA,CONSOLE,ADMIN_TOKEN,CLI,CLI_ARGS
   case "$1" in
     storage)
-      SERVICES=storage,pubsub,tasks,secretmanager,scheduler
+      SERVICES=storage,pubsub,tasks,secretmanager,scheduler,logging
       # The hooks are the #285 fixtures (two ready.d scripts, the second
       # creating a bucket, and a shutdown.d script checked after stop), and
       # the seed file names tasks and storage.
@@ -80,7 +82,9 @@ compat_shard() {
       # Resource Manager v3 and v1 (#298), which every instance serves:
       # TestOneProjectNumberEverywhere (#1211) needs it and Cloud Storage in
       # one instance, so its tests run here.
-      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER
+      # Cloud Logging as TASKS_LOGGING (#1256): only the Cloud Tasks
+      # dispatch log test reads it, so the Logging tests run in served.
+      TEST_VARS+=,STORAGE,CORS_ORIGIN,PUBSUB,TASKS,SECRETS,SCHEDULER,TOFU,RESOURCEMANAGER,TASKS_LOGGING
       # The restart probes' fixtures, left just before stop so no
       # suite-level reset wipes them: Secret Manager (#483), a secret and a
       # version; Cloud Tasks and Cloud Scheduler (#596), a paused queue with

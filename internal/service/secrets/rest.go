@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -141,14 +142,38 @@ type jsonSecret struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 	Etag        string            `json:"etag,omitempty"`
 	ExpireTime  string            `json:"expireTime,omitempty"`
+	Topics      []jsonTopic       `json:"topics,omitempty"`
+	Rotation    *jsonRotation     `json:"rotation,omitempty"`
+	// VersionDestroyTTL is a google.protobuf.Duration in JSON: seconds
+	// with an "s" (#1278).
+	VersionDestroyTTL string `json:"versionDestroyTtl,omitempty"`
+}
+
+// jsonRotation is a Secret's rotation schedule (#1278).
+type jsonRotation struct {
+	NextRotationTime string `json:"nextRotationTime,omitempty"`
+	RotationPeriod   string `json:"rotationPeriod,omitempty"`
+}
+
+// durationJSON renders d as protojson renders a Duration.
+func durationJSON(d time.Duration) string {
+	b, _ := protojson.Marshal(durationpb.New(d))
+	return strings.Trim(string(b), `"`)
+}
+
+// jsonTopic is a Secret's Pub/Sub topic (#1259).
+type jsonTopic struct {
+	Name string `json:"name"`
 }
 
 type jsonVersion struct {
 	Name        string `json:"name"`
 	CreateTime  string `json:"createTime"`
 	DestroyTime string `json:"destroyTime,omitempty"`
-	State       string `json:"state"`
-	Etag        string `json:"etag,omitempty"`
+	// ScheduledDestroyTime is set while a destruction is scheduled (#1278).
+	ScheduledDestroyTime string `json:"scheduledDestroyTime,omitempty"`
+	State                string `json:"state"`
+	Etag                 string `json:"etag,omitempty"`
 
 	ClientSpecifiedPayloadChecksum bool `json:"clientSpecifiedPayloadChecksum,omitempty"`
 }
@@ -173,6 +198,21 @@ func renderSecret(s Secret) jsonSecret {
 	if !s.Expire.IsZero() {
 		out.ExpireTime = s.Expire.UTC().Format(time.RFC3339Nano)
 	}
+	for _, t := range s.Topics {
+		out.Topics = append(out.Topics, jsonTopic{Name: t})
+	}
+	if !s.NextRotation.IsZero() || s.RotationPeriod > 0 {
+		out.Rotation = &jsonRotation{}
+		if !s.NextRotation.IsZero() {
+			out.Rotation.NextRotationTime = s.NextRotation.UTC().Format(time.RFC3339Nano)
+		}
+		if s.RotationPeriod > 0 {
+			out.Rotation.RotationPeriod = durationJSON(s.RotationPeriod)
+		}
+	}
+	if s.VersionDestroyTTL > 0 {
+		out.VersionDestroyTTL = durationJSON(s.VersionDestroyTTL)
+	}
 	return out
 }
 
@@ -187,6 +227,9 @@ func renderVersion(v Version) jsonVersion {
 	}
 	if !v.Destroyed.IsZero() {
 		out.DestroyTime = v.Destroyed.UTC().Format(time.RFC3339Nano)
+	}
+	if !v.ScheduledDestroy.IsZero() {
+		out.ScheduledDestroyTime = v.ScheduledDestroy.UTC().Format(time.RFC3339Nano)
 	}
 	return out
 }
@@ -285,7 +328,8 @@ func (h *RESTServer) patchSecret(w http.ResponseWriter, r *http.Request) error {
 	if _, err := NewGRPCServer(h.store).UpdateSecret(r.Context(), &secretmanagerpb.UpdateSecretRequest{
 		Secret: &secretmanagerpb.Secret{Name: SecretName(project, secret), Labels: body.GetLabels(),
 			Annotations: body.GetAnnotations(), Etag: body.GetEtag(), Replication: body.GetReplication(),
-			Expiration: body.GetExpiration()},
+			Expiration: body.GetExpiration(), Topics: body.GetTopics(),
+			Rotation: body.GetRotation(), VersionDestroyTtl: body.GetVersionDestroyTtl()},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: paths},
 	}); err != nil {
 		return err
