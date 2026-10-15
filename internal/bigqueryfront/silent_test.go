@@ -297,7 +297,7 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 	}
 	n := len(emu.log)
 	for _, path := range []string{"/queries", "/jobs"} {
-		body := `{"query":"CREATE TABLE ds.u (x INT64); EXECUTE IMMEDIATE CONCAT('SELECT ', CAST(1 AS STRING))"}`
+		body := `{"query":"CREATE TABLE ds.u (x INT64); EXECUTE IMMEDIATE (SELECT 'SELECT 1' FROM ds.u)"}`
 		if path == "/jobs" {
 			body = `{"configuration":{"query":` + body + `}}`
 		}

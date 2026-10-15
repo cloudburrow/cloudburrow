@@ -330,13 +330,25 @@ var parityRows = []parityRow{
 	// Spanner
 	{Resource: "Spanner instances, databases and reads", Service: "spanner",
 		Methods: []string{"InstanceAdmin/CreateInstance", "InstanceAdmin/GetInstance", "DatabaseAdmin/CreateDatabase", "DatabaseAdmin/GetDatabase", "DatabaseAdmin/GetDatabaseDdl",
+			"InstanceAdmin/ListInstances", "InstanceAdmin/DeleteInstance", "DatabaseAdmin/ListDatabases", "DatabaseAdmin/DropDatabase",
 			"Spanner/ExecuteStreamingSql", "Spanner/StreamingRead"},
 		Provider: "spanner", Offers: "Instances, databases, tables, columns and indexes, DDL, read-only query editor, Create database, Drop database, Delete instance",
 		Tests: []string{"TestConsoleSpannerCreateAndDropDatabase"}},
 	{Resource: "Spanner sessions and transactions", Service: "spanner",
-		Methods: []string{"Spanner/CreateSession", "Spanner/BeginTransaction"}, Excluded: transactionReason},
+		Methods: []string{"Spanner/CreateSession", "Spanner/BeginTransaction", "Spanner/BatchCreateSessions", "Spanner/GetSession",
+			"Spanner/ListSessions", "Spanner/DeleteSession", "Spanner/Rollback"}, Excluded: transactionReason},
+	{Resource: "Spanner reads and writes the client library offers besides the console's", Service: "spanner",
+		Methods: []string{"Spanner/Read", "Spanner/PartitionQuery", "Spanner/PartitionRead", "Spanner/BatchWrite", "Spanner/ExecuteBatchDml"},
+		Excluded: "other forms of what the console already offers: Read is StreamingRead answered at once, PartitionQuery and PartitionRead " +
+			"split a query or read for parallel workers, and BatchWrite and ExecuteBatchDml apply several writes in one call; the console " +
+			"reads with ExecuteStreamingSql and StreamingRead and writes one confirmed DML statement at a time (#798)"},
+	{Resource: "Spanner DDL, instance configurations and instance partitions", Service: "spanner",
+		Methods: []string{"DatabaseAdmin/UpdateDatabaseDdl", "InstanceAdmin/ListInstanceConfigs", "InstanceAdmin/GetInstanceConfig",
+			"InstanceAdmin/CreateInstancePartition", "InstanceAdmin/GetInstancePartition", "InstanceAdmin/ListInstancePartitions",
+			"InstanceAdmin/DeleteInstancePartition", "InstanceAdmin/ListInstancePartitionOperations"},
+		Issue: 1207},
 	{Resource: "Spanner DML", Service: "spanner",
-		Methods:  []string{"Spanner/Commit"},
+		Methods:  []string{"Spanner/Commit", "Spanner/ExecuteSql"},
 		Provider: "spanner", Offers: "Read-write mode in the query editor: one INSERT, UPDATE or DELETE, confirmed with the database named, committed in a read-write transaction, rows affected reported (#798)",
 		Tests: []string{"TestConsoleSpannerDML", "TestSpannerStatementClassifier", "TestQueryModeChoosesTheCallNotTheText"}},
 
@@ -358,7 +370,7 @@ var parityRows = []parityRow{
 		Provider: "bigquery", Offers: "Edit table on a table's page, which sends tables.patch, not tables.update: the front carries out both on one path (#1054), so the description and labels Edit table changes are what a tables.update of them changes; adding fields in Edit table is #1013 (#1048)",
 		Tests: []string{"TestConsoleBigQueryEditTableViewsAndInsertOptions", "TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms"}},
 	{Resource: "BigQuery queries", Service: "bigquery",
-		Methods:  []string{"bigquery.jobs.query"},
+		Methods:  []string{"bigquery.jobs.query", "bigquery.jobs.getQueryResults"},
 		Provider: "bigquery", Offers: "The query editor on every dataset and table page, run with jobs.query: read-only by default, one SELECT or WITH … SELECT, at most 200 rows (#698); an opt-in, confirmed Read-write mode for DDL and scripts with DECLARE (#994), and a DML statement of its own (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE) answered with the rows it changed (#1024); DML inside a script (#1028) and UPDATE … FROM (#1027) refused with the reason",
 		Tests: []string{"TestConsoleBigQueryDatasetsSchemaAndQuery", "TestTheBigQueryEditorRunsOnlyOneSelect",
 			"TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts", "TestConsoleBigQueryReadWriteEditorRunsDML",
@@ -381,6 +393,13 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleBigQueryRoutines", "TestBigQueryRoutinesSectionAndPage", "TestBigQueryRoutinesThroughThePage"}},
 	// The Storage Read and Write APIs (gRPC, google.cloud.bigquery.storage.v1)
 	// have no coverage page; this row writes the exclusion down (#782).
+	{Resource: "BigQuery models", Service: "bigquery",
+		Methods: []string{"bigquery.models.list", "bigquery.models.get", "bigquery.models.patch", "bigquery.models.delete"},
+		Excluded: "no model can exist: the emulator does not serve BigQuery ML's CREATE MODEL, so a dataset's models are always none " +
+			"and there is nothing to show, edit or delete (#1200)"},
+	{Resource: "BigQuery projects", Service: "bigquery",
+		Methods:  []string{"bigquery.projects.list"},
+		Excluded: "lists the one project the instance serves; the console's project picker already names it, from Resource Manager"},
 	{Resource: "BigQuery Storage Read and Write APIs", Service: "bigquery",
 		Excluded: "a client's read and write transport (Arrow and Avro read sessions, managedwriter default, COMMITTED, PENDING and BUFFERED streams, Verified in docs/compatibility.md); a table's Preview reads its rows and Insert rows and the load forms write them, the console's equivalents"},
 
@@ -417,6 +436,19 @@ var parityRows = []parityRow{
 			"PredictionService and batch prediction named as not served (#869)",
 		Tests: []string{"TestConsoleOnlinePredictionThroughTheConsoleAPI", "TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser",
 			"TestPredictRelaysThroughTheIngressAndShowsTheAnswerVerbatim", "TestPredictRefusesWhatItCannotSend"}},
+	// PredictionService over gRPC (#1193) is a protocol for the requests
+	// these screens already send, through the same handlers.
+	{Resource: "Vertex AI PredictionService: Predict and RawPredict", Service: "vertexai",
+		Methods: []string{"PredictionService/Predict", "PredictionService/RawPredict"},
+		Screen:  "/ai/predict", Offers: "Online prediction sends a deployed container the request Predict relays " +
+			"(instances and parameters, the container's answer verbatim); Embeddings sends the text-embedding :predict " +
+			"a Predict on the publisher model runs",
+		Tests: []string{"TestConsoleOnlinePredictionThroughTheConsoleAPI", "TestPredictionClientReachesACustomEndpoint",
+			"TestGRPCPredictEmbedsLikeTheJSONRoute"}},
+	{Resource: "Vertex AI PredictionService: GenerateContent", Service: "vertexai",
+		Methods: []string{"PredictionService/GenerateContent"},
+		Screen:  "/ai/playground", Offers: "Playground: the generateContent subset GenerateContent serves, through the same API path",
+		Tests: []string{"TestPlaygroundGeneratesThroughTheRealAPIPath", "TestGRPCGenerateContentMatchesTheJSONRoute"}},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},

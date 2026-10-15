@@ -32,9 +32,12 @@ type writtenExtract struct {
 	// "SNAPPY", "GZIP" or "ZSTD".
 	parquet      bool
 	parquetCodec string
-	gzip         bool
-	delimiter    rune
-	header       bool
+	// parquetNativeGeography is the job's nativeGeographyExportEnabled:
+	// GEOGRAPHY in Parquet's GEOGRAPHY logical type (extractparquet.go).
+	parquetNativeGeography bool
+	gzip                   bool
+	delimiter              rune
+	header                 bool
 	// uris are the URIs written, each wildcard replaced (shardURI): the
 	// rows are shared out between them (shareRows).
 	uris   []string

@@ -1457,6 +1457,91 @@
     ]
   },
   {
+    "Key": "vertexai",
+    "Title": "Vertex AI PredictionService",
+    "counts": {
+      "Implemented": 1,
+      "Unimplemented": 11,
+      "Verified": 2
+    },
+    "rows": [
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/DirectPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/DirectRawPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/EmbedContent",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/Explain",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/GenerateContent",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/Predict",
+        "status": "Verified",
+        "tests": [
+          "test/compat/predictiongrpc_test.go:59 TestPredictionClientReachesACustomEndpoint"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/RawPredict",
+        "status": "Verified",
+        "tests": [
+          "test/compat/predictiongrpc_test.go:59 TestPredictionClientReachesACustomEndpoint"
+        ]
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/ServerStreamingPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/StreamDirectPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/StreamDirectRawPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/StreamGenerateContent",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/StreamRawPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/StreamingPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.aiplatform.v1.PredictionService/StreamingRawPredict",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      }
+    ]
+  },
+  {
     "Key": "pubsub",
     "Title": "Pub/Sub",
     "counts": {
@@ -2880,25 +2965,41 @@
     "Key": "spanner",
     "Title": "Spanner",
     "counts": {
-      "Unknown": 55,
-      "Verified": 10
+      "Refused": 32,
+      "Verified": 33
     },
     "rows": [
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackupSchedule",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateDatabase",
@@ -2911,23 +3012,42 @@
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackupSchedule",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DropDatabase",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:217 TestSpannerDatabaseAdminSchemaListAndDrop"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackupSchedule",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabase",
@@ -2946,63 +3066,121 @@
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/InternalUpdateGraphOperation",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupOperations",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupSchedules",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackups",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseOperations",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseRoles",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabases",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:217 TestSpannerDatabaseAdminSchemaListAndDrop"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/RestoreDatabase",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/SetIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/TestIamPermissions",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackup",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackupSchedule",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabase",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabaseDdl",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:217 TestSpannerDatabaseAdminSchemaListAndDrop"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstance",
@@ -3015,27 +3193,48 @@
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstanceConfig",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstancePartition",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstance",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstanceConfig",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstancePartition",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstance",
@@ -3046,63 +3245,115 @@
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstanceConfig",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstancePartition",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigOperations",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigs",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstancePartitionOperations",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstancePartitions",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:140 TestSpannerInstancePartitionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstances",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/MoveInstance",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/SetIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/TestIamPermissions",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstance",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstanceConfig",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstancePartition",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.v1.Spanner/BatchCreateSessions",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/BatchWrite",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:293 TestSpannerBatchWrite"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/BeginTransaction",
@@ -3133,15 +3384,24 @@
       },
       {
         "method": "google.spanner.v1.Spanner/DeleteSession",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/ExecuteBatchDml",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/ExecuteSql",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/ExecuteStreamingSql",
@@ -3152,31 +3412,53 @@
       },
       {
         "method": "google.spanner.v1.Spanner/FetchCacheUpdate",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/spannerdata_test.go:340 TestSpannerFetchCacheUpdateIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.v1.Spanner/GetSession",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/ListSessions",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/PartitionQuery",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:216 TestSpannerPartitionedQueryAndRead"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/PartitionRead",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:216 TestSpannerPartitionedQueryAndRead"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/Read",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/Rollback",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/StreamingRead",
@@ -3194,8 +3476,8 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Unknown": 25,
-      "Verified": 22
+      "Refused": 19,
+      "Verified": 28
     },
     "rows": [
       {
@@ -3232,15 +3514,27 @@
       },
       {
         "method": "bigquery.datasets.patch",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:165 TestBigQueryDatasetUpdatesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.datasets.undelete",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:165 TestBigQueryDatasetUpdatesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.datasets.update",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:165 TestBigQueryDatasetUpdatesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.jobs.cancel",
@@ -3268,7 +3562,10 @@
       },
       {
         "method": "bigquery.jobs.getQueryResults",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:49 TestBigQueryGetQueryResultsPages"
+        ]
       },
       {
         "method": "bigquery.jobs.insert",
@@ -3303,27 +3600,46 @@
       },
       {
         "method": "bigquery.models.delete",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:141 TestBigQueryModelsOfADatasetWithNone"
+        ]
       },
       {
         "method": "bigquery.models.get",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:141 TestBigQueryModelsOfADatasetWithNone"
+        ]
       },
       {
         "method": "bigquery.models.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:141 TestBigQueryModelsOfADatasetWithNone"
+        ]
       },
       {
         "method": "bigquery.models.patch",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:141 TestBigQueryModelsOfADatasetWithNone"
+        ]
       },
       {
         "method": "bigquery.projects.getServiceAccount",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:194 TestBigQueryServiceAccountIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.projects.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:121 TestBigQueryProjectsListNamesTheInstancesProject"
+        ]
       },
       {
         "method": "bigquery.routines.delete",
@@ -3343,7 +3659,11 @@
       },
       {
         "method": "bigquery.routines.getIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.routines.insert",
@@ -3362,47 +3682,91 @@
       },
       {
         "method": "bigquery.routines.setIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.routines.testIamPermissions",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.routines.update",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:281 TestBigQueryRoutineUpdateIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.batchDelete",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.delete",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.get",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.getIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.insert",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.list",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.testIamPermissions",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.update",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:209 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.tabledata.insertAll",
@@ -3438,7 +3802,11 @@
       },
       {
         "method": "bigquery.tables.getIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.tables.insert",
@@ -3461,23 +3829,31 @@
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:251 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
-          "test/compat/bigquerysilent_test.go:489 TestBigQueryTableUpdateAddsColumns",
+          "test/compat/bigquerysilent_test.go:501 TestBigQueryTableUpdateAddsColumns",
           "test/compat/consolebigquerywrites_test.go:182 TestConsoleBigQueryEditTableViewsAndInsertOptions"
         ]
       },
       {
         "method": "bigquery.tables.setIamPolicy",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.tables.testIamPermissions",
-        "status": "Unknown"
+        "status": "Refused",
+        "tests": [
+          "test/compat/bigquerymethods_test.go:248 TestBigQueryTableAndRoutineIAMIsRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.tables.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerysilent_test.go:489 TestBigQueryTableUpdateAddsColumns"
+          "test/compat/bigquerysilent_test.go:501 TestBigQueryTableUpdateAddsColumns"
         ]
       }
     ]

@@ -15,13 +15,14 @@ Do not edit these files by hand.
 | [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 6 | 0 | 5 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging (write and read)](logging.md) | 6 | 4 | 0 | 2 | 0 | 0 | 0 | 0 |
+| [Vertex AI PredictionService](vertexai.md) | 14 | 2 | 0 | 11 | 1 | 0 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 40 | 0 | 47 | 0 | 0 | 0 | 11 |
 | [Firestore](firestore.md) | 17 | 6 | 0 | 0 | 0 | 0 | 11 | 0 |
 | [Datastore](datastore.md) | 8 | 4 | 0 | 0 | 0 | 0 | 4 | 0 |
 | [Bigtable](bigtable.md) | 50 | 6 | 0 | 0 | 0 | 0 | 44 | 0 |
-| [Spanner](spanner.md) | 65 | 10 | 0 | 0 | 0 | 0 | 55 | 0 |
-| [BigQuery (REST API v2)](bigquery.md) | 47 | 22 | 0 | 0 | 0 | 0 | 25 | 0 |
+| [Spanner](spanner.md) | 65 | 33 | 32 | 0 | 0 | 0 | 0 | 0 |
+| [BigQuery (REST API v2)](bigquery.md) | 47 | 28 | 19 | 0 | 0 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven

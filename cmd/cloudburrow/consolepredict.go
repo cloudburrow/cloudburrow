@@ -8,7 +8,9 @@ import (
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
 
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/prediction"
 )
 
@@ -113,4 +115,41 @@ func predictionEndpoint(svc *runpb.Service) (prediction.Endpoint, bool) {
 		ep.Message = ""
 	}
 	return ep, true
+}
+
+// endpointResolver resolves the PredictionService endpoint names the local AI
+// endpoint serves (#1193): projects/{p}/locations/{l}/endpoints/{id}, where
+// {id} is the Cloud Run service ID of a deployed custom prediction container.
+// It reads the same list the console's Online prediction page does.
+type endpointResolver struct {
+	src predictionSource
+}
+
+func (r endpointResolver) PredictURL(ctx context.Context, project, location, endpoint string) (string, error) {
+	if loc := r.src.run.location(); location != loc {
+		return "", apierror.NotFound("endpoint %s: location %q is not served; Cloud Run services on this instance are in %q",
+			endpoint, location, loc)
+	}
+	eps, err := r.src.PredictionEndpoints(ctx, project)
+	if err != nil {
+		return "", &apierror.Error{Code: codes.Unavailable, Reason: "backendError",
+			Message: "cannot list prediction endpoints: " + err.Error()}
+	}
+	for _, ep := range eps {
+		if ep.Name[strings.LastIndex(ep.Name, "/")+1:] != endpoint {
+			continue
+		}
+		u, err := ep.PredictURL()
+		if err != nil {
+			msg := fmt.Sprintf("endpoint %s is %s and has no URL yet", endpoint, ep.State)
+			if ep.Message != "" {
+				msg += ": " + ep.Message
+			}
+			return "", apierror.FailedPrecondition("%s", msg)
+		}
+		return u, nil
+	}
+	return "", apierror.NotFound("no custom prediction endpoint %q is deployed in projects/%s/locations/%s: "+
+		"an endpoint is a Cloud Run service whose container sets the AIP_* contract variables (docs/prediction.md)",
+		endpoint, project, location)
 }

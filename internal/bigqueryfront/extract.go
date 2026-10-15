@@ -30,6 +30,9 @@ type extractConfig struct {
 	PrintHeader       *bool           `json:"printHeader"`
 	// UseAvroLogicalTypes writes DATE and TIME as Avro logical types.
 	UseAvroLogicalTypes *bool `json:"useAvroLogicalTypes"`
+	// NativeGeographyExportEnabled writes a PARQUET extract's GEOGRAPHY
+	// columns in Parquet's own GEOGRAPHY logical type, not GeoParquet's.
+	NativeGeographyExportEnabled bool `json:"nativeGeographyExportEnabled"`
 }
 
 // csvExportTypes are the column types whose values the emulator writes to
@@ -256,10 +259,18 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		}
 	}
 	if parquetFormat {
-		if loc, typ := parquetUnwritten(meta.Schema.Fields, ""); loc != "" {
+		switch loc, typ := parquetUnwritten(meta.Schema.Fields, e.NativeGeographyExportEnabled, ""); {
+		case loc == "":
+		case typ == "GEOGRAPHY":
+			notImplemented(fmt.Sprintf("to PARQUET of a table with a GEOGRAPHY column (%s) without "+
+				"nativeGeographyExportEnabled. BigQuery then writes GeoParquet metadata, whose version, encoding and "+
+				"CRS its documentation does not give. With nativeGeographyExportEnabled, CloudBurrow writes the column "+
+				"in Parquet's own GEOGRAPHY logical type (edges spherical), as documented.", loc))
+			return
+		default:
 			notImplemented(fmt.Sprintf("to PARQUET of a table with a %s column (%s). CloudBurrow writes Parquet of "+
 				"the column types whose form BigQuery's documentation gives: INT64, FLOAT64, BOOL, STRING, JSON, BYTES, NUMERIC, "+
-				"BIGNUMERIC, DATE, DATETIME, TIMESTAMP, TIME, and RECORDs and REPEATED columns of them (docs/compatibility.md).", typ, loc))
+				"BIGNUMERIC, DATE, DATETIME, TIMESTAMP, TIME, GEOGRAPHY (with nativeGeographyExportEnabled), and RECORDs and REPEATED columns of them (docs/compatibility.md).", typ, loc))
 			return
 		}
 		if strings.Contains(string(got), `"precision"`) {
@@ -327,7 +338,7 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 		// #957: the emulator writes these differently from BigQuery.
 		// #1015: and it reads the table by its bare ID, which names the
 		// first table of that ID made in any dataset (qualify.go).
-		f.writeExtract(w, r, e, writtenExtract{json: jsonFormat, avro: avroFormat, avroCodec: avroCodec, avroLogical: logical, parquet: parquetFormat, parquetCodec: parquetCodec, gzip: gz, delimiter: delimiter, header: header,
+		f.writeExtract(w, r, e, writtenExtract{json: jsonFormat, avro: avroFormat, avroCodec: avroCodec, avroLogical: logical, parquet: parquetFormat, parquetCodec: parquetCodec, parquetNativeGeography: e.NativeGeographyExportEnabled, gzip: gz, delimiter: delimiter, header: header,
 			uris: sentURIs, fields: meta.Schema.Fields})
 		return
 	}

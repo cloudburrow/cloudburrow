@@ -25,6 +25,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
+	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -50,6 +51,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	schedStore := scheduler.NewStore(store.NewMemory())
 	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)
 	logging.NewServer(logging.NewStore(10)).Register(srv)
+	vertexai.NewServer(nil).RegisterGRPC(srv)
 	// No Knative: every Cloud Run handler validates its request before
 	// reaching the cluster, and an empty request never gets that far.
 	runSrv := runadapter.NewServer(nil, "coverage", time.Second)

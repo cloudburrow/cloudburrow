@@ -58,7 +58,7 @@ ALL=(
   RUN_STORAGE RUN_PUBSUB RUN_KMS RUN_SCHEDULER RUN_LOGGING RUN_BIGQUERY
   SPANNER DATASTORE FIRESTORE BIGTABLE MEMORYSTORE MYSQL MYSQL_PASSWORD CLOUDSQL
   BIGQUERY BIGQUERY_STORAGE BIGQUERY_PROJECT
-  LOCALAI GCLOUD TOFU
+  LOCALAI PREDICTION GCLOUD TOFU
 )
 
 only="" strict="" plain="" cli="" gcloud="" tofu=""
@@ -293,12 +293,15 @@ value() {
     BIGQUERY_PROJECT) from_env '.GOOGLE_CLOUD_PROJECT // empty' ;;
     # The local generation endpoint, only with --local-ai-model: neither env
     # nor the runtime file carries it, so the line `up` prints in its log.
-    LOCALAI)
+    # A detached instance's log stamps each line, hence the optional prefix.
+    # PREDICTION is the same endpoint, which Cloud Run alone also starts, for
+    # PredictionService on custom prediction containers (#1193).
+    LOCALAI|PREDICTION)
       need_runtime
       local log
       log=$(jq -r '.log // empty' <<< "$RUNTIME_JSON")
       [ -n "$log" ] || log=${INSTANCE_DIR:+$INSTANCE_DIR/up.log}
-      [ -z "$log" ] || [ ! -r "$log" ] || VALUE=$(sed -n 's|^local AI: *http://||p' "$log" | tail -n 1) ;;
+      [ -z "$log" ] || [ ! -r "$log" ] || VALUE=$(sed -n -E 's|^([0-9TZ:.-]+ )?local AI: *http://||p' "$log" | tail -n 1) ;;
     GCLOUD) VALUE=$gcloud ;;
     TOFU) VALUE=$tofu ;;
     *) echo "compat-env: internal error: no source for $1" >&2; exit 2 ;;
