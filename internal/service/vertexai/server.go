@@ -173,39 +173,41 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request, requested stri
 		_ = json.NewEncoder(w).Encode(resp)
 		return
 	}
-	model, err := s.resolveModel(requested)
+	model, chunks, errFn, err := s.startGeneration(r.Context(), requested, r.Body)
 	if err != nil {
 		apierror.WriteJSON(w, err)
-		return
-	}
-	req, err := decodeRequest(r.Body)
-	if err != nil {
-		apierror.WriteJSON(w, err)
-		return
-	}
-	chunks, errFn, err := s.gen.Generate(r.Context(), Request{Prompt: promptOf(req)})
-	if err != nil {
-		apierror.WriteJSON(w, apierror.Internal(err, "starting the local runtime failed"))
 		return
 	}
 	s.writeStream(w, r, model, chunks, errFn)
+}
+
+// startGeneration resolves the model, decodes and validates the JSON request
+// and starts the generator. It is the one entry point for the JSON routes and
+// the gRPC PredictionService, unary and streaming alike, so every transport
+// resolves, refuses and honours the same fields the same way.
+func (s *Server) startGeneration(ctx context.Context, requested string, body io.Reader) (string, <-chan Chunk, func() error, error) {
+	model, err := s.resolveModel(requested)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	req, err := decodeRequest(body)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	chunks, errFn, err := s.gen.Generate(ctx, Request{Prompt: promptOf(req)})
+	if err != nil {
+		return "", nil, nil, apierror.Internal(err, "starting the local runtime failed")
+	}
+	return model, chunks, errFn, nil
 }
 
 // generateUnary serves one generateContent, for the JSON route and the gRPC
 // PredictionService alike, so the two answer the same request the same way.
 // body is the JSON request; the stream is assembled into one response.
 func (s *Server) generateUnary(ctx context.Context, requested string, body io.Reader) (*GenerateContentResponse, error) {
-	model, err := s.resolveModel(requested)
+	model, chunks, errFn, err := s.startGeneration(ctx, requested, body)
 	if err != nil {
 		return nil, err
-	}
-	req, err := decodeRequest(body)
-	if err != nil {
-		return nil, err
-	}
-	chunks, errFn, err := s.gen.Generate(ctx, Request{Prompt: promptOf(req)})
-	if err != nil {
-		return nil, apierror.Internal(err, "starting the local runtime failed")
 	}
 	var text strings.Builder
 	finish := FinishReasonStop

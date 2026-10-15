@@ -13,9 +13,15 @@ The screen never talks to the model. Every generation is forwarded, unchanged, t
 
 ```
 POST /v1beta1/projects/console/locations/us-central1/publishers/google/models/{model}:streamGenerateContent?alt=sse
+POST /v1beta1/projects/console/locations/us-central1/publishers/google/models/{model}:generateContent
 ```
 
-— the path and body [the SDK sends](generation.md). The relay copies bytes back and does not
+— the path and body [the SDK sends](generation.md). **Stream**, beside Run and on by default,
+picks which: on, the answer is shown chunk by chunk as `streamGenerateContent` sends it; off, it
+is the one `generateContent` answer (#1257). The history names the method of each run. The
+same code serves both over gRPC, as `PredictionService.StreamGenerateContent` and
+`GenerateContent` on the same port, so the switch covers those methods too
+(`TestPlaygroundStreamSwitchPicksTheMethod`). The relay copies bytes back and does not
 parse candidates, so it cannot reshape what the API said or invent a response when the API
 failed. A console that reached the generator directly would be a second implementation, and
 the first thing a second implementation does is disagree with the first.

@@ -403,3 +403,46 @@ func TestPlaygroundRefusalsMatchTheAPI(t *testing.T) {
 		})
 	}
 }
+
+// The Stream switch picks the method (#1257): on, the relay streams
+// :streamGenerateContent as before; off, it sends the unary :generateContent
+// and relays the API's one JSON answer. Both against the real vertexai
+// routes, which serve the gRPC StreamGenerateContent and GenerateContent from
+// the same code.
+func TestPlaygroundStreamSwitchPicksTheMethod(t *testing.T) {
+	const model = "gemma-4-e2b-it-community"
+	api := httptest.NewServer(vertexai.NewServer(&vertexai.EchoGenerator{ID: model}).Handler())
+	defer api.Close()
+	srv := newPlaygroundServer(t, &Playground{
+		Addr: func() string { return strings.TrimPrefix(api.URL, "http://") }, Model: model,
+	})
+
+	resp, body := postJSON(t, srv, "/api/ai/playground", `{"prompt":"hello there","stream":true}`)
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("stream = %d %q: %s", resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	}
+	if n := strings.Count(body, "data: "); n != 3 {
+		t.Errorf("stream carried %d events, want one per word and a final one: %s", n, body)
+	}
+
+	resp, body = postJSON(t, srv, "/api/ai/playground", `{"prompt":"hello there","stream":false}`)
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+		t.Fatalf("unary = %d %q: %s", resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	}
+	var got struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct{ Text string } `json:"parts"`
+			} `json:"content"`
+			FinishReason string `json:"finishReason"`
+		} `json:"candidates"`
+		ModelVersion string `json:"modelVersion"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
+		t.Fatalf("unary answer is not a GenerateContentResponse: %v: %s", err, body)
+	}
+	if len(got.Candidates) != 1 || got.Candidates[0].Content.Parts[0].Text != "HELLO THERE" ||
+		got.Candidates[0].FinishReason != "STOP" || got.ModelVersion != model {
+		t.Errorf("unary answer = %s", body)
+	}
+}

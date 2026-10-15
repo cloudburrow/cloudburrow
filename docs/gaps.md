@@ -22,8 +22,8 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 |---|---|---|---|---|---|
 | Cloud Storage | 11 | 5 | 5 | 1 | 0 |
 | Pub/Sub | 4 | 1 | 2 | 1 | 0 |
-| Cloud Tasks | 4 | 3 | 1 | 0 | 0 |
-| Cloud Run | 12 | 9 | 1 | 0 | 2 |
+| Cloud Tasks | 5 | 4 | 1 | 0 | 0 |
+| Cloud Run | 13 | 10 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 2 | 2 | 0 | 0 | 0 |
 | Cloud KMS | 7 | 1 | 3 | 2 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **89** | **45** | **32** | **7** | **5** |
+| **Total** | **91** | **47** | **32** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -46,7 +46,7 @@ Already tracked: none open. ACLs and object IAM are excluded (below).
 | `objects.bulkRestore`: restoring soft-deleted objects in bulk (a long-running bucket operation) is 501 | not built yet | M |
 | `buckets.operations.list` with a `filter` is 501 | not built yet | S |
 | `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) | not built yet | M |
-| XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |
+| XML API: bucket `PUT`, service `GET` and form `POST` are 501 | not built yet | M |
 | gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |
@@ -69,22 +69,24 @@ Already tracked: #982 (Google's message for an invalid label is not measured).
 ## Cloud Tasks
 
 Already tracked: #1215 (`RunTask`, `BatchCreateTasks`, `BatchDeleteTasks`, CMEK config). Queue IAM
-conditions are excluded (below). Closed: `ListQueues` filters on any Queue field (#1255).
+conditions are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
+| `ListQueues` with a `filter` other than on `state` is `UNIMPLEMENTED` (a `state` filter is honoured since #1222) | not built yet | S |
 | `oidcToken` / `oauthToken` on an HTTP task are refused `UNIMPLEMENTED` (#1243, with Cloud Scheduler's) | not built yet | M |
-| `stackdriver_logging_config` is refused: no dispatch is written to Cloud Logging (#1256) | not built yet | M |
+| `stackdriver_logging_config` is refused: no dispatch is written to Cloud Logging | not built yet | M |
 | A queue-level `http_target` on `UpdateQueue` is refused | not built yet | M |
 | App Engine targets and `app_engine_routing_override` | no emulator support (no App Engine) | L |
 
 ## Cloud Run
 
-Already tracked: #1216 (IAM policy methods on Services and Jobs). Closed: `UpdateService` with a partial `update_mask` (#1260).
+Already tracked: #1216 (IAM policy methods on Services and Jobs).
 
 | Gap | Why open | Size |
 |---|---|---|
 | `Operations.ListOperations` with a `filter` is `UNIMPLEMENTED` (listing and `WaitOperation` are served since #1229) | not built yet | S |
+| `UpdateService` with a partial `update_mask` is `UNIMPLEMENTED` | not built yet | S |
 | Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity | not built yet | L |
 | Logs are not served through the Cloud Run API | not built yet | M |
 | `Builds.SubmitBuild` is not served | not built yet | M |
@@ -139,7 +141,7 @@ IAM conditions are excluded (below).
 |---|---|---|
 | `Secret.expire_time` / `ttl` are refused `UNIMPLEMENTED` (#1225) | not built yet | S |
 | `ListSecrets`, `ListSecretVersions` with a `filter` are `UNIMPLEMENTED` (#1228) | not built yet | M |
-| `Secret.topics`: event notifications to Pub/Sub are refused (#1259) | not built yet | M |
+| `Secret.topics`: event notifications to Pub/Sub are refused | not built yet | M |
 | `customer_managed_encryption` on a replica or the automatic policy | no emulator support (needs KMS-backed CMEK) | M |
 | Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) | needs live GCP | S |
 
@@ -154,12 +156,11 @@ Already tracked: #1216 (IAM policy methods, `MoveProject`, `UndeleteProject`).
 
 ## Vertex AI
 
-Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244).
+Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244); `PredictionService.StreamGenerateContent` over gRPC, and an official-SDK test of `GenerateContent` over gRPC (#1257).
 
 | Gap | Why open | Size |
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
-| `PredictionService.StreamGenerateContent` over gRPC is `UNIMPLEMENTED`; `GenerateContent` over gRPC is served with no official-SDK test (#1257) | not built yet | M |
 | Streaming predict (`StreamRawPredict`, `StreamingPredict`, `ServerStreamingPredict`, `StreamingRawPredict`, `StreamDirect*`) and `DirectPredict`, `DirectRawPredict` | not built yet | M |
 | `RawPredict` on a publisher model | not built yet | S |
 | `Explain` | no emulator support | L |
@@ -167,14 +168,15 @@ Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1
 ## BigQuery
 
 Already tracked: #1217 (procedures, script transactions, RANGE variables), #1218 (row access
-policies, table and routine IAM), #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs,
-snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501). Since then #1111 is built: a RANGE in a STRUCT parameter is sent built as `RANGE(start, end)`, and a schema update with a new column or field before the table's is refused 412 "Precondition Failed", as BigQuery refuses it.
+policies, table and routine IAM), #1201 (scripting blocks), #1111 (a new column before the
+table's, RANGE in a STRUCT parameter), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs,
+snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). Closed by this sweep: `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239; inside a script it stays 501), a lone `CREATE VIEW` with a column list (#1240), and a `STRUCT` query parameter with a `BYTES` field (#1241: already built by #1082 and verified by `TestBigQueryBytesParameters`; a stale `compatibility.md` row still said 501).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `ALTER TABLE` `RENAME TO`, `RENAME COLUMN`, `DROP COLUMN`, `SET DATA TYPE`, defaults and constraints are 501 (`ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN … SET OPTIONS` are carried out, #1227) | not built yet | M |
+| `ALTER TABLE` (`ADD COLUMN`, `SET OPTIONS`, `RENAME TO`, …) is 501, though `tables.patch` already does the same changes (#1227) | not built yet | M |
 | A view's column list inside a multi-statement script, and a column's `OPTIONS` in the list (a lone `CREATE VIEW v (c, d) AS …` is carried out, #1240) | not built yet | S |
-| `CREATE TABLE`/`VIEW` and `ALTER VIEW` `OPTIONS` in a multi-statement script (the emulator drops them; a lone `CREATE TABLE`/`VIEW` or `ALTER VIEW … SET OPTIONS` sets `description`, `friendly_name`, `labels` and `expiration_timestamp`, #1251), and other table options (`partition_expiration_days`, `require_partition_filter`, `kms_key_name`, `max_staleness`, …: 501) | not built yet | M |
+| `CREATE VIEW … OPTIONS(description = …)` keeps no description (the emulator drops it, #1251) | not built yet | S |
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name needs renaming | not built yet | S |

@@ -1853,9 +1853,8 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Implemented": 1,
-      "Unimplemented": 10,
-      "Verified": 3
+      "Unimplemented": 9,
+      "Verified": 5
     },
     "rows": [
       {
@@ -1882,8 +1881,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/GenerateContent",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationgrpc_test.go:28 TestStreamGenerateContentThroughThePredictionClient"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/Predict",
@@ -1916,8 +1917,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamGenerateContent",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/generationgrpc_test.go:28 TestStreamGenerateContentThroughThePredictionClient"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamRawPredict",

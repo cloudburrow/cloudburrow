@@ -166,7 +166,14 @@ func (s *Server) handlePlayground(w http.ResponseWriter, r *http.Request) {
 // playgroundRequest is what the screen sends.
 type playgroundRequest struct {
 	Prompt string `json:"prompt"`
+	// Stream picks the method: true (the default, when absent) relays
+	// :streamGenerateContent, as StreamGenerateContent streams it, and false
+	// relays the unary :generateContent, as GenerateContent answers (#1257).
+	Stream *bool `json:"stream,omitempty"`
 }
+
+// maxRelayBytes bounds a relayed unary answer or refusal.
+const maxRelayBytes = 1 << 20
 
 // handlePlaygroundGenerate relays a generation to the real API and streams the
 // result back as server-sent events.
@@ -206,9 +213,13 @@ func (s *Server) handlePlaygroundGenerate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	stream := body.Stream == nil || *body.Stream
+	target := p.generatePath("streamGenerateContent") + "?alt=sse"
+	if !stream {
+		target = p.generatePath("generateContent")
+	}
 	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
-		"http://"+p.endpoint()+p.generatePath("streamGenerateContent")+"?alt=sse",
-		strings.NewReader(string(payload)))
+		"http://"+p.endpoint()+target, strings.NewReader(string(payload)))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -224,11 +235,12 @@ func (s *Server) handlePlaygroundGenerate(w http.ResponseWriter, r *http.Request
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK || !stream {
+		// The unary answer, and any refusal, is relayed as the API wrote it.
 		// The API's own message reaches the screen, unchanged. A generic
 		// failure here would hide the one useful thing — which field was
 		// refused, or which model is actually served.
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, maxRelayBytes))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)
 		_, _ = w.Write(msg)
