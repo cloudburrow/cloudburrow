@@ -31,18 +31,39 @@ func TestParseAlter(t *testing.T) {
 		t.Errorf("actions = %+v", st.actions)
 	}
 	for sql, want := range map[string]string{
-		"ALTER TABLE ds.t RENAME TO u":                               "RENAME TO",
-		"ALTER TABLE ds.t RENAME COLUMN a TO b":                      "RENAME COLUMN",
-		"ALTER TABLE ds.t ADD COLUMN a INT64, DROP COLUMN b":         "DROP COLUMN",
-		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE NUMERIC":      "SET DATA TYPE",
-		"ALTER TABLE ds.t ALTER COLUMN a SET DEFAULT 1":              "DEFAULT",
-		"ALTER TABLE ds.t SET OPTIONS (partition_expiration_days=1)": "partition_expiration_days",
-		"ALTER TABLE ds.t ADD COLUMN a INT64 DEFAULT 1":              "after the column's type",
-		"ALTER TABLE ds.t ADD PRIMARY KEY (a) NOT ENFORCED":          "constraint",
+		"ALTER TABLE ds.t RENAME TO u, SET OPTIONS (description = 'x')": "RENAME TO with other actions",
+		"ALTER TABLE ds.t RENAME TO other.u":                            "RENAME TO a name with a dataset",
+		"ALTER TABLE ds.t ADD COLUMN a INT64, DROP COLUMN b":            "DROP COLUMN with ADD COLUMN",
+		"ALTER TABLE ds.t DROP COLUMN s.x":                              "nested field",
+		"ALTER TABLE ds.t RENAME COLUMN s.x TO y":                       "nested field",
+		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE NUMERIC":         "SET DATA TYPE",
+		"ALTER TABLE ds.t ALTER COLUMN a SET DEFAULT 1":                 "DEFAULT",
+		"ALTER TABLE ds.t SET OPTIONS (partition_expiration_days=1)":    "partition_expiration_days",
+		"ALTER TABLE ds.t ADD COLUMN a INT64 DEFAULT 1":                 "after the column's type",
+		"ALTER TABLE ds.t ADD PRIMARY KEY (a) NOT ENFORCED":             "constraint",
 	} {
 		toks, _ := lex(sql)
 		if got := alterUnsupported(toks); !strings.Contains(got, want) {
 			t.Errorf("%s: %q, want %q", sql, got, want)
+		}
+	}
+	// RENAME TO, RENAME COLUMN and DROP COLUMN are carried out (#1322).
+	toks, _ = lex("ALTER TABLE ds.t RENAME COLUMN IF EXISTS a TO b, DROP COLUMN IF EXISTS c, DROP COLUMN `d`")
+	st, unsupported, msg = parseAlter(toks)
+	if unsupported != "" || msg != "" || len(st.actions) != 3 || st.actions[0].kind != "rename column" ||
+		!st.actions[0].ifExists || st.actions[0].column != "a" || st.actions[0].newName != "b" ||
+		st.actions[1].kind != "drop column" || !st.actions[1].ifExists || st.actions[2].column != "d" {
+		t.Errorf("parseAlter = %+v %q %q", st, unsupported, msg)
+	}
+	toks, _ = lex("ALTER TABLE ds.t RENAME TO u")
+	if st, unsupported, msg = parseAlter(toks); unsupported != "" || msg != "" || st.actions[0].kind != "rename table" ||
+		st.actions[0].newName != "u" {
+		t.Errorf("parseAlter = %+v %q %q", st, unsupported, msg)
+	}
+	for _, sql := range []string{"ALTER TABLE ds.t RENAME TO", "ALTER TABLE ds.t RENAME COLUMN a b", "ALTER TABLE ds.t DROP COLUMN a b"} {
+		toks, _ := lex(sql)
+		if _, _, msg := parseAlter(toks); !strings.HasPrefix(msg, "Syntax error") {
+			t.Errorf("%s: %q, want a syntax error", sql, msg)
 		}
 	}
 	for _, sql := range []string{"ALTER TABLE ds.t ADD COLUMN a INT64", "SELECT 1; ALTER TABLE ds.t SET OPTIONS (description = 'x')"} {
