@@ -82,7 +82,7 @@ func TestBigQueryAlterTableNamesAndNotImplemented(t *testing.T) {
 			"ALTER TABLE " + ref + " RENAME TO `t!`":                                     http.StatusBadRequest,
 			"ALTER TABLE " + ref + " RENAME COLUMN a TO `c!`":                            http.StatusBadRequest,
 			"ALTER TABLE " + ref + " RENAME TO renamed, SET OPTIONS (description = 'x')": http.StatusNotImplemented,
-			"ALTER TABLE " + ref + " ALTER COLUMN a SET DEFAULT 1":                       http.StatusNotImplemented,
+			"ALTER TABLE " + ref + " ALTER COLUMN a.x SET DEFAULT 1":                     http.StatusNotImplemented,
 			"ALTER TABLE " + ref + " ADD COLUMN b STRING, RENAME COLUMN a TO c":          http.StatusNotImplemented,
 			"ALTER TABLE " + ref + " SET OPTIONS (max_staleness = INTERVAL 1 HOUR)":      http.StatusNotImplemented,
 		} {

@@ -1,0 +1,317 @@
+CloudBurrow patch 14 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1340). Needs googlesqlite patch 0027.
+
+The bug: a table made by tables.insert with a column's
+defaultValueExpression kept the expression in its metadata, but the
+engine's table was made without a DEFAULT (contentdata's CreateTable), so
+`INSERT INTO t (id) VALUES (1)` read the column back NULL; and
+tabledata.insertAll, the Storage Write API and loads (AddTableData) gave
+every column of every row, NULL for one a row left out, so no default was
+ever applied. A table made by CREATE TABLE ... DEFAULT had its default in
+the engine, but tables.get had no defaultValueExpression for the column
+(addTableMetadata). Measured through CloudBurrow's front, 2026-10-15.
+
+BigQuery keeps the expression in the schema and applies it to an insert
+that leaves the column out; "NULL values in the loaded data are not
+converted to default values" (https://cloud.google.com/bigquery/docs/default-values).
+The patch makes a top-level column's defaultValueExpression its DEFAULT
+in the engine; leaves a column with a default out of the INSERT of a row
+that does not give it (a NULL given stays NULL), consecutive rows that
+give the same columns by one statement, in their order; and gives a
+CREATE TABLE column its DEFAULT's text as its defaultValueExpression.
+server/column_defaults_test.go fails without the patch and passes with
+it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -117,7 +117,14 @@
+ 		if err := validateIdent("column", field.Name); err != nil {
+ 			return err
+ 		}
+-		fields = append(fields, fmt.Sprintf("`%s` %s", escapeIdent(field.Name), r.encodeSchemaField(field)))
++		def := fmt.Sprintf("`%s` %s", escapeIdent(field.Name), r.encodeSchemaField(field))
++		if field.DefaultValueExpression != "" {
++			// CloudBurrow patch (cloudburrow/cloudburrow#1340): the
++			// column's defaultValueExpression is its DEFAULT in the
++			// engine, which applies it to an INSERT that leaves it out.
++			def += " DEFAULT " + field.DefaultValueExpression
++		}
++		fields = append(fields, def)
+ 	}
+ 	tablePath, err := r.tablePath(ref.ProjectId, ref.DatasetId, ref.TableId)
+ 	if err != nil {
+@@ -588,11 +595,73 @@
+ 		_ = tx.MetadataRepoMode()
+ 	}()
+ 
+-	var columns []*types.Column
++	var allColumns []*types.Column
+ 	for _, col := range table.Columns {
+-		columns = append(columns, col)
++		allColumns = append(allColumns, col)
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1340): a column with a
++	// default that a row does not give (tabledata.insertAll, the Storage
++	// Write API, a load whose data has fewer columns) is left out of that
++	// row's INSERT, so the engine writes its default; a NULL given stays
++	// NULL. Rows are inserted by one statement per set of columns given.
++	hasDefault := false
++	for _, col := range allColumns {
++		if col.DefaultValueExpression != "" {
++			hasDefault = true
++		}
+ 	}
++	if !hasDefault {
++		return r.addTableRows(ctx, tx, projectID, datasetID, table.ID, allColumns, table.Data)
++	}
++	// Consecutive rows that give the same columns go in by one
++	// statement, in their order.
++	var runKey string
++	var runColumns []*types.Column
++	var run types.Data
++	flush := func() error {
++		if len(run) == 0 {
++			return nil
++		}
++		err := r.addTableRows(ctx, tx, projectID, datasetID, table.ID, runColumns, run)
++		run = nil
++		return err
++	}
++	for _, data := range table.Data {
++		var key strings.Builder
++		var cols []*types.Column
++		for i, col := range allColumns {
++			if _, found := data[col.Name]; !found && col.DefaultValueExpression != "" {
++				continue
++			}
++			fmt.Fprintf(&key, "%d,", i)
++			cols = append(cols, col)
++		}
++		if key.String() != runKey || len(cols) == 0 {
++			if err := flush(); err != nil {
++				return err
++			}
++			runKey, runColumns = key.String(), cols
++		}
++		if len(cols) == 0 {
++			// A row that gives no column, of a table whose every column
++			// has a default.
++			tablePath, err := r.tablePath(projectID, datasetID, table.ID)
++			if err != nil {
++				return err
++			}
++			if _, err := tx.Tx().ExecContext(ctx, fmt.Sprintf("INSERT `%s` (`%s`) VALUES (DEFAULT)",
++				tablePath, escapeIdent(allColumns[0].Name))); err != nil {
++				return err
++			}
++			continue
++		}
++		run = append(run, data)
++	}
++	return flush()
++}
+ 
++// addTableRows inserts rows, giving each of columns (AddTableData).
++func (r *Repository) addTableRows(ctx context.Context, tx *connection.Tx, projectID, datasetID, tableID string, columns []*types.Column, rows types.Data) error {
+ 	placeholders := make([]string, 0, len(columns))
+ 	columnsWithEscape := make([]string, 0, len(columns))
+ 	for _, col := range columns {
+@@ -610,7 +679,7 @@
+ 		columnsWithEscape = append(columnsWithEscape, fmt.Sprintf("`%s`", escapeIdent(col.Name)))
+ 	}
+ 
+-	tablePath, err := r.tablePath(projectID, datasetID, table.ID)
++	tablePath, err := r.tablePath(projectID, datasetID, tableID)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -626,8 +695,8 @@
+ 		return err
+ 	}
+ 
+-	for _, data := range table.Data {
+-		values := make([]interface{}, 0, len(table.Columns))
++	for _, data := range rows {
++		values := make([]interface{}, 0, len(columns))
+ 
+ 		for _, column := range columns {
+ 			value, found := data[column.Name]
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1859,7 +1859,11 @@
+ 	}
+ 	fields := make([]*bigqueryv2.TableFieldSchema, 0, len(spec.Columns))
+ 	for _, column := range spec.Columns {
+-		fields = append(fields, types.TableFieldSchemaFromColumnType(column.Name, column.Type))
++		field := types.TableFieldSchemaFromColumnType(column.Name, column.Type)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1340): a CREATE
++		// TABLE column's DEFAULT reads back as its defaultValueExpression.
++		field.DefaultValueExpression = column.DefaultSQL
++		fields = append(fields, field)
+ 	}
+ 	conn, err := server.connMgr.Connection(ctx, projectID, datasetID)
+ 	if err != nil {
+--- a/server/storage_handler.go
++++ b/server/storage_handler.go
+@@ -588,6 +588,16 @@
+ 		ret[f.TextName()] = v
+ 		return true
+ 	})
++	// CloudBurrow patch (cloudburrow/cloudburrow#1340): a field the
++	// write stream's schema has that a row leaves unset is NULL, as
++	// BigQuery writes it; only a column the schema lacks gets its
++	// default (AddTableData).
++	fields := msg.Descriptor().Fields()
++	for i := 0; i < fields.Len(); i++ {
++		if _, ok := ret[fields.Get(i).TextName()]; !ok {
++			ret[fields.Get(i).TextName()] = nil
++		}
++	}
+ 	return ret, decodeErr
+ }
+ 
+--- a/types/types.go
++++ b/types/types.go
+@@ -91,6 +91,12 @@
+ 	Type   Type      `yaml:"type" validate:"type"`
+ 	Mode   Mode      `yaml:"mode" validate:"mode"`
+ 	Fields []*Column `yaml:"fields"`
++	// DefaultValueExpression is the column's default (a top-level
++	// column's TableFieldSchema.defaultValueExpression): AddTableData
++	// leaves a column with one out of a row that does not give it, so
++	// the engine writes the default. CloudBurrow patch
++	// (cloudburrow/cloudburrow#1340).
++	DefaultValueExpression string `yaml:"-"`
+ }
+ 
+ func (c *Column) FormatType() string {
+@@ -550,10 +556,11 @@
+ 		fields = append(fields, NewColumnWithSchema(field))
+ 	}
+ 	return &Column{
+-		Name:   s.Name,
+-		Type:   Type(s.Type),
+-		Mode:   Mode(s.Mode),
+-		Fields: fields,
++		Name:                   s.Name,
++		Type:                   Type(s.Type),
++		Mode:                   Mode(s.Mode),
++		Fields:                 fields,
++		DefaultValueExpression: s.DefaultValueExpression,
+ 	}
+ }
+ 
+--- /dev/null
++++ b/server/column_defaults_test.go
+@@ -0,0 +1,105 @@
++package server_test
++
++import (
++	"context"
++	"fmt"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/iterator"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestColumnDefaults is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1340): a column made by tables.insert with a
++// defaultValueExpression read back NULL from an INSERT that left it out,
++// and tabledata.insertAll never applied a default; a CREATE TABLE
++// column's DEFAULT was applied by the engine but tables.get had no
++// defaultValueExpression for it.
++func TestColumnDefaults(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test", types.NewDataset("ds")))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	ds := client.Dataset("ds")
++	run := func(q string) {
++		t.Helper()
++		job, err := client.Query(q).Run(ctx)
++		if err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		if status, err := job.Wait(ctx); err != nil || status.Err() != nil {
++			t.Fatalf("%s: %v, %v", q, err, status.Err())
++		}
++	}
++	read := func(table string) []string {
++		t.Helper()
++		it, err := client.Query("SELECT id, s FROM ds." + table + " ORDER BY id").Read(ctx)
++		if err != nil {
++			t.Fatal(err)
++		}
++		var out []string
++		for {
++			var row []bigquery.Value
++			if err := it.Next(&row); err == iterator.Done {
++				break
++			} else if err != nil {
++				t.Fatal(err)
++			}
++			out = append(out, fmt.Sprint(row))
++		}
++		return out
++	}
++
++	api := ds.Table("api")
++	if err := api.Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{
++		{Name: "id", Type: bigquery.IntegerFieldType},
++		{Name: "s", Type: bigquery.StringFieldType, DefaultValueExpression: "'dflt'"},
++	}}); err != nil {
++		t.Fatal(err)
++	}
++	run("INSERT INTO ds.api (id) VALUES (1)")
++	if err := api.Inserter().Put(ctx, []*bigquery.ValuesSaver{
++		{Schema: bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType}}, Row: []bigquery.Value{2}},
++		{Schema: bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType}, {Name: "s", Type: bigquery.StringFieldType}},
++			Row: []bigquery.Value{3, nil}},
++		{Schema: bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType}}, Row: []bigquery.Value{4}},
++	}); err != nil {
++		t.Fatal(err)
++	}
++	if got, want := fmt.Sprint(read("api")), "[[1 dflt] [2 dflt] [3 <nil>] [4 dflt]]"; got != want {
++		t.Errorf("tables.insert table: rows %s, want %s", got, want)
++	}
++
++	run("CREATE TABLE ds.ddl (id INT64, s STRING DEFAULT 'x')")
++	md, err := ds.Table("ddl").Metadata(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(md.Schema) != 2 || md.Schema[1].DefaultValueExpression != "'x'" || md.Schema[0].DefaultValueExpression != "" {
++		t.Errorf("CREATE TABLE schema defaults: %+v %+v, want s's 'x'", md.Schema[0], md.Schema[1])
++	}
++	run("INSERT INTO ds.ddl (id) VALUES (1)")
++	if got, want := fmt.Sprint(read("ddl")), "[[1 x]]"; got != want {
++		t.Errorf("CREATE TABLE table: rows %s, want %s", got, want)
++	}
++}

@@ -42,8 +42,16 @@ import (
 // DATA TYPE (#1334) make the table again (alterremake.go); ADD PRIMARY KEY,
 // ADD [CONSTRAINT] FOREIGN KEY, DROP PRIMARY KEY and DROP CONSTRAINT
 // (#1334) change its tableConstraints through the tables.patch path
-// (alterkeys.go), with the actions above in one statement. SET DEFAULT and
-// DROP DEFAULT, a nested field, a remaking action with one that is not,
+// (alterkeys.go), with the actions above in one statement. ALTER COLUMN
+// SET DEFAULT and DROP DEFAULT (#1340) change the column's
+// defaultValueExpression through the tables.patch path, which makes the
+// engine's table again with the new DEFAULT (columndefaults.go); "Setting
+// the default value for a column only affects future inserts to the
+// table. It does not change any existing table data", and SET DEFAULT
+// NULL is DROP DEFAULT. ADD COLUMN ... DEFAULT is refused, 400, as
+// BigQuery refuses it: "You cannot add a new column with a default value
+// to an existing table" (https://cloud.google.com/bigquery/docs/default-values).
+// A nested field, a remaking action with one that is not,
 // and the table options that change how the table behaves, stay 501
 // before anything of the statement is changed (alterUnsupported).
 //
@@ -60,7 +68,7 @@ type alterStmt struct {
 
 // alterAction is one action of an ALTER TABLE.
 type alterAction struct {
-	kind        string // "add", "options", "column options", "drop not null", "rename table", "rename column", "drop column", "set type", "add primary key", "add foreign key", "drop primary key", "drop constraint"
+	kind        string // "add", "options", "column options", "drop not null", "set default", "drop default", "rename table", "rename column", "drop column", "set type", "add primary key", "add foreign key", "drop primary key", "drop constraint"
 	ifExists    bool   // ADD COLUMN IF NOT EXISTS, ALTER COLUMN IF EXISTS, ADD CONSTRAINT IF NOT EXISTS, DROP ... IF EXISTS
 	column      string
 	newName     string         // RENAME TO's table, RENAME COLUMN's new name, a constraint's name
@@ -96,7 +104,8 @@ func alterNotImplemented(what string) string {
 	return "Not implemented here: ALTER TABLE " + what + ". BigQuery runs it, but the emulator behind CloudBurrow " +
 		"reports ALTER TABLE done and leaves the table unchanged (measured), and CloudBurrow carries out only ADD COLUMN, " +
 		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp), ALTER COLUMN SET OPTIONS (description), " +
-		"ALTER COLUMN DROP NOT NULL, ALTER COLUMN SET DATA TYPE, RENAME TO, RENAME COLUMN, DROP COLUMN and primary and foreign keys, " +
+		"ALTER COLUMN DROP NOT NULL, ALTER COLUMN SET DATA TYPE, ALTER COLUMN SET DEFAULT and DROP DEFAULT, RENAME TO, RENAME COLUMN, " +
+		"DROP COLUMN and primary and foreign keys, " +
 		"so nothing of the statement was run."
 }
 
@@ -137,6 +146,9 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 			if len(rest) > 1 && rest[0].is("NOT") && rest[1].is("NULL") {
 				f["mode"] = "REQUIRED"
 				rest = rest[2:]
+			}
+			if len(rest) > 0 && rest[0].is("DEFAULT") {
+				return st, "", addDefaultRefused(act.column)
 			}
 			if len(rest) > 0 {
 				opts, ok := readOptions(rest)
@@ -205,9 +217,18 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 					return st, "ALTER COLUMN SET DATA TYPE to a STRUCT or an ARRAY", ""
 				}
 				act.kind, act.field = "set type", f
-			case len(rest) > 1 && (rest[0].is("SET") || rest[0].is("DROP")) && rest[1].is("DEFAULT"):
-				return st, "ALTER COLUMN " + strings.ToUpper(rest[0].text) + " DEFAULT: the emulator applies a column's default " +
-					"only from the CREATE TABLE that made the engine's table, never from the table's defaultValueExpression (measured)", ""
+			case len(rest) == 2 && rest[0].is("DROP") && rest[1].is("DEFAULT"):
+				act.kind = "drop default"
+			case len(rest) > 1 && rest[0].is("DROP") && rest[1].is("DEFAULT"):
+				return st, "", fmt.Sprintf("Syntax error: unexpected %q after DROP DEFAULT", rest[2].text)
+			case len(rest) == 2 && rest[0].is("SET") && rest[1].is("DEFAULT"):
+				return st, "", "Syntax error: SET DEFAULT without an expression"
+			case len(rest) > 2 && rest[0].is("SET") && rest[1].is("DEFAULT"):
+				act.kind = "set default"
+				if len(rest) == 3 && rest[2].is("NULL") {
+					act.kind = "drop default"
+				}
+				act.options = []alterOption{{name: "default", val: rest[2:]}}
 			default:
 				return st, "ALTER COLUMN as written", ""
 			}
@@ -551,6 +572,23 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 				}
 			}
 			fields = append(fields, a.field)
+			schemaChanged = true
+		case "set default", "drop default": // #1340, columndefaults.go
+			f := find(a.column)
+			if f == nil {
+				if a.ifExists {
+					continue
+				}
+				return failWith(http.StatusBadRequest, "invalidQuery", "Column not found: "+a.column+" in table "+name, text)
+			}
+			if a.kind == "drop default" {
+				if _, ok := f["defaultValueExpression"]; ok {
+					delete(f, "defaultValueExpression")
+					schemaChanged = true
+				}
+				continue
+			}
+			f["defaultValueExpression"] = exprText(text, a.options[0].val)
 			schemaChanged = true
 		case "drop not null", "column options":
 			f := find(a.column)

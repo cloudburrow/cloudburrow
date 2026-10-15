@@ -31,7 +31,7 @@ import (
 // the emulator's reason and #1027, and they change no row (a DML statement of
 // its own is TestConsoleBigQueryReadWriteEditorRunsDML); a lone SELECT is sent back to
 // Read-only; ALTER TABLE ADD COLUMN and SET OPTIONS run (#1227), RENAME
-// COLUMN and DROP COLUMN too (#1322), and ALTER COLUMN SET DEFAULT is
+// COLUMN and DROP COLUMN too (#1322), and ALTER COLUMN of a nested field is
 // refused in the API's own words (the front's 501),
 // without the client library's envelope. Read-only mode still refuses a DDL
 // statement and says where it runs.
@@ -178,8 +178,8 @@ func TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts(t *testing.T) {
 	if n := countRows(t, h, orders); n != 4 {
 		t.Errorf("after DROP COLUMN the table has %d rows, want 4", n)
 	}
-	refused("read-write", "ALTER TABLE orders ALTER COLUMN id SET DEFAULT 1",
-		"Not implemented here: ALTER TABLE ALTER COLUMN SET DEFAULT")
+	refused("read-write", "ALTER TABLE orders ALTER COLUMN id.x SET DEFAULT 1",
+		"Not implemented here: ALTER TABLE ALTER COLUMN of a nested field")
 	refused("", "CREATE TABLE never AS SELECT 1 AS a", "Switch it to Read-write")
 	if _, err := ds.Table("never").Metadata(ctx); !isNotFound(err) {
 		t.Errorf("a CREATE refused in Read-only made the table: %v", err)

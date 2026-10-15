@@ -47,8 +47,10 @@ import (
 // names the client's destination (jobText). 501: `$__NULL__` and
 // `$__UNPARTITIONED__` as a destination, WRITE_TRUNCATE_DATA, a query that
 // is not one SELECT, a destination of another project or that does not
-// exist, and an ingestion-time partitioned table (partitionFilter). Load
-// and copy jobs into a partition stay 501 (decoratedDestination).
+// exist. Into a partition of an ingestion-time partitioned table, the
+// rows are not checked: they are written with the partition's
+// _PARTITIONTIME (and _PARTITIONDATE), as a load or a copy into one
+// writes them (ingestionColumns, #1277).
 
 // partitionRows answers tabledata.list of partition dec of base, whose
 // rows hold filter.
@@ -277,7 +279,7 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 		e.Reason, e.Message = "notImplemented", "Not implemented here: a query job whose destination is the partition "+
 			dest.DatasetID+"."+dest.TableID+", whose result's columns are not the table's. The table was not changed."
 	}
-	if e.Message == "" {
+	if e.Message == "" && !m.ingestion() {
 		if n, why := f.scalar(r, "SELECT COUNT(*) FROM "+sp+" WHERE NOT COALESCE("+filter+", FALSE)"); why != "" {
 			e.Message = "CloudBurrow could not read the query's result: " + why
 		} else if n > 0 {
@@ -298,7 +300,8 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 			cols[i] = quoteName(fl.Name)
 		}
 		list := strings.Join(cols, ", ")
-		sql := "INSERT INTO " + bp + " (" + list + ") SELECT " + list + " FROM " + sp
+		pcols, pvals := ingestionColumns(m, dec) // the partition's time (#1277)
+		sql := "INSERT INTO " + bp + " (" + list + pcols + ") SELECT " + list + pvals + " FROM " + sp
 		if write == "WRITE_TRUNCATE" {
 			sql = "DELETE FROM " + bp + " WHERE " + filter + ";\n" + sql
 		}
@@ -411,9 +414,25 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 		cols[i] = quoteName(fl.Name)
 	}
 	list := strings.Join(cols, ", ")
+	// Into an ingestion-time partitioned table: the rows of a partition
+	// get its time; without a decorator, rows of ingestion-time
+	// partitioned tables keep theirs (truncated to the destination's
+	// unit), others get the copy's (#1277).
+	pcols, pvals := ingestionColumns(dest.meta, dest.dec)
+	keep := dest.dec == "" && pcols != ""
+	for _, s := range sources {
+		keep = keep && s.meta.ingestion()
+	}
+	srcExtra := ""
+	switch {
+	case keep:
+		srcExtra, pvals = ", _PARTITIONTIME AS _cb_pt", strings.ReplaceAll(pvals, "_PARTITIONTIME", "_cb_pt")
+	case dest.dec == "":
+		pcols, pvals = "", ""
+	}
 	selects := make([]string, len(sources))
 	for i, s := range sources {
-		selects[i] = "SELECT " + list + " FROM " + quotePath([]string{project, s.base.DatasetID, s.base.TableID}) +
+		selects[i] = "SELECT " + list + srcExtra + " FROM " + quotePath([]string{project, s.base.DatasetID, s.base.TableID}) +
 			" WHERE " + s.where
 	}
 	rows := "(" + strings.Join(selects, " UNION ALL ") + ")"
@@ -421,7 +440,7 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 	if msg != "" {
 		return fail("backendError", "CloudBurrow could not read the source: "+msg)
 	}
-	if dest.dec != "" {
+	if dest.dec != "" && !dest.meta.ingestion() {
 		if bad, msg := f.scalar(r, "SELECT COUNT(*) FROM "+rows+" WHERE NOT COALESCE("+dest.where+", FALSE)"); msg != "" {
 			return fail("backendError", "CloudBurrow could not read the source: "+msg)
 		} else if bad > 0 {
@@ -437,7 +456,7 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 			return fail("duplicate", "Already Exists: Table "+tableName(project, dest.ref))
 		}
 	}
-	sql := "INSERT INTO " + bp + " (" + list + ") SELECT " + list + " FROM " + rows
+	sql := "INSERT INTO " + bp + " (" + list + pcols + ") SELECT " + list + pvals + " FROM " + rows
 	if write == "WRITE_TRUNCATE" {
 		sql = "DELETE FROM " + bp + " WHERE " + dest.where + ";\n" + sql
 	}
@@ -531,7 +550,9 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 		e := rowError{Reason: "backendError"}
 		sp := quotePath([]string{project, scratch.DatasetID, scratch.TableID})
 		bp := quotePath([]string{project, dest.DatasetID, base})
-		if n, why := f.scalar(r, "SELECT COUNT(*) FROM "+sp+" WHERE NOT COALESCE("+filter+", FALSE)"); why != "" {
+		if m.ingestion() {
+			// The rows are written into the partition (#1277).
+		} else if n, why := f.scalar(r, "SELECT COUNT(*) FROM "+sp+" WHERE NOT COALESCE("+filter+", FALSE)"); why != "" {
 			e.Message = "CloudBurrow could not read the loaded rows: " + why
 		} else if n > 0 {
 			e.Reason, e.Message = "invalid", "Some rows belong to different partitions rather than destination partition "+
@@ -550,7 +571,8 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 				cols[i] = quoteName(fl.Name)
 			}
 			list := strings.Join(cols, ", ")
-			sql := "INSERT INTO " + bp + " (" + list + ") SELECT " + list + " FROM " + sp
+			pcols, pvals := ingestionColumns(m, dec) // the partition's time (#1277)
+			sql := "INSERT INTO " + bp + " (" + list + pcols + ") SELECT " + list + pvals + " FROM " + sp
 			if write == "WRITE_TRUNCATE" {
 				sql = "DELETE FROM " + bp + " WHERE " + filter + ";\n" + sql
 			}
