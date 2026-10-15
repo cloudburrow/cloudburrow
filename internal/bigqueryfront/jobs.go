@@ -130,6 +130,20 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		}
 		return checkTableID(ref.TableID)
 	}
+	var dests []*tableRef
+	if c.Load != nil {
+		dests = append(dests, c.Load.DestinationTable)
+	}
+	if c.Query != nil {
+		dests = append(dests, c.Query.DestinationTable)
+	}
+	if c.Copy != nil {
+		dests = append(dests, c.Copy.DestinationTable)
+	}
+	if msg := decoratedDestination(dests...); msg != "" { // #1273, partitionreads.go
+		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
+		return
+	}
 	var msg, reason string
 	var afterLoad func() // #1000, loadFloat
 	switch {
