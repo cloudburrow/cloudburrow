@@ -1,0 +1,45 @@
+CloudBurrow patch 9 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1192).
+
+The bug: the emulator's HTTP server had a ReadTimeout of 15 s, which Go's
+net/http applies to the whole request, headers and body, from its first
+byte. A load's data is read from the body as the load runs (the multipart
+upload handler reads the job, adds it, and only then reads the data), so a
+load whose data took more than 15 s to arrive failed "failed to read csv:
+read tcp 127.0.0.1:9051->...: i/o timeout", with whatever had arrived
+unread. Measured through CloudBurrow's front with a 5.6 MB multipart CSV
+upload: at 300 KiB/s it loaded, and at 150 KiB/s it failed so, after 15 s
+of the data. On main's CI run 38715623235 the console's 5 MB resumable load
+(TestConsoleBigQueryLoadFromAFile), which the front sends from the file it
+kept, failed the same way after 15 s, where it takes under a second.
+BigQuery puts no such clock on an upload.
+
+The patch keeps 15 s for a request's headers (ReadHeaderTimeout) and for an
+idle connection (IdleTimeout), which ReadTimeout set before, and puts no
+clock on the body. WriteTimeout, 5 minutes from the headers, still bounds
+the whole request.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/server.go
++++ b/server/server.go
+@@ -225,7 +225,14 @@
+ 		Handler:      s.Handler,
+ 		Addr:         httpAddr,
+ 		WriteTimeout: 5 * time.Minute,
+-		ReadTimeout:  15 * time.Second,
++		// CloudBurrow patch (cloudburrow/cloudburrow#1192): 15 s for a
++		// request's headers and for an idle connection, as ReadTimeout gave
++		// them, but no clock on the body, which ReadTimeout gave 15 s in
++		// all: a load's data is read as the load runs, and a large upload
++		// whose bytes took longer to arrive failed "failed to read csv: ...
++		// i/o timeout". WriteTimeout still bounds the whole request.
++		ReadHeaderTimeout: 15 * time.Second,
++		IdleTimeout:       15 * time.Second,
+ 	}
+ 	s.httpServer = httpServer
+ 
