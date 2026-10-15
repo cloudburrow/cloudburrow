@@ -80,7 +80,7 @@ func avroExportSchema(typ string, logical bool) (any, string) {
 	case "NUMERIC":
 		return map[string]any{"type": "bytes", "logicalType": "decimal", "precision": 38, "scale": 9}, "bytes.decimal"
 	case "BIGNUMERIC":
-		return map[string]any{"type": "bytes", "logicalType": "decimal", "precision": 77, "scale": 38}, "bytes.decimal"
+		return map[string]any{"type": "bytes", "logicalType": "decimal", "precision": 76, "scale": 38}, "bytes.decimal"
 	}
 	return nil, ""
 }

@@ -60,8 +60,8 @@ const wildcardShard = "000000000000"
 //     extract, it failed "unsupported destination format " and left an
 //     empty object at the URI. BigQuery's default is CSV, so CSV is sent.
 //   - AVRO and PARQUET: 400 "unsupported destination format", and an empty
-//     object left. The front writes AVRO itself for the types in
-//     avroUnwritten (writeExtract, #957); 501 for PARQUET and the others,
+//     object left. The front writes them itself for the types in
+//     avroUnwritten and parquetUnwritten (writeExtract, #957); 501 for the others,
 //     before anything is written.
 //   - NEWLINE_DELIMITED_JSON: every value was written as a JSON string (a
 //     FLOAT 1.5 as "1.5", a BOOL as "true"). The front writes it itself for
@@ -109,7 +109,18 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	format := strings.ToUpper(e.DestinationFormat)
 	jsonFormat := format == "NEWLINE_DELIMITED_JSON"
 	avroFormat := format == "AVRO"
-	csvFormat := !jsonFormat && !avroFormat
+	parquetFormat := format == "PARQUET"
+	csvFormat := !jsonFormat && !avroFormat && !parquetFormat
+	parquetCodec := ""
+	if parquetFormat {
+		switch c := strings.ToUpper(e.Compression); c {
+		case "", "NONE":
+		case "SNAPPY", "GZIP", "ZSTD":
+			parquetCodec = c
+		default:
+			parquetCodec = "-"
+		}
+	}
 	gz := strings.EqualFold(e.Compression, "GZIP")
 	avroCodec := ""
 	if avroFormat {
@@ -132,19 +143,18 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	case e.SourceTable == nil || len(uris) == 0:
 		f.next.ServeHTTP(w, r)
 		return
-	case format == "PARQUET":
-		notImplemented(fmt.Sprintf("to %s. BigQuery writes it, but the emulator behind CloudBurrow does not support it "+
-			"(measured: 400 \"unsupported destination format %s\", and an empty object was left at the URI), and "+
-			"CloudBurrow does not write %s files itself: it has no way to check them against BigQuery's.", format, format, format))
+	case parquetFormat && parquetCodec == "-":
+		notImplemented(fmt.Sprintf("to PARQUET with compression %s. BigQuery documents SNAPPY, GZIP and ZSTD for "+
+			"Parquet, which CloudBurrow writes.", e.Compression))
 		return
-	case format != "" && format != "CSV" && !jsonFormat && !avroFormat:
+	case format != "" && format != "CSV" && !jsonFormat && !avroFormat && !parquetFormat:
 		f.next.ServeHTTP(w, r)
 		return
 	case avroFormat && e.Compression != "" && !strings.EqualFold(e.Compression, "NONE") && avroCodec == "":
 		notImplemented(fmt.Sprintf("to AVRO with compression %s. BigQuery documents DEFLATE and SNAPPY for Avro, "+
 			"which CloudBurrow writes.", e.Compression))
 		return
-	case !avroFormat && e.Compression != "" && !strings.EqualFold(e.Compression, "NONE") && !gz:
+	case !avroFormat && !parquetFormat && e.Compression != "" && !strings.EqualFold(e.Compression, "NONE") && !gz:
 		notImplemented(fmt.Sprintf("with compression %s. BigQuery documents GZIP for CSV and JSON, and %s only for "+
 			"Avro or Parquet; the emulator behind CloudBurrow ignores the compression (measured).", e.Compression, e.Compression))
 		return
@@ -206,7 +216,20 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 			return
 		}
 	}
-	if loc := nestedField(meta.Schema.Fields); loc != "" && !avroFormat {
+	if parquetFormat {
+		if loc, typ := parquetUnwritten(meta.Schema.Fields, ""); loc != "" {
+			notImplemented(fmt.Sprintf("to PARQUET of a table with a %s column (%s). CloudBurrow writes Parquet of "+
+				"the column types whose form BigQuery's documentation gives: INT64, BOOL, STRING, BYTES, NUMERIC, "+
+				"BIGNUMERIC, DATE, DATETIME, TIMESTAMP, TIME and RECORDs of them (docs/compatibility.md).", typ, loc))
+			return
+		}
+		if strings.Contains(string(got), `"precision"`) {
+			notImplemented("to PARQUET of a table with a parameterized NUMERIC or BIGNUMERIC column, which BigQuery " +
+				"writes with the column's precision and scale, which the emulator behind CloudBurrow does not keep.")
+			return
+		}
+	}
+	if loc := nestedField(meta.Schema.Fields); loc != "" && !avroFormat && !parquetFormat {
 		if jsonFormat {
 			notImplemented("to NEWLINE_DELIMITED_JSON of a table with a RECORD or REPEATED column (" + loc + "). " +
 				"BigQuery writes it, but its documentation does not give the form, so CloudBurrow does not write it.")
@@ -255,11 +278,11 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 	if strings.Contains(uri, "*") {
 		sent = strings.Replace(uri, "*", wildcardShard, 1)
 	}
-	if jsonFormat || avroFormat || gz || delimiter != ',' || emptyWithHeader || f.storageHost != "" && f.sharedID(r, src.DatasetID, src.TableID) {
+	if jsonFormat || avroFormat || parquetFormat || gz || delimiter != ',' || emptyWithHeader || f.storageHost != "" && f.sharedID(r, src.DatasetID, src.TableID) {
 		// #957: the emulator writes these differently from BigQuery.
 		// #1015: and it reads the table by its bare ID, which names the
 		// first table of that ID made in any dataset (qualify.go).
-		f.writeExtract(w, r, e, writtenExtract{json: jsonFormat, avro: avroFormat, avroCodec: avroCodec, avroLogical: logical, gzip: gz, delimiter: delimiter, header: header,
+		f.writeExtract(w, r, e, writtenExtract{json: jsonFormat, avro: avroFormat, avroCodec: avroCodec, avroLogical: logical, parquet: parquetFormat, parquetCodec: parquetCodec, gzip: gz, delimiter: delimiter, header: header,
 			uri: sent, fields: meta.Schema.Fields})
 		return
 	}

@@ -28,11 +28,15 @@ type writtenExtract struct {
 	// avroLogical is the job's useAvroLogicalTypes: DATE as int date, TIME
 	// as long time-micros.
 	avroLogical bool
-	gzip        bool
-	delimiter   rune
-	header      bool
-	uri         string // the URI written, its wildcard replaced
-	fields      []field
+	// parquet is PARQUET (extractparquet.go), with parquetCodec "",
+	// "SNAPPY", "GZIP" or "ZSTD".
+	parquet      bool
+	parquetCodec string
+	gzip         bool
+	delimiter    rune
+	header       bool
+	uri          string // the URI written, its wildcard replaced
+	fields       []field
 }
 
 // writeExtract carries out an extract job the front writes itself (#957):
@@ -102,6 +106,11 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 		return
 	}
 	data, msg := encodeExtract(x, rows)
+	if msg != "" && x.parquet {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job to PARQUET "+
+			"that CloudBurrow could not write ("+msg+"). Nothing was written.")
+		return
+	}
 	if msg != "" && x.avro {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job to AVRO "+
 			"that CloudBurrow could not write ("+msg+"). Nothing was written.")
@@ -114,7 +123,7 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 		return
 	}
 	contentType := http.DetectContentType(data)
-	if x.avro {
+	if x.avro || x.parquet {
 		contentType = "application/octet-stream"
 	}
 	if x.json && !x.gzip {
@@ -266,6 +275,9 @@ func (f front) tableRows(r *http.Request, dataset, table string) ([][]any, int, 
 func encodeExtract(x writtenExtract, rows [][]any) ([]byte, string) {
 	if x.avro {
 		return encodeAvroExtract(x, rows)
+	}
+	if x.parquet {
+		return encodeParquetExtract(x, rows)
 	}
 	var buf bytes.Buffer
 	var out io.Writer = &buf
