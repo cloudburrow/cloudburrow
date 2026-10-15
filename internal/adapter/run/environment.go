@@ -103,3 +103,19 @@ func injectedNames(annotations map[string]string) map[string]bool {
 	}
 	return out
 }
+
+// PodConfigAnnotation is the revision annotation recording the Cloud Run
+// volumes, mounts and service account (#1297), as a RevisionTemplate's
+// JSON, so the console's editor can prefill them.
+const PodConfigAnnotation = annPodConfig
+
+// ReadPodConfig decodes PodConfigAnnotation's value, or returns an empty
+// template.
+func ReadPodConfig(ann map[string]string, containers int) *runpb.RevisionTemplate {
+	t := &runpb.RevisionTemplate{}
+	for range containers {
+		t.Containers = append(t.Containers, &runpb.Container{})
+	}
+	readPodConfig(ann, t)
+	return t
+}

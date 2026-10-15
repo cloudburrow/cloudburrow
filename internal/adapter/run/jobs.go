@@ -125,6 +125,9 @@ func checkJob(job *runpb.Job) error {
 	if len(et.GetTemplate().GetContainers()) == 0 {
 		return apierror.InvalidArgument("job requires template.template.containers")
 	}
+	if err := checkVolumes(et.GetTemplate()); err != nil {
+		return err
+	}
 	for field, m := range map[string]map[string]string{"labels": job.GetLabels(), "annotations": job.GetAnnotations(),
 		"template.labels": et.GetLabels(), "template.annotations": et.GetAnnotations()} {
 		if err := validateMetadata(field, m); err != nil {

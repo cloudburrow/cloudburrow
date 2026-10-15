@@ -1863,6 +1863,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 			Section: "Container",
 		},
 		runSecretEnvField("Container"),
+		runVolumeFields("Container")[0], runVolumeFields("Container")[1], runVolumeFields("Container")[2],
 		{
 			Name: "cpu", Label: "CPU limit", Type: "text",
 			Help:    `Optional, as Kubernetes quantities: "1", "500m".`,
@@ -2019,6 +2020,9 @@ func runFormTemplate(values map[string]string) (*runpb.RevisionTemplate, error) 
 	}
 
 	tmpl := &runpb.RevisionTemplate{Containers: []*runpb.Container{container}}
+	if err := applyRunVolumes(podFields{&tmpl.ServiceAccount, &tmpl.Volumes}, container, values); err != nil {
+		return nil, err
+	}
 	minInstances, err := optionalInt(values["minInstances"], "minimum instances")
 	if err != nil {
 		return nil, err

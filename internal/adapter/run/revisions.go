@@ -163,6 +163,9 @@ func FromKnativeRevision(r krev, serviceName string) *runpb.Revision {
 		}
 		out.Containers = append(out.Containers, container)
 	}
+	pc := &runpb.RevisionTemplate{Containers: out.Containers}
+	readPodConfig(r.Metadata.Annotations, pc)
+	out.ServiceAccount, out.Volumes = pc.ServiceAccount, pc.Volumes
 	if cc := r.Spec.ContainerConcurrency; cc > 0 {
 		out.MaxInstanceRequestConcurrency = int32(cc)
 	}

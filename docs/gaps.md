@@ -83,7 +83,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 
 | Gap | Why open | Size |
 |---|---|---|
-| Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity | not built yet | L |
+| Refused service and job fields: VPC access, Cloud SQL, Cloud Storage FUSE and NFS volumes, `subPath`, encryption keys, binary authorization, execution environment, session affinity; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297) | not built yet | L |
 | Logs are not served through the Cloud Run API | not built yet | M |
 | `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
 | `Instances.*` is not served | not built yet | L |

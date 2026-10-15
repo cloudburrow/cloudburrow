@@ -595,17 +595,17 @@ func TestJobRefusesWhatItDoesNotMap(t *testing.T) {
 		"template.template.vpcAccess: no VPC exists locally": func(j *runpb.Job) {
 			j.Template.Template.VpcAccess = &runpb.VpcAccess{Connector: "c"}
 		},
-		"template.template.serviceAccount: CloudBurrow performs no authentication": func(j *runpb.Job) {
-			j.Template.Template.ServiceAccount = "sa@p.iam.gserviceaccount.com"
-		},
 		"template.template.encryptionKey": func(j *runpb.Job) { j.Template.Template.EncryptionKey = "k" },
-		"template.template.volumes":       func(j *runpb.Job) { j.Template.Template.Volumes = []*runpb.Volume{{Name: "v"}} },
+		"template.template.volumes.nfs": func(j *runpb.Job) {
+			j.Template.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_Nfs{Nfs: &runpb.NFSVolumeSource{Server: "s"}}}}
+		},
 		"template.template.executionEnvironment": func(j *runpb.Job) {
 			j.Template.Template.ExecutionEnvironment = runpb.ExecutionEnvironment_EXECUTION_ENVIRONMENT_GEN2
 		},
 		"template.template.nodeSelector": func(j *runpb.Job) { j.Template.Template.NodeSelector = &runpb.NodeSelector{Accelerator: "l4"} },
-		"container.volumeMounts": func(j *runpb.Job) {
-			j.Template.Template.Containers[0].VolumeMounts = []*runpb.VolumeMount{{Name: "v", MountPath: "/v"}}
+		"container.volumeMounts.subPath": func(j *runpb.Job) {
+			j.Template.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_EmptyDir{EmptyDir: &runpb.EmptyDirVolumeSource{}}}}
+			j.Template.Template.Containers[0].VolumeMounts = []*runpb.VolumeMount{{Name: "v", MountPath: "/v", SubPath: "x"}}
 		},
 		"container.dependsOn": func(j *runpb.Job) { j.Template.Template.Containers[0].DependsOn = []string{"x"} },
 		"container.ports": func(j *runpb.Job) {
