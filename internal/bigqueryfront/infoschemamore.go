@@ -205,13 +205,13 @@ func snapshotsRows(project, dataset string, t infoTable) [][]string {
 }
 
 // constraintsOf is a table's primary key columns and foreign keys.
-type foreignKey struct {
+type infoForeignKey struct {
 	name                     string
 	refProject, refDS, refTb string
 	columns, refColumns      []string
 }
 
-func constraintsOf(t infoTable) (pk []string, fks []foreignKey) {
+func constraintsOf(t infoTable) (pk []string, fks []infoForeignKey) {
 	tc, _ := t["tableConstraints"].(map[string]any)
 	if p, _ := tc["primaryKey"].(map[string]any); p != nil {
 		cols, _ := p["columns"].([]any)
@@ -223,7 +223,7 @@ func constraintsOf(t infoTable) (pk []string, fks []foreignKey) {
 	for _, x := range raw {
 		m, _ := x.(map[string]any)
 		ref, _ := m["referencedTable"].(map[string]any)
-		fk := foreignKey{name: str(m, "name"), refProject: str(ref, "projectId"), refDS: str(ref, "datasetId"), refTb: str(ref, "tableId")}
+		fk := infoForeignKey{name: str(m, "name"), refProject: str(ref, "projectId"), refDS: str(ref, "datasetId"), refTb: str(ref, "tableId")}
 		cr, _ := m["columnReferences"].([]any)
 		for _, y := range cr {
 			c, _ := y.(map[string]any)
