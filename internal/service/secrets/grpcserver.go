@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"google.golang.org/protobuf/proto"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
 	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
@@ -55,6 +56,9 @@ func toProtoSecret(s Secret) *secretmanagerpb.Secret {
 		Labels:      s.Labels,
 		Annotations: s.Annotations,
 		Etag:        s.Etag,
+	}
+	if !s.Expire.IsZero() {
+		out.Expiration = &secretmanagerpb.Secret_ExpireTime{ExpireTime: timestamppb.New(s.Expire)}
 	}
 	// Replication is a required field of the resource, so it is always
 	// present in a response even when the caller did not set one.
@@ -140,9 +144,13 @@ func (g *GRPCServer) CreateSecret(_ context.Context, req *secretmanagerpb.Create
 	if err := checkCreatable(sec); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	expire, err := expireOf(sec, g.store.now())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	kind, locations := replicationOf(sec.GetReplication())
-	created, err := g.store.CreateSecret(project, req.GetSecretId(),
-		sec.GetLabels(), sec.GetAnnotations(), kind, locations...)
+	created, err := g.store.CreateSecretExpiring(project, req.GetSecretId(),
+		sec.GetLabels(), sec.GetAnnotations(), expire, kind, locations...)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -177,18 +185,22 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			"update_mask must name at least one field; an empty mask would clear every label"))
 	}
 
-	var updateLabels, updateAnnotations, checkReplication bool
+	var updateLabels, updateAnnotations, checkReplication, updateExpire bool
 	for _, p := range paths {
 		switch {
 		case p == "labels":
 			updateLabels = true
 		case p == "annotations":
 			updateAnnotations = true
+		case p == "expire_time" || p == "ttl" || p == "expireTime":
+			// Either path names the expiration oneof; a mask naming it with
+			// neither field set clears it (#1225).
+			updateExpire = true
 		case p == "replication" || strings.HasPrefix(p, "replication."):
 			checkReplication = true
 		default:
 			return nil, apierror.Wrap(apierror.InvalidArgument(
-				"update_mask path %q is not supported; only labels and annotations are mutable", p))
+				"update_mask path %q is not supported; only labels, annotations, expire_time and ttl are mutable", p))
 		}
 	}
 	if err := g.secretEtag(project, id, sec.GetEtag()); err != nil {
@@ -199,8 +211,17 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			return nil, apierror.Wrap(err)
 		}
 	}
-	updated, err := g.store.UpdateSecret(project, id, sec.GetLabels(), sec.GetAnnotations(),
-		updateLabels, updateAnnotations)
+	var expire time.Time
+	if updateExpire {
+		if expire, err = expireOf(sec, g.store.now()); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+	}
+	updated, err := g.store.UpdateSecretFields(project, id, SecretUpdate{
+		Labels: sec.GetLabels(), Annotations: sec.GetAnnotations(),
+		UpdateLabels: updateLabels, UpdateAnnotations: updateAnnotations,
+		Expire: expire, UpdateExpire: updateExpire,
+	})
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -268,13 +289,15 @@ func (g *GRPCServer) ListSecrets(_ context.Context, req *secretmanagerpb.ListSec
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if err := checkNoFilter(req.GetFilter()); err != nil {
+	filter, err := parseSecretFilter(req.GetFilter())
+	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	all, err := g.store.ListSecrets(project)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	all = filterList(all, filter)
 
 	names := make([]string, len(all))
 	byName := make(map[string]Secret, len(all))
@@ -284,7 +307,9 @@ func (g *GRPCServer) ListSecrets(_ context.Context, req *secretmanagerpb.ListSec
 	}
 	// The scope is the parent, so a token issued for one project cannot be
 	// replayed against another.
-	page, next, err := paging.Page(req.GetParent(), names, req.GetPageToken(), int(req.GetPageSize()))
+	// The filter is part of the scope, so a token cannot be replayed with
+	// another filter.
+	page, next, err := paging.Page(req.GetParent()+"?"+req.GetFilter(), names, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -295,7 +320,7 @@ func (g *GRPCServer) ListSecrets(_ context.Context, req *secretmanagerpb.ListSec
 	return &secretmanagerpb.ListSecretsResponse{
 		Secrets:       out,
 		NextPageToken: next,
-		TotalSize:     int32(len(all)),
+		TotalSize:     listTotal(len(all), filter),
 	}, nil
 }
 
@@ -356,13 +381,15 @@ func (g *GRPCServer) ListSecretVersions(_ context.Context, req *secretmanagerpb.
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if err := checkNoFilter(req.GetFilter()); err != nil {
+	filter, err := parseVersionFilter(req.GetFilter())
+	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	all, err := g.store.ListVersions(project, id)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	all = filterList(all, filter)
 
 	// Paging sorts its keys ascending, but versions are reported newest
 	// first. Sorting on the complement of the version number gives that
@@ -376,7 +403,7 @@ func (g *GRPCServer) ListSecretVersions(_ context.Context, req *secretmanagerpb.
 		keys[i] = k
 		byKey[k] = v
 	}
-	page, next, err := paging.Page(req.GetParent(), keys, req.GetPageToken(), int(req.GetPageSize()))
+	page, next, err := paging.Page(req.GetParent()+"?"+req.GetFilter(), keys, req.GetPageToken(), int(req.GetPageSize()))
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -387,7 +414,7 @@ func (g *GRPCServer) ListSecretVersions(_ context.Context, req *secretmanagerpb.
 	return &secretmanagerpb.ListSecretVersionsResponse{
 		Versions:      out,
 		NextPageToken: next,
-		TotalSize:     int32(len(all)),
+		TotalSize:     listTotal(len(all), filter),
 	}, nil
 }
 

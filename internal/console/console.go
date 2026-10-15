@@ -139,6 +139,10 @@ type Listing struct {
 	// backend. A screen that silently ignores a filter is lying about what
 	// the rows are.
 	Note string `json:"note,omitempty"`
+	// ServerFilter, when set, gives the list screen a filter box whose text
+	// the backend evaluates in the service's own filter syntax (#1228), as
+	// opposed to the table's client-side search over the rows it has.
+	ServerFilter *ServerFilter `json:"serverFilter,omitempty"`
 	// Cursor is the token that fetches the rows after these.
 	//
 	// Every content listing stopped at a fixed limit and said "there may be
@@ -173,6 +177,27 @@ type Listing struct {
 //
 // Implementations call the service's own API rather than reaching into a
 // store, which is what keeps the console a view.
+// ServerFilter is a list screen's filter box: the filter in force, the
+// syntax it takes, and why it was refused when it was.
+type ServerFilter struct {
+	// Value is the filter the rows were listed with; empty is none.
+	Value string `json:"value"`
+	// Placeholder is an example filter.
+	Placeholder string `json:"placeholder,omitempty"`
+	// Help names the syntax.
+	Help string `json:"help,omitempty"`
+	// Error is the backend's refusal of Value; the rows are then empty.
+	Error string `json:"error,omitempty"`
+}
+
+// FilterLister is a provider whose list screen takes a filter the service
+// evaluates (#1228). handleResources calls it instead of List, with the
+// screen's filter text, empty for none; it reports the filter on
+// Listing.ServerFilter.
+type FilterLister interface {
+	ListFiltered(ctx context.Context, project, filter string) (Listing, error)
+}
+
 type Provider interface {
 	// ID is the URL segment and navigation key, e.g. "storage".
 	ID() string
@@ -1209,7 +1234,18 @@ func (s *Server) handleResources(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), readBudget)
 	defer cancel()
 
-	listing, err := p.List(ctx, project)
+	var listing Listing
+	var err error
+	filter := r.URL.Query().Get("filter")
+	if fl, ok := p.(FilterLister); ok {
+		listing, err = fl.ListFiltered(ctx, project, filter)
+	} else if filter != "" {
+		// A filter this screen cannot apply is refused, not ignored: every
+		// row would come back and read as a filter that matched them all.
+		err = fmt.Errorf("%s takes no filter", p.Title())
+	} else {
+		listing, err = p.List(ctx, project)
+	}
 	if err != nil {
 		// Reported as an unavailable listing rather than an HTTP error, so
 		// the screen can render its error state with the cause instead of
