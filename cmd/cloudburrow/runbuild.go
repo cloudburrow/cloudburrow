@@ -76,6 +76,47 @@ func (f storageSourceFetcher) Fetch(ctx context.Context, bucket, object string, 
 	}
 }
 
+// Put writes a Cloud Build log to this instance's Cloud Storage (#1347).
+// With create, a missing bucket is made first in project: the build's
+// default logs bucket, which Google owns and here is the instance's.
+func (f storageSourceFetcher) Put(ctx context.Context, project, bucket, object string, data []byte, create bool) error {
+	put := func() (int, string, error) {
+		u := f.base() + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=media&name=" + url.QueryEscape(object)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
+		if err != nil {
+			return 0, "", err
+		}
+		req.Header.Set("Content-Type", "text/plain; charset=utf-8")
+		resp, err := f.client.Do(req)
+		if err != nil {
+			return 0, "", err
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return resp.StatusCode, strings.TrimSpace(string(b)), nil
+	}
+	code, msg, err := put()
+	if err == nil && code == http.StatusNotFound && create {
+		body := fmt.Sprintf(`{"name":%q}`, bucket)
+		req, rerr := http.NewRequestWithContext(ctx, http.MethodPost, f.base()+"/storage/v1/b?project="+url.QueryEscape(project), strings.NewReader(body))
+		if rerr != nil {
+			return rerr
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if resp, rerr := f.client.Do(req); rerr == nil {
+			resp.Body.Close()
+		}
+		code, msg, err = put()
+	}
+	if err != nil {
+		return fmt.Errorf("write gs://%s/%s: %v", bucket, object, err)
+	}
+	if code != http.StatusOK {
+		return fmt.Errorf("write gs://%s/%s: HTTP %d %s", bucket, object, code, msg)
+	}
+	return nil
+}
+
 // localImageBuilder builds SubmitBuild's source with the host's Docker, or
 // pack for buildpacks, and loads the image into the instance's kind cluster.
 type localImageBuilder struct {
@@ -117,17 +158,30 @@ func (b *localImageBuilder) docker(ctx context.Context, spec runadapter.BuildSpe
 	if _, err := exec.LookPath("docker"); err != nil {
 		return fmt.Errorf("docker is not installed")
 	}
-	if _, err := os.Stat(filepath.Join(dir, spec.Dockerfile)); err != nil {
-		return fmt.Errorf("the source has no %s at its root", spec.Dockerfile)
+	dockerfile, context := filepath.Join(dir, spec.Dockerfile), filepath.Join(dir, spec.Context)
+	if _, err := os.Stat(dockerfile); err != nil {
+		if spec.Dockerfile == "Dockerfile" {
+			return fmt.Errorf("the source has no Dockerfile at its root")
+		}
+		return fmt.Errorf("the source has no %s", spec.Dockerfile)
 	}
 	arch, err := b.loader.NodeArchitecture(ctx, b.cfg.KubeconfigPath())
 	if err != nil {
 		return fmt.Errorf("read the cluster's node architecture: %w", err)
 	}
-	out, err := exec.CommandContext(ctx, "docker", "build", "--platform", "linux/"+arch,
-		"-t", spec.LocalImage, "-f", filepath.Join(dir, spec.Dockerfile), dir).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("docker build: %v\n%s", err, tailLines(string(out), 25))
+	args := []string{"build", "--platform", "linux/" + arch, "-t", spec.LocalImage, "-f", dockerfile}
+	for _, a := range spec.BuildArgs {
+		args = append(args, "--build-arg", a)
+	}
+	var out bytes.Buffer
+	cmd := exec.CommandContext(ctx, "docker", append(args, context)...)
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if spec.Log != nil {
+		cmd.Stdout = io.MultiWriter(&out, spec.Log)
+		cmd.Stderr = cmd.Stdout
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker build: %v\n%s", err, tailLines(out.String(), 25))
 	}
 	return nil
 }
@@ -175,7 +229,7 @@ func (b *localImageBuilder) pack(ctx context.Context, spec runadapter.BuildSpec,
 	}
 	repo := "build-" + suffix + ":latest"
 	err = (&buildpacks.Builder{}).Build(ctx, buildpacks.Request{
-		Source: dir, Image: name + ":5000/" + repo, Registry: name + ":5000", Network: network,
+		Source: filepath.Join(dir, spec.Context), Image: name + ":5000/" + repo, Registry: name + ":5000", Network: network,
 		Insecure: true, FunctionTarget: spec.FunctionTarget, Env: spec.Env,
 	})
 	if err != nil {

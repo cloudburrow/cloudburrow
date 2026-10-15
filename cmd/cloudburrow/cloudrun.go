@@ -154,7 +154,7 @@ func (r *runService) Start(ctx context.Context) error {
 	// beside Cloud Run's, JSON at their own v1 paths.
 	sourceDeploy := func(g grpc.ServiceRegistrar) {
 		adapter.ArtifactRegistry().Register(g)
-		adapter.CloudBuild().Register(g)
+		builds.CloudBuild().Register(g)
 		ops.Register(g)
 	}
 	if r.cfg.Endpoints.Console != 0 {
@@ -173,7 +173,7 @@ func (r *runService) Start(ctx context.Context) error {
 	if err := r.server.Register(func(g *grpc.Server) {
 		register(g)
 		adapter.ArtifactRegistry().Register(g)
-		adapter.CloudBuild().Register(g)
+		builds.CloudBuild().Register(g)
 	}); err != nil {
 		return err
 	}

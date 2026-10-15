@@ -26,7 +26,9 @@ import (
 // operation, projects/{p}/locations/{l}/operations/{build id}, carries
 // BuildOperationMetadata while it runs and answers with the Build, which is
 // what `gcloud run deploy --source` reconstructs and polls. GetBuild and
-// ListBuilds read them back; the other methods are UNIMPLEMENTED.
+// ListBuilds read them back; CreateBuild and CancelBuild
+// (cloudbuildcreate.go) run and stop builds of their own. The other methods
+// are UNIMPLEMENTED.
 
 // BuildLogURLBase, when set, is where a build's logUrl points: the
 // instance's console, which the CLI sets. A build's log is the builder's
@@ -84,10 +86,18 @@ func buildDigest(id string) string {
 // GetBuild and ListBuilds over the builds this instance ran.
 type CloudBuildServer struct {
 	cbpb.UnimplementedCloudBuildServer
+	// builds runs CreateBuild's builds: nil leaves CreateBuild
+	// FAILED_PRECONDITION.
+	builds *BuildsServer
 }
 
-// CloudBuild returns the Cloud Build service.
+// CloudBuild returns the Cloud Build service, which reads builds but cannot
+// create them; BuildsServer.CloudBuild returns one that can.
 func (s *Server) CloudBuild() *CloudBuildServer { return &CloudBuildServer{} }
+
+// CloudBuild returns the Cloud Build service, whose CreateBuild runs builds
+// with this Builds service's source fetcher and local builder.
+func (b *BuildsServer) CloudBuild() *CloudBuildServer { return &CloudBuildServer{builds: b} }
 
 // Register adds the service to a gRPC server or a JSON transcoder.
 func (c *CloudBuildServer) Register(g grpc.ServiceRegistrar) { cbpb.RegisterCloudBuildServer(g, c) }

@@ -51,6 +51,15 @@ type BuildSpec struct {
 	// FunctionTarget and Env are the buildpacks build's inputs.
 	FunctionTarget string
 	Env            map[string]string
+	// Context is the directory inside the source that a BuildDocker build
+	// sends to Docker, and a BuildBuildpacks build builds; empty is the
+	// source's root. A Cloud Build docker step names it (#1347).
+	Context string
+	// BuildArgs are a BuildDocker build's --build-arg values, NAME=VALUE.
+	BuildArgs []string
+	// Log, when set, receives the builder's output as it runs: a Cloud
+	// Build build's log (#1347).
+	Log io.Writer
 }
 
 // ImageBuilder builds a source archive into an image in the cluster.
