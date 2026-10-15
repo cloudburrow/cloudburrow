@@ -4237,7 +4237,8 @@
         "method": "google.storage.v2.Storage/BidiWriteObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
         ]
       },
       {
@@ -4257,7 +4258,8 @@
         "method": "google.storage.v2.Storage/CreateBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
+          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
         ]
       },
       {
@@ -4278,7 +4280,8 @@
         "method": "google.storage.v2.Storage/GetBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
+          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
         ]
       },
       {
@@ -4292,7 +4295,8 @@
         "method": "google.storage.v2.Storage/GetObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
         ]
       },
       {
@@ -4374,14 +4378,16 @@
         "method": "google.storage.v2.Storage/UpdateBucket",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
+          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
         ]
       },
       {
         "method": "google.storage.v2.Storage/UpdateObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
         ]
       },
       {
