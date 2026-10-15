@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -27,6 +28,12 @@ type Server struct {
 	// makes every :predict a 501 carrying embedUnavailable.
 	embedder         embedding.Embedder
 	embedUnavailable error
+
+	// endpoints resolves custom prediction endpoints, reached through
+	// ingress with client; nil serves none (see endpoints.go).
+	endpoints EndpointResolver
+	ingress   func() string
+	client    *http.Client
 }
 
 // NewServer returns a server. A nil generator is valid and makes every
@@ -64,6 +71,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /"+GeminiAPIVersion+"/models/{model}", s.handle)
 	// Text-embedding :predict, which Vertex clients send under v1 as well.
 	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/publishers/{publisher}/models/{model}", s.handle)
+	// Custom prediction containers, as Vertex endpoints (#1193).
+	mux.HandleFunc("POST /v1/projects/{project}/locations/{location}/endpoints/{endpoint}", s.handleEndpoint)
 	mux.HandleFunc("/", s.notFound)
 	// The playground page and any browser tab can reach this port (#676).
 	return hostguard.Wrap(mux)
@@ -147,6 +156,16 @@ func (s *Server) resolveModel(requested string) (string, error) {
 }
 
 func (s *Server) generate(w http.ResponseWriter, r *http.Request, requested string, stream bool) {
+	if !stream {
+		resp, err := s.generateUnary(r.Context(), requested, r.Body)
+		if err != nil {
+			apierror.WriteJSON(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
 	model, err := s.resolveModel(requested)
 	if err != nil {
 		apierror.WriteJSON(w, err)
@@ -157,24 +176,30 @@ func (s *Server) generate(w http.ResponseWriter, r *http.Request, requested stri
 		apierror.WriteJSON(w, err)
 		return
 	}
-
 	chunks, errFn, err := s.gen.Generate(r.Context(), Request{Prompt: promptOf(req)})
 	if err != nil {
 		apierror.WriteJSON(w, apierror.Internal(err, "starting the local runtime failed"))
 		return
 	}
-
-	if stream {
-		s.writeStream(w, r, model, chunks, errFn)
-		return
-	}
-	s.writeUnary(w, r, model, chunks, errFn)
+	s.writeStream(w, r, model, chunks, errFn)
 }
 
-// writeUnary assembles the stream into a single response.
-func (s *Server) writeUnary(w http.ResponseWriter, r *http.Request, model string,
-	chunks <-chan Chunk, errFn func() error) {
-
+// generateUnary serves one generateContent, for the JSON route and the gRPC
+// PredictionService alike, so the two answer the same request the same way.
+// body is the JSON request; the stream is assembled into one response.
+func (s *Server) generateUnary(ctx context.Context, requested string, body io.Reader) (*GenerateContentResponse, error) {
+	model, err := s.resolveModel(requested)
+	if err != nil {
+		return nil, err
+	}
+	req, err := decodeRequest(body)
+	if err != nil {
+		return nil, err
+	}
+	chunks, errFn, err := s.gen.Generate(ctx, Request{Prompt: promptOf(req)})
+	if err != nil {
+		return nil, apierror.Internal(err, "starting the local runtime failed")
+	}
 	var text strings.Builder
 	finish := FinishReasonStop
 	for c := range chunks {
@@ -184,13 +209,13 @@ func (s *Server) writeUnary(w http.ResponseWriter, r *http.Request, model string
 		}
 		text.WriteString(c.Text)
 	}
-	if err := generationError(r.Context(), errFn); err != nil {
-		apierror.WriteJSON(w, err)
-		return
+	if err := generationError(ctx, errFn); err != nil {
+		return nil, err
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(textResponse(model, strings.TrimRight(text.String(), "\n"), finish))
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return textResponse(model, strings.TrimRight(text.String(), "\n"), finish), nil
 }
 
 // writeStream writes server-sent events in the shape the SDK parses.

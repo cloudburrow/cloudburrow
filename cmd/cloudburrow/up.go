@@ -387,6 +387,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.Ingress))
 	}
 
+	// With Cloud Run, the local AI endpoint also serves PredictionService for
+	// the custom prediction containers it runs (#1193), so it is started even
+	// with no model: the official aiplatform client reaches them through it.
+	localAISrv = withPredictionEndpoints(cfg, localAISrv, runSvc, ingressAddr)
+
 	// The console reads through the objects above rather than owning any of
 	// them, so it cannot answer from a store of its own.
 	consoleSrv := buildConsole(consoleDeps{

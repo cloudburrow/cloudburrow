@@ -30,9 +30,13 @@ import (
 // exported as a STRING field"); FLOAT64 as DOUBLE (parquetExportType);
 // a REPEATED column in Parquet's LIST form (parquetNodes); a REQUIRED
 // column required, any other optional; compressed with SNAPPY, GZIP or
-// ZSTD, as the job names, or not. 501 for the rest: GEOGRAPHY (BYTE_ARRAY
-// GEOGRAPHY with GeoParquet metadata, whose bytes the documentation does
-// not give), INTERVAL and RANGE (not in the table), and a parameterized
+// ZSTD, as the job names, or not. GEOGRAPHY only with the job's
+// nativeGeographyExportEnabled ("BigQuery to Parquet export will write the
+// native Parquet Geography type instead of the default GeoParquet type",
+// the REST reference): BYTE_ARRAY GEOGRAPHY "(edges = spherical)", as the
+// table gives it, with values in WKB (parquetGeography). 501 for the rest:
+// GEOGRAPHY without it (GeoParquet metadata, whose bytes the
+// documentation does not give), INTERVAL and RANGE (not in the table), and a parameterized
 // NUMERIC. The file's writer metadata, page and row group sizes and
 // encodings are the writer's, not BigQuery's (UNVERIFIED): a Parquet
 // reader reads the same rows and types, not the same bytes.
@@ -45,6 +49,9 @@ type parquetLeaf struct {
 	logical pqschema.LogicalType
 	length  int
 	scale   int
+	// geography is a GEOGRAPHY column: BYTE_ARRAY written with no logical
+	// type, which parquetGeography then sets to GEOGRAPHY in the footer.
+	geography bool
 }
 
 // parquetExportType is the Parquet type the front writes a column of the
@@ -68,6 +75,8 @@ func parquetExportType(typ string) (parquetLeaf, bool) {
 		return parquetLeaf{phys: parquet.Types.Double, logical: pqschema.NoLogicalType{}}, true
 	case "BYTES":
 		return parquetLeaf{phys: parquet.Types.ByteArray, logical: pqschema.NoLogicalType{}}, true
+	case "GEOGRAPHY":
+		return parquetLeaf{phys: parquet.Types.ByteArray, logical: pqschema.NoLogicalType{}, geography: true}, true
 	case "NUMERIC":
 		return parquetLeaf{phys: parquet.Types.FixedLenByteArray, logical: pqschema.NewDecimalLogicalType(38, 9), length: 16, scale: 9}, true
 	case "BIGNUMERIC":
@@ -83,18 +92,18 @@ func parquetExportType(typ string) (parquetLeaf, bool) {
 }
 
 // parquetUnwritten returns the first column of fields, by its path below
-// prefix, and its type, that the front does not write to Parquet (above);
-// "" when it writes them all.
-func parquetUnwritten(fields []field, prefix string) (string, string) {
+// prefix, and its type, that the front does not write to Parquet (above),
+// GEOGRAPHY among them unless nativeGeo; "" when it writes them all.
+func parquetUnwritten(fields []field, nativeGeo bool, prefix string) (string, string) {
 	for _, fl := range fields {
 		typ := strings.ToUpper(fl.Type)
 		if typ == "RECORD" || typ == "STRUCT" {
-			if loc, t := parquetUnwritten(fl.Fields, prefix+fl.Name+"."); loc != "" {
+			if loc, t := parquetUnwritten(fl.Fields, nativeGeo, prefix+fl.Name+"."); loc != "" {
 				return loc, t
 			}
 			continue
 		}
-		if _, ok := parquetExportType(typ); !ok {
+		if _, ok := parquetExportType(typ); !ok || typ == "GEOGRAPHY" && !nativeGeo {
 			return prefix + fl.Name, typ
 		}
 	}
@@ -292,6 +301,9 @@ func parquetValue(typ string, leaf parquetLeaf, s string) (any, error) {
 	case "BYTES":
 		b, err := base64.StdEncoding.DecodeString(s)
 		return parquet.ByteArray(b), err
+	case "GEOGRAPHY":
+		b, err := wktToWKB(s) // wkb.go
+		return parquet.ByteArray(b), err
 	case "NUMERIC", "BIGNUMERIC":
 		n, err := unscaled(s, leaf.scale) // avrorows.go
 		if err != nil {
@@ -360,8 +372,21 @@ func encodeParquetExtract(x writtenExtract, rows [][]any) ([]byte, string) {
 	case "ZSTD":
 		codec = compress.Codecs.Zstd
 	}
+	opts := []parquet.WriterProperty{parquet.WithCompression(codec)}
+	var geo []bool // by leaf column, in order
+	for _, c := range cols {
+		geo = append(geo, c.leaf.geography)
+	}
+	sch := pqschema.NewSchema(root)
+	for i, g := range geo {
+		if g {
+			// Parquet: "the sort order for GEOGRAPHY is undefined", so no
+			// min and max statistics.
+			opts = append(opts, parquet.WithStatsPath(sch.Column(i).ColumnPath(), false))
+		}
+	}
 	var buf bytes.Buffer
-	fw := file.NewParquetWriter(&buf, root, file.WithWriterProps(parquet.NewWriterProperties(parquet.WithCompression(codec))))
+	fw := file.NewParquetWriter(&buf, root, file.WithWriterProps(parquet.NewWriterProperties(opts...)))
 	rg := fw.AppendRowGroup()
 	for _, c := range cols {
 		cw, err := rg.NextColumn()
@@ -425,5 +450,9 @@ func encodeParquetExtract(x writtenExtract, rows [][]any) ([]byte, string) {
 	if err := fw.Close(); err != nil {
 		return nil, err.Error()
 	}
-	return buf.Bytes(), ""
+	out, err := parquetGeography(buf.Bytes(), geo)
+	if err != nil {
+		return nil, err.Error()
+	}
+	return out, ""
 }

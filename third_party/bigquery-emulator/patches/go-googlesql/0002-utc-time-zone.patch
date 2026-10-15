@@ -1,0 +1,59 @@
+CloudBurrow patch 2 to github.com/goccy/go-googlesql v0.3.0
+(cloudburrow/cloudburrow#1189).
+
+The bug: the bindings have no way to build an absl::TimeZone, so
+AnalyzerOptions.SetDefaultTimeZone could not be called, and the analyzer
+kept its built-in default zone, America/Los_Angeles, where BigQuery's is
+UTC. The patch adds UTCTimeZone(), a TimeZone of UTC: an absl::TimeZone
+is one pointer to its zone's implementation, and a null one is UTC
+(abseil's cctz: a default-constructed time_zone is "in effect UTC", and
+utc_time_zone() returns one), so it is a zeroed block of wasm memory,
+allocated once. SetDefaultTimeZone copies it. googlesqlite patch 0019
+sets it; its test default_time_zone_utc_test.go fails without it.
+
+Licence: a modification of goccy/go-googlesql, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/go-googlesql.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/utc_time_zone.go
+@@ -0,0 +1,37 @@
++package googlesql
++
++import (
++	"sync"
++
++	wasm2go "github.com/goccy/googlesqlwasm2go"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1189): the bindings have no
++// way to build an absl::TimeZone, so AnalyzerOptions.SetDefaultTimeZone
++// could not be called and the analyzer kept its built-in default,
++// America/Los_Angeles. An absl::TimeZone is one pointer to its zone's
++// implementation, and a null one is UTC (cctz: "time_zone() // in effect
++// UTC", utc_time_zone() returns a default-constructed time_zone), so a
++// zeroed block of wasm memory is a TimeZone of UTC. SetDefaultTimeZone
++// copies it; the block is allocated once and never freed.
++
++var (
++	utcTimeZoneOnce sync.Once
++	utcTimeZone     *TimeZone
++)
++
++// UTCTimeZone returns a TimeZone of UTC, for SetDefaultTimeZone.
++func UTCTimeZone() *TimeZone {
++	utcTimeZoneOnce.Do(func() {
++		m := module()
++		m.mu.Lock()
++		defer m.mu.Unlock()
++		// 8 bytes: the 4-byte pointer, rounded up to an alignment that
++		// does not depend on the wasm target's pointer size.
++		ptr := wasm2go.WasmAlloc(m.g, 8)
++		mem := wasm2go.Memory(m.g)
++		clear(mem[uint32(ptr) : uint32(ptr)+8])
++		utcTimeZone = &TimeZone{ptr: uint64(uint32(ptr))}
++	})
++	return utcTimeZone
++}

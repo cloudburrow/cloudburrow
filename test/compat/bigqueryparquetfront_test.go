@@ -117,7 +117,7 @@ func TestBigQueryParquetConvertedTypes(t *testing.T) {
 		"FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%E6S', ts_ms), TO_HEX(bytes), TO_HEX(fixed), uint64, CAST(float AS STRING), "+
 		"CAST(double AS STRING) FROM DS.converted ORDER BY id"),
 		"[[1 01:02:03.004000 01:02:03.004567 2024-01-02 03:04:05.123000 0001 6162 1 1.5 0.1] "+
-			"[2 23:59:59.999000 00:00:00.000000 1969-12-31 23:59:59.999000 ff ff00 9223372036854775807 +Inf -Inf] "+
+			"[2 23:59:59.999000 00:00:00.000000 1969-12-31 23:59:59.999000 ff ff00 9223372036854775807 inf -inf] "+
 			"[3 <nil> <nil> <nil> <nil> <nil> <nil> <nil> <nil>]]"; got != want {
 		t.Errorf("rows:\n got %s\nwant %s", got, want)
 	}

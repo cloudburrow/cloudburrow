@@ -160,7 +160,7 @@ func TestBigQueryIntervalComparison(t *testing.T) {
 		{"CAST(INTERVAL -1 SECOND AS STRING)", "0-0 0 -0:0:1"},
 		{"CAST(MAKE_INTERVAL(second => -61) AS STRING)", "0-0 0 -0:1:1"},
 		{"CAST(INTERVAL -1 MONTH AS STRING)", "-0-1 0 0:0:0"},
-		{"CAST(INTERVAL 1500 MILLISECOND AS STRING)", "0-0 0 0:0:1.5"},
+		{"CAST(INTERVAL 1500 MILLISECOND AS STRING)", "0-0 0 0:0:1.500"}, // groups of three digits (#1202)
 		{"INTERVAL 1 MICROSECOND > INTERVAL 0 SECOND", true},
 	} {
 		row, err := oneValue(ctx, c, "SELECT "+tc.expr, false)

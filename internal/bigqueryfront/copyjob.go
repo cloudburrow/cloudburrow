@@ -122,6 +122,12 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		invalid("Required parameter is missing: a copy job needs sourceTable or sourceTables, and destinationTable.")
 		return
 	}
+	for _, src := range srcs { // #1218
+		if why := f.protectedRead(r, project, src.DatasetID, src.TableID, "a copy job"); why != "" {
+			writeError(w, http.StatusNotImplemented, "notImplemented", why)
+			return
+		}
+	}
 	write := strings.ToUpper(c.WriteDisposition)
 	if write == "" {
 		write = "WRITE_EMPTY"

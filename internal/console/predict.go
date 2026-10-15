@@ -21,8 +21,8 @@ import (
 // What CloudBurrow serves for prediction is the custom container contract
 // (docs/prediction.md): a container that reads AIP_HTTP_PORT,
 // AIP_HEALTH_ROUTE and AIP_PREDICT_ROUTE, deployed as a Cloud Run service onto
-// Knative. There is no Vertex Endpoint resource and no PredictionService, so
-// the screen offers neither — it lists the deployed contract containers and
+// Knative. There is no Vertex Endpoint resource, and PredictionService is
+// served only on the local AI endpoint (#1193), so the screen offers neither — it lists the deployed contract containers and
 // POSTs {"instances": [...], "parameters": {...}} to one's predict route,
 // through the cluster ingress, exactly as `curl` in docs/prediction.md does.
 //
@@ -125,7 +125,8 @@ const predictDeploy = "Deploy a container that honours the Vertex AI custom pred
 // on the screen rather than silently absent.
 var predictNotServed = []string{
 	"Vertex AI Endpoint and DeployedModel resources (the container is called directly)",
-	"PredictionService.Predict, RawPredict, StreamingPredict and Explain",
+	"PredictionService StreamingPredict, Explain and the other streaming methods (Predict and RawPredict " +
+		"are served over gRPC on the local AI endpoint, for the official aiplatform client)",
 	"Model Registry upload and versions",
 	"Batch prediction",
 }

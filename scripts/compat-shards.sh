@@ -112,7 +112,9 @@ compat_shard() {
       # here. BigQuery for the revision that is refused by the validating
       # front at its injected CLOUDBURROW_BIGQUERY_ENDPOINT (#874, #902), as
       # RUN_BIGQUERY, with the one project its emulator serves.
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,BIGQUERY_PROJECT ;;
+      # PREDICTION: the local AI endpoint, which Cloud Run starts, serving
+      # PredictionService for the custom prediction containers (#1193).
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,BIGQUERY_PROJECT,PREDICTION ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.

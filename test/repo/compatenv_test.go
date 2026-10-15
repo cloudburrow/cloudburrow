@@ -190,7 +190,8 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 	write("credentials.json", "{}\n")
 	write("kubeconfig", "apiVersion: v1\n")
 	write("admin-token", "fixture-admin-token\n")
-	write("up.log", "starting\nlocal AI:  http://127.0.0.1:9020\n  model:   m\n")
+	// A detached instance stamps each line of its log (#1193).
+	write("up.log", "starting\n2026-10-15T10:31:31.107839Z local AI:  http://127.0.0.1:9020\n  model:   m\n")
 	write("up.json", `{"pid": 1, "control": "127.0.0.1:50001", "log": "`+filepath.Join(dir, "up.log")+`",
   "endpoints": {"control": "127.0.0.1:50001", "metadata": "127.0.0.1:9005", "console": "127.0.0.1:9090",
     "tasks": "127.0.0.1:9003", "secretmanager": "127.0.0.1:9006", "run": "127.0.0.1:50002"}}`)
@@ -311,6 +312,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"BIGQUERY_STORAGE": "127.0.0.1:9015",
 		"BIGQUERY_PROJECT": "ct-local",
 		"LOCALAI":          "127.0.0.1:9020",
+		"PREDICTION":       "127.0.0.1:9020",
 		"GCLOUD":           "/opt/gcloud/bin/gcloud",
 		"TOFU":             "/opt/tofu",
 	}

@@ -4,10 +4,12 @@ go 1.26.0
 
 require (
 	cloud.google.com/go v0.123.0
+	cloud.google.com/go/aiplatform v1.127.0
 	cloud.google.com/go/auth v0.24.1
 	cloud.google.com/go/bigquery v1.85.0
 	cloud.google.com/go/bigtable v1.58.0
 	cloud.google.com/go/cloudtasks v1.20.0
+	cloud.google.com/go/compute/metadata v0.9.0
 	cloud.google.com/go/datastore v1.27.0
 	cloud.google.com/go/firestore v1.26.0
 	cloud.google.com/go/iam v1.14.0
@@ -60,7 +62,6 @@ require (
 require (
 	cel.dev/expr v0.25.2 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
-	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/monitoring v1.30.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/GoogleCloudPlatform/grpc-gcp-go/grpcgcp v1.6.0 // indirect

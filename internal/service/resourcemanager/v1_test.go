@@ -82,8 +82,17 @@ func TestV1ProjectsThroughTheOfficialClient(t *testing.T) {
 	if _, err := c.Projects.Delete("v1-made-one").Context(ctx).Do(); err != nil {
 		t.Fatalf("v1 delete: %v", err)
 	}
-	if _, err := c.Projects.Get("v1-made-one").Context(ctx).Do(); code(err) != http.StatusNotFound {
-		t.Errorf("v1 get after delete = %v, want 404", err)
+	if p, err := c.Projects.Get("v1-made-one").Context(ctx).Do(); err != nil || p.LifecycleState != "DELETE_REQUESTED" {
+		t.Errorf("v1 get after delete = %+v, %v; want DELETE_REQUESTED", p, err)
+	}
+	if l, err := c.Projects.List().Filter("id:v1-made-one").Context(ctx).Do(); err != nil || len(l.Projects) != 0 {
+		t.Errorf("v1 list without a state term = %+v, %v; want the deleted project left out", l, err)
+	}
+	if _, err := c.Projects.Undelete("v1-made-one", &crmv1.UndeleteProjectRequest{}).Context(ctx).Do(); err != nil {
+		t.Fatalf("v1 undelete: %v", err)
+	}
+	if p, err := c.Projects.Get("v1-made-one").Context(ctx).Do(); err != nil || p.LifecycleState != "ACTIVE" {
+		t.Errorf("v1 get after undelete = %+v, %v; want ACTIVE", p, err)
 	}
 }
 

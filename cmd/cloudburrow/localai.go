@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/embedding"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
@@ -64,6 +65,29 @@ func buildLocalAI(cfg config.Config) (*vertexai.Server, error) {
 		attachEmbedder(srv, cfg)
 	}
 	return srv, nil
+}
+
+// withPredictionEndpoints makes srv serve custom prediction endpoints when
+// Cloud Run is enabled, starting an endpoint with no model if srv is nil.
+// Generation and embeddings on it answer as they do with nothing configured.
+func withPredictionEndpoints(cfg config.Config, srv *vertexai.Server, run interface{ Addr() string }, ingress func() string) *vertexai.Server {
+	enabled := false
+	for _, s := range cfg.EnabledServices() {
+		enabled = enabled || s == config.ServiceRun
+	}
+	if !enabled {
+		return srv
+	}
+	if srv == nil {
+		srv = vertexai.NewServerOn(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.LocalAI)), nil)
+	}
+	srv.SetEndpoints(endpointResolver{src: predictionSource{run: runProvider{
+		kubeconfig:     cfg.KubeconfigPath(),
+		namespace:      runadapter.WorkloadNamespace,
+		runAddr:        runAddrOf(run),
+		defaultProject: cfg.DefaultProject(),
+	}}}, ingress, nil)
+	return srv
 }
 
 // embeddingCache is where pinned embedding models are kept.
@@ -140,6 +164,10 @@ func printLocalAI(w io.Writer, srv *vertexai.Server, cfg config.Config) {
 	if cfg.LocalAI.Embeddings {
 		fmt.Fprintf(w, "  embeddings: POST /v1/projects/{p}/locations/{l}/publishers/google/models/%s:predict\n", localai.EmbeddingGemmaONNXID)
 		fmt.Fprintf(w, "              a COMMUNITY ONNX int8 conversion, NOT an official Google artifact\n")
+	}
+	if srv.ServesEndpoints() {
+		fmt.Fprintf(w, "  custom prediction: PredictionService (gRPC) and POST /v1/projects/{p}/locations/{l}/endpoints/{service}:predict\n")
+		fmt.Fprintf(w, "              {service} is a deployed Cloud Run prediction container; see docs/prediction.md\n")
 	}
 	fmt.Fprintf(w, "  generation options are refused rather than ignored; see docs/generation.md\n")
 }

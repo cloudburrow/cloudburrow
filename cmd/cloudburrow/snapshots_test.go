@@ -105,7 +105,7 @@ func TestStateRoundTripsTasksSecretsAndProjects(t *testing.T) {
 			if _, err := ss.AddVersion("snap-proj", "api-key", []byte("v3")); err != nil {
 				t.Fatal(err)
 			}
-			if err := reg.Delete("snap-proj"); err != nil {
+			if _, err := reg.Delete("snap-proj"); err != nil {
 				t.Fatal(err)
 			}
 
