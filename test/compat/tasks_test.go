@@ -283,9 +283,44 @@ func TestTasksRefusesWhatItWouldDrop(t *testing.T) {
 		StackdriverLoggingConfig: &taskspb.StackdriverLoggingConfig{SamplingRatio: 1}}}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("CreateQueue with stackdriver_logging_config = %v; want Unimplemented", err)
 	}
-	it := c.ListQueues(ctx, &taskspb.ListQueuesRequest{Parent: location(h), Filter: "state: PAUSED"})
+	it := c.ListQueues(ctx, &taskspb.ListQueuesRequest{Parent: location(h), Filter: "name: compat"})
 	if _, err := it.Next(); status.Code(err) != codes.Unimplemented {
-		t.Errorf("ListQueues with a filter = %v; want Unimplemented", err)
+		t.Errorf("ListQueues with a filter on name = %v; want Unimplemented", err)
+	}
+}
+
+// TestTasksListQueuesFiltersByState (#1222): ListQueues honours a filter on
+// state, Google's sample "state: PAUSED" among them, through the official
+// client.
+// covers: google.cloud.tasks.v2.CloudTasks/ListQueues
+func TestTasksListQueuesFiltersByState(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c := tasksClient(t, h)
+	paused := queue(t, h, c, "filter-paused")
+	running := queue(t, h, c, "filter-running")
+	if _, err := c.PauseQueue(ctx, &taskspb.PauseQueueRequest{Name: paused}); err != nil {
+		t.Fatal(err)
+	}
+	for filter, want := range map[string]string{"state: PAUSED": paused, "state != PAUSED": running, "state = RUNNING": running} {
+		got := map[string]bool{}
+		for it := c.ListQueues(ctx, &taskspb.ListQueuesRequest{Parent: location(h), Filter: filter}); ; {
+			q, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				t.Fatalf("ListQueues %q: %v", filter, err)
+			}
+			got[q.GetName()] = true
+		}
+		other := running
+		if want == running {
+			other = paused
+		}
+		if !got[want] || got[other] {
+			t.Errorf("ListQueues %q = %v; want %s and not %s", filter, got, want, other)
+		}
 	}
 }
 

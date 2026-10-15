@@ -400,14 +400,48 @@ func (g *GRPCServer) GetQueue(_ context.Context, req *taskspb.GetQueueRequest) (
 	return toProtoQueue(q), nil
 }
 
+// queueFilter parses a ListQueues filter. The reference's sample is
+// "state: PAUSED", so a comparison of state with one of its values (":", "="
+// or "!=") is honoured. Anything else is refused naming the filter, never
+// ignored: ignoring it would return every queue and read as a filter that
+// matched them all (#578).
+func queueFilter(filter string) (func(*taskspb.Queue) bool, error) {
+	f := strings.TrimSpace(filter)
+	if f == "" {
+		return func(*taskspb.Queue) bool { return true }, nil
+	}
+	refuse := apierror.Unimplemented("ListQueues filter %q is not implemented: only state (\":\", \"=\" or \"!=\" RUNNING, PAUSED or DISABLED) is; list without one and select client-side", f)
+	rest, ok := strings.CutPrefix(f, "state")
+	if !ok {
+		return nil, refuse
+	}
+	rest = strings.TrimSpace(rest)
+	var op string
+	for _, o := range []string{"!=", "=", ":"} {
+		if r, ok := strings.CutPrefix(rest, o); ok {
+			op, rest = o, strings.TrimSpace(r)
+			break
+		}
+	}
+	want := strings.Trim(rest, `"`)
+	v, known := taskspb.Queue_State_value[want]
+	if op == "" || !known || v == int32(taskspb.Queue_STATE_UNSPECIFIED) {
+		return nil, refuse
+	}
+	state := taskspb.Queue_State(v)
+	if op == "!=" {
+		return func(q *taskspb.Queue) bool { return q.GetState() != state }, nil
+	}
+	return func(q *taskspb.Queue) bool { return q.GetState() == state }, nil
+}
+
 func (g *GRPCServer) ListQueues(_ context.Context, req *taskspb.ListQueuesRequest) (*taskspb.ListQueuesResponse, error) {
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
-	// Ignoring it would return every queue and read as a filter that
-	// matched them all (#578).
-	if f := strings.TrimSpace(req.GetFilter()); f != "" {
-		return nil, apierror.Unimplemented("ListQueues filter %q is not implemented; list without one and select client-side", f)
+	keep, err := queueFilter(req.GetFilter())
+	if err != nil {
+		return nil, err
 	}
 	queues, err := g.store.ListQueues(req.GetParent())
 	if err != nil {
@@ -416,6 +450,9 @@ func (g *GRPCServer) ListQueues(_ context.Context, req *taskspb.ListQueuesReques
 	byName := map[string]Queue{}
 	names := make([]string, 0, len(queues))
 	for _, q := range queues {
+		if !keep(toProtoQueue(q)) {
+			continue
+		}
 		byName[q.Name] = q
 		names = append(names, q.Name)
 	}

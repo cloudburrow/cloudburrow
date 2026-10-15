@@ -81,6 +81,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
+          "test/compat/tasks_test.go:296 TestTasksListQueuesFiltersByState",
           "test/compat/tasks_test.go:93 TestTasksListQueues"
         ]
       },
@@ -103,7 +104,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/PurgeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:296 TestTasksPurgeQueue"
+          "test/compat/tasks_test.go:331 TestTasksPurgeQueue"
         ]
       },
       {
