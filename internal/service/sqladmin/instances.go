@@ -225,6 +225,18 @@ func (s *Server) upInstanceError(e Engine) error {
 	return Errorf(http.StatusBadRequest, "The instance %s cannot be changed or deleted through the API: "+upInstanceWhy, e.Instance(), svc)
 }
 
+// haWhy is why high availability is not served (#1330). A Cloud SQL HA
+// instance is one server whose disk is replicated synchronously to a
+// standby in a second zone; on failover the standby takes the same
+// connection name and IP address with no committed transaction lost.
+// CloudBurrow's replicas are asynchronous streaming or binary log
+// replicas on their own kind node, so a standby built from one could lose
+// the transactions not yet replicated when it is promoted, and there is
+// no second zone to fail over to: it would not be faithful.
+const haWhy = "high availability is a standby in a second zone, kept in step synchronously, that takes over the same " +
+	"connection name and IP address with no committed transaction lost; CloudBurrow runs one zone, and its replicas " +
+	"replicate asynchronously, so a failover could lose transactions. Use ZONAL instances and read replicas (docs/cloudsql.md)"
+
 // instanceBody is the part of DatabaseInstance a write reads.
 type instanceBody struct {
 	raw map[string]any // settings, as sent
@@ -255,11 +267,17 @@ type instanceBody struct {
 
 func (b instanceBody) unsupported() error {
 	if b.FailoverReplica != nil {
-		return unimplemented("failover replicas", "high availability needs a standby server and failover, which CloudBurrow does not run")
+		return unimplemented("failover replicas", haWhy)
 	}
 	if b.Settings != nil {
 		if b.Settings.AvailabilityType == "REGIONAL" {
-			return unimplemented("availabilityType REGIONAL", "high availability needs a standby server and failover, which CloudBurrow does not run")
+			return unimplemented("availabilityType REGIONAL", haWhy)
+		}
+		if bc, ok := b.raw["backupConfiguration"].(map[string]any); ok {
+			ed, _ := b.raw["edition"].(string)
+			if err := retentionInvalid(bc, ed); err != nil {
+				return err
+			}
 		}
 		if bc := b.Settings.BackupConfiguration; bc != nil {
 			if bc.StartTime != "" {
@@ -685,6 +703,9 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 		}
 	}
 	bc["kind"], bc["enabled"] = "sql#backupConfiguration", spec.BackupEnabled
+	if _, ok := bc["transactionLogRetentionDays"]; !ok {
+		bc["transactionLogRetentionDays"] = transactionLogDays(spec)
+	}
 	if _, ok := bc["backupRetentionSettings"]; !ok {
 		bc["backupRetentionSettings"] = map[string]any{"retentionUnit": "COUNT", "retainedBackups": defaultRetained}
 	}

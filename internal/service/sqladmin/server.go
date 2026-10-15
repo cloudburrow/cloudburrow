@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -111,6 +112,9 @@ type Server struct {
 	// backups are the backup runs, nil unless EnableBackups was called.
 	backups  *backupStore
 	stopAuto chan struct{}
+	// clockOffset is how far Advance has moved the retention clock past
+	// the real one, in nanoseconds.
+	clockOffset atomic.Int64
 	// Observe, if set, is called once per request with the method name and
 	// the answer's status.
 	Observe func(method string, code int)
@@ -212,6 +216,16 @@ func (s *Server) createdNamed(project, name string) *created {
 // ServeHTTP routes /v1/... and /sql/v1beta4/..., which differ only in prefix.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
+	if path == ClockPath {
+		out, err := s.serveClock(r)
+		if err != nil {
+			s.fail(w, "", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+		_ = json.NewEncoder(w).Encode(out)
+		return
+	}
 	var prefix string
 	switch {
 	case strings.HasPrefix(path, "/v1/"):
@@ -261,7 +275,9 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 // verbWhy is why an instance method other than restart is not served.
 func verbWhy(verb string) string {
 	switch verb {
-	case "failover", "demoteMaster", "demote", "switchover", "reencrypt":
+	case "failover":
+		return haWhy
+	case "demoteMaster", "demote", "switchover", "reencrypt":
 		return "failover replicas, high availability and external primaries are not served; read replicas are (docs/cloudsql.md)"
 	case "pointInTimeRestore":
 		return "it restores from a Backup and DR Service datasource, which CloudBurrow does not serve; " +
@@ -637,7 +653,7 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		}
 		if u.Type != "" && u.Type != "BUILT_IN" {
 			return "sql.users.insert", nil, unimplemented("users of type "+u.Type,
-				"IAM database authentication needs Google's IAM, so only BUILT_IN users are served")
+				iamWhy+", so only BUILT_IN users are served")
 		}
 		if err := e.CreateUser(ctx, User{Name: u.Name, Host: u.Host}, u.Password); err != nil {
 			return "sql.users.insert", nil, err
