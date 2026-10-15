@@ -71,6 +71,12 @@ func TestBytesParameters(t *testing.T) {
 		{"a RANGE in a STRUCT", "SELECT @s", "NAMED",
 			`[{"name":"s","parameterType":{"type":"STRUCT","structTypes":[{"name":"r","type":{"type":"RANGE","rangeElementType":{"type":"DATE"}}}]},` +
 				`"parameterValue":{"structValues":{}}}]`, http.StatusNotImplemented, "", ""},
+		{"a top-level RANGE (#1111)", "SELECT @r", "NAMED",
+			`[{"name":"r","parameterType":{"type":"RANGE","rangeElementType":{"type":"DATE"}},` +
+				`"parameterValue":{"rangeValue":{"start":{"value":"2020-01-01"},"end":{"value":"2020-02-01"}}}}]`, http.StatusNotImplemented, "", ""},
+		{"an ARRAY of RANGE (#1111)", "SELECT @r", "NAMED",
+			`[{"name":"r","parameterType":{"type":"ARRAY","arrayType":{"type":"RANGE","rangeElementType":{"type":"DATE"}}},` +
+				`"parameterValue":{"arrayValues":[]}}]`, http.StatusNotImplemented, "", ""},
 		{"not base64 in a STRUCT", "SELECT @s", "NAMED",
 			`[{"name":"s","parameterType":{"type":"STRUCT","structTypes":[{"name":"x","type":{"type":"BYTES"}}]},` +
 				`"parameterValue":{"structValues":{"x":{"value":"not base64!"}}}}]`, http.StatusBadRequest, "", ""},
