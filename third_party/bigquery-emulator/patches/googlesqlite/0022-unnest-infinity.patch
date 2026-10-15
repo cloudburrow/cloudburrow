@@ -1,0 +1,114 @@
+CloudBurrow patch 22 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1204). Applies after patch 0021.
+
+The bug: UNNEST of an array holding an infinite FLOAT64, such as
+SELECT x FROM UNNEST([CAST('inf' AS FLOAT64)]) AS x, failed "failed to scan
+rows: json: unsupported value: +Inf". UNNEST reads the array through
+json_each(googlesqlite_decode_array(...)), and googlesqlite_decode_array
+wrote each element's EncodeValue, a bare float64 for a FLOAT64, into JSON,
+which has no infinity. Patch 0004 already puts an infinity inside an ARRAY or
+a STRUCT in the value envelope (encodeElement); the patch exports that as
+value.EncodeElement and uses it in googlesqlite_decode_array, so the element
+reaches json_each as the envelope and is read back as the infinity. BigQuery
+returns the row, Infinity. inf_unnest_test.go fails without the patch and
+passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/inf_unnest_test.go
+@@ -0,0 +1,57 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"math"
++	"testing"
++)
++
++// TestUnnestInfinity is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1204): UNNEST of an array holding an infinite
++// FLOAT64 failed "json: unsupported value: +Inf", because the array was
++// re-encoded as JSON, which has no infinity, on its way to json_each.
++// BigQuery returns the infinities.
++func TestUnnestInfinity(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=unnest_inf")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	for _, tc := range []struct {
++		q    string
++		want []float64
++	}{
++		{"SELECT x FROM UNNEST([CAST('inf' AS FLOAT64)]) AS x", []float64{math.Inf(1)}},
++		{"SELECT x FROM UNNEST([CAST('-inf' AS FLOAT64), 1.5, IEEE_DIVIDE(1, 0)]) AS x WITH OFFSET o ORDER BY o", []float64{math.Inf(-1), 1.5, math.Inf(1)}},
++		{"SELECT x FROM UNNEST([CAST('inf' AS FLOAT64), 2.0]) AS x WHERE x > 3", []float64{math.Inf(1)}},
++		{"SELECT MAX(x) FROM UNNEST([CAST('inf' AS FLOAT64), 2.0]) AS x", []float64{math.Inf(1)}},
++		{"SELECT s.f FROM UNNEST([STRUCT(CAST('-inf' AS FLOAT64) AS f)]) AS s", []float64{math.Inf(-1)}},
++	} {
++		rows, err := db.QueryContext(ctx, tc.q)
++		if err != nil {
++			t.Fatalf("%s: %v", tc.q, err)
++		}
++		var got []float64
++		for rows.Next() {
++			var f float64
++			if err := rows.Scan(&f); err != nil {
++				t.Fatalf("%s: Scan: %v", tc.q, err)
++			}
++			got = append(got, f)
++		}
++		if err := rows.Err(); err != nil {
++			t.Fatalf("%s: %v", tc.q, err)
++		}
++		rows.Close()
++		if len(got) != len(tc.want) {
++			t.Fatalf("%s = %v, want %v", tc.q, got, tc.want)
++		}
++		for i := range got {
++			if got[i] != tc.want[i] {
++				t.Errorf("%s = %v, want %v", tc.q, got, tc.want)
++			}
++		}
++	}
++}
+--- a/internal/function_register.go
++++ b/internal/function_register.go
+@@ -152,8 +152,10 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
+ 			return "", err
+ 		}
+ 		encodedValues := make([]any, 0, len(array.Values))
+-		for _, value := range array.Values {
+-			v, err := EncodeValue(value)
++		for _, elem := range array.Values {
++			// CloudBurrow patch (cloudburrow/cloudburrow#1204): an infinite
++			// FLOAT64 goes in the envelope, as JSON has no infinity.
++			v, err := value.EncodeElement(elem)
+ 			if err != nil {
+ 				return "", err
+ 			}
+--- a/internal/value/encoder.go
++++ b/internal/value/encoder.go
+@@ -67,6 +67,15 @@ func encodeElement(v Value) (any, error) {
+ 	return EncodeValue(v)
+ }
+ 
++// EncodeElement is encodeElement for callers outside this package that write
++// a value's encoding into JSON. CloudBurrow patch
++// (cloudburrow/cloudburrow#1204): googlesqlite_decode_array, which UNNEST
++// reads through json_each, wrote each element's EncodeValue into JSON, and an
++// infinite FLOAT64 failed "json: unsupported value: +Inf".
++func EncodeElement(v Value) (any, error) {
++	return encodeElement(v)
++}
++
+ // ValueFromGoValue converts a plain Go value (the kind a SQL driver
+ // hands us across the FFI boundary) into a googlesqlite Value.
+ func ValueFromGoValue(v any) (Value, error) {
