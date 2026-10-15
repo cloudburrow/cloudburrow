@@ -82,7 +82,7 @@ import (
 func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
 	if q.UseLegacySQL != nil && *q.UseLegacySQL {
 		// Legacy SQL has no DDL or scripting.
-		if f.policies.inProject(projectOf(f.base)) { // rowpolicies.go, #1218
+		if f.policiesInProject(r, projectOf(f.base)) { // rowpolicies.go, #1218
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a legacy SQL query in a project "+
 				"with row access policies, which CloudBurrow applies to GoogleSQL queries only. Nothing was run.")
 			return
