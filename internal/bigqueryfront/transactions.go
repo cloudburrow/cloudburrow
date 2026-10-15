@@ -13,50 +13,69 @@ import (
 // BigQuery: a transaction runs from BEGIN TRANSACTION to COMMIT
 // TRANSACTION or ROLLBACK TRANSACTION, or to the end of the query, which
 // rolls it back; its statements see its own writes; transactions "cannot be
-// nested"; an error inside one goes to the query's exception handler, or,
-// with none, fails the query and rolls the transaction back.
+// nested"; an error inside one goes to the query's exception handler, where
+// the transaction is still open, or, with none, fails the query and rolls
+// the transaction back. Its statements may be queries, DML, and the CREATE
+// TEMP TABLE and DROP TABLE of a TEMP table; variables and control flow
+// work inside it as anywhere in the script.
 //
 // The emulator has no sessions, and runs each request in one SQLite
 // transaction, which jobs.query rolls back whole when the request fails
-// (measured, #935). It reads only the rows of a script's last statement: a
-// SELECT 1/0 before the last statement did not fail the script (measured).
-// So the front carries out the subset it can make exact, a transaction whose
-// statements are queries and DML (SELECT, WITH, INSERT, UPDATE, DELETE,
-// MERGE, TRUNCATE TABLE), in the same list of statements as its BEGIN and
-// its COMMIT or ROLLBACK:
+// (measured, #935). So the front keeps the transaction itself, from the
+// BEGIN TRANSACTION the script runs to the COMMIT or ROLLBACK it runs, in
+// whatever block either is (txnState). The interpreter (scriptflow.go)
+// carries out DECLARE, SET, blocks, CALL and EXECUTE IMMEDIATE inside it as
+// it does elsewhere; what changes is how a statement is sent (sendInTxn):
 //
-//   - Each statement is first run as a probe, a request of the
-//     transaction's earlier DML, then the statement, then a statement that
-//     fails with probeSentinel, so the emulator rolls the whole request back.
-//     A query is run as a scalar subquery that reads every column of every
-//     row before the probe fails, so its errors are seen. A probe that fails
-//     with another error is the statement's failure: the transaction fails
-//     there, with nothing of it kept.
-//   - At COMMIT, every DML statement is sent as one request, BEGIN
+//   - A statement that changes data (INSERT, UPDATE, DELETE, MERGE,
+//     TRUNCATE TABLE) or makes a TEMP table is first run as a probe: a
+//     request of the transaction's earlier such statements, then the
+//     statement, then a statement that fails with probeSentinel, so the
+//     emulator rolls the whole request back. A probe that fails with another
+//     error is the statement's failure; else the statement is kept, to be
+//     applied at COMMIT.
+//   - A query that reads a table is a probe too, as a scalar subquery that
+//     reads every column of every row before the probe fails, so that its
+//     errors are seen; its rows are not the script's answer. A query that
+//     reads no table is sent as it is.
+//   - DROP TABLE of a TEMP table the transaction made is kept by the front
+//     alone: a TEMP table lasts only for its request, and the emulator
+//     cannot drop one inside a script (replacesTemp). A later statement of
+//     the script that names it is 501, as the probes would still see it.
+//   - At COMMIT, the kept statements are sent as one request, BEGIN
 //     TRANSACTION; ...; COMMIT TRANSACTION, which the emulator runs in one
 //     SQLite transaction: all of it is kept, or none. At ROLLBACK, or at the
 //     end of the script, nothing is sent.
 //
-// The transaction's queries' rows are not used: a COMMIT follows them, and
-// the script's answer is its last statement's. The DML is applied as one
-// atomic request at COMMIT, which is a serial order of the transaction
-// among other requests, as BigQuery's snapshot isolation allows.
+// The DML is applied as one atomic request at COMMIT, which is a serial
+// order of the transaction among other requests, as BigQuery's snapshot
+// isolation allows.
 //
-// After a statement of a transaction failed, BigQuery's transaction is
-// still open in the exception handler. Here nothing of it was kept, so in
-// that state ROLLBACK TRANSACTION ends it, a query that reads no table runs
-// (SELECT @@error.message), and COMMIT, or any statement that reads or
-// writes a table, is 501: BigQuery would see the transaction's writes.
-//
-// 501 before anything runs: a DECLARE, SET, control-flow block, CALL,
-// EXECUTE IMMEDIATE, TEMP table or function, or DDL inside a transaction; a
-// COMMIT with no BEGIN TRANSACTION before it in its list; a transaction
-// with no COMMIT or ROLLBACK in its list other than at the script's top
-// level. A ROLLBACK with no transaction open is 501 when it runs: BigQuery's
-// documentation does not say what it does.
+// 501:
+//   - an expression the interpreter evaluates (a DECLARE's DEFAULT, a SET,
+//     a condition, a FOR's query, EXECUTE IMMEDIATE ... INTO) that reads a
+//     table, after the transaction changed data or made a TEMP table: its
+//     value would have to come back from a request that is rolled back;
+//   - a TEMP table the transaction made and did not drop, once a statement
+//     after the transaction names it; making a TEMP table of a name the
+//     script made before;
+//   - DDL other than the above, a TEMP function, or CREATE or DROP
+//     PROCEDURE inside a transaction, and a transaction inside a procedure;
+//   - COMMIT or ROLLBACK with no transaction open, which BigQuery's
+//     documentation does not describe.
 
 // probeSentinel is the error a probe ends with, to be rolled back.
 const probeSentinel = "cloudburrow: transaction probe, rolled back"
+
+// txnState is the transaction a script has open.
+type txnState struct {
+	// kept: the statements to apply at COMMIT, in order; dml whether one
+	// changes data.
+	kept []string
+	dml  bool
+	// temps: the TEMP tables it made, lower-case, true until dropped.
+	temps map[string]bool
+}
 
 type txnKey struct{}
 
@@ -102,32 +121,91 @@ func txnStatementKind(t []token) string {
 	return ""
 }
 
-// unsupportedTransactions returns why the transactions in nodes, a list of
-// statements (top at the script's top level), cannot be carried out, or "".
-func unsupportedTransactions(nodes []scriptNode, top bool) string {
-	for i := 0; i < len(nodes); i++ {
-		n := nodes[i]
-		if isTxnNode(n, "COMMIT") {
-			return "a COMMIT TRANSACTION with no BEGIN TRANSACTION before it in its block. CloudBurrow carries out a transaction only when its BEGIN and its COMMIT or ROLLBACK are statements of the same block."
+// dropsTable returns the name a DROP TABLE [IF EXISTS] name statement
+// drops, if it is one name (tempName), and whether it has IF EXISTS.
+func dropsTable(t []token) (name string, ifExists, ok bool) {
+	if len(t) < 3 || !t[0].is("DROP") || !t[1].is("TABLE") {
+		return "", false, false
+	}
+	i := 2
+	if i+1 < len(t) && t[i].is("IF") && t[i+1].is("EXISTS") {
+		i, ifExists = i+2, true
+	}
+	parts, n := path(t, i)
+	if n != len(t) && !(n == len(t)-1 && t[n].punct(";")) {
+		return "", false, false
+	}
+	name, ok = tempName(parts)
+	return strings.ToLower(name), ifExists, ok
+}
+
+// unsupportedInTxn returns why a statement cannot be in a transaction
+// here, or "" (above).
+func unsupportedInTxn(n scriptNode) string {
+	switch n.kind {
+	case nodeCreateProc, nodeDropProc:
+		return "CREATE PROCEDURE or DROP PROCEDURE inside a transaction."
+	case nodeStmt:
+	default:
+		return ""
+	}
+	t := n.toks
+	if len(t) == 0 {
+		return ""
+	}
+	if _, ok := createsTemp(t); ok {
+		return ""
+	}
+	if _, _, ok := dropsTable(t); ok {
+		return ""
+	}
+	switch {
+	case t[0].is("CREATE"):
+		for _, x := range t[1:min(len(t), 6)] {
+			if x.is("FUNCTION") {
+				return "a CREATE FUNCTION inside a transaction. A TEMP function would last only for the request that made it, and the front sends the transaction's statements as requests of their own."
+			}
 		}
-		if !isTxnNode(n, "BEGIN") {
+		return "DDL other than CREATE TEMP TABLE, or DROP TABLE of a TEMP table, inside a transaction."
+	case t[0].is("ALTER") || t[0].is("DROP") || t[0].is("GRANT") || t[0].is("REVOKE") || t[0].is("EXPORT") || t[0].is("LOAD"):
+		return "DDL other than CREATE TEMP TABLE, or DROP TABLE of a TEMP table, inside a transaction."
+	}
+	return ""
+}
+
+// unsupportedTransactions returns why the transactions in nodes, a list of
+// statements, cannot be carried out, or "": what follows a BEGIN
+// TRANSACTION in its list, up to its COMMIT or ROLLBACK, and the blocks in
+// that, is checked (unsupportedInTxn). top is unused: a transaction may end
+// in any block.
+func unsupportedTransactions(nodes []scriptNode, top bool) string {
+	_ = top
+	var inside func([]scriptNode) string
+	inside = func(ns []scriptNode) string {
+		for _, n := range ns {
+			if msg := unsupportedInTxn(n); msg != "" {
+				return msg
+			}
+			for _, b := range append([][]scriptNode{n.body, n.els, n.handler}, n.bodies...) {
+				if msg := inside(b); msg != "" {
+					return msg
+				}
+			}
+		}
+		return ""
+	}
+	for i := 0; i < len(nodes); i++ {
+		if !isTxnNode(nodes[i], "BEGIN") {
 			continue
 		}
 		j := i + 1
 		for ; j < len(nodes); j++ {
-			m := nodes[j]
-			if isTxnNode(m, "COMMIT") || isTxnNode(m, "ROLLBACK") {
+			if isTxnNode(nodes[j], "COMMIT") || isTxnNode(nodes[j], "ROLLBACK") {
 				break
 			}
-			if isTxnNode(m, "BEGIN") {
-				continue // nested: an error when it runs
-			}
-			if m.kind != nodeStmt || txnStatementKind(m.toks) == "" {
-				return "a statement inside a transaction other than a query or DML (SELECT, INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE) on a table that is not TEMP. CloudBurrow carries out such a transaction itself, as statements whose writes it applies at COMMIT, and cannot run a DECLARE, SET, block, CALL, EXECUTE IMMEDIATE or TEMP table or function inside one."
-			}
 		}
-		if j == len(nodes) && !top {
-			return "a transaction with no COMMIT TRANSACTION or ROLLBACK TRANSACTION in its block. CloudBurrow carries out a transaction only when its BEGIN and its COMMIT or ROLLBACK are statements of the same block."
+		if msg := inside(nodes[i+1 : j]); msg != "" {
+			return msg
 		}
 		i = j
 	}
@@ -157,122 +235,229 @@ func txnFail(msg, text string, pos int) *scriptFlow {
 	return &scriptFlow{failed: true, status: http.StatusBadRequest, body: body, msg: msg, text: text, pos: pos, hasPos: true}
 }
 
-// transaction carries out the transaction whose BEGIN TRANSACTION is
-// nodes[i] (above). It returns the index of its last node, the COMMIT or
-// ROLLBACK, and a flow that ends the list early.
-func (s *scriptRun) transaction(nodes []scriptNode, i int) (int, *scriptFlow) {
-	begin := nodes[i]
-	if s.txnOpen {
-		return i, txnFail("Transaction cannot be nested: BEGIN TRANSACTION inside a transaction.", s.text(begin.toks), begin.toks[0].pos)
+// beginTransaction carries out BEGIN TRANSACTION.
+func (s *scriptRun) beginTransaction(n scriptNode) *scriptFlow {
+	if s.txn != nil {
+		return txnFail("Transaction cannot be nested: BEGIN TRANSACTION inside a transaction.", s.text(n.toks), n.toks[0].pos)
 	}
 	if flow := s.flush(); flow != nil {
-		return i, flow
+		return flow
 	}
-	var dml []string
-	j := i + 1
-	commit := false
-	for ; j < len(nodes); j++ {
-		n := nodes[j]
-		if isTxnNode(n, "COMMIT") || isTxnNode(n, "ROLLBACK") {
-			commit = isTxnNode(n, "COMMIT")
-			break
-		}
-		if !s.step() {
-			return j, &scriptFlow{}
-		}
-		text := s.text(n.toks)
-		if s.notImpl != "" {
-			return j, &scriptFlow{}
-		}
-		pos := n.toks[0].pos
-		if isTxnNode(n, "BEGIN") {
-			s.txnOpen = true
-			return j, txnFail("Transaction cannot be nested: BEGIN TRANSACTION inside a transaction.", text, pos)
-		}
-		kind := txnStatementKind(n.toks)
-		probe := "BEGIN TRANSACTION;\n"
-		for _, d := range dml {
-			probe += d + ";\n"
-		}
-		sentinel := "SELECT ERROR(" + sqlString(probeSentinel) + ")"
-		if kind == "query" {
-			probe += "SELECT IF((SELECT COUNT(TO_JSON_STRING(cloudburrow_row)) FROM (\n" + text + "\n) AS cloudburrow_row) >= 0, ERROR(" +
-				sqlString(probeSentinel) + "), ERROR(" + sqlString(probeSentinel) + "))"
-		} else {
-			probe += text + ";\n" + sentinel
-		}
-		_, flow := s.sendTxn(probe)
-		if flow == nil {
-			// A probe never succeeds: it ends with an error.
-			s.notImpl = "Not implemented here: a probe of a statement inside a transaction was not rolled back. Its writes may have been kept."
-			return j, &scriptFlow{}
-		}
-		if !flow.failed {
-			return j, flow
-		}
-		if !strings.Contains(flow.msg, probeSentinel) {
-			// The statement failed: nothing of the transaction was kept,
-			// and the transaction stays open, for a handler to end.
-			s.txnOpen = true
-			flow.text, flow.pos, flow.hasPos = text, pos, true
-			return j, flow
-		}
-		if kind == "dml" {
-			dml = append(dml, text)
-		}
+	s.txn = &txnState{temps: map[string]bool{}}
+	s.last, s.lastQuery = nil, ""
+	return nil
+}
+
+// endTransaction carries out a COMMIT or ROLLBACK.
+func (s *scriptRun) endTransaction(n scriptNode) *scriptFlow {
+	if s.txn == nil {
+		s.notImpl = "Not implemented here: " + strings.ToUpper(n.toks[0].text) + " TRANSACTION with no transaction open, which BigQuery's documentation does not describe. What the statements before it did was kept."
+		return &scriptFlow{}
 	}
-	if commit && len(dml) > 0 {
-		if _, flow := s.sendTxn("BEGIN TRANSACTION;\n" + strings.Join(dml, ";\n") + ";\nCOMMIT TRANSACTION"); flow != nil {
-			if flow.failed {
-				end := nodes[j]
-				flow.text, flow.pos, flow.hasPos = s.text(end.toks), end.toks[0].pos, true
-			}
-			return j, flow
-		}
-	}
+	txn := s.txn
+	s.txn = nil
 	// COMMIT and ROLLBACK have no rows: the script's last statement does
 	// not answer with the transaction's.
 	s.last, s.lastQuery = nil, ""
-	return j, nil
-}
-
-// endTransaction carries out a COMMIT or ROLLBACK that ends no
-// transaction() started in its turn: the transaction a failed statement
-// left open (above), or none.
-func (s *scriptRun) endTransaction(n scriptNode) *scriptFlow {
-	switch {
-	case s.txnOpen && isTxnNode(n, "ROLLBACK"):
-		if flow := s.flush(); flow != nil {
-			return flow
+	for name, live := range txn.temps {
+		if live {
+			// BigQuery keeps it for the rest of the script; here it
+			// lasted only for the transaction's requests.
+			if s.goneTemps == nil {
+				s.goneTemps = map[string]bool{}
+			}
+			s.goneTemps[name] = true
 		}
-		s.txnOpen = false
-		s.last, s.lastQuery = nil, ""
-		return nil
-	case s.txnOpen:
-		s.notImpl = "Not implemented here: COMMIT TRANSACTION after a statement of the transaction failed. BigQuery would commit what the transaction's statements before the failure did, but CloudBurrow ran them only as probes it rolled back. What the statements before the transaction did was kept."
-	default:
-		s.notImpl = "Not implemented here: " + strings.ToUpper(n.toks[0].text) + " TRANSACTION with no transaction open, which BigQuery's documentation does not describe. What the statements before it did was kept."
 	}
-	return &scriptFlow{}
+	if !isTxnNode(n, "COMMIT") || !txn.dml {
+		return nil
+	}
+	if _, flow := s.sendTxn("BEGIN TRANSACTION;\n" + strings.Join(txn.kept, ";\n") + ";\nCOMMIT TRANSACTION"); flow != nil {
+		if flow.failed {
+			flow.text, flow.pos, flow.hasPos = s.text(n.toks), n.toks[0].pos, true
+		}
+		return flow
+	}
+	return nil
 }
 
-// readsInFailedTxn reports whether text, sent while a failed transaction
-// is open, reads or writes a table, and refuses it (above).
-func (s *scriptRun) readsInFailedTxn(text string) bool {
-	if !s.txnOpen {
+// namesTemp reports whether toks name one of names, as a word or a quoted
+// identifier.
+func namesTemp(toks []token, names map[string]bool, want bool) bool {
+	for _, t := range toks {
+		if t.kind != tokWord && t.kind != tokQuoted {
+			continue
+		}
+		if v, ok := names[strings.ToLower(t.text)]; ok && v == want {
+			return true
+		}
+	}
+	return false
+}
+
+// readsTable reports whether a statement or expression may read a table:
+// a FROM or JOIN that is not followed by a subquery or UNNEST, other than
+// EXTRACT's, TRIM's and IS DISTINCT FROM's; a comma after a FROM's
+// subquery; or TABLE.
+func readsTable(toks []token) bool {
+	var calls []string
+	fromSub := map[int]bool{} // depths of the parentheses a FROM opened
+	sub := func(i int) bool {
+		return i+1 < len(toks) && (toks[i+1].punct("(") || toks[i+1].is("UNNEST"))
+	}
+	for i, t := range toks {
+		switch {
+		case t.punct("("):
+			name := ""
+			if i > 0 && toks[i-1].kind == tokWord {
+				name = strings.ToUpper(toks[i-1].text)
+			}
+			if i > 0 && (toks[i-1].is("FROM") || toks[i-1].is("JOIN")) {
+				fromSub[len(calls)] = true
+			}
+			calls = append(calls, name)
+		case t.punct(")"):
+			if len(calls) > 0 {
+				calls = calls[:len(calls)-1]
+			}
+			if fromSub[len(calls)] {
+				delete(fromSub, len(calls))
+				if i+1 < len(toks) && toks[i+1].punct(",") {
+					return true
+				}
+			}
+		case t.is("TABLE"):
+			return true
+		case t.is("JOIN"):
+			if !sub(i) {
+				return true
+			}
+		case t.is("FROM"):
+			if i > 0 && toks[i-1].is("DISTINCT") {
+				continue
+			}
+			if len(calls) > 0 && (calls[len(calls)-1] == "EXTRACT" || calls[len(calls)-1] == "TRIM") {
+				continue
+			}
+			if !sub(i) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// goneTemp refuses text that names a TEMP table a transaction made and
+// left (endTransaction).
+func (s *scriptRun) goneTemp(toks []token) bool {
+	if len(s.goneTemps) == 0 || !namesTemp(toks, s.goneTemps, true) {
 		return false
 	}
+	if s.notImpl == "" {
+		s.notImpl = "Not implemented here: a statement that names a TEMP table made inside a transaction, after the transaction. BigQuery keeps it for the rest of the script, but CloudBurrow keeps it only for the transaction's own requests. What the statements before it did was kept."
+	}
+	return true
+}
+
+// readInTxn checks q, a query whose value the interpreter needs, inside a
+// transaction: it is sent as it is unless it reads what the transaction
+// changed, which is 501 (above). ok is false when refused.
+func (s *scriptRun) readInTxn(q string) bool {
+	toks, _ := lex(q)
+	if s.goneTemp(toks) {
+		return false
+	}
+	if s.txn == nil || len(s.txn.kept) == 0 || !readsTable(toks) && !namesTemp(toks, s.txn.temps, true) && !namesTemp(toks, s.txn.temps, false) {
+		return true
+	}
+	if s.notImpl == "" {
+		s.notImpl = "Not implemented here: an expression (a DECLARE's DEFAULT, a SET, a condition, a FOR's query or EXECUTE IMMEDIATE ... INTO) that reads a table inside a transaction after it changed data. CloudBurrow sees the transaction's writes only in requests it rolls back, which return no rows. What the statements before the transaction did was kept."
+	}
+	return false
+}
+
+// sendInTxn sends text, a statement of the open transaction (above). rec
+// is nil for a statement run as a probe, which has no rows.
+func (s *scriptRun) sendInTxn(text string) (*recorder, *scriptFlow) {
+	txn := s.txn
 	toks, _ := lex(text)
-	bad := len(toks) > 0 && txnStatementKind(toks) == "dml"
-	for _, t := range toks {
-		if t.is("FROM") || t.is("TABLE") {
-			bad = true
+	for len(toks) > 0 && toks[len(toks)-1].punct(";") {
+		toks = toks[:len(toks)-1]
+	}
+	if len(toks) == 0 {
+		return nil, nil
+	}
+	refuse := func(msg string) (*recorder, *scriptFlow) {
+		if s.notImpl == "" {
+			s.notImpl = "Not implemented here: " + msg + " What the statements before the transaction did was kept."
 		}
+		return nil, &scriptFlow{}
 	}
-	if bad && s.notImpl == "" {
-		s.notImpl = "Not implemented here: a statement that reads or writes a table after a statement of a transaction failed, before the transaction ends. BigQuery's transaction is still open there, and its statements would see its writes, but CloudBurrow ran them only as probes it rolled back. What the statements before the transaction did was kept."
+	if s.goneTemp(toks) {
+		return nil, &scriptFlow{}
 	}
-	return bad
+	if name, ifExists, ok := dropsTable(toks); ok {
+		live, made := txn.temps[name]
+		switch {
+		case made && live:
+			txn.temps[name] = false
+			return nil, nil
+		case made && ifExists:
+			return nil, nil
+		}
+		return refuse("DROP TABLE of a table other than a TEMP table the transaction made, inside a transaction.")
+	}
+	if namesTemp(toks, txn.temps, false) {
+		return refuse("a statement that names a TEMP table the transaction dropped. CloudBurrow drops it only at the transaction's end.")
+	}
+	name, temp := createsTemp(toks)
+	kind := txnStatementKind(toks)
+	switch {
+	case temp:
+		name = strings.ToLower(name)
+		if _, ok := txn.temps[name]; ok || s.goneTemps[name] {
+			return refuse("a CREATE TEMP TABLE of a name the script made a TEMP table of before.")
+		}
+		kind = "temp"
+	case isTransaction(toks):
+		return refuse("a transaction statement run by EXECUTE IMMEDIATE.")
+	case kind == "":
+		return refuse("a statement inside a transaction other than a query, DML, CREATE TEMP TABLE or DROP TABLE of a TEMP table.")
+	case kind == "query" && !readsTable(toks) && !namesTemp(toks, txn.temps, true):
+		// It reads nothing the transaction changed.
+		return s.send(text)
+	}
+	probe := "BEGIN TRANSACTION;\n"
+	for _, d := range txn.kept {
+		probe += d + ";\n"
+	}
+	sentinel := "SELECT ERROR(" + sqlString(probeSentinel) + ")"
+	if kind == "query" {
+		probe += "SELECT IF((SELECT COUNT(TO_JSON_STRING(cloudburrow_row)) FROM (\n" + text + "\n) AS cloudburrow_row) >= 0, ERROR(" +
+			sqlString(probeSentinel) + "), ERROR(" + sqlString(probeSentinel) + "))"
+	} else {
+		probe += text + ";\n" + sentinel
+	}
+	_, flow := s.sendTxn(probe)
+	if flow == nil {
+		// A probe never succeeds: it ends with an error.
+		s.notImpl = "Not implemented here: a probe of a statement inside a transaction was not rolled back. Its writes may have been kept."
+		return nil, &scriptFlow{}
+	}
+	if !flow.failed || !strings.Contains(flow.msg, probeSentinel) {
+		// The statement failed: the transaction stays open, without it.
+		if flow.failed {
+			flow.text = text
+		}
+		return nil, flow
+	}
+	switch kind {
+	case "dml":
+		txn.kept, txn.dml = append(txn.kept, text), true
+	case "temp":
+		txn.kept, txn.temps[name] = append(txn.kept, text), true
+	}
+	return nil, nil
 }
 
 // sendTxn sends text as a transaction's probe or COMMIT (send).
