@@ -927,7 +927,9 @@ type Server struct {
 	// prediction is the online prediction screen (#869); never nil, and one
 	// with no source offers no screen.
 	prediction *Prediction
-	metrics    MetricsSource
+	// localModels, when set, offers the Local models page (#1306).
+	localModels LocalModels
+	metrics     MetricsSource
 	// series is the retained history the charts draw. Nil means this
 	// instance keeps none, which the endpoint says rather than returning an
 	// empty array that looks like an idle cluster.
@@ -1044,6 +1046,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ai/playground", s.handlePlaygroundGenerate)
 	mux.HandleFunc("GET /api/ai/embeddings", s.handleEmbeddingsStatus)
 	mux.HandleFunc("POST /api/ai/embeddings", s.handleEmbeddingsPredict)
+	mux.HandleFunc("GET /api/ai/local-models", s.handleLocalModels)
+	mux.HandleFunc("POST /api/ai/local-models/{id}/{action}", s.handleLocalModelAction)
 	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
 	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
@@ -1212,6 +1216,11 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	if s.playground.embeddingsConfigured() {
 		out = append(out, map[string]any{
 			"id": "ai-embed", "title": "Embeddings", "create": false, "delete": false,
+		})
+	}
+	if s.localModels != nil {
+		out = append(out, map[string]any{
+			"id": "ai-local", "title": "Local models", "create": false, "delete": false,
 		})
 	}
 	// Online prediction likewise, only where Cloud Run can run a prediction

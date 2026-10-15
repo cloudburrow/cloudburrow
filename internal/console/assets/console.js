@@ -119,6 +119,11 @@ const ROUTES = [
   { path: "/ai/embeddings", service: "ai-embed", screen: "embeddings", icon: "ai",
     title: "Embeddings",
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
+  // Local models (#1306): download a pinned model, verified against its
+  // pinned digests, then load, unload or delete it.
+  { path: "/ai/local-models", service: "ai-local", screen: "local-models", icon: "ai",
+    title: "Local models",
+    section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
   { path: "/ai/predict",    service: "ai-predict", screen: "predict", icon: "ai",
     title: "Online prediction",
     section: "AI and machine learning", product: "vertexai", productTitle: "Vertex AI" },
@@ -5124,12 +5129,14 @@ function dispatch(view) {
   stopActivityPolling();
   stopFaultsPoll();
   stopPrediction();
+  stopLocalModelsPoll();
   REVEAL_SUSPENDED = false;
   if (!match) return notFound(view, location.pathname);
   if (match.screen === "search") return renderSearch(view);
   if (match.screen === "playground") return renderPlayground(view);
   if (match.screen === "predict") return renderPredict(view);
   if (match.screen === "embeddings") return renderEmbeddings(view);
+  if (match.screen === "local-models") return renderLocalModels(view);
   if (match.screen === "instance") return renderInstance(view);
   if (match.screen === "monitoring") return renderMonitoring(view);
   if (match.screen === "logs") return renderLogs(view);
@@ -8115,6 +8122,127 @@ async function renderEmbeddings(view) {
       el("div", {}, el("label", { text: "Model " }), model, models, el("label", { text: " Method " }), method, el("label", { text: " Task type " }), task,
         el("label", { text: " Dimensions " }), dim, " ", send)),
     result);
+}
+
+// Local models (#1306) lists the catalogue with each model's download state
+// and size. Download is offered only for a pinned, ungated model, and only
+// after the user confirms its exact size; the server refuses any other size.
+// Load and Unload are offered where the runtime supports them.
+let LOCAL_MODELS_POLL = null;
+
+function stopLocalModelsPoll() {
+  if (LOCAL_MODELS_POLL) { clearTimeout(LOCAL_MODELS_POLL); LOCAL_MODELS_POLL = null; }
+}
+
+const LOCAL_MODEL_STATES = {
+  "not-pinned": "Not pinned", absent: "Not downloaded", partial: "Partly downloaded",
+  corrupt: "Digest mismatch", downloading: "Downloading", downloaded: "Downloaded",
+};
+
+async function localModelAction(id, action, body) {
+  const resp = await fetch(`/api/ai/local-models/${encodeURIComponent(id)}/${action}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(errorMessageOf(text) || `HTTP ${resp.status}`);
+  return JSON.parse(text);
+}
+
+async function renderLocalModels(view) {
+  stopLocalModelsPoll();
+  const title = "Local models";
+  const subtitle = "Download, load, unload and delete the local AI models this instance can serve";
+  const header = () => pageHeader(title, subtitle);
+  let status;
+  try {
+    status = await api("/api/ai/local-models");
+  } catch (err) {
+    return setChildren(view, header(),
+      errorState("Local models unavailable", String(err.message), () => renderLocalModels(view)));
+  }
+  if (!status.configured) {
+    return setChildren(view, header(), emptyState("Local models are not available", status.note || ""));
+  }
+  const message = el("p", { id: "local-models-message", class: "unavailable", role: "status" });
+  const fail = (err) => { message.textContent = `[error] ${err.message}`; announce(err.message); };
+  const again = () => renderLocalModels(view);
+
+  const actionsFor = (m) => {
+    const out = [];
+    const btn = (label, run, cls = "secondary") => {
+      const b = el("button", { class: cls, text: label, "data-action": label.toLowerCase() });
+      b.addEventListener("click", async () => {
+        b.disabled = true;
+        try { await run(); } catch (err) { fail(err); } finally { b.disabled = false; }
+      });
+      out.push(b);
+    };
+    const canDownload = m.pinned && !m.downloadNote && m.state !== "downloaded" && m.state !== "downloading";
+    if (canDownload) {
+      btn("Download", () => confirmDestructive({
+        title: `Download ${m.id}?`,
+        detail: `${formatBytes(m.bytes)} (${m.bytes.toLocaleString()} bytes) from huggingface.co/${m.repo} ` +
+          `at revision ${m.revision.slice(0, 12)}: ${m.files.map((f) => f.path).join(", ")}. ` +
+          (m.official ? "" : "This is a COMMUNITY conversion, NOT an official Google artifact. ") +
+          `Licence: ${m.license}.`,
+        confirmWord: m.id, confirmLabel: "Download",
+        consequence: "Each file is checked against its pinned SHA-256 before it is kept.",
+        onConfirm: async () => { await localModelAction(m.id, "download", { confirmBytes: m.bytes }); again(); },
+      }), "primary");
+    }
+    if (m.state === "downloading") btn("Cancel", async () => { await localModelAction(m.id, "cancel"); again(); });
+    if (m.loadable && m.state === "downloaded" && !m.loaded) {
+      btn("Load", async () => { await localModelAction(m.id, "load"); announce(`${m.id} loaded`); again(); });
+    }
+    if (m.loadable && m.loaded) {
+      btn("Unload", async () => { await localModelAction(m.id, "unload"); announce(`${m.id} unloaded`); again(); });
+    }
+    if (m.pinned && !m.loaded && m.state !== "downloading" && m.state !== "absent") {
+      btn("Delete", () => confirmDestructive({
+        title: `Delete the local copy of ${m.id}?`,
+        detail: `${formatBytes(m.downloaded)} in the instance's model cache. It can be downloaded again.`,
+        confirmWord: m.id, consequence: "",
+        onConfirm: async () => { await localModelAction(m.id, "delete"); again(); },
+      }), "secondary danger");
+    }
+    return out;
+  };
+
+  const rows = status.models.map((m) => {
+    const state = LOCAL_MODEL_STATES[m.state] || m.state;
+    const progress = m.state === "downloading" && m.bytes
+      ? el("progress", { max: String(m.bytes), value: String(m.downloaded),
+          "aria-label": `${m.id} download progress` }) : null;
+    const notes = [m.error ? `Last download failed: ${m.error}` : "", m.downloadNote || "",
+      m.loadable ? "" : (m.loadNote || "")].filter(Boolean);
+    return el("tr", { "data-model": m.id },
+      el("td", {}, el("span", { class: "mono", text: m.id }),
+        el("div", { class: "unavailable", text: `${m.publisher}${m.official ? "" : " — not an official Google artifact"}` })),
+      el("td", { text: m.modality }),
+      el("td", { class: "mono", text: m.pinned ? formatBytes(m.bytes) : "—" }),
+      el("td", { "data-state": m.state },
+        el("span", { text: state + (m.state === "downloading" && m.bytes
+          ? ` ${Math.floor((100 * m.downloaded) / m.bytes)}%` : "") }), progress),
+      el("td", { text: m.loaded ? "Loaded" : (m.loadable ? "Not loaded" : "—") }),
+      el("td", {}, ...actionsFor(m),
+        ...notes.map((n) => el("div", { class: "unavailable", text: n }))));
+  });
+
+  setChildren(view, header(),
+    el("div", { class: "card" }, el("p", { class: "unavailable", text: status.note })),
+    message,
+    el("table", { id: "local-models" },
+      el("thead", {}, el("tr", {},
+        el("th", { text: "Model" }), el("th", { text: "Modality" }), el("th", { text: "Size" }),
+        el("th", { text: "Download state" }), el("th", { text: "Runtime" }), el("th", { text: "Actions" }))),
+      el("tbody", {}, ...rows)));
+
+  if (status.models.some((m) => m.state === "downloading")) {
+    LOCAL_MODELS_POLL = setTimeout(() => {
+      if (location.pathname === "/ai/local-models") renderLocalModels(view);
+    }, 1000);
+  }
 }
 
 function embeddingNorm(v) {

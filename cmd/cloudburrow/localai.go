@@ -206,3 +206,55 @@ func preflightLocalAI(modelPath, image string) error {
 	}
 	return nil
 }
+
+// embedRuntime loads and unloads models into the running local AI endpoint
+// for the console's Local models page (#1306). Only the embedding runtime
+// can: the generation model is the container -local-ai-model started, which
+// has no unload, so it is reported as loaded and offered nothing.
+type embedRuntime struct{ srv *vertexai.Server }
+
+func (r embedRuntime) Loads(m localai.Model) (bool, string) {
+	if m.Runtime != localai.RuntimeONNX {
+		if m.ID == r.srv.Model() {
+			return false, "served by the LiteRT-LM container -local-ai-model started, which has no load or unload; restart without it to stop serving it"
+		}
+		return false, "only the embedding runtime loads and unloads models; a generation model is served with up -local-ai-model"
+	}
+	return m.Runnable()
+}
+
+func (r embedRuntime) Load(m localai.Model, dir string) error {
+	e, err := embedding.Open(dir, m.ID)
+	if err != nil {
+		return err
+	}
+	if old := r.srv.SwapEmbedder(e, nil); old != nil {
+		_ = old.Close()
+	}
+	return nil
+}
+
+func (r embedRuntime) Unload(m localai.Model) error {
+	old := r.srv.SwapEmbedder(nil, fmt.Errorf("%s was unloaded on the console's Local models page; load it there to serve it again", m.ID))
+	if old != nil {
+		return old.Close()
+	}
+	return nil
+}
+
+func (r embedRuntime) Loaded(m localai.Model) bool {
+	if m.Runtime == localai.RuntimeONNX {
+		return m.ID == localai.EmbeddingGemmaONNXID && r.srv.EmbedderLoaded()
+	}
+	return m.ID == r.srv.Model()
+}
+
+// localModelsFor is the Local models page's manager: the cache
+// -local-ai-embeddings fetches into, and the running endpoint, if any.
+func localModelsFor(cfg config.Config, srv *vertexai.Server) *localai.Manager {
+	g := &localai.Manager{Cache: embeddingCache(cfg)}
+	if srv != nil {
+		g.Runtime = embedRuntime{srv: srv}
+	}
+	return g
+}
