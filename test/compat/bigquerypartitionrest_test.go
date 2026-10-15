@@ -124,7 +124,10 @@ func TestBigQueryStreamingBuffer(t *testing.T) {
 // job's destination take only rows of that partition, WRITE_TRUNCATE_DATA
 // into a partition replaces its rows and keeps the table's schema, and a
 // copy job of an ingestion-time partitioned table keeps each row's
-// _PARTITIONTIME and, into a table it makes, the partitioning. An
+// _PARTITIONTIME and, into a table it makes, the partitioning; with
+// schemaUpdateOptions, a query or load job into a partition adds a
+// column (ALLOW_FIELD_ADDITION) or relaxes one (ALLOW_FIELD_RELAXATION),
+// and without them it fails. An
 // ingestion-time table's `$__UNPARTITIONED__`, its streaming buffer, is
 // 501 as a destination. Measured first: each was 501, and a copy gave
 // every row the copy's time.
@@ -185,6 +188,55 @@ func TestBigQueryPartitionDestinationsRest(t *testing.T) {
 	if got, want := all(), "2 2024-01-02,3 null,4 1950-06-01,6 null,7 2024-01-01"; got != want {
 		t.Errorf("after WRITE_TRUNCATE_DATA: %s, want %s", got, want)
 	}
+
+	// A schema update through one partition: schemaUpdateOptions add a
+	// column, NULL in the other partitions' rows, or relax one.
+	exec("CREATE TABLE " + p("ps") + " (n INT64, d DATE) PARTITION BY d")
+	exec("INSERT INTO " + p("ps") + " (n, d) VALUES (1, DATE '2024-01-01'), (2, DATE '2024-01-02')")
+	wide := "SELECT 3 AS n, DATE '2024-01-01' AS d, 'x' AS s"
+	if err := query(wide, "ps$20240101", bigquery.WriteAppend); err == nil || !strings.Contains(err.Error(), "Cannot add fields") {
+		t.Errorf("a new column without ALLOW_FIELD_ADDITION: %v, want invalid", err)
+	}
+	q := c.Query(wide)
+	q.Dst, q.WriteDisposition = ds.Table("ps$20240101"), bigquery.WriteTruncate
+	q.SchemaUpdateOptions = []string{"ALLOW_FIELD_ADDITION"}
+	j, err = q.Run(ctx)
+	if err := waitJob(ctx, j, err); err != nil {
+		t.Fatalf("ALLOW_FIELD_ADDITION into ps$20240101: %v", err)
+	}
+	if got, want := strings.Join(rows("SELECT CONCAT(CAST(n AS STRING), ' ', CAST(d AS STRING), ' ', IFNULL(s, 'null')) FROM "+p("ps")), ","),
+		"2 2024-01-02 null,3 2024-01-01 x"; got != want {
+		t.Errorf("after the column was added: %s, want %s", got, want)
+	}
+	if md, err := ds.Table("ps").Metadata(ctx); err != nil || len(md.Schema) != 3 || md.Schema[2].Name != "s" || md.Schema[2].Required ||
+		md.TimePartitioning == nil || md.TimePartitioning.Field != "d" {
+		t.Errorf("ps after the column was added: %v, %+v", err, md)
+	}
+	req := ds.Table("pr")
+	if err := req.Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{
+		{Name: "n", Type: bigquery.IntegerFieldType, Required: true}, {Name: "d", Type: bigquery.DateFieldType}},
+		TimePartitioning: &bigquery.TimePartitioning{Field: "d", Type: bigquery.DayPartitioningType}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := query("SELECT 1 AS n, DATE '2024-01-01' AS d", "pr$20240101", bigquery.WriteAppend); err == nil ||
+		!strings.Contains(err.Error(), "REQUIRED to NULLABLE") {
+		t.Errorf("a NULLABLE column into a REQUIRED one without ALLOW_FIELD_RELAXATION: %v, want invalid", err)
+	}
+	ld = ds.Table("pr$20240101").LoaderFrom(bigquery.NewReaderSource(bytes.NewReader([]byte(",2024-01-01\n"))))
+	ld.WriteDisposition = bigquery.WriteAppend
+	ld.SchemaUpdateOptions = []string{"ALLOW_FIELD_RELAXATION"}
+	ld.Src.(*bigquery.ReaderSource).Schema = bigquery.Schema{{Name: "n", Type: bigquery.IntegerFieldType}, {Name: "d", Type: bigquery.DateFieldType}}
+	j, err = ld.Run(ctx)
+	if err := waitJob(ctx, j, err); err != nil {
+		t.Fatalf("ALLOW_FIELD_RELAXATION load into pr$20240101: %v", err)
+	}
+	if md, err := req.Metadata(ctx); err != nil || len(md.Schema) != 2 || md.Schema[0].Required {
+		t.Errorf("pr after the relaxation: %v, %+v", err, md)
+	}
+	if got := rows("SELECT IFNULL(CAST(n AS STRING), 'null') FROM " + p("pr")); !reflect.DeepEqual(got, []string{"null"}) {
+		t.Errorf("pr rows: %v, want [null]", got)
+	}
+
 	exec("CREATE TABLE " + p("pi") + " (n INT64) PARTITION BY _PARTITIONDATE")
 	wantAPIError(t, "query into pi$__UNPARTITIONED__", query("SELECT 1 AS n", "pi$__UNPARTITIONED__", bigquery.WriteAppend),
 		http.StatusNotImplemented, "")

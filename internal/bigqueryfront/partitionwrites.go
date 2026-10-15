@@ -39,14 +39,18 @@ import (
 // queryWrite does, so a query that fails changes nothing. Then every row
 // of the result must be in P, or the job fails, reason invalid, the table
 // unchanged (BigQuery's wording UNVERIFIED); the result's columns must be
-// the table's, or it is 501 (a schema update of a partitioned table
-// through one partition is not built). WRITE_APPEND adds the rows;
-// WRITE_TRUNCATE replaces the partition's rows, and only those, in one
+// the table's, or those schemaUpdateOptions make them (partitionSchema,
+// below; #1273). WRITE_APPEND adds the rows; WRITE_TRUNCATE (and
+// WRITE_TRUNCATE_DATA, the same for one partition: the table's schema is
+// kept) replaces the partition's rows, and only those, in one
 // script (DELETE of P's rows, INSERT of the result), which the emulator
 // runs in one transaction (querywrite.go); WRITE_EMPTY (the default) fails
 // the job, reason duplicate, when P holds rows. The job jobs.get reports
-// names the client's destination (jobText). 501: `$__NULL__` and
-// `$__UNPARTITIONED__` as a destination, WRITE_TRUNCATE_DATA, a query that
+// names the client's destination (jobText). `$__NULL__` and
+// `$__UNPARTITIONED__` of a column- or range-partitioned table take the
+// rows of that partition only. 501: `$__UNPARTITIONED__` of an
+// ingestion-time partitioned table (its streaming buffer,
+// streamingbuffer.go), a query that
 // is not one SELECT, a destination of another project or that does not
 // exist. Into a partition of an ingestion-time partitioned table, the
 // rows are not checked: they are written with the partition's
@@ -233,8 +237,16 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 		return notImplemented("whose query is not one SELECT statement")
 	}
 	lq, _, _, _ := bytesParameters(c.queryOptions) // as runQuery sends them (#1078)
+	opts := c.SchemaUpdateOptions
+	if write == "" || write == "WRITE_EMPTY" {
+		opts = nil // schemaUpdateOptions are for WRITE_APPEND and WRITE_TRUNCATE (above)
+	}
 	if result, status, _ := f.lone(r, lq, lq.Query); status == http.StatusOK && !sameSchema(result, m.Schema.Fields) {
-		return notImplemented("whose result's columns are not the table's")
+		if _, _, _, why := partitionSchema(m.Schema.Fields, result, opts, name); why != "" {
+			return notImplemented(why)
+		} else if m.ingestion() {
+			return notImplemented("whose result's columns are not the table's, of an ingestion-time partitioned table")
+		}
 	}
 	scratch := tableRef{ProjectID: project, DatasetID: dest.DatasetID, TableID: scratchTable()}
 	if !editJob(r, func(job map[string]any) bool {
@@ -279,9 +291,19 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 	sstatus, sgot := f.get(r, tablePath(scratch.DatasetID, scratch.TableID))
 	if sstatus != http.StatusOK || json.Unmarshal(sgot, &sm) != nil || json.Unmarshal(sm.Schema, &fields) != nil {
 		e.Message = "CloudBurrow could not read the query's result: " + errorMessage(sgot, sstatus)
-	} else if !sameSchema(fields.Fields, m.Schema.Fields) {
-		e.Reason, e.Message = "notImplemented", "Not implemented here: a query job whose destination is the partition "+
-			dest.DatasetID+"."+dest.TableID+", whose result's columns are not the table's. The table was not changed."
+	}
+	var target []field
+	changed := false
+	if e.Message == "" && !sameSchema(fields.Fields, m.Schema.Fields) {
+		var invalid, why string
+		target, changed, invalid, why = partitionSchema(m.Schema.Fields, fields.Fields, opts, name)
+		switch {
+		case why != "" || m.ingestion():
+			e.Reason, e.Message = "notImplemented", "Not implemented here: a query job whose destination is the partition "+
+				dest.DatasetID+"."+dest.TableID+", whose result's columns are not the table's. The table was not changed."
+		case invalid != "":
+			e.Reason, e.Message = "invalid", invalid+". The table was not changed."
+		}
 	}
 	if e.Message == "" && !m.ingestion() {
 		if n, why := f.scalar(r, "SELECT COUNT(*) FROM "+sp+" WHERE NOT COALESCE("+filter+", FALSE)"); why != "" {
@@ -296,6 +318,11 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 			e.Message = "CloudBurrow could not read the partition: " + why
 		} else if n > 0 {
 			e.Reason, e.Message = "duplicate", "Already Exists: Table "+name
+		}
+	}
+	if e.Message == "" && changed {
+		if why := f.updatePartitionedSchema(r, dest.DatasetID, base, m.Schema.Fields, target); why != "" {
+			e.Message = "CloudBurrow could not update the schema of " + name + ": " + why
 		}
 	}
 	if e.Message == "" {
@@ -332,8 +359,10 @@ func decorated(id string) (table, dec string, ok bool) {
 }
 
 // partitionCopy carries out a copy job (copyJob) whose destination or a
-// source is a partition (above), and reports whether it answered w. write
-// is the job's writeDisposition, defaulted.
+// source is a partition (above), or whose sources are ingestion-time
+// partitioned tables, whose rows' _PARTITIONTIME it keeps (#1273), and
+// reports whether it answered w. write and create are the job's
+// writeDisposition and createDisposition, defaulted.
 func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConfig, srcs []tableRef, write, create string) bool {
 	some := false
 	for _, t := range append(append([]tableRef{}, srcs...), *c.DestinationTable) {
@@ -565,8 +594,26 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 	case write != "" && write != "WRITE_EMPTY" && write != "WRITE_APPEND" && write != "WRITE_TRUNCATE" &&
 		write != "WRITE_TRUNCATE_DATA":
 		return nil, notImplemented("with writeDisposition " + write)
-	case l.Schema != nil && !sameSchema(l.Schema.Fields, m.Schema.Fields):
-		return nil, notImplemented("with a schema other than the table's")
+	}
+	// A schema update through the partition (partitionSchema, below).
+	next := m.Schema.Fields
+	var target []field
+	changed := false
+	invalid := ""
+	if l.Schema != nil && !sameSchema(l.Schema.Fields, m.Schema.Fields) {
+		opts := l.SchemaUpdateOptions
+		if write == "" || write == "WRITE_EMPTY" {
+			opts = nil
+		}
+		var why string
+		target, changed, invalid, why = partitionSchema(m.Schema.Fields, l.Schema.Fields, opts, name)
+		switch {
+		case why != "":
+			return nil, notImplemented(why)
+		case m.ingestion():
+			return nil, notImplemented("with a schema other than the table's, of an ingestion-time partitioned table")
+		}
+		next = l.Schema.Fields
 	}
 	scratch := tableRef{ProjectID: project, DatasetID: dest.DatasetID, TableID: scratchTable()}
 	var client json.RawMessage
@@ -615,7 +662,9 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 		e := rowError{Reason: "backendError"}
 		sp := quotePath([]string{project, scratch.DatasetID, scratch.TableID})
 		bp := quotePath([]string{project, dest.DatasetID, base})
-		if m.ingestion() {
+		if invalid != "" {
+			e.Reason, e.Message = "invalid", invalid+". The table was not changed."
+		} else if m.ingestion() {
 			// The rows are written into the partition (#1277).
 		} else if n, why := f.scalar(r, "SELECT COUNT(*) FROM "+sp+" WHERE NOT COALESCE("+filter+", FALSE)"); why != "" {
 			e.Message = "CloudBurrow could not read the loaded rows: " + why
@@ -630,9 +679,14 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 				e.Reason, e.Message = "duplicate", "Already Exists: Table "+name
 			}
 		}
+		if e.Message == "" && changed {
+			if why := f.updatePartitionedSchema(r, dest.DatasetID, base, m.Schema.Fields, target); why != "" {
+				e.Message = "CloudBurrow could not update the schema of " + name + ": " + why
+			}
+		}
 		if e.Message == "" {
-			cols := make([]string, len(m.Schema.Fields))
-			for i, fl := range m.Schema.Fields {
+			cols := make([]string, len(next))
+			for i, fl := range next {
 				cols[i] = quoteName(fl.Name)
 			}
 			list := strings.Join(cols, ", ")
@@ -653,4 +707,119 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 		}
 		f.clientJob(w, rec, text)
 	}, true
+}
+
+// A schema update through one partition (#1273). BigQuery takes
+// schemaUpdateOptions "when writeDisposition is WRITE_APPEND; when
+// writeDisposition is WRITE_TRUNCATE_DATA; when writeDisposition is
+// WRITE_TRUNCATE and the destination table is a partition of a table,
+// specified by partition decorators"
+// (https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobConfigurationQuery):
+// ALLOW_FIELD_ADDITION adds a column the rows have and the table does not,
+// NULLABLE, at the table's end, and ALLOW_FIELD_RELAXATION relaxes a
+// REQUIRED column the rows give as NULLABLE. Without the option, the job
+// fails, reason invalid, the table unchanged. The table's columns, in its
+// order, must come first; anything else (a column left out, retyped, given
+// in another order, a RECORD's fields changed) stays 501, as does a schema
+// update of an ingestion-time partitioned table, whose rows' times the
+// table's remaking (schemaupdate.go's addColumns) would not keep.
+
+// partitionSchema compares the rows' columns, next, with the table's,
+// old. It returns the table's schema after the write, whether it changes,
+// and why the job fails (invalid) or is not carried out (501), or "".
+func partitionSchema(old, next []field, opts []string, name string) (target []field, changed bool, invalid, notBuilt string) {
+	if len(next) < len(old) {
+		return nil, false, "", "whose columns are not the table's (one is left out)"
+	}
+	target = make([]field, 0, len(next))
+	for i, o := range old {
+		n := next[i]
+		if !strings.EqualFold(o.Name, n.Name) || canonicalType(o.Type) != canonicalType(n.Type) || !sameSchema(o.Fields, n.Fields) {
+			return nil, false, "", "whose columns are not the table's (" + n.Name + ")"
+		}
+		t := o
+		switch om, nm := modeOf(o), modeOf(n); {
+		case om == nm, om == "NULLABLE" && nm == "REQUIRED":
+		case om == "REQUIRED" && nm == "NULLABLE":
+			if !hasOption(opts, "ALLOW_FIELD_RELAXATION") {
+				return nil, false, "Provided Schema does not match Table " + name + ". Field " + o.Name +
+					" has changed mode from REQUIRED to NULLABLE", "" // UNVERIFIED wording
+			}
+			t.Mode, changed = "NULLABLE", true
+		default:
+			return nil, false, "", "whose column " + n.Name + " has another mode than the table's"
+		}
+		target = append(target, t)
+	}
+	for _, n := range next[len(old):] {
+		if !hasOption(opts, "ALLOW_FIELD_ADDITION") {
+			return nil, false, "Provided Schema does not match Table " + name + ". Cannot add fields (field: " + n.Name + ")", "" // UNVERIFIED wording
+		}
+		if modeOf(n) == "REQUIRED" {
+			return nil, false, "Provided Schema does not match Table " + name + ". Cannot add required fields to an " +
+				"existing schema. (field: " + n.Name + ")", "" // UNVERIFIED wording
+		}
+		t := n
+		if t.Mode == "" {
+			t.Mode = "NULLABLE"
+		}
+		target, changed = append(target, t), true
+	}
+	return target, changed, "", ""
+}
+
+// updatePartitionedSchema gives dataset.table the schema target: added
+// columns through addColumns (schemaupdate.go), which keeps its rows and
+// settings, or a relaxed mode through tables.patch, the metadata's alone
+// (schemaupdate.go). It returns why it could not, or "".
+func (f front) updatePartitionedSchema(r *http.Request, dataset, table string, old, target []field) string {
+	status, got := f.get(r, tablePath(dataset, table))
+	current, ok := decodeMap(got)
+	if status != http.StatusOK || !ok {
+		return errorMessage(got, status)
+	}
+	// The table's own schema (descriptions and all), relaxed, with the
+	// new columns at its end.
+	schema, _ := current["schema"].(map[string]any)
+	fields, _ := schema["fields"].([]any)
+	if len(fields) != len(old) {
+		return "could not read the table's schema"
+	}
+	out := make([]any, 0, len(target))
+	for i, fl := range fields {
+		m, _ := fl.(map[string]any)
+		if m == nil {
+			return "could not read the table's schema"
+		}
+		c := map[string]any{}
+		for k, v := range m {
+			c[k] = v
+		}
+		c["mode"] = modeOf(target[i])
+		out = append(out, c)
+	}
+	for _, t := range target[len(old):] {
+		b, _ := json.Marshal(t)
+		var c map[string]any
+		if json.Unmarshal(b, &c) != nil {
+			return "could not write the new column " + t.Name
+		}
+		out = append(out, c)
+	}
+	raw, err := json.Marshal(map[string]any{"fields": out})
+	if err != nil {
+		return err.Error()
+	}
+	if len(target) > len(old) {
+		rec := newRecorder()
+		if !f.addColumns(rec, r, dataset, table, got, old, raw) {
+			return errorMessage(rec.body.Bytes(), rec.status)
+		}
+		return ""
+	}
+	body, _ := json.Marshal(map[string]json.RawMessage{"schema": raw})
+	if status, got := f.send(r, http.MethodPatch, tablePath(dataset, table), body); status != http.StatusOK {
+		return errorMessage(got, status)
+	}
+	return ""
 }
