@@ -74,6 +74,7 @@ type jsonObject struct {
 	EventBasedHold                                                      *bool
 	Metadata                                                            map[string]string
 	Owner                                                               *struct{ Entity, EntityID string }
+	Acl                                                                 []jsonACE
 	Retention                                                           *struct{ Mode, RetainUntilTime string }
 }
 
@@ -106,6 +107,9 @@ func (o jsonObject) proto() *pb.Object {
 	if o.Owner != nil {
 		out.Owner = &pb.Owner{Entity: o.Owner.Entity, EntityId: o.Owner.EntityID}
 	}
+	for _, e := range o.Acl {
+		out.Acl = append(out.Acl, e.objectProto())
+	}
 	if r := o.Retention; r != nil {
 		out.Retention = &pb.Object_Retention{RetainUntilTime: ts(r.RetainUntilTime)}
 		switch strings.ToLower(r.Mode) {
@@ -123,7 +127,7 @@ var objectFields = map[string]string{
 	"content_type": "contentType", "content_encoding": "contentEncoding", "content_disposition": "contentDisposition",
 	"cache_control": "cacheControl", "content_language": "contentLanguage", "metadata": "metadata",
 	"custom_time": "customTime", "temporary_hold": "temporaryHold", "event_based_hold": "eventBasedHold",
-	"retention": "retention",
+	"retention": "retention", "acl": "acl",
 }
 
 // objectToJSON is o as JSON API metadata: every field it sets, or, with
@@ -162,11 +166,14 @@ func objectToJSON(o *pb.Object, paths []string) (map[string]any, error) {
 	if c := o.GetChecksums(); c != nil && paths == nil {
 		addChecksums(all, c)
 	}
-	if len(o.GetAcl()) > 0 {
-		return nil, grpcstatus.Error(codes.Unimplemented, "object ACLs are not implemented over gRPC: use predefined_acl or the JSON API")
+	if acl := o.GetAcl(); len(acl) > 0 || paths != nil {
+		all["acl"] = aclToJSON(acl)
 	}
-	if o.GetContexts() != nil || o.GetCustomerEncryption() != nil {
-		return nil, grpcstatus.Error(codes.Unimplemented, "object contexts and customer-supplied encryption are not implemented")
+	if o.GetContexts() != nil {
+		return nil, grpcstatus.Error(codes.Unimplemented, "object contexts are not implemented: the JSON API does not serve them")
+	}
+	if o.GetCustomerEncryption() != nil {
+		return nil, grpcstatus.Error(codes.Unimplemented, "customer-supplied encryption keys are not implemented: the JSON API does not serve them")
 	}
 	if paths == nil {
 		return all, nil
@@ -238,6 +245,7 @@ type jsonBucket struct {
 	ObjectRetention       *struct{ Mode string }
 	Lifecycle             *struct{ Rule []jsonRule }
 	Owner                 *struct{ Entity, EntityID string }
+	Acl, DefaultObjectAcl []jsonACE
 }
 
 func (b jsonBucket) proto() *pb.Bucket {
@@ -295,6 +303,12 @@ func (b jsonBucket) proto() *pb.Bucket {
 	if o := b.Owner; o != nil {
 		out.Owner = &pb.Owner{Entity: o.Entity, EntityId: o.EntityID}
 	}
+	for _, e := range b.Acl {
+		out.Acl = append(out.Acl, e.bucketProto())
+	}
+	for _, e := range b.DefaultObjectAcl {
+		out.DefaultObjectAcl = append(out.DefaultObjectAcl, e.objectProto())
+	}
 	if l := b.Lifecycle; l != nil {
 		out.Lifecycle = &pb.Bucket_Lifecycle{}
 		for _, r := range l.Rule {
@@ -325,14 +339,12 @@ var bucketMaskFields = map[string]string{
 	"soft_delete_policy": "softDeletePolicy", "iam_config": "iamConfiguration", "cors": "cors",
 	"website": "website", "logging": "logging", "billing": "billing", "encryption": "encryption",
 	"autoclass": "autoclass", "lifecycle": "lifecycle", "rpo": "rpo",
+	"acl": "acl", "default_object_acl": "defaultObjectAcl",
 }
 
 // bucketToJSON is b as JSON API metadata: every field it sets, or, with
 // paths (an update_mask), those fields, null where b leaves one unset.
 func bucketToJSON(b *pb.Bucket, paths []string) (map[string]any, error) {
-	if len(b.GetAcl()) > 0 || len(b.GetDefaultObjectAcl()) > 0 {
-		return nil, grpcstatus.Error(codes.Unimplemented, "bucket ACLs are not implemented over gRPC: use predefined_acl or the JSON API")
-	}
 	if b.GetCustomPlacementConfig() != nil || b.GetIpFilter() != nil {
 		return nil, grpcstatus.Error(codes.Unimplemented, "custom_placement_config and ip_filter are not implemented over gRPC")
 	}
@@ -347,6 +359,12 @@ func bucketToJSON(b *pb.Bucket, paths []string) (map[string]any, error) {
 	set("rpo", b.GetRpo(), b.GetRpo() != "")
 	set("labels", b.GetLabels(), len(b.GetLabels()) > 0)
 	set("defaultEventBasedHold", b.GetDefaultEventBasedHold(), b.GetDefaultEventBasedHold() || paths != nil)
+	if acl := b.GetAcl(); len(acl) > 0 || paths != nil {
+		all["acl"] = bucketACLToJSON(acl)
+	}
+	if acl := b.GetDefaultObjectAcl(); len(acl) > 0 || paths != nil {
+		all["defaultObjectAcl"] = aclToJSON(acl)
+	}
 	if v := b.GetVersioning(); v != nil {
 		all["versioning"] = map[string]any{"enabled": v.GetEnabled()}
 	}
@@ -474,4 +492,47 @@ func mapEntry(out map[string]any, field, key string, from map[string]string) {
 	} else {
 		m[key] = nil
 	}
+}
+
+// --- access control lists (#1233) ----------------------------------------
+
+// jsonACE is a JSON API BucketAccessControl or ObjectAccessControl.
+type jsonACE struct {
+	Entity, Role, ID, EntityID, Etag, Email, Domain string
+	ProjectTeam                                     *struct{ ProjectNumber, Team string }
+}
+
+func (e jsonACE) bucketProto() *pb.BucketAccessControl {
+	out := &pb.BucketAccessControl{Role: e.Role, Id: e.ID, Entity: e.Entity, EntityId: e.EntityID, Etag: e.Etag, Email: e.Email, Domain: e.Domain}
+	if t := e.ProjectTeam; t != nil {
+		out.ProjectTeam = &pb.ProjectTeam{ProjectNumber: t.ProjectNumber, Team: t.Team}
+	}
+	return out
+}
+
+func (e jsonACE) objectProto() *pb.ObjectAccessControl {
+	out := &pb.ObjectAccessControl{Role: e.Role, Id: e.ID, Entity: e.Entity, EntityId: e.EntityID, Etag: e.Etag, Email: e.Email, Domain: e.Domain}
+	if t := e.ProjectTeam; t != nil {
+		out.ProjectTeam = &pb.ProjectTeam{ProjectNumber: t.ProjectNumber, Team: t.Team}
+	}
+	return out
+}
+
+// aclToJSON is an object ACL (or a default object ACL) as the JSON API
+// takes it: entity and role, which is all an entry sets. An empty list is
+// [], which sets an empty ACL.
+func aclToJSON(acl []*pb.ObjectAccessControl) []any {
+	out := []any{}
+	for _, e := range acl {
+		out = append(out, map[string]any{"entity": e.GetEntity(), "role": e.GetRole()})
+	}
+	return out
+}
+
+func bucketACLToJSON(acl []*pb.BucketAccessControl) []any {
+	out := []any{}
+	for _, e := range acl {
+		out = append(out, map[string]any{"entity": e.GetEntity(), "role": e.GetRole()})
+	}
+	return out
 }
