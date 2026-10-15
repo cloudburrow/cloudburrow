@@ -38,12 +38,14 @@ import (
 // expiration_timestamp) an expression the emulator evaluates, so
 // TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 7 DAY) is read.
 //
-// RENAME TO, RENAME COLUMN, DROP COLUMN, ALTER COLUMN SET DATA TYPE, SET
-// DEFAULT and DROP DEFAULT, ADD PRIMARY KEY and ADD FOREIGN KEY, and the
-// table options that change how the table behaves, stay 501 before
-// anything of the statement is changed (alterUnsupported): they need the
-// table renamed or remade under its jobs, or behaviour the emulator does not
-// have, and tables.patch does not do them either.
+// RENAME TO, RENAME COLUMN and DROP COLUMN (#1322) and ALTER COLUMN SET
+// DATA TYPE (#1334) make the table again (alterremake.go); ADD PRIMARY KEY,
+// ADD [CONSTRAINT] FOREIGN KEY, DROP PRIMARY KEY and DROP CONSTRAINT
+// (#1334) change its tableConstraints through the tables.patch path
+// (alterkeys.go), with the actions above in one statement. SET DEFAULT and
+// DROP DEFAULT, a nested field, a remaking action with one that is not,
+// and the table options that change how the table behaves, stay 501
+// before anything of the statement is changed (alterUnsupported).
 //
 // A script with an ALTER TABLE is carried out by the front's script
 // interpreter (hasControlFlow, scriptflow.go), each ALTER TABLE in its
@@ -58,11 +60,14 @@ type alterStmt struct {
 
 // alterAction is one action of an ALTER TABLE.
 type alterAction struct {
-	kind        string // "add", "options", "column options", "drop not null", "rename table", "rename column", "drop column"
-	ifExists    bool   // ADD COLUMN IF NOT EXISTS, ALTER COLUMN IF EXISTS
+	kind        string // "add", "options", "column options", "drop not null", "rename table", "rename column", "drop column", "set type", "add primary key", "add foreign key", "drop primary key", "drop constraint"
+	ifExists    bool   // ADD COLUMN IF NOT EXISTS, ALTER COLUMN IF EXISTS, ADD CONSTRAINT IF NOT EXISTS, DROP ... IF EXISTS
 	column      string
-	newName     string         // RENAME TO's table, RENAME COLUMN's new name
-	field       map[string]any // ADD COLUMN's TableFieldSchema
+	newName     string         // RENAME TO's table, RENAME COLUMN's new name, a constraint's name
+	field       map[string]any // ADD COLUMN's TableFieldSchema, SET DATA TYPE's (no name)
+	columns     []string       // a key's columns
+	refPath     []string       // FOREIGN KEY's REFERENCES table
+	refColumns  []string       // and its columns
 	options     []alterOption
 	description *alterOption // ADD COLUMN's OPTIONS(description)
 }
@@ -91,7 +96,8 @@ func alterNotImplemented(what string) string {
 	return "Not implemented here: ALTER TABLE " + what + ". BigQuery runs it, but the emulator behind CloudBurrow " +
 		"reports ALTER TABLE done and leaves the table unchanged (measured), and CloudBurrow carries out only ADD COLUMN, " +
 		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp), ALTER COLUMN SET OPTIONS (description), " +
-		"ALTER COLUMN DROP NOT NULL, RENAME TO, RENAME COLUMN and DROP COLUMN, so nothing of the statement was run."
+		"ALTER COLUMN DROP NOT NULL, ALTER COLUMN SET DATA TYPE, RENAME TO, RENAME COLUMN, DROP COLUMN and primary and foreign keys, " +
+		"so nothing of the statement was run."
 }
 
 // parseAlter reads an ALTER TABLE statement. unsupported names what the
@@ -186,10 +192,22 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 					}
 				}
 				act.kind, act.options = "column options", opts
-			case len(rest) > 1 && rest[0].is("SET") && rest[1].is("DATA"):
-				return st, "ALTER COLUMN SET DATA TYPE, which changes the column's type in every row", ""
+			case len(rest) > 0 && rest[0].punct("."):
+				return st, "ALTER COLUMN of a nested field", ""
+			case len(rest) > 2 && rest[0].is("SET") && rest[1].is("DATA") && rest[2].is("TYPE"):
+				f, next, what := fieldType(rest, 3)
+				switch {
+				case what != "":
+					return st, "ALTER COLUMN SET DATA TYPE " + what, ""
+				case next != len(rest):
+					return st, "", fmt.Sprintf("Syntax error: unexpected %q after SET DATA TYPE", rest[next].text)
+				case f["type"] == "RECORD" || f["mode"] == "REPEATED":
+					return st, "ALTER COLUMN SET DATA TYPE to a STRUCT or an ARRAY", ""
+				}
+				act.kind, act.field = "set type", f
 			case len(rest) > 1 && (rest[0].is("SET") || rest[0].is("DROP")) && rest[1].is("DEFAULT"):
-				return st, "ALTER COLUMN " + strings.ToUpper(rest[0].text) + " DEFAULT, a default value the emulator does not apply", ""
+				return st, "ALTER COLUMN " + strings.ToUpper(rest[0].text) + " DEFAULT: the emulator applies a column's default " +
+					"only from the CREATE TABLE that made the engine's table, never from the table's defaultValueExpression (measured)", ""
 			default:
 				return st, "ALTER COLUMN as written", ""
 			}
@@ -234,8 +252,12 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 				return st, "", fmt.Sprintf("Syntax error: unexpected %q after DROP COLUMN", a[j+1].text)
 			}
 			act.kind, act.column = "drop column", a[j].text
-		case len(a) > 0 && (a[0].is("ADD") || a[0].is("DROP")):
-			return st, strings.ToUpper(a[0].text) + " of a constraint or key", ""
+		case len(a) > 1 && (a[0].is("ADD") && (a[1].is("PRIMARY") || a[1].is("CONSTRAINT") || a[1].is("FOREIGN")) ||
+			a[0].is("DROP") && (a[1].is("PRIMARY") || a[1].is("CONSTRAINT"))):
+			var msg string
+			if act, msg = parseKeyAction(a); msg != "" {
+				return st, "", msg
+			}
 		case len(a) > 0:
 			return st, fmt.Sprintf("%s", strings.ToUpper(a[0].text)), ""
 		}
@@ -250,7 +272,7 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 		switch a.kind {
 		case "rename table":
 			renames++
-		case "rename column", "drop column":
+		case "rename column", "drop column", "set type":
 			remakes++
 		default:
 			others++
@@ -260,7 +282,8 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 	case renames > 0 && len(st.actions) > 1:
 		return st, "RENAME TO with other actions in the same statement", ""
 	case remakes > 0 && others > 0:
-		return st, "RENAME COLUMN or DROP COLUMN with ADD COLUMN, SET OPTIONS or ALTER COLUMN in the same statement", ""
+		return st, "RENAME COLUMN, DROP COLUMN or ALTER COLUMN SET DATA TYPE with ADD COLUMN, SET OPTIONS, another ALTER COLUMN " +
+			"or a key in the same statement", ""
 	}
 	return st, "", ""
 }
@@ -470,6 +493,7 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 		Schema struct {
 			Fields []map[string]any `json:"fields"`
 		} `json:"schema"`
+		TableConstraints *tableConstraints `json:"tableConstraints"`
 	}
 	if status != http.StatusOK || json.Unmarshal(got, &current) != nil {
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not read "+name, text)
@@ -479,7 +503,7 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 			", a "+current.Type+".", text)
 	}
 	switch st.actions[0].kind {
-	case "rename table", "rename column", "drop column": // alone, parseAlter
+	case "rename table", "rename column", "drop column", "set type": // alone, parseAlter
 		return s.remakeTable(st, ds, table, name, got, text)
 	}
 	fields := current.Schema.Fields
@@ -493,8 +517,19 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 		}
 		return nil
 	}
+	cons := current.TableConstraints
+	if cons == nil {
+		cons = &tableConstraints{}
+	}
+	consChanged := false
 	for _, a := range st.actions {
 		switch a.kind {
+		case "add primary key", "add foreign key", "drop primary key", "drop constraint":
+			changed, flow := s.applyKey(cons, a, func(c string) bool { return find(c) != nil }, name, text)
+			if flow != nil {
+				return flow
+			}
+			consChanged = consChanged || changed
 		case "add":
 			if find(a.column) != nil {
 				if a.ifExists {
@@ -597,6 +632,13 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 	}
 	if schemaChanged {
 		patch["schema"] = map[string]any{"fields": fields}
+	}
+	if consChanged {
+		if cons.empty() {
+			patch["tableConstraints"] = nil
+		} else {
+			patch["tableConstraints"] = cons
+		}
 	}
 	if len(patch) == 0 {
 		return s.assigned()

@@ -30,12 +30,12 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 1 | 1 | 0 | 0 | 0 |
 | Vertex AI | 2 | 0 | 2 | 0 | 0 |
-| BigQuery | 33 | 14 | 16 | 3 | 0 |
+| BigQuery | 35 | 16 | 16 | 3 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 3 | 3 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **79** | **30** | **37** | **7** | **5** |
+| **Total** | **81** | **32** | **37** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -167,6 +167,8 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 |---|---|---|
 | `ALTER TABLE` `ALTER COLUMN SET DATA TYPE`, `SET DEFAULT` / `DROP DEFAULT`, keys and constraints are 501, and so are `RENAME TO`, `RENAME COLUMN` and `DROP COLUMN` with another action, of a nested field, of a table with row access policies or keys, and `RENAME COLUMN` of a partitioning or clustering column (`ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` are carried out since #1227, `RENAME TO`, `RENAME COLUMN` and `DROP COLUMN` since #1322) (#1334) | not built yet | M |
 | A view's column list inside a multi-statement script with a `TEMP` table or function, or in a dry run, and a column option other than a `description` literal in the list, are 501 (a list in any other script, and a column's description, are carried out since #1323) (#1335) | not built yet | S |
+| `ALTER TABLE` `ALTER COLUMN SET DEFAULT` / `DROP DEFAULT` are 501: the engine applies a column default only from the `CREATE TABLE` that made its table, never from the table's `defaultValueExpression` (measured, #1340); and so are `RENAME TO` with another action, a nested field, `RENAME TO` another dataset, a table with row access policies, `RENAME COLUMN` of a partitioning or clustering column, `RENAME COLUMN` or `DROP COLUMN` of a table with keys, and `RENAME COLUMN`, `DROP COLUMN` or `SET DATA TYPE` with an action that is not one of them (`ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` are carried out since #1227, `RENAME TO`, `RENAME COLUMN` and `DROP COLUMN` since #1322, `SET DATA TYPE` and primary and foreign keys since #1334) (#1340) | not built yet | M |
+| A view's column list inside a multi-statement script, and a column's `OPTIONS` in the list (a lone `CREATE VIEW v (c, d) AS …` is carried out, #1240) (#1323) | not built yet | S |
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) (#1324) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 (#1325) | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix), names the same once replaced, and a load that is not CSV, are 501 (renaming by replacing characters is built since #1326) (#1336) | not built yet | S |
