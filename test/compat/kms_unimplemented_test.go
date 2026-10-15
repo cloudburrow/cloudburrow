@@ -26,25 +26,13 @@ const kmsService = "google.cloud.kms.v1.KeyManagementService/"
 // request here for a method that is no longer unimplemented, fails the test,
 // so a feature issue that implements a method must update the table.
 //
-// covers: google.cloud.kms.v1.KeyManagementService/AsymmetricDecrypt (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/AsymmetricSign (unimplemented)
 // covers: google.cloud.kms.v1.KeyManagementService/CreateImportJob (unimplemented)
 // covers: google.cloud.kms.v1.KeyManagementService/Decapsulate (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/DeleteCryptoKeyVersion (unimplemented)
 // covers: google.cloud.kms.v1.KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes (unimplemented)
 // covers: google.cloud.kms.v1.KeyManagementService/GetImportJob (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/GetPublicKey (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/GetRetiredResource (unimplemented)
 // covers: google.cloud.kms.v1.KeyManagementService/ImportCryptoKeyVersion (unimplemented)
 // covers: google.cloud.kms.v1.KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion (unimplemented)
 // covers: google.cloud.kms.v1.KeyManagementService/ListImportJobs (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/ListRetiredResources (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/MacSign (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/MacVerify (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/RawDecrypt (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/RawEncrypt (unimplemented)
 func TestKMSUnimplementedContract(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -63,14 +51,6 @@ func TestKMSUnimplementedContract(t *testing.T) {
 	job := ring.GetName() + "/importJobs/j"
 	data := []byte("cloudburrow")
 	calls := map[string]func(context.Context) error{
-		"AsymmetricDecrypt": func(ctx context.Context) error {
-			_, err := c.AsymmetricDecrypt(ctx, &kmspb.AsymmetricDecryptRequest{Name: v, Ciphertext: data})
-			return err
-		},
-		"AsymmetricSign": func(ctx context.Context) error {
-			_, err := c.AsymmetricSign(ctx, &kmspb.AsymmetricSignRequest{Name: v, Data: data})
-			return err
-		},
 		"CreateImportJob": func(ctx context.Context) error {
 			_, err := c.CreateImportJob(ctx, &kmspb.CreateImportJobRequest{Parent: ring.GetName(), ImportJobId: "j",
 				ImportJob: &kmspb.ImportJob{ImportMethod: kmspb.ImportJob_RSA_OAEP_3072_SHA256_AES_256, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}})
@@ -80,32 +60,12 @@ func TestKMSUnimplementedContract(t *testing.T) {
 			_, err := c.Decapsulate(ctx, &kmspb.DecapsulateRequest{Name: v, Ciphertext: data})
 			return err
 		},
-		"DeleteCryptoKey": func(ctx context.Context) error {
-			_, err := c.DeleteCryptoKey(ctx, &kmspb.DeleteCryptoKeyRequest{Name: k})
-			return err
-		},
-		"DeleteCryptoKeyVersion": func(ctx context.Context) error {
-			_, err := c.DeleteCryptoKeyVersion(ctx, &kmspb.DeleteCryptoKeyVersionRequest{Name: v})
-			return err
-		},
 		"ExportTrustedKeyWrappedCryptoKeyVersion": func(ctx context.Context) error {
 			_, err := c.ExportTrustedKeyWrappedCryptoKeyVersion(ctx, &kmspb.ExportTrustedKeyWrappedCryptoKeyVersionRequest{Name: v})
 			return err
 		},
-		"GenerateRandomBytes": func(ctx context.Context) error {
-			_, err := c.GenerateRandomBytes(ctx, &kmspb.GenerateRandomBytesRequest{Location: loc, LengthBytes: 8, ProtectionLevel: kmspb.ProtectionLevel_HSM})
-			return err
-		},
 		"GetImportJob": func(ctx context.Context) error {
 			_, err := c.GetImportJob(ctx, &kmspb.GetImportJobRequest{Name: job})
-			return err
-		},
-		"GetPublicKey": func(ctx context.Context) error {
-			_, err := c.GetPublicKey(ctx, &kmspb.GetPublicKeyRequest{Name: v})
-			return err
-		},
-		"GetRetiredResource": func(ctx context.Context) error {
-			_, err := c.GetRetiredResource(ctx, &kmspb.GetRetiredResourceRequest{Name: loc + "/retiredResources/r"})
 			return err
 		},
 		"ImportCryptoKeyVersion": func(ctx context.Context) error {
@@ -120,26 +80,6 @@ func TestKMSUnimplementedContract(t *testing.T) {
 		},
 		"ListImportJobs": func(ctx context.Context) error {
 			_, err := c.ListImportJobs(ctx, &kmspb.ListImportJobsRequest{Parent: ring.GetName()}).Next()
-			return err
-		},
-		"ListRetiredResources": func(ctx context.Context) error {
-			_, err := c.ListRetiredResources(ctx, &kmspb.ListRetiredResourcesRequest{Parent: loc}).Next()
-			return err
-		},
-		"MacSign": func(ctx context.Context) error {
-			_, err := c.MacSign(ctx, &kmspb.MacSignRequest{Name: v, Data: data})
-			return err
-		},
-		"MacVerify": func(ctx context.Context) error {
-			_, err := c.MacVerify(ctx, &kmspb.MacVerifyRequest{Name: v, Data: data, Mac: data})
-			return err
-		},
-		"RawDecrypt": func(ctx context.Context) error {
-			_, err := c.RawDecrypt(ctx, &kmspb.RawDecryptRequest{Name: v, Ciphertext: data, InitializationVector: make([]byte, 12)})
-			return err
-		},
-		"RawEncrypt": func(ctx context.Context) error {
-			_, err := c.RawEncrypt(ctx, &kmspb.RawEncryptRequest{Name: v, Plaintext: data})
 			return err
 		},
 	}

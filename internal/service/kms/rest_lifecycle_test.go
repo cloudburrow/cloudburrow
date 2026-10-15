@@ -30,8 +30,9 @@ func TestRESTLifecycle(t *testing.T) {
 	if code, m, raw := restDo(t, "PATCH", key+"?updateMask=labels", `{"labels":{"team":"payments"}}`); code != 200 || m["labels"].(map[string]any)["team"] != "payments" {
 		t.Errorf("PATCH labels = %d %s", code, raw)
 	}
-	// Reaches #405's check in proto form: it names version_template.algorithm.
-	if code, m, raw := restDo(t, "PATCH", key+"?updateMask=versionTemplate.algorithm", `{"versionTemplate":{"algorithm":"EC_SIGN_P256_SHA256"}}`); code != 501 ||
+	// Reaches the check in proto form: it names version_template.algorithm,
+	// an algorithm of another purpose (#1212).
+	if code, m, raw := restDo(t, "PATCH", key+"?updateMask=versionTemplate.algorithm", `{"versionTemplate":{"algorithm":"EC_SIGN_P256_SHA256"}}`); code != 400 ||
 		!strings.Contains(m["error"].(map[string]any)["message"].(string), "version_template.algorithm") {
 		t.Errorf("PATCH versionTemplate.algorithm = %d %s; want #405's refusal naming version_template.algorithm", code, raw)
 	}
@@ -56,9 +57,10 @@ func TestRESTLifecycle(t *testing.T) {
 		status, names           string
 	}{
 		{"unbound version verb", "POST", key + "/cryptoKeyVersions/1:nope", "{}", 404, "NOT_FOUND", ":nope"},
-		{"bound, not transcoded", "POST", key + "/cryptoKeyVersions/1:asymmetricSign", `{"data":"aGk="}`, 501, "UNIMPLEMENTED", "AsymmetricSign"},
-		{"DeleteCryptoKey", "DELETE", key, "", 501, "UNIMPLEMENTED", "DeleteCryptoKey"},
-		{"DeleteCryptoKeyVersion", "DELETE", key + "/cryptoKeyVersions/1", "", 501, "UNIMPLEMENTED", "DeleteCryptoKeyVersion"},
+		{"bound, not transcoded", "POST", key + "/cryptoKeyVersions/1:decapsulate", `{"ciphertext":"aGk="}`, 501, "UNIMPLEMENTED", "Decapsulate"},
+		{"sign with a symmetric key", "POST", key + "/cryptoKeyVersions/1:asymmetricSign", `{"data":"aGk="}`, 400, "FAILED_PRECONDITION", "purpose"},
+		{"DeleteCryptoKey with versions", "DELETE", key, "", 400, "FAILED_PRECONDITION", "DeleteCryptoKeyVersion first"},
+		{"DeleteCryptoKeyVersion not destroyed", "DELETE", key + "/cryptoKeyVersions/1", "", 400, "FAILED_PRECONDITION", "DESTROYED"},
 		{"unknown body field", "PATCH", key + "?updateMask=labels", `{"labels":{},"bogus":1}`, 400, "INVALID_ARGUMENT", "CryptoKey"},
 		{"snake_case mask", "PATCH", key + "?updateMask=version_template.algorithm", `{}`, 400, "INVALID_ARGUMENT", "updateMask"},
 		{"name conflict", "PATCH", key + "?updateMask=labels", `{"name":"projects/demo-project/locations/global/keyRings/r/cryptoKeys/other"}`, 400, "INVALID_ARGUMENT", "differs"},
