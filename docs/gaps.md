@@ -147,7 +147,7 @@ Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by 
 
 | Gap | Why open | Size |
 |---|---|---|
-| Liens, TagKeys, TagValues, TagBindings (#1295) are not served (Folders and Organizations are, #1294) | not built yet | L |
+| Regional tag bindings (the `{location}-cloudresourcemanager` endpoints) are not served; Liens, TagKeys, TagValues, TagBindings, TagHolds and EffectiveTags are (#1295), stored, with only the project-delete lien enforced | not built yet | S |
 
 ## Vertex AI
 

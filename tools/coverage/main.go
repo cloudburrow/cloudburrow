@@ -106,7 +106,11 @@ var areas = []area{
 	// google.cloud.location.Locations too (#1291); Cloud Scheduler lists it
 	// as well, and both serve it, so the one registry status is true of both.
 	{Key: "kms", Title: "Cloud KMS", Own: true, Services: []string{"google.cloud.kms.v1.KeyManagementService", "google.iam.v1.IAMPolicy", "google.cloud.location.Locations"}},
-	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects", "google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations"}},
+	// Liens (#1295) have no gRPC service, so they are not counted here;
+	// docs/compatibility.md lists them.
+	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations, Tags)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects",
+		"google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations", "google.cloud.resourcemanager.v3.TagKeys",
+		"google.cloud.resourcemanager.v3.TagValues", "google.cloud.resourcemanager.v3.TagBindings", "google.cloud.resourcemanager.v3.TagHolds"}},
 	// google.cloud.location.Locations is the mixin cloudscheduler.googleapis.com
 	// serves (#1237); Cloud KMS serves it too (#1291).
 	{Key: "scheduler", Title: "Cloud Scheduler", Own: true, Services: []string{"google.cloud.scheduler.v1.CloudScheduler", "google.cloud.location.Locations"}},

@@ -182,6 +182,7 @@ func (p hierarchyProvider) Detail(_ context.Context, _ string, path []string) (c
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Folder", Properties: props}}},
 			{ID: "folders", Label: "Folders", Listing: children},
 			{ID: "projects", Label: "Projects", Listing: projects},
+			tagSection(p.registry, resourcemanager.CRMPrefix+f.Name),
 		},
 	}
 	if f.State == resourcemanager.StateActive {
@@ -219,15 +220,18 @@ func (p hierarchyProvider) DetailActions(_ context.Context, _ string, path []str
 	if f.State == resourcemanager.StateDeleteRequested {
 		return []console.Action{{ID: folderUndelete, Label: "Undelete folder"}}
 	}
-	return []console.Action{{ID: folderMove, Label: "Move folder", Fields: []console.Field{
+	return append([]console.Action{{ID: folderMove, Label: "Move folder", Fields: []console.Field{
 		{Name: "parent", Label: "Destination", Type: "select", Required: true, Options: p.parentOptions(f.Name), Default: f.Parent,
 			Help: "The organization, or a folder that is not this one or under it."},
-	}}}
+	}}}, tagActions(p.registry, resourcemanager.CRMPrefix+f.Name)...)
 }
 
 func (p hierarchyProvider) ActAt(_ context.Context, _ string, path []string, action string, values map[string]string) error {
 	if len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
+	}
+	if ok, err := tagAct(p.registry, resourcemanager.CRMPrefix+"folders/"+strings.TrimPrefix(path[0], "folders/"), action, values); ok {
+		return err
 	}
 	var err error
 	switch action {

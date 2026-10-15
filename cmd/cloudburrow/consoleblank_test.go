@@ -15,6 +15,7 @@ import (
 	"cloud.google.com/go/bigtable"
 	"cloud.google.com/go/bigtable/bttest"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -204,6 +205,18 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	}
 	// The resource hierarchy (#1294): a folder under the organization.
 	if _, err := d.projects.CreateFolder(resourcemanager.OrganizationName, "Blank folder"); err != nil {
+		t.Fatal(err)
+	}
+	// Tags (#1295): a key with a value, bound to the project.
+	tk, err := d.projects.CreateTagKey(&rmpb.TagKey{Parent: resourcemanager.OrganizationName, ShortName: "blank-key", Description: "Blank key"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tv, err := d.projects.CreateTagValue(&rmpb.TagValue{Parent: tk.GetName(), ShortName: "blank-value", Description: "Blank value"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.projects.CreateTagBinding(&rmpb.TagBinding{Parent: projectTarget(blankProject), TagValue: tv.GetName()}, false); err != nil {
 		t.Fatal(err)
 	}
 

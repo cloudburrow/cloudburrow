@@ -52,6 +52,10 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(rmReg))
 	rmpb.RegisterFoldersServer(srv, resourcemanager.NewFoldersServer(rmReg))
 	rmpb.RegisterOrganizationsServer(srv, resourcemanager.OrganizationsServer{})
+	rmpb.RegisterTagKeysServer(srv, resourcemanager.NewTagKeysServer(rmReg))
+	rmpb.RegisterTagValuesServer(srv, resourcemanager.NewTagValuesServer(rmReg))
+	rmpb.RegisterTagBindingsServer(srv, resourcemanager.NewTagBindingsServer(rmReg))
+	rmpb.RegisterTagHoldsServer(srv, resourcemanager.NewTagHoldsServer(rmReg))
 	schedStore := scheduler.NewStore(store.NewMemory())
 	scheduler.NewGRPCServer(schedStore, scheduler.NewRunner(schedStore, nil, nil, nil, time.Second), nil).Register(srv)
 	// The Locations mixin is registered once, by KMS above (#1291): Cloud
