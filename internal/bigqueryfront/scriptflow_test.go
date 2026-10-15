@@ -1,8 +1,10 @@
 package bigqueryfront
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestScriptParser (#1201): a script's blocks are read into their parts.
@@ -96,5 +98,83 @@ func TestScriptRaise(t *testing.T) {
 	code, got = do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "BEGIN RAISE USING MESSAGE = 'boom'; EXCEPTION WHEN ERROR THEN SELECT @@error.message AS m; END"))
 	if code != 200 || emu.log[len(emu.log)-1] != "QUERY SELECT ('boom') AS m" {
 		t.Errorf("a caught RAISE: %d %v %q", code, got, emu.log)
+	}
+}
+
+// TestScriptTimeLimit (#1201): a script fails once it has run for
+// BigQuery's cumulative time limit for a multi-statement query, 24 hours,
+// not after a count of steps of CloudBurrow's own.
+func TestScriptTimeLimit(t *testing.T) {
+	now := time.Unix(0, 0)
+	defer func(f func() time.Time) { scriptNow = f }(scriptNow)
+	scriptNow = func() time.Time { now = now.Add(time.Hour); return now }
+	emu := &scriptEmulator{run: func(q string) (int, string) { return 200, `{"jobComplete":true}` }}
+	code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "LOOP SELECT 1; END LOOP"))
+	msg, _ := got["error"].(map[string]any)["message"].(string)
+	if code != 400 || !strings.Contains(msg, "24 hours") {
+		t.Errorf("a loop that never ends: %d %v", code, got)
+	}
+	if n := len(emu.log); n < 5 || n > 30 {
+		t.Errorf("the loop ran %d statements in its 24 hours of one an hour", n)
+	}
+}
+
+// TestScriptVariableLimits (#1201): a variable of over 1 MB fails the
+// script, BigQuery's documented limit.
+func TestScriptVariableLimits(t *testing.T) {
+	s := &scriptRun{scopes: []map[string]scriptVar{{}}}
+	if flow := s.assign("x", scriptVar{"STRING", "'" + strings.Repeat("a", scriptVarLimit) + "'"}, s.scopes[0], "SET x = ..."); flow == nil || !strings.Contains(flow.msg, "1 MB") {
+		t.Errorf("a variable of over 1 MB: %+v", flow)
+	}
+	for i := 0; i < 10; i++ {
+		flow := s.assign(fmt.Sprint("v", i), scriptVar{"STRING", strings.Repeat("a", scriptVarLimit-10)}, s.scopes[0], "DECLARE")
+		if flow != nil {
+			t.Fatalf("variable %d: %+v", i, flow)
+		}
+	}
+	if flow := s.assign("v10", scriptVar{"STRING", strings.Repeat("a", scriptVarLimit-10)}, s.scopes[0], "DECLARE"); flow == nil || !strings.Contains(flow.msg, "10 MB") {
+		t.Errorf("variables of over 10 MB: %+v", flow)
+	}
+}
+
+// TestScriptStackTrace (#1201): @@error.stack_trace and
+// @@error.formatted_stack_trace name the failed statement's line and
+// column, in the forms of BigQuery's reference.
+func TestScriptStackTrace(t *testing.T) {
+	sql := "DECLARE x INT64;\nBEGIN\n  SELECT 1/0;\nEXCEPTION WHEN ERROR THEN SELECT 1; END"
+	s := &scriptRun{sql: sql}
+	vars := s.errorVars(&scriptFlow{failed: true, msg: "division by zero", pos: strings.Index(sql, "SELECT 1/0"), hasPos: true})
+	if got := vars["formatted_stack_trace"].lit; got != "'At [3:3]'" {
+		t.Errorf("formatted_stack_trace %s", got)
+	}
+	if got := vars["stack_trace"].lit; got != "[STRUCT<line INT64, column INT64, filename STRING, location STRING>(3, 3, NULL, NULL)]" {
+		t.Errorf("stack_trace %s", got)
+	}
+	if l, c := lineColumn("é\nab", 3); l != 2 || c != 1 {
+		t.Errorf("lineColumn %d %d", l, c)
+	}
+}
+
+// TestScriptLastStatement (#1201): a last statement that changes data is
+// the client's own request, so a query job keeps its DML counts; a script
+// ending in a SET answers with no rows.
+func TestScriptLastStatement(t *testing.T) {
+	emu := &scriptEmulator{run: func(q string) (int, string) {
+		if strings.HasSuffix(q, "AS BOOL)") {
+			return 200, `{"jobComplete":true,"schema":{"fields":[{"name":"f0_","type":"BOOLEAN"}]},"rows":[{"f":[{"v":"true"}]}]}`
+		}
+		if strings.HasPrefix(q, "SELECT CAST") {
+			return 200, `{"jobComplete":true,"schema":{"fields":[{"name":"f0_","type":"INTEGER"}]},"rows":[{"f":[{"v":"1"}]}]}`
+		}
+		return 200, `{"jobComplete":true}`
+	}}
+	do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "IF TRUE THEN INSERT INTO ds.t (n) VALUES (1); END IF"))
+	if n := len(emu.log); n == 0 || !strings.Contains(emu.log[n-1], "INSERT INTO") {
+		t.Errorf("the last DML: %q", emu.log)
+	}
+	emu.log = nil
+	do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "DECLARE x INT64; IF TRUE THEN SELECT 1 AS a; SET x = 1; END IF"))
+	if n := len(emu.log); n == 0 || strings.Contains(emu.log[n-1], "AS a") {
+		t.Errorf("a script ending in SET: %q", emu.log)
 	}
 }
