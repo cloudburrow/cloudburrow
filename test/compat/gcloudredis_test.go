@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance, google.cloud.redis.v1.CloudRedis/ListInstances, google.cloud.redis.v1.CloudRedis/UpdateInstance, google.cloud.redis.v1.CloudRedis/DeleteInstance, google.cloud.redis.v1.CloudRedis/GetInstanceAuthString, google.longrunning.Operations/GetOperation
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance, google.cloud.redis.v1.CloudRedis/ListInstances, google.cloud.redis.v1.CloudRedis/UpdateInstance, google.cloud.redis.v1.CloudRedis/DeleteInstance, google.cloud.redis.v1.CloudRedis/GetInstanceAuthString
 //
 // TestGcloudRedis (#1302): through the configuration `cloudburrow
 // gcloud-setup` writes and nothing else, the real gcloud creates a Basic

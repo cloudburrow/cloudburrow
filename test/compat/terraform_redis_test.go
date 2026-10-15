@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance, google.cloud.redis.v1.CloudRedis/UpdateInstance, google.cloud.redis.v1.CloudRedis/DeleteInstance, google.cloud.redis.v1.CloudRedis/GetInstanceAuthString, google.longrunning.Operations/GetOperation
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance, google.cloud.redis.v1.CloudRedis/UpdateInstance, google.cloud.redis.v1.CloudRedis/DeleteInstance, google.cloud.redis.v1.CloudRedis/GetInstanceAuthString
 //
 // TestTerraformRedisInstance (#1302): a google_redis_instance with AUTH
 // applies with the official hashicorp/google provider through `cloudburrow

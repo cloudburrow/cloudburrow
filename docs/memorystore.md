@@ -4,7 +4,8 @@
 server, in the cluster (#296). It follows the [Cloud SQL](cloudsql.md) decision (#121): Google
 publishes no Memorystore emulator, so what runs is the kind of server Memorystore itself runs,
 giving an application a real data plane at a stable local address. Since #1302 the
-Memorystore admin API describes that one server, and does nothing else (§4).
+Memorystore admin API describes that server, and creates, resizes and deletes instances of
+your own, each a Valkey server of its own (§4).
 
 ## 1. What you get
 
@@ -40,36 +41,78 @@ Then it starts the instance in `--mode ephemeral` and checks that the key is gon
 - **Ephemeral**: `--save "" --appendonly no`. Nothing is written to disk, so every restart
   starts empty.
 
-`cloudburrow state save` does not capture Memorystore. Use Valkey's own `BGSAVE`, or the
-append-only file on the volume.
+`cloudburrow state save` does not capture Memorystore, created instances included, and
+`cloudburrow reset` does not empty it. Use Valkey's own `BGSAVE`, or the append-only file on
+the volume.
 
 ## 3. What you do not get
 
-**Only the read half of the Memorystore admin API (`redis.googleapis.com`).** There is one
-instance and it cannot be created, resized, upgraded, deleted, exported, imported or failed over;
-no AUTH strings, no in-transit encryption, no read replicas, no maintenance windows and no IAM.
+**Not all of the Memorystore admin API (`redis.googleapis.com`).** Instances are BASIC tier and
+`REDIS_7_2` only: no Standard tier, replicas or failover, no upgrade, export or import, no
+in-transit encryption, no RDB persistence, no maintenance windows and no IAM. Each is 501.
 
-**No authentication.** Protected mode is off and there is no password, for the same reason Cloud
-SQL uses `trust`: nothing in CloudBurrow authenticates a request, and a password printed in the
-banner would imply otherwise. The host endpoint is bound to loopback. Do not expose it.
+**No authentication on the server `up` runs.** Protected mode is off and there is no password,
+for the same reason Cloud SQL uses `trust`: nothing in CloudBurrow authenticates a request, and a
+password printed in the banner would imply otherwise. The host endpoint is bound to loopback. Do
+not expose it. An instance you create with `auth_enabled` does require AUTH (§4).
 
 ## 4. The admin API
 
 `--services memorystore` also serves `google.cloud.redis.v1.CloudRedis` on
-`--port-memorystore-admin` (default `9021`), gRPC and JSON on one port, exported as
-`CLOUDBURROW_MEMORYSTORE_ENDPOINT` (#1302). It describes the one running server as
-`projects/<default project>/locations/us-central1/instances/memorystore`: host and port are
-`REDIS_HOST:REDIS_PORT`, `redis_version` and `memory_size_gb` are read from the server
-(`REDIS_7_2`, 1 GB: the server runs with `--maxmemory 1gb` and Memorystore's default
-`volatile-lru` eviction), and the state is READY while it answers.
+`--port-memorystore-admin` (default `9021`), gRPC and JSON on one port, with
+`google.longrunning.Operations` for its operations, exported as
+`CLOUDBURROW_MEMORYSTORE_ENDPOINT` (#1302). `cloudburrow gcloud-setup` points `gcloud redis` at
+it, and `cloudburrow terraform` points `google_redis_instance` at it.
+
+**The instance `up` runs** is `projects/<default project>/locations/us-central1/instances/memorystore`:
+host and port are `REDIS_HOST:REDIS_PORT`, `redis_version` and `memory_size_gb` are read from the
+server (`REDIS_7_2`, 1 GB: the server runs with `--maxmemory 1gb` and Memorystore's default
+`volatile-lru` eviction), and the state is READY while it answers. It has no AUTH
+(`GetInstanceAuthString` is FAILED_PRECONDITION), and it cannot be updated or deleted:
+`UpdateInstance` and `DeleteInstance` on it are FAILED_PRECONDITION. Run `up` without
+`memorystore` in `--services` to have none.
+
+**Instances you create** are each a Valkey server of their own: a Deployment and Service in the
+cluster, of the same image and settings, reached from the host through a tunnel of their own on
+an OS-assigned port, which the instance's `host` and `port` report.
 
 ```go
 c, _ := redis.NewCloudRedisClient(ctx, option.WithEndpoint(os.Getenv("CLOUDBURROW_MEMORYSTORE_ENDPOINT")),
 	option.WithoutAuthentication(), option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
-inst, _ := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: "projects/" + project + "/locations/us-central1/instances/memorystore"})
+op, _ := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{
+	Parent: "projects/" + project + "/locations/us-central1", InstanceId: "cache",
+	Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 2, AuthEnabled: true}})
+inst, _ := op.Wait(ctx) // READY, once its server answers
+auth, _ := c.GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: inst.Name})
+rdb := goredis.NewClient(&goredis.Options{Addr: fmt.Sprintf("%s:%d", inst.Host, inst.Port), Password: auth.AuthString})
 ```
 
-`GetInstanceAuthString` is FAILED_PRECONDITION, since AUTH is off. Every method that would create,
-change or remove an instance is UNIMPLEMENTED. The console's Memorystore page shows the instance
-and has **Flush** (FLUSHALL); the API itself has no flush. See
+```sh
+gcloud redis instances create cache --region=us-central1 --size=2 --tier=basic --enable-auth
+```
+
+| Field | What it does |
+|---|---|
+| `tier` | BASIC. STANDARD_HA is 501: one server, no replica |
+| `memory_size_gb` | 1 to 300: the server's `maxmemory` |
+| `redis_version` | empty or `REDIS_7_2`, what Valkey 8.1 is; any other is 501 |
+| `auth_enabled` | `--requirepass` with a generated string (a UUID, as Google's), which `GetInstanceAuthString` returns. It is in the server's Deployment arguments in the cluster |
+| `redis_configs` | `maxmemory-policy` (default `volatile-lru`), `notify-keyspace-events`, `activedefrag`, `lfu-decay-time`, `lfu-log-factor`, `stream-node-max-bytes`, `stream-node-max-entries`, and `maxmemory-gb` (a `maxmemory` below the size); another is INVALID_ARGUMENT |
+| `display_name`, `labels`, `location_id` | kept and returned; placement is not real, so any region is accepted |
+
+`UpdateInstance` changes `display_name`, `labels`, `memory_size_gb` and `redis_configs`; the size
+and configs are set on the running server with `CONFIG SET`, so it keeps its keys, and a config
+removed goes back to its default. `DeleteInstance` removes the server, its Service and its volume.
+
+**Modes.** A created instance follows the instance's mode, as the server `up` runs does. In
+persistent mode its record is kept in `<state-dir>/<name>/memorystore`, its server keeps an
+append-only file on a volume of its own, and after `stop` and `up` it is READY again (REPAIRING
+while its server starts), with its AUTH string and its keys. In ephemeral mode nothing is kept:
+`up` removes the servers a previous run left, keeping their volumes as the server `up` runs keeps
+its own, so a later persistent run has them back.
+
+The console's Memorystore page lists the instances and has **Create instance**, **Edit** and
+**Delete**, and **Flush** (FLUSHALL) on the instance `up` runs; the API itself has no flush.
+`UpgradeInstance`, `FailoverInstance`, `ImportInstance`, `ExportInstance` and
+`RescheduleMaintenance` are 501. See
 [compatibility.md](compatibility.md#memorystore-for-redis--googlecloudredisv1).

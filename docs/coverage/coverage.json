@@ -2765,19 +2765,42 @@
     "Key": "memorystore",
     "Title": "Memorystore for Redis",
     "counts": {
-      "Unimplemented": 8,
-      "Verified": 3
+      "Unimplemented": 5,
+      "Verified": 6
     },
     "rows": [
       {
         "method": "google.cloud.redis.v1.CloudRedis/CreateInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
+        ],
+        "unverified": [
+          {
+            "code": "UNIMPLEMENTED",
+            "case": "tier STANDARD_HA (CloudBurrow's own)",
+            "test": "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete"
+          }
+        ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/DeleteInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
+        ],
+        "unverified": [
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "the instance `up` runs (CloudBurrow's own)",
+            "test": "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer"
+          }
+        ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/ExportInstance",
@@ -2793,20 +2816,26 @@
         "method": "google.cloud.redis.v1.CloudRedis/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
         ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/GetInstanceAuthString",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
             "case": "an instance with AUTH disabled",
-            "test": "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+            "test": "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer"
           }
         ]
       },
@@ -2819,7 +2848,8 @@
         "method": "google.cloud.redis.v1.CloudRedis/ListInstances",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer"
         ]
       },
       {
@@ -2829,8 +2859,12 @@
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/UpdateInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
+        ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/UpgradeInstance",

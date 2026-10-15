@@ -48,6 +48,10 @@ func (s *Server) operation(name string) (*longrunningpb.Operation, error) {
 	return out, nil
 }
 
+// Operation returns an operation CreateInstance, UpdateInstance or
+// DeleteInstance started, as GetOperation does.
+func (s *Server) Operation(name string) (*longrunningpb.Operation, error) { return s.operation(name) }
+
 // OperationsServer serves google.longrunning.Operations for the operations
 // CreateInstance, UpdateInstance and DeleteInstance return, as
 // redis.googleapis.com does: the SDK's op.Wait, gcloud and Terraform poll

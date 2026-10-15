@@ -448,10 +448,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
 		kms: kmsSvc, scheduler: schedulerSvc, run: runSvc, logging: loggingSvc,
-		faults:   faults,
-		metaAddr: metaSrv.Addr,
-		ingress:  ingressAddr,
-		mysql:    mysqlCreds,
+		memorystore: memorystoreAdminSvc,
+		faults:      faults,
+		metaAddr:    metaSrv.Addr,
+		ingress:     ingressAddr,
+		mysql:       mysqlCreds,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.

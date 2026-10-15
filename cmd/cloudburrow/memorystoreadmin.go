@@ -222,6 +222,10 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 // Remove closes the server's tunnel and deletes its Deployment, Service
 // and volume.
 func (p *memorystoreProvisioner) Remove(ctx context.Context, server string) error {
+	return p.remove(ctx, server, true)
+}
+
+func (p *memorystoreProvisioner) remove(ctx context.Context, server string, volume bool) error {
 	p.mu.Lock()
 	f := p.tunnels[server]
 	delete(p.tunnels, server)
@@ -234,13 +238,19 @@ func (p *memorystoreProvisioner) Remove(ctx context.Context, server string) erro
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	_, err := p.installer.Kubectl(ctx, "-n", p.cfg.Cluster.Namespace, "delete",
-		"deployment/"+server, "service/"+server, "persistentvolumeclaim/"+server+"-data", "--ignore-not-found", "--wait=false")
+	objects := []string{"deployment/" + server, "service/" + server}
+	if volume {
+		objects = append(objects, "persistentvolumeclaim/"+server+"-data")
+	}
+	_, err := p.installer.Kubectl(ctx, append(append([]string{"-n", p.cfg.Cluster.Namespace, "delete"}, objects...),
+		"--ignore-not-found", "--wait=false")...)
 	return err
 }
 
 // tidy removes the created servers no instance keeps: every one, in
-// ephemeral mode, whose instances went with the last run.
+// ephemeral mode, whose instances went with the last run. An ephemeral
+// run keeps their volumes, as it keeps the one of the server `up` runs:
+// the persistent run after it has its instances back, with their data.
 func (p *memorystoreProvisioner) tidy(ctx context.Context, keep []string) {
 	out, err := p.installer.Kubectl(ctx, "-n", p.cfg.Cluster.Namespace, "get", "deployments",
 		"-l", "cloudburrow.dev/instance="+p.cfg.Name, "-o", "name")
@@ -254,7 +264,7 @@ func (p *memorystoreProvisioner) tidy(ctx context.Context, keep []string) {
 	for _, line := range strings.Fields(out) {
 		name := strings.TrimPrefix(line, "deployment.apps/")
 		if strings.HasPrefix(name, redisadmin.ServerPrefix) && !kept[name] {
-			_ = p.Remove(ctx, name)
+			_ = p.remove(ctx, name, p.cfg.Mode == config.ModePersistent)
 		}
 	}
 }

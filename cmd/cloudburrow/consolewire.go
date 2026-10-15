@@ -36,6 +36,9 @@ type consoleDeps struct {
 	secrets   *secretsService
 	kms       *kmsService
 	scheduler *schedulerService
+	// memorystore is the Memorystore admin API (#1302), whose instances the
+	// Memorystore page creates, edits and deletes.
+	memorystore *memorystoreAdminService
 	// logging is Cloud Logging, whose metrics, sinks and exclusions have
 	// screens of their own (#1226).
 	logging *loggingService
@@ -199,7 +202,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceCloudSQL, func(a string) console.Provider { return cloudSQLProvider{endpoint: a} }},
 		{config.ServiceCloudSQLMySQL, func(a string) console.Provider { return newCloudSQLMySQLProvider(a, d.mysql) }},
 		// Memorystore's Instances page, through the admin API (#1302).
-		{config.ServiceMemorystore, func(a string) console.Provider { return newMemorystoreProvider(d.cfg, a) }},
+		{config.ServiceMemorystore, func(a string) console.Provider { return newMemorystoreProvider(d.cfg, a, d.memorystore) }},
 		// The emulator serves the instance's default project and no other, so
 		// the screen is told which one that is (#698).
 		{config.ServiceBigQuery, func(a string) console.Provider {

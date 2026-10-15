@@ -203,9 +203,9 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 
 | Gap | Why open | Size |
 |---|---|---|
-| The Memorystore admin API (`redis.googleapis.com`) (#1302) | not built yet | L |
+| Memorystore for Redis beyond one BASIC Valkey server per instance (#1302): STANDARD_HA (replicas, failover, read replicas), Redis versions other than `REDIS_7_2`, in-transit encryption, RDB persistence and customer-managed keys are UNIMPLEMENTED | not built yet | L |
 | The Cloud SQL Admin API beyond instance reads, databases, users and operations (served since #1301): creating or changing instances, IAM database authentication, backups, replicas, the Auth Proxy and connector path (`connectSettings`, `generateEphemeralCert`) (#1330) | not built yet | L |
-| The rest of the Memorystore admin API: `ListInstances`, `GetInstance` and `GetInstanceAuthString` are served over the one Valkey server (#1302); creating, updating, upgrading, deleting, importing, exporting and failing over an instance are UNIMPLEMENTED, and the gcloud and Terraform endpoint overrides are not exported until a test drives them | not built yet | M |
+| The rest of the Memorystore admin API: `UpgradeInstance`, `ImportInstance`, `ExportInstance`, `FailoverInstance` and `RescheduleMaintenance` are UNIMPLEMENTED; creating, updating and deleting instances, their operations, `gcloud redis` and `google_redis_instance` are served since #1302 | not built yet | M |
 
 ## Functions, credentials, tooling
 

@@ -61,7 +61,9 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	// The Locations mixin is registered once, by KMS above (#1291): Cloud
 	// Scheduler serves it too, on its own port, and the registry key is global.
 	logging.NewServer(logging.NewStore(10)).Register(srv)
-	redisadmin.NewServer(redisadmin.Instance{Project: "coverage"}, nil).Register(srv)
+	redis := redisadmin.NewServer(redisadmin.Instance{Project: "coverage"}, nil)
+	redis.EnableCreate(context.Background(), nil, nil, nil, nil)
+	redis.Register(srv)
 	vertexai.NewServer(nil).RegisterGRPC(srv)
 	logging.NewAdmin(store.NewMemory()).Register(srv)
 	// No Knative: every Cloud Run handler validates its request before

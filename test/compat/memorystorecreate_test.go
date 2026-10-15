@@ -38,7 +38,7 @@ func memorystoreAdminClient(t *testing.T, h *Harness) (*redisadmin.CloudRedisCli
 	return c, project
 }
 
-// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/UpdateInstance, google.cloud.redis.v1.CloudRedis/DeleteInstance, google.longrunning.Operations/GetOperation
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/UpdateInstance, google.cloud.redis.v1.CloudRedis/DeleteInstance
 //
 // TestMemorystoreCreateConnectUpdateDelete (#1302), with cloud.google.com/
 // go/redis/apiv1: CreateInstance's operation completes with a READY
@@ -178,5 +178,75 @@ func TestMemorystoreCreateConnectUpdateDelete(t *testing.T) {
 			t.Fatal("the deleted instance's server still answers")
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// restartProbeInstance is the created instance TestMemorystoreCreatedAcrossRestart
+// leaves for the run after CI's stop and up.
+const restartProbeInstance = "restart-probe"
+
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance, google.cloud.redis.v1.CloudRedis/GetInstanceAuthString
+//
+// TestMemorystoreCreatedAcrossRestart (#1302): a created instance follows
+// the CloudBurrow instance's mode, as the server `up` runs does. Without
+// CLOUDBURROW_TEST_MEMORYSTORE_EXPECT it creates restart-probe, with AUTH,
+// and writes a key; CI then restarts the instance and runs it again:
+// "present" (persistent mode) wants the instance back, READY, at an address
+// of its own with the same AUTH string and the key; "absent" (ephemeral)
+// wants no such instance.
+func TestMemorystoreCreatedAcrossRestart(t *testing.T) {
+	h := New(t)
+	c, project := memorystoreAdminClient(t, h)
+	ctx := h.Context()
+	parent := "projects/" + project + "/locations/us-central1"
+	name := parent + "/instances/" + restartProbeInstance
+	expect := os.Getenv(envMemorystoreExpect)
+	if expect == "absent" {
+		if _, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
+			t.Fatalf("ephemeral mode after stop/up: GetInstance = %v, want NOT_FOUND", err)
+		}
+		return
+	}
+	if expect == "" {
+		if _, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); status.Code(err) == codes.NotFound {
+			op, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: restartProbeInstance,
+				Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, AuthEnabled: true}})
+			if err != nil {
+				t.Fatalf("CreateInstance: %v", err)
+			}
+			if _, err := op.Wait(ctx); err != nil {
+				t.Fatalf("CreateInstance operation: %v", err)
+			}
+		}
+	}
+	var inst *redispb.Instance
+	deadline := time.Now().Add(3 * time.Minute)
+	for {
+		var err error
+		if inst, err = c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); err != nil {
+			t.Fatalf("GetInstance: %v", err)
+		}
+		if inst.GetState() == redispb.Instance_READY {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("instance %s is %s, not READY, after 3 minutes: %s", name, inst.GetState(), inst.GetStatusMessage())
+		}
+		time.Sleep(time.Second)
+	}
+	auth, err := c.GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := redis.NewClient(&redis.Options{Addr: net.JoinHostPort(inst.GetHost(), strconv.Itoa(int(inst.GetPort()))), Password: auth.GetAuthString()})
+	defer rc.Close()
+	if expect == "" {
+		if err := rc.Set(ctx, "probe", "written-before-stop", 0).Err(); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if got, err := rc.Get(ctx, "probe").Result(); err != nil || got != "written-before-stop" {
+		t.Fatalf("persistent mode after stop/up: GET = %q, %v; want the key written before stop", got, err)
 	}
 }
