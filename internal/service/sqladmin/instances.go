@@ -183,6 +183,12 @@ func (s *Server) bringUp(name, opID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
 	err := s.writes.prov.Start(ctx, spec)
+	if err == nil && spec.PITREnabled() && spec.MasterInstanceName == "" {
+		// The first base, so the instance is recoverable from its start.
+		if err = s.takePITRBase(name); err != nil {
+			err = fmt.Errorf("take the point-in-time recovery base: %w", err)
+		}
+	}
 	s.emu.Lock()
 	if cur := s.writes.byName[name]; cur == c && c.state != "PENDING_DELETE" {
 		if err != nil {

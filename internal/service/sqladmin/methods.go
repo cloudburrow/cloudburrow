@@ -76,7 +76,7 @@ var Methods = []Method{
 	{"sql.operations.get", "GET", "v1/projects/{project}/operations/{operation}", true},
 	{"sql.operations.list", "GET", "v1/projects/{project}/operations", true},
 	{"sql.projects.instances.getDiskShrinkConfig", "GET", "v1/projects/{project}/instances/{instance}/getDiskShrinkConfig", false},
-	{"sql.projects.instances.getLatestRecoveryTime", "GET", "v1/projects/{project}/instances/{instance}/getLatestRecoveryTime", false},
+	{"sql.projects.instances.getLatestRecoveryTime", "GET", "v1/projects/{project}/instances/{instance}/getLatestRecoveryTime", true},
 	{"sql.projects.instances.performDiskShrink", "POST", "v1/projects/{project}/instances/{instance}/performDiskShrink", false},
 	{"sql.projects.instances.rescheduleMaintenance", "POST", "v1/projects/{project}/instances/{instance}/rescheduleMaintenance", false},
 	{"sql.projects.instances.resetReplicaSize", "POST", "v1/projects/{project}/instances/{instance}/resetReplicaSize", false},
