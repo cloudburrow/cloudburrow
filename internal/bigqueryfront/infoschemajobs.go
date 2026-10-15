@@ -24,8 +24,8 @@ import (
 // (https://cloud.google.com/bigquery/docs/information-schema-jobs) but
 // those whose STRUCTs Google does not document (jobsLeftOut). Every user
 // is the instance's one, so JOBS_BY_USER is JOBS. The jobs are the
-// project's top-level ones (as jobs.list without parentJobId lists them),
-// and not the query reading the view, which has no record yet.
+// project's top-level ones and the child jobs of scripts (scriptjobs.go,
+// #1353), and not the query reading the view, which has no record yet.
 //
 // The instance's jobs are in one location, US (the emulator gives jobs and
 // datasets none; BigQuery's default). A region other than the query's
@@ -244,7 +244,7 @@ func (f front) jobsRows(r *http.Request) (string, int, string) {
 		if token != "" {
 			q.Set("pageToken", token)
 		}
-		req := r.Clone(r.Context())
+		req := r.Clone(withAllJobLevels(r.Context())) // children too (#1353)
 		u := *r.URL
 		u.Path, u.RawPath = "", ""
 		p := f.base + "/jobs"
