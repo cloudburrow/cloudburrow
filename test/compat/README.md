@@ -98,6 +98,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_MEMORYSTORE` | `REDIS_HOST`:`REDIS_PORT` | Memorystore |
 | `CLOUDBURROW_TEST_MYSQL`, `CLOUDBURROW_TEST_MYSQL_PASSWORD` | `MYSQL_HOST`:`MYSQL_PORT`, `MYSQL_PASSWORD` | Cloud SQL for MySQL |
 | `CLOUDBURROW_TEST_CLOUDSQL` | `PGHOST`:`PGPORT` | Cloud SQL for PostgreSQL |
+| `CLOUDBURROW_TEST_SQLADMIN` | `CLOUDBURROW_SQLADMIN_ENDPOINT` | the Cloud SQL Admin API (#1301), with either Cloud SQL service |
 | `CLOUDBURROW_TEST_BIGQUERY`, `CLOUDBURROW_TEST_BIGQUERY_STORAGE`, `CLOUDBURROW_TEST_BIGQUERY_PROJECT` | `CLOUDBURROW_BIGQUERY_ENDPOINT`, `CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT`, `GOOGLE_CLOUD_PROJECT` | BigQuery, whose emulator serves the instance's one project |
 | `CLOUDBURROW_TEST_LOCALAI` | the `local AI:` line of `up.log` | the generation tests; only with `--local-ai-model` |
 | `CLOUDBURROW_TEST_PREDICTION` | the `local AI:` line of `up.log` | `TestPredictionClientReachesACustomEndpoint`; any instance with Cloud Run, which starts the local AI endpoint for PredictionService (#1193) |

@@ -587,6 +587,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--port-cloudsql-mysql` | `CLOUDBURROW_PORT_CLOUDSQL_MYSQL` | `endpoints.cloudsqlMySQL` | `9017` | Cloud SQL for MySQL host endpoint (`--services cloudsql-mysql`). |
 | `--port-kms` | `CLOUDBURROW_PORT_KMS` | `endpoints.kms` | `9018` | Cloud KMS host endpoint (`--services kms`). See [Cloud KMS](#cloud-kms). |
 | `--port-cloudsql` | `CLOUDBURROW_PORT_CLOUDSQL` | `endpoints.cloudsql` | `9019` | Cloud SQL for PostgreSQL host endpoint (`--services cloudsql`). `0` = OS-assigned: `env` then exports `PGPORT` only from a running instance. Moves with `--port-base`. See [cloudsql.md](cloudsql.md). |
+| `--port-sqladmin` | `CLOUDBURROW_PORT_SQLADMIN` | `endpoints.sqladmin` | `9021` | The Cloud SQL Admin API (`sqladmin` v1 and v1beta4, #1301), bound when `cloudsql` or `cloudsql-mysql` is enabled. Moves with `--port-base`. See [cloudsql.md](cloudsql.md). |
 | `--port-ingress` | `CLOUDBURROW_PORT_INGRESS` | `endpoints.ingress` | `9080` | Host port of the cluster ingress gateway. **Fixed when the cluster is created**; `0` publishes nothing. See [Cluster ingress](#cluster-ingress). |
 | `--port-console` | `CLOUDBURROW_PORT_CONSOLE` | `endpoints.console` | `9090` | The web console. See [Console](#console). |
 | `--cluster-provider` | `CLOUDBURROW_CLUSTER_PROVIDER` | `cluster.provider` | `kind` | Only `kind` is supported (ADR-0005). |

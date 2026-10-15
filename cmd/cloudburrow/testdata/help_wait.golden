@@ -89,6 +89,8 @@ Flags:
     	Secret Manager host port (0 = OS-assigned)
   -port-spanner int
     	Spanner emulator host port (0 = OS-assigned; default 9013)
+  -port-sqladmin int
+    	Cloud SQL Admin API host port (0 = OS-assigned; default 9021)
   -port-storage int
     	Cloud Storage host port (0 = OS-assigned)
   -port-tasks int

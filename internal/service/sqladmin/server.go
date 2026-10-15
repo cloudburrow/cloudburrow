@@ -1,0 +1,588 @@
+// Package sqladmin serves the Cloud SQL Admin API (sqladmin v1 and v1beta4,
+// #1301) over the PostgreSQL and MySQL servers CloudBurrow runs.
+//
+// Google publishes no Cloud SQL emulator, so there is nothing to wrap: each
+// running server is described as one Cloud SQL instance, and the databases
+// and users methods run CREATE, ALTER and DROP in that server, so what they
+// report is what the server holds. Nothing here keeps its own copy of a
+// database or a user.
+//
+// What cannot be faithful is refused with 501 and says why: creating,
+// patching, restarting or deleting an instance (that would mean starting or
+// stopping a server), backups, replicas, imports and exports, SSL
+// certificates, and the connectors' connectSettings and
+// generateEphemeralCert, which need the instance's server certificate and a
+// TLS listener on 3307 that CloudBurrow does not run.
+package sqladmin
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Region is the region every instance reports. CloudBurrow has no regions;
+// one constant keeps connection names stable.
+const Region = "us-central1"
+
+// Database is one database, as an engine reports it.
+type Database struct {
+	Name, Charset, Collation string
+}
+
+// User is one user, as an engine reports it. Host is MySQL's; PostgreSQL's
+// is empty, as Cloud SQL's is.
+type User struct {
+	Name, Host string
+}
+
+// Engine is one running server.
+type Engine interface {
+	// Instance is the instance's name in the API.
+	Instance() string
+	// DatabaseVersion is the Cloud SQL enum, such as POSTGRES_17.
+	DatabaseVersion() string
+	// InstalledVersion is the server's own version as Cloud SQL spells
+	// databaseInstalledVersion, such as POSTGRES_17_11, read from the server.
+	InstalledVersion(ctx context.Context) (string, error)
+	// Addr is the host address the server is reached at, empty when its
+	// tunnel is not up.
+	Addr() string
+	ListDatabases(ctx context.Context) ([]Database, error)
+	CreateDatabase(ctx context.Context, d Database) error
+	UpdateDatabase(ctx context.Context, d Database) error
+	DeleteDatabase(ctx context.Context, name string) error
+	ListUsers(ctx context.Context) ([]User, error)
+	CreateUser(ctx context.Context, u User, password string) error
+	UpdateUser(ctx context.Context, u User, password string) error
+	DeleteUser(ctx context.Context, u User) error
+}
+
+// apiError is an error with the HTTP status and Google status it answers.
+type apiError struct {
+	code   int
+	status string
+	msg    string
+}
+
+func (e *apiError) Error() string { return e.msg }
+
+// Errorf is an error the server answers with code and the matching status.
+func Errorf(code int, format string, args ...any) error {
+	st := map[int]string{
+		http.StatusBadRequest: "INVALID_ARGUMENT", http.StatusNotFound: "NOT_FOUND",
+		http.StatusConflict: "ALREADY_EXISTS", http.StatusNotImplemented: "UNIMPLEMENTED",
+		http.StatusPreconditionFailed: "FAILED_PRECONDITION", http.StatusServiceUnavailable: "UNAVAILABLE",
+	}[code]
+	if st == "" {
+		st = "UNKNOWN"
+	}
+	return &apiError{code: code, status: st, msg: fmt.Sprintf(format, args...)}
+}
+
+// Server is the Admin API's HTTP server.
+type Server struct {
+	addr    string
+	engines []Engine
+
+	mu  sync.Mutex
+	ops map[string]map[string]any // by operation name
+	// opOrder is creation order, for operations.list.
+	opOrder []string
+
+	srv *http.Server
+	ln  net.Listener
+	// Observe, if set, is called once per request with the method name and
+	// the answer's status.
+	Observe func(method string, code int)
+}
+
+// NewServer serves engines at addr once started.
+func NewServer(addr string, engines ...Engine) *Server {
+	return &Server{addr: addr, engines: engines, ops: map[string]map[string]any{}}
+}
+
+func (s *Server) Name() string { return "sqladmin" }
+
+// Start binds the listener and serves in the background.
+func (s *Server) Start(context.Context) error {
+	ln, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		return fmt.Errorf("sqladmin: listen on %s: %w", s.addr, err)
+	}
+	s.ln = ln
+	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = s.srv.Serve(ln) }()
+	return nil
+}
+
+// Stop shuts the server down.
+func (s *Server) Stop(ctx context.Context) error {
+	if s.srv == nil {
+		return nil
+	}
+	return s.srv.Shutdown(ctx)
+}
+
+// Addr is the bound address, empty before Start.
+func (s *Server) Addr() string {
+	if s.ln == nil {
+		return ""
+	}
+	return s.ln.Addr().String()
+}
+
+func (s *Server) engine(name string) Engine {
+	for _, e := range s.engines {
+		if e.Instance() == name {
+			return e
+		}
+	}
+	return nil
+}
+
+// ServeHTTP routes /v1/... and /sql/v1beta4/..., which differ only in prefix.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	var prefix string
+	switch {
+	case strings.HasPrefix(path, "/v1/"):
+		prefix = "/v1/"
+	case strings.HasPrefix(path, "/sql/v1beta4/"):
+		prefix = "/sql/v1beta4/"
+	default:
+		s.fail(w, "", Errorf(http.StatusNotFound, "%s is not a Cloud SQL Admin API path", path))
+		return
+	}
+	base := "http://" + r.Host + prefix
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(path, prefix), "/"), "/")
+	method, out, err := s.route(r, base, parts)
+	if err != nil {
+		s.fail(w, method, err)
+		return
+	}
+	if s.Observe != nil {
+		s.Observe(method, http.StatusOK)
+	}
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (s *Server) fail(w http.ResponseWriter, method string, err error) {
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		ae = &apiError{code: http.StatusBadRequest, status: "FAILED_PRECONDITION", msg: err.Error()}
+	}
+	if s.Observe != nil {
+		s.Observe(method, ae.code)
+	}
+	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	w.WriteHeader(ae.code)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+		"code": ae.code, "message": ae.msg, "status": ae.status,
+		"errors": []map[string]any{{"domain": "global", "reason": strings.ToLower(ae.status), "message": ae.msg}},
+	}})
+}
+
+func unimplemented(what, why string) error {
+	return Errorf(http.StatusNotImplemented, "CloudBurrow does not implement %s: %s", what, why)
+}
+
+const instanceWhy = "each instance is a server CloudBurrow runs with --services cloudsql or cloudsql-mysql; " +
+	"starting, changing or stopping a server through the API is not served (docs/cloudsql.md)"
+
+const connectorWhy = "the Cloud SQL connectors and Auth Proxy need the instance's server CA and a TLS listener on 3307, " +
+	"which CloudBurrow does not run; connect to the server's address directly (docs/cloudsql.md)"
+
+func (s *Server) route(r *http.Request, base string, p []string) (string, any, error) {
+	if len(p) < 2 || p[0] != "projects" || p[1] == "" || strings.Contains(p[1], ":") || len(p) == 2 {
+		// flags, locations, and projects/{project}:pointInTimeRestore.
+		return "", nil, unimplemented(r.URL.Path, "only instances, databases, users and operations are served")
+	}
+	project := p[1]
+	rest := p[2:]
+	ctx := r.Context()
+	switch rest[0] {
+	case "operations":
+		switch {
+		case len(rest) == 1 && r.Method == http.MethodGet:
+			return "sql.operations.list", s.listOperations(project, r.URL.Query().Get("instance")), nil
+		case len(rest) == 2 && r.Method == http.MethodGet:
+			op, err := s.operation(project, rest[1])
+			return "sql.operations.get", op, err
+		}
+		return "sql.operations", nil, unimplemented("this operations method", "operations finish before they are returned, so there is nothing to cancel")
+	case "instances":
+	default:
+		return "", nil, unimplemented("projects/"+project+"/"+rest[0], "only instances, databases, users and operations are served")
+	}
+	if len(rest) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			out, err := s.listInstances(ctx, base, project)
+			return "sql.instances.list", out, err
+		case http.MethodPost:
+			return "sql.instances.insert", nil, unimplemented("instances.insert", instanceWhy)
+		}
+		return "sql.instances", nil, Errorf(http.StatusNotFound, "method %s is not served on instances", r.Method)
+	}
+	name, verb, _ := strings.Cut(rest[1], ":")
+	e := s.engine(name)
+	if e == nil {
+		return "sql.instances.get", nil, Errorf(http.StatusNotFound, "The Cloud SQL instance does not exist. "+
+			"CloudBurrow's instances are %s.", s.instanceNames())
+	}
+	if verb == "generateEphemeralCert" {
+		return "sql.connect.generateEphemeral", nil, unimplemented("connect.generateEphemeralCert", connectorWhy)
+	}
+	if verb != "" {
+		return "sql.instances." + verb, nil, unimplemented("instances."+verb, instanceWhy)
+	}
+	if len(rest) == 2 {
+		switch r.Method {
+		case http.MethodGet:
+			out, err := s.instance(ctx, base, project, e)
+			return "sql.instances.get", out, err
+		case http.MethodPatch, http.MethodPut:
+			return "sql.instances.patch", nil, unimplemented("instances.patch and update", instanceWhy)
+		case http.MethodDelete:
+			return "sql.instances.delete", nil, unimplemented("instances.delete", instanceWhy)
+		}
+		return "sql.instances", nil, Errorf(http.StatusNotFound, "method %s is not served on an instance", r.Method)
+	}
+	switch rest[2] {
+	case "databases":
+		return s.databases(r, base, project, e, rest[3:])
+	case "users":
+		return s.users(r, base, project, e, rest[3:])
+	case "connectSettings":
+		return "sql.connect.get", nil, unimplemented("connect.get (connectSettings)", connectorWhy)
+	}
+	return "sql.instances." + rest[2], nil, unimplemented("instances/{instance}/"+rest[2],
+		"only databases and users are served beneath an instance; backups, replicas, SSL certificates and imports are not")
+}
+
+func (s *Server) instanceNames() string {
+	var n []string
+	for _, e := range s.engines {
+		n = append(n, e.Instance())
+	}
+	if len(n) == 0 {
+		return "none"
+	}
+	return strings.Join(n, " and ")
+}
+
+func (s *Server) listInstances(ctx context.Context, base, project string) (any, error) {
+	items := []any{}
+	for _, e := range s.engines {
+		in, err := s.instance(ctx, base, project, e)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, in)
+	}
+	return map[string]any{"kind": "sql#instancesList", "items": items}, nil
+}
+
+func (s *Server) instance(ctx context.Context, base, project string, e Engine) (map[string]any, error) {
+	state := "RUNNABLE"
+	installed, err := e.InstalledVersion(ctx)
+	if err != nil {
+		// The server is not answering: Cloud SQL's word for an instance that
+		// is not serving is UNKNOWN_STATE, not an error from the API.
+		state = "UNKNOWN_STATE"
+	}
+	host := "127.0.0.1"
+	if h, _, err := net.SplitHostPort(e.Addr()); err == nil && h != "" {
+		host = h
+	}
+	in := map[string]any{
+		"kind":            "sql#instance",
+		"name":            e.Instance(),
+		"project":         project,
+		"connectionName":  project + ":" + Region + ":" + e.Instance(),
+		"databaseVersion": e.DatabaseVersion(),
+		"state":           state,
+		"region":          Region,
+		"gceZone":         Region + "-a",
+		"backendType":     "SECOND_GEN",
+		"instanceType":    "CLOUD_SQL_INSTANCE",
+		"selfLink":        base + "projects/" + project + "/instances/" + e.Instance(),
+		"ipAddresses":     []any{map[string]any{"type": "PRIMARY", "ipAddress": host}},
+		"settings": map[string]any{
+			"kind":             "sql#settings",
+			"tier":             "db-custom-1-3840",
+			"activationPolicy": "ALWAYS",
+			"availabilityType": "ZONAL",
+			"pricingPlan":      "PER_USE",
+			"settingsVersion":  "1",
+			"ipConfiguration":  map[string]any{"ipv4Enabled": true},
+			"backupConfiguration": map[string]any{
+				"kind": "sql#backupConfiguration", "enabled": false,
+			},
+		},
+	}
+	if installed != "" {
+		in["databaseInstalledVersion"] = installed
+	}
+	return in, nil
+}
+
+func (s *Server) databases(r *http.Request, base, project string, e Engine, rest []string) (string, any, error) {
+	ctx := r.Context()
+	if len(rest) == 0 {
+		switch r.Method {
+		case http.MethodGet:
+			dbs, err := e.ListDatabases(ctx)
+			if err != nil {
+				return "sql.databases.list", nil, err
+			}
+			items := []any{}
+			for _, d := range dbs {
+				items = append(items, databaseJSON(base, project, e, d))
+			}
+			return "sql.databases.list", map[string]any{"kind": "sql#databasesList", "items": items}, nil
+		case http.MethodPost:
+			var d struct{ Name, Charset, Collation string }
+			if err := decode(r, &d); err != nil {
+				return "sql.databases.insert", nil, err
+			}
+			if d.Name == "" {
+				return "sql.databases.insert", nil, Errorf(http.StatusBadRequest, "Missing parameter: name.")
+			}
+			if err := e.CreateDatabase(ctx, Database{Name: d.Name, Charset: d.Charset, Collation: d.Collation}); err != nil {
+				return "sql.databases.insert", nil, err
+			}
+			return "sql.databases.insert", s.done(base, project, e, "CREATE_DATABASE", d.Name), nil
+		}
+		return "sql.databases", nil, Errorf(http.StatusNotFound, "method %s is not served on databases", r.Method)
+	}
+	name := rest[0]
+	find := func() (Database, error) {
+		dbs, err := e.ListDatabases(ctx)
+		if err != nil {
+			return Database{}, err
+		}
+		for _, d := range dbs {
+			if d.Name == name {
+				return d, nil
+			}
+		}
+		return Database{}, Errorf(http.StatusNotFound, "Not Found: database %s does not exist in instance %s.", name, e.Instance())
+	}
+	switch r.Method {
+	case http.MethodGet:
+		d, err := find()
+		if err != nil {
+			return "sql.databases.get", nil, err
+		}
+		return "sql.databases.get", databaseJSON(base, project, e, d), nil
+	case http.MethodPatch, http.MethodPut:
+		method := "sql.databases.patch"
+		if r.Method == http.MethodPut {
+			method = "sql.databases.update"
+		}
+		cur, err := find()
+		if err != nil {
+			return method, nil, err
+		}
+		var d struct{ Name, Charset, Collation string }
+		if err := decode(r, &d); err != nil {
+			return method, nil, err
+		}
+		if d.Name != "" && d.Name != name {
+			return method, nil, Errorf(http.StatusBadRequest, "a database cannot be renamed: the body names %s, the path %s", d.Name, name)
+		}
+		next := cur
+		if d.Charset != "" {
+			next.Charset = d.Charset
+		}
+		if d.Collation != "" {
+			next.Collation = d.Collation
+		}
+		if next != cur {
+			if err := e.UpdateDatabase(ctx, next); err != nil {
+				return method, nil, err
+			}
+		}
+		return method, s.done(base, project, e, "UPDATE_DATABASE", name), nil
+	case http.MethodDelete:
+		if _, err := find(); err != nil {
+			return "sql.databases.delete", nil, err
+		}
+		if err := e.DeleteDatabase(ctx, name); err != nil {
+			return "sql.databases.delete", nil, err
+		}
+		return "sql.databases.delete", s.done(base, project, e, "DELETE_DATABASE", name), nil
+	}
+	return "sql.databases", nil, Errorf(http.StatusNotFound, "method %s is not served on a database", r.Method)
+}
+
+func databaseJSON(base, project string, e Engine, d Database) map[string]any {
+	return map[string]any{
+		"kind": "sql#database", "name": d.Name, "charset": d.Charset, "collation": d.Collation,
+		"instance": e.Instance(), "project": project,
+		"selfLink": base + "projects/" + project + "/instances/" + e.Instance() + "/databases/" + d.Name,
+	}
+}
+
+func (s *Server) users(r *http.Request, base, project string, e Engine, rest []string) (string, any, error) {
+	ctx := r.Context()
+	q := r.URL.Query()
+	find := func(name, host string) (User, error) {
+		us, err := e.ListUsers(ctx)
+		if err != nil {
+			return User{}, err
+		}
+		for _, u := range us {
+			if u.Name == name && (u.Host == host || (host == "" && u.Host == "%")) {
+				return u, nil
+			}
+		}
+		return User{}, Errorf(http.StatusNotFound, "Not Found: user %s does not exist in instance %s.", name, e.Instance())
+	}
+	if len(rest) == 1 && r.Method == http.MethodGet {
+		u, err := find(rest[0], q.Get("host"))
+		if err != nil {
+			return "sql.users.get", nil, err
+		}
+		return "sql.users.get", userJSON(project, e, u), nil
+	}
+	if len(rest) != 0 {
+		return "sql.users", nil, Errorf(http.StatusNotFound, "%s is not a Cloud SQL Admin API path", r.URL.Path)
+	}
+	switch r.Method {
+	case http.MethodGet:
+		us, err := e.ListUsers(ctx)
+		if err != nil {
+			return "sql.users.list", nil, err
+		}
+		items := []any{}
+		for _, u := range us {
+			items = append(items, userJSON(project, e, u))
+		}
+		return "sql.users.list", map[string]any{"kind": "sql#usersList", "items": items}, nil
+	case http.MethodPost:
+		var u struct {
+			Name, Host, Password, Type string
+		}
+		if err := decode(r, &u); err != nil {
+			return "sql.users.insert", nil, err
+		}
+		if u.Name == "" {
+			return "sql.users.insert", nil, Errorf(http.StatusBadRequest, "Missing parameter: name.")
+		}
+		if u.Type != "" && u.Type != "BUILT_IN" {
+			return "sql.users.insert", nil, unimplemented("users of type "+u.Type,
+				"IAM database authentication needs Google's IAM, so only BUILT_IN users are served")
+		}
+		if err := e.CreateUser(ctx, User{Name: u.Name, Host: u.Host}, u.Password); err != nil {
+			return "sql.users.insert", nil, err
+		}
+		return "sql.users.insert", s.done(base, project, e, "CREATE_USER", u.Name), nil
+	case http.MethodPut:
+		var u struct{ Name, Host, Password string }
+		if err := decode(r, &u); err != nil {
+			return "sql.users.update", nil, err
+		}
+		name, host := q.Get("name"), q.Get("host")
+		if name == "" {
+			name, host = u.Name, u.Host
+		}
+		cur, err := find(name, host)
+		if err != nil {
+			return "sql.users.update", nil, err
+		}
+		if err := e.UpdateUser(ctx, cur, u.Password); err != nil {
+			return "sql.users.update", nil, err
+		}
+		return "sql.users.update", s.done(base, project, e, "UPDATE_USER", name), nil
+	case http.MethodDelete:
+		cur, err := find(q.Get("name"), q.Get("host"))
+		if err != nil {
+			return "sql.users.delete", nil, err
+		}
+		if err := e.DeleteUser(ctx, cur); err != nil {
+			return "sql.users.delete", nil, err
+		}
+		return "sql.users.delete", s.done(base, project, e, "DELETE_USER", cur.Name), nil
+	}
+	return "sql.users", nil, Errorf(http.StatusNotFound, "method %s is not served on users", r.Method)
+}
+
+func userJSON(project string, e Engine, u User) map[string]any {
+	m := map[string]any{"kind": "sql#user", "name": u.Name, "instance": e.Instance(), "project": project,
+		"type": "BUILT_IN"}
+	if u.Host != "" {
+		m["host"] = u.Host
+	}
+	return m
+}
+
+func decode(r *http.Request, v any) error {
+	if r.Body == nil {
+		return nil
+	}
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil && !errors.Is(err, io.EOF) {
+		return Errorf(http.StatusBadRequest, "Invalid JSON payload received: %v", err)
+	}
+	return nil
+}
+
+// done records an operation that has already finished: every method here
+// runs its statement before it answers, so the operation is DONE when it is
+// returned, and operations.get answers the same thing afterwards.
+func (s *Server) done(base, project string, e Engine, opType, target string) map[string]any {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	id := hex.EncodeToString(b)
+	id = id[:8] + "-" + id[8:12] + "-" + id[12:16] + "-" + id[16:20] + "-" + id[20:]
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	op := map[string]any{
+		"kind": "sql#operation", "name": id, "operationType": opType, "status": "DONE",
+		"targetId": e.Instance(), "targetProject": project,
+		"targetLink": base + "projects/" + project + "/instances/" + e.Instance(),
+		"selfLink":   base + "projects/" + project + "/operations/" + id,
+		"insertTime": now, "startTime": now, "endTime": now, "user": "cloudburrow@localhost",
+	}
+	s.mu.Lock()
+	s.ops[id] = op
+	s.opOrder = append(s.opOrder, id)
+	s.mu.Unlock()
+	return op
+}
+
+func (s *Server) operation(project, name string) (map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	op, ok := s.ops[name]
+	if !ok || op["targetProject"] != project {
+		return nil, Errorf(http.StatusNotFound, "The Cloud SQL operation %s does not exist in project %s.", name, project)
+	}
+	return op, nil
+}
+
+func (s *Server) listOperations(project, instance string) any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := []any{}
+	// Newest first, as Cloud SQL lists them.
+	for i := len(s.opOrder) - 1; i >= 0; i-- {
+		op := s.ops[s.opOrder[i]]
+		if op["targetProject"] != project || (instance != "" && op["targetId"] != instance) {
+			continue
+		}
+		items = append(items, op)
+	}
+	return map[string]any{"kind": "sql#operationsList", "items": items}
+}

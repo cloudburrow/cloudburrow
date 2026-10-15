@@ -403,6 +403,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
 	coord.Register(rmSrv)
 
+	// The Cloud SQL Admin API (#1301), over whichever database servers run.
+	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds)
+	if sqlAdminSrv != nil {
+		coord.Register(sqlAdminSrv)
+	}
+
 	// Built before the console so the console can offer its playground, and
 	// registered after it for the same reason the other components are:
 	// ownership by the coordinator rather than a goroutine beside it.
@@ -494,6 +500,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := schedulerSvc.Addr(); a != "" {
 			live["scheduler"] = a
+		}
+		if sqlAdminSrv != nil && sqlAdminSrv.Addr() != "" {
+			live["sqladmin"] = sqlAdminSrv.Addr()
 		}
 		if a := loggingSvc.Addr(); a != "" {
 			live["logging"] = a

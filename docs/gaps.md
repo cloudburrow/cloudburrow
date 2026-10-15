@@ -209,7 +209,7 @@ access policies and table and routine IAM (#1218), infinite FLOAT64 in UNNEST (#
 
 | Gap | Why open | Size |
 |---|---|---|
-| The Cloud SQL Admin API: instances, connection names, IAM database authentication, backups, replicas, the Auth Proxy path | not built yet | L |
+| The Cloud SQL Admin API beyond instance reads, databases, users and operations (served since #1301): creating or changing instances, IAM database authentication, backups, replicas, the Auth Proxy and connector path (`connectSettings`, `generateEphemeralCert`) | not built yet | L |
 | The Memorystore admin API (`redis.googleapis.com`) | not built yet | L |
 
 ## Functions, credentials, tooling

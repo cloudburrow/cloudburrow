@@ -286,6 +286,10 @@ type Endpoints struct {
 	// restart (#584). Fixed for the same reason MySQL's is: `env` can then
 	// export PGHOST/PGPORT without a running instance.
 	CloudSQL int `json:"cloudsql"`
+	// SQLAdmin is the host port of the Cloud SQL Admin API (#1301), served
+	// in process over the PostgreSQL and MySQL servers above. Bound only
+	// when one of them is enabled.
+	SQLAdmin int `json:"sqladmin"`
 }
 
 // NamedPort is one host endpoint and the name its --port-<name> flag uses.
@@ -338,6 +342,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"memorystore", &e.Memorystore},
 		{"cloudsql-mysql", &e.CloudSQLMySQL},
 		{"cloudsql", &e.CloudSQL},
+		{"sqladmin", &e.SQLAdmin},
 	}
 }
 
@@ -636,6 +641,8 @@ func Default() Config {
 			CloudSQLMySQL:   9017,
 			// After KMS's 9018: the next free port in the block.
 			CloudSQL: 9019,
+			// The Cloud SQL Admin API (#1301), over the two servers above.
+			SQLAdmin: 9021,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with
