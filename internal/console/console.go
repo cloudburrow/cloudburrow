@@ -943,6 +943,9 @@ type Server struct {
 	// settings are the console's own server-side settings, such as the
 	// upload limit.
 	settings settings
+	// stateLoadLimit replaces StateLoadLimit when set, so a test can reach
+	// the bound without a 5 GiB body.
+	stateLoadLimit int64
 	// connect is the Connect page's source (#802); nil offers no page.
 	connect ConnectSource
 
