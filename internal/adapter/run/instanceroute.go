@@ -164,13 +164,32 @@ func (s *Server) instanceRouteReady(ctx context.Context, w workload) (bool, stri
 	if ing.Status.ObservedGeneration < ing.Metadata.Generation {
 		return false, "the route is being programmed"
 	}
-	for _, c := range ing.Status.Conditions {
-		if c.Type == "Ready" {
-			if c.Status == "True" {
-				return true, ""
-			}
-			return false, "the route is not ready: " + c.Message
+	return kingressReady(ing.Status.Conditions)
+}
+
+// kingressReady reads a programmed route's conditions.
+//
+// Ready waits on LoadBalancerReady, and Kourier's probe for it reaches the
+// instance's own container: Knative's queue-proxy answers that probe for a
+// revision, and an instance has none, so a container that does not answer
+// 200 on /healthz, or serves nothing, would never be ready. The route is
+// programmed once NetworkConfigured holds; whether the container answers is
+// the container's business, as on Cloud Run.
+func kingressReady(conds []ksvcCondition) (bool, string) {
+	ready, configured, msg := false, false, ""
+	for _, c := range conds {
+		switch c.Type {
+		case "Ready":
+			ready, msg = c.Status == "True", c.Message
+		case "NetworkConfigured":
+			configured = c.Status == "True"
 		}
+	}
+	if ready || configured {
+		return true, ""
+	}
+	if msg != "" {
+		return false, "the route is not ready: " + msg
 	}
 	return false, "the route is being programmed"
 }

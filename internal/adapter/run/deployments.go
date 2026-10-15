@@ -380,7 +380,7 @@ type kwaitingPod struct {
 // itself: the image cannot be pulled, or the container's configuration is
 // invalid.
 var podStartFailures = map[string]bool{"ErrImagePull": true, "ImagePullBackOff": true, "InvalidImageName": true,
-	"CreateContainerConfigError": true, "CreateContainerError": true}
+	"ErrImageNeverPull": true, "CreateContainerConfigError": true, "CreateContainerError": true}
 
 // podFailure names why one of w's pods cannot start, or "".
 func (s *Server) podFailure(ctx context.Context, w workload) string {

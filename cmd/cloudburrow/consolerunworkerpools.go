@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	runclient "cloud.google.com/go/run/apiv2"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
@@ -31,6 +32,21 @@ type runWorkerPoolsProvider struct {
 	runAddr        func() string
 	defaultProject string
 	region         string
+	// readyTimeout is the adapter's: how long an operation waits for the
+	// pods and route to be ready before it fails (#1348).
+	readyTimeout time.Duration
+}
+
+// MutationBudget implements console.MutationBudgeter: a create, an update
+// and a start wait until the rollout is ready, as a service's deploy does,
+// so the console waits as long as the adapter's operation can, and a
+// little more for the operation's own answer, rather than the default
+// minute (#1348).
+func (p runWorkerPoolsProvider) MutationBudget() time.Duration {
+	if p.readyTimeout <= 0 {
+		return 0
+	}
+	return p.readyTimeout + 30*time.Second
 }
 
 func (runWorkerPoolsProvider) ID() string    { return "run-worker-pools" }
