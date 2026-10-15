@@ -470,6 +470,12 @@ type Server struct {
 	srv  *http.Server
 	grpc *grpc.Server
 	done chan struct{}
+	// inflight counts gRPC calls being served. gRPC arrives over h2c, which
+	// hijacks the connection, so http.Server.Shutdown does not wait for
+	// them; Stop does, so a call (and its trace span, #1159) finishes
+	// before the server is gone.
+	inflight sync.WaitGroup
+	stopping bool // set by Stop under mu; no call is counted after it
 }
 
 // NewServer returns a Resource Manager server over reg, bound to addr.
@@ -528,6 +534,15 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	both := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+			s.mu.Lock()
+			if s.stopping {
+				s.mu.Unlock()
+				http.Error(w, "Resource Manager is stopping", http.StatusServiceUnavailable)
+				return
+			}
+			s.inflight.Add(1)
+			s.mu.Unlock()
+			defer s.inflight.Done()
 			g.ServeHTTP(w, r)
 			return
 		}
@@ -543,6 +558,7 @@ func (s *Server) Start(ctx context.Context) error {
 	done := make(chan struct{})
 	s.mu.Lock()
 	s.ln, s.srv, s.grpc, s.done = ln, srv, g, done
+	s.stopping = false
 	s.mu.Unlock()
 	go func() {
 		defer close(done)
@@ -557,6 +573,9 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	srv, g, done := s.srv, s.grpc, s.done
 	s.srv = nil
+	if srv != nil {
+		s.stopping = true
+	}
 	s.mu.Unlock()
 	if srv == nil {
 		return nil
@@ -564,6 +583,14 @@ func (s *Server) Stop(ctx context.Context) error {
 	err := srv.Shutdown(ctx)
 	if err != nil {
 		_ = srv.Close()
+	}
+	// Calls already being served finish first (see inflight), unless ctx
+	// ends; then they are cut off with the rest.
+	served := make(chan struct{})
+	go func() { s.inflight.Wait(); close(served) }()
+	select {
+	case <-served:
+	case <-ctx.Done():
 	}
 	if g != nil {
 		g.Stop()

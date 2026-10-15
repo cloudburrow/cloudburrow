@@ -121,7 +121,7 @@ jobs:
           cd "$RUNNER_TEMP/bigquery-emulator"
           sha256sum bigquery-emulator-* | tee SHA256SUMS
           echo "sums=$(sha256sum SHA256SUMS | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bigquery-emulator
           path: ${{ runner.temp }}/bigquery-emulator
@@ -212,7 +212,7 @@ jobs:
       - run: make test-race
       # The emulator binaries the bigquery-emulator job built, each checked
       # against the sums it reported, for make build (#1087).
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: bigquery-emulator
           path: ${{ runner.temp }}/bigquery-emulator
@@ -389,7 +389,7 @@ jobs:
           curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
-      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           install_only: true
           version: v0.33.0
@@ -409,7 +409,7 @@ jobs:
           done
           find diagnostics -type f -size +1M -delete || true
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: integration-diagnostics
@@ -481,7 +481,7 @@ jobs:
           echo "$RUNNER_TEMP/google-cloud-sdk/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" version
 
-      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           install_only: true
           version: v0.33.0
@@ -496,7 +496,7 @@ jobs:
       # services: an exact version, no dependency cache, and `make
       # compat-node` installs from the committed lock with `npm ci
       # --ignore-scripts`.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: matrix.shard == 'storage' || matrix.shard == 'emulators'
         with:
           node-version: "24.21.0"
@@ -522,7 +522,7 @@ jobs:
 
       # The emulator binaries the bigquery-emulator job built, each checked
       # against the sums it reported, for make build (#1087).
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: bigquery-emulator
           path: ${{ runner.temp }}/bigquery-emulator
@@ -862,7 +862,7 @@ jobs:
           [ "$rc" = 0 ] || { echo "the console browser suite did not pass"; exit 1; }
           echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure() && (matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators')
         with:
           name: browser-screenshots-${{ matrix.shard }}
@@ -873,7 +873,7 @@ jobs:
           if-no-files-found: ignore
 
       # The shard's test logs, for compat-coverage.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: compat-log-${{ matrix.shard }}
@@ -895,7 +895,7 @@ jobs:
           # and it records what it could not collect rather than failing.
           ./bin/cloudburrow diagnose -o diagnostics/bundle.tar.gz --name ci --state-dir "$RUNNER_TEMP/cb" || true
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: compat-diagnostics-${{ matrix.shard }}
@@ -926,7 +926,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: compat-log-*
           path: logs

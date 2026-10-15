@@ -35,8 +35,13 @@ func TestTwoInstancesRunSideBySideWithAPortBase(t *testing.T) {
 	}
 
 	// Blocks well clear of the defaults and of each other, varied per run so
-	// a leftover from an interrupted run does not hold them.
-	first := 20000 + int(time.Now().UnixNano()%300)*100
+	// a leftover from an interrupted run does not hold them, and below
+	// Linux's ephemeral range (32768 and up): there an outgoing connection,
+	// such as one of the instance's own tunnels, can already hold a port the
+	// layout needs (#1158: Resource Manager's 127.0.0.1:36507 was taken).
+	// The highest port is then 32000 (the second base) + 90 (the layout's
+	// span), below 32768.
+	first := 20000 + int(time.Now().UnixNano()%120)*100
 	type instance struct {
 		name, stateDir string
 		base           int
