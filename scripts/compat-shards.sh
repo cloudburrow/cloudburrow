@@ -40,7 +40,7 @@ COMPAT_SHARDS="storage served run emulators acceptance"
 # storage.
 COMPAT_BROWSER_SHARDS="storage run emulators"
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun)'
-COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|CloudSQL|Bigtable)'
+COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|CloudSQL|Bigtable|Spanner)'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services
