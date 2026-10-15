@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,7 +43,12 @@ type Spec struct {
 	AvailabilityType   string            `json:"availabilityType,omitempty"`
 	ActivationPolicy   string            `json:"activationPolicy,omitempty"`
 	CreateTime         string            `json:"createTime"`
-	SettingsVersion    int               `json:"settingsVersion"`
+	// Settings are the other settings the instance was given (disk size
+	// and type, maintenance window, insights, ...), recorded and answered
+	// as given: they describe the machine Cloud SQL would run, which the
+	// server here does not change.
+	Settings        map[string]any `json:"settings,omitempty"`
+	SettingsVersion int            `json:"settingsVersion"`
 }
 
 // MySQL reports whether the spec is a MySQL instance.
@@ -207,6 +213,8 @@ func (s *Server) upInstanceError(e Engine) error {
 
 // instanceBody is the part of DatabaseInstance a write reads.
 type instanceBody struct {
+	raw map[string]any // settings, as sent
+
 	Name                 string           `json:"name"`
 	DatabaseVersion      string           `json:"databaseVersion"`
 	RootPassword         string           `json:"rootPassword"`
@@ -260,7 +268,17 @@ func (b instanceBody) unsupported() error {
 func (b instanceBody) apply(spec *Spec, replace bool) {
 	st := b.Settings
 	if replace {
-		spec.Labels, spec.Flags, spec.DeletionProtection = nil, nil, false
+		spec.Labels, spec.Flags, spec.DeletionProtection, spec.Settings = nil, nil, false, nil
+	}
+	if len(b.raw) > 0 {
+		next := map[string]any{}
+		for k, v := range spec.Settings {
+			next[k] = v
+		}
+		for k, v := range b.raw {
+			next[k] = v
+		}
+		spec.Settings = next
 	}
 	if st == nil {
 		return
@@ -285,6 +303,26 @@ func (b instanceBody) apply(spec *Spec, replace bool) {
 	}
 }
 
+func decodeInstance(r *http.Request) (instanceBody, error) {
+	var b instanceBody
+	var raw struct {
+		Settings map[string]any `json:"settings"`
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		return b, Errorf(http.StatusBadRequest, "Invalid request: %v", err)
+	}
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return b, nil
+	}
+	if err := json.Unmarshal(body, &b); err != nil {
+		return b, Errorf(http.StatusBadRequest, "Invalid JSON payload received: %v", err)
+	}
+	_ = json.Unmarshal(body, &raw)
+	b.raw = raw.Settings
+	return b, nil
+}
+
 func flagsEqual(a, b []Flag) bool {
 	if len(a) != len(b) {
 		return false
@@ -306,8 +344,8 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	if s.writes == nil {
 		return nil, s.noWrites("instances.insert")
 	}
-	var b instanceBody
-	if err := decode(r, &b); err != nil {
+	b, err := decodeInstance(r)
+	if err != nil {
 		return nil, err
 	}
 	if b.Name == "" {
@@ -359,7 +397,7 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	}
 	c := &created{spec: spec, engine: s.writes.prov.Engine(spec), state: "PENDING_CREATE"}
 	s.writes.byName[b.Name] = c
-	err := s.saveLocked()
+	err = s.saveLocked()
 	s.emu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("sqladmin: keep instance %s: %w", b.Name, err)
@@ -414,8 +452,8 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 	if err != nil {
 		return nil, err
 	}
-	var b instanceBody
-	if err := decode(r, &b); err != nil {
+	b, err := decodeInstance(r)
+	if err != nil {
 		return nil, err
 	}
 	if err := b.unsupported(); err != nil {
@@ -558,6 +596,20 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 		in["instanceType"] = "CLOUD_SQL_INSTANCE"
 	}
 	st := in["settings"].(map[string]any)
+	// Cloud SQL's defaults for what a create leaves out.
+	st["storageAutoResize"] = true
+	st["storageAutoResizeLimit"] = "0"
+	st["dataDiskSizeGb"] = "10"
+	st["dataDiskType"] = "PD_SSD"
+	st["replicationType"] = "SYNCHRONOUS"
+	for k, v := range spec.Settings {
+		switch k {
+		case "kind", "settingsVersion", "tier", "userLabels", "databaseFlags", "deletionProtectionEnabled",
+			"availabilityType", "activationPolicy", "backupConfiguration":
+		default:
+			st[k] = v
+		}
+	}
 	st["tier"] = spec.Tier
 	st["settingsVersion"] = fmt.Sprint(spec.SettingsVersion)
 	st["deletionProtectionEnabled"] = spec.DeletionProtection
