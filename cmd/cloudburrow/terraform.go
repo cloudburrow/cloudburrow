@@ -72,6 +72,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// google_project (#301): Resource Manager v1, and the Cloud Billing read
 	// the provider makes on every refresh, both served on the Resource
 	// Manager port.
+	// The Cloud SQL Admin API (#1301): a google_sql_database and a
+	// google_sql_user on an instance `up` runs apply, plan clean and destroy
+	// in TestTerraformSQLDatabaseAndUser. The provider calls v1beta4.
+	{sqlAdminEndpoint, "sql_custom_endpoint", "GOOGLE_SQL_CUSTOM_ENDPOINT", "/sql/v1beta4/", true},
 	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
 	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true},
 }
@@ -79,6 +83,10 @@ var terraformEndpoints = []terraformEndpoint{
 // resourceManagerEndpoint keys the Resource Manager rows. It is not a
 // selectable service: the project registry, and so its API, always runs.
 const resourceManagerEndpoint config.Service = "resourcemanager"
+
+// sqlAdminEndpoint keys the Cloud SQL Admin API row: it is served when
+// either Cloud SQL service is (#1301), and is not a service of its own.
+const sqlAdminEndpoint config.Service = "sqladmin"
 
 // terraformAccessToken is what the provider presents. CloudBurrow
 // authenticates nothing, so any token works; a fixed, obviously local one
@@ -105,9 +113,9 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceTasks: cfg.Endpoints.Tasks, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceRun: cfg.Endpoints.Run,
 		config.ServiceKMS: cfg.Endpoints.KMS, resourceManagerEndpoint: cfg.Endpoints.ResourceManager,
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
-		config.ServiceBigQuery: cfg.Endpoints.BigQuery,
+		config.ServiceBigQuery: cfg.Endpoints.BigQuery, sqlAdminEndpoint: cfg.Endpoints.SQLAdmin,
 	}
-	enabled := map[config.Service]bool{resourceManagerEndpoint: true}
+	enabled := map[config.Service]bool{resourceManagerEndpoint: true, sqlAdminEndpoint: sqlAdminEnabled(cfg)}
 	for _, s := range cfg.EnabledServices() {
 		enabled[s] = true
 	}

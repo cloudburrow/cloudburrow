@@ -178,6 +178,7 @@ var gcloudOverrides = []struct{ property, harness string }{
 	{"cloudscheduler", "SCHEDULER"},
 	{"logging", "LOGGING"},
 	{"cloudresourcemanager", "RESOURCEMANAGER"},
+	{"sql", "SQLADMIN"},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`

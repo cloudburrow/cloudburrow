@@ -5,6 +5,7 @@ package compat
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -401,6 +402,95 @@ func TestSQLAdminDatabasesAndUsersAreTheServers(t *testing.T) {
 			}
 			if len(ops.Items) < 5 || ops.Items[0].OperationType != "DELETE_DATABASE" {
 				t.Errorf("operations.list: %d items, the first %+v", len(ops.Items), ops.Items[0])
+			}
+		})
+	}
+}
+
+// TestGcloudSQL (#1301): through gcloud-setup's configuration, the real
+// gcloud lists and describes the instances, creates a database and a user
+// that the official Go client then finds, lists both, and deletes both,
+// over v1beta4 on the sqladmin port.
+// covers: sql.instances.list, sql.instances.get, sql.databases.insert, sql.databases.list, sql.databases.delete, sql.users.insert, sql.users.list, sql.users.delete, sql.operations.get
+func TestGcloudSQL(t *testing.T) {
+	h := New(t)
+	svc := sqlAdminService(t, h)
+	g := newGcloudSession(t, h)
+	p := "--project=" + h.Project()
+	inst := "postgres"
+	if os.Getenv(EnvCloudSQL) == "" {
+		inst = "mysql"
+	}
+	if got := g.must("sql", "instances", "list", p, "--format=value(name,state)"); !strings.Contains(got, inst+"\tRUNNABLE") {
+		t.Errorf("sql instances list = %q", got)
+	}
+	if got := g.must("sql", "instances", "describe", inst, p, "--format=value(connectionName)"); strings.TrimSpace(got) != h.Project()+":us-central1:"+inst {
+		t.Errorf("sql instances describe = %q", got)
+	}
+	g.must("sql", "databases", "create", "gcloud_db", "--instance="+inst, p)
+	if _, err := svc.Databases.Get(h.Project(), inst, "gcloud_db").Do(); err != nil {
+		t.Errorf("databases.get after gcloud create: %v", err)
+	}
+	if got := g.must("sql", "databases", "list", "--instance="+inst, p, "--format=value(name)"); !strings.Contains(got, "gcloud_db") {
+		t.Errorf("sql databases list = %q", got)
+	}
+	g.must("sql", "users", "create", "gcloud_user", "--instance="+inst, "--password=gcloud-Pass1", p)
+	if got := g.must("sql", "users", "list", "--instance="+inst, p, "--format=value(name)"); !strings.Contains(got, "gcloud_user") {
+		t.Errorf("sql users list = %q", got)
+	}
+	del := []string{"sql", "users", "delete", "gcloud_user", "--instance=" + inst, p, "--quiet"}
+	if inst == "mysql" {
+		del = append(del, "--host=%")
+	}
+	g.must(del...)
+	g.must("sql", "databases", "delete", "gcloud_db", "--instance="+inst, p, "--quiet")
+	_, err := svc.Databases.Get(h.Project(), inst, "gcloud_db").Do()
+	wantHTTP(t, "databases.get after gcloud delete", err, http.StatusNotFound)
+}
+
+// TestConsoleCloudSQLUsersMatchTheAdminAPI (#1301): on each Cloud SQL page,
+// a database's Add user creates a user the Cloud SQL Admin API's users.get
+// finds (and, on MySQL, that logs in with its password), and Delete user
+// removes one the API created, so the console and the API manage the same
+// users in the same server.
+func TestConsoleCloudSQLUsersMatchTheAdminAPI(t *testing.T) {
+	h := New(t)
+	svc := sqlAdminService(t, h)
+	addr := consoleAddr(t, h)
+	project := h.Project()
+	type page struct{ provider, instance, host string }
+	var pages []page
+	if os.Getenv(EnvCloudSQL) != "" {
+		pages = append(pages, page{"cloudsql", "postgres", ""})
+	}
+	if os.Getenv(EnvMySQL) != "" {
+		pages = append(pages, page{"cloudsql-mysql", "mysql", "%"})
+	}
+	for _, pg := range pages {
+		t.Run(pg.instance, func(t *testing.T) {
+			act := func(action string, values map[string]string) {
+				t.Helper()
+				body, _ := json.Marshal(map[string]any{"Path": []string{"cloudburrow"}, "Action": action, "Values": values})
+				if code, out := consoleDo(t, addr, http.MethodPost, "/api/actions/"+pg.provider+"?project="+project, string(body)); code != http.StatusOK {
+					t.Fatalf("console %s = %d: %s", action, code, out)
+				}
+			}
+			act("add-user", map[string]string{"name": "console_user", "password": "console-Pass1"})
+			if _, err := svc.Users.Get(project, pg.instance, "console_user").Host(pg.host).Do(); err != nil {
+				t.Errorf("users.get of the console's user: %v", err)
+			}
+			if pg.instance == "mysql" {
+				if err := myEngine(t, h).login("console_user", "console-Pass1", "cloudburrow"); err != nil {
+					t.Errorf("the console's MySQL user cannot log in: %v", err)
+				}
+			}
+			if _, err := svc.Users.Insert(project, pg.instance, &sqladmin.User{Name: "api_user", Password: "api-Pass1"}).Do(); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"console_user", "api_user"} {
+				act("delete-user", map[string]string{"name": name, "host": pg.host})
+				_, err := svc.Users.Get(project, pg.instance, name).Host(pg.host).Do()
+				wantHTTP(t, "users.get after the console's Delete user of "+name, err, http.StatusNotFound)
 			}
 		})
 	}
