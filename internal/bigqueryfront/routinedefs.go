@@ -433,13 +433,7 @@ func (f front) listRoutines(w http.ResponseWriter, r *http.Request, project, dat
 		writeRaw(w, status, got)
 		return
 	}
-	f.functionsIn(r, project, dataset) // the jobs from before the front started
-	defs := f.functions.defsIn(project, dataset)
-	names := make([]string, 0, len(defs))
-	for n := range defs {
-		names = append(names, n)
-	}
-	sort.Strings(names)
+	live := f.liveRoutines(r, project, dataset)
 	q := r.URL.Query()
 	start := 0
 	if tok := q.Get("pageToken"); tok != "" {
@@ -465,6 +459,41 @@ func (f front) listRoutines(w http.ResponseWriter, r *http.Request, project, dat
 	} else {
 		mask = listFields
 	}
+	next := ""
+	if start > len(live) {
+		start = len(live)
+	}
+	page := live[start:]
+	if len(page) > max {
+		page, next = page[:max], strconv.Itoa(start+max)
+	}
+	routines := []map[string]any{}
+	for _, def := range page {
+		out := map[string]any{}
+		for _, k := range mask {
+			if v, ok := def[k]; ok {
+				out[k] = v
+			}
+		}
+		routines = append(routines, out)
+	}
+	resp := map[string]any{"routines": routines}
+	if next != "" {
+		resp["nextPageToken"] = next
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// liveRoutines returns the definitions of the routines the front knows in
+// dataset that the engine still has, procedures among them, by name.
+func (f front) liveRoutines(r *http.Request, project, dataset string) []map[string]any {
+	f.functionsIn(r, project, dataset) // the jobs from before the front started
+	defs := f.functions.defsIn(project, dataset)
+	names := make([]string, 0, len(defs))
+	for n := range defs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
 	var live []map[string]any
 	procs := f.functions.procsIn(project, dataset) // #1217, procedures.go
 	for n, p := range procs {
@@ -489,29 +518,7 @@ func (f front) listRoutines(w http.ResponseWriter, r *http.Request, project, dat
 			live = append(live, def)
 		}
 	}
-	next := ""
-	if start > len(live) {
-		start = len(live)
-	}
-	page := live[start:]
-	if len(page) > max {
-		page, next = page[:max], strconv.Itoa(start+max)
-	}
-	routines := []map[string]any{}
-	for _, def := range page {
-		out := map[string]any{}
-		for _, k := range mask {
-			if v, ok := def[k]; ok {
-				out[k] = v
-			}
-		}
-		routines = append(routines, out)
-	}
-	resp := map[string]any{"routines": routines}
-	if next != "" {
-		resp["nextPageToken"] = next
-	}
-	writeJSON(w, http.StatusOK, resp)
+	return live
 }
 
 // knownRoutine returns a routine's definition, when the front knows it and
