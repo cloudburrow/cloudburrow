@@ -79,6 +79,9 @@ const ROUTES = [
   { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Firestore databases", section: "Databases" },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
   { path: "/bigtable",  service: "bigtable",  title: "Bigtable",  section: "Databases" },
+  // The project's Bigtable instances, with their clusters, app profiles and
+  // IAM policy (#1358). Not under /bigtable/, where it would shadow a table.
+  { path: "/bigtable-instances", service: "bigtable-instances", icon: "bigtable", title: "Bigtable instances", section: "Databases" },
   { path: "/spanner",   service: "spanner",   title: "Spanner",   section: "Databases" },
   // Cloud SQL is one product with a page per engine, as the console this
   // mirrors lists PostgreSQL and MySQL instances under one product (#868).

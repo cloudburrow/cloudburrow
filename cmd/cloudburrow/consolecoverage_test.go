@@ -38,7 +38,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceSecrets:       {Providers: []string{"secrets"}},
 	config.ServiceFirestore:     {Providers: []string{"firestore", "firestore-databases"}},
 	config.ServiceDatastore:     {Providers: []string{"datastore"}},
-	config.ServiceBigtable:      {Providers: []string{"bigtable"}},
+	config.ServiceBigtable:      {Providers: []string{"bigtable", "bigtable-instances"}},
 	config.ServiceSpanner:       {Providers: []string{"spanner"}},
 	config.ServiceCloudSQL:      {Providers: []string{"cloudsql", "cloudsql-instances"}},
 	config.ServiceBigQuery:      {Providers: []string{"bigquery", "bigquery-jobs"}},

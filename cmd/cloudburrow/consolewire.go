@@ -198,6 +198,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceFirestore, func(a string) console.Provider { return firestoreDatabasesProvider{endpoint: a} }},
 		{config.ServiceDatastore, func(a string) console.Provider { return datastoreProvider{endpoint: a} }},
 		{config.ServiceBigtable, func(a string) console.Provider { return bigtableProvider{endpoint: a} }},
+		// Instances, clusters, app profiles and instance IAM, through the
+		// instance admin API the Bigtable front serves (#1358).
+		{config.ServiceBigtable, func(a string) console.Provider { return bigtableInstancesProvider{endpoint: a} }},
 		{config.ServiceSpanner, func(a string) console.Provider { return spannerProvider{endpoint: a} }},
 		{config.ServiceCloudSQL, func(a string) console.Provider { return cloudSQLProvider{endpoint: a} }},
 		{config.ServiceCloudSQLMySQL, func(a string) console.Provider { return newCloudSQLMySQLProvider(a, d.mysql) }},

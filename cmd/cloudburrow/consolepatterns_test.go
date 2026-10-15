@@ -70,6 +70,10 @@ func createForms(t *testing.T) map[string][]console.Field {
 	out["kms/edit"] = kmsKeyEditForm(&kmspb.CryptoKey{Name: "projects/p/locations/l/keyRings/r/cryptoKeys/k"}).Fields
 	// Create index (#1343).
 	out["firestore-databases/createindex"] = createIndexFields()
+	// Create instance, Add cluster and Create app profile (#1358).
+	_, out["bigtable-instances"] = bigtableInstancesProvider{}.CreateForm()
+	out["bigtable-instances/addcluster"] = append(clusterFields(""), nodeFields(nil, "")...)
+	out["bigtable-instances/profile"] = []console.Field{profileIDField()}
 	return out
 }
 
