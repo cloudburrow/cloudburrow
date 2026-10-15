@@ -87,16 +87,17 @@ func (s *Server) pitrUnavailable(e Engine) error {
 		return unimplemented("point-in-time recovery", "this server was started without a backup store (docs/cloudsql.md)")
 	}
 	if _, ok := s.pitrSpec(e.Instance()); !ok {
-		if t := s.target(e); !t.Created {
-			return unimplemented("point-in-time recovery of "+e.Instance(), "it is the server `cloudburrow up` runs, "+
-				"which keeps no transaction log; create an instance with point-in-time recovery enabled (docs/cloudsql.md)")
-		}
+		t := s.target(e)
 		key := "pointInTimeRecoveryEnabled"
-		if s.target(e).MySQL {
+		if t.MySQL {
 			key = "binaryLogEnabled"
 		}
+		why := ""
+		if !t.Created {
+			why = "; it is the server `cloudburrow up` runs, which keeps no transaction log: create an instance with it enabled"
+		}
 		return Errorf(http.StatusBadRequest, "Invalid request: point-in-time recovery is not enabled on instance %s "+
-			"(settings.backupConfiguration.%s).", e.Instance(), key)
+			"(settings.backupConfiguration.%s)%s.", e.Instance(), key, why)
 	}
 	return nil
 }

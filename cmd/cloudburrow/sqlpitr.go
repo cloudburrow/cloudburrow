@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
@@ -100,17 +103,22 @@ func (d *sqlDumper) bases(ctx context.Context, t sqladmin.DumpTarget) ([]int64, 
 	if t.MySQL {
 		dir = mysqlPITRDir + "/base"
 	}
+	// The clock to the microsecond: busybox's date has no %N.
+	clock := `date -u +%s.%N`
+	if !t.MySQL {
+		clock = `psql -U postgres -d template1 -AtX -c "SELECT to_char(extract(epoch FROM clock_timestamp()), 'FM9999999999.000000')"`
+	}
 	var out bytes.Buffer
-	if err := d.sh(ctx, t, nil, &out, `date -u +%s; ls "$1" 2>/dev/null || true`, dir); err != nil {
+	if err := d.sh(ctx, t, nil, &out, clock+`; ls "$1" 2>/dev/null || true`, dir); err != nil {
 		return nil, time.Time{}, err
 	}
 	lines := strings.Fields(out.String())
 	if len(lines) == 0 {
 		return nil, time.Time{}, fmt.Errorf("no clock reading from the server")
 	}
-	now, err := strconv.ParseInt(lines[0], 10, 64)
+	now, err := parseEpoch(lines[0])
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("the server's clock: %w", err)
+		return nil, time.Time{}, err
 	}
 	var ids []int64
 	for _, l := range lines[1:] {
@@ -119,7 +127,22 @@ func (d *sqlDumper) bases(ctx context.Context, t sqladmin.DumpTarget) ([]int64, 
 		}
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	return ids, time.Unix(now, 0), nil
+	return ids, now, nil
+}
+
+// parseEpoch parses seconds since the epoch with a fraction, exactly.
+func parseEpoch(s string) (time.Time, error) {
+	secs, frac, _ := strings.Cut(s, ".")
+	sec, err := strconv.ParseInt(secs, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("the server's clock %q: %w", s, err)
+	}
+	frac = (frac + "000000000")[:9]
+	ns, err := strconv.ParseInt(frac, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("the server's clock %q: %w", s, err)
+	}
+	return time.Unix(sec, ns), nil
 }
 
 func (d *sqlDumper) RecoveryWindow(ctx context.Context, t sqladmin.DumpTarget) (time.Time, time.Time, bool, error) {
@@ -193,74 +216,179 @@ done`
 	return d.Load(ctx, dst, dir)
 }
 
-// mysqlStop finds where the replay stops: each binary log from the base's
-// position on, and the position, in the last one, of the first
-// transaction committed after the target ("" when none is).
-const mysqlStop = mysqlPITRPrelude + `base="$R/base/$1.sql"; target=$2
-file=$(sed -n "s/.*SOURCE_LOG_FILE='\([^']*\)'.*/\1/p" "$base" | head -1)
-pos=$(sed -n "s/.*SOURCE_LOG_POS=\([0-9]*\).*/\1/p" "$base" | head -1)
-dir=$(dirname "$(mysql -uroot -N -B -e 'SELECT @@log_bin_basename')")
-mysql -uroot -N -B -e 'FLUSH BINARY LOGS'
-started=
-for f in $(mysql -uroot -N -B -e 'SHOW BINARY LOGS' | awk '{print $1}'); do
-  [ "$f" = "$file" ] && started=1
-  [ -n "$started" ] || continue
-  from=4; [ "$f" = "$file" ] && from=$pos
-  stop=$(mysqlbinlog --start-position="$from" "$dir/$f" | awk -v t="$target" '
-    /^# at [0-9]+/ { at=$3 }
-    /immediate_commit_timestamp=/ { match($0, /immediate_commit_timestamp=[0-9]+/); v=substr($0, RSTART+27, RLENGTH-27); if (v+0 > t+0) { print at; exit } }')
-  echo "$f $from $stop"
-  [ -z "$stop" ] || break
-done
-[ -n "$started" ] || { echo "the binary log $file of the base is gone" >&2; exit 1; }`
+// mysqlPITRUser is the replication user a MySQL recovery's clone
+// replicates the source's binary log as, for the length of the recovery.
+const mysqlPITRUser = "cloudsqlpitr"
+
+// mysqlRecoverySource readies the source for a recovery: the replication
+// user, whose statements commit after the target, and a binary log
+// rotation, so every transaction up to now is in a closed file. It prints
+// the base's binary log file and position, then each binary log's name.
+const mysqlRecoverySource = mysqlPITRPrelude + `base="$R/base/$1.sql"
+mysql -uroot -e "CREATE USER IF NOT EXISTS '` + mysqlPITRUser + `'@'%' IDENTIFIED BY '$2'; ALTER USER '` + mysqlPITRUser + `'@'%' IDENTIFIED BY '$2'; GRANT REPLICATION SLAVE ON *.* TO '` + mysqlPITRUser + `'@'%'; FLUSH BINARY LOGS"
+sed -n "s/.*SOURCE_LOG_FILE='\([^']*\)', SOURCE_LOG_POS=\([0-9]*\).*/\1 \2/p" "$base" | head -1
+dirname "$(mysql -uroot -N -B -e 'SELECT @@log_bin_basename')"
+mysql -uroot -N -B -e 'SHOW BINARY LOGS' | awk '{print $1}'`
+
+// mysqlRecoveryReplay replicates the source's binary log into the clone
+// from the base's position to the stop position, with MySQL's own
+// applier, and waits for it to stop there.
+const mysqlRecoveryReplay = `set -e
+export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"
+q() { mysql -uroot -N -B -e "$1"; }
+q "SET GLOBAL server_id = $8"
+q "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$1', SOURCE_PORT = $2, SOURCE_USER = '` + mysqlPITRUser + `', SOURCE_PASSWORD = '$3', SOURCE_LOG_FILE = '$4', SOURCE_LOG_POS = $5, SOURCE_SSL = 1, SOURCE_AUTO_POSITION = 0"
+q "START REPLICA UNTIL SOURCE_LOG_FILE = '$6', SOURCE_LOG_POS = $7"
+i=0
+while :; do
+  st=$(mysql -uroot -e 'SHOW REPLICA STATUS\G')
+  sql=$(echo "$st" | sed -n 's/^ *Replica_SQL_Running: //p')
+  err=$(echo "$st" | sed -n 's/^ *Last_Error: //p')
+  ioerr=$(echo "$st" | sed -n 's/^ *Last_IO_Error: //p')
+  [ -z "$err" ] || { q "STOP REPLICA; RESET REPLICA ALL"; echo "replay: $err" >&2; exit 1; }
+  if [ "$sql" = No ]; then
+    file=$(echo "$st" | sed -n 's/^ *Relay_Source_Log_File: //p'); pos=$(echo "$st" | sed -n 's/^ *Exec_Source_Log_Pos: //p')
+    q "STOP REPLICA; RESET REPLICA ALL"
+    [ "$file" = "$6" ] && [ "$pos" = "$7" ] || { echo "replay stopped at $file:$pos, not $6:$7 $ioerr" >&2; exit 1; }
+    exit 0
+  fi
+  i=$((i+1)); [ $i -lt 600 ] || { q "STOP REPLICA; RESET REPLICA ALL"; echo "replay did not reach $6:$7: $ioerr" >&2; exit 1; }
+  sleep 0.5
+done`
 
 func (d *sqlDumper) mysqlCopyAt(ctx context.Context, src, dst sqladmin.DumpTarget, at time.Time, id int64, dir string) error {
-	var plan bytes.Buffer
-	if err := d.sh(ctx, src, nil, &plan, mysqlStop, strconv.FormatInt(id, 10), strconv.FormatInt(at.UnixMicro(), 10)); err != nil {
-		return fmt.Errorf("read the binary log: %w", err)
+	if !src.Created {
+		return fmt.Errorf("only a created instance keeps its binary log for recovery")
 	}
-	baseFile := filepath.Join(dir, "base.sql")
-	if err := d.toFile(ctx, src, baseFile, mysqlPITRPrelude+`cat "$R/base/$1.sql"`, strconv.FormatInt(id, 10)); err != nil {
-		return err
+	password := randomHex(12)
+	defer func() {
+		_ = d.sh(context.Background(), src, nil, io.Discard, mysqlPITRPrelude+`mysql -uroot -e "DROP USER IF EXISTS '`+mysqlPITRUser+`'@'%'"`)
+	}()
+	var info bytes.Buffer
+	if err := d.sh(ctx, src, nil, &info, mysqlRecoverySource, strconv.FormatInt(id, 10), password); err != nil {
+		return fmt.Errorf("ready the source: %w", err)
 	}
-	replay := filepath.Join(dir, "replay.sql")
-	f, err := os.Create(replay)
+	lines := strings.Split(strings.TrimSpace(info.String()), "\n")
+	if len(lines) < 3 {
+		return fmt.Errorf("ready the source: %q", info.String())
+	}
+	baseFile, basePosS, _ := strings.Cut(lines[0], " ")
+	basePos, err := strconv.ParseInt(basePosS, 10, 64)
+	if err != nil {
+		return fmt.Errorf("the base's binary log position %q: %w", lines[0], err)
+	}
+	logDir, logs := lines[1], lines[2:]
+	stopFile, stopPos, err := d.mysqlStopAt(ctx, src, logDir, logs, baseFile, basePos, at, dir)
 	if err != nil {
 		return err
 	}
-	for _, line := range strings.Split(strings.TrimSpace(plan.String()), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		args := []string{"--skip-gtids", "--start-position=" + fields[1]}
-		if len(fields) == 3 {
-			args = append(args, "--stop-position="+fields[2])
-		}
-		err = d.sh(ctx, src, nil, f, mysqlPITRPrelude+`dir=$(dirname "$(mysql -uroot -N -B -e 'SELECT @@log_bin_basename')")
-f=$1; shift; exec mysqlbinlog "$@" "$dir/$f"`, append([]string{fields[0]}, args...)...)
-		if err != nil {
-			break
-		}
+	// The base, then the transactions up to the target.
+	baseDump := filepath.Join(dir, "base.sql")
+	if err := d.toFile(ctx, src, baseDump, mysqlPITRPrelude+`cat "$R/base/$1.sql"`, strconv.FormatInt(id, 10)); err != nil {
+		return err
 	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
+	in, err := os.Open(baseDump)
 	if err != nil {
-		return fmt.Errorf("read the binary log: %w", err)
+		return err
 	}
-	for _, p := range []string{baseFile, replay} {
-		in, err := os.Open(p)
-		if err != nil {
-			return err
-		}
-		err = d.sh(ctx, dst, in, io.Discard, `export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"; exec mysql -uroot`)
-		_ = in.Close()
-		if err != nil {
-			return fmt.Errorf("load %s into %s: %w", filepath.Base(p), dst.Instance, err)
-		}
+	err = d.sh(ctx, dst, in, io.Discard, `export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"; exec mysql -uroot`)
+	_ = in.Close()
+	if err != nil {
+		return fmt.Errorf("load the base into %s: %w", dst.Instance, err)
+	}
+	if stopFile == baseFile && stopPos == basePos {
+		return nil // nothing committed between the base and the target
+	}
+	serverID := 2 + crc32.ChecksumIEEE([]byte(dst.Instance))%1000000
+	if err := d.sh(ctx, dst, nil, io.Discard, mysqlRecoveryReplay, d.deployment(src), strconv.Itoa(components.CloudSQLMySQLPort),
+		password, baseFile, strconv.FormatInt(basePos, 10), stopFile, strconv.FormatInt(stopPos, 10), fmt.Sprint(serverID)); err != nil {
+		return fmt.Errorf("replay the binary log into %s: %w", dst.Instance, err)
 	}
 	return nil
+}
+
+// mysqlStopAt reads the source's binary logs from the base's position on
+// and returns where the first transaction committed after at starts.
+func (d *sqlDumper) mysqlStopAt(ctx context.Context, src sqladmin.DumpTarget, logDir string, logs []string,
+	baseFile string, basePos int64, at time.Time, dir string) (string, int64, error) {
+	started := false
+	for _, name := range logs {
+		if name == baseFile {
+			started = true
+		}
+		if !started {
+			continue
+		}
+		from := int64(4)
+		if name == baseFile {
+			from = basePos
+		}
+		path := filepath.Join(dir, "binlog")
+		if err := d.toFile(ctx, src, path, `exec cat "$1/$2"`, logDir, name); err != nil {
+			return "", 0, fmt.Errorf("read the binary log %s: %w", name, err)
+		}
+		raw, err := os.ReadFile(path)
+		_ = os.Remove(path)
+		if err != nil {
+			return "", 0, err
+		}
+		pos, found, err := firstCommitAfter(raw, from, at)
+		if err != nil {
+			return "", 0, fmt.Errorf("the binary log %s: %w", name, err)
+		}
+		if found {
+			return name, pos, nil
+		}
+	}
+	if !started {
+		return "", 0, fmt.Errorf("the binary log %s of the base is gone", baseFile)
+	}
+	return "", 0, fmt.Errorf("no transaction after %s is in the binary log", at.UTC().Format(time.RFC3339Nano))
+}
+
+// Binary log event types that start a transaction (MySQL's
+// binlog_event.h): each carries the transaction's commit timestamp.
+const (
+	binlogGTIDEvent          = 33
+	binlogAnonymousGTIDEvent = 34
+	binlogHeaderLen          = 19
+)
+
+// firstCommitAfter scans a binary log file from offset from and returns
+// the offset of the first (anonymous) GTID event whose
+// immediate_commit_timestamp, in microseconds, is after at.
+func firstCommitAfter(raw []byte, from int64, at time.Time) (int64, bool, error) {
+	if len(raw) < 4 || string(raw[:4]) != "\xfebin" {
+		return 0, false, fmt.Errorf("not a binary log")
+	}
+	target := at.UnixMicro()
+	off := from
+	for off+binlogHeaderLen <= int64(len(raw)) {
+		h := raw[off:]
+		typ := h[4]
+		size := int64(binary.LittleEndian.Uint32(h[9:13]))
+		if size < binlogHeaderLen || off+size > int64(len(raw)) {
+			break // the event being written
+		}
+		if typ == binlogGTIDEvent || typ == binlogAnonymousGTIDEvent {
+			// flags 1, sid 16, gno 8, logical timestamp type 1,
+			// last_committed 8, sequence_number 8, then the commit time
+			// in 7 bytes, whose top bit says the original follows.
+			body := h[binlogHeaderLen:size]
+			const at = 1 + 16 + 8 + 1 + 8 + 8
+			if len(body) < at+7 {
+				return 0, false, fmt.Errorf("a GTID event at %d has no commit timestamp", off)
+			}
+			var b [8]byte
+			copy(b[:7], body[at:at+7])
+			ts := int64(binary.LittleEndian.Uint64(b[:]) &^ (1 << 55))
+			if ts > target {
+				return off, true, nil
+			}
+		}
+		off += size
+	}
+	return 0, false, nil
 }
 
 func (d *sqlDumper) toFile(ctx context.Context, t sqladmin.DumpTarget, path, script string, args ...string) error {

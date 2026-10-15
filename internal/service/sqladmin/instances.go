@@ -262,9 +262,6 @@ func (b instanceBody) unsupported() error {
 			return unimplemented("availabilityType REGIONAL", "high availability needs a standby server and failover, which CloudBurrow does not run")
 		}
 		if bc := b.Settings.BackupConfiguration; bc != nil {
-			if bc.PointInTimeRecoveryEnabled || bc.BinaryLogEnabled {
-				return unimplemented("point-in-time recovery", "it needs write-ahead or binary logs archived, which CloudBurrow does not keep; backups are served")
-			}
 			if bc.StartTime != "" {
 				if _, err := time.Parse("15:04", bc.StartTime); err != nil {
 					return Errorf(http.StatusBadRequest, "Invalid request: backupConfiguration.startTime %q is not HH:MM.", bc.StartTime)
