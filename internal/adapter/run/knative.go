@@ -61,6 +61,9 @@ type ksvc struct {
 				} `json:"containers"`
 			} `json:"spec"`
 		} `json:"template"`
+		// Traffic is the routing that was asked for (#1224); Status.Traffic
+		// is what Knative resolved it to.
+		Traffic []ktraffic `json:"traffic"`
 	} `json:"spec"`
 	Status struct {
 		// ObservedGeneration is the spec generation Knative has reconciled.
@@ -73,11 +76,7 @@ type ksvc struct {
 		LatestCreatedRevisionName string          `json:"latestCreatedRevisionName"`
 		// Traffic is where the Service routes requests: which revisions
 		// serve, and what share each takes.
-		Traffic []struct {
-			RevisionName   string `json:"revisionName"`
-			Percent        int    `json:"percent"`
-			LatestRevision bool   `json:"latestRevision"`
-		} `json:"traffic"`
+		Traffic []ktraffic `json:"traffic"`
 	} `json:"status"`
 }
 

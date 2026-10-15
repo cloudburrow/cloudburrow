@@ -178,7 +178,6 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
@@ -227,7 +226,6 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ],
@@ -250,7 +248,6 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecretVersions",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:94 TestSecretManagerListFilters",
           "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
         ]
       },
@@ -258,7 +255,6 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
-          "test/compat/secretexpiryfilter_test.go:94 TestSecretManagerListFilters",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
@@ -287,9 +283,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
-          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:361 TestSecretUpdateAppliesOnlyTheMask",
+          "test/compat/secrets_test.go:362 TestSecretUpdateAppliesOnlyTheMask",
           "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace"
         ]
       }
@@ -299,9 +294,8 @@
     "Key": "run",
     "Title": "Cloud Run v2",
     "counts": {
-      "Not served": 17,
-      "Unimplemented": 6,
-      "Verified": 18
+      "Not served": 15,
+      "Verified": 26
     },
     "rows": [
       {
@@ -383,8 +377,10 @@
       },
       {
         "method": "google.cloud.run.v2.Jobs/GetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/GetJob",
@@ -409,13 +405,31 @@
       },
       {
         "method": "google.cloud.run.v2.Jobs/SetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+        ],
+        "unverified": [
+          {
+            "code": "ABORTED",
+            "case": "a stale etag, ADR-0006 rule 2",
+            "test": "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+          }
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/TestIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+        ],
+        "unverified": [
+          {
+            "code": "OK",
+            "case": "an empty set on a missing job, as iam_policy.proto documents",
+            "test": "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+          }
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/UpdateJob",
@@ -462,14 +476,17 @@
       },
       {
         "method": "google.cloud.run.v2.Services/GetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Services/GetService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:57 TestRunServiceLifecycle"
+          "test/compat/run_test.go:57 TestRunServiceLifecycle",
+          "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
         ]
       },
       {
@@ -482,31 +499,54 @@
       },
       {
         "method": "google.cloud.run.v2.Services/SetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+        ],
+        "unverified": [
+          {
+            "code": "ABORTED",
+            "case": "a stale etag, ADR-0006 rule 2",
+            "test": "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+          }
+        ]
       },
       {
         "method": "google.cloud.run.v2.Services/TestIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+        ],
+        "unverified": [
+          {
+            "code": "OK",
+            "case": "an empty set on a missing service, as iam_policy.proto documents",
+            "test": "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+          }
+        ]
       },
       {
         "method": "google.cloud.run.v2.Services/UpdateService",
         "status": "Verified",
         "tests": [
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
-          "test/compat/run_test.go:226 TestRunUpdateService"
+          "test/compat/run_test.go:226 TestRunUpdateService",
+          "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
         ]
       },
       {
         "method": "google.cloud.run.v2.Tasks/GetTask",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runtasks_test.go:24 TestRunTasksAreAnExecutionsPods"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Tasks/ListTasks",
-        "status": "Not served",
-        "note": "the service is not registered on any port"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runtasks_test.go:24 TestRunTasksAreAnExecutionsPods"
+        ]
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
@@ -1257,8 +1297,8 @@
     "Key": "resourcemanager",
     "Title": "Resource Manager v3 (Projects)",
     "counts": {
-      "Unimplemented": 5,
-      "Verified": 6
+      "Unimplemented": 4,
+      "Verified": 7
     },
     "rows": [
       {
@@ -1278,6 +1318,9 @@
       {
         "method": "google.cloud.resourcemanager.v3.Projects/GetIamPolicy",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -1292,12 +1335,15 @@
         "method": "google.cloud.resourcemanager.v3.Projects/ListProjects",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:175 TestResourceManagerV3ListProjects"
+          "test/compat/resourcemanager_test.go:260 TestResourceManagerV3ListProjects"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/MoveProject",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -1310,17 +1356,25 @@
       {
         "method": "google.cloud.resourcemanager.v3.Projects/SetIamPolicy",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/TestIamPermissions",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/UndeleteProject",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
+        ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/UpdateProject",
@@ -3746,8 +3800,8 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Refused": 10,
-      "Verified": 37
+      "Refused": 16,
+      "Verified": 31
     },
     "rows": [
       {
@@ -3786,14 +3840,14 @@
         "method": "bigquery.datasets.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:172 TestBigQueryDatasetUpdatesAreSaved"
+          "test/compat/bigquerymethods_test.go:168 TestBigQueryDatasetUpdatesAreSaved"
         ]
       },
       {
         "method": "bigquery.datasets.undelete",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:172 TestBigQueryDatasetUpdatesAreSaved"
+          "test/compat/bigquerymethods_test.go:168 TestBigQueryDatasetUpdatesAreSaved"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3801,7 +3855,7 @@
         "method": "bigquery.datasets.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:172 TestBigQueryDatasetUpdatesAreSaved"
+          "test/compat/bigquerymethods_test.go:168 TestBigQueryDatasetUpdatesAreSaved"
         ]
       },
       {
@@ -3832,7 +3886,7 @@
         "method": "bigquery.jobs.getQueryResults",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:54 TestBigQueryGetQueryResultsPages"
+          "test/compat/bigquerymethods_test.go:50 TestBigQueryGetQueryResultsPages"
         ]
       },
       {
@@ -3870,42 +3924,42 @@
         "method": "bigquery.models.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:146 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.models.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:146 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.models.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:146 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.models.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:146 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:142 TestBigQueryModelsOfADatasetWithNone"
         ]
       },
       {
         "method": "bigquery.projects.getServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:250 TestBigQueryServiceAccount"
+          "test/compat/bigquerymethods_test.go:246 TestBigQueryServiceAccount"
         ]
       },
       {
         "method": "bigquery.projects.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:126 TestBigQueryProjectsListNamesTheInstancesProject"
+          "test/compat/bigquerymethods_test.go:122 TestBigQueryProjectsListNamesTheInstancesProject"
         ]
       },
       {
@@ -3928,7 +3982,7 @@
         "method": "bigquery.routines.getIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:420 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3951,7 +4005,7 @@
         "method": "bigquery.routines.setIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:420 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3959,7 +4013,7 @@
         "method": "bigquery.routines.testIamPermissions",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:420 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -3967,67 +4021,73 @@
         "method": "bigquery.routines.update",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:453 TestBigQueryRoutineUpdateIsRefused"
+          "test/compat/bigquerymethods_test.go:339 TestBigQueryRoutineUpdateIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.batchDelete",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.delete",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.get",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.getIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies"
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.insert",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.list",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.testIamPermissions",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies"
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.rowAccessPolicies.update",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies"
-        ]
+          "test/compat/bigquerymethods_test.go:267 TestBigQueryRowAccessPoliciesAreRefused"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "bigquery.tabledata.insertAll",
@@ -4065,7 +4125,7 @@
         "method": "bigquery.tables.getIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:420 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -4098,7 +4158,7 @@
         "method": "bigquery.tables.setIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:420 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -4106,7 +4166,7 @@
         "method": "bigquery.tables.testIamPermissions",
         "status": "Refused",
         "tests": [
-          "test/compat/bigquerymethods_test.go:420 TestBigQueryTableAndRoutineIAMIsRefused"
+          "test/compat/bigquerymethods_test.go:306 TestBigQueryTableAndRoutineIAMIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },

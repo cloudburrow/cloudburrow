@@ -86,6 +86,9 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	if err != nil {
 		return nil, err
 	}
+	if err := s.checkTrafficRevisions(ctx, id, svc.GetTraffic()); err != nil {
+		return nil, err
+	}
 	// validate_only: the request was checked in full, including the
 	// mapping, and nothing is applied (#581). Before, the service was
 	// deployed anyway.
@@ -145,6 +148,9 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 	}
 	manifest, err := renderService(svc, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(svc.GetName())))
 	if err != nil {
+		return nil, err
+	}
+	if err := s.checkTrafficRevisions(ctx, id, svc.GetTraffic()); err != nil {
 		return nil, err
 	}
 	if req.GetValidateOnly() {

@@ -90,9 +90,6 @@ func TestUnsupportedConfigurationIsReported(t *testing.T) {
 		{"encryption key", func(s *runpb.Service) {
 			s.Template.EncryptionKey = "projects/p/locations/l/keyRings/r/cryptoKeys/k"
 		}, "encryptionKey"},
-		{"traffic splitting", func(s *runpb.Service) {
-			s.Traffic = []*runpb.TrafficTarget{{Percent: 50}, {Percent: 50}}
-		}, "traffic"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
