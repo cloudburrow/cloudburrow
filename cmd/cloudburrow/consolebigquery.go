@@ -282,7 +282,7 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 		props = append(props, console.Property{Label: "Labels", Value: formatLabels(md.Labels)})
 	}
 
-	return console.Detail{
+	detail := console.Detail{
 		Summary: []console.Property{
 			{Label: "Dataset", Value: datasetID},
 			{Label: "Type", Value: orDash(string(md.Type))},
@@ -297,7 +297,13 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 			},
 			p.previewSection(ctx, t, md.Schema),
 		},
-	}, nil
+	}
+	if md.Type != bigquery.ViewTable && md.Type != bigquery.MaterializedView {
+		// A view has no row access policies of its own (#1218).
+		detail.Sections = append(detail.Sections, p.rowPoliciesSection(ctx, datasetID, tableID))
+	}
+	detail.Sections = append(detail.Sections, p.tablePermissions(ctx, datasetID, tableID))
+	return detail, nil
 }
 
 // schemaRows flattens a schema, naming a nested field by its dotted path, the

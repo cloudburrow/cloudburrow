@@ -17,6 +17,10 @@ import (
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // The BigQuery REST methods docs/coverage listed as Unknown (#1200): each is
@@ -258,43 +262,153 @@ func TestBigQueryServiceAccount(t *testing.T) {
 	}
 }
 
-// TestBigQueryRowAccessPoliciesAreRefused records that the front refuses
-// every rowAccessPolicies method: the emulator has no row-level security
-// and answered each 500, which the Go client retries.
+// TestBigQueryRowAccessPolicies makes, reads and drops row access policies
+// through the generated client and DDL, and reads a table with them (#1218).
+// CloudBurrow takes every caller to be its credentials' account
+// (docs/compatibility.md), so a policy granted to it filters the caller's
+// rows, and one granted to someone else alone leaves none. The two IAM
+// methods of a policy stay 501 (ADR-0006).
 //
-// covers: bigquery.rowAccessPolicies.insert (unimplemented), bigquery.rowAccessPolicies.list (unimplemented), bigquery.rowAccessPolicies.get (unimplemented), bigquery.rowAccessPolicies.update (unimplemented)
-// covers: bigquery.rowAccessPolicies.delete (unimplemented), bigquery.rowAccessPolicies.batchDelete (unimplemented), bigquery.rowAccessPolicies.getIamPolicy (unimplemented), bigquery.rowAccessPolicies.testIamPermissions (unimplemented)
-func TestBigQueryRowAccessPoliciesAreRefused(t *testing.T) {
+// covers: bigquery.rowAccessPolicies.insert, bigquery.rowAccessPolicies.list, bigquery.rowAccessPolicies.get, bigquery.rowAccessPolicies.update
+// covers: bigquery.rowAccessPolicies.delete, bigquery.rowAccessPolicies.batchDelete, bigquery.rowAccessPolicies.getIamPolicy (unimplemented), bigquery.rowAccessPolicies.testIamPermissions (unimplemented)
+func TestBigQueryRowAccessPolicies(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
 	svc := bigqueryService(t, h)
 	ds, tbl := seedOrders(t, h, c)
 	ctx := h.Context()
 	d, tb := ds.DatasetID, tbl.TableID
-	pol := &bq.RowAccessPolicy{
-		RowAccessPolicyReference: &bq.RowAccessPolicyReference{ProjectId: project, DatasetId: d, TableId: tb, PolicyId: "eu"},
-		FilterPredicate:          "region = 'eu'",
+	me := "serviceAccount:cloudburrow-local@" + project + ".iam.gserviceaccount.com"
+	pol := func(id, filter string, grantees ...string) *bq.RowAccessPolicy {
+		return &bq.RowAccessPolicy{
+			RowAccessPolicyReference: &bq.RowAccessPolicyReference{ProjectId: project, DatasetId: d, TableId: tb, PolicyId: id},
+			FilterPredicate:          filter,
+			Grantees:                 grantees,
+		}
 	}
-	resource := "projects/" + project + "/datasets/" + d + "/tables/" + tb + "/rowAccessPolicies/eu"
+	ids := func() []int64 {
+		t.Helper()
+		it, err := c.Query("SELECT id FROM `" + project + "." + d + "." + tb + "` ORDER BY id").Read(ctx)
+		if err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		var got []int64
+		for {
+			var row struct {
+				ID int64 `bigquery:"id"`
+			}
+			err := it.Next(&row)
+			if err == iterator.Done {
+				return got
+			}
+			if err != nil {
+				t.Fatalf("query: %v", err)
+			}
+			got = append(got, row.ID)
+		}
+	}
 
-	_, err := svc.RowAccessPolicies.Insert(project, d, tb, pol).Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.rowAccessPolicies.insert", err)
-	_, err = svc.RowAccessPolicies.List(project, d, tb).Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.rowAccessPolicies.list", err)
-	_, err = svc.RowAccessPolicies.Get(project, d, tb, "eu").Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.rowAccessPolicies.get", err)
-	_, err = svc.RowAccessPolicies.Update(project, d, tb, "eu", pol).Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.rowAccessPolicies.update", err)
-	err = svc.RowAccessPolicies.Delete(project, d, tb, "eu").Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.rowAccessPolicies.delete", err)
-	err = svc.RowAccessPolicies.BatchDelete(project, d, tb, &bq.BatchDeleteRowAccessPoliciesRequest{PolicyIds: []string{"eu"}}).Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.rowAccessPolicies.batchDelete", err)
+	// Someone else's policy alone: the caller reads no rows.
+	if _, err := svc.RowAccessPolicies.Insert(project, d, tb, pol("us", "region = 'us'", "user:someone@example.com")).Context(ctx).Do(); err != nil {
+		t.Fatalf("rowAccessPolicies.insert: %v", err)
+	}
+	if got := ids(); len(got) != 0 {
+		t.Errorf("rows with no policy for the caller = %v, want none", got)
+	}
+	// The caller's policy: its rows.
+	if _, err := svc.RowAccessPolicies.Insert(project, d, tb, pol("eu", "region = 'nowhere'", me)).Context(ctx).Do(); err != nil {
+		t.Fatalf("rowAccessPolicies.insert: %v", err)
+	}
+	if _, err := svc.RowAccessPolicies.Insert(project, d, tb, pol("eu", "TRUE", me)).Context(ctx).Do(); !isCode(err, http.StatusConflict) {
+		t.Errorf("insert of an existing policy = %v, want 409", err)
+	}
+	if _, err := svc.RowAccessPolicies.Update(project, d, tb, "eu", pol("eu", "region = 'eu'", me)).Context(ctx).Do(); err != nil {
+		t.Fatalf("rowAccessPolicies.update: %v", err)
+	}
+	if got := ids(); fmt.Sprint(got) != "[1 2]" {
+		t.Errorf("rows = %v, want [1 2]", got)
+	}
+	got, err := svc.RowAccessPolicies.Get(project, d, tb, "eu").Context(ctx).Do()
+	if err != nil || got.FilterPredicate != "region = 'eu'" || fmt.Sprint(got.Grantees) != "["+me+"]" || got.CreationTime == "" || got.Etag == "" {
+		t.Errorf("rowAccessPolicies.get = %+v, %v", got, err)
+	}
+	list, err := svc.RowAccessPolicies.List(project, d, tb).Context(ctx).Do()
+	if err != nil || len(list.RowAccessPolicies) != 2 {
+		t.Errorf("rowAccessPolicies.list = %+v, %v", list, err)
+	}
+	if _, err := svc.RowAccessPolicies.Insert(project, d, tb, pol("bad", "nope = 1", me)).Context(ctx).Do(); !isCode(err, http.StatusBadRequest) {
+		t.Errorf("insert with a filter on no column = %v, want 400", err)
+	}
+
+	// Reads the front cannot filter are refused, not answered unfiltered.
+	if _, err := svc.Tabledata.List(project, d, tb).Context(ctx).Do(); !isCode(err, http.StatusNotImplemented) {
+		t.Errorf("tabledata.list of a protected table = %v, want 501", err)
+	}
+	if _, err := c.Query("DELETE FROM `" + d + "." + tb + "` WHERE TRUE").Read(ctx); err == nil {
+		t.Error("DELETE of a protected table ran")
+	}
+	if _, err := tbl.ExtractorTo(bigquery.NewGCSReference("gs://nowhere-1218/x.csv")).Run(ctx); !isCode(err, http.StatusNotImplemented) {
+		t.Errorf("extract job of a protected table = %v, want 501", err)
+	}
+	if _, err := ds.Table("copy").CopierFrom(tbl).Run(ctx); !isCode(err, http.StatusNotImplemented) {
+		t.Errorf("copy job of a protected table = %v, want 501", err)
+	}
+	sc, _ := bigqueryClient(t, h)
+	if err := sc.EnableStorageReadClient(ctx,
+		option.WithEndpoint(h.Endpoint(EnvBigQueryStorage)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))); err != nil {
+		t.Fatalf("EnableStorageReadClient: %v", err)
+	}
+	var row []bigquery.Value
+	if err := sc.Dataset(d).Table(tb).Read(ctx).Next(&row); status.Code(err) != codes.Unimplemented {
+		t.Errorf("Storage Read of a protected table = %v, want UNIMPLEMENTED", err)
+	}
+
+	// DDL: a policy granted to everyone, then dropped.
+	if _, err := c.Query("CREATE ROW ACCESS POLICY big ON `" + d + "." + tb + "` GRANT TO ('allUsers') FILTER USING (amount > 6)").Read(ctx); err != nil {
+		t.Fatalf("CREATE ROW ACCESS POLICY: %v", err)
+	}
+	if got := ids(); fmt.Sprint(got) != "[1 2 3]" {
+		t.Errorf("rows with two policies = %v, want [1 2 3]", got)
+	}
+	if _, err := c.Query("DROP ROW ACCESS POLICY big ON `" + d + "." + tb + "`").Read(ctx); err != nil {
+		t.Fatalf("DROP ROW ACCESS POLICY: %v", err)
+	}
+	if err := svc.RowAccessPolicies.Delete(project, d, tb, "us").Context(ctx).Do(); err != nil {
+		t.Fatalf("rowAccessPolicies.delete: %v", err)
+	}
+	if err := svc.RowAccessPolicies.BatchDelete(project, d, tb, &bq.BatchDeleteRowAccessPoliciesRequest{PolicyIds: []string{"eu"}}).Context(ctx).Do(); err != nil {
+		t.Fatalf("rowAccessPolicies.batchDelete: %v", err)
+	}
+	if _, err := svc.RowAccessPolicies.Get(project, d, tb, "eu").Context(ctx).Do(); !isCode(err, http.StatusNotFound) {
+		t.Errorf("get of a deleted policy = %v, want 404", err)
+	}
+	if got := ids(); fmt.Sprint(got) != "[1 2 3 4]" {
+		t.Errorf("rows with no policies = %v, want all four", got)
+	}
+	if _, err := c.Query("CREATE ROW ACCESS POLICY x ON `" + d + "." + tb + "` GRANT TO ('allUsers') FILTER USING (TRUE)").Read(ctx); err != nil {
+		t.Fatalf("CREATE ROW ACCESS POLICY: %v", err)
+	}
+	if _, err := c.Query("DROP ALL ROW ACCESS POLICIES ON `" + d + "." + tb + "`").Read(ctx); err != nil {
+		t.Fatalf("DROP ALL ROW ACCESS POLICIES: %v", err)
+	}
+	if list, err := svc.RowAccessPolicies.List(project, d, tb).Context(ctx).Do(); err != nil || len(list.RowAccessPolicies) != 0 {
+		t.Errorf("list after DROP ALL = %+v, %v", list, err)
+	}
+
+	resource := "projects/" + project + "/datasets/" + d + "/tables/" + tb + "/rowAccessPolicies/eu"
 	_, err = svc.RowAccessPolicies.GetIamPolicy(resource, &bq.GetIamPolicyRequest{}).Context(ctx).Do()
 	wantNotImplemented(t, "bigquery.rowAccessPolicies.getIamPolicy", err)
 	_, err = svc.RowAccessPolicies.TestIamPermissions(resource, &bq.TestIamPermissionsRequest{
 		Permissions: []string{"bigquery.rowAccessPolicies.getFilteredData"},
 	}).Context(ctx).Do()
 	wantNotImplemented(t, "bigquery.rowAccessPolicies.testIamPermissions", err)
+}
+
+// isCode reports whether err is a googleapi error of code.
+func isCode(err error, code int) bool {
+	var e *googleapi.Error
+	return errors.As(err, &e) && e.Code == code
 }
 
 // TestBigQueryTableAndRoutineIAMIsRefused records that the front refuses
