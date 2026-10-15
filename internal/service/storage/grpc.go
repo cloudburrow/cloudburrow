@@ -12,6 +12,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -125,6 +126,11 @@ func (g *grpcStorage) call(ctx context.Context, method, path string, q url.Value
 // do is call for a request answered with JSON: a JSON error becomes a gRPC
 // status, and a success is decoded into out (when not nil).
 func (g *grpcStorage) do(ctx context.Context, method, path string, q url.Values, body any, out any) error {
+	return g.doH(ctx, method, path, q, nil, body, out)
+}
+
+// doH is do with request headers: a customer-supplied key's.
+func (g *grpcStorage) doH(ctx context.Context, method, path string, q url.Values, hdr http.Header, body any, out any) error {
 	var raw []byte
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -133,7 +139,7 @@ func (g *grpcStorage) do(ctx context.Context, method, path string, q url.Values,
 		}
 		raw = b
 	}
-	rep, err := g.call(ctx, method, path, q, nil, raw)
+	rep, err := g.call(ctx, method, path, q, hdr, raw)
 	if err != nil {
 		return err
 	}
@@ -248,14 +254,29 @@ func setGen(q url.Values, name string, g int64) {
 	}
 }
 
-// noCSEK refuses customer-supplied encryption keys, which the JSON API
-// does not serve (it refuses customerEncryption, and keeps no key to check
-// a later read against), so there is no JSON handler to answer them.
-func noCSEK(p *pb.CommonObjectRequestParams) error {
-	if p != nil && (p.GetEncryptionAlgorithm() != "" || len(p.GetEncryptionKeyBytes()) > 0) {
-		return grpcstatus.Error(codes.Unimplemented, "customer-supplied encryption keys are not implemented")
+// csekHeaders are the JSON API headers (csek.go) that carry a request's
+// customer-supplied key, under prefix. The key's SHA-256 is optional over
+// gRPC (CommonObjectRequestParams), so it is computed when missing.
+func csekHeaders(alg string, key, sum []byte, prefix string, into http.Header) http.Header {
+	if alg == "" && len(key) == 0 && len(sum) == 0 {
+		return into
 	}
-	return nil
+	if into == nil {
+		into = http.Header{}
+	}
+	if len(sum) == 0 && len(key) > 0 {
+		h := sha256.Sum256(key)
+		sum = h[:]
+	}
+	into.Set(prefix+"Algorithm", alg)
+	into.Set(prefix+"Key", base64.StdEncoding.EncodeToString(key))
+	into.Set(prefix+"Key-Sha256", base64.StdEncoding.EncodeToString(sum))
+	return into
+}
+
+// keyHeaders are csekHeaders for CommonObjectRequestParams.
+func keyHeaders(p *pb.CommonObjectRequestParams) http.Header {
+	return csekHeaders(p.GetEncryptionAlgorithm(), p.GetEncryptionKeyBytes(), p.GetEncryptionKeySha256Bytes(), csekHeader, nil)
 }
 
 // --- buckets ----------------------------------------------------------------
@@ -492,9 +513,6 @@ func (g *grpcStorage) TestIamPermissions(ctx context.Context, req *iampb.TestIam
 // --- object metadata ------------------------------------------------------
 
 func (g *grpcStorage) GetObject(ctx context.Context, req *pb.GetObjectRequest) (*pb.Object, error) {
-	if err := noCSEK(req.GetCommonObjectRequestParams()); err != nil {
-		return nil, err
-	}
 	b, err := bucketID(req.GetBucket())
 	if err != nil {
 		return nil, err
@@ -509,12 +527,12 @@ func (g *grpcStorage) GetObject(ctx context.Context, req *pb.GetObjectRequest) (
 		q.Set("softDeleted", "true")
 	}
 	setIf(q, "restoreToken", req.GetRestoreToken())
-	return g.getObject(ctx, b, req.GetObject(), q)
+	return g.getObject(ctx, b, req.GetObject(), q, keyHeaders(req.GetCommonObjectRequestParams()))
 }
 
-func (g *grpcStorage) getObject(ctx context.Context, b, o string, q url.Values) (*pb.Object, error) {
+func (g *grpcStorage) getObject(ctx context.Context, b, o string, q url.Values, key http.Header) (*pb.Object, error) {
 	var out jsonObject
-	if err := g.do(ctx, http.MethodGet, objectPath(b, o), q, nil, &out); err != nil {
+	if err := g.doH(ctx, http.MethodGet, objectPath(b, o), q, key, nil, &out); err != nil {
 		return nil, err
 	}
 	return out.proto(), nil
@@ -562,9 +580,6 @@ func (g *grpcStorage) ListObjects(ctx context.Context, req *pb.ListObjectsReques
 }
 
 func (g *grpcStorage) DeleteObject(ctx context.Context, req *pb.DeleteObjectRequest) (*emptypb.Empty, error) {
-	if err := noCSEK(req.GetCommonObjectRequestParams()); err != nil {
-		return nil, err
-	}
 	b, err := bucketID(req.GetBucket())
 	if err != nil {
 		return nil, err
@@ -582,9 +597,6 @@ func (g *grpcStorage) DeleteObject(ctx context.Context, req *pb.DeleteObjectRequ
 }
 
 func (g *grpcStorage) UpdateObject(ctx context.Context, req *pb.UpdateObjectRequest) (*pb.Object, error) {
-	if err := noCSEK(req.GetCommonObjectRequestParams()); err != nil {
-		return nil, err
-	}
 	o := req.GetObject()
 	b, err := bucketID(o.GetBucket())
 	if err != nil {
@@ -609,16 +621,13 @@ func (g *grpcStorage) UpdateObject(ctx context.Context, req *pb.UpdateObjectRequ
 		q.Set("overrideUnlockedRetention", "true")
 	}
 	var out jsonObject
-	if err := g.do(ctx, http.MethodPatch, objectPath(b, o.GetName()), q, body, &out); err != nil {
+	if err := g.doH(ctx, http.MethodPatch, objectPath(b, o.GetName()), q, keyHeaders(req.GetCommonObjectRequestParams()), body, &out); err != nil {
 		return nil, err
 	}
 	return out.proto(), nil
 }
 
 func (g *grpcStorage) ComposeObject(ctx context.Context, req *pb.ComposeObjectRequest) (*pb.Object, error) {
-	if err := noCSEK(req.GetCommonObjectRequestParams()); err != nil {
-		return nil, err
-	}
 	d := req.GetDestination()
 	b, err := bucketID(d.GetBucket())
 	if err != nil {
@@ -646,7 +655,7 @@ func (g *grpcStorage) ComposeObject(ctx context.Context, req *pb.ComposeObjectRe
 	setIf(q, "destinationPredefinedAcl", req.GetDestinationPredefinedAcl())
 	setIf(q, "kmsKeyName", req.GetKmsKey())
 	var out jsonObject
-	if err := g.do(ctx, http.MethodPost, objectPath(b, d.GetName())+"/compose", q,
+	if err := g.doH(ctx, http.MethodPost, objectPath(b, d.GetName())+"/compose", q, keyHeaders(req.GetCommonObjectRequestParams()),
 		map[string]any{"destination": dest, "sourceObjects": srcs, "deleteSourceObjects": req.GetDeleteSourceObjects()}, &out); err != nil {
 		return nil, err
 	}
@@ -654,12 +663,6 @@ func (g *grpcStorage) ComposeObject(ctx context.Context, req *pb.ComposeObjectRe
 }
 
 func (g *grpcStorage) RewriteObject(ctx context.Context, req *pb.RewriteObjectRequest) (*pb.RewriteResponse, error) {
-	if err := noCSEK(req.GetCommonObjectRequestParams()); err != nil {
-		return nil, err
-	}
-	if req.GetCopySourceEncryptionAlgorithm() != "" || len(req.GetCopySourceEncryptionKeyBytes()) > 0 {
-		return nil, grpcstatus.Error(codes.Unimplemented, "customer-supplied encryption keys are not implemented")
-	}
 	sb, err := bucketID(req.GetSourceBucket())
 	if err != nil {
 		return nil, err
@@ -700,7 +703,9 @@ func (g *grpcStorage) RewriteObject(ctx context.Context, req *pb.RewriteObjectRe
 		RewriteToken        string
 		Resource            *jsonObject
 	}
-	if err := g.do(ctx, http.MethodPost, path, q, body, &out); err != nil {
+	key := csekHeaders(req.GetCopySourceEncryptionAlgorithm(), req.GetCopySourceEncryptionKeyBytes(),
+		req.GetCopySourceEncryptionKeySha256Bytes(), csekSourceHeader, keyHeaders(req.GetCommonObjectRequestParams()))
+	if err := g.doH(ctx, http.MethodPost, path, q, key, body, &out); err != nil {
 		return nil, err
 	}
 	resp := &pb.RewriteResponse{Done: out.Done, RewriteToken: out.RewriteToken}
@@ -713,9 +718,6 @@ func (g *grpcStorage) RewriteObject(ctx context.Context, req *pb.RewriteObjectRe
 }
 
 func (g *grpcStorage) RestoreObject(ctx context.Context, req *pb.RestoreObjectRequest) (*pb.Object, error) {
-	if err := noCSEK(req.GetCommonObjectRequestParams()); err != nil {
-		return nil, err
-	}
 	b, err := bucketID(req.GetBucket())
 	if err != nil {
 		return nil, err
@@ -762,9 +764,12 @@ func (g *grpcStorage) MoveObject(ctx context.Context, req *pb.MoveObjectRequest)
 // --- reads ------------------------------------------------------------------
 
 // readMedia reads [off, off+n) of a pinned generation (n < 0: to the end).
-func (g *grpcStorage) readMedia(ctx context.Context, b, o string, gen, off, n int64) ([]byte, error) {
+func (g *grpcStorage) readMedia(ctx context.Context, b, o string, gen, off, n int64, key http.Header) ([]byte, error) {
 	q := url.Values{"alt": {"media"}, "generation": {strconv.FormatInt(gen, 10)}}
-	hdr := http.Header{}
+	hdr := key.Clone()
+	if hdr == nil {
+		hdr = http.Header{}
+	}
 	switch {
 	case n == 0:
 		return nil, nil
@@ -810,9 +815,6 @@ func checksummed(b []byte) *pb.ChecksummedData {
 
 func (g *grpcStorage) ReadObject(req *pb.ReadObjectRequest, stream pb.Storage_ReadObjectServer) error {
 	ctx := stream.Context()
-	if err := noCSEK(req.GetCommonObjectRequestParams()); err != nil {
-		return err
-	}
 	b, err := bucketID(req.GetBucket())
 	if err != nil {
 		return err
@@ -823,7 +825,8 @@ func (g *grpcStorage) ReadObject(req *pb.ReadObjectRequest, stream pb.Storage_Re
 	pre(q, "ifGenerationNotMatch", req.IfGenerationNotMatch)
 	pre(q, "ifMetagenerationMatch", req.IfMetagenerationMatch)
 	pre(q, "ifMetagenerationNotMatch", req.IfMetagenerationNotMatch)
-	obj, err := g.getObject(ctx, b, req.GetObject(), q)
+	key := keyHeaders(req.GetCommonObjectRequestParams())
+	obj, err := g.getObject(ctx, b, req.GetObject(), q, key)
 	if err != nil {
 		return err
 	}
@@ -831,7 +834,7 @@ func (g *grpcStorage) ReadObject(req *pb.ReadObjectRequest, stream pb.Storage_Re
 	if err != nil {
 		return err
 	}
-	data, err := g.readMedia(ctx, b, req.GetObject(), obj.GetGeneration(), start, length)
+	data, err := g.readMedia(ctx, b, req.GetObject(), obj.GetGeneration(), start, length, key)
 	if err != nil {
 		return err
 	}
@@ -868,9 +871,6 @@ func (g *grpcStorage) BidiReadObject(stream pb.Storage_BidiReadObjectServer) err
 	if spec == nil {
 		return grpcstatus.Error(codes.InvalidArgument, "the first BidiReadObjectRequest must carry read_object_spec")
 	}
-	if err := noCSEK(spec.GetCommonObjectRequestParams()); err != nil {
-		return err
-	}
 	b, err := bucketID(spec.GetBucket())
 	if err != nil {
 		return err
@@ -885,7 +885,8 @@ func (g *grpcStorage) BidiReadObject(stream pb.Storage_BidiReadObjectServer) err
 	pre(q, "ifGenerationNotMatch", spec.IfGenerationNotMatch)
 	pre(q, "ifMetagenerationMatch", spec.IfMetagenerationMatch)
 	pre(q, "ifMetagenerationNotMatch", spec.IfMetagenerationNotMatch)
-	obj, err := g.getObject(ctx, b, spec.GetObject(), q)
+	key := keyHeaders(spec.GetCommonObjectRequestParams())
+	obj, err := g.getObject(ctx, b, spec.GetObject(), q, key)
 	if err != nil {
 		return err
 	}
@@ -895,7 +896,7 @@ func (g *grpcStorage) BidiReadObject(stream pb.Storage_BidiReadObjectServer) err
 	}
 	for {
 		for _, rr := range req.GetReadRanges() {
-			if err := g.sendRange(ctx, stream, b, obj, rr); err != nil {
+			if err := g.sendRange(ctx, stream, b, obj, rr, key); err != nil {
 				return err
 			}
 		}
@@ -908,12 +909,12 @@ func (g *grpcStorage) BidiReadObject(stream pb.Storage_BidiReadObjectServer) err
 	}
 }
 
-func (g *grpcStorage) sendRange(ctx context.Context, stream pb.Storage_BidiReadObjectServer, b string, obj *pb.Object, rr *pb.ReadRange) error {
+func (g *grpcStorage) sendRange(ctx context.Context, stream pb.Storage_BidiReadObjectServer, b string, obj *pb.Object, rr *pb.ReadRange, key http.Header) error {
 	start, length, err := span(obj.GetSize(), rr.GetReadOffset(), rr.GetReadLength())
 	if err != nil {
 		return err
 	}
-	data, err := g.readMedia(ctx, b, obj.GetName(), obj.GetGeneration(), start, length)
+	data, err := g.readMedia(ctx, b, obj.GetName(), obj.GetGeneration(), start, length, key)
 	if err != nil {
 		return err
 	}
@@ -949,19 +950,16 @@ func uploadIDOf(loc string) (string, error) {
 }
 
 func (g *grpcStorage) StartResumableWrite(ctx context.Context, req *pb.StartResumableWriteRequest) (*pb.StartResumableWriteResponse, error) {
-	if err := noCSEK(req.GetCommonObjectRequestParams()); err != nil {
-		return nil, err
-	}
-	id, err := g.startWrite(ctx, req.GetWriteObjectSpec(), req.GetObjectChecksums())
+	id, err := g.startWrite(ctx, req.GetWriteObjectSpec(), req.GetObjectChecksums(), keyHeaders(req.GetCommonObjectRequestParams()))
 	if err != nil {
 		return nil, err
 	}
 	return &pb.StartResumableWriteResponse{UploadId: id}, nil
 }
 
-func (g *grpcStorage) startWrite(ctx context.Context, spec *pb.WriteObjectSpec, sums *pb.ObjectChecksums) (string, error) {
+func (g *grpcStorage) startWrite(ctx context.Context, spec *pb.WriteObjectSpec, sums *pb.ObjectChecksums, key http.Header) (string, error) {
 	if spec.GetAppendable() {
-		return "", grpcstatus.Error(codes.Unimplemented, "appendable objects are not implemented")
+		return "", grpcstatus.Error(codes.Unimplemented, "appendable objects are not implemented: they exist only in zonal (Rapid storage) buckets, which CloudBurrow does not model (custom_placement_config is refused), and its store holds only finalized generations")
 	}
 	r := spec.GetResource()
 	b, err := bucketID(r.GetBucket())
@@ -981,7 +979,11 @@ func (g *grpcStorage) startWrite(ctx context.Context, spec *pb.WriteObjectSpec, 
 	setIf(q, "predefinedAcl", spec.GetPredefinedAcl())
 	setIf(q, "kmsKeyName", r.GetKmsKey())
 	raw, _ := json.Marshal(body)
-	hdr := http.Header{"Content-Type": {"application/json; charset=UTF-8"}}
+	hdr := key.Clone()
+	if hdr == nil {
+		hdr = http.Header{}
+	}
+	hdr.Set("Content-Type", "application/json; charset=UTF-8")
 	if spec.ObjectSize != nil {
 		hdr.Set("X-Upload-Content-Length", strconv.FormatInt(spec.GetObjectSize(), 10))
 	}
@@ -1000,9 +1002,12 @@ func (g *grpcStorage) startWrite(ctx context.Context, spec *pb.WriteObjectSpec, 
 
 // putChunk sends data at first to session id; total < 0 means more is to
 // come. It returns the bytes persisted, or the object once it is final.
-func (g *grpcStorage) putChunk(ctx context.Context, id string, first int64, data []byte, total int64, sums *pb.ObjectChecksums) (int64, *pb.Object, error) {
+func (g *grpcStorage) putChunk(ctx context.Context, id string, first int64, data []byte, total int64, sums *pb.ObjectChecksums, key http.Header) (int64, *pb.Object, error) {
 	q := url.Values{"uploadType": {"resumable"}, "upload_id": {id}}
-	hdr := http.Header{}
+	hdr := key.Clone()
+	if hdr == nil {
+		hdr = http.Header{}
+	}
 	tot := "*"
 	if total >= 0 {
 		tot = strconv.FormatInt(total, 10)
@@ -1052,7 +1057,7 @@ func (g *grpcStorage) putChunk(ctx context.Context, id string, first int64, data
 }
 
 func (g *grpcStorage) QueryWriteStatus(ctx context.Context, req *pb.QueryWriteStatusRequest) (*pb.QueryWriteStatusResponse, error) {
-	n, obj, err := g.putChunk(ctx, req.GetUploadId(), 0, nil, -1, nil)
+	n, obj, err := g.putChunk(ctx, req.GetUploadId(), 0, nil, -1, nil, keyHeaders(req.GetCommonObjectRequestParams()))
 	if err != nil {
 		return nil, err
 	}
@@ -1082,6 +1087,8 @@ type writer struct {
 	persisted int64
 	buf       []byte
 	obj       *pb.Object
+	// key is the write's customer-supplied key, as JSON API headers.
+	key http.Header
 }
 
 // writeMsg is what WriteObject and BidiWriteObject messages share.
@@ -1098,20 +1105,17 @@ type writeMsg struct {
 
 // open starts or resumes the session the first message names.
 func (g *grpcStorage) open(ctx context.Context, m writeMsg) (*writer, error) {
-	if err := noCSEK(m.params); err != nil {
-		return nil, err
-	}
-	w := &writer{g: g}
+	w := &writer{g: g, key: keyHeaders(m.params)}
 	switch {
 	case m.uploadID != "":
 		w.id = m.uploadID
-		n, obj, err := g.putChunk(ctx, w.id, 0, nil, -1, nil)
+		n, obj, err := g.putChunk(ctx, w.id, 0, nil, -1, nil, w.key)
 		if err != nil {
 			return nil, err
 		}
 		w.persisted, w.obj = n, obj
 	case m.spec != nil:
-		id, err := g.startWrite(ctx, m.spec, nil)
+		id, err := g.startWrite(ctx, m.spec, nil, w.key)
 		if err != nil {
 			return nil, err
 		}
@@ -1149,7 +1153,7 @@ func (w *writer) add(ctx context.Context, m writeMsg) error {
 	}
 	if m.finish {
 		total := w.persisted + int64(len(w.buf))
-		_, obj, err := w.g.putChunk(ctx, w.id, w.persisted, w.buf, total, m.sums)
+		_, obj, err := w.g.putChunk(ctx, w.id, w.persisted, w.buf, total, m.sums, w.key)
 		if err != nil {
 			return err
 		}
@@ -1171,7 +1175,7 @@ func (w *writer) persist(ctx context.Context) error {
 	if n == 0 || w.obj != nil {
 		return nil
 	}
-	got, _, err := w.g.putChunk(ctx, w.id, w.persisted, w.buf[:n], -1, nil)
+	got, _, err := w.g.putChunk(ctx, w.id, w.persisted, w.buf[:n], -1, nil, w.key)
 	if err != nil {
 		return err
 	}
@@ -1228,7 +1232,7 @@ func (g *grpcStorage) BidiWriteObject(stream pb.Storage_BidiWriteObjectServer) e
 			return err
 		}
 		if req.GetAppendObjectSpec() != nil {
-			return grpcstatus.Error(codes.Unimplemented, "appendable objects are not implemented")
+			return grpcstatus.Error(codes.Unimplemented, "appendable objects are not implemented: they exist only in zonal (Rapid storage) buckets, which CloudBurrow does not model (custom_placement_config is refused), and its store holds only finalized generations")
 		}
 		m := writeMsg{uploadID: req.GetUploadId(), spec: req.GetWriteObjectSpec(), params: req.GetCommonObjectRequestParams(),
 			offset: req.GetWriteOffset(), data: req.GetChecksummedData(), sums: req.GetObjectChecksums(),

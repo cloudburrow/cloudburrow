@@ -124,6 +124,10 @@ func (s *Server) resumableStart(w http.ResponseWriter, r *http.Request, bucket s
 		meta.ContentType = r.Header.Get("X-Upload-Content-Type")
 	}
 	meta.PredefinedACL = q.Get("predefinedAcl")
+	if meta.KeySHA256, err = parseCSEK(r.Header, csekHeader); err != nil {
+		writeError(w, err)
+		return
+	}
 	if err := s.bucketExists(bucket); err != nil {
 		writeError(w, err)
 		return
