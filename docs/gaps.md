@@ -23,7 +23,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Storage | 7 | 1 | 5 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 16 | 13 | 1 | 0 | 2 |
+| Cloud Run | 7 | 4 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 0 | 0 | 0 | 0 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 3 | 3 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 3 | 3 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **78** | **30** | **36** | **7** | **5** |
+| **Total** | **69** | **21** | **36** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -76,23 +76,14 @@ queue-level `http_target` (#1282).
 
 ## Cloud Run
 
-Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` with a partial `update_mask` (#1260); container logs in Cloud Logging as `cloud_run_revision` and `cloud_run_job` (#1298).
+Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` with a partial `update_mask` (#1260); container logs in Cloud Logging as `cloud_run_revision` and `cloud_run_job` (#1298); the v1 (Knative) API, with `gcloud run services list`, `describe` and `deploy --image` (#1293, #1297); `Builds.SubmitBuild` (#1268).
 
 | Gap | Why open | Size |
 |---|---|---|
 | Refused service and job fields: VPC access, Cloud SQL, Cloud Storage FUSE and NFS volumes, `subPath`, encryption keys, binary authorization, execution environment, session affinity; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297) | not built yet | L |
-| Logs are not served through the Cloud Run API | not built yet | M |
-| Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity | not built yet | L |
 | `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
-| `Instances.*` is not served | not built yet | L |
-| `WorkerPools.*` is not served | not built yet | L |
-| `gcloud run services list` / `describe` use the v1 (Knative-shaped) API, which is not served | not built yet | L |
-| Refused service and job fields: service account, VPC access, volumes, encryption keys, binary authorization, execution environment, session affinity (#1297) | not built yet | L |
-| `Builds.SubmitBuild` is not served (#1268) | not built yet | M |
-| Logs are not served through the Cloud Run API (#1298) | not built yet | M |
 | `Instances.*` is not served (#1299) | not built yet | L |
 | `WorkerPools.*` is not served (#1300) | not built yet | L |
-| `gcloud run deploy` through the v1 (Knative) API, served since #1293 for services, revisions, routes and configurations, is not verified: its default `startupProbe` and other v1 fields are refused as not mapped, and `projects.locations.list` and the rest of v1 (domain mappings, jobs, IAM) are 501 | not built yet | M |
 | `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
 | `CancelExecution`'s result | needs live GCP | S |
