@@ -76,6 +76,13 @@ func toProtoQueue(q Queue) *taskspb.Queue {
 			}
 			return timestamppb.New(q.Purged)
 		}(),
+		StackdriverLoggingConfig: func() *taskspb.StackdriverLoggingConfig {
+			if q.Logging == nil {
+				return nil
+			}
+			return &taskspb.StackdriverLoggingConfig{SamplingRatio: q.Logging.SamplingRatio}
+		}(),
+		HttpTarget: queueHTTPTarget(q),
 	}
 }
 
@@ -88,6 +95,9 @@ func checkQueue(p *taskspb.Queue) error {
 	if err := checkAppEngineRouting(p); err != nil {
 		return err
 	}
+	if err := checkHTTPTarget(p); err != nil {
+		return err
+	}
 	if err := checkRateLimits(p, ""); err != nil {
 		return err
 	}
@@ -95,9 +105,10 @@ func checkQueue(p *taskspb.Queue) error {
 }
 
 func checkLogging(p *taskspb.Queue) error {
-	if p.GetStackdriverLoggingConfig() != nil {
-		return apierror.Unimplemented("queue.stackdriver_logging_config is not implemented: no dispatch is written to " +
-			"Cloud Logging; attempts are in the console's operations ledger and /admin/events")
+	if c := p.GetStackdriverLoggingConfig(); c != nil {
+		if err := checkSamplingRatio(c.GetSamplingRatio()); err != nil {
+			return apierror.InvalidArgument("%v", err)
+		}
 	}
 	return nil
 }
@@ -168,6 +179,10 @@ func fromProtoQueue(p *taskspb.Queue) Queue {
 			MaxConcurrentDispatches: int(rl.GetMaxConcurrentDispatches()),
 		}
 	}
+	if c := p.GetStackdriverLoggingConfig(); c != nil {
+		q.Logging = &LoggingConfig{SamplingRatio: c.GetSamplingRatio()}
+	}
+	q.HTTPTarget = httpTargetJSON(p.GetHttpTarget())
 	if rc := p.GetRetryConfig(); rc != nil {
 		q.RetryConfig = RetryConfig{
 			MaxAttempts:      int(rc.GetMaxAttempts()),
@@ -309,7 +324,7 @@ func (g *GRPCServer) CreateQueue(_ context.Context, req *taskspb.CreateQueueRequ
 // updatableQueuePaths are the fields an empty update_mask replaces: every
 // Queue field that is neither the name nor output only. A field left out of
 // the request is cleared, then defaulted as on create.
-var updatableQueuePaths = []string{"app_engine_routing_override", "rate_limits", "retry_config", "stackdriver_logging_config"}
+var updatableQueuePaths = []string{"app_engine_routing_override", "http_target", "rate_limits", "retry_config", "stackdriver_logging_config"}
 
 // UpdateQueue replaces the fields its mask names, or with an empty mask
 // every settable field, as the API documents; it creates a queue that does
@@ -327,30 +342,38 @@ func (g *GRPCServer) UpdateQueue(_ context.Context, req *taskspb.UpdateQueueRequ
 	if len(paths) == 0 {
 		paths = updatableQueuePaths
 	}
-	var sets []func(*RetryConfig, *RateLimits)
+	var sets []func(*Queue)
 	want := fromProtoQueue(in)
 	for _, p := range paths {
 		field, sub, _ := strings.Cut(p, ".")
-		var set func(*RetryConfig, *RateLimits)
+		var set func(*Queue)
 		var err error
 		switch field {
 		case "rate_limits":
 			if err = checkRateLimits(in, sub); err == nil {
-				set, err = rateLimitsSetter(sub, want.RateLimits)
+				var f func(*RetryConfig, *RateLimits)
+				if f, err = rateLimitsSetter(sub, want.RateLimits); err == nil {
+					set = func(q *Queue) { f(&q.RetryConfig, &q.RateLimits) }
+				}
 			}
 		case "retry_config":
 			if err = checkRetry(in, sub); err == nil {
-				set, err = retryConfigSetter(sub, want.RetryConfig)
+				var f func(*RetryConfig, *RateLimits)
+				if f, err = retryConfigSetter(sub, want.RetryConfig); err == nil {
+					set = func(q *Queue) { f(&q.RetryConfig, &q.RateLimits) }
+				}
 			}
-		case "stackdriver_logging_config":
-			err = checkLogging(in)
+		case "stackdriver_logging_config", "stackdriver_logging_config.sampling_ratio":
+			if err = checkLogging(in); err == nil {
+				logging := want.Logging
+				set = func(q *Queue) { q.Logging = logging }
+			}
 		case "http_target":
-			// Newer than the contract this server is built from, which has
-			// no such field, so the value never reaches it: refused rather
-			// than dropped. It would rewrite every task's URL, method and
-			// headers and mint their tokens.
-			err = apierror.Unimplemented("update_mask path %q is not implemented: each task is dispatched with its own "+
-				"httpRequest; set the URL, method and headers there", p)
+			// The whole message (#1282); a path under it replaces it too.
+			if err = checkHTTPTarget(in); err == nil {
+				target := want.HTTPTarget
+				set = func(q *Queue) { q.HTTPTarget = target }
+			}
 		case "app_engine_routing_override":
 			err = checkAppEngineRouting(in)
 		case "name":
@@ -369,9 +392,9 @@ func (g *GRPCServer) UpdateQueue(_ context.Context, req *taskspb.UpdateQueueRequ
 			sets = append(sets, set)
 		}
 	}
-	q, _, err := g.store.UpdateQueue(in.GetName(), func(rc *RetryConfig, rl *RateLimits) error {
+	q, _, err := g.store.UpdateQueue(in.GetName(), func(q *Queue) error {
 		for _, set := range sets {
-			set(rc, rl)
+			set(q)
 		}
 		return nil
 	})
@@ -422,41 +445,6 @@ func (g *GRPCServer) GetQueue(_ context.Context, req *taskspb.GetQueueRequest) (
 		return nil, err
 	}
 	return toProtoQueue(q), nil
-}
-
-// queueFilter parses a ListQueues filter. The reference's sample is
-// "state: PAUSED", so a comparison of state with one of its values (":", "="
-// or "!=") is honoured. Anything else is refused naming the filter, never
-// ignored: ignoring it would return every queue and read as a filter that
-// matched them all (#578).
-func queueFilter(filter string) (func(*taskspb.Queue) bool, error) {
-	f := strings.TrimSpace(filter)
-	if f == "" {
-		return func(*taskspb.Queue) bool { return true }, nil
-	}
-	refuse := apierror.Unimplemented("ListQueues filter %q is not implemented: only state (\":\", \"=\" or \"!=\" RUNNING, PAUSED or DISABLED) is; list without one and select client-side", f)
-	rest, ok := strings.CutPrefix(f, "state")
-	if !ok {
-		return nil, refuse
-	}
-	rest = strings.TrimSpace(rest)
-	var op string
-	for _, o := range []string{"!=", "=", ":"} {
-		if r, ok := strings.CutPrefix(rest, o); ok {
-			op, rest = o, strings.TrimSpace(r)
-			break
-		}
-	}
-	want := strings.Trim(rest, `"`)
-	v, known := taskspb.Queue_State_value[want]
-	if op == "" || !known || v == int32(taskspb.Queue_STATE_UNSPECIFIED) {
-		return nil, refuse
-	}
-	state := taskspb.Queue_State(v)
-	if op == "!=" {
-		return func(q *taskspb.Queue) bool { return q.GetState() != state }, nil
-	}
-	return func(q *taskspb.Queue) bool { return q.GetState() == state }, nil
 }
 
 func (g *GRPCServer) ListQueues(_ context.Context, req *taskspb.ListQueuesRequest) (*taskspb.ListQueuesResponse, error) {

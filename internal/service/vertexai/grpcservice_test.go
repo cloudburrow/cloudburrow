@@ -3,6 +3,7 @@ package vertexai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -309,11 +310,145 @@ func TestGRPCOtherMethodsAreUnimplemented(t *testing.T) {
 	if status.Code(err) != codes.Unimplemented {
 		t.Errorf("Explain: %v, want UNIMPLEMENTED", err)
 	}
-	st, err := c.StreamGenerateContent(context.Background(), &aiplatformpb.GenerateContentRequest{})
+	// On an endpoint rather than a publisher model, streaming is refused.
+	st, err := c.StreamGenerateContent(context.Background(), &aiplatformpb.GenerateContentRequest{Model: endpointName})
 	if err == nil {
 		_, err = st.Recv()
 	}
 	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("StreamGenerateContent: %v, want UNIMPLEMENTED", err)
+		t.Errorf("StreamGenerateContent on an endpoint: %v, want UNIMPLEMENTED", err)
+	}
+}
+
+const grpcModelName = "projects/p/locations/us-central1/publishers/google/models/" + testModel
+
+var grpcUser = []*aiplatformpb.Content{{Role: "user", Parts: []*aiplatformpb.Part{{Data: &aiplatformpb.Part_Text{Text: "hello there"}}}}}
+
+// recvAll reads a stream to its end, returning the messages and the final
+// status (nil for a clean end).
+func recvAll(t *testing.T, c aiplatformpb.PredictionServiceClient, req *aiplatformpb.GenerateContentRequest) ([]*aiplatformpb.GenerateContentResponse, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	st, err := c.StreamGenerateContent(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var out []*aiplatformpb.GenerateContentResponse
+	for {
+		m, err := st.Recv()
+		if err == io.EOF {
+			return out, nil
+		}
+		if err != nil {
+			return out, err
+		}
+		out = append(out, m)
+	}
+}
+
+func TestGRPCStreamGenerateContentEmitsOneMessagePerChunk(t *testing.T) {
+	c, _ := startMixed(t, NewServer(&ScriptedGenerator{ID: testModel, Chunks: []string{"Hel", "lo", " world"}}))
+	msgs, err := recvAll(t, c, &aiplatformpb.GenerateContentRequest{Model: grpcModelName, Contents: grpcUser})
+	if err != nil {
+		t.Fatalf("StreamGenerateContent: %v", err)
+	}
+	if len(msgs) != 4 {
+		t.Fatalf("got %d messages, want 3 chunks and a final one: %v", len(msgs), msgs)
+	}
+	var text strings.Builder
+	for i, m := range msgs {
+		cand := m.GetCandidates()
+		if len(cand) != 1 || cand[0].GetContent().GetRole() != "model" || m.GetModelVersion() != testModel {
+			t.Fatalf("message %d = %v", i, m)
+		}
+		last := i == len(msgs)-1
+		if got := cand[0].GetFinishReason(); (got == aiplatformpb.Candidate_STOP) != last {
+			t.Errorf("message %d finishReason = %v; only the last carries STOP", i, got)
+		}
+		text.WriteString(cand[0].GetContent().GetParts()[0].GetText())
+	}
+	if text.String() != "Hello world" {
+		t.Errorf("text = %q", text.String())
+	}
+}
+
+// The stream must actually stream: the first message arrives while the
+// generator still holds the second chunk.
+func TestGRPCStreamArrivesBeforeGenerationFinishes(t *testing.T) {
+	release := make(chan struct{})
+	slow := &blockingGenerator{inner: &ScriptedGenerator{ID: testModel, Chunks: []string{"first", "second"}}, afterFirst: release}
+	c, _ := startMixed(t, NewServer(slow))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	st, err := c.StreamGenerateContent(ctx, &aiplatformpb.GenerateContentRequest{Model: grpcModelName, Contents: grpcUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan string, 1)
+	go func() {
+		m, err := st.Recv()
+		if err != nil {
+			close(got)
+			return
+		}
+		got <- m.GetCandidates()[0].GetContent().GetParts()[0].GetText()
+	}()
+	select {
+	case text, ok := <-got:
+		if !ok || text != "first" {
+			t.Fatalf("first message = %q (ok=%v), want the first chunk", text, ok)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no message arrived while generation was in progress: the stream is buffered")
+	}
+	close(release)
+}
+
+func TestGRPCStreamRefusesWhatTheUnaryCallRefuses(t *testing.T) {
+	temp := float32(0.2)
+	cases := []struct {
+		name string
+		srv  *Server
+		req  *aiplatformpb.GenerateContentRequest
+	}{
+		{"unconfigured", NewServer(nil), &aiplatformpb.GenerateContentRequest{Model: grpcModelName, Contents: grpcUser}},
+		{"temperature", NewServer(&EchoGenerator{ID: testModel}), &aiplatformpb.GenerateContentRequest{
+			Model: grpcModelName, Contents: grpcUser, GenerationConfig: &aiplatformpb.GenerationConfig{Temperature: &temp}}},
+		{"substitution", NewServer(&EchoGenerator{ID: testModel}), &aiplatformpb.GenerateContentRequest{
+			Model: "projects/p/locations/l/publishers/google/models/gemini-2.0-flash", Contents: grpcUser}},
+		{"publisher", NewServer(&EchoGenerator{ID: testModel}), &aiplatformpb.GenerateContentRequest{
+			Model: "projects/p/locations/l/publishers/meta/models/" + testModel, Contents: grpcUser}},
+		{"no contents", NewServer(&EchoGenerator{ID: testModel}), &aiplatformpb.GenerateContentRequest{Model: grpcModelName}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := startMixed(t, tc.srv)
+			_, unaryErr := c.GenerateContent(context.Background(), tc.req)
+			if unaryErr == nil {
+				t.Fatal("the unary call was not refused")
+			}
+			msgs, err := recvAll(t, c, tc.req)
+			if len(msgs) != 0 {
+				t.Errorf("got %d messages before the refusal", len(msgs))
+			}
+			if status.Code(err) != status.Code(unaryErr) || status.Convert(err).Message() != status.Convert(unaryErr).Message() {
+				t.Errorf("stream refusal = %v, want the unary refusal %v", err, unaryErr)
+			}
+		})
+	}
+}
+
+// A failure after the first chunk ends the stream with an error status, not
+// a clean end.
+func TestGRPCStreamFailureAfterFirstChunkIsVisible(t *testing.T) {
+	gen := &ScriptedGenerator{ID: testModel, Chunks: []string{"partial"}, Err: errors.New("runtime died mid-generation")}
+	c, _ := startMixed(t, NewServer(gen))
+	msgs, err := recvAll(t, c, &aiplatformpb.GenerateContentRequest{Model: grpcModelName, Contents: grpcUser})
+	if len(msgs) != 1 {
+		t.Errorf("got %d messages, want the partial chunk", len(msgs))
+	}
+	if status.Code(err) != codes.Internal || !strings.Contains(err.Error(), "runtime died mid-generation") {
+		t.Errorf("final status = %v, want INTERNAL naming the failure", err)
 	}
 }

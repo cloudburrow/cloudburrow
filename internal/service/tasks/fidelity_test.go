@@ -65,15 +65,15 @@ func TestTaskFieldsAreRefusedOrKept(t *testing.T) {
 	}
 }
 
-// max_retry_duration round-trips; stackdriver_logging_config and a list
-// filter are refused rather than ignored (#578).
+// max_retry_duration round-trips; a sampling_ratio out of range (#1256) and
+// a list filter are refused rather than ignored (#578).
 func TestQueueFieldsAreRefusedOrKept(t *testing.T) {
 	t.Parallel()
 	c := serve(t)
 	cc := ctx(t)
 	_, err := c.CreateQueue(cc, &taskspb.CreateQueueRequest{Parent: loc, Queue: &taskspb.Queue{Name: queueA,
-		StackdriverLoggingConfig: &taskspb.StackdriverLoggingConfig{SamplingRatio: 1}}})
-	wantCodeNaming(t, err, codes.Unimplemented, "stackdriver_logging_config")
+		StackdriverLoggingConfig: &taskspb.StackdriverLoggingConfig{SamplingRatio: 1.5}}})
+	wantCodeNaming(t, err, codes.InvalidArgument, "stackdriver_logging_config")
 	if _, err := c.CreateQueue(cc, &taskspb.CreateQueueRequest{Parent: loc, Queue: &taskspb.Queue{Name: queueA,
 		RetryConfig: &taskspb.RetryConfig{MaxRetryDuration: durationpb.New(90 * time.Second)}}}); err != nil {
 		t.Fatal(err)
@@ -85,10 +85,70 @@ func TestQueueFieldsAreRefusedOrKept(t *testing.T) {
 	if q.GetRetryConfig().GetMaxRetryDuration().AsDuration() != 90*time.Second {
 		t.Errorf("max_retry_duration = %v; want 90s", q.GetRetryConfig().GetMaxRetryDuration())
 	}
-	for _, f := range []string{"name: q", "state < PAUSED", "state: SLEEPING", "state: PAUSED AND name: q", "labels.a = b"} {
+	for _, f := range []string{"state < PAUSED", "state: SLEEPING", "labels.a = b", "rate_limits = 1",
+		"rate_limits.max_burst_size = many", "retry_config.min_backoff > soon", "(state: PAUSED", "state:", "name"} {
 		_, err = c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: f})
-		wantCodeNaming(t, err, codes.Unimplemented, "filter")
+		wantCodeNaming(t, err, codes.InvalidArgument, "filter")
 	}
+	_, err = c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: `name =~ "q.*"`})
+	wantCodeNaming(t, err, codes.Unimplemented, "regular expressions")
+}
+
+// Any Queue field can be filtered on, combined with AND, OR and NOT (#1255).
+func TestListQueuesFiltersOnAnyQueueField(t *testing.T) {
+	t.Parallel()
+	c := serve(t)
+	cc := ctx(t)
+	fast, slow := loc+"/queues/fast", loc+"/queues/slow-lane"
+	for _, q := range []*taskspb.Queue{
+		{Name: fast, RateLimits: &taskspb.RateLimits{MaxDispatchesPerSecond: 50, MaxConcurrentDispatches: 20},
+			RetryConfig: &taskspb.RetryConfig{MaxAttempts: 3, MinBackoff: durationpb.New(time.Second)}},
+		{Name: slow, RateLimits: &taskspb.RateLimits{MaxDispatchesPerSecond: 1, MaxConcurrentDispatches: 2},
+			RetryConfig: &taskspb.RetryConfig{MaxAttempts: 10, MinBackoff: durationpb.New(30 * time.Second)}},
+	} {
+		if _, err := c.CreateQueue(cc, &taskspb.CreateQueueRequest{Parent: loc, Queue: q}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.PauseQueue(cc, &taskspb.PauseQueueRequest{Name: slow}); err != nil {
+		t.Fatal(err)
+	}
+	for f, want := range map[string]string{
+		"name: slow":            slow,
+		`name = "` + fast + `"`: fast,
+		"rate_limits.max_dispatches_per_second > 10":       fast,
+		"rateLimits.maxConcurrentDispatches <= 2":          slow,
+		"retry_config.max_attempts >= 5 AND state: PAUSED": slow,
+		"retry_config.min_backoff < 10s":                   fast,
+		"retry_config.min_backoff = 30":                    slow,
+		"NOT name: fast":                                   slow,
+		"-state: PAUSED":                                   fast,
+		"(name: nothing OR name: fast) state = RUNNING":    fast,
+		"name: SLOW-LANE":                                  slow,
+		"retry_config.max_attempts: 3":                     fast,
+		"name: queues state: PAUSED":                       slow,
+		"rate_limits.max_burst_size:* name: fast":          fast,
+	} {
+		resp, err := c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: f})
+		if err != nil {
+			t.Fatalf("filter %q: %v", f, err)
+		}
+		if len(resp.GetQueues()) != 1 || resp.GetQueues()[0].GetName() != want {
+			t.Errorf("filter %q listed %v; want %s alone", f, names(resp.GetQueues()), want)
+		}
+	}
+	resp, err := c.ListQueues(cc, &taskspb.ListQueuesRequest{Parent: loc, Filter: "name: q OR name: fast", PageSize: 1})
+	if err != nil || len(resp.GetQueues()) != 1 || resp.GetNextPageToken() == "" {
+		t.Errorf("paged filter = %v, %q, %v; want one queue and a next page", names(resp.GetQueues()), resp.GetNextPageToken(), err)
+	}
+}
+
+func names(qs []*taskspb.Queue) []string {
+	var out []string
+	for _, q := range qs {
+		out = append(out, q.GetName())
+	}
+	return out
 }
 
 // A state filter is honoured, as Google's sample "state: PAUSED" (#1222).

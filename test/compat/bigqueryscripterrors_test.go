@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -60,5 +61,67 @@ func TestBigQueryScriptRuntimeErrorBeforeLast(t *testing.T) {
 	}
 	if got := count(); got != before {
 		t.Errorf("%d rows after the refused script, want %d", got, before)
+	}
+}
+
+// TestBigQueryAssert (#1253): ASSERT expr [AS 'description'] fails the
+// query when expr is FALSE or NULL, with "Assertion failed: " and the
+// description, or the expression's text without one, alone or in a script
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/debugging-statements#assert).
+// Measured first against the pinned emulator: ASSERT FALSE answered done
+// and `ASSERT FALSE; SELECT 1` the row 1. A runtime error in its
+// expression fails it with that error, a statement after a failed ASSERT
+// does not run, what ran before it is kept, and a handler catches it.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert
+func TestBigQueryAssert(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	d := ds.DatasetID
+	if err := bqRun(ctx, c, "CREATE TABLE "+d+".t (n INT64)", false); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	count := func() int64 { return rows(t, ctx, c, "SELECT COUNT(*) FROM "+d+".t")[0][0].(int64) }
+	for _, insert := range []bool{false, true} {
+		for sql, want := range map[string]string{
+			"ASSERT FALSE":                                          "Assertion failed: FALSE",
+			"ASSERT 1 > 2 AS 'one must be greater'":                 "Assertion failed: one must be greater",
+			"ASSERT CAST(NULL AS BOOL) AS 'null fails'":             "Assertion failed: null fails",
+			"ASSERT FALSE; SELECT 1":                                "Assertion failed: FALSE",
+			"ASSERT (SELECT SUM(x) FROM (SELECT 1/0 AS x)) IS NULL": "zero divided",
+			"IF TRUE THEN ASSERT (SELECT COUNT(*) > 10 FROM UNNEST([1, 2, 3])) AS 'Table must contain more than 10 rows.'; END IF": "Assertion failed: Table must contain more than 10 rows.",
+		} {
+			err := bqRun(ctx, c, sql, insert)
+			var be *bigquery.Error
+			if err == nil || !strings.Contains(err.Error(), want) || errors.As(err, &be) && be.Reason == "notImplemented" {
+				t.Errorf("insert=%v: %s: %v, want it failed with %q", insert, sql, err, want)
+			}
+		}
+		for _, sql := range []string{
+			"ASSERT TRUE",
+			"ASSERT EXISTS(SELECT x FROM UNNEST([7877, 7907]) AS x WHERE x = 7907) AS 'Column X must contain the value 7907.'",
+			"DECLARE n INT64 DEFAULT 3; ASSERT n = 3",
+		} {
+			if err := bqRun(ctx, c, sql, insert); err != nil {
+				t.Errorf("insert=%v: %s: %v, want it to succeed", insert, sql, err)
+			}
+		}
+		// What ran before the failed ASSERT is kept; what follows it never runs.
+		before := count()
+		err := bqRun(ctx, c, "INSERT INTO "+d+".t VALUES (1); ASSERT FALSE AS 'stop'; INSERT INTO "+d+".t VALUES (2)", insert)
+		if err == nil || !strings.Contains(err.Error(), "Assertion failed: stop") {
+			t.Errorf("insert=%v: an ASSERT between two INSERTs: %v", insert, err)
+		}
+		if got := count(); got != before+1 {
+			t.Errorf("insert=%v: %d rows after the failed ASSERT, want %d", insert, got, before+1)
+		}
+	}
+	if got := rows(t, ctx, c, "ASSERT TRUE; SELECT 2 AS a"); len(got) != 1 || got[0][0] != int64(2) {
+		t.Errorf("ASSERT TRUE; SELECT 2: %v", got)
+	}
+	if got := rows(t, ctx, c, "BEGIN ASSERT FALSE AS 'caught'; EXCEPTION WHEN ERROR THEN SELECT @@error.message; END"); len(got) != 1 || got[0][0] != "Assertion failed: caught" {
+		t.Errorf("a handler's @@error.message: %v", got)
 	}
 }

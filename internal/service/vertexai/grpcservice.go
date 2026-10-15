@@ -24,8 +24,8 @@ import (
 //
 // The official Go client, cloud.google.com/go/aiplatform's PredictionClient,
 // speaks gRPC only, so it could not reach the JSON routes above. This serves
-// the methods those routes implement — Predict, RawPredict, GenerateContent
-// and EmbedContent (#1244) — on the same port, and every other method answers
+// the methods those routes implement — Predict, RawPredict, GenerateContent,
+// StreamGenerateContent (#1257) and EmbedContent (#1244) — on the same port, and every other method answers
 // UNIMPLEMENTED.
 //
 // Each method converts its request to the JSON the matching route reads and
@@ -189,48 +189,112 @@ func (p *predictionService) RawPredict(ctx context.Context, req *aiplatformpb.Ra
 	return &httpbody.HttpBody{ContentType: a.contentType, Data: a.body}, nil
 }
 
-// GenerateContent serves the same subset the JSON generateContent route does.
-func (p *predictionService) GenerateContent(ctx context.Context, req *aiplatformpb.GenerateContentRequest) (*aiplatformpb.GenerateContentResponse, error) {
+// generateTarget checks a GenerateContent model name and returns the JSON
+// body the generateContent route reads: the proto's JSON mapping, less the
+// model, which the route takes from the path. Every field the client set is
+// kept, so one the subset refuses is refused here too.
+func generateTarget(method string, req *aiplatformpb.GenerateContentRequest) (string, []byte, error) {
 	t, err := parseTarget("model", req.GetModel())
 	if err != nil {
-		return nil, grpcError(err)
+		return "", nil, err
 	}
 	if t.model == "" {
-		return nil, status.Errorf(codes.Unimplemented,
-			"GenerateContent is served only on publisher models (projects/{p}/locations/{l}/publishers/google/models/{m}), not on endpoints")
+		return "", nil, apierror.Unimplemented(
+			"%s is served only on publisher models (projects/{p}/locations/{l}/publishers/google/models/{m}), not on endpoints", method)
 	}
 	if err := t.checkPublisher(); err != nil {
-		return nil, grpcError(err)
+		return "", nil, err
 	}
-	// The request as the JSON route reads it: the proto's JSON mapping, less
-	// the model, which the route takes from the path. Every field the client
-	// set is kept, so one the subset refuses is refused here too.
 	j, err := protojson.Marshal(req)
 	if err != nil {
-		return nil, grpcError(apierror.InvalidArgument("%v", err))
+		return "", nil, apierror.InvalidArgument("%v", err)
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(j, &fields); err != nil {
-		return nil, grpcError(apierror.Internal(err, "re-encoding the request: %v", err))
+		return "", nil, apierror.Internal(err, "re-encoding the request: %v", err)
 	}
 	delete(fields, "model")
 	body, err := json.Marshal(fields)
 	if err != nil {
-		return nil, grpcError(apierror.Internal(err, "re-encoding the request: %v", err))
+		return "", nil, apierror.Internal(err, "re-encoding the request: %v", err)
 	}
-	resp, err := p.s.generateUnary(ctx, t.model, bytes.NewReader(body))
-	if err != nil {
-		return nil, grpcError(err)
-	}
+	return t.model, body, nil
+}
+
+// toProto converts a JSON-route response to its proto.
+func toProto(resp *GenerateContentResponse) (*aiplatformpb.GenerateContentResponse, error) {
 	out, err := json.Marshal(resp)
 	if err != nil {
-		return nil, grpcError(apierror.Internal(err, "encoding the response: %v", err))
+		return nil, apierror.Internal(err, "encoding the response: %v", err)
 	}
 	pb := &aiplatformpb.GenerateContentResponse{}
 	if err := lenient.Unmarshal(out, pb); err != nil {
-		return nil, grpcError(apierror.Internal(err, "the answer does not fit GenerateContentResponse: %v", err))
+		return nil, apierror.Internal(err, "the answer does not fit GenerateContentResponse: %v", err)
 	}
 	return pb, nil
+}
+
+// GenerateContent serves the same subset the JSON generateContent route does.
+func (p *predictionService) GenerateContent(ctx context.Context, req *aiplatformpb.GenerateContentRequest) (*aiplatformpb.GenerateContentResponse, error) {
+	model, body, err := generateTarget("GenerateContent", req)
+	if err != nil {
+		return nil, grpcError(err)
+	}
+	resp, err := p.s.generateUnary(ctx, model, bytes.NewReader(body))
+	if err != nil {
+		return nil, grpcError(err)
+	}
+	pb, err := toProto(resp)
+	return pb, grpcError(err)
+}
+
+// StreamGenerateContent serves the same subset as the JSON
+// :streamGenerateContent route (#1257): one GenerateContentResponse per chunk
+// the runtime decodes, sent as it arrives, with the finish reason on a final
+// message of its own, as the SSE route frames it. A refusal before the first
+// chunk is the unary call's refusal; a failure after one is the stream's
+// final status.
+func (p *predictionService) StreamGenerateContent(req *aiplatformpb.GenerateContentRequest, stream aiplatformpb.PredictionService_StreamGenerateContentServer) error {
+	ctx := stream.Context()
+	model, body, err := generateTarget("StreamGenerateContent", req)
+	if err != nil {
+		return grpcError(err)
+	}
+	actual, chunks, errFn, err := p.s.startGeneration(ctx, model, bytes.NewReader(body))
+	if err != nil {
+		return grpcError(err)
+	}
+	for c := range chunks {
+		var resp *GenerateContentResponse
+		if c.Last {
+			resp = textResponse(actual, "", c.FinishReason)
+		} else {
+			resp = textResponse(actual, c.Text, "")
+		}
+		pb, err := toProto(resp)
+		if err != nil {
+			drain(chunks)
+			return grpcError(err)
+		}
+		if err := stream.Send(pb); err != nil {
+			drain(chunks)
+			return err // the client went away
+		}
+	}
+	if err := generationError(ctx, errFn); err != nil {
+		return grpcError(err)
+	}
+	return grpcError(ctx.Err())
+}
+
+// drain discards the rest of a generation so its goroutine can end. The
+// generators stop on context cancellation, which a failed Send implies, so
+// this only empties what is already in flight.
+func drain(chunks <-chan Chunk) {
+	go func() {
+		for range chunks {
+		}
+	}()
 }
 
 // EmbedContent embeds one content with the local embedding model, as the

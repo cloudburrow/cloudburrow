@@ -70,8 +70,14 @@ func TestUpdateServiceRefusals(t *testing.T) {
 	img := "ghcr.io/knative/helloworld-go@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 	if _, err := s.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: updated(img, "v2"),
-		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"template.containers"}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("update with a mask = %v, want Unimplemented", err)
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"template.nonsense"}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("update with an unknown mask path = %v, want InvalidArgument", err)
+	}
+	for _, path := range []string{"uri", "template.containers.image"} {
+		if _, err := s.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: updated(img, "v2"),
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{path}}}); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("update with mask %q = %v, want InvalidArgument", path, err)
+		}
 	}
 	missing := updated(img, "v2")
 	missing.Name = "projects/demo-project/locations/us-central1/services/absent"
@@ -104,5 +110,39 @@ func TestUpdateServiceRefusals(t *testing.T) {
 	}
 	if len(r.applied) != 1 {
 		t.Errorf("refused updates reached the cluster: %d applies", len(r.applied))
+	}
+}
+
+// A mask names the fields to change; the rest are kept as read back from
+// Knative (#1260).
+func TestUpdateServiceWithAMaskChangesOnlyTheNamedFields(t *testing.T) {
+	r := &applyRunner{scriptedRunner: scriptedRunner{answers: map[string]string{
+		"get ksvc hello": `{"metadata":{"name":"hello","generation":2,"labels":{"cloudburrow.dev/owned":"true"},
+		  "annotations":{"cloudburrow.dev/cloud-run-labels":"{\"team\":\"a\"}"}},
+		  "spec":{"template":{"metadata":{"annotations":{"autoscaling.knative.dev/max-scale":"3"}},
+		    "spec":{"containers":[{"image":"ghcr.io/knative/helloworld-go:v1","command":["/srv"],"args":["--x"],
+		      "resources":{"limits":{"memory":"256Mi"}},
+		      "env":[{"name":"TARGET","value":"v1"}]}]}}},
+		  "status":{"observedGeneration":2,"latestReadyRevisionName":"hello-00001","latestCreatedRevisionName":"hello-00001"}}`,
+	}}}
+	s := NewServer(&Knative{Kube: k8s.NewWith(r, "k", "", "default")}, "inst", time.Second)
+	in := &runpb.Service{Name: svcParent, Labels: map[string]string{"team": "b"},
+		Template: &runpb.RevisionTemplate{Scaling: &runpb.RevisionScaling{MaxInstanceCount: 9}}}
+	if _, err := s.UpdateService(context.Background(), &runpb.UpdateServiceRequest{Service: in,
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"labels"}}}); err != nil {
+		t.Fatalf("UpdateService with mask labels: %v", err)
+	}
+	if len(r.applied) != 1 {
+		t.Fatalf("applied = %d manifests, want 1", len(r.applied))
+	}
+	m := r.applied[0]
+	for _, want := range []string{`\"team\":\"b\"`, "helloworld-go:v1", `"/srv"`, `"--x"`, `memory: "256Mi"`,
+		`value: "v1"`, `max-scale: "3"`} {
+		if !strings.Contains(m, want) {
+			t.Errorf("manifest lacks %s:\n%s", want, m)
+		}
+	}
+	if strings.Contains(m, `max-scale: "9"`) {
+		t.Errorf("template.scaling changed though the mask named only labels:\n%s", m)
 	}
 }

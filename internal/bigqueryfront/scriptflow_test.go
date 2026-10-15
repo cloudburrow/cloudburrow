@@ -178,3 +178,56 @@ func TestScriptLastStatement(t *testing.T) {
 		t.Errorf("a script ending in SET: %q", emu.log)
 	}
 }
+
+// TestScriptAssert (#1253): ASSERT, alone or in a script, fails with
+// "Assertion failed: " and its description, or its expression's text,
+// when the expression is FALSE or NULL; a statement after it is not sent.
+func TestScriptAssert(t *testing.T) {
+	emu := &scriptEmulator{run: func(q string) (int, string) {
+		cell := ""
+		switch {
+		case strings.HasPrefix(q, "SELECT (TRUE"):
+			cell = `{"v":"true"}`
+		case strings.HasPrefix(q, "SELECT (FALSE"):
+			cell = `{"v":"false"}`
+		case strings.HasPrefix(q, "SELECT (NULL"):
+			cell = `{"v":null}`
+		case strings.HasPrefix(q, "SELECT (1)"):
+			return 200, `{"jobComplete":true,"schema":{"fields":[{"name":"f0_","type":"INTEGER"}]},"rows":[{"f":[{"v":"1"}]}]}`
+		default:
+			return 200, `{"jobComplete":true}`
+		}
+		return 200, `{"jobComplete":true,"schema":{"fields":[{"name":"f0_","type":"BOOLEAN"}]},"rows":[{"f":[` + cell + `]}]}`
+	}}
+	for sql, want := range map[string]string{
+		"ASSERT FALSE":                              "Assertion failed: FALSE",
+		"ASSERT FALSE AS 'must hold'":               "Assertion failed: must hold",
+		"ASSERT NULL AS \"is null\";":               "Assertion failed: is null",
+		"ASSERT FALSE; INSERT INTO ds.t VALUES (1)": "Assertion failed: FALSE",
+		"ASSERT TRUE":                               "",
+		"ASSERT TRUE AS 'x'; SELECT 2":              "",
+		"ASSERT 1":                                  "ASSERT expression must be of type BOOL, but is of type INT64",
+		"ASSERT TRUE AS x":                          "ASSERT description must be a STRING literal",
+	} {
+		emu.log = nil
+		code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", sql))
+		if want == "" {
+			if code != 200 {
+				t.Errorf("%q: %d %v, want 200", sql, code, got)
+			}
+			continue
+		}
+		e, _ := got["error"].(map[string]any)
+		if code != 400 || e == nil || e["message"] != want || errorReason(got) != "invalidQuery" {
+			t.Errorf("%q: %d %v, want 400 %q", sql, code, got, want)
+		}
+		for _, q := range emu.log {
+			if strings.Contains(q, "INSERT") {
+				t.Errorf("%q: sent %q after the failed ASSERT", sql, q)
+			}
+		}
+	}
+	if earlierQuery("ASSERT FALSE") != scriptSplits || earlierQuery("CREATE TEMP TABLE t AS SELECT 1 AS a; ASSERT TRUE") != scriptKeepsTemp {
+		t.Errorf("earlierQuery does not carry out ASSERT")
+	}
+}

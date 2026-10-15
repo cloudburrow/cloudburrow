@@ -1,6 +1,7 @@
 package main
 
 import (
+	loggingpb "cloud.google.com/go/logging/apiv2/loggingpb"
 	"context"
 	"errors"
 	"fmt"
@@ -157,6 +158,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// observable while the cluster comes up, then the cluster, then the
 	// components that need it, then the tunnels that need those.
 	forwarders := buildForwarders(cfg)
+	// A database's tunnel is up once its user logs in through it (#1262).
+	for _, s := range []config.Service{config.ServiceCloudSQLMySQL, config.ServiceCloudSQL} {
+		if f := forwarderFor(forwarders, string(s)); f != nil {
+			f.SetHandshake(databaseHandshake(s, mysqlCreds))
+		}
+	}
 	for _, f := range forwarders {
 		// What each tunnel did, in up.log and so in a diagnose bundle (#526).
 		f.Logf = func(format string, args ...any) {
@@ -178,6 +185,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Secret Manager has no upstream emulator either, so it too is served
 	// from this process.
 	secretsSvc := newSecretsService(cfg)
+	if secretsSvc != nil {
+		secretsSvc.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
+	}
 	secretsSvc.register(coord)
 	kmsSvc := newKMSService(cfg)
 	kmsSvc.register(coord)
@@ -186,6 +196,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	schedulerSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)
 	loggingSvc.register(coord)
+	if loggingSvc != nil {
+		// A queue's sampled dispatch attempts go to the instance's Cloud
+		// Logging through its own WriteLogEntries (#1256), so exclusions
+		// apply to them as to any write.
+		api := loggingSvc.api
+		tasksSvc.useLogging(func(ctx context.Context, e *loggingpb.LogEntry) error {
+			_, err := api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Entries: []*loggingpb.LogEntry{e}})
+			return err
+		})
+	}
 	if secretsSvc != nil {
 		runSvc.useSecrets(lazySecretResolver{svc: secretsSvc})
 	}

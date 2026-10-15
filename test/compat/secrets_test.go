@@ -4,11 +4,9 @@ package compat
 
 import (
 	"fmt"
-	"google.golang.org/protobuf/types/known/durationpb"
 	"hash/crc32"
 	"strings"
 	"testing"
-	"time"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
@@ -298,7 +296,9 @@ func TestSecretErrorsUseGoogleCodes(t *testing.T) {
 }
 
 // TestSecretManagerRefusesWhatItWouldDrop: through the official client, a
-// rotation or topics on CreateSecret is UNIMPLEMENTED naming the field,
+// version_aliases on CreateSecret is UNIMPLEMENTED naming the field (topics
+// are served since #1259, TestSecretManagerTopicNotifications, rotation
+// since #1278, TestSecretManagerRotationAndDelayedDestroy),
 // user-managed replication with no replicas is INVALID_ARGUMENT, a stale
 // etag is FAILED_PRECONDITION and the current one succeeds, and an access
 // carries the payload's CRC32C, which Google's samples verify (#580).
@@ -308,10 +308,9 @@ func TestSecretManagerRefusesWhatItWouldDrop(t *testing.T) {
 	ctx := h.Context()
 	auto := &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{Automatic: &secretmanagerpb.Replication_Automatic{}}}
 	for field, sec := range map[string]*secretmanagerpb.Secret{
-		"rotation": {Replication: auto, Rotation: &secretmanagerpb.Rotation{RotationPeriod: durationpb.New(24 * time.Hour)}},
-		"topics":   {Replication: auto, Topics: []*secretmanagerpb.Topic{{Name: "projects/" + h.Project() + "/topics/rotations"}}},
+		"version_aliases": {Replication: auto, VersionAliases: map[string]int64{"current": 1}},
 	} {
-		_, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: "refused-" + field, Secret: sec})
+		_, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: "refused-" + strings.ReplaceAll(field, "_", "-"), Secret: sec})
 		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), field) {
 			t.Errorf("CreateSecret with %s = %v; want Unimplemented naming %s", field, err, field)
 		}

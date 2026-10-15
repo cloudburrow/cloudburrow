@@ -204,6 +204,13 @@ database's name.
 Durability is measured in CI. A row written before `stop` is read back after `up` in persistent
 mode, and is absent after `up --mode ephemeral`.
 
+**Ready means a login** (#1262), for MySQL and PostgreSQL alike. `up` reports ready only once
+the application's user has logged in to its database through the host address `up` prints and
+run `SELECT 1`. An accepted TCP connection is not enough: after `stop` and `up` the tunnel
+once carried a connection that mysqld never answered, and the first query ended in
+`unexpected EOF`. The same login gates every re-establishment of the tunnel. `up` waits up
+to three minutes for it, then fails, naming the driver's error.
+
 **The console screen** (#868) is Cloud SQL's **MySQL** page, at `/cloudsql-mysql`, beside
 **PostgreSQL**. It lists the one server, with its version, and its databases (MySQL's own are
 left out), then a database's tables, views, routines, users, server settings and live activity,
