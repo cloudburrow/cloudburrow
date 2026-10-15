@@ -147,7 +147,7 @@ func (v ddlVerdict) selects() []createStmt {
 //   - CREATE MATERIALIZED VIEW and DROP MATERIALIZED VIEW: 400 "Statement
 //     not supported".
 //   - CREATE VIEW with a column list: 400 "CREATE VIEW with explicit column
-//     list is not supported".
+//     list is not supported"; one alone is carried out before this (#1240).
 //   - (#937) CREATE TABLE ... LIKE, COPY and CLONE: 400 "CREATE TABLE LIKE
 //     is not supported" (COPY, CLONE); CREATE SNAPSHOT TABLE and DROP
 //     SNAPSHOT TABLE: 400 "Statement not supported".
@@ -218,7 +218,9 @@ func checkDDL(sql string) ddlVerdict {
 					// TABLE LIKE, TABLE COPY, TABLE CLONE (#937).
 					unsupported = "CREATE " + kind
 				case kind == "VIEW" && c.columnList && unsupported == "":
-					unsupported = "CREATE VIEW with a column list"
+					// A lone one is carried out before this (#1240,
+					// viewcolumns.go).
+					unsupported = "CREATE VIEW with a column list in a multi-statement script"
 				case kind == "TABLE" || kind == "VIEW":
 					c.text, c.pos = sql[body[0].pos:body[len(body)-1].end], body[0].pos
 					base := body[0].pos
@@ -289,6 +291,8 @@ func checkDDL(sql string) ddlVerdict {
 	case unsupported != "":
 		hint := "A view without a column list (CREATE VIEW ... AS SELECT a AS name) is supported."
 		switch unsupported {
+		case "CREATE VIEW with a column list in a multi-statement script":
+			hint = "A query that is one CREATE VIEW with a column list is carried out (#1240)."
 		case "CREATE TABLE LIKE":
 			hint = "CREATE TABLE ... AS SELECT * FROM the source LIMIT 0 makes a table with its columns (not its options)."
 		case "CREATE TABLE COPY", "CREATE TABLE CLONE", "CREATE SNAPSHOT TABLE", "DROP SNAPSHOT TABLE":

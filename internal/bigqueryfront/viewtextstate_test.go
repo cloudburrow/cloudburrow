@@ -9,7 +9,7 @@ func TestViewTextsOutliveAFrontRestart(t *testing.T) {
 	path := viewTextsStateFile(t.TempDir())
 	a := &viewTexts{}
 	a.keep(path, t.Logf)
-	want := viewText{engine: "SELECT `id#1` AS `id` FROM x", client: "SELECT id FROM p1.t WHERE id > 0"}
+	want := viewText{engine: "SELECT `id#1` AS `id` FROM x", client: "SELECT id FROM p1.t WHERE id > 0", explicit: true}
 	key := viewKey("p", "d", "v")
 	a.add(key, want)
 	b := &viewTexts{}

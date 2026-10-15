@@ -33,6 +33,9 @@ import (
 // (viewtextstate.go, #1028).
 type viewText struct {
 	engine, client string
+	// explicit is whether the view was made with a column list (#1240,
+	// viewcolumns.go): tables.get then answers useExplicitColumnNames.
+	explicit bool
 }
 
 type viewTexts struct {
@@ -163,6 +166,9 @@ func (f front) getTable(w http.ResponseWriter, r *http.Request, dataset, table s
 	}
 	if view, _ := meta["view"].(map[string]any); ok && view != nil && view["query"] == t.engine {
 		view["query"] = t.client
+		if t.explicit {
+			view["useExplicitColumnNames"] = true
+		}
 		writeRecorded(w, rec, meta)
 		return
 	}

@@ -106,8 +106,9 @@ func rows(t *testing.T, ctx context.Context, c *bigquery.Client, sql string) [][
 // `x!`, and failed a CREATE OR REPLACE VIEW of an existing view, 400,
 // leaving it unreadable. A view with names BigQuery takes is made and
 // read, and CREATE OR REPLACE VIEW replaces an existing one. CREATE
-// MATERIALIZED VIEW and a view's column list, which the emulator does not
-// support (400 "not supported", measured), are 501.
+// MATERIALIZED VIEW and a view's column list in a multi-statement script
+// (a lone one is carried out, #1240), which the emulator does not support
+// (400 "not supported", measured), are 501.
 func TestBigQueryViewNamesAndColumns(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -129,7 +130,7 @@ func TestBigQueryViewNamesAndColumns(t *testing.T) {
 			}
 		}
 		for _, sql := range []string{
-			"CREATE VIEW " + path("listed") + " (c, d) AS SELECT a, b FROM " + path("base"),
+			"SELECT 1; CREATE VIEW " + path("listed") + " (c, d) AS SELECT a, b FROM " + path("base"),
 			"CREATE MATERIALIZED VIEW " + path("mv") + " AS SELECT a FROM " + path("base"),
 		} {
 			wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusNotImplemented, "notImplemented")

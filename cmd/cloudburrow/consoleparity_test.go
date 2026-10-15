@@ -439,7 +439,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleBigQueryEditTableViewsAndInsertOptions", "TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms"}},
 	{Resource: "BigQuery queries", Service: "bigquery",
 		Methods:  []string{"bigquery.jobs.query", "bigquery.jobs.getQueryResults"},
-		Provider: "bigquery", Offers: "The query editor on every dataset and table page, run with jobs.query: read-only by default, one SELECT or WITH … SELECT, at most 200 rows (#698); an opt-in, confirmed Read-write mode for DDL and scripts with DECLARE (#994), and a DML statement of its own (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE) answered with the rows it changed (#1024); DML inside a script (#1028) and UPDATE … FROM (#1027) refused with the reason",
+		Provider: "bigquery", Offers: "The query editor on every dataset and table page, run with jobs.query: read-only by default, one SELECT or WITH … SELECT, at most 200 rows (#698); an opt-in, confirmed Read-write mode for DDL (a view's column list too, #1240) and scripts with DECLARE (#994), and a DML statement of its own (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE) answered with the rows it changed (#1024); DML inside a script (#1028) and UPDATE … FROM (#1027) refused with the reason",
 		Tests: []string{"TestConsoleBigQueryDatasetsSchemaAndQuery", "TestTheBigQueryEditorRunsOnlyOneSelect",
 			"TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts", "TestConsoleBigQueryReadWriteEditorRunsDML",
 			"TestTheBigQueryReadWriteEditorScreensStatements", "TestBigQueryDMLAnswerSaysWhatChanged",
