@@ -439,6 +439,7 @@
         "method": "google.cloud.run.v2.Jobs/CreateJob",
         "status": "Verified",
         "tests": [
+          "test/compat/runcloudsql_test.go:121 TestRunJobCloudSQLVolume",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
           "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
@@ -479,6 +480,7 @@
         "method": "google.cloud.run.v2.Jobs/RunJob",
         "status": "Verified",
         "tests": [
+          "test/compat/runcloudsql_test.go:121 TestRunJobCloudSQLVolume",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
           "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
@@ -548,8 +550,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
+          "test/compat/runcloudsql_test.go:59 TestRunServiceCloudSQLVolume",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
-          "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount"
+          "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount"
         ]
       },
       {
@@ -572,9 +575,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
+          "test/compat/runcloudsql_test.go:59 TestRunServiceCloudSQLVolume",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
-          "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount"
+          "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount"
         ]
       },
       {
@@ -870,8 +874,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
-          "test/compat/runvolumes_test.go:165 TestRunV1VolumesProbesAndServiceAccount",
-          "test/compat/runvolumes_test.go:210 TestGcloudRunDeployImage"
+          "test/compat/runvolumes_test.go:167 TestRunV1VolumesProbesAndServiceAccount",
+          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
         ]
       },
       {
@@ -879,7 +883,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
-          "test/compat/runvolumes_test.go:210 TestGcloudRunDeployImage"
+          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
         ]
       },
       {
@@ -887,8 +891,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
-          "test/compat/runvolumes_test.go:165 TestRunV1VolumesProbesAndServiceAccount",
-          "test/compat/runvolumes_test.go:210 TestGcloudRunDeployImage"
+          "test/compat/runvolumes_test.go:167 TestRunV1VolumesProbesAndServiceAccount",
+          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
         ]
       },
       {
@@ -903,7 +907,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
-          "test/compat/runvolumes_test.go:210 TestGcloudRunDeployImage"
+          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
         ]
       },
       {

@@ -185,6 +185,12 @@ spec:
 	b.WriteString("    spec:\n")
 	o := containerRender{project: projectOf(w.name), secrets: s.secrets, batch: true,
 		injected: s.injectedFor(projectOf(w.name)), volumes: p.volumes}
+	if len(cloudSQLVolumes(p.volumes)) > 0 {
+		// A service's and a job's are served (#1346); no proxy is rendered
+		// beside a worker pool's or an instance's containers yet.
+		return "", apierror.Unimplemented("unsupported Cloud Run configuration: volumes.cloudSqlInstance: "+
+			"Cloud SQL volumes are served on services and jobs, not on %ss", w.kind)
+	}
 	if err := renderVolumes(&b, p.volumes, o); err != nil {
 		return "", err
 	}
