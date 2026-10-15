@@ -141,16 +141,18 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceRun] {
 		// Two screens of one product: services, and jobs with their
 		// executions (#785).
-		var storageAddr string
-		if enabled[config.ServiceStorage] && d.cfg.Endpoints.Storage != 0 {
-			storageAddr = storageSourceFetcher{cfg: d.cfg}.base()
+		// The storage tunnel's bound address, not the configured port, which
+		// is 0 when the OS assigns it (--port-storage 0).
+		var runStorage string
+		if enabled[config.ServiceStorage] && storageAddr != "" {
+			runStorage = hostURL(storageAddr)
 		}
 		providers = append(providers, runProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
-			storageAddr:    storageAddr,
+			storageAddr:    runStorage,
 		}, runJobsProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,
