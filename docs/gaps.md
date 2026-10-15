@@ -225,7 +225,7 @@ Closed by this sweep: Test permissions on the Permissions tab (#1242).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Request metrics, the request log and traces for Spanner (raw tunnel, no front; still "not measured"), and for Firestore's and Datastore's calls from pods, which bypass the host tunnel's guard (#1288; Pub/Sub, Bigtable and the host's Firestore and Datastore calls since #1266, #1267) | not built yet | M |
+| Request metrics, the request log and traces for persistent Datastore's calls from pods: its pod runs no call front yet, since with it an entity written shortly before a pod restart was lost (#1307; Spanner, Firestore and ephemeral Datastore since #1288) | not built yet | S |
 | Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |
 

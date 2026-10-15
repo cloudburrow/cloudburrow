@@ -18,6 +18,8 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/callfront"
+	"github.com/cloudburrow/cloudburrow/internal/calllog"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
@@ -151,6 +153,59 @@ func TestPubSubCallsAfterAFrontRestart(t *testing.T) {
 	if v, ok := counter(parseMetrics(t, b.String()), "cloudburrow_requests_total",
 		map[string]string{"service": "pubsub", "method": "CreateTopic", "code": "OK"}); !ok || v != 1 {
 		t.Errorf("CreateTopic after a restart = %v (found %v), want 1", v, ok)
+	}
+}
+
+// A call front's calls (#1288): the official Pub/Sub client's, through the
+// front Spanner, Firestore and Datastore run (internal/callfront) before an
+// in-memory Pub/Sub, are counted and recorded under the front's service by
+// canonical code, with the project their routing headers name, once the
+// scraper reads the front's call log.
+func TestCallFrontCallsAreMeasured(t *testing.T) {
+	fake := pstest.NewServer()
+	t.Cleanup(func() { _ = fake.Close() })
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := callfront.Server(callfront.Handler(fake.Addr, &calllog.Ring{}, t.Logf), t.Logf)
+	go func() { _ = srv.Serve(l) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	client, err := pubsub.NewClient(context.Background(), "fs", option.WithEndpoint(l.Addr().String()),
+		option.WithoutAuthentication(), option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	rec := admin.NewRecorder(100, time.Now)
+	reg := metrics.New("firestore", "spanner")
+	s := newFrontCallScraper("firestore", nil, rec, reg, nil)
+	s.addr = func() string { return l.Addr().String() }
+	if got := reg.Unmeasured(); len(got) != 1 || got[0] != "spanner" {
+		t.Fatalf("unmeasured = %v, want spanner alone", got)
+	}
+	ctx := context.Background()
+	if _, err := client.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: "projects/fs/topics/absent"}); err == nil {
+		t.Fatal("GetTopic of an absent topic succeeded")
+	}
+	if _, err := client.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: "projects/fs/topics/t"}); err != nil {
+		t.Fatal(err)
+	}
+	s.scrape(ctx)
+	var b strings.Builder
+	_ = reg.Write(&b)
+	fams := parseMetrics(t, b.String())
+	for _, want := range []map[string]string{
+		{"service": "firestore", "method": "GetTopic", "code": "NOT_FOUND"},
+		{"service": "firestore", "method": "CreateTopic", "code": "OK"},
+	} {
+		if v, ok := counter(fams, "cloudburrow_requests_total", want); !ok || v != 1 {
+			t.Errorf("%v = %v (found %v), want 1", want, v, ok)
+		}
+	}
+	if events := rec.Events("firestore", 10); len(events) != 2 {
+		t.Fatalf("events = %+v, want 2", events)
 	}
 }
 

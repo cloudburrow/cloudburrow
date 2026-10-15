@@ -26,6 +26,13 @@ const (
 	// which the official clients do not use.
 	SpannerPort = 9010
 
+	// The emulators' own ports behind their call fronts
+	// (internal/callfront, #1288), on their pods' loopback alone: the
+	// fronts serve FirestorePort, DatastorePort and SpannerPort.
+	FirestoreEmulatorPort = 8090
+	DatastoreEmulatorPort = 8091
+	SpannerEmulatorPort   = 9011
+
 	// CloudSQLImage is PostgreSQL 17.11, pinned by digest.
 	//
 	// Not a Google-published component, and the only backend here that is
@@ -139,13 +146,30 @@ func OptionalPort(s config.Service) int {
 	}
 }
 
+// callFront is the call front (internal/callfront, #1288) serving port for
+// the emulator on upstream on the pod's loopback: it passes every call
+// through unread and keeps its method, outcome and duration for the CLI's
+// request metrics, request log and traces, so a pod's calls are seen as
+// the host's are. Its image is the storage image, which
+// LifecycleComponent.Backends sets.
+func callFront(port, upstream int) *Front {
+	return &Front{
+		Name:       "front",
+		PullPolicy: "Never",
+		Args: []string{"call-front", "--listen", fmt.Sprintf("0.0.0.0:%d", port),
+			"--upstream", fmt.Sprintf("127.0.0.1:%d", upstream)},
+		UpstreamPort: upstream,
+	}
+}
+
 func firestoreBackend(project string) Backend {
 	return Backend{
 		Name:  "firestore",
 		Image: PubSubImage, // the same digest-pinned Cloud SDK emulators image
 		Port:  FirestorePort,
 		Command: []string{"gcloud", "beta", "emulators", "firestore", "start",
-			fmt.Sprintf("--host-port=0.0.0.0:%d", FirestorePort)},
+			fmt.Sprintf("--host-port=127.0.0.1:%d", FirestoreEmulatorPort)},
+		Front: callFront(FirestorePort, FirestoreEmulatorPort),
 	}
 }
 
@@ -162,6 +186,13 @@ func firestoreBackend(project string) Backend {
 // Ephemeral mode keeps the gcloud wrapper with --no-store-on-disk, because
 // writing to a directory nothing preserves only slows startup.
 //
+// Ephemeral mode runs the call front (#1288) before the emulator, so a
+// pod's calls are measured. Persistent mode does not yet: with the front in
+// the pod, an entity written shortly before the pod was deleted was missing
+// from the next pod in two of three restarts (TestDatastoreSurvivesAPodRestart,
+// measured; it passes without the front), so its calls are measured from the
+// host alone, by the tunnel's guard (#1267), until that is understood (#1307).
+//
 // Both modes run as Firestore in Datastore mode (#371), which is what a
 // Datastore database in Google Cloud is today, and which is strongly
 // consistent. Without it the emulator defaults to --consistency=0.9: about
@@ -170,9 +201,10 @@ func firestoreBackend(project string) Backend {
 func datastoreBackend(project string, persistent bool) Backend {
 	b := Backend{Name: "datastore", Image: PubSubImage, Port: DatastorePort}
 	if !persistent {
+		b.Front = callFront(DatastorePort, DatastoreEmulatorPort)
 		b.Command = []string{"gcloud", "beta", "emulators", "datastore", "start",
 			"--project=" + project,
-			fmt.Sprintf("--host-port=0.0.0.0:%d", DatastorePort),
+			fmt.Sprintf("--host-port=127.0.0.1:%d", DatastoreEmulatorPort),
 			"--no-store-on-disk", "--use-firestore-in-datastore-mode"}
 		return b
 	}
@@ -226,11 +258,17 @@ func bigtableBackend(project string) Backend {
 	}
 }
 
+// spannerBackend runs the image's gateway on the pod's loopback, its gRPC
+// port behind the call front (#1288); the REST port, which the official
+// clients do not use, stays unpublished.
 func spannerBackend() Backend {
 	return Backend{
 		Name:  "spanner",
 		Image: SpannerImage,
 		Port:  SpannerPort,
+		Command: []string{"./gateway_main", "--hostname", "127.0.0.1",
+			"--grpc_port", fmt.Sprint(SpannerEmulatorPort), "--http_port", "9020"},
+		Front: callFront(SpannerPort, SpannerEmulatorPort),
 	}
 }
 

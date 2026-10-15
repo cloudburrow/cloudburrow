@@ -142,6 +142,26 @@ func (l *gatedLog) stop() {
 // whatever name it dialed, which a check could only break. Everything else,
 // HTTP/1.1 and any other h2c request, is checked.
 func guardHandler(upstream string, logf func(string, ...any)) http.Handler {
+	proxy := PassThrough(upstream, logf)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isGRPC(r) {
+			proxy.ServeHTTP(w, r)
+			return
+		}
+		if !hostguard.Allowed(r.Host) {
+			hostguard.Refuse(w, r)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	})
+}
+
+// PassThrough proxies every request to upstream in the protocol it arrived
+// in, HTTP/1.1 or h2c, gRPC streams and trailers included, with no Host
+// check: the guard's proxy (guardHandler) without the guard, for the call
+// front an emulator's pod runs (internal/callfront, #1288), which pods
+// reach by the Service's name.
+func PassThrough(upstream string, logf func(string, ...any)) http.Handler {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -198,18 +218,7 @@ func guardHandler(upstream string, logf func(string, ...any)) http.Handler {
 		},
 		ErrorLog: log.New(logWriter(logf), "", 0),
 	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isGRPC(r) {
-			proxy.ServeHTTP(w, r)
-			return
-		}
-		if !hostguard.Allowed(r.Host) {
-			hostguard.Refuse(w, r)
-			return
-		}
-		proxy.ServeHTTP(w, r)
-	})
+	return proxy
 }
 
 // h2cUpgrade reports whether r is an HTTP/1.1 request asking to switch to

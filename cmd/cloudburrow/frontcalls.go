@@ -79,8 +79,8 @@ func newFrontCalls(rec *admin.Recorder, reg *metrics.Registry, tracing *telemetr
 	return f
 }
 
-// tunnelCalls records each request a guarded tunnel carried (#1267):
-// Firestore's and Datastore's calls from the host.
+// tunnelCalls records each request a guarded tunnel carried (#1267): the
+// host's calls to persistent Datastore, which runs no call front yet (#1307).
 func tunnelCalls(rec *admin.Recorder, reg *metrics.Registry, tracing *telemetry.Tracing, service string) func(netfwd.Call) {
 	f := newFrontCalls(rec, reg, tracing, service)
 	return func(c netfwd.Call) {

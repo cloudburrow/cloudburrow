@@ -274,7 +274,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		_ = tracing.Shutdown(sctx)
 	}()
 	if tracing.Enabled() {
-		fmt.Fprintln(stderr, "tracing: exporting spans for tasks, run, secretmanager, kms, scheduler, logging, resourcemanager, pubsub, bigtable, firestore and datastore to the configured OTLP endpoint")
+		fmt.Fprintln(stderr, "tracing: exporting spans for tasks, run, secretmanager, kms, scheduler, logging, resourcemanager, pubsub, bigtable, spanner, firestore and datastore to the configured OTLP endpoint")
 	}
 	if tasksSvc != nil {
 		tasksSvc.tracing = tracing
@@ -355,17 +355,22 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		coord.Register(newStorageEventScraper(f, recorder, requestMetrics))
 		coord.Register(newStorageChannelRelay(f, stdout))
 	}
-	for _, svc := range []config.Service{config.ServicePubSub, config.ServiceBigtable} {
-		// Every call the Pub/Sub (#1266) and Bigtable (#1267) fronts served.
-		if f := forwarderFor(forwarders, string(svc)); f != nil {
-			coord.Register(newFrontCallScraper(string(svc), f, recorder, requestMetrics, tracing))
+	for _, svc := range []config.Service{config.ServicePubSub, config.ServiceBigtable,
+		config.ServiceSpanner, config.ServiceFirestore, config.ServiceDatastore} {
+		f := forwarderFor(forwarders, string(svc))
+		if f == nil {
+			continue
 		}
-	}
-	for _, svc := range []config.Service{config.ServiceFirestore, config.ServiceDatastore} {
-		// The host's calls, which pass through the tunnel's guard (#1267).
-		if f := forwarderFor(forwarders, string(svc)); f != nil {
+		if svc == config.ServiceDatastore && cfg.Mode == config.ModePersistent {
+			// Persistent Datastore runs no call front yet (#1307): the
+			// host's calls, which pass through the tunnel's guard (#1267).
 			f.Observe = tunnelCalls(recorder, requestMetrics, tracing, string(svc))
+			continue
 		}
+		// Every call the Pub/Sub (#1266) and Bigtable (#1267) fronts and
+		// the Spanner, Firestore and Datastore call fronts (#1288) served,
+		// the host's and a pod's alike.
+		coord.Register(newFrontCallScraper(string(svc), f, recorder, requestMetrics, tracing))
 	}
 
 	// The project registry, opened before the console because the console

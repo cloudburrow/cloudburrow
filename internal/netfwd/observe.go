@@ -36,6 +36,13 @@ type Call struct {
 // once it is answered. An h2c upgrade is not a call: the connection is then
 // the client's and the emulator's, and what crosses it is not seen.
 func observeGuard(next http.Handler, observe func(Call)) http.Handler {
+	return Observed(next, observe)
+}
+
+// Observed wraps next so observe is told about each request once it is
+// answered, as a guarded tunnel's are (#1267); the call front in an
+// emulator's pod uses it (internal/callfront, #1288).
+func Observed(next http.Handler, observe func(Call)) http.Handler {
 	if observe == nil {
 		return next
 	}
