@@ -222,10 +222,17 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 			console.Action{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(false)},
 			console.Action{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
 			console.Action{ID: actCopyTable, Label: "Copy table", Fields: bigqueryCopyFields()},
+			console.Action{ID: actCreateRowPolicy, Label: "Create row access policy", Fields: rowPolicyFields(p.project)}, // #1218
+			console.Action{ID: actDeleteAllRowPolicies, Label: "Delete all row access policies", Destructive: true,
+				Confirm: "Every row access policy of the table is deleted, and every query reads all of its rows again."},
 			deleteTable)
 	case 3:
 		if isRoutinePath(path) {
 			return []console.Action{deleteRoutineAction()}
+		}
+	case 4:
+		if isRowPolicyPath(path) { // a policy's row on its table's page (#1218)
+			return []console.Action{deleteRowPolicyAction()}
 		}
 	}
 	return nil
@@ -353,6 +360,12 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 		return err
 	case action == "edittable" && len(path) == 2:
 		return p.editTable(ctx, path[0], path[1], values)
+	case action == actCreateRowPolicy && len(path) == 2: // #1218, consolebigquerypolicies.go
+		return p.createRowPolicy(ctx, path[0], path[1], values)
+	case action == actDeleteAllRowPolicies && len(path) == 2:
+		return p.deleteAllRowPolicies(ctx, path[0], path[1])
+	case action == actDeleteRowPolicy && isRowPolicyPath(path):
+		return p.deleteRowPolicy(ctx, path[0], path[1], path[3])
 	case action == actDeleteRoutine && isRoutinePath(path):
 		return p.deleteRoutine(ctx, path[0], path[2])
 	case action == "deletetable" && len(path) == 2:

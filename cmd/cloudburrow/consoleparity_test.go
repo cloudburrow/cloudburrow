@@ -434,6 +434,10 @@ var parityRows = []parityRow{
 		Methods:  []string{"bigquery.routines.insert", "bigquery.routines.list", "bigquery.routines.get", "bigquery.routines.delete"},
 		Provider: "bigquery", Offers: "Routines on a dataset's page (routines.list: each routine's type, language and arguments), a routine's page at [dataset, routines, routine] (routines.get: body, arguments, return type or table, details) and Delete routine on the page and the row (routines.delete, #782, #1177); routines are made in the query editor's Read-write mode (CREATE FUNCTION, CREATE TABLE FUNCTION)",
 		Tests: []string{"TestConsoleBigQueryRoutines", "TestBigQueryRoutinesSectionAndPage", "TestBigQueryRoutinesThroughThePage"}},
+	{Resource: "BigQuery row access policies", Service: "bigquery",
+		Methods:  []string{"bigquery.rowAccessPolicies.list", "bigquery.rowAccessPolicies.get", "bigquery.rowAccessPolicies.insert", "bigquery.rowAccessPolicies.update", "bigquery.rowAccessPolicies.delete", "bigquery.rowAccessPolicies.batchDelete"},
+		Provider: "bigquery", Offers: "Row access policies tab on a table's page (rowAccessPolicies.list: each policy's filter and grantees, and whom CloudBurrow takes the caller to be); Create row access policy (rowAccessPolicies.insert, or rowAccessPolicies.update with Replace an existing policy), Delete policy on each row (rowAccessPolicies.delete) and Delete all row access policies (rowAccessPolicies.batchDelete); rowAccessPolicies.get reads one back (#1218). A table's and a routine's Permissions tab show the API's 501 for their IAM methods, which ADR-0006 does not store",
+		Tests: []string{"TestConsoleBigQueryRowAccessPolicies", "TestBigQueryRowAccessPoliciesTab"}},
 	// The Storage Read and Write APIs (gRPC, google.cloud.bigquery.storage.v1)
 	// have no coverage page; this row writes the exclusion down (#782).
 	{Resource: "BigQuery models", Service: "bigquery",
