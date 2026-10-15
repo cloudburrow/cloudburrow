@@ -46,7 +46,6 @@ Already tracked: none open. ACLs and object IAM are excluded (below).
 | `objects.bulkRestore`: restoring soft-deleted objects in bulk (a long-running bucket operation) is 501 | not built yet | M |
 | `buckets.operations.list` with a `filter` is 501 | not built yet | S |
 | `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) | not built yet | M |
-| XML API: bucket `PUT`, service `GET` and form `POST` are 501 | not built yet | M |
 | gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |
