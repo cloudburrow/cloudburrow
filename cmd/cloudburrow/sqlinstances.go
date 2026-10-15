@@ -135,6 +135,7 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 // a replica that has a source already is left as it is.
 const mysqlReplicaSetup = `set -e
 export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"
+` + mysqlAwaitSocket + `
 if [ -n "$(mysql -uroot -N -e 'SHOW REPLICA STATUS')" ]; then exit 0; fi
 src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" -h "$CLOUDSQL_PRIMARY_HOST" -u ` + components.SQLReplicaUser + `; }
 dbs=$(src mysql -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
