@@ -61,7 +61,7 @@ const runJobNameImmutable = "A job name cannot be changed after it is created."
 // something the adapter refuses or does not serve (docs/coverage/run.md), so
 // a control for it could only fail.
 const runJobNotOffered = "Not offered, because the Cloud Run adapter refuses or does not serve them: " +
-	"permissions (the Jobs IAM methods return UNIMPLEMENTED), service accounts, VPC access, " +
+	"service accounts, VPC access, " +
 	"volumes, binary authorization, and triggers."
 
 // runTasksNotOffered is the execution page's account of its task list.

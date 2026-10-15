@@ -46,7 +46,16 @@ type Project struct {
 	CreateTime  string `json:"createTime"`
 	// Labels are stored and returned unchanged. Nothing interprets them.
 	Labels map[string]string `json:"labels,omitempty"`
+	// DeleteTime is when a DELETE_REQUESTED project was deleted (RFC 3339).
+	// It is purged RetentionPeriod later, until when UndeleteProject
+	// restores it (#1216).
+	DeleteTime string `json:"deleteTime,omitempty"`
 }
+
+// RetentionPeriod is how long a deleted project is kept in DELETE_REQUESTED
+// before it is purged: Google's 30 days ("Shutting down (deleting)
+// projects", cloud.google.com/resource-manager/docs/creating-managing-projects).
+const RetentionPeriod = 30 * 24 * time.Hour
 
 // projectIDPattern is Google's rule for a project identifier: 6 to 30
 // characters, lowercase letters, digits and hyphens, starting with a letter
@@ -78,10 +87,12 @@ const keyPrefix = "resourcemanager/projects/"
 type Registry struct {
 	mu sync.Mutex
 	st store.Store
+	// now is the clock deletion and purging read; a test sets it.
+	now func() time.Time
 }
 
 // New returns a registry backed by st.
-func New(st store.Store) *Registry { return &Registry{st: st} }
+func New(st store.Store) *Registry { return &Registry{st: st, now: time.Now} }
 
 // Backing is the store the registry keeps its records in, for state
 // snapshots, which capture it record for record (#289).
@@ -120,7 +131,11 @@ func (r *Registry) register(p Project) (Project, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, err := r.st.Get(key(p.ProjectID)); err == nil {
+	if old, err := r.load(p.ProjectID); err == nil {
+		if old.State == StateDeleteRequested {
+			return Project{}, apierror.AlreadyExists(
+				"project %q already exists and is pending deletion; UndeleteProject restores it", p.ProjectID)
+		}
 		return Project{}, apierror.AlreadyExists("project %q already exists", p.ProjectID)
 	}
 
@@ -130,8 +145,9 @@ func (r *Registry) register(p Project) (Project, error) {
 		p.DisplayName = p.ProjectID
 	}
 	if p.CreateTime == "" {
-		p.CreateTime = time.Now().UTC().Format(time.RFC3339)
+		p.CreateTime = r.now().UTC().Format(time.RFC3339)
 	}
+	p.DeleteTime = ""
 
 	b, err := json.Marshal(p)
 	if err != nil {
@@ -156,13 +172,12 @@ func (r *Registry) Update(id, displayName string, labels map[string]string) (Pro
 	// Read under the same lock as the write. Reading through Get would drop the
 	// lock between the two, so two concurrent updates could each write a project
 	// built from the state before the other.
-	b, err := r.st.Get(key(id))
+	p, err := r.load(id)
 	if err != nil {
-		return Project{}, apierror.NotFound("project %q not found", id)
+		return Project{}, err
 	}
-	var p Project
-	if err := json.Unmarshal(b, &p); err != nil {
-		return Project{}, apierror.Internal(err, "decode project %q", id)
+	if p.State == StateDeleteRequested {
+		return Project{}, apierror.FailedPrecondition("project %q is pending deletion; undelete it before updating it", id)
 	}
 
 	if name := strings.TrimSpace(displayName); name != "" {
@@ -178,12 +193,37 @@ func (r *Registry) Update(id, displayName string, labels map[string]string) (Pro
 		p.Labels = labels
 	}
 
+	return p, r.put(p)
+}
+
+// put stores a project record.
+func (r *Registry) put(p Project) error {
 	encoded, err := json.Marshal(p)
 	if err != nil {
-		return Project{}, apierror.Internal(err, "encode project")
+		return apierror.Internal(err, "encode project")
 	}
-	if err := r.st.Put(key(id), encoded); err != nil {
-		return Project{}, apierror.Internal(err, "store project")
+	if err := r.st.Put(key(p.ProjectID), encoded); err != nil {
+		return apierror.Internal(err, "store project")
+	}
+	return nil
+}
+
+// load reads a project record, purging it when it has been pending deletion
+// for longer than RetentionPeriod. The caller holds r.mu, or reads only.
+func (r *Registry) load(id string) (Project, error) {
+	b, err := r.st.Get(key(id))
+	if err != nil {
+		return Project{}, apierror.NotFound("project %q not found", id)
+	}
+	var p Project
+	if err := json.Unmarshal(b, &p); err != nil {
+		return Project{}, apierror.Internal(err, "decode project %q", id)
+	}
+	if p.State == StateDeleteRequested {
+		if t, err := time.Parse(time.RFC3339, p.DeleteTime); err == nil && !r.now().Before(t.Add(RetentionPeriod)) {
+			_ = r.st.Delete(key(id))
+			return Project{}, apierror.NotFound("project %q not found", id)
+		}
 	}
 	return p, nil
 }
@@ -208,19 +248,17 @@ func (r *Registry) EnsureExists(id string) (Project, error) {
 }
 
 // Get returns one project.
+//
+// A project pending deletion is returned, in DELETE_REQUESTED, as Google's
+// GetProject returns it; one past RetentionPeriod is purged and not found.
 func (r *Registry) Get(id string) (Project, error) {
-	b, err := r.st.Get(key(id))
-	if err != nil {
-		return Project{}, apierror.NotFound("project %q not found", id)
-	}
-	var p Project
-	if err := json.Unmarshal(b, &p); err != nil {
-		return Project{}, apierror.Internal(err, "decode project %q", id)
-	}
-	return p, nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.load(id)
 }
 
-// List returns every project, ordered by identifier.
+// List returns every project, ordered by identifier, those pending deletion
+// included. Active lists the others.
 func (r *Registry) List() ([]Project, error) {
 	keys, err := r.st.List(keyPrefix)
 	if err != nil {
@@ -239,22 +277,58 @@ func (r *Registry) List() ([]Project, error) {
 	return out, nil
 }
 
-// Delete removes a project from the registry.
+// Active returns the projects that are not pending deletion.
+func (r *Registry) Active() ([]Project, error) {
+	all, err := r.List()
+	if err != nil {
+		return nil, err
+	}
+	out := all[:0]
+	for _, p := range all {
+		if p.State != StateDeleteRequested {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// Delete marks a project DELETE_REQUESTED, as Google's DeleteProject does
+// (#1216). It is kept for RetentionPeriod, during which Undelete restores it
+// and its ID cannot be used again, and is then purged.
 //
-// It deletes the registration and nothing else. Resources created under the
-// identifier live in the services that own them, and removing a row here does
-// not reach into those — which is stated rather than implied, because a delete
+// It changes the registration and nothing else. Resources created under the
+// identifier live in the services that own them, and a delete here does not
+// reach into those, which is stated rather than implied, because a delete
 // that silently left data behind would be the worse surprise.
-func (r *Registry) Delete(id string) error {
+func (r *Registry) Delete(id string) (Project, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, err := r.st.Get(key(id)); err != nil {
-		return apierror.NotFound("project %q not found", id)
+	p, err := r.load(id)
+	if err != nil {
+		return Project{}, err
 	}
-	if err := r.st.Delete(key(id)); err != nil {
-		return apierror.Internal(err, "delete project %q", id)
+	if p.State == StateDeleteRequested {
+		return Project{}, apierror.FailedPrecondition("project %q is already pending deletion", id)
 	}
-	return nil
+	p.State = StateDeleteRequested
+	p.DeleteTime = r.now().UTC().Format(time.RFC3339)
+	return p, r.put(p)
+}
+
+// Undelete restores a project pending deletion to ACTIVE.
+func (r *Registry) Undelete(id string) (Project, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, err := r.load(id)
+	if err != nil {
+		return Project{}, err
+	}
+	if p.State != StateDeleteRequested {
+		return Project{}, apierror.FailedPrecondition("project %q is not pending deletion; only a DELETE_REQUESTED project can be undeleted", id)
+	}
+	p.State = StateActive
+	p.DeleteTime = ""
+	return p, r.put(p)
 }
 
 // ErrNotImplemented names a Resource Manager capability this does not provide.

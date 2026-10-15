@@ -10,9 +10,9 @@ Do not edit these files by hand.
 |---|---|---|---|---|---|---|---|---|
 | [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 1 |
-| [Cloud Run v2](run.md) | 41 | 18 | 0 | 6 | 0 | 17 | 0 | 0 |
+| [Cloud Run v2](run.md) | 41 | 24 | 0 | 0 | 0 | 17 | 0 | 4 |
 | [Cloud KMS](kms.md) | 38 | 19 | 0 | 19 | 0 | 0 | 0 | 72 |
-| [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 6 | 0 | 5 | 0 | 0 | 0 | 0 |
+| [Resource Manager v3 (Projects)](resourcemanager.md) | 11 | 7 | 0 | 4 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging (write and read)](logging.md) | 6 | 6 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 4 |

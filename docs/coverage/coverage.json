@@ -306,8 +306,7 @@
     "Title": "Cloud Run v2",
     "counts": {
       "Not served": 17,
-      "Unimplemented": 6,
-      "Verified": 18
+      "Verified": 24
     },
     "rows": [
       {
@@ -389,8 +388,10 @@
       },
       {
         "method": "google.cloud.run.v2.Jobs/GetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/GetJob",
@@ -415,13 +416,31 @@
       },
       {
         "method": "google.cloud.run.v2.Jobs/SetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+        ],
+        "unverified": [
+          {
+            "code": "ABORTED",
+            "case": "a stale etag, ADR-0006 rule 2",
+            "test": "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+          }
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/TestIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+        ],
+        "unverified": [
+          {
+            "code": "OK",
+            "case": "an empty set on a missing job, as iam_policy.proto documents",
+            "test": "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+          }
+        ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/UpdateJob",
@@ -468,8 +487,10 @@
       },
       {
         "method": "google.cloud.run.v2.Services/GetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+        ]
       },
       {
         "method": "google.cloud.run.v2.Services/GetService",
@@ -488,13 +509,31 @@
       },
       {
         "method": "google.cloud.run.v2.Services/SetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+        ],
+        "unverified": [
+          {
+            "code": "ABORTED",
+            "case": "a stale etag, ADR-0006 rule 2",
+            "test": "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+          }
+        ]
       },
       {
         "method": "google.cloud.run.v2.Services/TestIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+        ],
+        "unverified": [
+          {
+            "code": "OK",
+            "case": "an empty set on a missing service, as iam_policy.proto documents",
+            "test": "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+          }
+        ]
       },
       {
         "method": "google.cloud.run.v2.Services/UpdateService",
@@ -1263,8 +1302,8 @@
     "Key": "resourcemanager",
     "Title": "Resource Manager v3 (Projects)",
     "counts": {
-      "Unimplemented": 5,
-      "Verified": 6
+      "Unimplemented": 4,
+      "Verified": 7
     },
     "rows": [
       {
@@ -1284,6 +1323,9 @@
       {
         "method": "google.cloud.resourcemanager.v3.Projects/GetIamPolicy",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -1298,12 +1340,15 @@
         "method": "google.cloud.resourcemanager.v3.Projects/ListProjects",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:175 TestResourceManagerV3ListProjects"
+          "test/compat/resourcemanager_test.go:260 TestResourceManagerV3ListProjects"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/MoveProject",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -1316,17 +1361,25 @@
       {
         "method": "google.cloud.resourcemanager.v3.Projects/SetIamPolicy",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/TestIamPermissions",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/resourcemanager_test.go:207 TestResourceManagerV3RefusesIAMAndMove"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/UndeleteProject",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
+        ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/UpdateProject",
