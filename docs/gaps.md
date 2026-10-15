@@ -225,7 +225,7 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 | Gap | Why open | Size |
 |---|---|---|
 | Functions in languages other than Go (#1303) | not built yet | L |
-| Terraform resources beyond the verified set (#1304): Firestore, Spanner and Bigtable resources (the wrapper sets no endpoint for them, #1331), Logging bucket config and linked dataset (#1332) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, BigQuery dataset access and row access policies) | L |
+| Terraform resources beyond the verified set (#1304): Firestore and Bigtable admin resources (`google_firestore_database`, `_index`, `google_bigtable_instance`: the emulators serve no admin API for them) and Spanner resources (refused by the wrapper: the emulator's admin REST port is not published, #1331), Logging bucket config and linked dataset (#1332) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, BigQuery dataset access and row access policies, Firestore documents, Bigtable tables) | L |
 
 ## Console
 

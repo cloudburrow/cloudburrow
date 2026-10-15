@@ -209,3 +209,48 @@ func (l *lockedBuffer) String() string {
 	defer l.mu.Unlock()
 	return l.b.String()
 }
+
+// TestTerraformRefusesWhatItCannotPoint (#1331): Spanner resources are
+// always refused, Firestore and Bigtable ones only when the instance does
+// not serve them, and Bigtable's address is given only when it does.
+func TestTerraformRefusesWhatItCannotPoint(t *testing.T) {
+	dir := t.TempDir()
+	module := `resource "google_spanner_database" "db" {}
+data "google_firestore_document" "d" {}
+  resource "google_bigtable_table" "t" {}
+resource "google_storage_bucket" "b" {}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	none := config.Default()
+	none.Services = []config.Service{config.ServiceStorage}
+	if got := unpointed(dir, unpointedResources(none)); len(got) != 3 ||
+		!strings.HasPrefix(got[0], "google_spanner_database ") || !strings.HasPrefix(got[1], "google_firestore_document ") ||
+		!strings.HasPrefix(got[2], "google_bigtable_table ") {
+		t.Errorf("without the emulators: unpointed = %q", got)
+	}
+	if h := bigtableHost(none); h != "" {
+		t.Errorf("bigtableHost without Bigtable = %q", h)
+	}
+	all := config.Default()
+	all.Services = []config.Service{config.ServiceStorage, config.ServiceFirestore, config.ServiceBigtable, config.ServiceSpanner}
+	if got := unpointed(dir, unpointedResources(all)); len(got) != 1 || !strings.HasPrefix(got[0], "google_spanner_database ") {
+		t.Errorf("with the emulators: unpointed = %q, want Spanner alone", got)
+	}
+	if h := bigtableHost(all); h != "127.0.0.1:9012" {
+		t.Errorf("bigtableHost = %q", h)
+	}
+	body, _ := terraformProvider(all, false)
+	if !strings.Contains(body, `firestore_custom_endpoint = "http://127.0.0.1:9010/v1/"`) {
+		t.Errorf("provider lacks the Firestore endpoint:\n%s", body)
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{{[]string{"-chdir=x", "plan"}, "plan"}, {[]string{"init"}, "init"}, {nil, ""}} {
+		if got := subcommand(c.args); got != c.want {
+			t.Errorf("subcommand(%q) = %q, want %q", c.args, got, c.want)
+		}
+	}
+}

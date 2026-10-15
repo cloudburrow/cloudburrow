@@ -1,7 +1,7 @@
 # eval "$(cloudburrow env --format terraform)" before running terraform.
 # The token authorises nothing: CloudBurrow checks none.
 export GOOGLE_PROJECT="golden"
-export GOOGLE_OAUTH_ACCESS_TOKEN="cloudburrow-local-not-a-credential"
+export GOOGLE_OAUTH_ACCESS_TOKEN="owner"
 export GOOGLE_STORAGE_CUSTOM_ENDPOINT="http://127.0.0.1:9001/storage/v1/"
 export GOOGLE_PUBSUB_CUSTOM_ENDPOINT="http://127.0.0.1:9002/v1/"
 export GOOGLE_CLOUD_TASKS_CUSTOM_ENDPOINT="http://127.0.0.1:9003/v2/"
