@@ -10,10 +10,7 @@ func TestUnservedMethods(t *testing.T) {
 	const ds = "/bigquery/v2/projects/p/datasets/d"
 	const tb = ds + "/tables/t"
 	for _, c := range []struct{ method, path, want string }{
-		{"GET", "/bigquery/v2/projects/p/serviceAccount", "bigquery.projects.getServiceAccount"},
 		{"POST", ds + ":undelete", "bigquery.datasets.undelete"},
-		{"PATCH", ds, "bigquery.datasets.patch"},
-		{"PUT", ds, "bigquery.datasets.update"},
 		{"GET", tb + "/rowAccessPolicies", "bigquery.rowAccessPolicies.list"},
 		{"POST", tb + "/rowAccessPolicies", "bigquery.rowAccessPolicies.insert"},
 		{"POST", tb + "/rowAccessPolicies:batchDelete", "bigquery.rowAccessPolicies.batchDelete"},
@@ -30,6 +27,9 @@ func TestUnservedMethods(t *testing.T) {
 		{"POST", ds + "/routines/f:testIamPermissions", "bigquery.routines.testIamPermissions"},
 		// What the emulator serves passes.
 		{"GET", ds, ""},
+		{"PATCH", ds, ""}, // datasetupdate.go, #1205
+		{"PUT", ds, ""},
+		{"GET", "/bigquery/v2/projects/p/serviceAccount", ""},
 		{"DELETE", ds, ""},
 		{"GET", tb, ""},
 		{"PATCH", tb, ""},

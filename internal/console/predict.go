@@ -125,7 +125,7 @@ const predictDeploy = "Deploy a container that honours the Vertex AI custom pred
 // on the screen rather than silently absent.
 var predictNotServed = []string{
 	"Vertex AI Endpoint and DeployedModel resources (the container is called directly)",
-	"PredictionService StreamingPredict, Explain and the other streaming methods (Predict and RawPredict "+
+	"PredictionService StreamingPredict, Explain and the other streaming methods (Predict and RawPredict " +
 		"are served over gRPC on the local AI endpoint, for the official aiplatform client)",
 	"Model Registry upload and versions",
 	"Batch prediction",

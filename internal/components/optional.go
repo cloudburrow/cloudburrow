@@ -19,6 +19,9 @@ const (
 	FirestorePort = 8080
 	DatastorePort = 8081
 	BigtablePort  = 8086
+	// BigtableEmulatorPort is the Bigtable emulator's own port, on its
+	// pod's loopback alone: its front serves BigtablePort (#1206).
+	BigtableEmulatorPort = 8096
 	// SpannerPort is the gRPC port; the emulator also serves REST on 9020,
 	// which the official clients do not use.
 	SpannerPort = 9010
@@ -198,12 +201,28 @@ const bigtableEmulator = "/google-cloud-sdk/platform/bigtable-emulator/cbtemulat
 // the image is pinned by digest, so the binary is either there on every
 // start or on none, and a fallback that reached the network would break
 // the promise `up --offline` makes (#604).
+//
+// The front (internal/bigtablefront, #1206) runs beside it in the pod, as
+// `cloudburrow-storage bigtable-front` from the locally built storage image,
+// whose reference LifecycleComponent.Backends sets. The emulator panics on
+// every RPC it does not implement (backups, schema bundles, UndeleteTable,
+// change streams), restarting the pod and losing every table; the front
+// answers those UNIMPLEMENTED and forwards the rest. It serves the
+// Service's port, so every client goes through it, and the emulator listens
+// on BigtableEmulatorPort on the pod's loopback alone.
 func bigtableBackend(project string) Backend {
 	return Backend{
 		Name:    "bigtable",
 		Image:   PubSubImage,
-		Command: []string{bigtableEmulator, "-host", "0.0.0.0", "-port", fmt.Sprint(BigtablePort)},
+		Command: []string{bigtableEmulator, "-host", "127.0.0.1", "-port", fmt.Sprint(BigtableEmulatorPort)},
 		Port:    BigtablePort,
+		Front: &Front{
+			Name:       "front",
+			PullPolicy: "Never",
+			Args: []string{"bigtable-front", "--listen", fmt.Sprintf("0.0.0.0:%d", BigtablePort),
+				"--upstream", fmt.Sprintf("127.0.0.1:%d", BigtableEmulatorPort)},
+			UpstreamPort: BigtableEmulatorPort,
+		},
 	}
 }
 

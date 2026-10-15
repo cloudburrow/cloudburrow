@@ -136,6 +136,14 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.managedFolders.getIamPolicy"] = s.managedFoldersGetIamPolicy
 	s.handlers["storage.managedFolders.setIamPolicy"] = s.managedFoldersSetIamPolicy
 	s.handlers["storage.managedFolders.testIamPermissions"] = s.managedFoldersTestIamPermissions
+	s.handlers["storage.folders.insert"] = s.foldersInsert
+	s.handlers["storage.folders.get"] = s.foldersGet
+	s.handlers["storage.folders.list"] = s.foldersList
+	s.handlers["storage.folders.delete"] = s.foldersDelete
+	s.handlers["storage.folders.deleteRecursive"] = s.foldersDeleteRecursive
+	s.handlers["storage.folders.rename"] = s.foldersRename
+	s.handlers["storage.buckets.operations.get"] = s.operationsGet
+	s.handlers["storage.buckets.operations.list"] = s.operationsList
 	s.handlers["storage.buckets.setIamPolicy"] = s.bucketsSetIamPolicy
 	s.handlers["storage.buckets.testIamPermissions"] = s.bucketsTestIamPermissions
 	s.handlers["storage.projects.hmacKeys.create"] = s.hmacKeysCreate
@@ -179,6 +187,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch {
+	case strings.HasPrefix(path, controlPrefix):
+		// No bucket is named "v2" (bucket names are 3 to 63 characters), so
+		// the Storage Control API's paths take nothing from the XML API.
+		s.serveControl(w, r)
 	case strings.HasPrefix(path, jsonPrefix):
 		if err := checkSystemParams(r); err != nil {
 			apierror.WriteJSON(w, err)

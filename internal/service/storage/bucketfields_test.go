@@ -71,7 +71,12 @@ func TestStorageBucketFieldsNeverSilentlyDropped(t *testing.T) {
 			continue
 		}
 		name := fmt.Sprintf("fields-%02d", i)
-		code, resp := raw(t, "POST", h.URL+"/storage/v1/b?project=p&prettyPrint=false", fmt.Sprintf(`{"name":%q,%q:%s}`, name, k, sample))
+		extra := ""
+		if k == "hierarchicalNamespace" {
+			// Hierarchical namespace needs uniform bucket-level access (#1203).
+			extra = `,"iamConfiguration":{"uniformBucketLevelAccess":{"enabled":true}}`
+		}
+		code, resp := raw(t, "POST", h.URL+"/storage/v1/b?project=p&prettyPrint=false", fmt.Sprintf(`{"name":%q,%q:%s%s}`, name, k, sample, extra))
 		refused := how != "kept" && how != "stored"
 		switch {
 		case refused && (code != 400 || !strings.Contains(resp, k)):
@@ -86,7 +91,8 @@ func TestStorageBucketFieldsNeverSilentlyDropped(t *testing.T) {
 		code, resp = raw(t, "PATCH", h.URL+"/storage/v1/b/"+name+"-p?prettyPrint=false", fmt.Sprintf(`{%q:%s}`, k, sample))
 		// A bucket's location is fixed at creation; a change is refused by
 		// name, which is not a silent drop either.
-		if k == "location" && code == 400 && strings.Contains(resp, k) {
+		// So is hierarchical namespace (#1203).
+		if (k == "location" || k == "hierarchicalNamespace") && code == 400 && strings.Contains(resp, k) {
 			continue
 		}
 		if code != 200 || !strings.Contains(resp, `"`+k+`":`) {

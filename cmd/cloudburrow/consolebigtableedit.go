@@ -19,6 +19,12 @@ package main
 //   - a cell's row on the row's page: Delete cells, addressed as
 //     [table, row key, family:qualifier].
 //
+// Since #1198: a table's page offers Delete rows by prefix and Delete all
+// rows (DropRowRange) and Edit deletion protection (UpdateTable); a cell
+// offers Increment and Append value (ReadModifyWriteRow); Delete row and
+// Delete cells are one CheckAndMutateRow each, applied only when the row or
+// the column holds a cell.
+//
 // Row pages are [table, row key], so a family cannot be addressed as
 // [table, family]: a row key can be any string, including a family's name.
 // Three segments are unambiguous, because a cell's third segment is always
@@ -253,14 +259,15 @@ func (p bigtableProvider) DetailActions(ctx context.Context, project string, pat
 	}
 	switch len(path) {
 	case 1:
-		return append([]console.Action{{ID: "addfamily", Label: "Add column family", Fields: bigtableAddFamilyFields()}},
+		out := append([]console.Action{{ID: "addfamily", Label: "Add column family", Fields: bigtableAddFamilyFields()}},
 			writeCell(true)...)
+		return append(out, p.tableActions(ctx, project, path[0])...)
 	case 2:
 		return append(writeCell(false),
 			console.Action{ID: "deleterow", Label: "Delete row", Destructive: true, Leaves: true})
 	case 3:
 		if _, _, isCell := splitColumn(path[2]); isCell {
-			return []console.Action{{ID: "deletecells", Label: "Delete cells", Destructive: true}}
+			return cellActions()
 		}
 		if path[1] != bigtableFamiliesSegment {
 			return nil
@@ -356,11 +363,12 @@ func (p bigtableProvider) ActAt(ctx context.Context, project string, path []stri
 		}
 		mut := bigtable.NewMutation()
 		mut.Set(family, values["qualifier"], ts, []byte(values["value"]))
-		return p.apply(ctx, project, path[0], row, mut, false)
+		return p.apply(ctx, project, path[0], row, mut)
 	case action == "deleterow" && len(path) == 2:
 		mut := bigtable.NewMutation()
 		mut.DeleteRow()
-		return p.apply(ctx, project, path[0], path[1], mut, true)
+		return p.applyIf(ctx, project, path[0], path[1], bigtable.StripValueFilter(), mut,
+			fmt.Sprintf("no row with key %s in %s", path[1], path[0]))
 	case action == "deletecells" && len(path) == 3:
 		family, qualifier, ok := splitColumn(path[2])
 		if !ok {
@@ -368,7 +376,30 @@ func (p bigtableProvider) ActAt(ctx context.Context, project string, path []stri
 		}
 		mut := bigtable.NewMutation()
 		mut.DeleteCellsInColumn(family, qualifier)
-		return p.applyToColumn(ctx, project, path[0], path[1], path[2], mut)
+		return p.applyIf(ctx, project, path[0], path[1], columnFilter(family, qualifier), mut,
+			fmt.Sprintf("row %s in %s has no cells in %s", path[1], path[0], path[2]))
+	case (action == "increment" || action == "append") && len(path) == 3:
+		return p.readModifyWrite(ctx, project, path, action, values)
+	case action == "deleteprefix" && len(path) == 1:
+		prefix := values["prefix"]
+		if prefix == "" {
+			return errors.New("a row key prefix is required; Delete all rows deletes every row")
+		}
+		return p.admin(ctx, project, func(a *bigtable.AdminClient) error {
+			return a.DropRowRange(ctx, path[0], prefix)
+		})
+	case action == "deleteallrows" && len(path) == 1:
+		return p.admin(ctx, project, func(a *bigtable.AdminClient) error {
+			return a.DropAllRows(ctx, path[0])
+		})
+	case action == "protection" && len(path) == 1:
+		protection := bigtable.Unprotected
+		if values["protected"] == "true" {
+			protection = bigtable.Protected
+		}
+		return p.admin(ctx, project, func(a *bigtable.AdminClient) error {
+			return a.UpdateTableWithDeletionProtection(ctx, path[0], protection)
+		})
 	}
 	return fmt.Errorf("unknown action %q", action)
 }
@@ -383,50 +414,120 @@ func (p bigtableProvider) admin(ctx context.Context, project string, call func(*
 	return call(a)
 }
 
-// apply sends one MutateRow. mustExist reads the row first: Bigtable deletes
-// a missing row without complaint, and a delete that reports success for
-// nothing reads as a delete that worked.
-func (p bigtableProvider) apply(ctx context.Context, project, table, row string, mut *bigtable.Mutation, mustExist bool) error {
+// apply sends one MutateRow.
+func (p bigtableProvider) apply(ctx context.Context, project, table, row string, mut *bigtable.Mutation) error {
 	c, err := bigtable.NewClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
 	if err != nil {
 		return fmt.Errorf("cannot reach Bigtable: %w", err)
 	}
 	defer c.Close()
-	tbl := c.Open(table)
-	if mustExist {
-		r, err := tbl.ReadRow(ctx, row, bigtable.RowFilter(bigtable.StripValueFilter()))
-		if err != nil {
-			return err
-		}
-		if len(r) == 0 {
-			return fmt.Errorf("no row with key %s in %s", row, table)
-		}
-	}
-	return tbl.Apply(ctx, row, mut)
+	return c.Open(table).Apply(ctx, row, mut)
 }
 
-// applyToColumn sends a mutation to one column of a row that holds it.
-func (p bigtableProvider) applyToColumn(ctx context.Context, project, table, row, column string, mut *bigtable.Mutation) error {
+// applyIf sends one CheckAndMutateRow: mut is applied when the row holds a
+// cell that predicate passes, in the same call, and refused with missing
+// otherwise. Bigtable deletes a missing row or column without complaint,
+// and a delete that reports success for nothing reads as a delete that
+// worked; a read first and a delete after could also delete what another
+// writer wrote between the two.
+func (p bigtableProvider) applyIf(ctx context.Context, project, table, row string, predicate bigtable.Filter, mut *bigtable.Mutation, missing string) error {
 	c, err := bigtable.NewClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
 	if err != nil {
 		return fmt.Errorf("cannot reach Bigtable: %w", err)
 	}
 	defer c.Close()
-	tbl := c.Open(table)
-	r, err := tbl.ReadRow(ctx, row, bigtable.RowFilter(bigtable.StripValueFilter()))
-	if err != nil {
+	var matched bool
+	if err := c.Open(table).Apply(ctx, row, bigtable.NewCondMutation(predicate, mut, nil),
+		bigtable.GetCondMutationResult(&matched)); err != nil {
 		return err
 	}
-	held := false
-	for _, items := range r {
-		for _, item := range items {
-			held = held || item.Column == column
+	if !matched {
+		return errors.New(missing)
+	}
+	return nil
+}
+
+// columnFilter passes the cells of one column, family and qualifier
+// matched exactly: both filters are RE2 patterns that match the whole name.
+func columnFilter(family, qualifier string) bigtable.Filter {
+	return bigtable.ChainFilters(bigtable.FamilyFilter(regexp.QuoteMeta(family)),
+		bigtable.ColumnFilter(regexp.QuoteMeta(qualifier)), bigtable.StripValueFilter())
+}
+
+// cellActions are a cell's actions on its row's page. Increment and Append
+// value are Bigtable's ReadModifyWriteRow, which reads and writes the
+// latest version of the cell in one atomic call.
+func cellActions() []console.Action {
+	return []console.Action{
+		{ID: "increment", Label: "Increment", Fields: []console.Field{{
+			Name: "amount", Label: "Amount", Type: "text", Required: true, Default: "1",
+			Pattern: `^-?[0-9]{1,19}$`,
+			Help: "A whole number, negative to decrease. Bigtable adds it to the latest value, " +
+				"which must be a 64-bit big-endian integer (8 bytes), and writes the sum as a new version."}}},
+		{ID: "append", Label: "Append value", Fields: []console.Field{{
+			Name: "value", Label: "Value", Type: "textarea", Required: true,
+			Help: "Bigtable appends the bytes of this text to the latest value and writes the result as a new version."}}},
+		{ID: "deletecells", Label: "Delete cells", Destructive: true},
+	}
+}
+
+// readModifyWrite sends Increment or Append value to one cell.
+func (p bigtableProvider) readModifyWrite(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	family, qualifier, ok := splitColumn(path[2])
+	if !ok {
+		return fmt.Errorf("%q is not a family:qualifier column", path[2])
+	}
+	m := bigtable.NewReadModifyWrite()
+	if action == "increment" {
+		raw := strings.TrimSpace(values["amount"])
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return fmt.Errorf("amount %q is not a whole number that fits in 64 bits", raw)
 		}
+		m.Increment(family, qualifier, n)
+	} else {
+		if values["value"] == "" {
+			return errors.New("a value to append is required")
+		}
+		m.AppendValue(family, qualifier, []byte(values["value"]))
 	}
-	if !held {
-		return fmt.Errorf("row %s in %s has no cells in %s", row, table, column)
+	c, err := bigtable.NewClient(ctx, project, bigtableInstance, localOpts(p.endpoint)...)
+	if err != nil {
+		return fmt.Errorf("cannot reach Bigtable: %w", err)
 	}
-	return tbl.Apply(ctx, row, mut)
+	defer c.Close()
+	_, err = c.Open(path[0]).ApplyReadModifyWrite(ctx, path[1], m)
+	return err
+}
+
+// tableActions are a table page's own actions: Delete rows by prefix and
+// Delete all rows (DropRowRange), and Edit deletion protection
+// (UpdateTable), prefilled from the table as it reads.
+func (p bigtableProvider) tableActions(ctx context.Context, project, table string) []console.Action {
+	out := []console.Action{
+		// Confirm: a destructive action with a form is otherwise sent on
+		// submit, and the rows it deletes cannot be restored, so it asks for
+		// the table's name back as Delete all rows does.
+		{ID: "deleteprefix", Label: "Delete rows by prefix", Destructive: true,
+			Confirm: "Every row whose key starts with the prefix is deleted, and cannot be restored; the column families are kept.",
+			Fields: []console.Field{{
+				Name: "prefix", Label: "Row key prefix", Type: "text", Required: true,
+				Help: "Every row whose key starts with this is deleted."}}},
+		{ID: "deleteallrows", Label: "Delete all rows", Destructive: true},
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	var info *bigtable.TableInfo
+	if err := p.admin(ctx, project, func(a *bigtable.AdminClient) (err error) {
+		info, err = a.TableInfo(ctx, table)
+		return err
+	}); err != nil {
+		return out
+	}
+	return append(out, console.Action{ID: "protection", Label: "Edit deletion protection", Fields: []console.Field{{
+		Name: "protected", Label: "Deletion protection", Type: "checkbox",
+		Default: strconv.FormatBool(info.DeletionProtection == bigtable.Protected),
+		Help:    "While it is on, Bigtable refuses to delete the table."}}})
 }
 
 var _ console.PathActor = bigtableProvider{}

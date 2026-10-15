@@ -232,6 +232,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if serveUnserved(w, r) { // unserved.go, #1200
 			return
 		}
+		if serveServiceAccount(w, r) { // datasetupdate.go, #1205
+			return
+		}
 		if tableIDsMayChange(r) {
 			defer ids.change()() // tableids.go, #1063
 		}
@@ -338,6 +341,10 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.insertDataset(w, r)
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
 			f.insertTable(w, r, dataset, "", false)
+		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
+			f.updateDataset(w, r, dataset) // #1205, datasetupdate.go
+		case r.Method == http.MethodGet && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
+			f.getDataset(w, r, dataset) // #1205, the front's etag
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[4] != "" && m[5] == "":
 			f.insertTable(w, r, dataset, table, true)
 		case r.Method == http.MethodGet && m[4] != "" && m[5] == "":
