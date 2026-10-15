@@ -17,9 +17,11 @@ The patch gives a CREATE TABLE with a column list and PARTITION BY
 _PARTITIONDATE, DATE(_PARTITIONTIME) or TIMESTAMP_TRUNC(_PARTITIONTIME,
 unit) the columns _PARTITIONTIME TIMESTAMP (and, by day, _PARTITIONDATE
 DATE), whose DEFAULT is the insert's time truncated to the unit (patch
-0027 applies it to INSERT ... VALUES and INSERT ... SELECT); the catalog
-makes them pseudo-columns, which SELECT * leaves out; and references are
-no longer rewritten, so a table without them fails "Unrecognized name".
+0027 applies it to INSERT ... VALUES and INSERT ... SELECT); a scan
+reads _PARTITIONDATE as the date of _PARTITIONTIME, so it follows an
+_PARTITIONTIME an INSERT gives; the catalog makes them pseudo-columns,
+which SELECT * leaves out; and references are no longer rewritten, so a
+table without them fails "Unrecognized name".
 ingestion_partition_test.go fails without the patch and passes with it.
 
 Licence: a modification of goccy/googlesqlite, which is under the MIT
@@ -30,7 +32,7 @@ Authors.
 
 --- /dev/null
 +++ b/ingestion_partition_test.go
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,81 @@
 +package googlesqlite_test
 +
 +import (
@@ -96,6 +98,10 @@ Authors.
 +	var n int64
 +	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ing_day WHERE _PARTITIONTIME = TIMESTAMP('2024-01-01')`).Scan(&n); err != nil || n != 1 {
 +		t.Errorf("rows of 2024-01-01: %d (%v), want 1", n, err)
++	}
++	// _PARTITIONDATE is the date of an _PARTITIONTIME an INSERT gave.
++	if err := db.QueryRowContext(ctx, `SELECT CAST(_PARTITIONDATE AS STRING) FROM ing_day WHERE id = 2`).Scan(&date); err != nil || date != "2024-01-01" {
++		t.Errorf("id 2: _PARTITIONDATE %s (%v), want 2024-01-01", date, err)
 +	}
 +	if err := db.QueryRowContext(ctx, `SELECT FORMAT_TIMESTAMP('%F %T', _PARTITIONTIME) FROM ing_hour`).Scan(&got); err != nil ||
 +		got != now.Truncate(time.Hour).Format(ts) && got != time.Now().UTC().Truncate(time.Hour).Format(ts) {
@@ -344,3 +350,24 @@ Authors.
  		)))
  		colIndex[column.Name] = int32(i)
  	}
+--- a/internal/formatter.go
++++ b/internal/formatter.go
+@@ -1599,9 +1599,17 @@
+ 	}
+ 	var columns []string
+ 	for _, col := range m1(n.node.ColumnList()) {
++		name := m1(col.Name())
++		if strings.EqualFold(name, "_PARTITIONDATE") {
++			// CloudBurrow patch (cloudburrow/cloudburrow#1277): an
++			// ingestion-time partitioned table's _PARTITIONDATE is the
++			// date of its _PARTITIONTIME, which an INSERT may give.
++			columns = append(columns, fmt.Sprintf("googlesqlite_date(`_PARTITIONTIME`) AS `%s`", uniqueColumnName(ctx, col)))
++			continue
++		}
+ 		columns = append(
+ 			columns,
+-			fmt.Sprintf("`%s` AS `%s`", m1(col.Name()), uniqueColumnName(ctx, col)),
++			fmt.Sprintf("`%s` AS `%s`", name, uniqueColumnName(ctx, col)),
+ 		)
+ 	}
+ 

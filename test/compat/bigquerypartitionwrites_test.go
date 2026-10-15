@@ -27,7 +27,8 @@ import (
 // documents ("the partition ID specified in the decorator must match the
 // data being written. Otherwise, an error occurs"). Load and copy jobs
 // into a partition do the same, and a copy job reads a partition as its
-// source. A partition of an ingestion-time partitioned table is 501.
+// source. A partition of an ingestion-time partitioned table is its rows
+// of that _PARTITIONTIME (TestBigQueryIngestionTime).
 // Measured first: every decorated name was "Table not found".
 //
 // covers: bigquery.tabledata.list, bigquery.tables.get, bigquery.jobs.insert, bigquery.jobs.get
@@ -92,9 +93,9 @@ func TestBigQueryPartitionDestinations(t *testing.T) {
 	if got := read("byday$20240105", 0); len(got) != 0 {
 		t.Errorf("an empty partition: %v", got)
 	}
-	it := ds.Table("ingest$20240101").Read(ctx)
-	var row []bigquery.Value
-	wantAPIError(t, "ingestion-time partition", it.Next(&row), http.StatusNotImplemented, "ingestion-time")
+	if got := read("ingest$20240101", 0); len(got) != 0 {
+		t.Errorf("an empty ingestion-time partition: %v", got)
+	}
 
 	run := func(sql, dst, write string) error {
 		q := c.Query(sql)
@@ -148,9 +149,13 @@ func TestBigQueryPartitionDestinations(t *testing.T) {
 	if got, want := read("byrange", 0), []string{"11z", "150d", "5a"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("byrange after truncate: %v, want %v", got, want)
 	}
-	// An ingestion-time partition is not built.
-	wantAPIError(t, "ingestion-time destination", run("SELECT 1 AS n", "ingest$20240101", "WRITE_APPEND"),
-		http.StatusNotImplemented, "ingestion-time")
+	// An ingestion-time partition takes any row (#1277).
+	if err := run("SELECT 1 AS n", "ingest$20240101", "WRITE_APPEND"); err != nil {
+		t.Fatalf("ingestion-time destination: %v", err)
+	}
+	if got := read("ingest$20240101", 0); !reflect.DeepEqual(got, []string{"1"}) {
+		t.Errorf("ingest$20240101: %v, want [1]", got)
+	}
 
 	// Load jobs into a partition (an upload, a CSV with the table's schema).
 	load := func(csv, dst, write string) error {

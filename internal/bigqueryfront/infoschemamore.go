@@ -32,8 +32,8 @@ import (
 // last_modified_time (it keeps no time per partition). storage_tier is
 // ACTIVE for a table made in the last 90 days (no partition of it can have
 // gone 90 days unmodified, https://cloud.google.com/bigquery/pricing#storage),
-// and NULL otherwise. An ingestion-time partitioned table that holds rows
-// is 501: the emulator keeps no row's ingestion time.
+// and NULL otherwise. An ingestion-time partitioned table's partitions are
+// its rows' _PARTITIONTIME, which CloudBurrow's engine keeps (#1277).
 //
 // The constraint views read each table's tableConstraints: the primary
 // key, named "<table>.pk$" as BigQuery names it, and its foreign keys.
@@ -100,16 +100,21 @@ func partitionIDExpr(m partitionMeta) (string, bool) {
 		return "", true
 	}
 	tp := m.TimePartitioning
+	format := map[string]string{"HOUR": "%Y%m%d%H", "MONTH": "%Y%m", "YEAR": "%Y"}[strings.ToUpper(tp.Type)]
+	if format == "" {
+		format = "%Y%m%d"
+	}
+	if m.ingestion() {
+		// The engine keeps each row's _PARTITIONTIME (#1277).
+		return "CASE WHEN _PARTITIONTIME IS NULL THEN '__UNPARTITIONED__' ELSE FORMAT_TIMESTAMP('" + format +
+			"', _PARTITIONTIME, 'UTC') END", true
+	}
 	col := quoteName(tp.Field)
 	expr := col
 	for _, fl := range m.Schema.Fields {
 		if strings.EqualFold(fl.Name, tp.Field) && (strings.EqualFold(fl.Type, "DATE") || strings.EqualFold(fl.Type, "DATETIME")) {
 			expr = "TIMESTAMP(" + col + ")"
 		}
-	}
-	format := map[string]string{"HOUR": "%Y%m%d%H", "MONTH": "%Y%m", "YEAR": "%Y"}[strings.ToUpper(tp.Type)]
-	if format == "" {
-		format = "%Y%m%d"
 	}
 	return fmt.Sprintf("CASE WHEN %s IS NULL THEN '__NULL__' WHEN %s < TIMESTAMP '1960-01-01' OR %s >= TIMESTAMP '2160-01-01' "+
 		"THEN '__UNPARTITIONED__' ELSE FORMAT_TIMESTAMP('%s', %s, 'UTC') END", col, expr, expr, format, expr), true
@@ -133,14 +138,6 @@ func (f front) partitionsRows(r *http.Request, dataset string, m *datasetMeta) (
 			return "", http.StatusInternalServerError, "cloudburrow: could not read a table's partitioning"
 		}
 		name := str(t, "tableId")
-		if pm.ingestion() {
-			if n, _ := strconv.ParseInt(pm.NumRows, 10, 64); n > 0 {
-				return "", http.StatusNotImplemented, "Not implemented here: INFORMATION_SCHEMA.PARTITIONS of a dataset with " +
-					"an ingestion-time partitioned table that holds rows (" + name + "). The emulator behind CloudBurrow keeps " +
-					"no row's ingestion time, so it cannot tell a partition's rows (docs/compatibility.md). Nothing was run."
-			}
-			continue
-		}
 		id, ok := partitionIDExpr(pm)
 		if !ok {
 			return "", http.StatusInternalServerError, "cloudburrow: could not read the range partitioning of " + name
