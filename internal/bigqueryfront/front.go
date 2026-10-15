@@ -58,7 +58,8 @@
 //     every row, as BigQuery does (csvLoad); CREATE TABLE or VIEW ... IF
 //     NOT EXISTS of one that exists does nothing (skipIfExists); a job the
 //     emulator failed reads back failed (jobFailures.watch); CREATE TABLE
-//     LIKE, COPY and CLONE and snapshot tables are 501 (checkDDL).
+//     LIKE, COPY and CLONE and snapshot tables are 501 (checkDDL), but for
+//     a lone statement (tablelikecopy.go, cloneddl.go).
 //   - (#944, #945, #946) a CSV load from Cloud Storage is read by the
 //     front and loaded as an upload (gcsload.go); a CSV load's
 //     fieldDelimiter, quote, allowJaggedRows and nullMarker are carried

@@ -150,7 +150,10 @@ func (v ddlVerdict) selects() []createStmt {
 //     list is not supported"; one alone is carried out before this (#1240).
 //   - (#937) CREATE TABLE ... LIKE, COPY and CLONE: 400 "CREATE TABLE LIKE
 //     is not supported" (COPY, CLONE); CREATE SNAPSHOT TABLE and DROP
-//     SNAPSHOT TABLE: 400 "Statement not supported".
+//     SNAPSHOT TABLE: 400 "Statement not supported". A lone LIKE or COPY
+//     (#1239, tablelikecopy.go), and a lone CLONE, CREATE SNAPSHOT TABLE or
+//     DROP SNAPSHOT TABLE (#1002, cloneddl.go), are carried out before
+//     checkDDL; it refuses the rest.
 //
 // It reads the statements with a lexer, not a parser. A statement in a
 // string is not read; EXECUTE IMMEDIATE's is put in the query's text

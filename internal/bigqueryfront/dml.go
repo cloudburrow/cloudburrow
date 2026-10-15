@@ -183,6 +183,17 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) {
+		if st, unsupported, ok := parseCloneDDL(q.Query); ok { // #1002, cloneddl.go
+			if unsupported != "" {
+				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+unsupported+
+					". Nothing was run.")
+				return
+			}
+			f.serveCloneDDL(w, r, q, insert, st)
+			return
+		}
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.refuseSnapshotQuery(w, r, q, insert) { // #1002, snapshots.go
 		return
 	}
