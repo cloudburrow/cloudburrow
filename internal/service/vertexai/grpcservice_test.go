@@ -309,10 +309,6 @@ func TestGRPCOtherMethodsAreUnimplemented(t *testing.T) {
 	if status.Code(err) != codes.Unimplemented {
 		t.Errorf("Explain: %v, want UNIMPLEMENTED", err)
 	}
-	_, err = c.EmbedContent(context.Background(), &aiplatformpb.EmbedContentRequest{})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("EmbedContent: %v, want UNIMPLEMENTED", err)
-	}
 	st, err := c.StreamGenerateContent(context.Background(), &aiplatformpb.GenerateContentRequest{})
 	if err == nil {
 		_, err = st.Recv()

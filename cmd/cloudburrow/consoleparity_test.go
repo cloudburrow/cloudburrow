@@ -605,6 +605,13 @@ var parityRows = []parityRow{
 			"a Predict on the publisher model runs",
 		Tests: []string{"TestConsoleOnlinePredictionThroughTheConsoleAPI", "TestPredictionClientReachesACustomEndpoint",
 			"TestGRPCPredictEmbedsLikeTheJSONRoute"}},
+	{Resource: "Vertex AI PredictionService: EmbedContent", Service: "vertexai",
+		Methods: []string{"PredictionService/EmbedContent"},
+		Screen:  "/ai/embeddings", Offers: "Embeddings: Method EmbedContent sends each text as the :embedContent " +
+			"an EmbedContent on the publisher model runs, with its task type and output dimensionality, and shows " +
+			"the API's answer or refusal verbatim (#1244)",
+		Tests: []string{"TestEmbeddingsScreenSendsBothMethods", "TestEmbedContentThroughThePredictionClient",
+			"TestGRPCEmbedContent", "TestEmbedContentREST"}},
 	{Resource: "Vertex AI PredictionService: GenerateContent", Service: "vertexai",
 		Methods: []string{"PredictionService/GenerateContent"},
 		Screen:  "/ai/playground", Offers: "Playground: the generateContent subset GenerateContent serves, through the same API path",
