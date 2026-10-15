@@ -66,6 +66,10 @@ var gcloudVerified = []struct {
 	// TestGcloudProjectsThroughGcloudSetup drives list, create, describe and
 	// delete through this override alone.
 	{resourceManagerService, "cloudresourcemanager", "/", true},
+	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
+	// TestGcloudSQL drives instances list and describe, and databases and
+	// users create, list and delete, with either Cloud SQL service.
+	{sqlAdminEndpoint, "sql", "/", false},
 }
 
 // gcloudFamilies is the gcloud-setup help's list of what it writes, from
@@ -112,13 +116,14 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 	ports := map[config.Service]int{config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub,
 		config.ServiceKMS: cfg.Endpoints.KMS, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceTasks: cfg.Endpoints.Tasks,
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
-		resourceManagerService: cfg.Endpoints.ResourceManager}
+		resourceManagerService: cfg.Endpoints.ResourceManager, sqlAdminEndpoint: cfg.Endpoints.SQLAdmin}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\n", cfg.DefaultProject())
 	b.WriteString("\n[api_endpoint_overrides]\n")
 	for _, v := range gcloudVerified {
-		if (v.always || serviceEnabled(cfg, v.service)) && ports[v.service] != 0 {
+		on := v.always || serviceEnabled(cfg, v.service) || (v.service == sqlAdminEndpoint && sqlAdminEnabled(cfg))
+		if on && ports[v.service] != 0 {
 			fmt.Fprintf(&b, "%s = http://%s%s\n", v.property, host(ports[v.service]), v.path)
 		}
 	}

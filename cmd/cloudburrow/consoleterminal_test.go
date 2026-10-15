@@ -26,6 +26,7 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		"logging":         "cloudburrow-host.cloudburrow.svc.cluster.local:9007",
 		"resourcemanager": "cloudburrow-host.cloudburrow.svc.cluster.local:9008",
 		"metadata":        "cloudburrow-host.cloudburrow.svc.cluster.local:9009",
+		"sqladmin":        "cloudburrow-host.cloudburrow.svc.cluster.local:9010",
 	}
 	env := terminalEnv(addrs)
 	for name, want := range map[string]string{

@@ -51,6 +51,8 @@ import (
 
 	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	bqv2 "google.golang.org/api/bigquery/v2"
+
+	sqladminsvc "github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -124,6 +126,20 @@ var areas = []area{
 	// validating front, classified by annotations alone, as the other
 	// opt-in emulators are.
 	{Key: "bigquery", Title: "BigQuery (REST API v2)", Methods: bigqueryMethods()},
+	// The Cloud SQL Admin API (#1301): CloudBurrow's own, over the
+	// PostgreSQL and MySQL servers it runs. Its methods are the discovery
+	// document's, which the server's own table is (internal/service/sqladmin).
+	{Key: "sqladmin", Title: "Cloud SQL Admin API (v1)", Own: true, Methods: sqladminMethods()},
+}
+
+// sqladminMethods is every method of the sqladmin v1 discovery document.
+func sqladminMethods() []string {
+	var out []string
+	for id := range sqladminsvc.MethodStatuses() {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // bigqueryMethods is every method of the official generated BigQuery client,
@@ -424,6 +440,14 @@ func loadRegistry(root string) (map[string]string, error) {
 	// Storage's registry is the server's own method table, so a method moves
 	// to implemented in the same change that builds it.
 	for id, isBuilt := range gcs.MethodStatuses() {
+		if isBuilt {
+			r[id] = regImplemented
+		} else {
+			r[id] = regUnimplemented
+		}
+	}
+	// The Cloud SQL Admin API's too (#1301).
+	for id, isBuilt := range sqladminsvc.MethodStatuses() {
 		if isBuilt {
 			r[id] = regImplemented
 		} else {

@@ -216,6 +216,7 @@ func compatEnvFixture(t *testing.T, edit func(env map[string]string)) (dir, envF
 		"MYSQL_PASSWORD":                        "fixture-'pw'",
 		"PGHOST":                                "127.0.0.1",
 		"PGPORT":                                "9019",
+		"CLOUDBURROW_SQLADMIN_ENDPOINT":         "127.0.0.1:9020",
 		"CLOUDBURROW_BIGQUERY_ENDPOINT":         "http://127.0.0.1:9014",
 		"CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT": "127.0.0.1:9015",
 	}
@@ -312,6 +313,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"MYSQL":               "127.0.0.1:9017",
 		"MYSQL_PASSWORD":      "fixture-'pw'",
 		"CLOUDSQL":            "127.0.0.1:9019",
+		"SQLADMIN":            "127.0.0.1:9020",
 		"BIGQUERY":            "http://127.0.0.1:9014",
 		"BIGQUERY_STORAGE":    "127.0.0.1:9015",
 		"BIGQUERY_PROJECT":    "ct-local",

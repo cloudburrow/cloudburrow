@@ -155,6 +155,7 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/service/redisadmin/` | The Memorystore for Redis admin API, built by us over the running Valkey server (#1302). |
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |
 | `internal/service/secrets/` | Secret Manager v1, built by us; with a cluster, versions are kept as Kubernetes Secrets in the workload namespace. |
+| `internal/service/sqladmin/` | The Cloud SQL Admin API (sqladmin v1 and v1beta4) over the PostgreSQL and MySQL servers, built by us (#1301). |
 | `internal/service/storage/` | Cloud Storage, built by us to Google's spec (#485), the only storage backend (#519). |
 | `internal/service/tasks/` | Cloud Tasks queues, tasks and HTTP dispatch, built by us. |
 | `internal/service/vertexai/` | The subset of Vertex AI `generateContent` the local runtime can perform. |

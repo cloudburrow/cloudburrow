@@ -55,9 +55,9 @@ func (cloudSQLMySQLProvider) Title() string { return "Cloud SQL for MySQL" }
 // mysqlConsoleReader is the account the SQL editor's statements run as.
 const mysqlConsoleReader = "cloudburrow_console"
 
-const cloudSQLMySQLNote = "A real MySQL, not the Cloud SQL Admin API. " +
-	"Google publishes no Cloud SQL emulator, so instances, connection names, " +
-	"IAM database authentication, backups and replicas do not exist here."
+const cloudSQLMySQLNote = "A real MySQL: Google publishes no Cloud SQL emulator. " +
+	"The Cloud SQL Admin API serves it as the instance mysql, with its databases " +
+	"and users; creating instances, IAM database authentication, backups and replicas do not exist here."
 
 // open returns a handle on one database as user, or on the server when
 // database is empty.

@@ -85,6 +85,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		if strings.HasPrefix(m, "storage.") {
 			continue
 		}
+		// The Cloud SQL Admin API's registry is its server's method table,
+		// and TestEveryUnservedMethodIsNotImplemented checks its 501s over
+		// HTTP (internal/service/sqladmin).
+		if strings.HasPrefix(m, "sql.") {
+			continue
+		}
 		methods = append(methods, m)
 	}
 	sort.Strings(methods)

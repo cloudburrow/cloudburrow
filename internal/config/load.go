@@ -192,6 +192,7 @@ type rawFlags struct {
 	resourceManager  int
 	scheduler        int
 	logging          int
+	sqladmin         int
 	firestore        int
 	datastore        int
 	bigtable         int
@@ -262,6 +263,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.IntVar(&r.resourceManager, "port-resourcemanager", 0, "Resource Manager v3 Projects API host port (0 = OS-assigned; default 9007)")
 	fs.IntVar(&r.scheduler, "port-scheduler", 0, "Cloud Scheduler host port (0 = OS-assigned; default 9008)")
 	fs.IntVar(&r.logging, "port-logging", 0, "Cloud Logging host port (0 = OS-assigned; default 9009)")
+	fs.IntVar(&r.sqladmin, "port-sqladmin", 0, "Cloud SQL Admin API host port (0 = OS-assigned; default 9020)")
 	fs.IntVar(&r.firestore, "port-firestore", 0, "Firestore emulator host port (0 = OS-assigned; default 9010)")
 	fs.IntVar(&r.datastore, "port-datastore", 0, "Datastore emulator host port (0 = OS-assigned; default 9011)")
 	fs.IntVar(&r.bigtable, "port-bigtable", 0, "Bigtable emulator host port (0 = OS-assigned; default 9012)")
@@ -448,6 +450,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 		{"PORT_RESOURCEMANAGER", &cfg.Endpoints.ResourceManager},
 		{"PORT_SCHEDULER", &cfg.Endpoints.Scheduler},
 		{"PORT_LOGGING", &cfg.Endpoints.Logging},
+		{"PORT_SQLADMIN", &cfg.Endpoints.SQLAdmin},
 		{"PORT_FIRESTORE", &cfg.Endpoints.Firestore},
 		{"PORT_DATASTORE", &cfg.Endpoints.Datastore},
 		{"PORT_BIGTABLE", &cfg.Endpoints.Bigtable},
@@ -546,6 +549,7 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 		{"port-resourcemanager", raw.resourceManager, &cfg.Endpoints.ResourceManager},
 		{"port-scheduler", raw.scheduler, &cfg.Endpoints.Scheduler},
 		{"port-logging", raw.logging, &cfg.Endpoints.Logging},
+		{"port-sqladmin", raw.sqladmin, &cfg.Endpoints.SQLAdmin},
 		{"port-firestore", raw.firestore, &cfg.Endpoints.Firestore},
 		{"port-datastore", raw.datastore, &cfg.Endpoints.Datastore},
 		{"port-bigtable", raw.bigtable, &cfg.Endpoints.Bigtable},

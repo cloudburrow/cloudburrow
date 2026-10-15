@@ -40,6 +40,9 @@ var compatSections = map[string]string{
 	// whole discovery ID (`bigquery.jobs.insert`), so the section's other
 	// rows, which mention `jobs.insert` in passing, name none.
 	"bigquery": "## Optional services",
+	// The Cloud SQL Admin API (#1301), in Cloud SQL's subsection, named by
+	// whole discovery ID (`sql.databases.insert`) as BigQuery's are.
+	"sqladmin": "## Optional services",
 }
 
 // acceptedStatuses maps a status cell of docs/compatibility.md to the
@@ -127,7 +130,7 @@ var (
 // a bare gRPC name two services of the page share is an error, so the row
 // must qualify it.
 func namedMethods(key, op string, report map[string]string) (ids, ambiguous []string) {
-	if key == "bigquery" {
+	if key == "bigquery" || key == "sqladmin" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {
 				ids = append(ids, tok[1])

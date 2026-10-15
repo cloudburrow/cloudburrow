@@ -4765,5 +4765,489 @@
         ]
       }
     ]
+  },
+  {
+    "Key": "sqladmin",
+    "Title": "Cloud SQL Admin API (v1)",
+    "counts": {
+      "Unimplemented": 65,
+      "Verified": 15
+    },
+    "rows": [
+      {
+        "method": "sql.Backups.CreateBackup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.Backups.DeleteBackup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.Backups.GetBackup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.Backups.ListBackups",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.Backups.UpdateBackup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.backupRuns.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.backupRuns.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.backupRuns.insert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.backupRuns.list",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.blueGreenDeployments.create",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.blueGreenDeployments.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.blueGreenDeployments.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.blueGreenDeployments.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.blueGreenDeployments.switchover",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.connect.generateEphemeral",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.connect.get",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.connect.resolve",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.databases.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
+        ]
+      },
+      {
+        "method": "sql.databases.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
+        ]
+      },
+      {
+        "method": "sql.databases.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
+        ]
+      },
+      {
+        "method": "sql.databases.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:415 TestGcloudSQL"
+        ]
+      },
+      {
+        "method": "sql.databases.patch",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers"
+        ]
+      },
+      {
+        "method": "sql.databases.update",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers"
+        ]
+      },
+      {
+        "method": "sql.flags.list",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.ListEntraIdCertificates",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.ListServerCertificates",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.RotateEntraIdCertificate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.RotateServerCertificate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.acquireSsrsLease",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.addEntraIdCertificate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.addServerCa",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.addServerCertificate",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.clone",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.delete",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.demote",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.demoteMaster",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.executeSql",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.export",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.failover",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
+        ]
+      },
+      {
+        "method": "sql.instances.import",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.insert",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
+        ]
+      },
+      {
+        "method": "sql.instances.listServerCas",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.patch",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.pointInTimeRestore",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.preCheckMajorVersionUpgrade",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.promoteReplica",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.reencrypt",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.releaseSsrsLease",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.resetSslConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.restart",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.restoreBackup",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.rotateServerCa",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.startReplica",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.stopReplica",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.switchover",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.truncateLog",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.instances.update",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.operations.cancel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
+        ]
+      },
+      {
+        "method": "sql.operations.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers"
+        ]
+      },
+      {
+        "method": "sql.projects.instances.getDiskShrinkConfig",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.projects.instances.getLatestRecoveryTime",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.projects.instances.performDiskShrink",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.projects.instances.rescheduleMaintenance",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.projects.instances.resetReplicaSize",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.projects.instances.startExternalSync",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.projects.instances.verifyExternalSyncSettings",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.sslCerts.createEphemeral",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.sslCerts.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.sslCerts.get",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.sslCerts.insert",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.sslCerts.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.tiers.list",
+        "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:96 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "sql.users.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
+        ]
+      },
+      {
+        "method": "sql.users.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers"
+        ]
+      },
+      {
+        "method": "sql.users.insert",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
+        ]
+      },
+      {
+        "method": "sql.users.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:415 TestGcloudSQL",
+          "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
+        ]
+      },
+      {
+        "method": "sql.users.update",
+        "status": "Verified",
+        "tests": [
+          "test/compat/sqladmin_test.go:263 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
+        ]
+      }
+    ]
   }
 ]
