@@ -73,6 +73,10 @@ const ROUTES = [
     product: "storage", productTitle: "Cloud Storage" },
 
   { path: "/firestore", service: "firestore", title: "Firestore", section: "Databases" },
+  // The project's Firestore databases, each with its settings, indexes and
+  // field overrides (#1331, #1343). Not under /firestore/, where it would
+  // shadow a collection named "databases".
+  { path: "/firestore-databases", service: "firestore-databases", icon: "firestore", title: "Firestore databases", section: "Databases" },
   { path: "/datastore", service: "datastore", title: "Datastore", section: "Databases" },
   { path: "/bigtable",  service: "bigtable",  title: "Bigtable",  section: "Databases" },
   { path: "/spanner",   service: "spanner",   title: "Spanner",   section: "Databases" },

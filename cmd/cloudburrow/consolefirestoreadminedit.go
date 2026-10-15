@@ -38,8 +38,9 @@ const (
 	firestoreFieldsSegment  = "fields"
 )
 
-// firestoreCollectionPattern is a collection ID: no slash, not empty.
-const firestoreCollectionPattern = `^[^/]+$`
+// firestoreCollectionPattern is a collection ID: no slash, not empty. The
+// slash is escaped, as the browser compiles a pattern with the v flag.
+const firestoreCollectionPattern = `^[^\/]+$`
 
 // databaseEditFields are Edit database's inputs, prefilled from db.
 func databaseEditFields(db *adminpb.Database) []console.Field {

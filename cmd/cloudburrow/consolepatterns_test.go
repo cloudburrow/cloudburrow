@@ -68,6 +68,8 @@ func createForms(t *testing.T) map[string][]console.Field {
 		PubSub: &scheduler.PubSubTarget{Topic: "projects/p/topics/t", Data: []byte("x")}, Retry: scheduler.DefaultRetryConfig()}).Fields
 	// Edit key (#794).
 	out["kms/edit"] = kmsKeyEditForm(&kmspb.CryptoKey{Name: "projects/p/locations/l/keyRings/r/cryptoKeys/k"}).Fields
+	// Create index (#1343).
+	out["firestore-databases/createindex"] = createIndexFields()
 	return out
 }
 
