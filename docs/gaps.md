@@ -22,7 +22,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 |---|---|---|---|---|---|
 | Cloud Storage | 11 | 5 | 5 | 1 | 0 |
 | Pub/Sub | 4 | 1 | 2 | 1 | 0 |
-| Cloud Tasks | 5 | 4 | 1 | 0 | 0 |
+| Cloud Tasks | 4 | 3 | 1 | 0 | 0 |
 | Cloud Run | 12 | 9 | 1 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 2 | 2 | 0 | 0 | 0 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **90** | **46** | **32** | **7** | **5** |
+| **Total** | **89** | **45** | **32** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -69,11 +69,10 @@ Already tracked: #982 (Google's message for an invalid label is not measured).
 ## Cloud Tasks
 
 Already tracked: #1215 (`RunTask`, `BatchCreateTasks`, `BatchDeleteTasks`, CMEK config). Queue IAM
-conditions are excluded (below).
+conditions are excluded (below). Closed: `ListQueues` filters on any Queue field (#1255).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `ListQueues` with a `filter` other than on `state` is `UNIMPLEMENTED` (a `state` filter is honoured since #1222; #1255) | not built yet | S |
 | `oidcToken` / `oauthToken` on an HTTP task are refused `UNIMPLEMENTED` (#1243, with Cloud Scheduler's) | not built yet | M |
 | `stackdriver_logging_config` is refused: no dispatch is written to Cloud Logging (#1256) | not built yet | M |
 | A queue-level `http_target` on `UpdateQueue` is refused | not built yet | M |

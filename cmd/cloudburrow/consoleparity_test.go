@@ -72,8 +72,8 @@ var parityRows = []parityRow{
 	// Cloud Tasks
 	{Resource: "Cloud Tasks queues", Service: "tasks",
 		Methods:  []string{"CloudTasks/CreateQueue", "CloudTasks/DeleteQueue", "CloudTasks/GetQueue", "CloudTasks/ListQueues", "CloudTasks/PauseQueue", "CloudTasks/ResumeQueue", "CloudTasks/PurgeQueue"},
-		Provider: "tasks", Offers: "Queues list, queue detail with configuration, Create queue, Delete, Pause / Resume, Purge",
-		Tests: []string{"TestConsoleQueueActionsFollowState", "TestNoDetailShowsABlankProperty", "TestRowMenuClosesOnEscapeAndGivesFocusBack"}},
+		Provider: "tasks", Offers: "Queues list (with a filter box in ListQueues' own syntax, #1255), queue detail with configuration, Create queue, Delete, Pause / Resume, Purge",
+		Tests: []string{"TestConsoleQueueActionsFollowState", "TestConsoleQueueListFilter", "TestNoDetailShowsABlankProperty", "TestRowMenuClosesOnEscapeAndGivesFocusBack"}},
 	{Resource: "Cloud Tasks tasks", Service: "tasks",
 		Methods:  []string{"CloudTasks/GetTask", "CloudTasks/ListTasks", "CloudTasks/DeleteTask"},
 		Provider: "tasks", Offers: "Tasks section on the queue page, task detail (request, headers redacted, body), Delete task",
