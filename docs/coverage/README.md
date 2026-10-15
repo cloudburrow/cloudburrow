@@ -14,6 +14,7 @@ Do not edit these files by hand.
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 13 | 0 | 0 | 0 | 0 | 63 | 0 |
 | [Cloud KMS](kms.md) | 40 | 38 | 0 | 2 | 0 | 0 | 0 | 82 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 37 | 0 | 15 | 0 | 0 | 0 | 0 |
+| [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 19 | 1 | 0 | 0 | 0 | 18 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 42 | 0 | 1 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 14 | 10 | 0 | 4 | 0 | 0 | 0 | 0 |

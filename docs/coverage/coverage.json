@@ -2220,6 +2220,231 @@
     ]
   },
   {
+    "Key": "resourcemanagerv1",
+    "Title": "Resource Manager v1 REST (projects, org policies; liens on v1 and v3)",
+    "counts": {
+      "Refused": 1,
+      "Unknown": 18,
+      "Verified": 19
+    },
+    "rows": [
+      {
+        "method": "cloudresourcemanager.folders.clearOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.folders.getEffectiveOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.folders.getOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.folders.listAvailableOrgPolicyConstraints",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.folders.listOrgPolicies",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.folders.setOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.liens.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:358 TestResourceManagerLiens"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.liens.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:358 TestResourceManagerLiens"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.liens.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:358 TestResourceManagerLiens"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.liens.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagertags_test.go:358 TestResourceManagerLiens"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.operations.get",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.clearOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:332 TestGcloudFoldersAndOrganizations"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.organizations.getEffectiveOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.getIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.getOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.listAvailableOrgPolicyConstraints",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.listOrgPolicies",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.search",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:332 TestGcloudFoldersAndOrganizations"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.organizations.setIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.setOrgPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.organizations.testIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.projects.clearOrgPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.create",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.delete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.getAncestry",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:332 TestGcloudFoldersAndOrganizations"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.getEffectiveOrgPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.getIamPolicy",
+        "status": "Refused",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ],
+        "note": "an official-SDK test proves it is refused"
+      },
+      {
+        "method": "cloudresourcemanager.projects.getOrgPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.listAvailableOrgPolicyConstraints",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.listOrgPolicies",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.setIamPolicy",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.projects.setOrgPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.testIamPermissions",
+        "status": "Unknown"
+      },
+      {
+        "method": "cloudresourcemanager.projects.undelete",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      },
+      {
+        "method": "cloudresourcemanager.projects.update",
+        "status": "Verified",
+        "tests": [
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "scheduler",
     "Title": "Cloud Scheduler",
     "counts": {
