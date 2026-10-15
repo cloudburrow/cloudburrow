@@ -144,15 +144,15 @@ var areas = []area{
 	{Key: "storagegrpc", Title: "Cloud Storage (gRPC API v2)", Own: true, Methods: gcs.GRPCMethods()},
 	// The opt-in emulators (#717) are Google's, like Pub/Sub's: a method is
 	// Verified only by an annotated official-client test, and Unknown
-	// otherwise. Bigtable's instance admin service is not listed: nothing
-	// here claims instance or cluster administration.
+	// otherwise. Bigtable's instance admin service (#1331) is the Bigtable
+	// front's own (internal/bigtablefront), classified by annotations too.
 	{Key: "firestore", Title: "Firestore", Services: []string{"google.firestore.v1.Firestore"}},
 	// The Firestore Admin API (#1331) is CloudBurrow's own, served by the
 	// Firestore pod's call front (internal/firestoreadmin): the emulator
 	// serves the documents API alone.
 	{Key: "firestoreadmin", Title: "Firestore Admin API", Own: true, Services: []string{"google.firestore.admin.v1.FirestoreAdmin"}},
 	{Key: "datastore", Title: "Datastore", Services: []string{"google.datastore.v1.Datastore"}},
-	{Key: "bigtable", Title: "Bigtable", Services: []string{"google.bigtable.v2.Bigtable", "google.bigtable.admin.v2.BigtableTableAdmin"}},
+	{Key: "bigtable", Title: "Bigtable", Services: []string{"google.bigtable.v2.Bigtable", "google.bigtable.admin.v2.BigtableTableAdmin", "google.bigtable.admin.v2.BigtableInstanceAdmin"}},
 	{Key: "spanner", Title: "Spanner", Services: []string{"google.spanner.v1.Spanner", "google.spanner.admin.database.v1.DatabaseAdmin", "google.spanner.admin.instance.v1.InstanceAdmin"}},
 	// BigQuery (#993): the community emulator behind CloudBurrow's
 	// validating front, classified by annotations alone, as the other

@@ -30,12 +30,12 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 1 | 1 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 38 | 17 | 17 | 4 | 0 |
+| BigQuery | 38 | 16 | 18 | 4 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 6 | 6 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **82** | **31** | **38** | **8** | **5** |
+| **Total** | **82** | **30** | **39** | **8** | **5** |
 
 ## Cloud Storage
 
@@ -223,6 +223,7 @@ Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`),
 | Terraform resources beyond the verified set (#1304): Firestore and Bigtable admin resources (`google_firestore_database`, `_index`, `google_bigtable_instance`: the emulators serve no admin API for them) and Spanner instance updates (the emulator does not update instances, #1331), Logging bucket config and linked dataset (#1332), `google_project_service` (no Service Usage API, #1352), a worker pool's `scaling_mode` (#1354) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access and row access policies, partitioned and clustered tables and query jobs, Firestore documents, Bigtable tables, Spanner instances and databases) | L |
 | Terraform resources beyond the verified set (#1304): Firestore and Bigtable admin resources (`google_firestore_database`, `_index`, `google_bigtable_instance`: the emulators serve no admin API for them) and Spanner instance updates (the emulator does not update instances, #1331), Logging bucket config and linked dataset (#1332) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, BigQuery dataset access and row access policies, Firestore documents, Bigtable tables, Spanner instances and databases) | L |
 | Terraform resources beyond the verified set (#1304): Firestore and Bigtable admin resources (`google_firestore_database`, `_index`, `google_bigtable_instance`: the emulators serve no admin API for them) and Spanner instance updates (the emulator does not update instances, #1331), Logging bucket config and linked dataset (#1332), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access and row access policies, partitioned and clustered tables and query jobs, Firestore documents, Bigtable tables, Spanner instances and databases, `google_project_service` through the Service Usage API, #1352) | L |
+| Terraform resources beyond the verified set (#1304): `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), Logging bucket config and linked dataset (#1332) | partly verified (Pub/Sub schemas, secret versions, Storage ACLs and managed folders, Scheduler HTTP targets, BigQuery dataset access and row access policies, Firestore documents, databases, indexes and fields (the Admin API the call front serves), Bigtable instances (the instance admin API the Bigtable front serves) and tables, Spanner instances and databases) | L |
 
 ## Console
 

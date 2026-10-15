@@ -30,8 +30,8 @@ import (
 //
 // The document goes over the documents REST API at firestore_custom_endpoint;
 // the table over gRPC at BIGTABLE_EMULATOR_HOST, which the wrapper sets for
-// the provider. google_bigtable_instance, the instance admin API the
-// emulator does not serve, fails locally: docs/compatibility.md. Firestore's
+// the provider. google_bigtable_instance is
+// TestTerraformBigtableInstance. Firestore's
 // admin resources are TestTerraformFirestoreDatabaseIndexAndField, Spanner's
 // TestTerraformSpannerInstanceAndDatabase.
 func TestTerraformFirestoreDocumentAndBigtableTable(t *testing.T) {
