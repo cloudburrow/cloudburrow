@@ -1,6 +1,7 @@
 package run
 
 import (
+	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,11 +128,41 @@ func TestV1RoundTripAndRefusals(t *testing.T) {
 		back.GetTemplate().GetContainers()[0].GetImage() != "ghcr.io/x/y@sha256:abc" || back.GetTemplate().GetTimeout().GetSeconds() != 30 {
 		t.Errorf("round trip = %v", back)
 	}
+	// gcloud run deploy's default startup probe, volumes, mounts and the
+	// service account map onto v2's (#1297) and convert back unchanged.
 	in := toV1Service(v2, k)
-	in.Spec.Template.Spec.Volumes = []*runv1.Volume{{Name: "v"}}
-	in.Spec.Template.Spec.Containers[0].StartupProbe = &runv1.Probe{}
+	in.Spec.Template.Spec.ServiceAccountName = "sa@demo-project.iam.gserviceaccount.com"
+	in.Spec.Template.Spec.Volumes = []*runv1.Volume{
+		{Name: "creds", Secret: &runv1.SecretVolumeSource{SecretName: "db", Items: []*runv1.KeyToPath{{Key: "latest", Path: "pass"}}}},
+		{Name: "tmp", EmptyDir: &runv1.EmptyDirVolumeSource{Medium: "Memory", SizeLimit: "32Mi"}}}
+	c0 := in.Spec.Template.Spec.Containers[0]
+	c0.VolumeMounts = []*runv1.VolumeMount{{Name: "creds", MountPath: "/s", ReadOnly: true}, {Name: "tmp", MountPath: "/t"}}
+	c0.StartupProbe = &runv1.Probe{TcpSocket: &runv1.TCPSocketAction{Port: 8080}, TimeoutSeconds: 240, PeriodSeconds: 240, FailureThreshold: 1}
+	c0.LivenessProbe = &runv1.Probe{HttpGet: &runv1.HTTPGetAction{Path: "/healthz"}, PeriodSeconds: 5}
+	got, err := fromV1Service(in, v2.GetName())
+	if err != nil {
+		t.Fatalf("fromV1Service = %v", err)
+	}
+	if err := Unsupported(got); err != nil {
+		t.Fatalf("v2 refuses what v1 mapped: %v", err)
+	}
+	gc := got.GetTemplate().GetContainers()[0]
+	if got.GetTemplate().GetServiceAccount() == "" || gc.GetStartupProbe().GetTcpSocket().GetPort() != 8080 ||
+		gc.GetLivenessProbe().GetHttpGet().GetPath() != "/healthz" || len(gc.GetVolumeMounts()) != 2 ||
+		got.GetTemplate().GetVolumes()[1].GetEmptyDir().GetMedium() != runpb.EmptyDirVolumeSource_MEMORY {
+		t.Errorf("v1 fields = %v", got.GetTemplate())
+	}
+	again := toV1Template(got).Spec
+	if again.ServiceAccountName != in.Spec.Template.Spec.ServiceAccountName || again.Volumes[0].Secret.Items[0].Key != "latest" ||
+		!again.Containers[0].VolumeMounts[0].ReadOnly || again.Containers[0].StartupProbe.TimeoutSeconds != 240 {
+		t.Errorf("v1 read back = %+v", again)
+	}
+
+	in = toV1Service(v2, k)
+	in.Spec.Template.Spec.Volumes = []*runv1.Volume{{Name: "v", Csi: &runv1.CSIVolumeSource{Driver: "gcsfuse.run.googleapis.com"}}}
+	in.Spec.Template.Spec.Containers[0].ReadinessProbe = &runv1.Probe{}
 	_, err = fromV1Service(in, v2.GetName())
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "volumes") || !strings.Contains(err.Error(), "startupProbe") {
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "volumes") || !strings.Contains(err.Error(), "readinessProbe") {
 		t.Errorf("unmapped fields = %v; want Unimplemented naming them", err)
 	}
 }

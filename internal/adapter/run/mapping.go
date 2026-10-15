@@ -57,15 +57,9 @@ type podTemplate interface {
 // prefix is the template's path in the request: "template" for a service,
 // "template.template" for a job.
 func podTemplateGaps(prefix string, tmpl podTemplate) []string {
-	var gaps []string
-	if len(tmpl.GetVolumes()) > 0 {
-		gaps = append(gaps, prefix+".volumes: not mapped")
-	}
+	gaps := volumeGaps(prefix, tmpl)
 	if tmpl.GetVpcAccess() != nil {
 		gaps = append(gaps, prefix+".vpcAccess: no VPC exists locally")
-	}
-	if tmpl.GetServiceAccount() != "" {
-		gaps = append(gaps, prefix+".serviceAccount: CloudBurrow performs no authentication")
 	}
 	if tmpl.GetEncryptionKey() != "" {
 		gaps = append(gaps, prefix+".encryptionKey: customer-managed encryption keys (CMEK) are not supported for Cloud Run")
@@ -79,12 +73,6 @@ func podTemplateGaps(prefix string, tmpl podTemplate) []string {
 	}
 	if tmpl.GetNodeSelector() != nil {
 		gaps = append(gaps, prefix+".nodeSelector: there is one kind node and no GPU")
-	}
-	for _, c := range tmpl.GetContainers() {
-		if len(c.GetVolumeMounts()) > 0 {
-			gaps = append(gaps, "container.volumeMounts: not mapped")
-			break
-		}
 	}
 	for _, c := range tmpl.GetContainers() {
 		add := func(set bool, field, why string) {
@@ -192,6 +180,9 @@ func renderService(svc *runpb.Service, namespace, instance string, secrets Secre
 			return "", err
 		}
 	}
+	if err := checkVolumes(tmpl); err != nil {
+		return "", err
+	}
 	// secretKeyRef env vars, recorded so they read back as set (#581).
 	secretEnv := secretEnvRefs(tmpl.GetContainers())
 
@@ -222,6 +213,9 @@ metadata:
 	jsonAnnotation(&b, "        ", annSecretEnv, secretEnv, len(secretEnv) == 0)
 	record := injectedRecord(tmpl.GetContainers(), injected)
 	jsonAnnotation(&b, "        ", annInjectedEnv, record, len(record) == 0)
+	if pc := podConfigAnnotation(tmpl); pc != "" {
+		fmt.Fprintf(&b, "        %s: %q\n", annPodConfig, pc)
+	}
 
 	// Scaling. Cloud Run's min/max instances map onto Knative's autoscaling
 	// annotations, which is one of the few places the two line up directly.
@@ -245,9 +239,12 @@ metadata:
 	if t := tmpl.GetTimeout(); t != nil && t.GetSeconds() > 0 {
 		fmt.Fprintf(&b, "      timeoutSeconds: %d\n", t.GetSeconds())
 	}
+	o := containerRender{project: projectOf(svc.GetName()), secrets: secrets, injected: injected, volumes: tmpl.GetVolumes()}
+	if err := renderVolumes(&b, tmpl.GetVolumes(), o); err != nil {
+		return "", err
+	}
 	b.WriteString("      containers:\n")
-	if err := renderContainers(&b, tmpl.GetContainers(), containerRender{
-		project: projectOf(svc.GetName()), secrets: secrets, injected: injected}); err != nil {
+	if err := renderContainers(&b, tmpl.GetContainers(), o); err != nil {
 		return "", err
 	}
 	renderTraffic(&b, svc.GetTraffic())
@@ -267,6 +264,8 @@ type containerRender struct {
 	// injected is environment the runtime sets, rendered after the
 	// caller's and skipped where the caller set the same name.
 	injected []injectedEnv
+	// volumes are the pod's, so a secret volume's mount is read-only.
+	volumes []*runpb.Volume
 }
 
 // injectedEnv is one runtime-provided environment variable: a literal
@@ -335,6 +334,7 @@ func renderContainers(b *strings.Builder, containers []*runpb.Container, o conta
 		if err := renderEnv(b, c.GetEnv(), o); err != nil {
 			return err
 		}
+		renderVolumeMounts(b, c.GetVolumeMounts(), o.volumes)
 		if r := c.GetResources(); r != nil && len(r.GetLimits()) > 0 {
 			b.WriteString("          resources:\n            limits:\n")
 			for _, k := range sortedKeys(r.GetLimits()) {
@@ -491,6 +491,7 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 		}
 		svc.Template.Containers = append(svc.Template.Containers, container)
 	}
+	readPodConfig(tann, svc.Template)
 	if cc := k.Spec.Template.Spec.ContainerConcurrency; cc > 0 {
 		svc.Template.MaxInstanceRequestConcurrency = int32(cc)
 	}

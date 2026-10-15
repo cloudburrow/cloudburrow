@@ -643,16 +643,19 @@ func toV1Template(svc *runpb.Service) *runv1.RevisionTemplate {
 		Spec: &runv1.RevisionSpec{
 			ContainerConcurrency: int64(tmpl.GetMaxInstanceRequestConcurrency()),
 			TimeoutSeconds:       tmpl.GetTimeout().GetSeconds(),
-			Containers:           toV1Containers(tmpl.GetContainers()),
+			Containers:           toV1Containers(tmpl.GetContainers(), tmpl.GetVolumes()),
+			ServiceAccountName:   tmpl.GetServiceAccount(),
+			Volumes:              toV1Volumes(tmpl.GetVolumes()),
 		},
 	}
 }
 
-func toV1Containers(cs []*runpb.Container) []*runv1.Container {
+func toV1Containers(cs []*runpb.Container, volumes []*runpb.Volume) []*runv1.Container {
 	var out []*runv1.Container
 	for _, c := range cs {
 		v := &runv1.Container{Name: c.GetName(), Image: c.GetImage(), Command: c.GetCommand(), Args: c.GetArgs(),
-			WorkingDir: c.GetWorkingDir()}
+			WorkingDir: c.GetWorkingDir(), StartupProbe: toV1Probe(c.GetStartupProbe()), LivenessProbe: toV1Probe(c.GetLivenessProbe()),
+			VolumeMounts: toV1Mounts(c.GetVolumeMounts(), volumes)}
 		if l := c.GetResources().GetLimits(); len(l) > 0 {
 			v.Resources = &runv1.ResourceRequirements{Limits: l}
 		}
@@ -759,7 +762,8 @@ func toV1Revision(rev *runpb.Revision, kr krev) *runv1.Revision {
 	return &runv1.Revision{
 		ApiVersion: "serving.knative.dev/v1", Kind: "Revision", Metadata: m,
 		Spec: &runv1.RevisionSpec{ContainerConcurrency: int64(rev.GetMaxInstanceRequestConcurrency()),
-			Containers: toV1Containers(rev.GetContainers())},
+			Containers: toV1Containers(rev.GetContainers(), rev.GetVolumes()), ServiceAccountName: rev.GetServiceAccount(),
+			Volumes: toV1Volumes(rev.GetVolumes())},
 		Status: &runv1.RevisionStatus{ObservedGeneration: rev.GetObservedGeneration(), ServiceName: id,
 			Conditions: v1Conditions(kr.Status.Conditions)},
 	}
@@ -829,8 +833,8 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 	if ts.TimeoutSeconds > 0 {
 		svc.Template.Timeout = durationpb.New(time.Duration(ts.TimeoutSeconds) * time.Second)
 	}
-	svc.Template.ServiceAccount = ts.ServiceAccountName // refused by the v2 mapping
-	gap(len(ts.Volumes) > 0, "spec.template.spec.volumes")
+	svc.Template.ServiceAccount = ts.ServiceAccountName
+	svc.Template.Volumes = fromV1Volumes(ts.Volumes, gap)
 	gap(len(ts.ImagePullSecrets) > 0, "spec.template.spec.imagePullSecrets")
 	gap(len(ts.NodeSelector) > 0, "spec.template.spec.nodeSelector")
 	gap(ts.RuntimeClassName != "", "spec.template.spec.runtimeClassName")
@@ -859,11 +863,11 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 			out.Env = append(out.Env, ev)
 		}
 		gap(len(c.EnvFrom) > 0, "container.envFrom")
-		gap(c.LivenessProbe != nil, "container.livenessProbe")
-		gap(c.StartupProbe != nil, "container.startupProbe")
+		out.LivenessProbe = fromV1Probe(c.LivenessProbe, "container.livenessProbe", gap)
+		out.StartupProbe = fromV1Probe(c.StartupProbe, "container.startupProbe", gap)
+		out.VolumeMounts = fromV1Mounts(c.VolumeMounts)
 		gap(c.ReadinessProbe != nil, "container.readinessProbe")
-		gap(c.SecurityContext != nil, "container.securityContext")
-		gap(len(c.VolumeMounts) > 0, "container.volumeMounts")
+		gap(c.SecurityContext != nil && c.SecurityContext.RunAsUser != 0, "container.securityContext.runAsUser")
 		gap(c.ImagePullPolicy != "", "container.imagePullPolicy")
 		gap(c.TerminationMessagePath != "" || c.TerminationMessagePolicy != "", "container.terminationMessage")
 		svc.Template.Containers = append(svc.Template.Containers, out)
