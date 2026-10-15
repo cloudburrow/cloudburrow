@@ -60,6 +60,9 @@ func toProtoSecret(s Secret) *secretmanagerpb.Secret {
 	if !s.Expire.IsZero() {
 		out.Expiration = &secretmanagerpb.Secret_ExpireTime{ExpireTime: timestamppb.New(s.Expire)}
 	}
+	for _, t := range s.Topics {
+		out.Topics = append(out.Topics, &secretmanagerpb.Topic{Name: t})
+	}
 	// Replication is a required field of the resource, so it is always
 	// present in a response even when the caller did not set one.
 	out.Replication = toProtoReplication(s)
@@ -149,8 +152,8 @@ func (g *GRPCServer) CreateSecret(_ context.Context, req *secretmanagerpb.Create
 		return nil, apierror.Wrap(err)
 	}
 	kind, locations := replicationOf(sec.GetReplication())
-	created, err := g.store.CreateSecretExpiring(project, req.GetSecretId(),
-		sec.GetLabels(), sec.GetAnnotations(), expire, kind, locations...)
+	created, err := g.store.CreateSecretWithTopics(project, req.GetSecretId(),
+		sec.GetLabels(), sec.GetAnnotations(), expire, topicNames(sec), kind, locations...)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -185,7 +188,7 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			"update_mask must name at least one field; an empty mask would clear every label"))
 	}
 
-	var updateLabels, updateAnnotations, checkReplication, updateExpire bool
+	var updateLabels, updateAnnotations, checkReplication, updateExpire, updateTopics bool
 	for _, p := range paths {
 		switch {
 		case p == "labels":
@@ -196,11 +199,13 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 			// Either path names the expiration oneof; a mask naming it with
 			// neither field set clears it (#1225).
 			updateExpire = true
+		case p == "topics":
+			updateTopics = true
 		case p == "replication" || strings.HasPrefix(p, "replication."):
 			checkReplication = true
 		default:
 			return nil, apierror.Wrap(apierror.InvalidArgument(
-				"update_mask path %q is not supported; only labels, annotations, expire_time and ttl are mutable", p))
+				"update_mask path %q is not supported; only labels, annotations, expire_time, ttl and topics are mutable", p))
 		}
 	}
 	if err := g.secretEtag(project, id, sec.GetEtag()); err != nil {
@@ -221,11 +226,21 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 		Labels: sec.GetLabels(), Annotations: sec.GetAnnotations(),
 		UpdateLabels: updateLabels, UpdateAnnotations: updateAnnotations,
 		Expire: expire, UpdateExpire: updateExpire,
+		Topics: topicNames(sec), UpdateTopics: updateTopics,
 	})
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	return toProtoSecret(updated), nil
+}
+
+// topicNames are a Secret's topics by name.
+func topicNames(sec *secretmanagerpb.Secret) []string {
+	var out []string
+	for _, t := range sec.GetTopics() {
+		out = append(out, t.GetName())
+	}
+	return out
 }
 
 // replicationUnchanged enforces replication's IMMUTABLE field behaviour

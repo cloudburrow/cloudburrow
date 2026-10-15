@@ -21,7 +21,6 @@ func checkCreatable(sec *secretmanagerpb.Secret) error {
 		set   bool
 	}{
 		{"rotation", sec.GetRotation() != nil},
-		{"topics", len(sec.GetTopics()) > 0},
 		{"version_aliases", len(sec.GetVersionAliases()) > 0},
 		{"version_destroy_ttl", sec.GetVersionDestroyTtl() != nil},
 		{"customer_managed_encryption", sec.GetCustomerManagedEncryption() != nil},

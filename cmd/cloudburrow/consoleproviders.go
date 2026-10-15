@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	urlpkg "net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -3588,11 +3589,12 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		Groups: []console.PropertyGroup{
 			{Heading: "Replication", Properties: replicationProperties(secret)},
 			{Heading: "Expiration", Properties: []console.Property{{Label: "Expire time", Value: secretExpiry(secret)}}},
+			{Heading: "Notifications", Properties: []console.Property{{Label: "Pub/Sub topics", Value: secretTopicsText(secret)}}},
 		},
 		// Replication is fixed at creation in the real API, so the edit form
 		// covers labels and annotations and says so rather than offering a
 		// field the API would refuse.
-		Note: "Labels, annotations and the expiry can be edited. Replication is fixed when " +
+		Note: "Labels, annotations, the expiry and the notification topics can be edited. Replication is fixed when " +
 			"the secret is created.",
 	}
 	if len(secret.Labels) > 0 {
@@ -3631,6 +3633,8 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 					Help: secretExpireTimeHelp + " Clear it, and the TTL, to remove the expiry."},
 				{Name: "ttl", Label: "TTL", Type: "text", Section: "Expiration", Pattern: secretTTLPattern,
 					Help: secretTTLHelp + " It replaces the expire time."},
+				{Name: "topics", Label: "Pub/Sub topics", Type: "textarea", Section: "Notifications",
+					Default: strings.Join(secret.Topics, "\n"), Help: secretTopicsHelp + " Clear it to stop the notifications."},
 			},
 			Note: "Replication cannot be changed after a secret is created, so it " +
 				"is not offered here.",
@@ -3842,12 +3846,21 @@ func (p secretsProvider) Edit(_ context.Context, project string, path []string, 
 	if err != nil {
 		return err
 	}
+	id := lastSegment(path[0])
+	current, err := st.GetSecret(project, id)
+	if err != nil {
+		return err
+	}
+	topics := secretTopicsValue(values["topics"])
 	// Every field is always sent by the form, so each is always updated: a
 	// PATCH that left one alone because the operator did not touch it would
 	// make "clear every label", or "never expire", impossible to express.
-	_, err = st.UpdateSecretFields(project, lastSegment(path[0]), secrets.SecretUpdate{
+	// The topics are the exception: an update naming them sends every topic
+	// a TOPIC_CONFIGURED message (#1259), so they go only when changed.
+	_, err = st.UpdateSecretFields(project, id, secrets.SecretUpdate{
 		Labels: labels, Annotations: annotations, UpdateLabels: true, UpdateAnnotations: true,
 		Expire: expire, UpdateExpire: true,
+		Topics: topics, UpdateTopics: !slices.Equal(topics, current.Topics),
 	})
 	return err
 }
@@ -3860,6 +3873,29 @@ const (
 	secretTTLPattern = `^(\d+(\.\d+)?(ns|us|ms|s|m|h))+$`
 	secretTTLHelp    = "Optional, instead of an expire time. How long from now the secret lives, such as 3600s, 90m or 24h."
 )
+
+// The notification topics field of the secret forms (#1259).
+const secretTopicsHelp = "Optional. Up to 10 Pub/Sub topics, one projects/PROJECT/topics/TOPIC per line, " +
+	"published to when the secret or a version of it changes; each must exist on this instance's Pub/Sub."
+
+// secretTopicsText is a secret's topics as the page shows them.
+func secretTopicsText(sec secrets.Secret) string {
+	if len(sec.Topics) == 0 {
+		return "None"
+	}
+	return strings.Join(sec.Topics, ", ")
+}
+
+// secretTopicsValue reads the topics field: one topic per line or comma.
+func secretTopicsValue(v string) []string {
+	var out []string
+	for _, t := range strings.FieldsFunc(v, func(r rune) bool { return r == '\n' || r == ',' || r == '\r' }) {
+		if t = strings.TrimSpace(t); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
 
 // secretExpiry is a secret's expiry as the page shows it.
 func secretExpiry(sec secrets.Secret) string {
@@ -3921,6 +3957,8 @@ func (p secretsProvider) CreateForm() (string, []console.Field) {
 			Pattern: secretExpireTimePattern, Help: secretExpireTimeHelp},
 		{Name: "ttl", Label: "TTL", Type: "text", Section: "Expiration",
 			Pattern: secretTTLPattern, Help: secretTTLHelp},
+		{Name: "topics", Label: "Pub/Sub topics", Type: "textarea", Section: "Notifications",
+			Help: secretTopicsHelp},
 		{Name: "replication", Label: "Replication policy", Type: "select", Section: "Replication policy",
 			Options: []string{replicationAutomatic, replicationUserManaged}, Default: replicationAutomatic,
 			Help: "Recorded and returned as set; there is one local store either way. It cannot be changed " +
@@ -4008,7 +4046,8 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 		return "", err
 	}
 	id := strings.TrimSpace(values["secretId"])
-	sec, err := st.CreateSecretExpiring(project, id, labels, annotations, expire, kind, locations...)
+	sec, err := st.CreateSecretWithTopics(project, id, labels, annotations, expire,
+		secretTopicsValue(values["topics"]), kind, locations...)
 	if err != nil {
 		return "", err
 	}

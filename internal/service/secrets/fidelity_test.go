@@ -26,7 +26,6 @@ func TestCreateSecretRefusesFieldsItWouldDrop(t *testing.T) {
 	ctx := context.Background()
 	cases := map[string]*secretmanagerpb.Secret{
 		"rotation":            {Replication: automatic(), Rotation: &secretmanagerpb.Rotation{RotationPeriod: durationpb.New(86400e9)}},
-		"topics":              {Replication: automatic(), Topics: []*secretmanagerpb.Topic{{Name: "projects/demo/topics/t"}}},
 		"version_aliases":     {Replication: automatic(), VersionAliases: map[string]int64{"current": 1}},
 		"version_destroy_ttl": {Replication: automatic(), VersionDestroyTtl: durationpb.New(86400e9)},
 	}

@@ -178,6 +178,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Secret Manager has no upstream emulator either, so it too is served
 	// from this process.
 	secretsSvc := newSecretsService(cfg)
+	if secretsSvc != nil {
+		secretsSvc.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
+	}
 	secretsSvc.register(coord)
 	kmsSvc := newKMSService(cfg)
 	kmsSvc.register(coord)

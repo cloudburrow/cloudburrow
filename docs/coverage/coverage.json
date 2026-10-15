@@ -183,7 +183,8 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
@@ -192,28 +193,39 @@
         "tests": [
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:51 TestSecretLifecycle"
+          "test/compat/secrets_test.go:51 TestSecretLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+        ],
+        "unverified": [
+          {
+            "code": "NOT_FOUND",
+            "case": "a topic in Secret.topics that does not exist (Pub/Sub's code for the failed TOPIC_CONFIGURED publish)",
+            "test": "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+          }
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DeleteSecret",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:51 TestSecretLifecycle"
+          "test/compat/secrets_test.go:51 TestSecretLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DestroySecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
         "method": "google.cloud.secretmanager.v1.SecretManagerService/DisableSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
@@ -228,7 +240,8 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/EnableSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
+          "test/compat/secrets_test.go:121 TestSecretVersionLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ]
       },
       {
@@ -245,7 +258,8 @@
         "tests": [
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:51 TestSecretLifecycle"
+          "test/compat/secrets_test.go:51 TestSecretLifecycle",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
         ],
         "unverified": [
           {
@@ -311,6 +325,7 @@
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:361 TestSecretUpdateAppliesOnlyTheMask",
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
           "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace"
         ]
       }

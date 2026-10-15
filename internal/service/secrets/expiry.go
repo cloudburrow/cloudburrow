@@ -86,6 +86,7 @@ func (s *Store) Sweep() (time.Time, error) {
 			if err := s.deleteSecret(project, id); err != nil {
 				return time.Time{}, err
 			}
+			s.notify(sec, EventSecretDelete, nil, deleteExpiration)
 			continue
 		}
 		if next.IsZero() || sec.Expire.Before(next) {

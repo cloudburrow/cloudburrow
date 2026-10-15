@@ -298,7 +298,8 @@ func TestSecretErrorsUseGoogleCodes(t *testing.T) {
 }
 
 // TestSecretManagerRefusesWhatItWouldDrop: through the official client, a
-// rotation or topics on CreateSecret is UNIMPLEMENTED naming the field,
+// rotation on CreateSecret is UNIMPLEMENTED naming the field (topics are
+// served since #1259, TestSecretManagerTopicNotifications),
 // user-managed replication with no replicas is INVALID_ARGUMENT, a stale
 // etag is FAILED_PRECONDITION and the current one succeeds, and an access
 // carries the payload's CRC32C, which Google's samples verify (#580).
@@ -309,7 +310,6 @@ func TestSecretManagerRefusesWhatItWouldDrop(t *testing.T) {
 	auto := &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{Automatic: &secretmanagerpb.Replication_Automatic{}}}
 	for field, sec := range map[string]*secretmanagerpb.Secret{
 		"rotation": {Replication: auto, Rotation: &secretmanagerpb.Rotation{RotationPeriod: durationpb.New(24 * time.Hour)}},
-		"topics":   {Replication: auto, Topics: []*secretmanagerpb.Topic{{Name: "projects/" + h.Project() + "/topics/rotations"}}},
 	} {
 		_, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: "refused-" + field, Secret: sec})
 		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), field) {

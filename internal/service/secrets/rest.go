@@ -141,6 +141,12 @@ type jsonSecret struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 	Etag        string            `json:"etag,omitempty"`
 	ExpireTime  string            `json:"expireTime,omitempty"`
+	Topics      []jsonTopic       `json:"topics,omitempty"`
+}
+
+// jsonTopic is a Secret's Pub/Sub topic (#1259).
+type jsonTopic struct {
+	Name string `json:"name"`
 }
 
 type jsonVersion struct {
@@ -172,6 +178,9 @@ func renderSecret(s Secret) jsonSecret {
 	}
 	if !s.Expire.IsZero() {
 		out.ExpireTime = s.Expire.UTC().Format(time.RFC3339Nano)
+	}
+	for _, t := range s.Topics {
+		out.Topics = append(out.Topics, jsonTopic{Name: t})
 	}
 	return out
 }
@@ -285,7 +294,7 @@ func (h *RESTServer) patchSecret(w http.ResponseWriter, r *http.Request) error {
 	if _, err := NewGRPCServer(h.store).UpdateSecret(r.Context(), &secretmanagerpb.UpdateSecretRequest{
 		Secret: &secretmanagerpb.Secret{Name: SecretName(project, secret), Labels: body.GetLabels(),
 			Annotations: body.GetAnnotations(), Etag: body.GetEtag(), Replication: body.GetReplication(),
-			Expiration: body.GetExpiration()},
+			Expiration: body.GetExpiration(), Topics: body.GetTopics()},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: paths},
 	}); err != nil {
 		return err

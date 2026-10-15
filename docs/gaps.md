@@ -27,7 +27,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 1 | 0 | 0 | 0 |
 | Cloud KMS | 7 | 1 | 3 | 2 | 1 |
-| Secret Manager | 3 | 1 | 1 | 0 | 1 |
+| Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 2 | 2 | 0 | 0 | 0 |
 | Vertex AI | 5 | 4 | 1 | 0 | 0 |
 | BigQuery | 23 | 7 | 13 | 3 | 0 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 2 | 2 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 4 | 4 | 0 | 0 | 0 |
-| **Total** | **85** | **41** | **32** | **7** | **5** |
+| **Total** | **84** | **40** | **32** | **7** | **5** |
 
 ## Cloud Storage
 
@@ -131,11 +131,10 @@ methods (#1212), and their console (#1219).
 
 IAM conditions are excluded (below). Closed: `RotateSecret`, `EnableManagedRotation` and
 `Secret.rotation` (#1215), `Secret.expire_time` / `ttl` (#1225), and `ListSecrets` /
-`ListSecretVersions` filters (#1228).
+`ListSecretVersions` filters (#1228), and `Secret.topics` event notifications to Pub/Sub (#1259).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `Secret.topics`: event notifications to Pub/Sub are refused (#1259) | not built yet | M |
 | `customer_managed_encryption` on a replica or the automatic policy | no emulator support (needs KMS-backed CMEK) | M |
 | Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) | needs live GCP | S |
 

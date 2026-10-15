@@ -190,8 +190,6 @@ var unsetSecretFields = map[string]bool{
 	"replication.user_managed.replicas.customer_managed_encryption.kms_key_name": true,
 	"replication.automatic.customerManagedEncryption":                            true,
 	"replication.automatic.customer_managed_encryption":                          true,
-	"topics":              true,
-	"topics.name":         true,
 	"version_aliases":     true,
 	"version_destroy_ttl": true,
 }
@@ -202,7 +200,7 @@ func secretFieldKind(field string) (byte, bool) {
 	switch {
 	case field == "name", field == "replication.automatic", field == "replication.user_managed.replicas.location",
 		strings.HasPrefix(field, "labels."), strings.HasPrefix(field, "annotations."),
-		field == "labels", field == "annotations":
+		field == "labels", field == "annotations", field == "topics", field == "topics.name":
 		return 's', true
 	case field == "create_time", field == "expire_time":
 		return 't', true
@@ -268,6 +266,8 @@ func secretField(r any, field string) (filterValue, bool) {
 		return filterValue{set: true, strs: []string{""}, kind: 's'}, true
 	case field == "replication.user_managed.replicas.location":
 		return strValue(s.ReplicaLocations...), true
+	case field == "topics" || field == "topics.name":
+		return strValue(s.Topics...), true
 	}
 	return filterValue{}, unsetSecretFields[field]
 }
