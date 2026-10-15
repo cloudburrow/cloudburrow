@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/iam"
@@ -156,48 +157,105 @@ func TestBigQueryModelsOfADatasetWithNone(t *testing.T) {
 	wantHTTPStatus(t, "Model.Delete (models.delete)", m.Delete(ctx), http.StatusNotFound)
 }
 
-// TestBigQueryDatasetUpdatesAreRefused records that the front refuses
-// datasets.patch and datasets.update: the emulator answered both 200 and
-// kept nothing, so a datasets.get afterwards read the dataset as before. The
-// dataset is unchanged after the refusal.
+// TestBigQueryDatasetUpdatesAreSaved drives datasets.patch through the Go
+// client's Dataset.Update (which sends only the fields set, labels to delete
+// as null, and the etag as If-Match), and datasets.update through the
+// generated client, and reads each change back with datasets.get (#1205).
+// The emulator answered both 200 and kept nothing (#1200); bigquery-emulator
+// patch 0010 and the front (datasetupdate.go) now save them.
 //
-// covers: bigquery.datasets.patch (unimplemented), bigquery.datasets.update (unimplemented), bigquery.datasets.undelete (unimplemented)
-func TestBigQueryDatasetUpdatesAreRefused(t *testing.T) {
+// covers: bigquery.datasets.patch, bigquery.datasets.update, bigquery.datasets.undelete (unimplemented)
+func TestBigQueryDatasetUpdatesAreSaved(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
 	svc := bigqueryService(t, h)
-	ds, _ := seedOrders(t, h, c)
 	ctx := h.Context()
+	ds := c.Dataset("compat_dsupdate")
+	if err := ds.Create(ctx, &bigquery.DatasetMetadata{Description: "compat", Labels: map[string]string{"a": "1", "b": "2"}}); err != nil {
+		t.Fatalf("Dataset.Create: %v", err)
+	}
+	t.Cleanup(func() { _ = ds.Delete(h.Context()) })
 
-	_, err := ds.Update(ctx, bigquery.DatasetMetadataToUpdate{Description: "patched"}, "")
-	wantNotImplemented(t, "bigquery.datasets.patch", err)
-	_, err = svc.Datasets.Update(project, ds.DatasetID, &bq.Dataset{
-		DatasetReference: &bq.DatasetReference{ProjectId: project, DatasetId: ds.DatasetID}, Description: "updated",
-	}).Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.datasets.update", err)
+	before, err := ds.Metadata(ctx)
+	if err != nil {
+		t.Fatalf("Dataset.Metadata: %v", err)
+	}
+	if before.ETag == "" {
+		t.Fatalf("Dataset.Metadata gave no etag")
+	}
+
+	// A patch of the fields set only (a field mask), under the dataset's etag.
+	dm := bigquery.DatasetMetadataToUpdate{
+		Name:                       "Friendly",
+		DefaultTableExpiration:     2 * time.Hour,
+		DefaultPartitionExpiration: 3 * time.Hour,
+		DefaultCollation:           "und:ci",
+		MaxTimeTravel:              72 * time.Hour,
+		Access:                     []*bigquery.AccessEntry{{Role: bigquery.ReaderRole, EntityType: bigquery.SpecialGroupEntity, Entity: "projectReaders"}},
+	}
+	dm.SetLabel("c", "3")
+	dm.DeleteLabel("b")
+	got, err := ds.Update(ctx, dm, before.ETag)
+	if err != nil {
+		t.Fatalf("Dataset.Update (datasets.patch): %v", err)
+	}
 	md, err := ds.Metadata(ctx)
 	if err != nil {
 		t.Fatalf("Dataset.Metadata: %v", err)
 	}
-	if md.Description != "compat" {
-		t.Errorf("description after the refusals = %q, want %q", md.Description, "compat")
+	if md.Name != "Friendly" || md.Description != "compat" || md.DefaultTableExpiration != 2*time.Hour ||
+		md.DefaultPartitionExpiration != 3*time.Hour || md.DefaultCollation != "und:ci" || md.MaxTimeTravel != 72*time.Hour ||
+		md.Labels["a"] != "1" || md.Labels["c"] != "3" || len(md.Labels) != 2 || len(md.Access) != 1 {
+		t.Errorf("after the patch, Metadata = %+v (labels %v, access %d)", md, md.Labels, len(md.Access))
+	}
+	if md.ETag == before.ETag || md.ETag != got.ETag {
+		t.Errorf("etag after the patch = %q (answered %q, before %q)", md.ETag, got.ETag, before.ETag)
+	}
+
+	// The old etag no longer matches: 412, and nothing changed.
+	_, err = ds.Update(ctx, bigquery.DatasetMetadataToUpdate{Description: "stale"}, before.ETag)
+	wantHTTPStatus(t, "Dataset.Update with a stale etag", err, http.StatusPreconditionFailed)
+	if md2, err := ds.Metadata(ctx); err != nil || md2.Description != "compat" {
+		t.Errorf("after the refused patch: %v, description %q", err, md2.Description)
+	}
+
+	// An update replaces the dataset: what it leaves out is cleared.
+	_, err = svc.Datasets.Update(project, ds.DatasetID, &bq.Dataset{
+		DatasetReference: &bq.DatasetReference{ProjectId: project, DatasetId: ds.DatasetID}, Description: "updated",
+	}).Context(ctx).Do()
+	if err != nil {
+		t.Fatalf("datasets.update: %v", err)
+	}
+	md, err = ds.Metadata(ctx)
+	if err != nil {
+		t.Fatalf("Dataset.Metadata: %v", err)
+	}
+	if md.Description != "updated" || md.Name != "" || len(md.Labels) != 0 || md.DefaultTableExpiration != 0 {
+		t.Errorf("after the update, Metadata = %+v", md)
 	}
 
 	_, err = svc.Datasets.Undelete(project, ds.DatasetID+"_gone", &bq.UndeleteDatasetRequest{}).Context(ctx).Do()
 	wantNotImplemented(t, "bigquery.datasets.undelete", err)
 }
 
-// TestBigQueryServiceAccountIsRefused records that the front refuses
-// projects.getServiceAccount: the emulator answered 200 with no email.
+// TestBigQueryServiceAccount reads the project's BigQuery service agent
+// through the generated client (#1205): the emulator answered 200 with no
+// email (#1200).
 //
-// covers: bigquery.projects.getServiceAccount (unimplemented)
-func TestBigQueryServiceAccountIsRefused(t *testing.T) {
+// covers: bigquery.projects.getServiceAccount
+func TestBigQueryServiceAccount(t *testing.T) {
 	h := New(t)
 	_, project := bigqueryClient(t, h)
 	svc := bigqueryService(t, h)
 
-	_, err := svc.Projects.GetServiceAccount(project).Context(h.Context()).Do()
-	wantNotImplemented(t, "bigquery.projects.getServiceAccount", err)
+	got, err := svc.Projects.GetServiceAccount(project).Context(h.Context()).Do()
+	if err != nil {
+		t.Fatalf("projects.getServiceAccount: %v", err)
+	}
+	if got.Kind != "bigquery#getServiceAccountResponse" || !strings.HasPrefix(got.Email, "bq-") ||
+		!strings.HasSuffix(got.Email, "@bigquery-encryption.iam.gserviceaccount.com") {
+		t.Errorf("projects.getServiceAccount = %+v", got)
+	}
 }
 
 // TestBigQueryRowAccessPoliciesAreRefused records that the front refuses

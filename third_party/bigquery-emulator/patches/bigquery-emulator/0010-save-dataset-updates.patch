@@ -1,0 +1,82 @@
+CloudBurrow patch 10 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1205).
+
+The bug: datasets.patch and datasets.update changed the dataset the
+request had read (Dataset.UpdateContentIfExists, Dataset.UpdateContent)
+and answered it, but never wrote it to the metadata store, which every
+request reads its project and datasets from: a datasets.get afterwards
+read the dataset as it was before (measured, #1200).
+
+The patch writes the changed metadata with Repository.UpdateDataset, in
+a transaction as datasets.delete makes one, through a new Dataset.Save.
+What a patch merges and an update replaces is unchanged here: CloudBurrow's
+front sends both methods as a datasets.update of the whole dataset, merged
+as BigQuery merges a patch (internal/bigqueryfront/datasetupdate.go).
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/metadata/dataset.go
++++ b/internal/metadata/dataset.go
+@@ -100,6 +100,11 @@
+ 	d.content = newContent
+ }
+ 
++// Save writes the dataset's metadata, as it is now, to the repository.
++func (d *Dataset) Save(ctx context.Context, tx *sql.Tx) error {
++	return d.repo.UpdateDataset(ctx, tx, d)
++}
++
+ func (d *Dataset) Insert(ctx context.Context, tx *sql.Tx) error {
+ 	return d.repo.AddDataset(ctx, tx, d)
+ }
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1001,6 +1001,9 @@
+ 
+ func (h *datasetsPatchHandler) Handle(ctx context.Context, r *datasetsPatchRequest) (*bigqueryv2.Dataset, error) {
+ 	r.dataset.UpdateContentIfExists(r.newDataset)
++	if err := saveDataset(ctx, r.server, r.project, r.dataset); err != nil {
++		return nil, err
++	}
+ 	newContent := *r.dataset.Content()
+ 	return &newContent, nil
+ }
+@@ -1037,10 +1040,34 @@
+ 
+ func (h *datasetsUpdateHandler) Handle(ctx context.Context, r *datasetsUpdateRequest) (*bigqueryv2.Dataset, error) {
+ 	r.dataset.UpdateContent(r.newDataset)
++	if err := saveDataset(ctx, r.server, r.project, r.dataset); err != nil {
++		return nil, err
++	}
+ 	newContent := *r.dataset.Content()
+ 	return &newContent, nil
+ }
+ 
++// saveDataset writes dataset's metadata, as changed, to the metadata
++// store, which every request reads its project and datasets from.
++func saveDataset(ctx context.Context, server *Server, project *metadata.Project, dataset *metadata.Dataset) error {
++	conn, err := server.connMgr.Connection(ctx, project.ID, dataset.ID)
++	if err != nil {
++		return fmt.Errorf("failed to get connection: %w", err)
++	}
++	tx, err := conn.Begin(ctx)
++	if err != nil {
++		return fmt.Errorf("failed to start transaction: %w", err)
++	}
++	defer tx.RollbackIfNotCommitted()
++	if err := dataset.Save(ctx, tx.Tx()); err != nil {
++		return fmt.Errorf("failed to update dataset: %w", err)
++	}
++	if err := tx.Commit(); err != nil {
++		return fmt.Errorf("failed to commit dataset update: %w", err)
++	}
++	return nil
++}
++
+ func (h *jobsCancelHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+ 	ctx := r.Context()
+ 	server := serverFromContext(ctx)
