@@ -521,7 +521,8 @@ func (f front) insertDataset(w http.ResponseWriter, r *http.Request) {
 			DatasetID string `json:"datasetId"`
 		} `json:"datasetReference"`
 	}
-	if _, ok := decode(r, &body); !ok {
+	raw, ok := decode(r, &body)
+	if !ok {
 		f.next.ServeHTTP(w, r)
 		return
 	}
@@ -536,7 +537,36 @@ func (f front) insertDataset(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "duplicate", "Already Exists: Dataset "+projectOf(f.base)+":"+id)
 		return
 	}
+	if b, ok := withDefaultAccess(raw); ok {
+		setBody(r, b)
+	}
 	f.next.ServeHTTP(w, r)
+}
+
+// defaultDatasetAccess is the access list BigQuery gives a dataset created
+// without one: the project's readers, writers and owners, by their special
+// groups. BigQuery adds the creator too, as an OWNER by userByEmail; a
+// local caller has no identity, so that entry is left out. The emulator
+// gives such a dataset no access at all, and Terraform's
+// google_bigquery_dataset_iam_* resources, which read the access list as the
+// dataset's policy, crash on its absence (#1304).
+var defaultDatasetAccess = json.RawMessage(`[{"role":"WRITER","specialGroup":"projectWriters"},` +
+	`{"role":"OWNER","specialGroup":"projectOwners"},{"role":"READER","specialGroup":"projectReaders"}]`)
+
+// withDefaultAccess returns a datasets.insert body with BigQuery's default
+// access list when it names none, and false when it names one or is not a
+// JSON object.
+func withDefaultAccess(body []byte) ([]byte, bool) {
+	var content map[string]json.RawMessage
+	if json.Unmarshal(body, &content) != nil || content == nil {
+		return nil, false
+	}
+	if a, ok := content["access"]; ok && !bytes.Equal(bytes.TrimSpace(a), []byte("null")) {
+		return nil, false
+	}
+	content["access"] = defaultDatasetAccess
+	b, err := json.Marshal(content)
+	return b, err == nil
 }
 
 // insertTable checks tables.insert's body, or with update, tables.update's

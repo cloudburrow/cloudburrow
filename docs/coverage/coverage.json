@@ -68,7 +68,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:208 TestConsolePermissionsOnAQueue",
-          "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced"
+          "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_iam_more_test.go:29 TestTerraformStoredIAM"
         ]
       },
       {
@@ -143,7 +144,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:208 TestConsolePermissionsOnAQueue",
-          "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced"
+          "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_iam_more_test.go:29 TestTerraformStoredIAM"
         ]
       },
       {
@@ -270,7 +272,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
-          "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
+          "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_iam_more_test.go:29 TestTerraformStoredIAM"
         ]
       },
       {
@@ -331,7 +334,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
-          "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced"
+          "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_iam_more_test.go:29 TestTerraformStoredIAM"
         ]
       },
       {
@@ -1813,7 +1817,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
-          "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
+          "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_iam_more_test.go:29 TestTerraformStoredIAM"
         ],
         "unverified": [
           {
@@ -1833,7 +1838,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
-          "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
+          "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_iam_more_test.go:29 TestTerraformStoredIAM"
         ],
         "unverified": [
           {
@@ -3554,6 +3560,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageacl_test.go:40 TestStorageBucketACL",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
@@ -3571,6 +3578,7 @@
         "tests": [
           "test/compat/storageacl_test.go:163 TestStorageACLUniformAccess",
           "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
@@ -3579,7 +3587,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageacl_test.go:163 TestStorageACLUniformAccess",
-          "test/compat/storageacl_test.go:40 TestStorageBucketACL"
+          "test/compat/storageacl_test.go:40 TestStorageBucketACL",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists"
         ]
       },
       {
@@ -3587,6 +3596,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
@@ -3644,6 +3654,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnABucket",
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
+          "test/compat/terraform_iam_more_test.go:29 TestTerraformStoredIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
@@ -3746,6 +3757,7 @@
           "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnABucket",
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
           "test/compat/storageiam_test.go:59 TestStorageBucketIAMStaleEtag",
+          "test/compat/terraform_iam_more_test.go:29 TestTerraformStoredIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ],
         "unverified": [
@@ -3788,6 +3800,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageacl_test.go:84 TestStorageObjectACL",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
@@ -3804,6 +3817,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
@@ -3812,7 +3826,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageacl_test.go:163 TestStorageACLUniformAccess",
-          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
+          "test/compat/storageacl_test.go:84 TestStorageObjectACL",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists"
         ]
       },
       {
@@ -3820,6 +3835,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
@@ -4018,6 +4034,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageacl_test.go:84 TestStorageObjectACL",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
@@ -4034,6 +4051,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
@@ -4041,7 +4059,8 @@
         "method": "storage.objectAccessControls.list",
         "status": "Verified",
         "tests": [
-          "test/compat/storageacl_test.go:84 TestStorageObjectACL"
+          "test/compat/storageacl_test.go:84 TestStorageObjectACL",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists"
         ]
       },
       {
@@ -4049,6 +4068,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageacl_test.go:217 TestStorageACLMethods",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
@@ -4168,6 +4188,7 @@
           "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
           "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
+          "test/compat/terraform_iam_more_test.go:136 TestTerraformStorageACLLists",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
@@ -6061,6 +6082,7 @@
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
+          "test/compat/terraform_iam_more_test.go:238 TestTerraformBigQueryDatasetIAM",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
@@ -6073,6 +6095,7 @@
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
+          "test/compat/terraform_iam_more_test.go:238 TestTerraformBigQueryDatasetIAM",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
@@ -6085,6 +6108,7 @@
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
+          "test/compat/terraform_iam_more_test.go:238 TestTerraformBigQueryDatasetIAM",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
@@ -6102,7 +6126,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerymethods_test.go:170 TestBigQueryDatasetUpdatesAreSaved",
-          "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess"
+          "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
+          "test/compat/terraform_iam_more_test.go:238 TestTerraformBigQueryDatasetIAM"
         ]
       },
       {
