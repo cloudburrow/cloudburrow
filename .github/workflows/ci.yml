@@ -798,9 +798,10 @@ jobs:
       # flags. Most of the suite runs in the storage shard; the Cloud KMS and
       # Cloud Run screens are served only by the run shard's instance, so the
       # tests named TestKMS* and TestCloudRun* run there instead (#700), and
-      # the BigQuery, Firestore, Datastore and Cloud SQL screens only by the
-      # emulators shard's, so TestBigQuery*, TestFirestore*, TestDatastore*
-      # and TestCloudSQL* run there (#854, #868, #995). Every test selected for the shard must pass: go test
+      # the BigQuery, Firestore, Datastore, Cloud SQL and Bigtable screens only
+      # by the emulators shard's, so TestBigQuery*, TestFirestore*,
+      # TestDatastore*, TestCloudSQL* and TestBigtable* run there (#854, #868,
+      # #995, #1198). Every test selected for the shard must pass: go test
       # exits 0 on a skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
         if: matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators'
@@ -832,11 +833,12 @@ jobs:
           # cluster the prediction fixture is loaded into (#869), from
           # scripts/compat-env.sh as in the step above; --strict fails,
           # naming it, on any that is missing. The emulators shard's also
-          # the Datastore and Firestore emulators, which its tests write
-          # and read back through with the official clients (#895); the
+          # the Datastore, Firestore and Bigtable emulators, which its tests
+          # write and read back through with the official clients (#895,
+          # #1198); the
           # other shards run neither.
           BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
-          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE; fi
+          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE; fi
           BROWSER_ENV=$(scripts/compat-env.sh --strict --only "$BROWSER_VARS" --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
           eval "$BROWSER_ENV"
 
