@@ -393,13 +393,13 @@ func TestStorageWriteRefusesMalformedRequests(t *testing.T) {
 		req  *storagepb.AppendRowsRequest
 		code codes.Code
 	}{
-		"no write_stream":    {rowsReq("", true, nil, testRow(t, 1, nil)), codes.InvalidArgument},
-		"no writer_schema":   {rowsReq(ws.GetName(), false, nil, testRow(t, 1, nil)), codes.InvalidArgument},
-		"no rows":            {&storagepb.AppendRowsRequest{WriteStream: ws.GetName()}, codes.InvalidArgument},
-		"arrow rows":         {&storagepb.AppendRowsRequest{WriteStream: ws.GetName(), Rows: &storagepb.AppendRowsRequest_ArrowRows{}}, codes.Unimplemented},
-		"a stream not made":  {rowsReq("projects/p-1/datasets/ds/tables/t/streams/x", true, nil, testRow(t, 1, nil)), codes.NotFound},
-		"a table not there":  {rowsReq("projects/p-1/datasets/ds/tables/gone/streams/_default", true, nil, testRow(t, 1, nil)), codes.NotFound},
-		"a malformed stream": {rowsReq("projects/p-1/streams/x", true, nil, testRow(t, 1, nil)), codes.InvalidArgument},
+		"no write_stream":       {rowsReq("", true, nil, testRow(t, 1, nil)), codes.InvalidArgument},
+		"no writer_schema":      {rowsReq(ws.GetName(), false, nil, testRow(t, 1, nil)), codes.InvalidArgument},
+		"no rows":               {&storagepb.AppendRowsRequest{WriteStream: ws.GetName()}, codes.InvalidArgument},
+		"arrow rows, no schema": {&storagepb.AppendRowsRequest{WriteStream: ws.GetName(), Rows: &storagepb.AppendRowsRequest_ArrowRows{ArrowRows: &storagepb.AppendRowsRequest_ArrowData{}}}, codes.InvalidArgument},
+		"a stream not made":     {rowsReq("projects/p-1/datasets/ds/tables/t/streams/x", true, nil, testRow(t, 1, nil)), codes.NotFound},
+		"a table not there":     {rowsReq("projects/p-1/datasets/ds/tables/gone/streams/_default", true, nil, testRow(t, 1, nil)), codes.NotFound},
+		"a malformed stream":    {rowsReq("projects/p-1/streams/x", true, nil, testRow(t, 1, nil)), codes.InvalidArgument},
 	} {
 		if got := respCode(openAppend(t, ctx, c).send(tc.req)); got != tc.code {
 			t.Errorf("%s: %s, want %s", name, got, tc.code)

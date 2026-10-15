@@ -74,10 +74,11 @@ import (
 //     NOT_FOUND. The table's schema is returned.
 //   - GetWriteStream: a stream the front made, or a table's "_default"
 //     stream (COMMITTED); the schema only in the FULL view.
-//   - AppendRows: write_stream and proto_rows.writer_schema are required
-//     in the first request of a connection and may be left out of the
-//     rest, which use the connection's. Rows are proto_rows only
-//     (arrow_rows is UNIMPLEMENTED). An offset must be the stream's next
+//   - AppendRows: write_stream and the rows' writer_schema (proto_rows'
+//     or arrow_rows') are required in the first request of a connection
+//     and may be left out of the rest, which use the connection's. Rows
+//     are proto_rows (storagewriterows.go) or arrow_rows, an Arrow record
+//     batch (storagewritearrow.go, #1327). An offset must be the stream's next
 //     row: ALREADY_EXISTS below it, OUT_OF_RANGE above it, and no offset
 //     is allowed on the default stream. The result's offset is the append's
 //     first row; the default stream's has none. A row that does not decode
@@ -672,6 +673,16 @@ type appendConn struct {
 	stream string
 	schema *descriptorpb.DescriptorProto
 	convs  map[string]convResult
+	// arrowSchema is the connection's Arrow writer schema (arrow_rows),
+	// serialized; arrowConvs its converters, by stream.
+	arrowSchema []byte
+	arrowConvs  map[string]arrowConvResult
+}
+
+type arrowConvResult struct {
+	conv   *arrowConv
+	fields []field
+	err    error
 }
 
 type convResult struct {
@@ -685,7 +696,7 @@ type convResult struct {
 // writer schema, no rows) ends it; an append that fails is answered with
 // its error, and the connection goes on.
 func (w *storageWrite) appendRows(ss grpc.ServerStream) error {
-	c := &appendConn{convs: map[string]convResult{}}
+	c := &appendConn{convs: map[string]convResult{}, arrowConvs: map[string]arrowConvResult{}}
 	for {
 		var in rawFrame
 		if err := ss.RecvMsg(&in); err != nil {
@@ -726,23 +737,32 @@ func (w *storageWrite) appendOne(ctx context.Context, c *appendConn, req *storag
 			return nil, status.Error(codes.InvalidArgument, "write_stream is required in the first request of an AppendRows connection")
 		}
 	}
-	pr := req.GetProtoRows()
-	if pr == nil {
-		if req.GetArrowRows() != nil {
-			return nil, status.Error(codes.Unimplemented, "Not implemented here: AppendRows with arrow_rows. Nothing was written. "+
-				"Send the rows as proto_rows.")
+	pr, ar := req.GetProtoRows(), req.GetArrowRows()
+	switch {
+	case pr != nil:
+		if ws := pr.GetWriterSchema(); ws != nil {
+			if ws.GetProtoDescriptor() == nil {
+				return nil, status.Error(codes.InvalidArgument, "proto_rows.writer_schema.proto_descriptor is required")
+			}
+			if c.schema == nil || !proto.Equal(c.schema, ws.GetProtoDescriptor()) {
+				c.schema, c.convs = ws.GetProtoDescriptor(), map[string]convResult{}
+			}
+		} else if c.schema == nil {
+			return nil, status.Error(codes.InvalidArgument, "proto_rows.writer_schema is required in the first request of an AppendRows connection")
 		}
-		return nil, status.Error(codes.InvalidArgument, "proto_rows is required: the rows to append")
-	}
-	if ws := pr.GetWriterSchema(); ws != nil {
-		if ws.GetProtoDescriptor() == nil {
-			return nil, status.Error(codes.InvalidArgument, "proto_rows.writer_schema.proto_descriptor is required")
+	case ar != nil:
+		if ws := ar.GetWriterSchema(); ws != nil {
+			if len(ws.GetSerializedSchema()) == 0 {
+				return nil, status.Error(codes.InvalidArgument, "arrow_rows.writer_schema.serialized_schema is required")
+			}
+			if !bytes.Equal(c.arrowSchema, ws.GetSerializedSchema()) {
+				c.arrowSchema, c.arrowConvs = ws.GetSerializedSchema(), map[string]arrowConvResult{}
+			}
+		} else if c.arrowSchema == nil {
+			return nil, status.Error(codes.InvalidArgument, "arrow_rows.writer_schema is required in the first request of an AppendRows connection")
 		}
-		if c.schema == nil || !proto.Equal(c.schema, ws.GetProtoDescriptor()) {
-			c.schema, c.convs = ws.GetProtoDescriptor(), map[string]convResult{}
-		}
-	} else if c.schema == nil {
-		return nil, status.Error(codes.InvalidArgument, "proto_rows.writer_schema is required in the first request of an AppendRows connection")
+	default:
+		return nil, status.Error(codes.InvalidArgument, "proto_rows or arrow_rows is required: the rows to append")
 	}
 	st, err := w.stream(ctx, name)
 	if err != nil {
@@ -761,24 +781,52 @@ func (w *storageWrite) appendOne(ctx context.Context, c *appendConn, req *storag
 			"DEFAULT_VALUE. CloudBurrow does not apply column default values. Nothing was written.")), nil
 	}
 
-	cr, ok := c.convs[name]
-	if !ok {
-		cr.fields, cr.err = w.writableFields(ctx, st.table)
-		if cr.err == nil {
-			var md, derr = writerDescriptor(c.schema)
-			if derr != nil {
-				cr.err = derr
-			} else {
-				cr.conv, cr.err = newRowConv(md, cr.fields, "")
+	var (
+		rows    []json.RawMessage
+		rowErrs []*storagepb.RowError
+	)
+	if pr != nil {
+		cr, ok := c.convs[name]
+		if !ok {
+			cr.fields, cr.err = w.writableFields(ctx, st.table)
+			if cr.err == nil {
+				var md, derr = writerDescriptor(c.schema)
+				if derr != nil {
+					cr.err = derr
+				} else {
+					cr.conv, cr.err = newRowConv(md, cr.fields, "")
+				}
 			}
+			c.convs[name] = cr
 		}
-		c.convs[name] = cr
+		if cr.err != nil {
+			return appendFailed(name, cr.err), nil
+		}
+		serialized := pr.GetRows().GetSerializedRows()
+		rows, rowErrs, err = convertRows(cr.fields, len(serialized), func(i int) (map[string]any, error) { return cr.conv.row(serialized[i]) })
+	} else {
+		cr, ok := c.arrowConvs[name]
+		if !ok {
+			cr.fields, cr.err = w.writableFields(ctx, st.table)
+			if cr.err == nil {
+				var schema, serr = arrowWriterSchema(c.arrowSchema)
+				if serr != nil {
+					cr.err = serr
+				} else {
+					cr.conv, cr.err = newArrowConv(schema, cr.fields)
+				}
+			}
+			c.arrowConvs[name] = cr
+		}
+		if cr.err != nil {
+			return appendFailed(name, cr.err), nil
+		}
+		objs, objErrs, derr := cr.conv.rows(c.arrowSchema, ar.GetRows().GetSerializedRecordBatch())
+		if derr != nil {
+			return appendFailed(name, derr), nil
+		}
+		rows, rowErrs, err = convertRows(cr.fields, len(objs), func(i int) (map[string]any, error) { return objs[i], objErrs[i] })
 	}
-	if cr.err != nil {
-		return appendFailed(name, cr.err), nil
-	}
-
-	rows, rowErrs, err := convertRows(cr.conv, cr.fields, pr.GetRows().GetSerializedRows())
 	if err != nil {
 		return appendFailed(name, err), nil
 	}
@@ -845,18 +893,19 @@ func (w *storageWrite) appendOne(ctx context.Context, c *appendConn, req *storag
 	return &storagepb.AppendRowsResponse{WriteStream: name, Response: &storagepb.AppendRowsResponse_AppendResult_{AppendResult: result}}, nil
 }
 
-// convertRows writes each serialized row as insertAll's JSON, checked as
+// convertRows writes each of n rows, row(i) (a proto row's or an Arrow
+// row's object), as insertAll's JSON, checked as
 // insertAll checks a row, so that a PENDING or BUFFERED stream's rows fail
 // when appended, as BigQuery's do. A row that fails is a row error; a
 // value the emulator cannot store is an UNIMPLEMENTED error.
-func convertRows(rc *rowConv, fields []field, serialized [][]byte) ([]json.RawMessage, []*storagepb.RowError, error) {
-	rows := make([]json.RawMessage, 0, len(serialized))
+func convertRows(fields []field, n int, row func(int) (map[string]any, error)) ([]json.RawMessage, []*storagepb.RowError, error) {
+	rows := make([]json.RawMessage, 0, n)
 	var rowErrs []*storagepb.RowError
 	fail := func(i int, format string, args ...any) {
 		rowErrs = append(rowErrs, &storagepb.RowError{Index: int64(i), Code: storagepb.RowError_FIELDS_ERROR, Message: fmt.Sprintf(format, args...)})
 	}
-	for i, b := range serialized {
-		obj, err := rc.row(b)
+	for i := 0; i < n; i++ {
+		obj, err := row(i)
 		if err != nil {
 			fail(i, "%v", err)
 			continue
