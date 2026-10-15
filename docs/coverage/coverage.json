@@ -378,7 +378,8 @@
         "method": "google.cloud.run.v2.Jobs/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_iam_test.go:256 TestTerraformRunIAM"
         ]
       },
       {
@@ -406,7 +407,8 @@
         "method": "google.cloud.run.v2.Jobs/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced"
+          "test/compat/runiam_test.go:139 TestRunJobIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_iam_test.go:256 TestTerraformRunIAM"
         ],
         "unverified": [
           {
@@ -477,7 +479,8 @@
         "method": "google.cloud.run.v2.Services/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_iam_test.go:256 TestTerraformRunIAM"
         ]
       },
       {
@@ -499,7 +502,8 @@
         "method": "google.cloud.run.v2.Services/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced"
+          "test/compat/runiam_test.go:84 TestRunServiceIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_iam_test.go:256 TestTerraformRunIAM"
         ],
         "unverified": [
           {
@@ -3798,7 +3802,8 @@
         "method": "bigquery.datasets.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
@@ -3806,7 +3811,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly"
+          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
@@ -3814,7 +3820,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
-          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly"
+          "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
@@ -3957,7 +3964,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
-          "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete"
+          "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
@@ -3965,21 +3973,24 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryroutines_test.go:144 TestConsoleBigQueryRoutines",
-          "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete"
+          "test/compat/bigqueryroutines_test.go:29 TestBigQueryRoutinesListGetDelete",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
         "method": "bigquery.routines.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:124 TestBigQueryRoutineIAMIsStoredNotEnforced"
+          "test/compat/bigqueryiam_test.go:124 TestBigQueryRoutineIAMIsStoredNotEnforced",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
         "method": "bigquery.routines.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryfloat_test.go:205 TestBigQueryDropSchemaDropsRoutinesInsertFunctions"
+          "test/compat/bigqueryfloat_test.go:205 TestBigQueryDropSchemaDropsRoutinesInsertFunctions",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
@@ -3994,7 +4005,8 @@
         "method": "bigquery.routines.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:124 TestBigQueryRoutineIAMIsStoredNotEnforced"
+          "test/compat/bigqueryiam_test.go:124 TestBigQueryRoutineIAMIsStoredNotEnforced",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
@@ -4088,7 +4100,8 @@
         "method": "bigquery.tables.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
@@ -4097,21 +4110,24 @@
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerydml_test.go:192 TestBigQueryTablePatchLabelsAndDescription",
-          "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten"
+          "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
         "method": "bigquery.tables.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:40 TestBigQueryTableIAMIsStoredNotEnforced"
+          "test/compat/bigqueryiam_test.go:40 TestBigQueryTableIAMIsStoredNotEnforced",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
         "method": "bigquery.tables.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery"
+          "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
@@ -4136,7 +4152,8 @@
         "method": "bigquery.tables.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:40 TestBigQueryTableIAMIsStoredNotEnforced"
+          "test/compat/bigqueryiam_test.go:40 TestBigQueryTableIAMIsStoredNotEnforced",
+          "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
       {
