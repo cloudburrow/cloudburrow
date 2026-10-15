@@ -33,6 +33,9 @@ const gcloudMarker = "# Written by `cloudburrow gcloud-setup`; `cloudburrow gclo
 // so is not one of the services --services selects.
 const resourceManagerService config.Service = "resourcemanager"
 
+// serviceUsageService keys Service Usage, always served beside it (#1352).
+const serviceUsageService config.Service = "serviceusage"
+
 // gcloudVerified are the services whose gcloud use docs/compatibility.md
 // marks Verified; no other endpoint is written, so gcloud never believes a
 // service is local that has not been shown to work.
@@ -66,6 +69,9 @@ var gcloudVerified = []struct {
 	// TestGcloudProjectsThroughGcloudSetup drives list, create, describe and
 	// delete through this override alone.
 	{resourceManagerService, "cloudresourcemanager", "/", true},
+	// Service Usage (#1352): gcloud services list, enable and disable call
+	// v1, which gcloud appends. TestGcloudServices drives them.
+	{serviceUsageService, "serviceusage", "/", true},
 	// Cloud Run (#1293): gcloud run calls the v1 (Knative) API, served on
 	// the Run port beside v2. A command given --region calls
 	// {region}-{host}, which gcloud derives from this override, so on
@@ -77,6 +83,10 @@ var gcloudVerified = []struct {
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.
 	{sqlAdminEndpoint, "sql", "/", false},
+	// Memorystore for Redis (#1302): the admin API's JSON on its port;
+	// gcloud redis appends v1/. TestGcloudRedis creates, describes, lists,
+	// updates and deletes an instance, given --region.
+	{memorystoreAdminEndpoint, "redis", "/", false},
 }
 
 // gcloudFamilies is the gcloud-setup help's list of what it writes, from
@@ -124,16 +134,20 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		config.ServiceKMS: cfg.Endpoints.KMS, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceTasks: cfg.Endpoints.Tasks,
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
 		resourceManagerService: cfg.Endpoints.ResourceManager, config.ServiceRun: cfg.Endpoints.Run,
-		sqlAdminEndpoint: cfg.Endpoints.SQLAdmin}
+		sqlAdminEndpoint: cfg.Endpoints.SQLAdmin, memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
+		serviceUsageService: cfg.Endpoints.ServiceUsage}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask
-	// Service Usage, which is not served, whether an API is enabled before
-	// commands such as `run deploy` (#1297); every served API is enabled.
+	// Service Usage whether an API is enabled before commands such as `run
+	// deploy` (#1297), and offer to enable it. Service Usage is served since
+	// #1352, but a disable there is recorded, not enforced, so the prompt
+	// would only stand between a command and an API that answers anyway.
 	fmt.Fprintf(&b, "[core]\nproject = %s\ndisable_usage_reporting = true\nshould_prompt_to_enable_api = false\n", cfg.DefaultProject())
 	b.WriteString("\n[api_endpoint_overrides]\n")
 	for _, v := range gcloudVerified {
-		on := v.always || serviceEnabled(cfg, v.service) || (v.service == sqlAdminEndpoint && sqlAdminEnabled(cfg))
+		on := v.always || serviceEnabled(cfg, v.service) || (v.service == sqlAdminEndpoint && sqlAdminEnabled(cfg)) ||
+			(v.service == memorystoreAdminEndpoint && serviceEnabled(cfg, config.ServiceMemorystore))
 		if on && ports[v.service] != 0 {
 			addr := host(ports[v.service])
 			if ip := net.ParseIP(cfg.BindAddress); v.service == config.ServiceRun && ip != nil && ip.IsLoopback() {

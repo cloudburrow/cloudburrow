@@ -105,8 +105,8 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication, backups, replicas and failover,
-clones, imports and exports, and SSL certificates. See
+What answers 501, saying why: IAM database authentication, point-in-time recovery, failover
+replicas and high availability, cascading, cross-region and external-primary replicas, the project-level Backups API, imports and exports, and SSL certificates. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
 ### Creating instances (#1330)
@@ -126,11 +126,44 @@ connectors reach through 3307.
 | `settings.tier` | Required, recorded and answered. The server is not sized by it. |
 | `settings.databaseFlags` | Passed to the server: `-c name=value` to `postgres`, `--name=value` to `mysqld`. A patch that changes them starts the server again with them; a flag the server rejects fails the operation with its words. `cloudsql.*` flags (IAM authentication, Cloud SQL's extensions) are 501. |
 | `settings.userLabels`, `deletionProtectionEnabled`, other settings | Recorded and answered. `delete` of a protected instance is 400, as on Cloud SQL. |
-| `masterInstanceName`, `replicaConfiguration`, `availabilityType: REGIONAL` | 501: no replicas or standby. |
+| `masterInstanceName` | A read replica: see [Read replicas](#read-replicas-1330). |
+| `replicaConfiguration.failoverTarget`, `failoverReplica`, `availabilityType: REGIONAL` | 501: no standby or failover. |
 
 The operation `insert` returns is `RUNNING` until the server serves through its tunnel, then
 `DONE` (or `DONE` with the server's error, and the instance `FAILED`). `delete` removes the
 server, its Service and its volume. `restart` restarts its pod.
+
+### Read replicas (#1330)
+
+`instances.insert` with `masterInstanceName` (and `instanceType: READ_REPLICA_INSTANCE`, which
+may be left out) creates a replica: a server of its own, as above, replicating from its primary
+by the engine's own replication. `databaseVersion` and `tier` default to the primary's.
+
+- **PostgreSQL:** the primary gets a replication role, `cloudsqlreplica`, and a `replication`
+  line for it in `pg_hba.conf`; the replica's data directory is a `pg_basebackup -R -X stream`
+  of the primary, taken once, so it starts as a hot standby streaming from it. A write on it is
+  refused by the server (`cannot execute INSERT in a read-only transaction`).
+- **MySQL:** the primary's GTIDs are turned on by MySQL's online procedure (`SET PERSIST
+  gtid_mode`, as every Cloud SQL for MySQL instance has them) and it gets a `cloudsqlreplica`
+  user; the replica, with its own `server_id`, loads the primary's databases with
+  `mysqldump --set-gtid-purged=ON` and replicates with `SOURCE_AUTO_POSITION`, with
+  `super_read_only` on, so a write is refused by the server. Its `root` is the primary's.
+
+The replica answers `instanceType: READ_REPLICA_INSTANCE`, `masterInstanceName`
+(`{project}:{primary}`), `replicaConfiguration` and `settings.databaseReplicationEnabled`; the
+primary answers `replicaNames`, and `delete` of a primary with replicas is 400 until they are
+deleted or promoted. `stopReplica` and `startReplica` pause and resume replication
+(`pg_wal_replay_pause` and `resume`; `STOP REPLICA` and `START REPLICA`). `promoteReplica`
+makes it a standalone primary (`pg_promote()`; `STOP REPLICA`, `RESET REPLICA ALL` and
+`read_only` off, persisted). The connector reaches a replica like any instance. On the console, an
+instance's page offers **Create read replica**, and a replica's **Promote**, **Stop replication**
+and **Start replication**.
+
+The primary may be a created instance or a server `up` runs (`postgres` or `mysql`): their
+config allows it (PostgreSQL's `wal_level` is `replica` by default; MySQL's binary log is on,
+and GTIDs are turned on online, persisted in the server's data directory). A replica of a
+replica, of another project's or region's instance, or a failover replica is 501.
+Point-in-time recovery stays 501: it needs WAL and binary logs archived, which is not built.
 
 **The instances `up` runs stay as they are:** `postgres` and `mysql` cannot be patched,
 restarted or deleted through the API; each answers 400 naming the `--services` flag that
@@ -142,7 +175,44 @@ directory, so it is there, with its data, after `stop` and `up`. In ephemeral mo
 kept, and the next `up` removes what an earlier run created.
 
 The console's **Cloud SQL instances** page lists every instance, with Create instance,
-Delete and Restart.
+Delete and Restart; a created instance's page has **Edit instance** (tier, labels, database
+flags, deletion protection, automated backups and their start time, sent as one
+`instances.patch`).
+
+### Backups, restores and clones (#1330)
+
+`backupRuns.insert`, `list`, `get` and `delete`, `instances.restoreBackup` and
+`instances.clone` are served, for created instances and for the servers `up` runs, so
+`gcloud sql backups create`, `list`, `restore` and `delete` work.
+
+- **A backup is a real dump**, taken with the mechanism `cloudburrow snapshot` uses for
+  Cloud SQL: `pg_dump -Fc` of each database (or `mysqldump --single-transaction --routines
+  --triggers --events` of each database but MySQL's own), run inside the server's pod, and
+  kept on the host in `cloudsql-backups/<id>/` in the instance directory. A created
+  PostgreSQL instance's `postgres` database is included, since Cloud SQL gives it to the
+  application; on the server `up` runs it is the maintenance database and is left out.
+- **A restore really restores**: `restoreBackup` drops every application database of the
+  target and loads the backup's, ending the sessions connected to them, so the rows written
+  after the backup are gone. `restoreBackupContext.instanceId` may name another instance of
+  the same engine, as on Cloud SQL. **Users are not in a backup**: roles and MySQL's
+  `mysql` database stay the target's (Cloud SQL restores them too). A MySQL backup runs as
+  `root` with the password the server was started with; one changed afterwards through
+  `users.update` makes the backup fail with MySQL's words.
+- **`instances.clone`** creates a new instance with the source's settings, starts its server,
+  and loads a dump of the source taken then. A clone to a point in time
+  (`pointInTime`, `binLogCoordinates`) and a clone of some databases only are 501.
+- **`settings.backupConfiguration`** (`enabled`, `startTime`, `backupRetentionSettings`) is
+  recorded and answered. **An automated backup is taken at `startTime` (UTC) only if
+  CloudBurrow is running then**; a start time that passes while it is stopped is not made up
+  afterwards. The newest `retainedBackups` automated backups (7 by default) are kept.
+  `pointInTimeRecoveryEnabled` and `binaryLogEnabled` are 501.
+- **Persistence follows the instance's mode**: in persistent mode the dumps and their records
+  (`cloudsql-backups/backups.json`) survive `stop` and `up`; in ephemeral mode the next `up`
+  removes them. Deleting a created instance deletes its backups.
+
+The operation is `BACKUP_VOLUME`, `RESTORE_VOLUME` or `CLONE`, `RUNNING` until the dump or the
+load is done. The console's instance page has a **Backups** tab with **Create backup**,
+**Restore**, **Delete backup** and **Clone**.
 
 ### The Cloud SQL connectors (#1330)
 

@@ -104,6 +104,8 @@ Flags:
     	Cloud Scheduler host port (0 = OS-assigned; default 9008)
   -port-secrets int
     	Secret Manager host port (0 = OS-assigned)
+  -port-serviceusage int
+    	Service Usage API (serviceusage.googleapis.com) host port (0 = OS-assigned; default 9023)
   -port-spanner int
     	Spanner emulator host port (0 = OS-assigned; default 9013)
   -port-spanner-rest int

@@ -156,9 +156,10 @@ row marked **Planned** names a package that does not exist yet.
 | `internal/locations/` | The `google.cloud.location.Locations` mixin's gRPC registration, shared by Cloud Scheduler and Cloud KMS (#1237, #1291). |
 | `internal/service/logging/` | Cloud Logging write and read (`LoggingServiceV2`), built by us (#304). |
 | `internal/service/resourcemanager/` | The project registry, and the Resource Manager v3 and v1 Projects APIs over it (#298, #301). |
-| `internal/service/redisadmin/` | The Memorystore for Redis admin API, built by us over the running Valkey server (#1302). |
+| `internal/service/redisadmin/` | The Memorystore for Redis admin API, built by us over the running Valkey server and a Valkey server per created instance, which `cmd/cloudburrow` provisions in the cluster (#1302). |
 | `internal/service/scheduler/` | Cloud Scheduler, built by us (#302). |
 | `internal/service/secrets/` | Secret Manager v1, built by us; with a cluster, versions are kept as Kubernetes Secrets in the workload namespace. |
+| `internal/service/serviceusage/` | The Service Usage API v1 (which APIs each project has enabled), built by us; enabling an API not served is refused, disabling is stored, not enforced (#1352). |
 | `internal/service/sqladmin/` | The Cloud SQL Admin API (sqladmin v1 and v1beta4) over the PostgreSQL and MySQL servers, built by us (#1301). |
 | `internal/service/storage/` | Cloud Storage, built by us to Google's spec (#485), the only storage backend (#519). |
 | `internal/service/tasks/` | Cloud Tasks queues, tasks and HTTP dispatch, built by us. |

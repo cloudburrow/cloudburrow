@@ -92,6 +92,15 @@ var terraformEndpoints = []terraformEndpoint{
 	// emulator's REST API, Spanner's second port (Endpoints.SpannerREST),
 	// which the call front in its pod serves.
 	{config.ServiceSpanner, "spanner_custom_endpoint", "GOOGLE_SPANNER_CUSTOM_ENDPOINT", "/v1/", true},
+	// Memorystore for Redis (#1302): a google_redis_instance applies, is
+	// reached with its AUTH string, plans clean, updates its size and labels
+	// in place and destroys in TestTerraformRedisInstance, over the admin
+	// API's JSON on its port (Endpoints.MemorystoreAdmin), each instance a
+	// Valkey server of its own.
+	{memorystoreAdminEndpoint, "redis_custom_endpoint", "GOOGLE_REDIS_CUSTOM_ENDPOINT", "/v1/", true},
+	// google_project_service (#1352): the Service Usage API v1 on its own
+	// port, in TestTerraformProjectService.
+	{serviceUsageService, "service_usage_custom_endpoint", "GOOGLE_SERVICE_USAGE_CUSTOM_ENDPOINT", "/v1/", true},
 	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
 	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true},
 	// google_folder (#1294): Resource Manager v3 Folders, on the same port,
@@ -110,6 +119,11 @@ const resourceManagerEndpoint config.Service = "resourcemanager"
 // sqlAdminEndpoint keys the Cloud SQL Admin API row: it is served when
 // either Cloud SQL service is (#1301), and is not a service of its own.
 const sqlAdminEndpoint config.Service = "sqladmin"
+
+// memorystoreAdminEndpoint keys the Memorystore admin API's rows (#1302),
+// apart from the RESP server's "memorystore": it is the CLI's own port,
+// published to pods as cloudburrow-host's "memorystore-admin".
+const memorystoreAdminEndpoint config.Service = "memorystore-admin"
 
 // terraformAccessToken is what the provider presents. CloudBurrow
 // authenticates nothing, so any token works for its own APIs; a fixed one
@@ -140,14 +154,18 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub,
 		config.ServiceTasks: cfg.Endpoints.Tasks, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceRun: cfg.Endpoints.Run,
 		config.ServiceKMS: cfg.Endpoints.KMS, resourceManagerEndpoint: cfg.Endpoints.ResourceManager,
+		serviceUsageService:     cfg.Endpoints.ServiceUsage,
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
 		config.ServiceBigQuery: cfg.Endpoints.BigQuery, sqlAdminEndpoint: cfg.Endpoints.SQLAdmin,
 		config.ServiceFirestore: cfg.Endpoints.Firestore,
 		// The REST port: the provider's Spanner resources use REST, the
 		// client libraries the gRPC one.
 		config.ServiceSpanner: cfg.Endpoints.SpannerREST,
+		// The admin API's port, not the RESP one.
+		memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 	}
-	enabled := map[config.Service]bool{resourceManagerEndpoint: true, sqlAdminEndpoint: sqlAdminEnabled(cfg)}
+	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
+		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
 	for _, s := range cfg.EnabledServices() {
 		enabled[s] = true
 	}

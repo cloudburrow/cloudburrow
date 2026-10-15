@@ -18,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
@@ -36,6 +37,9 @@ type consoleDeps struct {
 	secrets   *secretsService
 	kms       *kmsService
 	scheduler *schedulerService
+	// memorystore is the Memorystore admin API (#1302), whose instances the
+	// Memorystore page creates, edits and deletes.
+	memorystore *memorystoreAdminService
 	// logging is Cloud Logging, whose metrics, sinks and exclusions have
 	// screens of their own (#1226).
 	logging *loggingService
@@ -50,6 +54,9 @@ type consoleDeps struct {
 	// mysql are the instance's generated MySQL passwords, which the Cloud SQL
 	// for MySQL screen reads and administers the server with (#868).
 	mysql components.MySQLCredentials
+	// serviceUsage is the Service Usage API (#1352), whose APIs & Services
+	// page reads and changes the same server.
+	serviceUsage *serviceusage.Server
 }
 
 // runAddrOf is the adapter's live address, or nothing when there is no
@@ -178,6 +185,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
 	}
+	// APIs & Services (#1352): always served, as projects are.
+	if d.serviceUsage != nil {
+		providers = append(providers, serviceUsageProvider{api: d.serviceUsage})
+	}
 	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
 	if enabled[config.ServiceLogging] && d.logging != nil {
 		screen := loggingAdminScreen{svc: d.logging, faults: d.faults}
@@ -202,7 +213,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceCloudSQL, func(a string) console.Provider { return cloudSQLProvider{endpoint: a} }},
 		{config.ServiceCloudSQLMySQL, func(a string) console.Provider { return newCloudSQLMySQLProvider(a, d.mysql) }},
 		// Memorystore's Instances page, through the admin API (#1302).
-		{config.ServiceMemorystore, func(a string) console.Provider { return newMemorystoreProvider(d.cfg, a) }},
+		{config.ServiceMemorystore, func(a string) console.Provider { return newMemorystoreProvider(d.cfg, a, d.memorystore) }},
 		// The emulator serves the instance's default project and no other, so
 		// the screen is told which one that is (#698).
 		{config.ServiceBigQuery, func(a string) console.Provider {

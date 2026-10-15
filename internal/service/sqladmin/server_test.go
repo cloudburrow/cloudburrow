@@ -65,6 +65,9 @@ func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv.EnableInstanceWrites(newFakeProv(), "")
+	if err := srv.EnableBackups(&fakeDumper{data: map[string]string{}}, t.TempDir(), false); err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 	param := regexp.MustCompile(`\{[^}]+\}`)

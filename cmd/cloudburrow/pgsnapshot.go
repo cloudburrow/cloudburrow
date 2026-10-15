@@ -29,22 +29,51 @@ type postgresSnapshotter struct {
 	// exec runs a command in the server's container, with stdin when it is
 	// not nil. A test replaces it.
 	exec func(ctx context.Context, stdin io.Reader, stdout io.Writer, argv ...string) error
+	// superuser is the role the tools run as, components.CloudSQLUser when
+	// empty: a created instance's is postgres (#1330).
+	superuser string
+	// bare is a created instance's server, which has no default database
+	// for Import to recreate.
+	bare bool
 }
 
 func newPostgresSnapshotter(cfg config.Config) *postgresSnapshotter {
+	return &postgresSnapshotter{exec: podExec(cfg, string(config.ServiceCloudSQL))}
+}
+
+// podExec runs a command in deployment's container through the instance's
+// kubeconfig.
+func podExec(cfg config.Config, deployment string) func(ctx context.Context, stdin io.Reader, stdout io.Writer, argv ...string) error {
 	kube := kubeRunner(cfg.KubeconfigPath(), cfg.Cluster.Namespace)
-	return &postgresSnapshotter{exec: func(ctx context.Context, stdin io.Reader, stdout io.Writer, argv ...string) error {
+	return func(ctx context.Context, stdin io.Reader, stdout io.Writer, argv ...string) error {
 		args := []string{"exec"}
 		if stdin != nil {
 			args = append(args, "-i")
 		}
-		args = append(append(args, "deploy/"+string(config.ServiceCloudSQL), "--"), argv...)
+		args = append(append(args, "deploy/"+deployment, "--"), argv...)
 		var stderr bytes.Buffer
 		if err := kube.Pipe(ctx, stdin, stdout, &stderr, args...); err != nil {
 			return fmt.Errorf("%s: %w: %s", argv[0], err, strings.TrimSpace(tail(stderr.String(), 2000)))
 		}
 		return nil
-	}}
+	}
+}
+
+// maintenance is the database psql connects to, which no application
+// uses. A created instance's applications use postgres, which Cloud SQL
+// gives them, so its backups include postgres and template1 is the one.
+func (p *postgresSnapshotter) maintenance() string {
+	if p.bare {
+		return "template1"
+	}
+	return "postgres"
+}
+
+func (p *postgresSnapshotter) user() string {
+	if p.superuser != "" {
+		return p.superuser
+	}
+	return components.CloudSQLUser
 }
 
 func tail(s string, n int) string {
@@ -68,7 +97,7 @@ func pgDumpEntry(i int) string { return fmt.Sprintf("databases/%03d.dump", i) }
 // application uses, so every application database can be dropped from it.
 func (p *postgresSnapshotter) psql(ctx context.Context, statement string) (string, error) {
 	var out bytes.Buffer
-	err := p.exec(ctx, nil, &out, "psql", "-U", components.CloudSQLUser, "-d", "postgres",
+	err := p.exec(ctx, nil, &out, "psql", "-U", p.user(), "-d", p.maintenance(),
 		"-v", "ON_ERROR_STOP=1", "-AtX", "-c", statement)
 	return out.String(), err
 }
@@ -76,7 +105,11 @@ func (p *postgresSnapshotter) psql(ctx context.Context, statement string) (strin
 // databases are the application's: every database but the templates and
 // the maintenance one.
 func (p *postgresSnapshotter) databases(ctx context.Context) ([]string, error) {
-	out, err := p.psql(ctx, "SELECT datname FROM pg_database WHERE NOT datistemplate AND datname <> 'postgres' ORDER BY datname")
+	q := "SELECT datname FROM pg_database WHERE NOT datistemplate AND datname <> 'postgres' ORDER BY datname"
+	if p.bare {
+		q = "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname"
+	}
+	out, err := p.psql(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("list databases: %w", err)
 	}
@@ -120,7 +153,7 @@ func (p *postgresSnapshotter) exportOne(ctx context.Context, w admin.EntryWriter
 	}
 	defer os.Remove(f.Name())
 	defer f.Close()
-	if err := p.exec(ctx, nil, f, "pg_dump", "-U", components.CloudSQLUser, "-d", name, "-Fc", "--no-owner"); err != nil {
+	if err := p.exec(ctx, nil, f, "pg_dump", "-U", p.user(), "-d", name, "-Fc", "--no-owner"); err != nil {
 		return err
 	}
 	size, err := f.Seek(0, io.SeekCurrent)
@@ -149,7 +182,7 @@ func (p *postgresSnapshotter) Import(ctx context.Context, r admin.EntryReader) e
 		return fmt.Errorf("%s: %w", pgDatabasesEntry, err)
 	}
 	for _, name := range names {
-		if name == "" || name == "postgres" || strings.HasPrefix(name, "template") {
+		if name == "" || (name == "postgres" && !p.bare) || strings.HasPrefix(name, "template") {
 			return fmt.Errorf("%s names %q, which is not an application database", pgDatabasesEntry, name)
 		}
 	}
@@ -175,7 +208,7 @@ func (p *postgresSnapshotter) Import(ctx context.Context, r admin.EntryReader) e
 		}
 		restored = restored || name == components.CloudSQLDatabase
 	}
-	if !restored {
+	if !restored && !p.bare {
 		if _, err := p.psql(ctx, "CREATE DATABASE "+quotePGIdent(components.CloudSQLDatabase)); err != nil {
 			return fmt.Errorf("recreate %s: %w", components.CloudSQLDatabase, err)
 		}
@@ -192,6 +225,6 @@ func (p *postgresSnapshotter) importOne(ctx context.Context, r admin.EntryReader
 		return err
 	}
 	defer f.Close()
-	return p.exec(ctx, f, io.Discard, "pg_restore", "-U", components.CloudSQLUser, "-d", name,
+	return p.exec(ctx, f, io.Discard, "pg_restore", "-U", p.user(), "-d", name,
 		"--no-owner", "--exit-on-error")
 }

@@ -82,9 +82,9 @@ const (
 	//
 	// Like Cloud SQL it is a real data plane and not an emulator: Google
 	// publishes no Memorystore emulator, and what runs is an open-source
-	// server of the kind Memorystore for Valkey and for Redis runs. None of
-	// the Memorystore admin API (redis.googleapis.com) is served except its
-	// reads, which describe this one server (#1302).
+	// server of the kind Memorystore for Valkey and for Redis runs. The
+	// Memorystore admin API (redis.googleapis.com) describes this server, and
+	// runs a Valkey server of its own for each instance it creates (#1302).
 	ServiceMemorystore Service = "memorystore"
 	// ServiceCloudSQLMySQL runs a real MySQL in the cluster (#297), the
 	// second Cloud SQL engine beside PostgreSQL, on the same terms: a real
@@ -298,6 +298,10 @@ type Endpoints struct {
 	// in process over the PostgreSQL and MySQL servers above. Bound only
 	// when one of them is enabled.
 	SQLAdmin int `json:"sqladmin"`
+	// ServiceUsage is the host port of the Service Usage API v1
+	// (serviceusage.googleapis.com, #1352), served in process: which APIs
+	// each project has enabled. Always bound, as Resource Manager is.
+	ServiceUsage int `json:"serviceUsage"`
 }
 
 // NamedPort is one host endpoint and the name its --port-<name> flag uses.
@@ -353,6 +357,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"cloudsql-mysql", &e.CloudSQLMySQL},
 		{"cloudsql", &e.CloudSQL},
 		{"sqladmin", &e.SQLAdmin},
+		{"serviceusage", &e.ServiceUsage},
 	}
 }
 
@@ -658,6 +663,9 @@ func Default() Config {
 			// Spanner's second port, its REST API (#1331). 9020 and 9021
 			// are Cloud SQL Admin's and Memorystore's admin APIs.
 			SpannerREST: 9022,
+			// The Service Usage API (#1352), always on beside Resource
+			// Manager: the next free port in the block.
+			ServiceUsage: 9023,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

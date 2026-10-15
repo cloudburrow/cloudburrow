@@ -52,7 +52,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 // clusterScreens are the registry's screens that belong to no selectable
 // service: Resource Manager, the AI catalogue and CloudBurrow's own cluster.
 var clusterScreens = []string{
-	"projects", "hierarchy", "tags", "ai",
+	"projects", "hierarchy", "tags", "serviceusage", "ai",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",
 }
 
@@ -132,14 +132,17 @@ func coverageDeps(t *testing.T) consoleDeps {
 		StateDir: t.TempDir(), Mode: config.ModeEphemeral,
 		Services: config.KnownServices(),
 	}
+	projects := resourcemanager.New(store.NewMemory())
 	d := consoleDeps{
 		cfg:       cfg,
-		projects:  resourcemanager.New(store.NewMemory()),
+		projects:  projects,
 		tasks:     &tasksService{},
 		secrets:   &secretsService{},
 		kms:       &kmsService{},
 		scheduler: &schedulerService{},
 		logging:   &loggingService{},
+		// The APIs & Services page (#1352) reads the Service Usage server.
+		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),
 	}
 	for _, s := range config.KnownServices() {
 		d.forwarders = append(d.forwarders, namedForwarder(t, string(s), "127.0.0.1:1"))

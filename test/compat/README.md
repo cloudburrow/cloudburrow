@@ -87,6 +87,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_KMS` | `CLOUDBURROW_KMS_ENDPOINT` | Cloud KMS, gcloud kms, Terraform |
 | `CLOUDBURROW_TEST_LOGGING` | `CLOUDBURROW_LOGGING_ENDPOINT` | Cloud Logging, gcloud logging |
 | `CLOUDBURROW_TEST_RESOURCEMANAGER` | `CLOUDBURROW_RESOURCEMANAGER_ENDPOINT` | Resource Manager |
+| `CLOUDBURROW_TEST_SERVICEUSAGE` | `CLOUDBURROW_SERVICEUSAGE_ENDPOINT` | the Service Usage API (#1352), gcloud services and Terraform's `google_project_service` |
 | `CLOUDBURROW_TEST_RUN_STORAGE`, `CLOUDBURROW_TEST_RUN_PUBSUB` | as `STORAGE` and `PUBSUB` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER`, `CLOUDBURROW_TEST_RUN_LOGGING` | as `KMS`, `SCHEDULER` and `LOGGING` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_TASKS_LOGGING` | as `LOGGING` | the Cloud Tasks dispatch log (#1256), in the storage shard, so the Logging tests stay in served |

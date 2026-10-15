@@ -71,6 +71,7 @@ var targetEndpoints = []targetEndpoint{
 	{"KMS", envKey("CLOUDBURROW_KMS_ENDPOINT")},
 	{"LOGGING", envKey("CLOUDBURROW_LOGGING_ENDPOINT")},
 	{"RESOURCEMANAGER", envKey("CLOUDBURROW_RESOURCEMANAGER_ENDPOINT")},
+	{"SERVICEUSAGE", envKey("CLOUDBURROW_SERVICEUSAGE_ENDPOINT")},
 	{"SPANNER", envKey("SPANNER_EMULATOR_HOST")},
 	{"SPANNER_REST", envKey("CLOUDBURROW_SPANNER_REST_ENDPOINT")},
 	{"DATASTORE", envKey("DATASTORE_EMULATOR_HOST")},
@@ -82,6 +83,7 @@ var targetEndpoints = []targetEndpoint{
 	{"MYSQL", hostPort("MYSQL_HOST", "MYSQL_PORT")},
 	{"CLOUDSQL", hostPort("PGHOST", "PGPORT")},
 	{"SQLADMIN", envKey("CLOUDBURROW_SQLADMIN_ENDPOINT")},
+	{"MEMORYSTORE_ADMIN", envKey("CLOUDBURROW_MEMORYSTORE_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that
@@ -192,8 +194,10 @@ var gcloudOverrides = []struct {
 	{"cloudscheduler", []string{"SCHEDULER"}},
 	{"logging", []string{"LOGGING", "RUN_LOGGING"}},
 	{"cloudresourcemanager", []string{"RESOURCEMANAGER"}},
+	{"serviceusage", []string{"SERVICEUSAGE"}},
 	{"run", []string{"RUN"}},
 	{"sql", []string{"SQLADMIN"}},
+	{"redis", []string{"MEMORYSTORE_ADMIN"}},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`

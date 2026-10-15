@@ -54,6 +54,7 @@ import (
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 	runv1 "google.golang.org/api/run/v1"
 
+	serviceusagesvc "github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	sqladminsvc "github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -161,6 +162,22 @@ var areas = []area{
 	// PostgreSQL and MySQL servers it runs. Its methods are the discovery
 	// document's, which the server's own table is (internal/service/sqladmin).
 	{Key: "sqladmin", Title: "Cloud SQL Admin API (v1)", Own: true, Methods: sqladminMethods()},
+	// The Service Usage API (#1352): CloudBurrow's own, JSON only, as
+	// Terraform and gcloud call it. No proto, so its methods are the
+	// official generated client's.
+	{Key: "serviceusage", Title: "Service Usage API (v1)", Own: true,
+		Methods: serviceusageMethods()},
+}
+
+// serviceusageMethods is every method of the serviceusage v1 discovery
+// document, from the server's own table (internal/service/serviceusage).
+func serviceusageMethods() []string {
+	var out []string
+	for id := range serviceusagesvc.MethodStatuses() {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // sqladminMethods is every method of the sqladmin v1 discovery document.
@@ -502,12 +519,14 @@ func loadRegistry(root string) (map[string]string, error) {
 			r[id] = regUnimplemented
 		}
 	}
-	// The Cloud SQL Admin API's too (#1301).
-	for id, isBuilt := range sqladminsvc.MethodStatuses() {
-		if isBuilt {
-			r[id] = regImplemented
-		} else {
-			r[id] = regUnimplemented
+	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
+	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses()} {
+		for id, isBuilt := range statuses {
+			if isBuilt {
+				r[id] = regImplemented
+			} else {
+				r[id] = regUnimplemented
+			}
 		}
 	}
 	return r, nil

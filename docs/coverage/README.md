@@ -18,7 +18,7 @@ Do not edit these files by hand.
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 42 | 0 | 1 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 14 | 10 | 0 | 4 | 0 | 0 | 0 | 0 |
-| [Memorystore for Redis](memorystore.md) | 11 | 3 | 0 | 8 | 0 | 0 | 0 | 1 |
+| [Memorystore for Redis](memorystore.md) | 11 | 6 | 0 | 5 | 0 | 0 | 0 | 3 |
 | [Pub/Sub](pubsub.md) | 35 | 33 | 2 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 68 | 0 | 19 | 0 | 0 | 0 | 14 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 24 | 21 | 0 | 0 | 3 | 0 | 0 | 0 |
@@ -28,7 +28,8 @@ Do not edit these files by hand.
 | [Bigtable](bigtable.md) | 50 | 16 | 34 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 33 | 32 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 46 | 1 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 22 | 0 | 58 | 0 | 0 | 0 | 0 |
+| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 31 | 0 | 49 | 0 | 0 | 0 | 0 |
+| [Service Usage API (v1)](serviceusage.md) | 10 | 7 | 0 | 3 | 0 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven

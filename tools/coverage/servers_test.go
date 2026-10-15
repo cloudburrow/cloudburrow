@@ -63,7 +63,9 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	// The Locations mixin is registered once, by KMS above (#1291): Cloud
 	// Scheduler serves it too, on its own port, and the registry key is global.
 	logging.NewServer(logging.NewStore(10)).Register(srv)
-	redisadmin.NewServer(redisadmin.Instance{Project: "coverage"}, nil).Register(srv)
+	redis := redisadmin.NewServer(redisadmin.Instance{Project: "coverage"}, nil)
+	redis.EnableCreate(context.Background(), nil, nil, nil, nil)
+	redis.Register(srv)
 	vertexai.NewServer(nil).RegisterGRPC(srv)
 	adminpb.RegisterFirestoreAdminServer(srv, firestoreadmin.New(""))
 	logging.NewAdmin(store.NewMemory()).Register(srv)
@@ -101,7 +103,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		// The Cloud SQL Admin API's registry is its server's method table,
 		// and TestEveryUnservedMethodIsNotImplemented checks its 501s over
 		// HTTP (internal/service/sqladmin).
-		if strings.HasPrefix(m, "sql.") {
+		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") {
 			continue
 		}
 		// The Cloud Storage gRPC API's proto is registered under

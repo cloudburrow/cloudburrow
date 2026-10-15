@@ -27,7 +27,8 @@
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
-          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
+          "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
         ]
       },
       {
@@ -43,7 +44,8 @@
         "method": "google.cloud.tasks.v2.CloudTasks/DeleteQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks"
+          "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
+          "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
         ]
       },
       {
@@ -76,7 +78,8 @@
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
-          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
+          "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
+          "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
         ]
       },
       {
@@ -165,7 +168,8 @@
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
-          "test/compat/tasksupdate_test.go:27 TestTasksUpdateQueue"
+          "test/compat/tasksupdate_test.go:27 TestTasksUpdateQueue",
+          "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
         ]
       }
     ]
@@ -204,7 +208,8 @@
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
-          "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
+          "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion",
+          "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ],
         "unverified": [
           {
@@ -220,7 +225,8 @@
         "tests": [
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
-          "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
+          "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion",
+          "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ]
       },
       {
@@ -275,7 +281,8 @@
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
-          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications"
+          "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ],
         "unverified": [
           {
@@ -345,7 +352,8 @@
           "test/compat/secrets_test.go:360 TestSecretUpdateAppliesOnlyTheMask",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
-          "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace"
+          "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace",
+          "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ]
       }
     ]
@@ -440,14 +448,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
-          "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
+          "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes",
+          "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
       {
         "method": "google.cloud.run.v2.Jobs/DeleteJob",
         "status": "Verified",
         "tests": [
-          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
       {
@@ -463,7 +473,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
-          "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
+          "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes",
+          "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
       {
@@ -514,7 +525,8 @@
         "method": "google.cloud.run.v2.Jobs/UpdateJob",
         "status": "Verified",
         "tests": [
-          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
       {
@@ -544,14 +556,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
-          "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount"
+          "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount",
+          "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
       {
         "method": "google.cloud.run.v2.Services/DeleteService",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:58 TestRunServiceLifecycle"
+          "test/compat/run_test.go:58 TestRunServiceLifecycle",
+          "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
       {
@@ -568,7 +582,8 @@
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
-          "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount"
+          "test/compat/runvolumes_test.go:113 TestRunServiceVolumesAndServiceAccount",
+          "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
       {
@@ -615,7 +630,8 @@
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
           "test/compat/run_test.go:227 TestRunUpdateService",
           "test/compat/run_test.go:320 TestRunUpdateServiceWithAMask",
-          "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags"
+          "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
+          "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
       {
@@ -636,14 +652,16 @@
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle",
+          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
         ]
       },
       {
         "method": "google.cloud.run.v2.WorkerPools/DeleteWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle",
+          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
         ]
       },
       {
@@ -658,7 +676,8 @@
         "method": "google.cloud.run.v2.WorkerPools/GetWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle",
+          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
         ]
       },
       {
@@ -688,7 +707,8 @@
         "method": "google.cloud.run.v2.WorkerPools/UpdateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:51 TestRunWorkerPoolLifecycle",
+          "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
         ]
       }
     ]
@@ -1099,7 +1119,8 @@
         "tests": [
           "test/compat/kms_purposes_test.go:82 TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM",
           "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
-          "test/compat/kms_test.go:46 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -1178,14 +1199,16 @@
         "method": "google.cloud.kms.v1.KeyManagementService/CreateImportJob",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys"
+          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys",
+          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/CreateKeyRing",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:46 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -1274,7 +1297,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/DestroyCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:415 TestKMSDestroyCryptoKeyVersion"
+          "test/compat/kms_test.go:415 TestKMSDestroyCryptoKeyVersion",
+          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -1362,7 +1386,8 @@
           "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
           "test/compat/kms_test.go:199 TestKMSNamesAreValidatedBeforeLookup",
           "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
-          "test/compat/kms_test.go:46 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -1421,14 +1446,16 @@
         "method": "google.cloud.kms.v1.KeyManagementService/GetImportJob",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys"
+          "test/compat/kms_import_test.go:32 TestKMSImportManuallyWrappedKeys",
+          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ]
       },
       {
         "method": "google.cloud.kms.v1.KeyManagementService/GetKeyRing",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:46 TestKMSResources"
+          "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -1507,7 +1534,8 @@
         "tests": [
           "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources",
-          "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys"
+          "test/compat/kms_test.go:929 TestKMSFullViewAddsNothingForSoftwareKeys",
+          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -1659,7 +1687,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_rotation_test.go:31 TestKMSRotationSchedule",
-          "test/compat/kms_test.go:884 TestKMSUpdateCryptoKey"
+          "test/compat/kms_test.go:884 TestKMSUpdateCryptoKey",
+          "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
           {
@@ -2990,19 +3019,42 @@
     "Key": "memorystore",
     "Title": "Memorystore for Redis",
     "counts": {
-      "Unimplemented": 8,
-      "Verified": 3
+      "Unimplemented": 5,
+      "Verified": 6
     },
     "rows": [
       {
         "method": "google.cloud.redis.v1.CloudRedis/CreateInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
+        ],
+        "unverified": [
+          {
+            "code": "UNIMPLEMENTED",
+            "case": "tier STANDARD_HA (CloudBurrow's own)",
+            "test": "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete"
+          }
+        ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/DeleteInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
+        ],
+        "unverified": [
+          {
+            "code": "FAILED_PRECONDITION",
+            "case": "the instance `up` runs (CloudBurrow's own)",
+            "test": "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer"
+          }
+        ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/ExportInstance",
@@ -3018,20 +3070,26 @@
         "method": "google.cloud.redis.v1.CloudRedis/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
         ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/GetInstanceAuthString",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
         ],
         "unverified": [
           {
             "code": "FAILED_PRECONDITION",
             "case": "an instance with AUTH disabled",
-            "test": "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+            "test": "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer"
           }
         ]
       },
@@ -3044,7 +3102,8 @@
         "method": "google.cloud.redis.v1.CloudRedis/ListInstances",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreadmin_test.go:37 TestMemorystoreAdminDescribesTheServer"
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer"
         ]
       },
       {
@@ -3054,8 +3113,12 @@
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/UpdateInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
+        ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/UpgradeInstance",
@@ -3080,7 +3143,8 @@
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
-          "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
+          "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema",
+          "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ]
       },
       {
@@ -3089,7 +3153,8 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:219 TestPubSubDeleteTopic",
-          "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
+          "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema",
+          "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ]
       },
       {
@@ -4249,7 +4314,8 @@
         "method": "google.storage.v2.Storage/ComposeObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpccompose_test.go:20 TestStorageGRPCComposeDeletesSources"
         ]
       },
       {
@@ -5736,6 +5802,7 @@
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
+          "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
@@ -5747,6 +5814,7 @@
           "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
+          "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
@@ -5758,6 +5826,7 @@
           "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
+          "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
@@ -5824,7 +5893,8 @@
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:200 TestConsoleBigQueryJobPageShowsDMLRows",
-          "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
+          "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
+          "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
         ]
       },
       {
@@ -5856,6 +5926,7 @@
           "test/compat/bigqueryinfoschemajobs_test.go:27 TestBigQueryInformationSchemaJobs",
           "test/compat/bigqueryinfoschemamore_test.go:75 TestBigQueryInformationSchemaPartitionsAndConstraints",
           "test/compat/bigqueryinfoschemaregion_test.go:16 TestBigQueryInformationSchemaRegionViews",
+          "test/compat/bigqueryinfoschemaschemata_test.go:19 TestBigQueryInformationSchemaSchemataOptions",
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryingestiontime_test.go:31 TestBigQueryIngestionTime",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
@@ -5877,7 +5948,8 @@
           "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
-          "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile"
+          "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
+          "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
         ]
       },
       {
@@ -5907,6 +5979,7 @@
           "test/compat/bigqueryinfoschemajobs_test.go:27 TestBigQueryInformationSchemaJobs",
           "test/compat/bigqueryinfoschemamore_test.go:75 TestBigQueryInformationSchemaPartitionsAndConstraints",
           "test/compat/bigqueryinfoschemaregion_test.go:16 TestBigQueryInformationSchemaRegionViews",
+          "test/compat/bigqueryinfoschemaschemata_test.go:19 TestBigQueryInformationSchemaSchemataOptions",
           "test/compat/bigqueryinfoschemaviews_test.go:27 TestBigQueryInformationSchemaViews",
           "test/compat/bigqueryingestiontime_test.go:31 TestBigQueryIngestionTime",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
@@ -6133,6 +6206,7 @@
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
+          "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
@@ -6161,6 +6235,7 @@
           "test/compat/bigqueryviewcolumns_test.go:138 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
+          "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
@@ -6183,6 +6258,7 @@
           "test/compat/bigqueryjsonunknown_test.go:27 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
+          "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
         ]
       },
@@ -6203,7 +6279,8 @@
           "test/compat/bigquerydml_test.go:285 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
           "test/compat/bigquerysilent_test.go:586 TestBigQueryTableUpdateAddsColumns",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
-          "test/compat/consolebigquerywrites_test.go:214 TestConsoleBigQueryEditTableViewsAndInsertOptions"
+          "test/compat/consolebigquerywrites_test.go:214 TestConsoleBigQueryEditTableViewsAndInsertOptions",
+          "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
         ]
       },
       {
@@ -6234,8 +6311,8 @@
     "Key": "sqladmin",
     "Title": "Cloud SQL Admin API (v1)",
     "counts": {
-      "Unimplemented": 58,
-      "Verified": 22
+      "Unimplemented": 49,
+      "Verified": 31
     },
     "rows": [
       {
@@ -6265,26 +6342,35 @@
       },
       {
         "method": "sql.backupRuns.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlbackups_test.go:230 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups"
+        ]
       },
       {
         "method": "sql.backupRuns.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlbackups_test.go:230 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups"
+        ]
       },
       {
         "method": "sql.backupRuns.insert",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlbackups_test.go:230 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups"
+        ]
       },
       {
         "method": "sql.backupRuns.list",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:98 TestSQLAdminRefusesWhatItCannotDoFaithfully"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/cloudsqlbackups_test.go:230 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups"
+        ]
       },
       {
         "method": "sql.blueGreenDeployments.create",
@@ -6316,7 +6402,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlconnector_test.go:36 TestCloudSQLConnectorDialsBothServers",
-          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
         ]
       },
       {
@@ -6324,7 +6411,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlconnector_test.go:36 TestCloudSQLConnectorDialsBothServers",
-          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
         ]
       },
       {
@@ -6336,9 +6424,9 @@
         "method": "sql.databases.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
+          "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:424 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6346,8 +6434,8 @@
         "method": "sql.databases.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6355,9 +6443,9 @@
         "method": "sql.databases.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
+          "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:424 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6365,29 +6453,29 @@
         "method": "sql.databases.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:420 TestGcloudSQL"
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:424 TestGcloudSQL"
         ]
       },
       {
         "method": "sql.databases.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.databases.update",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.flags.list",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:98 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:99 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6433,19 +6521,21 @@
       },
       {
         "method": "sql.instances.clone",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:98 TestSQLAdminRefusesWhatItCannotDoFaithfully"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups"
+        ]
       },
       {
         "method": "sql.instances.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:228 TestGcloudSQLInstances",
-          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
-          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
+          "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
+          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
         ]
       },
       {
@@ -6472,7 +6562,7 @@
         "method": "sql.instances.failover",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:98 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:99 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6480,10 +6570,14 @@
         "method": "sql.instances.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:228 TestGcloudSQLInstances",
-          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlbackups_test.go:230 TestGcloudSQLBackups",
+          "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
-          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
+          "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
+          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
+          "test/compat/sqladmin_test.go:424 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
         ]
       },
@@ -6496,18 +6590,21 @@
         "method": "sql.instances.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:228 TestGcloudSQLInstances",
-          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
-          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
+          "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
+          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
         ]
       },
       {
         "method": "sql.instances.list",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:228 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
-          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:424 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
         ]
       },
@@ -6520,13 +6617,16 @@
         "method": "sql.instances.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
         ]
       },
       {
         "method": "sql.instances.pointInTimeRestore",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/sqladmin_test.go:99 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -6536,8 +6636,11 @@
       },
       {
         "method": "sql.instances.promoteReplica",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
+        ]
       },
       {
         "method": "sql.instances.reencrypt",
@@ -6563,8 +6666,11 @@
       },
       {
         "method": "sql.instances.restoreBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlbackups_test.go:230 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups"
+        ]
       },
       {
         "method": "sql.instances.rotateServerCa",
@@ -6573,13 +6679,17 @@
       },
       {
         "method": "sql.instances.startReplica",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
+        ]
       },
       {
         "method": "sql.instances.stopReplica",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
+        ]
       },
       {
         "method": "sql.instances.switchover",
@@ -6607,11 +6717,13 @@
         "method": "sql.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlinstances_test.go:228 TestGcloudSQLInstances",
-          "test/compat/cloudsqlinstances_test.go:255 TestTerraformSQLDatabaseInstance",
+          "test/compat/cloudsqlbackups_test.go:230 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups",
+          "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
+          "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:424 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6619,7 +6731,7 @@
         "method": "sql.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -6686,7 +6798,7 @@
         "method": "sql.tiers.list",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/sqladmin_test.go:98 TestSQLAdminRefusesWhatItCannotDoFaithfully"
+          "test/compat/sqladmin_test.go:99 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6694,8 +6806,8 @@
         "method": "sql.users.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:424 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6703,15 +6815,15 @@
         "method": "sql.users.get",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.users.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:424 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6719,8 +6831,8 @@
         "method": "sql.users.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:420 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:424 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -6728,8 +6840,91 @@
         "method": "sql.users.update",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:268 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:272 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
+        ]
+      }
+    ]
+  },
+  {
+    "Key": "serviceusage",
+    "Title": "Service Usage API (v1)",
+    "counts": {
+      "Unimplemented": 3,
+      "Verified": 7
+    },
+    "rows": [
+      {
+        "method": "serviceusage.operations.cancel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "serviceusage.operations.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "serviceusage.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.operations.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "serviceusage.services.batchEnable",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.services.batchGet",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.services.disable",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:217 TestGcloudServices",
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.services.enable",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:217 TestGcloudServices",
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.services.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:217 TestGcloudServices",
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.services.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:217 TestGcloudServices",
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
         ]
       }
     ]

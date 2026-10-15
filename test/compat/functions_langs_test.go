@@ -92,10 +92,11 @@ func TestFunctionsRubyBuiltWithBuildpacks(t *testing.T) {
 
 // TestFunctionsPHPBuiltWithBuildpacks (#1319) builds the unmodified
 // testdata/function-php fixture (composer.json pinning
-// google/cloud-functions-framework 1.4.3, index.php) with the pinned Google
-// builder, which detects PHP from composer.json; deploys it through the
-// official Cloud Run v2 client; and asserts the http and cloudevent
-// signatures. The CloudEvent function logs to stderr: a PHP function's
+// google/cloud-functions-framework 1.4.3, index.php) with Google's pinned PHP
+// functions builder, which internal/buildpacks picks for a PHP function (the
+// general builder has none of its own and would run index.php without the
+// framework's router); deploys it through the official Cloud Run v2 client;
+// and asserts the http and cloudevent signatures. The CloudEvent function logs to stderr: a PHP function's
 // standard output is its response.
 func TestFunctionsPHPBuiltWithBuildpacks(t *testing.T) {
 	testLanguageFunction(t, languageFunction{

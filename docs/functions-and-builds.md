@@ -15,24 +15,33 @@ function runs unchanged. The fixtures in `testdata/function` (Go), `testdata/fun
 `testdata/function-ruby` (Ruby), `testdata/function-php` (PHP) and `testdata/function-dotnet`
 (.NET) contain no CloudBurrow-specific code — that is the point.
 
-**Languages.** Go is Verified. Node.js and Python (#1303) have fixtures and gated tests,
-`TestFunctionsNodejsBuiltWithBuildpacks` and `TestFunctionsPythonBuiltWithBuildpacks`, that
-build them with the pinned builder and deploy them through the Cloud Run v2 client, but **no
-run has passed yet** (they need amd64 nodes), so they are Implemented, not Verified. Java,
-Ruby, PHP and .NET (#1319) have the same: fixtures and gated tests,
+**Languages.** Go, Node.js, Python, Java, Ruby, PHP and .NET are Verified. Node.js and Python
+(#1303) and Java, Ruby, PHP and .NET (#1319) have fixtures and gated tests,
+`TestFunctionsNodejsBuiltWithBuildpacks`, `TestFunctionsPythonBuiltWithBuildpacks`,
 `TestFunctionsJavaBuiltWithBuildpacks`, `TestFunctionsRubyBuiltWithBuildpacks`,
-`TestFunctionsPHPBuiltWithBuildpacks` and `TestFunctionsDotnetBuiltWithBuildpacks`, written on
-an arm64 Mac whose kind nodes cannot run the builder's amd64 images, so none has run; what is
-checked on every change is that `buildpacks.Detect` names each fixture's language from its
-manifest (`TestDetectTheFunctionFixtures`). They are Implemented, not Verified.
+`TestFunctionsPHPBuiltWithBuildpacks` and `TestFunctionsDotnetBuiltWithBuildpacks`, that build
+them with the pinned builder and deploy them through the Cloud Run v2 client. All six passed in
+one dated run: 2026-10-15, [run 38805202491](https://github.com/cloudburrow/cloudburrow/actions/runs/38805202491) of `functions.yml` on `fix/1319-php-function`, `ubuntu-24.04` amd64 runner, pack 0.40.9. They need amd64 nodes, so on every change what is checked is
+that `buildpacks.Detect` names each fixture's language from its manifest
+(`TestDetectTheFunctionFixtures`).
+
+**PHP uses Google's PHP functions builder.** `gcr.io/buildpacks/builder` has no PHP Functions
+Framework buildpack: given `GOOGLE_FUNCTION_TARGET` it still builds a PHP web application, nginx
+and php-fpm running `index.php` directly, so the framework's router and autoloader never load
+and a function fails with `Class "Google\CloudFunctions\FunctionsFramework" not found`. Google
+builds PHP functions with its per-language builder,
+`us-docker.pkg.dev/serverless-runtimes/google-22-full/builder/php` (pinned by digest in
+`dependencies.json`), whose functions-framework and cloudfunctions buildpacks serve
+`vendor/google/cloud-functions-framework/router.php`. `internal/buildpacks` picks it for a build
+with a function target whose runtime is PHP; every other build uses the general builder (#1319).
 
 | Signature | Status | Evidence |
 |---|---|---|
 | `http` | **Verified** | `TestFunctionsFrameworkBuiltWithBuildpacks`: `POST /` returns the handler's JSON; a body-less request still answers. Verified by a dated CI run (2026-09-27, run 36357529139, amd64); gated |
 | `cloudevent` | **Verified** | `TestFunctionsFrameworkBuiltWithBuildpacks`: a Google-schema CloudEvent in binary mode reaches the handler, which logs its type, subject and data. Verified by the same run; gated |
 | Errors | **Verified** | `TestFunctionsFrameworkBuiltWithBuildpacks`: a request without `ce-*` headers to a CloudEvent function returns **HTTP 400**. Verified by the same run; gated |
-| Java, Ruby, PHP and .NET, `http` and `cloudevent` | **Implemented, not yet run** | The four #1319 tests assert what the Node.js test does: the greeting, a body-less 200, and the handler logging the event's type, subject and data. No HTTP 400 is asserted for a request with no `ce-*` headers: nothing has measured these frameworks' answer. Gated; no run has passed |
-| Node.js and Python, `http` and `cloudevent` | **Implemented, not yet run** | `TestFunctionsNodejsBuiltWithBuildpacks` and `TestFunctionsPythonBuiltWithBuildpacks` assert what the Go test does for `http` (the greeting, a body-less 200) and `cloudevent` (the handler logs the event's type, subject and data). Only the Python test asserts the HTTP 400 for a request with no `ce-*` headers: the Node.js framework (5.0.5) hands such a body to the function as a structured-mode event instead. Gated; no run has passed |
+| Java, Ruby, PHP and .NET, `http` and `cloudevent` | **Verified** | The four #1319 tests assert what the Node.js test does: the greeting, a body-less 200, and the handler logging the event's type, subject and data. No HTTP 400 is asserted for a request with no `ce-*` headers: nothing has measured these frameworks' answer. Verified by a dated CI run (2026-10-15, run 38805202491, amd64); gated |
+| Node.js and Python, `http` and `cloudevent` | **Verified** | `TestFunctionsNodejsBuiltWithBuildpacks` and `TestFunctionsPythonBuiltWithBuildpacks` assert what the Go test does for `http` (the greeting, a body-less 200) and `cloudevent` (the handler logs the event's type, subject and data). Only the Python test asserts the HTTP 400 for a request with no `ce-*` headers: the Node.js framework (5.0.5) hands such a body to the function as a structured-mode event instead. Verified by the same run (2026-10-15, run 38805202491, amd64); gated |
 
 The tests are in `test/compat` and run only with `CLOUDBURROW_TEST_FUNCTIONS=1`, against an
 instance whose cluster nodes are amd64, with `pack` and Docker installed. They are too slow for
@@ -40,7 +49,8 @@ every merge, so no CI shard runs them; see
 [compatibility.md](compatibility.md#what-ci-does-not-run-and-why). They run on demand in
 [`functions.yml`](../.github/workflows/functions.yml) (`workflow_dispatch` only). The Go rows are
 Verified by one dated run: 2026-09-27, [run 36357529139](https://github.com/cloudburrow/cloudburrow/actions/runs/36357529139) of `functions.yml` on main, `ubuntu-latest` amd64 runner, pack 0.40.9; the test passed in 136s, building `Hello` (`http`) in 58s and
-`Event` (`cloudevent`) in 39s. Nothing re-runs it on merge.
+`Event` (`cloudevent`) in 39s. The Node.js, Python, Java, Ruby, PHP and .NET rows are Verified
+by 2026-10-15, [run 38805202491](https://github.com/cloudburrow/cloudburrow/actions/runs/38805202491) of `functions.yml` on `fix/1319-php-function`, `ubuntu-24.04` amd64 runner, pack 0.40.9, in which all ten Functions tests passed. Nothing re-runs them on merge.
 
 Built images deploy through the established Knative path, like any other image.
 
@@ -118,8 +128,8 @@ The registry must share a Docker network with the build, because the buildpack l
 
 | Behaviour | Status |
 |---|---|
-| Build Node.js and Python source with no Dockerfile | **Implemented, not yet run** — `TestFunctionsNodejsBuiltWithBuildpacks` and `TestFunctionsPythonBuiltWithBuildpacks` build `testdata/function-nodejs` and `testdata/function-python`; gated, and no run has passed |
-| Build Java, Ruby, PHP and .NET source with no Dockerfile | **Implemented, not yet run** — the four #1319 tests build `testdata/function-java`, `-ruby`, `-php` and `-dotnet`; gated, and no run has passed |
+| Build Node.js and Python source with no Dockerfile | **Verified** — `TestFunctionsNodejsBuiltWithBuildpacks` and `TestFunctionsPythonBuiltWithBuildpacks` build `testdata/function-nodejs` and `testdata/function-python`; Verified by a dated CI run (2026-10-15, run 38805202491, amd64); gated |
+| Build Java, Ruby, PHP and .NET source with no Dockerfile | **Verified** — the four #1319 tests build `testdata/function-java`, `-ruby`, `-php` (with Google's PHP functions builder) and `-dotnet`; Verified by the same run (2026-10-15, run 38805202491, amd64); gated |
 | Build Go source with no Dockerfile | **Verified** — `TestFunctionsFrameworkBuiltWithBuildpacks` builds `testdata/function` through `internal/buildpacks`; Verified by a dated CI run (2026-09-27, run 36357529139, amd64); gated |
 | Resulting image runs and answers | **Verified** — the same test deploys it through the Cloud Run v2 client and expects `{"greeting":"hello CloudBurrow"}`; Verified by the same run; gated |
 | Cache reuse on rebuild | **Verified** — `TestFunctionsRebuildReusesLayers` rebuilds unchanged source and asserts pack's log reports reused layers (`Reusing layer '…'`), and that the first build reported none; Verified by a dated run (2026-09-27, macOS/arm64 Docker Desktop, emulated amd64 builder, pack 0.40.9), the rebuild reusing 6 layers, and passed again in the dated CI run (2026-09-27, run 36357529139, amd64), again reusing 6 layers; gated, not run on merge |
@@ -135,6 +145,6 @@ Docker Desktop (emulated amd64 builder, pack 0.40.9), and 2026-09-27, [run 36357
 
 ### Not covered
 
-A passing run of the Node.js, Python, Java, Ruby, PHP and .NET tests · the emulated arm64 build path, which only a run by hand has
+A re-run of the language tests on merge (the workflow is dispatch-only) · the emulated arm64 build path, which only a run by hand has
 exercised (the gated test needs amd64 nodes) · fully offline builds, since the first build
 must fetch the builder.

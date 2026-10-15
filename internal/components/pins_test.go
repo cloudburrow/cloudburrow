@@ -66,14 +66,15 @@ func TestPinsMatchTheInventory(t *testing.T) {
 	inv, unresolved := inventory(t)
 	node := inv["cluster"]["kubernetesNodeImage"]
 	checks := map[string][2]string{
-		"PubSubImage":      {components.PubSubImage, pinned(inv["emulatorBackends"]["googleCloudCliEmulatorsImage"])},
-		"SpannerImage":     {components.SpannerImage, pinned(inv["emulatorBackends"]["spannerEmulator"])},
-		"KnativeVersion":   {components.KnativeVersion, inv["serving"]["knativeServing"].Version},
-		"net-kourier":      {components.KnativeVersion, inv["serving"]["knativeNetKourier"].Version},
-		"DefaultNodeImage": {config.DefaultNodeImage, node.Image + ":" + node.Version + "@" + *node.Digest},
-		"KindVersion":      {doctor.KindVersion, inv["cluster"]["kind"].Version},
-		"BuilderImage":     {buildpacks.BuilderImage, pinned(inv["build"]["buildpacksBuilder"])},
-		"TerminalImage":    {terminal.Image, pinned(inv["consoleTerminal"]["cloudSdkImage"])},
+		"PubSubImage":             {components.PubSubImage, pinned(inv["emulatorBackends"]["googleCloudCliEmulatorsImage"])},
+		"SpannerImage":            {components.SpannerImage, pinned(inv["emulatorBackends"]["spannerEmulator"])},
+		"KnativeVersion":          {components.KnativeVersion, inv["serving"]["knativeServing"].Version},
+		"net-kourier":             {components.KnativeVersion, inv["serving"]["knativeNetKourier"].Version},
+		"DefaultNodeImage":        {config.DefaultNodeImage, node.Image + ":" + node.Version + "@" + *node.Digest},
+		"KindVersion":             {doctor.KindVersion, inv["cluster"]["kind"].Version},
+		"BuilderImage":            {buildpacks.BuilderImage, pinned(inv["build"]["buildpacksBuilder"])},
+		"PHPFunctionBuilderImage": {buildpacks.PHPFunctionBuilderImage, pinned(inv["build"]["buildpacksPHPFunctionBuilder"])},
+		"TerminalImage":           {terminal.Image, pinned(inv["consoleTerminal"]["cloudSdkImage"])},
 	}
 	for name, c := range checks {
 		if c[0] != c[1] {

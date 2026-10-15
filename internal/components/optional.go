@@ -2,6 +2,8 @@ package components
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 )
@@ -408,14 +410,46 @@ func memorystoreBackend(persistent bool) Backend {
 	// maxmemory is the instance's size, as Memorystore sizes one: 1 GB, the
 	// smallest Basic tier instance, which the admin API reports as
 	// memory_size_gb (#1302), with Memorystore's default eviction policy.
-	args := []string{"valkey-server", "--protected-mode", "no", "--maxmemory", "1gb", "--maxmemory-policy", "volatile-lru"}
+	return MemorystoreServer("memorystore", persistent, 1<<30, "", nil)
+}
+
+// MemorystoreServer is a Valkey server of the image and settings the
+// instance `up` runs (memorystoreBackend), named name: the one `up` runs,
+// and each instance the Memorystore admin API's CreateInstance makes
+// (#1302), with that instance's maxmemory in bytes, AUTH string (""
+// for none) and further settings, by Valkey's names. It follows the
+// instance's mode as the first does: an append-only file on a volume of
+// its own when persistent, nothing on disk when ephemeral.
+func MemorystoreServer(name string, persistent bool, maxmemory int64, password string, settings map[string]string) Backend {
+	args := []string{"valkey-server", "--protected-mode", "no", "--maxmemory", fmt.Sprint(maxmemory)}
+	if maxmemory == 1<<30 {
+		args[len(args)-1] = "1gb"
+	}
+	policy := "volatile-lru"
+	if p, ok := settings["maxmemory-policy"]; ok {
+		policy = p
+	}
+	args = append(args, "--maxmemory-policy", policy)
+	keys := make([]string, 0, len(settings))
+	for k := range settings {
+		if k != "maxmemory-policy" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "--"+k, settings[k])
+	}
+	if password != "" {
+		args = append(args, "--requirepass", password)
+	}
 	if persistent {
 		args = append(args, "--dir", "/data", "--appendonly", "yes", "--appendfsync", "everysec")
 	} else {
 		args = append(args, "--save", "", "--appendonly", "no")
 	}
 	return Backend{
-		Name:       "memorystore",
+		Name:       name,
 		Image:      MemorystoreImage,
 		Port:       MemorystorePort,
 		Args:       args,
@@ -507,4 +541,65 @@ func CloudSQLInstanceBackend(name string, mysql, persistent bool, rootPassword s
 	}
 	b.Name = SQLInstancePrefix + name
 	return b
+}
+
+// SQLReplicaSource is the primary a read replica replicates from: its
+// Service in the namespace and the password of its replication user,
+// cloudsqlreplica, as Cloud SQL names it.
+type SQLReplicaSource struct {
+	Host     string
+	Password string
+	// ServerID is the replica's MySQL server_id, which must differ from
+	// its primary's.
+	ServerID uint32
+}
+
+// SQLReplicaUser is the replication user a replica connects to its
+// primary as.
+const SQLReplicaUser = "cloudsqlreplica"
+
+// CloudSQLReplicaBackend makes b, a created instance's server, a read
+// replica of src (#1330). A PostgreSQL replica's data directory is a
+// pg_basebackup of the primary, taken once, written with -R so the server
+// starts as a hot standby streaming from it. A MySQL replica runs with
+// GTIDs and read_only; it is given the primary's data and its replication
+// source once it serves (cmd/cloudburrow's provisioner), as MySQL's own
+// GTID replication setup does.
+func CloudSQLReplicaBackend(b Backend, mysql bool, src SQLReplicaSource) Backend {
+	b.Env = copyEnv(b.Env)
+	b.Env["CLOUDSQL_REPLICATION_PASSWORD"] = src.Password
+	b.Env["CLOUDSQL_PRIMARY_HOST"] = src.Host
+	if mysql {
+		b.Args = append(append([]string{}, b.Args...), fmt.Sprintf("--server-id=%d", src.ServerID),
+			"--gtid-mode=ON", "--enforce-gtid-consistency=ON", "--read-only=ON")
+		return b
+	}
+	args := b.Args
+	if len(args) == 0 {
+		args = []string{"postgres"}
+	}
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	b.Command = []string{"sh", "-c", `set -e
+if [ ! -s "$PGDATA/PG_VERSION" ]; then
+  mkdir -p "$PGDATA" && chown -R postgres:postgres "$(dirname "$PGDATA")" && chmod 700 "$PGDATA"
+  asuser=$(command -v su-exec || command -v gosu)
+  until PGPASSWORD="$CLOUDSQL_REPLICATION_PASSWORD" "$asuser" postgres pg_basebackup -h "$CLOUDSQL_PRIMARY_HOST" -p ` +
+		fmt.Sprint(CloudSQLPort) + ` -U ` + SQLReplicaUser + ` -D "$PGDATA" -R -X stream -c fast; do
+    echo "waiting for the primary $CLOUDSQL_PRIMARY_HOST"; rm -rf "$PGDATA"/* ; sleep 2
+  done
+fi
+exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+	b.Args = nil
+	return b
+}
+
+func copyEnv(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m)+2)
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }

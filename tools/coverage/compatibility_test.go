@@ -52,6 +52,8 @@ var compatSections = map[string]string{
 	// The Cloud SQL Admin API (#1301), in Cloud SQL's subsection, named by
 	// whole discovery ID (`sql.databases.insert`) as BigQuery's are.
 	"sqladmin": "## Optional services",
+	// The Service Usage API (#1352), named by whole discovery ID.
+	"serviceusage": "## Service Usage — `serviceusage.googleapis.com` v1",
 }
 
 // acceptedStatuses maps a status cell of docs/compatibility.md to the
@@ -140,8 +142,9 @@ var (
 // must qualify it.
 func namedMethods(key, op string, report map[string]string) (ids, ambiguous []string) {
 	// Discovery-ID pages: BigQuery, the Cloud Run v1 API (#1293), the
-	// Cloud SQL Admin API (#1301) and Resource Manager v1 REST (#1296).
-	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" {
+	// Cloud SQL Admin API (#1301), Resource Manager v1 REST (#1296) and
+	// Service Usage (#1352).
+	if key == "bigquery" || key == "runv1" || key == "sqladmin" || key == "resourcemanagerv1" || key == "serviceusage" {
 		for _, tok := range storageToken.FindAllStringSubmatch(op, -1) {
 			if _, ok := report[tok[1]]; ok {
 				ids = append(ids, tok[1])

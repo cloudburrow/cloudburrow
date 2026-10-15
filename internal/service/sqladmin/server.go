@@ -108,6 +108,9 @@ type Server struct {
 	// was called; emu guards them.
 	emu    sync.RWMutex
 	writes *instances
+	// backups are the backup runs, nil unless EnableBackups was called.
+	backups  *backupStore
+	stopAuto chan struct{}
 	// Observe, if set, is called once per request with the method name and
 	// the answer's status.
 	Observe func(method string, code int)
@@ -133,6 +136,10 @@ func (s *Server) Start(context.Context) error {
 	if s.writes != nil {
 		s.restore()
 	}
+	if s.backups != nil {
+		s.stopAuto = make(chan struct{})
+		go s.automate(s.stopAuto)
+	}
 	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
@@ -145,6 +152,10 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 	if s.conn != nil {
 		s.conn.stop()
+	}
+	if s.stopAuto != nil {
+		close(s.stopAuto)
+		s.stopAuto = nil
 	}
 	if s.writes != nil {
 		if c, ok := s.writes.prov.(interface{ Close() }); ok {
@@ -250,17 +261,17 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 // verbWhy is why an instance method other than restart is not served.
 func verbWhy(verb string) string {
 	switch verb {
-	case "failover", "promoteReplica", "demoteMaster", "demote", "switchover", "startReplica", "stopReplica":
-		return "replicas and failover need a second server replicating from the first, which CloudBurrow does not run"
-	case "clone", "restoreBackup", "pointInTimeRestore":
-		return "clones and restores need backups, which CloudBurrow does not take"
+	case "failover", "demoteMaster", "demote", "switchover", "reencrypt":
+		return "failover replicas, high availability and external primaries are not served; read replicas are (docs/cloudsql.md)"
+	case "pointInTimeRestore":
+		return "point-in-time recovery needs write-ahead or binary logs archived, which CloudBurrow does not keep; restore a backup run with restoreBackup"
 	case "import", "export":
 		return "imports and exports go through Cloud Storage buckets, which this API does not reach"
-	case "backupRuns", "backups":
-		return "backups need a backup store and restores, which CloudBurrow does not run"
+	case "backups":
+		return "the project-level Backups API is not served; an instance's backups are its backupRuns"
 	}
-	return "beneath an instance only databases, users, connectSettings and restart are served; " +
-		"backups, replicas, SSL certificates and imports are not (docs/cloudsql.md)"
+	return "beneath an instance only databases, users, backupRuns, connectSettings, restart, restoreBackup and clone are served; " +
+		"replicas, SSL certificates and imports are not (docs/cloudsql.md)"
 }
 
 func (s *Server) route(r *http.Request, base string, p []string) (string, any, error) {
@@ -317,6 +328,24 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		out, err := s.generateEphemeralCert(r, project, e)
 		return "sql.connect.generateEphemeral", out, err
 	}
+	if len(rest) == 3 && r.Method == http.MethodPost && (rest[2] == "restoreBackup" || rest[2] == "clone" ||
+		rest[2] == "promoteReplica" || rest[2] == "stopReplica" || rest[2] == "startReplica") {
+		verb = rest[2]
+	}
+	switch verb {
+	case "promoteReplica", "stopReplica", "startReplica":
+		if r.Method != http.MethodPost {
+			break
+		}
+		out, err := s.replicaVerb(base, project, name, verb)
+		return "sql.instances." + verb, out, err
+	case "restoreBackup":
+		out, err := s.restoreBackup(r, base, project, e)
+		return "sql.instances.restoreBackup", out, err
+	case "clone":
+		out, err := s.cloneInstance(r, base, project, e)
+		return "sql.instances.clone", out, err
+	}
 	if verb != "" {
 		return "sql.instances." + verb, nil, unimplemented("instances."+verb, verbWhy(verb))
 	}
@@ -346,6 +375,8 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		return s.databases(r, base, project, e, rest[3:])
 	case "users":
 		return s.users(r, base, project, e, rest[3:])
+	case "backupRuns":
+		return s.backupRuns(r, base, project, e, rest[3:])
 	case "connectSettings":
 		if len(rest) != 3 || r.Method != http.MethodGet {
 			return "sql.connect.get", nil, Errorf(http.StatusNotFound, "%s is not a Cloud SQL Admin API path", r.URL.Path)
@@ -445,6 +476,12 @@ func (s *Server) instance(ctx context.Context, base, project string, e Engine) (
 	}
 	if installed != "" {
 		in["databaseInstalledVersion"] = installed
+	}
+	s.emu.RLock()
+	rs := s.replicaNamesLocked(project, e.Instance())
+	s.emu.RUnlock()
+	if len(rs) > 0 {
+		in["replicaNames"] = rs
 	}
 	return in, nil
 }

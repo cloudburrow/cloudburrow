@@ -217,8 +217,9 @@ func TestCloudSQLInstanceWrites(t *testing.T) {
 		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
 	wantHTTP(t, "a version no image provides", err, http.StatusNotImplemented)
 	_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "rep-" + suffix, DatabaseVersion: "POSTGRES_17",
-		MasterInstanceName: up, Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
-	wantHTTP(t, "a replica", err, http.StatusNotImplemented)
+		MasterInstanceName: up, ReplicaConfiguration: &sqladmin.ReplicaConfiguration{FailoverTarget: true},
+		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
+	wantHTTP(t, "a failover replica", err, http.StatusNotImplemented)
 }
 
 // TestGcloudSQLInstances (#1330): `gcloud sql instances create`, describe,
