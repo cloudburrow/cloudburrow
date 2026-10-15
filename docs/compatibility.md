@@ -713,9 +713,26 @@ which no page lists.
 | `Datastore.RunAggregationQuery` | **Refused** | `TestDatastoreAggregationIsRefused` (#1197): `UNIMPLEMENTED` "Method google.datastore.v1.Datastore/RunAggregationQuery is unimplemented", so a count through the client fails |
 | `Bigtable.MutateRow`, `Bigtable.ReadRows`, `BigtableTableAdmin.CreateTable`, `BigtableTableAdmin.ModifyColumnFamilies` | **Verified** | `TestBigtableTableAndRows` |
 | `BigtableTableAdmin.ListTables`, `BigtableTableAdmin.GetTable` | **Verified** | `TestConsoleBigtableCreateAndDeleteTable`, including `NOT_FOUND` from `GetTable` after the console's delete |
+| `Bigtable.MutateRows`, `Bigtable.CheckAndMutateRow`, `Bigtable.ReadModifyWriteRow`, `Bigtable.SampleRowKeys` | **Verified** | `TestBigtableBulkAndConditionalWrites` (#1198): `ApplyBulk` rows read back, a conditional mutation takes its true branch on a row that has the column and its false branch on one that does not, two increments read 5 then 12, and the sampled keys are sorted |
+| `BigtableTableAdmin.DropRowRange`, `BigtableTableAdmin.GenerateConsistencyToken`, `BigtableTableAdmin.CheckConsistency`, `BigtableTableAdmin.UpdateTable`, `BigtableTableAdmin.DeleteTable` | **Verified** | `TestBigtableTableMaintenance` (#1198): `DropRowRange` by prefix and `DropAllRows` remove what they should, `WaitForReplication` returns, deletion protection set and cleared is read back by `TableInfo`, and `Tables` no longer lists a deleted table |
+| `Bigtable.PingAndWarm` | **Verified** | `TestBigtablePingAndWarm` (#1198) |
+| `BigtableTableAdmin` authorized views (`CreateAuthorizedView`, `GetAuthorizedView`, `ListAuthorizedViews`, `UpdateAuthorizedView`, `DeleteAuthorizedView`) | **Refused** | `TestBigtableRefusedAdminMethods` (#1198): `UNIMPLEMENTED` "the emulator does not currently support authorized views" |
+| `BigtableTableAdmin` snapshots (`SnapshotTable`, `GetSnapshot`, `ListSnapshots`, `DeleteSnapshot`, `CreateTableFromSnapshot`) | **Refused** | `TestBigtableRefusedAdminMethods` (#1198): `UNIMPLEMENTED` "the emulator does not currently support snapshots" |
+| `BigtableTableAdmin.GetIamPolicy`, `BigtableTableAdmin.SetIamPolicy`, `BigtableTableAdmin.TestIamPermissions` | **Refused** | `TestBigtableRefusedAdminMethods` (#1198): `UNIMPLEMENTED` "unimplemented feature" |
+| `Bigtable.PrepareQuery`, `Bigtable.ExecuteQuery`, `Bigtable.GetClientConfiguration`, `Bigtable.OpenTable`, `Bigtable.OpenAuthorizedView`, `Bigtable.OpenMaterializedView` | **Refused** | `TestBigtableRefusedDataMethods` (#1198): `UNIMPLEMENTED` "the emulator does not currently support <Method>"; so `PrepareStatement` (SQL) fails, and the session data plane is unavailable |
 | `Spanner.CreateSession`, `Spanner.BeginTransaction`, `Spanner.Commit`, `Spanner.StreamingRead`, `InstanceAdmin.CreateInstance`, `DatabaseAdmin.CreateDatabase` | **Verified** | `TestSpannerSchemaAndQuery`, `TestSpannerReadWriteTransactionIsAtomic`, `TestSpannerDatabasesAreIsolated` (a `StreamingRead` answering `NOT_FOUND` across databases) |
 | `Spanner.ExecuteStreamingSql` | **Verified** | `TestSpannerSchemaAndQuery` |
 | `InstanceAdmin.GetInstance`, `DatabaseAdmin.GetDatabase`, `DatabaseAdmin.GetDatabaseDdl` | **Verified** | `TestConsoleSpannerCreateAndDropDatabase`, including `NOT_FOUND` after the console's drops |
+
+**Fifteen Bigtable RPCs crash the emulator** (#1198, measured one call each): the backup methods
+(`CreateBackup`, `CopyBackup`, `GetBackup`, `ListBackups`, `UpdateBackup`, `DeleteBackup`,
+`RestoreTable`), the schema bundle methods (`CreateSchemaBundle`, `GetSchemaBundle`,
+`ListSchemaBundles`, `UpdateSchemaBundle`, `DeleteSchemaBundle`), `UndeleteTable`, and the change
+stream reads (`GenerateInitialChangeStreamPartitions`, `ReadChangeStream`). `bttest` embeds a nil
+server for them, so a call panics: the client sees `UNAVAILABLE` "error reading from server: EOF",
+the pod restarts, and every table is lost. No test calls them, since one would take the emulator
+away from every other test, so [coverage](coverage/bigtable.md) leaves them Unknown; #1206 tracks
+answering `UNIMPLEMENTED` instead.
 
 **All four are in-memory.** CloudBurrow provisions no volume for them and `status` lists them
 as never surviving a restart. Nothing here is persistent, whatever `--mode` says.
