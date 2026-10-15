@@ -89,6 +89,9 @@ var terraformEndpoints = []terraformEndpoint{
 	// emulator's REST API, Spanner's second port (Endpoints.SpannerREST),
 	// which the call front in its pod serves.
 	{config.ServiceSpanner, "spanner_custom_endpoint", "GOOGLE_SPANNER_CUSTOM_ENDPOINT", "/v1/", true},
+	// google_project_service (#1352): the Service Usage API v1 on its own
+	// port, in TestTerraformProjectService.
+	{serviceUsageService, "service_usage_custom_endpoint", "GOOGLE_SERVICE_USAGE_CUSTOM_ENDPOINT", "/v1/", true},
 	{resourceManagerEndpoint, "resource_manager_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
 	{resourceManagerEndpoint, "cloud_billing_custom_endpoint", "GOOGLE_CLOUD_BILLING_CUSTOM_ENDPOINT", "/v1/", true},
 	// google_folder (#1294): Resource Manager v3 Folders, on the same port,
@@ -137,6 +140,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceStorage: cfg.Endpoints.Storage, config.ServicePubSub: cfg.Endpoints.PubSub,
 		config.ServiceTasks: cfg.Endpoints.Tasks, config.ServiceSecrets: cfg.Endpoints.Secrets, config.ServiceRun: cfg.Endpoints.Run,
 		config.ServiceKMS: cfg.Endpoints.KMS, resourceManagerEndpoint: cfg.Endpoints.ResourceManager,
+		serviceUsageService:     cfg.Endpoints.ServiceUsage,
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
 		config.ServiceBigQuery: cfg.Endpoints.BigQuery, sqlAdminEndpoint: cfg.Endpoints.SQLAdmin,
 		config.ServiceFirestore: cfg.Endpoints.Firestore,
@@ -144,7 +148,7 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		// client libraries the gRPC one.
 		config.ServiceSpanner: cfg.Endpoints.SpannerREST,
 	}
-	enabled := map[config.Service]bool{resourceManagerEndpoint: true, sqlAdminEndpoint: sqlAdminEnabled(cfg)}
+	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg)}
 	for _, s := range cfg.EnabledServices() {
 		enabled[s] = true
 	}

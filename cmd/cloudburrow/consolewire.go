@@ -18,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
@@ -50,6 +51,9 @@ type consoleDeps struct {
 	// mysql are the instance's generated MySQL passwords, which the Cloud SQL
 	// for MySQL screen reads and administers the server with (#868).
 	mysql components.MySQLCredentials
+	// serviceUsage is the Service Usage API (#1352), whose APIs & Services
+	// page reads and changes the same server.
+	serviceUsage *serviceusage.Server
 }
 
 // runAddrOf is the adapter's live address, or nothing when there is no
@@ -177,6 +181,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})
+	}
+	// APIs & Services (#1352): always served, as projects are.
+	if d.serviceUsage != nil {
+		providers = append(providers, serviceUsageProvider{api: d.serviceUsage})
 	}
 	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
 	if enabled[config.ServiceLogging] && d.logging != nil {

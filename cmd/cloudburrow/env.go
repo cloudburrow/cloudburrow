@@ -430,6 +430,17 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 				"the Cloud SQL Admin API, REST, plaintext; read by no client library: pass http://" + sa + "/ to option.WithEndpoint"})
 	}
 
+	// Service Usage (#1352): gcloud services, and Terraform's
+	// google_project_service through service_usage_custom_endpoint.
+	if cfg.Endpoints.ServiceUsage > 0 {
+		su := addr(cfg.Endpoints.ServiceUsage)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_SERVICEUSAGE", "http://" + su + "/",
+				"read by gcloud; gcloud services list, enable and disable"},
+			envVar{cliEndpointVar("serviceusage"), su,
+				"the Service Usage API v1, REST, plaintext; read by no client library: pass http://" + su + "/ to option.WithEndpoint"})
+	}
+
 	// Resource Manager (#298). gcloud reads the override; the client
 	// libraries do not, and need the endpoint in client options. gcloud's
 	// projects commands call v1, served beside v3 since #301
@@ -544,7 +555,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		"firestore": &e.Firestore, "datastore": &e.Datastore, "bigtable": &e.Bigtable,
 		"spanner": &e.Spanner, "spanner-rest": &e.SpannerREST, "bigquery": &e.BigQuery, "bigquery-storage": &e.BigQueryStorage,
 		"memorystore": &e.Memorystore, "cloudsql-mysql": &e.CloudSQLMySQL, "cloudsql": &e.CloudSQL, "resourcemanager": &e.ResourceManager,
-		"sqladmin": &e.SQLAdmin,
+		"sqladmin": &e.SQLAdmin, "serviceusage": &e.ServiceUsage,
 		// The ingress gateway, which kind publishes where `up` configured
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).

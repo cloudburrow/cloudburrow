@@ -6521,5 +6521,88 @@
         ]
       }
     ]
+  },
+  {
+    "Key": "serviceusage",
+    "Title": "Service Usage API (v1)",
+    "counts": {
+      "Unimplemented": 3,
+      "Verified": 7
+    },
+    "rows": [
+      {
+        "method": "serviceusage.operations.cancel",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "serviceusage.operations.delete",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "serviceusage.operations.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.operations.list",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "serviceusage.services.batchEnable",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.services.batchGet",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.services.disable",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:217 TestGcloudServices",
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.services.enable",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:217 TestGcloudServices",
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.services.get",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:217 TestGcloudServices",
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      },
+      {
+        "method": "serviceusage.services.list",
+        "status": "Verified",
+        "tests": [
+          "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
+          "test/compat/serviceusage_test.go:217 TestGcloudServices",
+          "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
+        ]
+      }
+    ]
   }
 ]

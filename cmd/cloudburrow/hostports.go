@@ -24,6 +24,7 @@ func hostPorts(cfg config.Config) map[string]int {
 		"control":         e.Control,
 		"metadata":        e.Metadata,
 		"resourcemanager": e.ResourceManager,
+		"serviceusage":    e.ServiceUsage,
 		"console":         e.Console,
 		"ingress":         e.Ingress,
 	}
