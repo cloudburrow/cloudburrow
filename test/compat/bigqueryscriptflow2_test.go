@@ -79,19 +79,8 @@ func TestBigQueryScriptControlFlowMore(t *testing.T) {
 		t.Errorf("a read after DML: %v %v", got, err)
 	}
 
-	// Still 501, with the reason: CALL and transactions in such a script.
-	wantReason(t, "CALL in a block", bqRun(ctx, c, "IF TRUE THEN CALL "+ds.DatasetID+".p(); END IF", false), 501, "notImplemented")
-	// Stored procedures, which the emulator reports done and runs nothing
-	// of, are 501 outside such a script too.
-	for _, sql := range []string{
-		"CREATE OR REPLACE PROCEDURE " + ds.DatasetID + ".p() BEGIN INSERT INTO " + tbl + " (n) VALUES (9); END",
-		"CALL " + ds.DatasetID + ".p()",
-	} {
-		for _, insert := range []bool{false, true} {
-			err := bqRun(ctx, c, sql, insert)
-			wantReason(t, sql, err, 501, "notImplemented")
-		}
-	}
+	// Still 501, with the reason: a transaction in such a script. Stored
+	// procedures are TestBigQueryStoredProcedures (#1217).
 	err = bqRun(ctx, c, "IF TRUE THEN BEGIN TRANSACTION; INSERT INTO "+tbl+" (n) VALUES (5); COMMIT TRANSACTION; END IF", false)
 	wantReason(t, "a transaction in a block", err, 501, "notImplemented")
 	if err != nil && !strings.Contains(err.Error(), "transaction") {

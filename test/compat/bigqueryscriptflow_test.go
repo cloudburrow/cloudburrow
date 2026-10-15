@@ -137,6 +137,7 @@ func TestBigQueryScriptControlFlow(t *testing.T) {
 			}
 		}
 	}
-	// What cannot be carried out faithfully is 501, before anything runs.
-	wantReason(t, "CALL in a block", bqRun(ctx, c, "IF TRUE THEN CALL "+ds.DatasetID+".p(); END IF", false), 501, "notImplemented")
+	// A CALL in a block runs the procedure (#1217, TestBigQueryStoredProcedures):
+	// one that does not exist is notFound.
+	wantReason(t, "CALL in a block", bqRun(ctx, c, "IF TRUE THEN CALL "+ds.DatasetID+".p(); END IF", false), 404, "notFound")
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,9 @@ func routinesAPI(t *testing.T, deleted *[]string) *httptest.Server {
 			"returnType":{"typeKind":"INT64"},"definitionBody":"x + 1","creationTime":"1700000000000","lastModifiedTime":"1700000000000"}`,
 		"tf": `{"routineReference":{"projectId":"p","datasetId":"d","routineId":"tf"},"routineType":"TABLE_VALUED_FUNCTION","language":"SQL",
 			"returnTableType":{"columns":[{"name":"y","type":{"typeKind":"INT64"}}]},"definitionBody":"SELECT 1 AS y"}`,
+		"p": `{"routineReference":{"projectId":"p","datasetId":"d","routineId":"p"},"routineType":"PROCEDURE","language":"SQL",
+			"arguments":[{"name":"x","mode":"IN","dataType":{"typeKind":"INT64"}},{"name":"y","mode":"OUT","dataType":{"typeKind":"STRING"}}],
+			"definitionBody":"BEGIN SET y = CAST(x AS STRING); END"}`,
 	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -28,7 +32,8 @@ func routinesAPI(t *testing.T, deleted *[]string) *httptest.Server {
 		switch {
 		case r.Method == http.MethodGet && path == "/projects/p/datasets/d/routines":
 			_, _ = io.WriteString(w, `{"routines":[{"routineReference":{"projectId":"p","datasetId":"d","routineId":"f"}},`+
-				`{"routineReference":{"projectId":"p","datasetId":"d","routineId":"tf"}}]}`)
+				`{"routineReference":{"projectId":"p","datasetId":"d","routineId":"tf"}},`+
+				`{"routineReference":{"projectId":"p","datasetId":"d","routineId":"p"}}]}`)
 		case strings.HasPrefix(path, "/projects/p/datasets/d/routines/"):
 			id := strings.TrimPrefix(path, "/projects/p/datasets/d/routines/")
 			body, ok := routines[id]
@@ -68,10 +73,22 @@ func TestBigQueryRoutinesSectionAndPage(t *testing.T) {
 	}
 	defer c.Close()
 	sec := p.routinesSection(ctx, c.Dataset("d"))
-	if sec.ID != "routines" || sec.Listing.Unavailable != "" || len(sec.Listing.Items) != 2 {
+	if sec.ID != "routines" || sec.Listing.Unavailable != "" || len(sec.Listing.Items) != 3 {
 		t.Fatalf("the Routines section = %+v", sec)
 	}
-	f, tf := sec.Listing.Items[0], sec.Listing.Items[1]
+	byName := map[string]console.Resource{}
+	for _, it := range sec.Listing.Items {
+		byName[it.Name] = it
+	}
+	f, tf := byName["f"], byName["tf"]
+	// A stored procedure (#1217): its arguments with their modes.
+	if pr := byName["p"]; pr.Fields["Type"] != "Procedure" || pr.Fields["Arguments"] != "x INT64, OUT y STRING" {
+		t.Errorf("the procedure's row = %+v", pr)
+	}
+	if d, _ := p.Detail(ctx, "p", []string{"d", "routines", "p"}); d.Unavailable != "" || !strings.Contains(fmt.Sprintf("%+v", d.Sections), "BEGIN SET y") ||
+		!strings.Contains(fmt.Sprintf("%+v", d.Sections), "OUT") {
+		t.Errorf("the procedure's page does not show its body and argument modes: %+v", d.Sections)
+	}
 	if f.Name != "f" || f.Fields["Type"] != "Function" || f.Fields["Language"] != "SQL" || f.Fields["Arguments"] != "x INT64, a ARRAY<STRING>" ||
 		strings.Join(f.Opens, "/") != "d/routines/f" || len(f.Actions) != 1 || f.Actions[0].ID != actDeleteRoutine {
 		t.Errorf("the f row = %+v", f)
