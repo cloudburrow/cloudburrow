@@ -298,6 +298,10 @@ func TestScriptVariablesDoNotOutliveTheScript(t *testing.T) {
 // that changes nothing kept, are answered as the emulator answered them.
 func TestFailedScriptThatWroteIs501(t *testing.T) {
 	fail := func(q string) (int, string) {
+		if strings.Contains(q, probeSentinel) {
+			// A transaction's probe fails at its end (transactions.go).
+			return 400, `{"error":{"code":400,"message":"` + probeSentinel + `","errors":[{"reason":"invalidQuery"}]}}`
+		}
 		if !strings.Contains(q, "nope") {
 			return 200, `{"jobComplete":true}`
 		}
@@ -312,7 +316,9 @@ func TestFailedScriptThatWroteIs501(t *testing.T) {
 		{"CREATE TABLE ds.e1 AS SELECT 1 AS a; SELECT * FROM nope.nope; CREATE TABLE ds.e2 AS SELECT 1 AS a", 400},
 		{"INSERT INTO ds.t VALUES (1); SELECT * FROM nope.nope", 501},
 		{"DROP TABLE ds.t; SELECT * FROM nope.nope", 501},
-		{"BEGIN TRANSACTION; CREATE TEMP TABLE tt AS SELECT 1 AS a; INSERT INTO ds.t VALUES (1); COMMIT TRANSACTION; SELECT * FROM nope.nope", 501},
+		// Carried out by the front (transactions.go): the COMMIT is
+		// kept, and the script fails at the SELECT, as in BigQuery.
+		{"BEGIN TRANSACTION; CREATE TEMP TABLE tt AS SELECT 1 AS a; INSERT INTO ds.t VALUES (1); COMMIT TRANSACTION; SELECT * FROM nope.nope", 400},
 		// Nothing kept either way.
 		{"SELECT 1; SELECT * FROM nope.nope", 400},
 		{"DECLARE x INT64; SET x = 2; SELECT * FROM nope.nope", 400},

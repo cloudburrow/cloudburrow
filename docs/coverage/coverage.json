@@ -4276,6 +4276,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerymethods_test.go:52 TestBigQueryGetQueryResultsPages",
+          "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions"
         ]
       },
@@ -4289,7 +4290,8 @@
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigqueryscripterrors_test.go:21 TestBigQueryScriptRuntimeErrorBeforeLast",
-          "test/compat/bigquerytransactions_test.go:111 TestBigQueryScriptRangeVariables",
+          "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
+          "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
@@ -4317,7 +4319,8 @@
           "test/compat/bigquerydml_test.go:334 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigqueryscripterrors_test.go:21 TestBigQueryScriptRuntimeErrorBeforeLast",
-          "test/compat/bigquerytransactions_test.go:111 TestBigQueryScriptRangeVariables",
+          "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
+          "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",

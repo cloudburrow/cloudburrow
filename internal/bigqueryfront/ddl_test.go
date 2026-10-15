@@ -146,10 +146,10 @@ func TestCreateTableAsSelectColumnsAreChecked(t *testing.T) {
 // the verdicts are written with.
 func TestRefusalsReachTheClientAsBigQueryAnswers(t *testing.T) {
 	for sql, want := range map[string][2]any{
-		"ALTER TABLE ds.t DROP COLUMN ok":         {501, "notImplemented"},
-		"ALTER TABLE ds.t ADD COLUMN `a!` STRING": {400, "invalidQuery"},
-		"IF TRUE THEN BEGIN TRANSACTION; END IF":  {501, "notImplemented"},
-		"IF TRUE THEN COMMIT TRANSACTION; END IF": {501, "notImplemented"},
+		"ALTER TABLE ds.t DROP COLUMN ok":                                    {501, "notImplemented"},
+		"ALTER TABLE ds.t ADD COLUMN `a!` STRING":                            {400, "invalidQuery"},
+		"COMMIT TRANSACTION":                                                 {501, "notImplemented"},
+		"BEGIN TRANSACTION; CREATE TABLE ds.x (a INT64); COMMIT TRANSACTION": {501, "notImplemented"},
 		"CALL ds.p()": {404, "notFound"},
 		"CREATE TEMP PROCEDURE ds.p() BEGIN SELECT 1; END":             {501, "notImplemented"},
 		"CREATE PROCEDURE ds.p() BEGIN BEGIN TRANSACTION; COMMIT; END": {501, "notImplemented"},

@@ -99,7 +99,7 @@ func hasControlFlow(sql string) bool {
 	if !ok {
 		return false
 	}
-	// A script with a transaction the front can carry out, or with a
+	// A script with a transaction, or with a
 	// ROLLBACK, which the emulator refuses ("Statement not supported:
 	// RollbackStatement", measured), is carried out by the front
 	// (transactions.go). Another keeps going to the emulator as before.
@@ -113,7 +113,9 @@ func hasControlFlow(sql string) bool {
 	}
 	if txn {
 		p := &scriptParser{toks: toks}
-		if nodes := p.block(); rollback || p.err == "" && unsupportedInScript(nodes) == "" {
+		// One it cannot is 501 there (unsupportedInScript): the emulator
+		// would ignore its BEGIN and COMMIT.
+		if p.block(); rollback || p.err == "" {
 			return true
 		}
 	}
@@ -525,9 +527,10 @@ type scriptRun struct {
 	// anything else is sent.
 	pendingDML bool
 	start      time.Time
-	// txnOpen: a statement of a transaction failed and the transaction
-	// has not ended (transactions.go).
-	txnOpen bool
+	// txn is the transaction open; goneTemps the TEMP tables
+	// transactions made and left (transactions.go).
+	txn       *txnState
+	goneTemps map[string]bool
 	// limit is the error a BigQuery limit failed the script with.
 	limit string
 	// plain: the script has no control flow, and is carried out here only
@@ -570,6 +573,12 @@ func (f front) runScript(w http.ResponseWriter, r *http.Request, q queryOptions,
 	s := &scriptRun{f: f, r: r, q: q, sql: q.Query, scopes: []map[string]scriptVar{{}}, start: scriptNow(),
 		plain: !hasControlFlow(q.Query)}
 	flow := s.run(nodes)
+	if s.txn != nil {
+		// The query ended with a transaction open: rolled back, and its
+		// probes have no rows.
+		s.txn, s.pending, s.pendingDML = nil, "", false
+		s.last, s.lastQuery = nil, ""
+	}
 	if s.limit != "" {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: s.limit})
 		return
@@ -830,14 +839,6 @@ func (s *scriptRun) run(nodes []scriptNode) *scriptFlow {
 		if !s.step() {
 			return &scriptFlow{}
 		}
-		if isTxnNode(n, "BEGIN") { // transactions.go
-			j, flow := s.transaction(nodes, i)
-			if flow != nil {
-				return flow
-			}
-			i = j
-			continue
-		}
 		if flow := s.runNode(n); flow != nil {
 			if flow.failed && !flow.hasPos {
 				if pos := nodePos(n); pos >= 0 {
@@ -861,6 +862,9 @@ func (s *scriptRun) runNode(n scriptNode) *scriptFlow {
 		}
 		if n.toks[0].is("RAISE") {
 			return s.raise(n.toks)
+		}
+		if isTxnNode(n, "BEGIN") {
+			return s.beginTransaction(n) // transactions.go
 		}
 		if isTxnNode(n, "COMMIT") || isTxnNode(n, "ROLLBACK") {
 			return s.endTransaction(n) // transactions.go
@@ -1109,8 +1113,24 @@ func (s *scriptRun) runText(text string) *scriptFlow {
 	if len(toks) == 0 {
 		return nil
 	}
+	if s.goneTemp(toks) { // transactions.go
+		return &scriptFlow{}
+	}
 	query := toks[0].is("SELECT") || toks[0].is("WITH") || toks[0].punct("(")
 	dml := toks[0].is("INSERT") || toks[0].is("UPDATE") || toks[0].is("DELETE") || toks[0].is("MERGE")
+	if s.txn != nil {
+		// Inside a transaction (transactions.go): run in its turn; a
+		// probe has no rows.
+		rec, flow := s.sendInTxn(text)
+		if flow != nil {
+			return flow
+		}
+		s.last, s.lastQuery = rec, ""
+		if query && rec != nil {
+			s.lastQuery = text
+		}
+		return nil
+	}
 	if (query || dml) && s.guarded == 0 {
 		s.pending, s.pendingDML, s.last, s.lastQuery = text, dml, nil, ""
 		return nil
@@ -1130,8 +1150,10 @@ func (s *scriptRun) runText(text string) *scriptFlow {
 
 // send runs text as a query of its own through the front, as jobs.query.
 func (s *scriptRun) send(text string) (*recorder, *scriptFlow) {
-	if !txnRequest(s.r) && s.readsInFailedTxn(text) { // transactions.go
-		return nil, &scriptFlow{}
+	if !txnRequest(s.r) && s.txn == nil && len(s.goneTemps) > 0 { // transactions.go
+		if toks, _ := lex(text); s.goneTemp(toks) {
+			return nil, &scriptFlow{}
+		}
 	}
 	if s.pendingDML {
 		// A statement that changes data runs before anything that may
@@ -1226,6 +1248,9 @@ func (s *scriptRun) query(q string, columns int) ([]scriptVar, *scriptFlow) {
 
 // queryRows is query; with columns -1, the rows are each row's columns.
 func (s *scriptRun) queryRows(q string, columns int) ([]scriptVar, [][]scriptVar, *scriptFlow) {
+	if s.txn != nil && !s.readInTxn(q) { // transactions.go
+		return nil, nil, &scriptFlow{}
+	}
 	rec, flow := s.send(q)
 	if flow != nil {
 		return nil, nil, flow
