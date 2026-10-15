@@ -16,10 +16,11 @@ import (
 // and executions, ...) are part of it. A page with no entry here fails the
 // test, so a new generated page cannot go unchecked.
 var compatSections = map[string]string{
-	"storage": "## Cloud Storage — JSON API v1",
-	"pubsub":  "## Pub/Sub — `google.pubsub.v1`",
-	"tasks":   "## Cloud Tasks — `google.cloud.tasks.v2`",
-	"run":     "## Cloud Run — `google.cloud.run.v2`",
+	"storage":     "## Cloud Storage — JSON API v1",
+	"storagegrpc": "## Cloud Storage — gRPC (`google.storage.v2`)",
+	"pubsub":      "## Pub/Sub — `google.pubsub.v1`",
+	"tasks":       "## Cloud Tasks — `google.cloud.tasks.v2`",
+	"run":         "## Cloud Run — `google.cloud.run.v2`",
 	// The v1 (Knative) API (#1293) is a row of the Cloud Run section, which
 	// names each Verified method by its whole discovery ID.
 	"runv1":           "## Cloud Run — `google.cloud.run.v2`",

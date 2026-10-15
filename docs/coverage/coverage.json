@@ -3729,6 +3729,178 @@
     ]
   },
   {
+    "Key": "storagegrpc",
+    "Title": "Cloud Storage (gRPC API v2)",
+    "counts": {
+      "Implemented": 3,
+      "Verified": 21
+    },
+    "rows": [
+      {
+        "method": "google.storage.v2.Storage/BidiReadObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/BidiWriteObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/CancelResumableWrite",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.storage.v2.Storage/ComposeObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/CreateBucket",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/DeleteBucket",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/DeleteObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/GetBucket",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/GetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/GetObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/ListBuckets",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/ListObjects",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/LockBucketRetentionPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/MoveObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/QueryWriteStatus",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      },
+      {
+        "method": "google.storage.v2.Storage/ReadObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/RestoreObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/RewriteObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/SetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/StartResumableWrite",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/TestIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/UpdateBucket",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/UpdateObject",
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+        ]
+      },
+      {
+        "method": "google.storage.v2.Storage/WriteObject",
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
+      }
+    ]
+  },
+  {
     "Key": "firestore",
     "Title": "Firestore",
     "counts": {

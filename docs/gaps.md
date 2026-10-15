@@ -47,7 +47,7 @@ Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `o
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | model limit | S |
 | `channels.stop`, `objects.watchAll`: object change notification channels (webhooks) (#1281) | not built yet | M |
 | XML API: bucket `PUT`, service `GET` and form `POST` are 501 (#1258) | not built yet | M |
-| gRPC `google.storage.v2`: not served at all, deferred until the JSON API is complete | not built yet | L |
+| gRPC `google.storage.v2` (#1321): served on the JSON API's port; `UNIMPLEMENTED` over gRPC are appendable objects, customer-supplied encryption keys, the `acl` fields (use `predefined_acl` or the JSON API), managed-folder IAM, `ListObjects.filter` and `ComposeObject.delete_source_objects` | not built yet | M |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |
 | `buckets.relocate`, `buckets.operations.advanceRelocateBucket` | no emulator support (one location) | M |

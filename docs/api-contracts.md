@@ -33,7 +33,9 @@ for it would imply CloudBurrow answers those calls, which it does not. Cloud Sto
 until CloudBurrow built its own server (#485, #519).
 
 Cloud Storage is deliberately the **JSON API v1**, not `google.storage.v2`: the JSON API is
-what official clients use by default, and it is discovery-based rather than proto-defined.
+what official clients use by default, and it is discovery-based rather than proto-defined. The
+gRPC API is served too (#1321), from the JSON API's handlers; its proto is the Go client's copy,
+vendored as `internal/service/storage/storagev2pb` (`tools/genstoragev2pb`).
 
 ## Pinning
 

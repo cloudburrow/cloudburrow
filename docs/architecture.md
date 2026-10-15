@@ -249,7 +249,7 @@ Verified against client source in #1 and unchanged by this revision:
 | Client | Service | Mechanism | Notes |
 |---|---|---|---|
 | Go | Storage | `STORAGE_EMULATOR_HOST` | Scheme optional; client appends `storage/v1/`. |
-| Go | Storage (gRPC) | `STORAGE_EMULATOR_HOST_GRPC` | Must differ from the HTTP endpoint. |
+| Go | Storage (gRPC) | `STORAGE_EMULATOR_HOST_GRPC` | Bare host:port. CloudBurrow serves gRPC as h2c on the HTTP endpoint's port (#1321), so it is the same address. |
 | Go / Python | Pub/Sub | `PUBSUB_EMULATOR_HOST` | Sets endpoint, insecure transport, disables auth. |
 | Python | Storage | `STORAGE_EMULATOR_HOST` | **Scheme required** — value used verbatim. |
 | Go / Python | Cloud Tasks | **None exists** | Explicit endpoint in client options. |
