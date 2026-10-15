@@ -44,6 +44,16 @@ type tasksService struct {
 	worker   *tasks.Worker
 	db       store.Store
 	store    *tasks.Store
+	// tokens mints the Authorization header of an HTTP task with
+	// oidcToken or oauthToken, from the instance's local key (#1243).
+	tokens tasks.TokenMinter
+}
+
+// useTokens mints task tokens with m. Called before Start.
+func (t *tasksService) useTokens(m tasks.TokenMinter) {
+	if t != nil {
+		t.tokens = m
+	}
 }
 
 // Store returns the Cloud Tasks store, available after Start.
@@ -158,6 +168,9 @@ func (t *tasksService) Start(ctx context.Context) error {
 	}
 	if t.tracing != nil && t.tracing.Enabled() {
 		dispatcher = dispatcher.WithTracing(t.tracing.Provider())
+	}
+	if t.tokens != nil {
+		dispatcher = dispatcher.WithTokens(t.tokens)
 	}
 	t.worker = tasks.NewWorker(st, dispatcher, clock, 200*time.Millisecond)
 	return nil

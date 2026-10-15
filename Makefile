@@ -168,9 +168,12 @@ fmt:
 	gofmt -s -w .
 
 ## fmt-check: Fail if any file is not formatted
+# The files git tracks or would add, so an ignored directory, such as the
+# BigQuery engine's build tree (third_party/bigquery-emulator/build), is not
+# scanned on a developer's machine when CI's clean checkout has none.
 .PHONY: fmt-check
 fmt-check:
-	@unformatted=$$(gofmt -s -l .); \
+	@unformatted=$$(git ls-files -z --cached --others --exclude-standard -- '*.go' | xargs -0 gofmt -s -l); \
 	if [ -n "$$unformatted" ]; then \
 		echo "not gofmt-ed:"; echo "$$unformatted"; exit 1; \
 	fi

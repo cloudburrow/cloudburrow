@@ -82,7 +82,7 @@ import (
 func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
 	if q.UseLegacySQL != nil && *q.UseLegacySQL {
 		// Legacy SQL has no DDL or scripting.
-		if f.policies.inProject(projectOf(f.base)) { // rowpolicies.go, #1218
+		if f.policiesInProject(r, projectOf(f.base)) { // rowpolicies.go, #1218
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a legacy SQL query in a project "+
 				"with row access policies, which CloudBurrow applies to GoogleSQL queries only. Nothing was run.")
 			return
@@ -387,6 +387,12 @@ func (f front) checkQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 	kept := "The emulator ran the script in one transaction and rolled it back, so nothing of it was kept."
 	if committed {
 		kept = "The emulator kept what the statements before the failing one did."
+	}
+	if failed && txnRequest(r) {
+		// A transaction's probe or COMMIT (transactions.go): the emulator
+		// rolled it back whole, as BigQuery rolls a transaction back.
+		rec.copyTo(w)
+		return
 	}
 	if v.handler && failed {
 		e := rowError{Reason: "notImplemented", Message: "Not implemented here: the script failed (" + errMsg + ") and has a " +

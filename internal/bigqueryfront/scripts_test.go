@@ -310,7 +310,7 @@ func TestFailedScriptThatWroteIs501(t *testing.T) {
 		{"CREATE TABLE ds.e1 AS SELECT 1 AS a; SELECT * FROM nope.nope; CREATE TABLE ds.e2 AS SELECT 1 AS a", 501},
 		{"INSERT INTO ds.t VALUES (1); SELECT * FROM nope.nope", 501},
 		{"DROP TABLE ds.t; SELECT * FROM nope.nope", 501},
-		{"BEGIN TRANSACTION; INSERT INTO ds.t VALUES (1); COMMIT TRANSACTION; SELECT * FROM nope.nope", 501},
+		{"BEGIN TRANSACTION; CREATE TEMP TABLE tt AS SELECT 1 AS a; INSERT INTO ds.t VALUES (1); COMMIT TRANSACTION; SELECT * FROM nope.nope", 501},
 		// Nothing kept either way.
 		{"SELECT 1; SELECT * FROM nope.nope", 400},
 		{"DECLARE x INT64; SET x = 2; SELECT * FROM nope.nope", 400},
@@ -339,8 +339,8 @@ func TestFailedScriptThatWroteIs501(t *testing.T) {
 	// statements before the failing one did, as BigQuery does: it fails
 	// with the emulator's error; with a transaction in the script, 501.
 	for sql, want := range map[string]string{
-		"CREATE TABLE ds.e1 AS SELECT 1 AS a; SELECT * FROM nope.nope":                           "jobInternalError",
-		"BEGIN TRANSACTION; INSERT INTO ds.t VALUES (1); COMMIT TRANSACTION; SELECT * FROM nope": "notImplemented",
+		"CREATE TABLE ds.e1 AS SELECT 1 AS a; SELECT * FROM nope.nope":                                                                  "jobInternalError",
+		"BEGIN TRANSACTION; CREATE TEMP TABLE tt AS SELECT 1 AS a; INSERT INTO ds.t VALUES (1); COMMIT TRANSACTION; SELECT * FROM nope": "notImplemented",
 	} {
 		h := Wrap(&listingEmulator{scriptEmulator: &scriptEmulator{run: emu.run}})
 		code, got := do(t, h, "POST", base+"/jobs", queryBody("/jobs", sql))

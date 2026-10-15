@@ -356,6 +356,12 @@ func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
 				Label: "Header " + pair.Label, Value: pair.Value,
 			})
 		}
+		switch {
+		case req.OIDCToken != nil:
+			request = append(request, authTokenProperties("oidc", req.OIDCToken.ServiceAccountEmail, req.OIDCToken.Audience, req.URL)...)
+		case req.OAuthToken != nil:
+			request = append(request, authTokenProperties("oauth", req.OAuthToken.ServiceAccountEmail, req.OAuthToken.Scope, req.URL)...)
+		}
 		sections = append(sections, console.Section{
 			ID: "request", Label: "Request", Kind: console.KindProperties,
 			Groups: []console.PropertyGroup{{Heading: "HTTP request", Properties: request}},

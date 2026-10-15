@@ -33,6 +33,25 @@ type HTTPTarget struct {
 	Method  string            `json:"method"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Body    []byte            `json:"body,omitempty"`
+	// At most one of OIDCToken and OAuthToken: the Authorization header
+	// each attempt carries, minted per attempt (#1243).
+	OIDCToken  *OIDCToken  `json:"oidcToken,omitempty"`
+	OAuthToken *OAuthToken `json:"oauthToken,omitempty"`
+}
+
+// OIDCToken mirrors google.cloud.scheduler.v1.OidcToken. An empty Audience
+// means the job's URI, as the API documents.
+type OIDCToken struct {
+	ServiceAccountEmail string `json:"serviceAccountEmail"`
+	Audience            string `json:"audience,omitempty"`
+}
+
+// OAuthToken mirrors google.cloud.scheduler.v1.OAuthToken. An empty Scope
+// means https://www.googleapis.com/auth/cloud-platform, as the API
+// documents.
+type OAuthToken struct {
+	ServiceAccountEmail string `json:"serviceAccountEmail"`
+	Scope               string `json:"scope,omitempty"`
 }
 
 // PubSubTarget is a Pub/Sub job's message.

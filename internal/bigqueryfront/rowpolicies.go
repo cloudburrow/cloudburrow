@@ -188,19 +188,20 @@ func (p *rowPolicies) reset() {
 	p.saveLocked()
 }
 
-// inProject reports whether any table of project has policies.
-func (p *rowPolicies) inProject(project string) bool {
+// projectKeys returns the keys of the tables of project with policies.
+func (p *rowPolicies) projectKeys(project string) []string {
 	if p == nil {
-		return false
+		return nil
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	var keys []string
 	for k := range p.tables {
 		if strings.HasPrefix(k, project+"\x00") {
-			return true
+			keys = append(keys, k)
 		}
 	}
-	return false
+	return keys
 }
 
 // datasetTables returns the IDs of the tables of dataset with policies.
@@ -350,6 +351,22 @@ func (f front) tableInfo(r *http.Request, dataset, table string) (tableMeta, boo
 	return m, true
 }
 
+// policiesInProject reports whether a table of project that is still there
+// has policies. The policies of a table that is gone, or was made again,
+// are dropped on the way (livePolicies), so a dataset or table deleted with
+// its policies no longer refuses the project's table functions and legacy
+// SQL queries.
+func (f front) policiesInProject(r *http.Request, project string) bool {
+	live := false
+	for _, k := range f.policies.projectKeys(project) {
+		parts := strings.Split(k, "\x00")
+		if len(parts) == 3 && len(f.livePolicies(r, project, parts[1], parts[2])) > 0 {
+			live = true
+		}
+	}
+	return live
+}
+
 // livePolicies returns the policies of dataset.table of project, dropping
 // them when the table they were made on is gone (above).
 func (f front) livePolicies(r *http.Request, project, dataset, table string) []rowPolicy {
@@ -475,7 +492,7 @@ func resolve(parts []string, project string) (dataset, table string, ok bool) {
 // why it is refused.
 func (f front) filterQuery(r *http.Request, sql string) (string, bool, string) {
 	project := projectOf(f.base)
-	if !f.policies.inProject(project) {
+	if !f.policiesInProject(r, project) {
 		return sql, false, ""
 	}
 	toks, ok := lex(sql)

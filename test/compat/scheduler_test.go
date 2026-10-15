@@ -40,8 +40,8 @@ func schedulerClient(t *testing.T, h *Harness) *scheduler.CloudSchedulerClient {
 // TestSchedulerHTTPAndPubSubJobs (#302), with cloud.google.com/go/scheduler/
 // apiv1 against the CI instance: an every-minute HTTP job that RunJob
 // delivers at once to an httptest server; a Pub/Sub job whose message a
-// subscription receives; pause and resume; and App Engine and OIDC targets
-// refused as UNIMPLEMENTED.
+// subscription receives; pause and resume; and an App Engine target refused
+// as UNIMPLEMENTED. OIDC and OAuth tokens are TestSchedulerJobTokens (#1243).
 func TestSchedulerHTTPAndPubSubJobs(t *testing.T) {
 	h := New(t)
 	c := schedulerClient(t, h)
@@ -126,11 +126,5 @@ func TestSchedulerHTTPAndPubSubJobs(t *testing.T) {
 		Name: parent + "/jobs/app-engine", Schedule: "* * * * *",
 		Target: &schedulerpb.Job_AppEngineHttpTarget{AppEngineHttpTarget: &schedulerpb.AppEngineHttpTarget{RelativeUri: "/"}}}}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("App Engine target = %v, want Unimplemented", err)
-	}
-	if _, err := c.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: parent, Job: &schedulerpb.Job{
-		Name: parent + "/jobs/oidc", Schedule: "* * * * *",
-		Target: &schedulerpb.Job_HttpTarget{HttpTarget: &schedulerpb.HttpTarget{Uri: srv.URL,
-			AuthorizationHeader: &schedulerpb.HttpTarget_OidcToken{OidcToken: &schedulerpb.OidcToken{ServiceAccountEmail: "x@y"}}}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("OIDC token = %v, want Unimplemented", err)
 	}
 }

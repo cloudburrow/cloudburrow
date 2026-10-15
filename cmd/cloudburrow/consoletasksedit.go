@@ -194,10 +194,10 @@ const tasksHTTPMethods = "POST, GET, HEAD, PUT, DELETE, PATCH or OPTIONS"
 // tasksCreateTaskFields is Create task on a queue's page. A function so the
 // pattern check in consolepatterns_test.go reads the fields shipped.
 //
-// An HTTP target only: App Engine targets and OIDC or OAuth tokens are refused
-// by this instance's CreateTask, so they are not offered.
+// An HTTP target only: App Engine targets are refused by this instance's
+// CreateTask, so they are not offered. An OIDC or OAuth token is (#1243).
 func tasksCreateTaskFields() []console.Field {
-	return []console.Field{
+	return append([]console.Field{
 		{Name: "url", Label: "URL", Type: "url", Required: true,
 			Help: "The full URL the task is sent to, http or https."},
 		{Name: "httpMethod", Label: "HTTP method", Type: "text", Required: true, Default: "POST",
@@ -211,7 +211,7 @@ func tasksCreateTaskFields() []console.Field {
 			Help: "Optional. An RFC 3339 time such as 2026-09-27T15:04:05Z; empty dispatches it now."},
 		{Name: "taskId", Label: "Task ID", Type: "text", Pattern: `^[A-Za-z0-9_\-]{1,500}$`,
 			Help: "Optional. Letters, digits, hyphens and underscores; empty lets Cloud Tasks name it."},
-	}
+	}, authTokenFields("")...)
 }
 
 // createTask is CreateTask with the form's HTTP request.
@@ -231,12 +231,25 @@ func (p tasksProvider) createTask(ctx context.Context, project, queue string, va
 	if err != nil {
 		return fmt.Errorf("headers: %w", err)
 	}
-	task := &cloudtaskspb.Task{MessageType: &cloudtaskspb.Task_HttpRequest{HttpRequest: &cloudtaskspb.HttpRequest{
+	auth, err := parseAuthToken(values)
+	if err != nil {
+		return err
+	}
+	hr := &cloudtaskspb.HttpRequest{
 		Url:        strings.TrimSpace(values["url"]),
 		HttpMethod: cloudtaskspb.HttpMethod(method),
 		Headers:    headers,
 		Body:       []byte(values["body"]),
-	}}}
+	}
+	switch auth.kind {
+	case "oidc":
+		hr.AuthorizationHeader = &cloudtaskspb.HttpRequest_OidcToken{OidcToken: &cloudtaskspb.OidcToken{
+			ServiceAccountEmail: auth.email, Audience: auth.audience}}
+	case "oauth":
+		hr.AuthorizationHeader = &cloudtaskspb.HttpRequest_OauthToken{OauthToken: &cloudtaskspb.OAuthToken{
+			ServiceAccountEmail: auth.email, Scope: auth.scope}}
+	}
+	task := &cloudtaskspb.Task{MessageType: &cloudtaskspb.Task_HttpRequest{HttpRequest: hr}}
 	if id := strings.TrimSpace(values["taskId"]); id != "" {
 		task.Name = queue + "/tasks/" + id
 	}

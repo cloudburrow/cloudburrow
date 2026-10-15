@@ -196,12 +196,21 @@ func toProtoTask(t Task) *taskspb.Task {
 		if m, ok := taskspb.HttpMethod_value[strings.ToUpper(t.HTTPRequest.Method)]; ok {
 			method = taskspb.HttpMethod(m)
 		}
-		pt.MessageType = &taskspb.Task_HttpRequest{HttpRequest: &taskspb.HttpRequest{
+		hr := &taskspb.HttpRequest{
 			Url:        t.HTTPRequest.URL,
 			HttpMethod: method,
 			Headers:    t.HTTPRequest.Headers,
 			Body:       t.HTTPRequest.Body,
-		}}
+		}
+		switch {
+		case t.HTTPRequest.OIDCToken != nil:
+			hr.AuthorizationHeader = &taskspb.HttpRequest_OidcToken{OidcToken: &taskspb.OidcToken{
+				ServiceAccountEmail: t.HTTPRequest.OIDCToken.ServiceAccountEmail, Audience: t.HTTPRequest.OIDCToken.Audience}}
+		case t.HTTPRequest.OAuthToken != nil:
+			hr.AuthorizationHeader = &taskspb.HttpRequest_OauthToken{OauthToken: &taskspb.OAuthToken{
+				ServiceAccountEmail: t.HTTPRequest.OAuthToken.ServiceAccountEmail, Scope: t.HTTPRequest.OAuthToken.Scope}}
+		}
+		pt.MessageType = &taskspb.Task_HttpRequest{HttpRequest: hr}
 	}
 	return pt
 }
@@ -220,16 +229,9 @@ func fromProtoTask(p *taskspb.Task, parent string) (Task, error) {
 		}
 		return Task{}, apierror.InvalidArgument("task requires an httpRequest")
 	}
-	// The Authorization header Cloud Tasks would mint. Refused rather than
-	// dispatched without it, which a target checking the token would reject
-	// in a way that points nowhere; Cloud Scheduler refuses the same (#578).
-	if hr.GetOidcToken() != nil {
-		return Task{}, apierror.Unimplemented("httpRequest.oidcToken is not implemented: the task would be dispatched " +
-			"without an Authorization header; set the header yourself in httpRequest.headers")
-	}
-	if hr.GetOauthToken() != nil {
-		return Task{}, apierror.Unimplemented("httpRequest.oauthToken is not implemented: the task would be dispatched " +
-			"without an Authorization header; set the header yourself in httpRequest.headers")
+	oidc, oauth, err := authorizationFromProto(hr)
+	if err != nil {
+		return Task{}, err
 	}
 	switch hr.GetHttpMethod() {
 	case taskspb.HttpMethod_GET, taskspb.HttpMethod_HEAD, taskspb.HttpMethod_DELETE, taskspb.HttpMethod_OPTIONS:
@@ -245,12 +247,34 @@ func fromProtoTask(p *taskspb.Task, parent string) (Task, error) {
 		t.DispatchDeadline = d
 	}
 	t.HTTPRequest = &HTTPRequest{
-		URL:     hr.GetUrl(),
-		Method:  hr.GetHttpMethod().String(),
-		Headers: hr.GetHeaders(),
-		Body:    hr.GetBody(),
+		URL:        hr.GetUrl(),
+		Method:     hr.GetHttpMethod().String(),
+		Headers:    hr.GetHeaders(),
+		Body:       hr.GetBody(),
+		OIDCToken:  oidc,
+		OAuthToken: oauth,
 	}
 	return t, nil
+}
+
+// authorizationFromProto is the token an HTTP task asks Cloud Tasks to mint
+// (#1243). The service account is required, as on Google; that it exists
+// and that the queue may act as it are not checked, because nothing here
+// authenticates or authorises (ADR-0004).
+func authorizationFromProto(hr *taskspb.HttpRequest) (*OIDCToken, *OAuthToken, error) {
+	switch a := hr.GetAuthorizationHeader().(type) {
+	case *taskspb.HttpRequest_OidcToken:
+		if a.OidcToken.GetServiceAccountEmail() == "" {
+			return nil, nil, apierror.InvalidArgument("httpRequest.oidcToken.serviceAccountEmail is required")
+		}
+		return &OIDCToken{ServiceAccountEmail: a.OidcToken.GetServiceAccountEmail(), Audience: a.OidcToken.GetAudience()}, nil, nil
+	case *taskspb.HttpRequest_OauthToken:
+		if a.OauthToken.GetServiceAccountEmail() == "" {
+			return nil, nil, apierror.InvalidArgument("httpRequest.oauthToken.serviceAccountEmail is required")
+		}
+		return nil, &OAuthToken{ServiceAccountEmail: a.OauthToken.GetServiceAccountEmail(), Scope: a.OauthToken.GetScope()}, nil
+	}
+	return nil, nil, nil
 }
 
 // generateTaskName builds a name when the caller does not supply one, which

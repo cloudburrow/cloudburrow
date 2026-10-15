@@ -869,8 +869,9 @@ are not taken.
   field or a malformed value is a 400 that names the component and the field, and nothing is
   seeded.
 - **Fields the emulator is not known to honour are refused by name**, never dropped: Pub/Sub
-  `kmsKeyName`, `bigqueryConfig` and `cloudStorageConfig`, and a Scheduler job's `appEngineHttpTarget`, `oauthToken` and
-  `oidcToken`, which the API itself refuses as `UNIMPLEMENTED`. Bucket `labels`, `location` and `storageClass` are seeded and kept (#503).
+  `kmsKeyName`, `bigqueryConfig` and `cloudStorageConfig`, and a Scheduler job's `appEngineHttpTarget`,
+  which the API itself refuses as `UNIMPLEMENTED`. An `httpTarget` may set `oidcToken` or `oauthToken`
+  (#1243), minted locally at each attempt as for a job created through the API. Bucket `labels`, `location` and `storageClass` are seeded and kept (#503).
 - **Pub/Sub schemas** (#890). `pubsub.schemas` declares schemas, each a `name`
   (`projects/{project}/schemas/{schema}`), a `type` and a `definition`, created with one revision
   before any topic. The type must be `AVRO`: the emulator refuses Protocol Buffer schemas as

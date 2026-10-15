@@ -37,12 +37,13 @@ func TestTaskFieldsAreRefusedOrKept(t *testing.T) {
 		return &taskspb.CreateTaskRequest{Parent: queueA, Task: &taskspb.Task{DispatchDeadline: dd,
 			MessageType: &taskspb.Task_HttpRequest{HttpRequest: hr}}}
 	}
+	// A token needs its service account (#1243).
 	_, err := c.CreateTask(cc, task(&taskspb.HttpRequest{Url: "http://x/", AuthorizationHeader: &taskspb.HttpRequest_OidcToken{
-		OidcToken: &taskspb.OidcToken{ServiceAccountEmail: "sa@p.iam.gserviceaccount.com"}}}, nil))
-	wantCodeNaming(t, err, codes.Unimplemented, "oidcToken")
+		OidcToken: &taskspb.OidcToken{Audience: "a"}}}, nil))
+	wantCodeNaming(t, err, codes.InvalidArgument, "oidcToken.serviceAccountEmail")
 	_, err = c.CreateTask(cc, task(&taskspb.HttpRequest{Url: "http://x/", AuthorizationHeader: &taskspb.HttpRequest_OauthToken{
-		OauthToken: &taskspb.OAuthToken{ServiceAccountEmail: "sa@p.iam.gserviceaccount.com"}}}, nil))
-	wantCodeNaming(t, err, codes.Unimplemented, "oauthToken")
+		OauthToken: &taskspb.OAuthToken{Scope: "s"}}}, nil))
+	wantCodeNaming(t, err, codes.InvalidArgument, "oauthToken.serviceAccountEmail")
 	for _, m := range []taskspb.HttpMethod{taskspb.HttpMethod_GET, taskspb.HttpMethod_HEAD, taskspb.HttpMethod_DELETE, taskspb.HttpMethod_OPTIONS} {
 		_, err = c.CreateTask(cc, task(&taskspb.HttpRequest{Url: "http://x/", HttpMethod: m, Body: []byte("x")}, nil))
 		wantCodeNaming(t, err, codes.InvalidArgument, "body")

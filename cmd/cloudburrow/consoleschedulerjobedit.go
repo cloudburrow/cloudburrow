@@ -107,6 +107,14 @@ func schedulerEditForm(j scheduler.Job) *console.EditForm {
 				Default: j.AttemptDeadline.String(), Section: target,
 				Help: "How long one attempt may take, 15s to 30m. " + schedulerDurationHelp},
 		)
+		var tok authToken
+		switch {
+		case j.HTTP.OIDCToken != nil:
+			tok = authToken{kind: "oidc", email: j.HTTP.OIDCToken.ServiceAccountEmail, audience: j.HTTP.OIDCToken.Audience}
+		case j.HTTP.OAuthToken != nil:
+			tok = authToken{kind: "oauth", email: j.HTTP.OAuthToken.ServiceAccountEmail, scope: j.HTTP.OAuthToken.Scope}
+		}
+		fields = append(fields, authTokenFieldsFor(target, tok)...)
 	} else {
 		fields = append(fields,
 			console.Field{Name: "targetType", Label: "Target type", Type: "text", Default: "Pub/Sub", Immutable: true,
@@ -137,8 +145,8 @@ func schedulerEditForm(j scheduler.Job) *console.EditForm {
 		Label:  "Edit job",
 		Fields: fields,
 		Note: "Saved through UpdateJob; the next run follows the new schedule. The name, region and target type " +
-			"cannot be changed, and the state changes with Pause and Resume. App Engine targets and OIDC or " +
-			"OAuth tokens are not implemented on this instance, so they are not offered.",
+			"cannot be changed, and the state changes with Pause and Resume. App Engine targets are not " +
+			"implemented on this instance, so they are not offered.",
 	}
 }
 
@@ -197,12 +205,25 @@ func (p schedulerProvider) Edit(ctx context.Context, project string, path []stri
 				headers[k] = v
 			}
 		}
-		job.Target = &schedulerpb.Job_HttpTarget{HttpTarget: &schedulerpb.HttpTarget{
+		h := &schedulerpb.HttpTarget{
 			Uri:        strings.TrimSpace(values["uri"]),
 			HttpMethod: schedulerpb.HttpMethod(method),
 			Headers:    headers,
 			Body:       []byte(values["body"]),
-		}}
+		}
+		auth, err := parseAuthToken(values)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		switch auth.kind {
+		case "oidc":
+			h.AuthorizationHeader = &schedulerpb.HttpTarget_OidcToken{OidcToken: &schedulerpb.OidcToken{
+				ServiceAccountEmail: auth.email, Audience: auth.audience}}
+		case "oauth":
+			h.AuthorizationHeader = &schedulerpb.HttpTarget_OauthToken{OauthToken: &schedulerpb.OAuthToken{
+				ServiceAccountEmail: auth.email, Scope: auth.scope}}
+		}
+		job.Target = &schedulerpb.Job_HttpTarget{HttpTarget: h}
 		job.AttemptDeadline = durationpb.New(schedulerDuration(values, "attemptDeadline", "Attempt deadline", &errs))
 		paths = append(paths, "http_target", "attempt_deadline")
 	} else {

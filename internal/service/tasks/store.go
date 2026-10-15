@@ -104,6 +104,32 @@ type HTTPRequest struct {
 	Method  string            `json:"method"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Body    []byte            `json:"body,omitempty"`
+	// At most one of OIDCToken and OAuthToken: the Authorization header
+	// each attempt carries, minted per attempt (#1243).
+	OIDCToken  *OIDCToken  `json:"oidcToken,omitempty"`
+	OAuthToken *OAuthToken `json:"oauthToken,omitempty"`
+}
+
+// OIDCToken mirrors google.cloud.tasks.v2.OidcToken. An empty Audience
+// means the task's URL, as the API documents.
+type OIDCToken struct {
+	ServiceAccountEmail string `json:"serviceAccountEmail"`
+	Audience            string `json:"audience,omitempty"`
+}
+
+// OAuthToken mirrors google.cloud.tasks.v2.OAuthToken. An empty Scope means
+// https://www.googleapis.com/auth/cloud-platform, as the API documents.
+type OAuthToken struct {
+	ServiceAccountEmail string `json:"serviceAccountEmail"`
+	Scope               string `json:"scope,omitempty"`
+}
+
+// TokenMinter mints the tokens an HTTP task's oidcToken or oauthToken asks
+// for. The instance supplies one signed by its own local key
+// (internal/metadata); nothing is ever obtained from Google.
+type TokenMinter interface {
+	ServiceAccountIDToken(account, audience string) (string, error)
+	ServiceAccountAccessToken(account, scope string) (string, error)
 }
 
 // Task is a queued unit of work.

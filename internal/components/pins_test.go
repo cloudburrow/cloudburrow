@@ -323,7 +323,7 @@ func TestRealToolPinsMatchTheInventory(t *testing.T) {
 		t.Fatalf("realTools.googleCloudCli = %+v; want a versioned source and a sha256 digest", gcloud)
 	}
 	ci := read("../../.github/workflows/ci.yml")
-	if want := "curl -fsSLo \"$RUNNER_TEMP/gcloud.tar.gz\" " + gcloud.Source + "\n"; !strings.Contains(ci, want) {
+	if want := "curl --retry 5 --retry-all-errors -fsSLo \"$RUNNER_TEMP/gcloud.tar.gz\" " + gcloud.Source + "\n"; !strings.Contains(ci, want) {
 		t.Errorf("ci.yml does not download %s", gcloud.Source)
 	}
 	if want := "echo \"" + strings.TrimPrefix(*gcloud.Digest, "sha256:") + "  $RUNNER_TEMP/gcloud.tar.gz\" | sha256sum -c -"; !strings.Contains(ci, want) {

@@ -79,9 +79,10 @@ func TestBigQueryScriptControlFlowMore(t *testing.T) {
 		t.Errorf("a read after DML: %v %v", got, err)
 	}
 
-	// Still 501, with the reason: a transaction in such a script. Stored
-	// procedures are TestBigQueryStoredProcedures (#1217).
-	err = bqRun(ctx, c, "IF TRUE THEN BEGIN TRANSACTION; INSERT INTO "+tbl+" (n) VALUES (5); COMMIT TRANSACTION; END IF", false)
+	// Still 501, with the reason: a block inside a transaction. Stored
+	// procedures are TestBigQueryStoredProcedures (#1217), transactions
+	// TestBigQueryScriptTransactions.
+	err = bqRun(ctx, c, "IF TRUE THEN BEGIN TRANSACTION; IF TRUE THEN INSERT INTO "+tbl+" (n) VALUES (5); END IF; COMMIT TRANSACTION; END IF", false)
 	wantReason(t, "a transaction in a block", err, 501, "notImplemented")
 	if err != nil && !strings.Contains(err.Error(), "transaction") {
 		t.Errorf("the transaction's 501 gives no reason: %v", err)
