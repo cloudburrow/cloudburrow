@@ -13,6 +13,7 @@ import (
 	"cloud.google.com/go/datastore"
 	"cloud.google.com/go/datastore/apiv1/datastorepb"
 	"cloud.google.com/go/firestore"
+	"cloud.google.com/go/firestore/apiv1/firestorepb"
 	"cloud.google.com/go/spanner"
 	database "cloud.google.com/go/spanner/admin/database/apiv1"
 	databasepb "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
@@ -1916,6 +1917,9 @@ func (p firestoreProvider) QueryForm(path []string) (string, []console.Field) {
 		{Name: "limit", Label: "Limit", Type: "text", Default: "50",
 			Pattern: `^[0-9]{1,4}$`,
 			Help:    fmt.Sprintf("At most %d, which is where every listing on this console stops.", detailLimit)},
+		{Name: "count", Label: "Count only", Type: "checkbox",
+			Help: "Answer how many documents match the filter, counted by Firestore " +
+				"(a COUNT aggregation query), instead of listing them. Limit and Order by do not apply."},
 	}
 }
 
@@ -1960,6 +1964,9 @@ func (p firestoreProvider) Build(ctx context.Context, project string, path []str
 		}
 		q = q.Where(field, op, value)
 	}
+	if values["count"] == "true" {
+		return firestoreCount(ctx, q)
+	}
 	if order := strings.TrimSpace(values["orderBy"]); order != "" {
 		dir := firestore.Asc
 		if values["descending"] == "true" {
@@ -1990,6 +1997,32 @@ func (p firestoreProvider) Build(ctx context.Context, project string, path []str
 	}
 	out.Total = len(out.Items)
 	return out, nil
+}
+
+// firestoreCount answers Count only: one RunAggregationQuery with a COUNT
+// over the filtered query, which Firestore counts without returning a
+// document (#1198).
+func firestoreCount(ctx context.Context, q firestore.Query) (console.Listing, error) {
+	res, err := q.NewAggregationQuery().WithCount("count").Get(ctx)
+	if err != nil {
+		return console.Listing{}, err
+	}
+	n, ok := res["count"]
+	if !ok {
+		return console.Listing{}, fmt.Errorf("Firestore answered the count with no count")
+	}
+	var count string
+	switch v := n.(type) {
+	case *firestorepb.Value:
+		count = strconv.FormatInt(v.GetIntegerValue(), 10)
+	default:
+		count = fmt.Sprint(v)
+	}
+	return console.Listing{
+		Columns: []string{"Count"}, NameColumn: "Aggregation", Noun: "aggregations",
+		Items: []console.Resource{{Name: "count(*)", Fields: map[string]string{"Count": count}}},
+		Total: 1,
+	}, nil
 }
 
 // typedValue reads a form value as the type the comparison needs.
@@ -2385,8 +2418,9 @@ func (p bigtableProvider) rowDetail(ctx context.Context, project, table, rowKey 
 					"Timestamp": item.Timestamp.Time().Format(time.RFC3339Nano),
 					"Value":     string(item.Value),
 				},
-				// Every version of the column, through MutateRow (#797).
-				Actions: []console.Action{{ID: "deletecells", Label: "Delete cells", Destructive: true}},
+				// Every version of the column: Delete cells through CheckAndMutateRow,
+				// Increment and Append value through ReadModifyWriteRow (#797, #1198).
+				Actions: cellActions(),
 			})
 		}
 	}

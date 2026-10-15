@@ -90,9 +90,13 @@ func removed(tx Tx, b bucketRecord, o objectRecord, now time.Time, by int64) err
 	return emit(tx, objectEvent{Type: EventDelete, Object: o, OverwrittenBy: by, Time: now})
 }
 
-// finalized writes o as the new live version and emits its OBJECT_FINALIZE,
+// finalized writes o as the new live version, creating the folders in its
+// path in a hierarchical bucket (#1203), and emits its OBJECT_FINALIZE,
 // naming the live generation it replaced, if any (#506).
 func finalized(tx Tx, o objectRecord, cur objectRecord, replaced bool, now time.Time) error {
+	if err := objectFolders(tx, o, now); err != nil {
+		return err
+	}
 	if err := putObject(tx, o); err != nil {
 		return err
 	}

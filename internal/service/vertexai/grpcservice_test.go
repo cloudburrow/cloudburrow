@@ -321,4 +321,3 @@ func TestGRPCOtherMethodsAreUnimplemented(t *testing.T) {
 		t.Errorf("StreamGenerateContent: %v, want UNIMPLEMENTED", err)
 	}
 }
-

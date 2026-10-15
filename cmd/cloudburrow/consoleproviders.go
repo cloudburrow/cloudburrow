@@ -1426,6 +1426,13 @@ func (storageProvider) CreateForm() (string, []console.Field) {
 		{Name: "storageClass", Label: "Default storage class", Type: "select", Section: class, Default: "STANDARD",
 			Options: []string{"STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE"},
 			Help:    "The class a new object gets when it names none. Classes are recorded, not priced: nothing is billed here."},
+		// Hierarchical namespace (#1203) needs uniform bucket-level access
+		// and excludes versioning, so checking it turns the one on and the
+		// other off, and holds them there.
+		{Name: "hierarchicalNamespace", Label: "Enable hierarchical namespace", Type: "checkbox", Section: class,
+			Default: "false", Requires: []string{"uniformAccess"}, Excludes: []string{"versioning"},
+			Help: "The bucket has real folders, which can be created, renamed and deleted as folders. It can be " +
+				"enabled only when the bucket is created, needs uniform bucket-level access and excludes object versioning."},
 		{Name: "uniformAccess", Label: "Uniform bucket-level access", Type: "checkbox", Section: access, Default: "true",
 			Help: "Access is granted by IAM alone, as a managed folder requires. There are no ACLs here, so " +
 				"fine-grained access is not offered."},
@@ -1480,6 +1487,9 @@ func bucketCreateRequest(name string, values map[string]string) ([]byte, string,
 	}
 	if values["versioning"] == "true" {
 		b["versioning"] = map[string]any{"enabled": true}
+	}
+	if values["hierarchicalNamespace"] == "true" {
+		b["hierarchicalNamespace"] = map[string]any{"enabled": true}
 	}
 	if v := strings.TrimSpace(values["softDeleteSeconds"]); v != "" {
 		b["softDeletePolicy"] = map[string]any{"retentionDurationSeconds": v}
@@ -3183,6 +3193,9 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	if path[0] == objectPage {
 		return p.objectDetail(ctx, path)
 	}
+	if path[0] == operationPage {
+		return p.operationDetail(ctx, path)
+	}
 	if b, id, ok := notificationPath(path); ok {
 		return p.notificationDetail(ctx, b, id)
 	}
@@ -3210,14 +3223,23 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 	// A bucket's own settings, which nothing showed, what can be changed
 	// about them, and its soft-deleted objects (#789). Only the prefix root
 	// carries them: a folder is not a resource and has no configuration.
-	// Every page can make a managed folder under it (#828).
+	// Every page can make a managed folder under it (#828), and, in a
+	// bucket with hierarchical namespace, a folder (#1203).
 	actions := []console.Action{createManagedFolderAction(bucket, prefix)}
+	meta, metaErr := p.readBucket(ctx, bucket)
+	hns := metaErr == nil && meta.hierarchical()
+	if hns {
+		actions = append(actions, createFolderAction(bucket, prefix))
+	}
 	var edit *console.EditForm
 	if prefix == "" {
-		if b, err := p.readBucket(ctx, bucket); err == nil {
-			sections = append(sections, bucketConfigSection(b), p.deletedObjects(ctx, b))
-			edit = bucketEditForm(b)
-			actions = append(actions, lockRetentionAction(b)...)
+		if metaErr == nil {
+			sections = append(sections, bucketConfigSection(meta), p.deletedObjects(ctx, meta))
+			edit = bucketEditForm(meta)
+			actions = append(actions, lockRetentionAction(meta)...)
+			if hns {
+				sections = append(sections, p.operationsSection(ctx, bucket))
+			}
 		}
 		// Its notifications, and Create notification (#791).
 		notifications, create := p.notificationsSection(ctx, project, bucket)
@@ -3232,6 +3254,9 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 		// its Permissions tab.
 		if p.isManagedFolder(ctx, bucket, prefix) {
 			summary = append(summary, console.Property{Label: "Type", Value: "Managed folder"})
+		}
+		if hns {
+			summary = append(summary, p.folderSummary(ctx, bucket, prefix)...)
 		}
 	}
 	summary = append(summary,
@@ -3266,6 +3291,11 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 	managed, merr := p.managedFolders(ctx, bucket, prefix)
 	if merr != nil {
 		out.Note = "Managed folders could not be listed: " + merr.Error()
+	}
+	// A bucket with hierarchical namespace has real folders (#1203), listed
+	// with folders.list rather than read off the objects' prefixes.
+	if b, err := p.readBucket(ctx, bucket); err == nil && b.hierarchical() {
+		return p.hnsObjects(ctx, out, bucket, prefix, path, body.Items, managed)
 	}
 	folderRow := func(name string) console.Resource {
 		row := console.Resource{
@@ -3302,7 +3332,16 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 	for _, name := range rest {
 		out.Items = append(out.Items, folderRow(name))
 	}
-	for _, o := range body.Items {
+	out.Items = append(out.Items, objectRows(bucket, prefix, body.Items)...)
+	out.Total = len(out.Items)
+	return out, nil
+}
+
+// objectRows are the browser's rows for the objects directly under a
+// prefix.
+func objectRows(bucket, prefix string, items []objectJSON) []console.Resource {
+	var out []console.Resource
+	for _, o := range items {
 		name := strings.TrimPrefix(o.Name, prefix)
 		if name == "" {
 			continue
@@ -3312,7 +3351,7 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 		if err == nil {
 			size = formatBytes(n)
 		}
-		out.Items = append(out.Items, console.Resource{
+		out = append(out, console.Resource{
 			Name: name,
 			Fields: map[string]string{
 				"Size": size, "Type": o.ContentType, "Updated": shortTime(o.Updated),
@@ -3327,8 +3366,7 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 			Actions: objectActions(bucket, o.meta()),
 		})
 	}
-	out.Total = len(out.Items)
-	return out, nil
+	return out
 }
 
 // bucketConfig is the bucket's own settings, as the backend reports them.
@@ -3364,6 +3402,7 @@ func bucketConfigSection(b bucketMeta) console.Section {
 		}
 	}
 	protection := []console.Property{
+		{Label: "Hierarchical namespace", Value: yesNo(b.hierarchical())},
 		{Label: "Object versioning", Value: yesNo(b.Versioning.Enabled)},
 		{Label: "Uniform bucket-level access", Value: yesNo(b.IAMConfiguration.UniformBucketLevelAccess.Enabled)},
 		{Label: "Retention policy", Value: retention},

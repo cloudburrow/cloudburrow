@@ -107,9 +107,34 @@ func TestBigtableRunsTheEmulatorDirectly(t *testing.T) {
 	if !ok {
 		t.Fatal("no Bigtable backend")
 	}
-	want := []string{bigtableEmulator, "-host", "0.0.0.0", "-port", "8086"}
+	// On the pod's loopback alone, behind its front (#1206).
+	want := []string{bigtableEmulator, "-host", "127.0.0.1", "-port", "8096"}
 	if strings.Join(b.Command, " ") != strings.Join(want, " ") {
 		t.Errorf("command = %q, want %q", b.Command, want)
+	}
+}
+
+// Every Bigtable client goes through the front (#1206), which refuses the
+// RPCs the emulator would panic on: it serves the Service's port, from the
+// storage image, and forwards to the emulator's loopback port.
+func TestBigtableIsServedThroughItsFront(t *testing.T) {
+	c := NewLifecycleComponent("", config.Config{Services: []config.Service{config.ServiceBigtable}}, io.Discard)
+	c.SetBuiltinStorageImage("dev.local/cloudburrow-storage:abc")
+	var b *Backend
+	for _, got := range c.Backends() {
+		if got.Name == "bigtable" {
+			b = &got
+		}
+	}
+	if b == nil || b.Front == nil {
+		t.Fatalf("no Bigtable backend with a front: %+v", b)
+	}
+	if b.Port != BigtablePort || b.Front.UpstreamPort != BigtableEmulatorPort || b.Front.Image != "dev.local/cloudburrow-storage:abc" {
+		t.Errorf("port %d, front upstream %d, image %q", b.Port, b.Front.UpstreamPort, b.Front.Image)
+	}
+	want := "bigtable-front --listen 0.0.0.0:8086 --upstream 127.0.0.1:8096"
+	if got := strings.Join(b.Front.Args, " "); got != want {
+		t.Errorf("front args = %q, want %q", got, want)
 	}
 }
 

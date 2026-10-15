@@ -148,10 +148,9 @@ func TestBigQueryCreateTableAsSelectColumnsAreChecked(t *testing.T) {
 
 // TestBigQueryScriptBlocks (#901): the DDL inside a script's IF, LOOP and
 // BEGIN ... EXCEPTION blocks is held to the rules, 400, and nothing is
-// made. A control-flow block BigQuery would run is 501, since the emulator
-// skips the statements inside it and reports success (measured): the
-// table the IF would make is not there. A BEGIN ... END block, which the
-// emulator runs, is run.
+// made. A control-flow block, which the emulator skips (measured), the
+// front carries out (#1201): the table the IF makes is there. A BEGIN ...
+// END block, which the emulator runs, is run.
 func TestBigQueryScriptBlocks(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -162,15 +161,22 @@ func TestBigQueryScriptBlocks(t *testing.T) {
 		"IF TRUE THEN CREATE TABLE " + path("if!") + " (a INT64); END IF":                                http.StatusBadRequest,
 		"LOOP CREATE TABLE " + path("loop!") + " (a INT64); LEAVE; END LOOP":                             http.StatusBadRequest,
 		"BEGIN SELECT 1; EXCEPTION WHEN ERROR THEN CREATE TABLE " + path("handler!") + " (a INT64); END": http.StatusBadRequest,
-		"IF TRUE THEN CREATE TABLE " + path("ifok") + " (a INT64); END IF":                               http.StatusNotImplemented,
-		"WHILE FALSE DO SELECT 1; END WHILE":                                                             http.StatusNotImplemented,
 	} {
 		wantHTTPStatus(t, sql, bqRun(ctx, c, sql, false), code)
 	}
-	for _, table := range []string{"if!", "loop!", "handler!", "ifok"} {
+	for _, table := range []string{"if!", "loop!", "handler!"} {
 		if tableExists(t, ctx, ds.Table(table)) {
 			t.Errorf("the refused script made %s", table)
 		}
+	}
+	// #1201: the front carries control flow out itself.
+	for _, sql := range []string{"IF TRUE THEN CREATE TABLE " + path("ifok") + " (a INT64); END IF", "WHILE FALSE DO SELECT 1; END WHILE"} {
+		if err := bqRun(ctx, c, sql, false); err != nil {
+			t.Errorf("%s: %v", sql, err)
+		}
+	}
+	if !tableExists(t, ctx, ds.Table("ifok")) {
+		t.Error("the IF block did not make its table")
 	}
 	if err := bqRun(ctx, c, "BEGIN CREATE TABLE "+path("block")+" (a INT64); END", false); err != nil {
 		t.Fatalf("a BEGIN ... END block: %v", err)
