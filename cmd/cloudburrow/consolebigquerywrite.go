@@ -14,7 +14,8 @@ package main
 // What the mode runs is what the validating front (internal/bigqueryfront)
 // serves and the compat tests exercise through jobs.query: DDL (CREATE
 // SCHEMA, CREATE TABLE with columns or AS SELECT, CREATE VIEW (with a
-// column list too, #1240), CREATE OR
+// column list too, in a script and with a column's description, #1240,
+// #1323), CREATE OR
 // REPLACE, IF NOT EXISTS, DROP) and scripts with DECLARE and SET
 // (docs/compatibility.md). A statement the front answers 501, such as ALTER
 // TABLE or a control-flow block, is sent, and the answer is shown in the

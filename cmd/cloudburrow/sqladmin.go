@@ -39,7 +39,12 @@ func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds compon
 	if len(engines) == 0 {
 		return nil
 	}
-	return sqladmin.NewServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.SQLAdmin)), engines...)
+	srv := sqladmin.NewServer(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Endpoints.SQLAdmin)), engines...)
+	// The connector path (#1330): the connectors always dial 3307, so the
+	// listener is not moved by --port-base. A CA that cannot be read leaves
+	// the rest of the API serving, and connectSettings says why.
+	_ = srv.EnableConnector(net.JoinHostPort(cfg.BindAddress, strconv.Itoa(sqladmin.ConnectorPort)), cfg.InstanceDir())
+	return srv
 }
 
 // sqlAdminEnabled is whether `up` binds the Admin API's port.

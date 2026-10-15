@@ -20,3 +20,4 @@ environment:
   GOOGLE_CLOUD_PROJECT: "golden"
   PUBSUB_EMULATOR_HOST: "host.docker.internal:9002"
   STORAGE_EMULATOR_HOST: "http://host.docker.internal:9001"
+  STORAGE_EMULATOR_HOST_GRPC: "host.docker.internal:9001"

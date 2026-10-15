@@ -131,6 +131,12 @@ func TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts(t *testing.T) {
 	if got := columns("listed"); got != "order_id:INTEGER,where_to:STRING" {
 		t.Errorf("CREATE VIEW with a column list made columns %s", got)
 	}
+	// And in a script, with a column's description (#1323).
+	write("DECLARE k INT64 DEFAULT 1;\nCREATE VIEW scripted (order_id OPTIONS(description = 'the order')) AS SELECT id FROM `" + project + "." + ds.DatasetID + ".orders`;")
+	if md, err := ds.Table("scripted").Metadata(ctx); err != nil || len(md.Schema) != 1 || md.Schema[0].Name != "order_id" ||
+		md.Schema[0].Description != "the order" {
+		t.Errorf("the script's CREATE VIEW with a column list reads %+v (%v)", md, err)
+	}
 	write("CREATE OR REPLACE TABLE totals AS SELECT 1 AS n")
 	if got := columns("totals"); got != "n:INTEGER" {
 		t.Errorf("CREATE OR REPLACE TABLE left columns %s, want n:INTEGER", got)

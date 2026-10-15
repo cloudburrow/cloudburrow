@@ -176,8 +176,8 @@ func (f front) withInformationSchemaViews(w http.ResponseWriter, r *http.Request
 			var msg string
 			sub, status, msg = infoSchemaBuilders[ref.view](f, r, ref.dataset, meta)
 			if status != 0 {
-				reason := "notFound"
-				if status != http.StatusNotFound {
+				reason := map[int]string{http.StatusNotFound: "notFound", http.StatusNotImplemented: "notImplemented"}[status]
+				if reason == "" {
 					reason = "internalError"
 				}
 				writeError(w, status, reason, msg)

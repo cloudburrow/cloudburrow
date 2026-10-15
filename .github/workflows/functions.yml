@@ -1,9 +1,10 @@
-# The six gated Functions tests (#678; TestFunctionsSubmitBuildBuildpacks since #1268;
+# The ten gated Functions tests (#678; TestFunctionsSubmitBuildBuildpacks since #1268;
 # TestFunctionsNodejsBuiltWithBuildpacks and TestFunctionsPythonBuiltWithBuildpacks
-# since #1303), on demand: TestFunctionsFrameworkBuiltWithBuildpacks
-# builds testdata/function with the pinned Google builder and deploys it
-# through the official Cloud Run v2 client, and the Node.js and Python tests do
-# the same for testdata/function-nodejs and testdata/function-python; they
+# since #1303; the Java, Ruby, PHP and .NET ones since #1319), on demand:
+# TestFunctionsFrameworkBuiltWithBuildpacks builds testdata/function with the
+# pinned Google builder and deploys it through the official Cloud Run v2
+# client, and the language tests do the same for testdata/function-nodejs,
+# -python, -java, -ruby, -php and -dotnet; they
 # need amd64 kind nodes (the builder's only platform), which a maintainer's
 # arm64 Mac does not have;
 # TestFunctionsRebuildReusesLayers and TestFunctionsBuildBrokenModulePathFails
@@ -35,7 +36,8 @@ jobs:
     # amd64: the Google builder publishes linux/amd64 only, and
     # TestFunctionsFrameworkBuiltWithBuildpacks skips on any other node.
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 120: ten tests, eight of which build their fixture twice (#1319).
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -110,7 +112,7 @@ jobs:
           TESTS='TestFunctions'
           set -o pipefail
           rc=0
-          CLOUDBURROW_TEST_FUNCTIONS=1 go test -tags compat -count=1 -timeout 45m -run "$TESTS" -v ./test/compat/ | tee functions.log || rc=1
+          CLOUDBURROW_TEST_FUNCTIONS=1 go test -tags compat -count=1 -timeout 100m -run "$TESTS" -v ./test/compat/ | tee functions.log || rc=1
           # go test exits 0 when a test skips, and each of these skips
           # without the gate, a tool or amd64 nodes, so every selected test
           # must have passed: the acceptance shard's all_passed in ci.yml,

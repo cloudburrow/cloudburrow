@@ -51,6 +51,7 @@ import (
 
 	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	bqv2 "google.golang.org/api/bigquery/v2"
+	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 	runv1 "google.golang.org/api/run/v1"
 
 	sqladminsvc "github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -106,11 +107,20 @@ var areas = []area{
 	// google.cloud.location.Locations too (#1291); Cloud Scheduler lists it
 	// as well, and both serve it, so the one registry status is true of both.
 	{Key: "kms", Title: "Cloud KMS", Own: true, Services: []string{"google.cloud.kms.v1.KeyManagementService", "google.iam.v1.IAMPolicy", "google.cloud.location.Locations"}},
-	// Liens (#1295) have no gRPC service, so they are not counted here;
-	// docs/compatibility.md lists them.
+	// Liens (#1295) have no gRPC service: they are on resourcemanagerv1.
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations, Tags)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects",
 		"google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations", "google.cloud.resourcemanager.v3.TagKeys",
 		"google.cloud.resourcemanager.v3.TagValues", "google.cloud.resourcemanager.v3.TagBindings", "google.cloud.resourcemanager.v3.TagHolds"}},
+	// Resource Manager's JSON-only surface: v1 REST, which gcloud projects
+	// and Terraform's google_project and google_project_organization_policy
+	// call (#301, #1296), and liens (#1295), which have no gRPC service. A
+	// lien's v3 REST method has the same discovery ID as v1's
+	// (cloudresourcemanager.liens.create) and is served by the same handler
+	// on both paths, so v3's liens are these rows too. No proto, so the
+	// methods are the official generated client's, and a method is Verified
+	// only by an annotated official-client test, as runv1's are.
+	{Key: "resourcemanagerv1", Title: "Resource Manager v1 REST (projects, org policies; liens on v1 and v3)",
+		Methods: discoveryMethods("cloudresourcemanager", reflect.TypeOf(crmv1.Service{}))},
 	// google.cloud.location.Locations is the mixin cloudscheduler.googleapis.com
 	// serves (#1237); Cloud KMS serves it too (#1291).
 	{Key: "scheduler", Title: "Cloud Scheduler", Own: true, Services: []string{"google.cloud.scheduler.v1.CloudScheduler", "google.cloud.location.Locations"}},
@@ -125,6 +135,11 @@ var areas = []area{
 	{Key: "memorystore", Title: "Memorystore for Redis", Own: true, Services: []string{"google.cloud.redis.v1.CloudRedis"}},
 	{Key: "pubsub", Title: "Pub/Sub", Services: []string{"google.pubsub.v1.Publisher", "google.pubsub.v1.Subscriber", "google.pubsub.v1.SchemaService"}},
 	{Key: "storage", Title: "Cloud Storage (JSON API)", Own: true, Methods: storageMethods()},
+	// The gRPC API (#1321), served from the JSON API's handlers. Its proto
+	// is registered under CloudBurrow's own name, since the CLI links the Go
+	// client's copy too, so its methods come from the server's service
+	// descriptor, under the name clients call.
+	{Key: "storagegrpc", Title: "Cloud Storage (gRPC API v2)", Own: true, Methods: gcs.GRPCMethods()},
 	// The opt-in emulators (#717) are Google's, like Pub/Sub's: a method is
 	// Verified only by an annotated official-client test, and Unknown
 	// otherwise. Bigtable's instance admin service is not listed: nothing

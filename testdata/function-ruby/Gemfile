@@ -1,0 +1,6 @@
+# The Ruby fixture used to verify Google Functions Framework and Buildpacks
+# support (#1319). The pinned Google builder detects Ruby from this file and
+# installs the locked gems with Bundler.
+source "https://rubygems.org"
+
+gem "functions_framework", "1.7.0"

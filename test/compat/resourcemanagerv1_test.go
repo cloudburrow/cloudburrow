@@ -37,6 +37,8 @@ func v1ID(h *Harness, prefix string) string {
 	return strings.TrimRight(id, "-")
 }
 
+// covers: cloudresourcemanager.projects.create, cloudresourcemanager.projects.get, cloudresourcemanager.projects.list, cloudresourcemanager.projects.update, cloudresourcemanager.projects.delete, cloudresourcemanager.projects.undelete, cloudresourcemanager.projects.getIamPolicy (unimplemented)
+//
 // TestResourceManagerV1Projects.
 //
 // The v1 REST surface (#301) through google.golang.org/api/

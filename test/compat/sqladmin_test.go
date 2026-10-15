@@ -90,9 +90,10 @@ func TestSQLAdminInstancesDescribeTheRunningServers(t *testing.T) {
 }
 
 // TestSQLAdminRefusesWhatItCannotDoFaithfully (#1301): creating, patching,
-// restarting and deleting an instance, the connectors' connectSettings and
-// generateEphemeralCert, and tiers, flags and backup runs answer 501.
-// covers: sql.instances.insert (unimplemented), sql.instances.patch (unimplemented), sql.instances.delete (unimplemented), sql.instances.restart (unimplemented), sql.connect.get (unimplemented), sql.connect.generateEphemeral (unimplemented), sql.tiers.list (unimplemented), sql.flags.list (unimplemented), sql.backupRuns.list (unimplemented)
+// restarting and deleting an instance, IAM database authentication (an
+// access token in generateEphemeralCert, #1330), and tiers, flags and
+// backup runs answer 501.
+// covers: sql.instances.insert (unimplemented), sql.instances.patch (unimplemented), sql.instances.delete (unimplemented), sql.instances.restart (unimplemented), sql.tiers.list (unimplemented), sql.flags.list (unimplemented), sql.backupRuns.list (unimplemented)
 func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	h := New(t)
 	svc := sqlAdminService(t, h)
@@ -109,10 +110,8 @@ func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	wantHTTP(t, "instances.delete", err, 501)
 	_, err = svc.Instances.Restart(p, inst).Do()
 	wantHTTP(t, "instances.restart", err, 501)
-	_, err = svc.Connect.Get(p, inst).Do()
-	wantHTTP(t, "connect.get", err, 501)
-	_, err = svc.Connect.GenerateEphemeralCert(p, inst, &sqladmin.GenerateEphemeralCertRequest{PublicKey: "x"}).Do()
-	wantHTTP(t, "connect.generateEphemeralCert", err, 501)
+	_, err = svc.Connect.GenerateEphemeralCert(p, inst, &sqladmin.GenerateEphemeralCertRequest{PublicKey: "x", AccessToken: "iam"}).Do()
+	wantHTTP(t, "connect.generateEphemeralCert with an access token (IAM database authentication)", err, 501)
 	_, err = svc.Tiers.List(p).Do()
 	wantHTTP(t, "tiers.list", err, 501)
 	_, err = svc.Flags.List().Do()

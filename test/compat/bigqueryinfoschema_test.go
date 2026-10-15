@@ -20,7 +20,7 @@ import (
 // ROUTINES and PARAMETERS, through jobs.query and jobs.insert, have
 // BigQuery's documented columns and types and a row for what the dataset
 // holds: a partitioned, clustered table with a description, labels and a
-// nested field, a view and a function. PARTITIONS is 501. Measured first:
+// nested field, a view and a function. MATERIALIZED_VIEWS is 501. Measured first:
 // TABLES had 7 columns, creation_time a STRING; TABLE_OPTIONS was empty;
 // ROUTINES, PARAMETERS and COLUMN_FIELD_PATHS were 400 "Table not found".
 //
@@ -202,10 +202,10 @@ func TestBigQueryInformationSchemaDatasetViews(t *testing.T) {
 			t.Errorf("insert=%v: a join gave %v, %v", insert, rows, err)
 		}
 
-		_, _, err = read("SELECT * FROM "+ds.DatasetID+".INFORMATION_SCHEMA.PARTITIONS", insert)
+		_, _, err = read("SELECT * FROM "+ds.DatasetID+".INFORMATION_SCHEMA.MATERIALIZED_VIEWS", insert)
 		var e *googleapi.Error
 		if !errors.As(err, &e) || e.Code != http.StatusNotImplemented {
-			t.Errorf("insert=%v: PARTITIONS gave %v, want 501", insert, err)
+			t.Errorf("insert=%v: MATERIALIZED_VIEWS gave %v, want 501", insert, err)
 		}
 		_, _, err = read("SELECT * FROM no_such_dataset_1286.INFORMATION_SCHEMA.TABLES", insert)
 		if !errors.As(err, &e) || e.Code != http.StatusNotFound {

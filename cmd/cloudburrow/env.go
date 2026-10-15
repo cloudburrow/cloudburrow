@@ -256,6 +256,10 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		vars = append(vars,
 			envVar{"STORAGE_EMULATOR_HOST", "http://" + addr(cfg.Endpoints.Storage),
 				"read by the official Cloud Storage clients"},
+			// The gRPC API (#1321) is the same port, as h2c; the Go client's
+			// NewGRPCClient reads this variable, bare host:port.
+			envVar{"STORAGE_EMULATOR_HOST_GRPC", addr(cfg.Endpoints.Storage),
+				"read by the Go client's gRPC transport (storage.NewGRPCClient)"},
 			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE", "http://" + addr(cfg.Endpoints.Storage) + "/storage/v1/",
 				"gcloud storage"})
 	}

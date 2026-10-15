@@ -60,7 +60,11 @@ func (f *fake) CreateUser(_ context.Context, u User, _ string) error { f.users[u
 // unimplemented answer 501, so tools/coverage's registry cannot claim a
 // method the router does not serve.
 func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
-	ts := httptest.NewServer(NewServer("", newFake()))
+	srv := NewServer("", newFake())
+	if err := srv.EnableConnector("127.0.0.1:0", t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv)
 	defer ts.Close()
 	param := regexp.MustCompile(`\{[^}]+\}`)
 	for _, m := range Methods {

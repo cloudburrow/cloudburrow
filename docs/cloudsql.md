@@ -107,10 +107,53 @@ _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "or
 
 What answers 501, saying why: creating, changing, restarting or deleting an instance (an
 instance is a server `up` starts with `--services`), IAM database authentication, backups,
-replicas, imports and exports, SSL certificates, and the Cloud SQL connectors and Auth Proxy
-(`connectSettings`, `generateEphemeralCert`), which need the instance's server CA and a TLS
-listener on 3307 that CloudBurrow does not run. Connect to the server directly. See
+replicas, imports and exports, and SSL certificates. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
+
+### The Cloud SQL connectors (#1330)
+
+The official connectors reach both servers by connection name, as they reach Cloud SQL. Point
+the connector's Admin API at CloudBurrow and change nothing else:
+
+```go
+import (
+    "cloud.google.com/go/cloudsqlconn"
+    "cloud.google.com/go/cloudsqlconn/postgres/pgxv5"
+)
+
+cleanup, err := pgxv5.RegisterDriver("cloudsql-postgres",
+    cloudsqlconn.WithAdminAPIEndpoint("http://"+os.Getenv("CLOUDBURROW_SQLADMIN_ENDPOINT")+"/"))
+db, err := sql.Open("cloudsql-postgres",
+    "host="+project+":us-central1:postgres user=cloudburrow dbname=cloudburrow sslmode=disable")
+```
+
+MySQL is the same with `cloud.google.com/go/cloudsqlconn/mysql/mysql`, the instance `mysql`,
+and `MYSQL_PASSWORD`. The connector still wants a credential to send. CloudBurrow checks none,
+so ADC, the metadata server or `cloudsqlconn.WithTokenSource` all work.
+
+What happens underneath is what Cloud SQL does:
+
+1. `connectSettings` returns the instance's **server CA**, `127.0.0.1` as its `PRIMARY` address,
+   and a DNS name, `{instance}.{project}.us-central1.sql.cloudburrow.internal`. Each instance's
+   CA is generated on the host the first time it is needed and kept, with its key, in
+   `cloudsql-{instance}-server-ca.json` in the instance directory (mode 0600). It is never
+   printed, and it stays the same across restarts, so a connector's cached copy stays valid.
+2. `generateEphemeralCert` signs the connector's public key with that CA, for one hour.
+3. The connector dials **`127.0.0.1:3307`** with TLS 1.3. A listener in the `cloudburrow` process
+   picks the instance by the DNS name. It presents a certificate signed by the instance's CA,
+   with `project:instance` as its CN, which is what the connector checks. It requires the client
+   certificate that was issued for that project's instance, and then forwards the connection to
+   the server.
+
+**Port 3307 is fixed.** It is a constant in every connector, not a setting, so `--port-base` does
+not move it. Only one CloudBurrow instance at a time can serve connectors. On a second instance,
+`connectSettings` and `generateEphemeralCert` answer 503 and say so, and the rest of the API
+still serves.
+
+Verified with `cloud.google.com/go/cloudsqlconn` on both servers. The Auth Proxy
+(`cloud-sql-proxy`) is built on the same connector, but no pinned proxy binary is tested yet.
+IAM database authentication (`WithIAMAuthN`, an `access_token` in `generateEphemeralCert`) is 501.
+Connecting to the server directly, as above, still works and needs none of this.
 
 ## 4. Authentication is trust, on purpose
 

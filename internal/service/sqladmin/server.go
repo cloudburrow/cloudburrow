@@ -9,10 +9,10 @@
 //
 // What cannot be faithful is refused with 501 and says why: creating,
 // patching, restarting or deleting an instance (that would mean starting or
-// stopping a server), backups, replicas, imports and exports, SSL
-// certificates, and the connectors' connectSettings and
-// generateEphemeralCert, which need the instance's server certificate and a
-// TLS listener on 3307 that CloudBurrow does not run.
+// stopping a server), IAM database authentication, backups, replicas,
+// imports and exports, and SSL certificates. The connector path
+// (connectSettings, generateEphemeralCert and the TLS listener on 3307) is
+// in connector.go (#1330).
 package sqladmin
 
 import (
@@ -101,6 +101,8 @@ type Server struct {
 
 	srv *http.Server
 	ln  net.Listener
+	// conn is the connector path, nil unless EnableConnector was called.
+	conn *connector
 	// Observe, if set, is called once per request with the method name and
 	// the answer's status.
 	Observe func(method string, code int)
@@ -120,6 +122,9 @@ func (s *Server) Start(context.Context) error {
 		return fmt.Errorf("sqladmin: listen on %s: %w", s.addr, err)
 	}
 	s.ln = ln
+	if s.conn != nil {
+		s.conn.start(s)
+	}
 	s.srv = &http.Server{Handler: s, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = s.srv.Serve(ln) }()
 	return nil
@@ -129,6 +134,9 @@ func (s *Server) Start(context.Context) error {
 func (s *Server) Stop(ctx context.Context) error {
 	if s.srv == nil {
 		return nil
+	}
+	if s.conn != nil {
+		s.conn.stop()
 	}
 	return s.srv.Shutdown(ctx)
 }
@@ -200,9 +208,6 @@ func unimplemented(what, why string) error {
 const instanceWhy = "each instance is a server CloudBurrow runs with --services cloudsql or cloudsql-mysql; " +
 	"starting, changing or stopping a server through the API is not served (docs/cloudsql.md)"
 
-const connectorWhy = "the Cloud SQL connectors and Auth Proxy need the instance's server CA and a TLS listener on 3307, " +
-	"which CloudBurrow does not run; connect to the server's address directly (docs/cloudsql.md)"
-
 func (s *Server) route(r *http.Request, base string, p []string) (string, any, error) {
 	if len(p) < 2 || p[0] != "projects" || p[1] == "" || strings.Contains(p[1], ":") || len(p) == 2 {
 		// flags, locations, and projects/{project}:pointInTimeRestore.
@@ -242,7 +247,11 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 			"CloudBurrow's instances are %s.", s.instanceNames())
 	}
 	if verb == "generateEphemeralCert" {
-		return "sql.connect.generateEphemeral", nil, unimplemented("connect.generateEphemeralCert", connectorWhy)
+		if r.Method != http.MethodPost {
+			return "sql.connect.generateEphemeral", nil, Errorf(http.StatusNotFound, "method %s is not served on generateEphemeralCert", r.Method)
+		}
+		out, err := s.generateEphemeralCert(r, project, e)
+		return "sql.connect.generateEphemeral", out, err
 	}
 	if verb != "" {
 		return "sql.instances." + verb, nil, unimplemented("instances."+verb, instanceWhy)
@@ -265,7 +274,11 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 	case "users":
 		return s.users(r, base, project, e, rest[3:])
 	case "connectSettings":
-		return "sql.connect.get", nil, unimplemented("connect.get (connectSettings)", connectorWhy)
+		if len(rest) != 3 || r.Method != http.MethodGet {
+			return "sql.connect.get", nil, Errorf(http.StatusNotFound, "%s is not a Cloud SQL Admin API path", r.URL.Path)
+		}
+		out, err := s.connectSettings(project, e)
+		return "sql.connect.get", out, err
 	}
 	return "sql.instances." + rest[2], nil, unimplemented("instances/{instance}/"+rest[2],
 		"only databases and users are served beneath an instance; backups, replicas, SSL certificates and imports are not")

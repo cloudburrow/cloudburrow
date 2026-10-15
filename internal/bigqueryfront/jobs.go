@@ -58,6 +58,9 @@ type jobBody struct {
 			Quote           *string `json:"quote"`
 			AllowJaggedRows bool    `json:"allowJaggedRows"`
 			NullMarker      *string `json:"nullMarker"`
+			// detected is whether the front detected Schema (#1324,
+			// jsondetect.go).
+			detected bool
 		} `json:"load"`
 		Query *struct {
 			queryOptions
@@ -148,7 +151,10 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			w = rec
 			defer finish(out, rec)
 		}
-		legacyLoadTypes(r, c.Load.Schema) // #1034, typenames.go
+		legacyLoadTypes(r, c.Load.Schema)                                      // #1034, typenames.go
+		if check(c.Load.DestinationTable) == "" && !f.jsonDetect(w, r, &job) { // #1324, jsondetect.go
+			return
+		}
 		reason = "invalid"
 		msg = check(c.Load.DestinationTable)
 		if d := c.Load.DestinationTable; msg == "" && d != nil && f.refuseSnapshotWrite(w, r, d.DatasetID, d.TableID, "a load job") { // #1002
