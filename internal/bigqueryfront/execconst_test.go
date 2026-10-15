@@ -11,6 +11,9 @@ func TestExecuteImmediateOfAConstant(t *testing.T) {
 		{"EXECUTE IMMEDIATE 'SELECT ' || '2'", "SELECT 2"},
 		{"DECLARE t STRING DEFAULT 'ds.t'; EXECUTE IMMEDIATE ('SELECT * FROM ' || t)", "DECLARE t STRING DEFAULT 'ds.t'; SELECT * FROM ds.t"},
 		{"DECLARE q STRING DEFAULT CONCAT('SELECT ', \"3\"); EXECUTE IMMEDIATE q", "DECLARE q STRING DEFAULT CONCAT('SELECT ', \"3\"); SELECT 3"},
+		// INTO (#1037).
+		{"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT @y' INTO a USING 1 AS y", "DECLARE a INT64; SET a = IF((SELECT COUNT(*) FROM (SELECT (1))) > 1, " +
+			"ERROR('EXECUTE IMMEDIATE ... INTO: the query returned more than one row'), (SELECT (1)))"},
 	} {
 		got, changed, code, msg := expandExecuteImmediate(c.sql)
 		if !changed || code != 0 || got != c.want {
@@ -20,7 +23,9 @@ func TestExecuteImmediateOfAConstant(t *testing.T) {
 	for _, sql := range []string{
 		"EXECUTE IMMEDIATE CONCAT('SELECT ', CAST(1 AS STRING))",
 		"DECLARE x INT64 DEFAULT 1; EXECUTE IMMEDIATE 'SELECT ' || x",
-		"EXECUTE IMMEDIATE 'SELECT 1' INTO a",
+		"EXECUTE IMMEDIATE 'INSERT ds.t VALUES (1)' INTO a",
+		"EXECUTE IMMEDIATE 'SELECT 1' INTO a + 1",
+		"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2' INTO a, b",
 	} {
 		if _, _, code, _ := expandExecuteImmediate(sql); code != 501 {
 			t.Errorf("%s: %d, want 501", sql, code)

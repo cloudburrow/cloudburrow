@@ -47,7 +47,7 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 			"the statement it gives, but the emulator behind CloudBurrow reports every EXECUTE IMMEDIATE done and runs " +
 			"nothing (measured), and CloudBurrow carries one out itself only when its SQL is a string literal, a " +
 			"CONCAT or || of string literals and such variables, or a script variable set to one by its DECLARE's " +
-			"DEFAULT or a SET, run with no INTO and with literals, " +
+			"DEFAULT or a SET, run with INTO only of a query, and with literals, " +
 			"variables or query parameters in USING. Nothing was run."
 	}
 	// vars are the script's STRING variables whose value the text gives,
@@ -112,12 +112,33 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 					using = i
 				}
 			}
-			if into >= 0 {
-				return notImplemented("... INTO, which sets script variables from the statement's result.")
-			}
 			exprEnd := end
-			if using >= 0 {
+			if into >= 0 {
+				exprEnd = into
+			} else if using >= 0 {
 				exprEnd = using
+			}
+			// INTO's variables, up to USING.
+			var intoVars []string
+			if into >= 0 {
+				stop := end
+				if using > into {
+					stop = using
+				}
+				names, rest := declaredNames(body[into+1 : stop])
+				switch {
+				case len(names) == 0 || len(rest) > 0 || body[into+1].kind != tokWord:
+					return notImplemented(fmt.Sprintf("... INTO %s, which is not one script variable.",
+						statementText(sql, body[into+1:stop])))
+				case len(names) > 1:
+					return notImplemented("... INTO several variables. CloudBurrow runs INTO as a SET of the " +
+						"variable, and the emulator behind it does not run SET (a, b) = ... (measured).")
+				}
+				for _, n := range names {
+					intoVars = append(intoVars, n)
+					delete(vars, strings.ToLower(n))
+					unknown[strings.ToLower(n)] = true
+				}
 			}
 			expr := body[2:exprEnd]
 			var inner string
@@ -149,6 +170,11 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 			if code != 0 {
 				return sql, false, code, why
 			}
+			if into >= 0 {
+				if out, why = immediateInto(out, intoVars); why != "" {
+					return notImplemented(why)
+				}
+			}
 			edits = append(edits, varEdit{body[0].pos, body[len(body)-1].end, out})
 		}
 	}
@@ -164,6 +190,37 @@ func expandExecuteImmediate(sql string) (text string, changed bool, code int, ms
 	}
 	b.WriteString(sql[last:])
 	return b.String(), true, 0, ""
+}
+
+// immediateInto returns the SET statement that runs EXECUTE IMMEDIATE's
+// query, inner, INTO the variable vars[0] (#1037). BigQuery sets the
+// variable from the query's one row, and fails when the query returns
+// more than one row
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language#execute_immediate).
+// The emulator runs SET v = (query), but a scalar subquery of several rows
+// gives the first there (measured: SET x = (SELECT n FROM UNNEST([1, 2])
+// n) set 1), so the query is counted first and ERROR fails the script
+// when it has more than one row ("more than one row"; BigQuery's wording
+// UNVERIFIED). The emulator evaluates a SET's value only when the
+// variable is read (measured: a script ending in the SET of two rows
+// succeeded; with SELECT x after it, it failed), so a script that never
+// reads the variable does not fail where BigQuery's does. No rows set the variable NULL, UNVERIFIED against BigQuery.
+// inner must be a query (SELECT or WITH); it returns why it cannot be run
+// so, or "".
+func immediateInto(inner string, vars []string) (string, string) {
+	toks, ok := lex(inner)
+	if !ok || len(toks) == 0 {
+		return "", "... INTO of a statement CloudBurrow cannot read."
+	}
+	first := 0
+	for first < len(toks) && toks[first].punct("(") {
+		first++
+	}
+	if first >= len(toks) || !toks[first].is("SELECT") && !toks[first].is("WITH") {
+		return "", "... INTO of " + statementText(inner, toks) + ", which is not a query (SELECT or WITH)."
+	}
+	return "SET " + vars[0] + " = IF((SELECT COUNT(*) FROM (" + inner + ")) > 1, " +
+		"ERROR('EXECUTE IMMEDIATE ... INTO: the query returned more than one row'), (" + inner + "))", ""
 }
 
 // declaredNames returns the names a DECLARE gives (a, b, c), and the
