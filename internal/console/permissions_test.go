@@ -50,6 +50,15 @@ func (f policyFake) SetPolicy(_ context.Context, _ string, _ []string, p Policy)
 	return nil
 }
 
+// TestPermissions answers every permission but one the fake denies, as a
+// service that enforced something would.
+func (f policyFake) TestPermissions(_ context.Context, _ string, _ []string, perms []string) ([]string, error) {
+	if slices.Contains(perms, "bad") {
+		return nil, errors.New("permission bad is not valid")
+	}
+	return slices.DeleteFunc(slices.Clone(perms), func(p string) bool { return p == "x.denied" }), nil
+}
+
 func postPermissions(t *testing.T, url string, body map[string]any) (int, string) {
 	t.Helper()
 	b, _ := json.Marshal(body)
@@ -147,6 +156,38 @@ func TestPermissionsTabAndChanges(t *testing.T) {
 	}
 }
 
+// Test permissions (#1242) asks the provider's TestIamPermissions with the
+// permissions named, each once, needs no etag and changes nothing.
+func TestPermissionsTest(t *testing.T) {
+	t.Parallel()
+	sets := 0
+	f := policyFake{fakeProvider: fakeProvider{id: "iam", title: "IAM fake"}, policy: &Policy{Etag: "e1"}, sets: &sets}
+	srv := serve(t, f)
+	code, body := postPermissions(t, srv.URL, map[string]any{"Path": []string{"r"},
+		"Test": map[string]any{"Permissions": []string{"a.get, x.denied", " a.get\nb.list "}}})
+	var got struct{ Asked, Permissions []string }
+	if err := json.Unmarshal([]byte(body), &got); code != http.StatusOK || err != nil {
+		t.Fatalf("test = %d %v: %s", code, err, body)
+	}
+	if !slices.Equal(got.Asked, []string{"a.get", "x.denied", "b.list"}) || !slices.Equal(got.Permissions, []string{"a.get", "b.list"}) {
+		t.Errorf("test = %+v", got)
+	}
+	for what, req := range map[string]map[string]any{
+		"no permission": {"Path": []string{"r"}, "Test": map[string]any{"Permissions": []string{" , "}}},
+		"no policy":     {"Path": []string{"other"}, "Test": map[string]any{"Permissions": []string{"a.get"}}},
+		"the service's": {"Path": []string{"r"}, "Test": map[string]any{"Permissions": []string{"bad"}}},
+		"and a change too": {"Path": []string{"r"}, "Etag": "e1", "Test": map[string]any{"Permissions": []string{"a.get"}},
+			"Remove": map[string]any{"Member": "user:a@example.com", "Role": "roles/viewer"}},
+	} {
+		if code, body := postPermissions(t, srv.URL, req); code != http.StatusBadRequest {
+			t.Errorf("%s = %d %s; want 400", what, code, body)
+		}
+	}
+	if sets != 0 {
+		t.Errorf("Test permissions reached SetPolicy %d times", sets)
+	}
+}
+
 func TestGrantAccessAndRemovePrincipal(t *testing.T) {
 	p := Policy{Etag: "e", Bindings: []Binding{
 		{Role: "roles/viewer", Members: []string{"user:a@example.com"}, Condition: "c: true"},
@@ -187,6 +228,8 @@ func TestPermissionsTabIsDrawn(t *testing.T) {
 	src := consoleAsset(t, "console.js")
 	for _, want := range []string{
 		`case "permissions":`,
+		`id: "test-permissions", text: "Test permissions"`,
+		`"POST", { Path: segments, Test: { Permissions: perms } })`,
 		`section.kind === "permissions" ? permissionsNote(section.permissions) : null,`,
 		`setChildren(into, permissionsNote(view),`,
 		`text: "Grant access"`,

@@ -27,12 +27,16 @@ import (
 // key, a bucket and a managed folder (#847), the binding Grant access writes is what the official
 // client's GetIamPolicy reads, and a change made with an etag that a change
 // through the official client has made stale is refused with the message
-// the official client's own SetIamPolicy gets for that etag.
+// the official client's own SetIamPolicy gets for that etag. Test
+// permissions (#1242) answers what the official client's
+// TestIamPermissions answers, and changes nothing.
 
 // policyHandle is the official client's IAM for one resource.
 type policyHandle struct {
 	get func(ctx context.Context) (*iampb.Policy, error)
 	set func(ctx context.Context, p *iampb.Policy) error
+	// test is the official client's TestIamPermissions.
+	test func(ctx context.Context, perms []string) ([]string, error)
 }
 
 func handleOf(h *iam.Handle) policyHandle {
@@ -47,6 +51,7 @@ func handleOf(h *iam.Handle) policyHandle {
 		set: func(ctx context.Context, p *iampb.Policy) error {
 			return h.SetPolicy(ctx, &iam.Policy{InternalProto: p})
 		},
+		test: h.TestPermissions,
 	}
 }
 
@@ -98,6 +103,20 @@ func consoleGrant(t *testing.T, addr, service, project string, path []string, et
 	return code, e.Error
 }
 
+// consoleTestPermissions is Test permissions on the tab, and what it
+// answers: the permissions asked, as the console read them, and those held.
+func consoleTestPermissions(t *testing.T, addr, service, project string, path []string, perms ...string) (int, []string, []string, string) {
+	t.Helper()
+	b, _ := json.Marshal(map[string]any{"Path": path, "Test": map[string]any{"Permissions": perms}})
+	code, body := consoleDo(t, addr, http.MethodPost, "/api/permissions/"+service+"?project="+url.QueryEscape(project), string(b))
+	var out struct {
+		Asked, Permissions []string
+		Error              string
+	}
+	_ = json.Unmarshal([]byte(body), &out)
+	return code, out.Asked, out.Permissions, out.Error
+}
+
 func holders(p *iampb.Policy, role string) []string {
 	for _, b := range p.GetBindings() {
 		if b.GetRole() == role {
@@ -108,7 +127,7 @@ func holders(p *iampb.Policy, role string) []string {
 }
 
 // consolePermissionsRoundTrip is the acceptance for one resource.
-func consolePermissionsRoundTrip(t *testing.T, h *Harness, addr, service string, path []string, c policyHandle, role string) {
+func consolePermissionsRoundTrip(t *testing.T, h *Harness, addr, service string, path []string, c policyHandle, role, perm string) {
 	t.Helper()
 	ctx := h.Context()
 	project := h.Project()
@@ -157,9 +176,29 @@ func consolePermissionsRoundTrip(t *testing.T, h *Harness, addr, service string,
 	if slices.Contains(holders(after, role), "user:late@example.com") || len(holders(after, "roles/viewer")) != 1 {
 		t.Errorf("a refused grant changed the policy: %v", after.GetBindings())
 	}
+
+	// Test permissions (#1242): the console's answer is the official
+	// client's TestIamPermissions answer, and the policy is unchanged.
+	perms := []string{perm, "resourcemanager.projects.get"}
+	sdk, err := c.test(ctx, perms)
+	if err != nil {
+		t.Fatalf("the official client's TestIamPermissions: %v", err)
+	}
+	code, asked, held, msg := consoleTestPermissions(t, addr, service, project, path, perm+",\n"+perms[1]+", "+perm)
+	if code != http.StatusOK || !slices.Equal(asked, perms) || !slices.Equal(held, sdk) {
+		t.Errorf("Test permissions = %d %q asked %v held %v; want %v held, as the official client reads", code, msg, asked, held, sdk)
+	}
+	if again, err := c.get(ctx); err != nil || string(again.GetEtag()) != string(after.GetEtag()) {
+		t.Errorf("Test permissions changed the policy: etag %q, was %q (%v)", again.GetEtag(), after.GetEtag(), err)
+	}
+	if code, _, _, msg := consoleTestPermissions(t, addr, service, project, path, " , "); code != http.StatusBadRequest {
+		t.Errorf("Test permissions of none = %d %q; want 400", code, msg)
+	}
 }
 
 // TestConsolePermissionsOnAQueue, in the shards that serve Cloud Tasks.
+//
+// covers: google.cloud.tasks.v2.CloudTasks/GetIamPolicy, google.cloud.tasks.v2.CloudTasks/SetIamPolicy, google.cloud.tasks.v2.CloudTasks/TestIamPermissions
 func TestConsolePermissionsOnAQueue(t *testing.T) {
 	h := New(t)
 	c := tasksClient(t, h)
@@ -172,10 +211,16 @@ func TestConsolePermissionsOnAQueue(t *testing.T) {
 			_, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: name, Policy: p})
 			return err
 		},
-	}, "roles/cloudtasks.enqueuer")
+		test: func(ctx context.Context, perms []string) ([]string, error) {
+			r, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: name, Permissions: perms})
+			return r.GetPermissions(), err
+		},
+	}, "roles/cloudtasks.enqueuer", "cloudtasks.tasks.create")
 }
 
 // TestConsolePermissionsOnASecret, in the shards that serve Secret Manager.
+//
+// covers: google.cloud.secretmanager.v1.SecretManagerService/GetIamPolicy, google.cloud.secretmanager.v1.SecretManagerService/SetIamPolicy, google.cloud.secretmanager.v1.SecretManagerService/TestIamPermissions
 func TestConsolePermissionsOnASecret(t *testing.T) {
 	h := New(t)
 	c := secretsClient(t, h)
@@ -190,11 +235,13 @@ func TestConsolePermissionsOnASecret(t *testing.T) {
 		_ = c.DeleteSecret(context.Background(), &secretmanagerpb.DeleteSecretRequest{Name: s.GetName()})
 	})
 	consolePermissionsRoundTrip(t, h, consoleAddr(t, h), "secrets", []string{s.GetName()}, handleOf(c.IAM(s.GetName())),
-		"roles/secretmanager.secretAccessor")
+		"roles/secretmanager.secretAccessor", "secretmanager.versions.access")
 }
 
 // TestConsolePermissionsOnAKeyRingAndKey, in the served shard, whose instance
 // serves Cloud KMS: a ring's policy and its key's, each its own.
+//
+// covers: google.iam.v1.IAMPolicy/GetIamPolicy, google.iam.v1.IAMPolicy/SetIamPolicy, google.iam.v1.IAMPolicy/TestIamPermissions
 func TestConsolePermissionsOnAKeyRingAndKey(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
@@ -218,17 +265,19 @@ func TestConsolePermissionsOnAKeyRingAndKey(t *testing.T) {
 	}
 	t.Run("ring", func(t *testing.T) {
 		consolePermissionsRoundTrip(t, h, addr, "kms", []string{ring.GetName()}, handleOf(c.ResourceIAM(ring.GetName())),
-			"roles/cloudkms.admin")
+			"roles/cloudkms.admin", "cloudkms.keyRings.get")
 	})
 	t.Run("key", func(t *testing.T) {
 		consolePermissionsRoundTrip(t, h, addr, "kms", []string{ring.GetName(), "k"}, handleOf(c.ResourceIAM(key.GetName())),
-			"roles/cloudkms.cryptoKeyEncrypterDecrypter")
+			"roles/cloudkms.cryptoKeyEncrypterDecrypter", "cloudkms.cryptoKeyVersions.useToEncrypt")
 	})
 }
 
 // TestConsolePermissionsOnABucket, in the storage shard: through the JSON
 // API's storage.buckets.getIamPolicy and setIamPolicy, whose stale etag is
 // refused 412.
+//
+// covers: storage.buckets.getIamPolicy, storage.buckets.setIamPolicy, storage.buckets.testIamPermissions
 func TestConsolePermissionsOnABucket(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)
@@ -238,7 +287,7 @@ func TestConsolePermissionsOnABucket(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = bh.Delete(context.Background()) })
 	consolePermissionsRoundTrip(t, h, consoleAddr(t, h), "storage", []string{bh.BucketName()}, handleOf(bh.IAM()),
-		"roles/storage.objectViewer")
+		"roles/storage.objectViewer", "storage.objects.get")
 }
 
 // managedFolderHandle is a managed folder's IAM through Google's generated JSON
@@ -265,6 +314,13 @@ func managedFolderHandle(s *storagev1.Service, bucket, folder string) policyHand
 			_, err := s.ManagedFolders.SetIamPolicy(bucket, folder, in).Context(ctx).Do()
 			return err
 		},
+		test: func(ctx context.Context, perms []string) ([]string, error) {
+			r, err := s.ManagedFolders.TestIamPermissions(bucket, folder, perms).Context(ctx).Do()
+			if err != nil {
+				return nil, err
+			}
+			return r.Permissions, nil
+		},
 	}
 }
 
@@ -273,6 +329,8 @@ func managedFolderHandle(s *storagev1.Service, bucket, folder string) policyHand
 // JSON API's storage.managedFolders.getIamPolicy and setIamPolicy, whose stale
 // etag is refused 412; the bucket's own policy is left alone, and a plain
 // folder's page has no tab.
+//
+// covers: storage.managedFolders.getIamPolicy, storage.managedFolders.setIamPolicy, storage.managedFolders.testIamPermissions
 func TestConsolePermissionsOnAManagedFolder(t *testing.T) {
 	h := New(t)
 	c := storageClient(t, h)
@@ -285,7 +343,7 @@ func TestConsolePermissionsOnAManagedFolder(t *testing.T) {
 	}
 	addr := consoleAddr(t, h)
 	consolePermissionsRoundTrip(t, h, addr, "storage", []string{b, "team", "reports"},
-		managedFolderHandle(s, b, "team/reports/"), "roles/storage.objectViewer")
+		managedFolderHandle(s, b, "team/reports/"), "roles/storage.objectViewer", "storage.objects.list")
 
 	if bp, err := bh.IAM().Policy(ctx); err != nil || len(bp.Roles()) != 0 {
 		t.Errorf("the bucket's policy took the managed folder's bindings: %v, %v", bp.Roles(), err)

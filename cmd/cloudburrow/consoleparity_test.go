@@ -291,13 +291,21 @@ var parityRows = []parityRow{
 		Provider: "storage", Offers: "Permissions tab on a managed folder's page, the folder page its row opens, typed Managed folder: principals and roles, Grant access, Remove principal, with the note that nothing is enforced; a plain folder has none (#847)",
 		Tests: []string{"TestConsolePermissionsOnAManagedFolder", "TestStoragePermissionsOnAManagedFolder", "TestStorageManagedFolderPermissionsThroughTheTab"}},
 	{Resource: "Cloud Tasks permission check", Service: "tasks",
-		Methods: []string{"CloudTasks/TestIamPermissions"}, Excluded: testIamPermissionsReason},
+		Methods:  []string{"CloudTasks/TestIamPermissions"},
+		Provider: "tasks", Offers: "Test permissions on the Permissions tab of a queue's page: permissions typed in, each answered Held or Not held as the service's TestIamPermissions answers, the policy unchanged; every one of an existing resource is Held, since nothing is enforced (ADR-0006, #1242)",
+		Tests: []string{"TestConsolePermissionsOnAQueue", "TestPermissionsTest"}},
 	{Resource: "Secret Manager permission check", Service: "secretmanager",
-		Methods: []string{"SecretManagerService/TestIamPermissions"}, Excluded: testIamPermissionsReason},
+		Methods:  []string{"SecretManagerService/TestIamPermissions"},
+		Provider: "secrets", Offers: "Test permissions on the Permissions tab of a secret's page: permissions typed in, each answered Held or Not held as the service's TestIamPermissions answers, the policy unchanged; every one of an existing resource is Held, since nothing is enforced (ADR-0006, #1242)",
+		Tests: []string{"TestConsolePermissionsOnASecret", "TestPermissionsTest"}},
 	{Resource: "Cloud KMS permission check", Service: "kms",
-		Methods: []string{"IAMPolicy/TestIamPermissions"}, Excluded: testIamPermissionsReason},
+		Methods:  []string{"IAMPolicy/TestIamPermissions"},
+		Provider: "kms", Offers: "Test permissions on the Permissions tab of a key ring's page and a key's: permissions typed in, each answered Held or Not held as the service's TestIamPermissions answers, the policy unchanged; every one of an existing resource is Held, since nothing is enforced (ADR-0006, #1242)",
+		Tests: []string{"TestConsolePermissionsOnAKeyRingAndKey", "TestPermissionsTest"}},
 	{Resource: "Cloud Storage permission check", Service: "storage",
-		Methods: []string{"storage.buckets.testIamPermissions", "storage.managedFolders.testIamPermissions"}, Excluded: testIamPermissionsReason},
+		Methods:  []string{"storage.buckets.testIamPermissions", "storage.managedFolders.testIamPermissions"},
+		Provider: "storage", Offers: "Test permissions on the Permissions tab of a bucket's page and a managed folder's: permissions typed in, each answered Held or Not held as the service's TestIamPermissions answers, the policy unchanged; every one of an existing resource is Held, since nothing is enforced (ADR-0006, #1242)",
+		Tests: []string{"TestConsolePermissionsOnABucket", "TestConsolePermissionsOnAManagedFolder", "TestTestPermissionsThroughTheTab", "TestPermissionsTest"}},
 
 	// Firestore and Datastore
 	{Resource: "Firestore documents (read)", Service: "firestore",
@@ -531,8 +539,6 @@ var parityRows = []parityRow{
 }
 
 const (
-	testIamPermissionsReason = "a caller asks which of the permissions it names it holds; CloudBurrow stores policies " +
-		"and enforces none, so there is nothing a page could show"
 	transactionReason = "session and transaction plumbing a client performs under a read or a write; " +
 		"no resource or action of its own"
 )

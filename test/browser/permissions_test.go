@@ -283,3 +283,49 @@ func TestStorageManagedFolderPermissionsThroughTheTab(t *testing.T) {
 		t.Errorf("the grant and the removal sent %d requests, want 2: %v", len(sent), sent)
 	}
 }
+
+// TestTestPermissionsThroughTheTab (#1242), in the storage shard: Test
+// permissions on a bucket's Permissions tab opens a form; the permissions
+// typed there, separated by commas and new lines, are each answered with the
+// service's TestIamPermissions result, Held for every one since nothing is
+// enforced; the policy is left as it was, and the dialog's Close sends
+// nothing more.
+func TestTestPermissionsThroughTheTab(t *testing.T) {
+	needService(t, "storage")
+	p := open(t)
+	project := uniqueProject(t)
+	bucket := project + "-testperms"
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/storage?project="+project, `{"name":"`+bucket+`"}`); code != http.StatusOK {
+		t.Fatalf("create a bucket through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() {
+		consoleDo(t, http.MethodDelete, "/api/resources/storage?project="+project+"&name="+bucket, "")
+	})
+	before, _ := folderPermissionsOf(t, project, bucket)
+
+	p.navigate("/storage/browser/" + bucket + "?project=" + project)
+	p.waitFor(`[...document.querySelectorAll("#view .tab-strip .tab")].some((t) => t.textContent === "Permissions")`)
+	p.clickText("#view .tab-strip .tab", "Permissions")
+	p.waitFor(`document.querySelector("#test-permissions") !== null`)
+	p.clickText("#view #test-permissions", "Test permissions")
+	p.waitFor(`document.querySelector(".modal.is-open #f-permissions") !== null`)
+	p.eval(`(() => { const f = document.querySelector(".modal.is-open #f-permissions");
+		f.value = "storage.objects.get,\nstorage.buckets.delete, storage.objects.get";
+		f.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`, nil)
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelectorAll("#test-permissions-table tbody tr").length === 2`)
+	var rows string
+	p.eval(`[...document.querySelectorAll("#test-permissions-table tbody tr")].map((r) => r.textContent).join("|")`, &rows)
+	if want := "storage.objects.getHeld|storage.buckets.deleteHeld"; rows != want {
+		t.Errorf("Test permissions reads %q; want %q", rows, want)
+	}
+	p.clickText(".modal.is-open .modal-actions button", "Close")
+	p.waitFor(`document.querySelector(".modal") === null`)
+	sent := p.posts("/api/permissions/storage")
+	if len(sent) != 1 {
+		t.Errorf("Test permissions sent %v; want one request", sent)
+	}
+	if after, _ := folderPermissionsOf(t, project, bucket); len(after) != len(before) {
+		t.Errorf("Test permissions changed the policy: %v, was %v", after, before)
+	}
+}

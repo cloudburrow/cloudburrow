@@ -223,9 +223,10 @@ snapshots, clones), #957 (extract formats), #1204 (infinite FLOAT64 in UNNEST). 
 
 ## Console
 
+Closed by this sweep: Test permissions on the Permissions tab (#1242).
+
 | Gap | Why open | Size |
 |---|---|---|
-| `TestIamPermissions` has no console surface on the Permissions tab (#1242) | not built yet | S |
 | Request-rate, latency and resource charts for Pub/Sub and the opt-in emulators (labelled "not measured") | not built yet | M |
 | Embedding playground | not built yet | M |
 | Model download, load and unload from the playground | not built yet | M |
