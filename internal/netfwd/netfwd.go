@@ -96,6 +96,9 @@ type Forwarder struct {
 	pod        string
 	containers string
 	stderr     *syncBuffer
+	// handshake, when set, is what a launch must also pass: see
+	// SetHandshake.
+	handshake Handshake
 
 	// Logf, when set, receives one line per exit and re-establishment, so a
 	// diagnose bundle says what the tunnel did (#526).
@@ -131,6 +134,23 @@ func New(target Target, kubeconfig, bindAddr string) *Forwarder {
 
 // kubeBind is where kubectl listens behind a guarded tunnel.
 const kubeBind = "127.0.0.1"
+
+// Handshake is one real exchange in the backend's own protocol through
+// addr, the tunnel's address: a login and a query for a database.
+type Handshake func(ctx context.Context, addr string) error
+
+// SetHandshake makes the tunnel count as up only once h succeeds through
+// it, at Start and at every re-establishment (#1262). Carrying a TCP
+// connection is not serving one: after stop and up, MySQL's tunnel
+// carried a connection, `up` reported ready, and the first client's
+// handshake ended in EOF. A launch whose handshake fails is torn down and
+// tried again, binding the pod that is there by then, and Start gives up
+// after HandshakeWait with the protocol's own words. Call it before Start.
+func (f *Forwarder) SetHandshake(h Handshake) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.handshake = h
+}
 
 func (f *Forwarder) Name() string {
 	if f.target.Label != "" {
@@ -173,13 +193,21 @@ func (f *Forwarder) Start(ctx context.Context) error {
 	// only by a failed connection (#526). The Service is the fallback when
 	// none is Ready in time, as it was before.
 	deadline := time.Now().Add(startPodWait)
+	// A backend that carries but does not serve yet is waited for longer:
+	// it is starting, and a pod is bound (#1262).
+	serveDeadline := time.Now().Add(HandshakeWait)
 	var err error
 	for {
 		err = f.launch(ctx, true)
 		if err == nil || !(errors.Is(err, errNoReadyPod) || errors.Is(err, ErrForwardFailed)) {
 			break
 		}
-		if time.Now().After(deadline) {
+		if errors.Is(err, errNotServing) {
+			if time.Now().After(serveDeadline) {
+				err = fmt.Errorf("tunnel %s did not serve within %s: %w", f.Name(), HandshakeWait, err)
+				break
+			}
+		} else if time.Now().After(deadline) {
 			if errors.Is(err, errNoReadyPod) {
 				err = f.launch(ctx, false)
 			}
@@ -306,7 +334,7 @@ func (f *Forwarder) launch(ctx context.Context, requirePod bool) error {
 		default:
 		}
 		if err := f.carries(addr, errOut); err == nil {
-			return nil
+			return f.serves(ctx, addr)
 		} else if !errors.Is(err, errNotListening) {
 			f.stopProcess(context.Background())
 			return err
@@ -338,6 +366,39 @@ func (f *Forwarder) carries(addr string, errOut *syncBuffer) error {
 	return nil
 }
 
+// serves runs the handshake, when there is one, through a tunnel that
+// carries, and tears the tunnel down when it fails: a stream bound to a
+// sandbox that is gone hangs rather than fails (#566), so the next launch
+// binds afresh rather than this one being tried again.
+func (f *Forwarder) serves(ctx context.Context, addr string) error {
+	f.mu.Lock()
+	h := f.handshake
+	f.mu.Unlock()
+	if h == nil {
+		return nil
+	}
+	hctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
+	err := h(hctx, addr)
+	cancel()
+	if err == nil {
+		return nil
+	}
+	f.stopProcess(context.Background())
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return fmt.Errorf("%w: %w", errNotServing, err)
+}
+
+// HandshakeWait is how long Start waits for a tunnel with a handshake to
+// serve, from its first launch: a database recovering its data after a
+// restart takes seconds, and this bounds one that never will.
+var HandshakeWait = 3 * time.Minute
+
+// handshakeTimeout bounds one handshake: a login answers in milliseconds,
+// and one through a stale stream never does.
+var handshakeTimeout = 5 * time.Second
+
 // streamCheck is how long a probe connection waits for kubectl to report a
 // failed stream before the tunnel counts as carrying.
 var streamCheck = 750 * time.Millisecond
@@ -345,6 +406,9 @@ var streamCheck = 750 * time.Millisecond
 var (
 	errNotListening = errors.New("not listening yet")
 	errNoReadyPod   = errors.New("no Ready pod to bind")
+	// errNotServing is a tunnel that carries a connection on which the
+	// handshake failed. It is an ErrForwardFailed, retried as one.
+	errNotServing = fmt.Errorf("%w: the backend does not serve through the tunnel yet", ErrForwardFailed)
 )
 
 // startPodWait is how long Start waits for a Ready pod before binding the
