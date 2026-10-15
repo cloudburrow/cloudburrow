@@ -234,3 +234,56 @@ func sqlFields(fields []*bigquery.StandardSQLField) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+// actEditRoutine is Edit routine, on a routine's page (#1238).
+const actEditRoutine = "editroutine"
+
+// editRoutineAction is Edit routine: the body and description, drawn from
+// the routine. Its type, language, arguments and return type are kept.
+func editRoutineAction(md *bigquery.RoutineMetadata) console.Action {
+	return console.Action{ID: actEditRoutine, Label: "Edit routine", Fields: []console.Field{
+		{Name: "body", Label: "Body", Type: "textarea", Required: true, Default: md.Body,
+			Help: "A SQL function's expression, or a table function's query. The type, language, arguments and return type are kept."},
+		{Name: "description", Label: "Description", Type: "text", Default: md.Description},
+	}}
+}
+
+// routineMetadata reads a routine with routines.get.
+func (p bigqueryProvider) routineMetadata(ctx context.Context, datasetID, routineID string) (*bigquery.RoutineMetadata, error) {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := p.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	return c.Dataset(datasetID).Routine(routineID).Metadata(ctx)
+}
+
+// editRoutine replaces a routine's body and description with routines.update
+// (#1238), restating what the form does not change, since routines.update
+// replaces the whole routine, and sending the etag it read.
+func (p bigqueryProvider) editRoutine(ctx context.Context, datasetID, routineID string, values map[string]string) error {
+	body := strings.TrimSpace(values["body"])
+	if body == "" {
+		return errors.New("a routine needs a body")
+	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	c, err := p.client(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	r := c.Dataset(datasetID).Routine(routineID)
+	md, err := r.Metadata(ctx)
+	if err != nil {
+		return bigqueryRefusal(err)
+	}
+	_, err = r.Update(ctx, &bigquery.RoutineMetadataToUpdate{
+		Type: md.Type, Language: md.Language, Arguments: md.Arguments, ReturnType: md.ReturnType,
+		ReturnTableType: md.ReturnTableType, DeterminismLevel: md.DeterminismLevel, ImportedLibraries: md.ImportedLibraries,
+		Body: body, Description: strings.TrimSpace(values["description"]),
+	}, md.ETag)
+	return bigqueryRefusal(err)
+}

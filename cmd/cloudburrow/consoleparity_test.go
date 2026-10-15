@@ -451,6 +451,10 @@ var parityRows = []parityRow{
 		Methods:  []string{"bigquery.routines.insert", "bigquery.routines.list", "bigquery.routines.get", "bigquery.routines.delete"},
 		Provider: "bigquery", Offers: "Routines on a dataset's page (routines.list: each routine's type, language and arguments), a routine's page at [dataset, routines, routine] (routines.get: body, arguments, return type or table, details) and Delete routine on the page and the row (routines.delete, #782, #1177); routines are made in the query editor's Read-write mode (CREATE FUNCTION, CREATE TABLE FUNCTION)",
 		Tests: []string{"TestConsoleBigQueryRoutines", "TestBigQueryRoutinesSectionAndPage", "TestBigQueryRoutinesThroughThePage"}},
+	{Resource: "BigQuery routine edit", Service: "bigquery",
+		Methods:  []string{"bigquery.routines.update"},
+		Provider: "bigquery", Offers: "Edit routine on a routine's page: its body and description, with its type, language, arguments and return type kept (routines.update, #1238)",
+		Tests: []string{"TestBigQueryEditRoutine", "TestBigQueryRoutineUpdate"}},
 	// The Storage Read and Write APIs (gRPC, google.cloud.bigquery.storage.v1)
 	// have no coverage page; this row writes the exclusion down (#782).
 	{Resource: "BigQuery models", Service: "bigquery",

@@ -37,6 +37,12 @@ func routinesAPI(t *testing.T, deleted *[]string) *httptest.Server {
 				_, _ = io.WriteString(w, `{"error":{"code":404,"message":"Not found: Routine p:d.`+id+`","errors":[{"reason":"notFound","message":"Not found"}]}}`)
 				return
 			}
+			if r.Method == http.MethodPut {
+				b, _ := io.ReadAll(r.Body)
+				*deleted = append(*deleted, "put "+id+" "+r.Header.Get("If-Match")+" "+string(b))
+				_, _ = io.WriteString(w, body)
+				return
+			}
 			if r.Method == http.MethodDelete {
 				*deleted = append(*deleted, id)
 				w.WriteHeader(http.StatusNoContent)
@@ -111,7 +117,7 @@ func TestBigQueryRoutinesSectionAndPage(t *testing.T) {
 	if d, _ := p.Detail(ctx, "p", []string{"d", "routines", "tf"}); !strings.Contains(propertiesText(d), "TABLE<y INT64>") {
 		t.Errorf("the table function's page does not show its return table: %+v", d)
 	}
-	if acts := p.DetailActions(ctx, "p", []string{"d", "routines", "f"}); len(acts) != 1 || acts[0].ID != actDeleteRoutine || !acts[0].Destructive {
+	if acts := p.DetailActions(ctx, "p", []string{"d", "routines", "f"}); len(acts) != 2 || acts[0].ID != actEditRoutine || acts[1].ID != actDeleteRoutine || !acts[1].Destructive {
 		t.Errorf("the routine page's actions = %+v", acts)
 	}
 
@@ -140,4 +146,33 @@ func propertiesText(d console.Detail) string {
 		}
 	}
 	return b.String()
+}
+
+// TestBigQueryEditRoutine (#1238): Edit routine is drawn from the routine and
+// sends routines.update with the new body and description, the routine's
+// type, arguments and return type restated, and the etag it read.
+func TestBigQueryEditRoutine(t *testing.T) {
+	var calls []string
+	api := routinesAPI(t, &calls)
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	ctx := context.Background()
+	acts := p.DetailActions(ctx, "p", []string{"d", "routines", "f"})
+	if len(acts) == 0 || acts[0].ID != actEditRoutine || acts[0].Fields[0].Default != "x + 1" {
+		t.Fatalf("the routine page's actions = %+v", acts)
+	}
+	if err := p.ActAt(ctx, "p", []string{"d", "routines", "f"}, actEditRoutine, map[string]string{"body": "x + 2", "description": "two"}); err != nil {
+		t.Fatalf("Edit routine: %v", err)
+	}
+	if len(calls) != 1 || !strings.HasPrefix(calls[0], "put f ") {
+		t.Fatalf("calls = %q; want one routines.update", calls)
+	}
+	for _, want := range []string{`"definitionBody":"x + 2"`, `"description":"two"`, `"routineType":"SCALAR_FUNCTION"`, `"returnType":{"typeKind":"INT64"}`, `"name":"x"`} {
+		if !strings.Contains(calls[0], want) {
+			t.Errorf("routines.update body %s lacks %s", calls[0], want)
+		}
+	}
+	if err := p.ActAt(ctx, "p", []string{"d", "routines", "f"}, actEditRoutine, map[string]string{"body": " "}); err == nil {
+		t.Error("Edit routine with no body succeeded")
+	}
 }

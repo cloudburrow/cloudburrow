@@ -3755,8 +3755,8 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Refused": 16,
-      "Verified": 31
+      "Refused": 15,
+      "Verified": 32
     },
     "rows": [
       {
@@ -3974,11 +3974,10 @@
       },
       {
         "method": "bigquery.routines.update",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:339 TestBigQueryRoutineUpdateIsRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigquerymethods_test.go:342 TestBigQueryRoutineUpdate"
+        ]
       },
       {
         "method": "bigquery.rowAccessPolicies.batchDelete",

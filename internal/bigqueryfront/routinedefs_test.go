@@ -2,7 +2,10 @@ package bigqueryfront
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -95,7 +98,56 @@ func TestRoutinesListGetDelete(t *testing.T) {
 	if code, got := do(t, h, "GET", base+"/datasets/nope/routines", ""); code != 404 {
 		t.Errorf("routines.list of a dataset that does not exist: %d %v", code, got)
 	}
-	if code, got := do(t, h, "PUT", base+"/datasets/ds/routines/g", "{}"); code != 501 {
-		t.Errorf("routines.update: %d %v", code, got)
+	if code, got := do(t, h, "PUT", base+"/datasets/ds/routines/g", "{}"); code != 404 {
+		t.Errorf("routines.update of one that is gone: %d %v", code, got)
+	}
+}
+
+// routines.update (#1238): a drop and an insert, keeping the creation time;
+// a stale If-Match, a routineReference naming another routine and a PATCH
+// are refused.
+func TestRoutinesUpdate(t *testing.T) {
+	e := newStateEmulator()
+	e.datasets["ds"] = true
+	h := Wrap(e)
+	const def = `"routineType":"SCALAR_FUNCTION","language":"SQL","arguments":[{"name":"x","dataType":{"typeKind":"INT64"}}]`
+	if code, got := do(t, h, "POST", base+"/datasets/ds/routines", `{"routineReference":{"projectId":"p","datasetId":"ds","routineId":"g"},`+
+		def+`,"definitionBody":"x * 10"}`); code != 200 {
+		t.Fatalf("routines.insert: %d %v", code, got)
+	}
+	_, before := do(t, h, "GET", base+"/datasets/ds/routines/g", "")
+	code, got := do(t, h, "PUT", base+"/datasets/ds/routines/g", `{"routineReference":{"projectId":"p","datasetId":"ds","routineId":"g"},`+
+		def+`,"definitionBody":"x * 20","description":"twenty"}`)
+	if code != 200 || got["definitionBody"] != "x * 20" || got["creationTime"] != before["creationTime"] || got["etag"] == before["etag"] {
+		t.Fatalf("routines.update: %d %v (before %v)", code, got, before)
+	}
+	if code, read := do(t, h, "GET", base+"/datasets/ds/routines/g", ""); code != 200 || read["definitionBody"] != "x * 20" || read["description"] != "twenty" {
+		t.Errorf("routines.get after routines.update: %d %v", code, read)
+	}
+	if _, ok := e.funcs["ds.g"]; !ok {
+		t.Errorf("routines.update left no function in the engine: %v", e.funcs)
+	}
+	// With no routineReference, the path names it.
+	if code, got := do(t, h, "PUT", base+"/datasets/ds/routines/g", `{`+def+`,"definitionBody":"x * 30"}`); code != 200 || got["definitionBody"] != "x * 30" {
+		t.Errorf("routines.update with no routineReference: %d %v", code, got)
+	}
+	if code, got := do(t, h, "PUT", base+"/datasets/ds/routines/g", `{"routineReference":{"routineId":"other"},`+def+`,"definitionBody":"x"}`); code != 400 {
+		t.Errorf("routines.update naming another routine: %d %v", code, got)
+	}
+	req := httptest.NewRequest("PUT", base+"/datasets/ds/routines/g", strings.NewReader(`{`+def+`,"definitionBody":"x"}`))
+	req.Header.Set("If-Match", `"stale"`)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusPreconditionFailed {
+		t.Errorf("routines.update with a stale If-Match: %d %s", rec.Code, rec.Body)
+	}
+	if code, got := do(t, h, "PUT", base+"/datasets/ds/routines/g", `{"definitionBody":"x"}`); code != 400 {
+		t.Errorf("routines.update with only a body: %d %v", code, got)
+	}
+	if code, got := do(t, h, "PATCH", base+"/datasets/ds/routines/g", "{}"); code != 501 {
+		t.Errorf("a PATCH of a routine: %d %v", code, got)
+	}
+	if code, got := do(t, h, "PUT", base+"/datasets/ds/routines/nope", "{}"); code != 404 {
+		t.Errorf("routines.update of one that does not exist: %d %v", code, got)
 	}
 }
