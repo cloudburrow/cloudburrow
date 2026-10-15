@@ -448,14 +448,31 @@ with the promise.
 
 ## 6. Local AI
 
-[#39](https://github.com/cloudburrow/cloudburrow/issues/39) established that local
-inference is not viable today: no current Linux LiteRT-LM binary, and every Gemma artifact
-gated. The console therefore shows **no AI panel that appears to work**.
+[#39](https://github.com/cloudburrow/cloudburrow/issues/39) first concluded that local
+inference was not viable, and [local-ai.md](local-ai.md) §4 records the correction: the
+LiteRT-LM runtime builds from Google's source and runs on Linux. The console's AI area is
+therefore working pages, not a disabled placeholder. **Vertex AI** is one drawer row under
+*AI and machine learning*, with five pages:
 
-The AI area is present, disabled, and says exactly why, linking to
-[local-ai.md](local-ai.md). It becomes operational only when a runtime does — which is
-[#48](https://github.com/cloudburrow/cloudburrow/issues/48)'s to claim, not this
-specification's.
+| Page | Route | What it does | When it is off |
+|---|---|---|---|
+| **Model Garden** | `/ai/models` | Every catalogued model with its publisher, repository, access, modality, licence, runtime and status detail; a row opens the model's provenance | Always present: it is the catalogue, not a runtime |
+| **Studio** (Vertex AI Studio) | `/ai/playground` | A prompt sent through the same `generateContent` / `streamGenerateContent` path the official SDK drives, with **Stream** (on: each chunk as it arrives; off: one answer, #1257) and **Raw** (the body as `:streamRawPredict` or `:rawPredict`, #1284, #1285), **Cancel**, first-token and total timings, and this session's history, held in memory only. The generation options the endpoint refuses are listed as refused, not ignored | Says local AI is not configured and to start with `-local-ai-model` ([generation.md](generation.md)) |
+| **Embeddings** | `/ai/embeddings` | Text sent as text-embedding `:predict`, `:embedContent` (with task type and output dimensionality, #1244) or `:rawPredict` (#1284); each vector with its dimension and norm, a copy of it, the pairwise cosine similarity and the request sent; the model ID sent as typed, and the API's refusal shown verbatim (#1305) | Says to start with `-local-ai-embeddings` ([embeddings.md](embeddings.md)) |
+| **Local models** | `/ai/local-models` | Each catalogued model's download state and size; **Download** (only a pinned, ungated model, its exact size confirmed, each file checked against its pinned SHA-256), **Cancel**, **Load** and **Unload** (the embedding runtime only), **Delete** the local copy (#1306) | Says local model management is not available on this instance |
+| **Online prediction** | `/ai/predict` | A custom prediction request (JSON instances and parameters) sent to a deployed contract container, a Cloud Run service with `AIP_*` variables, and the container's status and body verbatim (#869) | Offered only where Cloud Run runs; with no such service it offers **Deploy container** |
+
+**Provenance is stated where the output is shown.** No Google-published model is ungated, so
+what runs is a community conversion: the Gemma generation model, and the ONNX EmbeddingGemma
+(#41). Studio and Embeddings each say so above their output, Model Garden says so in its note
+and in each model's status detail; `TestProvenanceIsRecordedNotAssumed` holds that a community
+conversion is never reported as Google-published. A model with no runtime, no pin or gated access is listed with
+the reason and never offered as runnable.
+
+**What is not served is named, not drawn.** Vertex's `Endpoint` resource and batch prediction
+have no page; Online prediction names them as not served
+([playground.md](playground.md) §8). The PredictionService methods the pages send, and the
+tests that exercise them, are the Vertex AI rows of §8.
 
 ---
 
