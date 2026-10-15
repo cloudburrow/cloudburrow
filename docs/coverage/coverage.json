@@ -177,6 +177,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
@@ -225,6 +226,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ],
@@ -247,6 +249,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecretVersions",
         "status": "Verified",
         "tests": [
+          "test/compat/secretexpiryfilter_test.go:94 TestSecretManagerListFilters",
           "test/compat/secrets_test.go:121 TestSecretVersionLifecycle"
         ]
       },
@@ -254,6 +257,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/ListSecrets",
         "status": "Verified",
         "tests": [
+          "test/compat/secretexpiryfilter_test.go:94 TestSecretManagerListFilters",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:51 TestSecretLifecycle"
         ]
@@ -282,8 +286,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
+          "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
-          "test/compat/secrets_test.go:362 TestSecretUpdateAppliesOnlyTheMask",
+          "test/compat/secrets_test.go:361 TestSecretUpdateAppliesOnlyTheMask",
           "test/compat/terraform_secrets_test.go:21 TestTerraformSecretLabelChangeInPlace"
         ]
       }

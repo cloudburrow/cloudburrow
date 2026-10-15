@@ -596,3 +596,17 @@ func listTotal(n int, f *listFilter) int32 {
 	}
 	return int32(n)
 }
+
+// ListSecretsFiltered is ListSecrets with a ListSecrets filter applied, for
+// callers outside the API such as the console (#1228).
+func (s *Store) ListSecretsFiltered(project, filter string) ([]Secret, error) {
+	f, err := parseSecretFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	all, err := s.ListSecrets(project)
+	if err != nil {
+		return nil, err
+	}
+	return filterList(all, f), nil
+}

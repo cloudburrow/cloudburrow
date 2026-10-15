@@ -123,3 +123,6 @@ func (s *Store) Run(ctx context.Context) {
 		}
 	}
 }
+
+// Now is the time on the store's clock, from which a ttl counts.
+func (s *Store) Now() time.Time { return s.now() }
