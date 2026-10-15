@@ -96,7 +96,7 @@ func (f front) serveQuery(w http.ResponseWriter, r *http.Request, q queryOptions
 // dataset.
 func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool,
 	serve func(http.ResponseWriter, *http.Request, queryOptions, bool)) {
-	text, expanded, code, msg := expandExecuteImmediate(q.Query)
+	text, expanded, code, msg := expandExecuteImmediate(q.Query, f.immediateEval(r, q))
 	if code != 0 {
 		reason := "notImplemented"
 		if code == http.StatusBadRequest {
@@ -134,6 +134,59 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 	rec := newRecorder()
 	serve(rec, r, q, insert)
 	f.clientText(w, rec, client)
+}
+
+// immediateEval evaluates the SQL of an EXECUTE IMMEDIATE of q
+// (evalImmediate, #1037): it runs the script probe on the emulator, with
+// q's default dataset and query parameters, and reads its first row's one
+// value. The emulator keeps a script's variables after it, under their
+// names (#956), so the probe's are renamed as a script's are
+// (renameVariables), and none outlives it; a probe whose variables cannot
+// be renamed so is 501.
+func (f front) immediateEval(r *http.Request, q queryOptions) immediateEval {
+	return func(probe string) (string, string, bool, int, string) {
+		probe, _, why := renameVariables(probe, f.variableColumns(r, q, ddlVerdict{}))
+		if why != "" {
+			return "", "", false, http.StatusNotImplemented, "whose SQL CloudBurrow evaluates first, by running the " +
+				"statements before it, which it could not do here: " + why
+		}
+		legacy := false
+		req, err := json.Marshal(queryOptions{Query: probe, UseLegacySQL: &legacy, DefaultDataset: q.DefaultDataset,
+			ParameterMode: q.ParameterMode, QueryParameters: q.QueryParameters})
+		if err != nil {
+			return "", "", false, http.StatusInternalServerError, err.Error()
+		}
+		status, got := f.send(r, http.MethodPost, "/queries", req)
+		var res struct {
+			Schema tableSchema `json:"schema"`
+			Rows   []struct {
+				F []struct {
+					V *string `json:"v"`
+				} `json:"f"`
+			} `json:"rows"`
+			JobComplete *bool `json:"jobComplete"`
+			Error       struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(got, &res) != nil || status != http.StatusOK {
+			why := res.Error.Message
+			if why == "" {
+				why = fmt.Sprintf("HTTP %d", status)
+			}
+			if status >= 500 || status == 0 {
+				return "", "", false, http.StatusNotImplemented, "whose SQL CloudBurrow could not evaluate first (" + why + "). Nothing was run."
+			}
+			return "", "", false, http.StatusBadRequest, why
+		}
+		if res.JobComplete != nil && !*res.JobComplete || len(res.Schema.Fields) != 1 {
+			return "", "", false, http.StatusNotImplemented, "whose SQL CloudBurrow could not evaluate first (no answer of one column). Nothing was run."
+		}
+		if len(res.Rows) == 0 || len(res.Rows[0].F) == 0 || res.Rows[0].F[0].V == nil {
+			return res.Schema.Fields[0].Type, "", true, 0, ""
+		}
+		return res.Schema.Fields[0].Type, *res.Rows[0].F[0].V, false, 0, ""
+	}
 }
 
 // clientText answers w with rec, the answer to a query whose text the

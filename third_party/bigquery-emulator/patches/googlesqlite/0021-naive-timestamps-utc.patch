@@ -1,0 +1,231 @@
+CloudBurrow patch 21 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1188).
+
+The bug: a TIMESTAMP with no time zone was read in America/Los_Angeles,
+the analyzer's default zone, where BigQuery reads it in UTC ("If no time
+zone is specified, the default time zone, UTC, is used", BigQuery's
+timestamp type docs). Measured through CloudBurrow's front, on the
+emulator built with patches 0001 to 0017: TIMESTAMP '2020-01-01',
+CAST('2020-01-01' AS TIMESTAMP), CAST(DATE '2020-01-01' AS TIMESTAMP),
+SAFE_CAST('2020-01-01' AS TIMESTAMP) and the bounds of
+RANGE<TIMESTAMP> '[2020-01-01, 2020-02-01)' were each 2020-01-01 08:00 UTC,
+and CAST(TIMESTAMP '2020-01-01 05:00:00+00' AS STRING) was
+"2019-12-31 21:00:00-08". TIMESTAMP '2020-01-01 00:00:00', TIMESTAMP(...)
+and a CAST of a column were already UTC. go-googlesql has no binding that
+makes a TimeZone, so the analyzer's default cannot be set.
+
+The patch extends applyNaiveTimestampUTC, the rewrite that gives a
+TIMESTAMP literal with no zone "+00:00" before the analyzer reads it:
+- it read a date alone's "-01" as an offset and left it; a date alone is
+  now its midnight in UTC;
+- the bounds of a RANGE<TIMESTAMP> literal with no zone, and the string
+  of CAST('<value>' AS TIMESTAMP) or SAFE_CAST, get the same.
+Turning off the analyzer's folding of a CAST of a literal
+(SetFoldLiteralCast(false)) was tried and dropped: the run time's CAST
+then refused a named zone ("2020-01-01 00:00:00 America/New_York") and
+wrote a TIMESTAMP as RFC 3339 text. Still in the default zone: a CAST of a
+DATE or DATETIME literal to TIMESTAMP, and a CAST of a TIMESTAMP literal
+to STRING.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -940,7 +940,16 @@
+ 		// emitted a TIMESTAMP keyword (handled below).
+ 		if c == '\'' || c == '"' {
+ 			end := scanStringLiteral(query, i)
+-			b.WriteString(query[i:end])
++			// CloudBurrow patch (cloudburrow/cloudburrow#1188): the
++			// analyzer folds CAST('<value>' AS TIMESTAMP) in its default
++			// zone too.
++			if end > i+1 && castToTimestamp(query, i, end) && !timestampHasTZ(query[i+1:end-1]) {
++				b.WriteByte(c)
++				b.WriteString(naiveTimestampUTC(query[i+1 : end-1]))
++				b.WriteByte(query[end-1])
++			} else {
++				b.WriteString(query[i:end])
++			}
+ 			i = end
+ 			continue
+ 		}
+@@ -962,6 +971,22 @@
+ 			word := query[i:j]
+ 			b.WriteString(word)
+ 			i = j
++			if strings.EqualFold(word, "RANGE") {
++				// CloudBurrow patch (cloudburrow/cloudburrow#1188): a
++				// RANGE<TIMESTAMP> literal's bounds are read in the
++				// analyzer's default zone too.
++				if k, ok := rangeTimestampLiteral(query, i); ok {
++					end := scanStringLiteral(query, k)
++					if end > k+1 && end <= len(query) {
++						b.WriteString(query[i:k])
++						b.WriteByte(query[k])
++						b.WriteString(naiveRangeBoundsUTC(query[k+1 : end-1]))
++						b.WriteByte(query[end-1])
++						i = end
++						continue
++					}
++				}
++			}
+ 			if strings.EqualFold(word, "TIMESTAMP") {
+ 				// Skip whitespace, then if the next token is a string
+ 				// literal without a TZ marker, rewrite it to UTC.
+@@ -978,8 +1003,7 @@
+ 						content := query[k+1 : end-1]
+ 						if !timestampHasTZ(content) {
+ 							b.WriteByte(quote)
+-							b.WriteString(content)
+-							b.WriteString("+00:00")
++							b.WriteString(naiveTimestampUTC(content))
+ 							b.WriteByte(quote)
+ 						} else {
+ 							b.WriteString(query[k:end])
+@@ -994,6 +1018,86 @@
+ 		i++
+ 	}
+ 	return b.String()
++}
++
++// naiveTimestampUTC returns s, a TIMESTAMP literal's text with no zone,
++// in UTC. CloudBurrow patch (cloudburrow/cloudburrow#1188): a date alone
++// gets a midnight, as the analyzer reads no offset right after a date.
++func naiveTimestampUTC(s string) string {
++	if dateOnly.MatchString(s) {
++		return strings.TrimSpace(s) + " 00:00:00+00:00"
++	}
++	return s + "+00:00"
++}
++
++// castToTimestamp reports whether the string literal query[start:end] is
++// the operand of CAST or SAFE_CAST to TIMESTAMP: CAST('<value>' AS
++// TIMESTAMP).
++func castToTimestamp(query string, start, end int) bool {
++	before := strings.TrimRight(query[:start], " \t\n\r")
++	if !strings.HasSuffix(before, "(") {
++		return false
++	}
++	before = strings.TrimRight(before[:len(before)-1], " \t\n\r")
++	upper := strings.ToUpper(before)
++	if !strings.HasSuffix(upper, "CAST") {
++		return false
++	}
++	if n := len(upper) - len("CAST"); n > 0 && isIdentCont(upper[n-1]) && !strings.HasSuffix(upper, "SAFE_CAST") {
++		return false
++	}
++	return castTimestampTail.MatchString(query[end:])
++}
++
++// rangeTimestampLiteral reports whether query, from i (just past a RANGE
++// keyword), goes on `<TIMESTAMP>` and a string literal, and where that
++// literal starts.
++func rangeTimestampLiteral(query string, i int) (int, bool) {
++	skip := func(k int) int {
++		for k < len(query) && (query[k] == ' ' || query[k] == '\t' || query[k] == '\n' || query[k] == '\r') {
++			k++
++		}
++		return k
++	}
++	k := skip(i)
++	if k >= len(query) || query[k] != '<' {
++		return 0, false
++	}
++	k = skip(k + 1)
++	if k+len("TIMESTAMP") > len(query) || !strings.EqualFold(query[k:k+len("TIMESTAMP")], "TIMESTAMP") {
++		return 0, false
++	}
++	k = skip(k + len("TIMESTAMP"))
++	if k >= len(query) || query[k] != '>' {
++		return 0, false
++	}
++	k = skip(k + 1)
++	if k >= len(query) || query[k] != '\'' && query[k] != '"' {
++		return 0, false
++	}
++	return k, true
++}
++
++// naiveRangeBoundsUTC returns a RANGE<TIMESTAMP> literal's text,
++// "[start, end)", with each bound that has no zone in UTC; UNBOUNDED and
++// NULL bounds, and any text not of that form, are kept.
++func naiveRangeBoundsUTC(s string) string {
++	t := strings.TrimSpace(s)
++	if len(t) < 2 || t[0] != '[' || t[len(t)-1] != ')' {
++		return s
++	}
++	parts := strings.Split(t[1:len(t)-1], ",")
++	if len(parts) != 2 {
++		return s
++	}
++	for i, p := range parts {
++		p = strings.TrimSpace(p)
++		if p != "" && !strings.EqualFold(p, "UNBOUNDED") && !strings.EqualFold(p, "NULL") && !timestampHasTZ(p) {
++			p = naiveTimestampUTC(p)
++		}
++		parts[i] = p
++	}
++	return "[" + parts[0] + ", " + parts[1] + ")"
+ }
+ 
+ // timestampHasTZ reports whether a TIMESTAMP literal body already
+@@ -1001,6 +1105,12 @@
+ // timezone name).
+ func timestampHasTZ(s string) bool {
+ 	if len(s) == 0 {
++		return false
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1188): a date alone,
++	// 2020-01-01, ends in what tzOffsetTail reads as an offset ("-01"),
++	// so it was left in the default zone.
++	if dateOnly.MatchString(s) {
+ 		return false
+ 	}
+ 	if strings.HasSuffix(s, "Z") || strings.HasSuffix(s, "z") {
+@@ -1019,7 +1129,11 @@
+ }
+ 
+ var (
+-	timestampNeedle = regexp.MustCompile(`(?i)\bTIMESTAMP\s*['"]`)
++	timestampNeedle = regexp.MustCompile(`(?i)\bTIMESTAMP\s*(>\s*)?['"]|['"]\s*AS\s+TIMESTAMP\s*\)`)
++	// What follows CAST('<value>' (cloudburrow/cloudburrow#1188).
++	castTimestampTail = regexp.MustCompile(`(?i)^\s+AS\s+TIMESTAMP\s*\)`)
++	// A date with no time and no zone (cloudburrow/cloudburrow#1188).
++	dateOnly = regexp.MustCompile(`^\s*\d{1,4}-\d{1,2}-\d{1,2}\s*$`)
+ 	// Match `[+-]HH`, `[+-]HHMM`, or `[+-]HH:MM` at the tail.
+ 	tzOffsetTail = regexp.MustCompile(`[+-]\d{2}(?::?\d{2})?\s*$`)
+ 	// Match a trailing alphabetic timezone identifier separated from
+--- /dev/null
++++ b/internal/naive_timestamp_utc_test.go
+@@ -0,0 +1,27 @@
++package internal
++
++import "testing"
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1188): TIMESTAMP and
++// RANGE<TIMESTAMP> literals with no zone are read as UTC.
++func TestNaiveTimestampLiteralsAreUTC(t *testing.T) {
++	for in, want := range map[string]string{
++		`SELECT TIMESTAMP '2020-01-01'`:                                                         `SELECT TIMESTAMP '2020-01-01 00:00:00+00:00'`,
++		`SELECT TIMESTAMP "2020-1-2"`:                                                           `SELECT TIMESTAMP "2020-1-2 00:00:00+00:00"`,
++		`SELECT TIMESTAMP '2020-01-01 10:00:00'`:                                                `SELECT TIMESTAMP '2020-01-01 10:00:00+00:00'`,
++		`SELECT TIMESTAMP '2020-01-01 10:00:00-05'`:                                             `SELECT TIMESTAMP '2020-01-01 10:00:00-05'`,
++		`SELECT TIMESTAMP '2020-01-01 10:00:00 America/New_York'`:                               `SELECT TIMESTAMP '2020-01-01 10:00:00 America/New_York'`,
++		`SELECT RANGE<TIMESTAMP> '[2020-01-01, 2020-02-01 12:00:00)'`:                           `SELECT RANGE<TIMESTAMP> '[2020-01-01 00:00:00+00:00, 2020-02-01 12:00:00+00:00)'`,
++		`SELECT RANGE < timestamp > "[UNBOUNDED, 2020-02-01Z)"`:                                 `SELECT RANGE < timestamp > "[UNBOUNDED, 2020-02-01Z)"`,
++		`SELECT RANGE<TIMESTAMP> '[2020-01-01 00:00:00+03, NULL)'`:                              `SELECT RANGE<TIMESTAMP> '[2020-01-01 00:00:00+03, NULL)'`,
++		`SELECT RANGE<DATE> '[2020-01-01, 2020-02-01)'`:                                         `SELECT RANGE<DATE> '[2020-01-01, 2020-02-01)'`,
++		`SELECT '2020-01-01' AS TIMESTAMP_x`:                                                    `SELECT '2020-01-01' AS TIMESTAMP_x`,
++		`SELECT CAST('2020-01-01' AS TIMESTAMP), SAFE_CAST ( "2020-01-01 10:00" as timestamp )`: `SELECT CAST('2020-01-01 00:00:00+00:00' AS TIMESTAMP), SAFE_CAST ( "2020-01-01 10:00+00:00" as timestamp )`,
++		`SELECT CAST('2020-01-01 10:00:00+03' AS TIMESTAMP), CAST('2020-01-01' AS DATE)`:        `SELECT CAST('2020-01-01 10:00:00+03' AS TIMESTAMP), CAST('2020-01-01' AS DATE)`,
++		`SELECT MYCAST('2020-01-01' AS TIMESTAMP)`:                                              `SELECT MYCAST('2020-01-01' AS TIMESTAMP)`,
++	} {
++		if got := applyNaiveTimestampUTC(in); got != want {
++			t.Errorf("applyNaiveTimestampUTC(%q) = %q, want %q", in, got, want)
++		}
++	}
++}

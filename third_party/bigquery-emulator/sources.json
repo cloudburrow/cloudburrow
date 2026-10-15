@@ -21,7 +21,8 @@
         "patches/bigquery-emulator/0005-nested-geography-wkt.patch",
         "patches/bigquery-emulator/0006-wkt-number-form.patch",
         "patches/bigquery-emulator/0007-index-job-ids.patch",
-        "patches/bigquery-emulator/0008-range-schema-and-values.patch"
+        "patches/bigquery-emulator/0008-range-schema-and-values.patch",
+        "patches/bigquery-emulator/0009-read-jobs-by-key.patch"
       ]
     },
     {
@@ -47,7 +48,11 @@
         "patches/googlesqlite/0014-json-builders-typed-values.patch",
         "patches/googlesqlite/0015-nan-sort-order.patch",
         "patches/googlesqlite/0016-free-parser-options.patch",
-        "patches/googlesqlite/0017-collect-before-catalog-rebuild.patch"
+        "patches/googlesqlite/0017-collect-before-catalog-rebuild.patch",
+        "patches/googlesqlite/0018-tables-and-functions-of-one-name.patch",
+        "patches/googlesqlite/0019-read-rows-by-key.patch",
+        "patches/googlesqlite/0020-one-ast-walk-per-statement.patch",
+        "patches/googlesqlite/0021-naive-timestamps-utc.patch"
       ]
     },
     {

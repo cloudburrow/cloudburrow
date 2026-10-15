@@ -12,6 +12,10 @@ type field struct {
 	Type   string  `json:"type"`
 	Mode   string  `json:"mode"`
 	Fields []field `json:"fields"`
+	// RangeElementType is a RANGE field's element type (#1111).
+	RangeElementType *struct {
+		Type string `json:"type"`
+	} `json:"rangeElementType,omitempty"`
 }
 
 // tableSchema is a Table's schema.

@@ -1,0 +1,201 @@
+CloudBurrow patch 18 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1186).
+
+The bug: the googlesqlite_catalog table, where the catalog persists its
+specs, is keyed by the spec's bare path, the same for a table and a
+function of one dataset. A CREATE TABLE named as a function of its dataset
+upserted over the function's row, replacing its spec with the table's but
+keeping its kind 'function', and the catalog load that followed read the
+table's spec as a function's, with no return type, and panicked in
+(*Type).FunctionArgumentType. From then on every DROP (which rebuilds the
+catalog from the specs) panicked too, and the table functions were lost
+until a restart; and a DROP of either deleted both rows. BigQuery keeps
+tables and routines in separate namespaces, so the table and the function
+are both legal.
+
+The patch keys a function's row 'function:<path>' and a table function's
+'tvf:<path>' (tables and views keep the bare path: one namespace in
+BigQuery), moves the rows a catalog of before the patch saved to those
+keys once per catalog, and has the upsert set the kind too.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -38,14 +38,38 @@
+   @updatedAt,
+   @createdAt
+ ) ON CONFLICT(name) DO UPDATE SET
++  kind = @kind,
+   spec = @spec,
+   updatedAt = @updatedAt
+ `
+ 	deleteCatalogQuery = `
+ DELETE FROM googlesqlite_catalog WHERE name = @name
+ `
++	// CloudBurrow patch (cloudburrow/cloudburrow#1186): a function's and
++	// a table function's rows were keyed by their bare path, as a table's
++	// is, so a table named as a function of its dataset overwrote the
++	// function's row (keeping its kind), and the next catalog load read
++	// the table's spec as a function's and panicked. Rows a catalog of
++	// before the patch saved are moved to the kind-qualified keys.
++	migrateCatalogKeysQuery = `
++UPDATE googlesqlite_catalog SET name = kind || ':' || name
++WHERE kind IN ('function', 'tvf') AND name NOT LIKE kind || ':%'
++`
+ )
+ 
++// catalogKey is the googlesqlite_catalog row name of a spec of kind
++// stored under name: tables and views (one namespace in BigQuery) keep
++// the bare path, functions and table functions take a kind prefix, so a
++// table and a function of one name are two rows. CloudBurrow patch
++// (cloudburrow/cloudburrow#1186).
++func catalogKey(kind catalogSpecKind, name string) string {
++	switch kind {
++	case FunctionSpecKind, TVFSpecKind:
++		return string(kind) + ":" + name
++	}
++	return name
++}
++
+ type catalogSpecKind string
+ 
+ const (
+@@ -59,6 +83,9 @@
+ type Catalog struct {
+ 	db           *sql.DB
+ 	lastSyncedAt time.Time
++	// keysMigrated: the catalog table's rows have their kind-qualified
++	// keys (CloudBurrow patch, cloudburrow/cloudburrow#1186).
++	keysMigrated bool
+ 	mu           sync.Mutex
+ 	tables       []*TableSpec
+ 	functions    []*FunctionSpec
+@@ -1964,7 +1991,7 @@
+ 	if err := c.deleteTVFSpecByName(name); err != nil {
+ 		return err
+ 	}
+-	if _, err := conn.ExecContext(ctx, deleteCatalogQuery, sql.Named("name", name)); err != nil {
++	if _, err := conn.ExecContext(ctx, deleteCatalogQuery, sql.Named("name", catalogKey(TVFSpecKind, name))); err != nil {
+ 		return err
+ 	}
+ 	return nil
+@@ -2005,7 +2032,7 @@
+ 	if err := c.deleteFunctionSpecByName(name); err != nil {
+ 		return err
+ 	}
+-	if _, err := conn.ExecContext(ctx, deleteCatalogQuery, sql.Named("name", name)); err != nil {
++	if _, err := conn.ExecContext(ctx, deleteCatalogQuery, sql.Named("name", catalogKey(FunctionSpecKind, name))); err != nil {
+ 		return err
+ 	}
+ 	return nil
+@@ -2197,7 +2224,7 @@
+ 	if _, err := conn.ExecContext(
+ 		ctx,
+ 		upsertCatalogQuery,
+-		sql.Named("name", spec.TVFName()),
++		sql.Named("name", catalogKey(TVFSpecKind, spec.TVFName())),
+ 		sql.Named("kind", string(TVFSpecKind)),
+ 		sql.Named("spec", string(encoded)),
+ 		sql.Named("updatedAt", now),
+@@ -2217,7 +2244,7 @@
+ 	if _, err := conn.ExecContext(
+ 		ctx,
+ 		upsertCatalogQuery,
+-		sql.Named("name", spec.FuncName()),
++		sql.Named("name", catalogKey(FunctionSpecKind, spec.FuncName())),
+ 		sql.Named("kind", string(FunctionSpecKind)),
+ 		sql.Named("spec", string(encoded)),
+ 		sql.Named("updatedAt", now),
+@@ -2231,6 +2258,12 @@
+ func (c *Catalog) createCatalogTablesIfNotExists(ctx context.Context, conn *Conn) error {
+ 	if _, err := conn.ExecContext(ctx, createCatalogTableQuery); err != nil {
+ 		return fmt.Errorf("failed to create catalog table: %w", err)
++	}
++	if !c.keysMigrated {
++		if _, err := conn.ExecContext(ctx, migrateCatalogKeysQuery); err != nil {
++			return fmt.Errorf("failed to migrate catalog keys: %w", err)
++		}
++		c.keysMigrated = true
+ 	}
+ 	return nil
+ }
+--- /dev/null
++++ b/table_function_same_name_test.go
+@@ -0,0 +1,72 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++)
++
++// TestTableAndFunctionOfOneName is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1186): tables and functions are separate
++// namespaces, so a table named as a function is made beside it, both
++// answer, and a later DROP of anything neither panics nor loses the
++// table functions; dropping the one leaves the other.
++func TestTableAndFunctionOfOneName(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=table_function_same_name")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	exec := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	one := func(q string, want int64) {
++		t.Helper()
++		var got int64
++		if err := db.QueryRowContext(ctx, q).Scan(&got); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		if got != want {
++			t.Fatalf("%s = %d, want %d", q, got, want)
++		}
++	}
++	exec("CREATE FUNCTION twice(x INT64) RETURNS INT64 AS (x * 2)")
++	exec("CREATE TABLE FUNCTION tf(n INT64) AS (SELECT n AS v)")
++	exec("CREATE TABLE twice (n INT64)")
++	exec("INSERT INTO twice (n) VALUES (7)")
++	one("SELECT twice(3)", 6)
++	one("SELECT n FROM twice", 7)
++
++	exec("CREATE TABLE t (a INT64)")
++	exec("DROP TABLE t")
++	one("SELECT v FROM tf(4)", 4)
++	one("SELECT twice(5)", 10)
++	one("SELECT n FROM twice", 7)
++
++	exec("DROP TABLE twice")
++	one("SELECT twice(6)", 12)
++	one("SELECT v FROM tf(8)", 8)
++	if err := db.QueryRowContext(ctx, "SELECT n FROM twice").Scan(new(int64)); err == nil || !strings.Contains(err.Error(), "not found") {
++		t.Fatalf("a dropped table answered %v", err)
++	}
++
++	exec("CREATE TABLE twice (n INT64)")
++	exec("INSERT INTO twice (n) VALUES (9)")
++	exec("DROP FUNCTION twice")
++	one("SELECT n FROM twice", 9)
++	one("SELECT v FROM tf(1)", 1)
++	if err := db.QueryRowContext(ctx, "SELECT twice(1)").Scan(new(int64)); err == nil || !strings.Contains(err.Error(), "not found") {
++		t.Fatalf("a dropped function answered %v", err)
++	}
++
++	// A table function of the table's name too.
++	exec("CREATE TABLE FUNCTION twice(n INT64) AS (SELECT n * 2 AS v)")
++	one("SELECT v FROM twice(5)", 10)
++	exec("DROP TABLE FUNCTION twice")
++	one("SELECT n FROM twice", 9)
++}

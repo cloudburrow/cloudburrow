@@ -83,8 +83,67 @@ func nestedTimestampValue(fl field, cell map[string]any, int64Timestamp bool) bo
 			cell["v"] = t
 			return true
 		}
+	case "RANGE":
+		s, ok := cell["v"].(string)
+		if !ok || fl.RangeElementType == nil {
+			return false
+		}
+		if t := restRange(s, strings.ToUpper(fl.RangeElementType.Type)); t != s {
+			cell["v"] = t
+			return true
+		}
 	case "RECORD":
 		return nestedTimestampCells(fl.Fields, cell["v"], int64Timestamp)
+	}
+	return false
+}
+
+// restRange writes s, a RANGE value "[start, end)" whose element type is
+// elem, with each TIMESTAMP bound that is the engine's text as int64
+// microseconds and each DATETIME bound's space as a "T": BigQuery's REST
+// form, which the official Go client parses whatever useInt64Timestamp
+// asks (cloud.google.com/go/bigquery convertRangeValue), #1111. The
+// emulator writes a top-level RANGE so (engine patch bigquery-emulator
+// 0008) but not one inside a STRUCT. Bounds already in that form, and
+// UNBOUNDED, are kept, so s comes back unchanged when nothing is to do.
+func restRange(s, elem string) string {
+	if elem != "TIMESTAMP" && elem != "DATETIME" || len(s) < 2 || s[0] != '[' || s[len(s)-1] != ')' {
+		return s
+	}
+	parts := strings.Split(s[1:len(s)-1], ", ")
+	if len(parts) != 2 {
+		return s
+	}
+	for i, p := range parts {
+		switch {
+		case p == "UNBOUNDED":
+		case elem == "TIMESTAMP" && strings.HasSuffix(p, "+00"):
+			t, err := parseTimestamp(p) // storagerows.go
+			if err != nil {
+				return s
+			}
+			parts[i] = strconv.FormatInt(t.UnixMicro(), 10)
+		case elem == "DATETIME":
+			parts[i] = strings.Replace(p, " ", "T", 1)
+		}
+	}
+	return "[" + parts[0] + ", " + parts[1] + ")"
+}
+
+// nestedRange reports whether fields have a RANGE inside a RECORD, whose
+// value the emulator leaves as its engine's text (restRange).
+func nestedRange(fields []field, nested bool) bool {
+	for _, fl := range fields {
+		switch legacyType(fl.Type) {
+		case "RANGE":
+			if nested {
+				return true
+			}
+		case "RECORD":
+			if nestedRange(fl.Fields, true) {
+				return true
+			}
+		}
 	}
 	return false
 }

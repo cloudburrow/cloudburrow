@@ -1,0 +1,509 @@
+CloudBurrow patch 20 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1070).
+
+The cost: Analyzer.Analyze (internal/analyzer.go) walked each statement's
+parse tree five times before analyzing it: getParameterMode twice (in
+sliceArgsPerStatement and again in the statement's action), then
+countPositionalParams or collectNamedParamNames, validateLiteralCasts and
+preRegisterWildcardTables. Each node of each walk is several calls into the
+WebAssembly engine (NumChildren, Child, the node's type), so for an
+INSERT ... VALUES of a few thousand literal rows, the batches a CloudBurrow
+load sends, the walks were 36% of the statement's CPU time. One walk,
+collectStmtASTFacts, now gathers all of it: the `?` count, the @names, the
+first CAST(<string literal> AS <numeric type>) that cannot succeed, and the
+wildcard table paths. Each is used where it was before and in the same
+order (parameter mode, then the cast error, then the wildcard tables are
+registered, lazily in the statement's action), so the errors and their
+messages are unchanged.
+
+Measured on Apple silicon (M4 Max), 2,000-row INSERT ... VALUES of an INT64,
+a FLOAT64 and a STRING: BenchmarkInsertValues 190 to 117 ms per statement
+(10,500 to 17,000 rows/s); on the patched emulator built natively,
+20,000 rows by sequential jobs.query, 9,900-10,100 to 15,700-16,100 rows/s,
+the process flat at about 300 MiB as before. What is left is mostly the
+parse (ParseNextScriptStatement, about 39%) and formatting each row's SQL
+(about 20%).
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch is
+offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -1209,70 +1209,119 @@
+ 	return out
+ }
+ 
+-// validateLiteralCasts walks the AST looking for CAST(<string-literal>
+-// AS <numeric-type>) expressions where the literal would fail at
+-// runtime. googlesql's analyzer currently does not fold such casts at
+-// analysis time; rejecting them here produces the
+-// "Could not cast literal" message users expect, and matches the
+-// historical googlesql behavior.
+-func validateLiteralCasts(stmt googlesql.ASTStatementNode, query string) error {
+-	var firstErr error
+-	_ = astWalk(stmt, func(node googlesql.ASTNode) error {
+-		if firstErr != nil {
+-			return nil
+-		}
+-		cast, ok := node.(*googlesql.ASTCastExpression)
+-		if !ok {
+-			return nil
+-		}
+-		exprNode, _ := cast.Expr()
+-		strLit, ok := exprNode.(*googlesql.ASTStringLiteral)
+-		if !ok {
+-			return nil
+-		}
+-		strVal, _ := strLit.StringValue()
+-		typeNode, _ := cast.Type()
+-		simple, ok := typeNode.(*googlesql.ASTSimpleType)
+-		if !ok {
+-			return nil
+-		}
+-		path, _ := simple.TypeName()
+-		ids, _ := path.ToIdentifierVector()
+-		if len(ids) != 1 {
+-			return nil
+-		}
+-		typeName := strings.ToUpper(ids[0])
+-		switch typeName {
+-		case "INT32", "INT64", "UINT32", "UINT64":
+-			// Mirror StringValue.ToInt64: base 0 for hex/0x-prefixed.
+-			base := 10
+-			if strings.Contains(strings.ToLower(strVal), "0x") {
+-				base = 0
++// stmtASTFacts is what Analyze needs to know of one statement's parse
++// tree before it analyzes it.
++//
++// CloudBurrow patch (cloudburrow/cloudburrow#1070): these were five
++// walks of the tree per statement (the parameter mode twice, the `?`
++// count or the @names, the literal casts, the wildcard tables), each
++// node of each walk several calls into the WebAssembly engine; for an
++// INSERT ... VALUES of a few thousand rows they were about 40% of the
++// statement's time. collectStmtASTFacts gathers all of it in one walk.
++type stmtASTFacts struct {
++	// positional is the number of `?` parameters.
++	positional int
++	// hasNamed reports any @name parameter; named holds the distinct
++	// non-empty names, lowercased, in the order they first appear.
++	hasNamed bool
++	named    []string
++	// castErr is the first CAST(<string literal> AS <numeric type>)
++	// whose literal would fail at runtime. googlesql's analyzer does
++	// not fold such casts at analysis time; rejecting them here
++	// produces the "Could not cast literal" message users expect, and
++	// matches the historical googlesql behavior.
++	castErr error
++	// wildcardTables are the paths of the table references whose last
++	// segment ends with `*` (e.g. `project.dataset.table_*`).
++	wildcardTables [][]string
++}
++
++func collectStmtASTFacts(stmt googlesql.ASTStatementNode, query string) *stmtASTFacts {
++	f := &stmtASTFacts{}
++	seen := map[string]struct{}{}
++	_ = astWalk(stmt, func(node googlesql.ASTNode) error {
++		switch n := node.(type) {
++		case *googlesql.ASTParameterExpr:
++			if m1(n.Position()) > 0 {
++				f.positional++
+ 			}
+-			if _, perr := strconv.ParseInt(strVal, base, 64); perr == nil {
++			nameID := m1(n.Name())
++			if nameID == nil {
+ 				return nil
+ 			}
+-			if _, perr := strconv.ParseInt(strVal, 0, 64); perr == nil {
++			f.hasNamed = true
++			raw, _ := nameID.GetAsString()
++			name := strings.ToLower(raw)
++			if name == "" {
+ 				return nil
+ 			}
+-		case "FLOAT", "FLOAT64", "DOUBLE":
+-			if _, perr := strconv.ParseFloat(strVal, 64); perr == nil {
++			if _, ok := seen[name]; ok {
+ 				return nil
+ 			}
+-		default:
++			seen[name] = struct{}{}
++			f.named = append(f.named, name)
++		case *googlesql.ASTCastExpression:
++			if f.castErr == nil {
++				f.castErr = literalCastError(n, query)
++			}
++		case *googlesql.ASTTablePathExpression:
++			if ids := wildcardTablePath(n); ids != nil {
++				f.wildcardTables = append(f.wildcardTables, ids)
++			}
++		}
++		return nil
++	})
++	return f
++}
++
++// literalCastError is the error of CAST(<string-literal> AS
++// <numeric-type>) whose literal would fail at runtime, or nil.
++func literalCastError(cast *googlesql.ASTCastExpression, query string) error {
++	exprNode, _ := cast.Expr()
++	strLit, ok := exprNode.(*googlesql.ASTStringLiteral)
++	if !ok {
++		return nil
++	}
++	strVal, _ := strLit.StringValue()
++	typeNode, _ := cast.Type()
++	simple, ok := typeNode.(*googlesql.ASTSimpleType)
++	if !ok {
++		return nil
++	}
++	path, _ := simple.TypeName()
++	ids, _ := path.ToIdentifierVector()
++	if len(ids) != 1 {
++		return nil
++	}
++	typeName := strings.ToUpper(ids[0])
++	switch typeName {
++	case "INT32", "INT64", "UINT32", "UINT64":
++		// Mirror StringValue.ToInt64: base 0 for hex/0x-prefixed.
++		base := 10
++		if strings.Contains(strings.ToLower(strVal), "0x") {
++			base = 0
++		}
++		if _, perr := strconv.ParseInt(strVal, base, 64); perr == nil {
+ 			return nil
+ 		}
+-		if m1(cast.IsSafeCast()) {
++		if _, perr := strconv.ParseInt(strVal, 0, 64); perr == nil {
+ 			return nil
+ 		}
+-		line, col := parseLocationLineCol(cast, query)
+-		firstErr = fmt.Errorf(
+-			"failed to analyze: INVALID_ARGUMENT: Could not cast literal %q to type %s [at %d:%d]",
+-			strVal, typeName, line, col,
+-		)
++	case "FLOAT", "FLOAT64", "DOUBLE":
++		if _, perr := strconv.ParseFloat(strVal, 64); perr == nil {
++			return nil
++		}
++	default:
+ 		return nil
+-	})
+-	return firstErr
++	}
++	if m1(cast.IsSafeCast()) {
++		return nil
++	}
++	line, col := parseLocationLineCol(cast, query)
++	return fmt.Errorf(
++		"failed to analyze: INVALID_ARGUMENT: Could not cast literal %q to type %s [at %d:%d]",
++		strVal, typeName, line, col,
++	)
+ }
+ 
+ // parseLocationLineCol converts the byte offset of an AST node's start
+@@ -1299,104 +1348,35 @@
+ 	return line, col
+ }
+ 
+-// preRegisterWildcardTables walks the AST looking for table references
+-// whose last path segment ends with `*` (e.g. `project.dataset.table_*`).
+-// For each such reference, build the corresponding wildcard table and
+-// add it to the wasm-side catalog so the analyzer resolves the
+-// reference. The googlesql SimpleCatalog has no native wildcard
+-// support, so we pre-register an equivalent SimpleTable here.
+-func (a *Analyzer) preRegisterWildcardTables(stmt googlesql.ASTStatementNode) {
+-	_ = astWalk(stmt, func(node googlesql.ASTNode) error {
+-		tpath, ok := node.(*googlesql.ASTTablePathExpression)
+-		if !ok {
+-			return nil
+-		}
+-		pe, _ := tpath.PathExpr()
+-		if pe == nil {
+-			return nil
+-		}
+-		ids, _ := pe.ToIdentifierVector()
+-		if len(ids) == 0 {
+-			return nil
+-		}
+-		last := ids[len(ids)-1]
+-		if last == "" || last[len(last)-1] != '*' {
+-			return nil
+-		}
+-		a.catalog.registerWildcardTableByPath(ids)
++// wildcardTablePath is the path of a table reference whose last path
++// segment ends with `*`, or nil. For each such reference, Analyze builds
++// the corresponding wildcard table and adds it to the wasm-side catalog
++// so the analyzer resolves the reference. The googlesql SimpleCatalog
++// has no native wildcard support, so we pre-register an equivalent
++// SimpleTable.
++func wildcardTablePath(tpath *googlesql.ASTTablePathExpression) []string {
++	pe, _ := tpath.PathExpr()
++	if pe == nil {
+ 		return nil
+-	})
+-}
+-
+-// countPositionalParams walks the AST counting `?` occurrences. Used to
+-// split positional arguments across statements in a multi-statement
+-// script, where the resolved-tree walker's limited descent otherwise
+-// mis-reports per-statement parameter counts.
+-func countPositionalParams(stmt googlesql.ASTStatementNode) int {
+-	var n int
+-	_ = astWalk(stmt, func(node googlesql.ASTNode) error {
+-		if p, ok := node.(*googlesql.ASTParameterExpr); ok {
+-			if m1(p.Position()) > 0 {
+-				n++
+-			}
+-		}
++	}
++	ids, _ := pe.ToIdentifierVector()
++	if len(ids) == 0 {
+ 		return nil
+-	})
+-	return n
+-}
+-
+-// collectNamedParamNames walks the AST and returns the lowercased names
+-// of every distinct `@name` reference. Used to validate that the
+-// caller-supplied named args cover every name the query references —
+-// the resolved-tree walker can't surface this directly today.
+-func collectNamedParamNames(stmt googlesql.ASTStatementNode) []string {
+-	seen := map[string]struct{}{}
+-	var out []string
+-	_ = astWalk(stmt, func(node googlesql.ASTNode) error {
+-		p, ok := node.(*googlesql.ASTParameterExpr)
+-		if !ok {
+-			return nil
+-		}
+-		nameID := m1(p.Name())
+-		if nameID == nil {
+-			return nil
+-		}
+-		raw, _ := nameID.GetAsString()
+-		name := strings.ToLower(raw)
+-		if name == "" {
+-			return nil
+-		}
+-		if _, ok := seen[name]; ok {
+-			return nil
+-		}
+-		seen[name] = struct{}{}
+-		out = append(out, name)
++	}
++	last := ids[len(ids)-1]
++	if last == "" || last[len(last)-1] != '*' {
+ 		return nil
+-	})
+-	return out
++	}
++	return ids
+ }
+ 
+-func (a *Analyzer) getParameterMode(stmt googlesql.ASTStatementNode) (googlesql.ParameterMode, error) {
+-	var (
+-		enabledNamedParameter      bool
+-		enabledPositionalParameter bool
+-	)
+-	_ = astWalk(stmt, func(node googlesql.ASTNode) error {
+-		switch n := node.(type) {
+-		case *googlesql.ASTParameterExpr:
+-			if m1(n.Position()) > 0 {
+-				enabledPositionalParameter = true
+-			}
+-			if m1(n.Name()) != nil {
+-				enabledNamedParameter = true
+-			}
+-		}
+-		return nil
+-	})
+-	if enabledNamedParameter && enabledPositionalParameter {
++// parameterMode is the statement's parameter mode: positional if it has
++// a `?`, named otherwise; both is an error.
++func (f *stmtASTFacts) parameterMode() (googlesql.ParameterMode, error) {
++	if f.hasNamed && f.positional > 0 {
+ 		return googlesql.ParameterModeParameterNone, fmt.Errorf("named parameter and positional parameter cannot be used together")
+ 	}
+-	if enabledPositionalParameter {
++	if f.positional > 0 {
+ 		return googlesql.ParameterModeParameterPositional, nil
+ 	}
+ 	return googlesql.ParameterModeParameterNamed, nil
+@@ -1444,17 +1424,17 @@
+ // a multi-statement script with positional placeholders would hand all
+ // args to every statement, and the underlying SQLite stmt would reject
+ // the over-supply.
+-func (a *Analyzer) sliceArgsPerStatement(parsed *parsedScript, args []driver.NamedValue) ([][]driver.NamedValue, error) {
+-	stmtArgsList := make([][]driver.NamedValue, len(parsed.stmts))
++func (a *Analyzer) sliceArgsPerStatement(facts []*stmtASTFacts, args []driver.NamedValue) ([][]driver.NamedValue, error) {
++	stmtArgsList := make([][]driver.NamedValue, len(facts))
+ 	remaining := args
+-	for i, stmt := range parsed.stmts {
+-		stmtMode, err := a.getParameterMode(stmt)
++	for i, f := range facts {
++		stmtMode, err := f.parameterMode()
+ 		if err != nil {
+ 			return nil, err
+ 		}
+ 		switch stmtMode {
+ 		case googlesql.ParameterModeParameterPositional:
+-			consumed := min(countPositionalParams(stmt), len(remaining))
++			consumed := min(f.positional, len(remaining))
+ 			stmtArgsList[i] = remaining[:consumed]
+ 			remaining = remaining[consumed:]
+ 		case googlesql.ParameterModeParameterNamed:
+@@ -1465,7 +1445,7 @@
+ 			// positional args (database/sql wraps these as
+ 			// NamedArg with empty Name), as long as the total
+ 			// arg count covers every @name reference.
+-			names := collectNamedParamNames(stmt)
++			names := f.named
+ 			providedNamed := map[string]struct{}{}
+ 			for _, v := range args {
+ 				if v.Name != "" {
+@@ -1558,12 +1538,17 @@
+ 		tvfMap[spec.TVFName()] = spec
+ 	}
+ 	actionFuncs := make([]stmtActionFunc, 0, len(parsed.stmts))
+-	stmtArgsList, err := a.sliceArgsPerStatement(parsed, args)
++	facts := make([]*stmtASTFacts, len(parsed.stmts))
++	for i, stmt := range parsed.stmts {
++		facts[i] = collectStmtASTFacts(stmt, query)
++	}
++	stmtArgsList, err := a.sliceArgsPerStatement(facts, args)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 	for i, stmt := range parsed.stmts {
+ 		stmtArgs := stmtArgsList[i]
++		stmtFacts := facts[i]
+ 		// Script-level control-flow AST nodes (IF / WHILE / LOOP /
+ 		// REPEAT / FOR IN / CASE / RAISE / BREAK / CONTINUE / RETURN
+ 		// / CALL) are not subclasses of ResolvedStatement, so the
+@@ -1580,14 +1565,16 @@
+ 			continue
+ 		}
+ 		actionFuncs = append(actionFuncs, func() (StmtAction, error) {
+-			mode, err := a.getParameterMode(stmt)
++			mode, err := stmtFacts.parameterMode()
+ 			if err != nil {
+ 				return nil, err
+ 			}
+-			if err := validateLiteralCasts(stmt, query); err != nil {
+-				return nil, err
++			if stmtFacts.castErr != nil {
++				return nil, stmtFacts.castErr
+ 			}
+-			a.preRegisterWildcardTables(stmt)
++			for _, ids := range stmtFacts.wildcardTables {
++				a.catalog.registerWildcardTableByPath(ids)
++			}
+ 			stmtNode, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query)
+ 			if err != nil {
+ 				return nil, err
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -1743,7 +1743,7 @@
+ // registerWildcardTableByPath pre-creates a wildcard table for `path`
+ // and installs it into the googlesql catalog so the analyzer can
+ // resolve the reference. Called from the analyzer before a statement
+-// is analyzed (see preRegisterWildcardTables). Silent if the path
++// is analyzed (see wildcardTablePath). Silent if the path
+ // does not match any registered tables.
+ func (c *Catalog) registerWildcardTableByPath(path []string) {
+ 	c.mu.Lock()
+--- /dev/null
++++ b/statement_ast_facts_test.go
+@@ -0,0 +1,90 @@
++package googlesqlite_test
++
++import (
++	"database/sql"
++	"fmt"
++	"strings"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++func insertValuesStmt(table string, from, n int) string {
++	var b strings.Builder
++	fmt.Fprintf(&b, "INSERT INTO %s (i, f, s) VALUES ", table)
++	for k := from; k < from+n; k++ {
++		if k > from {
++			b.WriteString(", ")
++		}
++		fmt.Fprintf(&b, "(%d, %d.5, 'row-%d-abcdefghij')", k, k, k)
++	}
++	return b.String()
++}
++
++// BenchmarkInsertValues inserts 2,000-row INSERT ... VALUES statements, the
++// batches the CloudBurrow front sends for a load (#1070).
++func BenchmarkInsertValues(b *testing.B) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=bench_insert_values")
++	if err != nil {
++		b.Fatal(err)
++	}
++	defer db.Close()
++	if _, err := db.Exec("CREATE TABLE t (i INT64, f FLOAT64, s STRING)"); err != nil {
++		b.Fatal(err)
++	}
++	const rows = 2000
++	b.ResetTimer()
++	for i := 0; i < b.N; i++ {
++		if _, err := db.Exec(insertValuesStmt("t", i*rows, rows)); err != nil {
++			b.Fatal(err)
++		}
++	}
++	b.ReportMetric(float64(rows*b.N)/b.Elapsed().Seconds(), "rows/s")
++}
++
++// TestStatementASTFacts holds what Analyze reads off each statement's parse
++// tree, now gathered in one walk (#1070): the parameter mode, the `?` each
++// statement of a script takes, the @names, and the literal casts. The
++// expectations are the unpatched engine's.
++func TestStatementASTFacts(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=statement_ast_facts")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	if _, err := db.Exec("CREATE TABLE t (i INT64, s STRING)"); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := db.Exec("INSERT INTO t (i, s) VALUES (?, ?); INSERT INTO t (i, s) VALUES (?, 'b')", 1, "a", 2); err != nil {
++		t.Fatalf("positional parameters across two statements: %v", err)
++	}
++	if _, err := db.Exec("INSERT INTO t (i, s) VALUES (@n, @S), (@N + 1, @s)", sql.Named("n", 3), sql.Named("s", "c")); err != nil {
++		t.Fatalf("named parameters: %v", err)
++	}
++	var got []string
++	rows, err := db.Query("SELECT FORMAT('%d:%s', i, s) FROM t ORDER BY i")
++	if err != nil {
++		t.Fatal(err)
++	}
++	for rows.Next() {
++		var v string
++		if err := rows.Scan(&v); err != nil {
++			t.Fatal(err)
++		}
++		got = append(got, v)
++	}
++	rows.Close()
++	if want := "1:a 2:b 3:c 4:c"; strings.Join(got, " ") != want {
++		t.Errorf("rows = %q, want %q", strings.Join(got, " "), want)
++	}
++	// applyMixedParameterRewrite names each `?` before the walk.
++	if _, err := db.Exec("SELECT @a, ?", sql.Named("a", 1), 2); err != nil {
++		t.Errorf("named and positional together: %v", err)
++	}
++	if _, err := db.Exec("SELECT 1; SELECT CAST('x' AS INT64)"); err == nil || !strings.Contains(err.Error(), `Could not cast literal "x" to type INT64 [at 1:19]`) {
++		t.Errorf("literal cast: err = %v", err)
++	}
++	if _, err := db.Exec("SELECT SAFE_CAST('x' AS INT64), CAST('7' AS INT64)"); err != nil {
++		t.Errorf("castable literals: %v", err)
++	}
++}
