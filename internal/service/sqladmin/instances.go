@@ -62,6 +62,35 @@ type Spec struct {
 	// server runs in the one cluster; the region is what the instance
 	// reports, in its connection name too.
 	Region string `json:"region,omitempty"`
+	// HAPrimary is which of a high-availability instance's two servers is
+	// its primary (#1408): "" or "a", the server the instance was created
+	// with, or "b", its second. A failover swaps them; a ZONAL instance
+	// keeps the one it was left with.
+	HAPrimary string `json:"haPrimary,omitempty"`
+	// HAEpochs are, per server, the failover a server was last rebuilt as
+	// a standby at: 0 for a server that never was one. A server rebuilds
+	// its data from the primary when its epoch changes, and keeps it
+	// otherwise, so a promoted standby keeps its data across restarts.
+	HAEpochs [2]int `json:"haEpochs,omitempty"`
+	// HAPassword is the standby's replication user's; never answered.
+	HAPassword string `json:"haPassword,omitempty"`
+}
+
+// Regional reports whether the instance has a standby (#1408).
+func (s Spec) Regional() bool { return s.AvailabilityType == "REGIONAL" }
+
+// PrimaryNode is the index of the primary's server, 0 ("a") or 1 ("b").
+func (s Spec) PrimaryNode() int {
+	if s.HAPrimary == "b" {
+		return 1
+	}
+	return 0
+}
+
+// zone is the zone of a server, by index: the instance's gceZone, and its
+// secondaryGceZone for the standby, as Cloud SQL reports them.
+func (s Spec) zone(node int) string {
+	return s.region() + "-" + string(rune('a'+node))
 }
 
 // region is the instance's region.
@@ -92,6 +121,12 @@ type Provisioner interface {
 	// Prune removes every created server not named in keep: what an
 	// earlier run left that this one does not keep.
 	Prune(ctx context.Context, keep []string) error
+	// Failover makes a REGIONAL instance's standby its primary (#1408):
+	// from is the instance before, to after, with HAPrimary swapped and
+	// the old primary's epoch advanced, so it is rebuilt as the standby.
+	// The instance's endpoint, its host tunnel and connector route, reach
+	// the new primary once it returns.
+	Failover(ctx context.Context, from, to Spec) error
 }
 
 type created struct {
@@ -235,17 +270,11 @@ func (s *Server) upInstanceError(e Engine) error {
 	return Errorf(http.StatusBadRequest, "The instance %s cannot be changed or deleted through the API: "+upInstanceWhy, e.Instance(), svc)
 }
 
-// haWhy is why high availability is not served (#1330). A Cloud SQL HA
-// instance is one server whose disk is replicated synchronously to a
-// standby in a second zone; on failover the standby takes the same
-// connection name and IP address with no committed transaction lost.
-// CloudBurrow's replicas are asynchronous streaming or binary log
-// replicas on their own kind node, so a standby built from one could lose
-// the transactions not yet replicated when it is promoted, and there is
-// no second zone to fail over to: it would not be faithful.
-const haWhy = "high availability is a standby in a second zone, kept in step synchronously, that takes over the same " +
-	"connection name and IP address with no committed transaction lost; CloudBurrow runs one zone, and its replicas " +
-	"replicate asynchronously, so a failover could lose transactions. Use ZONAL instances and read replicas (docs/cloudsql.md)"
+// legacyFailoverWhy is why failoverReplica and failoverTarget are refused:
+// they are the first-generation MySQL failover replica, which Cloud SQL
+// replaced with availabilityType REGIONAL (#1408).
+const legacyFailoverWhy = "it is the legacy MySQL failover replica; a high-availability instance is created " +
+	"with settings.availabilityType REGIONAL and failed over with instances.failover (docs/cloudsql.md)"
 
 // instanceBody is the part of DatabaseInstance a write reads.
 type instanceBody struct {
@@ -281,15 +310,15 @@ type instanceBody struct {
 
 func (b instanceBody) unsupported() error {
 	if b.FailoverReplica != nil {
-		return unimplemented("failover replicas", haWhy)
+		return unimplemented("failover replicas", legacyFailoverWhy)
 	}
 	if b.InstanceType == "ON_PREMISES_INSTANCE" || b.OnPremisesConfiguration != nil {
 		return unimplemented("source representation instances (instanceType ON_PREMISES_INSTANCE)",
 			"an instance's server is one CloudBurrow runs; a server outside it is not represented or replicated from")
 	}
 	if b.Settings != nil {
-		if b.Settings.AvailabilityType == "REGIONAL" {
-			return unimplemented("availabilityType REGIONAL", haWhy)
+		if a := b.Settings.AvailabilityType; a != "" && a != "ZONAL" && a != "REGIONAL" {
+			return Errorf(http.StatusBadRequest, "Invalid request: Invalid value for availabilityType: %s.", a)
 		}
 		if bc, ok := b.raw["backupConfiguration"].(map[string]any); ok {
 			ed, _ := b.raw["edition"].(string)
@@ -447,6 +476,14 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 			spec.Region = b.Region
 		}
 	}
+	if replica && spec.Regional() {
+		return nil, unimplemented("availabilityType REGIONAL on a read replica",
+			"a read replica here is one server; make the primary REGIONAL, and its replicas follow it across a failover (docs/cloudsql.md)")
+	}
+	if spec.Regional() {
+		// The second server, b, is built as the standby.
+		spec.HAPassword, spec.HAEpochs[1] = newReplicationPassword(), 1
+	}
 	if replica {
 		if s.engine(b.Name) != nil {
 			return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
@@ -583,7 +620,23 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid request since instance settings are missing tier.")
 	}
-	restart := !flagsEqual(next.Flags, c.spec.Flags) || c.state == "FAILED"
+	if next.Regional() && next.MasterInstanceName != "" {
+		s.emu.Unlock()
+		return nil, unimplemented("availabilityType REGIONAL on a read replica",
+			"a read replica here is one server; make the primary REGIONAL, and its replicas follow it across a failover (docs/cloudsql.md)")
+	}
+	// Turning high availability on adds the standby, and off removes it
+	// (#1408); either is a change the provisioner applies.
+	haChange := next.Regional() != c.spec.Regional()
+	if haChange && next.Regional() {
+		if next.HAPassword == "" {
+			next.HAPassword = newReplicationPassword()
+		}
+		// The standby is built afresh.
+		sb := 1 - next.PrimaryNode()
+		next.HAEpochs[sb] = max(next.HAEpochs[0], next.HAEpochs[1]) + 1
+	}
+	restart := !flagsEqual(next.Flags, c.spec.Flags) || c.state == "FAILED" || haChange
 	next.SettingsVersion++
 	c.spec = next
 	if restart {
@@ -706,8 +759,12 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	}
 	in["createTime"] = spec.CreateTime
 	if r := spec.region(); r != Region {
-		in["region"], in["gceZone"] = r, r+"-a"
+		in["region"] = r
 		in["connectionName"] = spec.Project + ":" + r + ":" + spec.Name
+	}
+	in["gceZone"] = spec.zone(spec.PrimaryNode())
+	if spec.Regional() {
+		in["secondaryGceZone"] = spec.zone(1 - spec.PrimaryNode())
 	}
 	if up := upgradable(spec.DatabaseVersion); len(up) > 0 && spec.MasterInstanceName == "" {
 		in["upgradableDatabaseVersions"] = up

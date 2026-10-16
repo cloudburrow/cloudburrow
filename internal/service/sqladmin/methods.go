@@ -51,7 +51,7 @@ var Methods = []Method{
 	{"sql.instances.demoteMaster", "POST", "v1/projects/{project}/instances/{instance}/demoteMaster", false},
 	{"sql.instances.executeSql", "POST", "v1/projects/{project}/instances/{instance}/executeSql", false},
 	{"sql.instances.export", "POST", "v1/projects/{project}/instances/{instance}/export", true},
-	{"sql.instances.failover", "POST", "v1/projects/{project}/instances/{instance}/failover", false},
+	{"sql.instances.failover", "POST", "v1/projects/{project}/instances/{instance}/failover", true},
 	{"sql.instances.get", "GET", "v1/projects/{project}/instances/{instance}", true},
 	{"sql.instances.import", "POST", "v1/projects/{project}/instances/{instance}/import", true},
 	{"sql.instances.insert", "POST", "v1/projects/{project}/instances", true},

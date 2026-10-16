@@ -154,11 +154,15 @@ mysql $MYSQL_LOCAL -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRI
 `
 
 func (p *sqlProvisioner) rollout(ctx context.Context, name string) error {
+	return p.rolloutDeployment(ctx, components.SQLInstancePrefix+name)
+}
+
+func (p *sqlProvisioner) rolloutDeployment(ctx context.Context, deployment string) error {
 	_, err := p.inst.Kubectl(ctx, "-n", p.inst.Namespace, "rollout", "status",
-		"deployment/"+components.SQLInstancePrefix+name, "--watch=true", "--timeout=280s")
+		"deployment/"+deployment, "--watch=true", "--timeout=280s")
 	if err != nil {
-		logs, _ := p.inst.Kubectl(ctx, "-n", p.inst.Namespace, "logs", "deployment/"+components.SQLInstancePrefix+name, "--tail=5")
-		return fmt.Errorf("the server of instance %s did not become ready: %w %s", name, err, strings.TrimSpace(logs))
+		logs, _ := p.inst.Kubectl(ctx, "-n", p.inst.Namespace, "logs", "deployment/"+deployment, "--tail=5")
+		return fmt.Errorf("the server %s did not become ready: %w %s", deployment, err, strings.TrimSpace(logs))
 	}
 	return nil
 }
@@ -180,11 +184,19 @@ func (p *sqlProvisioner) serves(ctx context.Context, spec sqladmin.Spec) error {
 }
 
 func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
-	b := p.backend(spec)
+	primary := spec.PrimaryNode()
+	b := p.nodeBackend(spec, primary)
+	if primary != 0 {
+		// The instance's Service, which the tunnel and the replicas reach,
+		// selects the primary's server (#1408).
+		if err := p.applyService(ctx, spec); err != nil {
+			return err
+		}
+	}
 	if err := p.inst.Apply(ctx, b.Manifest(p.inst.Namespace, p.inst.Instance)); err != nil {
 		return err
 	}
-	if err := p.rollout(ctx, spec.Name); err != nil {
+	if err := p.rolloutDeployment(ctx, b.Name); err != nil {
 		return err
 	}
 	if spec.MasterInstanceName != "" && spec.MySQL() {
@@ -205,15 +217,18 @@ func (p *sqlProvisioner) Start(ctx context.Context, spec sqladmin.Spec) error {
 		p.up[spec.Name] = true
 		p.mu.Unlock()
 	}
-	return p.serves(ctx, spec)
+	if err := p.serves(ctx, spec); err != nil {
+		return err
+	}
+	return p.standby(ctx, spec)
 }
 
 func (p *sqlProvisioner) Restart(ctx context.Context, spec sqladmin.Spec) error {
-	if _, err := p.inst.Kubectl(ctx, "-n", p.inst.Namespace, "rollout", "restart",
-		"deployment/"+components.SQLInstancePrefix+spec.Name); err != nil {
+	d := nodeName(spec.Name, spec.PrimaryNode())
+	if _, err := p.inst.Kubectl(ctx, "-n", p.inst.Namespace, "rollout", "restart", "deployment/"+d); err != nil {
 		return err
 	}
-	if err := p.rollout(ctx, spec.Name); err != nil {
+	if err := p.rolloutDeployment(ctx, d); err != nil {
 		return err
 	}
 	return p.serves(ctx, spec)
@@ -231,8 +246,10 @@ func (p *sqlProvisioner) Remove(ctx context.Context, name string) error {
 	obj := components.SQLInstancePrefix + name
 	// The volume goes with the server, as a deleted Cloud SQL instance's
 	// data does.
+	sb := components.SQLStandbyPrefix + name
 	_, err := p.inst.Kubectl(ctx, "-n", p.inst.Namespace, "delete",
 		"deployment/"+obj, "service/"+obj, "persistentvolumeclaim/"+obj+"-data",
+		"deployment/"+sb, "service/"+sb, "persistentvolumeclaim/"+sb+"-data",
 		"--ignore-not-found", "--wait=true")
 	return err
 }
@@ -251,7 +268,9 @@ func (p *sqlProvisioner) Prune(ctx context.Context, keep []string) error {
 		_, n, _ := strings.Cut(line, "/")
 		rest, ok := strings.CutPrefix(n, components.SQLInstancePrefix)
 		if !ok {
-			continue
+			if rest, ok = strings.CutPrefix(n, components.SQLStandbyPrefix); !ok {
+				continue
+			}
 		}
 		if strings.HasPrefix(line, "persistentvolumeclaim") {
 			rest = strings.TrimSuffix(rest, "-data")

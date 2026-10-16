@@ -92,12 +92,12 @@ func TestSQLAdminInstancesDescribeTheRunningServers(t *testing.T) {
 // TestSQLAdminRefusesWhatItCannotDoFaithfully (#1301, #1330):
 // pointInTimeRestore (a Backup and DR datasource; a clone to a point in
 // time of the server `up` runs, which keeps no log, is a 400),
-// failover, replicas, IAM database authentication (an access token in
+// legacy failover replicas, IAM database authentication (an access token in
 // generateEphemeralCert) answer 501 (tiers and flags are served since
 // #1380, TestSQLAdminTiersAndFlags);
 // the instances `up` runs refuse a patch, restart or delete with the
 // reason (instance writes act on created instances, TestCloudSQLInstanceWrites).
-// covers: sql.instances.pointInTimeRestore (unimplemented), sql.instances.failover (unimplemented)
+// covers: sql.instances.pointInTimeRestore (unimplemented)
 func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	h := New(t)
 	svc := sqlAdminService(t, h)
@@ -120,7 +120,9 @@ func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 		Datasource: "projects/" + p + "/instances/" + inst, TargetInstance: "pitr"}).Do()
 	wantHTTP(t, "instances.pointInTimeRestore", err, 501)
 	_, err = svc.Instances.Failover(p, inst, &sqladmin.InstancesFailoverRequest{}).Do()
-	wantHTTP(t, "instances.failover", err, 501)
+	// The instances `up` runs are ZONAL, and refuse a failover as they
+	// refuse a patch (#1408).
+	wantHTTP(t, "instances.failover of the instance up runs", err, http.StatusBadRequest)
 	_, err = svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: "replica", DatabaseVersion: "POSTGRES_17",
 		MasterInstanceName: inst, ReplicaConfiguration: &sqladmin.ReplicaConfiguration{FailoverTarget: true},
 		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
