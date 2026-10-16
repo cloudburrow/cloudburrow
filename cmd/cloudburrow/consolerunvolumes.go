@@ -1,7 +1,7 @@
 package main
 
-// Cloud Run: the service account, Secret Manager files and in-memory
-// volumes on the deploy and job forms, and their edit forms (#1297).
+// Cloud Run: the service account, Secret Manager files, in-memory and NFS
+// (#1448) volumes on the deploy and job forms, and their edit forms (#1297).
 //
 // The adapter mounts a Secret Manager volume from the Kubernetes Secret
 // holding the secret's versions and an in-memory emptyDir as a tmpfs, and
@@ -56,6 +56,10 @@ func runVolumeFields(section string) []console.Field {
 				"as gcloud's --add-cloudsql-instances takes them. Each is a Unix socket at /cloudsql/<connection name>, " +
 				"served by the Cloud SQL Auth Proxy beside the container (#1346). It is the volume Cloud Run v1's " +
 				"run.googleapis.com/cloudsql-instances annotation makes, so a service gcloud deployed shows its instances here."},
+		{Name: "nfsVolumes", Label: "NFS volumes", Type: "map", Section: section,
+			Help: "Optional. One /mount/path=server:/export per line, or /mount/path=server:/export:ro for read-only, " +
+				"as gcloud's --add-volume type=nfs takes them (#1448). The node mounts the export, so the server is any " +
+				"NFS server the instance's cluster reaches: a local instance has no Filestore."},
 	}
 }
 
@@ -76,14 +80,15 @@ func applyRunVolumes(p podFields, c *runpb.Container, values map[string]string) 
 	rawSecret, sentSecret := values["secretFiles"]
 	rawMemory, sentMemory := values["memoryVolumes"]
 	rawSQL, sentSQL := values["cloudSqlInstances"]
-	if !sentSecret && !sentMemory && !sentSQL {
+	rawNFS, sentNFS := values["nfsVolumes"]
+	if !sentSecret && !sentMemory && !sentSQL && !sentNFS {
 		return nil
 	}
 	var keep []*runpb.Volume
 	kept := map[string]bool{}
 	for _, v := range *p.volumes {
 		if (v.GetSecret() != nil && sentSecret) || (v.GetEmptyDir() != nil && sentMemory) ||
-			(v.GetCloudSqlInstance() != nil && sentSQL) {
+			(v.GetCloudSqlInstance() != nil && sentSQL) || (v.GetNfs() != nil && sentNFS) {
 			continue
 		}
 		keep = append(keep, v)
@@ -156,6 +161,21 @@ func applyRunVolumes(p podFields, c *runpb.Container, values map[string]string) 
 			mounts = append(mounts, &runpb.VolumeMount{Name: "cloudsql", MountPath: "/cloudsql"})
 		}
 	}
+	if sentNFS {
+		m, err := console.ParseMap(rawNFS)
+		if err != nil {
+			return fmt.Errorf("NFS volumes: %w", err)
+		}
+		for i, dir := range sortedKeys(m) {
+			n, ok := parseRunNFS(m[dir])
+			if !path.IsAbs(dir) || path.Clean(dir) == "/" || !ok {
+				return fmt.Errorf("NFS volumes: %s=%q is not /mount/path=server:/export[:ro]", dir, m[dir])
+			}
+			name := fmt.Sprintf("nfs-%d", i+1)
+			keep = append(keep, &runpb.Volume{Name: name, VolumeType: &runpb.Volume_Nfs{Nfs: n}})
+			mounts = append(mounts, &runpb.VolumeMount{Name: name, MountPath: path.Clean(dir)})
+		}
+	}
 	for _, mt := range mounts {
 		for _, other := range mounts {
 			if mt != other && mt.GetMountPath() == other.GetMountPath() {
@@ -204,4 +224,43 @@ func runCloudSQLDefault(volumes []*runpb.Volume) string {
 		conns = append(conns, v.GetCloudSqlInstance().GetInstances()...)
 	}
 	return strings.Join(conns, ", ")
+}
+
+// parseRunNFS reads server:/export or server:/export:ro.
+func parseRunNFS(ref string) (*runpb.NFSVolumeSource, bool) {
+	ref = strings.TrimSpace(ref)
+	readOnly := false
+	if r, ok := strings.CutSuffix(ref, ":ro"); ok {
+		ref, readOnly = r, true
+	}
+	server, export, ok := strings.Cut(ref, ":")
+	if !ok || server == "" || !path.IsAbs(export) {
+		return nil, false
+	}
+	return &runpb.NFSVolumeSource{Server: server, Path: export, ReadOnly: readOnly}, true
+}
+
+// runNFSDefault is the NFS volumes field's prefill.
+func runNFSDefault(volumes []*runpb.Volume, mounts []*runpb.VolumeMount) string {
+	byName := map[string]*runpb.NFSVolumeSource{}
+	for _, v := range volumes {
+		if n := v.GetNfs(); n != nil {
+			byName[v.GetName()] = n
+		}
+	}
+	out := map[string]string{}
+	for _, m := range mounts {
+		if n := byName[m.GetName()]; n != nil {
+			p := n.GetPath()
+			if p == "" {
+				p = "/"
+			}
+			ref := n.GetServer() + ":" + p
+			if n.GetReadOnly() {
+				ref += ":ro"
+			}
+			out[m.GetMountPath()] = ref
+		}
+	}
+	return console.FormatMap(out)
 }

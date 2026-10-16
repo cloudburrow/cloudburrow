@@ -91,3 +91,31 @@ func TestConsoleShowsTheWorkloadsServiceAccount(t *testing.T) {
 		t.Error("the job's summary does not name the default compute account")
 	}
 }
+
+// The NFS volumes field (#1448) builds an NFS volume per mount path, a
+// trailing :ro making it read-only, and prefills back to the same lines;
+// a line that is not server:/export is refused.
+func TestRunNFSVolumeFieldRoundTrip(t *testing.T) {
+	lines := `{"/mnt/ro":"10.0.0.2:/exports:ro","/mnt/share":"nfs.example:/"}`
+	tmpl, err := runFormTemplate(map[string]string{"image": "ghcr.io/x/y:1", "nfsVolumes": lines})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := tmpl.GetVolumes()
+	if len(v) != 2 || v[0].GetNfs().GetServer() != "10.0.0.2" || v[0].GetNfs().GetPath() != "/exports" ||
+		!v[0].GetNfs().GetReadOnly() || v[1].GetNfs().GetServer() != "nfs.example" || v[1].GetNfs().GetReadOnly() {
+		t.Fatalf("volumes = %v", v)
+	}
+	if got := runNFSDefault(v, tmpl.GetContainers()[0].GetVolumeMounts()); got != lines {
+		t.Errorf("prefill = %s; want %s", got, lines)
+	}
+	for _, bad := range []string{`{"/mnt":"server"}`, `{"/mnt":":/x"}`, `{"/mnt":"s:relative"}`, `{"/":"s:/"}`} {
+		if _, err := runFormTemplate(map[string]string{"image": "ghcr.io/x/y:1", "nfsVolumes": bad}); err == nil {
+			t.Errorf("%s was accepted", bad)
+		}
+	}
+	job, err := runJobFormTemplate(map[string]string{"image": "busybox:1", "nfsVolumes": `{"/data":"s:/x"}`})
+	if err != nil || len(job.GetTemplate().GetVolumes()) != 1 {
+		t.Errorf("job form NFS volume = %v, %v", job, err)
+	}
+}

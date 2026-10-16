@@ -4,6 +4,7 @@ package compat
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -94,5 +95,41 @@ resource "google_cloud_run_v2_service" "s" {
 	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
 	if _, err := svcs.GetService(ctx, &runpb.GetServiceRequest{Name: name}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetService after destroy: %v; want NotFound", err)
+	}
+}
+
+// covers: google.cloud.run.v2.Services/CreateService, google.cloud.run.v2.Services/GetService
+//
+// TestConsoleRunNFSVolume (#1448), in the run shard: a service deployed on
+// the console's Deploy container form with an NFS volume (one read-only)
+// against an NFS server in the instance's cluster becomes ready, is read
+// back by the official ServicesClient with both, and its edit form is
+// prefilled with the same lines.
+func TestConsoleRunNFSVolume(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c := runClient(t, h)
+	server, _ := runNFSServer(t)
+	ctx := h.Context()
+	project := h.Project()
+	id := "console-nfs"
+	name := runParent(h) + "/services/" + id
+	t.Cleanup(func() { _, _ = c.DeleteService(h.Context(), &runpb.DeleteServiceRequest{Name: name}) })
+	lines := fmt.Sprintf(`{"/mnt/ro":"%[1]s:/:ro","/mnt/share":"%[1]s:/"}`, server)
+	if code, body := consoleCreate(t, addr, "run", project, map[string]string{
+		"name": id, "image": helloDigest, "nfsVolumes": lines,
+	}); code != http.StatusOK {
+		t.Fatalf("console deploy = %d: %s", code, body)
+	}
+	svc, err := c.GetService(ctx, &runpb.GetServiceRequest{Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := svc.GetTemplate().GetVolumes(); len(v) != 2 || v[0].GetNfs().GetServer() != server || !v[0].GetNfs().GetReadOnly() ||
+		v[1].GetNfs().GetReadOnly() || len(svc.GetTemplate().GetContainers()[0].GetVolumeMounts()) != 2 {
+		t.Errorf("the console's service reads %v", svc.GetTemplate())
+	}
+	if _, values, _ := consoleRunEditForm(t, addr, project, id); values["nfsVolumes"] != lines {
+		t.Errorf("the edit form is prefilled with %q; want %q", values["nfsVolumes"], lines)
 	}
 }
