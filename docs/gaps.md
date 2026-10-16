@@ -94,7 +94,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 | `Instances.*` is not served (#1299) | not built yet | L |
 | `WorkerPools.*` is not served (#1300) | not built yet | L |
 | A worker pool's `update_mask` and instance splits across revisions are refused (served since #1300 and #1299; operations wait for the instances and an instance has a URL since #1348) | not built yet | M |
-| The v1 (Knative) API's `replaceJob` and `run` (`gcloud run jobs update` and `execute`), executions and tasks are 501; a domain mapping never becomes Ready, as no DNS is served (projects.locations.list, IAM, jobs create/get/list/delete and domain mappings since #1349) | not built yet | M |
+| A v1 (Knative) domain mapping never becomes Ready, as no DNS is served; v1 `overrides.delayExecution` and set-based `labelSelector`s (`gcloud run jobs executions tasks list --succeeded`) are 501 (projects.locations.list, IAM, jobs create/get/list/delete and domain mappings since #1349; `replaceJob`, `run`, executions and tasks since #1379) | not built yet | S |
 | `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
 | `CancelExecution`'s result | needs live GCP | S |

@@ -1116,8 +1116,8 @@
     "Key": "runv1",
     "Title": "Cloud Run v1 (Knative API)",
     "counts": {
-      "Unknown": 49,
-      "Verified": 27
+      "Unknown": 41,
+      "Verified": 35
     },
     "rows": [
       {
@@ -1168,19 +1168,31 @@
       },
       {
         "method": "run.namespaces.executions.cancel",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1executions_test.go:66 TestRunV1JobExecutionsAndTasks"
+        ]
       },
       {
         "method": "run.namespaces.executions.delete",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1executions_test.go:66 TestRunV1JobExecutionsAndTasks"
+        ]
       },
       {
         "method": "run.namespaces.executions.get",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1executions_test.go:66 TestRunV1JobExecutionsAndTasks"
+        ]
       },
       {
         "method": "run.namespaces.executions.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1executions_test.go:66 TestRunV1JobExecutionsAndTasks"
+        ]
       },
       {
         "method": "run.namespaces.instances.create",
@@ -1240,11 +1252,17 @@
       },
       {
         "method": "run.namespaces.jobs.replaceJob",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1executions_test.go:66 TestRunV1JobExecutionsAndTasks"
+        ]
       },
       {
         "method": "run.namespaces.jobs.run",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1executions_test.go:66 TestRunV1JobExecutionsAndTasks"
+        ]
       },
       {
         "method": "run.namespaces.revisions.delete",
@@ -1326,11 +1344,17 @@
       },
       {
         "method": "run.namespaces.tasks.get",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1executions_test.go:66 TestRunV1JobExecutionsAndTasks"
+        ]
       },
       {
         "method": "run.namespaces.tasks.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1executions_test.go:66 TestRunV1JobExecutionsAndTasks"
+        ]
       },
       {
         "method": "run.namespaces.workerpools.create",

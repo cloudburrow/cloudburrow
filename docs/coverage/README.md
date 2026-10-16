@@ -13,7 +13,7 @@ Do not edit these files by hand.
 | [Cloud Run v2](run.md) | 41 | 41 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Artifact Registry](artifactregistry.md) | 50 | 3 | 0 | 47 | 0 | 0 | 0 | 0 |
 | [Cloud Build](cloudbuild.md) | 19 | 5 | 0 | 14 | 0 | 0 | 0 | 0 |
-| [Cloud Run v1 (Knative API)](runv1.md) | 76 | 27 | 0 | 0 | 0 | 0 | 49 | 0 |
+| [Cloud Run v1 (Knative API)](runv1.md) | 76 | 35 | 0 | 0 | 0 | 0 | 41 | 0 |
 | [Cloud KMS](kms.md) | 40 | 38 | 0 | 2 | 0 | 0 | 0 | 82 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 37 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 19 | 1 | 0 | 0 | 0 | 18 | 0 |
