@@ -94,6 +94,10 @@ type PredictEndpoint struct {
 	// PredictURL is the address the request is sent to, empty until the
 	// endpoint has a URI.
 	PredictURL string `json:"predictUrl,omitempty"`
+	// GRPCPort is the model's gRPC port (its grpcPorts, the service's port
+	// named h2c), 0 when it serves none; the screen offers DirectRawPredict
+	// only on one that does (#1477).
+	GRPCPort int `json:"grpcPort,omitempty"`
 }
 
 // PredictStatus is what the screen needs to render.
@@ -143,6 +147,7 @@ func (p *Prediction) endpoints(ctx context.Context, project string) ([]PredictEn
 			State: string(e.State), Message: e.Message, URI: e.URI,
 			PredictRoute: orDefault(e.Routes.Predict, prediction.DefaultPredictRoute),
 			HealthRoute:  orDefault(e.Routes.Health, prediction.DefaultHealthRoute),
+			GRPCPort:     e.GRPCPort,
 		}
 		if u, err := e.PredictURL(); err == nil {
 			pe.PredictURL = u
@@ -294,27 +299,8 @@ func (s *Server) handlePredict(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The endpoint is looked up afresh, by name, among the ones the Cloud
-	// Run API reports: the browser names an endpoint, never a URL, so this
-	// route can reach a deployed predict route and nothing else.
-	listCtx, cancel := context.WithTimeout(r.Context(), readBudget)
-	eps, err := p.endpoints(listCtx, r.URL.Query().Get("project"))
-	cancel()
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "cannot list prediction endpoints: " + userMessage(err)})
-		return
-	}
-	var ep *PredictEndpoint
-	for i := range eps {
-		if eps[i].Name == req.Endpoint || eps[i].ID == req.Endpoint {
-			ep = &eps[i]
-			break
-		}
-	}
-	if ep == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{
-			"error": fmt.Sprintf("no prediction endpoint named %q is deployed", req.Endpoint),
-		})
+	ep, gateway, ok := p.lookup(w, r, req.Endpoint)
+	if !ok {
 		return
 	}
 	if ep.PredictURL == "" {
@@ -323,11 +309,6 @@ func (s *Server) handlePredict(w http.ResponseWriter, r *http.Request) {
 			msg += ": " + ep.Message
 		}
 		writeJSON(w, http.StatusConflict, map[string]string{"error": msg})
-		return
-	}
-	gateway := p.ingress()
-	if gateway == "" {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": ingressUnpublished})
 		return
 	}
 	target, err := url.Parse(ep.PredictURL)
@@ -382,6 +363,39 @@ func (s *Server) handlePredict(w http.ResponseWriter, r *http.Request) {
 		result.ContractError = contractError(body, got)
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// lookup finds the endpoint named name afresh, among the ones the Cloud Run
+// API reports, and the gateway to reach it through, writing the console's
+// refusal when there is none: the browser names an endpoint, never a URL,
+// so the relays can reach a deployed container and nothing else.
+func (p *Prediction) lookup(w http.ResponseWriter, r *http.Request, name string) (*PredictEndpoint, string, bool) {
+	listCtx, cancel := context.WithTimeout(r.Context(), readBudget)
+	eps, err := p.endpoints(listCtx, r.URL.Query().Get("project"))
+	cancel()
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "cannot list prediction endpoints: " + userMessage(err)})
+		return nil, "", false
+	}
+	var ep *PredictEndpoint
+	for i := range eps {
+		if eps[i].Name == name || eps[i].ID == name {
+			ep = &eps[i]
+			break
+		}
+	}
+	if ep == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": fmt.Sprintf("no prediction endpoint named %q is deployed", name),
+		})
+		return nil, "", false
+	}
+	gateway := p.ingress()
+	if gateway == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": ingressUnpublished})
+		return nil, "", false
+	}
+	return ep, gateway, true
 }
 
 // contractError checks a 200 answer against the request with the contract's

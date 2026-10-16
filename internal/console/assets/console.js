@@ -8571,13 +8571,15 @@ async function renderPredict(view) {
   const drawFacts = () => {
     const e = endpoints.find((x) => x.name === select.value) || endpoints[0];
     const rows = [["Resource", e.name], ["State", e.state], ["Predict URL", e.predictUrl || "none yet"],
-      ["Predict route", e.predictRoute], ["Health route", e.healthRoute]];
+      ["Predict route", e.predictRoute], ["Health route", e.healthRoute],
+      ["gRPC port", e.grpcPort ? `${e.grpcPort} (h2c)` : "none (the model declares no grpcPorts)"]];
     if (e.message) rows.push(["Detail", e.message]);
     setChildren(facts, ...rows.flatMap(([k, v]) =>
       [el("dt", { text: k }), el("dd", { class: k === "State" || k === "Detail" ? null : "mono", text: v })]));
+    // DirectRawPredict is offered only on a model that serves gRPC (#1477).
+    directRaw.hidden = !e.grpcPort;
   };
   select.addEventListener("change", drawFacts);
-  drawFacts();
 
   const instances = el("textarea", { id: "predict-instances", rows: "6", spellcheck: "false",
     class: "mono", "aria-describedby": "predict-instances-help" });
@@ -8650,6 +8652,70 @@ async function renderPredict(view) {
   send.addEventListener("click", run);
   cancel.addEventListener("click", stopPrediction);
 
+  // DirectRawPredict (#1477): method_name and the input bytes, sent to the
+  // model's gRPC server as the local AI endpoint's DirectRawPredict sends
+  // them; the output bytes or the container's status as they came back.
+  const rawMethod = el("input", { id: "predict-raw-method", class: "mono", type: "text", spellcheck: "false",
+    placeholder: "/tensorflow.serving.PredictionService/Predict", "aria-describedby": "predict-raw-method-help" });
+  const rawInput = el("textarea", { id: "predict-raw-input", rows: "3", spellcheck: "false", class: "mono",
+    "aria-describedby": "predict-raw-input-help" });
+  const rawError = el("p", { class: "form-error", role: "alert", id: "predict-raw-error", hidden: true });
+  const rawSend = el("button", { class: "primary", id: "predict-raw-send", text: "DirectRawPredict" });
+  const rawTiming = el("span", { class: "unavailable", id: "predict-raw-timing", text: "" });
+  const rawStatus = el("p", { id: "predict-raw-status" });
+  const rawOutput = el("pre", { class: "mono pg-output", id: "predict-raw-output", "aria-live": "polite" });
+  const rawResult = el("div", { id: "predict-raw-result", hidden: true }, rawStatus, rawOutput);
+  rawSend.addEventListener("click", async () => {
+    rawError.hidden = true;
+    rawSend.disabled = true;
+    rawTiming.textContent = "sending…";
+    try {
+      const res = await fetch("/api/ai/predict/direct-raw?" + new URLSearchParams({ project }), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ endpoint: select.value, methodName: rawMethod.value, input: rawInput.value }),
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        rawError.textContent = errorMessageOf(text) || `HTTP ${res.status}`;
+        rawError.hidden = false;
+        rawTiming.textContent = "";
+        return;
+      }
+      const r = JSON.parse(text);
+      setChildren(rawStatus,
+        el("span", { class: "status", "data-state": r.code === "OK" ? "ok" : "error" }, el("span", { text: r.code })),
+        el("span", { class: "mono", text: ` ${r.method} on ${r.authority}` }));
+      rawOutput.textContent = r.code === "OK"
+        ? `output (base64): ${r.output}\noutput (hex): ${r.outputHex}`
+        : r.message;
+      rawTiming.textContent = `${r.durationMs} ms`;
+      rawResult.hidden = false;
+    } catch (err) {
+      rawError.textContent = String(err.message);
+      rawError.hidden = false;
+      rawTiming.textContent = "";
+    } finally {
+      rawSend.disabled = false;
+    }
+  });
+  const directRaw = el("section", { class: "card", id: "predict-direct-raw", "aria-labelledby": "predict-direct-raw-title" },
+    el("h2", { id: "predict-direct-raw-title", text: "DirectRawPredict" }),
+    el("p", { class: "form-help", text: "This model declares grpcPorts, so its container's gRPC server is reached " +
+      "on its h2c port. The input bytes are the method's request message; the output is its response message." }),
+    el("div", { class: "form-row" },
+      el("label", { for: "predict-raw-method", text: "Method name" }), rawMethod,
+      el("p", { class: "form-help", id: "predict-raw-method-help", text:
+        "The fully qualified gRPC method, /namespace.Service/Method." })),
+    el("div", { class: "form-row" },
+      el("label", { for: "predict-raw-input", text: "Input (base64)" }), rawInput,
+      el("p", { class: "form-help", id: "predict-raw-input-help", text:
+        "The serialized request message, base64. Leave empty to send the empty message." })),
+    rawError,
+    el("div", { class: "form-actions" }, rawSend, rawTiming),
+    rawResult);
+  drawFacts();
+
   setChildren(view, header(),
     el("section", { class: "card", id: "predict-form", "aria-label": "Prediction request" },
       el("div", { class: "form-row" },
@@ -8670,6 +8736,7 @@ async function renderPredict(view) {
       formError,
       el("div", { class: "form-actions" }, send, cancel, timing)),
     result,
+    directRaw,
     notServed);
 }
 

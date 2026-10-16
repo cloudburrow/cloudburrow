@@ -4095,8 +4095,8 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Unimplemented": 4,
-      "Verified": 10
+      "Unimplemented": 1,
+      "Verified": 13
     },
     "rows": [
       {
@@ -4109,8 +4109,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/DirectRawPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/predictiondirectraw_test.go:64 TestPredictionClientReachesAModelsGRPCServer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/EmbedContent",
@@ -4164,8 +4166,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamDirectRawPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/predictiondirectraw_test.go:64 TestPredictionClientReachesAModelsGRPCServer"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamGenerateContent",
@@ -4191,8 +4195,10 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/StreamingRawPredict",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/predictiondirectraw_test.go:64 TestPredictionClientReachesAModelsGRPCServer"
+        ]
       }
     ]
   },

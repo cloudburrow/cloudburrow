@@ -198,9 +198,58 @@ the tensor methods (`DirectPredict`, `ServerStreamingPredict`, …) relay it as 
 | `aiplatform.Model` registry (upload, list, version) | **Not supported** |
 | `aiplatform.Endpoint` / `DeployedModel` | **Not supported** |
 | `PredictionService.Predict` / `RawPredict` | **Verified** over gRPC on the local AI endpoint, as `projects/{p}/locations/{l}/endpoints/{service}` (#1193); see [compatibility.md](compatibility.md#vertex-ai-predictionservice--googlecloudaiplatformv1) |
+| `containerSpec.grpcPorts` | **Verified**: the service's container port named `h2c` (#1477); see [A model's gRPC server](#a-models-grpc-server) |
+| `PredictionService.DirectRawPredict` / `StreamDirectRawPredict` / `StreamingRawPredict` | **Verified**, relayed to the container's gRPC server (#1477) |
 | `LocalModel.build_cpr_model` | Available to you; CloudBurrow does not invoke it |
 | `LocalModel.deploy_to_local_endpoint` | **Declined by design** — see [The decision](#the-decision) |
 | Model Garden, tuning, batch prediction | **Not supported** |
+
+## A model's gRPC server
+
+Vertex AI's `containerSpec.grpcPorts` names the port a model's container serves gRPC on: Vertex
+sends `DirectRawPredict`, `StreamDirectRawPredict` and `StreamingRawPredict` there, and its health
+checks too. A model here is a Cloud Run service, and Cloud Run serves a container port end to end
+over HTTP/2 cleartext when the port is named `h2c` (#1475). So a model's `grpcPorts` are deployed
+as its service's port named `h2c` (#1477):
+
+```go
+c.CreateService(ctx, &runpb.CreateServiceRequest{
+    Parent:    "projects/p/locations/us-central1",
+    ServiceId: "model",
+    Service: &runpb.Service{Template: &runpb.RevisionTemplate{
+        Containers: []*runpb.Container{{
+            Image: "dev.local/my-grpc-model:v1",
+            Ports: []*runpb.ContainerPort{{Name: "h2c", ContainerPort: 8500}},
+            Env:   []*runpb.EnvVar{{Name: "AIP_DEPLOYED_MODEL_ID", Values: &runpb.EnvVar_Value{Value: "m1"}}},
+        }},
+    }},
+})
+```
+
+or `gcloud run deploy model --image=... --port=8500 --use-http2`, or **Use HTTP/2 end-to-end** on
+the console's Cloud Run deploy form. An `AIP_*` variable claims the contract, as for any prediction
+container. Cloud Run has one container port, so the gRPC port is also the one Knative probes, as
+Vertex sends its health checks to the first `grpcPorts` entry.
+
+The three methods then call `method_name` on that server, through the cluster ingress with the
+service's host as `:authority`, sending `input` as the request message's bytes and returning each
+response message as `output`, undecoded:
+
+```go
+resp, err := c.DirectRawPredict(ctx, &aiplatformpb.DirectRawPredictRequest{
+    Endpoint:   "projects/p/locations/us-central1/endpoints/model",
+    MethodName: "/tensorflow.serving.PredictionService/Predict",
+    Input:      requestBytes, // a serialized tensorflow.serving.PredictRequest
+})
+```
+
+`StreamDirectRawPredict` and `StreamingRawPredict` are one bidirectional stream to `method_name`:
+each request's `input` is sent as it arrives and each message the container sends is returned as it
+arrives. The container's own status comes back with its code and message. A model with no `h2c`
+port is `FAILED_PRECONDITION`; see
+[compatibility.md](compatibility.md#vertex-ai-predictionservice--googlecloudaiplatformv1) for the
+rest. The console's Online prediction page offers **DirectRawPredict** on such an endpoint: a method
+name and base64 input, and the output bytes or the container's status.
 
 ## Accelerators
 
@@ -235,6 +284,7 @@ own kind cluster** with `kind load docker-image`. Endpoints are deleted through
 | `google-cloud-aiplatform[prediction]` | 2.1.3 | Apache-2.0 | Developer-installed for contract verification; not redistributed |
 | `golang:1.27-alpine` | `sha256:8a5910f3…3414` | BSD-3-Clause (Go) / MIT (Alpine) | Pull-only build stage; not redistributed |
 | `gcr.io/distroless/static-debian12` | `sha256:d75cdd72…43f2` | Apache-2.0 | Pull-only base; not redistributed |
+| `registry.k8s.io/e2e-test-images/agnhost` | 2.53, `sha256:99c6b4bb…1a85` | Apache-2.0 | Pulled by the cluster for the gRPC model tests (#1477); not redistributed |
 
 Both base images are pinned by digest in `testdata/predictor/Dockerfile`, so the fixture that
 proved the contract is the fixture a later run rebuilds. Both digests are multi-arch manifest
@@ -266,3 +316,15 @@ SDK:
 The contract test uses **non-default routes** (`/healthz`, `/v1/predict`) and asserts that
 the default routes return 404, so it proves the `AIP_*` environment is actually plumbed
 through rather than that the fixture happens to agree with CloudBurrow's assumptions.
+
+`test/compat/predictiondirectraw_test.go`, the gRPC model (#1477): agnhost's
+`grpc-health-checking` deployed with its port named `h2c`, called through the official
+`aiplatform` PredictionClient and through the console, on one instance with `--services run`
+(2026-10-16, darwin/arm64):
+
+```
+=== RUN   TestPredictionClientReachesAModelsGRPCServer
+--- PASS: TestPredictionClientReachesAModelsGRPCServer (19.65s)
+=== RUN   TestConsoleDirectRawPredictThroughTheConsoleAPI
+--- PASS: TestConsoleDirectRawPredictThroughTheConsoleAPI (3.45s)
+```

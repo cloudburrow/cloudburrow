@@ -29,13 +29,13 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 1 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
-| Vertex AI | 3 | 0 | 3 | 0 | 0 |
+| Vertex AI | 2 | 0 | 2 | 0 | 0 |
 | BigQuery | 28 | 5 | 15 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **63** | **12** | **32** | **13** | **6** |
+| **Total** | **62** | **12** | **31** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -166,12 +166,12 @@ No gap is left open here.
 Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244);
 `PredictionService.StreamGenerateContent` over gRPC, and an official-SDK test of `GenerateContent`
 over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`, `DirectPredict`,
-`ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285).
+`ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285); `DirectRawPredict`,
+`StreamDirectRawPredict` and `StreamingRawPredict`, relayed to a model's gRPC server on its `h2c` port (#1477).
 
 | Gap | Why open | Size |
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1454) | no emulator support (one text-only model) | S |
-| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served: Cloud Run serves an `h2c` port (#1475), but a model's `grpcPorts` are not deployed (#1454) | no emulator support (no gRPC model server) | M |
 | `Explain` (#1454) | no emulator support | L |
 
 ## BigQuery

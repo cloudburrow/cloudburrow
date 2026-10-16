@@ -1145,6 +1145,18 @@ var parityRows = []parityRow{
 			"methods are that request in Tensor form (#1285)",
 		Tests: []string{"TestStreamingPredictOnTheGenerationModel", "TestStreamingPredictOnTheEmbeddingModel",
 			"TestGRPCServerStreamingPredictStreamsGeneration", "TestGRPCDirectPredictEmbedsLikePredict"}},
+	// A model's gRPC server (#1477): a custom endpoint whose model declares
+	// grpcPorts, the Cloud Run port named h2c.
+	{Resource: "Vertex AI PredictionService: DirectRawPredict", Service: "vertexai",
+		Methods: []string{"PredictionService/DirectRawPredict"},
+		Screen:  "/ai/predict", Offers: "Online prediction: on an endpoint whose model declares grpcPorts (its gRPC port in the endpoint's facts), " +
+			"the DirectRawPredict form sends a method name and the input bytes (base64) to the container's gRPC server, as DirectRawPredict " +
+			"relays them, and shows the output bytes (base64 and hex) or the container's status (#1477)",
+		Tests: []string{"TestConsoleDirectRawPredictThroughTheConsoleAPI", "TestDirectRawPredictOnAModelWithGRPCPorts",
+			"TestPredictionClientReachesAModelsGRPCServer", "TestDirectRawPredictRelaysToTheModelsGRPCServer"}},
+	{Resource: "Vertex AI PredictionService: streaming raw predict on a gRPC model", Service: "vertexai",
+		Methods:  []string{"PredictionService/StreamDirectRawPredict", "PredictionService/StreamingRawPredict"},
+		Excluded: "the streaming forms of the DirectRawPredict the Online prediction page sends: the same method_name and input bytes on a stream held open both ways, which a request-and-answer form has no way to hold; the page's DirectRawPredict calls the same method on the same container (#1477)"},
 	{Resource: "Starting the instance",
 		Commands: []string{"up"},
 		Excluded: "starts the process that serves the console, so the console cannot exist before it"},
