@@ -8,9 +8,9 @@ package logging
 //     BucketMetadata and the bucket as its response. A client's Wait returns
 //     at once without polling; the Operations mixin is not served.
 //   - A link is stored under its bucket, which must have Log Analytics on
-//     (analytics_enabled), and names the BigQuery dataset Google would make
-//     for it. No dataset is made: the link is configuration. CreateLink and
-//     DeleteLink answer done Operations with a LinkMetadata.
+//     (analytics_enabled), and makes the BigQuery dataset it names, with
+//     the _AllLogs view of the bucket's entries (analytics.go, #1423).
+//     CreateLink and DeleteLink answer done Operations with a LinkMetadata.
 //   - Settings and CmekSettings are read and written per parent (#1395). A KMS key
 //     is refused UNIMPLEMENTED, as a bucket's cmek_settings is: entries are
 //     not encrypted with a customer key here. The service account IDs are
@@ -27,6 +27,7 @@ import (
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -49,10 +50,35 @@ func (a *Admin) doneOp(project parent, location string, metadata, response proto
 		return nil, apierror.Wrap(apierror.Internal(err, "operation response"))
 	}
 	a.ops++
-	return &longrunningpb.Operation{
+	op := &longrunningpb.Operation{
 		Name:     fmt.Sprintf("%s/locations/%s/operations/op-%d-%d", project, location, a.now().UnixNano(), a.ops),
 		Metadata: md, Done: true, Result: &longrunningpb.Operation_Response{Response: resp},
-	}, nil
+	}
+	// Kept for GetOperation, which gcloud polls even a done operation with
+	// (#1423); the last maxDoneOps of them.
+	if a.done == nil {
+		a.done = map[string]*longrunningpb.Operation{}
+	}
+	a.done[op.Name] = op
+	a.doneOrder = append(a.doneOrder, op.Name)
+	if len(a.doneOrder) > maxDoneOps {
+		delete(a.done, a.doneOrder[0])
+		a.doneOrder = a.doneOrder[1:]
+	}
+	return op, nil
+}
+
+// maxDoneOps is how many done bucket and link operations are kept.
+const maxDoneOps = 1000
+
+// doneOperation is the done operation of that name, or nil.
+func (a *Admin) doneOperation(name string) *longrunningpb.Operation {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if op := a.done[name]; op != nil {
+		return proto.Clone(op).(*longrunningpb.Operation)
+	}
+	return nil
 }
 
 func (s configServer) bucketOp(b *loggingpb.LogBucket, md *loggingpb.BucketMetadata) (*longrunningpb.Operation, error) {
@@ -154,8 +180,8 @@ func linkOp(a *Admin, ref linkRef, md *loggingpb.LinkMetadata, response proto.Me
 }
 
 // CreateLink links a bucket with Log Analytics on to a BigQuery dataset
-// named after the link. The dataset is named, not made.
-func (s configServer) CreateLink(_ context.Context, req *loggingpb.CreateLinkRequest) (*longrunningpb.Operation, error) {
+// named after the link, which it makes (analytics.go).
+func (s configServer) CreateLink(ctx context.Context, req *loggingpb.CreateLinkRequest) (*longrunningpb.Operation, error) {
 	bucket, err := parseBucket("parent", req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -197,6 +223,30 @@ func (s configServer) CreateLink(_ context.Context, req *loggingpb.CreateLinkReq
 			DatasetId: "bigquery.googleapis.com/projects/" + bucket.parent.id + "/datasets/" + strings.ReplaceAll(id, "-", "_"),
 		},
 	}
+	// The dataset is made in the instance's BigQuery and filled with what
+	// the bucket holds (analytics.go, #1423).
+	if s.a.linked == nil {
+		return nil, apierror.Wrap(apierror.FailedPrecondition("a link makes a BigQuery dataset, and BigQuery is not served on this instance: start it with bigquery among --services"))
+	}
+	project, dataset := linkedDataset(l)
+	if err := s.a.linked.Create(ctx, project, dataset, linkDatasetDescription(ref), linkedSchema()); err != nil {
+		if errors.Is(err, ErrProjectNotServed) {
+			return nil, apierror.Wrap(apierror.FailedPrecondition("a link makes a BigQuery dataset in the bucket's project, %s, which this instance's BigQuery does not serve: it serves one project", project))
+		}
+		if errors.Is(err, ErrDatasetExists) {
+			return nil, apierror.Wrap(apierror.AlreadyExists("BigQuery dataset %s:%s already exists; a link makes its own dataset", project, dataset))
+		}
+		return nil, apierror.Wrap(&apierror.Error{Code: codes.Unavailable, Reason: "backendError", Message: fmt.Sprintf("making the linked BigQuery dataset %s:%s: %v", project, dataset, err)})
+	}
+	s.a.copies.mu.Lock()
+	entries := s.a.copies.entries
+	s.a.copies.mu.Unlock()
+	if entries != nil {
+		if err := appendLinked(ctx, s.a.linked, []*loggingpb.Link{l}, entries(bucket)); err != nil {
+			_ = s.a.linked.Delete(ctx, project, dataset)
+			return nil, apierror.Wrap(&apierror.Error{Code: codes.Unavailable, Reason: "backendError", Message: fmt.Sprintf("writing the bucket's entries into %s:%s: %v", project, dataset, err)})
+		}
+	}
 	raw, err := protojson.Marshal(l)
 	if err != nil {
 		return nil, apierror.Wrap(apierror.Internal(err, "encoding the link"))
@@ -208,15 +258,23 @@ func (s configServer) CreateLink(_ context.Context, req *loggingpb.CreateLinkReq
 }
 
 // DeleteLink removes a link.
-func (s configServer) DeleteLink(_ context.Context, req *loggingpb.DeleteLinkRequest) (*longrunningpb.Operation, error) {
+func (s configServer) DeleteLink(ctx context.Context, req *loggingpb.DeleteLinkRequest) (*longrunningpb.Operation, error) {
 	ref, err := parseLink("name", req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
-	if _, err := s.a.getLink(ref); err != nil {
+	l, err := s.a.getLink(ref)
+	if err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if s.a.linked != nil {
+		if project, dataset := linkedDataset(l); dataset != "" {
+			if err := s.a.linked.Delete(ctx, project, dataset); err != nil {
+				return nil, apierror.Wrap(&apierror.Error{Code: codes.Unavailable, Reason: "backendError", Message: fmt.Sprintf("deleting the linked BigQuery dataset %s:%s: %v", project, dataset, err)})
+			}
+		}
 	}
 	if err := s.a.db.Delete(ref.key()); err != nil {
 		return nil, apierror.Wrap(apierror.Internal(err, "deleting the link"))
@@ -406,4 +464,9 @@ func (s configServer) UpdateCmekSettings(ctx context.Context, req *loggingpb.Upd
 		return nil, apierror.Wrap(apierror.Unimplemented("kms_key_name: customer-managed encryption of log entries is not supported"))
 	}
 	return s.GetCmekSettings(ctx, &loggingpb.GetCmekSettingsRequest{Name: req.GetName()})
+}
+
+// linkDatasetDescription is the linked dataset's description.
+func linkDatasetDescription(ref linkRef) string {
+	return "Log Analytics linked dataset of the log bucket " + ref.bucket.name() + " (link " + ref.link + "); read-only"
 }

@@ -90,8 +90,8 @@ func TestSQLAdminInstancesDescribeTheRunningServers(t *testing.T) {
 }
 
 // TestSQLAdminRefusesWhatItCannotDoFaithfully (#1301, #1330):
-// pointInTimeRestore (a Backup and DR datasource; a clone to a point in
-// time of the server `up` runs, which keeps no log, is a 400),
+// pointInTimeRestore (a Backup and DR datasource, #1425; a clone to a point
+// in time of the server `up` runs, which keeps no log, is a 400),
 // legacy failover replicas, IAM database authentication (an access token in
 // generateEphemeralCert) answer 501 (tiers and flags are served since
 // #1380, TestSQLAdminTiersAndFlags);
@@ -117,7 +117,7 @@ func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	// The servers `up` runs keep no transaction log (TestCloudSQLPointInTimeRecovery).
 	wantHTTP(t, "instances.clone to a point in time", err, http.StatusBadRequest)
 	_, err = svc.Instances.PointInTimeRestore("projects/"+p, &sqladmin.PointInTimeRestoreContext{
-		Datasource: "projects/" + p + "/instances/" + inst, TargetInstance: "pitr"}).Do()
+		Datasource: pitrDatasource(p), TargetInstance: "pitr", PointInTime: "2026-01-01T00:00:00Z"}).Do()
 	wantHTTP(t, "instances.pointInTimeRestore", err, 501)
 	_, err = svc.Instances.Failover(p, inst, &sqladmin.InstancesFailoverRequest{}).Do()
 	// The instances `up` runs are ZONAL, and refuse a failover as they

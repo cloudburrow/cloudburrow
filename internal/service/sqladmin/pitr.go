@@ -38,6 +38,14 @@ type PITRDumper interface {
 	CopyAt(ctx context.Context, src, dst DumpTarget, at time.Time, dir string) error
 }
 
+// CoordinatesCopier is a PITRDumper that can also recover a MySQL server to
+// binary log coordinates (#1421).
+type CoordinatesCopier interface {
+	// CopyToCoordinates loads src's databases as they were at file:pos, a
+	// position in its binary log, into dst.
+	CopyToCoordinates(ctx context.Context, src, dst DumpTarget, file string, pos int64, dir string) error
+}
+
 // PITREnabled is whether spec keeps its transaction log for point-in-time
 // recovery: pointInTimeRecoveryEnabled for PostgreSQL, binaryLogEnabled
 // for MySQL, as Cloud SQL names them.
@@ -170,6 +178,57 @@ func (s *Server) copyAt(src, dst DumpTarget, at time.Time) error {
 	defer cancel()
 	if err := s.pitr().CopyAt(ctx, src, dst, at, dir); err != nil {
 		return fmt.Errorf("recover %s to %s: %w", src.Instance, at.UTC().Format(time.RFC3339Nano), err)
+	}
+	return nil
+}
+
+// binLogCoordinates is a clone's cloneContext.binLogCoordinates.
+type binLogCoordinates struct {
+	File string `json:"binLogFileName"`
+	// Position is an int64, a string on the wire as the API sends it.
+	Position json.Number `json:"binLogPosition"`
+	pos      int64
+}
+
+// checkBinLogCoordinates parses a clone's binLogCoordinates, which Cloud
+// SQL takes for MySQL sources with binary logging on, and not with a
+// pointInTime.
+func (s *Server) checkBinLogCoordinates(e Engine, raw json.RawMessage, withTime bool) (*binLogCoordinates, error) {
+	if !s.target(e).MySQL {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: cloneContext.binLogCoordinates applies only to MySQL instances.")
+	}
+	if withTime {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: a clone takes either cloneContext.pointInTime or binLogCoordinates, not both.")
+	}
+	var c binLogCoordinates
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: cloneContext.binLogCoordinates: %v.", err)
+	}
+	p, err := strconv.ParseInt(strings.Trim(string(c.Position), `"`), 10, 64)
+	if c.File == "" || err != nil || p <= 0 {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: cloneContext.binLogCoordinates needs binLogFileName and a positive binLogPosition.")
+	}
+	c.pos = p
+	if err := s.pitrUnavailable(e); err != nil {
+		return nil, err
+	}
+	if _, ok := s.pitr().(CoordinatesCopier); !ok {
+		return nil, unimplemented("cloning to binary log coordinates", "this server's backup store cannot replay a binary log")
+	}
+	return &c, nil
+}
+
+// copyToCoordinates is copyData up to binary log coordinates.
+func (s *Server) copyToCoordinates(src, dst DumpTarget, c binLogCoordinates) error {
+	dir, err := os.MkdirTemp(s.backups.dir, "pitr-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*startTimeout)
+	defer cancel()
+	if err := s.pitr().(CoordinatesCopier).CopyToCoordinates(ctx, src, dst, c.File, c.pos, dir); err != nil {
+		return fmt.Errorf("recover %s to %s:%d: %w", src.Instance, c.File, c.pos, err)
 	}
 	return nil
 }

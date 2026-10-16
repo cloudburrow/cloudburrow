@@ -284,6 +284,125 @@ while :; do
 done`
 
 func (d *sqlDumper) mysqlCopyAt(ctx context.Context, src, dst sqladmin.DumpTarget, at time.Time, id int64, dir string) error {
+	return d.mysqlCopyTo(ctx, src, dst, id, dir, func(logDir string, logs []string, baseFile string, basePos int64) (string, int64, error) {
+		return d.mysqlStopAt(ctx, src, logDir, logs, baseFile, basePos, at, dir)
+	})
+}
+
+var _ sqladmin.CoordinatesCopier = (*sqlDumper)(nil)
+
+// mysqlBaseCoordinates prints each base's name and the binary log file and
+// position it is consistent with.
+const mysqlBaseCoordinates = mysqlPITRPrelude + `for f in "$R"/base/*.sql; do
+  [ -f "$f" ] || continue
+  id=$(basename "$f" .sql)
+  c=$(sed -n "s/.*SOURCE_LOG_FILE='\([^']*\)', SOURCE_LOG_POS=\([0-9]*\).*/\1 \2/p" "$f" | head -1)
+  [ -z "$c" ] || echo "$id $c"
+done`
+
+// binlogBefore is whether file:pos is at or before file2:pos2. A server's
+// binary logs are numbered files of one basename, so their names sort.
+func binlogBefore(file string, pos int64, file2 string, pos2 int64) bool {
+	if file != file2 {
+		return file < file2
+	}
+	return pos <= pos2
+}
+
+// CopyToCoordinates is a clone to binLogCoordinates (#1421): the newest
+// base at or before the coordinates, then the binary log replayed up to
+// them: every transaction that starts before the position is applied.
+func (d *sqlDumper) CopyToCoordinates(ctx context.Context, src, dst sqladmin.DumpTarget, file string, pos int64, dir string) error {
+	if !src.MySQL {
+		return fmt.Errorf("binary log coordinates are MySQL's")
+	}
+	defer pitrLock(d.deployment(src))()
+	var out bytes.Buffer
+	if err := d.sh(ctx, src, nil, &out, mysqlBaseCoordinates); err != nil {
+		return err
+	}
+	var best int64
+	found := false
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 {
+			continue
+		}
+		id, err1 := strconv.ParseInt(f[0], 10, 64)
+		bp, err2 := strconv.ParseInt(f[2], 10, 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		if binlogBefore(f[1], bp, file, pos) && (!found || id > best) {
+			best, found = id, true
+		}
+	}
+	if !found {
+		return sqladmin.Errorf(400, "Invalid request: no backup of the source is at or before the binary log coordinates %s:%d; "+
+			"they must be after binary logging was enabled.", file, pos)
+	}
+	return d.mysqlCopyTo(ctx, src, dst, best, dir, func(logDir string, logs []string, baseFile string, basePos int64) (string, int64, error) {
+		known := false
+		for _, l := range logs {
+			known = known || l == file
+		}
+		if !known {
+			return "", 0, sqladmin.Errorf(400, "Invalid request: the binary log %s is not one of the source's (%s).", file, strings.Join(logs, ", "))
+		}
+		if file == baseFile && pos <= basePos {
+			return baseFile, basePos, nil
+		}
+		path := filepath.Join(dir, "binlog")
+		if err := d.toFile(ctx, src, path, `exec cat "$1/$2"`, logDir, file); err != nil {
+			return "", 0, fmt.Errorf("read the binary log %s: %w", file, err)
+		}
+		raw, err := os.ReadFile(path)
+		_ = os.Remove(path)
+		if err != nil {
+			return "", 0, err
+		}
+		from := int64(4)
+		if file == baseFile {
+			from = basePos
+		}
+		at, err := transactionBoundary(raw, from, pos)
+		if err != nil {
+			return "", 0, fmt.Errorf("the binary log %s: %w", file, err)
+		}
+		return file, at, nil
+	})
+}
+
+// transactionBoundary is where the replay to pos stops in a binary log
+// file: the start of the first transaction at or after pos, so every
+// transaction starting before pos is applied. A pos past the file's last
+// transaction is the file's end; one past the end is an error.
+func transactionBoundary(raw []byte, from, pos int64) (int64, error) {
+	if len(raw) < 4 || string(raw[:4]) != "\xfebin" {
+		return 0, fmt.Errorf("not a binary log")
+	}
+	off := from
+	for off+binlogHeaderLen <= int64(len(raw)) {
+		h := raw[off:]
+		size := int64(binary.LittleEndian.Uint32(h[9:13]))
+		if size < binlogHeaderLen || off+size > int64(len(raw)) {
+			break
+		}
+		if typ := h[4]; (typ == binlogGTIDEvent || typ == binlogAnonymousGTIDEvent) && off >= pos {
+			return off, nil
+		}
+		off += size
+	}
+	if pos > off {
+		return 0, sqladmin.Errorf(400, "Invalid request: the binary log position %d is past the file's end (%d).", pos, off)
+	}
+	return off, nil
+}
+
+// mysqlCopyTo loads base id into dst and replays the source's binary log
+// from the base to where stop says.
+func (d *sqlDumper) mysqlCopyTo(ctx context.Context, src, dst sqladmin.DumpTarget, id int64, dir string,
+	stop func(logDir string, logs []string, baseFile string, basePos int64) (string, int64, error)) error {
 	if !src.Created {
 		return fmt.Errorf("only a created instance keeps its binary log for recovery")
 	}
@@ -305,7 +424,7 @@ func (d *sqlDumper) mysqlCopyAt(ctx context.Context, src, dst sqladmin.DumpTarge
 		return fmt.Errorf("the base's binary log position %q: %w", lines[0], err)
 	}
 	logDir, logs := lines[1], lines[2:]
-	stopFile, stopPos, err := d.mysqlStopAt(ctx, src, logDir, logs, baseFile, basePos, at, dir)
+	stopFile, stopPos, err := stop(logDir, logs, baseFile, basePos)
 	if err != nil {
 		return err
 	}

@@ -288,6 +288,8 @@ type instanceBody struct {
 	Region               string           `json:"region"`
 	ReplicaConfiguration *json.RawMessage `json:"replicaConfiguration"`
 	FailoverReplica      *json.RawMessage `json:"failoverReplica"`
+	// IncludeReplicas is includeReplicasForMajorVersionUpgrade (#1421).
+	IncludeReplicas bool `json:"includeReplicasForMajorVersionUpgrade"`
 	// OnPremisesConfiguration and instanceType ON_PREMISES_INSTANCE make a
 	// source representation instance: a record of a server outside Cloud
 	// SQL (#1304), Terraform's google_sql_source_representation_instance.
@@ -588,7 +590,7 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress (the instance is %s).", st)
 	}
 	if upgrade {
-		if err := s.checkUpgrade(c, b.DatabaseVersion); err != nil {
+		if err := s.checkUpgrade(c, b.DatabaseVersion, b.IncludeReplicas); err != nil {
 			s.emu.Unlock()
 			return nil, err
 		}
@@ -611,7 +613,7 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 			return nil, err
 		}
 		op := s.pending(base, project, name, "MAJOR_VERSION_UPGRADE")
-		go s.upgrade(name, from, to, op["name"].(string))
+		go s.upgrade(name, from, to, op["name"].(string), b.IncludeReplicas)
 		return op, nil
 	}
 	next := c.spec

@@ -297,15 +297,33 @@ func (p loggingBucketsProvider) links(ctx context.Context, bucket string) consol
 	}
 	for _, k := range resp.GetLinks() {
 		id := k.GetName()[strings.LastIndex(k.GetName(), "/")+1:]
-		l.Items = append(l.Items, console.Resource{Name: id, Fields: map[string]string{
-			"BigQuery dataset": k.GetBigqueryDataset().GetDatasetId(), "Description": orDash(k.GetDescription()),
-			"Created": loggingTime(k.GetCreateTime())}})
+		l.Items = append(l.Items, console.Resource{Name: id, Link: logAnalyticsLink(k.GetBigqueryDataset().GetDatasetId()),
+			Fields: map[string]string{
+				"BigQuery dataset": k.GetBigqueryDataset().GetDatasetId(), "Description": orDash(k.GetDescription()),
+				"Created": loggingTime(k.GetCreateTime())}})
 	}
 	l.Total = len(l.Items)
 	return l
 }
 
-const linkNote = "A link names the BigQuery dataset Google would make for the bucket; no dataset is made locally (#1292)."
+const linkNote = "A link makes a read-only BigQuery dataset whose _AllLogs view holds the bucket's entries, " +
+	"kept current as entries arrive (#1423). Open a link to query it in Log Analytics: BigQuery's query editor on the dataset."
+
+// logAnalyticsLink is the BigQuery console page of a link's dataset
+// (bigquery.googleapis.com/projects/P/datasets/D), its query editor opened
+// on a query of _AllLogs (#1423), or "".
+func logAnalyticsLink(datasetID string) string {
+	parts := strings.Split(datasetID, "/")
+	if len(parts) != 5 {
+		return ""
+	}
+	project, dataset := parts[2], parts[4]
+	q := url.Values{}
+	q.Set("project", project)
+	q.Set("query", fmt.Sprintf("SELECT timestamp, severity, log_name, resource.type AS resource_type, text_payload, json_payload\n"+
+		"FROM `%s.%s._AllLogs`\nORDER BY timestamp DESC\nLIMIT 100", project, dataset))
+	return "/bigquery/" + url.PathEscape(dataset) + "?" + q.Encode()
+}
 
 // linkActions offers Create link on an active bucket with Log Analytics
 // on, and Delete link on one with links (#1292). DetailActions
