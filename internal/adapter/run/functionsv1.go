@@ -70,13 +70,26 @@ var v1EventTypes = map[string]string{
 	"google.storage.object.metadataUpdate":            storageEventPrefix + "metadataUpdated",
 }
 
+// v1EventReason says why a legacy event type is not delivered.
+func v1EventReason(typ string) string {
+	switch {
+	case strings.HasPrefix(typ, "providers/cloud.firestore/"):
+		return "Cloud Firestore's run on Google's Firestore emulator, which emits no document change events"
+	case strings.HasPrefix(typ, "providers/firebase") || strings.HasPrefix(typ, "providers/google.firebase") ||
+		strings.HasPrefix(typ, "google.firebase"):
+		return "Firebase's need Firebase services, which this instance does not serve"
+	case strings.HasPrefix(typ, "providers/cloud.storage/"):
+		return "the legacy object.change is not delivered: use google.storage.object.finalize and the other object events"
+	}
+	return "no other source is served"
+}
+
 // v2Trigger is the v2 event trigger a v1 one is delivered through.
 func v2Trigger(project string, et *fv1.EventTrigger) (*functionspb.EventTrigger, error) {
 	typ, ok := v1EventTypes[et.GetEventType()]
 	if !ok {
 		return nil, apierror.Unimplemented("eventTrigger.eventType %q is not supported: Pub/Sub's google.pubsub.topic.publish and Cloud Storage's "+
-			"google.storage.object.finalize, delete, archive and metadataUpdate are (the legacy providers/cloud.storage/eventTypes/object.change "+
-			"and Firestore, Firebase and other sources are not served)", et.GetEventType())
+			"google.storage.object.finalize, delete, archive and metadataUpdate are; %s", et.GetEventType(), v1EventReason(et.GetEventType()))
 	}
 	out := &functionspb.EventTrigger{EventType: typ, ServiceAccountEmail: gen1Account(project),
 		RetryPolicy: functionspb.EventTrigger_RETRY_POLICY_DO_NOT_RETRY}
@@ -106,19 +119,22 @@ func v2Trigger(project string, et *fv1.EventTrigger) (*functionspb.EventTrigger,
 
 // unsupportedV1 refuses what 1st gen offers and this instance cannot honour.
 func unsupportedV1(in *fv1.CloudFunction) error {
+	if in.GetSourceRepository() != nil {
+		return apierror.Unimplemented("sourceRepository is not supported: it names a Cloud Source Repositories repository, " +
+			"a hosted repository this instance does not serve; upload the source to a GenerateUploadUrl URL or name a " +
+			"Cloud Storage object in sourceArchiveUrl")
+	}
+	if in.GetVpcConnector() != "" || in.GetNetwork() != "" ||
+		in.GetVpcConnectorEgressSettings() != fv1.CloudFunction_VPC_CONNECTOR_EGRESS_SETTINGS_UNSPECIFIED {
+		return apierror.Unimplemented("vpcConnector and network are not supported: they name a Serverless VPC Access connector " +
+			"and its network, which this instance does not serve; a function here reaches what the cluster reaches")
+	}
 	var fields []string
 	add := func(set bool, field string) {
 		if set {
 			fields = append(fields, field)
 		}
 	}
-	add(in.GetSourceRepository() != nil, "sourceRepository")
-	add(in.GetNetwork() != "", "network")
-	add(in.GetVpcConnector() != "", "vpcConnector")
-	add(len(in.GetSecretEnvironmentVariables()) > 0, "secretEnvironmentVariables")
-	add(len(in.GetSecretVolumes()) > 0, "secretVolumes")
-	add(in.GetKmsKeyName() != "", "kmsKeyName")
-	add(in.GetBuildWorkerPool() != "", "buildWorkerPool")
 	add(in.GetDockerRepository() != "", "dockerRepository")
 	add(in.GetDockerRegistry() == fv1.CloudFunction_CONTAINER_REGISTRY, "dockerRegistry CONTAINER_REGISTRY")
 	add(in.GetBuildServiceAccount() != "", "buildServiceAccount")
@@ -167,6 +183,7 @@ func toV2(name string, in *fv1.CloudFunction) (*functionspb.Function, error) {
 		BuildConfig: &functionspb.BuildConfig{Runtime: in.GetRuntime(), EntryPoint: in.GetEntryPoint(),
 			EnvironmentVariables: in.GetBuildEnvironmentVariables(),
 			Source:               &functionspb.Source{Source: &functionspb.Source_StorageSource{StorageSource: src}}},
+		KmsKeyName: in.GetKmsKeyName(),
 		ServiceConfig: &functionspb.ServiceConfig{AvailableMemory: fmt.Sprintf("%dM", mb), TimeoutSeconds: timeout,
 			EnvironmentVariables: in.GetEnvironmentVariables(), MaxInstanceCount: in.GetMaxInstances(),
 			MinInstanceCount: in.GetMinInstances(), ServiceAccountEmail: in.GetServiceAccountEmail(),
@@ -174,6 +191,20 @@ func toV2(name string, in *fv1.CloudFunction) (*functionspb.Function, error) {
 	}
 	if fn.ServiceConfig.ServiceAccountEmail == "" {
 		fn.ServiceConfig.ServiceAccountEmail = gen1Account(project)
+	}
+	// The build's worker pool and the secrets are 2nd gen's, which v1's
+	// mirror field for field.
+	fn.BuildConfig.WorkerPool = in.GetBuildWorkerPool()
+	for _, s := range in.GetSecretEnvironmentVariables() {
+		fn.ServiceConfig.SecretEnvironmentVariables = append(fn.ServiceConfig.SecretEnvironmentVariables,
+			&functionspb.SecretEnvVar{Key: s.GetKey(), ProjectId: s.GetProjectId(), Secret: s.GetSecret(), Version: s.GetVersion()})
+	}
+	for _, v := range in.GetSecretVolumes() {
+		sv := &functionspb.SecretVolume{MountPath: v.GetMountPath(), ProjectId: v.GetProjectId(), Secret: v.GetSecret()}
+		for _, ver := range v.GetVersions() {
+			sv.Versions = append(sv.Versions, &functionspb.SecretVolume_SecretVersion{Version: ver.GetVersion(), Path: ver.GetPath()})
+		}
+		fn.ServiceConfig.SecretVolumes = append(fn.ServiceConfig.SecretVolumes, sv)
 	}
 	if et := in.GetEventTrigger(); et != nil {
 		t, err := v2Trigger(project, et)
@@ -355,6 +386,17 @@ func (v *FunctionsV1Server) prepareV1(name string, in *fv1.CloudFunction) (*func
 		return nil, err
 	}
 	if err := v.f.checkEventTrigger(fn.GetEventTrigger()); err != nil {
+		return nil, err
+	}
+	parent, _, _ := parseFunctionName(name)
+	_, location, _ := resource.ParseLocation(parent)
+	if err := checkBuildPool("buildWorkerPool", in.GetBuildWorkerPool(), location); err != nil {
+		return nil, err
+	}
+	if err := checkKMSKey("kmsKeyName", in.GetKmsKeyName()); err != nil {
+		return nil, err
+	}
+	if err := checkSecrets(fn.GetServiceConfig()); err != nil {
 		return nil, err
 	}
 	if in.GetRuntime() == "" {

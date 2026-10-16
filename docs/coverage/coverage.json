@@ -404,6 +404,7 @@
         "method": "google.cloud.run.v2.Builds/SubmitBuild",
         "status": "Verified",
         "tests": [
+          "test/compat/functionsfields_test.go:62 TestFunctionsFields",
           "test/compat/runbuilds_test.go:138 TestRunSubmitBuildDockerDeploys",
           "test/compat/runbuilds_test.go:217 TestFunctionsSubmitBuildBuildpacks"
         ]
@@ -1368,7 +1369,9 @@
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
+          "test/compat/functionsfields_test.go:62 TestFunctionsFields"
         ]
       },
       {
@@ -1378,7 +1381,9 @@
           "test/compat/consolefunctionsv1_test.go:95 TestConsoleFunctionsV1",
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
+          "test/compat/functionsfields_test.go:62 TestFunctionsFields"
         ]
       },
       {
@@ -1392,7 +1397,8 @@
         "method": "google.cloud.functions.v2.FunctionService/GenerateUploadUrl",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/functionsfields_test.go:62 TestFunctionsFields"
         ]
       },
       {
@@ -1401,7 +1407,8 @@
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsfields_test.go:62 TestFunctionsFields"
         ]
       },
       {
@@ -1424,7 +1431,8 @@
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
+          "test/compat/functionsfields_test.go:62 TestFunctionsFields"
         ]
       }
     ]
@@ -1450,6 +1458,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefunctionsv1_test.go:95 TestConsoleFunctionsV1",
+          "test/compat/functionsfields_test.go:182 TestFunctionsV1Fields",
           "test/compat/functionsv1_test.go:249 TestFunctionsV1BuildsAndServes",
           "test/compat/functionsv1_test.go:320 TestGcloudFunctionsV1",
           "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
@@ -1460,6 +1469,7 @@
         "method": "google.cloud.functions.v1.CloudFunctionsService/DeleteFunction",
         "status": "Verified",
         "tests": [
+          "test/compat/functionsfields_test.go:182 TestFunctionsV1Fields",
           "test/compat/functionsv1_test.go:249 TestFunctionsV1BuildsAndServes",
           "test/compat/functionsv1_test.go:320 TestGcloudFunctionsV1",
           "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
@@ -1478,6 +1488,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefunctionsv1_test.go:95 TestConsoleFunctionsV1",
+          "test/compat/functionsfields_test.go:182 TestFunctionsV1Fields",
           "test/compat/functionsv1_test.go:320 TestGcloudFunctionsV1",
           "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
         ]
@@ -1487,6 +1498,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefunctionsv1_test.go:95 TestConsoleFunctionsV1",
+          "test/compat/functionsfields_test.go:182 TestFunctionsV1Fields",
           "test/compat/functionsv1_test.go:320 TestGcloudFunctionsV1",
           "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
           "test/compat/terraformfunctionsv1_test.go:31 TestTerraformCloudFunctionsFunction"
