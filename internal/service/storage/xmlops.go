@@ -95,10 +95,14 @@ func xmlMeta(r *http.Request, name string) (uploadMeta, error) {
 			m.Metadata[lk[len("x-goog-meta-"):]] = v[0]
 		}
 	}
-	for _, h := range []string{"X-Goog-Copy-Source", "X-Goog-Acl", "X-Goog-Encryption-Kms-Key-Name", "X-Goog-Encryption-Algorithm"} {
+	for _, h := range []string{"X-Goog-Copy-Source", "X-Goog-Acl", "X-Goog-Encryption-Kms-Key-Name"} {
 		if r.Header.Get(h) != "" {
 			return m, badRequest("The XML API header %s is not supported by CloudBurrow; it is refused rather than ignored", h)
 		}
+	}
+	var err error
+	if m.KeySHA256, err = parseCSEK(r.Header, csekHeader); err != nil {
+		return m, err
 	}
 	return m, validObjectName(name)
 }
@@ -133,6 +137,7 @@ func (s *Server) xmlPutObject(w http.ResponseWriter, r *http.Request, bucket, na
 		return
 	}
 	xmlObjectHeaders(w, o)
+	csekResponseHeaders(w.Header(), o)
 	w.WriteHeader(http.StatusOK)
 }
 

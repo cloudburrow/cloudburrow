@@ -95,7 +95,8 @@ func TestConsoleCloudSQLInstancesCreateRestartAndDelete(t *testing.T) {
 
 // TestConsoleCloudSQLInstanceEditAndBackups (#1330): on a created
 // instance's page, Edit instance changes the tier, labels, a database flag,
-// deletion protection and the automated backups' start time in one
+// deletion protection, the automated backups' start time, retained backups
+// and transaction log retention days (one out of range refused) in one
 // instances.patch, which the official client (sqladmin/v1) reads back; the
 // Backups tab's Create backup takes a backup the client lists, Restore
 // loads it back over a changed row, Delete backup removes it, and Clone
@@ -138,7 +139,8 @@ func TestConsoleCloudSQLInstanceEditAndBackups(t *testing.T) {
 
 	code, out := consoleEdit(t, addr, "cloudsql-instances", project, []string{name}, map[string]string{
 		"tier": "db-custom-2-7680", "labels": "env=console,team=a", "flags": "max_connections=44",
-		"deletionProtection": "true", "backupsEnabled": "true", "backupStartTime": "04:30"})
+		"deletionProtection": "true", "backupsEnabled": "true", "backupStartTime": "04:30",
+		"retainedBackups": "5", "logRetentionDays": "3"})
 	if code != http.StatusOK {
 		t.Fatalf("edit = %d: %s", code, out)
 	}
@@ -150,8 +152,15 @@ func TestConsoleCloudSQLInstanceEditAndBackups(t *testing.T) {
 	}
 	if st := in.Settings; st.Tier != "db-custom-2-7680" || st.UserLabels["env"] != "console" || st.UserLabels["team"] != "a" ||
 		len(st.DatabaseFlags) != 1 || st.DatabaseFlags[0].Value != "44" || !st.DeletionProtectionEnabled ||
-		!st.BackupConfiguration.Enabled || st.BackupConfiguration.StartTime != "04:30" {
+		!st.BackupConfiguration.Enabled || st.BackupConfiguration.StartTime != "04:30" ||
+		st.BackupConfiguration.TransactionLogRetentionDays != 3 || st.BackupConfiguration.BackupRetentionSettings == nil ||
+		st.BackupConfiguration.BackupRetentionSettings.RetainedBackups != 5 {
 		t.Errorf("after the console's edit: %+v %+v", st, st.BackupConfiguration)
+	}
+	if code, out := consoleEdit(t, addr, "cloudsql-instances", project, []string{name}, map[string]string{
+		"tier": "db-custom-2-7680", "deletionProtection": "true", "backupsEnabled": "true", "logRetentionDays": "36"}); code == http.StatusOK ||
+		!strings.Contains(out, "transactionLogRetentionDays") {
+		t.Errorf("an edit to 36 days of log = %d: %s; want the API's refusal", code, out)
 	}
 	if code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/cloudsql-instances?project="+project+"&name=postgres", ""); code != http.StatusOK ||
 		strings.Contains(out, `"edit"`) {

@@ -223,6 +223,12 @@ func fromV1Job(in *runv1.Job) (*runpb.Job, error) {
 			case v1ClientName, v1ClientVersion:
 				// Which tool wrote the template: informational, as on a
 				// revision template.
+			case v1CloudSQLInstances:
+				vols, err := fromV1CloudSQL("spec.template.metadata.annotations["+k+"]", v, tt.Volumes, tt.Containers)
+				if err != nil {
+					return nil, err
+				}
+				tt.Volumes = vols
 			default:
 				gap(strings.HasPrefix(k, "run.googleapis.com/"), "spec.template.metadata.annotations["+k+"]")
 				ann[k] = v
@@ -276,7 +282,7 @@ func toV1Job(j *runpb.Job) *runv1.Job {
 	}
 	out := &runv1.Job{ApiVersion: "run.googleapis.com/v1", Kind: "Job", Metadata: meta,
 		Spec: &runv1.JobSpec{Template: &runv1.ExecutionTemplateSpec{
-			Metadata: &runv1.ObjectMeta{Labels: et.GetLabels(), Annotations: et.GetAnnotations()},
+			Metadata: &runv1.ObjectMeta{Labels: et.GetLabels(), Annotations: toV1CloudSQL(cloneAnn(et.GetAnnotations()), tt.GetVolumes())},
 			Spec: &runv1.ExecutionSpec{Parallelism: int64(et.GetParallelism()), TaskCount: int64(et.GetTaskCount()),
 				Template: &runv1.TaskTemplateSpec{Spec: ts}}}},
 		Status: &runv1.JobStatus{ObservedGeneration: j.GetObservedGeneration(), ExecutionCount: int64(j.GetExecutionCount())}}
@@ -305,6 +311,18 @@ func v1Condition(typ string, c *runpb.Condition) *runv1.GoogleCloudRunV1Conditio
 	out := &runv1.GoogleCloudRunV1Condition{Type: typ, Status: status, Message: c.GetMessage()}
 	if t := c.GetLastTransitionTime(); t != nil {
 		out.LastTransitionTime = t.AsTime().UTC().Format(time.RFC3339)
+	}
+	return out
+}
+
+// cloneAnn copies annotations, so adding to them leaves the job's alone.
+func cloneAnn(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
 	}
 	return out
 }

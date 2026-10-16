@@ -311,7 +311,7 @@ func (s *Server) prepareJob(job *runpb.Job, id string, generation int64) (*runpb
 	spec := jobSpec(job, generation, time.Now())
 	if _, err := renderExecution(spec, id, executionID(id), spec.GetTemplate().GetTemplate(),
 		spec.GetTemplate().GetTaskCount(), s.kn.namespace(), s.instance, s.secrets,
-		s.injectedFor(projectOf(spec.GetName()))); err != nil {
+		s.injectedFor(projectOf(spec.GetName())), s.cloudSQLConfig()); err != nil {
 		return nil, err
 	}
 	return spec, nil
@@ -543,7 +543,7 @@ func (j *JobsServer) RunJob(ctx context.Context, req *runpb.RunJobRequest) (*lon
 	for attempt := 0; ; attempt++ {
 		execID = executionID(id)
 		manifest, err = renderExecution(spec, id, execID, tmpl, taskCount, s.kn.namespace(), s.instance, s.secrets,
-			s.injectedFor(projectOf(spec.GetName())))
+			s.injectedFor(projectOf(spec.GetName())), s.cloudSQLConfig())
 		if err != nil {
 			return nil, err
 		}

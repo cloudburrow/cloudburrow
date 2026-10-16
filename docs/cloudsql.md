@@ -105,7 +105,7 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication, `pointInTimeRestore` (a Backup and DR datasource), failover
+What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource), failover
 replicas and high availability, cascading, cross-region and external-primary replicas, the project-level Backups API, imports and exports, and SSL certificates. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
@@ -127,7 +127,7 @@ connectors reach through 3307.
 | `settings.databaseFlags` | Passed to the server: `-c name=value` to `postgres`, `--name=value` to `mysqld`. A patch that changes them starts the server again with them; a flag the server rejects fails the operation with its words. `cloudsql.*` flags (IAM authentication, Cloud SQL's extensions) are 501. |
 | `settings.userLabels`, `deletionProtectionEnabled`, other settings | Recorded and answered. `delete` of a protected instance is 400, as on Cloud SQL. |
 | `masterInstanceName` | A read replica: see [Read replicas](#read-replicas-1330). |
-| `replicaConfiguration.failoverTarget`, `failoverReplica`, `availabilityType: REGIONAL` | 501: no standby or failover. |
+| `replicaConfiguration.failoverTarget`, `failoverReplica`, `availabilityType: REGIONAL`, `instances.failover` | 501, saying why (below). |
 
 The operation `insert` returns is `RUNNING` until the server serves through its tunnel, then
 `DONE` (or `DONE` with the server's error, and the instance `FAILED`). `delete` removes the
@@ -204,7 +204,9 @@ flags, deletion protection, automated backups and their start time, sent as one
 - **`settings.backupConfiguration`** (`enabled`, `startTime`, `backupRetentionSettings`) is
   recorded and answered. **An automated backup is taken at `startTime` (UTC) only if
   CloudBurrow is running then**; a start time that passes while it is stopped is not made up
-  afterwards. The newest `retainedBackups` automated backups (7 by default) are kept.
+  afterwards. The newest `retainedBackups` automated backups (7 by default) are kept;
+  `backupRetentionSettings.retentionUnit` other than `COUNT`, or `retainedBackups` outside 1 to
+  365, is 400, as on Cloud SQL. On-demand backups are kept until they are deleted.
   `pointInTimeRecoveryEnabled` and `binaryLogEnabled` turn on point-in-time recovery (next
   section).
 - **Persistence follows the instance's mode**: in persistent mode the dumps and their records
@@ -246,21 +248,50 @@ instance holding the source's databases as they were at that time, to the micros
   after the base are replayed too, as they are part of the binary log.
 - **Bases are taken** when the instance's server first serves with recovery on, and with each
   of its backups (on demand or automated). A base's time is the first whole second after it
-  was complete, by the server's clock.
+  was complete, by the server's clock. **A base that fails fails its backup**: the backup run
+  is `FAILED`, with the error, and its operation fails.
 - **The recovery window** is reported by `projects.instances.getLatestRecoveryTime` as
   Google documents it: `earliestRecoveryTime` is the oldest base's time, and
   `latestRecoveryTime` is the server's clock now. A `pointInTime` outside it is 400, naming the
-  window. Bases are not pruned yet (`transactionLogRetentionDays` is recorded, not applied);
-  the log lives on the server's volume, so deleting the instance deletes it, and in ephemeral
-  mode a restart of the server's pod loses it with the data.
+  window. The log lives on the server's volume, so deleting the instance deletes it, and in
+  ephemeral mode a restart of the server's pod loses it with the data.
+- **Retention:** `transactionLogRetentionDays` is applied as Google documents it: 1 to 7 days
+  on the Enterprise edition, 1 to 35 on Enterprise Plus (out of range is 400), 7 or 14 days
+  by default, and returned with the default when it is not set. A sweep, each minute, after
+  each base and after the clock is advanced, drops every base older than the newest one
+  complete by the window's start, with the log only those needed: PostgreSQL's archived WAL
+  segments before the kept base's start (`pg_archivecleanup` with its `backup_label`), MySQL's
+  binary logs before the kept base's file (`PURGE BINARY LOGS TO`). `earliestRecoveryTime` is
+  then the later of the oldest base and the window's start.
+- **The retention clock** is a CloudBurrow extension, so a test need not wait days, as Secret
+  Manager's clock is (#1278): `POST /cloudburrow/v1/clock:advance` on the Cloud SQL Admin
+  endpoint, with `{"duration": "86400s"}`, ages the log already kept by that much, sweeps, and
+  answers `{"now": …}`. The servers' own clocks do not move, so a `pointInTime` is still read on
+  them: log written before the advance is a day older, log written after it ages from when it
+  was written. The clock only moves forward, and starts again at the real time on `up`.
 - **What is not recovered to a time:** the servers `up` runs (`postgres`, `mysql`) keep no
   log, and a clone to a time of one is 400 saying so; a read replica takes no base.
   `instances.pointInTimeRestore` is 501: it restores from a Backup and DR Service datasource
   (`projects/…/backupVaults/…/dataSources/…`), which is not served.
 
+### High availability is 501 (#1330)
+
+On Cloud SQL, `availabilityType: REGIONAL` makes an instance a primary and a standby in a second
+zone of the region, its disk replicated synchronously to the standby, so a transaction is
+committed only once both have it; `instances.failover` (and an outage) moves the instance to the
+standby, which keeps the connection name and the IP address, with no committed transaction
+lost. A standby built from CloudBurrow's read replicas would not be that: they replicate
+asynchronously (streaming replication, GTID binary log replication), so a failover could lose
+the transactions not yet replicated, and they run in one zone of one kind cluster, with their
+own names. So `availabilityType: REGIONAL`, `failoverReplica`,
+`replicaConfiguration.failoverTarget` and `instances.failover` are 501 and say this; use a
+`ZONAL` instance and, to read elsewhere, read replicas.
+
 The console's instance page shows **Point-in-time recovery**, the earliest and latest recovery
 times, and a **Point-in-time restore** action (a new instance ID and a time); **Create
-instance** and **Edit instance** have a **Point-in-time recovery** checkbox.
+instance** and **Edit instance** have a **Point-in-time recovery** checkbox, and **Edit
+instance** has **Retained automated backups** and **Transaction log retention (days)**, sent in
+the same `instances.patch` and refused, in the API's words, out of range.
 
 ### The Cloud SQL connectors (#1330)
 
@@ -285,27 +316,128 @@ so ADC, the metadata server or `cloudsqlconn.WithTokenSource` all work.
 
 What happens underneath is what Cloud SQL does:
 
-1. `connectSettings` returns the instance's **server CA**, `127.0.0.1` as its `PRIMARY` address,
+1. `connectSettings` returns the instance's **server CA**, the connector listener's host
+   (`127.0.0.1` unless `--cloudsql-connector` says otherwise) as its `PRIMARY` address,
    and a DNS name, `{instance}.{project}.us-central1.sql.cloudburrow.internal`. Each instance's
    CA is generated on the host the first time it is needed and kept, with its key, in
    `cloudsql-{instance}-server-ca.json` in the instance directory (mode 0600). It is never
    printed, and it stays the same across restarts, so a connector's cached copy stays valid.
 2. `generateEphemeralCert` signs the connector's public key with that CA, for one hour.
-3. The connector dials **`127.0.0.1:3307`** with TLS 1.3. A listener in the `cloudburrow` process
+3. The connector dials that address at **port `3307`** with TLS 1.3. A listener in the `cloudburrow` process
    picks the instance by the DNS name. It presents a certificate signed by the instance's CA,
    with `project:instance` as its CN, which is what the connector checks. It requires the client
    certificate that was issued for that project's instance, and then forwards the connection to
    the server.
 
-**Port 3307 is fixed.** It is a constant in every connector, not a setting, so `--port-base` does
-not move it. Only one CloudBurrow instance at a time can serve connectors. On a second instance,
-`connectSettings` and `generateEphemeralCert` answer 503 and say so, and the rest of the API
-still serves.
+#### Running two instances with the connectors
 
-Verified with `cloud.google.com/go/cloudsqlconn` on both servers. The Auth Proxy
-(`cloud-sql-proxy`) is built on the same connector, but no pinned proxy binary is tested yet.
-IAM database authentication (`WithIAMAuthN`, an `access_token` in `generateEphemeralCert`) is 501.
-Connecting to the server directly, as above, still works and needs none of this.
+**Port 3307 is fixed.** It is a constant in every connector (`serverProxyPort` in
+`cloud.google.com/go/cloudsqlconn`, and the same in the Java and Python connectors and the Auth
+Proxy), so `--port-base` does not move it. What Cloud SQL varies between instances is the
+address, and that is what a second CloudBurrow instance varies too (#1364):
+`--cloudsql-connector host:port` (`CLOUDBURROW_CLOUDSQL_CONNECTOR`, `cloudsqlConnector` in the
+file) is where the listener binds, and `connectSettings` reports its host. When it is set,
+`cloudburrow env` exports it as `CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT`.
+
+- **Linux: another loopback address, nothing else changes.** All of `127.0.0.0/8` is routed to
+  `lo` with no setup, so `--cloudsql-connector 127.0.0.2:3307` binds without root, and an
+  unmodified connector dials `127.0.0.2:3307`. This is as faithful as the first instance.
+- **macOS: another port, and a dialer in the application.** Only `127.0.0.1` exists on `lo0`;
+  adding `127.0.0.2` takes `sudo ifconfig lo0 alias 127.0.0.2`, which CloudBurrow does not ask
+  for (if you run it yourself, the Linux form works). So the second instance takes another port,
+  `--cloudsql-connector 127.0.0.1:23307`, and the application redirects the connector's dial,
+  which still goes to the reported address at 3307. The Go connector supports that with its own
+  documented option, `WithDialFunc`, and still runs the whole handshake itself:
+
+  ```go
+  listener := os.Getenv("CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT") // 127.0.0.1:23307
+  cloudsqlconn.WithDialFunc(func(ctx context.Context, network, _ string) (net.Conn, error) {
+      return (&net.Dialer{}).DialContext(ctx, network, listener)
+  })
+  ```
+
+  The Java and Python connectors and the Auth Proxy document no option that changes the port
+  they dial, so an application using them reaches only the instance on 3307: run it against
+  that instance, one at a time.
+
+The option that needs no root and changes nothing in the application is the loopback address, so
+that is the one to use where it exists. A port is the fallback where it does not, and it is not
+the default: an unmodified connector against a moved port would dial whichever instance holds
+3307 and fail its CA check. `TestCloudSQLConnectorDialsBothServers` redirects only when the
+instance's listener is on another port.
+
+An instance whose address is taken still starts, and the rest of the Admin API serves.
+`connectSettings` and `generateEphemeralCert` answer 503 naming the CloudBurrow instance that
+holds it (each listener records its instance name and PID in the user's temporary directory
+while it serves) and the setting that moves it.
+
+Verified with `cloud.google.com/go/cloudsqlconn` on both servers, and with Google's Auth Proxy
+(`cloud-sql-proxy` 2.19.0) in a pod, below. IAM database authentication (`WithIAMAuthN`, an
+`access_token` in `generateEphemeralCert`, users of type `CLOUD_IAM_USER` and the like) is 501: it
+signs a database user in as a Google identity, and CloudBurrow has no identities
+([ADR-0004](adr/0004-local-access-and-no-authentication.md)). Connecting to the server directly,
+as above, still works and needs none of this.
+
+### Cloud Run's Cloud SQL volume (#1346)
+
+A Cloud Run service or job that names an instance in a `cloudSqlInstance` volume gets what Cloud
+Run gives it: a Unix socket at `<mountPath>/<connection name>`, PostgreSQL's at
+`/cloudsql/<connection name>/.s.PGSQL.5432`. An application connects as it would on Cloud Run:
+
+```sh
+psql -h /cloudsql/$PROJECT:us-central1:postgres -U cloudburrow -d cloudburrow
+```
+
+```go
+Volumes: []*runpb.Volume{{Name: "cloudsql", VolumeType: &runpb.Volume_CloudSqlInstance{
+    CloudSqlInstance: &runpb.CloudSqlInstance{Instances: []string{project + ":us-central1:postgres"}}}}},
+// and on the container:
+VolumeMounts: []*runpb.VolumeMount{{Name: "cloudsql", MountPath: "/cloudsql"}},
+```
+
+It is done the way Google does it. Google's Cloud SQL Auth Proxy runs beside the container:
+`gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.19.0`, pinned by digest, which the kind node pulls
+like a backend's image (and `cloudburrow prefetch` stores for `--offline`). It runs with
+`--unix-socket /cloudsql`, `--sqladmin-api-endpoint` at this Admin API as pods reach it, and the
+connection names. The volume is an `emptyDir` it shares with the container. The proxy gets a
+token from the metadata server, as on Cloud Run, then calls `connectSettings` and
+`generateEphemeralCert` and dials port 3307 with TLS 1.3.
+
+A pod cannot reach the host's `127.0.0.1:3307`, so pods get their own connector listener. It
+runs on any free port, and the `cloudburrow-host` Service maps port 3307 to it. A
+`connectSettings` request that comes through `cloudburrow-host` names that Service's cluster IP
+as the `PRIMARY` address. The TLS server name and certificates do not change. So a Cloud SQL
+volume works even while another CloudBurrow instance holds the host's 3307.
+
+In a service the proxy is a second container. In a job's task it is a Kubernetes native sidecar,
+so the task completes when its container exits. The connection names must be
+`project:us-central1:postgres` or `project:us-central1:mysql`, of an enabled server. Anything
+else is `INVALID_ARGUMENT` when the service or job is written; with Cloud SQL off, it is
+`FAILED_PRECONDITION`. Worker pools and instances refuse the volume. The console's deploy, edit
+and job forms have a **Cloud SQL connections** field, which mounts the volume at `/cloudsql`, as
+`gcloud run deploy --add-cloudsql-instances` does.
+
+`gcloud run deploy --add-cloudsql-instances`, `--set-cloudsql-instances` and
+`--remove-cloudsql-instances` work too. gcloud writes Cloud Run v1's
+`run.googleapis.com/cloudsql-instances` annotation on the revision template, and that is the same
+volume: named `cloudsql`, mounted at `/cloudsql` in every container, with the same proxy beside
+it. `services describe` shows the annotation; the v2 API shows the volume, and the console's
+Cloud SQL connections field shows its instances.
+
+```sh
+gcloud run deploy web --image=$IMAGE --region=us-central1 \
+  --add-cloudsql-instances=$PROJECT:us-central1:postgres
+```
+
+MySQL's socket is `/cloudsql/<connection name>` itself:
+
+```sh
+mysql -S /cloudsql/$PROJECT:us-central1:mysql -u cloudburrow cloudburrow
+```
+
+Verified by `TestRunServiceCloudSQLVolume` and `TestRunJobCloudSQLVolume` (PostgreSQL),
+`TestRunServiceCloudSQLMySQLVolume` (MySQL) and `TestGcloudRunDeployCloudSQL` (gcloud and the v1
+annotation).
 
 ## 4. Authentication is trust, on purpose
 

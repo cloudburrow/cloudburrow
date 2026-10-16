@@ -136,6 +136,11 @@ func (s *Server) objectsCopy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	dstKey, err := copyKeys(r, src)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	pre, err := parseObjectPreconditions(q, "if")
 	if err != nil {
 		writeError(w, err)
@@ -143,7 +148,7 @@ func (s *Server) objectsCopy(w http.ResponseWriter, r *http.Request) {
 	}
 	o := src
 	fresh(&o)
-	o.Bucket, o.Name, o.StorageClass = dstB, dstO, ""
+	o.Bucket, o.Name, o.StorageClass, o.KeySHA256 = dstB, dstO, "", dstKey
 	if len(body) > 0 {
 		// A copy with a body takes its metadata from the body.
 		o.ContentType, o.ContentEncoding, o.ContentDisposition, o.ContentLanguage, o.CacheControl, o.Metadata = "", "", "", "", "", nil
@@ -174,7 +179,9 @@ type rewriteState struct {
 	Body      map[string]any `json:"body,omitempty"`
 	// StorageClass is what a rewrite exists to change; empty keeps the
 	// destination bucket's default.
-	StorageClass string    `json:"storageClass,omitempty"`
+	StorageClass string `json:"storageClass,omitempty"`
+	// DstKeySHA256 is the destination's customer-supplied key (csek.go).
+	DstKeySHA256 []byte    `json:"dstKeySha256,omitempty"`
 	Done         int64     `json:"done"`
 	Created      time.Time `json:"created"`
 	Used         bool      `json:"used"`
@@ -249,7 +256,13 @@ func (s *Server) objectsRewrite(w http.ResponseWriter, r *http.Request) {
 			writeError(w, err)
 			return
 		}
-		st = rewriteState{Token: newUploadID(), Source: src, DstBucket: dstB, DstName: dstO, Body: body, StorageClass: class, Created: s.now()}
+		dstKey, err := copyKeys(r, src)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		st = rewriteState{Token: newUploadID(), Source: src, DstBucket: dstB, DstName: dstO, Body: body, StorageClass: class,
+			DstKeySHA256: dstKey, Created: s.now()}
 	}
 	step := st.Source.Size - st.Done
 	if per > 0 && step > per {
@@ -274,7 +287,7 @@ func (s *Server) objectsRewrite(w http.ResponseWriter, r *http.Request) {
 	}
 	o := st.Source
 	fresh(&o)
-	o.Bucket, o.Name, o.StorageClass = st.DstBucket, st.DstName, st.StorageClass
+	o.Bucket, o.Name, o.StorageClass, o.KeySHA256 = st.DstBucket, st.DstName, st.StorageClass, st.DstKeySHA256
 	if len(st.Body) > 0 {
 		o.ContentType, o.ContentEncoding, o.ContentDisposition, o.ContentLanguage, o.CacheControl, o.Metadata = "", "", "", "", "", nil
 		if err := applyDestination(&o, st.Body); err != nil {
@@ -350,6 +363,11 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	key, err := parseCSEK(r.Header, csekHeader)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	var sources []objectRecord
 	components := 0
 	if err := s.meta.View(func(tx Tx) error {
@@ -368,6 +386,11 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 			}
 			if m := so.ObjectPreconditions.IfGenerationMatch; m != "" && m != strconv.FormatInt(o.Generation, 10) {
 				return preconditionFailed("At least one of the pre-conditions you specified did not hold.")
+			}
+			// Every source of a compose with a customer-supplied key is
+			// encrypted with that key, and so is the result.
+			if err := checkCSEK(o, key); err != nil {
+				return err
 			}
 			if len(sources) > 0 && o.StorageClass != sources[0].StorageClass {
 				return badRequest("The source objects of a compose must share a storage class")
@@ -407,7 +430,7 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 	// A composite object has no MD5 (composite-objects docs); its CRC32C is
 	// the components' combined, which is the CRC32C of the joined bytes.
 	o := objectRecord{Bucket: bucket, Name: name, Blob: blob.ID, Size: blob.Size, CRC32C: blob.CRC32C,
-		ComponentCount: components, StorageClass: sources[0].StorageClass}
+		ComponentCount: components, StorageClass: sources[0].StorageClass, KeySHA256: key}
 	if err := validObjectName(name); err != nil {
 		writeError(w, err)
 		return

@@ -489,6 +489,10 @@ jobs:
           curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
           echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/gcloud.tar.gz" -C "$RUNNER_TEMP" && rm "$RUNNER_TEMP/gcloud.tar.gz"
+          # The beta commands (gcloud beta run domain-mappings, #1349) need the
+          # beta component, installed here, at the release pinned above,
+          # rather than offered from dl.google.com mid-test.
+          "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" components install beta --quiet
           # No update check: it would reach Google from every fresh
           # configuration the tests create, and the egress guard fails that.
           printf '[component_manager]\ndisable_update_check = true\n' >> "$RUNNER_TEMP/google-cloud-sdk/properties"

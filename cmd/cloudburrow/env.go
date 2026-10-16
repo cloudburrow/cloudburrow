@@ -428,6 +428,12 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL", "http://" + sa + "/", "gcloud sql (databases, users, instances list and describe)"},
 			envVar{cliEndpointVar("sqladmin"), sa,
 				"the Cloud SQL Admin API, REST, plaintext; read by no client library: pass http://" + sa + "/ to option.WithEndpoint"})
+		// The connectors' listener, only when --cloudsql-connector moved it
+		// (#1364): at the default, 127.0.0.1:3307, no application needs it.
+		if cfg.CloudSQLConnector != "" {
+			vars = append(vars, envVar{"CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT", cfg.CloudSQLConnector,
+				"the Cloud SQL connectors' TLS listener; they dial port 3307 at the address connect.get reports, so only a dialer that redirects reads this"})
+		}
 	}
 
 	// Service Usage (#1352): gcloud services, and Terraform's

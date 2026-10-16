@@ -45,7 +45,7 @@ const (
 
 // renderExecution renders the batch/v1 Job for one execution of a job.
 func renderExecution(spec *runpb.Job, jobID, execID string, tt *runpb.TaskTemplate, taskCount int32,
-	namespace, instance string, secrets SecretResolver, runtime []injectedEnv) (string, error) {
+	namespace, instance string, secrets SecretResolver, runtime []injectedEnv, sql *CloudSQLConfig) (string, error) {
 	et := spec.GetTemplate()
 	execName := spec.GetName() + "/executions/" + execID
 	raw, err := protojson.Marshal(tt)
@@ -97,9 +97,15 @@ metadata:
 	// Then CloudBurrow's endpoints and project (#576), as a revision gets.
 	injected = append(injected, runtime...)
 	o := containerRender{project: projectOf(spec.GetName()), secrets: secrets, batch: true, injected: injected,
-		volumes: tt.GetVolumes()}
+		volumes: tt.GetVolumes(), cloudSQL: sql}
 	if err := renderVolumes(&b, tt.GetVolumes(), o); err != nil {
 		return "", err
+	}
+	// Cloud SQL's Auth Proxy, as native sidecars: started first, and not
+	// holding the task open once its container exits.
+	if len(cloudSQLVolumes(tt.GetVolumes())) > 0 {
+		b.WriteString("      initContainers:\n")
+		renderCloudSQLProxies(&b, tt.GetVolumes(), o, true)
 	}
 	b.WriteString("      containers:\n")
 	if err := renderContainers(&b, tt.GetContainers(), o); err != nil {

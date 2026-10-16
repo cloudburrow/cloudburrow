@@ -40,6 +40,7 @@ type krev struct {
 	Spec struct {
 		ContainerConcurrency int `json:"containerConcurrency"`
 		Containers           []struct {
+			Name  string `json:"name"`
 			Image string `json:"image"`
 			Env   []struct {
 				Name  string `json:"name"`
@@ -151,6 +152,9 @@ func FromKnativeRevision(r krev, serviceName string) *runpb.Revision {
 	// variables are left out here as they are from the service (#576).
 	injected := injectedNames(r.Metadata.Annotations)
 	for _, c := range r.Spec.Containers {
+		if isCloudSQLProxy(c.Name, c.Image) {
+			continue // the Cloud SQL volume's sidecar, not a caller's container
+		}
 		container := &runpb.Container{Image: c.Image}
 		for _, e := range c.Env {
 			if injected[e.Name] {

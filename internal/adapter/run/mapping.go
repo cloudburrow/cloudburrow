@@ -155,14 +155,14 @@ type SecretResolver interface {
 }
 
 func ToKnative(svc *runpb.Service, namespace, instance string, secrets SecretResolver) (string, error) {
-	return renderService(svc, namespace, instance, secrets, nil)
+	return renderService(svc, namespace, instance, secrets, nil, nil)
 }
 
 // renderService is ToKnative with the environment CloudBurrow injects into
 // every container (#576), after the caller's and never over a name the
 // caller set.
 func renderService(svc *runpb.Service, namespace, instance string, secrets SecretResolver,
-	injected []injectedEnv) (string, error) {
+	injected []injectedEnv, sql *CloudSQLConfig) (string, error) {
 	if err := Unsupported(svc); err != nil {
 		return "", err
 	}
@@ -220,6 +220,8 @@ metadata:
 	jsonAnnotation(&b, "        ", annSecretEnv, secretEnv, len(secretEnv) == 0)
 	record := injectedRecord(tmpl.GetContainers(), injected)
 	jsonAnnotation(&b, "        ", annInjectedEnv, record, len(record) == 0)
+	built := builtImagesOf(tmpl.GetContainers())
+	jsonAnnotation(&b, "        ", annBuiltImages, built, len(built) == 0)
 	if pc := podConfigAnnotation(tmpl); pc != "" {
 		fmt.Fprintf(&b, "        %s: %q\n", annPodConfig, pc)
 	}
@@ -246,14 +248,19 @@ metadata:
 	if t := tmpl.GetTimeout(); t != nil && t.GetSeconds() > 0 {
 		fmt.Fprintf(&b, "      timeoutSeconds: %d\n", t.GetSeconds())
 	}
-	o := containerRender{project: projectOf(svc.GetName()), secrets: secrets, injected: injected, volumes: tmpl.GetVolumes()}
+	o := containerRender{project: projectOf(svc.GetName()), secrets: secrets, injected: injected, volumes: tmpl.GetVolumes(),
+		cloudSQL: sql}
 	if err := renderVolumes(&b, tmpl.GetVolumes(), o); err != nil {
 		return "", err
 	}
 	b.WriteString("      containers:\n")
+	// With an Auth Proxy beside it, Knative needs the serving container
+	// to name its port; Cloud Run's default is 8080.
+	o.defaultPort = len(cloudSQLVolumes(tmpl.GetVolumes())) > 0
 	if err := renderContainers(&b, tmpl.GetContainers(), o); err != nil {
 		return "", err
 	}
+	renderCloudSQLProxies(&b, tmpl.GetVolumes(), o, false)
 	renderTraffic(&b, svc.GetTraffic())
 	return b.String(), nil
 }
@@ -273,6 +280,11 @@ type containerRender struct {
 	injected []injectedEnv
 	// volumes are the pod's, so a secret volume's mount is read-only.
 	volumes []*runpb.Volume
+	// cloudSQL serves Cloud SQL volumes; nil refuses them.
+	cloudSQL *CloudSQLConfig
+	// defaultPort gives a lone serving container Cloud Run's port 8080
+	// explicitly, as Knative requires once a sidecar is beside it.
+	defaultPort bool
 }
 
 // injectedEnv is one runtime-provided environment variable: a literal
@@ -337,6 +349,8 @@ func renderContainers(b *strings.Builder, containers []*runpb.Container, o conta
 			for _, p := range ports {
 				fmt.Fprintf(b, "            - containerPort: %d\n", p.GetContainerPort())
 			}
+		} else if o.defaultPort && len(containers) == 1 {
+			b.WriteString("          ports:\n            - containerPort: 8080\n")
 		}
 		if err := renderEnv(b, c.GetEnv(), o); err != nil {
 			return err
@@ -470,10 +484,17 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 	}
 
 	injected := injectedNames(tann)
+	built := map[string]string{}
+	readJSONAnnotation(tann, annBuiltImages, &built)
 	for _, c := range k.Spec.Template.Spec.Containers {
+		if isCloudSQLProxy(c.Name, c.Image) {
+			continue // the Cloud SQL volume's sidecar, not a caller's container
+		}
 		image := c.Image
-		if uri, ok := localBuilds.original(image); ok {
-			image = uri // built by SubmitBuild: read back as the image_uri deployed
+		if uri, ok := built[image]; ok {
+			image = uri // built locally: read back as the reference deployed
+		} else if uri, ok := localBuilds.original(image); ok {
+			image = uri // a service rendered before annBuiltImages
 		}
 		container := &runpb.Container{Image: image, WorkingDir: c.WorkingDir,
 			StartupProbe: c.StartupProbe.toProbe(), LivenessProbe: c.LivenessProbe.toProbe(),

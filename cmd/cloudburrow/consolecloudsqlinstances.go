@@ -115,6 +115,26 @@ func pitrConfig(bc *sqladminapi.BackupConfiguration, version string, on bool) {
 	bc.ForceSendFields = append(bc.ForceSendFields, "PointInTimeRecoveryEnabled")
 }
 
+// retentionConfig sets bc's retained backups and transaction log days
+// from the Edit form; an empty field leaves the setting out.
+func retentionConfig(bc *sqladminapi.BackupConfiguration, retained, days string) error {
+	if retained = strings.TrimSpace(retained); retained != "" {
+		n, err := strconv.ParseInt(retained, 10, 64)
+		if err != nil {
+			return fmt.Errorf("retained automated backups: %q is not a number", retained)
+		}
+		bc.BackupRetentionSettings = &sqladminapi.BackupRetentionSettings{RetentionUnit: "COUNT", RetainedBackups: n}
+	}
+	if days = strings.TrimSpace(days); days != "" {
+		n, err := strconv.ParseInt(days, 10, 64)
+		if err != nil {
+			return fmt.Errorf("transaction log retention: %q is not a number", days)
+		}
+		bc.TransactionLogRetentionDays = n
+	}
+	return nil
+}
+
 func pitrOn(st *sqladminapi.Settings) bool {
 	return st != nil && st.BackupConfiguration != nil &&
 		(st.BackupConfiguration.PointInTimeRecoveryEnabled || st.BackupConfiguration.BinaryLogEnabled)
@@ -211,6 +231,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		st = &sqladminapi.Settings{}
 	}
 	protect, backups, start := "Off", "Off", ""
+	logDays, retained := "", ""
 	if st.DeletionProtectionEnabled {
 		protect = "On"
 	}
@@ -219,6 +240,12 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 			backups = "On"
 		}
 		start = bc.StartTime
+		if bc.TransactionLogRetentionDays > 0 {
+			logDays = strconv.FormatInt(bc.TransactionLogRetentionDays, 10)
+		}
+		if rs := bc.BackupRetentionSettings; rs != nil && rs.RetainedBackups > 0 {
+			retained = strconv.FormatInt(rs.RetainedBackups, 10)
+		}
 	}
 	pitr, earliest, latest := "Off", "", ""
 	if pitrOn(st) {
@@ -234,7 +261,8 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		{Label: "Version", Value: in.DatabaseVersion}, {Label: "Tier", Value: st.Tier},
 		{Label: "Labels", Value: formatPairs(st.UserLabels)}, {Label: "Database flags", Value: formatFlags(st.DatabaseFlags)},
 		{Label: "Deletion protection", Value: protect}, {Label: "Automated backups", Value: backups},
-		{Label: "Backup start time (UTC)", Value: start}, {Label: "Point-in-time recovery", Value: pitr},
+		{Label: "Backup start time (UTC)", Value: start}, {Label: "Retained automated backups", Value: retained},
+		{Label: "Point-in-time recovery", Value: pitr}, {Label: "Transaction log retention (days)", Value: logDays},
 		{Label: "Earliest recovery time", Value: earliest}, {Label: "Latest recovery time", Value: latest},
 		{Label: "Instance type", Value: in.InstanceType}, {Label: "Primary instance", Value: in.MasterInstanceName},
 		{Label: "Read replicas", Value: strings.Join(in.ReplicaNames, ", ")},
@@ -281,6 +309,10 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 			{Name: "backupStartTime", Label: "Backup start time (UTC, HH:MM)", Type: "text", Default: start, Pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
 			{Name: "pitr", Label: "Point-in-time recovery", Type: "checkbox", Default: strconv.FormatBool(pitr == "On"),
 				Help: "PostgreSQL's server restarts to archive its WAL; recovery reaches back to the first base taken after it is on."},
+			{Name: "retainedBackups", Label: "Retained automated backups", Type: "number", Default: retained,
+				Help: "1 to 365; older automated backups are deleted."},
+			{Name: "logRetentionDays", Label: "Transaction log retention (days)", Type: "number", Default: logDays,
+				Help: "1 to 7 (35 on Enterprise Plus); older log and bases are dropped, and the earliest recovery time moves with them."},
 		}, Note: "The database version and the instance ID cannot be changed."}
 	}
 	return d, nil
@@ -357,6 +389,9 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 		return sqlAPIError(err)
 	}
 	pitrConfig(st.BackupConfiguration, in.DatabaseVersion, v["pitr"] == "true")
+	if err := retentionConfig(st.BackupConfiguration, v["retainedBackups"], v["logRetentionDays"]); err != nil {
+		return err
+	}
 	if _, err := svc.Instances.Patch(project, path[0], &sqladminapi.DatabaseInstance{Settings: st}).Context(ctx).Do(); err != nil {
 		return sqlAPIError(err)
 	}

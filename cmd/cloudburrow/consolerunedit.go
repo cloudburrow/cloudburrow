@@ -106,6 +106,16 @@ func (p runProvider) revisionTemplate(ctx context.Context, service, revision str
 // spaces, so `sh -c "echo hi"` would come back as four arguments and deploy a
 // different command from the one that was serving.
 func runEditForm(service string, tmpl knTemplate, source string) *console.EditForm {
+	// The Cloud SQL Auth Proxy a Cloud SQL volume runs beside the container
+	// (#1346) is not one of the service's containers: the Cloud SQL
+	// connections field describes it.
+	own := tmpl.Spec.Containers[:0:0]
+	for _, c := range tmpl.Spec.Containers {
+		if c.Image != runadapter.CloudSQLProxyImage {
+			own = append(own, c)
+		}
+	}
+	tmpl.Spec.Containers = own
 	if len(tmpl.Spec.Containers) != 1 {
 		return nil
 	}
@@ -164,22 +174,23 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 	pod := runadapter.ReadPodConfig(tmpl.Metadata.Annotations, 1)
 	secretFiles, memoryVolumes := runVolumeDefaults(pod.GetVolumes(), pod.GetContainers()[0].GetVolumeMounts())
 	defaults := map[string]string{
-		"serviceAccount": pod.GetServiceAccount(),
-		"secretFiles":    secretFiles,
-		"memoryVolumes":  memoryVolumes,
-		"name":           service,
-		"image":          c.Image,
-		"port":           port,
-		"command":        strings.Join(c.Command, " "),
-		"args":           strings.Join(c.Args, " "),
-		"env":            console.FormatMap(plain),
-		"secretEnv":      console.FormatMap(secret),
-		"cpu":            c.Resources.Limits["cpu"],
-		"memory":         c.Resources.Limits["memory"],
-		"minInstances":   tmpl.Metadata.Annotations["autoscaling.knative.dev/min-scale"],
-		"maxInstances":   tmpl.Metadata.Annotations["autoscaling.knative.dev/max-scale"],
-		"concurrency":    positive(tmpl.Spec.ContainerConcurrency),
-		"timeout":        positive(tmpl.Spec.TimeoutSeconds),
+		"serviceAccount":    pod.GetServiceAccount(),
+		"secretFiles":       secretFiles,
+		"memoryVolumes":     memoryVolumes,
+		"cloudSqlInstances": runCloudSQLDefault(pod.GetVolumes()),
+		"name":              service,
+		"image":             c.Image,
+		"port":              port,
+		"command":           strings.Join(c.Command, " "),
+		"args":              strings.Join(c.Args, " "),
+		"env":               console.FormatMap(plain),
+		"secretEnv":         console.FormatMap(secret),
+		"cpu":               c.Resources.Limits["cpu"],
+		"memory":            c.Resources.Limits["memory"],
+		"minInstances":      tmpl.Metadata.Annotations["autoscaling.knative.dev/min-scale"],
+		"maxInstances":      tmpl.Metadata.Annotations["autoscaling.knative.dev/max-scale"],
+		"concurrency":       positive(tmpl.Spec.ContainerConcurrency),
+		"timeout":           positive(tmpl.Spec.TimeoutSeconds),
 	}
 	for k, v := range runSettingsDefaults(pod.GetExecutionEnvironment(), pod.GetVpcAccess(), pod.GetEncryptionKey(), pod.GetSessionAffinity()) {
 		defaults[k] = v

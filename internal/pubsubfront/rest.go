@@ -87,6 +87,11 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		// itself and undoes it.
 		r.Header.Del("Accept-Encoding")
 	}
+	if name, verb, ok := iamPath(r.URL.Path); ok {
+		// The emulator serves no IAM; the front stores policies (iam.go).
+		f.serveRESTIAM(w, r, name, verb)
+		return
+	}
 	if name, verb, ok := topicPath(r.URL.Path); ok {
 		f.serveTopic(w, r, name, verb, next)
 		return
@@ -256,6 +261,14 @@ func httpStatus(c codes.Code) int {
 		return http.StatusNotFound
 	case codes.Unavailable:
 		return http.StatusServiceUnavailable
+	case codes.FailedPrecondition, codes.OutOfRange:
+		return http.StatusBadRequest
+	case codes.AlreadyExists, codes.Aborted:
+		return http.StatusConflict
+	case codes.PermissionDenied:
+		return http.StatusForbidden
+	case codes.Unimplemented:
+		return http.StatusNotImplemented
 	}
 	return http.StatusInternalServerError
 }

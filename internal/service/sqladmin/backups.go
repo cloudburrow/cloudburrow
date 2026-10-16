@@ -322,6 +322,14 @@ func (s *Server) takeBackup(base, project string, e Engine, typ, description str
 	t := s.target(e)
 	go func() {
 		err := s.dump(t, run.ID)
+		if err == nil {
+			// The base a point-in-time recovery starts from is part of
+			// the backup: when it fails, so does the backup.
+			if err = s.takePITRBase(e.Instance()); err != nil {
+				err = fmt.Errorf("the point-in-time recovery base: %w", err)
+				_ = os.RemoveAll(b.runDir(run.ID))
+			}
+		}
 		b.mu.Lock()
 		run.EndTime = time.Now().UTC().Format(time.RFC3339Nano)
 		run.Status = "SUCCESSFUL"
@@ -330,9 +338,6 @@ func (s *Server) takeBackup(base, project string, e Engine, typ, description str
 		}
 		_ = b.saveLocked()
 		b.mu.Unlock()
-		if err == nil {
-			err = s.takePITRBase(e.Instance())
-		}
 		if err == nil && typ == "AUTOMATED" {
 			s.pruneAutomated(project, e.Instance())
 		}
@@ -634,6 +639,7 @@ func (s *Server) automate(stop <-chan struct{}) {
 			return
 		case now := <-t.C:
 			s.automatedTick(now.UTC())
+			s.sweepRetention()
 		}
 	}
 }

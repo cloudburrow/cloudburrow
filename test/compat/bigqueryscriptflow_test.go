@@ -53,6 +53,9 @@ func scriptRows(ctx context.Context, c *bigquery.Client, sql string, insert bool
 // out itself. The answer is the last statement's result, through
 // jobs.query and as a query job. Expected values follow BigQuery's
 // procedural-language reference.
+// Each construct is a subtest of its own.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.get, bigquery.jobs.getQueryResults
 func TestBigQueryScriptControlFlow(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -102,16 +105,18 @@ func TestBigQueryScriptControlFlow(t *testing.T) {
 			[][]bigquery.Value{{int64(1)}}},
 	}
 	for _, cs := range cases {
-		for _, insert := range []bool{false, true} {
-			got, err := scriptRows(ctx, c, cs.sql, insert)
-			if err != nil {
-				t.Errorf("%s (insert %v): %v", cs.name, insert, err)
-				continue
+		t.Run(cs.name, func(t *testing.T) {
+			for _, insert := range []bool{false, true} {
+				got, err := scriptRows(ctx, c, cs.sql, insert)
+				if err != nil {
+					t.Errorf("%s (insert %v): %v", cs.name, insert, err)
+					continue
+				}
+				if !reflect.DeepEqual(got, cs.want) {
+					t.Errorf("%s (insert %v): %v, want %v", cs.name, insert, got, cs.want)
+				}
 			}
-			if !reflect.DeepEqual(got, cs.want) {
-				t.Errorf("%s (insert %v): %v, want %v", cs.name, insert, got, cs.want)
-			}
-		}
+		})
 	}
 
 	// A failure no handler catches ends the script with its error; what

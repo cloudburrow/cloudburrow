@@ -143,3 +143,25 @@ func TestSubmitBuildRefusals(t *testing.T) {
 		t.Errorf("without storage: %v", err)
 	}
 }
+
+// A build is recorded under its tag and its digest; the fallback lookup
+// must answer the same every time (Go's map order varies), and a service's
+// own record keeps whichever reference was deployed.
+func TestBuiltImageReadsBackAsDeployed(t *testing.T) {
+	const uri = "us-central1-docker.pkg.dev/p/cloud-run-source-deploy/unit-readback"
+	const local = "dev.local/" + uri + ":latest"
+	digest := untagged(uri) + "@sha256:" + strings.Repeat("ab", 32)
+	localBuilds.record(uri, local)
+	localBuilds.record(digest, local)
+	for i := 0; i < 50; i++ {
+		if got, ok := localBuilds.original(local); !ok || got != uri+":latest" {
+			t.Fatalf("original = %q, %v; want the tag every time", got, ok)
+		}
+	}
+	for _, deployed := range []string{uri + ":latest", digest} {
+		got := builtImagesOf([]*runpb.Container{{Image: deployed}})
+		if got[local] != deployed {
+			t.Errorf("builtImagesOf(%q) = %v; want %s recorded for %s", deployed, got, deployed, local)
+		}
+	}
+}

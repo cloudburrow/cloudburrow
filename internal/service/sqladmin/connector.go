@@ -43,12 +43,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 // ConnectorPort is the port the connectors dial. It is a constant in every
 // connector (serverProxyPort in cloud.google.com/go/cloudsqlconn), not a
-// setting, so it cannot be moved by --port-base.
+// setting, so it cannot be moved by --port-base. What a second instance
+// changes is the address (--cloudsql-connector, #1364): connect.get reports
+// the listener's host, and the connector dials it at this port.
 const ConnectorPort = 3307
 
 // dnsSuffix is the domain of the DNS names connectSettings returns:
@@ -151,7 +154,12 @@ func serial() *big.Int {
 // connector is the TLS listener on 3307 and the instances' CAs.
 type connector struct {
 	addr string
-	cas  map[string]*serverCA // by instance
+	// owner is the CloudBurrow instance serving it, recorded beside the
+	// listener so a second instance that cannot bind the address can say
+	// which one holds it (#1364). Empty records nothing.
+	owner  string
+	record string               // the holder record this listener wrote, "" for none
+	cas    map[string]*serverCA // by instance
 
 	ln net.Listener
 	// unavailable says why the listener is not serving, empty when it is.
@@ -164,6 +172,13 @@ type connector struct {
 	// created and deleted through the API change (#1330).
 	dir  string
 	camu sync.RWMutex
+	// Pods (#1346) have a listener of their own, podLn, on podAddr: a Cloud
+	// SQL Auth Proxy in a pod always dials port 3307, which the cluster
+	// maps to it, so it serves even while another instance on this
+	// machine holds 3307. podHost is the address pods dial, or nil.
+	podAddr string
+	podLn   net.Listener
+	podHost func() string
 }
 
 func caPath(dir, instance string) string {
@@ -212,6 +227,37 @@ func (c *connector) removeInstance(instance string) {
 	c.mu.Unlock()
 }
 
+// ConnectorAddr is the address of the listener pods are published to, or ""
+// when it is not serving.
+func (s *Server) ConnectorAddr() string {
+	if s.conn == nil || s.conn.podLn == nil {
+		return ""
+	}
+	return s.conn.podLn.Addr().String()
+}
+
+// ServeConnectorToPods publishes the connector to pods (#1346), before
+// Start: a second listener on addr (host:0 for any port), and host, the
+// address pods dial port 3307 at, which the cluster forwards to it. A
+// connectSettings request that came through the cluster name pods use
+// (hostguard.ClusterHostService) is answered with host, so the proxy dials
+// that rather than its own loopback. TLS is unchanged: the server name is
+// still the instance's DNS name.
+func (s *Server) ServeConnectorToPods(addr string, host func() string) {
+	if s.conn != nil {
+		s.conn.podAddr, s.conn.podHost = addr, host
+	}
+}
+
+// fromPod reports whether r came through the cluster name pods use.
+func fromPod(r *http.Request) bool {
+	h := r.Host
+	if hh, _, err := net.SplitHostPort(h); err == nil {
+		h = hh
+	}
+	return h == "cloudburrow-host" || strings.HasPrefix(h, "cloudburrow-host.")
+}
+
 // EnableConnector serves the connector path: connectSettings and
 // generateEphemeralCert, and the TLS listener at addr (host:3307) they
 // point at. Each instance's CA is kept in dir.
@@ -230,34 +276,119 @@ func (s *Server) EnableConnector(addr, dir string) error {
 	return nil
 }
 
+// SetConnectorOwner names the CloudBurrow instance serving the connector
+// listener, so another instance that finds the address taken can say which
+// one holds it. Call it after EnableConnector and before Start.
+func (s *Server) SetConnectorOwner(instance string) {
+	if s.conn != nil {
+		s.conn.owner = instance
+	}
+}
+
+// holder is what a listener records about itself, so the next instance to
+// try its address can name it.
+type holder struct {
+	Instance string `json:"instance"`
+	PID      int    `json:"pid"`
+}
+
+// holderPath is the record for addr, in the user's temporary directory,
+// which every instance this user runs shares whatever its --state-dir.
+func holderPath(addr string) string {
+	r := strings.NewReplacer(":", "_", "[", "", "]", "", "/", "_")
+	return filepath.Join(os.TempDir(), "cloudburrow-cloudsql-connector-"+r.Replace(addr)+".json")
+}
+
+// heldBy says which CloudBurrow instance holds addr, from its record, or
+// "" when no running instance recorded it.
+func heldBy(addr string) string {
+	b, err := os.ReadFile(holderPath(addr))
+	if err != nil {
+		return ""
+	}
+	var h holder
+	if json.Unmarshal(b, &h) != nil || h.Instance == "" || !processAlive(h.PID) {
+		return ""
+	}
+	return fmt.Sprintf("CloudBurrow instance %q (pid %d)", h.Instance, h.PID)
+}
+
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = p.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, os.ErrPermission)
+}
+
+// bindError is why the listener could not bind, naming the instance that
+// holds the address when one recorded it, and the setting that moves it.
+func bindError(addr string, err error) string {
+	who := heldBy(addr)
+	if who == "" {
+		who = "another process (no running CloudBurrow instance recorded it)"
+	}
+	return fmt.Sprintf("the connector listener could not bind %s (%v): %s holds it. "+
+		"The Cloud SQL connectors dial port %d at the address connect.get reports, so start this "+
+		"instance with another --cloudsql-connector: another loopback address on Linux (127.0.0.2:%d), "+
+		"or on macOS another port, which the application's dialer must redirect to (docs/cloudsql.md)",
+		addr, err, who, ConnectorPort, ConnectorPort)
+}
+
 // start binds the listener. A port already in use is not fatal: the rest of
 // the Admin API still serves, and the connector methods say why they cannot.
 func (c *connector) start(s *Server) {
+	if len(c.cas) == 0 {
+		return
+	}
+	if c.podAddr != "" {
+		if ln, err := net.Listen("tcp", c.podAddr); err == nil {
+			c.podLn = ln
+			go c.accept(s, ln)
+		}
+	}
 	if c.unavailable != "" {
 		return
 	}
 	ln, err := net.Listen("tcp", c.addr)
 	if err != nil {
-		c.unavailable = fmt.Sprintf("the connector listener could not bind %s (%v); "+
-			"the Cloud SQL connectors always dial port %d, so only one CloudBurrow instance at a time can serve them",
-			c.addr, err, ConnectorPort)
+		c.unavailable = bindError(c.addr, err)
 		return
 	}
 	c.ln = ln
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go c.serve(s, conn)
+	if c.owner != "" {
+		b, _ := json.Marshal(holder{Instance: c.owner, PID: os.Getpid()})
+		if os.WriteFile(holderPath(ln.Addr().String()), b, 0o600) == nil {
+			c.record = holderPath(ln.Addr().String())
 		}
-	}()
+	}
+	go c.accept(s, ln)
+}
+
+func (c *connector) accept(s *Server, ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go c.serve(s, conn)
+	}
 }
 
 func (c *connector) stop() {
 	if c.ln != nil {
 		_ = c.ln.Close()
+	}
+	if c.podLn != nil {
+		_ = c.podLn.Close()
+	}
+	if c.record != "" {
+		_ = os.Remove(c.record)
+		c.record = ""
 	}
 }
 
@@ -376,9 +507,12 @@ func closeWrite(c net.Conn) {
 	}
 }
 
-func (s *Server) connectorReady() error {
+func (s *Server) connectorReady(r *http.Request) error {
 	if s.conn == nil {
 		return unimplemented("the connector path", "this server was started without its connector listener")
+	}
+	if s.conn.podLn != nil && s.conn.podHost != nil && s.conn.podHost() != "" && fromPod(r) {
+		return nil
 	}
 	if s.conn.unavailable != "" {
 		return Errorf(http.StatusServiceUnavailable, "%s", s.conn.unavailable)
@@ -399,13 +533,18 @@ func sslCertJSON(project, instance string, cert *x509.Certificate, certPEM strin
 }
 
 // connectSettings is connect.get.
-func (s *Server) connectSettings(project string, e Engine) (any, error) {
-	if err := s.connectorReady(); err != nil {
+func (s *Server) connectSettings(r *http.Request, project string, e Engine) (any, error) {
+	if err := s.connectorReady(r); err != nil {
 		return nil, err
 	}
 	host, _, _ := net.SplitHostPort(s.conn.addr)
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
+	}
+	if s.conn.podLn != nil && s.conn.podHost != nil && fromPod(r) {
+		if h := s.conn.podHost(); h != "" {
+			host = h
+		}
 	}
 	ca := s.conn.ca(e.Instance())
 	if ca == nil {
@@ -426,8 +565,13 @@ func (s *Server) connectSettings(project string, e Engine) (any, error) {
 
 // generateEphemeralCert is connect.generateEphemeralCert: it signs the
 // request's public key with the instance's CA, for one hour.
+// iamWhy is why IAM database authentication is not served: it signs a
+// database user in as a Google identity, and CloudBurrow has none (ADR-0004).
+const iamWhy = "IAM database authentication signs in as a Google identity, and CloudBurrow has no identities: " +
+	"every local caller is trusted (docs/adr/0004-local-access-and-no-authentication.md)"
+
 func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine) (any, error) {
-	if err := s.connectorReady(); err != nil {
+	if err := s.connectorReady(r); err != nil {
 		return nil, err
 	}
 	var req struct {
@@ -442,7 +586,7 @@ func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine
 	}
 	if req.AccessToken != "" || req.AccessToken2 != "" {
 		return nil, unimplemented("IAM database authentication (an access_token in generateEphemeralCert)",
-			"it needs Google's IAM; connect as a built-in user without WithIAMAuthN (docs/cloudsql.md)")
+			iamWhy+"; connect as a built-in user without WithIAMAuthN (docs/cloudsql.md)")
 	}
 	pk := req.PublicKey
 	if pk == "" {
@@ -483,4 +627,13 @@ func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine
 	cert, _ := x509.ParseCertificate(der)
 	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 	return map[string]any{"ephemeralCert": sslCertJSON(project, e.Instance(), cert, certPEM)}, nil
+}
+
+// Instances are the instance IDs served, in every project.
+func (s *Server) Instances() []string {
+	out := make([]string, 0, len(s.engines))
+	for _, e := range s.engines {
+		out = append(out, e.Instance())
+	}
+	return out
 }

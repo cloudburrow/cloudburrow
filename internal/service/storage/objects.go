@@ -60,6 +60,9 @@ type objectRecord struct {
 	// ACL is stored and never enforced (#1233); nil reads as the bucket's
 	// default object ACL (acl.go).
 	ACL []aclEntry `json:"acl"`
+	// KeySHA256 is the SHA-256 of the customer-supplied key the object is
+	// encrypted with (csek.go); nil means none.
+	KeySHA256 []byte `json:"keySha256,omitempty"`
 }
 
 func objectKey(bucket, name string) string { return objectPrefix + bucket + "/" + name }
@@ -153,8 +156,16 @@ func (s *Server) objectJSONWith(r *http.Request, o objectRecord, b bucketRecord)
 	if !o.CustomTime.IsZero() {
 		out["customTime"] = o.CustomTime.UTC().Format(time.RFC3339Nano)
 	}
-	// A composite object has no MD5 (#495).
-	if len(o.MD5) > 0 {
+	// A composite object has no MD5 (#495). An object encrypted with a
+	// customer-supplied key shows its checksums only to a request with the
+	// key (customer-supplied-keys docs).
+	if o.KeySHA256 != nil {
+		out["customerEncryption"] = csekJSON(o)
+		if !requestOpens(r, o) {
+			delete(out, "crc32c")
+		}
+	}
+	if len(o.MD5) > 0 && requestOpens(r, o) {
 		out["md5Hash"] = base64.StdEncoding.EncodeToString(o.MD5)
 	}
 	if o.ComponentCount > 0 {
@@ -254,6 +265,9 @@ type uploadMeta struct {
 	// predefinedAcl (#1233); both persist with a resumable session.
 	ACL           json.RawMessage `json:"acl,omitempty"`
 	PredefinedACL string          `json:"predefinedAcl,omitempty"`
+	// KeySHA256 is the request's customer-supplied key (csek.go), which
+	// persists with a resumable session; it is never read from the body.
+	KeySHA256 []byte `json:"keySha256,omitempty"`
 	// protection is the body's holds and retention, for applyProtection.
 	protection map[string]any
 }
@@ -272,7 +286,7 @@ var uploadFields = map[string]string{
 	"acl":          "kept", "owner": "output",
 	"temporaryHold": "kept", "eventBasedHold": "kept", "retention": "kept", "retentionExpirationTime": "output",
 	"customTime": "kept", "kmsKeyName": "customer-managed keys are not implemented",
-	"customerEncryption": "customer-supplied keys are not implemented", "contexts": "#492",
+	"customerEncryption": "output", "contexts": "object contexts are not implemented",
 }
 
 func parseUploadMeta(raw []byte) (uploadMeta, error) {
@@ -297,6 +311,7 @@ func parseUploadMeta(raw []byte) (uploadMeta, error) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return m, badRequest("Invalid argument: %v", err)
 	}
+	m.KeySHA256 = nil
 	m.protection = map[string]any{}
 	for _, k := range []string{"temporaryHold", "eventBasedHold", "retention"} {
 		if v, ok := generic[k]; ok {
@@ -435,6 +450,10 @@ func (s *Server) objectsInsertUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	meta.PredefinedACL = q.Get("predefinedAcl")
+	if meta.KeySHA256, err = parseCSEK(r.Header, csekHeader); err != nil {
+		writeError(w, err)
+		return
+	}
 	wantMD5, wantCRC, err := expectedHashes(r, meta)
 	if err != nil {
 		writeError(w, err)
@@ -489,7 +508,7 @@ func (s *Server) finalizeObject(bucket string, meta uploadMeta, blob Blob, pre o
 		Blob: blob.ID, Size: blob.Size, MD5: blob.MD5, CRC32C: blob.CRC32C,
 		ContentType: meta.ContentType, ContentEncoding: meta.ContentEncoding, ContentDisposition: meta.ContentDisposition,
 		ContentLanguage: meta.ContentLanguage, CacheControl: meta.CacheControl, Metadata: meta.Metadata,
-		StorageClass: class, Created: now, Updated: now}
+		StorageClass: class, Created: now, Updated: now, KeySHA256: meta.KeySHA256}
 	if o.ContentType == "" {
 		o.ContentType = "application/octet-stream"
 	}
@@ -576,7 +595,10 @@ func (s *Server) lookupObject(r *http.Request, bucket, name string, read bool) (
 		if err := pre.check(o, true, read); err != nil {
 			return err
 		}
-		return headerPreconditions(r, o)
+		if err := headerPreconditions(r, o); err != nil {
+			return err
+		}
+		return checkReadKey(r, o)
 	})
 	return o, err
 }
@@ -693,6 +715,7 @@ func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request, o objectReco
 	if o.ContentEncoding != "" {
 		h.Set("Content-Encoding", o.ContentEncoding)
 	}
+	csekResponseHeaders(h, o)
 	hash := "crc32c=" + crcBase64(o.CRC32C)
 	if len(o.MD5) > 0 {
 		hash += ",md5=" + base64.StdEncoding.EncodeToString(o.MD5)

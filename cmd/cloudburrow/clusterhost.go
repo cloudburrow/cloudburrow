@@ -18,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 	"github.com/cloudburrow/cloudburrow/internal/images"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
 // ClusterHostService is the cluster name pods use for the services this
@@ -65,6 +66,21 @@ type clusterHost struct {
 	mode    string
 	ports   map[string]int
 	relays  []*hostrelay.Relay
+	// clusterIP is the Service's, which a Cloud SQL Auth Proxy dials (#1346).
+	clusterIP string
+}
+
+// clusterServicePort is the Service port of a published service whose
+// clients dial a fixed port, where it differs from the bound one: the
+// Cloud SQL connectors always dial 3307 (#1346), and the pods' connector
+// listener is on a port of its own.
+var clusterServicePort = map[string]int{"cloudsql-connector": sqladmin.ConnectorPort}
+
+func servicePort(name string, port int) int {
+	if p, ok := clusterServicePort[name]; ok {
+		return p
+	}
+	return port
 }
 
 func newClusterHost(cfg config.Config, out io.Writer, services func() map[string]string) *clusterHost {
@@ -86,7 +102,28 @@ func (h *clusterHost) InCluster(service string) string {
 	if !ok {
 		return ""
 	}
-	return fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, h.cfg.Cluster.Namespace, port)
+	return fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, h.cfg.Cluster.Namespace, servicePort(service, port))
+}
+
+// ClusterIP is the cloudburrow-host Service's cluster IP, or "" before
+// Start or when it could not be read.
+func (h *clusterHost) ClusterIP() string {
+	if h == nil {
+		return ""
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.clusterIP
+}
+
+// Address is the address pods reach this machine at, or "" before Start.
+func (h *clusterHost) Address() string {
+	if h == nil {
+		return ""
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.address
 }
 
 // InClusterAll is every published service's in-cluster address.
@@ -195,12 +232,21 @@ func (h *clusterHost) Start(ctx context.Context) error {
 		stop()
 		return fmt.Errorf("apply the %s Service: %w", ClusterHostService, err)
 	}
+	// Read back for the Cloud SQL connector's address (#1346); a failure
+	// leaves Cloud SQL volumes refused, and nothing else.
+	clusterIP := ""
+	if _, ok := ports["cloudsql-connector"]; ok {
+		if out, err := kube.Do(ctx, "", "get", "service", ClusterHostService, "-n", h.cfg.Cluster.Namespace,
+			"-o", "jsonpath={.spec.clusterIP}"); err == nil && net.ParseIP(strings.TrimSpace(out)) != nil {
+			clusterIP = strings.TrimSpace(out)
+		}
+	}
 	mode := "host.docker.internal"
 	if relay {
 		mode = "a relay on the kind network gateway"
 	}
 	h.mu.Lock()
-	h.address, h.mode, h.ports, h.relays = address, mode, ports, relays
+	h.address, h.mode, h.ports, h.relays, h.clusterIP = address, mode, ports, relays, clusterIP
 	h.mu.Unlock()
 	names := make([]string, 0, len(ports))
 	for n := range ports {
@@ -233,7 +279,7 @@ func clusterHostManifest(namespace, instance, address string, ports map[string]i
 	sort.Strings(names)
 	var svc, eps strings.Builder
 	for _, n := range names {
-		fmt.Fprintf(&svc, "    - name: %s\n      port: %d\n      targetPort: %d\n      protocol: TCP\n", n, ports[n], ports[n])
+		fmt.Fprintf(&svc, "    - name: %s\n      port: %d\n      targetPort: %d\n      protocol: TCP\n", n, servicePort(n, ports[n]), ports[n])
 		fmt.Fprintf(&eps, "  - name: %s\n    port: %d\n    protocol: TCP\n", n, ports[n])
 	}
 	return fmt.Sprintf(`apiVersion: v1
