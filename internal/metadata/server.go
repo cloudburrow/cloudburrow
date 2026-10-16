@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,12 +39,28 @@ const FlavorValue = "Google"
 // they would against Google, rather than refreshing constantly or never.
 const TokenTTL = time.Hour
 
+// AccountHostPrefix begins the first label of a workload's metadata host
+// (#1388). Cloud Run tells each workload its own service account; here a
+// Cloud Run service, job or worker pool reaches this server under a name of
+// its account's, cloudburrow-sa-<hash>.<namespace>.svc.cluster.local: an
+// ExternalName Service the Cloud Run adapter creates, which resolves to
+// cloudburrow-host. The name the client dialed arrives as Host, and says
+// which account to name.
+const AccountHostPrefix = "cloudburrow-sa-"
+
+// AccountResolver names the service account a workload host's first label
+// stands for, or reports false for a label it never issued.
+type AccountResolver func(label string) (email string, ok bool)
+
 // Server is the local GCE metadata server.
 type Server struct {
 	creds   *Credentials
 	project string
 	port    int
 	host    string
+	// accounts resolves a workload's metadata host to its account; nil
+	// names the instance's own account to everyone.
+	accounts AccountResolver
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -59,7 +76,49 @@ func NewServer(creds *Credentials, project, host string, port int) *Server {
 	return &Server{creds: creds, project: project, host: host, port: port}
 }
 
+// WithAccounts makes the server name, to a workload that reaches it under
+// a cloudburrow-sa- host, the account that host stands for (#1388). It is
+// set before Start.
+func (s *Server) WithAccounts(r AccountResolver) *Server {
+	s.accounts = r
+	return s
+}
+
 func (s *Server) Name() string { return "metadata" }
+
+// workloadNamespaceSuffix is what may follow a workload host's first label:
+// nothing, <namespace>.svc or <namespace>.svc.cluster.local, the forms a
+// pod's resolver expands a Service name to. <label>.<namespace> alone is
+// refused, since a namespace can share its name with a public top-level
+// domain (#676).
+var workloadNamespaceSuffix = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?\.svc(\.cluster\.local)?$`)
+
+// workloadAccount is the account a request's Host names, when it is a
+// workload's metadata host the resolver issued.
+func (s *Server) workloadAccount(r *http.Request) (string, bool) {
+	if s.accounts == nil {
+		return "", false
+	}
+	host := strings.ToLower(r.Host)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(host, ".")
+	label, rest, _ := strings.Cut(host, ".")
+	if !strings.HasPrefix(label, AccountHostPrefix) || (rest != "" && !workloadNamespaceSuffix.MatchString(rest)) {
+		return "", false
+	}
+	return s.accounts(label)
+}
+
+// accountOf is the account a request is answered as: the workload's own, or
+// the instance's.
+func (s *Server) accountOf(r *http.Request) string {
+	if email, ok := s.workloadAccount(r); ok {
+		return email
+	}
+	return s.creds.Email
+}
 
 // Addr returns the resolved listen address, or "" before Start.
 func (s *Server) Addr() string {
@@ -134,7 +193,19 @@ func (s *Server) Handler() http.Handler {
 	// metadata.google.internal is the name clients use on GCE; it is in a
 	// top-level domain no attacker can register, so a client that maps it
 	// here is answered (#676).
-	return hostguard.Wrap(s.requireFlavor(mux), "metadata.google.internal")
+	//
+	// A workload's own host (#1388) is answered too: its first label is one
+	// the Cloud Run adapter issued, under a cluster-local suffix, which no
+	// attacker can register any more than cloudburrow-host.
+	inner := s.requireFlavor(mux)
+	guarded := hostguard.Wrap(inner, "metadata.google.internal")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.workloadAccount(r); ok {
+			inner.ServeHTTP(w, r)
+			return
+		}
+		guarded.ServeHTTP(w, r)
+	})
 }
 
 // DefaultZone is the zone reported to clients.
@@ -172,17 +243,22 @@ func (s *Server) requireFlavor(next http.Handler) http.Handler {
 // Both "default" and the account's own email must work, because clients use
 // whichever they were configured with and treat a 404 as "no such account"
 // rather than "wrong alias".
+//
+// The account is the workload's own when it reached this server under its
+// cloudburrow-sa- host (#1388), as Cloud Run names a revision's service
+// account, and the instance's otherwise.
 func (s *Server) serviceAccounts(w http.ResponseWriter, r *http.Request) {
 	const prefix = "/computeMetadata/v1/instance/service-accounts/"
 	rest := strings.TrimPrefix(r.URL.Path, prefix)
+	email := s.accountOf(r)
 
 	if rest == "" {
-		s.text(w, "default/\n"+s.creds.Email+"/\n")
+		s.text(w, "default/\n"+email+"/\n")
 		return
 	}
 
 	account, field, _ := strings.Cut(rest, "/")
-	if account != "default" && account != s.creds.Email {
+	if account != "default" && account != email {
 		http.Error(w, "service account not found", http.StatusNotFound)
 		return
 	}
@@ -191,7 +267,7 @@ func (s *Server) serviceAccounts(w http.ResponseWriter, r *http.Request) {
 	case "":
 		s.text(w, "aliases\nemail\nidentity\nscopes\ntoken\n")
 	case "email":
-		s.text(w, s.creds.Email)
+		s.text(w, email)
 	case "aliases":
 		s.text(w, "default")
 	case "scopes":
@@ -206,7 +282,7 @@ func (s *Server) serviceAccounts(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "non-empty audience parameter required", http.StatusBadRequest)
 			return
 		}
-		tok, err := s.creds.MintIDToken(audience, time.Now(), TokenTTL)
+		tok, err := s.creds.MintIDTokenFor(email, audience, time.Now(), TokenTTL)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

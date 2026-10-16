@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,7 +24,9 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
@@ -57,9 +60,15 @@ const runWorkerPoolNameImmutable = "A worker pool name cannot be changed after i
 // runWorkerPoolNotOffered names what the form leaves out because the adapter
 // refuses it (docs/coverage/run.md).
 const runWorkerPoolNotOffered = "Not offered, because the Cloud Run adapter refuses them: ports (a worker pool " +
-	"has no ingress), instance splits across revisions, VPC access, binary authorization and a service mesh."
+	"has no ingress), VPC access, binary authorization and a service mesh."
 
-const actScale = "scale"
+const (
+	actScale = "scale"
+	// actSplit sets instanceSplits across revisions (#1387).
+	actSplit = "split"
+	// splitLatestKey names the latest revision in the split form.
+	splitLatestKey = "LATEST"
+)
 
 func (p runWorkerPoolsProvider) jobs() runJobsProvider {
 	return runJobsProvider{runAddr: p.runAddr, defaultProject: p.defaultProject, region: p.region}
@@ -345,14 +354,79 @@ func (p runWorkerPoolsProvider) DetailActions(ctx context.Context, project strin
 		if err != nil {
 			return err
 		}
-		actions = []console.Action{scaleAction(wp.GetScaling().GetManualInstanceCount())}
+		actions = []console.Action{scaleAction(wp.GetScaling().GetManualInstanceCount()), splitAction(wp)}
 		return nil
 	})
 	return actions
 }
 
+// splitAction is Split instances (#1387): a percentage per revision, the
+// latest as LATEST, saved with UpdateWorkerPool and an update_mask of
+// instance_splits alone.
+func splitAction(wp *runpb.WorkerPool) console.Action {
+	current := map[string]string{}
+	for _, sp := range wp.GetInstanceSplits() {
+		key := lastSegment(sp.GetRevision())
+		if sp.GetType() == runpb.InstanceSplitAllocationType_INSTANCE_SPLIT_ALLOCATION_TYPE_LATEST {
+			key = splitLatestKey
+		}
+		current[key] = fmt.Sprint(sp.GetPercent())
+	}
+	if len(current) == 0 {
+		current[splitLatestKey] = "100"
+	}
+	return console.Action{ID: actSplit, Label: "Split instances", Fields: []console.Field{{
+		Name: "splits", Label: "Instance split", Type: "map", Required: true, Default: console.FormatMap(current),
+		Help: "One revision=percent per line, adding up to 100; LATEST is whichever revision is latest. " +
+			"Each revision runs its share of the instances, rounded so the shares add up to the instance count. " +
+			"Saved with UpdateWorkerPool, update_mask instance_splits.",
+	}}}
+}
+
+// instanceSplits parses the split form's lines.
+func instanceSplits(raw string) ([]*runpb.InstanceSplit, error) {
+	m, err := console.ParseMap(raw)
+	if err != nil {
+		return nil, fmt.Errorf("instance split: %w", err)
+	}
+	var out []*runpb.InstanceSplit
+	for _, k := range sortedKeys(m) {
+		pct, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimSpace(m[k]), "%"), 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("instance split: %s=%q is not a percentage", k, m[k])
+		}
+		sp := &runpb.InstanceSplit{Type: runpb.InstanceSplitAllocationType_INSTANCE_SPLIT_ALLOCATION_TYPE_REVISION,
+			Revision: strings.TrimSpace(k), Percent: int32(pct)}
+		if strings.EqualFold(sp.Revision, splitLatestKey) {
+			sp.Type, sp.Revision = runpb.InstanceSplitAllocationType_INSTANCE_SPLIT_ALLOCATION_TYPE_LATEST, ""
+		}
+		out = append(out, sp)
+	}
+	return out, nil
+}
+
 // ActAt implements console.PathActor.
 func (p runWorkerPoolsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if len(path) == 1 && action == actSplit {
+		splits, err := instanceSplits(values["splits"])
+		if err != nil {
+			return err
+		}
+		project = p.jobs().project(project)
+		if project == "" {
+			return errors.New("choose a project before changing a worker pool")
+		}
+		return p.withClients(ctx, func(wc *runclient.WorkerPoolsClient, _ *runclient.RevisionsClient) error {
+			op, err := wc.UpdateWorkerPool(ctx, &runpb.UpdateWorkerPoolRequest{
+				WorkerPool: &runpb.WorkerPool{Name: p.poolName(project, path[0]), InstanceSplits: splits},
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"instance_splits"}}})
+			if err != nil {
+				return err
+			}
+			_, err = op.Wait(ctx)
+			return err
+		})
+	}
 	if len(path) != 1 || action != actScale {
 		return fmt.Errorf("unknown action %q", action)
 	}
@@ -433,8 +507,11 @@ func (p runWorkerPoolsProvider) revisions(ctx context.Context, rc *runclient.Rev
 			return out
 		}
 		instances, status := "0", "Retired"
+		// A revision with a share of instanceSplits runs too (#1387).
+		if n, ok := runadapter.RevisionInstances(wp)[rev.GetName()]; ok {
+			instances, status = fmt.Sprint(n), "Active"
+		}
 		if rev.GetName() == wp.GetLatestCreatedRevision() {
-			instances = fmt.Sprint(wp.GetScaling().GetManualInstanceCount())
 			status = workerPoolStatus(wp)
 		}
 		out.Items = append(out.Items, console.Resource{Name: lastSegment(rev.GetName()), Status: status,
@@ -450,6 +527,7 @@ func workerPoolDetail(wp *runpb.WorkerPool, revisions console.Listing) console.D
 		console.Property{Label: "Region", Value: regionOf(wp.GetName())},
 		console.Property{Label: "Instances", Value: fmt.Sprint(wp.GetScaling().GetManualInstanceCount())},
 		console.Property{Label: "Latest revision", Value: lastSegment(wp.GetLatestCreatedRevision())},
+		console.Property{Label: "Service account", Value: runAccountText(wp.GetTemplate().GetServiceAccount(), projectOf(wp.GetName()))},
 		console.Property{Label: "Message", Value: wp.GetTerminalCondition().GetMessage()},
 		console.Property{Label: "Generation", Value: fmt.Sprint(wp.GetGeneration())},
 		console.Property{Label: "Created", Value: stampText(wp.GetCreateTime())},

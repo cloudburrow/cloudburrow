@@ -392,7 +392,7 @@ func TestRunConfigurationReportsScalingAndConcurrency(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := sectionText(runConfiguration(&svc))
+	got := sectionText(runConfiguration(&svc, ""))
 	for _, want := range []string{
 		"Minimum instances=1", "Maximum instances=10",
 		"Requests per instance=80", "Request timeout=600 seconds",
@@ -421,7 +421,7 @@ func TestUnsetScalingSettingsSayWhatTheyMean(t *testing.T) {
 		&svc); err != nil {
 		t.Fatal(err)
 	}
-	got := sectionText(runConfiguration(&svc))
+	got := sectionText(runConfiguration(&svc, ""))
 	for _, want := range []string{
 		"Requests per instance=unlimited",
 		"Request timeout=Knative's default",

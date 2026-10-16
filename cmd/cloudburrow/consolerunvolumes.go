@@ -15,15 +15,36 @@ import (
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
+
+// runAccountText is the account a Cloud Run workload runs as, which its
+// metadata server names to it (#1388): the template's serviceAccount, or the
+// project's Compute Engine default account when none is set.
+func runAccountText(serviceAccount, project string) string {
+	if serviceAccount != "" {
+		return serviceAccount
+	}
+	if project == "" {
+		return ""
+	}
+	return runadapter.DefaultComputeAccount(project) + " (Compute Engine default)"
+}
+
+// runRevisionAccount is runAccountText for a Knative revision template,
+// whose annotations record the service account.
+func runRevisionAccount(annotations map[string]string, project string) string {
+	return runAccountText(runadapter.ReadPodConfig(annotations, 0).GetServiceAccount(), project)
+}
 
 // runVolumeFields are the service account and volume fields.
 func runVolumeFields(section string) []console.Field {
 	return []console.Field{
 		{Name: "serviceAccount", Label: "Service account", Type: "text", Section: section,
-			Help: "Optional. The email of the identity the workload runs as. It is stored and returned; locally " +
-				"every workload's metadata server names the instance's own account."},
+			Help: "Optional. The email of the identity the workload runs as; empty is the project's Compute Engine " +
+				"default account. The workload's metadata server names it, in its email and its identity tokens; " +
+				"no permission is checked locally."},
 		{Name: "secretFiles", Label: "Files from Secret Manager", Type: "map", Section: section,
 			Help: "Optional. One /dir/file=secret per line, or /dir/file=secret:version; the version is latest " +
 				"when not given. The file holds the version's payload, read-only. Files in one directory come from one secret."},
