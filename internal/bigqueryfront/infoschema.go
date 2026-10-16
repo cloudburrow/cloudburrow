@@ -149,13 +149,34 @@ func rowsSubquery(columns string, rows [][]string) string {
 		lits = lits[rowsPerArray:]
 	}
 	parts = append(parts, "SELECT * FROM UNNEST(ARRAY<"+columns+">["+strings.Join(lits, ", ")+"])")
+	// SQLite also caps the terms of one compound SELECT (500): past
+	// termsPerUnion arrays, each run of them is a subquery of its own, so
+	// no limit of SQLite depends on the number of rows (#1374).
+	for len(parts) > termsPerUnion {
+		var next []string
+		for len(parts) > 0 {
+			n := min(termsPerUnion, len(parts))
+			if n == 1 {
+				next = append(next, parts[0])
+			} else {
+				next = append(next, "SELECT * FROM ("+strings.Join(parts[:n], " UNION ALL ")+")")
+			}
+			parts = parts[n:]
+		}
+		parts = next
+	}
 	return "(" + strings.Join(parts, " UNION ALL ") + ")"
 }
 
 // rowsPerArray is the most elements rowsSubquery puts in one array
 // literal, below SQLite's default cap of a function's arguments (127 in
-// releases before 3.48, 1,000 since).
-const rowsPerArray = 100
+// releases before 3.48, 1,000 since). termsPerUnion is the most terms it
+// puts in one UNION ALL, below SQLite's default cap of a compound
+// SELECT's terms (SQLITE_MAX_COMPOUND_SELECT, 500).
+const (
+	rowsPerArray  = 100
+	termsPerUnion = 100
+)
 
 func tableRowsOf(columns string, rows func(project, dataset string, t infoTable) [][]string) func(front, *http.Request, string, *datasetMeta) (string, int, string) {
 	return func(f front, r *http.Request, dataset string, m *datasetMeta) (string, int, string) {
