@@ -39,6 +39,12 @@ func TestCSVDialect(t *testing.T) {
 		{"null marker", `,"nullMarker":"\\N"`, "1,\\N\n2,\"\\N\"\n\\N,y\n", `[{"a":"1","b":""},{"a":"2","b":"\\N"},{"a":"","b":"y"}]`},
 		{"skip with a dialect", `,"fieldDelimiter":"|","skipLeadingRows":1`, "b|a\n1|x\n", `[{"a":"1","b":"x"}]`},
 		{"null marker, jagged", `,"nullMarker":"NA","allowJaggedRows":true`, "1\n", `[{"a":"1","b":""}]`},
+		// #1457: a quote of several characters is its first byte, and in
+		// ISO-8859-1 data any one character delimits or quotes, the raw
+		// bytes split before they are decoded.
+		{"quote of two characters", `,"quote":"'x"`, "1,'a,b'\n", `[{"a":"1","b":"a,b"}]`},
+		{"ISO-8859-1 delimiter and quote", `,"encoding":"ISO-8859-1","fieldDelimiter":"þ","quote":"«"`,
+			"1\xfe\xabcaf\xe9\xfex\xab\n2\xfe\xe9\n", `[{"a":"1","b":"caféþx"},{"a":"2","b":"é"}]`},
 	} {
 		emu := &csvEmulator{}
 		w := upload(t, Wrap(emu), loadJob(c.extra), c.data)
@@ -78,7 +84,7 @@ func TestCSVDialect(t *testing.T) {
 
 	// A delimiter or quote the front does not read is 501 before the data
 	// is sent.
-	for _, extra := range []string{`,"fieldDelimiter":"||"`, `,"fieldDelimiter":"é"`, `,"quote":"<<"`, `,"quote":"|","fieldDelimiter":"|"`} {
+	for _, extra := range []string{`,"fieldDelimiter":"||"`, `,"fieldDelimiter":"é"`, `,"quote":"☃"`, `,"quote":"«"`, `,"quote":"|","fieldDelimiter":"|"`} {
 		emu := &csvEmulator{}
 		if w := upload(t, Wrap(emu), loadJob(extra), "1,x\n"); w.Code != 501 || emu.loads != 0 {
 			t.Errorf("%s: %d %s, %d loads; want 501", extra, w.Code, w.Body, emu.loads)

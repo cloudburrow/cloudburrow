@@ -176,17 +176,26 @@ type jsonVersion struct {
 	Etag                 string `json:"etag,omitempty"`
 
 	ClientSpecifiedPayloadChecksum bool `json:"clientSpecifiedPayloadChecksum,omitempty"`
+	// ReplicationStatus reports the key version that encrypted each
+	// replica (#1453).
+	ReplicationStatus map[string]any `json:"replicationStatus,omitempty"`
+}
+
+// protoJSONMap is m in the JSON mapping, as a map for a hand-written body.
+func protoJSONMap(m proto.Message) map[string]any {
+	b, err := protojson.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	var out map[string]any
+	if json.Unmarshal(b, &out) != nil {
+		return nil
+	}
+	return out
 }
 
 func renderSecret(s Secret) jsonSecret {
-	repl := map[string]any{"automatic": map[string]any{}}
-	if s.Replication == "user-managed" {
-		replicas := make([]map[string]any, 0, len(s.ReplicaLocations))
-		for _, l := range s.ReplicaLocations {
-			replicas = append(replicas, map[string]any{"location": l})
-		}
-		repl = map[string]any{"userManaged": map[string]any{"replicas": replicas}}
-	}
+	repl := protoJSONMap(toProtoReplication(s))
 	out := jsonSecret{
 		Name:        s.Name,
 		Replication: repl,
@@ -224,6 +233,9 @@ func renderVersion(v Version) jsonVersion {
 		Etag:       v.Etag,
 
 		ClientSpecifiedPayloadChecksum: v.ClientChecksum,
+	}
+	if rs := toProtoReplicationStatus(v); rs != nil {
+		out.ReplicationStatus = protoJSONMap(rs)
 	}
 	if !v.Destroyed.IsZero() {
 		out.DestroyTime = v.Destroyed.UTC().Format(time.RFC3339Nano)

@@ -138,14 +138,10 @@ func (p pubsubSubscriptionsProvider) Detail(ctx context.Context, project string,
 	}
 
 	// Edit subscription (#786), prefilled from what the emulator returned;
-	// a detached subscription is kept as it was, and cannot be changed
-	// (#1406).
-	edit := subscriptionEditForm(s)
-	if s.GetDetached() {
-		edit = nil
-	}
+	// a detached subscription's configuration, which CloudBurrow's front
+	// keeps, is edited the same way (#1446).
 	return console.Detail{
-		Edit:    edit,
+		Edit:    subscriptionEditForm(s),
 		Summary: summary,
 		Sections: []console.Section{
 			subscriptionDeliverySection(s),

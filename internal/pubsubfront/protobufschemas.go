@@ -554,26 +554,60 @@ func (f *Front) checkPublish(topic string, msgs []*pubsubpb.PubsubMessage) error
 	return nil
 }
 
-// errTopicSchemaUpdate refuses an update of a binding to a front-kept
-// schema.
-func errTopicSchemaUpdate(topic string) error {
-	return apierror.Unimplemented("updating schema_settings of %s is not implemented: the binding names a Protocol Buffer "+
-		"schema, which CloudBurrow keeps itself because the Pub/Sub emulator refuses them; delete and create the topic instead", topic)
+// topicSchemaUpdate is what an UpdateTopic of schema_settings does to a
+// topic's binding to a front-kept schema (#1446): set is the binding it
+// then has, nil when it has none the front keeps.
+type topicSchemaUpdate struct {
+	topic string
+	set   *pubsubpb.SchemaSettings
 }
 
-// checkTopicSchemaUpdate refuses an UpdateTopic of schema_settings that
-// names a front-kept schema, or on a topic bound to one.
-func (f *Front) checkTopicSchemaUpdate(r *pubsubpb.UpdateTopicRequest) error {
+// planTopicSchemaUpdate is what an UpdateTopic of schema_settings does to
+// the front's bindings, nil when it names no front-kept schema and is on no
+// topic bound to one, which the emulator then applies alone. A binding to a
+// kept schema is checked as a CreateTopic's is and taken out of r, so the
+// emulator clears the topic's own binding; a binding to any other schema,
+// or none, is the emulator's to apply, and the front's is dropped. Google
+// documents schema_settings as updatable, and an empty schema_settings as
+// removing the binding ("gcloud pubsub topics update --clear-schema-settings").
+func (f *Front) planTopicSchemaUpdate(r *pubsubpb.UpdateTopicRequest) (*topicSchemaUpdate, error) {
 	if !masks(r.GetUpdateMask().GetPaths(), "schema_settings") {
-		return nil
+		return nil, nil
 	}
-	name, _ := splitRevision(r.GetTopic().GetSchemaSettings().GetSchema())
+	t := r.GetTopic()
+	name, _ := splitRevision(t.GetSchemaSettings().GetSchema())
 	_, kept := f.keptSchema(name)
-	_, bound := f.topicSchema(r.GetTopic().GetName())
-	if kept || bound {
-		return errTopicSchemaUpdate(r.GetTopic().GetName())
+	_, bound := f.topicSchema(t.GetName())
+	if !kept && !bound {
+		return nil, nil
 	}
-	return nil
+	plan := &topicSchemaUpdate{topic: t.GetName()}
+	if kept {
+		ss, err := f.takeTopicSchema(t)
+		if err != nil {
+			return nil, err
+		}
+		plan.set = ss
+	}
+	return plan, nil
+}
+
+// apply keeps the binding an UpdateTopic set, and returns the one it
+// replaced, for undo.
+func (u *topicSchemaUpdate) apply(f *Front) (undo func()) {
+	prev, had := f.topicSchema(u.topic)
+	if u.set != nil {
+		f.setTopicSchema(u.topic, u.set)
+	} else {
+		f.dropTopicSchema(u.topic)
+	}
+	return func() {
+		if had {
+			f.setTopicSchema(u.topic, prev)
+		} else {
+			f.dropTopicSchema(u.topic)
+		}
+	}
 }
 
 // schemaPath is a REST path under /v1/projects/{p}/schemas: the project's

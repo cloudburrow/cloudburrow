@@ -121,8 +121,9 @@ func TestParquetLoadColumns(t *testing.T) {
 		{"a schema not the file's", nil, "ab.parquet", `,"schema":{"fields":[{"name":"z","type":"STRING"}]}`, 501,
 			"a schema that is not the file's (z STRING; the file's is a INTEGER, b STRING)"},
 		{"a STRING into GEOGRAPHY", tables(`[{"name":"a","type":"INTEGER"},{"name":"b","type":"GEOGRAPHY"}]`), "ab.parquet", "", 501, "GEOGRAPHY"},
-		{"TIMESTAMP(NANOS)", nil, "ts_ns.parquet", "", 501, "INT64 (TIMESTAMP(NANOS)), which BigQuery's Parquet conversion table does not list"},
-		{"JSON", nil, "json.parquet", "", 501, "BYTE_ARRAY (JSON), which BigQuery's Parquet conversion table does not list"},
+		// #1457: "Other combinations of Parquet types and converted types are not supported".
+		{"TIMESTAMP(NANOS)", nil, "ts_ns.parquet", "", 400, "INT64 (TIMESTAMP(NANOS)), which BigQuery's Parquet conversion table does not list"},
+		{"JSON", nil, "json.parquet", "", 400, "BYTE_ARRAY (JSON), which BigQuery's Parquet conversion table does not list"},
 		{"referenceFileSchemaUri", ab, "ab.parquet", `,"referenceFileSchemaUri":"gs://b/x.parquet"`, 501, "referenceFileSchemaUri"},
 		{"into a view", map[string]string{tablesBase + "t": `{"type":"VIEW"}`}, "ab.parquet", "", 501, "which is a VIEW"},
 	} {

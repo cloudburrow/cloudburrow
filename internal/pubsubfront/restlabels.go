@@ -77,6 +77,7 @@ func (f *Front) serveTopic(w http.ResponseWriter, r *http.Request, name, verb st
 			return
 		}
 		var req pubsubpb.UpdateTopicRequest
+		var plan *topicSchemaUpdate
 		if restJSON.Unmarshal(body, &req) == nil {
 			if req.UpdateMask == nil && r.URL.Query().Get("updateMask") != "" {
 				req.UpdateMask = &fieldmaskpb.FieldMask{Paths: splitMask(r.URL.Query().Get("updateMask"), nil)}
@@ -85,10 +86,38 @@ func (f *Front) serveTopic(w http.ResponseWriter, r *http.Request, name, verb st
 				req.Topic = &pubsubpb.Topic{}
 			}
 			req.Topic.Name = name
-			if err := f.checkTopicSchemaUpdate(&req); err != nil {
+			// A binding to a Protocol Buffer schema the front keeps
+			// (protobufschemas.go, #1446) is the front's.
+			if plan, err = f.planTopicSchemaUpdate(&req); err != nil {
 				writeRESTError(w, err)
 				return
 			}
+			if plan != nil && plan.set != nil {
+				body, _ = editObjectBody(body, func(o jsonObject) {
+					if raw, k := o.field("topic"); raw != nil {
+						if b, changed := editObject(raw, func(t jsonObject) {
+							delete(t, "schemaSettings")
+							delete(t, "schema_settings")
+						}); changed {
+							o[k] = b
+						}
+					}
+				})
+				setBody(r, body)
+			}
+		}
+		var undo func()
+		if plan != nil {
+			// Set before the answer is rewritten (restAnswer), which names
+			// it, and undone if the emulator refuses the update.
+			undo = plan.apply(f)
+			sw := &statusWriter{ResponseWriter: w}
+			defer func() {
+				if !sw.ok() {
+					undo()
+				}
+			}()
+			w = sw
 		}
 		if f.restPatchTopic(w, r, name, body) {
 			return

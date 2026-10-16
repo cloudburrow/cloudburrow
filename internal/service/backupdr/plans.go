@@ -27,7 +27,7 @@ func (s *Server) planJSON(p *plan) map[string]any {
 	out := map[string]any{"name": p.Name, "backupVault": p.Vault, "resourceType": p.ResourceType, "backupRules": rules,
 		"createTime": p.CreateTime, "updateTime": p.UpdateTime, "state": "ACTIVE", "etag": strconv.Quote(p.UpdateTime),
 		"backupVaultServiceAccount": "service-backupdr@cloudburrow.iam.gserviceaccount.com",
-		"supportedResourceTypes":    []string{p.ResourceType}, "revisionId": "v0", "revisionName": p.Name + "/revisions/v0"}
+		"supportedResourceTypes":    []string{p.ResourceType}, "revisionId": p.revisionID(), "revisionName": p.revisionName()}
 	if p.LogRetentionDays > 0 {
 		out["logRetentionDays"] = strconv.FormatInt(p.LogRetentionDays, 10)
 	}
@@ -66,29 +66,12 @@ func (s *Server) createPlan(r *http.Request, loc string) (any, error) {
 	case len(body.Rules) == 0:
 		return nil, invalid("backupPlan.backupRules must have at least one rule.")
 	}
-	seen := map[string]bool{}
-	for i, ru := range body.Rules {
-		if err := checkID(fmt.Sprintf("backupPlan.backupRules[%d].ruleId", i), ru.RuleID); err != nil {
-			return nil, err
-		}
-		if seen[ru.RuleID] {
-			return nil, invalid("backupPlan.backupRules: ruleId %q is repeated.", ru.RuleID)
-		}
-		seen[ru.RuleID] = true
-		if ru.RetentionDays <= 0 {
-			return nil, invalid("backupPlan.backupRules[%d].backupRetentionDays must be positive.", i)
-		}
-		if err := checkSchedule(i, ru.Schedule); err != nil {
-			return nil, err
-		}
+	if err := checkRules(body.Rules); err != nil {
+		return nil, err
 	}
-	var logDays int64
-	if raw := strings.Trim(string(body.LogRetentionDays), `"`); raw != "" && raw != "null" {
-		n, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || n < 0 {
-			return nil, invalid("backupPlan.logRetentionDays %q is not a number of days.", body.LogRetentionDays)
-		}
-		logDays = n
+	logDays, err := parseLogDays(body.LogRetentionDays)
+	if err != nil {
+		return nil, err
 	}
 	name := loc + "/backupPlans/" + id
 	s.mu.Lock()
@@ -104,13 +87,51 @@ func (s *Server) createPlan(r *http.Request, loc string) (any, error) {
 	p := &plan{Name: name, Description: body.Description, Labels: body.Labels, Vault: body.Vault, ResourceType: body.ResourceType,
 		Rules: body.Rules, LogRetentionDays: logDays, CreateTime: now, UpdateTime: now}
 	s.st.Plans[name] = p
-	err := s.saveLocked()
+	s.addRevisionLocked(p)
+	err = s.saveLocked()
 	out := s.planJSON(p)
 	s.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
 	return s.opDone(loc, "create", name, out, "google.cloud.backupdr.v1.BackupPlan", nil), nil
+}
+
+// checkRules validates a plan's backup rules.
+func checkRules(rules []rule) error {
+	if len(rules) == 0 {
+		return invalid("backupPlan.backupRules must have at least one rule.")
+	}
+	seen := map[string]bool{}
+	for i, ru := range rules {
+		if err := checkID(fmt.Sprintf("backupPlan.backupRules[%d].ruleId", i), ru.RuleID); err != nil {
+			return err
+		}
+		if seen[ru.RuleID] {
+			return invalid("backupPlan.backupRules: ruleId %q is repeated.", ru.RuleID)
+		}
+		seen[ru.RuleID] = true
+		if ru.RetentionDays <= 0 {
+			return invalid("backupPlan.backupRules[%d].backupRetentionDays must be positive.", i)
+		}
+		if err := checkSchedule(i, ru.Schedule); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// parseLogDays parses logRetentionDays, an int64 as a JSON string or number.
+func parseLogDays(raw json.RawMessage) (int64, error) {
+	v := strings.Trim(string(raw), `"`)
+	if v == "" || v == "null" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return 0, invalid("backupPlan.logRetentionDays %q is not a number of days.", raw)
+	}
+	return n, nil
 }
 
 func checkSchedule(i int, sch map[string]any) error {
@@ -221,7 +242,7 @@ func (s *Server) associationJSON(a *association) map[string]any {
 	}
 	return map[string]any{"name": a.Name, "backupPlan": a.Plan, "resource": a.Resource, "resourceType": a.ResourceType,
 		"dataSource": a.DataSource, "createTime": a.CreateTime, "updateTime": a.UpdateTime, "state": "ACTIVE",
-		"rulesConfigInfo": infos, "backupPlanRevisionId": "v0", "backupPlanRevisionName": a.Plan + "/revisions/v0",
+		"rulesConfigInfo": infos, "backupPlanRevisionId": s.planRevision(a.Plan), "backupPlanRevisionName": a.Plan + "/revisions/" + s.planRevision(a.Plan),
 		"cloudSqlInstanceBackupPlanAssociationProperties": map[string]any{
 			"instanceCreateTime": s.st.DataSources[a.DataSource].info().CreateTime,
 		}}
@@ -385,15 +406,19 @@ func (s *Server) dataSourceJSON(d *dataSource) map[string]any {
 			}
 		}
 		cfg["gcpBackupConfig"] = map[string]any{"backupPlan": a.Plan, "backupPlanAssociation": a.Name, "backupPlanRules": rules,
-			"backupPlanRevisionId": "v0", "backupPlanRevisionName": a.Plan + "/revisions/v0"}
+			"backupPlanRevisionId": s.planRevision(a.Plan), "backupPlanRevisionName": a.Plan + "/revisions/" + s.planRevision(a.Plan)}
 	}
-	return map[string]any{"name": d.Name, "state": "ACTIVE", "configState": state, "backupCount": strconv.Itoa(count),
+	out := map[string]any{"name": d.Name, "state": "ACTIVE", "configState": state, "backupCount": strconv.Itoa(count),
 		"createTime": d.CreateTime, "updateTime": d.UpdateTime, "etag": strconv.Quote(d.UpdateTime), "totalStoredBytes": "0",
 		"backupConfigInfo": cfg,
 		"dataSourceGcpResource": map[string]any{"gcpResourcename": "//sqladmin.googleapis.com/" + res, "location": d.Info.Region,
 			"type": CloudSQLResourceType, "cloudSqlInstanceDatasourceProperties": map[string]any{
 				"name": res, "databaseInstalledVersion": d.Info.DatabaseVersion, "instanceCreateTime": d.Info.CreateTime,
 				"instanceTier": d.Info.Tier}}}
+	if len(d.Labels) > 0 {
+		out["labels"] = d.Labels
+	}
+	return out
 }
 
 func (s *Server) listDataSources(vaultName string) (any, error) {
@@ -445,12 +470,16 @@ func (s *Server) backupJSON(b *backup) map[string]any {
 	if d != nil {
 		res = "projects/" + d.Project + "/instances/" + d.Instance
 	}
-	out := map[string]any{"name": b.Name, "state": state, "backupType": typ, "createTime": b.CreateTime, "updateTime": b.CreateTime,
-		"expireTime": b.ExpireTime, "enforcedRetentionEndTime": b.ExpireTime, "etag": strconv.Quote(b.CreateTime),
+	updated := b.CreateTime
+	if b.UpdateTime != "" {
+		updated = b.UpdateTime
+	}
+	out := map[string]any{"name": b.Name, "state": state, "backupType": typ, "createTime": b.CreateTime, "updateTime": updated,
+		"expireTime": b.ExpireTime, "enforcedRetentionEndTime": b.enforcedEnd(), "etag": strconv.Quote(updated),
 		"cloudSqlInstanceBackupProperties": map[string]any{"databaseInstalledVersion": info.DatabaseVersion, "sourceInstance": res,
 			"instanceTier": info.Tier, "instanceCreateTime": info.CreateTime},
 		"gcpBackupPlanInfo": map[string]any{"backupPlan": b.Plan, "backupPlanRuleId": b.RuleID,
-			"backupPlanRevisionId": "v0", "backupPlanRevisionName": b.Plan + "/revisions/v0"},
+			"backupPlanRevisionId": b.revision(), "backupPlanRevisionName": b.Plan + "/revisions/" + b.revision()},
 		"gcpResource": map[string]any{"gcpResourcename": "//sqladmin.googleapis.com/" + res, "location": info.Region,
 			"type": CloudSQLResourceType}, "resourceSizeBytes": "0"}
 	if consistency != "" {
@@ -592,6 +621,7 @@ func (s *Server) backup(assocName, ruleID string, onDemand bool, retentionDays i
 	if retentionDays <= 0 {
 		retentionDays = ru.RetentionDays
 	}
+	rev := p.revisionID()
 	d := s.st.DataSources[a.DataSource]
 	s.mu.Unlock()
 	if d == nil {
@@ -603,7 +633,7 @@ func (s *Server) backup(assocName, ruleID string, onDemand bool, retentionDays i
 	}
 	now := s.now().UTC()
 	b := &backup{Name: d.Name + "/backups/" + strconv.FormatInt(now.UnixNano(), 10), DataSource: d.Name, RunID: runID,
-		Plan: a.Plan, RuleID: ruleID, CreateTime: now.Format(time.RFC3339Nano), Labels: labels,
+		Plan: a.Plan, RuleID: ruleID, CreateTime: now.Format(time.RFC3339Nano), Labels: labels, Revision: rev,
 		ExpireTime: now.Add(time.Duration(retentionDays) * 24 * time.Hour).Format(time.RFC3339Nano)}
 	if onDemand {
 		b.RuleID = ""

@@ -18,11 +18,11 @@ import (
 const resetPath = "/_cloudburrow/reset"
 
 // bucketScoped are the prefixes keyed by bucket name: <prefix><bucket>/...
-var bucketScoped = []string{objectPrefix, noncurrentPrefix, softObjectPrefix, notificationPrefix, mpuPrefix, managedFolderPrefix, folderPrefix, operationPrefix}
+var bucketScoped = []string{objectPrefix, noncurrentPrefix, softObjectPrefix, notificationPrefix, mpuPrefix, managedFolderPrefix, folderPrefix, operationPrefix, cachePrefix}
 
 // everyPrefix is all the state the server keeps.
 var everyPrefix = []string{bucketPrefix, objectPrefix, noncurrentPrefix, softObjectPrefix, softBucketPrefix,
-	sessionPrefix, rewritePrefix, notificationPrefix, outboxPrefix, mpuPrefix, hmacPrefix, managedFolderPrefix, folderPrefix, operationPrefix}
+	sessionPrefix, rewritePrefix, notificationPrefix, outboxPrefix, mpuPrefix, hmacPrefix, managedFolderPrefix, folderPrefix, operationPrefix, cachePrefix}
 
 // Reset removes every bucket, object version (live, noncurrent and
 // soft-deleted), soft-deleted bucket, upload session, rewrite token,

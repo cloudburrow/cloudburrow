@@ -20,6 +20,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/kms"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -53,6 +54,37 @@ type kmsService struct {
 	clock sched.Clock
 	// backend names where the key material is kept, for the warning.
 	backend string
+	// hierarchy is Resource Manager's registry, which Autokey resolves
+	// folder configs through (#1452); nil means project configs only.
+	hierarchy *resourcemanager.Registry
+}
+
+// useHierarchy makes Autokey see the registry's folders. Call it before
+// Start.
+func (s *kmsService) useHierarchy(reg *resourcemanager.Registry) {
+	if s != nil {
+		s.hierarchy = reg
+	}
+}
+
+// kmsHierarchy is kms.Hierarchy over Resource Manager's registry.
+type kmsHierarchy struct{ reg *resourcemanager.Registry }
+
+func (h kmsHierarchy) Ancestors(project string) ([]string, error) {
+	chain, err := h.reg.Ancestry(strings.TrimPrefix(project, "projects/"))
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, a := range chain[1:] {
+		out = append(out, a.Type+"s/"+a.ID)
+	}
+	return out, nil
+}
+
+func (h kmsHierarchy) FolderExists(name string) error {
+	_, err := h.reg.Folder(name)
+	return err
 }
 
 func newKMSService(cfg config.Config) *kmsService {
@@ -156,6 +188,9 @@ func (s *kmsService) Start(ctx context.Context) error {
 		clock = sched.RealClock{}
 	}
 	s.api = kms.NewServerWithClock(s.db, clock)
+	if s.hierarchy != nil {
+		s.api.UseHierarchy(kmsHierarchy{reg: s.hierarchy})
+	}
 	// Sweep once before serving, so a version that fell due while nothing
 	// was running is stored DESTROYED at once; Run keeps it so. The store may
 	// not be reachable yet: this service starts before the cluster its
@@ -169,7 +204,7 @@ func (s *kmsService) Start(ctx context.Context) error {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
 	s.server.ServeHTTP(jsonAPI)
-	if err := s.server.Register(func(g *grpc.Server) { s.api.Register(g) }); err != nil {
+	if err := s.server.Register(func(g *grpc.Server) { s.api.Register(g); s.api.Operations().Register(g) }); err != nil {
 		return err
 	}
 	if err := s.server.Start(ctx); err != nil {

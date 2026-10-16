@@ -13,8 +13,12 @@ import (
 	"io"
 	"net/http"
 
+	rpccode "google.golang.org/genproto/googleapis/rpc/code"
+	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // Error is a Google-style API error.
@@ -28,6 +32,10 @@ type Error struct {
 	Reason string
 	// Cause is the underlying error, if any.
 	Cause error
+	// Details are the google.rpc.Status details (ErrorInfo, BadRequest and
+	// the like) a gRPC status carried, kept so the JSON body carries them as
+	// Google's does.
+	Details []*anypb.Any
 }
 
 func (e *Error) Error() string {
@@ -40,7 +48,12 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error { return e.Cause }
 
 // GRPCStatus lets errors.As and the gRPC runtime pick up the code directly.
-func (e *Error) GRPCStatus() *status.Status { return status.New(e.Code, e.Message) }
+func (e *Error) GRPCStatus() *status.Status {
+	if len(e.Details) == 0 {
+		return status.New(e.Code, e.Message)
+	}
+	return status.FromProto(&spb.Status{Code: int32(e.Code), Message: e.Message, Details: e.Details})
+}
 
 // HTTPStatus returns the HTTP status for this error.
 //
@@ -123,7 +136,7 @@ func From(err error) *Error {
 	// A gRPC status keeps its code, so a REST transcoding of a gRPC method
 	// reports UNIMPLEMENTED as 501 rather than as an internal error.
 	if st, ok := status.FromError(err); ok && st.Code() != codes.Unknown {
-		return &Error{Code: st.Code(), Message: st.Message(), Reason: statusReasons[st.Code()]}
+		return &Error{Code: st.Code(), Message: st.Message(), Reason: statusReasons[st.Code()], Details: st.Proto().GetDetails()}
 	}
 	return Internal(err, "internal error")
 }
@@ -135,8 +148,25 @@ var statusReasons = map[codes.Code]string{
 	codes.PermissionDenied: "forbidden", codes.Unauthenticated: "unauthorized", codes.Unavailable: "backendError",
 }
 
-// jsonError is the Cloud Storage JSON API error envelope.
-type jsonError struct {
+// statusError is the error body of Google's JSON/HTTP mapping of
+// google.rpc.Status (https://cloud.google.com/apis/design/errors#http_mapping,
+// AIP-193): the HTTP code, the message, the canonical code's name in status,
+// and the status's details, each an Any in its JSON form with its "@type".
+// Every API but Cloud Storage's JSON API and BigQuery's v2 API answers so, and
+// the REST clients read status for the canonical code (gcloud prints it, the
+// Node and Java REST transports map it back) and details for ErrorInfo.
+type statusError struct {
+	Error struct {
+		Code    int               `json:"code"`
+		Message string            `json:"message"`
+		Status  string            `json:"status"`
+		Details []json.RawMessage `json:"details,omitempty"`
+	} `json:"error"`
+}
+
+// storageError is the Cloud Storage JSON API error envelope, which has no
+// status and carries errors[] with a reason instead.
+type storageError struct {
 	Error struct {
 		Code    int          `json:"code"`
 		Message string       `json:"message"`
@@ -150,23 +180,48 @@ type jsonDetail struct {
 	Reason  string `json:"reason"`
 }
 
-// WriteJSON renders the error in the Google JSON API envelope.
+// WriteJSON renders the error as Google's JSON mapping of google.rpc.Status:
+// {"error": {"code", "message", "status", "details"}}. Cloud Storage's JSON
+// API answers in its own envelope instead: WriteStorageJSON.
 func WriteJSON(w http.ResponseWriter, err error) {
 	e := From(err)
-	var body jsonError
+	var body statusError
+	body.Error.Code = e.HTTPStatus()
+	body.Error.Message = e.Message
+	body.Error.Status = rpccode.Code(e.Code).String()
+	for _, d := range e.Details {
+		// A detail whose type this binary does not link cannot be rendered as
+		// JSON; it is left out rather than failing the whole error.
+		if b, err := protojson.Marshal(d); err == nil {
+			body.Error.Details = append(body.Error.Details, b)
+		}
+	}
+	write(w, e.HTTPStatus(), body)
+}
+
+// WriteStorageJSON renders the error in the Cloud Storage JSON API envelope,
+// {"error": {"code", "message", "errors": [{"message", "domain", "reason"}]}},
+// which is Google's for that API: it carries no status.
+func WriteStorageJSON(w http.ResponseWriter, err error) {
+	e := From(err)
+	var body storageError
 	body.Error.Code = e.HTTPStatus()
 	body.Error.Message = e.Message
 	body.Error.Errors = []jsonDetail{{Message: e.Message, Domain: "global", Reason: e.Reason}}
+	write(w, e.HTTPStatus(), body)
+}
 
+func write(w http.ResponseWriter, code int, body any) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.WriteHeader(e.HTTPStatus())
+	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// DecodeJSON reads a Google JSON API error envelope. Used by tests to confirm
-// what a client would actually see.
+// DecodeJSON reads a Google JSON API error body, of either envelope. reason
+// is errors[0].reason, which only the Cloud Storage envelope carries. Used by
+// tests to confirm what a client would actually see.
 func DecodeJSON(r io.Reader) (code int, message, reason string, err error) {
-	var body jsonError
+	var body storageError
 	if err := json.NewDecoder(r).Decode(&body); err != nil {
 		return 0, "", "", err
 	}
@@ -174,6 +229,17 @@ func DecodeJSON(r io.Reader) (code int, message, reason string, err error) {
 		reason = body.Error.Errors[0].Reason
 	}
 	return body.Error.Code, body.Error.Message, reason, nil
+}
+
+// DecodeStatusJSON reads Google's JSON mapping of google.rpc.Status, as
+// WriteJSON writes it: the HTTP code, the message, the canonical code's name
+// and the raw details.
+func DecodeStatusJSON(r io.Reader) (code int, message, status string, details []json.RawMessage, err error) {
+	var body statusError
+	if err := json.NewDecoder(r).Decode(&body); err != nil {
+		return 0, "", "", nil, err
+	}
+	return body.Error.Code, body.Error.Message, body.Error.Status, body.Error.Details, nil
 }
 
 // Wrap converts an error for return through an `error` interface.

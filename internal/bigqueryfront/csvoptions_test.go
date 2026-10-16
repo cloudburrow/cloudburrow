@@ -35,6 +35,7 @@ func TestCSVLoadOptions(t *testing.T) {
 		{"control characters kept", loadJob(`,"preserveAsciiControlCharacters":true`), "1,a\x01b\x00\n", `[{"a":"1","b":"a\u0001b\u0000"}]`},
 		{"a tab in a value", loadJob(""), "1,a\tb\n", `[{"a":"1","b":"a\tb"}]`},
 		{"sourceColumnMatch NAME", loadJob(`,"sourceColumnMatch":"NAME","skipLeadingRows":1`), "B,a\nx,1\ny,2\n", `[{"a":"1","b":"x"},{"a":"2","b":"y"}]`},
+		{"NAME, the header the last skipped row", loadJob(`,"sourceColumnMatch":"NAME","skipLeadingRows":3`), "title\nnote,x\nb,a\nx,1\n", `[{"a":"1","b":"x"}]`},
 		{"NAME, jagged", loadJob(`,"sourceColumnMatch":"NAME","skipLeadingRows":"1","allowJaggedRows":true,"fieldDelimiter":"|"`), "b|a\nx\n", `[{"a":"","b":"x"}]`},
 		{"POSITION", loadJob(`,"sourceColumnMatch":"POSITION","skipLeadingRows":1`), "b,a\n1,x\n", `[{"a":"1","b":"x"}]`},
 		{"REQUIRED, jagged, maxBadRecords", loadJobWith(requiredB, `,"allowJaggedRows":true,"maxBadRecords":1`), "1\n2,y\n", `[{"a":"2","b":"y"}]`},
@@ -82,10 +83,11 @@ func TestCSVLoadOptionsRefused(t *testing.T) {
 		{"encoding unknown", loadJob(`,"encoding":"UTF-7"`), "1,x\n", 400, "invalid", false},
 		{"timeZone unknown", loadJob(`,"timeZone":"Mars/Olympus"`), "1,x\n", 400, "invalid", false},
 		{"dateFormat with a time", loadJob(`,"dateFormat":"MM/DD/YYYY HH24"`), "1,x\n", 400, "invalid", false},
-		// #1338: detected by the front, which cannot tell a header over
-		// columns that are all STRING.
-		{"timeZone with autodetect, all strings", `{"configuration":{"load":{"sourceFormat":"CSV","autodetect":true,"timeZone":"UTC",` +
-			`"destinationTable":{"projectId":"p","datasetId":"d","tableId":"t"}}}}`, "a\nx\n", 501, "notImplemented", false},
+		// #1338: detected by the front, which does not resolve a mix of
+		// types BigQuery does not document (#1457: columns all STRING are
+		// now read as BigQuery documents, TestDetectCSVHeader).
+		{"timeZone with autodetect, mixed types", `{"configuration":{"load":{"sourceFormat":"CSV","autodetect":true,"timeZone":"UTC",` +
+			`"destinationTable":{"projectId":"p","datasetId":"d","tableId":"t"}}}}`, "a\n1\ntrue\n", 501, "notImplemented", false},
 		{"maxBadRecords negative", loadJob(`,"maxBadRecords":-1`), "1,x\n", 400, "invalid", false},
 	} {
 		emu := &csvEmulator{}

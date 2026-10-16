@@ -14,8 +14,11 @@ import (
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	"google.golang.org/genproto/googleapis/api/annotations"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -75,6 +78,18 @@ func (f *fakeScheduler) UpdateJob(_ context.Context, r *schedulerpb.UpdateJobReq
 func (f *fakeScheduler) PauseJob(_ context.Context, r *schedulerpb.PauseJobRequest) (*schedulerpb.Job, error) {
 	f.got(r)
 	return &schedulerpb.Job{Name: r.GetName(), State: schedulerpb.Job_PAUSED}, nil
+}
+
+// ResumeJob fails as Google does when a status carries details: ErrorInfo,
+// which the JSON body must carry too (#1470).
+func (f *fakeScheduler) ResumeJob(_ context.Context, r *schedulerpb.ResumeJobRequest) (*schedulerpb.Job, error) {
+	f.got(r)
+	st, err := status.New(codes.FailedPrecondition, "job "+r.GetName()+" cannot resume").WithDetails(
+		&errdetails.ErrorInfo{Reason: "JOB_LOCKED", Domain: "cloudscheduler.googleapis.com"})
+	if err != nil {
+		return nil, err
+	}
+	return nil, st.Err()
 }
 
 type fakeOperations struct {
@@ -149,6 +164,27 @@ func wantError(t *testing.T, what string, code int, m map[string]any, raw string
 	msg, _ := e["message"].(string)
 	if code != wantCode || e["code"] != float64(wantCode) || e["status"] != wantStatus || !strings.Contains(msg, names) {
 		t.Errorf("%s = %d %s; want %d %s naming %q", what, code, raw, wantCode, wantStatus, names)
+	}
+}
+
+// A method's error is Google's JSON mapping of its gRPC status: the HTTP
+// code, the canonical code's name in status, and the status's details in
+// their JSON form, ErrorInfo with its @type (#1470).
+func TestTranscoderErrorCarriesStatusAndDetails(t *testing.T) {
+	srv, _ := setup(t, true, nil)
+	code, m, raw := call(t, "POST", srv.URL+"/v1/projects/p/locations/l/jobs/j:resume", "{}")
+	wantError(t, "ResumeJob", code, m, raw, 400, "FAILED_PRECONDITION", "cannot resume")
+	e, _ := m["error"].(map[string]any)
+	details, _ := e["details"].([]any)
+	if len(details) != 1 {
+		t.Fatalf("ResumeJob = %s; want one detail", raw)
+	}
+	d, _ := details[0].(map[string]any)
+	if d["@type"] != "type.googleapis.com/google.rpc.ErrorInfo" || d["reason"] != "JOB_LOCKED" || d["domain"] != "cloudscheduler.googleapis.com" {
+		t.Errorf("detail = %v; want the ErrorInfo", d)
+	}
+	if _, ok := e["errors"]; ok {
+		t.Errorf("ResumeJob = %s; want no errors[]", raw)
 	}
 }
 

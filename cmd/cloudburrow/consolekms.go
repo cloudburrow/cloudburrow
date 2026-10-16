@@ -282,7 +282,7 @@ func (p kmsProvider) keyDetail(ctx context.Context, key string) (console.Detail,
 				{Label: "Next rotation time", Value: kmsTime(k.GetNextRotationTime())},
 			},
 		}},
-		Note: "Only SOFTWARE protection exists locally. " +
+		Note: kmsProtectionNote + " " +
 			"Key material is never shown: no Cloud KMS method returns it; a public key is, through Get public key.",
 	}
 	if len(k.GetLabels()) > 0 {
@@ -416,9 +416,20 @@ func (p kmsProvider) Create(ctx context.Context, project string, values map[stri
 
 // kmsKeyHelp names what a key created here is, and what is refused, so the
 // form says it before the API has to.
-const kmsKeyHelp = "Creates a key at SOFTWARE protection with version 1, of the purpose and " +
-	"algorithm chosen below; an ENCRYPT_DECRYPT key gets version 1 as its primary. HSM and " +
-	"EXTERNAL protection are not implemented locally and are not offered."
+const kmsKeyHelp = "Creates a key with version 1, of the protection level, purpose and " +
+	"algorithm chosen below; an ENCRYPT_DECRYPT key gets version 1 as its primary. EXTERNAL " +
+	"and EXTERNAL_VPC protection are not implemented locally and are not offered."
+
+// kmsProtectionNote says what HSM means here (#1452).
+const kmsProtectionNote = "HSM keys behave as SOFTWARE keys do, with the same algorithms: their key material " +
+	"is not in a hardware security module, and no version has an attestation."
+
+// kmsProtectionField is Create key's and Create import job's Protection
+// level: the levels CreateCryptoKey and CreateImportJob accept (#1452).
+func kmsProtectionField(help string) console.Field {
+	return console.Field{Name: "protectionLevel", Label: "Protection level", Type: "select", Default: "SOFTWARE",
+		Options: []string{"SOFTWARE", "HSM"}, Help: help + " " + kmsProtectionNote}
+}
 
 // kmsCreateKeyFields is the Create key form on a ring's page. A function so
 // the pattern check in consolepatterns_test.go reads the fields shipped.
@@ -426,6 +437,7 @@ func kmsCreateKeyFields() []console.Field {
 	return []console.Field{
 		{Name: "cryptoKeyId", Label: "Key name", Type: "text", Required: true,
 			Help: kmsKeyHelp, Pattern: `^[A-Za-z0-9_\-]{1,63}$`},
+		kmsProtectionField("Fixed once the key exists; new versions get it."),
 		kmsPurposeField(),
 		kmsAlgorithmField(),
 		{Name: "labels", Label: "Labels", Type: "map",
@@ -476,11 +488,19 @@ func kmsCreateKeyRequest(ring string, values map[string]string) (*kmspb.CreateCr
 	} else if purpose == kmspb.CryptoKey_ENCRYPT_DECRYPT {
 		alg = kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION
 	}
+	level := kmspb.ProtectionLevel_SOFTWARE
+	if pl := strings.TrimSpace(values["protectionLevel"]); pl != "" {
+		v, ok := kmspb.ProtectionLevel_value[pl]
+		if !ok {
+			return nil, fmt.Errorf("protection level: %q is not a protection level", pl)
+		}
+		level = kmspb.ProtectionLevel(v)
+	}
 	key := &kmspb.CryptoKey{
 		Purpose: purpose,
 		Labels:  labels,
 		VersionTemplate: &kmspb.CryptoKeyVersionTemplate{
-			ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
+			ProtectionLevel: level,
 			Algorithm:       alg,
 		},
 	}
