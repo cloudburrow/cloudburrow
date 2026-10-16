@@ -454,6 +454,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
+		// executeSql reads a user's password from Secret Manager (#1462).
+		if secretsSvc != nil {
+			sqlAdminSrv.SetSecretAccessor(buildSecretAccessor{svc: secretsSvc})
+		}
 		coord.Register(sqlAdminSrv)
 	}
 	// The Backup and DR Service (#1433), over the Admin API's backups.
