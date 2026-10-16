@@ -233,8 +233,8 @@ func (f *FunctionsServer) CreateFunction(ctx context.Context, req *functionspb.C
 	if err := unsupportedFunction(in); err != nil {
 		return nil, err
 	}
-	if in.GetBuildConfig().GetRuntime() == "" {
-		return nil, apierror.InvalidArgument("build_config.runtime is required")
+	if err := checkRuntime(in.GetBuildConfig().GetRuntime()); err != nil {
+		return nil, err
 	}
 	if _, _, _, err := sourceOf(in.GetBuildConfig()); err != nil {
 		return nil, err
@@ -594,9 +594,9 @@ func (f *FunctionsServer) UpdateFunction(ctx context.Context, req *functionspb.U
 		}
 	}
 	if build {
-		if fn.GetBuildConfig().GetRuntime() == "" {
+		if err := checkRuntime(fn.GetBuildConfig().GetRuntime()); err != nil {
 			functions.mu.Unlock()
-			return nil, apierror.InvalidArgument("build_config.runtime is required")
+			return nil, err
 		}
 		if _, _, _, err := sourceOf(fn.GetBuildConfig()); err != nil {
 			functions.mu.Unlock()
@@ -868,11 +868,26 @@ func (f *FunctionsServer) download(w http.ResponseWriter, r *http.Request) {
 var Runtimes = []struct{ Name, Display string }{
 	{"nodejs22", "Node.js 22"}, {"nodejs20", "Node.js 20"}, {"nodejs18", "Node.js 18"},
 	{"python313", "Python 3.13"}, {"python312", "Python 3.12"}, {"python311", "Python 3.11"},
-	{"go125", "Go 1.25"}, {"go124", "Go 1.24"}, {"go123", "Go 1.23"},
-	{"java21", "Java 21"}, {"java17", "Java 17"},
-	{"ruby34", "Ruby 3.4"}, {"ruby33", "Ruby 3.3"},
-	{"php84", "PHP 8.4"}, {"php83", "PHP 8.3"},
-	{"dotnet8", ".NET 8"},
+	{"python310", "Python 3.10"}, {"python39", "Python 3.9"},
+	{"go125", "Go 1.25"}, {"go124", "Go 1.24"}, {"go123", "Go 1.23"}, {"go122", "Go 1.22"}, {"go121", "Go 1.21"},
+	{"java21", "Java 21"}, {"java17", "Java 17"}, {"java11", "Java 11"},
+	{"ruby34", "Ruby 3.4"}, {"ruby33", "Ruby 3.3"}, {"ruby32", "Ruby 3.2"},
+	{"php84", "PHP 8.4"}, {"php83", "PHP 8.3"}, {"php82", "PHP 8.2"},
+	{"dotnet8", ".NET 8"}, {"dotnet6", ".NET 6"},
+}
+
+// checkRuntime refuses a runtime ListRuntimes does not name, as Google
+// refuses one it does not support.
+func checkRuntime(runtime string) error {
+	if runtime == "" {
+		return apierror.InvalidArgument("build_config.runtime is required")
+	}
+	for _, r := range Runtimes {
+		if r.Name == runtime {
+			return nil
+		}
+	}
+	return apierror.InvalidArgument("build_config.runtime %q is not supported: ListRuntimes names the runtimes", runtime)
 }
 
 // ListRuntimes lists the runtimes a function can be built with.

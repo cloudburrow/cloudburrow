@@ -6,6 +6,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -347,5 +348,170 @@ func TestFunctionsAPIBuildsAndServes(t *testing.T) {
 	}
 	if _, err := rc.GetService(ctx, &runpb.GetServiceRequest{Name: fn.GetServiceConfig().GetService()}); status.Code(err) != codes.NotFound {
 		t.Errorf("the function's service after delete = %v; want NOT_FOUND", err)
+	}
+}
+
+// TestGcloudFunctions (#1377): the pinned gcloud, through gcloud-setup's
+// cloudfunctions override alone, egress to Google blocked. Ungated:
+// `functions list --v2`, `describe` and `delete` of a 2nd-gen function created
+// through the client (FAILED, its source not a zip). Gated as the Functions
+// tests are: `functions deploy --gen2` of testdata/function, which uploads
+// the source to a GenerateUploadUrl URL and polls the operation, and the
+// deployed function's url.
+func TestGcloudFunctions(t *testing.T) {
+	h := New(t)
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
+	g := newGcloudSession(t, h)
+	ctx, cancel := context.WithTimeout(h.Context(), 30*time.Minute)
+	t.Cleanup(cancel)
+	fc := functionsClient(t, h)
+	// gcloud names the instance's project, which is what it lists.
+	parent := "projects/" + g.project + "/locations/us-central1"
+
+	up, err := fc.GenerateUploadUrl(ctx, &functionspb.GenerateUploadUrlRequest{Parent: parent})
+	if err != nil {
+		t.Fatalf("GenerateUploadUrl: %v", err)
+	}
+	putSource(ctx, t, up.GetUploadUrl(), []byte("not a zip"))
+	op, err := fc.CreateFunction(ctx, &functionspb.CreateFunctionRequest{Parent: parent, FunctionId: "gcloud-fn", Function: &functionspb.Function{
+		BuildConfig: &functionspb.BuildConfig{Runtime: "go123", EntryPoint: "Hello",
+			Source: &functionspb.Source{Source: &functionspb.Source_StorageSource{StorageSource: up.GetStorageSource()}}}}})
+	if err != nil {
+		t.Fatalf("CreateFunction: %v", err)
+	}
+	_, _ = op.Wait(ctx)
+
+	if out := g.must("functions", "list", "--v2", "--regions=us-central1", "--format=value(name,state)"); !strings.Contains(out, "gcloud-fn") || !strings.Contains(out, "FAILED") {
+		t.Errorf("gcloud functions list = %q; want gcloud-fn FAILED", out)
+	}
+	if out := g.must("functions", "describe", "gcloud-fn", "--gen2", "--region=us-central1", "--format=value(buildConfig.runtime,buildConfig.entryPoint,state)"); !strings.Contains(out, "go123") || !strings.Contains(out, "Hello") {
+		t.Errorf("gcloud functions describe = %q", out)
+	}
+	g.must("functions", "delete", "gcloud-fn", "--gen2", "--region=us-central1", "--quiet")
+	if _, err := fc.GetFunction(ctx, &functionspb.GetFunctionRequest{Name: parent + "/functions/gcloud-fn"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetFunction after gcloud functions delete = %v; want NOT_FOUND", err)
+	}
+
+	// A deploy whose runtime is not served: gcloud reads ListRuntimes from
+	// this instance and refuses it before uploading anything.
+	src := filepath.Join(moduleRoot(t), "testdata", "function")
+	out, err := g.run(nil, "functions", "deploy", "gcloud-fn-bad", "--gen2", "--region=us-central1", "--runtime=go999",
+		"--entry-point=Hello", "--trigger-http", "--source="+src)
+	t.Logf("gcloud functions deploy --runtime=go999:\n%s", out)
+	if err == nil || !strings.Contains(out, "go999 is not a supported runtime") {
+		t.Errorf("gcloud functions deploy --runtime=go999 = %v:\n%s\nwant the runtime refused", err, out)
+	}
+
+	requireAmd64Functions(ctx, t)
+	out, err = g.run(nil, "functions", "deploy", "gcloud-fn-built", "--gen2", "--region=us-central1", "--runtime=go123",
+		"--entry-point=Hello", "--trigger-http", "--source="+src, "--memory=256Mi", "--set-env-vars=MODE=gcloud")
+	t.Logf("gcloud functions deploy:\n%s", out)
+	if err != nil {
+		t.Fatalf("gcloud functions deploy --gen2: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = g.run(nil, "functions", "delete", "gcloud-fn-built", "--gen2", "--region=us-central1", "--quiet")
+	})
+	desc := g.must("functions", "describe", "gcloud-fn-built", "--gen2", "--region=us-central1", "--format=value(state,url)")
+	if f := strings.Fields(desc); len(f) != 2 || f[0] != "ACTIVE" {
+		t.Fatalf("gcloud functions describe after deploy = %q; want ACTIVE and its url", desc)
+	}
+	code, body := functionRequest(t, ingress(t), hostOf(t, strings.Fields(desc)[1]), `{"name":"gcloud"}`, map[string]string{"Content-Type": "application/json"})
+	if code != http.StatusOK || !strings.Contains(body, `"greeting":"hello gcloud"`) {
+		t.Errorf("POST / = %d %q; want 200 and the greeting", code, body)
+	}
+	g.must("functions", "delete", "gcloud-fn-built", "--gen2", "--region=us-central1", "--quiet")
+}
+
+// TestTerraformCloudFunctions2Function (#1377): google_cloudfunctions2_function
+// through `cloudburrow terraform`, which points cloudfunctions2_custom_endpoint
+// at the Run port, egress to Google blocked. Ungated: a function whose
+// source object is not a zip fails to apply with this instance's build
+// error, and its IAM member is never reached. Gated as the Functions tests
+// are: testdata/function, zipped into a bucket object, applies ACTIVE with
+// its url and service, plans clean, updates its service_config in place and
+// destroys.
+func TestTerraformCloudFunctions2Function(t *testing.T) {
+	h := New(t)
+	m := newTFModule(t)
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
+	ctx, cancel := context.WithTimeout(h.Context(), 30*time.Minute)
+	t.Cleanup(cancel)
+	fc := functionsClient(t, h)
+	suffix := strings.TrimPrefix(m.project, "cb-test-")
+	bucketName := "tf-fn-src-" + strings.ToLower(strings.ReplaceAll(suffix, "_", "-"))
+	zipPath := filepath.Join(t.TempDir(), "function.zip")
+	module := func(id, archive, mode string) string {
+		if err := os.WriteFile(zipPath, []byte(archive), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprintf(`
+resource "google_storage_bucket" "src" {
+  project       = %[1]q
+  name          = %[2]q
+  location      = "US"
+  force_destroy = true
+}
+resource "google_storage_bucket_object" "zip" {
+  name   = "function.zip"
+  bucket = google_storage_bucket.src.name
+  source = %[3]q
+}
+resource "google_cloudfunctions2_function" "f" {
+  project  = %[1]q
+  name     = %[4]q
+  location = "us-central1"
+  build_config {
+    runtime     = "go123"
+    entry_point = "Hello"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.src.name
+        object = google_storage_bucket_object.zip.name
+      }
+    }
+  }
+  service_config {
+    available_memory      = "256M"
+    timeout_seconds       = 60
+    max_instance_count    = 2
+    environment_variables = { MODE = %[5]q }
+  }
+}
+`, m.project, bucketName, zipPath, id, mode)
+	}
+
+	m.write(module("tf-fn-bad", "not a zip", "bad"))
+	m.must("init", "-input=false", "-no-color")
+	out, err := m.tf("apply", "-auto-approve", "-input=false", "-no-color")
+	if err == nil || !strings.Contains(out, "Build failed") {
+		t.Errorf("apply of a source that is not a zip = %v; want this instance's build error:\n%s", err, lastLines(out, 30))
+	}
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := fc.GetFunction(ctx, &functionspb.GetFunctionRequest{Name: "projects/" + m.project + "/locations/us-central1/functions/tf-fn-bad"}); status.Code(err) != codes.NotFound {
+		t.Errorf("the failed function after destroy = %v; want NOT_FOUND", err)
+	}
+
+	requireAmd64Functions(ctx, t)
+	archive := string(zipFunction(t, filepath.Join(moduleRoot(t), "testdata", "function")))
+	name := "projects/" + m.project + "/locations/us-central1/functions/tf-fn"
+	m.write(module("tf-fn", archive, "first"))
+	m.apply()
+	fn, err := fc.GetFunction(ctx, &functionspb.GetFunctionRequest{Name: name})
+	if err != nil || fn.GetState() != functionspb.Function_ACTIVE || fn.GetUrl() == "" || fn.GetServiceConfig().GetService() == "" {
+		t.Fatalf("after apply, the function = %v, %v; want it ACTIVE with its url and service", fn, err)
+	}
+	m.planClean()
+	m.write(module("tf-fn", archive, "second"))
+	if out := m.must("apply", "-auto-approve", "-input=false", "-no-color"); !strings.Contains(out, "0 added, 1 changed, 0 destroyed") {
+		t.Errorf("the change was not applied in place:\n%s", lastLines(out, 20))
+	}
+	if fn, err := fc.GetFunction(ctx, &functionspb.GetFunctionRequest{Name: name}); err != nil || fn.GetServiceConfig().GetEnvironmentVariables()["MODE"] != "second" {
+		t.Errorf("after the change, the function = %v, %v", fn, err)
+	}
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := fc.GetFunction(ctx, &functionspb.GetFunctionRequest{Name: name}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetFunction after destroy = %v; want NOT_FOUND", err)
 	}
 }
