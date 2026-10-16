@@ -245,6 +245,7 @@ func (p storageProvider) DetailActions(ctx context.Context, project string, path
 				actions = append(actions, lockRetentionAction(b)...)
 				actions = append(actions, bucketACLActions(b)...)
 				actions = append(actions, bulkRestoreAction(), filterOperationsAction())
+				actions = append(actions, cacheActions()...)
 			}
 			actions = append(actions, p.bucketNotificationActions(ctx, project, path[0])...)
 		}

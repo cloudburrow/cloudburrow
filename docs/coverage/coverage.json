@@ -4643,44 +4643,97 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 19,
-      "Verified": 68
+      "Unimplemented": 9,
+      "Verified": 78
     },
     "rows": [
       {
         "method": "storage.anywhereCaches.disable",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+        ]
       },
       {
         "method": "storage.anywhereCaches.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+        ]
       },
       {
         "method": "storage.anywhereCaches.insert",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "a zone outside the bucket's location",
+            "test": "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          },
+          {
+            "code": "409",
+            "case": "a second cache in the zone (ANYWHERE_CACHE_ALREADY_EXISTS)",
+            "test": "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          }
+        ]
       },
       {
         "method": "storage.anywhereCaches.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+        ]
       },
       {
         "method": "storage.anywhereCaches.pause",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "a cache that is not running",
+            "test": "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          }
+        ]
       },
       {
         "method": "storage.anywhereCaches.resume",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+        ]
       },
       {
         "method": "storage.anywhereCaches.update",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "another update while one is pending",
+            "test": "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          }
+        ]
       },
       {
         "method": "storage.bucketAccessControls.delete",
@@ -4822,13 +4875,35 @@
       },
       {
         "method": "storage.buckets.operations.advanceRelocateBucket",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageanywherecache_test.go:292 TestStorageRelocate",
+          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "a relocation still syncing",
+            "test": "test/compat/storageanywherecache_test.go:292 TestStorageRelocate"
+          }
+        ]
       },
       {
         "method": "storage.buckets.operations.cancel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
+          "test/compat/storageanywherecache_test.go:292 TestStorageRelocate",
+          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "an Anywhere Cache update's operation, and a done one",
+            "test": "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          }
+        ]
       },
       {
         "method": "storage.buckets.operations.get",
@@ -4867,8 +4942,23 @@
       },
       {
         "method": "storage.buckets.relocate",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageanywherecache_test.go:292 TestStorageRelocate",
+          "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "the bucket's own location",
+            "test": "test/compat/storageanywherecache_test.go:292 TestStorageRelocate"
+          },
+          {
+            "code": "409",
+            "case": "a second relocation while one runs",
+            "test": "test/compat/storageanywherecache_test.go:292 TestStorageRelocate"
+          }
+        ]
       },
       {
         "method": "storage.buckets.restore",
@@ -5158,7 +5248,8 @@
         "method": "storage.notifications.list",
         "status": "Verified",
         "tests": [
-          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK"
+          "test/compat/notifications_test.go:158 TestNotificationConfigsCRUDThroughTheSDK",
+          "test/compat/storageanywherecache_test.go:470 TestStorageNotificationsWithoutPubSub"
         ]
       },
       {

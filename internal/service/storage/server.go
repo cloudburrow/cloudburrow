@@ -160,6 +160,16 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.folders.rename"] = s.foldersRename
 	s.handlers["storage.buckets.operations.get"] = s.operationsGet
 	s.handlers["storage.buckets.operations.list"] = s.operationsList
+	s.handlers["storage.buckets.operations.cancel"] = s.operationsCancel
+	s.handlers["storage.buckets.operations.advanceRelocateBucket"] = s.operationsAdvanceRelocateBucket
+	s.handlers["storage.buckets.relocate"] = s.bucketsRelocate
+	s.handlers["storage.anywhereCaches.insert"] = s.anywhereCachesInsert
+	s.handlers["storage.anywhereCaches.update"] = s.anywhereCachesUpdate
+	s.handlers["storage.anywhereCaches.get"] = s.anywhereCachesGet
+	s.handlers["storage.anywhereCaches.list"] = s.anywhereCachesList
+	s.handlers["storage.anywhereCaches.pause"] = s.anywhereCachesState(cachePaused, cacheRunning)
+	s.handlers["storage.anywhereCaches.resume"] = s.anywhereCachesState(cacheRunning, cachePaused, cacheDisabled)
+	s.handlers["storage.anywhereCaches.disable"] = s.anywhereCachesState(cacheDisabled, cacheRunning, cachePaused)
 	s.handlers["storage.buckets.setIamPolicy"] = s.bucketsSetIamPolicy
 	s.handlers["storage.buckets.testIamPermissions"] = s.bucketsTestIamPermissions
 	s.handlers["storage.projects.hmacKeys.create"] = s.hmacKeysCreate
