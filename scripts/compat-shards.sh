@@ -154,7 +154,10 @@ compat_shard() {
       # test finds its endpoint with `cloudburrow env`; STORAGE is not
       # exported, so the Cloud Storage tests stay in the storage shard.
       # The Cloud SQL Admin API over both Cloud SQL servers (#1301).
-      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT
+      # Resource Manager as BIGQUERY_RESOURCEMANAGER (#1392): only
+      # BigQuery's JOBS_BY_FOLDER test reads it, to move the project into a
+      # folder, so the Resource Manager tests stay in storage.
+      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       # A created Memorystore instance follows the mode too (#1302), with RDB

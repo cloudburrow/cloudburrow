@@ -43,6 +43,11 @@ func TestFunctionsWorkflowIsDispatchOnly(t *testing.T) {
 	}
 }
 
+// functionsSelection is functions.yml's -run: the Functions tests, and
+// TestGcloudFunctions and TestTerraformCloudFunctions2Function, whose
+// deploys from source are gated the same way (#1377).
+const functionsSelection = `TestFunctions|^TestGcloudFunctions$|^TestTerraformCloudFunctions2Function$`
+
 // TestFunctionsWorkflowRunsTheGatedTests: it installs the pinned pack,
 // checksum-verified, brings up an instance, runs the Functions tests with
 // the gate set, fails on a skip, and deletes the clusters.
@@ -82,7 +87,7 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 		"./bin/cloudburrow up --detach",
 		"./bin/cloudburrow wait",
 		`scripts/compat-env.sh --strict --only`,
-		"TESTS='TestFunctions'",
+		"TESTS='" + functionsSelection + "'",
 		`CLOUDBURROW_TEST_FUNCTIONS=1 go test -tags compat`,
 		`-run "$TESTS"`,
 		// The skip guard: every selected test must have passed.
@@ -99,14 +104,15 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 		t.Error("functions.yml does not check pack's tarball against a pinned SHA-256")
 	}
 
-	// The selection names exactly the eleven gated tests and the ungated
-	// TestFunctionsAPI (#1377), so a renamed one cannot drop out unnoticed.
+	// The selection names exactly the eleven gated tests, the ungated
+	// TestFunctionsAPI, and gcloud's and Terraform's Functions tests (#1377),
+	// so a renamed one cannot drop out unnoticed.
 	files, err := filepath.Glob(filepath.Join("..", "compat", "*_test.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	decl := regexp.MustCompile(`(?m)^func (Test\w+)\(t \*testing\.T\)`)
-	re := regexp.MustCompile("TestFunctions")
+	re := regexp.MustCompile(functionsSelection)
 	var got []string
 	for _, f := range files {
 		b, err := os.ReadFile(f)
@@ -122,17 +128,17 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 	for _, want := range []string{"TestFunctionsFrameworkBuiltWithBuildpacks", "TestFunctionsRebuildReusesLayers", "TestFunctionsBuildBrokenModulePathFails", "TestFunctionsSubmitBuildBuildpacks",
 		"TestFunctionsNodejsBuiltWithBuildpacks", "TestFunctionsPythonBuiltWithBuildpacks",
 		"TestFunctionsJavaBuiltWithBuildpacks", "TestFunctionsRubyBuiltWithBuildpacks", "TestFunctionsPHPBuiltWithBuildpacks", "TestFunctionsDotnetBuiltWithBuildpacks",
-		"TestFunctionsAPIBuildsAndServes", "TestFunctionsAPI"} {
+		"TestFunctionsAPIBuildsAndServes", "TestFunctionsAPI", "TestGcloudFunctions", "TestTerraformCloudFunctions2Function"} {
 		found := false
 		for _, g := range got {
 			found = found || g == want
 		}
 		if !found {
-			t.Errorf("-run TestFunctions does not select %s; it selects %q", want, got)
+			t.Errorf("-run %s does not select %s; it selects %q", functionsSelection, want, got)
 		}
 	}
-	if len(got) != 12 {
-		t.Errorf("-run TestFunctions selects %q; want the eleven gated Functions tests and TestFunctionsAPI", got)
+	if len(got) != 14 {
+		t.Errorf("-run %s selects %q; want the eleven gated Functions tests, TestFunctionsAPI, TestGcloudFunctions and TestTerraformCloudFunctions2Function", functionsSelection, got)
 	}
 }
 
