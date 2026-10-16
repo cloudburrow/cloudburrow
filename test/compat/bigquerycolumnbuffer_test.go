@@ -184,3 +184,50 @@ func TestBigQueryColumnStreamingBuffer(t *testing.T) {
 		t.Errorf("UPDATE after the flush: %v", err)
 	}
 }
+
+// TestBigQueryPartitionColumnLeftOut (#1273): a query job into a
+// partition whose result leaves out a REQUIRED column of the table, with
+// ALLOW_FIELD_RELAXATION, relaxes the column and writes it NULL, as
+// BigQuery's example appends a query whose "results will omit the second
+// column" with that option; without it the job fails and the table is
+// unchanged. Columns in another order stay 501. Measured first: each was
+// 501.
+//
+// covers: bigquery.jobs.insert, bigquery.jobs.get, bigquery.tables.get
+func TestBigQueryPartitionColumnLeftOut(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ctx := h.Context()
+	ds := validationDataset(t, h, c)
+	p := func(table string) string { return "`" + ds.DatasetID + "." + table + "`" }
+	tbl := ds.Table("lo")
+	if err := tbl.Create(ctx, &bigquery.TableMetadata{
+		Schema: bigquery.Schema{{Name: "d", Type: bigquery.DateFieldType}, {Name: "a", Type: bigquery.StringFieldType, Required: true},
+			{Name: "b", Type: bigquery.IntegerFieldType}},
+		TimePartitioning: &bigquery.TimePartitioning{Type: bigquery.DayPartitioningType, Field: "d"}}); err != nil {
+		t.Fatal(err)
+	}
+	query := func(sql string, opts ...string) error {
+		q := c.Query(sql)
+		q.Dst, q.WriteDisposition, q.SchemaUpdateOptions = ds.Table("lo$20240101"), bigquery.WriteAppend, opts
+		j, err := q.Run(ctx)
+		return waitJob(ctx, j, err)
+	}
+	if err := query("SELECT DATE '2024-01-01' AS d, 1 AS b"); err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Errorf("a REQUIRED column left out without ALLOW_FIELD_RELAXATION: %v, want the job to fail", err)
+	}
+	if err := query("SELECT DATE '2024-01-01' AS d, 2 AS b", "ALLOW_FIELD_RELAXATION"); err != nil {
+		t.Fatalf("with ALLOW_FIELD_RELAXATION: %v", err)
+	}
+	md, err := tbl.Metadata(ctx)
+	if err != nil || len(md.Schema) != 3 || md.Schema[1].Required {
+		t.Errorf("schema after the relaxing write: %v, %+v; want a NULLABLE", err, md)
+	}
+	if got := queryRows(t, ctx, c, "", "", "SELECT CONCAT(CAST(b AS STRING), ' ', IFNULL(a, 'null')) FROM "+p("lo")); !reflect.DeepEqual(got, []string{"2 null"}) {
+		t.Errorf("rows: %v, want [2 null]", got)
+	}
+	var apiErr error = query("SELECT DATE '2024-01-01' AS d, 3 AS b, 'x' AS a", "ALLOW_FIELD_RELAXATION")
+	if apiErr == nil || !strings.Contains(apiErr.Error(), "order") {
+		t.Errorf("columns in another order: %v, want 501", apiErr)
+	}
+}
