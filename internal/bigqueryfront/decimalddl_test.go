@@ -8,6 +8,51 @@ import (
 	"testing"
 )
 
+// TestColumnDescriptions: a column's and a STRUCT field's OPTIONS
+// (description = ...), literal or constant expression, are read and cut
+// from what the engine is sent; another column option is refused (#1438).
+func TestColumnDescriptions(t *testing.T) {
+	sql := `CREATE TABLE ds.t (a INT64 OPTIONS (description = "col"), b STRING OPTIONS (description = CONCAT('x', 'y')), ` +
+		`s STRUCT<f INT64 OPTIONS (description = 'field'), g STRING OPTIONS (description = UPPER('g'))>, n INT64 OPTIONS (description = NULL)) ` +
+		`OPTIONS (description = "d")`
+	d, msg, ok := parseDDLOptions(sql)
+	if !ok || msg != "" || d.invalid != "" || !d.sets() {
+		t.Fatalf("parseDDLOptions: ok %v, msg %q, invalid %q", ok, msg, d.invalid)
+	}
+	col, field := "col", "field"
+	want := []decimalColumn{{name: "a", description: &col}, {name: "b", descExpr: "CONCAT('x', 'y')"},
+		{name: "s", fields: []decimalColumn{{name: "f", description: &field}, {name: "g", descExpr: "UPPER('g')"}}}}
+	if !reflect.DeepEqual(d.decimals, want) {
+		t.Errorf("columns %+v, want %+v", d.decimals, want)
+	}
+	if want := `CREATE TABLE ds.t (a INT64 , b STRING , s STRUCT<f INT64 , g STRING >, n INT64 ) OPTIONS (description = "d")`; d.sent != want {
+		t.Errorf("sent %q, want %q", d.sent, want)
+	}
+	meta := map[string]json.RawMessage{"schema": json.RawMessage(`{"fields":[{"name":"a","type":"INTEGER"},` +
+		`{"name":"s","type":"RECORD","fields":[{"name":"f","type":"INTEGER"}]}]}`)}
+	putDecimalColumns(meta, want)
+	if got := string(meta["schema"]); got != `{"fields":[{"description":"col","name":"a","type":"INTEGER"},`+
+		`{"fields":[{"description":"field","name":"f","type":"INTEGER"}],"name":"s","type":"RECORD"}]}` {
+		t.Errorf("schema %s", got)
+	}
+	for _, bad := range []string{
+		"CREATE TABLE ds.t (a STRING OPTIONS (data_policies = ['x']))",
+		"CREATE TABLE ds.t (s STRUCT<a STRING OPTIONS (data_policies = ['x'])>)",
+	} {
+		if _, msg, ok := parseDDLOptions(bad); !ok || !strings.Contains(msg, "data_policies") {
+			t.Errorf("%s: ok %v, msg %q", bad, ok, msg)
+		}
+	}
+	if d, _, _ := parseDDLOptions("CREATE TABLE ds.t (a INT64 OPTIONS (rounding_mode = 'ROUND_HALF_EVEN'))"); !strings.Contains(d.invalid, "not a NUMERIC") {
+		t.Errorf("rounding_mode of an INT64: invalid %q", d.invalid)
+	}
+	// ALTER TABLE ADD COLUMN still refuses a STRUCT field's expression.
+	toks, _ := lex("ALTER TABLE ds.t ADD COLUMN s STRUCT<a STRING OPTIONS (description = UPPER('a'))>")
+	if _, unsupported, _ := parseAlter(toks); unsupported == "" {
+		t.Error("ALTER TABLE ADD COLUMN of a STRUCT field's description expression is not refused")
+	}
+}
+
 func TestReadDecimalColumns(t *testing.T) {
 	sql := "CREATE TABLE ds.t (id INT64, a NUMERIC(5, 2), b DECIMAL(3) NOT NULL, " +
 		"c BIGNUMERIC OPTIONS (description = 'x', rounding_mode = 'ROUND_HALF_EVEN'), s STRUCT<x NUMERIC(2)>, d STRING(4))"
@@ -15,8 +60,9 @@ func TestReadDecimalColumns(t *testing.T) {
 	if !ok || msg != "" || d.invalid != "" || !d.sets() {
 		t.Fatalf("parseDDLOptions: ok %v, msg %q, invalid %q", ok, msg, d.invalid)
 	}
+	x := "x"
 	want := []decimalColumn{{name: "a", precision: "5", scale: "2"}, {name: "b", precision: "3"},
-		{name: "c", rounding: "ROUND_HALF_EVEN"}, {name: "s", fields: []decimalColumn{{name: "x", precision: "2"}}}}
+		{name: "c", rounding: "ROUND_HALF_EVEN", description: &x}, {name: "s", fields: []decimalColumn{{name: "x", precision: "2"}}}}
 	if !reflect.DeepEqual(d.decimals, want) {
 		t.Errorf("decimals %+v, want %+v", d.decimals, want)
 	}
@@ -58,7 +104,7 @@ func TestReadDecimalColumns(t *testing.T) {
 	meta := map[string]json.RawMessage{"schema": json.RawMessage(`{"fields":[{"name":"A","type":"NUMERIC"},{"name":"c","type":"BIGNUMERIC"}]}`)}
 	putDecimalColumns(meta, want)
 	if got := string(meta["schema"]); got != `{"fields":[{"name":"A","precision":"5","scale":"2","type":"NUMERIC"},`+
-		`{"name":"c","roundingMode":"ROUND_HALF_EVEN","type":"BIGNUMERIC"}]}` {
+		`{"description":"x","name":"c","roundingMode":"ROUND_HALF_EVEN","type":"BIGNUMERIC"}]}` {
 		t.Errorf("schema %s", got)
 	}
 }
@@ -125,19 +171,19 @@ func TestDecimalOverflow(t *testing.T) {
 }
 
 // TestWithoutFieldRounding (#1409): a nested NUMERIC's parameters and a
-// STRUCT field's OPTIONS (rounding_mode) are cut from what the engine is
-// sent; a column's, and a field's description, are kept.
+// column's or STRUCT field's OPTIONS are cut from what the engine is sent
+// (#1438: the front sets them all).
 func TestWithoutFieldRounding(t *testing.T) {
 	sql := "CREATE TABLE ds.t (a NUMERIC(2) OPTIONS (rounding_mode = 'ROUND_HALF_EVEN'), " +
 		"s STRUCT<e NUMERIC(2) OPTIONS (rounding_mode = 'ROUND_HALF_EVEN'), d STRING OPTIONS (description = 'x')>, " +
 		"x ARRAY<STRUCT<e NUMERIC(2) OPTIONS(rounding_mode='ROUND_HALF_AWAY_FROM_ZERO')>>, r ARRAY<BIGDECIMAL(4, 2)>)"
 	d, _, ok := parseDDLOptions(sql)
-	want := "CREATE TABLE ds.t (a NUMERIC(2) OPTIONS (rounding_mode = 'ROUND_HALF_EVEN'), " +
-		"s STRUCT<e NUMERIC , d STRING OPTIONS (description = 'x')>, x ARRAY<STRUCT<e NUMERIC >>, r ARRAY<BIGDECIMAL>)"
+	want := "CREATE TABLE ds.t (a NUMERIC(2) , " +
+		"s STRUCT<e NUMERIC , d STRING >, x ARRAY<STRUCT<e NUMERIC >>, r ARRAY<BIGDECIMAL>)"
 	if !ok || d.sent != want {
 		t.Errorf("sent %q, want %q", d.sent, want)
 	}
-	if d, _, _ := parseDDLOptions("CREATE TABLE ds.t (a NUMERIC(2) OPTIONS (rounding_mode = 'ROUND_HALF_EVEN'))"); d.sent != "" {
-		t.Errorf("a column's rounding_mode: sent %q", d.sent)
+	if d, _, _ := parseDDLOptions("CREATE TABLE ds.t (a NUMERIC(2))"); d.sent != "" {
+		t.Errorf("no column OPTIONS: sent %q", d.sent)
 	}
 }

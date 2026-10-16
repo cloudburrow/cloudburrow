@@ -53,8 +53,10 @@ import (
 // In a multi-statement script with no TEMP table or function (#1415), a
 // CREATE, ALTER or DROP MATERIALIZED VIEW, and CALL
 // BQ.REFRESH_MATERIALIZED_VIEW, are run in their turn as lone ones, each a
-// child job (scriptflow.go); with a TEMP table, which lasts only for its
-// request, they are 501 (checkDDL).
+// child job (scriptflow.go); with a TEMP table or function, the script
+// is run as the text it amounts to, each TEMP one kept for the script in
+// the hidden dataset (#1434, tempsession.go); in a dry run of such a
+// script they are 501 (checkDDL).
 //
 // ALTER MATERIALIZED VIEW SET OPTIONS sets enable_refresh,
 // refresh_interval_minutes, max_staleness and the table options; DROP

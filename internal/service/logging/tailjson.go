@@ -48,20 +48,43 @@ func (r *tailRecorder) RegisterService(desc *grpc.ServiceDesc, impl any) {
 
 // jsonTail is a TailLogEntries stream over HTTP.
 type jsonTail struct {
-	ctx  context.Context
-	w    http.ResponseWriter
-	req  *loggingpb.TailLogEntriesRequest
-	mu   sync.Mutex
-	read bool
-	sent int // array elements written
+	ctx    context.Context
+	w      http.ResponseWriter
+	req    *loggingpb.TailLogEntriesRequest
+	mu     sync.Mutex
+	read   bool
+	opened bool // the 200 and the array's "[" are written
+	sent   int  // array elements written
 }
 
-func (t *jsonTail) Context() context.Context     { return t.ctx }
-func (t *jsonTail) SetHeader(metadata.MD) error  { return nil }
-func (t *jsonTail) SendHeader(metadata.MD) error { return nil }
-func (t *jsonTail) SetTrailer(metadata.MD)       {}
-func (t *jsonTail) SendMsg(m any) error          { return t.Send(m.(*loggingpb.TailLogEntriesResponse)) }
-func (t *jsonTail) RecvMsg(m any) error          { return apierror.Internal(nil, "RecvMsg is not used") }
+// open writes the 200 and opens the array, once. TailLogEntries calls
+// SendHeader when it has subscribed, so a client that sees "[" knows every
+// entry written after it is tailed (internal/service/logging run 38941061488:
+// opening first lost the entries written before the subscription).
+func (t *jsonTail) open() {
+	if t.opened {
+		return
+	}
+	t.opened = true
+	t.w.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	t.w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(t.w, "[\n")
+	if f, ok := t.w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (t *jsonTail) Context() context.Context    { return t.ctx }
+func (t *jsonTail) SetHeader(metadata.MD) error { return nil }
+func (t *jsonTail) SendHeader(metadata.MD) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.open()
+	return nil
+}
+func (t *jsonTail) SetTrailer(metadata.MD) {}
+func (t *jsonTail) SendMsg(m any) error    { return t.Send(m.(*loggingpb.TailLogEntriesResponse)) }
+func (t *jsonTail) RecvMsg(m any) error    { return apierror.Internal(nil, "RecvMsg is not used") }
 func (t *jsonTail) Recv() (*loggingpb.TailLogEntriesRequest, error) {
 	t.mu.Lock()
 	first := !t.read
@@ -83,6 +106,7 @@ func (t *jsonTail) Send(resp *loggingpb.TailLogEntriesResponse) error {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.open()
 	sep := ",\n"
 	if t.sent == 0 {
 		sep = ""
@@ -113,22 +137,17 @@ func (s *Server) serveTailJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A tail TailLogEntries would refuse is the usual JSON error; an
-	// accepted one opens the array at once, so the client sees the stream
-	// start before any entry arrives.
+	// accepted one opens the array as soon as it has subscribed (SendHeader),
+	// so the client sees the stream start before any entry arrives.
 	if _, _, _, err := s.tailSpec(req); err != nil {
 		writeTailError(w, err)
 		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, "[\n")
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
 	}
 	t := &jsonTail{ctx: r.Context(), w: w, req: req}
 	_ = s.TailLogEntries(t)
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.open()
 	_, _ = io.WriteString(w, "\n]")
 }
 
