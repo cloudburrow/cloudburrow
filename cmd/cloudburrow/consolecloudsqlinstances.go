@@ -287,8 +287,22 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		}
 		runs.Total = len(runs.Items)
 	}
-	d.Sections = []console.Section{{ID: "backups", Label: "Backups", Kind: console.KindListing, Listing: runs}}
-	d.Actions = append(p.backupActions(ids), replicaActions(in)...)
+	certs := console.Listing{Columns: []string{"SHA-1 fingerprint", "Expires"}, NameColumn: "Common name", Noun: "client certificates",
+		Note: "Client certificates signed by the instance's server CA (sslCerts). The private key is shown once, when the certificate is created."}
+	var fps []string
+	if list, err := svc.SslCerts.List(project, name).Context(ctx).Do(); err != nil {
+		certs.Unavailable = sqlAPIError(err).Error()
+	} else {
+		for _, c := range list.Items {
+			certs.Items = append(certs.Items, console.Resource{Name: c.CommonName, Fields: map[string]string{
+				"SHA-1 fingerprint": c.Sha1Fingerprint, "Expires": c.ExpirationTime}})
+			fps = append(fps, c.Sha1Fingerprint)
+		}
+		certs.Total = len(certs.Items)
+	}
+	d.Sections = []console.Section{{ID: "backups", Label: "Backups", Kind: console.KindListing, Listing: runs},
+		{ID: "client-certificates", Label: "Client certificates", Kind: console.KindListing, Listing: certs}}
+	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
 	if pitr == "On" {
 		d.Actions = append(d.Actions, console.Action{ID: "pitr-restore", Label: "Point-in-time restore", Fields: []console.Field{
 			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
@@ -415,6 +429,38 @@ func replicaActions(in *sqladminapi.DatabaseInstance) []console.Action {
 		Confirm: "The replica stops applying the primary's changes until replication is started again."})
 }
 
+// transferActions are Export and Import (#1380), to and from the
+// instance's Cloud Storage, through instances.export and instances.import.
+func transferActions() []console.Action {
+	uri := console.Field{Name: "uri", Label: "Cloud Storage file", Type: "text", Required: true, Pattern: "^gs://[^/]+/.+$",
+		Help: "gs://bucket/file in this instance's Cloud Storage; a name ending in .gz is gzip (SQL only)."}
+	fileType := console.Field{Name: "fileType", Label: "Format", Type: "select", Required: true, Options: []string{"SQL", "CSV"}, Default: "SQL"}
+	db := console.Field{Name: "database", Label: "Database", Type: "text",
+		Help: "Required on PostgreSQL, and for CSV; a MySQL SQL export without one exports every database."}
+	return []console.Action{
+		{ID: "export", Label: "Export", Fields: []console.Field{uri, fileType, db,
+			{Name: "selectQuery", Label: "SQL query (CSV)", Type: "text", Help: "The SELECT whose rows a CSV export writes."}}},
+		{ID: "import", Label: "Import", Confirm: "The file's statements or rows are run in, or loaded into, the database.",
+			Fields: []console.Field{uri, fileType, db,
+				{Name: "table", Label: "Table (CSV)", Type: "text", Help: "The table a CSV import loads its rows into."}}},
+	}
+}
+
+// certActions are Create client certificate, Delete client certificate and
+// Reset SSL configuration (#1380), through sslCerts.insert, sslCerts.delete
+// and instances.resetSslConfig.
+func certActions(fps []string) []console.Action {
+	acts := []console.Action{{ID: "create-client-cert", Label: "Create client certificate", Fields: []console.Field{{Name: "commonName",
+		Label: "Common name", Type: "text", Required: true, Help: "A name no other client certificate of the instance has."}}}}
+	if len(fps) > 0 {
+		acts = append(acts, console.Action{ID: "delete-client-cert", Label: "Delete client certificate", Destructive: true,
+			Confirm: "The certificate is deleted.", Fields: []console.Field{{Name: "fingerprint", Label: "SHA-1 fingerprint",
+				Type: "select", Required: true, Options: fps, Default: fps[0]}}})
+	}
+	return append(acts, console.Action{ID: "reset-ssl", Label: "Reset SSL configuration", Destructive: true,
+		Confirm: "Every client certificate of the instance is deleted, and the server's certificate is issued anew."})
+}
+
 func (p cloudSQLInstancesProvider) backupActions(ids []string) []console.Action {
 	acts := []console.Action{{ID: "create-backup", Label: "Create backup",
 		Fields: []console.Field{{Name: "description", Label: "Description", Type: "text"}}},
@@ -443,9 +489,45 @@ func (p cloudSQLInstancesProvider) DetailActions(ctx context.Context, project st
 // ActAt implements console.PathActor: the backup actions, through
 // backupRuns.insert, instances.restoreBackup and backupRuns.delete, Clone,
 // through instances.clone, Point-in-time restore, through instances.clone
-// with cloneContext.pointInTime, and the replica actions, through
-// instances.insert, promoteReplica, stopReplica and startReplica.
+// with cloneContext.pointInTime, the replica actions, through
+// instances.insert, promoteReplica, stopReplica and startReplica, and
+// Export and Import, through instances.export and instances.import.
 func (p cloudSQLInstancesProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
+	_, err := p.ActAtResult(ctx, project, path, action, v)
+	return err
+}
+
+// ActAtResult implements console.ResultActor: Create client certificate
+// answers with the certificate, its private key and the server CA, which
+// sslCerts.insert returns once; every other action with nothing.
+func (p cloudSQLInstancesProvider) ActAtResult(ctx context.Context, project string, path []string, action string, v map[string]string) (*console.Listing, error) {
+	if action != "create-client-cert" || len(path) != 1 {
+		return nil, p.actAt(ctx, project, path, action, v)
+	}
+	svc, err := p.api(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := svc.SslCerts.Insert(project, path[0], &sqladminapi.SslCertsInsertRequest{CommonName: strings.TrimSpace(v["commonName"])}).Context(ctx).Do()
+	if err != nil {
+		return nil, sqlAPIError(err)
+	}
+	out := &console.Listing{Columns: []string{"PEM"}, NameColumn: "File", Noun: "files"}
+	add := func(name, pem string) {
+		out.Items = append(out.Items, console.Resource{Name: name, Fields: map[string]string{"PEM": pem}})
+	}
+	if res.ClientCert != nil && res.ClientCert.CertInfo != nil {
+		add("client-cert.pem", res.ClientCert.CertInfo.Cert)
+		add("client-key.pem", res.ClientCert.CertPrivateKey)
+	}
+	if res.ServerCaCert != nil {
+		add("server-ca.pem", res.ServerCaCert.Cert)
+	}
+	out.Total = len(out.Items)
+	return out, nil
+}
+
+func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
 	if len(path) != 1 {
 		return fmt.Errorf("%s", console.DeeperThan(1, path).Unavailable)
 	}
@@ -484,6 +566,25 @@ func (p cloudSQLInstancesProvider) ActAt(ctx context.Context, project string, pa
 		_, err = svc.Instances.StopReplica(project, name).Context(ctx).Do()
 	case "start-replica":
 		_, err = svc.Instances.StartReplica(project, name).Context(ctx).Do()
+	case "export":
+		x := &sqladminapi.ExportContext{Uri: strings.TrimSpace(v["uri"]), FileType: v["fileType"]}
+		if d := strings.TrimSpace(v["database"]); d != "" {
+			x.Databases = []string{d}
+		}
+		if x.FileType == "CSV" {
+			x.CsvExportOptions = &sqladminapi.ExportContextCsvExportOptions{SelectQuery: strings.TrimSpace(v["selectQuery"])}
+		}
+		_, err = svc.Instances.Export(project, name, &sqladminapi.InstancesExportRequest{ExportContext: x}).Context(ctx).Do()
+	case "import":
+		x := &sqladminapi.ImportContext{Uri: strings.TrimSpace(v["uri"]), FileType: v["fileType"], Database: strings.TrimSpace(v["database"])}
+		if x.FileType == "CSV" {
+			x.CsvImportOptions = &sqladminapi.ImportContextCsvImportOptions{Table: strings.TrimSpace(v["table"])}
+		}
+		_, err = svc.Instances.Import(project, name, &sqladminapi.InstancesImportRequest{ImportContext: x}).Context(ctx).Do()
+	case "delete-client-cert":
+		_, err = svc.SslCerts.Delete(project, name, strings.TrimSpace(v["fingerprint"])).Context(ctx).Do()
+	case "reset-ssl":
+		_, err = svc.Instances.ResetSslConfig(project, name).Context(ctx).Do()
 	default:
 		return fmt.Errorf("unknown action %q", action)
 	}
@@ -494,10 +595,11 @@ func (p cloudSQLInstancesProvider) ActAt(ctx context.Context, project string, pa
 }
 
 var (
-	_ console.Driller   = cloudSQLInstancesProvider{}
-	_ console.Editor    = cloudSQLInstancesProvider{}
-	_ console.PathActor = cloudSQLInstancesProvider{}
-	_ console.Actor     = cloudSQLInstancesProvider{}
-	_ console.Creator   = cloudSQLInstancesProvider{}
-	_ console.Deleter   = cloudSQLInstancesProvider{}
+	_ console.Driller     = cloudSQLInstancesProvider{}
+	_ console.Editor      = cloudSQLInstancesProvider{}
+	_ console.PathActor   = cloudSQLInstancesProvider{}
+	_ console.ResultActor = cloudSQLInstancesProvider{}
+	_ console.Actor       = cloudSQLInstancesProvider{}
+	_ console.Creator     = cloudSQLInstancesProvider{}
+	_ console.Deleter     = cloudSQLInstancesProvider{}
 )

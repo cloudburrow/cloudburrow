@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"database/sql"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/jackc/pgx/v5"
 	sqladmin "google.golang.org/api/sqladmin/v1"
 )
 
@@ -31,24 +33,27 @@ type sqlTransferEngine struct {
 func sqlTransferEngines(t *testing.T, h *Harness) []sqlTransferEngine {
 	var out []sqlTransferEngine
 	if os.Getenv(EnvCloudSQL) != "" {
-		pg := func(t *testing.T) func(string) {
-			c := pgConnect(t, h, "cloudburrow")
-			return func(s string) {
-				t.Helper()
-				if _, err := c.Exec(h.Context(), s); err != nil {
-					t.Fatalf("%s: %v", s, err)
-				}
+		conn := func(t *testing.T) *pgx.Conn {
+			t.Helper()
+			c, err := pgx.Connect(h.Context(), fmt.Sprintf("postgres://cloudburrow@%s/cloudburrow?sslmode=disable", h.Endpoint(EnvCloudSQL)))
+			if err != nil {
+				t.Fatal(err)
 			}
+			return c
 		}
 		out = append(out, sqlTransferEngine{instance: "postgres",
 			exec: func(t *testing.T, stmts ...string) {
-				run := pg(t)
+				c := conn(t)
+				defer c.Close(context.Background())
 				for _, s := range stmts {
-					run(s)
+					if _, err := c.Exec(h.Context(), s); err != nil {
+						t.Fatalf("%s: %v", s, err)
+					}
 				}
 			},
 			rows: func(t *testing.T) string {
-				c := pgConnect(t, h, "cloudburrow")
+				c := conn(t)
+				defer c.Close(context.Background())
 				var s string
 				if err := c.QueryRow(h.Context(), "SELECT coalesce(string_agg(id::text || '=' || name, ';' ORDER BY id), '') FROM xfer_rows").Scan(&s); err != nil {
 					t.Fatal(err)
@@ -57,7 +62,13 @@ func sqlTransferEngines(t *testing.T, h *Harness) []sqlTransferEngine {
 			}})
 	}
 	if os.Getenv(EnvMySQL) != "" {
-		db := func(t *testing.T) *sql.DB { return mysqlDB(t, h) }
+		var d *sql.DB
+		db := func(t *testing.T) *sql.DB {
+			if d == nil {
+				d = mysqlDB(t, h)
+			}
+			return d
+		}
 		out = append(out, sqlTransferEngine{instance: "mysql",
 			exec: func(t *testing.T, stmts ...string) {
 				d := db(t)
@@ -377,7 +388,9 @@ func TestSQLAdminTiersAndFlags(t *testing.T) {
 }
 
 // TestGcloudSQLImportAndExport (#1380): gcloud sql export sql/csv and
-// gcloud sql import sql/csv against the instance's Cloud Storage.
+// gcloud sql import sql/csv against the instance's Cloud Storage, gcloud
+// sql ssl client-certs create, list and delete, and gcloud sql tiers list
+// and flags list.
 func TestGcloudSQLImportAndExport(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" {
@@ -391,7 +404,7 @@ func TestGcloudSQLImportAndExport(t *testing.T) {
 	g := newGcloudSession(t, h)
 	p := "--project=" + h.Project()
 	gs := "gs://" + bh.BucketName() + "/"
-	g.must("sql", "export", "sql", "postgres", gs+"g.sql", "--database=cloudburrow", p)
+	g.must("sql", "export", "sql", "postgres", gs+"g.sql", "--database=cloudburrow", "--table=xfer_rows", p)
 	g.must("sql", "export", "csv", "postgres", gs+"g.csv", "--database=cloudburrow", "--query=SELECT id, name FROM xfer_rows ORDER BY id", p)
 	if got := sqlReadObject(t, h, bh, "g.csv"); !strings.Contains(got, "2,two") && !strings.Contains(got, `2,"two"`) {
 		t.Errorf("gcloud sql export csv wrote %q", got)
@@ -406,10 +419,141 @@ func TestGcloudSQLImportAndExport(t *testing.T) {
 	if got := e.rows(t); got != "1=one;2=two" {
 		t.Errorf("rows after gcloud sql import csv: %q", got)
 	}
+	g.must("sql", "ssl", "client-certs", "create", "gcloud-cert", t.TempDir()+"/key.pem", "--instance=postgres", p)
+	if out := g.must("sql", "ssl", "client-certs", "list", "--instance=postgres", p, "--format=value(commonName)"); !strings.Contains(out, "gcloud-cert") {
+		t.Errorf("gcloud sql ssl client-certs list: %s", out)
+	}
+	g.must("sql", "ssl", "client-certs", "delete", "gcloud-cert", "--instance=postgres", p, "--quiet")
 	if out := g.must("sql", "tiers", "list", p, "--format=value(tier)"); !strings.Contains(out, "db-custom-1-3840") {
 		t.Errorf("gcloud sql tiers list: %s", out)
 	}
 	if out := g.must("sql", "flags", "list", "--database-version=POSTGRES_17", "--format=value(name)"); !strings.Contains(out, "max_connections") {
 		t.Errorf("gcloud sql flags list: %s", out)
+	}
+}
+
+// TestConsoleCloudSQLImportAndExport (#1380): the instance's page offers
+// Export and Import, which write a dump to the instance's Cloud Storage
+// and load it back through instances.export and instances.import.
+func TestConsoleCloudSQLImportAndExport(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" {
+		t.Skip("needs --services cloudsql")
+	}
+	addr := consoleAddr(t, h)
+	project := h.Project()
+	e := sqlTransferEngines(t, h)[0]
+	bh := sqlTransferBucket(t, h, "csqlx")
+	e.exec(t, "DROP TABLE IF EXISTS xfer_rows", "CREATE TABLE xfer_rows (id INT PRIMARY KEY, name VARCHAR(40))",
+		"INSERT INTO xfer_rows VALUES (1, 'console')")
+	defer e.exec(t, "DROP TABLE IF EXISTS xfer_rows")
+	code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/cloudsql-instances?project="+project+"&name=postgres", "")
+	if code != http.StatusOK || !strings.Contains(out, `"id":"export"`) || !strings.Contains(out, `"id":"import"`) {
+		t.Fatalf("the instance's page offers no Export and Import = %d: %.300s", code, out)
+	}
+	act := func(action string, values map[string]string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"Path": []string{"postgres"}, "Action": action, "Values": values})
+		if code, out := consoleDo(t, addr, http.MethodPost, "/api/actions/cloudsql-instances?project="+project, string(body)); code != http.StatusOK {
+			t.Fatalf("console %s = %d: %s", action, code, out)
+		}
+	}
+	uri := "gs://" + bh.BucketName() + "/console.sql"
+	act("export", map[string]string{"uri": uri, "fileType": "SQL", "database": "cloudburrow"})
+	var dump string
+	for i := 0; i < 120 && dump == ""; i++ {
+		if r, err := bh.Object("console.sql").NewReader(h.Context()); err == nil {
+			b, _ := io.ReadAll(r)
+			r.Close()
+			dump = string(b)
+		} else {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	if !strings.Contains(dump, "xfer_rows") {
+		t.Fatalf("the console's export wrote %.200q", dump)
+	}
+	// The dump holds every table of the database, so it is loaded into a
+	// new one, as a database with those tables would refuse it.
+	svc := sqlAdminService(t, h)
+	dbName := fmt.Sprintf("xfer_console_%d", time.Now().UnixNano()%1e6)
+	if _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: dbName}).Do(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = svc.Databases.Delete(project, "postgres", dbName).Do() }()
+	act("import", map[string]string{"uri": uri, "fileType": "SQL", "database": dbName})
+	got := ""
+	c, err := pgx.Connect(h.Context(), fmt.Sprintf("postgres://cloudburrow@%s/%s?sslmode=disable", h.Endpoint(EnvCloudSQL), dbName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(context.Background())
+	for i := 0; i < 120 && got != "1=console"; i++ {
+		time.Sleep(500 * time.Millisecond)
+		var s string
+		if err := c.QueryRow(h.Context(), "SELECT coalesce(string_agg(id::text || '=' || name, ';'), '') FROM xfer_rows").Scan(&s); err == nil {
+			got = s
+		}
+	}
+	if got != "1=console" {
+		t.Errorf("rows after the console's import: %q", got)
+	}
+}
+
+// TestConsoleCloudSQLClientCertificates (#1380): the instance's page lists
+// its client certificates; Create client certificate answers with the
+// certificate, its private key and the server CA, Delete client certificate
+// and Reset SSL configuration remove them, each through the Admin API.
+func TestConsoleCloudSQLClientCertificates(t *testing.T) {
+	h := New(t)
+	inst := sqlTransferEngines(t, h)[0].instance
+	addr := consoleAddr(t, h)
+	project := h.Project()
+	svc := sqlAdminService(t, h)
+	act := func(action string, values map[string]string) string {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"Path": []string{inst}, "Action": action, "Values": values})
+		code, out := consoleDo(t, addr, http.MethodPost, "/api/actions/cloudsql-instances?project="+project, string(body))
+		if code != http.StatusOK {
+			t.Fatalf("console %s = %d: %s", action, code, out)
+		}
+		return out
+	}
+	out := act("create-client-cert", map[string]string{"commonName": "console-cert"})
+	var res struct {
+		Result struct {
+			Items []struct {
+				Name   string
+				Fields map[string]string
+			}
+		}
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for _, i := range res.Result.Items {
+		files[i.Name] = i.Fields["PEM"]
+	}
+	if !strings.Contains(files["client-cert.pem"], "BEGIN CERTIFICATE") || !strings.Contains(files["client-key.pem"], "PRIVATE KEY") ||
+		!strings.Contains(files["server-ca.pem"], "BEGIN CERTIFICATE") {
+		t.Fatalf("create-client-cert answered %.300s", out)
+	}
+	list, err := svc.SslCerts.List(project, inst).Do()
+	if err != nil || len(list.Items) != 1 || list.Items[0].CommonName != "console-cert" {
+		t.Fatalf("sslCerts.list after the console's create: %v %+v", err, list)
+	}
+	code, page := consoleDo(t, addr, http.MethodGet, "/api/detail/cloudsql-instances?project="+project+"&name="+inst, "")
+	if code != http.StatusOK || !strings.Contains(page, "console-cert") || !strings.Contains(page, `"id":"delete-client-cert"`) {
+		t.Errorf("the instance's page does not list the certificate = %d: %.300s", code, page)
+	}
+	act("delete-client-cert", map[string]string{"fingerprint": list.Items[0].Sha1Fingerprint})
+	if list, err := svc.SslCerts.List(project, inst).Do(); err != nil || len(list.Items) != 0 {
+		t.Errorf("sslCerts.list after the console's delete: %v %+v", err, list)
+	}
+	act("create-client-cert", map[string]string{"commonName": "console-cert-2"})
+	act("reset-ssl", nil)
+	if list, err := svc.SslCerts.List(project, inst).Do(); err != nil || len(list.Items) != 0 {
+		t.Errorf("sslCerts.list after the console's Reset SSL configuration: %v %+v", err, list)
 	}
 }

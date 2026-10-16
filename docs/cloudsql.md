@@ -106,8 +106,44 @@ _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "or
 ```
 
 What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource), failover
-replicas and high availability, cascading, cross-region and external-primary replicas, the project-level Backups API, imports and exports, and SSL certificates. See
+replicas and high availability, cascading, cross-region and external-primary replicas, the project-level Backups API, parallel or BAK imports and exports, and server CA rotation. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
+
+### Imports and exports (#1380)
+
+`instances.export` and `instances.import`, and so `gcloud sql export sql|csv` and
+`gcloud sql import sql|csv`, write to and read from a `gs://` file in the instance's own
+Cloud Storage, so they need `--services storage` beside `cloudsql` or `cloudsql-mysql`;
+without it they answer 501. The bucket must exist, and an export to a file that exists
+fails its operation, as on Google.
+
+```sh
+gcloud sql export sql postgres gs://my-bucket/dump.sql.gz --database=cloudburrow
+gcloud sql import sql postgres gs://my-bucket/dump.sql.gz --database=other
+gcloud sql export csv mysql gs://my-bucket/rows.csv --database=cloudburrow --query='SELECT * FROM t'
+gcloud sql import csv mysql gs://my-bucket/rows.csv --database=cloudburrow --table=t
+```
+
+The server's own tools do the work, in its pod: `pg_dump` and `psql`, or `mysqldump` and
+`mysql`, for SQL files (gzip when the name ends in `.gz`); `COPY` for PostgreSQL's CSV;
+`SELECT ... INTO OUTFILE` and `LOAD DATA INFILE`, through the server's
+`secure_file_priv` directory, for MySQL's, with Cloud SQL's default quoting and the
+`csvExportOptions`/`csvImportOptions` characters (hex codes, such as `2C`). A PostgreSQL SQL
+export names exactly one database; a MySQL one without databases exports every application
+database. An import or export runs in the background, and `operations.cancel` stops it while
+it runs; a cancelled MySQL import can leave the rows it
+already loaded, as Google warns. Parallel imports and exports, BAK and TDE files and
+`masterData` answer 501. The console's instance page has Export and Import.
+
+### Client certificates, tiers and flags (#1380)
+
+`sslCerts.insert` (`gcloud sql ssl client-certs create`) signs a client certificate with the
+instance's server CA, the one the connectors trust, and returns its private key once;
+`list`, `get`, `delete` and `instances.resetSslConfig` (which deletes them all and reissues
+the server certificate) are served, and the console's instance page has a Client
+certificates tab. The servers are reached through the connector path, so the certificates
+are records the servers do not check on a direct connection. `tiers.list` and `flags.list`
+answer the lists Google documents for the versions served (`POSTGRES_17`, `MYSQL_8_4`).
 
 ### Creating instances (#1330)
 
