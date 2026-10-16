@@ -1,12 +1,15 @@
 package sqladmin
 
 import (
+	"archive/tar"
 	"context"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -78,6 +81,19 @@ func (f *fakeObjects) Create(_ context.Context, b, o string, d []byte) error {
 	}
 	f.objs[b+"/"+o] = d
 	return nil
+}
+
+func (f *fakeObjects) List(_ context.Context, b, prefix string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for k := range f.objs {
+		if n, ok := strings.CutPrefix(k, b+"/"); ok && strings.HasPrefix(n, prefix) {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func transferServer(t *testing.T) (*sqladmin.Service, *fakeTransferer, *fakeObjects) {
@@ -299,5 +315,76 @@ func TestServerCARotation(t *testing.T) {
 	list, _ = svc.Instances.ListServerCas("proj", "pg").Do()
 	if list.ActiveVersion != next || len(list.Certs) != 2 || list.Certs[1].Sha1Fingerprint != old {
 		t.Errorf("after rotateServerCa: active %s, certs %d, want active %s and the old one kept", list.ActiveVersion, len(list.Certs), next)
+	}
+}
+
+func (f *fakeTransferer) ExportParallel(_ context.Context, t DumpTarget, x SQLExport, w io.Writer) error {
+	f.note(fmt.Sprintf("exportParallel %s %d", strings.Join(x.Databases, ","), x.Threads))
+	tw := tar.NewWriter(w)
+	for _, n := range []string{"./toc.dat", "./3001.dat.gz"} {
+		_ = tw.WriteHeader(&tar.Header{Name: n, Mode: 0o644, Size: 2, Typeflag: tar.TypeReg})
+		_, _ = tw.Write([]byte("ok"))
+	}
+	return tw.Close()
+}
+
+func (f *fakeTransferer) ImportParallel(_ context.Context, t DumpTarget, x SQLImport, r io.Reader) error {
+	files, err := untar(r)
+	var names []string
+	for _, fl := range files {
+		names = append(names, fl.name)
+	}
+	sort.Strings(names)
+	f.note(fmt.Sprintf("importParallel %s %d %t %s", x.Database, x.Threads, x.Clean, strings.Join(names, ",")))
+	return err
+}
+
+// TestParallelTransfersAndMasterData (#1421): a parallel export writes the
+// transferer's directory under the folder, a second one fails its
+// operation, a parallel import reads the folder back; masterData and
+// threads are checked.
+func TestParallelTransfersAndMasterData(t *testing.T) {
+	svc, tr, obj := transferServer(t)
+	par := &sqladmin.ExportContextSqlExportOptions{Parallel: true, Threads: 3}
+	x := &sqladmin.ExportContext{Uri: "gs://b/dir/", Databases: []string{"cloudburrow"}, SqlExportOptions: par}
+	op, err := svc.Instances.Export("proj", "pg", &sqladmin.InstancesExportRequest{ExportContext: x}).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done := waitOp(t, svc, op); done.Error != nil {
+		t.Fatalf("parallel export: %+v", done.Error.Errors[0])
+	}
+	if _, ok := obj.objs["b/dir/toc.dat"]; !ok {
+		t.Fatalf("objects after the parallel export: %v", obj.objs)
+	}
+	op, _ = svc.Instances.Export("proj", "pg", &sqladmin.InstancesExportRequest{ExportContext: x}).Do()
+	if done := waitOp(t, svc, op); done.Error == nil {
+		t.Error("a parallel export to a folder that is not empty succeeded")
+	}
+	op, err = svc.Instances.Import("proj", "pg", &sqladmin.InstancesImportRequest{ImportContext: &sqladmin.ImportContext{
+		Uri: "gs://b/dir", Database: "cloudburrow", SqlImportOptions: &sqladmin.ImportContextSqlImportOptions{Parallel: true,
+			PostgresImportOptions: &sqladmin.ImportContextSqlImportOptionsPostgresImportOptions{Clean: true}}}}).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done := waitOp(t, svc, op); done.Error != nil {
+		t.Fatalf("parallel import: %+v", done.Error.Errors[0])
+	}
+	want := []string{"exportParallel cloudburrow 3", "importParallel cloudburrow 4 true 3001.dat.gz,toc.dat"}
+	tr.mu.Lock()
+	got := strings.Join(tr.got, "|")
+	tr.mu.Unlock()
+	if got != strings.Join(want, "|") {
+		t.Errorf("calls %q, want %q", got, want)
+	}
+	for _, bad := range []*sqladmin.ExportContextSqlExportOptions{
+		{Threads: 2},
+		{MysqlExportOptions: &sqladmin.ExportContextSqlExportOptionsMysqlExportOptions{MasterData: 1}}, // PostgreSQL
+	} {
+		_, err := svc.Instances.Export("proj", "pg", &sqladmin.InstancesExportRequest{ExportContext: &sqladmin.ExportContext{
+			Uri: "gs://b/x.sql", Databases: []string{"cloudburrow"}, SqlExportOptions: bad}}).Do()
+		if err == nil || !strings.Contains(err.Error(), "400") {
+			t.Errorf("export with %+v: %v, want 400", bad, err)
+		}
 	}
 }

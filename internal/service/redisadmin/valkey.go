@@ -21,11 +21,14 @@ type Valkey struct {
 	Addr func() string
 	// Password is the server's AUTH string, "" for none.
 	Password string
+	// CA is the PEM CA of a server with in-transit encryption (#1413),
+	// which is reached over TLS; "" for plain TCP.
+	CA string
 }
 
 // Dial is the Dialer of a created instance's server.
-func Dial(addr, password string) DataPlane {
-	return Valkey{Addr: func() string { return addr }, Password: password}
+func Dial(addr, password, caPEM string) DataPlane {
+	return Valkey{Addr: func() string { return addr }, Password: password, CA: caPEM}
 }
 
 func (v Valkey) client() (*redis.Client, error) {
@@ -36,7 +39,11 @@ func (v Valkey) client() (*redis.Client, error) {
 	if addr == "" {
 		return nil, errors.New("the Memorystore tunnel has no address")
 	}
-	return redis.NewClient(&redis.Options{Addr: addr, Password: v.Password, MaxRetries: -1, PoolSize: 1}), nil
+	tc, err := ClientTLS(v.CA)
+	if err != nil {
+		return nil, err
+	}
+	return redis.NewClient(&redis.Options{Addr: addr, Password: v.Password, MaxRetries: -1, PoolSize: 1, TLSConfig: tc}), nil
 }
 
 // Info reads INFO server's redis_version and CONFIG GET maxmemory.
@@ -180,6 +187,13 @@ func (v Valkey) Load(ctx context.Context, host string, port int) error {
 		return err
 	}
 	defer c.Close()
+	if v.CA != "" {
+		// The server at host:port, in the same pod, speaks plain TCP.
+		if err := c.ConfigSet(ctx, "tls-replication", "no").Err(); err != nil {
+			return fmt.Errorf("CONFIG SET tls-replication no: %w", err)
+		}
+		defer c.ConfigSet(context.WithoutCancel(ctx), "tls-replication", "yes")
+	}
 	if err := c.Do(ctx, "REPLICAOF", host, strconv.Itoa(port)).Err(); err != nil {
 		return fmt.Errorf("REPLICAOF: %w", err)
 	}

@@ -40,7 +40,9 @@ func TestLoggingLinksSettingsAndAsyncBuckets(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	project := "projects/" + h.Project()
+	// A link makes a BigQuery dataset in the bucket's project, which must
+	// be the one the instance's BigQuery serves (#1423).
+	project := "projects/" + linkProject(t)
 	global := project + "/locations/global"
 	id := fmt.Sprintf("links-%d", time.Now().UnixNano())
 

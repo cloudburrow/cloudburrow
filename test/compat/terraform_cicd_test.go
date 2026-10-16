@@ -9,6 +9,7 @@ import (
 
 	artifactregistry "cloud.google.com/go/artifactregistry/apiv1"
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
+	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -83,20 +84,106 @@ resource "google_artifact_registry_repository" "r" {
 	}
 }
 
-// TestTerraformCloudBuildTriggerRefused (#1304): Cloud Build is served for
-// builds, not triggers. A google_cloudbuild_trigger is refused by this
-// instance, 501 UNIMPLEMENTED from the transcoder on the Run port, with
-// egress to Google blocked: the provider was pointed here and nothing
-// reached Google. Triggers are not built.
-func TestTerraformCloudBuildTriggerRefused(t *testing.T) {
+// TestTerraformCloudBuildTriggerAndWorkerPool (#1422): a
+// google_cloudbuild_worker_pool and a webhook google_cloudbuild_trigger
+// with an inline build on it, its secret in Secret Manager, apply through
+// `cloudburrow terraform` with egress blocked; the official client reads
+// them back; the plan is clean; a new description, substitution and
+// display name change in place; the plan is clean again; and destroy
+// removes both. A trigger whose build is read from a repository
+// (source_to_build) is refused by this instance with the reason.
+// covers: google.devtools.cloudbuild.v1.CloudBuild/CreateBuildTrigger, google.devtools.cloudbuild.v1.CloudBuild/GetBuildTrigger, google.devtools.cloudbuild.v1.CloudBuild/UpdateBuildTrigger, google.devtools.cloudbuild.v1.CloudBuild/DeleteBuildTrigger, google.devtools.cloudbuild.v1.CloudBuild/CreateWorkerPool, google.devtools.cloudbuild.v1.CloudBuild/GetWorkerPool, google.devtools.cloudbuild.v1.CloudBuild/UpdateWorkerPool, google.devtools.cloudbuild.v1.CloudBuild/DeleteWorkerPool
+func TestTerraformCloudBuildTriggerAndWorkerPool(t *testing.T) {
 	h := New(t)
 	m := newTFModule(t)
 	_ = runClient(t, h) // skips without CLOUDBURROW_TEST_RUN
-	m.write(fmt.Sprintf(`
+	ctx := h.Context()
+	cb := cloudBuildClient(ctx, t, h)
+	secret := buildSecret(ctx, t, h, h.Project(), "tf-hook-secret")
+	suffix := strings.TrimPrefix(h.Project(), "cb-test-")
+	pool := "projects/" + h.Project() + "/locations/us-central1/workerPools/tfpool-" + suffix
+	module := func(desc, who, display string) string {
+		return fmt.Sprintf(`
+resource "google_cloudbuild_worker_pool" "p" {
+  project      = %[1]q
+  location     = "us-central1"
+  name         = "tfpool-%[2]s"
+  display_name = %[5]q
+  worker_config {
+    machine_type = "e2-standard-2"
+    disk_size_gb = 100
+  }
+}
+
 resource "google_cloudbuild_trigger" "t" {
+  project     = %[1]q
+  location    = "us-central1"
+  name        = "tf-hook-%[2]s"
+  description = %[3]q
+  webhook_config {
+    secret = "projects/%[1]s/secrets/%[6]s/versions/1"
+  }
+  substitutions = { _WHO = %[4]q }
+  build {
+    step {
+      name       = "alpine:3.20"
+      entrypoint = "sh"
+      args       = ["-c", "echo $_WHO"]
+    }
+    options {
+      worker_pool = google_cloudbuild_worker_pool.p.id
+    }
+  }
+}
+`, h.Project(), suffix, desc, who, display, secret)
+	}
+	check := func(when, desc, who, display string) {
+		t.Helper()
+		var tr *cbpb.BuildTrigger
+		for it := cb.ListBuildTriggers(ctx, &cbpb.ListBuildTriggersRequest{Parent: runParent(h), ProjectId: h.Project()}); ; {
+			x, err := it.Next()
+			if err != nil {
+				break
+			}
+			if x.GetName() == "tf-hook-"+suffix {
+				tr = x
+			}
+		}
+		if tr == nil || tr.GetDescription() != desc || tr.GetSubstitutions()["_WHO"] != who ||
+			tr.GetBuild().GetOptions().GetWorkerPool() != pool || tr.GetWebhookConfig().GetSecret() == "" {
+			t.Errorf("%s, the trigger = %v", when, tr)
+		}
+		p, err := cb.GetWorkerPool(ctx, &cbpb.GetWorkerPoolRequest{Name: pool})
+		if err != nil || p.GetDisplayName() != display {
+			t.Errorf("%s, the pool = %v, %v", when, p, err)
+		}
+	}
+	m.write(module("from terraform", "tf", "first"))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	check("after apply", "from terraform", "tf", "first")
+	m.planClean()
+
+	m.write(module("changed in place", "changed", "second"))
+	out := m.must("apply", "-auto-approve", "-input=false", "-no-color")
+	if !strings.Contains(out, "0 added, 2 changed, 0 destroyed") {
+		t.Errorf("the change was not applied in place:\n%s", lastLines(out, 20))
+	}
+	check("after the change", "changed in place", "changed", "second")
+	m.planClean()
+
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := cb.GetWorkerPool(ctx, &cbpb.GetWorkerPoolRequest{Name: pool}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetWorkerPool after destroy: %v; want NotFound", err)
+	}
+
+	// A repository trigger needs a hosted git service: refused here, so
+	// nothing reaches Google (egress is blocked anyway).
+	m.write(fmt.Sprintf(`
+resource "google_cloudbuild_trigger" "r" {
   project  = %q
   location = "us-central1"
-  name     = "tf-trigger"
+  name     = "tf-repo-trigger"
   source_to_build {
     uri       = "https://example.com/repo.git"
     ref       = "refs/heads/main"
@@ -110,15 +197,12 @@ resource "google_cloudbuild_trigger" "t" {
   }
 }
 `, h.Project()))
-	m.must("init", "-input=false", "-no-color")
 	out, err := m.tf("apply", "-auto-approve", "-input=false", "-no-color")
 	if err == nil {
-		t.Fatalf("a Cloud Build trigger applied:\n%s", lastLines(out, 20))
+		t.Fatalf("a repository trigger applied:\n%s", lastLines(out, 20))
 	}
-	// The transcoder's own refusal: Google would answer a create, and
-	// egress to it is blocked, so this 501 can only be the instance's.
-	if !strings.Contains(out, "Error 501: method CreateBuildTrigger not implemented") {
-		t.Errorf("the trigger was not refused 501 by this instance:\n%s", lastLines(out, 30))
+	if !strings.Contains(out, "Error 501") || !strings.Contains(out, "sourceToBuild is not supported") {
+		t.Errorf("the repository trigger was not refused 501 by this instance with the reason:\n%s", lastLines(out, 30))
 	}
 }
 

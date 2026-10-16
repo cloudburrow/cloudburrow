@@ -499,6 +499,16 @@ jobs:
           echo "$RUNNER_TEMP/google-cloud-sdk/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" version
 
+      # Google's Cloud SQL Auth Proxy binary for TestCloudSQLAuthProxyBinary
+      # (#1421), in the shard that runs the Cloud SQL suite: `make
+      # cloud-sql-proxy` downloads the pinned release and checks it against
+      # its SHA-256 before making it executable. The connector listens at
+      # the default 3307 there, the one port the proxy dials.
+      - name: Install the Cloud SQL Auth Proxy
+        if: matrix.shard == 'emulators'
+        run: |
+          echo "CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$(make -s cloud-sql-proxy)" >> "$GITHUB_ENV"
+
       - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           install_only: true
@@ -975,13 +985,18 @@ jobs:
           # Python (#1303), Java, Ruby, PHP and .NET (#1319) Functions tests,
           # and the Functions API's, gcloud's and Terraform's deploys of
           # testdata/function (#1377), and its builds with event triggers,
-          # through the client and gcloud (#1414), pull Google's builder and
+          # through the client and gcloud (#1414), and the v1 API's,
+          # gcloud --no-gen2's, the console's and Terraform's 1st-gen
+          # deploys (#1428), pull Google's builder and
           # build from source, too slow for every merge, so they run only when
           # CLOUDBURROW_TEST_FUNCTIONS is set (#678), in functions.yml on
           # amd64; the run shard runs the ungated halves of the gcloud and
           # Terraform ones (and of gcloud's event triggers), so they fail
-          # there but skip at the gate.
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers)$'
+          # there but skip at the gate. The Studio's local models test
+          # (#1396) needs a -tags onnx build, and Cloud Build's host-steps-off
+          # test (#1382) an instance without --cloudbuild-host-steps, which the
+          # run shard sets; both run locally.
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|ConsoleLocalModelsLoadEmbedUnload|CloudBuildHostStepsOff|FunctionsV1BuildsAndServes|GcloudFunctionsV1|ConsoleFunctionsV1|TerraformCloudFunctionsFunction)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

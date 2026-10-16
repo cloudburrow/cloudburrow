@@ -2,6 +2,7 @@ package redisadmin
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func newIO(t *testing.T) (*Server, *fakeIO, fakeObjects, *map[string]string) {
 	io := &fakeIO{files: map[string][]byte{}, data: "REDIS0011 one"}
 	set := &map[string]string{}
 	p := shellProv{fakeProv: &fakeProv{running: map[string]Spec{}}, io: io}
-	s.EnableCreate(context.Background(), p, func(addr, pw string) DataPlane { return fakeData{set: set, io: io} }, store.NewMemory(), nil)
+	s.EnableCreate(context.Background(), p, func(addr, pw, _ string) DataPlane { return fakeData{set: set, io: io} }, store.NewMemory(), nil)
 	objs := fakeObjects{}
 	s.UseStorage(objs)
 	op, err := s.CreateInstance(context.Background(), &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "cache",
@@ -101,11 +102,38 @@ func TestImportReplacesTheData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if op = wait(t, s, op); codes.Code(op.GetError().GetCode()) != codes.InvalidArgument {
-		t.Errorf("import of a bad file: %v", op.GetError())
+	if op = wait(t, s, op); codes.Code(op.GetError().GetCode()) != codes.InvalidArgument ||
+		!strings.HasSuffix(op.GetError().GetMessage(), ": [offset 0] Wrong signature trying to load DB from file") {
+		t.Errorf("import of a bad file: %v; want check-rdb's error", op.GetError())
 	}
 	if io.data != "REDIS0011 two" {
 		t.Errorf("a refused import changed the data to %q", io.data)
+	}
+}
+
+// A copy through the exec stream can end short (main run 38919188966): the
+// import checks the file's size on the server and copies it once more.
+func TestImportRecopiesAShortFile(t *testing.T) {
+	s, io, objs, _ := newIO(t)
+	ctx := context.Background()
+	name := parent + "/instances/cache"
+	objs["b/in.rdb"] = []byte("REDIS0011 three")
+	for _, tc := range []struct {
+		short int
+		ok    bool
+	}{{1, true}, {2, false}} {
+		io.short = tc.short
+		op, err := s.ImportInstance(ctx, importReq(name, "gs://b/in.rdb"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		op = wait(t, s, op)
+		if tc.ok && (op.GetError() != nil || io.data != "REDIS0011 three") {
+			t.Errorf("%d short copies: %v, data %q; want the file loaded", tc.short, op.GetError(), io.data)
+		}
+		if !tc.ok && !strings.Contains(op.GetError().GetMessage(), "7 of its 15 bytes arrived") {
+			t.Errorf("%d short copies: %v; want the short copy named", tc.short, op.GetError())
+		}
 	}
 }
 

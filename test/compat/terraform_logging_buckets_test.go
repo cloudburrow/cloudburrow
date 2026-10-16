@@ -3,10 +3,15 @@
 package compat
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"testing"
+	"time"
 
+	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/logging/apiv2/loggingpb"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -36,7 +41,10 @@ func TestTerraformLoggingBucketsAndLinks(t *testing.T) {
 	}
 	defer config.Close()
 
-	project := h.Project()
+	project := linkProject(t) // the link's dataset is made in BigQuery's project (#1423)
+	// That project is the same on every run, so the IDs are this run's.
+	sfx := fmt.Sprint(time.Now().UnixNano())
+	analyticsID, toggleID, linkID := "tf-analytics-"+sfx, "tf-toggle-"+sfx, "tf_link_"+sfx
 	module := func(retention int, description string) string {
 		return fmt.Sprintf(`
 resource "google_logging_project_bucket_config" "default" {
@@ -49,7 +57,7 @@ resource "google_logging_project_bucket_config" "default" {
 resource "google_logging_project_bucket_config" "analytics" {
   project          = %[1]q
   location         = "global"
-  bucket_id        = "tf-analytics"
+  bucket_id        = %[5]q
   retention_days   = %[2]d
   description      = %[3]q
   enable_analytics = true
@@ -57,22 +65,22 @@ resource "google_logging_project_bucket_config" "analytics" {
 resource "google_logging_project_bucket_config" "toggle" {
   project          = %[1]q
   location         = "us-central1"
-  bucket_id        = "tf-toggle"
+  bucket_id        = %[6]q
   retention_days   = %[2]d
   enable_analytics = %[4]t
 }
 resource "google_logging_linked_dataset" "link" {
-  link_id     = "tf_link"
+  link_id     = %[7]q
   bucket      = google_logging_project_bucket_config.analytics.id
   description = "linked"
 }
-`, project, retention, description, retention > 45)
+`, project, retention, description, retention > 45, analyticsID, toggleID, linkID)
 	}
 
 	parent := "projects/" + project + "/locations/global/buckets/"
 	check := func(when string, retention int32, description string) {
 		t.Helper()
-		for _, id := range []string{"_Default", "tf-analytics"} {
+		for _, id := range []string{"_Default", analyticsID} {
 			b, err := config.GetBucket(ctx, &loggingpb.GetBucketRequest{Name: parent + id})
 			if err != nil {
 				t.Fatalf("%s: GetBucket %s: %v", when, id, err)
@@ -80,20 +88,20 @@ resource "google_logging_linked_dataset" "link" {
 			if b.GetRetentionDays() != retention || b.GetDescription() != description {
 				t.Errorf("%s: bucket %s = %v; want retention %d and description %q", when, id, b, retention, description)
 			}
-			if id == "tf-analytics" && !b.GetAnalyticsEnabled() {
+			if id == analyticsID && !b.GetAnalyticsEnabled() {
 				t.Errorf("%s: bucket %s has analytics off", when, id)
 			}
 		}
-		tb, err := config.GetBucket(ctx, &loggingpb.GetBucketRequest{Name: "projects/" + project + "/locations/us-central1/buckets/tf-toggle"})
+		tb, err := config.GetBucket(ctx, &loggingpb.GetBucketRequest{Name: "projects/" + project + "/locations/us-central1/buckets/" + toggleID})
 		if err != nil || tb.GetRetentionDays() != retention || tb.GetAnalyticsEnabled() != (retention > 45) {
 			t.Errorf("%s: bucket tf-toggle = %v, %v; want retention %d and analytics %v", when, tb, err, retention, retention > 45)
 		}
-		l, err := config.GetLink(ctx, &loggingpb.GetLinkRequest{Name: parent + "tf-analytics/links/tf_link"})
+		l, err := config.GetLink(ctx, &loggingpb.GetLinkRequest{Name: parent + analyticsID + "/links/" + linkID})
 		if err != nil {
 			t.Fatalf("%s: GetLink: %v", when, err)
 		}
 		if l.GetDescription() != "linked" || l.GetLifecycleState() != loggingpb.LifecycleState_ACTIVE ||
-			l.GetBigqueryDataset().GetDatasetId() != "bigquery.googleapis.com/projects/"+project+"/datasets/tf_link" {
+			l.GetBigqueryDataset().GetDatasetId() != "bigquery.googleapis.com/projects/"+project+"/datasets/"+linkID {
 			t.Errorf("%s: the link is %v", when, l)
 		}
 	}
@@ -102,6 +110,11 @@ resource "google_logging_linked_dataset" "link" {
 	m.must("init", "-input=false", "-no-color")
 	m.apply()
 	check("after apply", 45, "first")
+	// The link made its BigQuery dataset, with the _AllLogs view (#1423).
+	bq, _ := bigqueryClient(t, h)
+	if md, err := bq.Dataset(linkID).Table("_AllLogs").Metadata(ctx); err != nil || md.Type != bigquery.ViewTable {
+		t.Errorf("_AllLogs of the Terraform link = %v, %v; want a view", md, err)
+	}
 	m.planClean()
 
 	m.write(module(60, "second"))
@@ -110,10 +123,14 @@ resource "google_logging_linked_dataset" "link" {
 	m.planClean()
 
 	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
-	if _, err := config.GetLink(ctx, &loggingpb.GetLinkRequest{Name: parent + "tf-analytics/links/tf_link"}); status.Code(err) != codes.NotFound {
+	if _, err := config.GetLink(ctx, &loggingpb.GetLinkRequest{Name: parent + analyticsID + "/links/" + linkID}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetLink after destroy: %v; want NotFound", err)
 	}
-	if b, err := config.GetBucket(ctx, &loggingpb.GetBucketRequest{Name: parent + "tf-analytics"}); err != nil ||
+	var ge *googleapi.Error
+	if _, err := bq.Dataset(linkID).Metadata(ctx); !errors.As(err, &ge) || ge.Code != http.StatusNotFound {
+		t.Errorf("the link's dataset after destroy = %v; want 404", err)
+	}
+	if b, err := config.GetBucket(ctx, &loggingpb.GetBucketRequest{Name: parent + analyticsID}); err != nil ||
 		b.GetLifecycleState() != loggingpb.LifecycleState_DELETE_REQUESTED {
 		t.Errorf("GetBucket tf-analytics after destroy = %v, %v; want DELETE_REQUESTED", b, err)
 	}

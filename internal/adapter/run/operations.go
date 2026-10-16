@@ -58,6 +58,11 @@ func (o *OperationsServer) CancelOperation(context.Context, *longrunningpb.Cance
 // cannot evaluate is INVALID_ARGUMENT, never ignored (opfilter.go).
 func (o *OperationsServer) ListOperations(_ context.Context, req *longrunningpb.ListOperationsRequest) (*longrunningpb.ListOperationsResponse, error) {
 	parent := req.GetName()
+	if parent == "" || parent == "operations" {
+		// Cloud Functions v1's operations.list (#1428), whose gRPC
+		// service is this one.
+		return o.adapter.listV1Operations(req)
+	}
 	if p := strings.Split(parent, "/"); len(p) != 4 || p[0] != "projects" || p[2] != "locations" || p[1] == "" || p[3] == "" {
 		return nil, apierror.InvalidArgument("name %q must be projects/{project}/locations/{location}", parent)
 	}

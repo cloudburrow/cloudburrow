@@ -72,6 +72,9 @@ func snapshotWriteMessage(project, dataset, table, what string) string {
 // refuseSnapshotWrite answers 400 invalid when dataset.table is a snapshot,
 // and reports whether it did.
 func (f front) refuseSnapshotWrite(w http.ResponseWriter, r *http.Request, dataset, table, what string) bool {
+	if f.refuseLinkedWrite(w, r, dataset, what) { // #1423, loglinks.go
+		return true
+	}
 	if dataset == "" || table == "" || !f.isSnapshot(r, dataset, table) {
 		return false
 	}
@@ -100,8 +103,8 @@ func (f front) listTables(w http.ResponseWriter, r *http.Request, dataset string
 		rec.copyTo(w)
 		return
 	}
+	changed := withoutLinkedEntries(list) // #1423, loglinks.go
 	tables, _ := list["tables"].([]any)
-	changed := false
 	for _, t := range tables {
 		m, _ := t.(map[string]any)
 		ref, _ := m["tableReference"].(map[string]any)

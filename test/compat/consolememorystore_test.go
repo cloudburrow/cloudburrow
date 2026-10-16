@@ -348,3 +348,72 @@ func TestConsoleMemorystoreStandardTier(t *testing.T) {
 		t.Errorf("after Edit's Replicas, GetInstance = %v, %v", got, err)
 	}
 }
+
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance
+//
+// TestConsoleMemorystoreInTransitEncryption (#1413): the console's Create
+// instance with Enable in-transit encryption creates a
+// SERVER_AUTHENTICATION instance, which the official client reads back;
+// its page shows In-transit encryption and a Server CA tab with the CA
+// server_ca_certs lists, which a go-redis TLS client trusts.
+func TestConsoleMemorystoreInTransitEncryption(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c, project := memorystoreAdminClient(t, h)
+	ctx := h.Context()
+	id := fmt.Sprintf("console-tls-%d", time.Now().UnixNano()%1e8)
+	name := "projects/" + project + "/locations/us-central1/instances/" + id
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = op.Wait(context.Background())
+		}
+	})
+	q := "?project=" + url.QueryEscape(project)
+	body, _ := json.Marshal(map[string]string{"id": id, "region": "us-central1", "memorySizeGb": "1", "tier": "BASIC",
+		"transitEncryption": "true"})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/memorystore"+q, string(body)); code != http.StatusOK {
+		t.Fatalf("console create = %d: %s", code, out)
+	}
+	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil || inst.GetTransitEncryptionMode() != redispb.Instance_SERVER_AUTHENTICATION || len(inst.GetServerCaCerts()) != 1 {
+		t.Fatalf("created from the console: %v, %v", inst, err)
+	}
+	code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/memorystore"+q+"&name="+id, "")
+	var detail struct {
+		Sections []struct {
+			ID     string `json:"id"`
+			Text   string `json:"text"`
+			Groups []struct {
+				Properties []struct{ Label, Value string } `json:"properties"`
+			} `json:"groups"`
+		} `json:"sections"`
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(out), &detail) != nil {
+		t.Fatalf("instance page = %d: %s", code, out)
+	}
+	mode, caText := "", ""
+	for _, s := range detail.Sections {
+		if s.ID == "server-ca" {
+			caText = s.Text
+		}
+		for _, g := range s.Groups {
+			for _, p := range g.Properties {
+				if p.Label == "In-transit encryption" {
+					mode = p.Value
+				}
+			}
+		}
+	}
+	if !strings.HasPrefix(mode, "Server authentication") {
+		t.Errorf("the page's In-transit encryption = %q", mode)
+	}
+	ca := inst.GetServerCaCerts()[0]
+	if !strings.Contains(caText, strings.TrimSpace(ca.GetCert())) || !strings.Contains(caText, ca.GetSha1Fingerprint()) {
+		t.Fatalf("the Server CA tab = %q; want the instance's CA", caText)
+	}
+	rc := tlsRedisAt(t, inst, "")
+	defer rc.Close()
+	if err := rc.Ping(ctx).Err(); err != nil {
+		t.Errorf("PING over TLS with the CA the page shows: %v", err)
+	}
+}
