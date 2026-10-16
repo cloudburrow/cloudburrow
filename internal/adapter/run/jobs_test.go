@@ -599,9 +599,6 @@ func TestJobRefusesWhatItDoesNotMap(t *testing.T) {
 	js, _, _, f := jobsServer(fakeSecrets{})
 	ctx := context.Background()
 	cases := map[string]func(*runpb.Job){
-		"template.template.volumes.gcs": func(j *runpb.Job) {
-			j.Template.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_Gcs{Gcs: &runpb.GCSVolumeSource{Bucket: "b"}}}}
-		},
 		"template.template.nodeSelector": func(j *runpb.Job) { j.Template.Template.NodeSelector = &runpb.NodeSelector{Accelerator: "l4"} },
 		"container.dependsOn":            func(j *runpb.Job) { j.Template.Template.Containers[0].DependsOn = []string{"x"} },
 		"container.ports": func(j *runpb.Job) {

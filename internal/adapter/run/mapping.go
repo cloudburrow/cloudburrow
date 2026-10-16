@@ -56,7 +56,7 @@ type podTemplate interface {
 // prefix is the template's path in the request: "template" for a service,
 // "template.template" for a job.
 func podTemplateGaps(prefix string, tmpl podTemplate) []string {
-	gaps := volumeGaps(prefix, tmpl)
+	var gaps []string
 	if tmpl.GetNodeSelector() != nil {
 		gaps = append(gaps, prefix+".nodeSelector: there is one kind node and no GPU")
 	}
@@ -262,8 +262,9 @@ metadata:
 	}
 	renderCloudSQLProxies(&b, tmpl.GetVolumes(), o, false)
 	renderTraffic(&b, svc.GetTraffic(), func(rev string) string { return kRevisionName(svc.GetName(), kname, rev) })
-	// The claims its NFS volumes mount, applied first (#1448).
-	return nfsClaims(namespace, instance, tmpl.GetVolumes()) + b.String(), nil
+	// The claims its NFS (#1448) and Cloud Storage (#1474) volumes mount,
+	// applied first.
+	return nfsClaims(namespace, instance, tmpl.GetVolumes()) + gcsClaims(namespace, instance, tmpl.GetVolumes()) + b.String(), nil
 }
 
 // containerRender is what differs between rendering a Knative revision's

@@ -27,9 +27,9 @@ import (
 // pod spec Knative validates and which refuses an inline nfs volume, a
 // PersistentVolume of the export with a claim bound to it (nfsClaims). An
 // instance has no Filestore, so the server is whatever NFS server the
-// cluster's node can reach. Cloud Storage FUSE volumes stay refused: no FUSE
-// driver is on the kind node, and Knative refuses the privileged container
-// or CSI volume one would need.
+// cluster's node can reach. A Cloud Storage FUSE volume (#1474) is the
+// node directory a gcsfuse pod mounted the instance's bucket on, mounted
+// with HostToContainer propagation (gcsfuse.go).
 //
 // The service account is stored and returned, not acted on: every workload
 // reaches the one metadata server, which names the instance's own account.
@@ -41,21 +41,6 @@ import (
 // the service account, as a RevisionTemplate's JSON, so they read back as
 // set rather than as the Kubernetes objects they rendered to.
 const annPodConfig = "cloudburrow.dev/pod-config"
-
-// volumeGaps names the volumes and mounts no pod renders.
-func volumeGaps(prefix string, tmpl podTemplate) []string {
-	var gaps []string
-	names := map[string]bool{}
-	for _, v := range tmpl.GetVolumes() {
-		names[v.GetName()] = true
-		switch {
-		case v.GetSecret() != nil, v.GetEmptyDir() != nil, v.GetCloudSqlInstance() != nil, v.GetNfs() != nil:
-		case v.GetGcs() != nil:
-			gaps = append(gaps, prefix+".volumes.gcs: Cloud Storage FUSE is not mounted locally")
-		}
-	}
-	return gaps
-}
 
 // checkVolumes validates volumes and mounts before anything renders, so a
 // mistake is the caller's InvalidArgument rather than an apply failure.
@@ -74,6 +59,11 @@ func checkVolumes(tmpl podTemplate) error {
 		}
 		if n := v.GetNfs(); n != nil && n.GetServer() == "" {
 			return apierror.InvalidArgument("volume %q: nfs.server is required", v.GetName())
+		}
+		if v.GetGcs() != nil {
+			if err := checkGCSVolume(v); err != nil {
+				return err
+			}
 		}
 		if v.GetVolumeType() == nil {
 			return apierror.InvalidArgument("volume %q sets no volume type", v.GetName())
@@ -161,6 +151,20 @@ func renderVolumes(b *strings.Builder, volumes []*runpb.Volume, o containerRende
 			if n.GetReadOnly() {
 				b.WriteString("            readOnly: true\n")
 			}
+		case v.GetGcs() != nil:
+			// The node directory its gcsfuse pod mounted the bucket on: a
+			// pod's hostPath where the pod is ours, and for a service, whose
+			// hostPath mounts Knative makes read-only, a PersistentVolume of
+			// the directory with a claim bound to it (gcsClaims).
+			g := v.GetGcs()
+			if !o.batch {
+				fmt.Fprintf(b, "          persistentVolumeClaim:\n            claimName: %s\n", gcsMountName(g))
+				if g.GetReadOnly() {
+					b.WriteString("            readOnly: true\n")
+				}
+				continue
+			}
+			fmt.Fprintf(b, "          hostPath:\n            path: %s\n            type: Directory\n", gcsHostPath(g))
 		case v.GetEmptyDir() != nil:
 			e := v.GetEmptyDir()
 			if e.GetMedium() != runpb.EmptyDirVolumeSource_MEMORY && e.GetSizeLimit() == "" {
@@ -186,9 +190,10 @@ func renderVolumeMounts(b *strings.Builder, mounts []*runpb.VolumeMount, volumes
 	if len(mounts) == 0 {
 		return
 	}
-	secret := map[string]bool{}
+	secret, gcs := map[string]bool{}, map[string]bool{}
 	for _, v := range volumes {
-		secret[v.GetName()] = v.GetSecret() != nil || v.GetNfs().GetReadOnly()
+		secret[v.GetName()] = v.GetSecret() != nil || v.GetNfs().GetReadOnly() || v.GetGcs().GetReadOnly()
+		gcs[v.GetName()] = v.GetGcs() != nil
 	}
 	b.WriteString("          volumeMounts:\n")
 	for _, m := range mounts {
@@ -198,6 +203,10 @@ func renderVolumeMounts(b *strings.Builder, mounts []*runpb.VolumeMount, volumes
 		}
 		if secret[m.GetName()] {
 			b.WriteString("              readOnly: true\n")
+		}
+		if gcs[m.GetName()] {
+			// The FUSE mount is made on the node after the pod may start.
+			b.WriteString("              mountPropagation: HostToContainer\n")
 		}
 	}
 }

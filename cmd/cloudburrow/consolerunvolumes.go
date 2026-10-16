@@ -1,6 +1,6 @@
 package main
 
-// Cloud Run: the service account, Secret Manager files, in-memory and NFS
+// Cloud Run: the service account, Secret Manager files, in-memory, NFS and Cloud Storage
 // (#1448) volumes on the deploy and job forms, and their edit forms (#1297).
 //
 // The adapter mounts a Secret Manager volume from the Kubernetes Secret
@@ -60,6 +60,10 @@ func runVolumeFields(section string) []console.Field {
 			Help: "Optional. One /mount/path=server:/export per line, or /mount/path=server:/export:ro for read-only, " +
 				"as gcloud's --add-volume type=nfs takes them (#1448). The node mounts the export, so the server is any " +
 				"NFS server the instance's cluster reaches: a local instance has no Filestore."},
+		{Name: "gcsVolumes", Label: "Cloud Storage volumes", Type: "map", Section: section,
+			Help: "Optional. One /mount/path=bucket per line, /mount/path=bucket:ro for read-only, and gcsfuse mount " +
+				"options after semicolons (bucket;only-dir=logs;implicit-dirs), as gcloud's --add-volume type=cloud-storage " +
+				"takes them (#1474). The bucket is this instance's Cloud Storage, mounted by Cloud Storage FUSE."},
 	}
 }
 
@@ -81,14 +85,16 @@ func applyRunVolumes(p podFields, c *runpb.Container, values map[string]string) 
 	rawMemory, sentMemory := values["memoryVolumes"]
 	rawSQL, sentSQL := values["cloudSqlInstances"]
 	rawNFS, sentNFS := values["nfsVolumes"]
-	if !sentSecret && !sentMemory && !sentSQL && !sentNFS {
+	rawGCS, sentGCS := values["gcsVolumes"]
+	if !sentSecret && !sentMemory && !sentSQL && !sentNFS && !sentGCS {
 		return nil
 	}
 	var keep []*runpb.Volume
 	kept := map[string]bool{}
 	for _, v := range *p.volumes {
 		if (v.GetSecret() != nil && sentSecret) || (v.GetEmptyDir() != nil && sentMemory) ||
-			(v.GetCloudSqlInstance() != nil && sentSQL) || (v.GetNfs() != nil && sentNFS) {
+			(v.GetCloudSqlInstance() != nil && sentSQL) || (v.GetNfs() != nil && sentNFS) ||
+			(v.GetGcs() != nil && sentGCS) {
 			continue
 		}
 		keep = append(keep, v)
@@ -176,6 +182,21 @@ func applyRunVolumes(p podFields, c *runpb.Container, values map[string]string) 
 			mounts = append(mounts, &runpb.VolumeMount{Name: name, MountPath: path.Clean(dir)})
 		}
 	}
+	if sentGCS {
+		m, err := console.ParseMap(rawGCS)
+		if err != nil {
+			return fmt.Errorf("Cloud Storage volumes: %w", err)
+		}
+		for i, dir := range sortedKeys(m) {
+			g, ok := parseRunGCS(m[dir])
+			if !path.IsAbs(dir) || path.Clean(dir) == "/" || !ok {
+				return fmt.Errorf("Cloud Storage volumes: %s=%q is not /mount/path=bucket[:ro][;option...]", dir, m[dir])
+			}
+			name := fmt.Sprintf("gcs-%d", i+1)
+			keep = append(keep, &runpb.Volume{Name: name, VolumeType: &runpb.Volume_Gcs{Gcs: g}})
+			mounts = append(mounts, &runpb.VolumeMount{Name: name, MountPath: path.Clean(dir)})
+		}
+	}
 	for _, mt := range mounts {
 		for _, other := range mounts {
 			if mt != other && mt.GetMountPath() == other.GetMountPath() {
@@ -258,6 +279,50 @@ func runNFSDefault(volumes []*runpb.Volume, mounts []*runpb.VolumeMount) string 
 			ref := n.GetServer() + ":" + p
 			if n.GetReadOnly() {
 				ref += ":ro"
+			}
+			out[m.GetMountPath()] = ref
+		}
+	}
+	return console.FormatMap(out)
+}
+
+// parseRunGCS reads bucket, bucket:ro, and either followed by gcsfuse mount
+// options after semicolons.
+func parseRunGCS(ref string) (*runpb.GCSVolumeSource, bool) {
+	parts := strings.Split(strings.TrimSpace(ref), ";")
+	bucket, readOnly := strings.TrimSpace(parts[0]), false
+	if b, ok := strings.CutSuffix(bucket, ":ro"); ok {
+		bucket, readOnly = b, true
+	}
+	if bucket == "" || strings.ContainsAny(bucket, ":/ ") {
+		return nil, false
+	}
+	g := &runpb.GCSVolumeSource{Bucket: bucket, ReadOnly: readOnly}
+	for _, o := range parts[1:] {
+		if o = strings.TrimSpace(o); o != "" {
+			g.MountOptions = append(g.MountOptions, o)
+		}
+	}
+	return g, true
+}
+
+// runGCSDefault is the Cloud Storage volumes field's prefill.
+func runGCSDefault(volumes []*runpb.Volume, mounts []*runpb.VolumeMount) string {
+	byName := map[string]*runpb.GCSVolumeSource{}
+	for _, v := range volumes {
+		if g := v.GetGcs(); g != nil {
+			byName[v.GetName()] = g
+		}
+	}
+	out := map[string]string{}
+	for _, m := range mounts {
+		if g := byName[m.GetName()]; g != nil {
+			ref := g.GetBucket()
+			if g.GetReadOnly() {
+				ref += ":ro"
+			}
+			for _, o := range g.GetMountOptions() {
+				ref += ";" + o
 			}
 			out[m.GetMountPath()] = ref
 		}

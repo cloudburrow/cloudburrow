@@ -78,9 +78,9 @@ func TestUnsupportedConfigurationIsReported(t *testing.T) {
 		mutate func(*runpb.Service)
 		want   string
 	}{
-		{"gcs volume", func(s *runpb.Service) {
-			s.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_Gcs{Gcs: &runpb.GCSVolumeSource{Bucket: "b"}}}}
-		}, "volumes.gcs"},
+		{"node selector", func(s *runpb.Service) {
+			s.Template.NodeSelector = &runpb.NodeSelector{Accelerator: "nvidia-l4"}
+		}, "nodeSelector"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -837,7 +837,8 @@ func TestVolumesAndServiceAccountRender(t *testing.T) {
 			ValueFrom *struct{} `json:"valueFrom"`
 		} `json:"env"`
 		Ports []struct {
-			ContainerPort int `json:"containerPort"`
+			ContainerPort int    `json:"containerPort"`
+			Name          string `json:"name"`
 		} `json:"ports"`
 	}, 1)
 	back := FromKnative(k, parent).GetTemplate()

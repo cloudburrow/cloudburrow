@@ -276,17 +276,22 @@ func (i *Installer) ConfigureDeployment(ctx context.Context) error {
 	}
 	if err := i.patchValidated(ctx, "patch", "configmap/config-features",
 		"-n", "knative-serving", "--type", "merge", "-p", KnativeFeatures); err != nil {
-		return fmt.Errorf("%w: enable Knative's persistent volume claims: %w", ErrInstallFailed, err)
+		return fmt.Errorf("%w: enable the Knative features Cloud Run's volumes need: %w", ErrInstallFailed, err)
 	}
 	return nil
 }
 
-// KnativeFeatures are the config-features flags Cloud Run's NFS volumes
-// need (#1448): Knative refuses an inline nfs volume, so a service's NFS
+// KnativeFeatures are the config-features flags Cloud Run's volumes need.
+// NFS (#1448): Knative refuses an inline nfs volume, so a service's NFS
 // volume is a PersistentVolume of the NFS export and a claim bound to it,
 // which a revision may mount, and write when the volume is not read-only.
+// Cloud Storage FUSE (#1474): the bucket is mounted on the node by a gcsfuse
+// pod, and a revision mounts that host directory with HostToContainer
+// propagation, so it sees the FUSE mount made under it.
 const KnativeFeatures = `{"data":{"kubernetes.podspec-persistent-volume-claim":"enabled",` +
-	`"kubernetes.podspec-persistent-volume-write":"enabled"}}`
+	`"kubernetes.podspec-persistent-volume-write":"enabled",` +
+	`"kubernetes.podspec-volumes-hostpath":"enabled",` +
+	`"kubernetes.podspec-volumes-mount-propagation":"enabled"}}`
 
 // webhookRetry bounds how long a patch of a ConfigMap Knative validates is
 // retried while its webhook refuses calls, and webhookRetryEvery spaces the

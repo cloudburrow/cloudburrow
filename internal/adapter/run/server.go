@@ -116,6 +116,9 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	if err := s.ensureWorkloadMetadata(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()); err != nil {
 		return nil, err
 	}
+	if err := s.ensureGCSFuse(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetVolumes()); err != nil {
+		return nil, err
+	}
 	// Cloud Run's K_* names for the revision's pods (#1448, kenv.go).
 	manifest = kEnvPolicy(s.kn.namespace()) + kEnvConfigMap(name, kname, s.kn.namespace(), s.instance, "") + manifest
 	if err := s.kn.Apply(ctx, manifest); err != nil {
@@ -182,6 +185,9 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 		return s.toProtoOperation(op.Name)
 	}
 	if err := s.ensureWorkloadMetadata(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()); err != nil {
+		return nil, err
+	}
+	if err := s.ensureGCSFuse(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetVolumes()); err != nil {
 		return nil, err
 	}
 	manifest = kEnvPolicy(s.kn.namespace()) +

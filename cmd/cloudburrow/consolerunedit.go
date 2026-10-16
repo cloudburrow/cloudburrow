@@ -180,6 +180,7 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 		"memoryVolumes":     memoryVolumes,
 		"cloudSqlInstances": runCloudSQLDefault(pod.GetVolumes()),
 		"nfsVolumes":        runNFSDefault(pod.GetVolumes(), pod.GetContainers()[0].GetVolumeMounts()),
+		"gcsVolumes":        runGCSDefault(pod.GetVolumes(), pod.GetContainers()[0].GetVolumeMounts()),
 		"name":              service,
 		"image":             c.Image,
 		"port":              port,

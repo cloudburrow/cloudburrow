@@ -685,6 +685,7 @@ func runJobEditForm(job *runpb.Job) *console.EditForm {
 		"serviceAccount": tt.GetServiceAccount(), "secretFiles": secretFiles, "memoryVolumes": memoryVolumes,
 		"cloudSqlInstances": runCloudSQLDefault(tt.GetVolumes()),
 		"nfsVolumes":        runNFSDefault(tt.GetVolumes(), c.GetVolumeMounts()),
+		"gcsVolumes":        runGCSDefault(tt.GetVolumes(), c.GetVolumeMounts()),
 		"name":              lastSegment(job.GetName()), "image": c.GetImage(),
 		"command": shellJoin(c.GetCommand()), "args": shellJoin(c.GetArgs()),
 		"env":        console.FormatMap(env),

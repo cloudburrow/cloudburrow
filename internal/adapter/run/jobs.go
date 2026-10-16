@@ -589,6 +589,9 @@ func (j *JobsServer) RunJob(ctx context.Context, req *runpb.RunJobRequest) (*lon
 		if err := s.ensureWorkloadMetadata(ctx, projectOf(spec.GetName()), tmpl.GetServiceAccount()); err != nil {
 			return nil, err
 		}
+		if err := s.ensureGCSFuse(ctx, projectOf(spec.GetName()), tmpl.GetVolumes()); err != nil {
+			return nil, err
+		}
 	}
 	var manifest, execID string
 	var created kjob
