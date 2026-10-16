@@ -200,12 +200,27 @@ func (s *Server) v1Services(ctx context.Context, sc v1Scope) ([]*runpb.Service, 
 }
 
 // v1Service reads one service in a scope.
+//
+// With a region its Knative Service is found as v2 finds it, scoped or under
+// an older version's name (#1400); without one (the global endpoint) it is
+// the scope's service of that ID in whichever region.
 func (s *Server) v1Service(ctx context.Context, sc v1Scope, id string) (*runpb.Service, ksvc, error) {
-	k, err := s.kn.Get(ctx, id)
-	if err == nil {
-		svc := FromKnative(k, fmt.Sprintf("projects/%s/locations/%s", sc.project, sc.location))
-		if sc.matches(svc.GetName()) {
-			return svc, k, nil
+	parent := fmt.Sprintf("projects/%s/locations/%s", sc.project, sc.location)
+	if sc.location != "" {
+		if k, err := s.service(ctx, parent+"/services/"+id, id); err == nil {
+			if svc := FromKnative(k, parent); sc.matches(svc.GetName()) {
+				return svc, k, nil
+			}
+		}
+		return nil, ksvc{}, apierror.NotFound("services.serving.knative.dev %q not found", id)
+	}
+	svcs, raw, err := s.v1Services(ctx, sc)
+	if err != nil {
+		return nil, ksvc{}, err
+	}
+	for _, svc := range svcs {
+		if sid, _ := ServiceID(svc.GetName()); sid == id {
+			return svc, raw[svc.GetName()], nil
 		}
 	}
 	return nil, ksvc{}, apierror.NotFound("services.serving.knative.dev %q not found", id)
@@ -453,14 +468,13 @@ func (s *Server) v1DeleteService(w http.ResponseWriter, r *http.Request) {
 
 // v1Revisions are the revisions of every service in a scope.
 func (s *Server) v1Revisions(ctx context.Context, sc v1Scope) ([]*runv1.Revision, error) {
-	svcs, _, err := s.v1Services(ctx, sc)
+	svcs, raw, err := s.v1Services(ctx, sc)
 	if err != nil {
 		return nil, err
 	}
 	var out []*runv1.Revision
 	for _, svc := range svcs {
-		id, _ := ServiceID(svc.GetName())
-		items, err := s.kn.Revisions(ctx, id)
+		items, err := s.kn.Revisions(ctx, raw[svc.GetName()].Metadata.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -508,13 +522,13 @@ func (s *Server) v1ListRevisions(w http.ResponseWriter, r *http.Request) {
 
 // v1Revision finds a revision by name among the scope's services' revisions.
 func (s *Server) v1Revision(ctx context.Context, sc v1Scope, name string) (*runv1.Revision, string, error) {
-	svcs, _, err := s.v1Services(ctx, sc)
+	svcs, raw, err := s.v1Services(ctx, sc)
 	if err != nil {
 		return nil, "", err
 	}
 	for _, svc := range svcs {
-		id, _ := ServiceID(svc.GetName())
-		if kr, err := s.kn.Revision(ctx, id, name); err == nil {
+		kname := raw[svc.GetName()].Metadata.Name
+		if kr, err := s.kn.Revision(ctx, kname, kRevisionName(svc.GetName(), kname, name)); err == nil {
 			return toV1Revision(FromKnativeRevision(kr, svc.GetName()), kr), svc.GetName(), nil
 		}
 	}
@@ -802,11 +816,13 @@ func pick(cs []ksvcCondition, as, from string) []ksvcCondition {
 
 func toV1Revision(rev *runpb.Revision, kr krev) *runv1.Revision {
 	id, _ := ServiceID(rev.GetService())
+	// Its Cloud Run ID, as v2 names it (#1400), not the Knative name.
+	revID := rev.GetName()[strings.LastIndex(rev.GetName(), "/")+1:]
 	m := &runv1.ObjectMeta{
-		Name: kr.Metadata.Name, Namespace: projectOf(rev.GetService()), Uid: rev.GetUid(), Generation: kr.Metadata.Generation,
+		Name: revID, Namespace: projectOf(rev.GetService()), Uid: rev.GetUid(), Generation: kr.Metadata.Generation,
 		Labels: map[string]string{v1LocationLabel: locationOf(rev.GetService()), labelService: id,
 			"serving.knative.dev/configuration": id, labelConfigGen: strconv.FormatInt(rev.GetGeneration(), 10)},
-		SelfLink:    fmt.Sprintf("/apis/serving.knative.dev/v1/namespaces/%s/revisions/%s", projectOf(rev.GetService()), kr.Metadata.Name),
+		SelfLink:    fmt.Sprintf("/apis/serving.knative.dev/v1/namespaces/%s/revisions/%s", projectOf(rev.GetService()), revID),
 		Annotations: toV1CloudSQL(nil, rev.GetVolumes()),
 	}
 	if !kr.Metadata.CreationTimestamp.IsZero() {

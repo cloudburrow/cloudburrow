@@ -23,7 +23,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Storage | 7 | 1 | 5 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 18 | 12 | 4 | 0 | 2 |
+| Cloud Run | 19 | 12 | 5 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 0 | 0 | 0 | 0 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 9 | 9 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **102** | **45** | **40** | **12** | **5** |
+| **Total** | **103** | **45** | **41** | **12** | **5** |
 
 ## Cloud Storage
 
@@ -96,6 +96,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 | `Instances.*` is not served (#1299) | not built yet | L |
 | `WorkerPools.*` is not served (#1300) | not built yet | L |
 | A v1 (Knative) domain mapping never becomes Ready, as no DNS is served; v1 `overrides.delayExecution` and set-based `labelSelector`s (`gcloud run jobs executions tasks list --succeeded`) are 501 (projects.locations.list, IAM, jobs create/get/list/delete and domain mappings since #1349; `replaceJob`, `run`, executions and tasks since #1379) | not built yet | S |
+| A service's container sees `K_SERVICE`, `K_CONFIGURATION` and `K_REVISION` as the scoped Knative names (`<id>-<scope>`, `<id>-<scope>-00001`), not Cloud Run's service and revision IDs, which the API reports: Knative reserves the three variables (two projects' services of one ID are two since #1400) | no emulator support (Knative reserves `K_SERVICE`, `K_CONFIGURATION` and `K_REVISION`) | S |
 | `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
 | `CancelExecution`'s result | needs live GCP | S |

@@ -134,9 +134,13 @@ func runLogTargets(raw []byte) ([]runLogSource, error) {
 				continue
 			}
 			src.project = n.Project
+			// The revision as the Cloud Run API names it, and the service's
+			// ID as its configuration, not the Knative names (#1400).
+			kname := l["serving.knative.dev/service"]
 			src.resource = &monitoredres.MonitoredResource{Type: "cloud_run_revision", Labels: map[string]string{
 				"project_id": n.Project, "location": n.Location, "service_name": n.ID,
-				"revision_name": l["serving.knative.dev/revision"], "configuration_name": l["serving.knative.dev/configuration"]}}
+				"revision_name":      runadapter.RevisionID(services[kname], kname, l["serving.knative.dev/revision"]),
+				"configuration_name": n.ID}}
 		case jobs[l["batch.kubernetes.io/job-name"]] != "":
 			exec := jobs[l["batch.kubernetes.io/job-name"]]
 			n, err := resource.Parse(exec)

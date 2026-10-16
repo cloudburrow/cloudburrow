@@ -52,6 +52,12 @@ func (f *fakeKube) nextRV() string { f.rv++; return strconv.Itoa(f.rv) }
 
 func matches(labels map[string]string, selector string) bool {
 	for _, term := range strings.Split(selector, ",") {
+		if absent, ok := strings.CutPrefix(term, "!"); ok {
+			if _, has := labels[absent]; has {
+				return false
+			}
+			continue
+		}
 		k, v, hasValue := strings.Cut(term, "=")
 		have, ok := labels[k]
 		if !ok || (hasValue && have != v) {

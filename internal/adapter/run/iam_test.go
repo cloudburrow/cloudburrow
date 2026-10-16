@@ -72,7 +72,7 @@ func TestJobIamPolicyIsStoredNotEnforced(t *testing.T) {
 	// A policy left by an earlier job of the same name (the garbage
 	// collector not yet run) is not the new job's.
 	f.mu.Lock()
-	cm := f.cms[iamCMPrefix+"job-iam"]
+	cm := f.cms[iamCMPrefix+"job-"+nameScope(jobParent)+"-iam"]
 	cm["metadata"].(map[string]any)["annotations"].(map[string]any)[annOwnerUID] = "uid-of-an-old-job"
 	f.mu.Unlock()
 	stale, err := js.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: name})

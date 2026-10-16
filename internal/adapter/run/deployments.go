@@ -106,10 +106,58 @@ type workload struct {
 	id   string
 	// name is the Cloud Run resource name.
 	name string
+	// scope is nameScope of the resource's project and location (#1399),
+	// or "" for objects an older version created under the unscoped name.
+	scope string
 }
 
-func (w workload) objectName() string { return "run-" + w.kind + "-" + w.id }
-func (w workload) selector() string   { return labelWorkload + "=" + w.kind + "-" + w.id }
+// newWorkload is the workload of a resource name, under the scoped names a
+// create uses.
+func newWorkload(kind, id, name string) workload {
+	return workload{kind: kind, id: id, name: name, scope: nameScope(parentOf(name))}
+}
+
+// workloadOf is the workload a spec ConfigMap was found as: scoped when it
+// carries the scope label, and under the unscoped names when it does not.
+func workloadOf(kind, id, name string, cm kconfigMap) workload {
+	return workload{kind: kind, id: id, name: name, scope: cm.Metadata.Labels[labelScope]}
+}
+
+func (w workload) objectName() string {
+	if w.scope == "" {
+		return "run-" + w.kind + "-" + w.id
+	}
+	return dnsLabel("run-" + w.kind + "-" + w.scope + "-" + w.id)
+}
+
+// selector selects w's objects, and never another scope's of the same ID.
+func (w workload) selector() string {
+	if w.scope == "" {
+		return labelWorkload + "=" + w.kind + "-" + w.id + ",!" + labelScope
+	}
+	return labelWorkload + "=" + w.kind + "-" + w.id + "," + labelScope + "=" + w.scope
+}
+
+// labelLines are the labels identifying w's pods, as YAML at indent.
+func (w workload) labelLines(indent string) string {
+	out := indent + labelWorkload + ": " + w.kind + "-" + w.id + "\n"
+	if w.scope != "" {
+		out += indent + labelScope + ": " + quoteLabel(w.scope) + "\n"
+	}
+	return out
+}
+
+// iamKey is what w's IAM policy ConfigMap is named by (iam.go): the ID
+// alone for an unscoped resource, as an older version named it.
+func (w workload) iamKey() string {
+	if w.scope == "" {
+		return w.id
+	}
+	return w.scope + "-" + w.id
+}
+
+// quoteLabel quotes a label value, so one of hex digits alone is a string.
+func quoteLabel(v string) string { return `"` + v + `"` }
 
 // configMap renders the ConfigMap holding a resource's spec.
 func (w workload) configMap(spec proto.Message, namespace, instance, resourceVersion string, extra map[string]string) (string, error) {
@@ -117,12 +165,14 @@ func (w workload) configMap(spec proto.Message, namespace, instance, resourceVer
 	if err != nil {
 		return "", apierror.Internal(err, "encode %s %s", w.kind, w.name)
 	}
+	labels := map[string]string{labelOwned: "true", labelInstance: instance, labelKind: "run-" + w.kind}
+	if w.scope != "" {
+		labels[labelScope] = w.scope
+	}
 	meta := map[string]any{
-		"name":      w.objectName(),
-		"namespace": namespace,
-		"labels": map[string]string{
-			labelOwned: "true", labelInstance: instance, labelKind: "run-" + w.kind,
-		},
+		"name":        w.objectName(),
+		"namespace":   namespace,
+		"labels":      labels,
 		"annotations": map[string]string{annRunName: w.name},
 	}
 	if resourceVersion != "" {
@@ -170,21 +220,18 @@ metadata:
   labels:
     %s: "true"
     %s: %q
-    %s: %s
-%s  annotations:
+%s%s  annotations:
     %s: %q
 spec:
   replicas: %d
   revisionHistoryLimit: 1000
   selector:
     matchLabels:
-      %s: %s
-%s  template:
+%s%s  template:
     metadata:
       labels:
-        %s: %s
-%s`, name, s.kn.namespace(), labelOwned, labelInstance, s.instance, labelWorkload, w.kind+"-"+w.id, split,
-		annRunName, w.name, replicas, labelWorkload, w.kind+"-"+w.id, indent(split, "  "), labelWorkload, w.kind+"-"+w.id,
+%s%s`, name, s.kn.namespace(), labelOwned, labelInstance, s.instance, w.labelLines("    "), split,
+		annRunName, w.name, replicas, w.labelLines("      "), indent(split, "  "), w.labelLines("        "),
 		indent(split, "    "))
 	if p.revision != "" {
 		raw, err := protojson.Marshal(p.revisionSpec)
@@ -214,8 +261,26 @@ spec:
 	return b.String(), nil
 }
 
-// loadSpec reads the ConfigMap behind w and checks it is the one named.
-func (s *Server) loadSpec(ctx context.Context, w workload) (kconfigMap, error) {
+// loadSpec reads the ConfigMap behind w and checks it is the one named. A
+// resource an older version created under the unscoped name (#1399) is
+// found too, and w is then set to its names.
+func (s *Server) loadSpec(ctx context.Context, w *workload) (kconfigMap, error) {
+	cm, err := s.specAt(ctx, *w)
+	if err == nil || w.scope == "" || apierror.From(err).Code != codes.NotFound {
+		return cm, err
+	}
+	legacy := *w
+	legacy.scope = ""
+	cm, lerr := s.specAt(ctx, legacy)
+	if lerr != nil || cm.Metadata.Labels[labelScope] != "" {
+		return kconfigMap{}, err
+	}
+	*w = legacy
+	return cm, nil
+}
+
+// specAt reads the ConfigMap at w's object name.
+func (s *Server) specAt(ctx context.Context, w workload) (kconfigMap, error) {
 	var cm kconfigMap
 	if err := s.kn.getObject(ctx, &cm, resConfigMap, w.objectName(), w.kind+" "+w.name); err != nil {
 		return kconfigMap{}, err
@@ -252,7 +317,9 @@ func (s *Server) loadDeployment(ctx context.Context, w workload) (kdeployment, b
 	return d, true, nil
 }
 
-// ensureAbsent refuses a create over an existing resource of the same ID.
+// ensureAbsent refuses a create over an existing resource of the same
+// name, under its scoped name or the unscoped one an older version used.
+// Another project's resource of the same ID is not in the way (#1399).
 func (s *Server) ensureAbsent(ctx context.Context, w workload) error {
 	var existing kconfigMap
 	err := s.kn.getObject(ctx, &existing, resConfigMap, w.objectName(), w.kind+" "+w.name)
@@ -260,6 +327,12 @@ func (s *Server) ensureAbsent(ctx context.Context, w workload) error {
 		return apierror.AlreadyExists("%s %s already exists", w.kind, w.name)
 	}
 	if apierror.From(err).Code != codes.NotFound {
+		return err
+	}
+	probe := w
+	if _, err := s.loadSpec(ctx, &probe); err == nil {
+		return apierror.AlreadyExists("%s %s already exists", w.kind, w.name)
+	} else if apierror.From(err).Code != codes.NotFound {
 		return err
 	}
 	return nil
@@ -359,7 +432,7 @@ func (s *Server) awaitWorkload(ctx context.Context, opName string, w workload,
 	read func(context.Context, kconfigMap) (proto.Message, *runpb.Condition, error)) {
 	deadline := time.Now().Add(s.readyTimeout)
 	for time.Now().Before(deadline) {
-		cm, err := s.loadSpec(ctx, w)
+		cm, err := s.loadSpec(ctx, &w)
 		if err != nil && apierror.From(err).Code == codes.NotFound {
 			_ = s.ops.Fail(opName, apierror.NotFound("%s %s was deleted before it became ready", w.kind, w.name))
 			return

@@ -320,7 +320,7 @@ func functionLogs(ctx context.Context, t *testing.T, kubeconfig, service, want s
 	var logs string
 	for deadline := time.Now().Add(time.Minute); ; time.Sleep(2 * time.Second) {
 		out, err := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfig, "-n", "default",
-			"logs", "-l", "serving.knative.dev/service="+service, "-c", "user-container", "--tail", "-1").CombinedOutput()
+			"logs", "-l", "serving.knative.dev/service="+ksvcName(kubeconfig, service), "-c", "user-container", "--tail", "-1").CombinedOutput()
 		logs = string(out)
 		if err == nil && strings.Contains(logs, want) {
 			return logs

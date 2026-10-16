@@ -17,8 +17,8 @@ import (
 // to one: a LATEST target is `latestRevision: true`, a REVISION target is
 // `revisionName`, and percent and tag carry over. A tag gets its own URL,
 // which Knative publishes as status.traffic[].url and is reported as the
-// target's traffic_statuses uri. Cloud Run's revision names are Knative's,
-// so a pinned revision needs no translation.
+// target's traffic_statuses uri. A pinned revision is named as the API names
+// it, and rendered as the Knative revision it is (kRevisionName, #1400).
 
 // ktraffic is one Knative traffic target, in spec or status.
 type ktraffic struct {
@@ -107,16 +107,17 @@ func validateTraffic(traffic []*runpb.TrafficTarget) error {
 	return nil
 }
 
-// checkTrafficRevisions refuses a target pinned to a revision the service
-// does not have: Knative would accept it and then leave the route unready.
-func (s *Server) checkTrafficRevisions(ctx context.Context, service string, traffic []*runpb.TrafficTarget) error {
+// checkTrafficRevisions refuses a target pinned to a revision the service,
+// name, whose Knative Service is kname, does not have: Knative would accept
+// it and then leave the route unready.
+func (s *Server) checkTrafficRevisions(ctx context.Context, name, kname string, traffic []*runpb.TrafficTarget) error {
 	for i, t := range traffic {
 		if trafficIsLatest(t) {
 			continue
 		}
 		r := trafficRevision(t)
-		if _, err := s.kn.Revision(ctx, service, r); err != nil {
-			return apierror.InvalidArgument("traffic[%d] names revision %s, which service %s does not have", i, r, service)
+		if _, err := s.kn.Revision(ctx, kname, kRevisionName(name, kname, r)); err != nil {
+			return apierror.InvalidArgument("traffic[%d] names revision %s, which service %s does not have", i, r, name)
 		}
 	}
 	return nil
@@ -124,7 +125,7 @@ func (s *Server) checkTrafficRevisions(ctx context.Context, service string, traf
 
 // renderTraffic writes a Knative Service's spec.traffic. No targets means
 // Knative's default, all traffic to the latest revision, which is Cloud Run's.
-func renderTraffic(b *strings.Builder, traffic []*runpb.TrafficTarget) {
+func renderTraffic(b *strings.Builder, traffic []*runpb.TrafficTarget, krev func(string) string) {
 	if len(traffic) == 0 {
 		return
 	}
@@ -133,7 +134,7 @@ func renderTraffic(b *strings.Builder, traffic []*runpb.TrafficTarget) {
 		if trafficIsLatest(t) {
 			b.WriteString("    - latestRevision: true\n")
 		} else {
-			fmt.Fprintf(b, "    - latestRevision: false\n      revisionName: %q\n", trafficRevision(t))
+			fmt.Fprintf(b, "    - latestRevision: false\n      revisionName: %q\n", krev(trafficRevision(t)))
 		}
 		fmt.Fprintf(b, "      percent: %d\n", t.GetPercent())
 		if t.GetTag() != "" {
@@ -144,7 +145,7 @@ func renderTraffic(b *strings.Builder, traffic []*runpb.TrafficTarget) {
 
 // fromKnativeTraffic reads a Knative Service's traffic back as Cloud Run's:
 // what was asked for (spec) and where requests go (status).
-func fromKnativeTraffic(k ksvc) ([]*runpb.TrafficTarget, []*runpb.TrafficTargetStatus) {
+func fromKnativeTraffic(k ksvc, rev func(string) string) ([]*runpb.TrafficTarget, []*runpb.TrafficTargetStatus) {
 	var targets []*runpb.TrafficTarget
 	for _, t := range k.Spec.Traffic {
 		out := &runpb.TrafficTarget{Percent: t.percent(), Tag: t.Tag}
@@ -152,7 +153,7 @@ func fromKnativeTraffic(k ksvc) ([]*runpb.TrafficTarget, []*runpb.TrafficTargetS
 			out.Type = runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST
 		} else {
 			out.Type = runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION
-			out.Revision = t.RevisionName
+			out.Revision = rev(t.RevisionName)
 		}
 		targets = append(targets, out)
 	}
@@ -163,7 +164,7 @@ func fromKnativeTraffic(k ksvc) ([]*runpb.TrafficTarget, []*runpb.TrafficTargetS
 	}
 	var statuses []*runpb.TrafficTargetStatus
 	for _, t := range k.Status.Traffic {
-		st := &runpb.TrafficTargetStatus{Revision: t.RevisionName, Percent: t.percent(), Tag: t.Tag}
+		st := &runpb.TrafficTargetStatus{Revision: rev(t.RevisionName), Percent: t.percent(), Tag: t.Tag}
 		st.Type = runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION
 		if t.latest() {
 			st.Type = runpb.TrafficTargetAllocationType_TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST

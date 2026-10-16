@@ -60,7 +60,7 @@ func parseWorkerPoolName(name string) (workload, error) {
 	if err != nil || n.Collection != "workerPools" || n.ParentCollection != "" {
 		return workload{}, apierror.InvalidArgument("%q is not a Cloud Run worker pool name", name)
 	}
-	return workload{kind: kindWorkerPool, id: n.ID, name: name}, nil
+	return newWorkload(kindWorkerPool, n.ID, name), nil
 }
 
 // unsupportedWorkerPool refuses what a Deployment does not render.
@@ -242,7 +242,7 @@ func (p *WorkerPoolsServer) CreateWorkerPool(ctx context.Context, req *runpb.Cre
 	}
 	wp := proto.Clone(req.GetWorkerPool()).(*runpb.WorkerPool)
 	wp.Name = req.GetParent() + "/workerPools/" + id
-	w := workload{kind: kindWorkerPool, id: id, name: wp.Name}
+	w := newWorkload(kindWorkerPool, id, wp.Name)
 	if wp.Template == nil {
 		wp.Template = &runpb.WorkerPoolRevisionTemplate{}
 	}
@@ -290,7 +290,7 @@ func (p *WorkerPoolsServer) GetWorkerPool(ctx context.Context, req *runpb.GetWor
 	if err != nil {
 		return nil, err
 	}
-	cm, err := p.s.loadSpec(ctx, w)
+	cm, err := p.s.loadSpec(ctx, &w)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +315,7 @@ func (p *WorkerPoolsServer) ListWorkerPools(ctx context.Context, req *runpb.List
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		w := workload{kind: kindWorkerPool, id: strings.TrimPrefix(name, prefix), name: name}
+		w := workloadOf(kindWorkerPool, strings.TrimPrefix(name, prefix), name, cm)
 		wp, err := s.readWorkerPool(ctx, w, cm)
 		if err != nil {
 			return nil, err
@@ -351,7 +351,7 @@ func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.Upd
 		return nil, err
 	}
 	parent := name[:strings.LastIndex(name, "/workerPools/")]
-	cm, err := s.loadSpec(ctx, w)
+	cm, err := s.loadSpec(ctx, &w)
 	if err != nil {
 		if apierror.From(err).Code == codes.NotFound && req.GetAllowMissing() {
 			return p.CreateWorkerPool(ctx, &runpb.CreateWorkerPoolRequest{Parent: parent, WorkerPoolId: w.id,
@@ -427,7 +427,7 @@ func (p *WorkerPoolsServer) DeleteWorkerPool(ctx context.Context, req *runpb.Del
 		return nil, err
 	}
 	parent := req.GetName()[:strings.LastIndex(req.GetName(), "/workerPools/")]
-	cm, err := s.loadSpec(ctx, w)
+	cm, err := s.loadSpec(ctx, &w)
 	if err != nil {
 		return nil, err
 	}
@@ -453,11 +453,11 @@ func (s *Server) workerPoolOwner(ctx context.Context, name string) (iamOwner, er
 	if err != nil {
 		return iamOwner{}, err
 	}
-	cm, err := s.loadSpec(ctx, w)
+	cm, err := s.loadSpec(ctx, &w)
 	if err != nil {
 		return iamOwner{}, err
 	}
-	return iamOwner{kind: "workerpool", id: w.id, name: name, apiVersion: "v1", objKind: "ConfigMap",
+	return iamOwner{kind: "workerpool", id: w.iamKey(), name: name, apiVersion: "v1", objKind: "ConfigMap",
 		objName: cm.Metadata.Name, uid: cm.Metadata.UID}, nil
 }
 
@@ -546,7 +546,7 @@ func (s *Server) loadWorkerPoolForRevisions(ctx context.Context, poolName string
 	if err != nil {
 		return workload{}, nil, err
 	}
-	cm, err := s.loadSpec(ctx, w)
+	cm, err := s.loadSpec(ctx, &w)
 	if err != nil {
 		return workload{}, nil, err
 	}

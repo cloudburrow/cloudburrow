@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"google.golang.org/grpc/codes"
@@ -36,9 +37,11 @@ const (
 
 // iamOwner is the resource a policy belongs to.
 type iamOwner struct {
-	// kind is "service" or "job".
+	// kind is "service", "job" or "workerpool".
 	kind string
-	id   string
+	// id is what the policy's ConfigMap is named by: the resource ID, and
+	// for a job or worker pool the scope too (#1399).
+	id string
 	// name is the Cloud Run resource name.
 	name string
 	// apiVersion, objKind, objName and uid are the owning object's.
@@ -53,11 +56,13 @@ func (s *Server) serviceOwner(ctx context.Context, name string) (iamOwner, error
 	if err != nil {
 		return iamOwner{}, err
 	}
-	k, err := s.kn.Get(ctx, id)
+	k, err := s.service(ctx, name, id)
 	if err != nil {
-		return iamOwner{}, apierror.NotFound("service %s not found", name)
+		return iamOwner{}, err
 	}
-	return iamOwner{kind: "service", id: id, name: name, apiVersion: "serving.knative.dev/v1",
+	// By its Knative name: the ID for an older version's service, as its
+	// policy was named then, and <id>-<scope> since (#1400).
+	return iamOwner{kind: "service", id: k.Metadata.Name, name: name, apiVersion: "serving.knative.dev/v1",
 		objKind: "Service", objName: k.Metadata.Name, uid: k.Metadata.UID}, nil
 }
 
@@ -71,7 +76,10 @@ func (s *Server) jobOwner(ctx context.Context, name string) (iamOwner, error) {
 	if err != nil {
 		return iamOwner{}, err
 	}
-	return iamOwner{kind: "job", id: id, name: name, apiVersion: "v1", objKind: "ConfigMap",
+	// The ConfigMap's name past its prefix: the ID alone for a job an older
+	// version created, as its policy was named then, and <scope>-<id> for
+	// one created since (#1399).
+	return iamOwner{kind: "job", id: strings.TrimPrefix(cm.Metadata.Name, jobCMPrefix), name: name, apiVersion: "v1", objKind: "ConfigMap",
 		objName: cm.Metadata.Name, uid: cm.Metadata.UID}, nil
 }
 

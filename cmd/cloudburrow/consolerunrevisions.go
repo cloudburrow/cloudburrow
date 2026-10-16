@@ -11,7 +11,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -54,34 +53,34 @@ func (p runProvider) revisionActions(svc *ksvcStatus, revision string) []console
 	return []console.Action{{ID: runDeleteRevision, Label: "Delete revision", Destructive: true}}
 }
 
-// service reads one Knative Service by name.
-func (p runProvider) service(ctx context.Context, name string) (*ksvcStatus, error) {
-	out, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "ksvc")
+// service reads one of project's services by its ID: nil, and no error,
+// when there is none. Of two regions' services of the ID, the console's
+// region's is preferred.
+func (p runProvider) service(ctx context.Context, project, id string) (*ksvcStatus, error) {
+	svcs, err := p.services(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	var list struct {
-		Items []ksvcStatus `json:"items"`
-	}
-	if err := json.Unmarshal(out, &list); err != nil {
-		return nil, fmt.Errorf("decode services: %w", err)
-	}
-	for i := range list.Items {
-		if list.Items[i].Metadata.Name == name {
-			return &list.Items[i], nil
+	var found *ksvcStatus
+	for i := range svcs {
+		if svcs[i].Metadata.Name != id {
+			continue
+		}
+		if found == nil || strings.Contains(svcs[i].FullName, "/locations/"+p.location()+"/") {
+			found = &svcs[i]
 		}
 	}
-	return nil, fmt.Errorf("no service named %s", name)
+	return found, nil
 }
 
 // DetailActions implements console.PathActor: a service's Manage traffic
 // (#1224) and a revision's Delete revision.
-func (p runProvider) DetailActions(ctx context.Context, _ string, path []string) []console.Action {
+func (p runProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if len(path) < 1 || len(path) > 2 || p.runEndpoint() == "" {
 		return nil
 	}
-	svc, err := p.service(ctx, path[0])
-	if err != nil {
+	svc, err := p.service(ctx, project, path[0])
+	if err != nil || svc == nil {
 		return nil
 	}
 	if len(path) == 1 {
