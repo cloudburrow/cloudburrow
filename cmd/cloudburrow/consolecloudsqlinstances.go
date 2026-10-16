@@ -300,6 +300,17 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		}
 		certs.Total = len(certs.Items)
 	}
+	if cas, err := svc.Instances.ListServerCas(project, name).Context(ctx).Do(); err == nil {
+		var fps []string
+		for _, c := range cas.Certs {
+			if c.Sha1Fingerprint == cas.ActiveVersion {
+				fps = append(fps, c.Sha1Fingerprint+" (active)")
+			} else {
+				fps = append(fps, c.Sha1Fingerprint)
+			}
+		}
+		d.Summary = append(d.Summary, console.Property{Label: "Server CAs", Value: strings.Join(fps, ", ")})
+	}
 	d.Sections = []console.Section{{ID: "backups", Label: "Backups", Kind: console.KindListing, Listing: runs},
 		{ID: "client-certificates", Label: "Client certificates", Kind: console.KindListing, Listing: certs}}
 	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
@@ -458,7 +469,11 @@ func certActions(fps []string) []console.Action {
 				Type: "select", Required: true, Options: fps, Default: fps[0]}}})
 	}
 	return append(acts, console.Action{ID: "reset-ssl", Label: "Reset SSL configuration", Destructive: true,
-		Confirm: "Every client certificate of the instance is deleted, and the server's certificate is issued anew."})
+		Confirm: "Every client certificate of the instance is deleted, and the server's certificate is issued anew."},
+		console.Action{ID: "add-server-ca", Label: "Add server CA",
+			Confirm: "A new upcoming server CA is made; one added before and never rotated in is replaced."},
+		console.Action{ID: "rotate-server-ca", Label: "Rotate server CA",
+			Confirm: "The upcoming server CA becomes the one the server's certificate is signed by; connectors fetch it on their next dial."})
 }
 
 func (p cloudSQLInstancesProvider) backupActions(ids []string) []console.Action {
@@ -585,6 +600,10 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 		_, err = svc.SslCerts.Delete(project, name, strings.TrimSpace(v["fingerprint"])).Context(ctx).Do()
 	case "reset-ssl":
 		_, err = svc.Instances.ResetSslConfig(project, name).Context(ctx).Do()
+	case "add-server-ca":
+		_, err = svc.Instances.AddServerCa(project, name).Context(ctx).Do()
+	case "rotate-server-ca":
+		_, err = svc.Instances.RotateServerCa(project, name, &sqladminapi.InstancesRotateServerCaRequest{}).Context(ctx).Do()
 	default:
 		return fmt.Errorf("unknown action %q", action)
 	}

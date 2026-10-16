@@ -273,3 +273,31 @@ func TestTiersAndFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestServerCARotation(t *testing.T) {
+	svc, _, _ := transferServer(t)
+	list, err := svc.Instances.ListServerCas("proj", "pg").Do()
+	if err != nil || len(list.Certs) != 1 || list.ActiveVersion != list.Certs[0].Sha1Fingerprint {
+		t.Fatalf("listServerCas: %v %+v", err, list)
+	}
+	old := list.ActiveVersion
+	if _, err := svc.Instances.RotateServerCa("proj", "pg", &sqladmin.InstancesRotateServerCaRequest{}).Do(); err == nil {
+		t.Error("rotateServerCa without an upcoming CA succeeded")
+	}
+	if _, err := svc.Instances.AddServerCa("proj", "pg").Do(); err != nil {
+		t.Fatal(err)
+	}
+	list, _ = svc.Instances.ListServerCas("proj", "pg").Do()
+	if len(list.Certs) != 2 || list.ActiveVersion != old {
+		t.Fatalf("after addServerCa: %+v", list)
+	}
+	next := list.Certs[1].Sha1Fingerprint
+	if _, err := svc.Instances.RotateServerCa("proj", "pg", &sqladmin.InstancesRotateServerCaRequest{
+		RotateServerCaContext: &sqladmin.RotateServerCaContext{NextVersion: next}}).Do(); err != nil {
+		t.Fatal(err)
+	}
+	list, _ = svc.Instances.ListServerCas("proj", "pg").Do()
+	if list.ActiveVersion != next || len(list.Certs) != 2 || list.Certs[1].Sha1Fingerprint != old {
+		t.Errorf("after rotateServerCa: active %s, certs %d, want active %s and the old one kept", list.ActiveVersion, len(list.Certs), next)
+	}
+}

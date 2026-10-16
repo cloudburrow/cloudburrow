@@ -197,7 +197,7 @@ func (c *connector) addInstance(instance string) error {
 	if c.unavailable != "" || c.cas == nil {
 		return nil
 	}
-	ca, err := loadOrCreateCA(caPath(c.dir, instance), instance)
+	ca, err := loadInstanceCA(c.dir, instance)
 	if err != nil {
 		return fmt.Errorf("sqladmin: server CA for %s: %w", instance, err)
 	}
@@ -218,6 +218,8 @@ func (c *connector) removeInstance(instance string) {
 	delete(c.cas, instance)
 	c.camu.Unlock()
 	_ = os.Remove(caPath(c.dir, instance))
+	_ = os.Remove(caPath(c.dir, instance) + upcomingSuffix)
+	_ = os.Remove(caPath(c.dir, instance) + previousSuffix)
 	_ = os.Remove((&sslCertStore{dir: c.dir}).path(instance))
 	c.mu.Lock()
 	for name := range c.certs {
@@ -265,7 +267,7 @@ func fromPod(r *http.Request) bool {
 func (s *Server) EnableConnector(addr, dir string) error {
 	c := &connector{addr: addr, dir: dir, cas: map[string]*serverCA{}, certs: map[string]*tls.Certificate{}}
 	for _, e := range s.engines {
-		ca, err := loadOrCreateCA(caPath(dir, e.Instance()), e.Instance())
+		ca, err := loadInstanceCA(dir, e.Instance())
 		if err != nil {
 			err = fmt.Errorf("sqladmin: server CA for %s: %w", e.Instance(), err)
 			s.conn = &connector{unavailable: err.Error()}

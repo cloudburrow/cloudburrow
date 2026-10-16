@@ -503,7 +503,8 @@ func TestConsoleCloudSQLImportAndExport(t *testing.T) {
 // TestConsoleCloudSQLClientCertificates (#1380): the instance's page lists
 // its client certificates; Create client certificate answers with the
 // certificate, its private key and the server CA, Delete client certificate
-// and Reset SSL configuration remove them, each through the Admin API.
+// and Reset SSL configuration remove them, and Add server CA and Rotate
+// server CA rotate the server CA the page shows, each through the Admin API.
 func TestConsoleCloudSQLClientCertificates(t *testing.T) {
 	h := New(t)
 	inst := sqlTransferEngines(t, h)[0].instance
@@ -556,4 +557,77 @@ func TestConsoleCloudSQLClientCertificates(t *testing.T) {
 	if list, err := svc.SslCerts.List(project, inst).Do(); err != nil || len(list.Items) != 0 {
 		t.Errorf("sslCerts.list after the console's Reset SSL configuration: %v %+v", err, list)
 	}
+	before, err := svc.Instances.ListServerCas(project, inst).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	act("add-server-ca", nil)
+	act("rotate-server-ca", nil)
+	after, err := svc.Instances.ListServerCas(project, inst).Do()
+	if err != nil || after.ActiveVersion == before.ActiveVersion {
+		t.Errorf("the console's Add server CA and Rotate server CA left the active CA %s: %v", before.ActiveVersion, err)
+	}
+	if _, page := consoleDo(t, addr, http.MethodGet, "/api/detail/cloudsql-instances?project="+project+"&name="+inst, ""); !strings.Contains(page, after.ActiveVersion+" (active)") {
+		t.Errorf("the instance's page does not show the active server CA %s", after.ActiveVersion)
+	}
+}
+
+// TestSQLAdminServerCARotation (#1380): addServerCa adds an upcoming server
+// CA beside the active one, rotateServerCa makes it the one connectSettings
+// returns and the connector path serves with, so the official connector
+// still connects, and listServerCas lists the active CA and the one
+// rotated out.
+// covers: sql.instances.listServerCas, sql.instances.addServerCa, sql.instances.rotateServerCa
+func TestSQLAdminServerCARotation(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" {
+		t.Skip("needs --services cloudsql")
+	}
+	svc := sqlAdminService(t, h)
+	p := h.Project()
+	list, err := svc.Instances.ListServerCas(p, "postgres").Do()
+	if err != nil || len(list.Certs) == 0 {
+		t.Fatalf("listServerCas: %v %+v", err, list)
+	}
+	old := list.ActiveVersion
+	op, err := svc.Instances.AddServerCa(p, "postgres").Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitSQLOp(t, svc, p, op)
+	list, err = svc.Instances.ListServerCas(p, "postgres").Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The upcoming CA is the newest; a CA rotated out before is older.
+	var next string
+	var newest time.Time
+	for _, c := range list.Certs {
+		at, _ := time.Parse(time.RFC3339Nano, c.CreateTime)
+		if c.Sha1Fingerprint != old && list.ActiveVersion == old && at.After(newest) {
+			next, newest = c.Sha1Fingerprint, at
+		}
+	}
+	if next == "" {
+		t.Fatalf("after addServerCa no upcoming CA is listed: %+v", list)
+	}
+	op, err = svc.Instances.RotateServerCa(p, "postgres", &sqladmin.InstancesRotateServerCaRequest{
+		RotateServerCaContext: &sqladmin.RotateServerCaContext{NextVersion: next}}).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitSQLOp(t, svc, p, op)
+	cs, err := svc.Connect.Get(p, "postgres").Do()
+	if err != nil || cs.ServerCaCert.Sha1Fingerprint != next {
+		t.Fatalf("connectSettings after rotateServerCa: %v %+v", err, cs.ServerCaCert)
+	}
+	c := sqlBackupCase{table: "ca_rows", register: pgRegister, dsn: func(_, conn string) string {
+		return fmt.Sprintf("host=%s user=cloudburrow dbname=cloudburrow sslmode=disable", conn)
+	}}
+	rows := sqlBackupRows(t, h, c, p+":us-central1:postgres", "DROP TABLE IF EXISTS ca_rows", "CREATE TABLE ca_rows (id INT PRIMARY KEY, name TEXT)",
+		"INSERT INTO ca_rows VALUES (1, 'a')")
+	if len(rows) != 1 {
+		t.Errorf("rows through the connector after the rotation: %v", rows)
+	}
+	sqlTransferEngines(t, h)[0].exec(t, "DROP TABLE IF EXISTS ca_rows")
 }

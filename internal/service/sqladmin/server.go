@@ -411,6 +411,21 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		return s.backupRuns(r, base, project, e, rest[3:])
 	case "sslCerts":
 		return s.sslCerts(r, base, project, e, rest[3:])
+	case "listServerCas":
+		if len(rest) == 3 && r.Method == http.MethodGet {
+			out, err := s.listServerCas(project, e)
+			return "sql.instances.listServerCas", out, err
+		}
+	case "addServerCa":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.addServerCa(base, project, e)
+			return "sql.instances.addServerCa", out, err
+		}
+	case "rotateServerCa":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.rotateServerCa(r, base, project, e)
+			return "sql.instances.rotateServerCa", out, err
+		}
 	case "createEphemeral":
 		if len(rest) == 3 && r.Method == http.MethodPost {
 			out, err := s.generateEphemeralCert(r, project, e)

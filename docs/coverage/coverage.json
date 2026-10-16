@@ -7201,8 +7201,8 @@
     "Key": "sqladmin",
     "Title": "Cloud SQL Admin API (v1)",
     "counts": {
-      "Unimplemented": 37,
-      "Verified": 43
+      "Unimplemented": 34,
+      "Verified": 46
     },
     "rows": [
       {
@@ -7402,8 +7402,10 @@
       },
       {
         "method": "sql.instances.addServerCa",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqltransfers_test.go:581 TestSQLAdminServerCARotation"
+        ]
       },
       {
         "method": "sql.instances.addServerCertificate",
@@ -7516,8 +7518,10 @@
       },
       {
         "method": "sql.instances.listServerCas",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqltransfers_test.go:581 TestSQLAdminServerCARotation"
+        ]
       },
       {
         "method": "sql.instances.patch",
@@ -7582,8 +7586,10 @@
       },
       {
         "method": "sql.instances.rotateServerCa",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqltransfers_test.go:581 TestSQLAdminServerCARotation"
+        ]
       },
       {
         "method": "sql.instances.startReplica",

@@ -106,7 +106,7 @@ _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "or
 ```
 
 What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource), failover
-replicas and high availability, cascading, cross-region and external-primary replicas, the project-level Backups API, parallel or BAK imports and exports, and server CA rotation. See
+replicas and high availability, cascading, cross-region and external-primary replicas, the project-level Backups API, and parallel or BAK imports and exports. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
 ### Imports and exports (#1380)
@@ -141,7 +141,10 @@ already loaded, as Google warns. Parallel imports and exports, BAK and TDE files
 instance's server CA, the one the connectors trust, and returns its private key once;
 `list`, `get`, `delete` and `instances.resetSslConfig` (which deletes them all and reissues
 the server certificate) are served, and the console's instance page has a Client
-certificates tab. The servers are reached through the connector path, so the certificates
+certificates tab. `addServerCa` and `rotateServerCa` rotate the server CA the connector path
+signs with (connectors pick it up from `connectSettings` on their next dial), and
+`listServerCas` lists the active, upcoming and rotated-out CAs; the console shows them, with
+Add server CA and Rotate server CA. The servers are reached through the connector path, so the certificates
 are records the servers do not check on a direct connection. `tiers.list` and `flags.list`
 answer the lists Google documents for the versions served (`POSTGRES_17`, `MYSQL_8_4`).
 
