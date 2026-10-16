@@ -198,6 +198,7 @@ the tensor methods (`DirectPredict`, `ServerStreamingPredict`, …) relay it as 
 | `aiplatform.Model` registry (upload, list, version) | **Not supported** |
 | `aiplatform.Endpoint` / `DeployedModel` | **Not supported** |
 | `PredictionService.Predict` / `RawPredict` | **Verified** over gRPC on the local AI endpoint, as `projects/{p}/locations/{l}/endpoints/{service}` (#1193); see [compatibility.md](compatibility.md#vertex-ai-predictionservice--googlecloudaiplatformv1) |
+| `PredictionService.Explain` | Sampled Shapley only, from the container's predictions, with the spec in `explanation_spec_override` since there is no `DeployedModel` to carry one (#1454); see [compatibility.md](compatibility.md#vertex-ai-predictionservice--googlecloudaiplatformv1) |
 | `LocalModel.build_cpr_model` | Available to you; CloudBurrow does not invoke it |
 | `LocalModel.deploy_to_local_endpoint` | **Declined by design** — see [The decision](#the-decision) |
 | Model Garden, tuning, batch prediction | **Not supported** |

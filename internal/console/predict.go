@@ -21,10 +21,12 @@ import (
 // What CloudBurrow serves for prediction is the custom container contract
 // (docs/prediction.md): a container that reads AIP_HTTP_PORT,
 // AIP_HEALTH_ROUTE and AIP_PREDICT_ROUTE, deployed as a Cloud Run service onto
-// Knative. There is no Vertex Endpoint resource, and PredictionService is
-// served only on the local AI endpoint (#1193), so the screen offers neither — it lists the deployed contract containers and
-// POSTs {"instances": [...], "parameters": {...}} to one's predict route,
-// through the cluster ingress, exactly as `curl` in docs/prediction.md does.
+// Knative. There is no Vertex Endpoint resource, so the screen lists the
+// deployed contract containers and POSTs {"instances": [...], "parameters":
+// {...}} to one's predict route, through the cluster ingress, exactly as
+// `curl` in docs/prediction.md does. Explain (#1454) is computed by the local
+// AI endpoint's PredictionService (#1193), so it is relayed there instead
+// (explain.go).
 //
 // Like the playground it is a relay: it does not parse or reshape the answer.
 // The container's status and body reach the screen unchanged, so an error the
@@ -49,6 +51,10 @@ type Prediction struct {
 	// is not published. Resolved per request for the same reason the
 	// playground's address is: the console is built before it is known.
 	Ingress func() string
+	// AI resolves the local AI endpoint's host:port, whose PredictionService
+	// serves Explain (#1454); "" when it is not running. Resolved per request,
+	// as Ingress is.
+	AI func() string
 	// Client is the HTTP client for the relay; nil uses http.DefaultClient.
 	Client *http.Client
 }
@@ -61,6 +67,13 @@ func (p *Prediction) ingress() string {
 		return ""
 	}
 	return p.Ingress()
+}
+
+func (p *Prediction) ai() string {
+	if p == nil || p.AI == nil {
+		return ""
+	}
+	return p.AI()
 }
 
 func (p *Prediction) client() *http.Client {
@@ -107,6 +120,10 @@ type PredictStatus struct {
 	Unavailable string `json:"unavailable,omitempty"`
 	// Ingress is the gateway requests go through.
 	Ingress string `json:"ingress,omitempty"`
+	// Explain reports whether Explain can be sent (#1454): the local AI
+	// endpoint that serves it is running. ExplainNote says why not.
+	Explain     bool   `json:"explain"`
+	ExplainNote string `json:"explainNote,omitempty"`
 	// Deploy says how to deploy an endpoint, for the empty state.
 	Deploy string `json:"deploy,omitempty"`
 	// NotServed lists the Vertex prediction surfaces CloudBurrow does not
@@ -124,9 +141,11 @@ const predictDeploy = "Deploy a container that honours the Vertex AI custom pred
 // predictNotServed are the Vertex surfaces that are not implemented, named
 // on the screen rather than silently absent.
 var predictNotServed = []string{
-	"Vertex AI Endpoint and DeployedModel resources (the container is called directly)",
-	"PredictionService StreamingPredict, Explain and the other streaming methods (Predict and RawPredict " +
-		"are served over gRPC on the local AI endpoint, for the official aiplatform client)",
+	"Vertex AI Endpoint and DeployedModel resources (the container is called directly), so no explanation " +
+		"spec is stored on a deployed model: Explain sends it as explanation_spec_override",
+	"Explain with integrated gradients or XRAI attributions: they need the model's gradients, which a custom " +
+		"container's predict route does not expose (Sampled Shapley needs only predictions, and is offered here)",
+	"Example-based explanations: they need an Example index, which nothing here builds",
 	"Model Registry upload and versions",
 	"Batch prediction",
 }
@@ -170,7 +189,10 @@ func (p *Prediction) Status(ctx context.Context, project string) PredictStatus {
 	}
 	st := PredictStatus{
 		Configured: true, Endpoints: []PredictEndpoint{}, Deploy: predictDeploy,
-		NotServed: predictNotServed, Ingress: p.ingress(),
+		NotServed: predictNotServed, Ingress: p.ingress(), Explain: p.ai() != "",
+	}
+	if !st.Explain {
+		st.ExplainNote = explainUnavailable
 	}
 	eps, err := p.endpoints(ctx, project)
 	if err != nil {

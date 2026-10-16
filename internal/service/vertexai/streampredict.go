@@ -481,7 +481,8 @@ func (p *predictionService) StreamRawPredict(req *aiplatformpb.StreamRawPredictR
 // gRPC model server methods: nothing here is one.
 func noModelServer(method, name string) error {
 	return apierror.Unimplemented("%s calls method_name %q on a gRPC model server, and none is served here: "+
-		"the local models answer Predict, RawPredict and their streaming forms, and custom prediction containers speak HTTP; "+
+		"the local models answer Predict, RawPredict and their streaming forms, and a custom endpoint is a Cloud Run service, "+
+		"whose container is reached over HTTP/1.1 at its predict route (a port named h2c is not honoured, so no gRPC server in it can be called); "+
 		"see docs/compatibility.md", method, name)
 }
 
@@ -550,11 +551,7 @@ func (s *Server) streamRawPredictREST(w http.ResponseWriter, r *http.Request, t 
 		return
 	}
 	// After the first event, a failure is a final event, as writeStream sends.
-	e := apierror.From(err)
-	b, _ := json.Marshal(map[string]any{
-		"error": map[string]any{"code": e.HTTPStatus(), "status": e.Code.String(), "message": e.Message},
-	})
-	fmt.Fprintf(w, "data: %s\n\n", b)
+	fmt.Fprintf(w, "data: %s\n\n", apierror.MarshalJSON(err))
 	if flusher != nil {
 		flusher.Flush()
 	}
