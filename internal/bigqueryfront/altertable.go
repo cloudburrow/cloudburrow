@@ -21,7 +21,9 @@ import (
 // and the statements after it, one or several in one statement, with
 // ALTER TABLE IF EXISTS:
 //
-//   - ADD COLUMN [IF NOT EXISTS] name type [OPTIONS(description = ...)],
+//   - ADD COLUMN [IF NOT EXISTS] name type [OPTIONS(description = ...,
+//     rounding_mode = ...)], a STRUCT's fields with their own
+//     OPTIONS(description, rounding_mode) (#1409, decimalddl.go),
 //     of any type the DDL writes: a scalar (STRING(10) and NUMERIC(10, 2)
 //     with their parameters), ARRAY<T> (a REPEATED column) and STRUCT<...>
 //     (a RECORD, its fields NULLABLE, REPEATED or NOT NULL). NOT NULL on the
@@ -161,12 +163,23 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 					return st, fmt.Sprintf("ADD COLUMN with %q after the column's type", rest[0].text), ""
 				}
 				for _, o := range opts {
+					if o.name == "rounding_mode" { // #1409, checked by roundingModeRefused
+						s, ok := stringLiteral(singleToken(o.val))
+						if !ok {
+							return st, "", roundingModeInvalid
+						}
+						f["roundingMode"] = s
+						continue
+					}
 					if o.name != "description" {
 						return st, "ADD COLUMN with the column option " + o.name, ""
 					}
 					o := o
 					act.description = &o
 				}
+			}
+			if msg := roundingModeRefused(f); msg != "" {
+				return st, "", msg
 			}
 			act.field = f
 		case len(a) > 1 && a[0].is("SET") && a[1].is("OPTIONS"):
@@ -455,10 +468,14 @@ func fieldType(t []token, i int) (map[string]any, int, string) {
 				}
 				for _, o := range opts {
 					s, ok := stringLiteral(singleToken(o.val))
-					if o.name != "description" || !ok {
-						return nil, i, "a STRUCT field's option " + o.name + " other than a description literal"
+					switch {
+					case o.name == "rounding_mode" && ok: // #1409, checked by roundingModeRefused
+						f["roundingMode"] = s
+					case o.name != "description" || !ok:
+						return nil, i, "a STRUCT field's option " + o.name + " other than a description or rounding_mode literal"
+					default:
+						f["description"] = s
 					}
-					f["description"] = s
 				}
 				next = end + 1
 			}

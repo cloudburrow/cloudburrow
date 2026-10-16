@@ -452,7 +452,7 @@ jobs:
     name: official SDK compatibility (${{ matrix.shard }})
     runs-on: ubuntu-latest
     # Well above its usual run; a wedged job fails here instead of at GitHub's 6-hour default (#715).
-    timeout-minutes: 60
+    timeout-minutes: 75
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
@@ -667,7 +667,9 @@ jobs:
             echo "== acceptance: $(grep -c -- '^--- PASS' e2e.log) e2e and $(grep -c -- '^--- PASS' k8s.log) test/k8s tests passed"
           else
             set +e
-            go test -tags=compat -timeout 25m -v ./test/compat/... | tee compat.log
+            # 45m: the emulators shard passed 25m in main run 38910752877 (Cloud SQL
+            # versions and HA, sink delivery, BigQuery), timing out in TestGcloud*.
+            go test -tags=compat -timeout 45m -v ./test/compat/... | tee compat.log
             rc=$?
             set -e
             if [ "$rc" -ne 0 ]; then
@@ -867,14 +869,15 @@ jobs:
           . scripts/compat-shards.sh
           RUN_SHARD_TESTS=$COMPAT_BROWSER_RUN_SHARD_TESTS
           EMULATORS_SHARD_TESTS=$COMPAT_BROWSER_EMULATORS_SHARD_TESTS
+          NEVER_TESTS=$COMPAT_BROWSER_NEVER_TESTS
           case "$SHARD" in
-            run) SELECT=(-run "$RUN_SHARD_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
-            emulators) SELECT=(-run "$EMULATORS_SHARD_TESTS"); PICK=(grep -E "$EMULATORS_SHARD_TESTS") ;;
-            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS") ;;
+            run) SELECT=(-run "$RUN_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
+            emulators) SELECT=(-run "$EMULATORS_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$EMULATORS_SHARD_TESTS") ;;
+            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS") ;;
           esac
           rc=0
           go test -tags=browser -count=1 -timeout 10m -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
-          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}"); do
+          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NEVER_TESTS"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
               { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" browser.log || echo 'no result')"; rc=1; }
           done
@@ -969,11 +972,19 @@ jobs:
           # signed-URL and versioning probes run in the check job against the
           # standalone storage server, not here; the three Functions
           # tests, SubmitBuild's buildpacks test (#1268) and the Node.js,
-          # Python (#1303), Java, Ruby, PHP and .NET (#1319) Functions tests
-          # pull Google's builder and build from source, too slow for
-          # every merge, so they run only when CLOUDBURROW_TEST_FUNCTIONS is
-          # set (#678).
-          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes)$'
+          # Python (#1303), Java, Ruby, PHP and .NET (#1319) Functions tests,
+          # and the Functions API's, gcloud's and Terraform's deploys of
+          # testdata/function (#1377), and its builds with event triggers,
+          # through the client and gcloud (#1414), pull Google's builder and
+          # build from source, too slow for every merge, so they run only when
+          # CLOUDBURROW_TEST_FUNCTIONS is set (#678), in functions.yml on
+          # amd64; the run shard runs the ungated halves of the gcloud and
+          # Terraform ones (and of gcloud's event triggers), so they fail
+          # there but skip at the gate. The Studio's local models test
+          # (#1396) needs a -tags onnx build, and Cloud Build's host-steps-off
+          # test (#1382) an instance without --cloudbuild-host-steps, which the
+          # run shard sets; both run locally.
+          never='^Test(FunctionsFrameworkBuiltWithBuildpacks|FunctionsRebuildReusesLayers|FunctionsBuildBrokenModulePathFails|GenerateContentThroughTheOfficialSDK|EmbeddingGemmaThroughTheOfficialSDK|EmbeddingGemmaThroughThePredictionClient|EmbedContentThroughThePredictionClient|GenerationNeverUsesApplicationDefaultCredentials|StreamGenerateContentThroughTheOfficialSDK|StreamGenerateContentThroughThePredictionClient|StorageSignedURLV2RegisteredCert|StorageVersioningPersistentMode|FunctionsSubmitBuildBuildpacks|RawPredictOnTheEmbeddingModel|RawPredictOnTheGenerationModel|StreamingPredictOnTheGenerationModel|StreamingPredictOnTheEmbeddingModel|ConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK|ConsoleLocalModelsUnloadDeleteDownloadLoad|FunctionsNodejsBuiltWithBuildpacks|FunctionsPythonBuiltWithBuildpacks|FunctionsJavaBuiltWithBuildpacks|FunctionsRubyBuiltWithBuildpacks|FunctionsPHPBuiltWithBuildpacks|FunctionsDotnetBuiltWithBuildpacks|FunctionsAPIBuildsAndServes|GcloudFunctions|TerraformCloudFunctions2Function|FunctionsEventTriggerBuilds|GcloudFunctionsEventTriggers|ConsoleLocalModelsLoadEmbedUnload|CloudBuildHostStepsOff)$'
           none=$(comm -23 all.txt ran.txt | grep -vE "$never" || true)
           if [ -n "$none" ]; then
             echo "tests that ran in no shard:"; echo "$none"; exit 1

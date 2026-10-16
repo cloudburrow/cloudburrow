@@ -13,6 +13,7 @@ import (
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -34,16 +35,23 @@ func folderLabel(h *Harness, prefix string) string {
 
 func foldersClients(t *testing.T, h *Harness) (*resourcemanager.FoldersClient, *resourcemanager.OrganizationsClient, *resourcemanager.ProjectsClient) {
 	t.Helper()
+	return foldersClientsAt(t, h, rmOptions(h))
+}
+
+// foldersClientsAt is foldersClients with opts, for a test that reads
+// Resource Manager under its own shard's variable.
+func foldersClientsAt(t *testing.T, h *Harness, opts []option.ClientOption) (*resourcemanager.FoldersClient, *resourcemanager.OrganizationsClient, *resourcemanager.ProjectsClient) {
+	t.Helper()
 	ctx := h.Context()
-	fc, err := resourcemanager.NewFoldersClient(ctx, rmOptions(h)...)
+	fc, err := resourcemanager.NewFoldersClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	oc, err := resourcemanager.NewOrganizationsClient(ctx, rmOptions(h)...)
+	oc, err := resourcemanager.NewOrganizationsClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pc, err := resourcemanager.NewProjectsClient(ctx, rmOptions(h)...)
+	pc, err := resourcemanager.NewProjectsClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}

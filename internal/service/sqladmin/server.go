@@ -278,10 +278,8 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 // verbWhy is why an instance method other than restart is not served.
 func verbWhy(verb string) string {
 	switch verb {
-	case "failover":
-		return haWhy
 	case "demoteMaster", "demote", "switchover", "reencrypt":
-		return "failover replicas, high availability and external primaries are not served; read replicas are (docs/cloudsql.md)"
+		return "external primaries, legacy failover replicas and switchover are not served; read replicas and high availability (availabilityType REGIONAL, instances.failover) are (docs/cloudsql.md)"
 	case "pointInTimeRestore":
 		return "it restores from a Backup and DR Service datasource, which CloudBurrow does not serve; " +
 			"recover to a point in time with instances.clone and cloneContext.pointInTime (docs/cloudsql.md)"
@@ -357,7 +355,7 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		return "sql.connect.generateEphemeral", out, err
 	}
 	if len(rest) == 3 && r.Method == http.MethodPost && (rest[2] == "restoreBackup" || rest[2] == "clone" ||
-		rest[2] == "promoteReplica" || rest[2] == "stopReplica" || rest[2] == "startReplica") {
+		rest[2] == "promoteReplica" || rest[2] == "stopReplica" || rest[2] == "startReplica" || rest[2] == "failover") {
 		verb = rest[2]
 	}
 	if len(rest) == 3 && rest[2] == "getLatestRecoveryTime" && r.Method == http.MethodGet {
@@ -371,6 +369,9 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		}
 		out, err := s.replicaVerb(base, project, name, verb)
 		return "sql.instances." + verb, out, err
+	case "failover":
+		out, err := s.failover(r, base, project, name)
+		return "sql.instances.failover", out, err
 	case "restoreBackup":
 		out, err := s.restoreBackup(r, base, project, e)
 		return "sql.instances.restoreBackup", out, err

@@ -1,0 +1,134 @@
+CloudBurrow patch 21 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1409). Applies after patch 0020; needs
+googlesqlite patch 0032.
+
+The gap: patch 0020's triggers round a value written to a top-level
+parameterized NUMERIC(P, S) or BIGNUMERIC(P, S) column only. BigQuery
+rounds a STRUCT's field, an ARRAY's element and a REPEATED RECORD's
+field, at any depth, by the field's roundingMode, else the table's
+defaultRoundingMode, else ROUND_HALF_AWAY_FROM_ZERO, and refuses one
+past its precision OUT_OF_RANGE
+(https://cloud.google.com/bigquery/docs/schemas#rounding_mode).
+
+The patch makes, for each top-level column that holds such a field (a
+RECORD, or a REPEATED NUMERIC or RECORD), the same AFTER INSERT and
+AFTER UPDATE OF triggers, calling googlesqlite_round_decimal_nested with
+a spec of where the fields are, their precisions, scales and modes. So
+every write path (DML, insertAll, loads, the Storage Write API, query
+destinations) rounds them, as it rounds a top-level column.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the
+MIT License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/metadata/rounding.go
++++ b/internal/metadata/rounding.go
+@@ -27,7 +27,8 @@
+ // made again each time the table's resource is written, so a change of
+ // schema or of a rounding mode takes effect. A table the engine does not
+ // have yet (the resource is written before it) is left alone; its
+-// CreateTable calls this again. Top-level columns only. CloudBurrow patch
++// CreateTable calls this again. A STRUCT column's fields and an ARRAY
++// column's elements, at any depth, round too (#1409). CloudBurrow patch
+ // (cloudburrow/cloudburrow#1401).
+ func SyncDecimalRounding(ctx context.Context, tx *sql.Tx, projectID, datasetID string, table *bigqueryv2.Table) error {
+ 	if table == nil || table.TableReference == nil || table.View != nil || table.MaterializedView != nil {
+@@ -57,20 +58,23 @@
+ 				return fmt.Errorf("rounding triggers of %s: %w", f.Name, err)
+ 			}
+ 		}
+-		typ := strings.ToUpper(f.Type)
+-		if (typ != "NUMERIC" && typ != "BIGNUMERIC") || f.Precision <= 0 || f.Mode == "REPEATED" {
++		col := quoteSQLite(f.Name)
++		var call string
++		if typ := strings.ToUpper(f.Type); (typ == "NUMERIC" || typ == "BIGNUMERIC") && f.Precision > 0 && f.Mode != "REPEATED" {
++			call = fmt.Sprintf("googlesqlite_round_decimal(NEW.%s, %d, %d, '%s', '%s')",
++				col, f.Precision, f.Scale, roundingModeOf(f, table.DefaultRoundingMode), strings.ReplaceAll(f.Name, "'", "''"))
++		} else if spec := nestedDecimalSpec(f, f.Name, table.DefaultRoundingMode); spec != nil {
++			// CloudBurrow patch (cloudburrow/cloudburrow#1409): a STRUCT's
++			// fields and an ARRAY's elements, at any depth, by
++			// googlesqlite_round_decimal_nested (googlesqlite patch 0032).
++			b, err := json.Marshal(spec)
++			if err != nil {
++				return err
++			}
++			call = fmt.Sprintf("googlesqlite_round_decimal_nested(NEW.%s, '%s')", col, strings.ReplaceAll(string(b), "'", "''"))
++		} else {
+ 			continue
+ 		}
+-		mode := f.RoundingMode
+-		if mode == "" || mode == "ROUNDING_MODE_UNSPECIFIED" {
+-			mode = table.DefaultRoundingMode
+-		}
+-		if mode != "ROUND_HALF_EVEN" {
+-			mode = "ROUND_HALF_AWAY_FROM_ZERO"
+-		}
+-		col := quoteSQLite(f.Name)
+-		call := fmt.Sprintf("googlesqlite_round_decimal(NEW.%s, %d, %d, '%s', '%s')",
+-			col, f.Precision, f.Scale, mode, strings.ReplaceAll(f.Name, "'", "''"))
+ 		for _, event := range []struct{ suffix, on string }{{"_ins", "INSERT"}, {"_upd", "UPDATE OF " + col}} {
+ 			q := fmt.Sprintf("CREATE TRIGGER %s AFTER %s ON %s FOR EACH ROW WHEN NEW.%s IS NOT NULL BEGIN "+
+ 				"UPDATE %s SET %s = %s WHERE rowid = NEW.rowid; END",
+@@ -86,6 +90,60 @@
+ 	return nil
+ }
+ 
++// roundingModeOf is the mode a value written to f rounds by: its
++// roundingMode, else the table's defaultRoundingMode, else
++// ROUND_HALF_AWAY_FROM_ZERO.
++func roundingModeOf(f *bigqueryv2.TableFieldSchema, tableMode string) string {
++	mode := f.RoundingMode
++	if mode == "" || mode == "ROUNDING_MODE_UNSPECIFIED" {
++		mode = tableMode
++	}
++	if mode != "ROUND_HALF_EVEN" {
++		mode = "ROUND_HALF_AWAY_FROM_ZERO"
++	}
++	return mode
++}
++
++// decimalSpec is googlesqlite_round_decimal_nested's spec: a leaf (N set)
++// is a parameterized NUMERIC or BIGNUMERIC, F a RECORD's fields that hold
++// one; an ARRAY's elements take the spec of the ARRAY. CloudBurrow patch
++// (cloudburrow/cloudburrow#1409).
++type decimalSpec struct {
++	N string                  `json:"n,omitempty"`
++	P int64                   `json:"p,omitempty"`
++	S int64                   `json:"s,omitempty"`
++	M string                  `json:"m,omitempty"`
++	F map[string]*decimalSpec `json:"f,omitempty"`
++}
++
++// nestedDecimalSpec is the spec of f, named path, or nil when it holds no
++// parameterized NUMERIC or BIGNUMERIC. CloudBurrow patch
++// (cloudburrow/cloudburrow#1409).
++func nestedDecimalSpec(f *bigqueryv2.TableFieldSchema, path, tableMode string) *decimalSpec {
++	switch strings.ToUpper(f.Type) {
++	case "NUMERIC", "BIGNUMERIC":
++		if f.Precision <= 0 {
++			return nil
++		}
++		return &decimalSpec{N: path, P: f.Precision, S: f.Scale, M: roundingModeOf(f, tableMode)}
++	case "RECORD", "STRUCT":
++		var fields map[string]*decimalSpec
++		for _, sub := range f.Fields {
++			if s := nestedDecimalSpec(sub, path+"."+sub.Name, tableMode); s != nil {
++				if fields == nil {
++					fields = map[string]*decimalSpec{}
++				}
++				fields[sub.Name] = s
++			}
++		}
++		if fields == nil {
++			return nil
++		}
++		return &decimalSpec{F: fields}
++	}
++	return nil
++}
++
+ func triggerName(projectID, datasetID, tableID, column string) string {
+ 	return "cb_round_" + strings.Join([]string{projectID, datasetID, tableID, column}, "_")
+ }

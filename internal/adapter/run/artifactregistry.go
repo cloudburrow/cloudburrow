@@ -12,8 +12,10 @@ import (
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/registry"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -22,12 +24,15 @@ import (
 // ArtifactRegistryServer serves the repository calls of
 // google.devtools.artifactregistry.v1.ArtifactRegistry that `gcloud run
 // deploy --source` makes (#1347): get, create and list, and the update and
-// delete Terraform's google_artifact_registry_repository makes (#1304). A repository is
-// stored metadata only. It is not a registry a docker client can push to:
-// images built on this instance (SubmitBuild, Cloud Build) are loaded into
-// the cluster as dev.local/<image URI>, and a Cloud Run service or job that
-// names an image under a repository's URL runs that local image. Every
-// other method is UNIMPLEMENTED.
+// delete Terraform's google_artifact_registry_repository makes (#1304).
+// A DOCKER repository is also a Docker registry (#1383): its registryUri,
+// {location}-docker.pkg.dev/{project}/{repository}, is served by the
+// Docker Registry HTTP API v2 on this port, and its packages, versions,
+// tags, Docker images and files are read from what that registry holds
+// (artifactregistrycontent.go). Images built on this instance are pushed
+// there too, and still loaded into the cluster as dev.local/<image URI>
+// for Cloud Run's fast path. Other formats, remote and virtual
+// repositories and every other method are UNIMPLEMENTED.
 type ArtifactRegistryServer struct {
 	arpb.UnimplementedArtifactRegistryServer
 	s *Server
@@ -130,8 +135,10 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 	if m := r.GetMode(); m != arpb.Repository_MODE_UNSPECIFIED && m != arpb.Repository_STANDARD_REPOSITORY {
 		return nil, apierror.Unimplemented("repository mode %v is not supported", m)
 	}
-	if r.GetKmsKeyName() != "" || len(r.GetCleanupPolicies()) > 0 || r.GetFormatConfig() != nil || r.GetModeConfig() != nil {
-		return nil, apierror.Unimplemented("kms_key_name, cleanup_policies and format or mode configs are not supported")
+	// Cleanup policies are stored and read back, as documented; nothing
+	// here runs them, as Artifact Registry runs them only daily.
+	if r.GetKmsKeyName() != "" || r.GetFormatConfig() != nil || r.GetModeConfig() != nil {
+		return nil, apierror.Unimplemented("kms_key_name and format or mode configs are not supported")
 	}
 	name := req.GetParent() + "/repositories/" + req.GetRepositoryId()
 	now := timestamppb.New(time.Now())
@@ -143,6 +150,7 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 		return nil, apierror.AlreadyExists("the repository already exists")
 	}
 	repositories.repos[name] = r
+	saveRepositoriesLocked()
 	repositories.mu.Unlock()
 	op := a.s.ops.Create(req.GetParent(), name)
 	_ = a.s.ops.SetMetadata(op.Name, &arpb.OperationMetadata{})
@@ -150,9 +158,10 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 	return a.s.toProtoOperation(op.Name)
 }
 
-// UpdateRepository applies the update mask's description and labels, the
-// fields a stored repository can change here; any other path is refused, as
-// those fields are refused at create. An empty mask replaces both.
+// UpdateRepository applies the update mask's description, labels,
+// cleanup_policies and cleanup_policy_dry_run, the fields a stored
+// repository can change here; any other path is refused, as those fields
+// are refused at create. An empty mask replaces all four.
 func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.UpdateRepositoryRequest) (*arpb.Repository, error) {
 	in := req.GetRepository()
 	if _, _, err := parseRepositoryName(in.GetName()); err != nil {
@@ -160,13 +169,13 @@ func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.U
 	}
 	paths := req.GetUpdateMask().GetPaths()
 	if len(paths) == 0 {
-		paths = []string{"description", "labels"}
+		paths = []string{"description", "labels", "cleanup_policies", "cleanup_policy_dry_run"}
 	}
 	for _, p := range paths {
 		switch p {
-		case "description", "labels":
+		case "description", "labels", "cleanup_policies", "cleanup_policy_dry_run":
 		default:
-			return nil, apierror.Unimplemented("update_mask path %q is not supported: only description and labels can change", p)
+			return nil, apierror.Unimplemented("update_mask path %q is not supported: only description, labels and cleanup policies can change", p)
 		}
 	}
 	repositories.mu.Lock()
@@ -182,16 +191,21 @@ func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.U
 			r.Description = in.GetDescription()
 		case "labels":
 			r.Labels = in.GetLabels()
+		case "cleanup_policies":
+			r.CleanupPolicies = in.GetCleanupPolicies()
+		case "cleanup_policy_dry_run":
+			r.CleanupPolicyDryRun = in.GetCleanupPolicyDryRun()
 		}
 	}
 	r.UpdateTime = timestamppb.New(time.Now())
 	repositories.repos[in.GetName()] = r
+	saveRepositoriesLocked()
 	return proto.Clone(r).(*arpb.Repository), nil
 }
 
-// DeleteRepository removes a repository and returns its operation, already
-// done. Images built under its URL stay in the cluster: they are this
-// instance's build cache, not the repository's contents.
+// DeleteRepository removes a repository, and every image its registry
+// holds, and returns its operation, already done. Images built under its
+// URL stay loaded in the cluster: they are this instance's build cache.
 func (a *ArtifactRegistryServer) DeleteRepository(_ context.Context, req *arpb.DeleteRepositoryRequest) (*longrunningpb.Operation, error) {
 	parent, _, err := parseRepositoryName(req.GetName())
 	if err != nil {
@@ -215,6 +229,10 @@ func RemoveRepository(name string) bool {
 		return false
 	}
 	delete(repositories.repos, name)
+	saveRepositoriesLocked()
+	if st := RegistryStore(); st != nil {
+		_ = st.DeleteRepository(repoOf(name))
+	}
 	return true
 }
 
@@ -228,4 +246,44 @@ func Repositories() []*arpb.Repository {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// repositoriesFile is where the repositories are saved, beside the
+// registry's content, so both survive a restart of the instance.
+const repositoriesFile = "repositories.json"
+
+// saveRepositoriesLocked writes every repository to the registry's state
+// directory; with no store, repositories are kept in memory only.
+func saveRepositoriesLocked() {
+	st := RegistryStore()
+	if st == nil {
+		return
+	}
+	list := &arpb.ListRepositoriesResponse{}
+	for _, r := range repositories.repos {
+		list.Repositories = append(list.Repositories, r)
+	}
+	sort.Slice(list.Repositories, func(i, j int) bool { return list.Repositories[i].Name < list.Repositories[j].Name })
+	b, err := protojson.Marshal(list)
+	if err != nil {
+		return
+	}
+	_ = st.WriteState(repositoriesFile, b)
+}
+
+// loadRepositories reads the repositories a previous run saved.
+func loadRepositories(st *registry.Store) {
+	b, err := st.ReadState(repositoriesFile)
+	if err != nil {
+		return
+	}
+	list := &arpb.ListRepositoriesResponse{}
+	if protojson.Unmarshal(b, list) != nil {
+		return
+	}
+	repositories.mu.Lock()
+	defer repositories.mu.Unlock()
+	for _, r := range list.GetRepositories() {
+		repositories.repos[r.GetName()] = r
+	}
 }

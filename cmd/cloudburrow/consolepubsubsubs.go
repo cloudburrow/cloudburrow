@@ -137,9 +137,15 @@ func (p pubsubSubscriptionsProvider) Detail(ctx context.Context, project string,
 		summary = append(summary, console.Property{Label: "State", Value: st.String()})
 	}
 
+	// Edit subscription (#786), prefilled from what the emulator returned;
+	// a detached subscription is kept as it was, and cannot be changed
+	// (#1406).
+	edit := subscriptionEditForm(s)
+	if s.GetDetached() {
+		edit = nil
+	}
 	return console.Detail{
-		// Edit subscription (#786), prefilled from what the emulator returned.
-		Edit:    subscriptionEditForm(s),
+		Edit:    edit,
 		Summary: summary,
 		Sections: []console.Section{
 			subscriptionDeliverySection(s),

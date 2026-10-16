@@ -175,15 +175,10 @@ func TestPITRRetentionAndFailedBase(t *testing.T) {
 	}
 	res.Body.Close()
 
-	// High availability stays 501, with why.
+	// A ZONAL instance has no standby to fail over to (#1408).
 	if _, err := svc.Instances.Failover("proj", "pit", &sqladmin.InstancesFailoverRequest{}).Do(); err == nil ||
-		!strings.Contains(err.Error(), "501") || !strings.Contains(err.Error(), "synchronously") {
-		t.Errorf("failover: %v, want 501 saying why", err)
-	}
-	if _, err := svc.Instances.Insert("proj", &sqladmin.DatabaseInstance{Name: "ha", DatabaseVersion: "POSTGRES_17",
-		Settings: &sqladmin.Settings{Tier: "db-custom-1-3840", AvailabilityType: "REGIONAL"}}).Do(); err == nil ||
-		!strings.Contains(err.Error(), "501") || !strings.Contains(err.Error(), "second zone") {
-		t.Errorf("REGIONAL: %v, want 501 saying why", err)
+		!strings.Contains(err.Error(), "400") || !strings.Contains(err.Error(), "ZONAL") {
+		t.Errorf("failover of a ZONAL instance: %v, want 400", err)
 	}
 }
 

@@ -51,10 +51,9 @@ var terraformEndpoints = []terraformEndpoint{
 	// Artifact Registry and Cloud Build v1 (#1304) are served on the Run
 	// port beside Cloud Run (#1347, SourceDeployHandler).
 	// google_artifact_registry_repository applies, plans clean, updates in
-	// place and destroys in TestTerraformArtifactRegistryRepository. Cloud
-	// Build serves builds, not triggers or worker pools: with the endpoint
-	// set, google_cloudbuild_trigger and _worker_pool are answered 501 by
-	// this instance, never sent to Google (TestTerraformCloudBuildTriggerRefused).
+	// place and destroys in TestTerraformArtifactRegistryRepository;
+	// google_cloudbuild_trigger (manual or webhook) and _worker_pool do in
+	// TestTerraformCloudBuildTriggerAndWorkerPool (#1422).
 	{config.ServiceRun, "artifact_registry_custom_endpoint", "GOOGLE_ARTIFACT_REGISTRY_CUSTOM_ENDPOINT", "/v1/", true},
 	{config.ServiceRun, "cloud_build_custom_endpoint", "GOOGLE_CLOUD_BUILD_CUSTOM_ENDPOINT", "/v1/", true},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a

@@ -18,6 +18,7 @@ import (
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // topicPath is the topic a REST path names, /v1/projects/{p}/topics/{t},
@@ -75,6 +76,20 @@ func (f *Front) serveTopic(w http.ResponseWriter, r *http.Request, name, verb st
 			writeRESTError(w, err)
 			return
 		}
+		var req pubsubpb.UpdateTopicRequest
+		if restJSON.Unmarshal(body, &req) == nil {
+			if req.UpdateMask == nil && r.URL.Query().Get("updateMask") != "" {
+				req.UpdateMask = &fieldmaskpb.FieldMask{Paths: splitMask(r.URL.Query().Get("updateMask"), nil)}
+			}
+			if req.Topic == nil {
+				req.Topic = &pubsubpb.Topic{}
+			}
+			req.Topic.Name = name
+			if err := f.checkTopicSchemaUpdate(&req); err != nil {
+				writeRESTError(w, err)
+				return
+			}
+		}
 		if f.restPatchTopic(w, r, name, body) {
 			return
 		}
@@ -87,12 +102,49 @@ func (f *Front) serveTopic(w http.ResponseWriter, r *http.Request, name, verb st
 			return
 		}
 		var t pubsubpb.Topic
+		var bound *pubsubpb.SchemaSettings
 		if restJSON.Unmarshal(body, &t) == nil {
 			if err := CheckLabels(t.GetLabels()); err != nil {
 				writeRESTError(w, err)
 				return
 			}
+			// A binding to a Protocol Buffer schema the front keeps
+			// (protobufschemas.go, #1406) is the front's.
+			ss, err := f.takeTopicSchema(&t)
+			if err != nil {
+				writeRESTError(w, err)
+				return
+			}
+			if _, had := f.topicSchema(name); ss != nil && !had {
+				b, _ := editObjectBody(body, func(o jsonObject) {
+					delete(o, "schemaSettings")
+					delete(o, "schema_settings")
+				})
+				setBody(r, b)
+				bound = ss
+				// Set before the answer is rewritten (restAnswer), which
+				// names it.
+				f.setTopicSchema(name, ss)
+			}
 		} // else the emulator's refusal is the answer
+		sw := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(sw, r)
+		if bound != nil && !sw.ok() {
+			f.dropTopicSchema(name)
+		}
+	case verb == "publish" && r.Method == http.MethodPost:
+		body, err := readBody(r)
+		if err != nil {
+			writeRESTError(w, err)
+			return
+		}
+		var req pubsubpb.PublishRequest
+		if restJSON.Unmarshal(body, &req) == nil {
+			if err := f.checkPublish(name, req.GetMessages()); err != nil {
+				writeRESTError(w, err)
+				return
+			}
+		}
 		next.ServeHTTP(w, r)
 	case verb == "" && r.Method == http.MethodDelete:
 		next.ServeHTTP(&statusWriter{ResponseWriter: w, onOK: func() { f.forget(name) }}, r)

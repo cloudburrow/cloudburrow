@@ -79,6 +79,10 @@ type ddlOptions struct {
 	// decimals are the column list's parameterized NUMERIC and
 	// BIGNUMERIC columns and rounding modes (#1401, decimalddl.go).
 	decimals []decimalColumn
+	// sent is the statement as the engine is sent it, a STRUCT field's
+	// OPTIONS (rounding_mode) cut, or "" for the statement as it is
+	// (#1409, decimalddl.go).
+	sent string
 }
 
 // optionsKey marks a request whose options the front is already setting,
@@ -157,6 +161,7 @@ func parseDDLOptionsOf(sql string, mv bool) (d ddlOptions, msg string, ok bool) 
 		if d.decimals, invalid = readDecimalColumns(d.columns); invalid != "" { // #1401
 			d.invalid = invalid
 		}
+		d.sent = withoutFieldRounding(sql, d.columns) // #1409
 	}
 	// The OPTIONS at the statement's own level, before its query, and the
 	// PARTITION BY and CLUSTER BY before them.
@@ -420,6 +425,10 @@ func (f front) ddlWithOptions(w http.ResponseWriter, r *http.Request, q queryOpt
 		return
 	}
 	rec := newRecorder()
+	client := jobText{}
+	if d.alter {
+		client.query = q.Query
+	}
 	if d.alter {
 		// The emulator refuses ALTER VIEW (measured: 400 "Statement not
 		// supported: AlterViewStatement") and answers ALTER TABLE ... SET
@@ -433,15 +442,18 @@ func (f front) ddlWithOptions(w http.ResponseWriter, r *http.Request, q queryOpt
 		}
 		f.next.ServeHTTP(rec, r)
 	} else {
+		if d.sent != "" { // #1409, decimalddl.go
+			if !setQueryText(r, insert, d.sent) {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
+				return
+			}
+			client.query, q.Query = q.Query, d.sent
+		}
 		f.runQuery(rec, r, q, insert)
 	}
 	var job map[string]any
 	if insert && rec.status == http.StatusOK {
 		_ = json.Unmarshal(rec.body.Bytes(), &job)
-	}
-	client := jobText{}
-	if d.alter {
-		client.query = q.Query
 	}
 	if _, failed := queryFailure(rec, job); failed || (d.ifNotExists && existed) {
 		f.clientText(w, rec, client)

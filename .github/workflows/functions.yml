@@ -1,4 +1,8 @@
-# The eleven gated Functions tests, with the ungated TestFunctionsAPI (#1377) (#678; TestFunctionsSubmitBuildBuildpacks since #1268;
+# The twelve gated Functions tests, with the ungated TestFunctionsAPI and
+# TestFunctionsEventTriggers, and the gated halves of TestGcloudFunctions and
+# TestTerraformCloudFunctions2Function (#1377) and TestGcloudFunctionsEventTriggers
+# (#1414) (#678; TestFunctionsSubmitBuildBuildpacks since #1268;
+# TestFunctionsEventTriggerBuilds since #1414;
 # TestFunctionsNodejsBuiltWithBuildpacks and TestFunctionsPythonBuiltWithBuildpacks
 # since #1303; the Java, Ruby, PHP and .NET ones since #1319), on demand:
 # TestFunctionsFrameworkBuiltWithBuildpacks builds testdata/function with the
@@ -36,8 +40,11 @@ jobs:
     # amd64: the Google builder publishes linux/amd64 only, and
     # TestFunctionsFrameworkBuiltWithBuildpacks skips on any other node.
     runs-on: ubuntu-latest
-    # 120: ten tests, eight of which build their fixture twice (#1319).
-    timeout-minutes: 120
+    # 165: ten tests, eight of which build their fixture twice (#1319),
+    # gcloud's and Terraform's builds of testdata/function (#1377), and four
+    # more of it with event triggers, two through the client and two through
+    # gcloud (#1414).
+    timeout-minutes: 165
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -58,6 +65,31 @@ jobs:
         run: |
           curl --retry 5 --retry-all-errors -fsSLo kubectl "https://dl.k8s.io/release/v1.36.4/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/
+
+      # The pinned Google Cloud CLI and Terraform, as ci.yml installs them,
+      # for TestGcloudFunctions and TestTerraformCloudFunctions2Function
+      # (#1377), whose deploys from source are gated as the Functions tests are.
+      - name: Install the Google Cloud CLI
+        run: |
+          curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
+          echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gcloud.tar.gz" -C "$RUNNER_TEMP" && rm "$RUNNER_TEMP/gcloud.tar.gz"
+          # The beta commands (gcloud beta run domain-mappings, #1349) need the
+          # beta component, installed here, at the release pinned above,
+          # rather than offered from dl.google.com mid-test.
+          "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" components install beta --quiet
+          # No update check: it would reach Google from every fresh
+          # configuration the tests create, and the egress guard fails that.
+          printf '[component_manager]\ndisable_update_check = true\n' >> "$RUNNER_TEMP/google-cloud-sdk/properties"
+          echo "$RUNNER_TEMP/google-cloud-sdk/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" version
+
+      # For the Terraform compat tests (#283). The wrapper is off so the test
+      # sees terraform's own exit status and output.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
 
       - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
@@ -101,18 +133,27 @@ jobs:
           if [ ! -s arch.txt ] || grep -vqx amd64 arch.txt; then echo "the cluster's nodes are not all amd64"; exit 1; fi
 
           # The harness variables from scripts/compat-env.sh (#711), the run
-          # shard's list without GCLOUD: no gcloud test is selected, so it is
-          # not installed. --strict: every one set, none a port of 0. An
-          # assignment, not eval "$(...)", so a failure fails the step.
+          # shard's list, GCLOUD the CLI installed above. --strict: every one
+          # set, none a port of 0. An assignment, not eval "$(...)", so a
+          # failure fails the step.
           ./bin/cloudburrow env "${CB[@]}" --format json > env.json
-          COMPAT_ENV=$(scripts/compat-env.sh --strict --only "${TEST_VARS%,GCLOUD}" --env-json env.json \
-            --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
+          # And Service Usage and Resource Manager, which the run shard does
+          # not export: gcloud functions deploy reads both once a deploy
+          # succeeds, and the harness points gcloud at only the services it
+          # names (run 38919482569). This job runs only the Functions tests, so
+          # neither suite runs twice.
+          TEST_VARS+=,SERVICEUSAGE,RESOURCEMANAGER
+          COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS" --env-json env.json \
+            --cli "$PWD/bin/cloudburrow" --gcloud "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" -- "${CB[@]}")
           eval "$COMPAT_ENV"
 
-          TESTS='TestFunctions'
+          # The Functions tests, gcloud's and Terraform's deploys of the
+          # same fixture (#1377), and its event triggers through the client
+          # and gcloud (#1414).
+          TESTS='TestFunctions|^TestGcloudFunctions$|^TestGcloudFunctionsEventTriggers$|^TestTerraformCloudFunctions2Function$'
           set -o pipefail
           rc=0
-          CLOUDBURROW_TEST_FUNCTIONS=1 go test -tags compat -count=1 -timeout 100m -run "$TESTS" -v ./test/compat/ | tee functions.log || rc=1
+          CLOUDBURROW_TEST_FUNCTIONS=1 go test -tags compat -count=1 -timeout 145m -run "$TESTS" -v ./test/compat/ | tee functions.log || rc=1
           # go test exits 0 when a test skips, and each of these skips
           # without the gate, a tool or amd64 nodes, so every selected test
           # must have passed: the acceptance shard's all_passed in ci.yml,

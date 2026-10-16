@@ -106,9 +106,12 @@ func TestGcloudRunDeployCloudSQL(t *testing.T) {
 	conn := runCloudSQLConn(t, h)
 	g := newGcloudSession(t, h)
 	id := "gcloud-cloudsql"
+	// The test project, as the SDK reads it: gcloud's own default is the
+	// instance's project, and services are per project since #1400.
 	region := "--region=us-central1"
-	t.Cleanup(func() { _, _ = g.run(nil, "run", "services", "delete", id, region, "--quiet") })
-	out, err := g.run(nil, "run", "deploy", id, "--image="+postgresImage, region, "--no-allow-unauthenticated",
+	project := "--project=" + h.Project()
+	t.Cleanup(func() { _, _ = g.run(nil, "run", "services", "delete", id, region, project, "--quiet") })
+	out, err := g.run(nil, "run", "deploy", id, "--image="+postgresImage, region, project, "--no-allow-unauthenticated",
 		"--command=sh", "--args=^@^-c@"+cloudSQLServeScript, "--set-env-vars=CONN="+conn,
 		"--add-cloudsql-instances="+conn, "--quiet", "--log-http")
 	if err != nil {
@@ -123,7 +126,7 @@ func TestGcloudRunDeployCloudSQL(t *testing.T) {
 	if !strings.Contains(out, `"run.googleapis.com/cloudsql-instances": "`+conn+`"`) {
 		t.Errorf("gcloud did not send the v1 annotation")
 	}
-	if got := g.must("run", "services", "describe", id, region, cloudSQLAnnotationFormat); strings.TrimSpace(got) != conn {
+	if got := g.must("run", "services", "describe", id, region, project, cloudSQLAnnotationFormat); strings.TrimSpace(got) != conn {
 		t.Errorf("describe shows cloudsql-instances %q; want %q", got, conn)
 	}
 	c := runClient(t, h)
@@ -144,16 +147,16 @@ func TestGcloudRunDeployCloudSQL(t *testing.T) {
 	// form needs arguments with no whitespace, so a plain image.
 	if os.Getenv(EnvConsole) != "" {
 		plain := id + "-console"
-		t.Cleanup(func() { _, _ = g.run(nil, "run", "services", "delete", plain, region, "--quiet") })
-		g.must("run", "deploy", plain, "--image="+helloDigest, region, "--no-allow-unauthenticated",
+		t.Cleanup(func() { _, _ = g.run(nil, "run", "services", "delete", plain, region, project, "--quiet") })
+		g.must("run", "deploy", plain, "--image="+helloDigest, region, project, "--no-allow-unauthenticated",
 			"--add-cloudsql-instances="+conn, "--quiet")
 		if _, values, _ := consoleRunEditForm(t, consoleAddr(t, h), h.Project(), plain); values["cloudSqlInstances"] != conn {
 			t.Errorf("the console's edit form prefills Cloud SQL connections with %q; want %q", values["cloudSqlInstances"], conn)
 		}
 	}
 
-	g.must("run", "services", "update", id, region, "--remove-cloudsql-instances="+conn, "--quiet")
-	if got := g.must("run", "services", "describe", id, region, cloudSQLAnnotationFormat); strings.TrimSpace(got) != "" {
+	g.must("run", "services", "update", id, region, project, "--remove-cloudsql-instances="+conn, "--quiet")
+	if got := g.must("run", "services", "describe", id, region, project, cloudSQLAnnotationFormat); strings.TrimSpace(got) != "" {
 		t.Errorf("after --remove-cloudsql-instances, describe shows %q", got)
 	}
 }

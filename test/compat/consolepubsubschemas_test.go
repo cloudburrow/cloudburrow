@@ -102,16 +102,16 @@ func TestConsolePubSubSchemas(t *testing.T) {
 	name := parent + "/schemas/console-schema"
 	t.Cleanup(func() { _ = sc.DeleteSchema(context.Background(), &pubsubpb.DeleteSchemaRequest{Name: name}) })
 
-	// What the form leaves out, still what the emulator does: Protocol Buffer
-	// schemas are refused, with the message the form's help quotes.
+	// Protocol Buffer schemas, which the emulator refuses, are served by
+	// CloudBurrow's Pub/Sub front (#1406), and the create form offers them.
 	const protobuf = "syntax = \"proto3\";\nmessage Burrow {\n  string name = 1;\n}\n"
-	_, err := sc.ValidateSchema(ctx, &pubsubpb.ValidateSchemaRequest{Parent: parent,
-		Schema: &pubsubpb.Schema{Type: pubsubpb.Schema_PROTOCOL_BUFFER, Definition: protobuf}})
-	wantRefused(t, "ValidateSchema(PROTOCOL_BUFFER)", err, codes.Unimplemented, "Protocol buffer support not implemented in emulator")
+	if _, err := sc.ValidateSchema(ctx, &pubsubpb.ValidateSchemaRequest{Parent: parent,
+		Schema: &pubsubpb.Schema{Type: pubsubpb.Schema_PROTOCOL_BUFFER, Definition: protobuf}}); err != nil {
+		t.Errorf("ValidateSchema(PROTOCOL_BUFFER) = %v, want it served by the front", err)
+	}
 	code, body := consoleDo(t, addr, http.MethodGet, "/api/services", "")
-	if code != http.StatusOK || !strings.Contains(body, `"label":"Create schema"`) ||
-		!strings.Contains(body, "Protocol buffer support not implemented in emulator") {
-		t.Fatalf("the console's services = %d %s; want pubsub-schemas' Create schema saying Protocol Buffer is refused", code, body)
+	if code != http.StatusOK || !strings.Contains(body, `"label":"Create schema"`) || !strings.Contains(body, "PROTOCOL_BUFFER") {
+		t.Fatalf("the console's services = %d %s; want pubsub-schemas' Create schema offering PROTOCOL_BUFFER", code, body)
 	}
 
 	// An invalid definition: ValidateSchema's own refusal, and nothing made.

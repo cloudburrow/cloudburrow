@@ -16,7 +16,6 @@ import (
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // consoleSubscriptionActions reads a subscription's page from the console
@@ -127,8 +126,6 @@ func TestConsolePubSubSnapshotsAndSeek(t *testing.T) {
 	if got, err := ps.SubscriptionAdminClient.GetSnapshot(ctx, &pubsubpb.GetSnapshotRequest{Snapshot: labelled}); err != nil || len(got.GetLabels()) != 0 {
 		t.Errorf("GetSnapshot of a snapshot created with labels = %v (%v); the Create snapshot form says the emulator drops them", got, err)
 	}
-	_, updErr := ps.SubscriptionAdminClient.UpdateSnapshot(ctx, &pubsubpb.UpdateSnapshotRequest{
-		Snapshot: &pubsubpb.Snapshot{Name: labelled, Labels: map[string]string{"env": "dev"}}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"labels"}}})
 	_ = ps.SubscriptionAdminClient.DeleteSnapshot(ctx, &pubsubpb.DeleteSnapshotRequest{Snapshot: labelled})
 
 	acts := consoleSubscriptionActions(t, addr, project, sub)
@@ -167,10 +164,18 @@ func TestConsolePubSubSnapshotsAndSeek(t *testing.T) {
 	if code != http.StatusOK || !strings.Contains(body, `"id":"snapshots"`) || !strings.Contains(body, snap) {
 		t.Errorf("the topic page = %d %s; want a Snapshots section listing %s", code, body, snap)
 	}
-	st, _ := status.FromError(updErr)
+	// Edit snapshot (#1406): the front applies UpdateSnapshot, which the
+	// emulator refuses; the official client reads the labels back.
 	code, body = consoleDo(t, addr, http.MethodGet, "/api/detail/pubsub-snapshots?project="+project+"&name="+url.QueryEscape(snap), "")
-	if updErr == nil || st.Code() != codes.Unimplemented || code != http.StatusOK || !strings.Contains(body, st.Message()) || strings.Contains(body, `"edit"`) {
-		t.Errorf("UpdateSnapshot = %v; the snapshot page (%d) must offer no edit and quote that refusal: %s", updErr, code, body)
+	if code != http.StatusOK || !strings.Contains(body, `"Edit snapshot"`) {
+		t.Errorf("the snapshot page = %d %s; want Edit snapshot", code, body)
+	}
+	editBody, _ := json.Marshal(map[string]any{"Path": []string{snap}, "Values": map[string]string{"labels": `{"env":"dev"}`}})
+	if code, out := consoleDo(t, addr, http.MethodPatch, "/api/resources/pubsub-snapshots?project="+project, string(editBody)); code != http.StatusOK {
+		t.Errorf("console Edit snapshot = %d: %s", code, out)
+	}
+	if got, err := ps.SubscriptionAdminClient.GetSnapshot(ctx, &pubsubpb.GetSnapshotRequest{Snapshot: snap}); err != nil || got.GetLabels()["env"] != "dev" {
+		t.Errorf("after the console's Edit snapshot, GetSnapshot = %v (%v); want env=dev", got, err)
 	}
 
 	// m1 and m2 are acknowledged; the subscription then has nothing.

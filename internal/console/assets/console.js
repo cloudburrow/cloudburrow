@@ -42,6 +42,11 @@ const ROUTES = [
   // Source builds and the repositories `gcloud run deploy --source` creates (#1347).
   { path: "/run/builds", service: "run-builds", title: "Build history", section: "Serverless computing",
     product: "run", productTitle: "Cloud Run" },
+  // Cloud Build's triggers and private worker pools (#1422).
+  { path: "/cloud-build/triggers", service: "cloud-build-triggers", title: "Triggers", section: "CI/CD",
+    product: "cloud-build", productTitle: "Cloud Build" },
+  { path: "/cloud-build/worker-pools", service: "cloud-build-worker-pools", title: "Worker pools", section: "CI/CD",
+    product: "cloud-build", productTitle: "Cloud Build" },
   { path: "/artifact-registry", service: "artifact-registry", title: "Repositories", section: "CI/CD",
     product: "artifact-registry", productTitle: "Artifact Registry" },
   // Cloud Functions v2, served on the Run port (#1377).
@@ -229,6 +234,8 @@ const ICONS = {
   "run-instances": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-worker-pools": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "run-builds": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
+  "cloud-build-triggers": '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
+  "cloud-build-worker-pools": '<rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/>',
   // Cloud Functions: braces around a bolt.
   functions: '<path d="M8 4c-2 0-3 1-3 3v2l-2 3 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2l2 3-2 3v2c0 2-1 3-3 3"/><path d="M13 7l-3 5h4l-3 5"/>',
   // Artifact Registry: stacked boxes.

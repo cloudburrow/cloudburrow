@@ -25,7 +25,13 @@ import (
 const EnvResourceManager = "CLOUDBURROW_TEST_RESOURCEMANAGER"
 
 func rmOptions(h *Harness) []option.ClientOption {
-	return []option.ClientOption{option.WithEndpoint(h.Endpoint(EnvResourceManager)), option.WithoutAuthentication(),
+	return rmOptionsAt(h.Endpoint(EnvResourceManager))
+}
+
+// rmOptionsAt is rmOptions at endpoint, for a test outside the Resource
+// Manager suite that reads it under its own shard's variable.
+func rmOptionsAt(endpoint string) []option.ClientOption {
+	return []option.ClientOption{option.WithEndpoint(endpoint), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))}
 }
 

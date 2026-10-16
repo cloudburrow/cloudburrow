@@ -55,7 +55,8 @@ func TestCloudRunRevisionDialingTheBigQueryServiceGetsTheFront(t *testing.T) {
 }
 
 // TestAPodDialingTheBigQueryServiceGetsTheFrontWithoutCloudRun (#902): on
-// an instance without Cloud Run, which publishes nothing to pods, a one-off
+// an instance without Cloud Run, which publishes only Resource Manager to
+// pods (#1392), a one-off
 // pod that dials bigquery.<namespace>.svc.cluster.local:9050 with the
 // official Go client gets the front's refusals, and none of what they
 // refused is stored: the front serves that port in the emulator's pod, so
@@ -75,9 +76,17 @@ func TestAPodDialingTheBigQueryServiceGetsTheFrontWithoutCloudRun(t *testing.T) 
 	defer cancel()
 	loadEnvProbe(ctx, t)
 	ns := testNamespace()
-	// Nothing is published to pods on this instance: no cloudburrow-host.
-	if _, err := kubectlGetIn(t, ns, "service", "cloudburrow-host"); err == nil {
-		t.Skip("this instance publishes host services to pods (Cloud Run is enabled); the Cloud Run tests cover it")
+	// Without Cloud Run, cloudburrow-host publishes Resource Manager alone,
+	// for the front's folder and organization lookups (#1392); with Cloud
+	// Run it publishes Cloud Run's API too, and the Cloud Run tests cover
+	// that instance.
+	if names, err := exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", ns, "get", "service", "cloudburrow-host",
+		"-o", "jsonpath={.spec.ports[*].name}").Output(); err == nil {
+		for _, name := range strings.Fields(string(names)) {
+			if name != "resourcemanager" {
+				t.Skipf("this instance publishes %s to pods (Cloud Run is enabled); the Cloud Run tests cover it", name)
+			}
+		}
 	}
 
 	bq, err := bigquery.NewClient(ctx, project, option.WithEndpoint(endpoint), option.WithoutAuthentication())

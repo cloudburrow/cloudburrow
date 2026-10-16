@@ -16,9 +16,12 @@ import (
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 	mrpb "google.golang.org/genproto/googleapis/api/monitoredres"
 	ltype "google.golang.org/genproto/googleapis/logging/type"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -52,6 +55,26 @@ func copyBucketObjects(t *testing.T, ctx context.Context, b *storage.BucketHandl
 	}
 }
 
+// copyClients are the Logging client options and the Storage client the copy
+// tests use, under the emulators shard's SINK_ names, beside the sinks that
+// deliver to Cloud Storage (#1404), so the Logging and Storage suites stay
+// in their shards; on a developer's instance the shared names do. Logging
+// is read first: the storage shard exports STORAGE without LOGGING, and a
+// gcloud session there has no logging override (CI run 38910752877).
+func copyClients(t *testing.T, h *Harness) ([]option.ClientOption, *storage.Client) {
+	t.Helper()
+	opts := []option.ClientOption{option.WithEndpoint(runShardEndpoint(h, envSinkLogging, EnvLogging)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials()))}
+	se := runShardEndpoint(h, envSinkStorage, EnvStorage)
+	t.Setenv("STORAGE_EMULATOR_HOST", se)
+	sc, err := storage.NewClient(h.Context(), option.WithoutAuthentication(), option.WithEndpoint(se+"/storage/v1/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	return opts, sc
+}
+
 // covers: google.logging.v2.ConfigServiceV2/CopyLogEntries
 //
 // TestLoggingCopyLogEntries (#1394): through the official ConfigClient,
@@ -69,13 +92,13 @@ func copyBucketObjects(t *testing.T, ctx context.Context, b *storage.BucketHandl
 func TestLoggingCopyLogEntries(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
-	sc := storageClient(t, h)
-	lc, err := vlogging.NewClient(ctx, loggingClientOptions(h)...)
+	opts, sc := copyClients(t, h)
+	lc, err := vlogging.NewClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lc.Close()
-	cc, err := vlogging.NewConfigClient(ctx, loggingClientOptions(h)...)
+	cc, err := vlogging.NewConfigClient(ctx, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +258,7 @@ func TestLoggingCopyLogEntries(t *testing.T) {
 func TestGcloudLoggingCopy(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
-	sc := storageClient(t, h)
+	_, sc := copyClients(t, h)
 	g := newGcloudSession(t, h)
 	project := h.Project()
 	p := "--project=" + project
