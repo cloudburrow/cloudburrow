@@ -48,8 +48,9 @@ the volume.
 ## 3. What you do not get
 
 **Not all of the Memorystore admin API (`redis.googleapis.com`).** Instances are BASIC tier and
-`REDIS_7_2` only: no Standard tier, replicas or failover, no upgrade, export or import, no
-in-transit encryption, no RDB persistence, no maintenance windows and no IAM. Each is 501.
+`REDIS_6_X`, `REDIS_7_0` or `REDIS_7_2`: no Standard tier, replicas or failover, no in-transit encryption,
+no maintenance windows and no IAM. Each is 501. Export and import to and from Cloud Storage RDB
+files, and RDB persistence, are served (#1384) when the instance runs `storage` too.
 
 **No authentication on the server `up` runs.** Protected mode is off and there is no password,
 for the same reason Cloud SQL uses `trust`: nothing in CloudBurrow authenticates a request, and a
@@ -112,7 +113,12 @@ while its server starts), with its AUTH string and its keys. In ephemeral mode n
 its own, so a later persistent run has them back.
 
 The console's Memorystore page lists the instances and has **Create instance**, **Edit** and
-**Delete**, and **Flush** (FLUSHALL) on the instance `up` runs; the API itself has no flush.
-`UpgradeInstance`, `FailoverInstance`, `ImportInstance`, `ExportInstance` and
-`RescheduleMaintenance` are 501. See
+**Delete**, **Export** and **Import** on a created instance's page, and **Flush** (FLUSHALL) on
+the instance `up` runs; the API itself has no flush. `ExportInstance` writes a `BGSAVE` snapshot
+to a `gs://` object; `ImportInstance` replaces the instance's data with an RDB file's, loaded by
+the server itself (`--services memorystore,storage`). `persistence_config` RDB sets the server's
+save point to the snapshot period, in place of the append-only file. `UpgradeInstance` moves an instance to a later version (REDIS_6_X is Redis 6.2, REDIS_7_0 Redis
+7.0, REDIS_7_2 Valkey 8.1) with its data, and **Upgrade** on its page does too (#1386).
+`FailoverInstance` is 501; `RescheduleMaintenance` is FAILED_PRECONDITION, since no maintenance
+is ever scheduled. See
 [compatibility.md](compatibility.md#memorystore-for-redis--googlecloudredisv1).

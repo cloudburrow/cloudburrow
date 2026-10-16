@@ -2,10 +2,12 @@ package redisadmin
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
+	redispb "cloud.google.com/go/redis/apiv1/redispb"
 	rpcstatus "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -85,13 +87,16 @@ func (o *OperationsServer) ListOperations(_ context.Context, req *longrunningpb.
 	if p := strings.Split(parent, "/"); len(p) != 4 || p[0] != "projects" || p[2] != "locations" || p[1] == "" || p[3] == "" {
 		return nil, apierror.InvalidArgument("name %q must be projects/{project}/locations/{location}", parent)
 	}
-	if req.GetFilter() != "" {
-		return nil, apierror.Unimplemented("filtering operations is not supported")
+	match, err := operationFilter(req.GetFilter())
+	if err != nil {
+		return nil, err
 	}
 	var names []string
 	if ops := o.api.Operations(); ops != nil {
 		for _, op := range ops.List(parent + "/operations/") {
-			names = append(names, op.Name)
+			if rendered, err := o.api.operation(op.Name); err == nil && match(rendered) {
+				names = append(names, op.Name)
+			}
 		}
 	}
 	page, next, err := paging.Page("redis-operations:"+parent, names, req.GetPageToken(), int(req.GetPageSize()))
@@ -107,16 +112,88 @@ func (o *OperationsServer) ListOperations(_ context.Context, req *longrunningpb.
 	return resp, nil
 }
 
-// DeleteOperation is UNIMPLEMENTED, as CancelOperation: the operations are
-// kept for as long as CloudBurrow runs.
-func (o *OperationsServer) DeleteOperation(context.Context, *longrunningpb.DeleteOperationRequest) (*emptypb.Empty, error) {
-	return nil, apierror.Unimplemented("deleting an operation is not supported")
+// DeleteOperation forgets an operation (#1386): the work it tracks goes on,
+// and GetOperation is NOT_FOUND after.
+func (o *OperationsServer) DeleteOperation(_ context.Context, req *longrunningpb.DeleteOperationRequest) (*emptypb.Empty, error) {
+	ops := o.api.Operations()
+	if ops == nil || ops.Delete(req.GetName()) != nil {
+		return nil, apierror.NotFound("operation %s not found", req.GetName())
+	}
+	return &emptypb.Empty{}, nil
 }
 
-// CancelOperation is UNIMPLEMENTED: a server being started is not stopped
-// halfway, and saying it was would be false.
-func (o *OperationsServer) CancelOperation(context.Context, *longrunningpb.CancelOperationRequest) (*emptypb.Empty, error) {
-	return nil, apierror.Unimplemented("cancelling an operation is not supported")
+// CancelOperation stops an import or export in progress (#1386): its
+// operation fails CANCELLED, and the instance is READY with its data as
+// the server has it. A done operation is left as it is. Create, update
+// and delete are FAILED_PRECONDITION: a server being started or removed is
+// not stopped halfway, and saying it was would be false.
+func (o *OperationsServer) CancelOperation(_ context.Context, req *longrunningpb.CancelOperationRequest) (*emptypb.Empty, error) {
+	op, err := o.api.operation(req.GetName())
+	if err != nil {
+		return nil, err
+	}
+	if op.GetDone() {
+		return &emptypb.Empty{}, nil
+	}
+	if !o.api.created.cancel(req.GetName()) {
+		return nil, apierror.FailedPrecondition("operation %s cannot be cancelled: only an import or export can", req.GetName())
+	}
+	return &emptypb.Empty{}, nil
+}
+
+// operationFilter is ListOperations' filter (AIP-160), the subset of it
+// that names an operation's own fields: comparisons of done, and of
+// metadata's verb and target, with = or !=, joined by AND. Another field
+// or operator is INVALID_ARGUMENT, not ignored.
+func operationFilter(filter string) (func(*longrunningpb.Operation) bool, error) {
+	type cond struct {
+		field, value string
+		neg          bool
+	}
+	var conds []cond
+	if strings.TrimSpace(filter) != "" {
+		for _, term := range strings.Split(filter, " AND ") {
+			term = strings.TrimSpace(term)
+			op := "="
+			if strings.Contains(term, "!=") {
+				op = "!="
+			}
+			k, v, ok := strings.Cut(term, op)
+			k, v = strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"`)
+			if !ok || k == "" {
+				return nil, apierror.InvalidArgument("filter %q: each term is field = value, joined by AND", filter)
+			}
+			switch k {
+			case "done":
+				if v != "true" && v != "false" {
+					return nil, apierror.InvalidArgument("filter %q: done is true or false", filter)
+				}
+			case "metadata.verb", "metadata.target":
+			default:
+				return nil, apierror.InvalidArgument("filter %q: field %q is not done, metadata.verb or metadata.target", filter, k)
+			}
+			conds = append(conds, cond{field: k, value: v, neg: op == "!="})
+		}
+	}
+	return func(op *longrunningpb.Operation) bool {
+		md := &redispb.OperationMetadata{}
+		_ = op.GetMetadata().UnmarshalTo(md)
+		for _, c := range conds {
+			var got string
+			switch c.field {
+			case "done":
+				got = strconv.FormatBool(op.GetDone())
+			case "metadata.verb":
+				got = md.GetVerb()
+			case "metadata.target":
+				got = md.GetTarget()
+			}
+			if (got == c.value) == c.neg {
+				return false
+			}
+		}
+		return true
+	}, nil
 }
 
 // WaitOperation returns the operation once it is done, or as it is when

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -94,4 +96,108 @@ func (v Valkey) ConfigSet(ctx context.Context, settings map[string]string) error
 		}
 	}
 	return nil
+}
+
+// infoField is field of INFO section, "" when absent.
+func infoField(ctx context.Context, c *redis.Client, section, field string) (string, error) {
+	raw, err := c.Info(ctx, section).Result()
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(raw, "\n") {
+		if k, val, ok := strings.Cut(strings.TrimSpace(line), ":"); ok && k == field {
+			return val, nil
+		}
+	}
+	return "", nil
+}
+
+// savePoll is how often Save and Load read the server's progress.
+var savePoll = 100 * time.Millisecond
+
+// Save snapshots the dataset with BGSAVE (#1384), waits for it to finish,
+// and returns the RDB file's path on the server's file system.
+func (v Valkey) Save(ctx context.Context) (string, error) {
+	c, err := v.client()
+	if err != nil {
+		return "", err
+	}
+	defer c.Close()
+	for {
+		// BGSAVE forks before it answers, so once it has answered the
+		// snapshot is in progress until rdb_bgsave_in_progress is 0.
+		err := c.BgSave(ctx).Err()
+		if err == nil {
+			break
+		}
+		if !strings.Contains(err.Error(), "in progress") {
+			return "", fmt.Errorf("BGSAVE: %w", err)
+		}
+		// Another save or an AOF rewrite is running: wait for it.
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(savePoll):
+		}
+	}
+	for {
+		busy, err := infoField(ctx, c, "persistence", "rdb_bgsave_in_progress")
+		if err != nil {
+			return "", err
+		}
+		if busy == "0" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(savePoll):
+		}
+	}
+	if st, err := infoField(ctx, c, "persistence", "rdb_last_bgsave_status"); err != nil {
+		return "", err
+	} else if st != "ok" {
+		return "", fmt.Errorf("BGSAVE failed: rdb_last_bgsave_status is %s", st)
+	}
+	cfg, err := c.ConfigGet(ctx, "dir").Result()
+	if err != nil {
+		return "", err
+	}
+	file, err := c.ConfigGet(ctx, "dbfilename").Result()
+	if err != nil {
+		return "", err
+	}
+	return path.Join(cfg["dir"], file["dbfilename"]), nil
+}
+
+// Load replaces the dataset with the one of the server at host:port, in
+// the same pod (#1384): the server replicates it, which empties its own
+// data and loads the other's RDB, then stops replicating. An AOF, when the
+// server keeps one, is written again from the loaded data.
+func (v Valkey) Load(ctx context.Context, host string, port int) error {
+	c, err := v.client()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if err := c.Do(ctx, "REPLICAOF", host, strconv.Itoa(port)).Err(); err != nil {
+		return fmt.Errorf("REPLICAOF: %w", err)
+	}
+	defer c.Do(context.WithoutCancel(ctx), "REPLICAOF", "NO", "ONE")
+	for {
+		link, err := infoField(ctx, c, "replication", "master_link_status")
+		if err != nil && !strings.HasPrefix(err.Error(), "LOADING") {
+			return err
+		}
+		syncing, _ := infoField(ctx, c, "replication", "master_sync_in_progress")
+		if err == nil && link == "up" && syncing == "0" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("the server did not load the RDB file: %w", ctx.Err())
+		case <-time.After(savePoll):
+		}
+	}
+	return c.Do(ctx, "REPLICAOF", "NO", "ONE").Err()
 }

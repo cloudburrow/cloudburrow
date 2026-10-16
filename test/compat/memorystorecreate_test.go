@@ -195,11 +195,27 @@ const restartProbeInstance = "restart-probe"
 // of its own with the same AUTH string and the key; "absent" (ephemeral)
 // wants no such instance.
 func TestMemorystoreCreatedAcrossRestart(t *testing.T) {
+	createdAcrossRestart(t, restartProbeInstance, nil)
+}
+
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance
+//
+// TestMemorystoreRDBAcrossRestart (#1384) is TestMemorystoreCreatedAcrossRestart
+// for an instance with RDB persistence (persistence_config RDB, ONE_HOUR),
+// restart-probe-rdb: its server keeps no append-only file, and the key
+// comes back after stop and up in persistent mode from the RDB snapshot
+// the server writes on its volume when it stops.
+func TestMemorystoreRDBAcrossRestart(t *testing.T) {
+	createdAcrossRestart(t, restartProbeInstance+"-rdb",
+		&redispb.PersistenceConfig{PersistenceMode: redispb.PersistenceConfig_RDB, RdbSnapshotPeriod: redispb.PersistenceConfig_ONE_HOUR})
+}
+
+func createdAcrossRestart(t *testing.T, id string, pc *redispb.PersistenceConfig) {
 	h := New(t)
 	c, project := memorystoreAdminClient(t, h)
 	ctx := h.Context()
 	parent := "projects/" + project + "/locations/us-central1"
-	name := parent + "/instances/" + restartProbeInstance
+	name := parent + "/instances/" + id
 	expect := os.Getenv(envMemorystoreExpect)
 	if expect == "absent" {
 		if _, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
@@ -209,8 +225,8 @@ func TestMemorystoreCreatedAcrossRestart(t *testing.T) {
 	}
 	if expect == "" {
 		if _, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); status.Code(err) == codes.NotFound {
-			op, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: restartProbeInstance,
-				Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, AuthEnabled: true}})
+			op, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: id,
+				Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, AuthEnabled: true, PersistenceConfig: pc}})
 			if err != nil {
 				t.Fatalf("CreateInstance: %v", err)
 			}
@@ -248,5 +264,13 @@ func TestMemorystoreCreatedAcrossRestart(t *testing.T) {
 	}
 	if got, err := rc.Get(ctx, "probe").Result(); err != nil || got != "written-before-stop" {
 		t.Fatalf("persistent mode after stop/up: GET = %q, %v; want the key written before stop", got, err)
+	}
+	if pc != nil {
+		if inst.GetPersistenceConfig().GetPersistenceMode() != pc.GetPersistenceMode() {
+			t.Errorf("after stop/up persistence_config = %v", inst.GetPersistenceConfig())
+		}
+		if cfg, err := rc.ConfigGet(ctx, "appendonly").Result(); err != nil || cfg["appendonly"] != "no" {
+			t.Errorf("after stop/up appendonly = %v, %v; want no: the key came from the RDB snapshot", cfg, err)
+		}
 	}
 }

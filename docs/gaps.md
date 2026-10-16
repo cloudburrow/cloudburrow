@@ -30,12 +30,12 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 44 | 20 | 16 | 8 | 0 |
+| BigQuery | 45 | 21 | 16 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
-| Cloud SQL, Memorystore | 6 | 6 | 0 | 0 | 0 |
+| Cloud SQL, Memorystore | 9 | 9 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **87** | **32** | **38** | **12** | **5** |
+| **Total** | **91** | **36** | **38** | **12** | **5** |
 
 ## Cloud Storage
 
@@ -221,6 +221,9 @@ Closed: instance reads, databases, users and operations (#1301), instance writes
 | The rest of the Memorystore admin API: `ListInstances`, `GetInstance` and `GetInstanceAuthString` are served over the one Valkey server (#1302); creating, updating, upgrading, deleting, importing, exporting and failing over an instance are UNIMPLEMENTED, and the gcloud and Terraform endpoint overrides are not exported until a test drives them | not built yet | M |
 | Memorystore for Redis beyond one BASIC Valkey server per instance (#1302): STANDARD_HA (replicas, failover, read replicas), Redis versions other than `REDIS_7_2`, in-transit encryption, RDB persistence and customer-managed keys are UNIMPLEMENTED | not built yet | L |
 | The rest of the Memorystore admin API: `UpgradeInstance`, `ImportInstance`, `ExportInstance`, `FailoverInstance` and `RescheduleMaintenance` are UNIMPLEMENTED; creating, updating and deleting instances, their operations, `gcloud redis` and `google_redis_instance` are served since #1302 | not built yet | M |
+| Memorystore for Redis beyond one BASIC Valkey server per instance (#1302): STANDARD_HA (replicas, failover, read replicas), Redis versions other than `REDIS_6_X`, `REDIS_7_0` and `REDIS_7_2` (#1386), in-transit encryption and customer-managed keys are UNIMPLEMENTED | not built yet | L |
+| The Cloud SQL Admin API beyond instance reads, databases, users and operations (served since #1301): creating or changing instances, IAM database authentication, backups, replicas, the Auth Proxy and connector path (`connectSettings`, `generateEphemeralCert`) (#1330) | not built yet | L |
+| The rest of the Memorystore admin API: `FailoverInstance` is UNIMPLEMENTED; creating, updating and deleting instances, their operations, `gcloud redis` and `google_redis_instance` are served since #1302, `ImportInstance`, `ExportInstance` and RDB persistence since #1384, and Locations, operation filters, `CancelOperation`, `DeleteOperation`, the maintenance policy, `RescheduleMaintenance`, other versions and `UpgradeInstance` since #1386 | not built yet | M |
 
 ## Functions, credentials, tooling
 Closed: Functions in Node.js, Python, Java, Ruby, PHP and .NET, with a dated run (#1303, #1319).

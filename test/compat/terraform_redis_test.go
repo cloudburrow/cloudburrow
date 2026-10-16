@@ -22,7 +22,8 @@ import (
 // terraform`, which sets redis_custom_endpoint to the Memorystore admin
 // API's v1 path. The official Go client reads it back, go-redis reaches it
 // at its host and port with the auth_string the provider read, the second
-// plan is empty, a change of size and labels applies in place, and after
+// plan is empty, a change of size, labels and the RDB persistence_config's
+// snapshot period (#1384) applies in place, and after
 // destroy the instance is gone.
 func TestTerraformRedisInstance(t *testing.T) {
 	h := New(t)
@@ -31,7 +32,7 @@ func TestTerraformRedisInstance(t *testing.T) {
 	ctx := h.Context()
 	id := fmt.Sprintf("tf-%d", time.Now().UnixNano()%1e8)
 	name := "projects/" + m.project + "/locations/us-central1/instances/" + id
-	module := func(size int, env string) string {
+	module := func(size int, env, period string) string {
 		return fmt.Sprintf(`
 resource "google_redis_instance" "cache" {
   project        = %q
@@ -43,26 +44,31 @@ resource "google_redis_instance" "cache" {
   display_name   = "tf cache"
   labels         = { env = %q }
   redis_configs  = { "maxmemory-policy" = "allkeys-lru" }
+  persistence_config {
+    persistence_mode    = "RDB"
+    rdb_snapshot_period = %q
+  }
 }
 output "auth" {
   value     = google_redis_instance.cache.auth_string
   sensitive = true
 }
-`, m.project, id, size, env)
+`, m.project, id, size, env, period)
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
 			_ = op.Wait(h.Context())
 		}
 	})
-	m.write(module(1, "dev"))
+	m.write(module(1, "dev", "TWELVE_HOURS"))
 	m.must("init", "-input=false", "-no-color")
 	m.apply()
 	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
 	if err != nil {
 		t.Fatalf("GetInstance after apply: %v", err)
 	}
-	if inst.GetMemorySizeGb() != 1 || !inst.GetAuthEnabled() || inst.GetLabels()["env"] != "dev" || inst.GetDisplayName() != "tf cache" {
+	if inst.GetMemorySizeGb() != 1 || !inst.GetAuthEnabled() || inst.GetLabels()["env"] != "dev" || inst.GetDisplayName() != "tf cache" ||
+		inst.GetPersistenceConfig().GetRdbSnapshotPeriod() != redispb.PersistenceConfig_TWELVE_HOURS {
 		t.Errorf("after apply, the instance reads back as %v", inst)
 	}
 	auth, err := c.GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: name})
@@ -79,10 +85,11 @@ output "auth" {
 	}
 	m.planClean()
 
-	m.write(module(2, "prod"))
+	m.write(module(2, "prod", "ONE_HOUR"))
 	m.apply()
 	inst, err = c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
-	if err != nil || inst.GetMemorySizeGb() != 2 || inst.GetLabels()["env"] != "prod" {
+	if err != nil || inst.GetMemorySizeGb() != 2 || inst.GetLabels()["env"] != "prod" ||
+		inst.GetPersistenceConfig().GetRdbSnapshotPeriod() != redispb.PersistenceConfig_ONE_HOUR {
 		t.Errorf("after the update, GetInstance = %v, %v", inst, err)
 	}
 	if v, err := rc.Get(ctx, "tf").Result(); err != nil || v != "1" {

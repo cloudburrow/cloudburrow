@@ -333,3 +333,9 @@ func truncate(s string, n int) string {
 func (i *Installer) Kubectl(ctx context.Context, args ...string) (string, error) {
 	return i.kubectl(ctx, "", args...)
 }
+
+// KubectlIn runs kubectl with stdin, which may be binary: a file copied
+// into a pod with exec (#1384).
+func (i *Installer) KubectlIn(ctx context.Context, stdin string, args ...string) (string, error) {
+	return i.kubectl(ctx, stdin, args...)
+}

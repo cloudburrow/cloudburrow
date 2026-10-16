@@ -3,6 +3,8 @@ package redisadmin
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -43,6 +46,79 @@ func (f *fakeProv) Remove(_ context.Context, server string) error {
 type fakeData struct {
 	set    *map[string]string
 	refuse error
+	// io, when set, is the server's data for Save and Load.
+	io *fakeIO
+}
+
+// fakeIO is a server's data and file system, for import and export.
+type fakeIO struct {
+	mu     sync.Mutex
+	data   string            // the dataset, as the RDB file Save writes
+	files  map[string][]byte // the container's files
+	saves  int
+	loaded string // the host:port Load replicated
+	argv   [][]string
+	badRDB bool // check-rdb refuses the file
+}
+
+func (d fakeData) Save(context.Context) (string, error) {
+	d.io.mu.Lock()
+	defer d.io.mu.Unlock()
+	d.io.saves++
+	d.io.files["/data/dump.rdb"] = []byte(d.io.data)
+	return "/data/dump.rdb", nil
+}
+
+func (d fakeData) Load(_ context.Context, host string, port int) error {
+	d.io.mu.Lock()
+	defer d.io.mu.Unlock()
+	d.io.loaded = fmt.Sprintf("%s:%d", host, port)
+	d.io.data = string(d.io.files["/tmp/cloudburrow-import.rdb"])
+	return nil
+}
+
+// Exec plays the programs import and export run in the container.
+func (f *fakeIO) Exec(_ context.Context, _ string, stdin []byte, argv ...string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.argv = append(f.argv, argv)
+	switch {
+	case argv[0] == "cat":
+		return f.files[argv[1]], nil
+	case argv[0] == "sh":
+		f.files[strings.TrimPrefix(argv[2], "cat > ")] = stdin
+	case strings.HasSuffix(argv[0], "-check-rdb") && f.badRDB:
+		return []byte("--- RDB ERROR DETECTED ---\n[offset 0] Wrong signature trying to load DB from file"), errors.New("exit status 1")
+	case strings.HasSuffix(argv[0], "-cli") && argv[len(argv)-1] == "ping":
+		return []byte("PONG\n"), nil
+	}
+	return nil, nil
+}
+
+// fakeObjects is a Cloud Storage.
+type fakeObjects map[string][]byte
+
+func (o fakeObjects) Read(_ context.Context, bucket, object string) ([]byte, error) {
+	b, ok := o[bucket+"/"+object]
+	if !ok {
+		return nil, apierror.NotFound("gs://%s/%s not found", bucket, object)
+	}
+	return b, nil
+}
+
+func (o fakeObjects) Write(_ context.Context, bucket, object string, data []byte) error {
+	o[bucket+"/"+object] = data
+	return nil
+}
+
+// shellProv is a fakeProv whose servers run programs on io.
+type shellProv struct {
+	*fakeProv
+	io *fakeIO
+}
+
+func (p shellProv) Exec(ctx context.Context, server string, stdin []byte, argv ...string) ([]byte, error) {
+	return p.io.Exec(ctx, server, stdin, argv...)
 }
 
 func (d fakeData) Info(context.Context) (ServerInfo, error) { return ServerInfo{Version: "7.2.4"}, nil }
@@ -172,7 +248,10 @@ func TestCreateRefusals(t *testing.T) {
 		{"no tier", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: &redispb.Instance{MemorySizeGb: 1}}, codes.InvalidArgument},
 		{"no size", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.MemorySizeGb = 0 })}, codes.InvalidArgument},
 		{"standard", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.Tier = redispb.Instance_STANDARD_HA })}, codes.Unimplemented},
-		{"version", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.RedisVersion = "REDIS_6_X" })}, codes.Unimplemented},
+		{"version", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.RedisVersion = "REDIS_5_0" })}, codes.Unimplemented},
+		{"persistence period", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
+			i.PersistenceConfig = &redispb.PersistenceConfig{PersistenceMode: redispb.PersistenceConfig_RDB, RdbSnapshotPeriod: 99}
+		})}, codes.InvalidArgument},
 		{"config", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.RedisConfigs = map[string]string{"save": "60 1"} })}, codes.InvalidArgument},
 		{"policy", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.RedisConfigs = map[string]string{"maxmemory-policy": "lots"} })}, codes.InvalidArgument},
 		{"the server up runs", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "memorystore", Instance: basic(nil)}, codes.AlreadyExists},
