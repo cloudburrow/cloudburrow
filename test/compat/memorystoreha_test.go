@@ -31,8 +31,8 @@ func role(ctx context.Context, t *testing.T, rc *redis.Client) string {
 	return ""
 }
 
-// eventually polls f for up to a minute.
-func eventually(t *testing.T, what string, f func() bool) {
+// eventuallyTrue polls f for up to a minute.
+func eventuallyTrue(t *testing.T, what string, f func() bool) {
 	t.Helper()
 	for end := time.Now().Add(time.Minute); ; {
 		if f() {
@@ -101,7 +101,7 @@ func TestMemorystoreStandardTierFailover(t *testing.T) {
 	}
 	reader := redis.NewClient(&redis.Options{Addr: net.JoinHostPort(inst.GetReadEndpoint(), strconv.Itoa(int(inst.GetReadEndpointPort()))), Password: pw})
 	defer reader.Close()
-	eventually(t, "the replica has the key", func() bool { v, err := reader.Get(ctx, "k").Result(); return err == nil && v == "v" })
+	eventuallyTrue(t, "the replica has the key", func() bool { v, err := reader.Get(ctx, "k").Result(); return err == nil && v == "v" })
 	if r := role(ctx, t, reader); r != "slave" {
 		t.Errorf("the read endpoint reaches a %s, want a replica", r)
 	}
@@ -135,7 +135,7 @@ func TestMemorystoreStandardTierFailover(t *testing.T) {
 	if err := next.Set(ctx, "k2", "v2", 0).Err(); err != nil {
 		t.Errorf("SET on the new primary: %v", err)
 	}
-	eventually(t, "a replica of the new primary has its write", func() bool {
+	eventuallyTrue(t, "a replica of the new primary has its write", func() bool {
 		v, err := reader.Get(ctx, "k2").Result()
 		return err == nil && v == "v2"
 	})
@@ -190,7 +190,7 @@ func TestGcloudRedisFailover(t *testing.T) {
 	if err := rc.Set(ctx, "k", "v", 0).Err(); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the replica has the key", func() bool {
+	eventuallyTrue(t, "the replica has the key", func() bool {
 		// WAIT 1: the write reached the replica.
 		n, err := rc.Do(ctx, "WAIT", 1, 1000).Int()
 		return err == nil && n >= 1
