@@ -22,7 +22,8 @@ import (
 // Table.Metadata and INFORMATION_SCHEMA.TABLE_OPTIONS. A query of a table
 // with require_partition_filter and no filter on its partitioning column
 // fails 400 with BigQuery's message, and one with the filter runs; a
-// query of a table with a privacy_policy is 501, the policy not enforced.
+// query of a table with an aggregation threshold privacy_policy and no
+// SELECT WITH AGGREGATION_THRESHOLD is 400 (#1426, bigqueryprivacypolicy_test.go).
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.get
 func TestBigQueryDDLMoreTableOptions(t *testing.T) {
@@ -107,14 +108,14 @@ func TestBigQueryDDLMoreTableOptions(t *testing.T) {
 		t.Errorf("without require_partition_filter: %v", got)
 	}
 
-	// privacy_policy: kept, a query refused.
+	// privacy_policy: kept, a query without the clause refused.
 	run("CREATE TABLE `"+ds.DatasetID+".private` (user STRING, x INT64) OPTIONS (privacy_policy = "+
 		`'{"aggregation_threshold_policy": {"threshold": 3, "privacy_unit_columns": "user"}}')`, false)
 	if got := options("private"); !strings.Contains(got["privacy_policy"], "aggregation_threshold_policy") {
 		t.Errorf("TABLE_OPTIONS privacy_policy: %v", got)
 	}
 	err = bqRun(ctx, c, "SELECT COUNT(*) FROM `"+ds.DatasetID+".private`", false)
-	wantReason(t, "a query of a table with a privacy policy", err, http.StatusNotImplemented, "notImplemented")
+	wantReason(t, "a query of a table with a privacy policy", err, http.StatusBadRequest, "invalidQuery")
 
 	// A bad value: 400.
 	err = bqRun(ctx, c, "CREATE TABLE `"+ds.DatasetID+".bad` (x INT64) OPTIONS (default_rounding_mode = 'UP')", false)

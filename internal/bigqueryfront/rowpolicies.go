@@ -621,6 +621,9 @@ func (f front) viewReadsProtected(r *http.Request, project, dataset, table strin
 // protectedRead returns why a read of dataset.table that the front cannot
 // filter (what: tabledata.list, an extract job, ...) is refused, or "".
 func (f front) protectedRead(r *http.Request, project, dataset, table, what string) string {
+	if why := f.privateRead(r, project, dataset, table, what); why != "" { // #1426, privacypolicy.go
+		return why
+	}
 	if len(f.livePolicies(r, project, dataset, table)) > 0 {
 		return refusePolicies(what)
 	}

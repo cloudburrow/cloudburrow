@@ -324,7 +324,7 @@ func (d *ddlOptions) readOptions(sql string, t []token) string {
 					d.invalid = msg
 				}
 				d.mv.staleness = &o
-			case moreOptionNames[name] && !d.view:
+			case moreOptionNames[name] && (!d.view || name == "privacy_policy"): // a view's: #1426, privacypolicy.go
 				o, msg := readMoreOption(name, val, sql)
 				if msg != "" && d.invalid == "" {
 					d.invalid = msg

@@ -717,7 +717,7 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 		f.insertMV(w, r, dataset, raw)
 		return
 	}
-	if bytes.Contains(raw, []byte(`"requirePartitionFilter"`)) { // #1390, tableoptions.go
+	if bytes.Contains(raw, []byte(`"requirePartitionFilter"`)) || bytes.Contains(raw, []byte(`"privacyPolicy"`)) { // #1390, tableoptions.go; #1426, privacypolicy.go
 		key := table
 		if body.TableReference != nil && key == "" {
 			key = body.TableReference.TableID
