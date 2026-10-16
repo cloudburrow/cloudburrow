@@ -7981,6 +7981,8 @@
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
+          "test/compat/cloudsqlpitrrestore_test.go:31 TestCloudSQLPointInTimeRestoreFromBackupDR",
+          "test/compat/cloudsqlpitrrestore_test.go:67 TestGcloudSQLPointInTimeRestoreRefused",
           "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
@@ -8065,6 +8067,8 @@
         "method": "sql.instances.pointInTimeRestore",
         "status": "Unimplemented",
         "tests": [
+          "test/compat/cloudsqlpitrrestore_test.go:31 TestCloudSQLPointInTimeRestoreFromBackupDR",
+          "test/compat/cloudsqlpitrrestore_test.go:67 TestGcloudSQLPointInTimeRestoreRefused",
           "test/compat/sqladmin_test.go:101 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"

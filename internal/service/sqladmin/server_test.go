@@ -82,7 +82,13 @@ func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
 			}
 			return "x"
 		})
-		req, _ := http.NewRequest(m.HTTPMethod, ts.URL+"/"+path+"?name=x", strings.NewReader("{}"))
+		body := "{}"
+		if m.ID == "sql.instances.pointInTimeRestore" {
+			// It checks its request before refusing a datasource (#1425).
+			body = `{"datasource":"projects/p/locations/us-central1/backupVaults/v/dataSources/d",` +
+				`"targetInstance":"target","pointInTime":"2026-01-01T00:00:00Z"}`
+		}
+		req, _ := http.NewRequest(m.HTTPMethod, ts.URL+"/"+path+"?name=x", strings.NewReader(body))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)

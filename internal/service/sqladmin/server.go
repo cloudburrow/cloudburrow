@@ -280,9 +280,6 @@ func verbWhy(verb string) string {
 	switch verb {
 	case "demoteMaster", "demote", "switchover", "reencrypt":
 		return "external primaries, legacy failover replicas and switchover are not served; read replicas and high availability (availabilityType REGIONAL, instances.failover) are (docs/cloudsql.md)"
-	case "pointInTimeRestore":
-		return "it restores from a Backup and DR Service datasource, which CloudBurrow does not serve; " +
-			"recover to a point in time with instances.clone and cloneContext.pointInTime (docs/cloudsql.md)"
 	case "backups":
 		return "the project-level Backups API is not served; an instance's backups are its backupRuns"
 	}
@@ -298,8 +295,12 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 	if len(p) == 3 && p[0] == "projects" && p[2] == "tiers" && r.Method == http.MethodGet {
 		return "sql.tiers.list", listTiers(), nil
 	}
+	if len(p) == 2 && p[0] == "projects" && strings.HasSuffix(p[1], ":pointInTimeRestore") &&
+		strings.TrimSuffix(p[1], ":pointInTimeRestore") != "" && r.Method == http.MethodPost {
+		return "sql.instances.pointInTimeRestore", nil, s.pointInTimeRestore(r)
+	}
 	if len(p) < 2 || p[0] != "projects" || p[1] == "" || strings.Contains(p[1], ":") || len(p) == 2 {
-		// flags, locations, and projects/{project}:pointInTimeRestore.
+		// flags and locations.
 		return "", nil, unimplemented(r.URL.Path, "only instances, databases, users and operations are served")
 	}
 	project := p[1]

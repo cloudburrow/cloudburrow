@@ -150,7 +150,7 @@ func TestCloudSQLAuthProxyBinary(t *testing.T) {
 	svc := sqlAdminService(t, h)
 	p := h.Project()
 	bh := sqlTransferBucket(t, h, "sqlproxy")
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	// Rows each engine's parallel import wrote, read through the proxy below.

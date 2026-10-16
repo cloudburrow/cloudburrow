@@ -105,7 +105,7 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource), legacy
+What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource, #1433), legacy
 failover replicas (`failoverReplica`, `failoverTarget`), external-primary replicas, `MYSQL_5_7` and versions Cloud SQL no longer lists, the project-level Backups API, BAK and TDE imports and exports, and upgrading a read replica on its own. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
@@ -417,8 +417,14 @@ instance holding the source's databases as they were at that time, to the micros
   was written. The clock only moves forward, and starts again at the real time on `up`.
 - **What is not recovered to a time:** the servers `up` runs (`postgres`, `mysql`) keep no
   log, and a clone to a time of one is 400 saying so; a read replica takes no base.
-  `instances.pointInTimeRestore` is 501: it restores from a Backup and DR Service datasource
-  (`projects/…/backupVaults/…/dataSources/…`), which is not served.
+  `instances.pointInTimeRestore` (#1425) restores an instance managed by the Backup and DR
+  Service from its datasource (`projects/…/locations/…/backupVaults/…/dataSources/…`, gcloud's
+  `sql instances point-in-time-restore DATASOURCE TARGET POINT_IN_TIME`). The Backup and DR
+  Service (`backupdr.googleapis.com`) is not served (#1433), so no instance is managed by it
+  and no datasource exists: the call checks its request as Google does (the datasource's format,
+  `targetInstance`, `pointInTime`, `preferredSecondaryZone` not equal to `preferredZone`, each a
+  400 naming the field) and then answers 501 saying so, creating no target. The same instance
+  recovered to the same time is `instances.clone` with `cloneContext.pointInTime`.
 
 ### High availability (#1408)
 
