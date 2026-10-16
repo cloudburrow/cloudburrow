@@ -140,7 +140,7 @@ IAM conditions are excluded (below). Closed: `RotateSecret`, `EnableManagedRotat
 
 ## Resource Manager
 
-Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296), and regional tag bindings and effective tags through the `{location}-cloudresourcemanager` endpoints (#1350).
+Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296), and regional tag bindings and effective tags through the `{location}-cloudresourcemanager` endpoints (#1350). Closed: project, folder and organization IAM, stored and never enforced (#1368).
 
 | Gap | Why open | Size |
 |---|---|---|
