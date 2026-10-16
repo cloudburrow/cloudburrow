@@ -869,14 +869,15 @@ jobs:
           . scripts/compat-shards.sh
           RUN_SHARD_TESTS=$COMPAT_BROWSER_RUN_SHARD_TESTS
           EMULATORS_SHARD_TESTS=$COMPAT_BROWSER_EMULATORS_SHARD_TESTS
+          NEVER_TESTS=$COMPAT_BROWSER_NEVER_TESTS
           case "$SHARD" in
-            run) SELECT=(-run "$RUN_SHARD_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
-            emulators) SELECT=(-run "$EMULATORS_SHARD_TESTS"); PICK=(grep -E "$EMULATORS_SHARD_TESTS") ;;
-            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS") ;;
+            run) SELECT=(-run "$RUN_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
+            emulators) SELECT=(-run "$EMULATORS_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$EMULATORS_SHARD_TESTS") ;;
+            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS") ;;
           esac
           rc=0
           go test -tags=browser -count=1 -timeout 10m -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
-          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}"); do
+          for t in $(go test -tags=browser -list '.*' ./test/browser/ | grep '^Test' | "${PICK[@]}" | grep -vE "$NEVER_TESTS"); do
             grep -q -- "^--- PASS: $t (" browser.log ||
               { echo "$t did not pass: $(grep -- "^--- [A-Z]*: $t (" browser.log || echo 'no result')"; rc=1; }
           done

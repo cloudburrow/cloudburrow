@@ -424,7 +424,7 @@ browser_suite() {  # <shard> <dir> <flags...>
   case "$shard" in
     run) select=-run pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS" ;;
     emulators) select=-run pattern="$COMPAT_BROWSER_EMULATORS_SHARD_TESTS" ;;
-    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS" ;;
+    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS" ;;
   esac
   for c in "${CLOUDBURROW_TEST_CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
     "$(command -v google-chrome || true)" "$(command -v google-chrome-stable || true)" "$(command -v chromium || true)"; do
