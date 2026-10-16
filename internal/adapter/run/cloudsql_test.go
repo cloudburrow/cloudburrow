@@ -1,6 +1,7 @@
 package run
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -171,5 +172,27 @@ func TestV1JobCloudSQLAnnotation(t *testing.T) {
 	job.Name = "projects/p/locations/us-central1/jobs/j"
 	if got := toV1Job(job).Spec.Template.Metadata.Annotations[v1CloudSQLInstances]; got != "p:us-central1:postgres" {
 		t.Errorf("annotation read back as %q", got)
+	}
+}
+
+// A Cloud SQL volume's Auth Proxy sidecar is never read back as one of the
+// caller's containers: gcloud run services update reads the service and
+// sends its containers back, and a sidecar sent back as a plain container
+// lost /cloudsql and crashed (land/83, TestGcloudRunDeployCloudSQL).
+func TestCloudSQLProxyIsNotReadBackAsAContainer(t *testing.T) {
+	var k ksvc
+	raw := `{"metadata":{"name":"app"},"spec":{"template":{"spec":{"containers":[
+		{"name":"user-container","image":"gcr.io/p/app:v1"},
+		{"name":"` + proxyContainerName("cloudsql") + `","image":"` + CloudSQLProxyImage + `","args":["--unix-socket","/cloudsql"]}]}}}}`
+	if err := json.Unmarshal([]byte(raw), &k); err != nil {
+		t.Fatal(err)
+	}
+	got := FromKnative(k, "projects/p/locations/us-central1").GetTemplate().GetContainers()
+	if len(got) != 1 || got[0].GetImage() != "gcr.io/p/app:v1" {
+		t.Errorf("containers read back = %v; want only the caller's app container", got)
+	}
+	// The same image under a name of the caller's own is the caller's.
+	if !isCloudSQLProxy(proxyContainerName("cloudsql"), CloudSQLProxyImage) || isCloudSQLProxy("mine", CloudSQLProxyImage) {
+		t.Error("isCloudSQLProxy should match only the sidecar's name and image")
 	}
 }

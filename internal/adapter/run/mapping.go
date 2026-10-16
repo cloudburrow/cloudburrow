@@ -487,6 +487,9 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 	built := map[string]string{}
 	readJSONAnnotation(tann, annBuiltImages, &built)
 	for _, c := range k.Spec.Template.Spec.Containers {
+		if isCloudSQLProxy(c.Name, c.Image) {
+			continue // the Cloud SQL volume's sidecar, not a caller's container
+		}
 		image := c.Image
 		if uri, ok := built[image]; ok {
 			image = uri // built locally: read back as the reference deployed

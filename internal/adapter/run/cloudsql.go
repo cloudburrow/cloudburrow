@@ -119,6 +119,16 @@ func proxyContainerName(volume string) string {
 	return n
 }
 
+// isCloudSQLProxy reports whether a rendered container is an Auth Proxy
+// sidecar renderCloudSQLProxies added for a Cloud SQL volume: the pinned
+// image under its sidecar name. The volume reads back as the volume, so the
+// sidecar is never one of the caller's containers; were it read back, a
+// read-modify-write (gcloud run services update) would send it as a plain
+// container without the socket directory, and it would crash.
+func isCloudSQLProxy(name, image string) bool {
+	return image == CloudSQLProxyImage && strings.HasPrefix(name, "cloud-sql-proxy-")
+}
+
 // renderCloudSQLProxies writes one Auth Proxy container per Cloud SQL
 // volume, as list items at the containers indent. native makes each a
 // Kubernetes native sidecar, for a batch Job's initContainers.

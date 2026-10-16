@@ -46,6 +46,7 @@ type ksvc struct {
 				ContainerConcurrency int   `json:"containerConcurrency"`
 				TimeoutSeconds       int64 `json:"timeoutSeconds"`
 				Containers           []struct {
+					Name       string   `json:"name"`
 					Image      string   `json:"image"`
 					WorkingDir string   `json:"workingDir"`
 					Command    []string `json:"command"`

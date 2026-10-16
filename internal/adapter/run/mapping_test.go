@@ -800,6 +800,7 @@ func TestVolumesAndServiceAccountRender(t *testing.T) {
 	var k ksvc
 	k.Spec.Template.Metadata.Annotations = map[string]string{annPodConfig: podConfigAnnotation(s.Template)}
 	k.Spec.Template.Spec.Containers = make([]struct {
+		Name       string   `json:"name"`
 		Image      string   `json:"image"`
 		WorkingDir string   `json:"workingDir"`
 		Command    []string `json:"command"`
