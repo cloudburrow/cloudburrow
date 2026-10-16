@@ -30,7 +30,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 1 | 1 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 38 | 16 | 18 | 4 | 0 |
+| BigQuery | 39 | 17 | 18 | 4 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 6 | 6 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
@@ -172,7 +172,7 @@ Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`),
 | `columnNameCharacterMap` `V1` / `V2` when a detected name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix), names the same once replaced, and a load that is not CSV, are 501 (renaming by replacing characters is built since #1326) (#1336) | not built yet | S |
 | CSV loads: a C-style (`%m/%d/%Y`) date or time format, and `timeZone` or a format with `autodetect` and no schema (SQL-style formats, `timeZone` and the UTF-16 and UTF-32 encodings are built, #1325) (#1338) | not built yet | S |
 | Storage Write API `arrow_rows` (#1327) | not built yet | M |
-| Locations (#1371): no `default_location` (`ALTER PROJECT SET OPTIONS`), so the default is always US; region-qualified dataset views other than `SCHEMATA` give every dataset's rows whatever its location; `SCHEMATA` has no `ddl` or `sync_status`, and in a script is the engine's (location NULL) | not built yet | S |
+| Locations (#1371, #1375): `ALTER ORGANIZATION`, every configuration but `default_location` (`default_time_zone`, the `region-REGION.` ones) and `ALTER PROJECT` inside a script are 501; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows (Google does not say whether BigQuery does); `SCHEMATA` in a script is read as the script starts, so a dataset the script makes is 404 there; its `ddl` leaves out `DEFAULT COLLATE` | not built yet | S |
 | Partition decorators: `$__NULL__` or `$__UNPARTITIONED__` as a destination, `WRITE_TRUNCATE_DATA` into a partition, a schema update through one partition, and `tabledata.insertAll` into a partition are 501 (reads, `tabledata.list`, `tables.get`, `tables.delete` and load, copy and query destinations are built, of an ingestion-time partitioned table too, #1273, #1277) | not built yet | M |
 | `INFORMATION_SCHEMA` `PARTITIONS` and the other dataset views but `VIEWS`, `TABLES`, `COLUMNS`, `COLUMN_FIELD_PATHS`, `TABLE_OPTIONS`, `ROUTINES` and `PARAMETERS` (built, #1274, #1286) are 501; `COLUMNS` has no `async_generation_status` (#1286) (#1328) | not built yet | M |
 | Region-qualified `INFORMATION_SCHEMA.JOBS` (built, #1275) has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (Google does not document their STRUCTs), nor child jobs; the region-qualified forms of the other views are "Table not found" (#1329) | not built yet | M |

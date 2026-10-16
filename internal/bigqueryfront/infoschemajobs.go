@@ -314,12 +314,12 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 			switch {
 			case key == "JOBS":
 				sub, status, msg = f.jobsRows(r)
-			case key == "SCHEMATA": // #1371, location.go: the region's datasets
-				sub, status, msg = f.regionRows(r, meta, key, "", schemataIn(strings.TrimPrefix(strings.ToLower(ref.region), "region-")))
+			case projectViews[key] != nil: // #1375, projectoptions.go
+				sub = projectViews[key](f)
 			case key == "TABLE_STORAGE":
-				sub, status, msg = f.regionRows(r, meta, "TABLE_STORAGE", storageColumns, front.storageRows)
-			default:
-				sub, status, msg = f.regionRows(r, meta, key, "", infoSchemaBuilders[key])
+				sub, status, msg = f.regionRows(r, meta, "TABLE_STORAGE", storageColumns, inRegion(location, front.storageRows))
+			default: // the region's datasets alone (#1375, projectoptions.go)
+				sub, status, msg = f.regionRows(r, meta, key, "", inRegion(location, infoSchemaBuilders[key]))
 			}
 			if status != 0 {
 				reason := map[int]string{http.StatusNotFound: "notFound", http.StatusNotImplemented: "notImplemented"}[status]

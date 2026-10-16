@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -13,8 +15,9 @@ import (
 // location is used" (https://cloud.google.com/bigquery/docs/datasets),
 // which is the project's or organization's default_location configuration
 // and, with none set, the US multi-region
-// (https://cloud.google.com/bigquery/docs/default-configuration). An
-// instance serves no ALTER PROJECT SET OPTIONS, so its default is US.
+// (https://cloud.google.com/bigquery/docs/default-configuration): an
+// instance's is the project's default_location, else US
+// (projectoptions.go, #1375).
 // datasets.get, datasets.list and tables.get then give that location (a
 // table's is its dataset's: "This value is inherited from the dataset").
 //
@@ -43,8 +46,9 @@ import (
 // jobs.query answer gives none, nor do jobs of state saved before #1371)
 // gets the request's location, else US.
 
-// defaultLocation is an instance's default location: BigQuery's when no
-// default_location is configured.
+// defaultLocation is BigQuery's default location, when no
+// default_location is configured; also that of a dataset stored without
+// one, before #1371.
 const defaultLocation = "US"
 
 // withLocation sets content's location to defaultLocation when it has none,
@@ -58,9 +62,9 @@ func withLocation(content map[string]json.RawMessage) bool {
 	return true
 }
 
-// datasetInsertLocation gives r's datasets.insert body the default
-// location when it names none.
-func datasetInsertLocation(r *http.Request) {
+// datasetInsertLocation gives r's datasets.insert body the location loc,
+// the project's default, when it names none.
+func datasetInsertLocation(r *http.Request, loc string) {
 	b, err := readBody(r)
 	if err != nil {
 		return
@@ -68,9 +72,14 @@ func datasetInsertLocation(r *http.Request) {
 	var body map[string]json.RawMessage
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.UseNumber()
-	if dec.Decode(&body) != nil || body == nil || !withLocation(body) {
+	if dec.Decode(&body) != nil || body == nil {
 		return
 	}
+	var have string
+	if v, ok := body["location"]; ok && json.Unmarshal(v, &have) == nil && have != "" {
+		return
+	}
+	body["location"], _ = json.Marshal(loc)
 	if out, err := json.Marshal(body); err == nil {
 		setBody(r, out)
 	}
@@ -181,7 +190,7 @@ func jobDatasets(conf map[string]any, project string, query bool) []string {
 }
 
 // jobLocation is the location of a job that gives none: the first named
-// dataset's that can be read, else the default.
+// dataset's that can be read, else the project's default.
 func (f front) jobLocation(r *http.Request, datasets []string) string {
 	seen := map[string]bool{}
 	for _, ds := range datasets {
@@ -193,7 +202,32 @@ func (f front) jobLocation(r *http.Request, datasets []string) string {
 			return loc
 		}
 	}
-	return defaultLocation
+	return f.settings.defaultLocation(projectOf(f.base))
+}
+
+// regionLocation is the location of the first region-qualified
+// INFORMATION_SCHEMA view a GoogleSQL query reads, or "": BigQuery runs
+// such a query in the region it names when the request gives no location
+// (#1375).
+func regionLocation(text string, legacy bool) string {
+	if legacy || text == "" {
+		return ""
+	}
+	if refs := informationSchemaJobs(text); len(refs) > 0 {
+		return canonLocation(strings.TrimPrefix(strings.ToLower(refs[0].region), "region-"))
+	}
+	return ""
+}
+
+// queryConf returns a query configuration's (or QueryRequest's) text and
+// whether it is legacy SQL (query: a jobs.query, whose default it is).
+func queryConf(q map[string]any, query bool) (string, bool) {
+	text, _ := q["query"].(string)
+	legacy, _ := q["useLegacySql"].(bool)
+	if _, set := q["useLegacySql"]; !set && query {
+		legacy = true
+	}
+	return text, legacy
 }
 
 // requestJobLocation gives r's jobs.insert jobReference (insert) or
@@ -214,7 +248,10 @@ func (f front) requestJobLocation(r *http.Request, insert bool) string {
 				job["jobReference"] = ref
 			}
 			conf, _ := job["configuration"].(map[string]any)
-			loc = f.jobLocation(r, jobDatasets(conf, project, false))
+			qc, _ := conf["query"].(map[string]any)
+			if loc = regionLocation(queryConf(qc, false)); loc == "" {
+				loc = f.jobLocation(r, jobDatasets(conf, project, false))
+			}
 			ref["location"] = loc
 			return true
 		})
@@ -233,7 +270,9 @@ func (f front) requestJobLocation(r *http.Request, insert bool) string {
 	if have, _ := body["location"].(string); have != "" {
 		return have
 	}
-	loc = f.jobLocation(r, jobDatasets(body, project, true))
+	if loc = regionLocation(queryConf(body, true)); loc == "" {
+		loc = f.jobLocation(r, jobDatasets(body, project, true))
+	}
 	body["location"] = loc
 	if out, err := json.Marshal(body); err == nil {
 		setBody(r, out)
@@ -246,7 +285,7 @@ func (f front) requestJobLocation(r *http.Request, insert bool) string {
 // jobReference.location the location loc, else the default.
 func withJobLocations(w http.ResponseWriter, loc string, serve func(http.ResponseWriter)) {
 	if loc == "" {
-		loc = defaultLocation
+		loc = defaultLocation // a request the front could not read
 	}
 	rec := newRecorder()
 	serve(rec)
@@ -286,7 +325,7 @@ func withJobLocations(w http.ResponseWriter, loc string, serve func(http.Respons
 // serveJobLocations wraps the front's handling of a jobs request (jobs.insert,
 // jobs.query, jobs.get, jobs.list, jobs.getQueryResults, jobs.cancel) with
 // its location (above), and reports whether r was one.
-func serveJobLocations(w http.ResponseWriter, r *http.Request, next http.Handler, serve func(http.ResponseWriter)) bool {
+func serveJobLocations(w http.ResponseWriter, r *http.Request, next http.Handler, settings *projectOptions, serve func(http.ResponseWriter)) bool {
 	p := r.URL.EscapedPath()
 	var base string
 	insert, post := false, false
@@ -306,7 +345,7 @@ func serveJobLocations(w http.ResponseWriter, r *http.Request, next http.Handler
 	}
 	loc := r.URL.Query().Get("location")
 	if post && r.Header.Get("Content-Encoding") == "" {
-		if got := (front{next: next, base: base}).requestJobLocation(r, insert); got != "" {
+		if got := (front{next: next, base: base, settings: settings}).requestJobLocation(r, insert); got != "" {
 			loc = got
 		}
 	}
@@ -314,56 +353,120 @@ func serveJobLocations(w http.ResponseWriter, r *http.Request, next http.Handler
 	return true
 }
 
-// INFORMATION_SCHEMA.SCHEMATA (#1371). The engine served it with NULL
-// location, creation_time and last_modified_time (STRINGs); BigQuery
+// INFORMATION_SCHEMA.SCHEMATA (#1371, #1375). The engine served it with
+// NULL location, creation_time and last_modified_time (STRINGs); BigQuery
 // documents a row per dataset with its location
 // (https://cloud.google.com/bigquery/docs/information-schema-datasets-schemata).
 // The front answers it as the other dataset views (infoschema.go): dataset-
 // qualified, that dataset's row, as the engine did; region-qualified, the
-// rows of the project's datasets in that region, but the front's own
-// results dataset (results.go). ddl and sync_status are
-// left out: Google documents no form of ddl the front could be held to,
-// and the front keeps no replica. default_collation_name is the dataset's
+// rows of the project's datasets in that region (inRegion,
+// projectoptions.go), but the front's own results dataset (results.go).
+// In a script too (#1375), read as the script starts: a dataset the
+// script itself makes is not yet there, and fails 404.
+//
+// ddl is the CREATE SCHEMA statement in the documented example's form:
+//
+//	CREATE SCHEMA `myproject.mydataset2`
+//	OPTIONS(
+//	  default_partition_expiration_days=3.0,
+//	  location="us"
+//	);
+//
+// its options sorted by name, those the dataset resource holds:
+// default_partition_expiration_days, default_table_expiration_days,
+// description, friendly_name, labels and location (lower case), each as
+// that example writes them (labels as CREATE SCHEMA's
+// [("key", "value")], UNVERIFIED); DEFAULT COLLATE is left out of it.
+// sync_status is NULL, as BigQuery gives it for a dataset with no replica,
+// and an instance keeps none. default_collation_name is the dataset's
 // defaultCollation, or NULL.
 const schemataColumns = "STRUCT<catalog_name STRING, schema_name STRING, schema_owner STRING, " +
-	"creation_time TIMESTAMP, last_modified_time TIMESTAMP, location STRING, default_collation_name STRING>"
+	"creation_time TIMESTAMP, last_modified_time TIMESTAMP, location STRING, ddl STRING, " +
+	"default_collation_name STRING, sync_status JSON>"
 
 func init() {
-	infoSchemaBuilders["SCHEMATA"] = schemataIn("")
-	engineInfoSchema["SCHEMATA"] = true // in a script, the engine's, as TABLES is
+	infoSchemaBuilders["SCHEMATA"] = front.schemataRows
 	regionViews["SCHEMATA"], regionColumns["SCHEMATA"] = true, schemataColumns
 }
 
-// schemataIn builds a dataset's SCHEMATA row, none for a dataset outside
-// region (a location, any case) unless region is "".
-func schemataIn(region string) func(front, *http.Request, string, *datasetMeta) (string, int, string) {
-	return func(f front, r *http.Request, dataset string, _ *datasetMeta) (string, int, string) {
-		project := projectOf(f.base)
-		if region != "" && dataset == resultsDataset {
-			return rowsSubquery(schemataColumns, nil), 0, "" // the front's own (results.go)
-		}
-		st, got := f.get(r, "/datasets/"+url.PathEscape(dataset))
-		if st == http.StatusNotFound {
-			return "", http.StatusNotFound, "Not found: Dataset " + project + ":" + dataset
-		}
-		var raw map[string]json.RawMessage
-		if st != http.StatusOK || json.Unmarshal(got, &raw) != nil || raw == nil {
-			return "", http.StatusInternalServerError, "cloudburrow: could not read the dataset: " + errorMessage(got, st)
-		}
-		withLocation(raw)
-		b, _ := json.Marshal(raw)
-		var ds map[string]any
-		_ = json.Unmarshal(b, &ds)
-		loc := str(ds, "location")
-		if region != "" && !strings.EqualFold(loc, region) {
-			return rowsSubquery(schemataColumns, nil), 0, ""
-		}
-		collation := "NULL"
-		if c := str(ds, "defaultCollation"); c != "" {
-			collation = sqlString(c)
-		}
-		row := []string{sqlString(project), sqlString(dataset), "NULL", millisTimestamp(ds["creationTime"]),
-			millisTimestamp(ds["lastModifiedTime"]), sqlString(loc), collation}
-		return rowsSubquery(schemataColumns, [][]string{row}), 0, ""
+// schemataRows builds a dataset's SCHEMATA row.
+func (f front) schemataRows(r *http.Request, dataset string, _ *datasetMeta) (string, int, string) {
+	project := projectOf(f.base)
+	st, got := f.get(r, "/datasets/"+url.PathEscape(dataset))
+	if st == http.StatusNotFound {
+		return "", http.StatusNotFound, "Not found: Dataset " + project + ":" + dataset
 	}
+	var raw map[string]json.RawMessage
+	if st != http.StatusOK || json.Unmarshal(got, &raw) != nil || raw == nil {
+		return "", http.StatusInternalServerError, "cloudburrow: could not read the dataset: " + errorMessage(got, st)
+	}
+	withLocation(raw)
+	b, _ := json.Marshal(raw)
+	var ds map[string]any
+	_ = json.Unmarshal(b, &ds)
+	loc := str(ds, "location")
+	collation := "NULL"
+	if c := str(ds, "defaultCollation"); c != "" {
+		collation = sqlString(c)
+	}
+	row := []string{sqlString(project), sqlString(dataset), "NULL", millisTimestamp(ds["creationTime"]),
+		millisTimestamp(ds["lastModifiedTime"]), sqlString(loc), sqlString(schemaDDL(project, dataset, ds)), collation, "NULL"}
+	return rowsSubquery(schemataColumns, [][]string{row}), 0, ""
+}
+
+// schemaDDL is the CREATE SCHEMA statement of dataset ds (above).
+func schemaDDL(project, dataset string, ds map[string]any) string {
+	quote := func(s string) string {
+		return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`).Replace(s) + `"`
+	}
+	days := func(v any) (string, bool) {
+		var ms float64
+		switch x := v.(type) {
+		case string:
+			n, err := strconv.ParseFloat(x, 64)
+			if err != nil {
+				return "", false
+			}
+			ms = n
+		case float64:
+			ms = x
+		default:
+			return "", false
+		}
+		s := strconv.FormatFloat(ms/86400000, 'f', -1, 64)
+		if !strings.ContainsAny(s, ".e") {
+			s += ".0"
+		}
+		return s, true
+	}
+	var opts []string
+	if d, ok := days(ds["defaultPartitionExpirationMs"]); ok {
+		opts = append(opts, "default_partition_expiration_days="+d)
+	}
+	if d, ok := days(ds["defaultTableExpirationMs"]); ok {
+		opts = append(opts, "default_table_expiration_days="+d)
+	}
+	if s := str(ds, "description"); s != "" {
+		opts = append(opts, "description="+quote(s))
+	}
+	if s := str(ds, "friendlyName"); s != "" {
+		opts = append(opts, "friendly_name="+quote(s))
+	}
+	if labels, _ := ds["labels"].(map[string]any); len(labels) > 0 {
+		keys := make([]string, 0, len(labels))
+		for k := range labels {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		pairs := make([]string, len(keys))
+		for i, k := range keys {
+			v, _ := labels[k].(string)
+			pairs[i] = "(" + quote(k) + ", " + quote(v) + ")"
+		}
+		opts = append(opts, "labels=["+strings.Join(pairs, ", ")+"]")
+	}
+	if loc := str(ds, "location"); loc != "" {
+		opts = append(opts, "location="+quote(strings.ToLower(loc)))
+	}
+	return "CREATE SCHEMA `" + project + "." + dataset + "`\nOPTIONS(\n  " + strings.Join(opts, ",\n  ") + "\n);"
 }

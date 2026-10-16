@@ -93,7 +93,8 @@ func TestBigQueryDatasetWithoutLocationIsInTheDefault(t *testing.T) {
 				t.Fatalf("insert=%v %s: %v", insert, from, err)
 			}
 			if got, w := infoSchemaColumns(schema), "catalog_name STRING, schema_name STRING, schema_owner STRING, "+
-				"creation_time TIMESTAMP, last_modified_time TIMESTAMP, location STRING, default_collation_name STRING"; got != w {
+				"creation_time TIMESTAMP, last_modified_time TIMESTAMP, location STRING, ddl STRING, default_collation_name STRING, "+
+				"sync_status JSON"; got != w {
 				t.Errorf("%s columns:\n got %s\nwant %s", from, got, w)
 			}
 			// region-us has the US dataset, not the EU one.
