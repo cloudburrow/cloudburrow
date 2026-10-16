@@ -178,13 +178,13 @@ func (s *Server) ImportInstance(ctx context.Context, req *redispb.ImportInstance
 // load replaces the data of the server at addr with the RDB file data.
 func (c *instances) load(ctx context.Context, sh Shell, server, bin, addr, auth string, data []byte) error {
 	file := importDir + "/" + importFile
-	if _, err := sh.Exec(ctx, server, data, "sh", "-c", "cat > "+file); err != nil {
-		return fmt.Errorf("copy the file to the server: %w", err)
-	}
 	cleanup := context.WithoutCancel(ctx)
 	defer sh.Exec(cleanup, server, nil, "rm", "-f", file)
+	if err := copyWhole(ctx, sh, server, file, data); err != nil {
+		return err
+	}
 	if out, err := sh.Exec(ctx, server, nil, bin+"-check-rdb", file); err != nil {
-		return apierror.InvalidArgument("the file is not an RDB file this instance's server can load: %s", lastLine(out, err))
+		return apierror.InvalidArgument("the file is not an RDB file this instance's server can load: %s", rdbError(out, err))
 	}
 	port := strconv.Itoa(importPort)
 	if out, err := sh.Exec(ctx, server, nil, bin+"-server", "--port", port, "--bind", "127.0.0.1", "--protected-mode", "no",
@@ -205,6 +205,50 @@ func (c *instances) load(ctx context.Context, sh Shell, server, bin, addr, auth 
 		}
 	}
 	return c.dialKey(addr, auth).Load(ctx, "127.0.0.1", importPort)
+}
+
+// copyWhole writes data to file on server and checks its size: a copy
+// through the exec stream's stdin can end short, and a short RDB file reads
+// as a corrupt one (main run 38919188966). A short copy is made once more.
+func copyWhole(ctx context.Context, sh Shell, server, file string, data []byte) error {
+	want := strconv.Itoa(len(data))
+	got := ""
+	for range 2 {
+		if _, err := sh.Exec(ctx, server, data, "sh", "-c", "cat > "+file); err != nil {
+			return fmt.Errorf("copy the file to the server: %w", err)
+		}
+		out, err := sh.Exec(ctx, server, nil, "sh", "-c", "wc -c < "+file)
+		if err != nil {
+			return fmt.Errorf("size the file on the server: %w", err)
+		}
+		if got = strings.TrimSpace(string(out)); got == want {
+			return nil
+		}
+	}
+	return fmt.Errorf("copy the file to the server: %s of its %s bytes arrived", got, want)
+}
+
+// rdbError is what check-rdb found wrong: the lines of its report between
+// "--- RDB ERROR DETECTED ---" and its closing counts, or, without that
+// report, its last line.
+func rdbError(out []byte, err error) string {
+	var found []string
+	in := false
+	for _, l := range strings.Split(string(out), "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case strings.Contains(l, "RDB ERROR DETECTED"):
+			in = true
+		case in && (strings.HasPrefix(l, "[info]") || strings.HasPrefix(l, "[additional info]")):
+			in = false
+		case in && l != "":
+			found = append(found, l)
+		}
+	}
+	if len(found) > 0 {
+		return strings.Join(found, "; ")
+	}
+	return lastLine(out, err)
 }
 
 // lastLine is the last line of a program's output, or its error.
