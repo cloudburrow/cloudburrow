@@ -324,7 +324,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
-				listJobs: listJobs, iam: iam, buffers: buffers}
+				listJobs: listJobs, iam: iam, buffers: buffers, resourceManager: o.resourceManager}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -451,6 +451,10 @@ type front struct {
 	// iam are the tables' and routines' IAM policies (iam.go, #1231),
 	// which OBJECT_PRIVILEGES reads (#1355), or nil.
 	iam *iamPolicies
+	// resourceManager is the instance's Resource Manager, which
+	// JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION read the project's ancestry
+	// from (infoschemahierarchy.go, #1392), or "".
+	resourceManager string
 }
 
 // Option is an option of Wrap.
@@ -478,6 +482,9 @@ type options struct {
 	// not lose (functionstate.go); empty: memory alone. logf logs.
 	stateDir string
 	logf     func(string, ...any)
+	// resourceManager is the instance's Resource Manager
+	// (http://host:port), or "" (infoschemahierarchy.go, #1392).
+	resourceManager string
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at

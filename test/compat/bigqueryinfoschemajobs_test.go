@@ -139,9 +139,11 @@ func TestBigQueryInformationSchemaJobs(t *testing.T) {
 		if !errors.As(err, &e) || e.Code != http.StatusNotFound || !strings.Contains(e.Message, "region-eu") {
 			t.Errorf("insert=%v: another region gave %v, want 404", insert, err)
 		}
+		// Built (#1392, TestBigQueryJobsByFolderAndOrganization): the
+		// project's jobs, or 400 when it is in no organization.
 		_, _, err = read("SELECT * FROM `region-us`.INFORMATION_SCHEMA.JOBS_BY_ORGANIZATION", insert)
-		if !errors.As(err, &e) || e.Code != http.StatusNotImplemented {
-			t.Errorf("insert=%v: JOBS_BY_ORGANIZATION gave %v, want 501", insert, err)
+		if err != nil && (!errors.As(err, &e) || e.Code != http.StatusBadRequest) {
+			t.Errorf("insert=%v: JOBS_BY_ORGANIZATION gave %v, want rows or 400", insert, err)
 		}
 	}
 }

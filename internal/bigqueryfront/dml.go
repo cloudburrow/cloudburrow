@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -163,7 +164,12 @@ func (d dmlCounts) patch(obj map[string]any) {
 // else through serveQuery.
 func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
 	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
-		if refs := informationSchemaJobs(q.Query); len(refs) > 0 { // #1275, infoschemajobs.go
+		refs := informationSchemaJobs(q.Query)
+		if links := unqualifiedSchemataLinks(q.Query, projectOf(f.base)); len(links) > 0 { // #1392, infoschemaprivileges.go
+			refs = append(refs, links...)
+			sort.Slice(refs, func(i, j int) bool { return refs[i].pos < refs[j].pos })
+		}
+		if len(refs) > 0 { // #1275, infoschemajobs.go
 			f.withInformationSchemaJobs(w, r, q, refs, insert)
 			return
 		}

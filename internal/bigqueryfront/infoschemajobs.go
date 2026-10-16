@@ -32,8 +32,8 @@ import (
 // datasets none; BigQuery's default). A region other than the query's
 // location (US when the request names none) is refused 404 "Not found"
 // (wording UNVERIFIED), as BigQuery refuses a view of another region than
-// the job's. JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION are 501: an instance
-// has neither.
+// the job's. JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION:
+// infoschemahierarchy.go (#1392).
 //
 // The region-qualified forms of the dataset views (regionViews, #1329) are
 // the union of every dataset's rows, and region TABLE_STORAGE a row per
@@ -60,7 +60,7 @@ type jobsRef struct {
 
 // jobsViews are the views jobsRef reads; false: refused 501.
 var jobsViews = map[string]bool{"JOBS": true, "JOBS_BY_PROJECT": true, "JOBS_BY_USER": true,
-	"JOBS_BY_FOLDER": false, "JOBS_BY_ORGANIZATION": false}
+	"JOBS_BY_FOLDER": true, "JOBS_BY_ORGANIZATION": true} // the last two: infoschemahierarchy.go (#1392)
 
 // informationSchemaJobs returns sql's references to
 // [project.]`region-x`.INFORMATION_SCHEMA.JOBS[_BY_...].
@@ -308,11 +308,6 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 	subs := map[string]string{}
 	meta := &datasetMeta{}
 	for _, ref := range refs {
-		if _, jobs := jobsViews[ref.view]; jobs && !jobsViews[ref.view] {
-			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: INFORMATION_SCHEMA."+ref.view+
-				": an instance has no folder or organization, so nothing was run.")
-			return
-		}
 		if region := strings.ToLower(strings.TrimPrefix(strings.ToLower(ref.region), "region-")); region != location {
 			writeError(w, http.StatusNotFound, "notFound", fmt.Sprintf("Not found: Dataset %s:%s was not found in location %s",
 				projectOf(f.base), ref.region, strings.ToUpper(location)))
@@ -324,7 +319,7 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		key := ref.view
-		if jobsViews[key] {
+		if jobsViews[key] && !hierarchyJobsViews[key] {
 			key = "JOBS"
 		}
 		sub, ok := subs[key]
@@ -334,13 +329,16 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 			switch {
 			case key == "JOBS":
 				sub, status, msg = f.jobsRows(r, pushedJobsFilter(q.Query, refs, time.Now()))
+			case hierarchyJobsViews[key]: // #1392, infoschemahierarchy.go
+				sub, status, msg = f.hierarchyJobsRows(r, key, pushedJobsFilter(q.Query, refs, time.Now()))
 			case key == "TABLE_STORAGE":
 				sub, status, msg = f.regionRows(r, meta, "TABLE_STORAGE", storageColumns, front.storageRows)
 			default:
 				sub, status, msg = f.regionRows(r, meta, key, "", infoSchemaBuilders[key])
 			}
 			if status != 0 {
-				reason := map[int]string{http.StatusNotFound: "notFound", http.StatusNotImplemented: "notImplemented"}[status]
+				reason := map[int]string{http.StatusNotFound: "notFound", http.StatusNotImplemented: "notImplemented",
+					http.StatusBadRequest: "invalidQuery"}[status]
 				if reason == "" {
 					reason = "internalError"
 				}

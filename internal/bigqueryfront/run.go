@@ -35,6 +35,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		"when it starts: the Storage Write API's streams and the rows they hold (#1115), and the functions it knows of; "+
 		"empty: kept in memory only")
 	storage := fs.String("storage", "", "the instance's Cloud Storage (http://host:port), which a load's gs:// URIs are read from and an extract job's bucket is looked up in")
+	resourceManager := fs.String("resourcemanager", "", "the instance's Resource Manager (http://host:port), which INFORMATION_SCHEMA.JOBS_BY_FOLDER "+
+		"and JOBS_BY_ORGANIZATION read a project's ancestry from (#1392); empty: those views are 501")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -69,7 +71,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	handler := Wrap(results, WithStorage(*storage), func(o *options) {
 		o.restarts, o.ids, o.records, o.stateDir, o.logf = watch, ids, records, *stateDir, logger.Printf
-		o.policies = policies
+		o.policies, o.resourceManager = policies, *resourceManager
 	})
 	// The emulator listens on the pod's loopback alone (#1114), so its
 	// container's readiness is asked of the front.
