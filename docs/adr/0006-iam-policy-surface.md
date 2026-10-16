@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -362,10 +362,22 @@ option (b), no enforcement. Folders and the local organization, which CloudBurro
    Remove principal, and says it is stored, not enforced and inherited by nothing.
 7. Every compatibility.md row for these methods reads ***Stored, not enforced***.
 
-Every service other than these eight (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
+### Artifact Registry repositories (amended by #1304)
+
+`ArtifactRegistry.GetIamPolicy`, `SetIamPolicy` and `TestIamPermissions` on
+`projects/*/locations/*/repositories/*` store a policy as Cloud Run's do, with the same rules:
+nothing enforces it, a stale `etag` is ABORTED, conditions are UNIMPLEMENTED, and
+`TestIamPermissions` grants every permission on a repository that exists. The policy is kept
+beside the repository, saved with it in the registry's state directory, and removed with it, so a
+repository made again under the same name starts with none; a policy change leaves the
+repository alone. Required test: `TestTerraformArtifactRegistryRepositoryIAM`
+(`google_artifact_registry_repository_iam_member`, `_binding` and `_policy`, read back with the
+official `artifactregistry` client).
+
+Every service other than these nine (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
 Storage's buckets and their ACLs, Cloud Run's services and jobs, BigQuery's tables, routines and row
-access policies, Pub/Sub's topics, subscriptions, snapshots and schemas, and Resource Manager's
-projects, folders and organization) keeps its current behaviour; Resource Manager's tag keys and
+access policies, Pub/Sub's topics, subscriptions, snapshots and schemas, Resource Manager's
+projects, folders and organization, and Artifact Registry's repositories) keeps its current behaviour; Resource Manager's tag keys and
 values keep their IAM UNIMPLEMENTED.
 
 ## Consequences

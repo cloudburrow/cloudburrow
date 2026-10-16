@@ -20,7 +20,7 @@ var objectMutable = map[string]string{
 	"storageClass":  "the storage class changes only by rewrite (#495)",
 	"temporaryHold": "kept", "eventBasedHold": "kept", "retention": "kept",
 	"acl": "kept", "contexts": "kept",
-	"kmsKeyName": "customer-managed keys are not implemented", "customerEncryption": "customer-supplied keys are not implemented",
+	"kmsKeyName": "customer-managed keys are not implemented", "customerEncryption": "an object's customer-supplied key changes only by rewrite",
 }
 
 // objectOutput are read-only Object properties; a body may carry them, and
@@ -152,6 +152,13 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 		if restated {
 			delete(body, "storageClass")
 		}
+		// So may the object's customer-supplied key (csek.go), as Terraform
+		// does for a google_storage_bucket_object with customer_encryption
+		// (#1304); only a different key or algorithm is refused.
+		csek, csekStated := body["customerEncryption"]
+		if csekStated {
+			delete(body, "customerEncryption")
+		}
 		if err := checkObjectBody(body); err != nil {
 			writeError(w, err)
 			return
@@ -178,6 +185,10 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 			if restated && class != "" && !strings.EqualFold(class, o.StorageClass) {
 				return badRequest("The object field %q cannot be changed here (%s); it is refused rather than dropped",
 					"storageClass", objectMutable["storageClass"])
+			}
+			if csekStated && !empty(csek) && !sameCSEK(csek, o) {
+				return badRequest("The object field %q cannot be changed here (%s); it is refused rather than dropped",
+					"customerEncryption", objectMutable["customerEncryption"])
 			}
 			before := o
 			now := s.now()
