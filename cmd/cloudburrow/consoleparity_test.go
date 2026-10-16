@@ -181,8 +181,8 @@ var parityRows = []parityRow{
 		Provider: "run-builds", Offers: "Build history page (/run/builds): every build, newest first, with its status, location, image, digest and Cloud Storage source; a build's page with each step's status, args and duration and the build log; Run build (a Dockerfile source in Cloud Storage built and its image pushed, as gcloud builds submit --tag) and Cancel on a running build's page; a build also runs from Deploy from source, as SubmitBuild, under the default build service account (#1347)",
 		Tests: []string{"TestConsoleSourceDeployScreens", "TestConsoleRunBuildAndCancel"}},
 	{Resource: "Artifact Registry repositories", Service: "artifactregistry",
-		Methods:  []string{"ArtifactRegistry/CreateRepository", "ArtifactRegistry/GetRepository", "ArtifactRegistry/ListRepositories"},
-		Provider: "artifact-registry", Offers: "Repositories page (/artifact-registry): each repository's format, location, URL, description and age; a repository is created by gcloud run deploy --source from the console's terminal (#1347)",
+		Methods:  []string{"ArtifactRegistry/CreateRepository", "ArtifactRegistry/GetRepository", "ArtifactRegistry/ListRepositories", "ArtifactRegistry/DeleteRepository", "ArtifactRegistry/UpdateRepository"},
+		Provider: "artifact-registry", Offers: "Repositories page (/artifact-registry): each repository's format, location, URL, description and age, and Delete (#1304); a repository is created by gcloud run deploy --source, and its description and labels changed by gcloud artifacts repositories update, from the console's terminal (#1347)",
 		Tests: []string{"TestConsoleSourceDeployScreens"}},
 
 	// Cloud KMS
