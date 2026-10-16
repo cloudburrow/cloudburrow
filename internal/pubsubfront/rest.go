@@ -92,8 +92,17 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		f.serveRESTIAM(w, r, name, verb)
 		return
 	}
+	if parent, name, verb, ok := schemaPath(r.URL.Path); ok && f.serveRESTSchema(w, r, parent, name, verb) {
+		// A Protocol Buffer schema is the front's (protobufschemas.go).
+		return
+	}
 	if name, verb, ok := topicPath(r.URL.Path); ok {
 		f.serveTopic(w, r, name, verb, next)
+		return
+	}
+	if f.restListSubscriptions(w, r) || f.restListSnapshots(w, r) {
+		// A project with a detached subscription or an updated snapshot
+		// (#1406).
 		return
 	}
 	collection, name, verb, ok := restPath(r.URL.Path)
@@ -102,6 +111,13 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		return
 	}
 	if collection == "snapshots" {
+		if f.serveRESTSnapshot(w, r, name, verb) {
+			return
+		}
+		if verb == "" && (r.Method == http.MethodDelete || r.Method == http.MethodPut) {
+			// Deleted or made again: what updates set goes.
+			w = &statusWriter{ResponseWriter: w, onOK: func() { f.forget(name) }}
+		}
 		// Creating a snapshot names its subscription in the body.
 		if r.Method == http.MethodPut && verb == "" {
 			body, err := readBody(r)
@@ -115,6 +131,9 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 			}
 		}
 		next.ServeHTTP(w, r)
+		return
+	}
+	if f.serveRESTDetached(w, r, name, verb) {
 		return
 	}
 	switch {

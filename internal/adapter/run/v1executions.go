@@ -175,9 +175,11 @@ func fromV1Overrides(in *runv1.Overrides) (*runpb.RunJobRequest_Overrides, error
 	if in == nil {
 		return nil, nil
 	}
-	if in.DelayExecution {
-		return nil, apierror.Unimplemented("unsupported Cloud Run v1 configuration: overrides.delayExecution: not mapped")
-	}
+	// delayExecution lets Cloud Run start the execution "within the next
+	// 12 hours depending on available capacity" (the v1 discovery
+	// document). Locally capacity is never waited for, so the execution
+	// starts at once, which keeps that promise (#1420). It is not read
+	// back: the v2 Execution this adapter stores has no field for it.
 	var gaps []string
 	gap := func(b bool, field string) {
 		if b {
@@ -303,7 +305,7 @@ func (s *Server) v1ListExecutions(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	execs, err := s.v1Executions(r.Context(), parent, sel[v1JobLabel])
+	execs, err := s.v1Executions(r.Context(), parent, sel.only(v1JobLabel))
 	if err != nil {
 		v1Write(w, err, nil)
 		return
@@ -312,7 +314,7 @@ func (s *Server) v1ListExecutions(w http.ResponseWriter, r *http.Request) {
 	var names []string
 	for i, e := range execs {
 		v := toV1Execution(e)
-		if selected(v.Metadata.Labels, sel) {
+		if selected(v.Metadata, sel) {
 			// Paging sorts its keys, so the key keeps the order.
 			key := strconv.Itoa(100000000+i) + "/" + v.Metadata.Name
 			byName[key] = v
@@ -385,7 +387,7 @@ func (s *Server) v1ListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var execs []string
-	if id := sel[v1ExecutionLabel]; id != "" {
+	if id := sel.only(v1ExecutionLabel); id != "" {
 		name, err := s.v1ExecutionByID(r.Context(), parent, id)
 		if err != nil && apierror.From(err).Code != codes.NotFound {
 			v1Write(w, err, nil)
@@ -395,7 +397,7 @@ func (s *Server) v1ListTasks(w http.ResponseWriter, r *http.Request) {
 			execs = append(execs, name)
 		}
 	} else {
-		all, err := s.v1Executions(r.Context(), parent, sel[v1JobLabel])
+		all, err := s.v1Executions(r.Context(), parent, sel.only(v1JobLabel))
 		if err != nil {
 			v1Write(w, err, nil)
 			return
@@ -419,7 +421,7 @@ func (s *Server) v1ListTasks(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, t := range resp.GetTasks() {
 				v := toV1Task(t)
-				if selected(v.Metadata.Labels, sel) {
+				if selected(v.Metadata, sel) {
 					key := strconv.Itoa(100000000+i) + "/" + strconv.Itoa(100000000+int(t.GetIndex()))
 					byName[key] = v
 					names = append(names, key)

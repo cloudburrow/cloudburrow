@@ -23,7 +23,7 @@ const (
 	cancelCopyAction  = "cancel-copy"
 	copyNote          = "Copies the bucket's entries a filter matches, stored when the copy starts, to a Cloud Storage bucket " +
 		"on this instance, as LOG_ID/YYYY/MM/DD/HH:00:00_HH:59:59_S0.json objects of LogEntry JSON, one per line (#1394). " +
-		"Only _Default holds entries here."
+		"_Default holds the project's own entries; any bucket also holds what sinks route to it."
 )
 
 // copyActions offers Copy log entries on an active bucket when the instance

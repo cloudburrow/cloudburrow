@@ -1608,3 +1608,7 @@ tr.is-inspected { background: var(--nav-selected); }
 /* Embeddings (#1305): a whole vector, wrapped rather than one long line. */
 .emb-vector pre, #emb-request pre { white-space: pre-wrap; word-break: break-all;
   font-size: var(--text-caption-size); max-height: 16rem; overflow: auto; }
+
+/* The Logs Explorer's log view pickers (#1410), shown in the view scope. */
+.log-view-controls { display: contents; }
+.log-view-controls[hidden], #log-view-note[hidden] { display: none; }

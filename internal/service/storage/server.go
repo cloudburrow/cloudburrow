@@ -210,7 +210,12 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	if s.serveCORS(w, r) {
 		return
 	}
+	if s.cloudBuildLogsGuard(w, r) {
+		return
+	}
 	switch {
+	case path == CloudBuildLogsPath:
+		s.serveCloudBuildLog(w, r)
 	case strings.HasPrefix(path, controlPrefix):
 		// No bucket is named "v2" (bucket names are 3 to 63 characters), so
 		// the Storage Control API's paths take nothing from the XML API.

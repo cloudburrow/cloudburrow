@@ -104,6 +104,10 @@ type Backend struct {
 	// and the backend's own container listens on Front.UpstreamPort, which
 	// the Service does not publish (#873).
 	Front *Front
+	// Selects, when set, is the app label the Service selects in place of
+	// Name: a Cloud SQL high-availability instance's Service selects its
+	// primary's server, which a failover changes (#1408).
+	Selects string
 }
 
 // Front is a container that stands in front of a backend in its pod.
@@ -546,7 +550,7 @@ spec:
     - name: api
       port: %d
       targetPort: %d
-`, b.Name, namespace, b.Name, b.Port, b.Port)
+`, b.Name, namespace, b.selects(), b.Port, b.Port)
 	for _, p := range b.ExtraPorts {
 		fmt.Fprintf(&sb, "    - name: %s\n      port: %d\n      targetPort: %d\n", p.Name, p.Port, p.Port)
 	}
@@ -585,4 +589,11 @@ func quoteList(items []string) string {
 		q[i] = fmt.Sprintf("%q", s)
 	}
 	return strings.Join(q, ", ")
+}
+
+func (b Backend) selects() string {
+	if b.Selects != "" {
+		return b.Selects
+	}
+	return b.Name
 }

@@ -12,9 +12,9 @@ Do not edit these files by hand.
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
 | [Cloud Run v2](run.md) | 41 | 41 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Artifact Registry](artifactregistry.md) | 50 | 20 | 0 | 30 | 0 | 0 | 0 | 0 |
-| [Cloud Build](cloudbuild.md) | 19 | 6 | 0 | 13 | 0 | 0 | 0 | 0 |
+| [Cloud Build](cloudbuild.md) | 19 | 18 | 0 | 1 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud Run v1 (Knative API)](runv1.md) | 76 | 35 | 0 | 0 | 0 | 0 | 41 | 0 |
+| [Cloud Run v1 (Knative API)](runv1.md) | 76 | 38 | 0 | 0 | 0 | 0 | 38 | 0 |
 | [Cloud KMS](kms.md) | 40 | 38 | 0 | 2 | 0 | 0 | 0 | 82 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 46 | 0 | 6 | 0 | 0 | 0 | 0 |
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 26 | 12 | 0 | 0 | 0 | 0 | 0 |
@@ -22,7 +22,7 @@ Do not edit these files by hand.
 | [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 14 | 10 | 0 | 4 | 0 | 0 | 0 | 0 |
 | [Memorystore for Redis](memorystore.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 2 |
-| [Pub/Sub](pubsub.md) | 47 | 45 | 2 | 0 | 0 | 0 | 0 | 4 |
+| [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 68 | 0 | 19 | 0 | 0 | 0 | 14 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 24 | 22 | 0 | 0 | 2 | 0 | 0 | 0 |
 | [Firestore](firestore.md) | 17 | 16 | 1 | 0 | 0 | 0 | 0 | 0 |
@@ -31,7 +31,7 @@ Do not edit these files by hand.
 | [Bigtable](bigtable.md) | 84 | 36 | 48 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 33 | 32 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 46 | 1 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 46 | 0 | 34 | 0 | 0 | 0 | 0 |
+| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 47 | 0 | 33 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 7 | 0 | 3 | 0 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat

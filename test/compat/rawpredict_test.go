@@ -26,7 +26,7 @@ import (
 func TestRawPredictOnTheEmbeddingModel(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	name := "projects/" + h.Project() + "/locations/us-central1/publishers/google/models/" + embeddingModel
 
@@ -70,7 +70,7 @@ func TestRawPredictOnTheEmbeddingModel(t *testing.T) {
 func TestRawPredictOnTheGenerationModel(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvLocalAI)
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	name := "projects/" + h.Project() + "/locations/us-central1/publishers/google/models/" + localModel
 	raw := func(model, body string) (*httpbody.HttpBody, error) {

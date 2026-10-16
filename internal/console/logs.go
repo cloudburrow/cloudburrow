@@ -408,6 +408,10 @@ func filterFrom(r *http.Request) Filter {
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if view := r.URL.Query().Get("view"); view != "" {
+		s.handleViewLogs(w, r, view)
+		return
+	}
 	entries := s.logs.Entries(filterFrom(r))
 	if entries == nil {
 		entries = []Entry{}
@@ -572,6 +576,16 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	// calls from it, everything else reads log entries.
 	if r.URL.Query().Get("stream") == "requests" {
 		s.streamRequests(w, r, flusher)
+		return
+	}
+
+	if view := r.URL.Query().Get("view"); view != "" {
+		if s.logViews == nil {
+			fmt.Fprintf(w, "event: failure\ndata: %s\n\n", mustJSON(map[string]string{"error": "Cloud Logging is not enabled on this instance"}))
+			flusher.Flush()
+			return
+		}
+		s.streamView(w, r, flusher, view)
 		return
 	}
 

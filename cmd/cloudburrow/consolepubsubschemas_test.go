@@ -127,8 +127,8 @@ func TestTheSchemasScreenCreatesCommitsRollsBackAndDeletes(t *testing.T) {
 		t.Fatalf("pubsub-schemas is not advertised with detail, delete and Create schema: %+v", services)
 	}
 	label, fields := pubsubSchemasProvider{}.CreateForm()
-	if label != "Create schema" || len(fields) != 2 || !strings.Contains(fields[1].Help, pubsubProtobufRefusal) {
-		t.Errorf("the create form = %q %+v; want an ID and a definition, saying Protocol Buffer is refused", label, fields)
+	if label != "Create schema" || len(fields) != 3 || fields[2].Name != "type" || len(fields[2].Options) != 2 {
+		t.Errorf("the create form = %q %+v; want an ID, a definition and a type, AVRO or PROTOCOL_BUFFER", label, fields)
 	}
 
 	if code, out := consolePost(t, srv.URL+"/api/resources/pubsub-schemas?project="+project,

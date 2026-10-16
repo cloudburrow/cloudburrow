@@ -80,7 +80,7 @@ func genaiClientAt(t *testing.T, h *Harness, envVar string) *genai.Client {
 func TestGenerateContentThroughTheOfficialSDK(t *testing.T) {
 	h := New(t)
 	cl := genaiClient(t, h)
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	resp, err := cl.Models.GenerateContent(ctx, localModel,
@@ -117,7 +117,7 @@ func TestGenerateContentThroughTheOfficialSDK(t *testing.T) {
 func TestStreamGenerateContentThroughTheOfficialSDK(t *testing.T) {
 	h := New(t)
 	cl := genaiClient(t, h)
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	var events int
@@ -188,7 +188,7 @@ func TestGenerationNeverUsesApplicationDefaultCredentials(t *testing.T) {
 		t.Fatalf("genai.NewClient: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	if _, err := cl.Models.GenerateContent(ctx, localModel, genai.Text("hello"), nil); err != nil {
 		t.Fatalf("GenerateContent: %v", err)

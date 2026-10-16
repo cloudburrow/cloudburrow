@@ -94,11 +94,29 @@ So do a step's `id`, `waitFor` and `timeout`, and the build's `timeout` (default
 Status goes `QUEUED`, `WORKING`, then `SUCCESS`, `FAILURE`, `TIMEOUT` or `CANCELLED`, with each
 step's status and timing; the operation answers with the Build, or fails (`UNKNOWN`, `CANCELLED`,
 `DEADLINE_EXCEEDED`). The log is written as Google writes it, `log-{build id}.txt` in
-`logsBucket`, or in the default `{project number}.cloudbuild-logs.googleusercontent.com` bucket,
-made in the instance's Cloud Storage on the first log; `options.logging` `NONE` or
-`CLOUD_LOGGING_ONLY` writes none. `gcloud builds submit` without `--async` tails that log from
-`storage.googleapis.com` directly, ignoring the `storage` endpoint override, so use `--async` and
-`gcloud builds describe`, or `gsutil cat` the log.
+`logsBucket`; `options.logging` `NONE` or `CLOUD_LOGGING_ONLY` writes none.
+
+**The default logs bucket (#1430).** A build without `logsBucket` reports Google's default,
+`gs://{project number}.cloudbuild-logs.googleusercontent.com`, and its log is written there, as
+on Google. Google owns that bucket, in a project of its own, and the instance's Cloud Storage
+treats it the same way: Cloud Build makes it on the first log, through a path of the storage
+server's own (`/_cloudburrow/cloudbuild-logs`) that skips the bucket-name check, since no user
+may create a name containing `google` (or a domain name they cannot verify). Through the APIs
+(JSON, XML, gRPC) it is read-only: `buckets.get`, `objects.list`, `objects.get` and downloads
+are served, so the official client, `gcloud storage cat` and `gsutil cat` read the log, and any
+write, delete, patch or copy into it is 403 Forbidden. It is not in the project's `buckets.list`,
+nor on the console's Cloud Storage page. A log that cannot be written (a `logsBucket` that does
+not exist, or Cloud Storage not running) is not dropped: Google documents no build field for it,
+so it goes to the instance log (`Cloud Build could not write the build log`) once per build, and
+the console's build page shows it as **Log write error**.
+
+**`gcloud builds submit` without `--async`**, and `gcloud builds log`, read the log from
+`https://storage.{core/universe_domain}/BUCKET/OBJECT` themselves, which no
+`api_endpoint_overrides` property changes (gcloud's `GCSLogTailer`). `--suppress-logs` does not
+help: it only stops printing, and the log is still polled from Google. So use `--async`, wait
+with `gcloud builds describe`, and read the log with `gcloud storage cat
+gs://BUCKET/log-ID.txt`, which honours the `storage` override `gcloud-setup` writes
+(`TestGcloudBuildsSubmitDefaultLogsBucket`), or the console's build page.
 
 **`ListBuilds` (#1382)** takes the `filter` "Filtering build results" documents: `status`,
 `build_id`, `trigger_id`, `tags`, `images`, `results.images.name`, `results.images.digest`,
@@ -119,13 +137,60 @@ build that SubmitBuild ran, for `gcloud run deploy --source` or a function, is r
 `FAILED_PRECONDITION`, naming why: its request was Cloud Run's, so there is no Cloud Build request
 to rerun. Deploy again to rebuild it.
 
-**Refused, with the reason** (`UNIMPLEMENTED`): a step's `secretEnv` (Secret Manager, which
-Cloud Build reads on Google), `script`, `allowFailure` and `allowExitCodes`; `env` and `volumes`
-on a docker build, docker push or pack step (the local builder runs those, not the step's
-container); the build's `secrets`, `availableSecrets`, `artifacts`, `serviceAccount`, worker
-pools, machine types and other `options`; and sources other than `storageSource`. Triggers,
+**Secrets, scripts and failures a build allows (#1407)**, on the arbitrary steps
+`--cloudbuild-host-steps` runs:
+- `availableSecrets.secretManager` (`versionName`, substitutions applied, and `env`) is read
+  from this instance's Secret Manager when the build runs; `availableSecrets.inline` and the
+  legacy `secrets` (`kmsKeyName` with `envMap` or `secretEnv`) are decrypted with this instance's
+  Cloud KMS. A step's `secretEnv`, and `options.secretEnv` for every arbitrary step, names which
+  of them the step gets as variables; refer to one in `args` as `$$NAME`, with a shell
+  `entrypoint`, as Google documents. A name nothing defines, a duplicate, or a malformed
+  `versionName` or `kmsKeyName` is `INVALID_ARGUMENT`; a secret the build names on an instance
+  without Secret Manager (or Cloud KMS) is `FAILED_PRECONDITION`, naming the service to enable;
+  one that cannot be read fails the build before its steps run, naming the version.
+- Cloud Build does not mask secrets in build logs: Google's documentation says nothing of it, so
+  a step that prints a secret shows it in the log, on Google and here (the logs bucket's
+  `log-{id}.txt` and the console's log view). Matching Google here is the user's decision
+  (2026-10-16); keep secrets out of a step's output. A step's secrets are
+  passed to `docker` through its environment as `-e NAME`, so no value is on a command line; they
+  are in the step container's environment while it runs, as on Google's worker.
+- A step's `script` is written to `/builder/script`, executable, and run by its `#!` line's
+  interpreter, else by `/bin/sh`, as Google documents. Substitutions are not applied inside a
+  script; `automapSubstitutions` (the step's, `true` or `false`, wins over `options`') gives them
+  as variables. `script` with `args` or `entrypoint` is `INVALID_ARGUMENT`.
+- `allowFailure`, and `allowExitCodes` (codes 0 to 255, which take precedence), leave a failed
+  step `FAILURE` with its `exitCode` while the build goes on, and the build is `SUCCESS` if
+  nothing else fails; steps waiting for it start. A step that times out still fails the build.
+- `options.env` is given to every arbitrary step, a step's own `env` overriding it.
+
+**Refused, with the reason** (`UNIMPLEMENTED`): `env`, `volumes` and `secretEnv` on a docker
+build, docker push or pack step (the local builder runs those, not the step's container: run
+`docker` from a step with `entrypoint: bash` to give it a secret); the build's `artifacts`,
+`serviceAccount`, worker pools, machine types, `options.dynamicSubstitutions` and other
+`options`; and sources other than `storageSource`. Triggers,
 worker pools and `ApproveBuild` are not served. The console's Build history takes the same
 filter in its filter box, and offers Retry on a finished build's page.
+
+**Build triggers and private worker pools (#1422).** A trigger is a stored build. A manual
+trigger (`RunBuildTrigger`, `gcloud builds triggers run`) and a webhook trigger
+(`webhookConfig.secret`, `POST …/triggers/{trigger}:webhook?secret=…`) run their inline `build`
+as `CreateBuild` does, with the trigger's substitutions, the run's `source.substitutions` over
+them, `$TRIGGER_NAME` and `buildTriggerId`. A webhook's `secret` must equal the Secret Manager
+version the trigger names (403 otherwise), and `$(body.field)` bindings take the payload's
+values. Make one with `gcloud builds triggers create manual --inline-config=build.yaml` or
+`create webhook --secret=projects/P/secrets/S/versions/1 --inline-config=build.yaml`, Terraform's
+`google_cloudbuild_trigger` with a `build` block, or the console's Cloud Build Triggers page.
+
+What needs a live service is refused with the reason: GitHub, GitLab, Bitbucket and Cloud
+Source Repositories events, a build read from a repository (`filename`, `gitFileSource`,
+`sourceToBuild`), since Google clones those from a hosted git service and not from a path on
+your machine, and `pubsubConfig`, whose subscription Google owns. To build on a Pub/Sub message,
+point a push subscription at the webhook URL.
+
+A worker pool (`gcloud builds worker-pools create`, `google_cloudbuild_worker_pool`, the console's
+Worker pools page) is stored with its long-running operations. A build that names it in
+`options.pool.name` runs on the host's Docker like any other, with the pool recorded on the build.
+Its machine type, disk and network are stored and not acted on.
 
 ## Artifact Registry's Docker registry (#1383)
 
@@ -234,9 +299,16 @@ any image is pulled, with `build failed: no runtime detected` naming the files l
 `build failed: exit status 1 (runtime nodejs, detected from package.json)`, followed by the
 tail of pack's log. `SubmitBuild`'s `buildpack_build.runtime` stays `UNIMPLEMENTED`.
 
-**Not supported:** **Eventarc trigger management.** Nothing creates or routes triggers, and a
-function's `eventTrigger` is refused (below). Delivery is whatever you point at the function — a
-Pub/Sub push subscription, for instance, which sends Pub/Sub's push body rather than a CloudEvent.
+**Event triggers** (#1414): a function's `eventTrigger` on Pub/Sub
+(`google.cloud.pubsub.topic.v1.messagePublished`) or Cloud Storage
+(`google.cloud.storage.object.v1.finalized`, `deleted`, `archived`, `metadataUpdated`, filtered
+on `bucket`) is made as Eventarc makes it, once the service is deployed: an `eventarc-…` push
+subscription on the topic (for Cloud Storage, on an `eventarc-…` topic the bucket's notification
+publishes to), whose pushes this instance converts to binary-mode CloudEvents (`ce-*` headers,
+`MessagePublishedData` or the object resource) and POSTs to the function through the ingress, with
+an ID token for the trigger's service account. `eventTrigger.trigger` names the trigger. It needs
+`--services run,storage,pubsub` and a published ingress port. No Eventarc API is served, and
+other event sources are refused. See the `eventTrigger` row of `docs/compatibility.md`.
 
 ## The Cloud Functions v2 API (#1377)
 
@@ -278,15 +350,17 @@ out, `service_config.*` and `labels` roll out a new revision of the same image, 
 and never enforced (ADR-0006). `locations.list` names the regions; any well-formed region is
 accepted in a name. Functions are kept in memory, and are gone when the instance restarts.
 
-**Refused, with the reason** (`UNIMPLEMENTED`): `eventTrigger` (a 2nd-gen trigger is an Eventarc
-trigger, which delivers a CloudEvent to the service; no Eventarc is served); GEN_1 functions and
+**Refused, with the reason** (`UNIMPLEMENTED`): an `eventTrigger` other than Pub/Sub's and Cloud
+Storage's (above), or on an instance without Pub/Sub; GEN_1 functions and
 uploads; `repo_source` and `git_uri`; worker pools, `docker_repository` and a build service
 account; VPC connectors, secret environment variables and volumes, KMS keys and binary
 authorization; `ListFunctions` `filter`, `order_by` and `page_token`; `GetFunction` `revision`.
 An unknown runtime is `INVALID_ARGUMENT`. The tests are `TestFunctionsAPI` (ungated: everything but
-a build that succeeds), and `TestFunctionsAPIBuildsAndServes`, `TestGcloudFunctions`'s deploy and
-`TestTerraformCloudFunctions2Function`'s apply, gated by `CLOUDBURROW_TEST_FUNCTIONS` and amd64
-nodes, which have **not yet run**.
+a build that succeeds), `TestFunctionsEventTriggers` and `TestGcloudFunctionsEventTriggers`'
+ungated half (event triggers, #1414), and `TestFunctionsAPIBuildsAndServes`,
+`TestFunctionsEventTriggerBuilds`, `TestGcloudFunctions`'s and `TestGcloudFunctionsEventTriggers`'
+deploys and `TestTerraformCloudFunctions2Function`'s apply, gated by `CLOUDBURROW_TEST_FUNCTIONS`
+and amd64 nodes, which have **not yet run**.
 
 ## Google Buildpacks (#33)
 

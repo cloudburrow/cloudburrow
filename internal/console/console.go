@@ -969,6 +969,9 @@ type Server struct {
 	// logDeleter is Cloud Logging's DeleteLog, behind the Logs Explorer's
 	// Delete log (#799); nil offers none.
 	logDeleter LogDeleter
+	// logViews reads Cloud Logging through a log view, for the Logs
+	// Explorer's view scope (#1410); nil offers none.
+	logViews LogViewReader
 	// settings are the console's own server-side settings, such as the
 	// upload limit.
 	settings settings
@@ -1055,6 +1058,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/page/{service}", s.handlePage)
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
+	mux.HandleFunc("GET /api/logs/buckets", s.handleLogBuckets)
 	mux.HandleFunc("DELETE /api/logs", s.handleDeleteLog)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/instance", s.handleInstance)

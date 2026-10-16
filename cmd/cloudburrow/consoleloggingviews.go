@@ -115,7 +115,7 @@ func (p loggingBucketsProvider) ActAt(ctx context.Context, project string, path 
 	if action == copyEntriesAction || action == cancelCopyAction {
 		return p.actOnCopy(ctx, project, path, action, values)
 	}
-	if err := bucketOfProject(project, path[0]); err != nil {
+	if err := bucketOfParent(ctx, project, path[0]); err != nil {
 		return err
 	}
 	a, err := p.admin()

@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 
@@ -486,7 +487,22 @@ type MemorystoreSettings struct {
 	// stops, in place of the append-only file. In persistent mode the
 	// snapshot is on the server's volume, so its data comes back with it.
 	RDBSeconds int
+	// ReplicaOf, host:port, starts the server as a replica of it
+	// (--replicaof): a Memorystore Standard tier node (#1412).
+	ReplicaOf string
+	// TLSCert, TLSKey and TLSCA, PEM, are in-transit encryption (#1413):
+	// the server serves TLS only, on MemorystoreTLSPort, with this
+	// certificate, and replicates over TLS trusting the CA. "" for none.
+	TLSCert, TLSKey, TLSCA string
 }
+
+// MemorystoreTLSPort is the port a Memorystore server with in-transit
+// encryption serves TLS on, as Memorystore's does (#1413).
+const MemorystoreTLSPort = 6378
+
+// memorystoreTLSDir is where a server's TLS files are written in its
+// container, from its environment, before it starts.
+const memorystoreTLSDir = "/tmp/tls"
 
 // Redis images of Memorystore's older versions (#1386), each the last
 // release of its line, pinned by the index digest (linux/amd64 and
@@ -537,6 +553,9 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 	if password != "" {
 		args = append(args, "--requirepass", password)
 	}
+	if h, p, err := net.SplitHostPort(o.ReplicaOf); err == nil {
+		args = append(args, "--replicaof", h, p)
+	}
 	switch {
 	case o.RDBSeconds > 0 && persistent:
 		args = append(args, "--dir", "/data", "--appendonly", "no", "--save", fmt.Sprintf("%d 1", o.RDBSeconds))
@@ -547,7 +566,7 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 	default:
 		args = append(args, "--save", "", "--appendonly", "no")
 	}
-	return Backend{
+	b := Backend{
 		Name:       name,
 		Image:      image,
 		Port:       MemorystorePort,
@@ -556,12 +575,32 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		MountPath:  "/data",
 		OwnsClaim:  persistent,
 	}
+	if o.TLSCert != "" {
+		// TLS only (--port 0), clients not asked for a certificate
+		// (SERVER_AUTHENTICATION), replication over TLS. The files are
+		// written from the environment, then the image's own entrypoint
+		// starts the server as it always does.
+		d := memorystoreTLSDir
+		args = append(args, "--port", "0", "--tls-port", fmt.Sprint(MemorystoreTLSPort),
+			"--tls-cert-file", d+"/server.crt", "--tls-key-file", d+"/server.key", "--tls-ca-cert-file", d+"/ca.crt",
+			"--tls-auth-clients", "no", "--tls-replication", "yes")
+		script := `set -e; mkdir -p ` + d + `; printf '%s' "$MEMORYSTORE_TLS_CERT" > ` + d + `/server.crt; ` +
+			`printf '%s' "$MEMORYSTORE_TLS_KEY" > ` + d + `/server.key; printf '%s' "$MEMORYSTORE_TLS_CA" > ` + d + `/ca.crt; ` +
+			`chmod 0755 ` + d + `; chmod 0644 ` + d + `/*; exec docker-entrypoint.sh "$@"`
+		b.Args = append([]string{"sh", "-c", script, "sh"}, args...)
+		b.Port = MemorystoreTLSPort
+		b.Env = map[string]string{"MEMORYSTORE_TLS_CERT": o.TLSCert, "MEMORYSTORE_TLS_KEY": o.TLSKey, "MEMORYSTORE_TLS_CA": o.TLSCA}
+	}
+	return b
 }
 
 // MemorystorePrimaryService is the Service of a Standard tier Memorystore
 // instance (#1385), named name, selecting the pod of node, its primary's
 // server: a failover applies it again with the new primary.
-func MemorystorePrimaryService(name, node, namespace, instance string) string {
+func MemorystorePrimaryService(name, node, namespace, instance string, port int) string {
+	if port == 0 {
+		port = MemorystorePort
+	}
 	return fmt.Sprintf(`apiVersion: v1
 kind: Service
 metadata:
@@ -578,7 +617,7 @@ spec:
     - name: api
       port: %d
       targetPort: %d
-`, name, namespace, instance, node, node, MemorystorePort, MemorystorePort)
+`, name, namespace, instance, node, node, port, port)
 }
 
 // MySQLCredentials are an instance's generated MySQL passwords.
@@ -729,4 +768,87 @@ func copyEnv(m map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// SQLStandbyPrefix starts the name of the Deployment, Service and volume
+// of the second server of a Cloud SQL high-availability instance (#1408):
+// "sqlha-" and the instance's name fit the 63 characters a Service's name
+// may have, as "sqlinst-" and it do.
+const SQLStandbyPrefix = "sqlha-"
+
+// SQLStandbyApplicationName is the application_name a high-availability
+// standby streams as, which its primary's synchronous_standby_names names,
+// so a read replica of the primary is never the synchronous standby.
+const SQLStandbyApplicationName = "cloudsqlstandby"
+
+// CloudSQLStandbyBackend makes b, one of the two PostgreSQL servers of a
+// high-availability instance, a standby built at epoch (#1408). When its
+// volume's recorded epoch differs, the server's data directory is
+// replaced by a pg_basebackup of the primary, host (the instance's
+// Service, which selects the primary), and the server starts as a hot
+// standby streaming from it as SQLStandbyApplicationName. When the epoch
+// is the recorded one, the data is kept: a standby resumes streaming, and
+// a standby promoted since starts as the primary it is now.
+func CloudSQLStandbyBackend(b Backend, host string, epoch int) Backend {
+	b.Env = copyEnv(b.Env)
+	b.Env["CLOUDSQL_PRIMARY_HOST"] = host
+	b.Env["CLOUDSQL_STANDBY_EPOCH"] = fmt.Sprint(epoch)
+	args := b.Args
+	if len(args) == 0 {
+		args = []string{"postgres"}
+	}
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	b.Command = []string{"sh", "-c", `set -e
+marker="$(dirname "$PGDATA")/cloudsql-standby-epoch"
+if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
+  mkdir -p "$PGDATA" && rm -rf "$PGDATA" && mkdir -p "$PGDATA"
+  chown -R postgres:postgres "$(dirname "$PGDATA")" && chmod 700 "$PGDATA"
+  asuser=$(command -v su-exec || command -v gosu)
+  until "$asuser" postgres pg_basebackup -h "$CLOUDSQL_PRIMARY_HOST" -p ` + fmt.Sprint(CloudSQLPort) + ` -U ` + SQLReplicaUser +
+		` -D "$PGDATA" -R -X stream -c fast; do
+    echo "waiting for the primary $CLOUDSQL_PRIMARY_HOST"; rm -rf "$PGDATA" && mkdir -p "$PGDATA" && chown postgres:postgres "$PGDATA" && chmod 700 "$PGDATA"; sleep 2
+  done
+  echo "primary_conninfo = 'host=$CLOUDSQL_PRIMARY_HOST port=` + fmt.Sprint(CloudSQLPort) + ` user=` + SQLReplicaUser +
+		` application_name=` + SQLStandbyApplicationName + `'" >> "$PGDATA/postgresql.auto.conf"
+  echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
+fi
+exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+	b.Args = nil
+	return b
+}
+
+// SQLStandbyUser is the replication user a MySQL high-availability
+// standby connects to its primary as (#1408), apart from the read
+// replicas' cloudsqlreplica, whose password each replica's creation sets.
+const SQLStandbyUser = "cloudsqlstandby"
+
+// CloudSQLMySQLStandbyBackend makes b, one of the two MySQL servers of a
+// high-availability instance, a standby built at epoch (#1408): when its
+// volume's recorded epoch differs, its data directory is removed, so the
+// image initialises a new one, which the provisioner fills from the
+// primary and starts replicating (cmd/cloudburrow's sqlha.go). It runs
+// with GTIDs and serverID; when the epoch is the recorded one, the data is
+// kept, as for a standby promoted since.
+func CloudSQLMySQLStandbyBackend(b Backend, host string, epoch int, serverID uint32) Backend {
+	b.Env = copyEnv(b.Env)
+	b.Env["CLOUDSQL_PRIMARY_HOST"] = host
+	b.Env["CLOUDSQL_STANDBY_EPOCH"] = fmt.Sprint(epoch)
+	args := append(append([]string{}, b.Args...), fmt.Sprintf("--server-id=%d", serverID),
+		"--gtid-mode=ON", "--enforce-gtid-consistency=ON")
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	b.Command = []string{"sh", "-c", `set -e
+marker=/var/lib/mysql/cloudsql-standby-epoch
+if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
+  rm -rf /var/lib/mysql/data
+  echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
+fi
+exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+	b.Args = nil
+	return b
 }
