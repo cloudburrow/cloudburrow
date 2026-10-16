@@ -20,7 +20,9 @@ import (
 // ROUTINES and PARAMETERS, through jobs.query and jobs.insert, have
 // BigQuery's documented columns and types and a row for what the dataset
 // holds: a partitioned, clustered table with a description, labels and a
-// nested field, a view and a function. SCHEMATA_LINKS is 501. Measured first:
+// nested field, a view and a function. COLUMNS' async_generation_status
+// is NULL, as of every column not a generated embedding one (#1458).
+// SCHEMATA_LINKS dataset-qualified is 400 (#1458). Measured first:
 // TABLES had 7 columns, creation_time a STRING; TABLE_OPTIONS was empty;
 // ROUTINES, PARAMETERS and COLUMN_FIELD_PATHS were 400 "Table not found".
 //
@@ -128,7 +130,8 @@ func TestBigQueryInformationSchemaDatasetViews(t *testing.T) {
 		}
 		columns("COLUMNS", schema, "table_catalog STRING, table_schema STRING, table_name STRING, column_name STRING, "+
 			"ordinal_position INTEGER, is_nullable STRING, data_type STRING, is_generated STRING, generation_expression STRING, "+
-			"is_stored STRING, is_hidden STRING, is_updatable STRING, is_system_defined STRING, is_partitioning_column STRING, "+
+			"is_stored STRING, async_generation_status RECORD, is_hidden STRING, is_updatable STRING, is_system_defined STRING, "+
+			"is_partitioning_column STRING, "+
 			"clustering_ordinal_position INTEGER, collation_name STRING, column_default STRING, rounding_mode STRING, "+
 			"data_policies ARRAY<RECORD>, policy_tags ARRAY<STRING>, is_identity STRING, identity_generation STRING, "+
 			"identity_start INTEGER, identity_increment INTEGER, identity_maximum INTEGER, identity_minimum INTEGER, identity_cycle STRING")
@@ -142,7 +145,8 @@ func TestBigQueryInformationSchemaDatasetViews(t *testing.T) {
 			{"d", "NO", "DATE", "YES", nil}, {"s", "YES", "STRING", "NO", int64(1)}, {"r", "YES", "ARRAY<STRUCT<x INT64>>", "NO", nil},
 		} {
 			r := rows[i]
-			if r[3] != want.name || r[4] != int64(i+1) || r[5] != want.nullable || r[6] != want.typ || r[13] != want.part || r[14] != want.cluster {
+			if r[3] != want.name || r[4] != int64(i+1) || r[5] != want.nullable || r[6] != want.typ || r[14] != want.part || r[15] != want.cluster ||
+				r[10] != nil {
 				t.Errorf("insert=%v: COLUMNS row %d = %v", insert, i, r)
 			}
 		}
@@ -202,10 +206,12 @@ func TestBigQueryInformationSchemaDatasetViews(t *testing.T) {
 			t.Errorf("insert=%v: a join gave %v, %v", insert, rows, err)
 		}
 
+		// BigQuery documents SCHEMATA_LINKS region-qualified only (#1458).
 		_, _, err = read("SELECT * FROM "+ds.DatasetID+".INFORMATION_SCHEMA.SCHEMATA_LINKS", insert)
 		var e *googleapi.Error
-		if !errors.As(err, &e) || e.Code != http.StatusNotImplemented {
-			t.Errorf("insert=%v: SCHEMATA_LINKS gave %v, want 501", insert, err)
+		if err == nil || !strings.Contains(err.Error(), "must include a region qualifier") ||
+			!insert && (!errors.As(err, &e) || e.Code != http.StatusBadRequest) {
+			t.Errorf("insert=%v: dataset-qualified SCHEMATA_LINKS gave %v, want 400 naming the region qualifier", insert, err)
 		}
 		_, _, err = read("SELECT * FROM no_such_dataset_1286.INFORMATION_SCHEMA.TABLES", insert)
 		if !errors.As(err, &e) || e.Code != http.StatusNotFound {

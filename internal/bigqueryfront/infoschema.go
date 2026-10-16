@@ -30,8 +30,8 @@ import (
 // The columns are BigQuery's documented ones
 // (https://cloud.google.com/bigquery/docs/information-schema-tables,
 // -columns, -column-field-paths, -table-options, -routines, -parameters),
-// but COLUMNS' async_generation_status, whose STRUCT's fields are not
-// documented. Not built (501): PARTITIONS and the other dataset views
+// with COLUMNS' async_generation_status always NULL (asyncGenerationNone,
+// #1458). Not built (501): PARTITIONS and the other dataset views
 // below; the region-qualified forms.
 
 // unbuiltInfoSchema are the dataset-scoped views BigQuery documents that
@@ -41,8 +41,17 @@ var unbuiltInfoSchema = map[string]bool{
 	"TABLE_CONSTRAINTS": true, "KEY_COLUMN_USAGE": true, "CONSTRAINT_COLUMN_USAGE": true,
 	"SEARCH_INDEXES": true, "SEARCH_INDEX_COLUMNS": true, "SEARCH_INDEX_OPTIONS": true,
 	"VECTOR_INDEXES": true, "VECTOR_INDEX_COLUMNS": true, "VECTOR_INDEX_OPTIONS": true,
-	"OBJECT_PRIVILEGES": true, "SCHEMATA_OPTIONS": true, "SCHEMATA_LINKS": true,
+	"SCHEMATA_OPTIONS": true,
 }
+
+// regionOnlyInfoSchema are the views BigQuery documents region-qualified
+// only ("Queries against this view must include a region qualifier",
+// https://cloud.google.com/bigquery/docs/information-schema-object-privileges,
+// -datasets-schemata-links): a dataset-qualified reference to one is
+// refused 400 invalidQuery (#1458; the wording is BigQuery's documented
+// rule, the error's own text UNVERIFIED). Their region forms are built
+// (infoschemaprivileges.go).
+var regionOnlyInfoSchema = map[string]bool{"OBJECT_PRIVILEGES": true, "SCHEMATA_LINKS": true}
 
 // engineInfoSchema are the views the engine serves itself.
 var engineInfoSchema = map[string]bool{"TABLES": true, "COLUMNS": true, "TABLE_OPTIONS": true}
@@ -357,10 +366,20 @@ func policyTags(fl map[string]any) string {
 
 const columnsColumns = "STRUCT<table_catalog STRING, table_schema STRING, table_name STRING, column_name STRING, " +
 	"ordinal_position INT64, is_nullable STRING, data_type STRING, is_generated STRING, generation_expression STRING, " +
-	"is_stored STRING, is_hidden STRING, is_updatable STRING, is_system_defined STRING, is_partitioning_column STRING, " +
+	"is_stored STRING, async_generation_status STRUCT<blocking_error STRUCT<message STRING>>, is_hidden STRING, " +
+	"is_updatable STRING, is_system_defined STRING, is_partitioning_column STRING, " +
 	"clustering_ordinal_position INT64, collation_name STRING, column_default STRING, rounding_mode STRING, " +
 	"data_policies ARRAY<STRUCT<name STRING>>, policy_tags ARRAY<STRING>, is_identity STRING, identity_generation STRING, " +
 	"identity_start INT64, identity_increment INT64, identity_maximum INT64, identity_minimum INT64, identity_cycle STRING>"
+
+// asyncGenerationNone is COLUMNS' async_generation_status of a column
+// that is not an automatically generated embedding column, which BigQuery
+// documents as NULL (https://cloud.google.com/bigquery/docs/information-schema-columns).
+// The emulator makes no such column (is_generated is always NEVER), so
+// every row has it. Of the STRUCT's fields BigQuery names one,
+// async_generation_status.blocking_error.message, which the type keeps
+// (#1458).
+const asyncGenerationNone = "CAST(NULL AS STRUCT<blocking_error STRUCT<message STRING>>)"
 
 func yesNo(b bool) string {
 	if b {
@@ -396,7 +415,7 @@ func columnsRows(project, dataset string, t infoTable) [][]string {
 		}
 		rows = append(rows, append(append([]string{}, head...), sqlString(name), strconv.Itoa(i+1),
 			yesNo(!strings.EqualFold(str(fl, "mode"), "REQUIRED")), sqlString(fieldSQLType(fl)), sqlString("NEVER"), "NULL",
-			"NULL", sqlString("NO"), "NULL", sqlString("NO"), yesNo(partCol != "" && strings.EqualFold(partCol, name)), clus,
+			"NULL", asyncGenerationNone, sqlString("NO"), "NULL", sqlString("NO"), yesNo(partCol != "" && strings.EqualFold(partCol, name)), clus,
 			sqlOrNull(str(fl, "collation")), sqlOrNull(str(fl, "defaultValueExpression")), sqlOrNull(str(fl, "roundingMode")),
 			"ARRAY<STRUCT<name STRING>>[]", policyTags(fl), sqlString("NO"), "NULL", "NULL", "NULL", "NULL", "NULL", "NULL"))
 	}
