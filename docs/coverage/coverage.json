@@ -1123,6 +1123,71 @@
     ]
   },
   {
+    "Key": "functions",
+    "Title": "Cloud Functions v2",
+    "counts": {
+      "Verified": 8
+    },
+    "rows": [
+      {
+        "method": "google.cloud.functions.v2.FunctionService/CreateFunction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v2.FunctionService/DeleteFunction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v2.FunctionService/GenerateDownloadUrl",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v2.FunctionService/GenerateUploadUrl",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v2.FunctionService/GetFunction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v2.FunctionService/ListFunctions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v2.FunctionService/ListRuntimes",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v2.FunctionService/UpdateFunction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "runv1",
     "Title": "Cloud Run v1 (Knative API)",
     "counts": {

@@ -185,6 +185,11 @@ var parityRows = []parityRow{
 		Provider: "artifact-registry", Offers: "Repositories page (/artifact-registry): each repository's format, location, URL, description and age, and Delete (#1304); a repository is created by gcloud run deploy --source, and its description and labels changed by gcloud artifacts repositories update, from the console's terminal (#1347)",
 		Tests: []string{"TestConsoleSourceDeployScreens"}},
 
+	{Resource: "Cloud Functions", Service: "functions",
+		Methods:  []string{"FunctionService/CreateFunction", "FunctionService/GetFunction", "FunctionService/ListFunctions", "FunctionService/DeleteFunction", "FunctionService/GenerateUploadUrl", "FunctionService/ListRuntimes", "FunctionService/UpdateFunction", "FunctionService/GenerateDownloadUrl"},
+		Provider: "functions", Offers: "Functions page (/functions): each 2nd-gen function's state, region, runtime, URL and age; a function's page with its URL, runtime, entry point, source, build, Cloud Run service, a link to the service's page and its logs, memory, timeout, instances and environment; Create function (a .zip uploaded to a GenerateUploadUrl URL, then CreateFunction, waited on), its runtimes the ones ListRuntimes names; Delete (#1377). An update (gcloud functions deploy of an existing function), the source download and IAM are reached with gcloud functions from the console's terminal",
+		Tests: []string{"TestConsoleFunctionsPage"}},
+
 	// Cloud KMS
 	{Resource: "Cloud KMS key rings and keys", Service: "kms",
 		Methods:  []string{"KeyManagementService/CreateKeyRing", "KeyManagementService/GetKeyRing", "KeyManagementService/ListKeyRings", "KeyManagementService/CreateCryptoKey", "KeyManagementService/GetCryptoKey", "KeyManagementService/ListCryptoKeys"},
