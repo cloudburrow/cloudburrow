@@ -277,9 +277,11 @@ func (f front) changeWindow(r *http.Request, q queryOptions, c changeFunc, ref s
 	}
 	earliest := now - hours*int64(time.Hour/time.Microsecond)
 	createdMicros := created * 1000
-	// A table made again by CREATE OR REPLACE TABLE keeps the history of
-	// the one it replaced (#1466): NULL reads from the start of it.
-	if start, ok := f.historyStart(r, c.dataset, c.table); ok && start < createdMicros {
+	// The history starts at the table's creation by the engine's clock,
+	// which follows the front's (the emulator keeps creationTime by the
+	// system's), and a table made again by CREATE OR REPLACE TABLE keeps
+	// the start of the one it replaced (#1466): NULL reads from there.
+	if start, ok := f.historyStart(r, c.dataset, c.table); ok {
 		createdMicros = start
 	}
 	start, hasStart := at(res.Rows[0].F[0].V)
