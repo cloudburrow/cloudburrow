@@ -62,7 +62,7 @@ enforced (#1367).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Any call but Get, List, Delete, Pull and StreamingPull on a detached subscription, and an `UpdateTopic` of `schema_settings` bound to a Protocol Buffer schema, answer `UNIMPLEMENTED` with the reason; the seed file still refuses `PROTOCOL_BUFFER` schemas; the front's messages for a refused `.proto` definition or message are its own (#1446) | not documented by Google (no answer to copy; Google's messages not measured) | S |
+| The front's messages for a refused `.proto` definition or message, and for the calls Google documents no answer to on a detached subscription (`FAILED_PRECONDITION` for a snapshot of it or a seek to a snapshot, `INVALID_ARGUMENT` for an immutable field), are its own (#1446) | Google's messages not measured (needs a live service) | S |
 | UNVERIFIED error codes: subscription expiration, exactly-once and label refusals ([pubsub.md](coverage/pubsub.md); an invalid label's message is #982) (#1445) | not documented by Google | S |
 
 ## Cloud Tasks

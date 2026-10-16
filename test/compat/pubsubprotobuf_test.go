@@ -135,7 +135,9 @@ func TestPubSubProtobufSchemaService(t *testing.T) {
 // one JSON and one BINARY, and publishes through the official client's
 // Publisher: a conforming message is delivered, a non-conforming one refused
 // INVALID_ARGUMENT, as Google documents; the topic reads back its binding.
-// covers: google.pubsub.v1.Publisher/CreateTopic, google.pubsub.v1.Publisher/GetTopic, google.pubsub.v1.Publisher/Publish
+// An UpdateTopic of schema_settings rebinds it, clears it and binds it again
+// (#1446), each binding the one Publish checks.
+// covers: google.pubsub.v1.Publisher/CreateTopic, google.pubsub.v1.Publisher/GetTopic, google.pubsub.v1.Publisher/Publish, google.pubsub.v1.Publisher/UpdateTopic
 func TestPubSubProtobufSchemaTopic(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)
@@ -190,17 +192,70 @@ func TestPubSubProtobufSchemaTopic(t *testing.T) {
 		if len(pulled) != 1 || pulled[0] != string(good) {
 			t.Errorf("pulled %q, want only the conforming message", pulled)
 		}
-		if _, err := c.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{Topic: &pubsubpb.Topic{Name: tn},
-			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"schema_settings"}}}); status.Code(err) != codes.Unimplemented {
-			t.Errorf("UpdateTopic(schema_settings) = %v, want UNIMPLEMENTED with the reason", err)
-		}
+	}
+
+	// UpdateTopic of schema_settings (#1446): the JSON topic is bound
+	// BINARY from the latest revision on, then cleared, then bound again,
+	// and each binding is the one Publish checks.
+	tn := parent + "/topics/proto-topic-json"
+	latest, err := sc.GetSchema(ctx, &pubsubpb.GetSchemaRequest{Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publish := func(data []byte) error {
+		_, err := c.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: tn, Messages: []*pubsubpb.PubsubMessage{{Data: data}}})
+		return err
+	}
+	upd, err := c.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
+		Topic: &pubsubpb.Topic{Name: tn, SchemaSettings: &pubsubpb.SchemaSettings{Schema: name,
+			Encoding: pubsubpb.Encoding_BINARY, FirstRevisionId: latest.GetRevisionId()}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"schema_settings"}}})
+	if err != nil || upd.GetSchemaSettings().GetEncoding() != pubsubpb.Encoding_BINARY ||
+		upd.GetSchemaSettings().GetFirstRevisionId() != latest.GetRevisionId() {
+		t.Fatalf("UpdateTopic(schema_settings, BINARY) = %v, %v", upd, err)
+	}
+	if got, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: tn}); err != nil ||
+		got.GetSchemaSettings().GetEncoding() != pubsubpb.Encoding_BINARY {
+		t.Errorf("GetTopic after the update = %v, %v", got, err)
+	}
+	if err := publish([]byte(`{"name":"burrow"}`)); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("Publish(JSON to the topic now BINARY) = %v, want INVALID_ARGUMENT", err)
+	}
+	if err := publish([]byte("\x0a\x06burrow")); err != nil {
+		t.Errorf("Publish(BINARY) = %v", err)
+	}
+	if _, err := c.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
+		Topic: &pubsubpb.Topic{Name: tn, SchemaSettings: &pubsubpb.SchemaSettings{Schema: name,
+			Encoding: pubsubpb.Encoding_JSON, LastRevisionId: "deadbeef"}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"schema_settings"}}}); status.Code(err) != codes.NotFound {
+		t.Errorf("UpdateTopic(schema_settings to an absent revision) = %v, want NOT_FOUND", err)
+	}
+	cleared, err := c.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{Topic: &pubsubpb.Topic{Name: tn},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"schema_settings"}}})
+	if err != nil || cleared.GetSchemaSettings() != nil {
+		t.Fatalf("UpdateTopic(clear schema_settings) = %v, %v", cleared, err)
+	}
+	if err := publish([]byte("anything at all")); err != nil {
+		t.Errorf("Publish to the topic with no schema = %v", err)
+	}
+	if _, err := c.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
+		Topic:      &pubsubpb.Topic{Name: tn, SchemaSettings: &pubsubpb.SchemaSettings{Schema: name, Encoding: pubsubpb.Encoding_JSON}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"schema_settings"}}}); err != nil {
+		t.Fatalf("UpdateTopic(bind again): %v", err)
+	}
+	if err := publish([]byte(`{"nope":1}`)); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("Publish(non-conforming) after binding again = %v, want INVALID_ARGUMENT", err)
 	}
 }
 
 // TestGcloudPubSubDetachAndProtobufSchemas (#1406): the real gcloud,
 // through `cloudburrow gcloud-setup`'s configuration with egress blocked,
 // detaches a subscription (`topics detach-subscription`), and creates, validates against and deletes a
-// protocol-buffer schema; the official client reads back what it did.
+// protocol-buffer schema; the official client reads back what it did. Since
+// #1446 it also updates, seeks and acknowledges on the detached
+// subscription, is refused a snapshot of it, and binds a topic to the
+// schema with `topics update --schema`, then clears it.
+// covers: google.pubsub.v1.Subscriber/UpdateSubscription, google.pubsub.v1.Subscriber/Seek, google.pubsub.v1.Subscriber/Acknowledge, google.pubsub.v1.Subscriber/CreateSnapshot, google.pubsub.v1.Publisher/UpdateTopic
 // covers: google.pubsub.v1.Publisher/DetachSubscription, google.pubsub.v1.SchemaService/CreateSchema, google.pubsub.v1.SchemaService/ValidateSchema, google.pubsub.v1.SchemaService/ValidateMessage, google.pubsub.v1.SchemaService/GetSchema, google.pubsub.v1.SchemaService/DeleteSchema
 func TestGcloudPubSubDetachAndProtobufSchemas(t *testing.T) {
 	h := New(t)
@@ -224,6 +279,19 @@ func TestGcloudPubSubDetachAndProtobufSchemas(t *testing.T) {
 	if err == nil || !strings.Contains(out, "FAILED_PRECONDITION") && !strings.Contains(out, "detached") {
 		t.Errorf("gcloud subscriptions pull of a detached subscription = %v:\n%s\nwant a FAILED_PRECONDITION refusal", err, out)
 	}
+	// The other calls on it (#1446): an update and a seek to a time are
+	// applied, a snapshot of it refused FAILED_PRECONDITION.
+	g.must("pubsub", "subscriptions", "update", "gcloud-detach-sub", p, "--ack-deadline=42", "--update-labels=env=test")
+	if got, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sn}); err != nil ||
+		got.GetAckDeadlineSeconds() != 42 || got.GetLabels()["env"] != "test" || !got.GetDetached() {
+		t.Errorf("after gcloud subscriptions update, GetSubscription = %v, %v", got, err)
+	}
+	g.must("pubsub", "subscriptions", "seek", "gcloud-detach-sub", p, "--time=2026-01-01T00:00:00Z")
+	g.must("pubsub", "subscriptions", "ack", "gcloud-detach-sub", p, "--ack-ids=some-ack-id")
+	if out, err := g.run(nil, "pubsub", "snapshots", "create", "gcloud-detach-snap", p, "--subscription=gcloud-detach-sub"); err == nil ||
+		!strings.Contains(out, "FAILED_PRECONDITION") && !strings.Contains(out, "detached") {
+		t.Errorf("gcloud snapshots create of a detached subscription = %v:\n%s\nwant a FAILED_PRECONDITION refusal", err, out)
+	}
 
 	name := "projects/" + h.Project() + "/schemas/gcloud-proto"
 	t.Cleanup(func() { _ = sc.DeleteSchema(context.Background(), &pubsubpb.DeleteSchemaRequest{Name: name}) })
@@ -240,6 +308,21 @@ func TestGcloudPubSubDetachAndProtobufSchemas(t *testing.T) {
 	if out, err := g.run(nil, "pubsub", "schemas", "validate-message", p, "--schema-name=gcloud-proto", "--message-encoding=json", `--message={"nope":1}`); err == nil {
 		t.Errorf("gcloud schemas validate-message of a non-conforming message succeeded:\n%s", out)
 	}
+	// A topic bound to it by `topics update`, then cleared (#1446).
+	bt := topic(t, h, c, "gcloud-proto-topic")
+	g.must("pubsub", "topics", "update", "gcloud-proto-topic", p, "--schema=gcloud-proto", "--message-encoding=json")
+	if got, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: bt}); err != nil ||
+		got.GetSchemaSettings().GetSchema() != name || got.GetSchemaSettings().GetEncoding() != pubsubpb.Encoding_JSON {
+		t.Errorf("after gcloud topics update --schema, GetTopic = %v, %v", got, err)
+	}
+	if out, err := g.run(nil, "pubsub", "topics", "publish", "gcloud-proto-topic", p, `--message={"nope":1}`); err == nil {
+		t.Errorf("gcloud topics publish of a non-conforming message succeeded:\n%s", out)
+	}
+	g.must("pubsub", "topics", "update", "gcloud-proto-topic", p, "--clear-schema-settings")
+	if got, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: bt}); err != nil || got.GetSchemaSettings() != nil {
+		t.Errorf("after gcloud topics update --clear-schema-settings, GetTopic = %v, %v", got, err)
+	}
+	g.must("pubsub", "topics", "publish", "gcloud-proto-topic", p, `--message={"nope":1}`)
 	g.must("pubsub", "schemas", "delete", "gcloud-proto", p, "--quiet")
 	if _, err := sc.GetSchema(ctx, &pubsubpb.GetSchemaRequest{Name: name}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetSchema after gcloud schemas delete = %v, want NOT_FOUND", err)
@@ -249,8 +332,9 @@ func TestGcloudPubSubDetachAndProtobufSchemas(t *testing.T) {
 // TestTerraformPubSubProtobufSchema (#1406): google_pubsub_schema of type
 // PROTOCOL_BUFFER, and a google_pubsub_topic bound to it, through
 // `cloudburrow terraform` with egress blocked: applied, a plan with no diff,
-// read back with the official client, and destroyed.
-// covers: google.pubsub.v1.SchemaService/CreateSchema, google.pubsub.v1.SchemaService/GetSchema, google.pubsub.v1.SchemaService/DeleteSchema, google.pubsub.v1.Publisher/CreateTopic, google.pubsub.v1.Publisher/GetTopic, google.pubsub.v1.Publisher/DeleteTopic
+// read back with the official client, the binding's encoding changed in
+// place (#1446), and destroyed.
+// covers: google.pubsub.v1.Publisher/UpdateTopic, google.pubsub.v1.SchemaService/CreateSchema, google.pubsub.v1.SchemaService/GetSchema, google.pubsub.v1.SchemaService/DeleteSchema, google.pubsub.v1.Publisher/CreateTopic, google.pubsub.v1.Publisher/GetTopic, google.pubsub.v1.Publisher/DeleteTopic
 func TestTerraformPubSubProtobufSchema(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)
@@ -261,7 +345,8 @@ func TestTerraformPubSubProtobufSchema(t *testing.T) {
 	name := "projects/" + project + "/schemas/tf-proto"
 	tn := "projects/" + project + "/topics/tf-proto-topic"
 
-	m.write(fmt.Sprintf(`
+	config := func(encoding string) string {
+		return fmt.Sprintf(`
 resource "google_pubsub_schema" "s" {
   project    = %[1]q
   name       = "tf-proto"
@@ -273,10 +358,12 @@ resource "google_pubsub_topic" "t" {
   name    = "tf-proto-topic"
   schema_settings {
     schema   = google_pubsub_schema.s.id
-    encoding = "JSON"
+    encoding = %[2]q
   }
 }
-`, project))
+`, project, encoding)
+	}
+	m.write(config("JSON"))
 	m.must("init", "-input=false", "-no-color")
 	m.apply()
 	s, err := sc.GetSchema(ctx, &pubsubpb.GetSchemaRequest{Name: name, View: pubsubpb.SchemaView_FULL})
@@ -286,6 +373,15 @@ resource "google_pubsub_topic" "t" {
 	got, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: tn})
 	if err != nil || got.GetSchemaSettings().GetSchema() != name || got.GetSchemaSettings().GetEncoding() != pubsubpb.Encoding_JSON {
 		t.Errorf("after apply, GetTopic = %v, %v", got, err)
+	}
+	m.planClean()
+	// The binding's encoding changed in place, an UpdateTopic of
+	// schema_settings (#1446).
+	m.write(config("BINARY"))
+	m.apply()
+	got, err = c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: tn})
+	if err != nil || got.GetSchemaSettings().GetSchema() != name || got.GetSchemaSettings().GetEncoding() != pubsubpb.Encoding_BINARY {
+		t.Errorf("after the encoding change, GetTopic = %v, %v", got, err)
 	}
 	m.planClean()
 	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
@@ -298,10 +394,12 @@ resource "google_pubsub_topic" "t" {
 }
 
 // TestConsolePubSubDetachAndProtobufSchema (#1406): Detach from topic on a
-// subscription's page detaches it, read back with the official client, and
-// the page then offers no Edit; the Schemas screen creates a
-// PROTOCOL_BUFFER schema, read back the same way.
-// covers: google.pubsub.v1.Publisher/DetachSubscription, google.pubsub.v1.SchemaService/CreateSchema
+// subscription's page detaches it, read back with the official client; the
+// Schemas screen creates a PROTOCOL_BUFFER schema, read back the same way.
+// Since #1446 the detached subscription's page offers Edit subscription,
+// which changes its kept configuration, and Edit topic binds a topic to the
+// PROTOCOL_BUFFER schema and clears it, each read back by the client.
+// covers: google.pubsub.v1.Publisher/DetachSubscription, google.pubsub.v1.SchemaService/CreateSchema, google.pubsub.v1.Subscriber/UpdateSubscription, google.pubsub.v1.Publisher/UpdateTopic
 func TestConsolePubSubDetachAndProtobufSchema(t *testing.T) {
 	h := New(t)
 	addr := consoleAddr(t, h)
@@ -330,5 +428,44 @@ func TestConsolePubSubDetachAndProtobufSchema(t *testing.T) {
 	s, err := sc.GetSchema(ctx, &pubsubpb.GetSchemaRequest{Name: name, View: pubsubpb.SchemaView_FULL})
 	if err != nil || s.GetType() != pubsubpb.Schema_PROTOCOL_BUFFER {
 		t.Errorf("the console's schema reads %v, %v", s, err)
+	}
+
+	edit := func(service, path string, v map[string]string) (int, string) {
+		body, _ := json.Marshal(map[string]any{"Path": []string{path}, "Values": v})
+		return consoleDo(t, addr, http.MethodPatch, "/api/resources/"+service+"?project="+project, string(body))
+	}
+	// Edit subscription on the detached subscription's page (#1446).
+	_, _, values := consolePubSubEditForm(t, addr, "pubsub-subscriptions", project, sn, "Edit subscription")
+	values["ackDeadline"] = "42"
+	values["labels"] = `{"env":"dev"}`
+	if code, out := edit("pubsub-subscriptions", sn, values); code != http.StatusOK {
+		t.Fatalf("console Edit subscription of the detached subscription = %d: %s", code, out)
+	}
+	if got, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sn}); err != nil ||
+		got.GetAckDeadlineSeconds() != 42 || got.GetLabels()["env"] != "dev" || !got.GetDetached() {
+		t.Errorf("after the console's edit, GetSubscription = %v, %v; want ack deadline 42, env=dev, detached", got, err)
+	}
+	// Edit topic binds a topic to the PROTOCOL_BUFFER schema, BINARY, then
+	// clears it (#1446).
+	_, _, values = consolePubSubEditForm(t, addr, "pubsub", project, tn, "Edit topic")
+	values["schema"] = "console-proto"
+	values["schemaEncoding"] = "BINARY"
+	if code, out := edit("pubsub", tn, values); code != http.StatusOK {
+		t.Fatalf("console Edit topic to the schema = %d: %s", code, out)
+	}
+	if got, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: tn}); err != nil ||
+		got.GetSchemaSettings().GetSchema() != name || got.GetSchemaSettings().GetEncoding() != pubsubpb.Encoding_BINARY {
+		t.Errorf("after the console's Edit topic, GetTopic = %v, %v; want bound BINARY to %s", got, err, name)
+	}
+	_, _, values = consolePubSubEditForm(t, addr, "pubsub", project, tn, "Edit topic")
+	if values["schema"] != name || values["schemaEncoding"] != "BINARY" {
+		t.Errorf("Edit topic is prefilled %v; want the binding", values)
+	}
+	values["schema"] = ""
+	if code, out := edit("pubsub", tn, values); code != http.StatusOK {
+		t.Fatalf("console Edit topic clearing the schema = %d: %s", code, out)
+	}
+	if got, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: tn}); err != nil || got.GetSchemaSettings() != nil {
+		t.Errorf("after the console cleared the schema, GetTopic = %v, %v", got, err)
 	}
 }

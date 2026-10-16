@@ -897,8 +897,9 @@ are not taken.
   (#1243), minted locally at each attempt as for a job created through the API. Bucket `labels`, `location` and `storageClass` are seeded and kept (#503).
 - **Pub/Sub schemas** (#890). `pubsub.schemas` declares schemas, each a `name`
   (`projects/{project}/schemas/{schema}`), a `type` and a `definition`, created with one revision
-  before any topic. The type must be `AVRO`: the emulator refuses Protocol Buffer schemas as
-  `UNIMPLEMENTED`, so `PROTOCOL_BUFFER` is refused by name. Every definition is checked with the
+  before any topic. The type is `AVRO` or, since #1446, `PROTOCOL_BUFFER`: the emulator refuses
+  Protocol Buffer schemas, and CloudBurrow's Pub/Sub front, which the seed goes through, serves
+  them. Every definition is checked with the
   API's `ValidateSchema` before anything is seeded, and one it refuses is a 400 with its message. A
   topic's `schemaSettings` names a schema, from the same seed or one that exists, and an `encoding`,
   `JSON` or `BINARY`, both required; the emulator then refuses a message that does not conform.
