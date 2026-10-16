@@ -24,49 +24,82 @@ import (
 // makes it with no precision or scale (scratchSchema), so the rows are
 // rounded once, by the table's own triggers, with its own modes.
 
-// decimalOverflow is the errors of the top-level parameterized NUMERIC and
-// BIGNUMERIC values of obj, a row checkRow passed, that are out of range
-// once rounded; tableMode is the table's defaultRoundingMode.
+// decimalOverflow is the errors of the parameterized NUMERIC and BIGNUMERIC
+// values of obj, a row checkRow passed, that are out of range once
+// rounded; tableMode is the table's defaultRoundingMode. A STRUCT's fields
+// and an ARRAY's elements, at any depth, are checked as a top-level
+// column's value is (#1409): the engine rounds them too (bigquery-emulator
+// patch 0021). A nested value's location is its field's path, a.b
+// (UNVERIFIED).
 func decimalOverflow(fields []field, obj map[string]any, tableMode string) []rowError {
 	var errs []rowError
 	for k, v := range obj {
-		f, ok := fieldNamed(fields, k)
-		if !ok || v == nil || f.Precision == "" || strings.EqualFold(f.Mode, "REPEATED") {
-			continue
-		}
-		typ := strings.ToUpper(f.Type)
-		if alias, ok := typeAliases[typ]; ok {
-			typ = alias
-		}
-		if typ != "NUMERIC" && typ != "BIGNUMERIC" {
-			continue
-		}
-		precision, err := strconv.ParseInt(string(f.Precision), 10, 64)
-		if err != nil {
-			continue
-		}
-		var scale int64
-		if f.Scale != "" {
-			if scale, err = strconv.ParseInt(string(f.Scale), 10, 64); err != nil {
-				continue
-			}
-		}
-		text := strings.TrimSpace(fmt.Sprint(v))
-		r, ok := new(big.Rat).SetString(text)
-		if !ok {
-			continue
-		}
-		mode := f.RoundingMode
-		if mode == "" || mode == "ROUNDING_MODE_UNSPECIFIED" {
-			mode = tableMode
-		}
-		if !roundedFits(roundDecimal(r, scale, mode), precision, scale) {
-			errs = append(errs, rowError{Reason: "invalid", Location: k,
-				Message: fmt.Sprintf("OUT_OF_RANGE: Value %s is out of range for column %s of type %s(%d, %d)",
-					text, f.Name, typ, precision, scale)})
+		if f, ok := fieldNamed(fields, k); ok {
+			errs = append(errs, decimalOverflowIn(f, v, f.Name, tableMode)...)
 		}
 	}
 	return errs
+}
+
+// decimalOverflowIn is decimalOverflow of v, a value of f, at path.
+func decimalOverflowIn(f field, v any, path, tableMode string) []rowError {
+	if v == nil {
+		return nil
+	}
+	if strings.EqualFold(f.Mode, "REPEATED") {
+		list, _ := v.([]any)
+		elem := f
+		elem.Mode = "NULLABLE"
+		var errs []rowError
+		for _, e := range list {
+			if errs = append(errs, decimalOverflowIn(elem, e, path, tableMode)...); len(errs) > 0 {
+				return errs
+			}
+		}
+		return nil
+	}
+	typ := strings.ToUpper(f.Type)
+	if alias, ok := typeAliases[typ]; ok {
+		typ = alias
+	}
+	if typ == "RECORD" || typ == "STRUCT" {
+		m, _ := v.(map[string]any)
+		var errs []rowError
+		for k, sv := range m {
+			if sub, ok := fieldNamed(f.Fields, k); ok {
+				errs = append(errs, decimalOverflowIn(sub, sv, path+"."+sub.Name, tableMode)...)
+			}
+		}
+		return errs
+	}
+	if f.Precision == "" || typ != "NUMERIC" && typ != "BIGNUMERIC" {
+		return nil
+	}
+	precision, err := strconv.ParseInt(string(f.Precision), 10, 64)
+	if err != nil {
+		return nil
+	}
+	var scale int64
+	if f.Scale != "" {
+		if scale, err = strconv.ParseInt(string(f.Scale), 10, 64); err != nil {
+			return nil
+		}
+	}
+	text := strings.TrimSpace(fmt.Sprint(v))
+	r, ok := new(big.Rat).SetString(text)
+	if !ok {
+		return nil
+	}
+	mode := f.RoundingMode
+	if mode == "" || mode == "ROUNDING_MODE_UNSPECIFIED" {
+		mode = tableMode
+	}
+	if roundedFits(roundDecimal(r, scale, mode), precision, scale) {
+		return nil
+	}
+	return []rowError{{Reason: "invalid", Location: path,
+		Message: fmt.Sprintf("OUT_OF_RANGE: Value %s is out of range for column %s of type %s(%d, %d)",
+			text, path, typ, precision, scale)}}
 }
 
 // roundDecimal rounds r to scale digits after the point: halves to even
@@ -96,19 +129,27 @@ func roundedFits(r *big.Rat, precision, scale int64) bool {
 }
 
 // scratchSchema is fields with no precision, scale or roundingMode on a
-// top-level NUMERIC or BIGNUMERIC column, for a scratch table the rows
-// pass through on their way to the table, which rounds them (above).
+// NUMERIC or BIGNUMERIC field, at any depth (#1409), for a scratch table
+// the rows pass through on their way to the table, which rounds them
+// (above).
 func scratchSchema(fields []field) tableSchema {
+	return tableSchema{Fields: unparameterized(fields)}
+}
+
+func unparameterized(fields []field) []field {
 	out := make([]field, len(fields))
 	for i, f := range fields {
 		typ := strings.ToUpper(f.Type)
 		if alias, ok := typeAliases[typ]; ok {
 			typ = alias
 		}
-		if typ == "NUMERIC" || typ == "BIGNUMERIC" {
+		switch typ {
+		case "NUMERIC", "BIGNUMERIC":
 			f.Precision, f.Scale, f.RoundingMode = "", "", ""
+		case "RECORD", "STRUCT":
+			f.Fields = unparameterized(f.Fields)
 		}
 		out[i] = f
 	}
-	return tableSchema{Fields: out}
+	return out
 }

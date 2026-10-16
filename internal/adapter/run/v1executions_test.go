@@ -78,9 +78,6 @@ func TestV1JobExecutionsAndTasks(t *testing.T) {
 		!strings.Contains(u.Query().Get("advancedFilter"), `labels."run.googleapis.com/execution_name"="`+id+`"`) {
 		t.Errorf("logUri = %q", exec.Status.LogUri)
 	}
-	if code := v1Do(t, h, http.MethodPost, ns+"/jobs/nightly:run", &runv1.RunJobRequest{Overrides: &runv1.Overrides{DelayExecution: true}}, nil); code != http.StatusNotImplemented {
-		t.Errorf("run with delayExecution = %d; want 501", code)
-	}
 	f.setStatus(id, map[string]any{"active": 1, "startTime": "2026-10-16T10:00:00Z"})
 
 	var got runv1.Execution

@@ -35,8 +35,10 @@ import (
 // delete), routes and configurations (list, get); and, in v1global.go,
 // projects.locations.list and the services' IAM methods (#1349), and, in
 // v1jobs.go, jobs (list, get, create, delete), and in v1domains.go domain
-// mappings and authorized domains. Everything else under /apis/ and /v1/
-// (replaceJob, run, executions, tasks) answers 501 UNIMPLEMENTED.
+// mappings and authorized domains; in v1executions.go replaceJob, run,
+// executions and tasks (#1379); and in v1selector.go the list calls'
+// labelSelector and fieldSelector (#1420). Everything else under /apis/
+// and /v1/ answers 501 UNIMPLEMENTED.
 
 // v1LocationLabel is the label Cloud Run v1 reports a resource's region in.
 const v1LocationLabel = "cloud.googleapis.com/location"
@@ -236,40 +238,6 @@ func v1Page(r *http.Request, scope string, names []string) ([]string, string, er
 	return page, next, nil
 }
 
-// labelSelector is v1's labelSelector query parameter: comma-separated
-// key=value (or key==value) equalities, spaces allowed around the sign, which
-// is what gcloud sends. Set-based
-// and inequality selectors are refused rather than ignored.
-func labelSelector(r *http.Request) (map[string]string, error) {
-	sel := r.URL.Query().Get("labelSelector")
-	out := map[string]string{}
-	if sel == "" {
-		return out, nil
-	}
-	for _, term := range strings.Split(sel, ",") {
-		// gcloud sends "key = value".
-		k, v, ok := strings.Cut(term, "=")
-		k, v = strings.TrimSpace(k), strings.TrimSpace(strings.TrimPrefix(v, "="))
-		if !ok || k == "" || strings.HasSuffix(k, "!") || strings.ContainsAny(k+v, " ()!") {
-			return nil, apierror.Unimplemented("labelSelector %q: only key=value equalities are supported", sel)
-		}
-		out[k] = v
-	}
-	if r.URL.Query().Get("fieldSelector") != "" {
-		return nil, apierror.Unimplemented("fieldSelector is not supported")
-	}
-	return out, nil
-}
-
-func selected(labels, sel map[string]string) bool {
-	for k, v := range sel {
-		if labels[k] != v {
-			return false
-		}
-	}
-	return true
-}
-
 func v1Write(w http.ResponseWriter, err error, body any) {
 	if err != nil {
 		rest.WriteError(w, err)
@@ -294,7 +262,7 @@ func (s *Server) v1ListServices(w http.ResponseWriter, r *http.Request) {
 	var names []string
 	for _, svc := range svcs {
 		v := toV1Service(svc, raw[svc.GetName()])
-		if selected(v.Metadata.Labels, sel) {
+		if selected(v.Metadata, sel) {
 			byName[svc.GetName()] = v
 			names = append(names, svc.GetName())
 		}
@@ -500,7 +468,7 @@ func (s *Server) v1ListRevisions(w http.ResponseWriter, r *http.Request) {
 	byKey := map[string]*runv1.Revision{}
 	var keys []string
 	for _, rev := range revs {
-		if !selected(rev.Metadata.Labels, sel) {
+		if !selected(rev.Metadata, sel) {
 			continue
 		}
 		key := rev.Metadata.Name
@@ -622,7 +590,8 @@ func (s *Server) v1ListOwned(w http.ResponseWriter, r *http.Request, kind string
 	byName := map[string]any{}
 	var names []string
 	for _, svc := range svcs {
-		if !selected(v1Labels(svc), sel) {
+		id, _ := ServiceID(svc.GetName())
+		if !selected(&runv1.ObjectMeta{Name: id, Namespace: sc.project, Labels: v1Labels(svc)}, sel) {
 			continue
 		}
 		byName[svc.GetName()] = conv(svc, raw[svc.GetName()])
