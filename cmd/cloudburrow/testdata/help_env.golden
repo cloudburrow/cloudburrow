@@ -60,6 +60,8 @@ Flags:
     	namespace for CloudBurrow-managed workloads
   -node-image string
     	pinned kind node image, which fixes the Kubernetes version
+  -port-backupdr int
+    	Backup and DR Service API host port (0 = OS-assigned; default 9024)
   -port-base int
     	move every fixed default port so the layout starts here (control here, ingress +80, console +90); explicit --port-* flags still win (0 = the defaults, from 9000)
   -port-bigquery int
@@ -123,7 +125,7 @@ Flags:
   -seed-file string
     	seed document (the /admin/seed body) applied when up starts
   -services string
-    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms)
+    	comma-separated services to start (default storage,pubsub,tasks,run,secretmanager; opt-in: firestore,datastore,bigtable,spanner,cloudsql,bigquery,memorystore,cloudsql-mysql,scheduler,logging,kms,backupdr)
   -shutdown-timeout duration
     	bounded time to drain on shutdown
   -state-dir string

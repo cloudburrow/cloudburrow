@@ -54,6 +54,11 @@ type BackupRun struct {
 	StartTime       string `json:"startTime,omitempty"`
 	EndTime         string `json:"endTime,omitempty"`
 	WindowStartTime string `json:"windowStartTime"`
+	// BackupDR marks a backup the Backup and DR Service took for a backup
+	// plan association (#1433): it is that service's, so backupRuns.list
+	// does not show it and deleting the instance does not delete it, as a
+	// Backup and DR backup outlives its instance in its vault.
+	BackupDR bool `json:"backupdr,omitempty"`
 }
 
 type backupStore struct {
@@ -243,7 +248,7 @@ func (s *Server) backupRuns(r *http.Request, base, project string, e Engine, res
 		}
 		b.mu.Lock()
 		run := b.runs[rest[0]]
-		if run != nil && (run.Project != project || run.Instance != e.Instance()) {
+		if run != nil && (run.Project != project || run.Instance != e.Instance() || run.BackupDR) {
 			run = nil
 		}
 		var cp BackupRun
@@ -283,6 +288,9 @@ func (s *Server) listBackupRuns(r *http.Request, base, project, instance string)
 	runs := b.sortedLocked(project, instance)
 	items := []any{}
 	for _, run := range runs {
+		if run.BackupDR {
+			continue
+		}
 		items = append(items, backupRunJSON(base, run))
 	}
 	b.mu.Unlock()
@@ -306,16 +314,24 @@ func (s *Server) listBackupRuns(r *http.Request, base, project, instance string)
 // takeBackup records a backup run and takes it in the background; the
 // operation it returns finishes when the dump does.
 func (s *Server) takeBackup(base, project string, e Engine, typ, description string) (map[string]any, error) {
+	op, _, err := s.takeBackupRun(base, project, e, typ, description, false)
+	return op, err
+}
+
+// takeBackupRun is takeBackup, returning the run's ID and, with backupDR,
+// marking it the Backup and DR Service's.
+func (s *Server) takeBackupRun(base, project string, e Engine, typ, description string, backupDR bool) (map[string]any, string, error) {
 	b := s.backups
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	b.mu.Lock()
 	run := &BackupRun{ID: b.newIDLocked(), Project: project, Instance: e.Instance(), DatabaseVersion: e.DatabaseVersion(),
-		Type: typ, Description: description, Status: "RUNNING", EnqueuedTime: now, StartTime: now, WindowStartTime: now}
+		Type: typ, Description: description, Status: "RUNNING", EnqueuedTime: now, StartTime: now, WindowStartTime: now,
+		BackupDR: backupDR}
 	b.runs[run.ID] = run
 	err := b.saveLocked()
 	b.mu.Unlock()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	op := s.pending(base, project, e.Instance(), "BACKUP_VOLUME")
 	id := op["name"].(string)
@@ -343,7 +359,7 @@ func (s *Server) takeBackup(base, project string, e Engine, typ, description str
 		}
 		s.finish(id, err)
 	}()
-	return op, nil
+	return op, run.ID, nil
 }
 
 func (s *Server) dump(t DumpTarget, id string) error {
@@ -401,6 +417,9 @@ func (s *Server) removeInstanceBackups(project, instance string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, r := range b.sortedLocked(project, instance) {
+		if r.BackupDR {
+			continue
+		}
 		delete(b.runs, r.ID)
 		_ = os.RemoveAll(b.runDir(r.ID))
 	}
@@ -440,28 +459,41 @@ func (s *Server) restoreBackup(r *http.Request, base, project string, e Engine) 
 	if err := decode(r, &body); err != nil {
 		return nil, err
 	}
-	if body.Backup != "" || body.BackupdrBackup != "" {
+	if body.Backup != "" {
 		return nil, unimplemented("restoring a backup by its Backups resource name", "the project-level Backups API is not served; restore a backup run by restoreBackupContext.backupRunId")
 	}
-	if body.Ctx == nil || body.Ctx.BackupRunID == "" {
-		return nil, Errorf(http.StatusBadRequest, "Invalid request: restoreBackupContext.backupRunId is required.")
-	}
-	srcProject, srcInstance := project, e.Instance()
-	if body.Ctx.Project != "" {
-		srcProject = body.Ctx.Project
-	}
-	if body.Ctx.InstanceID != "" {
-		srcInstance = body.Ctx.InstanceID
-	}
-	b.mu.Lock()
-	run := b.runs[body.Ctx.BackupRunID.String()]
 	var cp BackupRun
-	if run != nil {
-		cp = *run
-	}
-	b.mu.Unlock()
-	if run == nil || cp.Project != srcProject || cp.Instance != srcInstance {
-		return nil, Errorf(http.StatusNotFound, "The backup run %s does not exist for instance %s.", body.Ctx.BackupRunID, srcInstance)
+	if body.BackupdrBackup != "" {
+		// A Backup and DR backup (#1433): the vault's backup names the
+		// backup run the Backup and DR Service took.
+		if body.Ctx != nil {
+			return nil, Errorf(http.StatusBadRequest, "Invalid request: give restoreBackupContext or backupdrBackup, not both.")
+		}
+		run, err := s.backupDRRun(body.BackupdrBackup)
+		if err != nil {
+			return nil, err
+		}
+		cp = run
+	} else {
+		if body.Ctx == nil || body.Ctx.BackupRunID == "" {
+			return nil, Errorf(http.StatusBadRequest, "Invalid request: restoreBackupContext.backupRunId is required.")
+		}
+		srcProject, srcInstance := project, e.Instance()
+		if body.Ctx.Project != "" {
+			srcProject = body.Ctx.Project
+		}
+		if body.Ctx.InstanceID != "" {
+			srcInstance = body.Ctx.InstanceID
+		}
+		b.mu.Lock()
+		run := b.runs[body.Ctx.BackupRunID.String()]
+		if run != nil {
+			cp = *run
+		}
+		b.mu.Unlock()
+		if run == nil || cp.Project != srcProject || cp.Instance != srcInstance || cp.BackupDR {
+			return nil, Errorf(http.StatusNotFound, "The backup run %s does not exist for instance %s.", body.Ctx.BackupRunID, srcInstance)
+		}
 	}
 	if cp.Status != "SUCCESSFUL" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: the backup run %s is %s, not SUCCESSFUL.", cp.ID, cp.Status)

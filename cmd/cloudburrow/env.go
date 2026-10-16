@@ -436,6 +436,16 @@ func envVars(cfg config.Config, project, adcPath string) []envVar {
 		}
 	}
 
+	// The Backup and DR Service (#1433): gcloud backup-dr, and Terraform's
+	// google_backup_dr_* through backup_dr_custom_endpoint.
+	if backupDREnabled(cfg) && cfg.Endpoints.BackupDR != 0 {
+		bd := addr(cfg.Endpoints.BackupDR)
+		vars = append(vars,
+			envVar{"CLOUDSDK_API_ENDPOINT_OVERRIDES_BACKUPDR", "http://" + bd + "/", "read by gcloud; gcloud backup-dr vaults, plans, associations, data sources and backups"},
+			envVar{cliEndpointVar("backupdr"), bd,
+				"the Backup and DR Service API v1, REST, plaintext; read by no client library: pass http://" + bd + "/ to option.WithEndpoint"})
+	}
+
 	// Service Usage (#1352): gcloud services, and Terraform's
 	// google_project_service through service_usage_custom_endpoint.
 	if cfg.Endpoints.ServiceUsage > 0 {
@@ -566,6 +576,7 @@ func withLivePorts(cfg config.Config, live map[string]string) config.Config {
 		// started with --port-base exported the default 9021.
 		"memorystore-admin": &e.MemorystoreAdmin,
 		"serviceusage":      &e.ServiceUsage,
+		"backupdr":          &e.BackupDR,
 		// The ingress gateway, which kind publishes where `up` configured
 		// it: without this, `env --name x` for an instance started with
 		// --port-base exported the default ingress port (#863).

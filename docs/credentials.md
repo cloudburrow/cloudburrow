@@ -273,7 +273,7 @@ eval "$(cloudburrow gcloud-teardown)"  # unset CLOUDSDK_ACTIVE_CONFIG_NAME
 gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It sets
 `core/project`, turns on `auth/disable_credentials` and names the ADC fixture. It writes
 `api_endpoint_overrides` **only** for the services whose gcloud use is Verified below.
-Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `cloudresourcemanager`, `serviceusage`, `sql` and `redis`
+Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `cloudresourcemanager`, `serviceusage`, `sql`, `redis` and `backupdr` (the Backup and DR Service, with `backupdr` and a Cloud SQL service, #1433)
 (written whatever `--services` selects, since Resource Manager and Service Usage are always served; `sql` with either Cloud SQL service; `redis`, the Memorystore admin API, with `memorystore`). `run` (#1293) is
 `http://run.localhost:<port>/` on a loopback bind: gcloud run calls `{region}-{host}` for a
 command given `--region`, and `us-central1-run.localhost` is still loopback. `cloudresourcemanager`
