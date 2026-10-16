@@ -61,7 +61,8 @@ func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, nex
 		}
 		opts.maxBad = n
 	}
-	read := storedValues(fields) || stamps || opts.unknown || opts.maxBad > 0 && len(fields) > 0 // #1457: badJSONValue
+	read := storedValues(fields) || stamps || opts.unknown || opts.maxBad > 0 && len(fields) > 0 || // #1457: badJSONValue
+		hasJSONColumn(fields) // #1457: jsonColumnValues
 	if !read && (len(l.SourceURIs) == 0 || f.storage == nil && !severalObjects(l.SourceURIs)) {
 		// #1079: a load from Cloud Storage is read here, as one.
 		return r, next, nil, true
@@ -263,6 +264,9 @@ func jsonRecord(w io.Writer, text []byte, o jsonReadOptions, st *jsonState, loc,
 	}
 	changed, p := fixValues(o.fields, obj, "a load's record, "+where, "")
 	changed = changed || boolsChanged
+	if jsonColumnValues(o.fields, obj) { // #1457
+		changed = true
+	}
 	if p != nil {
 		return p.loadError()
 	}
@@ -391,4 +395,82 @@ func badJSONValue(fields []field, obj map[string]any) (string, bool) {
 		}
 	}
 	return "", changed
+}
+
+// hasJSONColumn reports whether fields hold a JSON column, at any depth.
+func hasJSONColumn(fields []field) bool {
+	for _, f := range fields {
+		switch strings.ToUpper(f.Type) {
+		case "JSON":
+			return true
+		case "RECORD", "STRUCT":
+			if hasJSONColumn(f.Fields) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// jsonColumnValues writes each value of a JSON column in obj, at any
+// depth, as its JSON text, and reports whether it wrote one (#1457). A
+// JSON column of a NEWLINE_DELIMITED_JSON load holds the field's value
+// whatever its type: in the JSON loading page's example, "address" is a
+// STRING, a STRUCT or an ARRAY, and "is loaded into a column with type
+// JSON that allows it to hold the mixed types". The emulator reads a JSON
+// column's value as JSON text, and failed a string that is not (measured:
+// "123 First Avenue", 400 "invalid character 'F' after top-level value").
+func jsonColumnValues(fields []field, obj map[string]any) bool {
+	changed := false
+	for k, v := range obj {
+		if v == nil {
+			continue
+		}
+		var f *field
+		for i := range fields {
+			if strings.EqualFold(fields[i].Name, k) {
+				f = &fields[i]
+				break
+			}
+		}
+		if f == nil {
+			continue
+		}
+		repeated := strings.EqualFold(f.Mode, "REPEATED")
+		switch strings.ToUpper(f.Type) {
+		case "JSON":
+			text := func(e any) any {
+				if e == nil {
+					return nil
+				}
+				b, err := json.Marshal(e)
+				if err != nil {
+					return e
+				}
+				return string(b)
+			}
+			if arr, ok := v.([]any); ok && repeated {
+				for i, e := range arr {
+					arr[i] = text(e)
+				}
+			} else {
+				obj[k] = text(v)
+			}
+			changed = true
+		case "RECORD", "STRUCT":
+			if !hasJSONColumn(f.Fields) {
+				continue
+			}
+			recs := []any{v}
+			if arr, ok := v.([]any); ok && repeated {
+				recs = arr
+			}
+			for _, r := range recs {
+				if m, ok := r.(map[string]any); ok && jsonColumnValues(f.Fields, m) {
+					changed = true
+				}
+			}
+		}
+	}
+	return changed
 }

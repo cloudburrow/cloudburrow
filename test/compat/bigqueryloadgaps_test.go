@@ -233,3 +233,30 @@ func TestBigQueryLoadBadValuesUnderMaxBadRecords(t *testing.T) {
 		t.Error("a bad value without maxBadRecords loaded")
 	}
 }
+
+// TestBigQueryJSONLoadMixedTypesIntoJSONColumn (#1457): a JSON column
+// holds a field whose values mix types, as the JSON loading page's
+// example loads "address" as a STRING, a STRUCT or an ARRAY ("The address
+// field is loaded into a column with type JSON that allows it to hold the
+// mixed types").
+// covers: bigquery.jobs.insert, bigquery.jobs.query
+func TestBigQueryJSONLoadMixedTypesIntoJSONColumn(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	src := bigquery.NewReaderSource(strings.NewReader(`{"id":"1","address":"123 First Avenue"}` + "\n" +
+		`{"id":"2","address":{"city":"New York","zip":"33333"}}` + "\n" +
+		`{"id":"3","address":[{"city":"New York"},"321 Main Street"]}` + "\n" + `{"id":"4","address":7}` + "\n"))
+	src.SourceFormat = bigquery.JSON
+	src.Schema = bigquery.Schema{{Name: "id", Type: bigquery.StringFieldType}, {Name: "address", Type: bigquery.JSONFieldType}}
+	if err := runLoad(ctx, ds.Table("mixed").LoaderFrom(src)); err != nil {
+		t.Fatal(err)
+	}
+	q := "SELECT id, JSON_TYPE(address), TO_JSON_STRING(address) FROM `" + ds.DatasetID + ".mixed` ORDER BY id"
+	want := `[[1 string "123 First Avenue"] [2 object {"city":"New York","zip":"33333"}] ` +
+		`[3 array [{"city":"New York"},"321 Main Street"]] [4 number 7]]`
+	if got := fmt.Sprint(rows(t, ctx, c, q)); got != want {
+		t.Errorf("rows %s, want %s", got, want)
+	}
+}

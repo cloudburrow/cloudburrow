@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -74,5 +75,20 @@ func TestJSONLoadBadValues(t *testing.T) {
 	want := `{"b":true,"d":"2024-01-02","i":1,"s":["a"]}` + "\n" + `{"b":false,"i":6}` + "\n"
 	if len(emu.data) != 1 || emu.data[0] != want {
 		t.Errorf("sent %q, want %q", emu.data, want)
+	}
+}
+
+// TestJSONColumnValues (#1457): a JSON column's value, of any JSON type,
+// is sent as its JSON text, in a RECORD and a REPEATED column too.
+func TestJSONColumnValues(t *testing.T) {
+	fields := []field{{Name: "j", Type: "JSON"}, {Name: "js", Type: "JSON", Mode: "REPEATED"},
+		{Name: "r", Type: "RECORD", Fields: []field{{Name: "j", Type: "JSON"}}}, {Name: "s", Type: "STRING"}}
+	obj := map[string]any{"j": "a b", "js": []any{map[string]any{"x": 1.0}, nil}, "r": map[string]any{"J": []any{"x"}}, "s": "t"}
+	if !jsonColumnValues(fields, obj) {
+		t.Fatal("nothing written")
+	}
+	got, _ := json.Marshal(obj)
+	if want := `{"j":"\"a b\"","js":["{\"x\":1}",null],"r":{"J":"[\"x\"]"},"s":"t"}`; string(got) != want {
+		t.Errorf("got %s, want %s", got, want)
 	}
 }
