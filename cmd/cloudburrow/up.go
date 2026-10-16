@@ -228,6 +228,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if loggingSvc != nil {
 		// CopyLogEntries writes to the instance's Cloud Storage (#1394).
 		loggingSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		// Sinks deliver to Pub/Sub and BigQuery too (#1404).
+		loggingSvc.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
+		loggingSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
 		// A queue's sampled dispatch attempts go to the instance's Cloud
 		// Logging through its own WriteLogEntries (#1256), so exclusions
 		// apply to them as to any write.
@@ -240,6 +243,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if secretsSvc != nil {
 		runSvc.useSecrets(lazySecretResolver{svc: secretsSvc})
 	}
+	// A Cloud Build build's secrets (#1407).
+	runSvc.useBuildSecrets(secretsSvc, kmsSvc)
 
 	// Admin routes must be mounted before the control server starts: it builds
 	// its mux at Start, so anything added afterwards is never routed.
@@ -527,6 +532,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// that same service (#799). A nil deleter offers none.
 		if d := loggingSvc.logDeleter(faults); d != nil {
 			consoleSrv.SetLogDeleter(d)
+		}
+		// And the Explorer reads through a log view (#1410).
+		if v := loggingSvc.logViewReader(faults); v != nil {
+			consoleSrv.SetLogViewReader(v)
 		}
 	}
 

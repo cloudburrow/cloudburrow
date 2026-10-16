@@ -18,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/hostrelay"
 	"github.com/cloudburrow/cloudburrow/internal/images"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
+	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
@@ -241,6 +242,15 @@ func (h *clusterHost) Start(ctx context.Context) error {
 			clusterIP = strings.TrimSpace(out)
 		}
 	}
+	// Artifact Registry's Docker registry (#1383) is served on the Run
+	// port; each node's containerd is pointed at it for every region's
+	// {region}-docker.pkg.dev, so a revision pulls a pushed image there and
+	// never from Google.
+	if p, ok := ports["run"]; ok {
+		if err := h.registryMirror(ctx, net.JoinHostPort(address, strconv.Itoa(p))); err != nil {
+			fmt.Fprintf(h.out, "  warning: Cloud Run cannot pull Artifact Registry images: %v\n", err)
+		}
+	}
 	mode := "host.docker.internal"
 	if relay {
 		mode = "a relay on the kind network gateway"
@@ -308,4 +318,34 @@ endpoints:
   - addresses: [%[4]q]
 ports:
 %[6]s`, ClusterHostService, namespace, instance, address, svc.String(), eps.String())
+}
+
+// registryMirrorHosts is the containerd hosts.toml that sends a pull from
+// one {region}-docker.pkg.dev to this instance's registry at addr: as its
+// server, so a failed pull never falls back to Google, and as a mirror, so
+// containerd names the registry it was asked for in the ns parameter.
+func registryMirrorHosts(addr string) string {
+	return fmt.Sprintf("server = \"http://%s\"\n\n[host.\"http://%s\"]\n  capabilities = [\"pull\", \"resolve\"]\n", addr, addr)
+}
+
+// registryMirror writes registryMirrorHosts into every node's
+// /etc/containerd/certs.d, the registry configuration directory containerd
+// reads on each pull, for every region Artifact Registry serves.
+func (h *clusterHost) registryMirror(ctx context.Context, addr string) error {
+	out, err := h.docker.Run(ctx, "kind", "get", "nodes", "--name", h.cfg.ClusterName())
+	if err != nil {
+		return err
+	}
+	var script strings.Builder
+	script.WriteString("set -e\n")
+	for _, r := range locations.Regions {
+		dir := "/etc/containerd/certs.d/" + r + "-docker.pkg.dev"
+		fmt.Fprintf(&script, "mkdir -p %s && printf '%%s' '%s' > %s/hosts.toml\n", dir, registryMirrorHosts(addr), dir)
+	}
+	for _, node := range strings.Fields(out) {
+		if _, err := h.docker.Run(ctx, "docker", "exec", node, "sh", "-c", script.String()); err != nil {
+			return fmt.Errorf("configure %s's registry mirror: %w", node, err)
+		}
+	}
+	return nil
 }

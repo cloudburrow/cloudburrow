@@ -10,8 +10,9 @@ package logging
 //     time series: Cloud Monitoring is not emulated, so nothing reads one.
 //     CountMatching counts the entries its filter matches over a window, for
 //     the console.
-//   - A sink stores its destination and filter. Only a log-bucket destination
-//     is delivered to (server.go routeOf, #1395); nothing else is.
+//   - A sink stores its destination and filter, and delivers: to a log bucket
+//     (server.go routeOf, #1395), and to Cloud Storage, Pub/Sub, BigQuery
+//     and another project (deliver.go, #1404).
 //   - An enabled exclusion is applied as Google applies a project exclusion to
 //     the _Default sink: a matching entry written after it is not stored, so it
 //     is never listed. Only the _Default bucket is modelled, so that is every
@@ -539,7 +540,8 @@ type configServer struct {
 }
 
 // checkDestination checks a sink destination against the forms the proto
-// documents. The destination is stored; nothing is delivered to it.
+// documents. Whether the destination exists is found at delivery
+// (deliver.go), as Google reports a missing one as a sink error.
 func checkDestination(d string) error {
 	parts := strings.Split(d, "/")
 	ok := false
@@ -662,13 +664,16 @@ func (s configServer) GetSink(_ context.Context, req *loggingpb.GetSinkRequest) 
 	return m.(*loggingpb.LogSink), nil
 }
 
-// stampSink fills a sink's output-only fields. writer_identity is left
-// empty: the service account Google assigns names the project number, which
-// this instance does not hold, and nothing is delivered under it.
-func (a *Admin) stampSink(sk *loggingpb.LogSink, old *loggingpb.LogSink) {
+// stampSink fills a sink's output-only fields. writer_identity is the
+// parent's Logging service agent (#1404), serviceAccount:service-{project}@
+// gcp-sa-logging.iam.gserviceaccount.com with the project ID where Google
+// has the project number (links.go serviceAccount), which logging_config.proto
+// documents for unique_writer_identity and for every non-project sink, so a
+// Terraform IAM grant has a member. Nothing is enforced on it (ADR-0004).
+func (a *Admin) stampSink(p parent, sk *loggingpb.LogSink, old *loggingpb.LogSink) {
 	now := timestamppb.New(a.now())
 	sk.CreateTime, sk.UpdateTime = now, now
-	sk.WriterIdentity = ""
+	sk.WriterIdentity = "serviceAccount:" + serviceAccount(p)
 	if old != nil {
 		sk.CreateTime = old.GetCreateTime()
 	}
@@ -700,7 +705,7 @@ func (s configServer) CreateSink(_ context.Context, req *loggingpb.CreateSinkReq
 	if _, err := s.a.get(kindSink, project, sk.GetName()); err == nil {
 		return nil, apierror.Wrap(apierror.AlreadyExists("sink %s already exists", kindSink.name(project, sk.GetName())))
 	}
-	s.a.stampSink(sk, nil)
+	s.a.stampSink(project, sk, nil)
 	if err := s.a.put(kindSink, project, sk.GetName(), sk); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -736,7 +741,7 @@ func (s configServer) UpdateSink(_ context.Context, req *loggingpb.UpdateSinkReq
 	if err := s.a.checkSink(project, sk); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	s.a.stampSink(sk, old)
+	s.a.stampSink(project, sk, old)
 	if err := s.a.put(kindSink, project, id, sk); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -918,7 +923,7 @@ func (a *Admin) ConfigServer() loggingpb.ConfigServiceV2Server { return configSe
 // MetricName is a metric's resource name.
 func MetricName(project, id string) string { return kindMetric.name(projectParent(project), id) }
 
-// sinkRoutes are p's enabled sinks whose destination is a log bucket;
+// sinkRoutes are p's enabled sinks, every destination;
 // children selects the include_children ones, for an entry below p.
 func (a *Admin) sinkRoutes(p parent, children bool) []sinkRoute {
 	page, _, err := a.list(kindSink, p, "", 1000)
@@ -931,15 +936,13 @@ func (a *Admin) sinkRoutes(p parent, children bool) []sinkRoute {
 		if sk.GetDisabled() || (children && !sk.GetIncludeChildren()) {
 			continue
 		}
-		bucket, ok := strings.CutPrefix(sk.GetDestination(), "logging.googleapis.com/")
-		if !ok || !strings.Contains(bucket, "/buckets/") {
-			continue
-		}
+		dest := strings.TrimPrefix(sk.GetDestination(), "logging.googleapis.com/")
 		match, err := compile(sk.GetFilter())
 		if err != nil {
 			continue
 		}
-		r := sinkRoute{match: match, bucket: bucket}
+		r := sinkRoute{match: match, sink: kindSink.name(p, sk.GetName()), parent: p, dest: dest,
+			partitioned: sk.GetBigqueryOptions().GetUsePartitionedTables()}
 		var ex []pred
 		for _, e := range sk.GetExclusions() {
 			if c, err := compile(e.GetFilter()); err == nil && !e.GetDisabled() {

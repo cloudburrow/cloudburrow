@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -132,19 +133,34 @@ func (s *Store) snapshot() []*loggingpb.LogEntry {
 	return out
 }
 
-// routedTo snapshots the entries sinks sent to bucket.
-func (s *Store) routedTo(bucket string) []*loggingpb.LogEntry {
+// inBucket is whether bucket holds e, as bucketEntries reads it.
+func (s *Store) inBucket(ref bucketRef, e *loggingpb.LogEntry) bool {
+	s.mu.Lock()
+	r := s.routed[e]
+	s.mu.Unlock()
+	if ref.location == "global" && ref.bucket == bucketDefault && (r == nil || !r.hidden) && entryParent(e) == ref.parent {
+		return true
+	}
+	return r != nil && slices.Contains(r.buckets, ref.name())
+}
+
+// bucketEntries snapshots what a log bucket holds: for a parent's global
+// _Default bucket, the parent's own entries an exclusion did not keep out,
+// and, in any bucket, the entries sinks routed to it (#1395, #1404).
+func (s *Store) bucketEntries(ref bucketRef) []*loggingpb.LogEntry {
+	name := ref.name()
+	own := ref.location == "global" && ref.bucket == bucketDefault
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []*loggingpb.LogEntry
 	for _, e := range s.entries {
-		if r := s.routed[e]; r != nil {
-			for _, b := range r.buckets {
-				if b == bucket {
-					out = append(out, e)
-					break
-				}
-			}
+		r := s.routed[e]
+		if own && (r == nil || !r.hidden) && entryParent(e) == ref.parent {
+			out = append(out, e)
+			continue
+		}
+		if r != nil && slices.Contains(r.buckets, name) {
+			out = append(out, e)
 		}
 	}
 	return out
@@ -157,13 +173,16 @@ type Server struct {
 	now   func() time.Time
 	// admin holds the project exclusions WriteLogEntries applies (#1226).
 	admin *Admin
+	// d delivers to sink destinations other than log buckets (deliver.go,
+	// #1404).
+	d deliverer
 }
 
 // UseAdmin makes the project exclusions admin stores apply to writes: an
 // entry an enabled exclusion matches is accepted and not stored, as Google's
 // _Default sink drops it.
 // It also gives CopyLogEntries (copy.go) the entries it copies.
-func (s *Server) UseAdmin(a *Admin) { s.admin = a; a.useEntries(s.store.snapshot) }
+func (s *Server) UseAdmin(a *Admin) { s.admin = a; a.useEntries(s.store.bucketEntries) }
 
 // CountMatching counts project's stored entries that filter matches with a
 // timestamp at or after since, for a log-based metric's console page. The
@@ -204,8 +223,9 @@ const (
 	// rejects entries more than a day in the future with INVALID_ARGUMENT.
 	MaxFutureSkew = 24 * time.Hour
 	// Retention is the _Default bucket's retention. Google accepts entries
-	// older than a bucket's retention but does not store them, so they are
-	// never listed; custom retention is not modelled.
+	// older than a bucket's retention but does not store them, so an entry
+	// older than this when written is not stored; a read applies each
+	// bucket's own retention_days (#1410).
 	Retention = 30 * 24 * time.Hour
 )
 
@@ -308,10 +328,11 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 	if n := proto.Size(req); n > MaxRequestBytes {
 		return nil, apierror.Wrap(apierror.InvalidArgument("the request is %d bytes, over the %d-byte (10 MB) limit", n, MaxRequestBytes))
 	}
-	now := s.now()
+	now := s.clock()
 	exclusions := map[parent]pred{}
 	sinks := map[parent][]sinkRoute{}
 	routes := map[*loggingpb.LogEntry]*route{}
+	var deliveries []delivery
 	out := make([]*loggingpb.LogEntry, 0, len(req.GetEntries()))
 	failed := map[int32]*spb.Status{}
 	var first *apierror.Error
@@ -332,7 +353,9 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 			continue
 		}
 		hidden := s.excluded(e, exclusions)
-		buckets := s.routeOf(e, sinks)
+		rt := s.routeOf(e, sinks, exclusions)
+		buckets := rt.buckets
+		deliveries = append(deliveries, rt.out...)
 		if hidden && len(buckets) == 0 {
 			continue
 		}
@@ -354,6 +377,7 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 		}
 		s.store.mu.Unlock()
 		s.store.append(out, routes)
+		s.deliver(deliveries)
 	}
 	if first != nil {
 		st, err := status.New(first.Code, fmt.Sprintf("%s (%d of %d entries not written)", first.Message, len(failed), len(req.GetEntries()))).
@@ -469,20 +493,13 @@ func (s *Server) ListLogEntries(_ context.Context, req *loggingpb.ListLogEntries
 
 	var found []*loggingpb.LogEntry
 	seen := map[*loggingpb.LogEntry]bool{}
-	add := func(e *loggingpb.LogEntry) {
-		if !seen[e] && match(e) {
-			seen[e] = true
-			found = append(found, e)
-		}
-	}
-	for _, e := range s.store.snapshot() {
-		if sources.parents[entryParent(e)] {
-			add(e)
-		}
-	}
-	for _, b := range sources.buckets {
-		for _, e := range s.store.routedTo(b) {
-			add(e)
+	now := s.clock()
+	for _, src := range sources {
+		for _, e := range s.store.bucketEntries(src.bucket) {
+			if !seen[e] && src.holds(e, now) && match(e) {
+				seen[e] = true
+				found = append(found, e)
+			}
 		}
 	}
 	less := func(a, b cursor) bool {
@@ -561,67 +578,109 @@ func (s *Server) DeleteLog(_ context.Context, req *loggingpb.DeleteLogRequest) (
 	return &emptypb.Empty{}, nil
 }
 
-// sources is what a ListLogEntries reads: the parents whose own entries it
-// lists, and the log buckets whose routed entries it lists too.
-type sources struct {
-	parents map[parent]bool
-	buckets []string
+// source is one log view a read covers (#1410): a bucket, the view's
+// filter, and the bucket's retention.
+type source struct {
+	bucket    bucketRef
+	view      pred // nil for _AllLogs or an unfiltered view
+	retention time.Duration
 }
 
-// sources resolves resource_names: parents, and bucket views. A parent's own
-// entries are those of its _Default bucket, so its _Default view is the
-// parent and what sinks routed there; another bucket's view is what sinks
-// routed to that bucket. A view's filter is not applied.
-func (s *Server) sources(names []string) (sources, error) {
-	out := sources{parents: map[parent]bool{}}
+// holds is whether e, one of the source bucket's entries, is in the view at
+// now: inside the bucket's retention and matched by the view's filter.
+// Google ages entries out of a bucket after its retention_days
+// (docs.cloud.google.com/logging/docs/buckets#retention).
+func (src source) holds(e *loggingpb.LogEntry, now time.Time) bool {
+	if src.retention > 0 && e.GetTimestamp().AsTime().Before(now.Add(-src.retention)) {
+		return false
+	}
+	return src.view == nil || src.view(e)
+}
+
+// sources resolves resource_names: a parent reads its global _Default
+// bucket (its own entries and what sinks routed there) through _AllLogs, and
+// {bucket}/views/{view} reads that bucket through the view. Each applies
+// the bucket's retention, and a view its filter (#1410); a view filter
+// outside what CloudBurrow evaluates (filter.go) is UNIMPLEMENTED, since
+// reading past it would show entries the view hides.
+func (s *Server) sources(names []string) ([]source, error) {
+	var out []source
 	for _, r := range names {
 		p, rest, err := cutParent("resource name", r)
 		if err != nil {
-			return out, err
+			return nil, err
 		}
 		if err := s.admin.check(p); err != nil {
-			return out, err
+			return nil, err
 		}
-		if rest == "" {
-			out.parents[p] = true
-			continue
+		ref, view := bucketRef{parent: p, location: "global", bucket: bucketDefault}, viewAllLogs
+		if rest != "" {
+			ref, view, err = parseView("resource name", r)
+			if err != nil {
+				return nil, apierror.InvalidArgument("resource name %q is neither a parent nor {parent}/locations/{location}/buckets/{bucket}/views/{view}", r)
+			}
 		}
-		ref, view, err := parseView("resource name", r)
-		if err != nil {
-			return out, apierror.InvalidArgument("resource name %q is neither a parent nor {parent}/locations/{location}/buckets/{bucket}/views/{view}", r)
-		}
+		src := source{bucket: ref, retention: defaultRetention * 24 * time.Hour}
 		if s.admin != nil {
 			s.admin.mu.Lock()
-			_, err := s.admin.getBucket(ref)
+			b, err := s.admin.getBucket(ref)
+			var v *loggingpb.LogView
 			if err == nil {
-				_, err = s.admin.getView(ref, view)
+				v, err = s.admin.getView(ref, view)
 			}
 			s.admin.mu.Unlock()
 			if err != nil {
-				return out, err
+				return nil, err
+			}
+			if d := b.GetRetentionDays(); d > 0 {
+				src.retention = time.Duration(d) * 24 * time.Hour
+			}
+			if f := strings.TrimSpace(v.GetFilter()); f != "" {
+				src.view, err = compileWith(f, s.admin.ancestors)
+				if err != nil {
+					return nil, apierror.Unimplemented("view %s: its filter %q is not one CloudBurrow evaluates: %s", v.GetName(), f, apierror.From(err).Message)
+				}
 			}
 		}
-		if ref.location == "global" && ref.bucket == bucketDefault {
-			out.parents[ref.parent] = true
-		}
-		out.buckets = append(out.buckets, ref.name())
+		out = append(out, src)
 	}
 	return out, nil
 }
 
-// sinkRoute is one sink that can send an entry to a log bucket.
+// sinkRoute is one sink and where it sends what it matches.
 type sinkRoute struct {
 	match, excluded pred
-	bucket          string
+	sink            string // the sink's resource name
+	parent          parent
+	// dest is the sink's destination without logging.googleapis.com/ for a
+	// log bucket or a project, else as stored.
+	dest        string
+	partitioned bool
 }
 
-// routeOf is the log buckets the sinks of the entry's own parent, and the
-// include_children sinks of the folders and organization above it, send it
-// to. Only a destination that is a log bucket is delivered to; Cloud
-// Storage, BigQuery, Pub/Sub and project destinations receive nothing.
-func (s *Server) routeOf(e *loggingpb.LogEntry, cache map[parent][]sinkRoute) []string {
+func (r sinkRoute) isBucket() bool {
+	return strings.Contains(r.dest, "/buckets/") && !strings.Contains(r.dest, ".googleapis.com/")
+}
+func (r sinkRoute) project() string { p, _ := strings.CutPrefix(r.dest, "projects/"); return p }
+func (r sinkRoute) isProject() bool {
+	return strings.HasPrefix(r.dest, "projects/") && !strings.Contains(r.project(), "/")
+}
+
+// routing is where one entry goes: log buckets, and other destinations.
+type routing struct {
+	buckets []string
+	out     []delivery
+}
+
+// routeOf is where the sinks of the entry's own parent, and the
+// include_children sinks of the folders and organization above it, send
+// it: log buckets, which store it, and the other destinations deliver.go
+// delivers to. A project destination's own _Default bucket and sinks take
+// it, once (rerouted).
+func (s *Server) routeOf(e *loggingpb.LogEntry, cache map[parent][]sinkRoute, exclusions map[parent]pred) routing {
+	var out routing
 	if s.admin == nil {
-		return nil
+		return out
 	}
 	own := entryParent(e)
 	var routes []sinkRoute
@@ -637,14 +696,49 @@ func (s *Server) routeOf(e *loggingpb.LogEntry, cache map[parent][]sinkRoute) []
 		}
 		routes = append(routes, rs...)
 	}
-	var out []string
 	seen := map[string]bool{}
+	s.follow(e, routes, cache, exclusions, &out, seen, true)
+	return out
+}
+
+func (s *Server) follow(e *loggingpb.LogEntry, routes []sinkRoute, cache map[parent][]sinkRoute, exclusions map[parent]pred,
+	out *routing, seen map[string]bool, reroute bool) {
 	for _, r := range routes {
-		if seen[r.bucket] || !r.match(e) || (r.excluded != nil && r.excluded(e)) {
+		if !r.match(e) || (r.excluded != nil && r.excluded(e)) {
 			continue
 		}
-		seen[r.bucket] = true
-		out = append(out, r.bucket)
+		switch {
+		case r.isBucket():
+			if !seen[r.dest] {
+				seen[r.dest] = true
+				out.buckets = append(out.buckets, r.dest)
+			}
+		case r.isProject():
+			if !reroute {
+				continue // routed to a project once already
+			}
+			dp := projectParent(r.project())
+			if seen["project|"+dp.id] {
+				continue
+			}
+			seen["project|"+dp.id] = true
+			ex, ok := exclusions[dp]
+			if !ok {
+				ex = s.admin.excluder(dp)
+				exclusions[dp] = ex
+			}
+			if def := (bucketRef{parent: dp, location: "global", bucket: bucketDefault}).name(); (ex == nil || !ex(e)) && !seen[def] && dp != entryParent(e) {
+				seen[def] = true
+				out.buckets = append(out.buckets, def)
+			}
+			rs, ok := cache[dp]
+			if !ok {
+				rs = s.admin.sinkRoutes(dp, false)
+				cache[dp] = rs
+			}
+			s.follow(e, rs, cache, exclusions, out, seen, false)
+		default:
+			out.out = append(out.out, delivery{sink: r.sink, parent: r.parent, dest: r.dest, partitioned: r.partitioned, e: e})
+		}
 	}
-	return out
 }

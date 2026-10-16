@@ -42,10 +42,29 @@ func newPostgresSnapshotter(cfg config.Config) *postgresSnapshotter {
 }
 
 // podExec runs a command in deployment's container through the instance's
-// kubeconfig.
+// kubeconfig. A created Cloud SQL instance's command runs in its primary's
+// server, the one its Service selects, which a high-availability
+// instance's failover changes (#1408).
 func podExec(cfg config.Config, deployment string) func(ctx context.Context, stdin io.Reader, stdout io.Writer, argv ...string) error {
+	return execIn(cfg, deployment, strings.HasPrefix(deployment, components.SQLInstancePrefix))
+}
+
+// nodeExec runs a command in deployment's own container: one server of a
+// high-availability instance, whichever its role.
+func nodeExec(cfg config.Config, deployment string) func(ctx context.Context, stdin io.Reader, stdout io.Writer, argv ...string) error {
+	return execIn(cfg, deployment, false)
+}
+
+func execIn(cfg config.Config, deployment string, primary bool) func(ctx context.Context, stdin io.Reader, stdout io.Writer, argv ...string) error {
 	kube := kubeRunner(cfg.KubeconfigPath(), cfg.Cluster.Namespace)
 	return func(ctx context.Context, stdin io.Reader, stdout io.Writer, argv ...string) error {
+		deployment := deployment
+		if primary {
+			if app, err := kube.Get(ctx, "service", deployment, "jsonpath={.spec.selector.app}"); err == nil &&
+				strings.TrimSpace(app) != "" {
+				deployment = strings.TrimSpace(app)
+			}
+		}
 		args := []string{"exec"}
 		if stdin != nil {
 			args = append(args, "-i")

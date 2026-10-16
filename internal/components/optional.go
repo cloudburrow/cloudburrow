@@ -214,10 +214,20 @@ func firestoreBackend(project string) Backend {
 
 // firestoreFront is the call front, serving the Firestore Admin API itself
 // (internal/firestoreadmin, #1331): the emulator serves the documents API
-// alone.
+// alone; and PartitionQuery, which it does not serve (internal/queryfront,
+// #1405).
 func firestoreFront() *Front {
 	f := callFront(FirestorePort, FirestoreEmulatorPort)
-	f.Args = append(f.Args, "--firestore-admin")
+	f.Args = append(f.Args, "--firestore-admin", "--queries", "firestore")
+	return f
+}
+
+// datastoreFront is the call front, answering RunAggregationQuery, which
+// the emulator does not serve, from its RunQuery (internal/queryfront,
+// #1405).
+func datastoreFront() *Front {
+	f := callFront(DatastorePort, DatastoreEmulatorPort)
+	f.Args = append(f.Args, "--queries", "datastore")
 	return f
 }
 
@@ -258,7 +268,7 @@ const DatastoreLockFile = "/data/datastore.lock"
 // measured).
 func datastoreBackend(project string, persistent bool) Backend {
 	b := Backend{Name: "datastore", Image: PubSubImage, Port: DatastorePort,
-		Front: callFront(DatastorePort, DatastoreEmulatorPort)}
+		Front: datastoreFront()}
 	if !persistent {
 		b.Command = []string{"gcloud", "beta", "emulators", "datastore", "start",
 			"--project=" + project,
@@ -719,4 +729,87 @@ func copyEnv(m map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// SQLStandbyPrefix starts the name of the Deployment, Service and volume
+// of the second server of a Cloud SQL high-availability instance (#1408):
+// "sqlha-" and the instance's name fit the 63 characters a Service's name
+// may have, as "sqlinst-" and it do.
+const SQLStandbyPrefix = "sqlha-"
+
+// SQLStandbyApplicationName is the application_name a high-availability
+// standby streams as, which its primary's synchronous_standby_names names,
+// so a read replica of the primary is never the synchronous standby.
+const SQLStandbyApplicationName = "cloudsqlstandby"
+
+// CloudSQLStandbyBackend makes b, one of the two PostgreSQL servers of a
+// high-availability instance, a standby built at epoch (#1408). When its
+// volume's recorded epoch differs, the server's data directory is
+// replaced by a pg_basebackup of the primary, host (the instance's
+// Service, which selects the primary), and the server starts as a hot
+// standby streaming from it as SQLStandbyApplicationName. When the epoch
+// is the recorded one, the data is kept: a standby resumes streaming, and
+// a standby promoted since starts as the primary it is now.
+func CloudSQLStandbyBackend(b Backend, host string, epoch int) Backend {
+	b.Env = copyEnv(b.Env)
+	b.Env["CLOUDSQL_PRIMARY_HOST"] = host
+	b.Env["CLOUDSQL_STANDBY_EPOCH"] = fmt.Sprint(epoch)
+	args := b.Args
+	if len(args) == 0 {
+		args = []string{"postgres"}
+	}
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	b.Command = []string{"sh", "-c", `set -e
+marker="$(dirname "$PGDATA")/cloudsql-standby-epoch"
+if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
+  mkdir -p "$PGDATA" && rm -rf "$PGDATA" && mkdir -p "$PGDATA"
+  chown -R postgres:postgres "$(dirname "$PGDATA")" && chmod 700 "$PGDATA"
+  asuser=$(command -v su-exec || command -v gosu)
+  until "$asuser" postgres pg_basebackup -h "$CLOUDSQL_PRIMARY_HOST" -p ` + fmt.Sprint(CloudSQLPort) + ` -U ` + SQLReplicaUser +
+		` -D "$PGDATA" -R -X stream -c fast; do
+    echo "waiting for the primary $CLOUDSQL_PRIMARY_HOST"; rm -rf "$PGDATA" && mkdir -p "$PGDATA" && chown postgres:postgres "$PGDATA" && chmod 700 "$PGDATA"; sleep 2
+  done
+  echo "primary_conninfo = 'host=$CLOUDSQL_PRIMARY_HOST port=` + fmt.Sprint(CloudSQLPort) + ` user=` + SQLReplicaUser +
+		` application_name=` + SQLStandbyApplicationName + `'" >> "$PGDATA/postgresql.auto.conf"
+  echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
+fi
+exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+	b.Args = nil
+	return b
+}
+
+// SQLStandbyUser is the replication user a MySQL high-availability
+// standby connects to its primary as (#1408), apart from the read
+// replicas' cloudsqlreplica, whose password each replica's creation sets.
+const SQLStandbyUser = "cloudsqlstandby"
+
+// CloudSQLMySQLStandbyBackend makes b, one of the two MySQL servers of a
+// high-availability instance, a standby built at epoch (#1408): when its
+// volume's recorded epoch differs, its data directory is removed, so the
+// image initialises a new one, which the provisioner fills from the
+// primary and starts replicating (cmd/cloudburrow's sqlha.go). It runs
+// with GTIDs and serverID; when the epoch is the recorded one, the data is
+// kept, as for a standby promoted since.
+func CloudSQLMySQLStandbyBackend(b Backend, host string, epoch int, serverID uint32) Backend {
+	b.Env = copyEnv(b.Env)
+	b.Env["CLOUDSQL_PRIMARY_HOST"] = host
+	b.Env["CLOUDSQL_STANDBY_EPOCH"] = fmt.Sprint(epoch)
+	args := append(append([]string{}, b.Args...), fmt.Sprintf("--server-id=%d", serverID),
+		"--gtid-mode=ON", "--enforce-gtid-consistency=ON")
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	b.Command = []string{"sh", "-c", `set -e
+marker=/var/lib/mysql/cloudsql-standby-epoch
+if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
+  rm -rf /var/lib/mysql/data
+  echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
+fi
+exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+	b.Args = nil
+	return b
 }

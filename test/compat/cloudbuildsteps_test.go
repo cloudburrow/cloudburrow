@@ -68,7 +68,7 @@ func TestCloudBuildArbitraryStepsFilterAndRetry(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}
-	ctx, cancel := context.WithTimeout(h.Context(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	t.Cleanup(cancel)
 	parent := runParent(h)
 	cb := cloudBuildClient(ctx, t, h)
@@ -149,8 +149,8 @@ func TestCloudBuildArbitraryStepsFilterAndRetry(t *testing.T) {
 		t.Errorf("the failed build = %v, %v", failed, err)
 	}
 	if _, err := cb.CreateBuild(ctx, &cbpb.CreateBuildRequest{ProjectId: h.Project(), Build: &cbpb.Build{
-		Steps: []*cbpb.BuildStep{{Name: img, SecretEnv: []string{"TOKEN"}}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("secretEnv = %v; want UNIMPLEMENTED", err)
+		Steps: []*cbpb.BuildStep{{Name: img, SecretEnv: []string{"TOKEN"}}}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a secretEnv no availableSecrets defines = %v; want INVALID_ARGUMENT (#1407)", err)
 	}
 
 	// ListBuilds' filter and paging.
@@ -285,7 +285,7 @@ func TestCloudBuildHostStepsOff(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	t.Cleanup(cancel)
 	parent := runParent(h)
 	cb := cloudBuildClient(ctx, t, h)
