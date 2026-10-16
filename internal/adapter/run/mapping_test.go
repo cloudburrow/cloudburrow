@@ -81,9 +81,6 @@ func TestUnsupportedConfigurationIsReported(t *testing.T) {
 		{"gcs volume", func(s *runpb.Service) {
 			s.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_Gcs{Gcs: &runpb.GCSVolumeSource{Bucket: "b"}}}}
 		}, "volumes.gcs"},
-		{"nfs volume", func(s *runpb.Service) {
-			s.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_Nfs{Nfs: &runpb.NFSVolumeSource{Server: "s"}}}}
-		}, "volumes.nfs"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -517,6 +514,8 @@ type ksvcStore struct {
 	applied map[string]string // name -> JSON
 	// aliases are the metadata alias Services applied (#1388), by manifest.
 	aliases []string
+	// kenv are the documents applied before each Knative Service.
+	kenv []string
 }
 
 func (s *ksvcStore) Run(_ context.Context, stdin string, args ...string) (string, error) {
@@ -528,6 +527,12 @@ func (s *ksvcStore) Run(_ context.Context, stdin string, args ...string) (string
 		s.aliases = append(s.aliases, stdin)
 		return "", nil
 	case args[0] == "apply":
+		// The Knative Service is the last document: the K_* policy and
+		// ConfigMap (#1448) and any NFS claims are applied before it.
+		if i := strings.LastIndex(stdin, "\n---\n"); i >= 0 {
+			s.kenv = append(s.kenv, stdin[:i])
+			stdin = stdin[i+len("\n---\n"):]
+		}
 		s.rv++
 		name, obj := ksvcFromManifest(stdin, s.rv)
 		b, err := json.Marshal(obj)

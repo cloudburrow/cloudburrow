@@ -262,7 +262,8 @@ metadata:
 	}
 	renderCloudSQLProxies(&b, tmpl.GetVolumes(), o, false)
 	renderTraffic(&b, svc.GetTraffic(), func(rev string) string { return kRevisionName(svc.GetName(), kname, rev) })
-	return b.String(), nil
+	// The claims its NFS volumes mount, applied first (#1448).
+	return nfsClaims(namespace, instance, tmpl.GetVolumes()) + b.String(), nil
 }
 
 // containerRender is what differs between rendering a Knative revision's

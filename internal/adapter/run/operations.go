@@ -45,11 +45,14 @@ func (o *OperationsServer) DeleteOperation(_ context.Context, _ *longrunningpb.D
 	return &emptypb.Empty{}, nil
 }
 
-// CancelOperation is not supported: a deployment already in flight cannot be
-// recalled here, and pretending otherwise would leave the caller believing the
-// rollout stopped.
+// CancelOperation is refused as Cloud Run refuses it (#1448): its
+// Operations mixin (run_v2.yaml) binds get, list, wait and delete and no
+// cancel, so the official clients have no CancelOperation, REST's :cancel
+// is a path Google does not bind (404, rest.go), and google.longrunning
+// documents UNIMPLEMENTED for a server that does not support the method.
+// Cloud Functions v1's operations, served here too, bind no cancel either.
 func (o *OperationsServer) CancelOperation(context.Context, *longrunningpb.CancelOperationRequest) (*emptypb.Empty, error) {
-	return nil, apierror.Unimplemented("cancelling an in-flight deployment is not supported")
+	return nil, apierror.Unimplemented("Cloud Run does not support CancelOperation: its operations can be read, listed, waited on and deleted")
 }
 
 // ListOperations lists the operations under projects/*/locations/*, the
