@@ -105,8 +105,8 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource), failover
-replicas and high availability, external-primary replicas, `MYSQL_5_7` and versions Cloud SQL no longer lists, the project-level Backups API, and parallel or BAK imports and exports. See
+What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource), legacy
+failover replicas (`failoverReplica`, `failoverTarget`), external-primary replicas, `MYSQL_5_7` and versions Cloud SQL no longer lists, the project-level Backups API, and parallel or BAK imports and exports. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
 ### Imports and exports (#1380)
@@ -169,7 +169,8 @@ and an address the connectors reach through 3307.
 | `settings.databaseFlags` | Passed to the server: `-c name=value` to `postgres`, `--name=value` to `mysqld`. A patch that changes them starts the server again with them; a flag the server rejects fails the operation with its words. `cloudsql.*` flags (IAM authentication, Cloud SQL's extensions) are 501. |
 | `settings.userLabels`, `deletionProtectionEnabled`, other settings | Recorded and answered. `delete` of a protected instance is 400, as on Cloud SQL. |
 | `masterInstanceName` | A read replica: see [Read replicas](#read-replicas-1330). |
-| `replicaConfiguration.failoverTarget`, `failoverReplica`, `availabilityType: REGIONAL`, `instances.failover` | 501, saying why (below). |
+| `settings.availabilityType` | `ZONAL` (the default) or `REGIONAL`, a high-availability instance with a synchronous standby: see [High availability](#high-availability-1408). Another value is 400. |
+| `replicaConfiguration.failoverTarget`, `failoverReplica` | 501: the legacy MySQL failover replica, which `REGIONAL` replaced. |
 
 The operation `insert` returns is `RUNNING` until the server serves through its tunnel, then
 `DONE` (or `DONE` with the server's error, and the instance `FAILED`). `delete` removes the
@@ -382,18 +383,75 @@ instance holding the source's databases as they were at that time, to the micros
   `instances.pointInTimeRestore` is 501: it restores from a Backup and DR Service datasource
   (`projects/…/backupVaults/…/dataSources/…`), which is not served.
 
-### High availability is 501 (#1330)
+### High availability (#1408)
 
 On Cloud SQL, `availabilityType: REGIONAL` makes an instance a primary and a standby in a second
 zone of the region, its disk replicated synchronously to the standby, so a transaction is
-committed only once both have it; `instances.failover` (and an outage) moves the instance to the
-standby, which keeps the connection name and the IP address, with no committed transaction
-lost. A standby built from CloudBurrow's read replicas would not be that: they replicate
-asynchronously (streaming replication, GTID binary log replication), so a failover could lose
-the transactions not yet replicated, and they run in one zone of one kind cluster, with their
-own names. So `availabilityType: REGIONAL`, `failoverReplica`,
-`replicaConfiguration.failoverTarget` and `instances.failover` are 501 and say this; use a
-`ZONAL` instance and, to read elsewhere, read replicas.
+committed only once both have it; `instances.failover` moves the instance to the standby, which
+keeps the connection name and the IP address, with no committed transaction lost.
+
+This used to be 501, on the reasoning that a standby built from CloudBurrow's replicas, which
+replicate asynchronously, could lose transactions in a failover. **The user's decision
+(2026-10-16):** build it on the engines' own synchronous replication instead, so a failover
+loses no committed transaction, as Google's regional standby does not; commits on an HA instance
+wait for the standby, as on Google. The design:
+
+- **Two servers, one endpoint.** A `REGIONAL` instance `NAME` is two Deployments,
+  `sqlinst-NAME` (the server it was created with) and `sqlha-NAME`, each with its own volume.
+  The instance's Service, `sqlinst-NAME`, selects whichever is the primary, so the host tunnel,
+  the connector route on 3307 and the instance's read replicas always reach the primary, as
+  Memorystore's Standard tier does (#1385). The standby serves no client and is not an instance:
+  `instances.list` does not list it, and it is not in `replicaNames`. `gceZone` is the primary's
+  zone and `secondaryGceZone` the standby's (`REGION-a`, `REGION-b`; every server runs in the one
+  kind cluster, so the zones are reported, as replica regions are, #1381).
+- **PostgreSQL:** the standby is a `pg_basebackup` of the primary streaming from the Service as
+  `application_name` `cloudsqlstandby`; the primary has `synchronous_standby_names =
+  'cloudsqlstandby'` and `synchronous_commit = on`, so a commit returns once the standby has
+  flushed its WAL to disk. That is Cloud SQL's guarantee (the regional disk is written in both
+  zones before a write is acknowledged); `remote_apply` would also wait for the standby to
+  replay it, which Cloud SQL does not promise and the standby, serving no reads, does not need.
+  Read replicas stream as `walreceiver`, so a replica never stands in for the standby.
+- **MySQL:** lossless semi-synchronous replication (`rpl_semi_sync_source` and
+  `rpl_semi_sync_replica`), GTID-based, from the user `cloudsqlstandby`:
+  `rpl_semi_sync_source_wait_point = AFTER_SYNC` (the commit becomes visible only once the
+  standby has acknowledged it), `wait_for_replica_count = 1`, `wait_no_replica = ON`, and
+  `rpl_semi_sync_source_timeout = 4294967295` ms, the largest MySQL takes. MySQL cannot be told
+  never to fall back to asynchronous replication: when a commit has waited that long, about
+  49.7 days, with no acknowledgement, it falls back, and `Rpl_semi_sync_source_status` turns
+  `OFF`. Until then a commit with no standby connected waits. The standby is filled from the
+  primary as a read replica is (a `mysqldump` with its GTIDs as purged), and its accounts are
+  copied with `SHOW CREATE USER` and `SHOW GRANTS`, with the binary log off, so they are there
+  when it is promoted.
+- **Failover.** `instances.failover` (with `failoverContext.settingsVersion`: a stale one is
+  412, as on Cloud SQL; a `ZONAL` instance is 400) answers a `FAILOVER` operation that: points
+  the Service at the standby; stops the primary's server; promotes the standby
+  (`pg_promote()`; MySQL stops its receiver, waits for every received transaction to be applied,
+  and drops its source); and rebuilds the old primary from the new one as the new standby, as
+  Cloud SQL makes a new standby after a failover. The connection name, the host port and the
+  connector reach the new primary; clients reconnect to the same endpoint. `gceZone` and
+  `secondaryGceZone` swap. The promoted server's Deployment is not changed, so it does not
+  restart; each server records the failover it was last rebuilt at, and keeps its data across
+  restarts otherwise.
+- **The window with no standby.** From the promotion until the new standby is streaming, the
+  new primary has none, and commits do not wait: PostgreSQL's `synchronous_standby_names` and
+  MySQL's semi-synchronous source are set once the standby streams, and the operation is
+  `DONE` then. No failover can happen in that window, as there is nothing to fail over to, so
+  no committed transaction can be lost; it is the same as Cloud SQL rebuilding a standby.
+- **ZONAL ⇄ REGIONAL.** A patch to `REGIONAL` adds the standby (the primary does not restart),
+  and to `ZONAL` turns synchronous replication off and removes the standby; the instance keeps
+  the server it was left on.
+- **Backups, import and export, point-in-time recovery, upgrades** run in the server the Service
+  selects, so in the primary after a failover. Read replicas follow the primary: they replicate
+  from the Service (PostgreSQL follows the new timeline). A read replica cannot be `REGIONAL`
+  itself (501).
+- **Not built:** automatic failover when the primary's pod fails (a pod that fails is restarted
+  in place, as for a `ZONAL` instance; fail over with `instances.failover`), and the
+  point-in-time recovery log of the old primary is not carried to the new one (a recovery to a
+  time before the failover recovers from a base taken after it, or is 400).
+
+`TestCloudSQLHighAvailability` checks it on both engines through the official client and
+connector: rows written before a failover are all there after it, through the same connection
+name, and the new primary has a synchronous standby of its own.
 
 The console's instance page shows **Point-in-time recovery**, the earliest and latest recovery
 times, and a **Point-in-time restore** action (a new instance ID and a time); **Create

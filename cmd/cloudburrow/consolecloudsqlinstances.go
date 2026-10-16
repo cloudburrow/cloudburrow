@@ -36,7 +36,8 @@ func (cloudSQLInstancesProvider) Title() string { return "Cloud SQL instances" }
 const cloudSQLInstancesNote = "Each created instance is a server of its own, from the official image of its " +
 	"database version (PostgreSQL 13 to 18, MySQL 8.0 or 8.4), reached through the connectors on port 3307. The instances `up` runs " +
 	"(postgres, mysql) cannot be edited or deleted here. A backup is a dump of the server's databases, kept on the host; " +
-	"point-in-time recovery, replicas, IAM authentication and failover do not exist here."
+	"an instance with REGIONAL availability has a synchronous standby, and Failover makes it the primary under the same connection name. " +
+	"IAM database authentication does not exist here."
 
 func (p cloudSQLInstancesProvider) api(ctx context.Context) (*sqladminapi.Service, error) {
 	return sqladminapi.NewService(ctx, option.WithEndpoint("http://"+p.endpoint+"/"), option.WithoutAuthentication(),
@@ -45,7 +46,7 @@ func (p cloudSQLInstancesProvider) api(ctx context.Context) (*sqladminapi.Servic
 
 func (p cloudSQLInstancesProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	l := console.Listing{
-		Columns:    []string{"Connection name", "Version", "Tier", "Address", "Deletion protection"},
+		Columns:    []string{"Connection name", "Version", "Tier", "Address", "Availability", "Deletion protection"},
 		NameColumn: "Instance ID",
 		Noun:       "instances",
 		Note:       cloudSQLInstancesNote,
@@ -65,16 +66,16 @@ func (p cloudSQLInstancesProvider) List(ctx context.Context, project string) (co
 		if len(in.IpAddresses) > 0 {
 			addr = in.IpAddresses[0].IpAddress
 		}
-		tier, protect := "", "Off"
+		tier, protect, avail := "", "Off", ""
 		if in.Settings != nil {
-			tier = in.Settings.Tier
+			tier, avail = in.Settings.Tier, in.Settings.AvailabilityType
 			if in.Settings.DeletionProtectionEnabled {
 				protect = "On"
 			}
 		}
 		l.Items = append(l.Items, console.Resource{Name: in.Name, Status: in.State, Fields: map[string]string{
 			"Connection name": in.ConnectionName, "Version": in.DatabaseVersion, "Tier": tier,
-			"Address": addr, "Deletion protection": protect,
+			"Address": addr, "Deletion protection": protect, "Availability": avail,
 		}})
 	}
 	l.Total = len(l.Items)
@@ -100,11 +101,17 @@ func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
 			Help: "Recorded and reported; the server is not sized by it."},
 		{Name: "rootPassword", Label: "Root password (MySQL)", Type: "password",
 			Help: "MySQL's root password. Empty leaves root without one, as Cloud SQL does. PostgreSQL's postgres user is trusted locally."},
+		{Name: "availabilityType", Label: "Zonal availability", Type: "select", Required: true,
+			Options: []string{"ZONAL", "REGIONAL"}, Default: "ZONAL", Help: availabilityHelp},
 		{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox"},
 		{Name: "pitr", Label: "Point-in-time recovery", Type: "checkbox",
 			Help: "Keeps the transaction log, PostgreSQL's archived WAL or MySQL's binary log, so a clone can be restored to any time since the instance started."},
 	}
 }
+
+// availabilityHelp explains the Zonal availability choice (#1408).
+const availabilityHelp = "ZONAL is a single zone. REGIONAL (highly available) adds a standby in a second zone, " +
+	"replicated synchronously, so a commit returns once the standby has it and a failover loses no committed transaction."
 
 // pitrConfig sets bc's point-in-time recovery switch, which Cloud SQL
 // names by engine: pointInTimeRecoveryEnabled for PostgreSQL,
@@ -152,7 +159,8 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 		return "", err
 	}
 	name := strings.TrimSpace(v["name"])
-	st := &sqladminapi.Settings{Tier: strings.TrimSpace(v["tier"]), DeletionProtectionEnabled: v["deletionProtection"] == "true"}
+	st := &sqladminapi.Settings{Tier: strings.TrimSpace(v["tier"]), DeletionProtectionEnabled: v["deletionProtection"] == "true",
+		AvailabilityType: v["availabilityType"]}
 	if v["pitr"] == "true" {
 		st.BackupConfiguration = &sqladminapi.BackupConfiguration{Enabled: true}
 		pitrConfig(st.BackupConfiguration, v["databaseVersion"], true)
@@ -263,6 +271,8 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	for _, pr := range []console.Property{
 		{Label: "State", Value: in.State}, {Label: "Connection name", Value: in.ConnectionName},
 		{Label: "Version", Value: in.DatabaseVersion}, {Label: "Tier", Value: st.Tier},
+		{Label: "Zonal availability", Value: st.AvailabilityType}, {Label: "Zone", Value: in.GceZone},
+		{Label: "Secondary zone", Value: in.SecondaryGceZone},
 		{Label: "Labels", Value: formatPairs(st.UserLabels)}, {Label: "Database flags", Value: formatFlags(st.DatabaseFlags)},
 		{Label: "Deletion protection", Value: protect}, {Label: "Automated backups", Value: backups},
 		{Label: "Backup start time (UTC)", Value: start}, {Label: "Retained automated backups", Value: retained},
@@ -319,6 +329,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		{ID: "client-certificates", Label: "Client certificates", Kind: console.KindListing, Listing: certs}}
 	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
+	d.Actions = append(d.Actions, failoverActions(in)...)
 	if pitr == "On" {
 		d.Actions = append(d.Actions, console.Action{ID: "pitr-restore", Label: "Point-in-time restore", Fields: []console.Field{
 			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
@@ -335,6 +346,9 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 			{Name: "flags", Label: "Database flags", Type: "text", Default: formatFlags(st.DatabaseFlags),
 				Help: "name=value pairs, separated by commas, passed to the server, which restarts with them."},
 			{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox", Default: strconv.FormatBool(st.DeletionProtectionEnabled)},
+			{Name: "availabilityType", Label: "Zonal availability", Type: "select", Required: true,
+				Options: []string{"ZONAL", "REGIONAL"}, Default: availabilityOr(st.AvailabilityType),
+				Help: availabilityHelp + " Changing it adds or removes the standby."},
 			{Name: "backupsEnabled", Label: "Automated backups", Type: "checkbox", Default: strconv.FormatBool(backups == "On")},
 			{Name: "backupStartTime", Label: "Backup start time (UTC, HH:MM)", Type: "text", Default: start, Pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
 			{Name: "pitr", Label: "Point-in-time recovery", Type: "checkbox", Default: strconv.FormatBool(pitr == "On"),
@@ -401,6 +415,7 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 	st := &sqladminapi.Settings{Tier: strings.TrimSpace(v["tier"]), UserLabels: map[string]string{},
 		DatabaseFlags:             []*sqladminapi.DatabaseFlags{},
 		DeletionProtectionEnabled: v["deletionProtection"] == "true",
+		AvailabilityType:          v["availabilityType"],
 		BackupConfiguration: &sqladminapi.BackupConfiguration{Enabled: v["backupsEnabled"] == "true",
 			StartTime: strings.TrimSpace(v["backupStartTime"]), ForceSendFields: []string{"Enabled"}},
 		ForceSendFields: []string{"DeletionProtectionEnabled", "UserLabels", "DatabaseFlags"}}
@@ -464,6 +479,24 @@ func upgradeActions(in *sqladminapi.DatabaseInstance) []console.Action {
 		Confirm: "The server is replaced by one of the new major version and its data loaded into it; connections are closed meanwhile.",
 		Fields: []console.Field{{Name: "databaseVersion", Label: "Database version", Type: "select", Required: true,
 			Options: opts, Default: opts[len(opts)-1]}}}}
+}
+
+// failoverActions is Failover on a REGIONAL instance (#1408): its standby
+// becomes the primary behind the same connection name.
+func failoverActions(in *sqladminapi.DatabaseInstance) []console.Action {
+	if in.Settings == nil || in.Settings.AvailabilityType != "REGIONAL" {
+		return nil
+	}
+	return []console.Action{{ID: "failover", Label: "Failover", Destructive: true,
+		Confirm: "The standby becomes the primary, under the same connection name; connections are closed, " +
+			"and the old primary is rebuilt as the new standby."}}
+}
+
+func availabilityOr(a string) string {
+	if a == "" {
+		return "ZONAL"
+	}
+	return a
 }
 
 // transferActions are Export and Import (#1380), to and from the
@@ -531,7 +564,8 @@ func (p cloudSQLInstancesProvider) DetailActions(ctx context.Context, project st
 // backupRuns.insert, instances.restoreBackup and backupRuns.delete, Clone,
 // through instances.clone, Point-in-time restore, through instances.clone
 // with cloneContext.pointInTime, the replica actions, through
-// instances.insert, promoteReplica, stopReplica and startReplica, and
+// instances.insert, promoteReplica, stopReplica and startReplica, Failover,
+// through instances.failover with the instance's settingsVersion, and
 // Export and Import, through instances.export and instances.import.
 func (p cloudSQLInstancesProvider) ActAt(ctx context.Context, project string, path []string, action string, v map[string]string) error {
 	_, err := p.ActAtResult(ctx, project, path, action, v)
@@ -603,6 +637,16 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 			MasterInstanceName: name, InstanceType: "READ_REPLICA_INSTANCE", Region: strings.TrimSpace(v["region"])}).Context(ctx).Do()
 	case "upgrade":
 		_, err = svc.Instances.Patch(project, name, &sqladminapi.DatabaseInstance{DatabaseVersion: v["databaseVersion"]}).Context(ctx).Do()
+	case "failover":
+		var in *sqladminapi.DatabaseInstance
+		if in, err = svc.Instances.Get(project, name).Context(ctx).Do(); err == nil {
+			var sv int64
+			if in.Settings != nil {
+				sv = in.Settings.SettingsVersion
+			}
+			_, err = svc.Instances.Failover(project, name, &sqladminapi.InstancesFailoverRequest{
+				FailoverContext: &sqladminapi.FailoverContext{SettingsVersion: sv}}).Context(ctx).Do()
+		}
 	case "promote-replica":
 		_, err = svc.Instances.PromoteReplica(project, name).Context(ctx).Do()
 	case "stop-replica":

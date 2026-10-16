@@ -21,11 +21,6 @@ import (
 	"strings"
 )
 
-// mysqlHAWhy is why a MySQL instance cannot be REGIONAL yet: its standby,
-// over lossless semi-synchronous replication, is not built (#1408).
-const mysqlHAWhy = "a MySQL standby over lossless semi-synchronous replication is not built yet; " +
-	"PostgreSQL instances can be REGIONAL (docs/cloudsql.md)"
-
 // failover is instances.failover.
 func (s *Server) failover(r *http.Request, base, project, name string) (any, error) {
 	c, err := s.createdFor(project, name, "instances.failover")

@@ -770,3 +770,36 @@ exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
 	b.Args = nil
 	return b
 }
+
+// SQLStandbyUser is the replication user a MySQL high-availability
+// standby connects to its primary as (#1408), apart from the read
+// replicas' cloudsqlreplica, whose password each replica's creation sets.
+const SQLStandbyUser = "cloudsqlstandby"
+
+// CloudSQLMySQLStandbyBackend makes b, one of the two MySQL servers of a
+// high-availability instance, a standby built at epoch (#1408): when its
+// volume's recorded epoch differs, its data directory is removed, so the
+// image initialises a new one, which the provisioner fills from the
+// primary and starts replicating (cmd/cloudburrow's sqlha.go). It runs
+// with GTIDs and serverID; when the epoch is the recorded one, the data is
+// kept, as for a standby promoted since.
+func CloudSQLMySQLStandbyBackend(b Backend, host string, epoch int, serverID uint32) Backend {
+	b.Env = copyEnv(b.Env)
+	b.Env["CLOUDSQL_PRIMARY_HOST"] = host
+	b.Env["CLOUDSQL_STANDBY_EPOCH"] = fmt.Sprint(epoch)
+	args := append(append([]string{}, b.Args...), fmt.Sprintf("--server-id=%d", serverID),
+		"--gtid-mode=ON", "--enforce-gtid-consistency=ON")
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	b.Command = []string{"sh", "-c", `set -e
+marker=/var/lib/mysql/cloudsql-standby-epoch
+if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
+  rm -rf /var/lib/mysql/data
+  echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
+fi
+exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+	b.Args = nil
+	return b
+}

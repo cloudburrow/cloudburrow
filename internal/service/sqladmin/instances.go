@@ -472,9 +472,6 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 		return nil, unimplemented("availabilityType REGIONAL on a read replica",
 			"a read replica here is one server; make the primary REGIONAL, and its replicas follow it across a failover (docs/cloudsql.md)")
 	}
-	if spec.Regional() && spec.MySQL() {
-		return nil, unimplemented("availabilityType REGIONAL on MySQL", mysqlHAWhy)
-	}
 	if spec.Regional() {
 		// The second server, b, is built as the standby.
 		spec.HAPassword, spec.HAEpochs[1] = newReplicationPassword(), 1
@@ -622,10 +619,6 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 	}
 	// Turning high availability on adds the standby, and off removes it
 	// (#1408); either is a change the provisioner applies.
-	if next.Regional() && next.MySQL() {
-		s.emu.Unlock()
-		return nil, unimplemented("availabilityType REGIONAL on MySQL", mysqlHAWhy)
-	}
 	haChange := next.Regional() != c.spec.Regional()
 	if haChange && next.Regional() {
 		if next.HAPassword == "" {
