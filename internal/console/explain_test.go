@@ -17,7 +17,9 @@ import (
 // Cloud Run resolver does for a deployed contract container.
 type fixedResolver struct{ url string }
 
-func (f fixedResolver) PredictURL(_ context.Context, _, _, _ string) (string, error) { return f.url, nil }
+func (f fixedResolver) PredictURL(_ context.Context, _, _, _ string) (string, error) {
+	return f.url, nil
+}
 
 // explainServer is a console whose Explain reaches the real PredictionService
 // of a local AI endpoint, which calls the doubler behind the fake ingress.
