@@ -191,6 +191,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Each Cloud Run workload is told its own service account (#1388).
 		metaSrv.WithAccounts(runSvc.metadataAccount)
 		runSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		// Functions' event triggers (#1414) deliver through Pub/Sub.
+		if serviceEnabled(cfg, config.ServicePubSub) {
+			runSvc.events = &eventsConfig{
+				transport: eventTransport{
+					pubsub:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") },
+					storage: func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+					client:  &http.Client{Timeout: time.Minute},
+				},
+				tokens: creds,
+			}
+		}
 	}
 	runSvc.register(coord)
 
@@ -603,6 +614,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	runSvc.useEnvironment(func() map[string]string {
 		return podEnvMap(podAddresses(forwarders, hostComp))
 	})
+	if runSvc != nil && runSvc.events != nil {
+		// The Pub/Sub emulator pushes a trigger's events to the Run port
+		// at its cloudburrow-host name.
+		runSvc.events.pushBase = func() string {
+			if a := hostComp.InCluster("run"); a != "" {
+				return "http://" + a
+			}
+			return ""
+		}
+	}
 	// Cloud SQL volumes (#1346): the Auth Proxy beside a revision asks the
 	// Admin API, through cloudburrow-host, and is told to dial the
 	// connector at that Service's cluster IP, port 3307, which forwards to

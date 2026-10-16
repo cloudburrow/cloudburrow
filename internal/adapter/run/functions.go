@@ -42,10 +42,8 @@ import (
 // reports. A function is stored in this process, like Artifact Registry's
 // repositories; the service is the cluster's Knative Service.
 //
-// Event triggers are refused (UNIMPLEMENTED): a 2nd-gen trigger is an
-// Eventarc trigger, which delivers a CloudEvent to the service, and this
-// instance serves no Eventarc. A Pub/Sub push subscription delivers Pub/Sub's
-// own push body, not the CloudEvent the function expects.
+// An event trigger is an Eventarc trigger (#1414, eventarc.go), made once
+// the service is deployed, which delivers CloudEvents to the service.
 type FunctionsServer struct {
 	functionspb.UnimplementedFunctionServiceServer
 	s      *Server
@@ -53,6 +51,8 @@ type FunctionsServer struct {
 	// base is the Run port's URL, for the upload and download URLs; it is
 	// read at each call, since the port can be OS-assigned.
 	base func() string
+	// events serves event triggers; nil refuses them.
+	events *Events
 }
 
 // Functions returns the Cloud Functions v2 service, which builds through
@@ -73,6 +73,8 @@ func (f *FunctionsServer) Register(g grpc.ServiceRegistrar) {
 type storedFunction struct {
 	fn     *functionspb.Function
 	policy *iampolicy.Stored
+	// trigger is what the function's event trigger made, nil without one.
+	trigger *liveTrigger
 }
 
 // functions is process-wide, like repositories.
@@ -91,6 +93,13 @@ func parseFunctionName(name string) (parent, id string, err error) {
 		return "", "", apierror.InvalidArgument("invalid function name %q: want projects/*/locations/*/functions/*", name)
 	}
 	return parent, id, nil
+}
+
+func cloneTrigger(t *functionspb.EventTrigger) *functionspb.EventTrigger {
+	if t == nil {
+		return nil
+	}
+	return proto.Clone(t).(*functionspb.EventTrigger)
 }
 
 func cloneFunction(fn *functionspb.Function) *functionspb.Function {
@@ -182,11 +191,6 @@ func unsupportedFunction(fn *functionspb.Function) error {
 	if len(fields) > 0 {
 		return apierror.Unimplemented("function field %s is not supported on this instance", strings.Join(fields, ", "))
 	}
-	if fn.GetEventTrigger() != nil {
-		return apierror.Unimplemented("event_trigger is not supported: a 2nd-gen trigger is an Eventarc trigger, " +
-			"which delivers a CloudEvent to the function's service, and this instance serves no Eventarc. " +
-			"Deploy an HTTP function, or a CloudEvent function and send it events yourself")
-	}
 	return nil
 }
 
@@ -233,6 +237,9 @@ func (f *FunctionsServer) CreateFunction(ctx context.Context, req *functionspb.C
 	if err := unsupportedFunction(in); err != nil {
 		return nil, err
 	}
+	if err := f.checkEventTrigger(in.GetEventTrigger()); err != nil {
+		return nil, err
+	}
 	if err := checkRuntime(in.GetBuildConfig().GetRuntime()); err != nil {
 		return nil, err
 	}
@@ -248,6 +255,10 @@ func (f *FunctionsServer) CreateFunction(ctx context.Context, req *functionspb.C
 		fn.ServiceConfig = &functionspb.ServiceConfig{}
 	}
 	defaultServiceConfig(fn)
+	defaultEventTrigger(fn)
+	if fn.EventTrigger != nil {
+		fn.EventTrigger.Trigger = ""
+	}
 	functions.mu.Lock()
 	if _, ok := functions.fns[name]; ok {
 		functions.mu.Unlock()
@@ -482,6 +493,11 @@ func (f *FunctionsServer) deploy(ctx context.Context, opName, name string, build
 			md.Stages[1].State = functionspb.Stage_COMPLETE
 		})
 	}
+	// The trigger is made once the service runs, as Google makes it.
+	if err := f.syncTrigger(ctx, name); err != nil {
+		f.fail(opName, name, err)
+		return
+	}
 	functions.mu.Lock()
 	sf, ok = functions.fns[name]
 	if !ok {
@@ -558,6 +574,9 @@ func (f *FunctionsServer) UpdateFunction(ctx context.Context, req *functionspb.U
 	if err := unsupportedFunction(in); err != nil {
 		return nil, err
 	}
+	if err := f.checkEventTrigger(in.GetEventTrigger()); err != nil {
+		return nil, err
+	}
 	paths := req.GetUpdateMask().GetPaths()
 	functions.mu.Lock()
 	sf, ok := functions.fns[in.GetName()]
@@ -570,9 +589,10 @@ func (f *FunctionsServer) UpdateFunction(ctx context.Context, req *functionspb.U
 		return nil, apierror.FailedPrecondition("An operation on function %s is already in progress", in.GetName())
 	}
 	fn := cloneFunction(sf.fn)
-	build, serve := false, false
+	build, serve, trig := false, false, false
 	if len(paths) == 0 {
 		fn.Description, fn.Labels = in.GetDescription(), in.GetLabels()
+		fn.EventTrigger, trig = cloneTrigger(in.GetEventTrigger()), true
 		fn.BuildConfig, fn.ServiceConfig = proto.Clone(in.GetBuildConfig()).(*functionspb.BuildConfig), proto.Clone(in.GetServiceConfig()).(*functionspb.ServiceConfig)
 		if fn.ServiceConfig == nil {
 			fn.ServiceConfig = &functionspb.ServiceConfig{}
@@ -591,6 +611,8 @@ func (f *FunctionsServer) UpdateFunction(ctx context.Context, req *functionspb.U
 			serve = true
 		case p == "labels":
 			serve = true // the service carries the labels
+		case p == "event_trigger" || strings.HasPrefix(p, "event_trigger.") || p == "eventTrigger" || strings.HasPrefix(p, "eventTrigger."):
+			trig = true
 		}
 	}
 	if build {
@@ -604,17 +626,18 @@ func (f *FunctionsServer) UpdateFunction(ctx context.Context, req *functionspb.U
 		}
 	}
 	defaultServiceConfig(fn)
+	defaultEventTrigger(fn)
 	// The service a function runs as is the server's to name.
 	fn.ServiceConfig.Service, fn.ServiceConfig.Uri = sf.fn.GetServiceConfig().GetService(), sf.fn.GetServiceConfig().GetUri()
 	fn.ServiceConfig.Revision = sf.fn.GetServiceConfig().GetRevision()
 	fn.UpdateTime = timestamppb.Now()
-	if build || serve {
+	if build || serve || trig {
 		fn.State = functionspb.Function_DEPLOYING
 	}
 	sf.fn = fn
 	functions.mu.Unlock()
 	op := f.newOperation(parent, in.GetName(), "update", functionspb.OperationType_UPDATE_FUNCTION, in)
-	if !build && !serve {
+	if !build && !serve && !trig {
 		f.setStage(op, func(md *functionspb.OperationMetadata) { md.EndTime = timestamppb.Now() })
 		_ = f.s.ops.Succeed(op, cloneFunction(fn))
 		return f.s.toProtoOperation(op)
@@ -635,11 +658,8 @@ func applyFunctionPath(fn, in *functionspb.Function, p string) error {
 	case "name", "state", "url", "update_time", "create_time", "environment":
 		return apierror.InvalidArgument("update_mask path %q is output only or immutable", p)
 	case "event_trigger", "eventTrigger":
-		if in.GetEventTrigger() == nil {
-			fn.EventTrigger = nil
-			return nil
-		}
-		return unsupportedFunction(in)
+		fn.EventTrigger = cloneTrigger(in.GetEventTrigger())
+		return nil
 	}
 	field, sub, _ := strings.Cut(p, ".")
 	var dst, src proto.Message
@@ -701,6 +721,7 @@ func (f *FunctionsServer) DeleteFunction(ctx context.Context, req *functionspb.D
 	svc := sf.fn.GetServiceConfig().GetService()
 	functions.mu.Unlock()
 	op := f.newOperation(parent, req.GetName(), "delete", functionspb.OperationType_DELETE_FUNCTION, nil)
+	f.teardown(ctx, sf.trigger)
 	if svc != "" {
 		if _, err := f.s.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: svc}); err != nil && apierror.From(err).Code != codes.NotFound {
 			functions.mu.Lock()
@@ -794,6 +815,8 @@ func (f *FunctionsServer) SourceHandler(next http.Handler) http.Handler {
 			f.upload(w, r)
 		case strings.HasPrefix(r.URL.Path, downloadPrefix) && r.Method == http.MethodGet:
 			f.download(w, r)
+		case strings.HasPrefix(r.URL.Path, eventarcPushPrefix) && r.Method == http.MethodPost && f.events != nil:
+			f.push(w, r)
 		default:
 			next.ServeHTTP(w, r)
 		}
