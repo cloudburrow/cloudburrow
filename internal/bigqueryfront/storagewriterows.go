@@ -47,7 +47,8 @@ import (
 //	STRING      string, enum, google.protobuf.StringValue
 //	TIMESTAMP   int64 (microseconds since the epoch), int32, uint32,
 //	            google.protobuf.Timestamp
-//	INTERVAL    string (google.protobuf.Duration: not implemented here)
+//	INTERVAL    string, google.protobuf.Duration (storagewriteinterval.go,
+//	            #1424)
 //	RANGE       a message of start and end, each of a type its element
 //	            type takes (storagewriterange.go, #1391)
 //	REPEATED    a repeated field; RECORD a message
@@ -81,6 +82,8 @@ type colConv struct {
 	wrapped protoreflect.FieldDescriptor
 	// timestamp: the field is a google.protobuf.Timestamp message.
 	timestamp bool
+	// duration: the field is a google.protobuf.Duration message.
+	duration bool
 	// rng writes a RANGE column's message of start and end.
 	rng *rangeConv
 }
@@ -155,8 +158,12 @@ func newRowConv(md protoreflect.MessageDescriptor, fields []field, path string) 
 			case name == "Timestamp" && cc.typ == "TIMESTAMP":
 				cc.timestamp = true
 			case name == "Duration" && cc.typ == "INTERVAL":
-				return nil, status.Errorf(codes.Unimplemented, "Not implemented here: a google.protobuf.Duration written to the "+
-					"INTERVAL column '%s' by the Storage Write API. Nothing was written. Write the interval as a string.", where)
+				sf, nf := fd.Message().Fields().ByName("seconds"), fd.Message().Fields().ByName("nanos")
+				if sf == nil || nf == nil || !isInt64Kind(sf.Kind()) || !isInt32Kind(nf.Kind()) {
+					return nil, status.Errorf(codes.InvalidArgument, "Invalid proto schema: the google.protobuf.Duration of '%s' "+
+						"has no int64 seconds and int32 nanos fields", where)
+				}
+				cc.duration = true
 			case wrapperTakes[cc.typ][name]:
 				v := fd.Message().Fields().ByName("value")
 				if v == nil {
@@ -328,6 +335,11 @@ func (cc colConv) value(v protoreflect.Value) (any, error) {
 			return nil, fmt.Errorf("the TIMESTAMP is out of range")
 		}
 		return timestampText(secs*1_000_000 + nanos/1000)
+	case cc.duration:
+		m := v.Message()
+		secs := m.Get(m.Descriptor().Fields().ByName("seconds")).Int()
+		nanos := m.Get(m.Descriptor().Fields().ByName("nanos")).Int()
+		return durationIntervalText(secs, nanos)
 	case cc.wrapped != nil:
 		m := v.Message()
 		return scalarValue(cc.typ, cc.wrapped, m.Get(cc.wrapped))
@@ -441,7 +453,9 @@ func scalarValue(typ string, fd protoreflect.FieldDescriptor, v protoreflect.Val
 			i = int64(u)
 		}
 		return timestampText(i)
-	case "GEOGRAPHY", "JSON", "INTERVAL":
+	case "INTERVAL":
+		return writeIntervalText(v.String())
+	case "GEOGRAPHY", "JSON":
 		return v.String(), nil
 	}
 	return nil, fmt.Errorf("no conversion to %s", typ)
