@@ -21,10 +21,12 @@ func TestBigQueryResourceTimesInMilliseconds(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
 	ctx := h.Context()
+	// Now by the front's clock, which the engine has followed since #1466
+	// and which earlier tests move forward.
 	near := func(what string, got time.Time) {
 		t.Helper()
-		if d := time.Since(got); d < -time.Minute || d > time.Minute {
-			t.Errorf("%s = %v, want within a minute of now", what, got)
+		if d := advanceBigQueryClock(t, h, 0).Sub(got); d < -time.Minute || d > time.Minute {
+			t.Errorf("%s = %v, want within a minute of the front's now", what, got)
 		}
 	}
 
