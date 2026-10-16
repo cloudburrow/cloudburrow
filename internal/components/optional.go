@@ -109,29 +109,45 @@ const (
 // pinned by its index digest (linux/amd64 and linux/arm64), at the minor
 // version Cloud SQL lists for it (docs.cloud.google.com/sql/docs/db-versions,
 // 2026-10-16). Like CloudSQLImage, none is Google-published. A node pulls
-// one only when an instance of its version is created. MySQL 5.7 has none:
-// its official image was last built in 2023 (5.7.44, linux/amd64 only)
-// and is not maintained.
+// one only when an instance of its version is created.
+//
+// PostgreSQL 9.6 to 12 (#1462) are past their upstream end of life, as
+// Cloud SQL's extended support says; each official image's last build,
+// the final minor version, is what runs (12.22, 11.22, 10.23, 9.6.24),
+// and each index still carries linux/amd64 and linux/arm64 (checked with
+// docker buildx imagetools inspect, 2026-10-16). MySQL 5.6 and 5.7 have
+// none to run: their official images are linux/amd64 only (5.7.44, last
+// built 2023-12; 5.6.51, 2021-12), so an arm64 node cannot run them, and
+// SQL Server's image (mcr.microsoft.com/mssql/server, not a Docker Hub
+// official image) is linux/amd64 only as well.
 const (
-	CloudSQLPostgres13Image = "postgres:13-alpine@sha256:fb9065b6e3e213bdc07edd372a5b2a26245840b7fb65d1fd8b6700106d51805c" // 13.23
-	CloudSQLPostgres14Image = "postgres:14-alpine@sha256:4ea9e5ed06591da7ea23eb65465e8d3187fe79f4d5ec3ae976d29a33b013e77a" // 14.24
-	CloudSQLPostgres15Image = "postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81" // 15.19
-	CloudSQLPostgres16Image = "postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea" // 16.15
-	CloudSQLPostgres18Image = "postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873" // 18.6
-	CloudSQLMySQL80Image    = "mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b"          // 8.0.46
+	CloudSQLPostgres96Image = "postgres:9.6-alpine@sha256:8342bcb43446694428ec6594e72e4299692854f0fc3aca090b0ab46f4c7f32a1" // 9.6.24
+	CloudSQLPostgres10Image = "postgres:10-alpine@sha256:63cfb6eac6b362c7c994f22c3804c61b31898cf0cb52f8e7e86bd99a244f4366"  // 10.23
+	CloudSQLPostgres11Image = "postgres:11-alpine@sha256:ea50b9fd617b66c9135816a4536cf6e0697d4eea7014a7194479c95f6edd5ef9"  // 11.22
+	CloudSQLPostgres12Image = "postgres:12-alpine@sha256:7c8f4870583184ebadf7f17a6513620aac5f365a7938dc6a6911c1d5df2f481a"  // 12.22
+	CloudSQLPostgres13Image = "postgres:13-alpine@sha256:fb9065b6e3e213bdc07edd372a5b2a26245840b7fb65d1fd8b6700106d51805c"  // 13.23
+	CloudSQLPostgres14Image = "postgres:14-alpine@sha256:4ea9e5ed06591da7ea23eb65465e8d3187fe79f4d5ec3ae976d29a33b013e77a"  // 14.24
+	CloudSQLPostgres15Image = "postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81"  // 15.19
+	CloudSQLPostgres16Image = "postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea"  // 16.15
+	CloudSQLPostgres18Image = "postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"  // 18.6
+	CloudSQLMySQL80Image    = "mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b"           // 8.0.46
 )
 
 // CloudSQLVersionImages are the images of the Cloud SQL databaseVersion
 // values a created instance can have, by that value.
 var CloudSQLVersionImages = map[string]string{
-	"POSTGRES_13": CloudSQLPostgres13Image,
-	"POSTGRES_14": CloudSQLPostgres14Image,
-	"POSTGRES_15": CloudSQLPostgres15Image,
-	"POSTGRES_16": CloudSQLPostgres16Image,
-	"POSTGRES_17": CloudSQLImage,
-	"POSTGRES_18": CloudSQLPostgres18Image,
-	"MYSQL_8_0":   CloudSQLMySQL80Image,
-	"MYSQL_8_4":   CloudSQLMySQLImage,
+	"POSTGRES_9_6": CloudSQLPostgres96Image,
+	"POSTGRES_10":  CloudSQLPostgres10Image,
+	"POSTGRES_11":  CloudSQLPostgres11Image,
+	"POSTGRES_12":  CloudSQLPostgres12Image,
+	"POSTGRES_13":  CloudSQLPostgres13Image,
+	"POSTGRES_14":  CloudSQLPostgres14Image,
+	"POSTGRES_15":  CloudSQLPostgres15Image,
+	"POSTGRES_16":  CloudSQLPostgres16Image,
+	"POSTGRES_17":  CloudSQLImage,
+	"POSTGRES_18":  CloudSQLPostgres18Image,
+	"MYSQL_8_0":    CloudSQLMySQL80Image,
+	"MYSQL_8_4":    CloudSQLMySQLImage,
 }
 
 // OptionalBackend returns the backend for an opt-in service, and whether one

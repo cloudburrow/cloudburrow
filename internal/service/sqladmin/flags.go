@@ -16,6 +16,10 @@ func listFlags(version string) (any, error) {
 		}
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: databaseVersion %q is not a Cloud SQL database version.", version)
 	}
+	if pgBefore12(version) || version == "POSTGRES_12" {
+		return nil, unimplemented("flags.list for "+version, "the flag table here is Cloud SQL's for PostgreSQL 13 to 18 and MySQL 8.0 and 8.4 "+
+			"(flagsdata.go); an instance of "+version+" takes databaseFlags, which its server checks when it starts")
+	}
 	items := []any{}
 	for _, f := range documentedFlags {
 		var applies []string
