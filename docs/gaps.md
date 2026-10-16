@@ -2,10 +2,10 @@
 
 Every place [compatibility.md](compatibility.md) or [docs/coverage](coverage/README.md) says
 something is not implemented (501, `UNIMPLEMENTED`, Unimplemented, Not served, Refused), was not
-measured, or rests on an UNVERIFIED choice, swept on 2026-10-15. Left out: what an open issue
-already tracks (listed per service), and what an ADR or a recorded maintainer decision excludes
-on purpose (the last section). The per-operation detail stays in compatibility.md; this page
-is the to-do view of it. Gaps filed by the sweep carry their issue number.
+measured, or rests on an UNVERIFIED choice, as of main at a7982946 (2026-10-16). What an ADR or a
+recorded maintainer decision excludes on purpose is in the last section. The per-operation detail
+stays in compatibility.md; this page is the to-do view of it. Every row names the open issue that
+tracks it; a closed issue is named only where it says what was built.
 
 **Why it is open:**
 
@@ -21,245 +21,274 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
 | Cloud Storage | 7 | 1 | 5 | 1 | 0 |
-| Pub/Sub | 1 | 0 | 0 | 1 | 0 |
+| Pub/Sub | 2 | 0 | 0 | 2 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 21 | 14 | 5 | 0 | 2 |
+| Cloud Run | 6 | 2 | 3 | 0 | 1 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 42 | 18 | 16 | 8 | 0 |
-| Spanner, Bigtable, Firestore, Datastore | 2 | 0 | 2 | 0 | 0 |
-| Cloud SQL, Memorystore | 9 | 9 | 0 | 0 | 0 |
-| Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
-| Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **98** | **43** | **37** | **13** | **5** |
+| BigQuery | 26 | 3 | 16 | 7 | 0 |
+| Spanner, Bigtable, Firestore, Datastore | 6 | 1 | 4 | 0 | 1 |
+| Cloud SQL, Memorystore | 3 | 3 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
+| Console | 1 | 1 | 0 | 0 | 0 |
+| **Total** | **68** | **13** | **37** | **13** | **5** |
 
 ## Cloud Storage
 
-Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `objects.bulkRestore`
-(#1279), `buckets.operations.list` filters (#1280), `channels.stop` and `objects.watchAll` (#1281), watchAll's listing parameters (#1393), channel delivery on an `up` instance (#1290), and the XML API's bucket `PUT`, service `GET` and form `POST` (#1258), and the gRPC `google.storage.v2` API itself (#1321).
+Closed: `objects.bulkRestore` (#1279), `buckets.operations.list` filters (#1280), `channels.stop`
+and `objects.watchAll` (#1281), watchAll's listing parameters (#1393), channel delivery on an `up`
+instance (#1290), the XML API's bucket `PUT`, service `GET` and form `POST` (#1258), the gRPC
+`google.storage.v2` API (#1321), and its customer-supplied encryption keys, ACLs, managed-folder
+IAM, `ComposeObject.delete_source_objects`, object contexts and `ListObjects.filter` (#1345). ACLs
+and object IAM on the JSON API are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| gRPC `google.storage.v2` (#1321): served on the JSON API's port; `UNIMPLEMENTED` over gRPC are appendable objects (zonal buckets only, which are not modelled; the store has no unfinalized object) (customer-supplied encryption keys, on both APIs, the `acl` fields, managed-folder IAM, `ComposeObject.delete_source_objects`, object contexts and `ListObjects.filter`, on both APIs, are carried out since #1345) (#1345) | not built yet | M |
-| `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
-| `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |
-| `buckets.relocate`, `buckets.operations.advanceRelocateBucket` | no emulator support (one location) | M |
-| `buckets.operations.cancel`: every operation is done when returned | no emulator support | S |
-| Notifications: the server with no Pub/Sub refuses a configuration (501) | no emulator support (needs Pub/Sub) | S |
-| 14 UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints and others; [storage.md](coverage/storage.md)) | not documented by Google | S |
+| gRPC `google.storage.v2`: appendable objects (Google documents them for zonal buckets only, which are not modelled; the store keeps finalized generations only), `Bucket.custom_placement_config` and `ip_filter`, and `SetIamPolicy`'s `update_mask` are `UNIMPLEMENTED` (#1443) | not built yet | M |
+| `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) | no emulator support (no cache tier) | S |
+| `anywhereCaches.*`, `rapidCaches.*` (#1444) | no emulator support (no cache tier) | M |
+| `buckets.relocate`, `buckets.operations.advanceRelocateBucket` (#1444) | no emulator support (one location) | M |
+| `buckets.operations.cancel`: every operation is done when returned (#1444) | no emulator support | S |
+| Notifications: the server with no Pub/Sub refuses a configuration (501) (#1444) | no emulator support (needs Pub/Sub) | S |
+| UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
 
 ## Pub/Sub
 
-Already tracked: #982 (Google's message for an invalid label is not measured).
+Closed: `DetachSubscription`, `UpdateSnapshot` and Protocol Buffer schemas, served by CloudBurrow's
+Pub/Sub front (#1406), and IAM on topics, subscriptions, snapshots and schemas, stored and never
+enforced (#1367).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `DetachSubscription`, `UpdateSnapshot` and Protocol Buffer schemas, which Google's emulator refuses `UNIMPLEMENTED`, are served by CloudBurrow's Pub/Sub front (#1406). Left: an `UpdateTopic` of `schema_settings` bound to a Protocol Buffer schema, and any call but Get, List, Delete, Pull and StreamingPull on a detached subscription, answer `UNIMPLEMENTED` with the reason; the seed file still refuses `PROTOCOL_BUFFER` schemas | front-served, not by the emulator; Google's exact messages for a refused `.proto` definition or message are not measured | S |
-| 4 UNVERIFIED error codes: subscription expiration, exactly-once and label refusals ([pubsub.md](coverage/pubsub.md)) | not documented by Google | S |
+| Any call but Get, List, Delete, Pull and StreamingPull on a detached subscription, and an `UpdateTopic` of `schema_settings` bound to a Protocol Buffer schema, answer `UNIMPLEMENTED` with the reason; the seed file still refuses `PROTOCOL_BUFFER` schemas; the front's messages for a refused `.proto` definition or message are its own (#1446) | not documented by Google (no answer to copy; Google's messages not measured) | S |
+| UNVERIFIED error codes: subscription expiration, exactly-once and label refusals ([pubsub.md](coverage/pubsub.md); an invalid label's message is #982) (#1445) | not documented by Google | S |
 
 ## Cloud Tasks
 
-Queue IAM conditions are excluded (below). Closed: `RunTask`, `BatchCreateTasks`,
-`BatchDeleteTasks` and the CMEK config (#1215), `oidcToken` / `oauthToken` on HTTP tasks and
-Cloud Scheduler jobs (#1243), `ListQueues` filters on any Queue field (#1255), and
-`stackdriver_logging_config`, with each sampled dispatch written to Cloud Logging (#1256), and a
-queue-level `http_target` (#1282).
+Closed: `RunTask`, `BatchCreateTasks`, `BatchDeleteTasks` and the CMEK config (#1215), `oidcToken`
+/ `oauthToken` on HTTP tasks and Cloud Scheduler jobs (#1243), `ListQueues` filters on any Queue
+field (#1255), `stackdriver_logging_config`, with each sampled dispatch written to Cloud Logging
+(#1256), and a queue-level `http_target` (#1282). Queue IAM conditions are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| App Engine targets and `app_engine_routing_override` | no emulator support (no App Engine) | L |
+| App Engine targets and `app_engine_routing_override` (#1447) | no emulator support (no App Engine) | L |
 
 ## Cloud Run
 
-Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` with a partial `update_mask` (#1260); container logs in Cloud Logging as `cloud_run_revision` and `cloud_run_job` (#1298); the v1 (Knative) API, with `gcloud run services list`, `describe` and `deploy --image` (#1293, #1297), and its locations, IAM, jobs and domain mappings (#1349); `Builds.SubmitBuild` (#1268); `Instances.*` (#1299) and `WorkerPools.*` (#1300), with operations that wait for readiness and an instance's URL (#1348).
+Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` with a partial
+`update_mask` (#1260); container logs in Cloud Logging as `cloud_run_revision` and
+`cloud_run_job` (#1298); the v1 (Knative) API, with `gcloud run services list`, `describe` and
+`deploy --image` (#1293, #1297), its locations, IAM, jobs and domain mappings (#1349), job runs,
+executions and tasks (#1379), and selectors, `overrides.delayExecution` and job IAM (#1420);
+`Builds.SubmitBuild` (#1268); `Instances.*` (#1299) and `WorkerPools.*` (#1300), with operations
+that wait for readiness and an instance's URL (#1348), and a worker pool's `update_mask` and
+instance splits (#1387); secret and in-memory volumes, the service account and v1 probes (#1297),
+`subPath`, Cloud SQL volumes through the Auth Proxy sidecar, and VPC access, encryption keys,
+binary authorization, execution environment and session affinity stored without effect (#1346);
+the service account named to its workload by the metadata server (#1388); two projects' resources
+of one ID (#1400); `gcloud run deploy --source` and `gcloud builds submit` with Artifact Registry
+and Cloud Build (#1347), steps of any image (#1382), a Docker registry for built images (#1383),
+`secretEnv`, `script` and `allowFailure` (#1407), Cloud Build triggers and worker pools (#1422),
+and the default logs bucket (#1430).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Refused service and job fields (#1346): Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, Cloud SQL volumes served by the Cloud SQL Auth Proxy sidecar, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346, with v1's `run.googleapis.com/cloudsql-instances` annotation as the same volume) | no emulator support (Knative refuses FUSE and NFS volumes) | M |
-| `gcloud run deploy --source` and `gcloud builds submit` are served since #1347 (Artifact Registry repositories, Cloud Build `builds.create`, `CancelBuild` and operations on the Run port, verified with gcloud on Dockerfile sources and a two-step cloudbuild.yaml); since #1382 steps of any image run as containers on the host's Docker (socket, `cloudbuild` network, shared `/workspace`), and `ListBuilds` `filter` and paging and `RetryBuild` are served; left: a step's `secretEnv`, `script` and `allowFailure`, and no image is pushed to a registry a docker client can reach | not built yet | S |
-| `gcloud run deploy --source` and `gcloud builds submit` are served since #1347 (Artifact Registry repositories, Cloud Build `builds.create`, `CancelBuild` and operations on the Run port, verified with gcloud on Dockerfile sources and a two-step cloudbuild.yaml); left: arbitrary step containers (only docker build, docker push and pack steps run) (a build's images are pushed to the instance's Artifact Registry since #1383) | not built yet | M |
-| `gcloud run deploy --source` and `gcloud builds submit` are served since #1347 (Artifact Registry repositories, Cloud Build `builds.create`, `CancelBuild` and operations on the Run port, verified with gcloud on Dockerfile sources and a two-step cloudbuild.yaml); since #1382 steps of any image run as containers on the host's Docker (socket, `cloudbuild` network, shared `/workspace`), and `ListBuilds` `filter` and paging and `RetryBuild` are served; since #1407 a step's `secretEnv` (Secret Manager and KMS `availableSecrets`; not masked in the log, as on Google), `script`, `allowFailure` and `allowExitCodes`; since #1430 a build without `logsBucket` writes its log to the default `{number}.cloudbuild-logs.googleusercontent.com` bucket, read-only to users; left: `options.dynamicSubstitutions`, and no image is pushed to a registry a docker client can reach | not built yet | S |
-| A worker pool's `update_mask` and instance splits across revisions are refused (served since #1300 and #1299; operations wait for the instances and an instance has a URL since #1348) | not built yet | M |
-| Refused service and job fields: VPC access, Cloud SQL, Cloud Storage FUSE and NFS volumes, `subPath`, encryption keys, binary authorization, execution environment, session affinity (the service account named to its workload by the metadata server in #1388; secret and in-memory volumes, the service account and v1 probes mapped in #1297) (#1346) | not built yet | L |
-| `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` (#1347) | not built yet | M |
-| Worker pool and standalone instance operations complete when written, not when their instances are ready; an instance gets no URL (`ingress` refused) (served since #1300 and #1299; a worker pool's `update_mask` and instance splits across revisions served in #1387) (#1348) | not built yet | M |
-| `gcloud run deploy` through the v1 (Knative) API, served since #1293 for services, revisions, routes and configurations, is not verified: its default `startupProbe` and other v1 fields are refused as not mapped, and `projects.locations.list` and the rest of v1 (domain mappings, jobs, IAM) are 501 (#1349) | not built yet | M |
-Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` with a partial `update_mask` (#1260); container logs in Cloud Logging as `cloud_run_revision` and `cloud_run_job` (#1298); the v1 (Knative) API, with `gcloud run services list`, `describe` and `deploy --image` (#1293, #1297), and its locations, IAM, jobs and domain mappings (#1349); `Builds.SubmitBuild` (#1268).
-| Refused service and job fields (#1346): Cloud SQL volumes (needs a Cloud SQL Auth Proxy sidecar and the 3307 connector published to pods), Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes (the service account named to its workload by the metadata server in #1388; secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346) | not built yet | M |
-| Refused service and job fields (#1346): Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes (the service account named to its workload by the metadata server in #1388; secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, Cloud SQL volumes served by the Cloud SQL Auth Proxy sidecar, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346; v1's `run.googleapis.com/cloudsql-instances` annotation is still refused) | no emulator support (Knative refuses FUSE and NFS volumes) | M |
-| Refused service and job fields (#1346): Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes (the service account named to its workload by the metadata server in #1388; secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, Cloud SQL volumes served by the Cloud SQL Auth Proxy sidecar, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346, with v1's `run.googleapis.com/cloudsql-instances` annotation as the same volume) | no emulator support (Knative refuses FUSE and NFS volumes) | M |
-| `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
-| Refused service and job fields: VPC access, Cloud SQL, Cloud Storage FUSE and NFS volumes, `subPath`, encryption keys, binary authorization, execution environment, session affinity (the service account named to its workload by the metadata server in #1388; secret and in-memory volumes, the service account and v1 probes mapped in #1297) | not built yet | L |
-| `Instances.*` is not served (#1299) | not built yet | L |
-| `WorkerPools.*` is not served (#1300) | not built yet | L |
-| A v1 (Knative) domain mapping never becomes Ready, as no DNS is served; a v1 job's own `spec.template.spec.delayExecution` is 501, and a run's `overrides.delayExecution` is not read back on the execution (projects.locations.list, IAM, jobs create/get/list/delete and domain mappings since #1349; `replaceJob`, `run`, executions and tasks since #1379; set-based `labelSelector`s, `fieldSelector`, `overrides.delayExecution` and `projects.locations.jobs` IAM since #1420) | not built yet | S |
-| A service's container sees `K_SERVICE`, `K_CONFIGURATION` and `K_REVISION` as the scoped Knative names (`<id>-<scope>`, `<id>-<scope>-00001`), not Cloud Run's service and revision IDs, which the API reports: Knative reserves the three variables (two projects' services of one ID are two since #1400) | no emulator support (Knative reserves `K_SERVICE`, `K_CONFIGURATION` and `K_REVISION`) | S |
-| `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
-| A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
-| `CancelExecution`'s result | needs live GCP | S |
+| Cloud Storage FUSE and NFS volumes on services and jobs are refused `UNIMPLEMENTED` naming the field (#1448) | no emulator support (Knative refuses a privileged container and CSI volumes) | M |
+| A service's container sees `K_SERVICE`, `K_CONFIGURATION` and `K_REVISION` as the scoped Knative names, not Cloud Run's service and revision IDs, which the API reports (#1448) | no emulator support (Knative reserves the three variables) | S |
+| `CancelOperation`: a deployment in flight cannot be recalled (#1448) | no emulator support | S |
+| Cloud Build: `options.dynamicSubstitutions`, `secretEnv` on a docker build, docker push or pack step, `ApproveBuild` and `approvalRequired`, and triggers with a repository or Pub/Sub source or a `filename` are refused; Artifact Registry: 27 methods `UNIMPLEMENTED` (rules, attachments, Maven, npm, Python, Apt and Yum artifacts, project and VPC-SC settings, package, version and file updates; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | not built yet | M |
+| v1 (Knative) API: a domain mapping never becomes Ready, as no DNS is served and no certificate issued; a job's own `spec.template.spec.delayExecution` is 501, and a run's `overrides.delayExecution` is not read back on the execution, as v2 has no field for either (#1450) | not built yet | S |
+| A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
 
 ## Cloud Scheduler
 
-Closed by this sweep: Locations (#1237).
+Closed by the sweep: Locations (#1237).
 
 | Gap | Why open | Size |
 |---|---|---|
-| App Engine targets | no emulator support (no App Engine) | L |
-| `ResumeJob` on an enabled job and the default `retry_config` are inferred from the Terraform provider | needs live GCP | S |
+| App Engine targets (#1447) | no emulator support (no App Engine) | L |
+| `ResumeJob` on an enabled job and the default `retry_config` are inferred from the Terraform provider (#1445) | needs live GCP | S |
 
 ## Cloud Logging
 
-Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394); the Terraform folder, organization and billing-account resources (#1403).
-Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394). Closed: sink delivery to Cloud Storage, Pub/Sub, BigQuery and another project, and `writer_identity` (#1404).
-Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394). Closed: sink delivery to Cloud Storage, Pub/Sub, BigQuery and another project, and `writer_identity` (#1404). Closed: `CopyLogEntries` from folder, organization and billing-account buckets, with their Operations JSON bindings (#1411); in the console, Log storage's Parent picker reaches those buckets, a billing account once Logging holds an entry or configuration for it or when named as `?parent=billingAccounts/ID` (Cloud Billing is not served, so nothing else lists one). Closed: log view filters and bucket retention applied on read, and TailLogEntries on views and over JSON (#1410); in the console, the Logs Explorer reads and tails through a chosen bucket and view.
-Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394). Closed: sink delivery to Cloud Storage, Pub/Sub, BigQuery and another project, and `writer_identity` (#1404). Closed: `CopyLogEntries` from folder, organization and billing-account buckets, with their Operations JSON bindings (#1411); in the console, Log storage's Parent picker reaches those buckets, a billing account once Logging holds an entry or configuration for it or when named as `?parent=billingAccounts/ID` (Cloud Billing is not served, so nothing else lists one). Closed: log view filters and bucket retention applied on read, and TailLogEntries on views and over JSON (#1410); in the console, the Logs Explorer reads and tails through a chosen bucket and view. Closed: Log Analytics, a link making a read-only BigQuery linked dataset whose `_AllLogs` view holds the bucket's entries, kept current as they are written (#1423); log views with a filter are not mapped into it.
-Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394); the Terraform folder, organization and billing-account resources (#1403). Closed: sink delivery to Cloud Storage, Pub/Sub, BigQuery and another project, and `writer_identity` (#1404). Closed: `CopyLogEntries` from folder, organization and billing-account buckets, with their Operations JSON bindings (#1411); in the console, Log storage's Parent picker reaches those buckets, a billing account once Logging holds an entry or configuration for it or when named as `?parent=billingAccounts/ID` (Cloud Billing is not served, so nothing else lists one). Closed: log view filters and bucket retention applied on read, and TailLogEntries on views and over JSON (#1410); in the console, the Logs Explorer reads and tails through a chosen bucket and view. Closed: Log Analytics, a link making a read-only BigQuery linked dataset whose `_AllLogs` view holds the bucket's entries, kept current as they are written (#1423); a view per log view, retention and DeleteLog applied to its rows, the dataset made again after an emulator restart and kept read-only across a front restart, and links refused on folder and organization buckets, which Google does not upgrade to Log Analytics (#1435).
+Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics,
+`MetricsServiceV2` (#1226); the Async bucket calls, links and settings of `ConfigServiceV2`
+(#1292), and `CopyLogEntries` (#1394); the Terraform folder, organization and billing-account
+resources (#1403); sink delivery to Cloud Storage, Pub/Sub, BigQuery and another project, and
+`writer_identity` (#1404); log view filters and bucket retention applied on read, and
+TailLogEntries on views and over JSON (#1410); `CopyLogEntries` from folder, organization and
+billing-account buckets (#1411); Log Analytics, a link making a read-only BigQuery linked dataset
+(#1423), with a view per log view, retention and DeleteLog applied to its rows, and links refused
+on folder and organization buckets, as Google refuses them (#1435).
 
 | Gap | Why open | Size |
 |---|---|---|
-| A BigQuery sink's schema mismatch is not written to an `export_errors` table, `protoPayload` is not exported, and the sink error codes but `topic_not_found` are CloudBurrow's (#1404) | not documented by Google | S |
+| A BigQuery sink's schema mismatch is not written to an `export_errors` table, `protoPayload` is not exported, and the sink error codes but `topic_not_found` are CloudBurrow's (#1451) | not documented by Google | S |
 
 ## Cloud KMS
 
 Closed: asymmetric, MAC and raw keys, random bytes, deletion and import jobs, the 19 Unimplemented
-methods (#1212), and their console (#1219). Closed by this sweep: Locations (#1291).
+methods (#1212), and their console (#1219). Closed by the sweep: Locations (#1291).
 
 | Gap | Why open | Size |
 |---|---|---|
-| HSM, EXTERNAL and EXTERNAL_VPC protection levels, `crypto_key_backend`, `external_protection_level_options` | no emulator support | L |
-| EKM, Autokey, AutokeyAdmin and HSM management services | no emulator support | L |
-| `key_access_justifications_policy` on `UpdateCryptoKey` | no emulator support | S |
-| REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` | not documented by Google | S |
-| 72 UNVERIFIED error codes ([kms.md](coverage/kms.md)) | not documented by Google | S |
-| Project-number parents are refused; whether Google accepts them, and whether an empty key ring can be deleted | needs live GCP | S |
+| HSM, EXTERNAL and EXTERNAL_VPC protection levels, `crypto_key_backend`, `external_protection_level_options` (#1452) | no emulator support | L |
+| EKM, Autokey, AutokeyAdmin and HSM management services (#1452) | no emulator support | L |
+| `key_access_justifications_policy` on `UpdateCryptoKey` (#1452) | no emulator support | S |
+| REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` (#1445) | not documented by Google | S |
+| UNVERIFIED error codes ([kms.md](coverage/kms.md)) (#1445) | not documented by Google | S |
+| Project-number parents are refused; whether Google accepts them, and whether an empty key ring can be deleted (#1445) | needs live GCP | S |
 
 ## Secret Manager
 
-IAM conditions are excluded (below). Closed: `RotateSecret`, `EnableManagedRotation` and
-`Secret.rotation` (#1215), `Secret.expire_time` / `ttl` (#1225), and `ListSecrets` /
-`ListSecretVersions` filters (#1228), `Secret.topics` event notifications to Pub/Sub (#1259), and
-`Secret.rotation` schedules and `version_destroy_ttl` delayed destruction (#1278).
+Closed: `RotateSecret`, `EnableManagedRotation` and `Secret.rotation` (#1215), `Secret.expire_time`
+/ `ttl` (#1225), `ListSecrets` / `ListSecretVersions` filters (#1228), `Secret.topics` event
+notifications to Pub/Sub (#1259), and `Secret.rotation` schedules and `version_destroy_ttl`
+delayed destruction (#1278). IAM conditions are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `customer_managed_encryption` on a replica or the automatic policy | no emulator support (needs KMS-backed CMEK) | M |
-| Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) | needs live GCP | S |
+| `customer_managed_encryption` on a replica or the automatic policy (#1453) | no emulator support (needs KMS-backed CMEK) | M |
+| Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) (#1445) | needs live GCP | S |
 
 ## Resource Manager
 
-Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296), and regional tag bindings and effective tags through the `{location}-cloudresourcemanager` endpoints (#1350). Closed: project, folder and organization IAM, stored and never enforced (#1368).
+Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216); v1 org policy on projects
+(#1296), and regional tag bindings and effective tags through the
+`{location}-cloudresourcemanager` endpoints (#1350); project, folder and organization IAM, stored
+and never enforced (#1368).
 
-| Gap | Why open | Size |
-|---|---|---|
 No gap is left open here.
 
 ## Vertex AI
 
-Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244); `PredictionService.StreamGenerateContent` over gRPC, and an official-SDK test of `GenerateContent` over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`, `DirectPredict`, `ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285).
+Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244);
+`PredictionService.StreamGenerateContent` over gRPC, and an official-SDK test of `GenerateContent`
+over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`, `DirectPredict`,
+`ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1244) | no emulator support (one text-only model) | S |
-| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served (#1285) | no emulator support (no gRPC model server) | M |
-| `Explain` | no emulator support | L |
+| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1454) | no emulator support (one text-only model) | S |
+| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served (#1454) | no emulator support (no gRPC model server) | M |
+| `Explain` (#1454) | no emulator support | L |
 
 ## BigQuery
 
-Already tracked: #957 (extract formats). Closed: copy jobs, snapshots and clones (#1002), a JSON load's field outside the schema (#1339), `EXECUTE IMMEDIATE` as a child job, `INTO`'s errors and `@@row_count` (#1037), scripting control flow, handlers and failed statements' child jobs (#1201), procedures, script transactions and RANGE variables (#1217), row access policies and table and routine IAM (#1218), infinite FLOAT64 in UNNEST (#1204), `ALTER TABLE` `ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` (#1227), `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239), a lone `CREATE VIEW` with a column list (#1240), a `STRUCT` parameter with a `BYTES` field (#1241, #1082), a schema update with a new column before the table's and a RANGE in a STRUCT parameter (#1111), `CREATE TABLE … PARTITION BY … CLUSTER BY …` (#1272), `INFORMATION_SCHEMA` `VIEWS` (#1274), the dataset views (#1286, #1328), region `JOBS` and the region views (#1275, #1329), time travel `AS OF CURRENT_TIMESTAMP()` (#1276), `RENAME TO`, `RENAME COLUMN`, `DROP COLUMN` (#1322), `SET DATA TYPE` and keys (#1334), a view's column list in a script (#1323), a JSON load with `autodetect` (#1324), CSV `timeZone`, SQL-style formats and encodings (#1325), and `columnNameCharacterMap` renaming (#1326); the Storage Write API's `arrow_rows` (#1327), C-style CSV formats and formats with `autodetect` (#1338), column defaults (#1340), `INFORMATION_SCHEMA` `SCHEMATA_OPTIONS` and `MATERIALIZED_VIEWS` (#1351) and region `OBJECT_PRIVILEGES` and `SCHEMATA_LINKS` (#1355), a script's child jobs (#1353), ingestion time and partition decorators (#1277, #1273), and filtered `INFORMATION_SCHEMA.JOBS` queries (#1369).
-Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs, snapshots, clones), #957 (extracting a model, as BQML is not supported), #1339 (a JSON load's field outside the schema). Closed: procedures, script transactions and RANGE variables (#1217), row access policies and table and routine IAM (#1218), infinite FLOAT64 in UNNEST (#1204), `ALTER TABLE` `ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` (#1227), `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239), a lone `CREATE VIEW` with a column list (#1240), a `STRUCT` parameter with a `BYTES` field (#1241, #1082), a schema update with a new column before the table's and a RANGE in a STRUCT parameter (#1111), `CREATE TABLE … PARTITION BY … CLUSTER BY …` (#1272), `INFORMATION_SCHEMA` `VIEWS` (#1274), the dataset views (#1286, #1328), region `JOBS` and the region views (#1275, #1329), time travel `AS OF CURRENT_TIMESTAMP()` (#1276), `RENAME TO`, `RENAME COLUMN`, `DROP COLUMN` (#1322), `SET DATA TYPE` and keys (#1334), a view's column list in a script (#1323), a JSON load with `autodetect` (#1324), CSV `timeZone`, SQL-style formats and encodings (#1325), and `columnNameCharacterMap` renaming (#1326).
+Already tracked: #1418 (`CHANGES` and `APPENDS` for `enable_change_history` tables), #1426
+(enforcing a table's `privacy_policy`; a query of such a table is 501), #1427 (Iceberg files for
+`storage_uri`), #1434 (materialized view statements in a script with a TEMP table or function),
+#1437 (`INTERVAL` arithmetic in the engine, and on the Write API's Arrow path), #1438
+(`CREATE TABLE` dropping a column's `OPTIONS(description)`).
+
+Closed: copy jobs, snapshots and clones (#1002), extracting every column type (#957),
+`EXECUTE IMMEDIATE` as a child job, `INTO`'s errors and `@@row_count` (#1037), scripting control
+flow, handlers and failed statements' child jobs (#1201), procedures, script transactions and
+RANGE variables (#1217), row access policies and table and routine IAM (#1218), infinite FLOAT64
+in UNNEST (#1204), `ALTER TABLE` `ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` (#1227),
+`routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239), a lone `CREATE VIEW`
+with a column list (#1240), a `STRUCT` parameter with a `BYTES` field (#1241, #1082), a schema
+update with a new column before the table's and a RANGE in a STRUCT parameter (#1111),
+`CREATE TABLE … PARTITION BY … CLUSTER BY …` (#1272), partition decorators and the streaming
+buffer (#1273), `INFORMATION_SCHEMA` `VIEWS` (#1274), the dataset views (#1286, #1328), region
+`JOBS` and the region views (#1275, #1329), time travel `AS OF CURRENT_TIMESTAMP()` (#1276),
+ingestion time (#1277), `RENAME TO`, `RENAME COLUMN`, `DROP COLUMN` (#1322), `SET DATA TYPE` and
+keys (#1334), a view's column list in a script (#1323, #1335), a JSON load with `autodetect`
+(#1324), CSV `timeZone`, SQL-style formats and encodings (#1325), `columnNameCharacterMap`
+renaming (#1326, #1336, #1373), the Storage Write API's `arrow_rows` (#1327), C-style CSV formats
+and formats with `autodetect` (#1338), a JSON load's field outside the schema (#1339), column
+defaults with `SET DEFAULT` and `DROP DEFAULT` (#1340), `SCHEMATA_OPTIONS` and
+`MATERIALIZED_VIEWS` (#1351), a script's child jobs (#1353), region `OBJECT_PRIVILEGES` and
+`SCHEMATA_LINKS` (#1355), filtered `INFORMATION_SCHEMA.JOBS` queries (#1369), DML of rows
+streamed in the last 30 minutes (#1370), project configurations (#1371, #1375, #1417), table
+options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOLDER`,
+`JOBS_BY_ORGANIZATION` and unqualified `SCHEMATA_LINKS` (#1392), and DDL in dry runs, scripts and
+`EXECUTE IMMEDIATE` (#1416).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `ALTER TABLE` is 501 for a foreign key to another project's table (an instance serves one project), the table options CloudBurrow does not set (#1390), `ALTER COLUMN SET OPTIONS (data_policies, data_governance_tags)`, an `ALTER TABLE` in a script with a `TEMP` table or function (the front runs such a script a statement at a time, which a `TEMP` table does not survive) or in a dry run of a script, and legacy SQL (#1416: `SET DATA TYPE` of a partitioning or clustering column, from `INT64` to a parameterized `NUMERIC`, of an `ARRAY` and of a `STRUCT`'s REPEATED field, `ALTER COLUMN SET OPTIONS (rounding_mode)`, a dry run of a lone `ALTER TABLE` and one given by `EXECUTE IMMEDIATE` are carried out; earlier forms since #1227, #1322, #1334, #1340, #1389); a statement of several ways is carried out a run at a time, so a later refusal leaves the earlier runs done | not built yet | S |
-| A dry run of `CREATE VIEW` with a column list, without `OR REPLACE` or `IF NOT EXISTS`, of a view that exists is 501, as what BigQuery's dry run answers for it is not known (a column list alone, in a script, in a script with a `TEMP` table, given by `EXECUTE IMMEDIATE`, in a dry run and in a script's dry run, and a column's description that is a constant expression, are carried out since #1240, #1323, #1335 and #1416; another column option is 400, as BigQuery takes description alone) (#1416) | not built yet | S |
-| `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) (#1324) | not built yet | M |
-| CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 (#1325) | not built yet | M |
-| `ALTER TABLE` `ALTER COLUMN SET DEFAULT` / `DROP DEFAULT` are 501: the engine applies a column default only from the `CREATE TABLE` that made its table, never from the table's `defaultValueExpression` (measured, #1340); the other `ALTER TABLE` forms are the row above (#1389) (`ADD COLUMN, `SET OPTIONS` and `ALTER COLUMN` are carried out since #1227, `RENAME TO`, `RENAME COLUMN` and `DROP COLUMN` since #1322, `SET DATA TYPE` and primary and foreign keys since #1334) (#1340) | not built yet | M |
-| What #1390 leaves of table `OPTIONS` and materialized views: `ALTER COLUMN … SET OPTIONS (rounding_mode)` is 501 (#1401 and #1409 round parameterized NUMERIC and BIGNUMERIC columns, STRUCT fields and ARRAY elements, and carry out `ADD COLUMN … OPTIONS (rounding_mode)`); `privacy_policy` is stored and a query of the table refused 501 (not enforced); `enable_change_history` is stored, `CHANGES` and `APPENDS` not served; `storage_uri` is stored, no Iceberg files written; `require_partition_filter` checks that the column is named in a `WHERE`, not that it prunes; smart tuning's rewrite of a base-table query to read a materialized view is not built (a query of the view reads current data and the automatic refresh follows a base table's change since #1415); options and materialized views in a script with a TEMP table or function are 501 (in other scripts built, #1415) | not built yet | M |
-| `columnNameCharacterMap` `V1` / `V2` when a detected name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix), names the same once replaced, and a load that is not CSV, are 501 (renaming by replacing characters is built since #1326) (#1336) | not built yet | S |
-| Partition decorators: through a partition, a schema change BigQuery does not document (a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order, a RECORD's fields changed), `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination and a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, none documented by BigQuery, are 501; a streamed row is modifiable by DML after the 20-second flush, not BigQuery's 30 minutes (#1370) (the rest of #1273 is built: the streaming buffer of column- and range-partitioned tables, DML refused on buffered rows, a REQUIRED column left out with `ALLOW_FIELD_RELAXATION`, #1273) | not documented by Google | S |
-| CSV loads: a C-style (`%m/%d/%Y`) date or time format, and `timeZone` or a format with `autodetect` and no schema (SQL-style formats, `timeZone` and the UTF-16 and UTF-32 encodings are built, #1325) (#1338) | not built yet | S |
-| Storage Write API `arrow_rows` (#1327) | not built yet | M |
-| Locations (#1371, #1375, #1417): `default_time_zone` does not reach `DATE`, `DATETIME`, `TIME`, `STRING` or `EXTRACT` given a column or other expression whose type the text does not show, `DATE_TRUNC` and the like, a `TIMESTAMP` literal with no offset, or a cast between `TIMESTAMP` and another type; the job and queue timeouts are stored, not enforced; `default_kms_key_name` reaches `tables.insert` only (not `CREATE TABLE`, a query's or a load's new table); `ALTER PROJECT`/`ALTER ORGANIZATION` inside a block, `IF` or loop of a script is 501, and a top-level one is carried out as the script starts; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows (Google does not say whether BigQuery does); `SCHEMATA` in a script with a TEMP table or function is read as the script starts | not built yet | S |
-| Partition decorators: `$__NULL__` or `$__UNPARTITIONED__` as a destination, `WRITE_TRUNCATE_DATA` into a partition, a schema update through one partition, and `tabledata.insertAll` into a partition are 501 (reads, `tabledata.list`, `tables.get`, `tables.delete` and load, copy and query destinations are built, of an ingestion-time partitioned table too, #1273, #1277) | not built yet | M |
-| `columnNameCharacterMap` `V1` / `V2` when a detected CSV name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix, an empty or too long name) and names the same once replaced are 501: BigQuery documents only that "invalid column names will be normalized", not how a name replacing characters cannot fix is (renaming by replacing characters is built since #1326; the map refused for a format other than CSV and Parquet, and a Parquet name refused under `STRICT`, since #1336) | not documented by Google | S |
-| `columnNameCharacterMap` `V1` / `V2` of a Parquet file whose name is still refused once its characters are replaced (a period, which BigQuery keeps, "except periods in Parquet file column names"; a `V1` leading digit) and names the same once replaced are 501: BigQuery does not document how it names them (renaming the file's columns at every depth, and a flexible name under `STRICT`, are built since #1373) | not documented by Google | S |
-| Partition decorators: through a partition, a schema change BigQuery does not document (a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order, a RECORD's fields changed), `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination and a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, none documented by BigQuery, are 501 (the rest of #1273 is built: the streaming buffer of column- and range-partitioned tables, DML refused on buffered rows, a REQUIRED column left out with `ALLOW_FIELD_RELAXATION`, #1273; and since #1370 DML refuses a row streamed in the last 30 minutes, on any table) | not documented by Google | S |
-| `INFORMATION_SCHEMA` `PARTITIONS` and the other dataset views but `VIEWS`, `TABLES`, `COLUMNS`, `COLUMN_FIELD_PATHS`, `TABLE_OPTIONS`, `ROUTINES` and `PARAMETERS` (built, #1274, #1286) are 501; `COLUMNS` has no `async_generation_status` (#1286) (#1328) | not built yet | M |
-| Region-qualified `INFORMATION_SCHEMA.JOBS` (built, #1275) has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (Google does not document their STRUCTs), nor child jobs; the region-qualified forms of the other views are "Table not found" (#1329) | not built yet | M |
-| `INFORMATION_SCHEMA` `MATERIALIZED_VIEWS`, `OBJECT_PRIVILEGES`, `SCHEMATA_OPTIONS` and `SCHEMATA_LINKS` are 501 (`PARTITIONS`, the constraint, snapshot, routine option and index views built, #1328); `PARTITIONS` has no byte counts or `last_modified_time`; `COLUMNS` has no `async_generation_status` (#1286) | not built yet | M |
-| Region-qualified `INFORMATION_SCHEMA.JOBS` (built, #1275) has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (Google does not document their STRUCTs, and the front knows none of their contents, #1329), nor child jobs; region `TABLE_STORAGE` has no byte counts (#1329) | not built yet | M |
-| `_PARTITIONTIME` of a row written by `tabledata.insertAll` is its partition's at once, where BigQuery reads it NULL while the row is in the streaming buffer; a table restored from state saved before #1277 keeps no ingestion time (its pseudo-columns fail 400 "Unrecognized name") (#1277) | no emulator support | S |
-| `SCHEMATA_LINKS` without a region qualifier is 501 (region `OBJECT_PRIVILEGES` and `SCHEMATA_LINKS` built, #1355; `PARTITIONS`, the constraint, snapshot, routine option and index views, #1328; `SCHEMATA_OPTIONS` and `MATERIALIZED_VIEWS`, #1351); `PARTITIONS` has no byte counts or `last_modified_time`; `COLUMNS` has no `async_generation_status` (#1286) (#1355) | not built yet | M |
-| Partition decorators: `tabledata.list` and `tables.get` of a partition, a partition as a load, copy or query destination, and a partition of an ingestion-time partitioned table are 501 (a query's read and `tables.delete` of one are built) (#1273) | not built yet | M |
-| `PARTITIONS` has no byte counts or `last_modified_time`; `COLUMNS` has no `async_generation_status` (#1286) (`SCHEMATA_LINKS` without a region qualifier built, #1392; region `OBJECT_PRIVILEGES` and `SCHEMATA_LINKS`, #1355; `PARTITIONS`, the constraint, snapshot, routine option and index views, #1328; `SCHEMATA_OPTIONS` and `MATERIALIZED_VIEWS`, #1351) (#1355) | not built yet | M |
-| Region-qualified `INFORMATION_SCHEMA.JOBS` (built, #1275) has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (Google does not document their STRUCTs, and the front knows none of their contents, #1329); region `TABLE_STORAGE` has no byte counts | not documented by Google | S |
-| A script the emulator runs whole (no control flow, no query before its last statement) makes no child jobs, as the emulator runs it as one job; a script's last DML statement has no child of its own, and a `SELECT` child names no destination table (child jobs of a script the front carries out, `jobs.list` `parentJobId` and `INFORMATION_SCHEMA.JOBS` `parent_job_id`, are built, #1353) | no emulator support | M |
-| Materialized views (`CREATE` / `DROP MATERIALIZED VIEW`) | no emulator support | L |
-| `datasets.undelete`: the emulator keeps nothing of a deleted dataset | no emulator support | M |
-| `FOR SYSTEM_TIME AS OF` a past time inside the time travel window is 501: the emulator keeps no history (`AS OF CURRENT_TIMESTAMP()` reads the table, and a time before the window fails 400 as in BigQuery, #1276) | no emulator support | L |
-| A failed script after a statement that wrote: the emulator does not roll back | no emulator support | L |
-| `MERGE` from a subquery inside a multi-statement script; DML with a `FROM` of several items | no emulator support | M |
-| `CREATE OR REPLACE TABLE`, `CREATE OR REPLACE [TEMP] TABLE`, `CREATE SCHEMA` of an existing dataset, and `DROP TABLE` of a script's temp table, later in a multi-statement script | no emulator support | M |
-| `CREATE [OR REPLACE] [TABLE] FUNCTION` of one that exists, and `DROP [TABLE] FUNCTION`, inside multi-statement scripts | no emulator support | M |
-| `DROP SCHEMA` where the script's other statements see the dataset | no emulator support | M |
-| `CREATE SCHEMA` options other than the supported strings, and `DEFAULT COLLATE` | no emulator support | M |
-| `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that does | no emulator support | S |
-| CSV: a multi-character or non-ASCII delimiter or quote, an empty `STRING` with a `nullMarker`, a `maxBadRecords` load the emulator fails | no emulator support | M |
-| Parquet loads with a NaN, and the other refused Parquet columns | no emulator support | S |
-| Storage Read API: `SplitReadStream`, and `ReadRows` of a stream made before the front last started | no emulator support | S |
-| A load of several Cloud Storage objects when the front was given no Cloud Storage | no emulator support | S |
-| Script variable named as an alias, a column or a table; `WRITE_TRUNCATE_DATA` of a result of another type | not documented by Google | S |
-| CSV header detection when every column reads as `STRING` | not documented by Google | S |
-| BigQuery's wording of every front refusal (UNVERIFIED throughout the BigQuery rows) | not documented by Google | S |
+| `ALTER TABLE` is 501 for a foreign key to another project's table (an instance serves one project), the table options not built, `ALTER COLUMN SET OPTIONS (data_policies, data_governance_tags)`, an `ALTER TABLE` in a script with a `TEMP` table or function or in a dry run of a script, and legacy SQL; a statement of several actions is carried out a step at a time, so a later refusal leaves the earlier steps done; a nested field's `ALTER COLUMN SET DEFAULT`, and a `WRITE_TRUNCATE_DATA` query job whose result lacks a column with a default, are 501 (#1456) | not built yet | S |
+| A dry run of `CREATE VIEW` with a column list, without `OR REPLACE` or `IF NOT EXISTS`, of a view that exists is 501, as what BigQuery's dry run answers for it is not known (#1456) | not documented by Google | S |
+| Table options and materialized views: `ALTER COLUMN … SET OPTIONS (rounding_mode)` is 501 where the Table OPTIONS row says so; `require_partition_filter` checks that the column is named in a `WHERE`, not that it prunes; smart tuning's rewrite of a base-table query to read a materialized view is not built (#1456); `privacy_policy` (#1426), `enable_change_history` (#1418), `storage_uri` (#1427) and materialized views in a script with a TEMP table or function (#1434) are tracked on their own | not built yet | M |
+| Project configurations: `default_time_zone` does not reach `DATE`, `DATETIME`, `TIME`, `STRING` or `EXTRACT` given a column or other expression whose type the text does not show, `DATE_TRUNC` and the like, or a `TIMESTAMP` literal with no offset; the job and queue timeouts are stored, not enforced; `default_kms_key_name` reaches `tables.insert` only; `ALTER PROJECT` / `ALTER ORGANIZATION` inside a block, `IF` or loop of a script is 501; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows (#1456) | not built yet | S |
+| `columnNameCharacterMap` `V1` / `V2` when a detected CSV or Parquet name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix, an empty or too long name, a Parquet name with a period) and names the same once replaced are 501: BigQuery documents only that "invalid column names will be normalized" (#1457) | not documented by Google | S |
+| Autodetect: a JSON column whose values mix types BigQuery does not document detecting, `skipLeadingRows` other than 1 into a new table, and a sample with a format or `timeZone` that BigQuery's detection is not documented for, are 501; CSV header detection where BigQuery and the emulator disagree (every column `STRING`, a name that reads as a number, boolean, date or timestamp) is 501 (#1457) | not documented by Google | S |
+| CSV: a multi-character or non-ASCII delimiter or quote, an empty `STRING` with a `nullMarker`, a `maxBadRecords` load the emulator fails, `sourceColumnMatch` `NAME` with `skipLeadingRows` other than 1; JSON: a null field outside the schema, a `maxBadRecords` load the emulator fails (#1457) | no emulator support | M |
+| Parquet loads with a NaN, and the other refused Parquet columns (#1457) | no emulator support | S |
+| A load of several Cloud Storage objects when the front was given no Cloud Storage (#1457) | no emulator support | S |
+| Partition decorators: `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination, a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, and through a partition a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order or a RECORD's fields changed, are 501, none documented by BigQuery (#1458) | not documented by Google | S |
+| A table made by `CREATE TABLE … AS SELECT`, a temporary table, or one made before the engine had the column keeps no stream time, so its streamed rows are held from DML only while in the 20-second streaming buffer; a query naming `_PARTITION_BUFFERED` or `_PARTITION_STREAMED` reads the engine's marks; a table restored from state saved before #1277 keeps no ingestion time (#1458) | no emulator support | S |
+| `PARTITIONS` has no byte counts or `last_modified_time`; region `TABLE_STORAGE` has no byte columns, `total_partitions` or `storage_last_modified_time`; `COLUMNS` has no `async_generation_status`; `OBJECT_PRIVILEGES` and `SCHEMATA_LINKS` dataset-qualified are 501 (#1458) | no emulator support (no faithful byte counts or write times) | M |
+| Region-qualified `INFORMATION_SCHEMA.JOBS` has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (#1458) | not documented by Google (their STRUCTs) | S |
+| A script the emulator runs whole (no control flow, no query before its last statement) makes no child jobs; a script's last DML statement has no child of its own, and a `SELECT` child names no destination table (#1459) | no emulator support | M |
+| `MERGE` from a subquery inside a multi-statement script; DML with a `FROM` of several items (#1459) | no emulator support | M |
+| `CREATE OR REPLACE TABLE`, `CREATE OR REPLACE [TEMP] TABLE`, `CREATE SCHEMA` of an existing dataset, `CREATE TABLE … LIKE`, `COPY` or `CLONE`, and `DROP TABLE` of a script's temp table, later in a multi-statement script (#1459) | no emulator support | M |
+| `CREATE [OR REPLACE] [TABLE] FUNCTION` of one that exists, and `DROP [TABLE] FUNCTION`, inside multi-statement scripts (#1459) | no emulator support | M |
+| `DROP SCHEMA` where the script's other statements see the dataset; `CREATE SCHEMA` options other than the supported strings, and `DEFAULT COLLATE` (#1459) | no emulator support | M |
+| `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that changes data; a runtime error or an `ASSERT` in a script with a `TEMP` table or function (#1459) | no emulator support | S |
+| A failed script after a statement that wrote: the emulator does not roll back (#1459) | no emulator support | L |
+| `FOR SYSTEM_TIME AS OF` a past time inside the time travel window, and a snapshot or clone at one, are 501: the emulator keeps no history (#1460) | no emulator support | L |
+| `datasets.undelete`: the emulator keeps nothing of a deleted dataset (#1460) | no emulator support | M |
+| Storage Read API: `SplitReadStream`, and `ReadRows` of a stream made before the front last started (#1460) | no emulator support | S |
+| BQML: `CREATE MODEL` is refused by the engine ("Statement not supported: CreateModelStatement"), so no model can be made, used or extracted (#1465) | no emulator support | L |
+| Script variable named as an alias, a column or a table; `WRITE_TRUNCATE_DATA` of a result of another type (#1445) | not documented by Google | S |
+| BigQuery's wording of every front refusal (UNVERIFIED throughout the BigQuery rows) (#1445) | not documented by Google | S |
 
 ## Spanner, Bigtable, Firestore, Datastore
 
+Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405).
+
 | Gap | Why open | Size |
 |---|---|---|
-| Spanner: 32 RPCs refused (backups, backup schedules, IAM, instance configurations, instance and partition updates, `FetchCacheUpdate`; [spanner.md](coverage/spanner.md)) | no emulator support | L |
-| Bigtable: 34 RPCs refused (authorized views, snapshots, backups, IAM, `ExecuteQuery`, …; [bigtable.md](coverage/bigtable.md)) | no emulator support | L |
-| Datastore GQL aggregation queries (`RunAggregationQuery` with `gql_query`) and `explain_options` | the emulator serves neither `RunAggregationQuery` nor query plans; the call front answers structured COUNT, SUM and AVG and Firestore `PartitionQuery` from its `RunQuery` (#1405), and refuses these 501 | S |
+| Spanner: 32 RPCs refused (backups, backup schedules, IAM, instance configurations, instance and partition updates, `FetchCacheUpdate`; [spanner.md](coverage/spanner.md)) (#1461) | no emulator support | L |
+| Bigtable: 48 RPCs refused (authorized, logical and materialized views, memory layers, snapshots, backups, schema bundles, table IAM, `ExecuteQuery`, change streams, …; [bigtable.md](coverage/bigtable.md)) (#1461) | no emulator support | L |
+| Bigtable: the admin REST API (JSON), which Terraform's `google_bigtable_app_profile` and `google_bigtable_instance_iam_*` use (#1440) | not built yet | M |
+| Firestore: `ExecutePipeline`; Firestore Admin: backups, backup schedules, restore, clone, user credentials, `ExportDocuments`, `ImportDocuments`, `BulkDeleteDocuments` (20 methods; [firestoreadmin.md](coverage/firestoreadmin.md)) (#1461) | no emulator support | L |
+| Datastore GQL aggregation queries (`RunAggregationQuery` with `gql_query`) and `explain_options` are 501 (#1461) | no emulator support (the emulator serves neither) | S |
+| Whether production reorders an array's excluded values after its indexed ones, as the emulator does (#941) | needs live GCP | S |
 
 ## Cloud SQL, Memorystore
 
-Closed: instance reads, databases, users and operations (#1301), instance writes, backups, replicas and the connector path (#1330), and the Memorystore admin API over Valkey (#1302).
+Closed: instance reads, databases, users and operations (#1301), instance writes, backups,
+restores and clones, read replicas, point-in-time recovery and the connector path (#1330), imports
+and exports, client certificates and server CA rotation, `tiers.list`, `flags.list` and
+`operations.cancel` (#1380), database versions, major version upgrades, cascading and cross-region
+replicas (#1381), high availability (#1408), Google's Auth Proxy binary (#1421),
+`pointInTimeRestore` and Backup and DR backups through the Backup and DR Service (#1425, #1433);
+the Memorystore admin API over Valkey (#1302), exports, imports and RDB persistence (#1384),
+STANDARD_HA and failover (#1385), versions, upgrades and maintenance (#1386), and in-transit
+encryption (#1413). IAM database authentication is excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| The Cloud SQL Admin API beyond instance reads and writes (a server per created instance, POSTGRES_17 and MYSQL_8_4), databases, users, operations (#1301), the connector path (`connectSettings`, `generateEphemeralCert` and TLS on 3307, served for the Go connector), backups, restores and clones over real dumps, read replicas (streaming and GTID replication, promote, stop and start), and point-in-time recovery of created instances (archived WAL, the binary log; clone to a time, getLatestRecoveryTime; `transactionLogRetentionDays` and retained backups applied, with a retention clock), all #1330, and `pointInTimeRestore` and Backup and DR backups through the Backup and DR Service (#1425, #1433): IAM database authentication (no identities, ADR-0004), legacy failover replicas (high availability, `REGIONAL` and `instances.failover`, is served since #1408), cascading and cross-region replicas, and other database versions (the pinned Auth Proxy binary is tested since #1421) | not built yet | L |
-| The Memorystore admin API (`redis.googleapis.com`) (#1302) | not built yet | L |
-| The Cloud SQL Admin API beyond instance reads and writes (a server per created instance, POSTGRES_17 and MYSQL_8_4), databases, users, operations (#1301), the connector path (`connectSettings`, `generateEphemeralCert` and TLS on 3307, served for the Go connector), backups, restores and clones over real dumps, read replicas (streaming and GTID replication, promote, stop and start), and point-in-time recovery of created instances (archived WAL, the binary log; clone to a time, getLatestRecoveryTime; `transactionLogRetentionDays` and retained backups applied, with a retention clock), all #1330, and imports and exports (SQL and CSV, to and from the instance's Cloud Storage), client certificates and server CA rotation (`sslCerts`, `resetSslConfig`, `addServerCa`, `rotateServerCa`, `listServerCas`), `tiers.list`, `flags.list` and `operations.cancel` (#1380), and `pointInTimeRestore` and Backup and DR backups through the Backup and DR Service (#1425, #1433): parallel imports and exports, BAK/TDE files, IAM database authentication (no identities, ADR-0004), legacy failover replicas (high availability, `REGIONAL` and `instances.failover`, is served since #1408), and a major version upgrade of an instance with replicas (#1330, #1381; the pinned Auth Proxy binary is tested since #1421) | not built yet | L |
-| The rest of the Memorystore admin API: `ListInstances`, `GetInstance` and `GetInstanceAuthString` are served over the one Valkey server (#1302); creating, updating, upgrading, deleting, importing, exporting and failing over an instance are UNIMPLEMENTED, and the gcloud and Terraform endpoint overrides are not exported until a test drives them | not built yet | M |
-| Memorystore for Redis beyond one BASIC Valkey server per instance (#1302): STANDARD_HA (replicas, failover, read replicas), Redis versions other than `REDIS_7_2`, in-transit encryption, RDB persistence and customer-managed keys are UNIMPLEMENTED | not built yet | L |
-| The rest of the Memorystore admin API: `UpgradeInstance`, `ImportInstance`, `ExportInstance`, `FailoverInstance` and `RescheduleMaintenance` are UNIMPLEMENTED; creating, updating and deleting instances, their operations, `gcloud redis` and `google_redis_instance` are served since #1302 | not built yet | M |
-| Memorystore for Redis beyond one BASIC Valkey server per instance (#1302): STANDARD_HA (replicas, failover, read replicas), Redis versions other than `REDIS_6_X`, `REDIS_7_0` and `REDIS_7_2` (#1386), in-transit encryption and customer-managed keys are UNIMPLEMENTED | not built yet | L |
-| Memorystore for Redis beyond BASIC and STANDARD_HA servers (#1302, #1385, #1413): customer-managed keys are UNIMPLEMENTED; `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image (in-transit encryption is served since #1413) | not built yet | M |
-| The Cloud SQL Admin API beyond instance reads, databases, users and operations (served since #1301): creating or changing instances, IAM database authentication, backups, replicas, the Auth Proxy and connector path (`connectSettings`, `generateEphemeralCert`) (#1330) | not built yet | L |
+| Cloud SQL: legacy failover replicas and external-primary replicas; `MYSQL_5_7`, `POSTGRES_12` and other versions; upgrading a replica on its own; a PostgreSQL database's charset change; `BAK` and `TDE` files; 32 methods 501 (`Backups.*`, blue-green deployments, `connect.resolve`, server and Entra ID certificates, `demote`, `switchover`, `executeSql`, `reencrypt`, disk shrink, external sync and others; [sqladmin.md](coverage/sqladmin.md)) (#1462) | not built yet | L |
+| Backup and DR: workload types other than Cloud SQL instances, `encryptionConfig`, `patch`, plan revisions, data source references, resource backup configs, management servers and trials (39 methods 501; [backupdr.md](coverage/backupdr.md)) (#1462) | not built yet | L |
+| Memorystore for Redis: customer-managed keys are 501; `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image; no server CA rotation for in-transit encryption (#1463) | not built yet | M |
 
 ## Functions, credentials, tooling
-Closed: Functions in Node.js, Python, Java, Ruby, PHP and .NET, with a dated run (#1303, #1319).
 
+Closed: Functions in Node.js, Python, Java, Ruby, PHP and .NET, with a dated run (#1303, #1319);
+Cloud Functions v2 and v1 APIs (#1377, #1428); Pub/Sub and project IAM in Terraform (#1367,
+#1368).
 
 | Gap | Why open | Size |
 |---|---|---|
-| A dated run of the Node.js, Python, Java, Ruby, PHP and .NET Functions tests (#1319) | fixtures and gated tests for all six exist; none has run, since the builder's amd64 images cannot run on arm64 nodes | S |
-| Terraform resources beyond the verified set (#1304): `google_pubsub_*_iam_*` (Pub/Sub serves no IAM methods, #1367), `google_project_iam_*` (ADR-0006 keeps project IAM UNIMPLEMENTED; a decision is needed, #1368), `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool), `google_cloudfunctions2_function` (served since #1377; the full apply is gated on amd64 nodes and not yet run) and v1 functions (refused by the wrapper: the v1 API is not served), `google_cloudbuild_trigger` and `_worker_pool` (refused 501: Cloud Build serves builds only), the Logging folder and organization resources (refused: Logging serves project parents only, #1403), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), and `google_secret_manager_regional_secret`, `google_bigquery_data_transfer_config` and `google_cloud_run_domain_mapping` (their endpoints are not set: not served, or never Ready) | partly verified (Cloud SQL client certificates and read replicas, a Memorystore maintenance policy, folder and organization IAM, secret versions' deletion policy, Artifact Registry repositories, Cloud Run services with a Cloud SQL volume, Pub/Sub schemas, secret versions, Storage ACLs, ACL lists and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access, dataset IAM and row access policies, partitioned and clustered tables and query jobs, `*_iam_member`, `*_iam_binding` and `*_iam_policy` on buckets, secrets, key rings, keys and queues, Firestore documents, databases, indexes and fields, Bigtable instances and tables, Spanner instances and databases, Logging bucket configs and linked datasets, `google_project_service`) | L |
-| Terraform resources beyond the verified set (#1304): `google_pubsub_*_iam_*` (Pub/Sub serves no IAM methods, #1367), `google_project_iam_*` (ADR-0006 keeps project IAM UNIMPLEMENTED; a decision is needed, #1368), `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool), `google_cloudfunctions2_function` (served since #1377; the full apply is gated on amd64 nodes and not yet run) and v1 functions (refused by the wrapper: the v1 API is not served) | partly verified (Artifact Registry repositories, Cloud Build webhook triggers and worker pools (#1422), Cloud Run services with a Cloud SQL volume, Pub/Sub schemas, secret versions, Storage ACLs, ACL lists and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access, dataset IAM and row access policies, partitioned and clustered tables and query jobs, `*_iam_member`, `*_iam_binding` and `*_iam_policy` on buckets, secrets, key rings, keys and queues, Firestore documents, databases, indexes and fields, Bigtable instances and tables, Spanner instances and databases, Logging bucket configs and linked datasets, `google_project_service`) | L |
-| Terraform resources beyond the verified set (#1304): `google_pubsub_*_iam_*` (Pub/Sub serves no IAM methods, #1367), `google_project_iam_*` (ADR-0006 keeps project IAM UNIMPLEMENTED; a decision is needed, #1368), `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool), `google_cloudfunctions2_function` (served since #1377; the full apply is gated on amd64 nodes and not yet run) and v1 functions (`google_cloudfunctions_function`, served since #1428: its failure path is verified and its full apply gated and not yet run, like v2's; `_iam_*` untested), `google_cloudbuild_trigger` and `_worker_pool` (refused 501: Cloud Build serves builds only), the Logging folder and organization resources (refused: Logging serves project parents only, #1403), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), and `google_secret_manager_regional_secret`, `google_bigquery_data_transfer_config` and `google_cloud_run_domain_mapping` (their endpoints are not set: not served, or never Ready) | partly verified (Cloud SQL client certificates and read replicas, a Memorystore maintenance policy, folder and organization IAM, secret versions' deletion policy, Artifact Registry repositories, Cloud Run services with a Cloud SQL volume, Pub/Sub schemas, secret versions, Storage ACLs, ACL lists and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access, dataset IAM and row access policies, partitioned and clustered tables and query jobs, `*_iam_member`, `*_iam_binding` and `*_iam_policy` on buckets, secrets, key rings, keys and queues, Firestore documents, databases, indexes and fields, Bigtable instances and tables, Spanner instances and databases, Logging bucket configs and linked datasets, `google_project_service`) | L |
-| Terraform resources beyond the verified set (#1304): `google_pubsub_*_iam_*` (Pub/Sub serves no IAM methods, #1367), `google_project_iam_*` (ADR-0006 keeps project IAM UNIMPLEMENTED; a decision is needed, #1368), `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool), `google_cloudfunctions2_function` (served since #1377; the full apply is gated on amd64 nodes and not yet run) and v1 functions (refused by the wrapper: the v1 API is not served), `google_bigtable_app_profile` and `google_bigtable_instance_iam_*` (the bigtableadmin REST API is not served), `google_cloudbuild_trigger` and `_worker_pool` (refused 501: Cloud Build serves builds only), the Logging folder and organization resources (refused: Logging serves project parents only, #1403), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), and `google_secret_manager_regional_secret`, `google_bigquery_data_transfer_config` and `google_cloud_run_domain_mapping` (their endpoints are not set: not served, or never Ready) | partly verified (Artifact Registry repository IAM, managed folder IAM, objects under a customer-supplied key, KMS secret ciphertexts and Bigtable GC policies (fifth batch), Cloud SQL client certificates and read replicas, a Memorystore maintenance policy, folder and organization IAM, secret versions' deletion policy, Artifact Registry repositories, Cloud Run services with a Cloud SQL volume, Pub/Sub schemas, secret versions, Storage ACLs, ACL lists and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access, dataset IAM and row access policies, partitioned and clustered tables and query jobs, `*_iam_member`, `*_iam_binding` and `*_iam_policy` on buckets, secrets, key rings, keys and queues, Firestore documents, databases, indexes and fields, Bigtable instances and tables, Spanner instances and databases, Logging bucket configs and linked datasets, `google_project_service`) | L |
-| Terraform resources beyond the verified set (#1304): `google_pubsub_*_iam_*` (Pub/Sub serves no IAM methods, #1367), `google_project_iam_*` (ADR-0006 keeps project IAM UNIMPLEMENTED; a decision is needed, #1368), `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool), `google_cloudfunctions2_function` (served since #1377; the full apply is gated on amd64 nodes and not yet run) and v1 functions (refused by the wrapper: the v1 API is not served), `google_bigtable_app_profile` and `google_bigtable_instance_iam_*` (the bigtableadmin REST API is not served) | partly verified (Artifact Registry repository IAM, managed folder IAM, objects under a customer-supplied key, KMS secret ciphertexts and Bigtable GC policies (fifth batch), Artifact Registry repositories, Cloud Build webhook triggers and worker pools (#1422), Cloud Run services with a Cloud SQL volume, Pub/Sub schemas, secret versions, Storage ACLs, ACL lists and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access, dataset IAM and row access policies, partitioned and clustered tables and query jobs, `*_iam_member`, `*_iam_binding` and `*_iam_policy` on buckets, secrets, key rings, keys and queues, Firestore documents, databases, indexes and fields, Bigtable instances and tables, Spanner instances and databases, Logging bucket configs and linked datasets, `google_project_service`) | L |
-| Functions in languages other than Go (#1303) | not built yet | L |
+| The gated full-lifecycle Functions tests are not yet run: the v2 and v1 APIs' build and serve, event triggers, `gcloud functions deploy --gen2`, and the full apply of Terraform's `google_cloudfunctions2_function` and `google_cloudfunctions_function`; `buildpack_build.runtime` and the v2 and v1 fields refused `UNIMPLEMENTED` (`repo_source`, worker pools, VPC connectors, secrets, KMS, binary authorization, other event types) (#1464) | the builder's amd64 images cannot run on arm64 nodes; no dated amd64 run yet | M |
+| Terraform resources beyond the verified set (#1304): `google_firestore_backup_schedule` (backups are not served), updates of `google_spanner_instance` (the emulator does not update instances) and the other `google_spanner_*` resources, a worker pool's `scaling_mode` (Google publishes no such field), `google_cloudfunctions_function_iam_*` (untested), the Logging folder and organization resources (refused: Logging serves project parents only), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_secret_manager_regional_secret`, `google_bigquery_data_transfer_config` and `google_cloud_run_domain_mapping` (their endpoints are not set: not served, or never Ready), `google_bigtable_app_profile` and `google_bigtable_instance_iam_*` (the bigtableadmin REST API is not served, #1440), and the other resources of the served services | partly verified (the five batches of #1304 and the verified rows of compatibility.md) | L |
 
 ## Console
 
-Closed by this sweep: Test permissions on the Permissions tab (#1242), and the request-rate, latency and resource charts (#1267).
+Closed by the sweep: Test permissions on the Permissions tab (#1242), and the request-rate,
+latency and resource charts (#1267).
 
-No gap is left open here.
+| Gap | Why open | Size |
+|---|---|---|
+| Artifact Registry repository IAM has no Permissions tab (#1439) | not built yet | S |
 
 ## Excluded on purpose
 
@@ -272,5 +301,8 @@ Not gaps to close; each stays until its decision is amended.
 - **IAM enforcement**: [ADR-0006](adr/0006-iam-policy-surface.md) stores policies, never enforces them.
 - **IAM Credentials `signBlob`**: refused because a local signature makes signed URLs no Google
   service accepts ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).
+- **Cloud SQL IAM database authentication** (`generateEphemeralCert` with an access token,
+  `cloudsql.iam_authentication`, users of an IAM type): 501, as CloudBurrow has no identities
+  ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).
 - **Local AI and embeddings in per-PR CI**, and the default build's embeddings answering 501:
   maintainer decisions recorded in compatibility.md (§What CI does not run, §Local AI, #41).
