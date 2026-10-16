@@ -113,6 +113,7 @@ func (r *Registry) loadFolder(name string) (Folder, error) {
 	if f.State == StateDeleteRequested {
 		if t, err := time.Parse(time.RFC3339, f.DeleteTime); err == nil && !r.now().Before(t.Add(RetentionPeriod)) {
 			_ = r.st.Delete(folderKey(id))
+			r.dropIAM(n)
 			return Folder{}, apierror.NotFound("folder %s not found", n)
 		}
 	}

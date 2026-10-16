@@ -418,7 +418,7 @@ func jsObjectKeys(t *testing.T, js, decl string) map[string]bool {
 	block := js[i+len(decl):]
 	block = block[:strings.Index(block, "\n};")]
 	keys := map[string]bool{}
-	key := regexp.MustCompile(`^\s*"?([A-Za-z0-9 /-]+?)"?\s*:`) // "CI/CD" is a category
+	key := regexp.MustCompile(`^\s*"?([A-Za-z0-9 /&-]+?)"?\s*:`) // "CI/CD" and "IAM & Admin" are categories
 	for _, line := range strings.Split(block, "\n") {
 		if m := key.FindStringSubmatch(line); m != nil {
 			keys[m[1]] = true

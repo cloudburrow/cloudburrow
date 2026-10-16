@@ -543,12 +543,8 @@ func (g *grpcStorage) ListObjects(ctx context.Context, req *pb.ListObjectsReques
 	if err != nil {
 		return nil, err
 	}
-	if req.GetFilter() != "" {
-		// The filter is over object contexts, which the JSON API does not
-		// serve (#492), so no object could match or fail it faithfully.
-		return nil, grpcstatus.Error(codes.Unimplemented, "ListObjects filter is not implemented: it filters on object contexts, which are not implemented")
-	}
 	q := url.Values{"projection": {"full"}}
+	setIf(q, "filter", req.GetFilter())
 	setIf(q, "prefix", req.GetPrefix())
 	setIf(q, "delimiter", req.GetDelimiter())
 	setIf(q, "pageToken", req.GetPageToken())

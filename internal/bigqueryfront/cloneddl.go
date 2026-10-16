@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -37,8 +38,17 @@ import (
 // them; CREATE_TABLE for a clone, UNVERIFIED), ddlOperationPerformed and
 // ddlTargetTable (jobText.ddl).
 //
-// 501, nothing done: FOR SYSTEM_TIME AS OF (the emulator keeps no table
-// history), OPTIONS(...) after the source, OR REPLACE (not in the
+// FOR SYSTEM_TIME AS OF the source is read as a query's is
+// (partitionreads.go, #1276): a time before the table's time travel window
+// fails 400 as BigQuery documents it, CURRENT_TIMESTAMP() (the engine's
+// now) clones the table as it is, and any other time is 501, as the
+// emulator keeps no history of a table's rows. OPTIONS(...) after the
+// source sets description, friendly_name, labels and expiration_timestamp
+// on the new table as CREATE TABLE's OPTIONS does (ddloptions.go); the
+// emulator does not delete a table when its expiration passes. Any other
+// option is 501.
+//
+// 501, nothing done: OR REPLACE (not in the
 // documented syntax), a table of another project, a dry run, legacy SQL,
 // any of these statements inside a multi-statement script (checkDDL), and
 // DROP SNAPSHOT TABLE of a table that is not a snapshot (BigQuery's
@@ -50,6 +60,10 @@ type cloneStmt struct {
 	ifClause bool   // IF NOT EXISTS, or (drop) IF EXISTS
 	dest     []string
 	src      []string
+	// asOf is the expression of FOR SYSTEM_TIME AS OF, "" without one;
+	// options the statement's OPTIONS(...), nil without them.
+	asOf    string
+	options *ddlOptions
 }
 
 // parseCloneDDL reads a lone CREATE [SNAPSHOT] TABLE ... CLONE or DROP
@@ -111,16 +125,41 @@ func parseCloneDDL(sql string) (st cloneStmt, unsupported string, ok bool) {
 	if len(st.src) == 0 {
 		return st, "", false
 	}
-	switch {
-	case replace:
+	if replace {
 		return st, "CREATE OR REPLACE " + strings.ToUpper(cloneStatement(st.kind)) + ", which BigQuery's documented " +
 			"syntax does not have", true
-	case i < len(t) && t[i].is("FOR"):
-		return st, cloneStatement(st.kind) + " with FOR SYSTEM_TIME AS OF. The emulator behind CloudBurrow keeps no " +
-			"table history", true
-	case i < len(t) && t[i].is("OPTIONS"):
-		return st, cloneStatement(st.kind) + " with OPTIONS(...)", true
-	case i < len(t):
+	}
+	if i+3 < len(t) && t[i].is("FOR") && t[i+1].is("SYSTEM_TIME") && t[i+2].is("AS") && t[i+3].is("OF") {
+		end := i + 4
+		for depth := 0; end < len(t); end++ {
+			switch {
+			case t[end].punct("(") || t[end].punct("["):
+				depth++
+			case t[end].punct(")") || t[end].punct("]"):
+				depth--
+			}
+			if depth == 0 && t[end].is("OPTIONS") && end+1 < len(t) && t[end+1].punct("(") {
+				break
+			}
+		}
+		if end == i+4 {
+			return st, "", false
+		}
+		st.asOf = sql[t[i+4].pos:t[end-1].end]
+		i = end
+	}
+	if i+1 < len(t) && t[i].is("OPTIONS") && t[i+1].punct("(") {
+		close := skipTo(t, i+2, ")")
+		if close != len(t)-1 {
+			return st, "", false
+		}
+		st.options = &ddlOptions{}
+		if msg := st.options.readOptions(sql, t[i+2:close]); msg != "" {
+			return st, cloneStatement(st.kind) + " with " + msg, true
+		}
+		i = len(t)
+	}
+	if i < len(t) {
 		return st, "", false
 	}
 	return st, "", true
@@ -249,6 +288,33 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 		failed(http.StatusNotFound, "notFound", "Not found: Dataset "+project+":"+dest.DatasetID)
 		return
 	}
+	if st.asOf != "" {
+		// Read as a query's FOR SYSTEM_TIME AS OF is (partitionreads.go):
+		// before the time travel window fails, now is the table as it is,
+		// and any other time is 501.
+		var m partitionMeta
+		if status, got := f.get(r, tablePath(src.DatasetID, src.TableID)); status == http.StatusOK {
+			_ = json.Unmarshal(got, &m)
+		}
+		switch code, msg := f.systemTime(r, q, src.DatasetID, tableName(project, src), m, st.asOf); {
+		case code == http.StatusNotImplemented:
+			writeError(w, code, "notImplemented", msg)
+			return
+		case code != 0:
+			failed(code, "invalidQuery", msg)
+			return
+		}
+	}
+	var expiration string
+	var setExpiration bool
+	if st.options != nil {
+		var status int
+		var body []byte
+		if expiration, setExpiration, status, body = f.expirationMillis(r, q, st.options.expiration); status != http.StatusOK {
+			failed(http.StatusBadRequest, "invalidQuery", "expiration_timestamp: "+errorMessage(body, status))
+			return
+		}
+	}
 	start := time.Now().UTC().Format(time.RFC3339Nano)
 	base := map[string]string{"projectId": project, "datasetId": src.DatasetID, "tableId": src.TableID}
 	var extra map[string]any
@@ -266,6 +332,13 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 		f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
 		failed(http.StatusInternalServerError, "backendError", msg)
 		return
+	}
+	if st.options != nil && st.options.sets() {
+		if msg := f.setTableOptions(r, dest.DatasetID, dest.TableID, *st.options, expiration, setExpiration); msg != "" {
+			f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
+			failed(http.StatusInternalServerError, "backendError", msg)
+			return
+		}
 	}
 	done("CREATE")
 }

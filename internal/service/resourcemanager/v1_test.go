@@ -69,8 +69,8 @@ func TestV1ProjectsThroughTheOfficialClient(t *testing.T) {
 		_ = bi.Body.Close()
 	}
 
-	if _, err := c.Projects.GetIamPolicy("v1-made-one", &crmv1.GetIamPolicyRequest{}).Context(ctx).Do(); code(err) != http.StatusNotImplemented {
-		t.Errorf("v1 getIamPolicy = %v, want 501", err)
+	if p, err := c.Projects.GetIamPolicy("v1-made-one", &crmv1.GetIamPolicyRequest{}).Context(ctx).Do(); err != nil || len(p.Bindings) != 0 || p.Etag == "" {
+		t.Errorf("v1 getIamPolicy = %+v, %v; want an empty policy with an etag", p, err)
 	}
 	// projects.update (#1265): name and labels replaced, the rest kept.
 	before, _ := c.Projects.Get("v1-made-one").Context(ctx).Do()

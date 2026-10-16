@@ -30,12 +30,12 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 1 | 1 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 40 | 18 | 18 | 4 | 0 |
+| BigQuery | 40 | 17 | 18 | 5 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 6 | 6 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **93** | **39** | **41** | **8** | **5** |
+| **Total** | **93** | **38** | **41** | **9** | **5** |
 
 ## Cloud Storage
 
@@ -44,7 +44,7 @@ Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `o
 
 | Gap | Why open | Size |
 |---|---|---|
-| gRPC `google.storage.v2` (#1321): served on the JSON API's port; `UNIMPLEMENTED` over gRPC are appendable objects (zonal buckets only, which are not modelled; the store has no unfinalized object) and `ListObjects.filter` (object contexts, which neither API stores) (customer-supplied encryption keys, on both APIs, the `acl` fields, managed-folder IAM and `ComposeObject.delete_source_objects` are carried out since #1345) (#1345) | not built yet | M |
+| gRPC `google.storage.v2` (#1321): served on the JSON API's port; `UNIMPLEMENTED` over gRPC are appendable objects (zonal buckets only, which are not modelled; the store has no unfinalized object) (customer-supplied encryption keys, on both APIs, the `acl` fields, managed-folder IAM, `ComposeObject.delete_source_objects`, object contexts and `ListObjects.filter`, on both APIs, are carried out since #1345) (#1345) | not built yet | M |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |
 | `buckets.relocate`, `buckets.operations.advanceRelocateBucket` | no emulator support (one location) | M |
@@ -142,7 +142,7 @@ IAM conditions are excluded (below). Closed: `RotateSecret`, `EnableManagedRotat
 
 ## Resource Manager
 
-Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296), and regional tag bindings and effective tags through the `{location}-cloudresourcemanager` endpoints (#1350).
+Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216). Closed by this sweep: v1 org policy on projects (#1296), and regional tag bindings and effective tags through the `{location}-cloudresourcemanager` endpoints (#1350). Closed: project, folder and organization IAM, stored and never enforced (#1368).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -161,7 +161,7 @@ Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1
 
 ## BigQuery
 
-Already tracked: #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs, snapshots, clones), #957 (extract formats), #1339 (a JSON load's field outside the schema). Closed: scripting control flow, handlers and failed statements' child jobs (#1201), procedures, script transactions and RANGE variables (#1217), row access policies and table and routine IAM (#1218), infinite FLOAT64 in UNNEST (#1204), `ALTER TABLE` `ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` (#1227), `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239), a lone `CREATE VIEW` with a column list (#1240), a `STRUCT` parameter with a `BYTES` field (#1241, #1082), a schema update with a new column before the table's and a RANGE in a STRUCT parameter (#1111), `CREATE TABLE … PARTITION BY … CLUSTER BY …` (#1272), `INFORMATION_SCHEMA` `VIEWS` (#1274), the dataset views (#1286, #1328), region `JOBS` and the region views (#1275, #1329), time travel `AS OF CURRENT_TIMESTAMP()` (#1276), `RENAME TO`, `RENAME COLUMN`, `DROP COLUMN` (#1322), `SET DATA TYPE` and keys (#1334), a view's column list in a script (#1323), a JSON load with `autodetect` (#1324), CSV `timeZone`, SQL-style formats and encodings (#1325), and `columnNameCharacterMap` renaming (#1326).
+Already tracked: #1002 (copy jobs, snapshots, clones), #957 (extract formats), #1339 (a JSON load's field outside the schema). Closed: `EXECUTE IMMEDIATE` as a child job, `INTO`'s errors and `@@row_count` (#1037), scripting control flow, handlers and failed statements' child jobs (#1201), procedures, script transactions and RANGE variables (#1217), row access policies and table and routine IAM (#1218), infinite FLOAT64 in UNNEST (#1204), `ALTER TABLE` `ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` (#1227), `routines.update` (#1238), a lone `CREATE TABLE … LIKE` or `COPY` (#1239), a lone `CREATE VIEW` with a column list (#1240), a `STRUCT` parameter with a `BYTES` field (#1241, #1082), a schema update with a new column before the table's and a RANGE in a STRUCT parameter (#1111), `CREATE TABLE … PARTITION BY … CLUSTER BY …` (#1272), `INFORMATION_SCHEMA` `VIEWS` (#1274), the dataset views (#1286, #1328), region `JOBS` and the region views (#1275, #1329), time travel `AS OF CURRENT_TIMESTAMP()` (#1276), `RENAME TO`, `RENAME COLUMN`, `DROP COLUMN` (#1322), `SET DATA TYPE` and keys (#1334), a view's column list in a script (#1323), a JSON load with `autodetect` (#1324), CSV `timeZone`, SQL-style formats and encodings (#1325), and `columnNameCharacterMap` renaming (#1326).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -174,10 +174,11 @@ Already tracked: #1037 (`EXECUTE IMMEDIATE ... INTO`), #1002 (copy jobs, snapsho
 | `columnNameCharacterMap` `V1` / `V2` when a detected name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix), names the same once replaced, and a load that is not CSV, are 501 (renaming by replacing characters is built since #1326) (#1336) | not built yet | S |
 | CSV loads: a C-style (`%m/%d/%Y`) date or time format, and `timeZone` or a format with `autodetect` and no schema (SQL-style formats, `timeZone` and the UTF-16 and UTF-32 encodings are built, #1325) (#1338) | not built yet | S |
 | Storage Write API `arrow_rows` (#1327) | not built yet | M |
-| Partition decorators: the streaming buffer of a column-partitioned table, which BigQuery documents ("each partition has a streaming buffer", its rows first in `__UNPARTITIONED__`), is not kept: a streamed row is in its partition at once and `tables.get` answers no `streamingBuffer`; a schema change through a partition that leaves a column out, reorders the columns or changes a RECORD's fields is 501; `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination and a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, none documented by BigQuery, are 501 (the rest of #1273 is built: schema updates through a partition of an ingestion-time table, DML and scripts into a partition refused, dry runs, nested `selectedFields`, #1273) | not built yet | M |
+| Partition decorators: through a partition, a schema change BigQuery does not document (a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order, a RECORD's fields changed), `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination and a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, none documented by BigQuery, are 501; a streamed row is modifiable by DML after the 20-second flush, not BigQuery's 30 minutes (#1370) (the rest of #1273 is built: the streaming buffer of column- and range-partitioned tables, DML refused on buffered rows, a REQUIRED column left out with `ALLOW_FIELD_RELAXATION`, #1273) | not documented by Google | S |
 | `INFORMATION_SCHEMA` `PARTITIONS` and the other dataset views but `VIEWS`, `TABLES`, `COLUMNS`, `COLUMN_FIELD_PATHS`, `TABLE_OPTIONS`, `ROUTINES` and `PARAMETERS` (built, #1274, #1286) are 501; `COLUMNS` has no `async_generation_status` (#1286) (#1328) | not built yet | M |
 | Region-qualified `INFORMATION_SCHEMA.JOBS` (built, #1275) has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (Google does not document their STRUCTs), nor child jobs; the region-qualified forms of the other views are "Table not found" (#1329) | not built yet | M |
 | `INFORMATION_SCHEMA` `MATERIALIZED_VIEWS`, `OBJECT_PRIVILEGES`, `SCHEMATA_OPTIONS` and `SCHEMATA_LINKS` are 501 (`PARTITIONS`, the constraint, snapshot, routine option and index views built, #1328); `PARTITIONS` has no byte counts or `last_modified_time`; `COLUMNS` has no `async_generation_status` (#1286) | not built yet | M |
+| A query of region-qualified `INFORMATION_SCHEMA.JOBS` with no filter the front pushes down (#1369: `job_id`, `state`, `job_type`, `project_id`, `parent_job_id`, `creation_time`, `ORDER BY creation_time LIMIT`) still inlines a row per job: `SELECT COUNT(*)` took 13 s at 5,000 jobs (54 s before #1369); a table of the job rows kept in the engine would make it a scan | partly built (#1369) | M |
 | Region-qualified `INFORMATION_SCHEMA.JOBS` (built, #1275) has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (Google does not document their STRUCTs, and the front knows none of their contents, #1329), nor child jobs; region `TABLE_STORAGE` has no byte counts (#1329) | not built yet | M |
 | `_PARTITIONTIME` of a row written by `tabledata.insertAll` is its partition's at once, where BigQuery reads it NULL while the row is in the streaming buffer; a table restored from state saved before #1277 keeps no ingestion time (its pseudo-columns fail 400 "Unrecognized name") (#1277) | no emulator support | S |
 | Partition decorators: `tabledata.list` and `tables.get` of a partition, a partition as a load, copy or query destination, and a partition of an ingestion-time partitioned table are 501 (a query's read and `tables.delete` of one are built) (#1273) | not built yet | M |

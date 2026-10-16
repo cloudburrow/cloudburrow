@@ -282,11 +282,6 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 				"REPEATED columns of them (docs/compatibility.md).", typ, loc))
 			return
 		}
-		if strings.Contains(string(got), `"precision"`) {
-			notImplemented("to AVRO of a table with a parameterized NUMERIC or BIGNUMERIC column, which BigQuery writes " +
-				"with the column's precision and scale, which the emulator behind CloudBurrow does not keep.")
-			return
-		}
 	}
 	if parquetFormat {
 		switch loc, typ := parquetUnwritten(meta.Schema.Fields, e.NativeGeographyExportEnabled, ""); {
@@ -301,11 +296,6 @@ func (f front) extractJob(w http.ResponseWriter, r *http.Request, e *extractConf
 			notImplemented(fmt.Sprintf("to PARQUET of a table with a %s column (%s). CloudBurrow writes Parquet of "+
 				"the column types whose form BigQuery's documentation gives: INT64, FLOAT64, BOOL, STRING, JSON, BYTES, NUMERIC, "+
 				"BIGNUMERIC, DATE, DATETIME, TIMESTAMP, TIME, GEOGRAPHY (with nativeGeographyExportEnabled), and RECORDs and REPEATED columns of them (docs/compatibility.md).", typ, loc))
-			return
-		}
-		if strings.Contains(string(got), `"precision"`) {
-			notImplemented("to PARQUET of a table with a parameterized NUMERIC or BIGNUMERIC column, which BigQuery " +
-				"writes with the column's precision and scale, which the emulator behind CloudBurrow does not keep.")
 			return
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Region-qualified INFORMATION_SCHEMA.JOBS, JOBS_BY_PROJECT and
@@ -142,14 +143,8 @@ func tableRefsSQL(v any) string {
 	return "ARRAY<STRUCT<project_id STRING, dataset_id STRING, table_id STRING>>[" + strings.Join(parts, ", ") + "]"
 }
 
-// jobRow is one JOBS row of a Job resource jobs.list gave.
-func jobRow(project string, job map[string]any) []string {
-	ref, _ := job["jobReference"].(map[string]any)
-	conf, _ := job["configuration"].(map[string]any)
-	stats, _ := job["statistics"].(map[string]any)
-	status, _ := job["status"].(map[string]any)
-	qs, _ := stats["query"].(map[string]any)
-	qc, _ := conf["query"].(map[string]any)
+// jobTypeOf is a job's job_type, from its configuration.
+func jobTypeOf(conf map[string]any) string {
 	jobType := strings.ToUpper(str(conf, "jobType"))
 	if jobType == "" {
 		for _, k := range []string{"query", "load", "copy", "extract"} {
@@ -158,6 +153,27 @@ func jobRow(project string, job map[string]any) []string {
 			}
 		}
 	}
+	return jobType
+}
+
+// jobStateOf is a listed job's state.
+func jobStateOf(job map[string]any) string {
+	status, _ := job["status"].(map[string]any)
+	if state := str(status, "state"); state != "" {
+		return state
+	}
+	return str(job, "state")
+}
+
+// jobRow is one JOBS row of a Job resource jobs.list gave.
+func jobRow(project string, job map[string]any) []string {
+	ref, _ := job["jobReference"].(map[string]any)
+	conf, _ := job["configuration"].(map[string]any)
+	stats, _ := job["statistics"].(map[string]any)
+	status, _ := job["status"].(map[string]any)
+	qs, _ := stats["query"].(map[string]any)
+	qc, _ := conf["query"].(map[string]any)
+	jobType := jobTypeOf(conf)
 	var dest any
 	for _, k := range []string{"query", "load", "copy"} {
 		if c, _ := conf[k].(map[string]any); c != nil && c["destinationTable"] != nil {
@@ -185,10 +201,7 @@ func jobRow(project string, job map[string]any) []string {
 			labels = append(labels, "("+sqlString(k)+", "+sqlString(v)+")")
 		}
 	}
-	state := str(status, "state")
-	if state == "" {
-		state = str(job, "state")
-	}
+	state := jobStateOf(job)
 	cache := "FALSE"
 	if b, _ := qs["cacheHit"].(bool); b {
 		cache = "TRUE"
@@ -232,15 +245,19 @@ func jobRow(project string, job map[string]any) []string {
 
 // jobsRows returns the subquery of the project's jobs, or the status and
 // message of why it cannot.
-func (f front) jobsRows(r *http.Request) (string, int, string) {
+func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, string) {
 	project := projectOf(f.base)
 	if f.listJobs == nil {
 		return "", http.StatusInternalServerError, "cloudburrow: the job list cannot be read here"
 	}
-	var rows [][]string
+	var jobs []map[string]any
 	token := ""
 	for {
-		q := url.Values{"projection": {"full"}, "allUsers": {"true"}, "maxResults": {"1000"}}
+		// One list, not pages of it: the engine reads every job of the
+		// project for each page (#1369). The bounds of creation_time the
+		// query gives cut it before the configurations are read.
+		q := url.Values{"projection": {"full"}, "allUsers": {"true"}}
+		filter.listBounds(q)
 		if token != "" {
 			q.Set("pageToken", token)
 		}
@@ -265,13 +282,16 @@ func (f front) jobsRows(r *http.Request) (string, int, string) {
 		if rec.status != 0 && rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &list) != nil {
 			return "", http.StatusInternalServerError, "cloudburrow: could not list the jobs: " + errorMessage(rec.body.Bytes(), rec.status)
 		}
-		for _, job := range list.Jobs {
-			rows = append(rows, jobRow(project, job))
-		}
+		jobs = append(jobs, list.Jobs...)
 		if list.NextPageToken == "" || list.NextPageToken == token {
 			break
 		}
 		token = list.NextPageToken
+	}
+	jobs = filter.apply(project, jobs)
+	rows := make([][]string, len(jobs))
+	for i, job := range jobs {
+		rows[i] = jobRow(project, job)
 	}
 	return rowsSubquery(jobsColumns, rows), 0, ""
 }
@@ -313,7 +333,7 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 			var msg string
 			switch {
 			case key == "JOBS":
-				sub, status, msg = f.jobsRows(r)
+				sub, status, msg = f.jobsRows(r, pushedJobsFilter(q.Query, refs, time.Now()))
 			case key == "TABLE_STORAGE":
 				sub, status, msg = f.regionRows(r, meta, "TABLE_STORAGE", storageColumns, front.storageRows)
 			default:

@@ -604,7 +604,8 @@ func TestCopyJobs(t *testing.T) {
 		{"RESTORE of a table", []string{"ds.s"}, "ds.new", `,"operationType":"RESTORE"`, 200}, // a failed job, #1002
 		{"a bad operationType", []string{"ds.s"}, "ds.new", `,"operationType":"MOVE"`, 400},
 		{"an encryption key", []string{"ds.s"}, "ds.new", `,"destinationEncryptionConfiguration":{"kmsKeyName":"k"}`, 501},
-		{"an expiration", []string{"ds.s"}, "ds.new", `,"destinationExpirationTime":"2030-01-01T00:00:00Z"`, 501},
+		{"an expiration of a table that exists", []string{"ds.s"}, "ds.full", `,"destinationExpirationTime":"2030-01-01T00:00:00Z","writeDisposition":"WRITE_APPEND"`, 501},
+		{"a bad expiration", []string{"ds.s"}, "ds.new", `,"destinationExpirationTime":"soon"`, 400},
 		{"schemas that differ", []string{"ds.s", "ds.other"}, "ds.new", "", 200}, // a failed job, #1002
 		{"WRITE_APPEND of another schema", []string{"ds.other"}, "ds.full", `,"writeDisposition":"WRITE_APPEND"`, 501},
 		{"into a view", []string{"ds.s"}, "ds.v", `,"writeDisposition":"WRITE_TRUNCATE"`, 501},
@@ -619,6 +620,12 @@ func TestCopyJobs(t *testing.T) {
 		if e.sent(`^POST .*(tables|queries) `) {
 			t.Errorf("%s: something was written: %v", c.name, e.log)
 		}
+	}
+	// destinationExpirationTime is the new destination's expirationTime (#1002).
+	e = setup()
+	code, got = do(t, Wrap(e), "POST", base+"/jobs", job("je", []string{"ds.s"}, "ds.new", `,"destinationExpirationTime":"2030-01-01T00:00:00Z"`))
+	if reason, _ := jobState(got); code != 200 || reason != "" || !e.sent(`POST .*/datasets/ds/tables .*"expirationTime":"1893456000000"`) {
+		t.Errorf("a copy with an expiration: %d %v, %v", code, got, e.log)
 	}
 	e = setup()
 	if code, got := do(t, Wrap(e), "POST", base+"/jobs", `{"jobReference":{"jobId":"x"},"configuration":{"copy":{"sourceTable":`+

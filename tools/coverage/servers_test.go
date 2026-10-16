@@ -53,7 +53,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	rmReg := resourcemanager.New(store.NewMemory())
 	rmpb.RegisterProjectsServer(srv, resourcemanager.NewProjectsServer(rmReg))
 	rmpb.RegisterFoldersServer(srv, resourcemanager.NewFoldersServer(rmReg))
-	rmpb.RegisterOrganizationsServer(srv, resourcemanager.OrganizationsServer{})
+	rmpb.RegisterOrganizationsServer(srv, resourcemanager.NewOrganizationsServer(rmReg))
 	rmpb.RegisterTagKeysServer(srv, resourcemanager.NewTagKeysServer(rmReg))
 	rmpb.RegisterTagValuesServer(srv, resourcemanager.NewTagValuesServer(rmReg))
 	rmpb.RegisterTagBindingsServer(srv, resourcemanager.NewTagBindingsServer(rmReg))

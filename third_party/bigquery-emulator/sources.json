@@ -28,7 +28,9 @@
         "patches/bigquery-emulator/0012-query-error-without-scan-prefix.patch",
         "patches/bigquery-emulator/0013-times-in-milliseconds.patch",
         "patches/bigquery-emulator/0014-column-defaults.patch",
-        "patches/bigquery-emulator/0015-ingestion-partition-time.patch"
+        "patches/bigquery-emulator/0015-ingestion-partition-time.patch",
+        "patches/bigquery-emulator/0016-streaming-buffer-mark.patch",
+        "patches/bigquery-emulator/0017-list-jobs-in-one-scan.patch"
       ]
     },
     {
@@ -65,7 +67,8 @@
         "patches/googlesqlite/0025-unnest-infinity.patch",
         "patches/googlesqlite/0026-int-float-comparisons.patch",
         "patches/googlesqlite/0027-column-defaults.patch",
-        "patches/googlesqlite/0028-ingestion-partition-time.patch"
+        "patches/googlesqlite/0028-ingestion-partition-time.patch",
+        "patches/googlesqlite/0029-streaming-buffer-mark.patch"
       ]
     },
     {

@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"golang.org/x/net/http2"
@@ -372,24 +371,6 @@ func (s *ProjectsServer) MoveProject(_ context.Context, req *rmpb.MoveProjectReq
 	return doneOperation("mp", id, toProto(p))
 }
 
-// projectIAMRefusal is why a project's IAM methods stay UNIMPLEMENTED:
-// ADR-0006 adds policy storage to named resources only, and a project's
-// policy is the one Google's resources inherit, which nothing here does.
-const projectIAMRefusal = ": a project's IAM policy (ADR-0006 stores policies only on the resources it names, " +
-	"and project-level bindings, which Google's resources inherit, do not exist here)"
-
-func (s *ProjectsServer) GetIamPolicy(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("GetIamPolicy" + projectIAMRefusal))
-}
-
-func (s *ProjectsServer) SetIamPolicy(context.Context, *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("SetIamPolicy" + projectIAMRefusal))
-}
-
-func (s *ProjectsServer) TestIamPermissions(context.Context, *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("TestIamPermissions" + projectIAMRefusal))
-}
-
 // --- REST --------------------------------------------------------------
 
 // restRoutes registers the v3 JSON paths, each transcoded to the gRPC
@@ -520,7 +501,7 @@ func (s *ProjectsServer) restDelete(w http.ResponseWriter, r *http.Request) erro
 }
 
 // restVerb is POST /v3/projects/{project}:{verb}: undelete and move, and
-// IAM, which is not served.
+// IAM, stored and not enforced (iam.go).
 func (s *ProjectsServer) restVerb(w http.ResponseWriter, r *http.Request) error {
 	raw, err := rest.PathValue(r, "project")
 	if err != nil {
@@ -529,7 +510,8 @@ func (s *ProjectsServer) restVerb(w http.ResponseWriter, r *http.Request) error 
 	_, verb, _ := strings.Cut(raw, ":")
 	switch verb {
 	case "getIamPolicy", "setIamPolicy", "testIamPermissions":
-		return ErrNotImplemented(verb + projectIAMRefusal)
+		id, _, _ := strings.Cut(raw, ":")
+		return serveIAM(w, r, s, "projects/"+id, verb)
 	case "move":
 		id, _, _ := strings.Cut(raw, ":")
 		var in rmpb.MoveProjectRequest
@@ -627,7 +609,7 @@ func (s *Server) Start(ctx context.Context) error {
 	g := grpc.NewServer(opts...)
 	rmpb.RegisterProjectsServer(g, s.projects)
 	rmpb.RegisterFoldersServer(g, s.folders)
-	rmpb.RegisterOrganizationsServer(g, OrganizationsServer{})
+	rmpb.RegisterOrganizationsServer(g, NewOrganizationsServer(s.projects.reg))
 	rmpb.RegisterTagKeysServer(g, s.tags.keys)
 	rmpb.RegisterTagValuesServer(g, s.tags.values)
 	rmpb.RegisterTagBindingsServer(g, s.tags.bindings)
@@ -638,8 +620,8 @@ func (s *Server) Start(ctx context.Context) error {
 	s.projects.restRoutes(router)
 	ops := &v1Ops{}
 	s.projects.v1Routes(router, ops)
-	s.projects.v1OrgRoutes(router)
-	s.folders.restRoutes(router, OrganizationsServer{}, ops)
+	s.projects.v1OrgRoutes(router, NewOrganizationsServer(s.projects.reg))
+	s.folders.restRoutes(router, NewOrganizationsServer(s.projects.reg), ops)
 	s.folders.v2Routes(router, ops)
 	s.tags.restRoutes(router)
 	var jsonAPI http.Handler = router

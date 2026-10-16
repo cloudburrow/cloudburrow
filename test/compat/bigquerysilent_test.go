@@ -403,20 +403,19 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 		}
 
 		// 501, before anything runs. What BigQuery does not document: INTO
-		// of a statement that is not a query, and numbers of variables and
-		// columns that differ (#1037), also where the front runs the
-		// script in its turn (in IF). Computed SQL, a USING expression or a
+		// of a statement that is not a query (#1037), also where the front
+		// runs the script in its turn (in IF); numbers of variables and
+		// columns that differ are an error now
+		// (TestBigQueryExecuteImmediateErrors). Computed SQL, a USING expression or a
 		// hidden variable in a script with a TEMP table, which cannot be
 		// run a statement at a time (TestBigQueryExecuteImmediateInTurn
 		// reads the rest back).
 		for _, sql := range []string{
 			// A name that must be quoted: the emulator does not SET one
 			// (measured), nor does the front's own run of a script read one.
-			"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 5' INTO `select`",
+			"DECLARE `select` INT64; EXECUTE IMMEDIATE 'SELECT 5' INTO `select`",
 			"DECLARE x INT64; EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".into_" + suffix + " (x INT64)' INTO x",
 			"DECLARE x INT64; IF TRUE THEN EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".into_" + suffix + " (x INT64)' INTO x; END IF",
-			"DECLARE a INT64; DECLARE b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2, 3' INTO a, b",
-			"DECLARE a INT64; DECLARE b INT64; IF TRUE THEN EXECUTE IMMEDIATE 'SELECT 1, 2, 3' INTO a, b; END IF",
 			"CREATE TEMP TABLE not_made (x INT64); EXECUTE IMMEDIATE (SELECT FORMAT('SELECT %d', COUNT(*)) FROM not_made); " +
 				"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64)",
 			"CREATE TEMP TABLE tmp (x INT64); EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a; CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64)",

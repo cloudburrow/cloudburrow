@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -236,9 +237,10 @@ func expandExecuteImmediate(sql string, eval immediateEval) (text string, change
 			}
 			if into >= 0 {
 				if cols, known := selectItemCount(out); known && cols != len(intoVars) {
-					return notImplemented(fmt.Sprintf("... INTO %d variables of a query of %d columns. BigQuery's "+
-						"documentation assigns the columns to the variables by position, and does not say what it "+
-						"does when their numbers differ.", len(intoVars), cols))
+					// The columns are assigned "by position", one per
+					// variable (scriptRun.setColumns; wording UNVERIFIED).
+					return sql, false, http.StatusBadRequest, fmt.Sprintf("EXECUTE IMMEDIATE ... INTO has %d variables, "+
+						"but the query returns %d columns", len(intoVars), cols)
 				}
 				bound := out
 				later := laterResult(stmts[si+1:])
@@ -498,13 +500,13 @@ func bindImmediate(inner string, items []usingItem) (string, int, string) {
 	if len(toks) == 0 {
 		return "", http.StatusBadRequest, "EXECUTE IMMEDIATE was given an empty statement."
 	}
+	if msg := restrictedImmediate(toks); msg != "" {
+		return "", http.StatusBadRequest, msg
+	}
 	for i, t := range toks {
 		if t.punct(";") {
 			return "", http.StatusNotImplemented, "of several statements (" + statementText(inner, toks[i+1:]) + " after the " +
 				"first). BigQuery's documentation gives it one statement."
-		}
-		if t.is("EXECUTE") && i+1 < len(toks) && toks[i+1].is("IMMEDIATE") {
-			return "", http.StatusNotImplemented, "of a statement that has an EXECUTE IMMEDIATE of its own."
 		}
 	}
 	named := map[string]string{}
@@ -1026,4 +1028,206 @@ func selectItemCount(query string) (int, bool) {
 		}
 	}
 	return n, true
+}
+
+// runsInTurn reports whether sql, a script with no control flow, is
+// carried out by the front's own run of it, a statement at a time
+// (runScript, #1037): one with an EXECUTE IMMEDIATE, which BigQuery runs
+// as a child job of its own, or that reads @@row_count, which the front
+// keeps. A TEMP table or function lasts only for the request that made
+// it, so a script with one is not: its EXECUTE IMMEDIATE is put in its
+// text (expandExecuteImmediate).
+func runsInTurn(sql string) bool {
+	upper := strings.ToUpper(sql)
+	if !strings.Contains(upper, "IMMEDIATE") && !strings.Contains(upper, "ROW_COUNT") {
+		return false
+	}
+	toks, ok := lex(sql)
+	if !ok || tokensHaveTemp(toks) {
+		return false
+	}
+	for i := 0; i+1 < len(toks); i++ {
+		if toks[i].is("EXECUTE") && toks[i+1].is("IMMEDIATE") || isRowCount(toks, i) {
+			return true
+		}
+	}
+	return false
+}
+
+// isRowCount reports whether toks[i:] begins with @@row_count.
+func isRowCount(toks []token, i int) bool {
+	return i+2 < len(toks) && toks[i].punct("@") && toks[i+1].punct("@") && toks[i+1].pos == toks[i].end &&
+		toks[i+2].is("row_count") && toks[i+2].pos == toks[i+1].end
+}
+
+// rowCountEdits write each @@row_count of toks as its value (scriptRun.text).
+//
+// BigQuery: "If used in a multi-statement query and the previous statement
+// is DML, specifies the number of rows modified, inserted, or deleted, as
+// a result of that DML statement. If the previous statement is a MERGE
+// statement, @@row_count represents the combined total number of rows
+// inserted, removed, and deleted"
+// (https://cloud.google.com/bigquery/docs/reference/system-variables). It
+// is NULL before any DML statement, and after a statement of another kind
+// (UNVERIFIED against BigQuery, which documents only the DML case).
+func (s *scriptRun) rowCountEdits(toks []token) []varEdit {
+	var edits []varEdit
+	for i := range toks {
+		if isRowCount(toks, i) {
+			v := s.rowCount
+			if v == "" {
+				v = "CAST(NULL AS INT64)"
+			}
+			edits = append(edits, varEdit{toks[i].pos, toks[i+2].end, "(" + v + ")"})
+		}
+	}
+	return edits
+}
+
+// readyRowCount runs a statement that changes data held back (pending),
+// when what is about to run reads @@row_count, so it reads its count.
+func (s *scriptRun) readyRowCount(toks, more []token, conds [][]token) *scriptFlow {
+	if !s.pendingDML {
+		return nil
+	}
+	reads := func(t []token) bool {
+		for i := range t {
+			if isRowCount(t, i) {
+				return true
+			}
+		}
+		return false
+	}
+	found := reads(toks) || reads(more)
+	for _, c := range conds {
+		found = found || reads(c)
+	}
+	if !found {
+		return nil
+	}
+	return s.flush()
+}
+
+// noteRowCount keeps @@row_count after the statement text ran, answered
+// by rec: a DML statement's numDmlAffectedRows, NULL after another
+// (rowCountEdits).
+func (s *scriptRun) noteRowCount(text string, rec *recorder) {
+	toks, _ := lex(text)
+	for len(toks) > 0 && toks[0].punct("(") {
+		toks = toks[1:]
+	}
+	s.rowCount = ""
+	if len(toks) == 0 || rec == nil ||
+		!toks[0].is("INSERT") && !toks[0].is("UPDATE") && !toks[0].is("DELETE") && !toks[0].is("MERGE") {
+		return
+	}
+	var resp struct {
+		NumDmlAffectedRows string `json:"numDmlAffectedRows"`
+		Statistics         struct {
+			Query struct {
+				NumDmlAffectedRows string `json:"numDmlAffectedRows"`
+			} `json:"query"`
+		} `json:"statistics"`
+	}
+	if json.Unmarshal(rec.body.Bytes(), &resp) != nil {
+		return
+	}
+	n := resp.NumDmlAffectedRows
+	if n == "" {
+		n = resp.Statistics.Query.NumDmlAffectedRows
+	}
+	if _, err := strconv.ParseInt(n, 10, 64); err == nil {
+		s.rowCount = n
+	}
+}
+
+// child is the child job id the statement or expression text ran as
+// (scriptjobs.go): an EXPRESSION while an expression is evaluated, and a
+// STATEMENT otherwise, as EXECUTE IMMEDIATE ... INTO's query is. Its stack
+// frame places it in the script; a statement EXECUTE IMMEDIATE ran is at
+// that EXECUTE IMMEDIATE, with its text (frames; BigQuery's frame of such
+// a statement UNVERIFIED).
+func (s *scriptRun) child(project, id, text string) scriptChild {
+	kind := "STATEMENT"
+	if s.expr > 0 && !s.intoQuery {
+		kind = "EXPRESSION"
+	}
+	c := scriptChild{project: project, id: id, kind: kind, text: text}
+	c.line, c.col, c.endLine, c.endCol = childAt(s.sql, text)
+	if f, ok := s.frames[text]; ok && kind == "STATEMENT" && c.line == 0 {
+		c.text, c.line, c.col, c.endLine, c.endCol = f.text, f.line, f.col, f.endLine, f.endCol
+	}
+	return c
+}
+
+// restrictedImmediate is the error for a statement BigQuery does not run
+// by EXECUTE IMMEDIATE, or "": "EXECUTE IMMEDIATE is restricted from being
+// executed dynamically as a nested element. This means EXECUTE IMMEDIATE
+// can't be nested in another EXECUTE IMMEDIATE statement", and so too
+// BEGIN ... END, CASE, IF, LOOP, REPEAT, WHILE and CALL
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language).
+// BigQuery's wording of the error is UNVERIFIED. toks is the statement,
+// read before it is run, so the check is the same alone, nested, or in a
+// script (#1037).
+func restrictedImmediate(toks []token) string {
+	i := 0
+	for i < len(toks) && toks[i].punct("(") {
+		i++
+	}
+	if i >= len(toks) {
+		return ""
+	}
+	t := toks[i]
+	word := ""
+	switch {
+	case t.is("EXECUTE") && i+1 < len(toks) && toks[i+1].is("IMMEDIATE"):
+		word = "EXECUTE IMMEDIATE"
+	case t.is("BEGIN") && !(i+1 < len(toks) && (toks[i+1].is("TRANSACTION") || toks[i+1].is("TRAN"))):
+		word = "BEGIN"
+	case i == 0 && (t.is("CASE") || t.is("IF") || t.is("LOOP") || t.is("REPEAT") || t.is("WHILE") || t.is("CALL")):
+		word = strings.ToUpper(t.text)
+	case i == 0 && (t.kind == tokWord || t.kind == tokQuoted) && len(toks) > 2 && toks[1].punct(":"):
+		// A label: label: LOOP ... END LOOP.
+		return restrictedImmediate(toks[2:])
+	}
+	if word == "" {
+		return ""
+	}
+	return word + " is restricted from being executed dynamically as a nested element: it can't be nested in an " +
+		"EXECUTE IMMEDIATE statement."
+}
+
+// frameAt places the statement text EXECUTE IMMEDIATE runs at that
+// EXECUTE IMMEDIATE, toks, with its text in the script (child).
+func (s *scriptRun) frameAt(text string, toks []token) {
+	if len(toks) == 0 || toks[len(toks)-1].end > len(s.sql) {
+		return
+	}
+	if s.frames == nil {
+		s.frames = map[string]scriptChild{}
+	}
+	c := scriptChild{text: s.sql[toks[0].pos:toks[len(toks)-1].end]}
+	c.line, c.col = lineColumn(s.sql, toks[0].pos)
+	c.endLine, c.endCol = lineColumn(s.sql, toks[len(toks)-1].end-1)
+	s.frames[text] = c
+}
+
+// rowCountInOneRequest reports whether sql reads @@row_count but has a
+// TEMP table or function, which keeps it in one request (runsInTurn): the
+// emulator does not know @@row_count (measured: "Unrecognized name:
+// @@row_count"), so such a script is 501.
+func rowCountInOneRequest(sql string) bool {
+	if !strings.Contains(strings.ToUpper(sql), "ROW_COUNT") {
+		return false
+	}
+	toks, ok := lex(sql)
+	if !ok || !tokensHaveTemp(toks) {
+		return false
+	}
+	for i := range toks {
+		if isRowCount(toks, i) {
+			return true
+		}
+	}
+	return false
 }

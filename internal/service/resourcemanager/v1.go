@@ -289,7 +289,8 @@ func (s *ProjectsServer) v1Delete(w http.ResponseWriter, r *http.Request) error 
 }
 
 // v1Verb is POST /v1/projects/{project}:{verb}: undelete, the org policy
-// verbs (#1296), getAncestry (#1294), and IAM, which is not served.
+// verbs (#1296), getAncestry (#1294), and IAM, stored and not enforced
+// (#1368, iam.go).
 func (s *ProjectsServer) v1Verb(w http.ResponseWriter, r *http.Request) error {
 	raw, err := rest.PathValue(r, "project")
 	if err != nil {
@@ -307,6 +308,8 @@ func (s *ProjectsServer) v1Verb(w http.ResponseWriter, r *http.Request) error {
 		return rest.WriteJSON(w, http.StatusOK, struct{}{})
 	case "getAncestry":
 		return s.v1Ancestry(w, id)
+	case "getIamPolicy", "setIamPolicy", "testIamPermissions":
+		return serveIAM(w, r, s, "projects/"+id, verb)
 	}
 	return s.v1OrgPolicy(w, r, id, verb)
 }

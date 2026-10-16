@@ -235,7 +235,7 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 		opts = nil // schemaUpdateOptions are for WRITE_APPEND and WRITE_TRUNCATE (above)
 	}
 	if result, status, _ := f.lone(r, lq, lq.Query); status == http.StatusOK && !sameSchema(result, m.Schema.Fields) {
-		if _, _, _, why := partitionSchema(m.Schema.Fields, result, opts, name); why != "" {
+		if _, _, _, why := partitionSchema(m.Schema.Fields, result, opts, name, m.partitionField()); why != "" {
 			return notImplemented(why)
 		}
 	}
@@ -287,7 +287,7 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 	changed := false
 	if e.Message == "" && !sameSchema(fields.Fields, m.Schema.Fields) {
 		var invalid, why string
-		target, changed, invalid, why = partitionSchema(m.Schema.Fields, fields.Fields, opts, name)
+		target, changed, invalid, why = partitionSchema(m.Schema.Fields, fields.Fields, opts, name, m.partitionField())
 		switch {
 		case why != "":
 			e.Reason, e.Message = "notImplemented", "Not implemented here: a query job whose destination is the partition "+
@@ -597,7 +597,7 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 			opts = nil
 		}
 		var why string
-		target, changed, invalid, why = partitionSchema(m.Schema.Fields, l.Schema.Fields, opts, name)
+		target, changed, invalid, why = partitionSchema(m.Schema.Fields, l.Schema.Fields, opts, name, m.partitionField())
 		if why != "" {
 			return nil, notImplemented(why)
 		}
@@ -707,37 +707,74 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 // NULLABLE, at the table's end, and ALLOW_FIELD_RELAXATION relaxes a
 // REQUIRED column the rows give as NULLABLE. Without the option, the job
 // fails, reason invalid, the table unchanged. The table's columns, in its
-// order, must come first; anything else (a column left out, retyped, given
-// in another order, a RECORD's fields changed) stays 501; a column
+// order, come first, but for a column left out (partitionSchema); columns
+// in another order and a RECORD's fields changed stay 501; a column
 // retyped fails, reason invalid, as "changing a column's data type" is not
 // a schema update BigQuery makes through a write. An ingestion-time
 // partitioned table's rows keep their _PARTITIONTIME through the table's
 // remaking (schemaupdate.go's addColumns).
 
 // partitionSchema compares the rows' columns, next, with the table's,
-// old. It returns the table's schema after the write, whether it changes,
-// and why the job fails (invalid) or is not carried out (501), or "".
-func partitionSchema(old, next []field, opts []string, name string) (target []field, changed bool, invalid, notBuilt string) {
-	if len(next) < len(old) {
-		return nil, false, "", "whose columns are not the table's (one is left out)"
-	}
+// old; part is the table's partitioning column, or "". It returns the
+// table's schema after the write, whether it changes, and why the job
+// fails (invalid) or is not carried out (501), or "".
+//
+// The rows may leave out a column of the table with
+// ALLOW_FIELD_RELAXATION: BigQuery's example appends, with it, a query
+// whose "results will omit the second column", a REQUIRED one, and the
+// option relaxes "all required fields in the destination table"
+// (managing-table-schemas, Make all columns NULLABLE with an append
+// job): the column left out is relaxed and its rows are NULL. A REQUIRED
+// column left out without it fails, invalid; a NULLABLE or REPEATED one
+// left out without it, which BigQuery's documentation does not give, and
+// the partitioning column left out, stay 501, as do columns in another
+// order (BigQuery documents no write that reorders a table) and a
+// RECORD's fields changed (it documents nested fields added through
+// tables.patch only, and "schema updates can't drop nested fields").
+func partitionSchema(old, next []field, opts []string, name, part string) (target []field, changed bool, invalid, notBuilt string) {
+	relax := hasOption(opts, "ALLOW_FIELD_RELAXATION")
 	target = make([]field, 0, len(next))
-	for i, o := range old {
-		n := next[i]
-		if strings.EqualFold(o.Name, n.Name) && canonicalType(o.Type) != canonicalType(n.Type) {
+	j := 0
+	for _, o := range old {
+		if j >= len(next) || !strings.EqualFold(o.Name, next[j].Name) {
+			// o is left out, or the columns are in another order.
+			for _, n := range next[j:] {
+				if strings.EqualFold(o.Name, n.Name) {
+					return nil, false, "", "whose columns are not in the table's order (" + n.Name + ")"
+				}
+			}
+			switch {
+			case part != "" && strings.EqualFold(o.Name, part):
+				return nil, false, "", "whose columns leave out the partitioning column " + o.Name
+			case !relax && modeOf(o) == "REQUIRED":
+				return nil, false, "Provided Schema does not match Table " + name + ". Field " + o.Name +
+					" is missing in new schema", "" // UNVERIFIED wording
+			case !relax:
+				return nil, false, "", "whose columns leave out " + o.Name + " without ALLOW_FIELD_RELAXATION"
+			}
+			t := o
+			if modeOf(o) == "REQUIRED" {
+				t.Mode, changed = "NULLABLE", true
+			}
+			target = append(target, t)
+			continue
+		}
+		n := next[j]
+		j++
+		if canonicalType(o.Type) != canonicalType(n.Type) {
 			// "Changing a column's data type" is not a schema update
 			// BigQuery makes through a write (managing-table-schemas).
 			return nil, false, "Provided Schema does not match Table " + name + ". Field " + o.Name +
 				" has changed type from " + canonicalType(o.Type) + " to " + canonicalType(n.Type), "" // UNVERIFIED wording
 		}
-		if !strings.EqualFold(o.Name, n.Name) || !sameSchema(o.Fields, n.Fields) {
-			return nil, false, "", "whose columns are not the table's (" + n.Name + ")"
+		if !sameSchema(o.Fields, n.Fields) {
+			return nil, false, "", "whose RECORD column " + n.Name + " has other fields than the table's"
 		}
 		t := o
 		switch om, nm := modeOf(o), modeOf(n); {
 		case om == nm, om == "NULLABLE" && nm == "REQUIRED":
 		case om == "REQUIRED" && nm == "NULLABLE":
-			if !hasOption(opts, "ALLOW_FIELD_RELAXATION") {
+			if !relax {
 				return nil, false, "Provided Schema does not match Table " + name + ". Field " + o.Name +
 					" has changed mode from REQUIRED to NULLABLE", "" // UNVERIFIED wording
 			}
@@ -747,7 +784,7 @@ func partitionSchema(old, next []field, opts []string, name string) (target []fi
 		}
 		target = append(target, t)
 	}
-	for _, n := range next[len(old):] {
+	for _, n := range next[j:] {
 		if !hasOption(opts, "ALLOW_FIELD_ADDITION") {
 			return nil, false, "Provided Schema does not match Table " + name + ". Cannot add fields (field: " + n.Name + ")", "" // UNVERIFIED wording
 		}
@@ -762,6 +799,18 @@ func partitionSchema(old, next []field, opts []string, name string) (target []fi
 		target, changed = append(target, t), true
 	}
 	return target, changed, "", ""
+}
+
+// partitionField is the partitioning column of m, or "" for an
+// ingestion-time partitioned table.
+func (m partitionMeta) partitionField() string {
+	switch {
+	case m.RangePartitioning != nil:
+		return m.RangePartitioning.Field
+	case m.TimePartitioning != nil:
+		return m.TimePartitioning.Field
+	}
+	return ""
 }
 
 // updatePartitionedSchema gives dataset.table the schema target: added

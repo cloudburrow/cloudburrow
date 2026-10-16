@@ -214,6 +214,17 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 				deleteTable,
 			}
 		}
+		if err == nil && md.Type == bigquery.Snapshot {
+			// A table snapshot is read-only: its page offers what Google's
+			// does, Restore among them (#1002).
+			return []console.Action{
+				{ID: "edittable", Label: "Edit table", Fields: bigqueryEditFields(md)},
+				{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
+				{ID: actCopyTable, Label: "Copy table", Fields: bigqueryCopyFields()},
+				{ID: actRestoreTable, Label: "Restore", Fields: bigquerySnapshotFields(actRestoreTable)},
+				deleteTable,
+			}
+		}
 		actions := []console.Action{{ID: "insertrows", Label: "Insert rows", Fields: insertFields(md)}}
 		if err == nil {
 			actions = append(actions, console.Action{ID: "edittable", Label: "Edit table", Fields: bigqueryEditFields(md)})
@@ -223,6 +234,8 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 			console.Action{ID: actLoadFile, Label: "Load from a file", Fields: bigqueryLoadFileFields(false)},
 			console.Action{ID: "export", Label: "Export to Cloud Storage", Fields: bigqueryExportFields()},
 			console.Action{ID: actCopyTable, Label: "Copy table", Fields: bigqueryCopyFields()},
+			console.Action{ID: actSnapshotTable, Label: "Snapshot", Fields: bigquerySnapshotFields(actSnapshotTable)}, // #1002
+			console.Action{ID: actCloneTable, Label: "Clone", Fields: bigquerySnapshotFields(actCloneTable)},
 			console.Action{ID: actCreateRowPolicy, Label: "Create row access policy", Fields: rowPolicyFields(p.project)}, // #1218
 			console.Action{ID: actDeleteAllRowPolicies, Label: "Delete all row access policies", Destructive: true,
 				Confirm: "Every row access policy of the table is deleted, and every query reads all of its rows again."},

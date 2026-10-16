@@ -51,12 +51,19 @@ func TestExecuteImmediateOfAConstant(t *testing.T) {
 		// The emulator does not SET a name that must be quoted, nor
 		// does the front's own run read one (#1037).
 		"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 1, 2' INTO a, `select`",
-		// The numbers of variables and columns differ (#1037).
-		"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2, 3' INTO a, b",
-		"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1' INTO a, b",
 	} {
 		if _, _, code, _ := expandExecuteImmediate(sql, nil); code != 501 {
 			t.Errorf("%s: %d, want 501", sql, code)
+		}
+	}
+	// The numbers of variables and columns differ: an error, as the
+	// columns are assigned by position, one per variable (#1037).
+	for _, sql := range []string{
+		"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2, 3' INTO a, b",
+		"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1' INTO a, b",
+	} {
+		if _, _, code, _ := expandExecuteImmediate(sql, nil); code != 400 {
+			t.Errorf("%s: %d, want 400", sql, code)
 		}
 	}
 }
@@ -249,5 +256,48 @@ func TestExecuteImmediateIntoCountsRows(t *testing.T) {
 	if got, _, code, _ := expandExecuteImmediate(sql+"; SELECT x", count("2", &probes)); code != 0 || len(probes) != 0 ||
 		!strings.Contains(got, "CREATE TEMP TABLE _cloudburrow_into_1") {
 		t.Errorf("a later statement: %q %d %q", got, code, probes)
+	}
+}
+
+// TestExecuteImmediateRunsInTurn (#1037): a script with an EXECUTE
+// IMMEDIATE or reading @@row_count is run a statement at a time, unless a
+// TEMP table keeps it in one request, where @@row_count is 501; what
+// BigQuery restricts from EXECUTE IMMEDIATE is named.
+func TestExecuteImmediateRunsInTurn(t *testing.T) {
+	for sql, want := range map[string]bool{
+		"EXECUTE IMMEDIATE 'SELECT 1'":                                true,
+		"INSERT ds.t VALUES (1); SELECT @@row_count":                  true,
+		"SELECT 'EXECUTE IMMEDIATE', '@@row_count'":                   false,
+		"SELECT @ @row_count":                                         false,
+		"CREATE TEMP TABLE u (x INT64); EXECUTE IMMEDIATE 'SELECT 1'": false,
+		"SELECT 1": false,
+	} {
+		if got := runsInTurn(sql); got != want {
+			t.Errorf("runsInTurn(%q) = %v, want %v", sql, got, want)
+		}
+	}
+	if !rowCountInOneRequest("CREATE TEMP TABLE u (x INT64); INSERT u VALUES (1); SELECT @@row_count") ||
+		rowCountInOneRequest("INSERT ds.t VALUES (1); SELECT @@row_count") {
+		t.Error("rowCountInOneRequest")
+	}
+	for sql, word := range map[string]string{
+		"EXECUTE IMMEDIATE 'SELECT 1'":           "EXECUTE IMMEDIATE",
+		"(EXECUTE IMMEDIATE 'SELECT 1')":         "EXECUTE IMMEDIATE",
+		"IF TRUE THEN SELECT 1; END IF":          "IF",
+		"while true do leave; end while":         "WHILE",
+		"REPEAT SELECT 1; UNTIL TRUE END REPEAT": "REPEAT",
+		"CASE WHEN TRUE THEN SELECT 1; END CASE": "CASE",
+		"CALL ds.p()":                            "CALL",
+		"BEGIN SELECT 1; END":                    "BEGIN",
+		"x: LOOP LEAVE x; END LOOP":              "LOOP",
+		"BEGIN TRANSACTION":                      "",
+		"SELECT IF(TRUE, 1, 2)":                  "",
+		"SELECT CASE WHEN TRUE THEN 1 END":       "",
+	} {
+		toks, _ := lex(sql)
+		got := restrictedImmediate(toks)
+		if word == "" && got != "" || word != "" && !strings.HasPrefix(got, word+" is restricted") {
+			t.Errorf("restrictedImmediate(%q) = %q, want %q", sql, got, word)
+		}
 	}
 }

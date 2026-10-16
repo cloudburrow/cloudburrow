@@ -158,11 +158,12 @@ func TestProjectsLifecycleThroughTheOfficialClient(t *testing.T) {
 func TestProjectsRefusesWhatItDoesNotServe(t *testing.T) {
 	_, _, c := startAPI(t)
 	ctx := context.Background()
-	if _, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/x"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("GetIamPolicy = %v", err)
+	// IAM is served since #1368; a project that does not exist has none.
+	if _, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/absent-1"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetIamPolicy of an absent project = %v, want NotFound", err)
 	}
-	if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: "projects/x"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("SetIamPolicy = %v", err)
+	if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: "projects/absent-1", Policy: &iampb.Policy{}}); status.Code(err) != codes.NotFound {
+		t.Errorf("SetIamPolicy of an absent project = %v, want NotFound", err)
 	}
 	if _, err := c.CreateProject(ctx, &rmpb.CreateProjectRequest{Project: &rmpb.Project{ProjectId: "in-folder-1", Parent: "folders/123"}}); status.Code(err) != codes.NotFound {
 		t.Errorf("CreateProject under an absent folder = %v", err)
@@ -205,8 +206,8 @@ func TestHierarchyThroughTheOfficialClients(t *testing.T) {
 	if o, err := oc.SearchOrganizations(ctx, &rmpb.SearchOrganizationsRequest{Query: "domain:" + OrganizationDomain}).Next(); err != nil || o.GetName() != OrganizationName {
 		t.Errorf("SearchOrganizations = %v, %v", o, err)
 	}
-	if _, err := oc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: OrganizationName}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("organization GetIamPolicy = %v, want Unimplemented", err)
+	if _, err := oc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "organizations/1"}); status.Code(err) != codes.NotFound {
+		t.Errorf("another organization's GetIamPolicy = %v, want NotFound", err)
 	}
 
 	create := func(parent, name string) *rmpb.Folder {
@@ -316,8 +317,8 @@ func TestHierarchyThroughTheOfficialClients(t *testing.T) {
 	if f, err := ud.Wait(ctx); err != nil || f.GetState() != rmpb.Folder_ACTIVE {
 		t.Errorf("UndeleteFolder = %v, %v", f, err)
 	}
-	if _, err := fc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: team.GetName()}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("folder GetIamPolicy = %v, want Unimplemented", err)
+	if p, err := fc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: team.GetName()}); err != nil || len(p.GetBindings()) != 0 {
+		t.Errorf("a new folder's GetIamPolicy = %v, %v; want an empty policy", p, err)
 	}
 }
 
@@ -344,8 +345,8 @@ func TestProjectsOverREST(t *testing.T) {
 	if p, err := it.Next(); err != nil || p.GetProjectId() != "rest-made-1" {
 		t.Errorf("REST SearchProjects = %v, %v", p, err)
 	}
-	if _, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/rest-made-1"}); err == nil {
-		t.Error("REST GetIamPolicy succeeded")
+	if p, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/rest-made-1"}); err != nil || len(p.GetBindings()) != 0 {
+		t.Errorf("REST GetIamPolicy = %v, %v; want an empty policy", p, err)
 	}
 	dop, err := c.DeleteProject(ctx, &rmpb.DeleteProjectRequest{Name: "projects/rest-made-1"})
 	if err != nil {

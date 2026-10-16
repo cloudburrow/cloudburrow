@@ -1,0 +1,49 @@
+CloudBurrow patch 16 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1273). Applies after patch 0015; needs
+googlesqlite patch 0029.
+
+A table made by tables.insert with timePartitioning on a field, or with
+rangePartitioning, is made in the engine with the pseudo-column
+_PARTITION_BUFFERED BOOL, which marks the rows of its streaming buffer
+(googlesqlite patch 0029), and a CREATE TABLE's schema leaves the column
+out as it leaves out _PARTITIONTIME.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the
+MIT License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -130,6 +130,13 @@
+ 	if err != nil {
+ 		return err
+ 	}
++	if tp := table.TimePartitioning; tp != nil && tp.Field != "" || table.RangePartitioning != nil {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1273): a table
++		// partitioned by a column or an integer range has the
++		// pseudo-column that marks the rows of its streaming buffer
++		// (googlesqlite patch 0029).
++		fields = append(fields, "`_PARTITION_BUFFERED` BOOL")
++	}
+ 	query := fmt.Sprintf("CREATE TABLE `%s` (%s)", tablePath, strings.Join(fields, ","))
+ 	if tp := table.TimePartitioning; tp != nil && tp.Field == "" {
+ 		// CloudBurrow patch (cloudburrow/cloudburrow#1277): an
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1859,10 +1859,12 @@
+ 	}
+ 	fields := make([]*bigqueryv2.TableFieldSchema, 0, len(spec.Columns))
+ 	for _, column := range spec.Columns {
+-		if strings.EqualFold(column.Name, "_PARTITIONTIME") || strings.EqualFold(column.Name, "_PARTITIONDATE") {
++		if strings.EqualFold(column.Name, "_PARTITIONTIME") || strings.EqualFold(column.Name, "_PARTITIONDATE") ||
++			strings.EqualFold(column.Name, "_PARTITION_BUFFERED") {
+ 			// CloudBurrow patch (cloudburrow/cloudburrow#1277): the
+ 			// pseudo-columns of an ingestion-time partitioned table are
+-			// not in its schema.
++			// not in its schema, nor (#1273) the streaming buffer's mark
++			// of a table partitioned by a column.
+ 			continue
+ 		}
+ 		field := types.TableFieldSchemaFromColumnType(column.Name, column.Type)

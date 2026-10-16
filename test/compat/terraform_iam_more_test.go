@@ -25,18 +25,19 @@ import (
 // TestTerraformBigQueryIAM's (member and binding, none, policy, none), each
 // read back through the official Go client and planned clean. Nothing is
 // enforced (ADR-0006).
-// covers: storage.buckets.getIamPolicy, storage.buckets.setIamPolicy, google.cloud.secretmanager.v1.SecretManagerService/GetIamPolicy, google.cloud.secretmanager.v1.SecretManagerService/SetIamPolicy, google.cloud.tasks.v2.CloudTasks/GetIamPolicy, google.cloud.tasks.v2.CloudTasks/SetIamPolicy, google.iam.v1.IAMPolicy/GetIamPolicy, google.iam.v1.IAMPolicy/SetIamPolicy
+// It runs where Storage, Secret Manager and Tasks are served (the storage
+// shard); the KMS resources are TestTerraformKMSStoredIAM, in the shard KMS
+// is served in, as no shard serves all four.
+// covers: storage.buckets.getIamPolicy, storage.buckets.setIamPolicy, google.cloud.secretmanager.v1.SecretManagerService/GetIamPolicy, google.cloud.secretmanager.v1.SecretManagerService/SetIamPolicy, google.cloud.tasks.v2.CloudTasks/GetIamPolicy, google.cloud.tasks.v2.CloudTasks/SetIamPolicy
 func TestTerraformStoredIAM(t *testing.T) {
 	h := New(t)
 	m := newTFModule(t) // skips without terraform or the CLI
 	sc := storageClient(t, h)
 	smc := secretsClient(t, h)
-	kc := kmsClients(t, h)["grpc"]
 	tc := tasksClient(t, h)
 	ctx := h.Context()
 	p := h.Project()
-	bucket, secret, ringID, queue := p+"-tfiam", "tfiam", "tfiam-"+p, "tfiam"
-	ring := "projects/" + p + "/locations/us-central1/keyRings/" + ringID
+	bucket, secret, queue := p+"-tfiam", "tfiam", "tfiam"
 
 	base := fmt.Sprintf(`
 resource "google_storage_bucket" "b" {
@@ -53,21 +54,12 @@ resource "google_secret_manager_secret" "s" {
     auto {}
   }
 }
-resource "google_kms_key_ring" "kr" {
+resource "google_cloud_tasks_queue" "q" {
   project  = %[1]q
   name     = %[4]q
   location = "us-central1"
 }
-resource "google_kms_crypto_key" "k" {
-  name     = "k"
-  key_ring = google_kms_key_ring.kr.id
-}
-resource "google_cloud_tasks_queue" "q" {
-  project  = %[1]q
-  name     = %[5]q
-  location = "us-central1"
-}
-`, p, bucket, secret, ringID, queue)
+`, p, bucket, secret, queue)
 
 	fromProto := func(get func() (*iampb.Policy, error), what string) func() map[string][]string {
 		return func() map[string][]string {
@@ -103,24 +95,65 @@ resource "google_cloud_tasks_queue" "q" {
 		{kind: "google_secret_manager_secret", label: "s",
 			ref:  map[string]string{"project": "google_secret_manager_secret.s.project", "secret_id": "google_secret_manager_secret.s.secret_id"},
 			read: fromProto(func() (*iampb.Policy, error) { return smc.GetIamPolicy(ctx, req(secretName)) }, secretName)},
-		{kind: "google_kms_key_ring", label: "kr", ref: map[string]string{"key_ring_id": "google_kms_key_ring.kr.id"},
-			read: fromProto(func() (*iampb.Policy, error) { return kc.GetIamPolicy(ctx, req(ring)) }, ring)},
-		{kind: "google_kms_crypto_key", label: "k", ref: map[string]string{"crypto_key_id": "google_kms_crypto_key.k.id"},
-			read: fromProto(func() (*iampb.Policy, error) { return kc.GetIamPolicy(ctx, req(ring+"/cryptoKeys/k")) }, ring+"/cryptoKeys/k")},
 		{kind: "google_cloud_tasks_queue", label: "q",
 			ref:  map[string]string{"project": "google_cloud_tasks_queue.q.project", "location": "google_cloud_tasks_queue.q.location", "name": "google_cloud_tasks_queue.q.name"},
 			read: fromProto(func() (*iampb.Policy, error) { return tc.GetIamPolicy(ctx, req(queueName)) }, queueName)},
 	}
 	runTFIAMPhases(t, m, base, [2]string{"roles/viewer", "roles/editor"}, targets)
 
-	// Destroy removed the bucket, the secret and the queue. The key ring
-	// stays, as on Google, and the key keeps no enabled version.
+	// Destroy removed the bucket, the secret and the queue.
 	if _, err := sc.Bucket(bucket).Attrs(ctx); !errors.Is(err, storage.ErrBucketNotExist) {
 		t.Errorf("the bucket after destroy: %v; want ErrBucketNotExist", err)
 	}
 	if _, err := smc.GetSecret(ctx, &secretmanagerpb.GetSecretRequest{Name: secretName}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetSecret after destroy: %v; want NotFound", err)
 	}
+}
+
+// TestTerraformKMSStoredIAM (#1304): google_kms_key_ring_iam_* and
+// google_kms_crypto_key_iam_* through the same four phases as
+// TestTerraformStoredIAM, read back through the official KMS client; the
+// policies are stored, not enforced (ADR-0006). Destroy leaves the key
+// ring, as on Google, and the key keeps no enabled version.
+// covers: google.iam.v1.IAMPolicy/GetIamPolicy, google.iam.v1.IAMPolicy/SetIamPolicy
+func TestTerraformKMSStoredIAM(t *testing.T) {
+	h := New(t)
+	m := newTFModule(t) // skips without terraform or the CLI
+	kc := kmsClients(t, h)["grpc"]
+	ctx := h.Context()
+	p := h.Project()
+	ringID := "tfiam-" + p
+	ring := "projects/" + p + "/locations/us-central1/keyRings/" + ringID
+	base := fmt.Sprintf(`
+resource "google_kms_key_ring" "kr" {
+  project  = %[1]q
+  name     = %[2]q
+  location = "us-central1"
+}
+resource "google_kms_crypto_key" "k" {
+  name     = "k"
+  key_ring = google_kms_key_ring.kr.id
+}
+`, p, ringID)
+	read := func(name string) func() map[string][]string {
+		return func() map[string][]string {
+			t.Helper()
+			pol, err := kc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: name})
+			if err != nil {
+				t.Fatalf("GetIamPolicy on %s: %v", name, err)
+			}
+			out := map[string][]string{}
+			for _, b := range pol.GetBindings() {
+				out[b.GetRole()] = b.GetMembers()
+			}
+			return out
+		}
+	}
+	targets := []tfIAMTarget{
+		{kind: "google_kms_key_ring", label: "kr", ref: map[string]string{"key_ring_id": "google_kms_key_ring.kr.id"}, read: read(ring)},
+		{kind: "google_kms_crypto_key", label: "k", ref: map[string]string{"crypto_key_id": "google_kms_crypto_key.k.id"}, read: read(ring + "/cryptoKeys/k")},
+	}
+	runTFIAMPhases(t, m, base, [2]string{"roles/viewer", "roles/editor"}, targets)
 	if _, err := kc.GetKeyRing(ctx, &kmspb.GetKeyRingRequest{Name: ring}); err != nil {
 		t.Errorf("GetKeyRing after destroy: %v; want the ring kept, as on Google", err)
 	}

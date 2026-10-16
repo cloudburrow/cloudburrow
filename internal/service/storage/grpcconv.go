@@ -77,6 +77,9 @@ type jsonObject struct {
 	Acl                                                                 []jsonACE
 	Retention                                                           *struct{ Mode, RetainUntilTime string }
 	CustomerEncryption                                                  *struct{ EncryptionAlgorithm, KeySha256 string }
+	Contexts                                                            *struct {
+		Custom map[string]struct{ Value, CreateTime, UpdateTime string }
+	}
 }
 
 func (o jsonObject) proto() *pb.Object {
@@ -111,6 +114,12 @@ func (o jsonObject) proto() *pb.Object {
 	}
 	if o.Owner != nil {
 		out.Owner = &pb.Owner{Entity: o.Owner.Entity, EntityId: o.Owner.EntityID}
+	}
+	if c := o.Contexts; c != nil && len(c.Custom) > 0 {
+		out.Contexts = &pb.ObjectContexts{Custom: map[string]*pb.ObjectCustomContextPayload{}}
+		for k, v := range c.Custom {
+			out.Contexts.Custom[k] = &pb.ObjectCustomContextPayload{Value: v.Value, CreateTime: ts(v.CreateTime), UpdateTime: ts(v.UpdateTime)}
+		}
 	}
 	for _, e := range o.Acl {
 		out.Acl = append(out.Acl, e.objectProto())
@@ -174,8 +183,21 @@ func objectToJSON(o *pb.Object, paths []string) (map[string]any, error) {
 	if acl := o.GetAcl(); len(acl) > 0 || paths != nil {
 		all["acl"] = aclToJSON(acl)
 	}
+	// Object contexts (contexts.go): a key the update_mask names and the
+	// object leaves out is deleted, as is every key for contexts.custom
+	// with an empty map.
+	custom := func() any {
+		if len(o.GetContexts().GetCustom()) == 0 {
+			return nil
+		}
+		m := map[string]any{}
+		for k, v := range o.GetContexts().GetCustom() {
+			m[k] = map[string]any{"value": v.GetValue()}
+		}
+		return m
+	}
 	if o.GetContexts() != nil {
-		return nil, grpcstatus.Error(codes.Unimplemented, "object contexts are not implemented: the JSON API does not serve them")
+		all["contexts"] = map[string]any{"custom": custom()}
 	}
 	if paths == nil {
 		return all, nil
@@ -185,6 +207,28 @@ func objectToJSON(o *pb.Object, paths []string) (map[string]any, error) {
 		if p == "*" {
 			for _, k := range objectFields {
 				out[k] = all[k]
+			}
+			continue
+		}
+		if p == "contexts" || p == "contexts.custom" {
+			out["contexts"] = map[string]any{"custom": custom()}
+			continue
+		}
+		if key, ok := strings.CutPrefix(p, "contexts.custom."); ok {
+			c, _ := out["contexts"].(map[string]any)
+			if c == nil {
+				c = map[string]any{}
+				out["contexts"] = c
+			}
+			m, _ := c["custom"].(map[string]any)
+			if m == nil {
+				m = map[string]any{}
+				c["custom"] = m
+			}
+			if v, has := o.GetContexts().GetCustom()[key]; has {
+				m[key] = map[string]any{"value": v.GetValue()}
+			} else {
+				m[key] = nil
 			}
 			continue
 		}

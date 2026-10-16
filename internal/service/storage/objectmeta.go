@@ -19,7 +19,7 @@ var objectMutable = map[string]string{
 	"cacheControl": "kept", "metadata": "kept", "customTime": "kept",
 	"storageClass":  "the storage class changes only by rewrite (#495)",
 	"temporaryHold": "kept", "eventBasedHold": "kept", "retention": "kept",
-	"acl": "kept", "contexts": "object contexts are not implemented",
+	"acl": "kept", "contexts": "kept",
 	"kmsKeyName": "customer-managed keys are not implemented", "customerEncryption": "customer-supplied keys are not implemented",
 }
 
@@ -53,6 +53,11 @@ func checkObjectBody(body map[string]any) error {
 			}
 		}
 	}
+	if v, ok := body["contexts"]; ok {
+		if err := checkContextsBody(v); err != nil {
+			return err
+		}
+	}
 	for _, k := range []string{"contentType", "contentEncoding", "contentDisposition", "contentLanguage", "cacheControl", "customTime"} {
 		if v, ok := body[k]; ok && v != nil {
 			if _, isStr := v.(string); !isStr {
@@ -66,7 +71,7 @@ func checkObjectBody(body map[string]any) error {
 func str(v any) string { s, _ := v.(string); return s }
 
 // applyObjectBody writes a patch (merge) or update (replace) onto o.
-func applyObjectBody(o *objectRecord, body map[string]any, replace bool) error {
+func applyObjectBody(o *objectRecord, body map[string]any, replace bool, now time.Time) error {
 	set := func(k string, dst *string) {
 		if v, ok := body[k]; ok {
 			*dst = str(v)
@@ -100,6 +105,11 @@ func applyObjectBody(o *objectRecord, body map[string]any, replace bool) error {
 		}
 	} else if replace {
 		o.Metadata = nil
+	}
+	if v, ok := body["contexts"]; ok {
+		applyContexts(o, v, replace, now)
+	} else if replace {
+		o.Contexts = nil
 	}
 	if v, ok := body["customTime"]; ok && v != nil {
 		t, err := time.Parse(time.RFC3339Nano, str(v))
@@ -170,7 +180,8 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 					"storageClass", objectMutable["storageClass"])
 			}
 			before := o
-			if err := applyObjectBody(&o, body, replace); err != nil {
+			now := s.now()
+			if err := applyObjectBody(&o, body, replace, now); err != nil {
 				return err
 			}
 			// The acl, like a bucket's, stays when a body leaves it out
@@ -181,7 +192,6 @@ func (s *Server) objectsModify(replace bool) http.HandlerFunc {
 			} else if set {
 				o.ACL = acl
 			}
-			now := s.now()
 			if err := applyProtection(&o, before, body, replace, override, now); err != nil {
 				return err
 			}

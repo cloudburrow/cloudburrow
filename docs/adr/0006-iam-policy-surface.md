@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -248,11 +248,8 @@ this amends the ADR in place as #421 and #504 did.
    `google_cloud_run_v2_job_iam_*` member, binding and policy through `cloudburrow terraform`.
 6. Every compatibility.md row for these methods reads ***Stored, not enforced***.
 
-**Project IAM stays UNIMPLEMENTED.** A project's policy is the one Google's resources
-inherit, and the Cloud Storage amendment above records that project-level bindings do not
-exist here. Nothing inherits, so a stored project policy would be read as the protection it
-is not. `GetIamPolicy`, `SetIamPolicy` and `TestIamPermissions` on Resource Manager projects
-answer UNIMPLEMENTED citing this ADR, until an amendment decides otherwise.
+~~**Project IAM stays UNIMPLEMENTED.**~~ Superseded by the Resource Manager amendment below
+(#1368, 2026-10-15): a project's policy is now stored, and still inherited by nothing.
 
 ### BigQuery (amended by #1231)
 
@@ -320,10 +317,56 @@ create of the same name through the front drops it, so `/admin/reset`, which del
 resources through the front, clears them (rule 5). Every compatibility.md row for these methods
 reads ***Stored, not enforced***.
 
-Every service other than these seven (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
+### Resource Manager projects, folders and the organization (amended by #1368)
+
+**Decided by the maintainer on 2026-10-15** (#1368): a project's IAM policy is **stored and
+never enforced**, as every other policy here is. This reverses the refusal above, which held that
+a stored project policy would be read as the protection it is not; the maintainer chose to store
+it and say so, as for BigQuery (#1231) and Cloud Storage ACLs (#1233). The decision is unchanged:
+option (b), no enforcement. Folders and the local organization, which CloudBurrow serves since
+#1294, are stored the same way.
+
+1. **Which methods.** `GetIamPolicy`, `SetIamPolicy` and `TestIamPermissions` on
+   `projects/{id}` or `projects/{number}`, `folders/{number}` and the local organization, over
+   gRPC and the v3 REST paths, v1 REST `projects.*` and `organizations.*` (which `gcloud
+   projects` and Terraform's `google_project_iam_*` call) and v2 REST `folders.*` (`gcloud
+   resource-manager folders`), served by `internal/service/resourcemanager/iam.go`.
+2. **Rules 1-3 apply.** The shared `internal/iampolicy` gives Secret Manager's etag, version and
+   condition handling: a set returns a new `etag`, a stale one is ABORTED (409 over REST), a
+   condition or audit config is UNIMPLEMENTED naming the field, and a version 3 policy without
+   conditions is accepted. An `auditConfigs` path in the update mask with no audit configs in the
+   policy is a no-op, not a refusal: Terraform's project IAM sends `bindings,etag,auditConfigs` on
+   every set.
+3. **No inheritance.** A project's, a folder's or the organization's bindings apply to nothing.
+   A resource's own `getIamPolicy` (a bucket's, a topic's, a secret's) still shows only its own
+   bindings, a new bucket's still shows none, and a project's policy is not merged into a
+   folder's or the reverse. The policy is a record of what was set, read back as it was set.
+4. **`TestIamPermissions`** answers, of the permissions asked, those that can be held on that
+   resource: every well-formed `service.resource.verb` permission, since any service's
+   permission can be granted on a project, less a folder's or an organization's
+   (`resourcemanager.folders.*`, `resourcemanager.organizations.*`) asked of a project and an
+   organization's asked of a folder. Nothing is denied, as Pub/Sub's rule says.
+5. **Where it is kept, and for how long.** In the project registry's store
+   (`resourcemanager/iam/…`), so it has the registry's persistence and `state save` captures it.
+   A project or folder pending deletion keeps its policy and refuses a set
+   (FAILED_PRECONDITION); purged after the 30 days, it loses it, and a project made again under
+   that ID starts with none. `/admin/reset` clears every stored policy (component
+   `resourcemanager`; `reset?project=` clears that project's), and leaves the projects, folders
+   and organization, which are a registry.
+6. **Required tests:** official-SDK compat tests with `cloud.google.com/go/resourcemanager/apiv3`
+   `ProjectsClient`, `FoldersClient` and `OrganizationsClient` and with
+   `google.golang.org/api/cloudresourcemanager/v1`; `gcloud projects add-iam-policy-binding`,
+   `get-iam-policy` and `remove-iam-policy-binding`; and `TestTerraformProjectIAM`:
+   `google_project_iam_member`, `_binding` and `_policy` through `cloudburrow terraform`. The
+   console's IAM page (IAM & Admin) shows the selected project's policy with Grant access and
+   Remove principal, and says it is stored, not enforced and inherited by nothing.
+7. Every compatibility.md row for these methods reads ***Stored, not enforced***.
+
+Every service other than these eight (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
 Storage's buckets and their ACLs, Cloud Run's services and jobs, BigQuery's tables, routines and row
-access policies, and Pub/Sub's topics, subscriptions, snapshots and schemas) keeps its current
-behaviour, Resource Manager projects included.
+access policies, Pub/Sub's topics, subscriptions, snapshots and schemas, and Resource Manager's
+projects, folders and organization) keeps its current behaviour; Resource Manager's tag keys and
+values keep their IAM UNIMPLEMENTED.
 
 ## Consequences
 

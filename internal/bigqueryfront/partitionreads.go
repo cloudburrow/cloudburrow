@@ -110,6 +110,9 @@ type partitionMeta struct {
 		} `json:"range"`
 	} `json:"rangePartitioning"`
 	Schema tableSchema `json:"schema"`
+	// buffered is whether the table, partitioned by a column, has rows in
+	// its streaming buffer (#1273, streamingbuffer.go).
+	buffered bool
 }
 
 func (m partitionMeta) ingestion() bool {
@@ -121,6 +124,9 @@ func (f front) partitionMetaOf(r *http.Request, dataset, table string) (partitio
 	var m partitionMeta
 	if status != http.StatusOK || json.Unmarshal(got, &m) != nil {
 		return m, false
+	}
+	if win, ok := f.buffers.window(projectOf(f.base), dataset, table); ok && win.Column && !m.ingestion() {
+		m.buffered = true
 	}
 	return m, true
 }
@@ -390,6 +396,21 @@ func (f front) systemTime(r *http.Request, q queryOptions, dataset, ref string, 
 // table with m hold, or the status and message of why the decorator is
 // refused (above). name is the decorated table's name, for the message.
 func partitionFilter(m partitionMeta, dec, name string) (string, int, string) {
+	filter, code, msg := partitionRows(m, dec, name)
+	if code != 0 || !m.buffered {
+		return filter, code, msg
+	}
+	// A table partitioned by a column holds its streaming buffer's rows
+	// in __UNPARTITIONED__, or (by day, near today) in their partition
+	// (#1273, streamingbuffer.go).
+	if dec == "__UNPARTITIONED__" {
+		return "(" + filter + " OR IFNULL(" + bufferedRows + ", FALSE))", 0, ""
+	}
+	return "(" + filter + " AND NOT IFNULL(" + bufferedRows + ", FALSE))", 0, ""
+}
+
+// partitionRows is partitionFilter without the streaming buffer.
+func partitionRows(m partitionMeta, dec, name string) (string, int, string) {
 	typeOf := func(field string) string {
 		for _, fl := range m.Schema.Fields {
 			if strings.EqualFold(fl.Name, field) {
