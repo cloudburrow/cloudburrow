@@ -22,20 +22,20 @@ tracks it; a closed issue is named only where it says what was built.
 |---|---|---|---|---|---|
 | Cloud Storage | 5 | 0 | 4 | 1 | 0 |
 | Pub/Sub | 2 | 0 | 0 | 1 | 1 |
-| Cloud Tasks | 0 | 0 | 0 | 0 | 0 |
+| Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 3 | 2 | 0 | 0 | 1 |
-| Cloud Scheduler | 1 | 0 | 0 | 0 | 1 |
+| Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 1 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
-| Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 28 | 5 | 15 | 8 | 0 |
+| Vertex AI | 5 | 0 | 5 | 0 | 0 |
+| BigQuery | 27 | 6 | 13 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
-| Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **59** | **10** | **30** | **13** | **6** |
+| **Total** | **64** | **13** | **32** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -74,7 +74,7 @@ field (#1255), `stackdriver_logging_config`, with each sampled dispatch written 
 
 | Gap | Why open | Size |
 |---|---|---|
-| Delivery to an App Engine target (#1447) | excluded: tasks and `app_engine_routing_override` are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
+| Delivery to an App Engine target (#1447) | no emulator support (no App Engine): tasks and `app_engine_routing_override` are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
 
 ## Cloud Run
 
@@ -107,7 +107,7 @@ Closed by the sweep: Locations (#1237).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Delivery to an App Engine target (#1447) | excluded: jobs are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
+| Delivery to an App Engine target (#1447) | no emulator support (no App Engine): jobs are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
 | `ResumeJob` on an enabled job and the default `retry_config` are inferred from the Terraform provider (#1445) | needs live GCP | S |
 
 ## Cloud Logging
@@ -171,8 +171,8 @@ over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`
 | Gap | Why open | Size |
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1454) | no emulator support (one text-only model) | S |
-| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served (#1454) | needs Cloud Run's `h2c` port, which is not honoured, so no gRPC server in a custom container can be reached | M |
-| `Explain` with integrated gradients, XRAI or examples (#1454); Sampled Shapley is served | they need the model's gradients or an Example index, which a custom container's predict route does not expose | L |
+| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served (#1454, #1477) | no emulator support: a model's container is deployed with its HTTP ports only; its `grpcPorts` are not deployed (#1477) | M |
+| `Explain` with integrated gradients, XRAI or examples (#1454); Sampled Shapley is served | no emulator support: they need the model's gradients or an Example index, which a custom container's predict route does not expose | L |
 | `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served: Cloud Run serves an `h2c` port (#1475), but a model's `grpcPorts` are not deployed (#1454) | no emulator support (no gRPC model server) | M |
 | `Explain` (#1454) | no emulator support | L |
 
