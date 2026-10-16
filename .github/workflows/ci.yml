@@ -870,9 +870,12 @@ jobs:
           # #1198); the
           # other shards run neither.
           BROWSER_VARS=CONSOLE,CONTROL,ADMIN_TOKEN,CLUSTER
-          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi
+          if [ "$SHARD" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
           # The Logs Explorer reads entries written through the Logging API (#1410).
-          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING; fi
+          if [ "$SHARD" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER; fi
+          # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
+          # Cloud Logging and BigQuery's official clients.
+          if [ "$SHARD" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi
           BROWSER_ENV=$(scripts/compat-env.sh --strict --only "$BROWSER_VARS" --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
           eval "$BROWSER_ENV"
 

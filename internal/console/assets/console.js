@@ -104,6 +104,12 @@ const ROUTES = [
     product: "cloudsql", productTitle: "Cloud SQL" },
   { path: "/cloudsql-mysql", service: "cloudsql-mysql", title: "MySQL",      section: "Databases",
     product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
+  // Memorystore for Redis (#1302) and the Backup and DR Service (#1433) had
+  // providers, and console API pages, but no route: /memorystore and
+  // /backupdr were "No such screen", so nothing of either was reachable from
+  // the console (found by TestMemorystoreRotateServerCAThroughThePage).
+  { path: "/memorystore", service: "memorystore", title: "Memorystore", section: "Databases" },
+  { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", section: "Storage" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
   // drawn without one (#698). It is one product with two pages: datasets,
@@ -286,6 +292,8 @@ const ICONS = {
   bigtable:  '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 9.7h18M3 14.3h18M7.5 5v14M12 5v14M16.5 5v14"/>',
   // Spanner: a globe, for a database that spans regions.
   spanner:   '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z"/>',
+  // Memorystore: a memory module, for an in-memory store.
+  memorystore: '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 17v3M12 17v3M17 17v3M7 11h2M11 11h2M15 11h2"/>',
   // Cloud SQL: a database cylinder with a query line.
   cloudsql:  '<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M9 12h6M9 16h4"/>',
   monitoring:'<path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/>',
@@ -5143,17 +5151,22 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
     }
   };
 
-  if (!action.destructive) {
+  if (!action.destructive && !action.confirm) {
     try { await apply(); } catch { /* reported by notify */ }
     return;
   }
   // An action that says what it puts at stake — Lock retention policy,
   // which cannot be undone (#789) — says it, and its button is its own verb.
+  // One that changes state without deleting anything, and has no form to
+  // submit — Rotate server CA, Restart, Set as default — is confirmed the
+  // same way before it is sent, as its Confirm promises, without the
+  // closing "cannot be undone".
   await confirmDestructive({
     title: `${action.label} ${name}?`,
     detail: action.confirm || undefined,
     confirmWord: name,
     confirmLabel: action.confirm ? action.label : undefined,
+    consequence: action.destructive ? undefined : "",
     onConfirm: apply,
   });
 }
