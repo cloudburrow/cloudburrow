@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Tables made by a job rather than by tables.insert (#881): a load job, a
@@ -245,9 +246,29 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		refused := &emulatorRefusal{} // #1397, failedjobs.go
 		raw, _ := readBody(r)
 		f.next = qf.watch(refused.watch(f.next))
+		var limits struct {
+			JobReference struct {
+				Location string `json:"location"`
+			} `json:"jobReference"`
+			Configuration struct {
+				JobTimeoutMs json.RawMessage `json:"jobTimeoutMs"`
+				DryRun       bool            `json:"dryRun"`
+			} `json:"configuration"`
+		}
+		_ = json.Unmarshal(raw, &limits)
+		var timeout time.Duration
+		if !limits.Configuration.DryRun {
+			timeout = f.jobTimeout(limits.Configuration.JobTimeoutMs, limits.JobReference.Location) // #1456, jobtimeout.go
+		}
+		run, timedOut, cancel := withJobTimeout(r, timeout)
+		defer cancel()
 		rec := newRecorder()
-		if !f.partitionQueryWrite(rec, r, job) && !f.queryWrite(rec, r, job) { // #1273, partitionwrites.go // #1067, #1080, querywrite.go
-			f.runQuery(rec, r, c.Query.queryOptions, true) // #1008, #1014
+		if !f.partitionQueryWrite(rec, run, job) && !f.queryWrite(rec, run, job) { // #1273, partitionwrites.go // #1067, #1080, querywrite.go
+			f.runQuery(rec, run, c.Query.queryOptions, true) // #1008, #1014
+		}
+		if timedOut(rec.status) {
+			f.timedOutInsert(w, r, raw, job, project, created, timeoutError(timeout))
+			return
 		}
 		answer := newRecorder()
 		noRetry(answer, rec, qf)
@@ -356,10 +377,27 @@ func (f front) query(w http.ResponseWriter, r *http.Request) {
 	}
 	qf := &queryFailures{} // #1109, queryfailures.go
 	f.next = qf.watch(f.next)
+	var limits struct {
+		JobTimeoutMs json.RawMessage `json:"jobTimeoutMs"`
+		Location     string          `json:"location"`
+		DryRun       bool            `json:"dryRun"`
+	}
+	_ = json.Unmarshal(raw, &limits)
+	var timeout time.Duration
+	if !limits.DryRun {
+		timeout = f.jobTimeout(limits.JobTimeoutMs, limits.Location) // #1456, jobtimeout.go
+	}
+	run, timedOut, cancel := withJobTimeout(r, timeout)
+	defer cancel()
 	rec := newRecorder()
-	f.runQuery(rec, r, body, false) // #1008, #1014
+	f.runQuery(rec, run, body, false) // #1008, #1014
 	answer := newRecorder()
-	noRetry(answer, rec, qf)
+	if timedOut(rec.status) {
+		e := timeoutError(timeout)
+		writeError(answer, http.StatusBadRequest, e.Reason, e.Message)
+	} else {
+		noRetry(answer, rec, qf)
+	}
 	f.recordFailedQuery(r, raw, answer.status, answer.body.Bytes(), created) // #1397, failedjobs.go
 	f.records.timed(w, answer, created, projectOf(f.base), "", false)
 }

@@ -177,6 +177,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.withDefaultTimeZone(w, r, q, insert) { // #1417, timezone.go
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.withDefaultTableKey(w, r, q, insert) { // #1456, projectdefaults.go
+		return
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && r.Context().Value(optionsKey{}) == nil {
 		if st, ok := parseMVStatement(q.Query); ok { // #1390, materializedviews.go
 			f.serveMV(w, r, q, insert, st)
