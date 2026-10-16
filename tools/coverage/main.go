@@ -142,7 +142,7 @@ var areas = []area{
 	{Key: "scheduler", Title: "Cloud Scheduler", Own: true, Services: []string{"google.cloud.scheduler.v1.CloudScheduler", "google.cloud.location.Locations"}},
 	// MetricsServiceV2 and ConfigServiceV2 since #1226: metrics, and project
 	// sinks and exclusions, are served; buckets and views since #1264, the
-	// Async bucket calls, links and settings since #1292; CopyLogEntries is not.
+	// Async bucket calls, links and settings since #1292, and CopyLogEntries since #1394.
 	{Key: "logging", Title: "Cloud Logging", Own: true, Services: []string{"google.logging.v2.LoggingServiceV2", "google.logging.v2.MetricsServiceV2", "google.logging.v2.ConfigServiceV2"}},
 	// The local AI endpoint's PredictionService (#1193).
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService"}},

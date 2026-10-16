@@ -20,9 +20,9 @@ package logging
 // filter the store could not evaluate is INVALID_ARGUMENT naming the term,
 // rather than stored and silently never matching.
 //
-// Buckets and views are in buckets.go (#1264). Every other ConfigServiceV2
-// method (the Async bucket calls, links, settings, CMEK)
-// stays UNIMPLEMENTED, as does a sink or exclusion of an organization, folder
+// Buckets and views are in buckets.go (#1264), the Async bucket calls, links
+// and settings in links.go (#1292), and CopyLogEntries in copy.go (#1394).
+// CMEK stays UNIMPLEMENTED, as does a sink or exclusion of an organization, folder
 // or billing account.
 
 import (
@@ -79,6 +79,8 @@ type Admin struct {
 	db  store.Store
 	now func() time.Time
 	ops int // operations answered, for unique names (#1292)
+	// copies are the CopyLogEntries operations (copy.go, #1394).
+	copies copies
 }
 
 // NewAdmin returns the admin services over db.
@@ -89,6 +91,7 @@ func NewAdmin(db store.Store) *Admin { return &Admin{db: db, now: time.Now} }
 func (a *Admin) Register(g grpc.ServiceRegistrar) {
 	loggingpb.RegisterMetricsServiceV2Server(g, metricsServer{a})
 	loggingpb.RegisterConfigServiceV2Server(g, configServer{a: a})
+	a.registerOperations(g)
 }
 
 // kind is one stored collection.

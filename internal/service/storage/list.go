@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -55,18 +56,12 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	prefix, delim := q.Get("prefix"), q.Get("delimiter")
-	trailing := q.Get("includeTrailingDelimiter") == "true"
-	start, end := q.Get("startOffset"), q.Get("endOffset")
-	var glob *regexp.Regexp
-	if g := q.Get("matchGlob"); g != "" {
-		re, err := globRE(g)
-		if err != nil {
-			writeError(w, err)
-			return
-		}
-		glob = re
+	sel, err := parseNameSelector(q)
+	if err != nil {
+		writeError(w, err)
+		return
 	}
+	prefix := sel.Prefix
 
 	filter, err := parseContextFilter(q.Get("filter"))
 	if err != nil {
@@ -91,23 +86,12 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 			if tok.After != "" && !resume && (name <= tok.After || tok.Prefix && strings.HasPrefix(name, tok.After)) {
 				continue
 			}
-			if start != "" && name < start || end != "" && name >= end {
+			if !sel.inRange(name) {
 				continue
 			}
-			if glob != nil && !glob.MatchString(name) {
-				continue
-			}
-			// A delimiter after the prefix folds the name into a synthetic
-			// prefix; with includeTrailingDelimiter, an object whose name is
-			// exactly that prefix is listed too.
-			var p string
-			if delim != "" {
-				if i := strings.Index(name[len(prefix):], delim); i >= 0 {
-					p = name[:len(prefix)+i+len(delim)]
-				}
-			}
+			p := sel.fold(name)
 			emitPrefix := p != "" && !seen[p]
-			emitItem := p == "" || trailing && name == p
+			emitItem := sel.itemOf(name, p)
 			var vs []objectRecord
 			if emitItem {
 				var err error
@@ -188,6 +172,78 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 		resp["nextPageToken"] = next
 	}
 	writeResponse(w, r, http.StatusOK, resp)
+}
+
+// nameSelector is the part of an objects.list query that selects names:
+// prefix, startOffset and endOffset, matchGlob, and delimiter with
+// includeTrailingDelimiter. objects.watchAll takes the same parameters and
+// delivers the changes of the objects a listing with them would show
+// (#1393), so both read them through this.
+type nameSelector struct {
+	Prefix    string `json:"prefix,omitempty"`
+	Delimiter string `json:"delimiter,omitempty"`
+	Trailing  bool   `json:"includeTrailingDelimiter,omitempty"`
+	Start     string `json:"startOffset,omitempty"`
+	End       string `json:"endOffset,omitempty"`
+	Glob      string `json:"matchGlob,omitempty"`
+	glob      *regexp.Regexp
+}
+
+// parseNameSelector reads q's selecting parameters; a malformed matchGlob
+// is a 400.
+func parseNameSelector(q url.Values) (nameSelector, error) {
+	sel := nameSelector{Prefix: q.Get("prefix"), Delimiter: q.Get("delimiter"),
+		Trailing: q.Get("includeTrailingDelimiter") == "true",
+		Start:    q.Get("startOffset"), End: q.Get("endOffset"), Glob: q.Get("matchGlob")}
+	return sel, sel.compile()
+}
+
+func (sel *nameSelector) compile() error {
+	if sel.Glob == "" || sel.glob != nil {
+		return nil
+	}
+	re, err := globRE(sel.Glob)
+	if err != nil {
+		return err
+	}
+	sel.glob = re
+	return nil
+}
+
+// inRange reports whether name is past startOffset, before endOffset and
+// matches matchGlob. It does not look at the prefix.
+func (sel nameSelector) inRange(name string) bool {
+	if sel.Start != "" && name < sel.Start || sel.End != "" && name >= sel.End {
+		return false
+	}
+	return sel.glob == nil || sel.glob.MatchString(name)
+}
+
+// fold is the synthetic prefix a delimiter after the prefix folds name
+// into, or "" when it folds into none. name must have the prefix.
+func (sel nameSelector) fold(name string) string {
+	if sel.Delimiter == "" {
+		return ""
+	}
+	if i := strings.Index(name[len(sel.Prefix):], sel.Delimiter); i >= 0 {
+		return name[:len(sel.Prefix)+i+len(sel.Delimiter)]
+	}
+	return ""
+}
+
+// itemOf reports whether name, folded into p, is listed as an object: when
+// it folds into no prefix, or, with includeTrailingDelimiter, when its name
+// is exactly that prefix.
+func (sel nameSelector) itemOf(name, p string) bool {
+	return p == "" || sel.Trailing && name == p
+}
+
+// selects reports whether a listing with sel lists name as an object.
+func (sel nameSelector) selects(name string) bool {
+	if !strings.HasPrefix(name, sel.Prefix) || !sel.inRange(name) {
+		return false
+	}
+	return sel.itemOf(name, sel.fold(name))
 }
 
 // listMode is what a listing shows: live versions, every version

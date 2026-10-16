@@ -117,7 +117,8 @@ type Server struct {
 // UseAdmin makes the project exclusions admin stores apply to writes: an
 // entry an enabled exclusion matches is accepted and not stored, as Google's
 // _Default sink drops it.
-func (s *Server) UseAdmin(a *Admin) { s.admin = a }
+// It also gives CopyLogEntries (copy.go) the entries it copies.
+func (s *Server) UseAdmin(a *Admin) { s.admin = a; a.useEntries(s.store.snapshot) }
 
 // CountMatching counts project's stored entries that filter matches with a
 // timestamp at or after since, for a log-based metric's console page. The

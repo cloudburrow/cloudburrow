@@ -1,24 +1,30 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
@@ -50,6 +56,40 @@ type loggingService struct {
 	// in persistent mode; set by Start.
 	admin *logging.Admin
 	db    store.Store
+	// storage is the Cloud Storage tunnel CopyLogEntries writes through
+	// (#1394), or nil; without Cloud Storage on the instance, the copy says
+	// so.
+	storage func() *netfwd.Forwarder
+}
+
+// storageObjectWriter uploads an object to the instance's Cloud Storage
+// with the JSON API's media upload, as any client would.
+type storageObjectWriter struct {
+	src    storageSourceFetcher // for its base(): the tunnel, else the port
+	client *http.Client
+}
+
+func (w storageObjectWriter) WriteObject(ctx context.Context, bucket, name, contentType string, data []byte) error {
+	u := w.src.base() + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=media&name=" + url.QueryEscape(name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", contentType)
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	_, msg, _, _ := apierror.DecodeJSON(io.LimitReader(resp.Body, 1<<16))
+	if msg == "" {
+		msg = resp.Status
+	}
+	return fmt.Errorf("gs://%s/%s: %s", bucket, name, msg)
 }
 
 // Admin is the metrics, sinks and exclusions server, or nil before Start.
@@ -177,6 +217,18 @@ func (s *loggingService) Start(ctx context.Context) error {
 	s.db = db
 	s.admin = logging.NewAdmin(db)
 	s.api.UseAdmin(s.admin)
+	if serviceEnabled(s.cfg, config.ServiceStorage) {
+		src := storageSourceFetcher{cfg: s.cfg}
+		if s.storage != nil {
+			src.addr = func() string {
+				if f := s.storage(); f != nil {
+					return f.HostAddr()
+				}
+				return ""
+			}
+		}
+		s.admin.UseStorage(storageObjectWriter{src: src, client: &http.Client{Timeout: 2 * time.Minute}})
+	}
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Logging))
 	s.server = grpctransport.New(addr)
 	s.server.Observe(s.calls)

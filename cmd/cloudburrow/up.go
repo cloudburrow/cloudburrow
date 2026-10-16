@@ -215,6 +215,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	loggingSvc := newLoggingService(cfg)
 	loggingSvc.register(coord)
 	if loggingSvc != nil {
+		// CopyLogEntries writes to the instance's Cloud Storage (#1394).
+		loggingSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
 		// A queue's sampled dispatch attempts go to the instance's Cloud
 		// Logging through its own WriteLogEntries (#1256), so exclusions
 		// apply to them as to any write.
