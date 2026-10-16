@@ -362,6 +362,39 @@ ungated half (event triggers, #1414), and `TestFunctionsAPIBuildsAndServes`,
 deploys and `TestTerraformCloudFunctions2Function`'s apply, gated by `CLOUDBURROW_TEST_FUNCTIONS`
 and amd64 nodes, which have **not yet run**.
 
+## The Cloud Functions v1 API (#1428)
+
+1st-gen functions are served through `cloudfunctions.googleapis.com/v1` on the same Run port, over
+the same machinery: a v1 `CloudFunction` is stored as a v2 function whose `environment` is
+`GEN_1`, built with the same buildpacks build and served as the same Cloud Run service. So the v2
+API, `gcloud functions list` and the console see it as 1st gen, as Google shows it. What differs
+is the v1 shape: `sourceArchiveUrl` (`gs://bucket/object`) or `sourceUploadUrl` (from v1's
+`generateUploadUrl`), `httpsTrigger` (its `url` reported as Google names it,
+`https://{region}-{project}.cloudfunctions.net/{name}`; the function is reached at its Cloud Run
+service's URL), `eventTrigger` (`google.pubsub.topic.publish` on a topic, `google.storage.object.*`
+on a bucket, both delivered as #1414's event triggers are), 1st gen's defaults (256 MB, 60 s, the
+App Engine default service account) and v1's statuses (`DEPLOY_IN_PROGRESS`, `ACTIVE`, `OFFLINE`
+after a failed deploy, `DELETE_IN_PROGRESS`), with `operations/{id}` operations. `call` POSTs its
+`data` to an HTTP function through the ingress. `gcloud functions deploy --no-gen2` works through
+`gcloud-setup`'s `cloudfunctions` override, which already names the Run port; it reads v2
+`ListRuntimes` with `name=… AND environment=GEN_1`, which is served.
+
+Refused with `UNIMPLEMENTED` and the reason: source repositories, VPC networks and connectors,
+secrets, CMEK, build worker pools, `dockerRepository` and Container Registry, a build service
+account, the legacy `object.change` and non-Pub/Sub, non-Storage event sources, call of an event
+function (publish to its topic or write to its bucket instead), and past versions. A 1st-gen
+function is updated through v1 only, and a 2nd-gen one through v2. `TestFunctionsV1API` and
+the ungated halves of `TestGcloudFunctionsV1`, `TestConsoleFunctionsV1` and
+`TestTerraformCloudFunctionsFunction` run on any instance with `--services run,storage,pubsub`;
+`TestFunctionsV1BuildsAndServes` and those three tests' deploys from `testdata/function` are gated
+like the other Functions tests and have **not yet run**.
+
+The console's Create function offers the Environment as Google's does: 1st gen creates through
+the v1 API with an HTTP trigger, a Pub/Sub topic or a Cloud Storage event, the function's page
+shows the v1 `CloudFunction`, and Test function calls a 1st-gen HTTP function through `call`.
+Terraform's `google_cloudfunctions_function` reaches the same API through
+`cloud_functions_custom_endpoint`, which `cloudburrow terraform` sets.
+
 ## Google Buildpacks (#33)
 
 `pack` plus Google's builder turns source into a runnable image with no Dockerfile.
