@@ -1,0 +1,63 @@
+CloudBurrow patch 22 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1419).
+
+The bug: jobs.list listed each job with only its reference, kind,
+statistics, status and user, whatever the projection, where BigQuery's
+projection=full "Includes all job data" (the enum's description in the
+API's discovery document,
+https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/list). So
+CloudBurrow's front read each configuration it had not seen with a
+jobs.get: 16.6 s for the first list of 5,000 jobs made by jobs.query
+(measured through the front, 2026-10-16, arm64 kind node), which the
+first unfiltered INFORMATION_SCHEMA.JOBS query after them waited for.
+
+The patch lists each job with the configuration it keeps, the one
+jobs.get answers, when the request asks for projection=full.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1995,6 +1995,9 @@
+ 	res, err := h.Handle(ctx, &jobsListRequest{
+ 		server:  server,
+ 		project: project,
++		// CloudBurrow patch (cloudburrow/cloudburrow#1419): "full" lists
++		// each job with its configuration, as BigQuery does.
++		full: r.URL.Query().Get("projection") == "full",
+ 	})
+ 	if err != nil {
+ 		errorResponse(ctx, w, errJobInternalError(err.Error()))
+@@ -2006,6 +2009,7 @@
+ type jobsListRequest struct {
+ 	server  *Server
+ 	project *metadata.Project
++	full    bool
+ }
+ 
+ func (h *jobsListHandler) Handle(ctx context.Context, r *jobsListRequest) (*bigqueryv2.JobList, error) {
+@@ -2018,14 +2022,18 @@
+ 	}
+ 	for _, job := range all {
+ 		content := job.Content()
+-		jobs = append(jobs, &bigqueryv2.JobListJobs{
++		listed := &bigqueryv2.JobListJobs{
+ 			Id:           content.Id,
+ 			JobReference: content.JobReference,
+ 			Kind:         content.Kind,
+ 			Statistics:   content.Statistics,
+ 			Status:       content.Status,
+ 			UserEmail:    content.UserEmail,
+-		})
++		}
++		if r.full {
++			listed.Configuration = content.Configuration
++		}
++		jobs = append(jobs, listed)
+ 	}
+ 	return &bigqueryv2.JobList{Jobs: jobs}, nil
+ }

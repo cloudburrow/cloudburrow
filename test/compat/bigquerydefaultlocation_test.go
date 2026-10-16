@@ -14,9 +14,10 @@ import (
 // with none and of a job whose location cannot be determined, as BigQuery
 // documents (https://cloud.google.com/bigquery/docs/default-configuration);
 // `region-eu`.INFORMATION_SCHEMA.PROJECT_OPTIONS and
-// EFFECTIVE_PROJECT_OPTIONS show it; NULL clears it, back to US. Another
-// configuration, and ALTER ORGANIZATION, are refused 501. Before, an
-// instance served no default_location: the default was always US.
+// EFFECTIVE_PROJECT_OPTIONS show it; NULL clears it, back to US. One inside
+// a script's block is refused 501. Before, an instance served no
+// default_location: the default was always US. The other configurations,
+// ALTER ORGANIZATION and a script are TestBigQueryProjectConfigurations'.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.datasets.insert, bigquery.datasets.get
 func TestBigQueryProjectDefaultLocation(t *testing.T) {
@@ -73,9 +74,9 @@ func TestBigQueryProjectDefaultLocation(t *testing.T) {
 		t.Errorf("EFFECTIVE_PROJECT_OPTIONS: %v (%v)", rows, err)
 	}
 
+	// One inside a block of a script is refused; a top-level one is not (TestBigQueryProjectConfigurations).
 	for _, sql := range []string{
-		"ALTER PROJECT SET OPTIONS (`region-us.default_time_zone` = 'America/Chicago')",
-		"ALTER ORGANIZATION SET OPTIONS (`default_location` = 'EU')",
+		"IF TRUE THEN ALTER PROJECT SET OPTIONS (`default_location` = 'EU'); END IF",
 	} {
 		if err := run(sql); err == nil || !strings.Contains(err.Error(), "501") && !strings.Contains(err.Error(), "Not implemented") {
 			t.Errorf("%s: %v, want 501", sql, err)
@@ -101,7 +102,9 @@ func TestBigQueryProjectDefaultLocation(t *testing.T) {
 // region; SCHEMATA has ddl and sync_status; and SCHEMATA in a script gives
 // the location. Before (docs/gaps.md, #1371): region-us gave every
 // dataset's rows whatever its location, and in a script SCHEMATA was the
-// engine's, location NULL.
+// engine's, location NULL. And (#1417) ddl has DEFAULT COLLATE, and
+// SCHEMATA after a CREATE SCHEMA in the same script shows the new dataset;
+// before, it was read as the script started, and the dataset was missing.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
 func TestBigQueryRegionViewsListTheRegionsDatasets(t *testing.T) {
@@ -148,6 +151,28 @@ func TestBigQueryRegionViewsListTheRegionsDatasets(t *testing.T) {
 	want := "CREATE SCHEMA `" + project + "." + eu.DatasetID + "`\nOPTIONS(\n  description=\"in EU\",\n  location=\"eu\"\n);"
 	if err != nil || len(rows) != 1 || rows[0][0] != want || rows[0][1] != nil {
 		t.Errorf("SCHEMATA ddl: %q (%v), want %q", rows, err, want)
+	}
+
+	// #1417: DEFAULT COLLATE in ddl, and SCHEMATA in a script sees a dataset the script made.
+	coll := c.Dataset(base + "_coll")
+	if err := coll.Create(ctx, &bigquery.DatasetMetadata{Location: "US", DefaultCollation: "und:ci"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = coll.DeleteWithContents(ctx) })
+	_, rows, err = infoSchemaRead(ctx, c, "SELECT ddl FROM `region-us`.INFORMATION_SCHEMA.SCHEMATA WHERE schema_name = '"+coll.DatasetID+"'", false)
+	want = "CREATE SCHEMA `" + project + "." + coll.DatasetID + "`\nDEFAULT COLLATE 'und:ci'\nOPTIONS(\n  location=\"us\"\n);"
+	if err != nil || len(rows) != 1 || rows[0][0] != want {
+		t.Errorf("SCHEMATA ddl with a collation: %q (%v), want %q", rows, err, want)
+	}
+	made := c.Dataset(base + "_made")
+	t.Cleanup(func() { _ = made.DeleteWithContents(ctx) })
+	for _, insert := range []bool{false, true} {
+		sql := "CREATE SCHEMA IF NOT EXISTS " + made.DatasetID + " OPTIONS (location = 'US');\n" +
+			"SELECT schema_name, location FROM `region-us`.INFORMATION_SCHEMA.SCHEMATA WHERE schema_name = '" + made.DatasetID + "'"
+		_, rows, err := infoSchemaRead(ctx, c, sql, insert)
+		if err != nil || len(rows) != 1 || rows[0][0] != made.DatasetID || rows[0][1] != "US" {
+			t.Errorf("insert=%v SCHEMATA after CREATE SCHEMA in the script: %v (%v)", insert, rows, err)
+		}
 	}
 
 	script := "DECLARE n INT64 DEFAULT 1;\nSELECT schema_name, location FROM " + us.DatasetID + ".INFORMATION_SCHEMA.SCHEMATA"

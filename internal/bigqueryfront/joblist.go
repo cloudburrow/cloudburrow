@@ -28,6 +28,12 @@ import (
 // change. The most recent maxJobConfigs are kept; an older one is read
 // again. The client's text of a job the front changed is then put in it
 // (jobTexts).
+//
+// A list gives each job the configuration it read, not the one it then
+// finds kept: with 5,000 kept (the cap until #1419) and more jobs than
+// that, the reads of a list dropped others it had just read, which it
+// then listed with no configuration (measured at 5,006 jobs: 12 of them
+// changed from one list to the next), and each list read them again.
 // jobListReaders is how many jobs.get a job list sends the emulator at once.
 const jobListReaders = 8
 
@@ -37,7 +43,9 @@ type jobConfigs struct {
 	order []string
 }
 
-const maxJobConfigs = 5000
+// maxJobConfigs is how many configurations are kept; past it, a list
+// reads the oldest again with jobs.get (10 ms each, measured).
+var maxJobConfigs = 20000
 
 func (j *jobConfigs) add(project, id string, conf json.RawMessage) {
 	if id == "" || len(conf) == 0 || string(conf) == "null" {
@@ -140,6 +148,8 @@ func (j *jobConfigs) serveJobList(w http.ResponseWriter, r *http.Request, next h
 		}
 	}
 	var wg sync.WaitGroup
+	var readMu sync.Mutex
+	read := map[missing]json.RawMessage{}
 	sem := make(chan struct{}, jobListReaders)
 	for _, m := range toRead {
 		wg.Add(1)
@@ -153,6 +163,14 @@ func (j *jobConfigs) serveJobList(w http.ResponseWriter, r *http.Request, next h
 			jf.base = base[:strings.LastIndex(base, "/")+1] + url.PathEscape(m.project)
 			if status, got := jf.get(r, "/jobs/"+url.PathEscape(m.id)); status == http.StatusOK {
 				j.note(got, m.project)
+				var job struct {
+					Configuration json.RawMessage `json:"configuration"`
+				}
+				if json.Unmarshal(got, &job) == nil && len(job.Configuration) > 0 {
+					readMu.Lock()
+					read[m] = job.Configuration
+					readMu.Unlock()
+				}
 			}
 		}()
 	}
@@ -169,9 +187,11 @@ func (j *jobConfigs) serveJobList(w http.ResponseWriter, r *http.Request, next h
 		if project == "" {
 			project = projectOf(base)
 		}
-		conf, ok := j.get(project, id)
+		conf, ok := read[missing{project, id}]
 		if !ok {
-			continue
+			if conf, ok = j.get(project, id); !ok {
+				continue
+			}
 		}
 		var c any
 		if json.Unmarshal(conf, &c) == nil {

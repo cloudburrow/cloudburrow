@@ -247,8 +247,29 @@ func jobRow(project string, job map[string]any) []string {
 // message of why it cannot.
 func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, string) {
 	project := projectOf(f.base)
+	jobs, status, msg := f.allJobs(r, filter)
+	if status != 0 {
+		return "", status, msg
+	}
+	if filter == nil { // nothing pushed down: the table of rows (jobstable.go, #1378)
+		if sub := f.tableJobsRows(r, project, jobs, true); sub != "" {
+			return sub, 0, ""
+		}
+	}
+	jobs = filter.apply(project, jobs)
+	rows := make([][]string, len(jobs))
+	for i, job := range jobs {
+		rows[i] = jobRow(project, job)
+	}
+	return rowsSubquery(jobsColumns, rows), 0, ""
+}
+
+// allJobs lists the project's jobs, top-level and children, within the
+// bounds of creation_time filter gives, or the status and message of why
+// it cannot.
+func (f front) allJobs(r *http.Request, filter *jobsFilter) ([]map[string]any, int, string) {
 	if f.listJobs == nil {
-		return "", http.StatusInternalServerError, "cloudburrow: the job list cannot be read here"
+		return nil, http.StatusInternalServerError, "cloudburrow: the job list cannot be read here"
 	}
 	var jobs []map[string]any
 	token := ""
@@ -280,7 +301,7 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 			NextPageToken string           `json:"nextPageToken"`
 		}
 		if rec.status != 0 && rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &list) != nil {
-			return "", http.StatusInternalServerError, "cloudburrow: could not list the jobs: " + errorMessage(rec.body.Bytes(), rec.status)
+			return nil, http.StatusInternalServerError, "cloudburrow: could not list the jobs: " + errorMessage(rec.body.Bytes(), rec.status)
 		}
 		jobs = append(jobs, list.Jobs...)
 		if list.NextPageToken == "" || list.NextPageToken == token {
@@ -288,17 +309,7 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 		}
 		token = list.NextPageToken
 	}
-	if filter == nil { // nothing pushed down: the table of rows (jobstable.go, #1378)
-		if sub := f.tableJobsRows(r, project, jobs); sub != "" {
-			return sub, 0, ""
-		}
-	}
-	jobs = filter.apply(project, jobs)
-	rows := make([][]string, len(jobs))
-	for i, job := range jobs {
-		rows[i] = jobRow(project, job)
-	}
-	return rowsSubquery(jobsColumns, rows), 0, ""
+	return jobs, 0, ""
 }
 
 // withInformationSchemaJobs answers q, whose text reads refs, by writing
@@ -335,7 +346,7 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 			case key == "JOBS":
 				sub, status, msg = f.jobsRows(r, pushedJobsFilter(q.Query, refs, time.Now()))
 			case projectViews[key] != nil: // #1375, projectoptions.go
-				sub = projectViews[key](f)
+				sub = projectViews[key](f, location)
 			case hierarchyJobsViews[key]: // #1392, infoschemahierarchy.go
 				sub, status, msg = f.hierarchyJobsRows(r, key, pushedJobsFilter(q.Query, refs, time.Now()))
 			case key == "TABLE_STORAGE":
