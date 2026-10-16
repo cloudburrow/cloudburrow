@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	"google.golang.org/api/iterator"
@@ -404,6 +405,9 @@ func TestConsoleBigQueryReadWriteEditorRunsDML(t *testing.T) {
 	addr := consoleAddr(t, h)
 	ctx := h.Context()
 	ds, orders := seedOrders(t, h, c)
+	// seedOrders streams its rows, and DML refuses rows streamed in the
+	// last 30 minutes, as BigQuery does (#1370).
+	advanceBigQueryClock(t, h, 31*time.Minute)
 	q := "?project=" + url.QueryEscape(project)
 
 	var page struct {

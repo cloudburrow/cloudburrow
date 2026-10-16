@@ -290,11 +290,32 @@ func TestConsoleBigQueryLoadExportAndJobHistory(t *testing.T) {
 			t.Errorf("the export's rows are %q", body)
 		}
 	}
-	code, out = consoleAct(t, addr, "bigquery", project, []string{ds.DatasetID, "people"}, "export", map[string]string{
-		"uri": "gs://" + bucketName + "/out/people.json", "format": "NEWLINE_DELIMITED_JSON", "compression": "NONE",
-		"fieldDelimiter": ",", "header": "true"})
-	if msg := consoleError(t, out); code != http.StatusBadRequest || !strings.Contains(msg, "Not implemented here") || !strings.Contains(msg, "NULL") {
-		t.Errorf("a JSON export of a NULL = %d %q, want the API's 501 in its words", code, msg)
+	// A JSON export leaves a NULL out of its row, as BigQuery does (#957).
+	_, jfields, _ := consoleJobResult(t, addr, project, []string{ds.DatasetID, "people"}, "export", map[string]string{
+		"uri": "gs://" + bucketName + "/out/people.json", "format": "NEWLINE_DELIMITED_JSON", "compression": "NONE"})
+	if jfields["State"] != "Succeeded" {
+		t.Errorf("the JSON export answered %v", jfields)
+	}
+	if jr, err := bucket.Object("out/people.json").NewReader(ctx); err != nil {
+		t.Errorf("the JSON export's object: %v", err)
+	} else {
+		jb, _ := io.ReadAll(jr)
+		_ = jr.Close()
+		var nulls, rows int
+		for _, line := range strings.Split(strings.TrimSpace(string(jb)), "\n") {
+			var row map[string]any
+			if err := json.Unmarshal([]byte(line), &row); err != nil {
+				t.Errorf("the JSON export's line %q: %v", line, err)
+				continue
+			}
+			rows++
+			if _, ok := row["name"]; !ok {
+				nulls++
+			}
+		}
+		if rows != 3 || nulls != 1 {
+			t.Errorf("the JSON export wrote %d rows, %d without a name; want 3 and the NULL left out of one: %q", rows, nulls, jb)
+		}
 	}
 
 	// Job history: both jobs, newest first.

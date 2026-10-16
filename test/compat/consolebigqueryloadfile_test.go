@@ -203,6 +203,9 @@ func TestConsoleBigQueryJobPageShowsDMLRows(t *testing.T) {
 	addr := consoleAddr(t, h)
 	ctx := h.Context()
 	ds, _ := seedOrders(t, h, c)
+	// seedOrders streams its rows, and DML refuses rows streamed in the
+	// last 30 minutes, as BigQuery does (#1370).
+	advanceBigQueryClock(t, h, 31*time.Minute)
 	run := func(sql string) (string, *bigquery.QueryStatistics) {
 		t.Helper()
 		q := c.Query(sql)
@@ -212,8 +215,11 @@ func TestConsoleBigQueryJobPageShowsDMLRows(t *testing.T) {
 			t.Fatalf("%s: %v", sql, err)
 		}
 		st, err := job.Wait(ctx)
-		if err != nil || st.Err() != nil {
-			t.Fatalf("%s: %v %v", sql, err, st.Err())
+		if err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		if st.Err() != nil {
+			t.Fatalf("%s: %v", sql, st.Err())
 		}
 		qs, _ := st.Statistics.Details.(*bigquery.QueryStatistics)
 		if qs == nil {

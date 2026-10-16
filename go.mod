@@ -15,6 +15,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.10.0
 	cloud.google.com/go/datastore v1.27.0
 	cloud.google.com/go/firestore v1.26.0
+	cloud.google.com/go/functions v1.26.0
 	cloud.google.com/go/iam v1.14.0
 	cloud.google.com/go/kms v1.35.0
 	cloud.google.com/go/logging v1.20.0
@@ -64,7 +65,6 @@ require (
 )
 
 require (
-	cloud.google.com/go/functions v1.26.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 )
