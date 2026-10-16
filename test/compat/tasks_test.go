@@ -206,26 +206,6 @@ func TestTasksTaskInMissingQueue(t *testing.T) {
 	}
 }
 
-// Unsupported operations must say so through the SDK, not return a plausible
-// empty success.
-func TestTasksUnsupportedOperationsAreHonest(t *testing.T) {
-	h := New(t)
-	c := tasksClient(t, h)
-	ctx := h.Context()
-	q := queue(t, h, c, "honest-queue")
-
-	// App Engine targets are out of scope and must be reported as such.
-	_, err := c.CreateTask(ctx, &taskspb.CreateTaskRequest{
-		Parent: q,
-		Task: &taskspb.Task{MessageType: &taskspb.Task_AppEngineHttpRequest{
-			AppEngineHttpRequest: &taskspb.AppEngineHttpRequest{RelativeUri: "/work"},
-		}},
-	})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("App Engine target = %v, want Unimplemented", status.Code(err))
-	}
-}
-
 // TestTasksRefusesWhatItWouldDrop: through the official client, a GET with a body is
 // INVALID_ARGUMENT, dispatch_deadline and max_retry_duration read back as
 // set, and a ListQueues regular expression is UNIMPLEMENTED (#578).

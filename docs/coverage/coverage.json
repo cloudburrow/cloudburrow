@@ -24,6 +24,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/CreateQueue",
         "status": "Verified",
         "tests": [
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
@@ -35,6 +36,8 @@
         "method": "google.cloud.tasks.v2.CloudTasks/CreateTask",
         "status": "Verified",
         "tests": [
+          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
@@ -44,6 +47,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/DeleteQueue",
         "status": "Verified",
         "tests": [
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
         ]
@@ -76,6 +80,8 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetQueue",
         "status": "Verified",
         "tests": [
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
@@ -87,6 +93,8 @@
         "method": "google.cloud.tasks.v2.CloudTasks/GetTask",
         "status": "Verified",
         "tests": [
+          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
@@ -97,8 +105,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
-          "test/compat/tasks_test.go:278 TestTasksListQueuesFiltersOnQueueFields",
-          "test/compat/tasks_test.go:334 TestTasksListQueuesFiltersByState",
+          "test/compat/tasks_test.go:258 TestTasksListQueuesFiltersOnQueueFields",
+          "test/compat/tasks_test.go:314 TestTasksListQueuesFiltersByState",
           "test/compat/tasks_test.go:92 TestTasksListQueues"
         ]
       },
@@ -121,7 +129,7 @@
         "method": "google.cloud.tasks.v2.CloudTasks/PurgeQueue",
         "status": "Verified",
         "tests": [
-          "test/compat/tasks_test.go:369 TestTasksPurgeQueue"
+          "test/compat/tasks_test.go:349 TestTasksPurgeQueue"
         ]
       },
       {
@@ -167,6 +175,8 @@
         "method": "google.cloud.tasks.v2.CloudTasks/UpdateQueue",
         "status": "Verified",
         "tests": [
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
@@ -3381,8 +3391,11 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/CreateJob",
         "status": "Verified",
         "tests": [
+          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
+          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens",
           "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
@@ -3392,8 +3405,10 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/DeleteJob",
         "status": "Verified",
         "tests": [
+          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
@@ -3402,8 +3417,11 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/GetJob",
         "status": "Verified",
         "tests": [
+          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
+          "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens",
           "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
@@ -3414,7 +3432,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs"
+          "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs"
         ]
       },
       {
@@ -3422,7 +3440,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -3431,7 +3449,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
         ]
       },
@@ -3439,8 +3457,9 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/RunJob",
         "status": "Verified",
         "tests": [
+          "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
-          "test/compat/scheduler_test.go:45 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens"
         ]
       },
@@ -3448,6 +3467,7 @@
         "method": "google.cloud.scheduler.v1.CloudScheduler/UpdateJob",
         "status": "Verified",
         "tests": [
+          "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"

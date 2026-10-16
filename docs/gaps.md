@@ -76,7 +76,7 @@ field (#1255), `stackdriver_logging_config`, with each sampled dispatch written 
 
 | Gap | Why open | Size |
 |---|---|---|
-| App Engine targets and `app_engine_routing_override` (#1447) | no emulator support (no App Engine) | L |
+| Delivery to an App Engine target (#1447) | excluded: tasks and `app_engine_routing_override` are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
 
 ## Cloud Run
 
@@ -111,7 +111,7 @@ Closed by the sweep: Locations (#1237).
 
 | Gap | Why open | Size |
 |---|---|---|
-| App Engine targets (#1447) | no emulator support (no App Engine) | L |
+| Delivery to an App Engine target (#1447) | excluded: jobs are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
 | `ResumeJob` on an enabled job and the default `retry_config` are inferred from the Terraform provider (#1445) | needs live GCP | S |
 
 ## Cloud Logging
