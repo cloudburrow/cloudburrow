@@ -65,6 +65,9 @@ type ddlOptions struct {
 	// options of a materialized view (materializedviews.go).
 	more []moreOption
 	mv   *mvOptions
+	// connection is the statement's WITH CONNECTION, a table for Apache
+	// Iceberg's (#1427, iceberg.go), or "".
+	connection string
 	// invalid is why BigQuery refuses an option's value (400), or "".
 	invalid string
 	// unsupported names the first option the front does not set.
@@ -184,6 +187,27 @@ func parseDDLOptionsOf(sql string, mv bool) (d ddlOptions, msg string, ok bool) 
 			j++
 			continue
 		}
+		if !d.alter && !d.view && j+2 < end && t[j].is("WITH") && t[j+1].is("CONNECTION") { // #1427, iceberg.go
+			k := j + 3
+			if t[j+2].is("DEFAULT") {
+				d.connection = "DEFAULT"
+			} else {
+				var p []string
+				p, k = path(t, j+2)
+				d.connection = strings.Join(p, ".")
+			}
+			if d.connection == "" || k > end {
+				d.invalid = "WITH CONNECTION takes a connection's name or DEFAULT"
+				break
+			}
+			cut := sql[t[j].pos:t[k-1].end]
+			if d.sent == "" {
+				d.sent = sql
+			}
+			d.sent = strings.Replace(d.sent, cut, "", 1)
+			j = k - 1
+			continue
+		}
 		if t[j].is("OPTIONS") && j+1 < end && t[j+1].punct("(") {
 			opt = j
 			break
@@ -225,6 +249,9 @@ func parseDDLOptionsOf(sql string, mv bool) (d ddlOptions, msg string, ok bool) 
 		return d, "", false
 	}
 	msg = d.readOptions(sql, t[opt+2:skipTo(t, opt+2, ")")])
+	if msg == "" && d.invalid == "" {
+		d.invalid = d.checkIceberg() // #1427, iceberg.go
+	}
 	return d, msg, true
 }
 
@@ -347,7 +374,7 @@ func (d *ddlOptions) readOptions(sql string, t []token) string {
 		also := ""
 		if !d.view {
 			also = ", partition_expiration_days, kms_key_name (stored), max_staleness, default_rounding_mode, tags, " +
-				"require_partition_filter, enable_change_history, storage_uri and privacy_policy"
+				"require_partition_filter, enable_change_history, storage_uri, file_format, table_format and privacy_policy"
 		}
 		return fmt.Sprintf("the %s option %s. CloudBurrow sets a %s's description, friendly_name, labels, "+
 			"expiration_timestamp%s from OPTIONS; the emulator behind it does not carry out what %s does", kind,
@@ -579,6 +606,9 @@ func (f front) setTableOptions(r *http.Request, dataset, table string, d ddlOpti
 	case d.clearKMS:
 		delete(meta, "encryptionConfiguration")
 	}
+	if d.connection != "" { // #1427, iceberg.go
+		moreOption{key: "biglakeConfiguration", value: map[string]any{"connectionId": d.connection}}.put(meta)
+	}
 	for _, o := range d.more { // #1390, tableoptions.go
 		o.put(meta)
 		if o.name == "require_partition_filter" && o.value == true {
@@ -604,6 +634,9 @@ func (f front) setTableOptions(r *http.Request, dataset, table string, d ddlOpti
 		if o.setting {
 			f.tables.set(streamKey(projectOf(f.base), dataset, table), created.CreationTime, o)
 		}
+	}
+	if uri, ok, _ := icebergConfig(meta["biglakeConfiguration"]); ok && f.icebergs != nil { // #1427
+		f.icebergs.add(f, dataset, table, uri, created.CreationTime)
 	}
 	return ""
 }

@@ -183,6 +183,12 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.icebergs != nil {
+		if p, ok := exportMetadataStatement(q.Query); ok { // #1427, iceberg.go
+			f.serveExportMetadata(w, r, q, insert, p)
+			return
+		}
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.checkReads(w, r, q, insert) { // #1390, tableoptions.go
 		return
 	}

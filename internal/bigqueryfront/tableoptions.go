@@ -65,7 +65,8 @@ type moreOption struct {
 
 // moreOptionNames are the options readMoreOption reads.
 var moreOptionNames = map[string]bool{"max_staleness": true, "default_rounding_mode": true, "tags": true,
-	"require_partition_filter": true, "enable_change_history": true, "storage_uri": true, "privacy_policy": true}
+	"require_partition_filter": true, "enable_change_history": true, "storage_uri": true, "privacy_policy": true,
+	"file_format": true, "table_format": true} // #1427, iceberg.go
 
 // readMoreOption reads name = val, one of moreOptionNames, of the statement
 // text sql. msg is why it cannot be read, a 400's.
@@ -133,6 +134,14 @@ func readMoreOption(name string, val []token, sql string) (o moreOption, msg str
 		if v != nil {
 			o.value = map[string]any{"storageUri": v}
 		}
+	case "file_format", "table_format": // #1427, iceberg.go
+		o.key = "biglakeConfiguration"
+		v, ok := str()
+		if !ok || v == nil {
+			return o, "the option " + name + " must be a STRING literal"
+		}
+		k := map[string]string{"file_format": "fileFormat", "table_format": "tableFormat"}[name]
+		o.value = map[string]any{k: strings.ToUpper(v.(string))}
 	case "enable_change_history":
 		o.setting = true
 		v, ok := boolean()
@@ -165,6 +174,19 @@ func (o moreOption) put(meta map[string]json.RawMessage) {
 	}
 	if o.value == nil {
 		delete(meta, o.key)
+		return
+	}
+	if part, ok := o.value.(map[string]any); ok && o.key == "biglakeConfiguration" { // #1427: merged
+		var cur map[string]any
+		_ = json.Unmarshal(meta[o.key], &cur)
+		if cur == nil {
+			cur = map[string]any{}
+		}
+		for k, v := range part {
+			cur[k] = v
+		}
+		b, _ := json.Marshal(cur)
+		meta[o.key] = b
 		return
 	}
 	b, _ := json.Marshal(o.value)
