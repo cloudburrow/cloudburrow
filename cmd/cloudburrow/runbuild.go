@@ -186,6 +186,13 @@ func (b *localImageBuilder) docker(ctx context.Context, spec runadapter.BuildSpe
 	}
 	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, "docker", append(args, context)...)
+	if len(spec.Secrets) > 0 {
+		// --build-arg NAME takes its value from docker's environment.
+		cmd.Env = os.Environ()
+		for k, v := range spec.Secrets {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+	}
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if spec.Log != nil {
 		cmd.Stdout = io.MultiWriter(&out, spec.Log)
@@ -242,6 +249,7 @@ func (b *localImageBuilder) pack(ctx context.Context, spec runadapter.BuildSpec,
 	err = (&buildpacks.Builder{}).Build(ctx, buildpacks.Request{
 		Source: filepath.Join(dir, spec.Context), Image: name + ":5000/" + repo, Registry: name + ":5000", Network: network,
 		Insecure: true, FunctionTarget: spec.FunctionTarget, Env: spec.Env,
+		SecretEnv: spec.Secrets,
 	})
 	if err != nil {
 		return err

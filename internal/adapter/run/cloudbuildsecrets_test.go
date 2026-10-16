@@ -162,14 +162,6 @@ func TestCreateBuildSecretsScriptAndAllowFailure(t *testing.T) {
 			t.Errorf("%s: %v; want INVALID_ARGUMENT", name, err)
 		}
 	}
-	// A docker build step the local builder runs cannot take secretEnv.
-	_, err = cb.CreateBuild(fromLoopback(), &cbpb.CreateBuildRequest{ProjectId: "proj-1", Build: &cbpb.Build{
-		Source: cbSource(), AvailableSecrets: &cbpb.Secrets{SecretManager: []*cbpb.SecretManagerSecret{
-			{VersionName: "projects/p/secrets/a/versions/1", Env: "T"}}},
-		Steps: []*cbpb.BuildStep{{Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", "x", "."}, SecretEnv: []string{"T"}}}}})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("secretEnv on a docker build step = %v; want UNIMPLEMENTED", err)
-	}
 }
 
 // failingLogs is a fetcher whose log writes fail.
