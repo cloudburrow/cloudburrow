@@ -114,7 +114,7 @@ func (s *Server) GetPublicKey(_ context.Context, req *kmspb.GetPublicKeyRequest)
 		PemCrc32C:       crc([]byte(p)),
 		Algorithm:       v.algorithm(),
 		Name:            v.Name,
-		ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
+		ProtectionLevel: v.protectionLevel(),
 	}
 	switch f := req.GetPublicKeyFormat(); f {
 	case kmspb.PublicKey_PUBLIC_KEY_FORMAT_UNSPECIFIED:
@@ -220,7 +220,7 @@ func (s *Server) AsymmetricSign(_ context.Context, req *kmspb.AsymmetricSignRequ
 		VerifiedDigestCrc32C: digestOK,
 		VerifiedDataCrc32C:   dataOK,
 		Name:                 v.Name,
-		ProtectionLevel:      kmspb.ProtectionLevel_SOFTWARE,
+		ProtectionLevel:      v.protectionLevel(),
 	}, nil
 }
 
@@ -256,7 +256,7 @@ func (s *Server) AsymmetricDecrypt(_ context.Context, req *kmspb.AsymmetricDecry
 		Plaintext:                pt,
 		PlaintextCrc32C:          crc(pt),
 		VerifiedCiphertextCrc32C: ctOK,
-		ProtectionLevel:          kmspb.ProtectionLevel_SOFTWARE,
+		ProtectionLevel:          v.protectionLevel(),
 	}, nil
 }
 
@@ -282,7 +282,7 @@ func (s *Server) MacSign(_ context.Context, req *kmspb.MacSignRequest) (*kmspb.M
 	}
 	m := v.mac(data)
 	return &kmspb.MacSignResponse{Name: v.Name, Mac: m, MacCrc32C: crc(m), VerifiedDataCrc32C: dataOK,
-		ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}, nil
+		ProtectionLevel: v.protectionLevel()}, nil
 }
 
 // MacVerify checks a MAC in constant time. A MAC that does not match is a
@@ -307,7 +307,7 @@ func (s *Server) MacVerify(_ context.Context, req *kmspb.MacVerifyRequest) (*kms
 	}
 	ok := hmac.Equal(v.mac(data), mac)
 	return &kmspb.MacVerifyResponse{Name: v.Name, Success: ok, VerifiedDataCrc32C: dataOK, VerifiedMacCrc32C: macOK,
-		VerifiedSuccessIntegrity: ok, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}, nil
+		VerifiedSuccessIntegrity: ok, ProtectionLevel: v.protectionLevel()}, nil
 }
 
 // Raw AES parameters (the raw-encryption page): GCM takes a 12-byte IV the
@@ -401,7 +401,7 @@ func (s *Server) RawEncrypt(_ context.Context, req *kmspb.RawEncryptRequest) (*k
 		VerifiedAdditionalAuthenticatedDataCrc32C: aadOK,
 		VerifiedInitializationVectorCrc32C:        ivOK,
 		Name:                                      v.Name,
-		ProtectionLevel:                           kmspb.ProtectionLevel_SOFTWARE,
+		ProtectionLevel:                           v.protectionLevel(),
 	}, nil
 }
 
@@ -474,7 +474,7 @@ func (s *Server) RawDecrypt(_ context.Context, req *kmspb.RawDecryptRequest) (*k
 	return &kmspb.RawDecryptResponse{
 		Plaintext:                pt,
 		PlaintextCrc32C:          crc(pt),
-		ProtectionLevel:          kmspb.ProtectionLevel_SOFTWARE,
+		ProtectionLevel:          v.protectionLevel(),
 		VerifiedCiphertextCrc32C: ctOK,
 		VerifiedAdditionalAuthenticatedDataCrc32C: aadOK,
 		VerifiedInitializationVectorCrc32C:        ivOK,
@@ -542,7 +542,7 @@ func (v keyVersion) kemPublicKey(f kmspb.PublicKey_PublicKeyFormat) (*kmspb.Publ
 	case *mlkem.DecapsulationKey1024:
 		ek = k.EncapsulationKey().Bytes()
 	}
-	return &kmspb.PublicKey{Algorithm: v.algorithm(), Name: v.Name, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
+	return &kmspb.PublicKey{Algorithm: v.algorithm(), Name: v.Name, ProtectionLevel: v.protectionLevel(),
 		PublicKeyFormat: f, PublicKey: &kmspb.ChecksummedData{Data: ek, Crc32CChecksum: crc(ek)}}, nil
 }
 
@@ -573,5 +573,5 @@ func (s *Server) Decapsulate(_ context.Context, req *kmspb.DecapsulateRequest) (
 	}
 	sum := crc32c(secret)
 	return &kmspb.DecapsulateResponse{Name: v.Name, SharedSecret: secret, SharedSecretCrc32C: &sum,
-		VerifiedCiphertextCrc32C: ctOK, ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE}, nil
+		VerifiedCiphertextCrc32C: ctOK, ProtectionLevel: v.protectionLevel()}, nil
 }

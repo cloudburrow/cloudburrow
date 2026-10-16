@@ -52,8 +52,8 @@ func TestLocations(t *testing.T) {
 		t.Errorf("GetLocation(global) = %v, %v", loc, err)
 	}
 	var md kmspb.LocationMetadata
-	if loc, _ := l.GetLocation(ctx, &locationpb.GetLocationRequest{Name: "projects/demo-project/locations/global"}); loc.GetMetadata().UnmarshalTo(&md) != nil || md.GetHsmAvailable() || md.GetEkmAvailable() {
-		t.Errorf("metadata = %v; want a LocationMetadata with no HSM and no EKM", loc.GetMetadata())
+	if loc, _ := l.GetLocation(ctx, &locationpb.GetLocationRequest{Name: "projects/demo-project/locations/global"}); loc.GetMetadata().UnmarshalTo(&md) != nil || !md.GetHsmAvailable() || md.GetEkmAvailable() {
+		t.Errorf("metadata = %v; want a LocationMetadata with HSM and no EKM", loc.GetMetadata())
 	}
 	for name, want := range map[string]codes.Code{
 		"projects/demo-project/locations/unit-lab":  codes.OK,

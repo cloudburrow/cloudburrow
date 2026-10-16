@@ -296,6 +296,17 @@ var parityRows = []parityRow{
 		Provider: "kms", Offers: "Edit key on a key's page: labels (#794), rotation period and next rotation time (#816)",
 		Tests: []string{"TestConsoleKMSEditKey", "TestKMSEditKeyThroughUpdateCryptoKey", "TestKMSEditKeyRotationThroughUpdateCryptoKey",
 			"TestKMSEditKeyLabelsThroughTheForm", "TestKMSEditKeyRotationThroughTheForm"}},
+	{Resource: "Cloud KMS EKM connections", Service: "kms",
+		Methods:  []string{"EkmService/CreateEkmConnection", "EkmService/GetEkmConnection", "EkmService/ListEkmConnections", "EkmService/UpdateEkmConnection", "EkmService/GetEkmConfig", "EkmService/UpdateEkmConfig"},
+		Provider: "kms-ekm", Offers: "EKM connections page (/kms/ekm): a project's connections in every location; Create EKM connection (location, Service Directory service, hostname, server certificate as PEM, key management mode, crypto space path); a connection's page with its service resolver, parsed certificate and whether it is its location's default; Edit (key management mode, crypto space path) and Set as default (the location's EkmConfig), with the note that nothing dials the EKM (#1452)",
+		Tests: []string{"TestConsoleKMSEkmConnections"}},
+	{Resource: "Cloud KMS Autokey", Service: "kms",
+		Methods:  []string{"AutokeyAdmin/GetAutokeyConfig", "AutokeyAdmin/UpdateAutokeyConfig", "AutokeyAdmin/ShowEffectiveAutokeyConfig", "Autokey/CreateKeyHandle", "Autokey/ListKeyHandles"},
+		Provider: "kms-autokey", Offers: "Autokey page (/kms/autokey): the effective key project, and the Autokey configurations the project resolves through, its own then its folders'; Edit configuration (resolution mode, key project) on each; the project's page lists its key handles; Create key handle (location, resource type, name), which makes an HSM key in the key project (#1452)",
+		Tests: []string{"TestConsoleKMSAutokey"}},
+	{Resource: "Cloud KMS key handle read", Service: "kms",
+		Methods:  []string{"Autokey/GetKeyHandle"},
+		Excluded: "a read of one key handle; the project's Autokey page lists every key handle with its key and resource type"},
 
 	// Resource Manager
 	{Resource: "Resource Manager projects", Service: "resourcemanager",

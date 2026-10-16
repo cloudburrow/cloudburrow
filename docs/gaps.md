@@ -26,7 +26,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Run | 6 | 2 | 3 | 0 | 1 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
-| Cloud KMS | 6 | 0 | 3 | 2 | 1 |
+| Cloud KMS | 12 | 0 | 6 | 4 | 2 |
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
@@ -35,7 +35,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **107** | **28** | **52** | **22** | **5** |
+| **Total** | **113** | **28** | **55** | **24** | **6** |
 
 ## Cloud Storage
 
@@ -141,6 +141,12 @@ methods (#1212), and their console (#1219). Closed by the sweep: Locations (#129
 | REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` (#1445) | not documented by Google | S |
 | UNVERIFIED error codes ([kms.md](coverage/kms.md)) (#1445) | not documented by Google | S |
 | Project-number parents are refused; whether Google accepts them, and whether an empty key ring can be deleted (#1445) | needs live GCP | S |
+| EXTERNAL, EXTERNAL_VPC and HSM_SINGLE_TENANT protection levels, `crypto_key_backend`, `external_protection_level_options` (#1469; HSM is served since #1452, without an HSM or an attestation) | no emulator support | L |
+| HsmManagement, `EkmService/VerifyConnectivity`, and IAM on `ekmConfig` and `ekmConnections` (#1469; EkmService CRUD, Autokey and AutokeyAdmin are served since #1452) | no emulator support | L |
+| `key_access_justifications_policy` is stored and returned, not enforced (#1452): no call carries an access justification locally | no emulator support | S |
+| REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` | not documented by Google | S |
+| 72 UNVERIFIED error codes ([kms.md](coverage/kms.md)) | not documented by Google | S |
+| Project-number parents are refused; whether Google accepts them, and whether an empty key ring can be deleted | needs live GCP | S |
 
 ## Secret Manager
 

@@ -444,6 +444,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	coord.Register(rmSrv)
 	// Its folders and organization are Logging parents (#1395).
 	loggingSvc.useHierarchy(projects)
+	// And Autokey resolves folder configs through them (#1452).
+	kmsSvc.useHierarchy(projects)
 
 	// The Service Usage API (#1352), which APIs each project has enabled,
 	// kept in the registry's store so it persists as the projects do.
