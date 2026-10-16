@@ -1,6 +1,7 @@
 package run
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"regexp"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
+	runpb "cloud.google.com/go/run/apiv2/runpb"
 	runv1 "google.golang.org/api/run/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -44,9 +46,16 @@ var Regions = []string{
 	"us-west1", "us-west2", "us-west3", "us-west4",
 }
 
-// v1IAMRE is a v1 IAM call on a service: the project, location, service ID
-// and method.
-var v1IAMRE = regexp.MustCompile(`^/v1/projects/([^/]+)/locations/([^/]+)/services/([^/:]+):(getIamPolicy|setIamPolicy|testIamPermissions)$`)
+// v1IAMRE is a v1 IAM call on a service or, as projects.locations.jobs
+// (#1420), a job: the project, location, collection, ID and method.
+var v1IAMRE = regexp.MustCompile(`^/v1/projects/([^/]+)/locations/([^/]+)/(services|jobs)/([^/:]+):(getIamPolicy|setIamPolicy|testIamPermissions)$`)
+
+// v1IAMServer is the v2 server whose IAM methods a v1 IAM call is.
+type v1IAMServer interface {
+	GetIamPolicy(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error)
+	SetIamPolicy(context.Context, *iampb.SetIamPolicyRequest) (*iampb.Policy, error)
+	TestIamPermissions(context.Context, *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error)
+}
 
 // v1Locations lists a project's locations: the regions, and each location
 // holding one of its services, paged with pageSize and pageToken.
@@ -89,10 +98,18 @@ func (s *Server) v1Locations(w http.ResponseWriter, r *http.Request) {
 	v1Write(w, nil, resp)
 }
 
-// v1IAM serves a v1 IAM call on a service through v2's.
+// v1IAM serves a v1 IAM call on a service or a job through v2's: the same
+// stored policy, never enforced (ADR-0006).
 func (s *Server) v1IAM(w http.ResponseWriter, r *http.Request, m []string) {
-	name := "projects/" + m[1] + "/locations/" + m[2] + "/services/" + m[3]
-	if _, _, err := s.v1Service(r.Context(), v1Scope{project: m[1], location: m[2]}, m[3]); err != nil {
+	name := "projects/" + m[1] + "/locations/" + m[2] + "/" + m[3] + "/" + m[4]
+	var srv v1IAMServer = s
+	if m[3] == "jobs" {
+		srv = s.Jobs()
+		if _, err := s.Jobs().GetJob(r.Context(), &runpb.GetJobRequest{Name: name}); err != nil {
+			v1Write(w, err, nil)
+			return
+		}
+	} else if _, _, err := s.v1Service(r.Context(), v1Scope{project: m[1], location: m[2]}, m[4]); err != nil {
 		v1Write(w, err, nil)
 		return
 	}
@@ -100,7 +117,7 @@ func (s *Server) v1IAM(w http.ResponseWriter, r *http.Request, m []string) {
 		resp proto.Message
 		err  error
 	)
-	switch m[4] {
+	switch m[5] {
 	case "getIamPolicy":
 		if r.Method != http.MethodGet {
 			break
@@ -114,18 +131,18 @@ func (s *Server) v1IAM(w http.ResponseWriter, r *http.Request, m []string) {
 			}
 			req.Options = &iampb.GetPolicyOptions{RequestedPolicyVersion: int32(n)}
 		}
-		resp, err = s.GetIamPolicy(r.Context(), req)
+		resp, err = srv.GetIamPolicy(r.Context(), req)
 	case "setIamPolicy":
 		req := &iampb.SetIamPolicyRequest{}
 		if err = v1DecodeProto(r, req); err == nil {
 			req.Resource = name
-			resp, err = s.SetIamPolicy(r.Context(), req)
+			resp, err = srv.SetIamPolicy(r.Context(), req)
 		}
 	case "testIamPermissions":
 		req := &iampb.TestIamPermissionsRequest{}
 		if err = v1DecodeProto(r, req); err == nil {
 			req.Resource = name
-			resp, err = s.TestIamPermissions(r.Context(), req)
+			resp, err = srv.TestIamPermissions(r.Context(), req)
 		}
 	}
 	if err == nil && resp == nil {

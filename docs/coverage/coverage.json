@@ -1266,8 +1266,8 @@
     "Key": "runv1",
     "Title": "Cloud Run v1 (Knative API)",
     "counts": {
-      "Unknown": 41,
-      "Verified": 35
+      "Unknown": 38,
+      "Verified": 38
     },
     "rows": [
       {
@@ -1578,15 +1578,24 @@
       },
       {
         "method": "run.projects.locations.jobs.getIamPolicy",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1selectors_test.go:29 TestRunV1SelectorsDelayAndJobIAM"
+        ]
       },
       {
         "method": "run.projects.locations.jobs.setIamPolicy",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1selectors_test.go:29 TestRunV1SelectorsDelayAndJobIAM"
+        ]
       },
       {
         "method": "run.projects.locations.jobs.testIamPermissions",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1selectors_test.go:29 TestRunV1SelectorsDelayAndJobIAM"
+        ]
       },
       {
         "method": "run.projects.locations.list",
