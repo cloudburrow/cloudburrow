@@ -55,6 +55,9 @@ type runService struct {
 	env runadapter.Environment
 	// cloudSQL serves Cloud SQL volumes (#1346); nil refuses them.
 	cloudSQL runadapter.CloudSQL
+	// events serves functions' event triggers (#1414); nil without
+	// Pub/Sub, which refuses them.
+	events *eventsConfig
 	// adapter is the started adapter, which the metadata server asks for a
 	// workload's account (#1388); nil before Start.
 	adapter atomic.Pointer[runadapter.Server]
@@ -216,6 +219,18 @@ func (r *runService) Start(ctx context.Context) error {
 	// build and a Cloud Run service, on the same port, with its source
 	// upload and download URLs.
 	functions := adapter.Functions(builds, func() string { return hostURL(r.server.Addr()) })
+	if r.events != nil {
+		ingress := ""
+		if r.cfg.Endpoints.Ingress != 0 {
+			host := r.cfg.BindAddress
+			if host == "" || host == "0.0.0.0" || host == "::" {
+				host = "127.0.0.1"
+			}
+			ingress = net.JoinHostPort(host, strconv.Itoa(r.cfg.Endpoints.Ingress))
+		}
+		functions.WithEvents(runadapter.Events{Transport: r.events.transport, Tokens: r.events.tokens,
+			PushBase: r.events.pushBase, Ingress: ingress})
+	}
 	// The Docker Registry HTTP API v2 at /v2/ (#1383), before the JSON
 	// APIs: no Google API's path starts with v2/ on this port but Cloud
 	// Run's own, /v2/projects/..., which the registry passes on.

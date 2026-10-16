@@ -71,8 +71,8 @@ func putSource(ctx context.Context, t *testing.T, uploadURL string, data []byte)
 // the build's error, and it is FAILED, with service_config's defaults; get
 // and list find it; a description and labels update changes nothing that
 // runs and completes at once; its IAM policy is stored and read back, not
-// enforced; delete removes it. An event trigger, a second create and a
-// missing function are refused.
+// enforced; delete removes it. An audit log trigger (#1414 serves Pub/Sub
+// and Cloud Storage ones), a second create and a missing function are refused.
 func TestFunctionsAPI(t *testing.T) {
 	h := New(t)
 	ctx, cancel := context.WithTimeout(h.Context(), 3*time.Minute)
@@ -205,10 +205,10 @@ func TestFunctionsAPI(t *testing.T) {
 	}
 
 	trig := &functionspb.Function{BuildConfig: in.GetBuildConfig(),
-		EventTrigger: &functionspb.EventTrigger{EventType: "google.cloud.pubsub.topic.v1.messagePublished", PubsubTopic: "projects/" + h.Project() + "/topics/t"}}
+		EventTrigger: &functionspb.EventTrigger{EventType: "google.cloud.audit.log.v1.written"}}
 	if _, err := fc.CreateFunction(ctx, &functionspb.CreateFunctionRequest{Parent: parent, FunctionId: "sdk-fn-trigger", Function: trig}); status.Code(err) != codes.Unimplemented ||
-		!strings.Contains(err.Error(), "Eventarc") {
-		t.Errorf("CreateFunction with an event trigger = %v; want UNIMPLEMENTED naming Eventarc", err)
+		!strings.Contains(err.Error(), "event_type") {
+		t.Errorf("CreateFunction with an audit log trigger = %v; want UNIMPLEMENTED naming the event type", err)
 	}
 
 	dop, err := fc.DeleteFunction(ctx, &functionspb.DeleteFunctionRequest{Name: name})
