@@ -2243,6 +2243,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
+          "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
         ]
       },
@@ -2251,6 +2252,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
+          "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
         ]
       },
@@ -2955,6 +2957,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
+          "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
         ]
       },
@@ -2963,6 +2966,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/kmslocations_test.go:24 TestKMSLocations",
+          "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/schedulerlocations_test.go:23 TestSchedulerLocations"
         ]
       },
@@ -3493,8 +3497,8 @@
     "Key": "memorystore",
     "Title": "Memorystore for Redis",
     "counts": {
-      "Unimplemented": 3,
-      "Verified": 8
+      "Unimplemented": 2,
+      "Verified": 9
     },
     "rows": [
       {
@@ -3591,8 +3595,10 @@
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/RescheduleMaintenance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance"
+        ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/UpdateInstance",
@@ -3601,6 +3607,7 @@
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
+          "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },

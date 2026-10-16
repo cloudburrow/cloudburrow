@@ -92,6 +92,8 @@ type record struct {
 	Created      time.Time         `json:"created"`
 	Server       string            `json:"server"`
 
+	// Maintenance is maintenance_policy, as protojson; "" for none (#1386).
+	Maintenance string `json:"maintenance,omitempty"`
 	// Persistence is persistence_config, as last set; nil when never set.
 	Persistence *persistence `json:"persistence,omitempty"`
 
@@ -122,6 +124,8 @@ type instances struct {
 	mu   sync.Mutex
 	byID map[string]*record // by resource name
 	busy map[string]string  // resource name -> pending operation
+	// cancels cancel the imports and exports in progress, by operation.
+	cancels map[string]context.CancelFunc
 	// objs is this instance's Cloud Storage, for import and export; nil
 	// when it is not enabled.
 	objs Objects
@@ -147,7 +151,7 @@ func (s *Server) EnableCreate(ctx context.Context, p Provisioner, dial Dialer, d
 		operations = lro.NewStore(nil)
 	}
 	s.created = &instances{prov: p, dial: dial, db: db, ops: operations, now: time.Now, bg: ctx,
-		byID: map[string]*record{}, busy: map[string]string{}}
+		byID: map[string]*record{}, busy: map[string]string{}, cancels: map[string]context.CancelFunc{}}
 }
 
 // Operations is the operations store, nil before EnableCreate.
@@ -334,6 +338,7 @@ func (c *instances) render(r *record) *redispb.Instance {
 		TransitEncryptionMode: redispb.Instance_DISABLED,
 		Nodes:                 []*redispb.NodeInfo{{Id: "node-0", Zone: r.LocationID}},
 		PersistenceConfig:     r.Persistence.render(c.now()),
+		MaintenancePolicy:     renderPolicy(r.Maintenance),
 	}
 	if region == "" {
 		inst.LocationId = ""
@@ -402,6 +407,13 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 	r := &record{Name: name, DisplayName: in.GetDisplayName(), Labels: copyMap(in.GetLabels()), LocationID: loc,
 		MemorySizeGB: in.GetMemorySizeGb(), RedisConfigs: copyMap(in.GetRedisConfigs()), Created: c.now(),
 		Server: ServerName(name), state: redispb.Instance_CREATING}
+	if mp := in.GetMaintenancePolicy(); mp != nil {
+		kept, err := maintenancePolicy(mp, c.now(), c.now())
+		if err != nil {
+			return nil, err
+		}
+		r.Maintenance = kept
+	}
 	if p := in.GetPersistenceConfig(); p != nil {
 		pc, err := newPersistence(p, nil, c.now())
 		if err != nil {
@@ -505,8 +517,11 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 			set["redis_configs"] = true
 		case "persistence_config", "persistenceConfig":
 			set["persistence_config"] = true
-		case "replica_count", "replicaCount", "read_replicas_mode", "readReplicasMode",
-			"maintenance_policy", "maintenancePolicy", "auth_enabled", "authEnabled", "secondary_ip_range", "secondaryIpRange":
+		case "maintenance_policy", "maintenancePolicy":
+			set["maintenance_policy"] = true
+		case "auth_enabled", "authEnabled":
+			set["auth_enabled"] = true
+		case "replica_count", "replicaCount", "read_replicas_mode", "readReplicasMode", "secondary_ip_range", "secondaryIpRange":
 			return nil, apierror.Unimplemented("updating %s is not supported", p)
 		default:
 			return nil, apierror.InvalidArgument("update_mask path %q is not an updatable field of Instance", p)
@@ -551,12 +566,36 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 			return nil, apierror.InvalidArgument("the server refused the change: %v", err)
 		}
 	}
+	if set["maintenance_policy"] {
+		next.Maintenance = ""
+		if mp := in.GetMaintenancePolicy(); mp != nil {
+			kept, err := maintenancePolicy(mp, policyCreated(r.Maintenance, c.now()), c.now())
+			if err != nil {
+				return nil, err
+			}
+			next.Maintenance = kept
+		}
+	}
+	if set["auth_enabled"] && in.GetAuthEnabled() != (r.AuthString != "") {
+		// AUTH on gets a fresh string, as Memorystore's does; off clears it.
+		pw := ""
+		if in.GetAuthEnabled() {
+			var err error
+			if pw, err = newAuthString(); err != nil {
+				return nil, apierror.Internal(err, "generate the AUTH string")
+			}
+		}
+		if err := c.dial(r.addr, r.AuthString).ConfigSet(ctx, map[string]string{"requirepass": pw}); err != nil {
+			return nil, apierror.InvalidArgument("the server refused the change: %v", err)
+		}
+		next.AuthString = pw
+	}
 	if set["persistence_config"] {
 		pc, err := newPersistence(in.GetPersistenceConfig(), r.Persistence, c.now())
 		if err != nil {
 			return nil, err
 		}
-		if err := c.persist(ctx, r, pc); err != nil {
+		if err := c.persist(ctx, &next, pc); err != nil {
 			return nil, err
 		}
 		next.Persistence = pc

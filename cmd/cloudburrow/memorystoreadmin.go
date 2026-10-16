@@ -137,7 +137,8 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 		s.server.Interpose(i)
 	}
 	ops := redisadmin.NewOperationsServer(s.api)
-	register := func(g grpc.ServiceRegistrar) { s.api.Register(g); ops.Register(g) }
+	locs := redisadmin.NewLocationsServer(s.api)
+	register := func(g grpc.ServiceRegistrar) { s.api.Register(g); ops.Register(g); locs.Register(g) }
 	var jsonAPI http.Handler = redisadmin.NewRESTHandler(register)
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)

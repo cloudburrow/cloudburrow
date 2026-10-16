@@ -120,7 +120,7 @@ func (s *Server) ExportInstance(ctx context.Context, req *redispb.ExportInstance
 		return nil, err
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(c.bg, importOpTimeout)
+		ctx, cancel := c.cancellable(op)
 		defer cancel()
 		data, err := c.snapshot(ctx, sh, server, addr, auth)
 		if err == nil {
@@ -168,7 +168,7 @@ func (s *Server) ImportInstance(ctx context.Context, req *redispb.ImportInstance
 		return nil, err
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(c.bg, importOpTimeout)
+		ctx, cancel := c.cancellable(op)
 		defer cancel()
 		c.done(r.Name, op, redispb.Instance_READY, c.load(ctx, sh, server, bin, addr, auth, data))
 	}()
@@ -230,11 +230,42 @@ func (c *instances) done(name, op string, state redispb.Instance_State, err erro
 	c.mu.Unlock()
 	if err != nil {
 		var e *apierror.Error
-		if !errors.As(err, &e) {
+		if errors.Is(err, context.Canceled) {
+			e = &apierror.Error{Code: codes.Canceled, Message: "the operation was cancelled", Cause: err}
+		} else if !errors.As(err, &e) {
 			e = &apierror.Error{Code: codes.Internal, Message: err.Error(), Cause: err}
 		}
 		_ = c.ops.Fail(op, e)
 		return
 	}
 	c.finish(op, inst)
+}
+
+// cancellable is the context an import or export runs under, bounded by
+// importOpTimeout, which CancelOperation of op cancels.
+func (c *instances) cancellable(op string) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(c.bg, importOpTimeout)
+	c.mu.Lock()
+	c.cancels[op] = cancel
+	c.mu.Unlock()
+	return ctx, func() {
+		c.mu.Lock()
+		delete(c.cancels, op)
+		c.mu.Unlock()
+		cancel()
+	}
+}
+
+// cancel cancels op, when it is an import or export in progress.
+func (c *instances) cancel(op string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	f, ok := c.cancels[op]
+	if ok {
+		f()
+	}
+	return ok
 }

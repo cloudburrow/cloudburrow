@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
 	redispb "cloud.google.com/go/redis/apiv1/redispb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -167,5 +168,30 @@ func TestRDBPersistence(t *testing.T) {
 	wait(t, s, op)
 	if (*set)["save"] != "" || (*set)["appendonly"] != "yes" {
 		t.Errorf("server settings after DISABLED %v", *set)
+	}
+}
+
+func TestOperationFilter(t *testing.T) {
+	for _, bad := range []string{"name = x", "done = maybe", "done"} {
+		if _, err := operationFilter(bad); code(err) != codes.InvalidArgument {
+			t.Errorf("filter %q: %v", bad, err)
+		}
+	}
+	s, _, _, _ := newIO(t)
+	o := NewOperationsServer(s)
+	resp, err := o.ListOperations(context.Background(), &longrunningpb.ListOperationsRequest{Name: parent, Filter: `metadata.verb != "create"`})
+	if err != nil || len(resp.GetOperations()) != 0 {
+		t.Errorf("verb != create = %v, %v", resp, err)
+	}
+	resp, err = o.ListOperations(context.Background(), &longrunningpb.ListOperationsRequest{Name: parent, Filter: `done = true AND metadata.verb = "create"`})
+	if err != nil || len(resp.GetOperations()) != 1 {
+		t.Fatalf("done create = %v, %v", resp, err)
+	}
+	name := resp.GetOperations()[0].GetName()
+	if _, err := o.DeleteOperation(context.Background(), &longrunningpb.DeleteOperationRequest{Name: name}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.GetOperation(context.Background(), &longrunningpb.GetOperationRequest{Name: name}); code(err) != codes.NotFound {
+		t.Errorf("after delete: %v", err)
 	}
 }

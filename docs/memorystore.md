@@ -117,6 +117,7 @@ The console's Memorystore page lists the instances and has **Create instance**, 
 the instance `up` runs; the API itself has no flush. `ExportInstance` writes a `BGSAVE` snapshot
 to a `gs://` object; `ImportInstance` replaces the instance's data with an RDB file's, loaded by
 the server itself (`--services memorystore,storage`). `persistence_config` RDB sets the server's
-save point to the snapshot period, in place of the append-only file. `UpgradeInstance`,
-`FailoverInstance` and `RescheduleMaintenance` are 501. See
+save point to the snapshot period, in place of the append-only file. `UpgradeInstance` and
+`FailoverInstance` are 501; `RescheduleMaintenance` is FAILED_PRECONDITION, since no maintenance
+is ever scheduled. See
 [compatibility.md](compatibility.md#memorystore-for-redis--googlecloudredisv1).

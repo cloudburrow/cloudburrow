@@ -374,6 +374,9 @@ var parityRows = []parityRow{
 		Methods:  []string{"CloudRedis/ExportInstance", "CloudRedis/ImportInstance"},
 		Provider: "memorystore", Offers: "Export and Import (confirmed: it overwrites) on a created instance's page, to and from a gs:// RDB file in this instance's Cloud Storage, each waiting for its operation; Edit's Persistence sets RDB snapshots (#1384)",
 		Tests: []string{"TestConsoleMemorystoreImportExport"}},
+	{Resource: "Memorystore maintenance reschedule", Service: "memorystore",
+		Methods:  []string{"CloudRedis/RescheduleMaintenance"},
+		Excluded: "CloudBurrow never schedules maintenance, so RescheduleMaintenance always answers FAILED_PRECONDITION: a Reschedule button would only ever fail (#1386)"},
 	// Cloud Scheduler
 	{Resource: "Cloud Scheduler jobs", Service: "scheduler",
 		Methods:  []string{"CloudScheduler/CreateJob", "CloudScheduler/DeleteJob", "CloudScheduler/GetJob", "CloudScheduler/ListJobs", "CloudScheduler/PauseJob", "CloudScheduler/ResumeJob", "CloudScheduler/RunJob"},

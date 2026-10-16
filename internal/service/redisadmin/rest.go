@@ -15,8 +15,7 @@ import (
 // method the server does not implement answers 501 UNIMPLEMENTED.
 
 // mixins are the Operations bindings redis_v1.yaml adds, which no redispb
-// descriptor carries. It binds Locations too; those are not served, and
-// answer 501.
+// descriptor carries, and the Locations mixin (#1386).
 var mixins = []*annotations.HttpRule{
 	{Selector: "google.cloud.location.Locations.GetLocation",
 		Pattern: &annotations.HttpRule_Get{Get: "/v1/{name=projects/*/locations/*}"}},

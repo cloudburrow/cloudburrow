@@ -58,7 +58,7 @@
   "google.cloud.redis.v1.CloudRedis/GetInstanceAuthString": "implemented",
   "google.cloud.redis.v1.CloudRedis/ImportInstance": "implemented",
   "google.cloud.redis.v1.CloudRedis/ListInstances": "implemented",
-  "google.cloud.redis.v1.CloudRedis/RescheduleMaintenance": "unimplemented",
+  "google.cloud.redis.v1.CloudRedis/RescheduleMaintenance": "implemented",
   "google.cloud.redis.v1.CloudRedis/UpdateInstance": "implemented",
   "google.cloud.redis.v1.CloudRedis/UpgradeInstance": "unimplemented",
   "google.cloud.resourcemanager.v3.Folders/CreateFolder": "implemented",
