@@ -277,3 +277,16 @@ func TestWrapPreservesRealErrors(t *testing.T) {
 		t.Errorf("status = %d, want 404", status)
 	}
 }
+
+// MarshalJSON is exactly the body WriteJSON sends, so a stream that can only
+// report a failure as an event reports it as a response would (#1471).
+func TestMarshalJSONIsWriteJSONsBody(t *testing.T) {
+	t.Parallel()
+	for _, err := range []error{FailedPrecondition("no runtime"), errors.New("boom"), status.Error(codes.OutOfRange, "past the end")} {
+		rec := httptest.NewRecorder()
+		WriteJSON(rec, err)
+		if got, want := string(MarshalJSON(err)), strings.TrimSuffix(rec.Body.String(), "\n"); got != want {
+			t.Errorf("MarshalJSON = %s, want %s", got, want)
+		}
+	}
+}

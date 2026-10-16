@@ -550,11 +550,7 @@ func (s *Server) streamRawPredictREST(w http.ResponseWriter, r *http.Request, t 
 		return
 	}
 	// After the first event, a failure is a final event, as writeStream sends.
-	e := apierror.From(err)
-	b, _ := json.Marshal(map[string]any{
-		"error": map[string]any{"code": e.HTTPStatus(), "status": e.Code.String(), "message": e.Message},
-	})
-	fmt.Fprintf(w, "data: %s\n\n", b)
+	fmt.Fprintf(w, "data: %s\n\n", apierror.MarshalJSON(err))
 	if flusher != nil {
 		flusher.Flush()
 	}
