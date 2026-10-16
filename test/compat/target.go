@@ -200,7 +200,7 @@ var gcloudOverrides = []struct {
 	{"cloudscheduler", []string{"SCHEDULER"}},
 	{"logging", []string{"LOGGING", "RUN_LOGGING", "SINK_LOGGING"}},
 	{"cloudresourcemanager", []string{"RESOURCEMANAGER", "LOGGING_RESOURCEMANAGER", "RUN_RESOURCEMANAGER"}},
-	{"serviceusage", []string{"SERVICEUSAGE"}},
+	{"serviceusage", []string{"SERVICEUSAGE", "RUN_SERVICEUSAGE"}},
 	{"run", []string{"RUN"}},
 	// Served on the Run port (#1347).
 	{"artifactregistry", []string{"RUN"}},
