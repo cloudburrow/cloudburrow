@@ -16,7 +16,7 @@ func TestPartitionFilter(t *testing.T) {
 		Field string `json:"field"`
 	}{"DAY", "d"}
 	if got, code, _ := partitionFilter(day, "20240101", "x"); code != 0 ||
-		got != "(TIMESTAMP(`d`) >= TIMESTAMP '2024-01-01 00:00:00' AND TIMESTAMP(`d`) < TIMESTAMP '2024-01-02 00:00:00')" {
+		got != "(TIMESTAMP(`d`, 'UTC') >= TIMESTAMP '2024-01-01 00:00:00+00' AND TIMESTAMP(`d`, 'UTC') < TIMESTAMP '2024-01-02 00:00:00+00')" {
 		t.Errorf("day: %q %d", got, code)
 	}
 	if _, code, _ := partitionFilter(day, "2024", "x"); code != 400 {
