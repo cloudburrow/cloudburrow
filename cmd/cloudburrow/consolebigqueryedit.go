@@ -256,6 +256,12 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 			}
 			return []console.Action{deleteRoutineAction()}
 		}
+		if isModelPath(path) { // #1465
+			if md, err := p.modelMetadata(ctx, path[0], path[2]); err == nil {
+				return []console.Action{editModelAction(md), deleteModelAction()}
+			}
+			return []console.Action{deleteModelAction()}
+		}
 	case 4:
 		if isRowPolicyPath(path) { // a policy's row on its table's page (#1218)
 			return []console.Action{deleteRowPolicyAction()}
@@ -439,6 +445,10 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 		return p.editRoutine(ctx, path[0], path[2], values)
 	case action == actDeleteRoutine && isRoutinePath(path):
 		return p.deleteRoutine(ctx, path[0], path[2])
+	case action == actEditModel && isModelPath(path): // #1465, consolebigquerymodels.go
+		return p.editModel(ctx, path[0], path[2], values)
+	case action == actDeleteModel && isModelPath(path):
+		return p.deleteModel(ctx, path[0], path[2])
 	case action == "deletetable" && len(path) == 2:
 		ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 		defer cancel()

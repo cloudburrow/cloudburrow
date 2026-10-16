@@ -7883,6 +7883,7 @@
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
           "test/compat/bigquerymaterializedviews_test.go:142 TestBigQueryMaterializedViews",
           "test/compat/bigquerymaterializedviews_test.go:29 TestBigQueryDDLMoreTableOptions",
+          "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -7997,6 +7998,8 @@
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
           "test/compat/bigquerymaterializedviews_test.go:142 TestBigQueryMaterializedViews",
           "test/compat/bigquerymaterializedviews_test.go:29 TestBigQueryDDLMoreTableOptions",
+          "test/compat/bigqueryml_test.go:251 TestBigQueryMLRefusals",
+          "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
@@ -8039,28 +8042,32 @@
         "method": "bigquery.models.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone",
+          "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels"
         ]
       },
       {
         "method": "bigquery.models.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone",
+          "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels"
         ]
       },
       {
         "method": "bigquery.models.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone",
+          "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels"
         ]
       },
       {
         "method": "bigquery.models.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone"
+          "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone",
+          "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels"
         ]
       },
       {
