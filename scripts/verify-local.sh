@@ -443,6 +443,8 @@ browser_suite() {  # <shard> <dir> <flags...>
   # As in CI: the emulators shard's tests also read back through the
   # Datastore, Firestore and Bigtable emulators (#895, #1198).
   if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER; fi
+  # The Logs Explorer reads entries written through the Logging API (#1410).
+  if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING; fi
   BROWSER_ENV=$(scripts/compat-env.sh --only "$BROWSER_VARS" --cli "$CLI" -- "$@" 2>/dev/null)
   (
     eval "$BROWSER_ENV"

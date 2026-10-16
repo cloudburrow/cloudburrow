@@ -1,10 +1,12 @@
 package bigqueryfront
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 // INFORMATION_SCHEMA.JOBS rows in a table (#1378).
@@ -31,6 +33,22 @@ import (
 // (tablesOf), and the statements that write it are the front's own,
 // which jobs.list leaves out (front.send). When the table cannot be
 // written, the query reads the literal, as before.
+//
+// Written in the background too (#1419). Measured on one instance
+// (--services bigquery,storage, arm64, 2026-10-16), the first unfiltered
+// COUNT(*) after 5,000 jobs were made took 25.1 s: 16.6 s to list them
+// (a jobs.get for each jobs.query job, whose configuration the front had
+// not seen, joblist.go) and 8.5 s for five INSERTs of 1,000 rows (1.65 ms
+// a row, whatever the batch); the queries after it took 0.24 to 0.27 s.
+// The engine now lists each job with its configuration (bigquery-emulator
+// patch 0022), so no jobs.get is sent. And once a project's table is
+// made, each job made through the front (jobs.insert, jobs.query) has the
+// table brought up to date in the background, jobsTableDelay later, one
+// sync at a time and one waiting at most: the INSERTs happen as the jobs
+// are made, and a query writes only what the last second added. A query
+// still syncs first, so it reads every job, as before. The background
+// never makes a table: one dropped (the emulator restarted, a write
+// failed) waits for the next query.
 
 // jobsTableName is the table of JOBS rows in resultsDataset. It does not
 // begin with scratchPrefix, so queryResults takes it for no scratch table
@@ -41,6 +59,14 @@ const jobsTableName = "cloudburrow_information_schema_jobs"
 // jobsTableBatch is how many rows one INSERT writes.
 const jobsTableBatch = 1000
 
+// jobsTableDelay is how long after a job is made the background sync
+// (above) runs: the jobs made meanwhile are written with it. A sync takes
+// every job not yet written, so the table never falls behind by more than
+// the jobs of one delay and one sync. (Waiting twice as long as the last
+// sync took, measured, fell behind: each sync took longer, the next
+// waited longer, and the first query after 5,000 jobs took 20 s.)
+var jobsTableDelay = time.Second
+
 // jobsTable is what the front wrote to each project's table of JOBS rows.
 type jobsTable struct {
 	mu sync.Mutex
@@ -48,6 +74,14 @@ type jobsTable struct {
 	// none is one whose table the front has not made since it started
 	// or the emulator restarted.
 	rows map[string]map[string]string
+
+	// bg guards queued and made, apart from mu, which a sync holds
+	// while it writes.
+	bg sync.Mutex
+	// queued are the projects a background sync waits to run for.
+	queued map[string]bool
+	// made are the projects whose table is made (rows has them).
+	made map[string]bool
 }
 
 // reset forgets the tables: the emulator restarted, and has none.
@@ -58,6 +92,47 @@ func (j *jobsTable) reset() {
 	j.mu.Lock()
 	j.rows = nil
 	j.mu.Unlock()
+	j.bg.Lock()
+	j.made = nil
+	j.bg.Unlock()
+}
+
+// setMade records whether the project's table is made.
+func (j *jobsTable) setMade(project string, made bool) {
+	j.bg.Lock()
+	defer j.bg.Unlock()
+	if !made {
+		delete(j.made, project)
+		return
+	}
+	if j.made == nil {
+		j.made = map[string]bool{}
+	}
+	j.made[project] = true
+}
+
+// soon runs sync jobsTableDelay from now, unless the project has no
+// table or a sync already waits to run for it.
+func (j *jobsTable) soon(project string, sync func()) {
+	if j == nil {
+		return
+	}
+	j.bg.Lock()
+	if !j.made[project] || j.queued[project] {
+		j.bg.Unlock()
+		return
+	}
+	if j.queued == nil {
+		j.queued = map[string]bool{}
+	}
+	j.queued[project] = true
+	j.bg.Unlock()
+	time.AfterFunc(jobsTableDelay, func() {
+		j.bg.Lock()
+		delete(j.queued, project)
+		j.bg.Unlock()
+		sync()
+	})
 }
 
 // jobsTableColumns is jobsColumns as a CREATE TABLE's column list.
@@ -71,9 +146,10 @@ func jobsTablePath() string {
 }
 
 // sync writes the project's table so that it holds rows (job ID to the
-// row's SQL), new ones in the order of ids, and reports whether it does.
-// No order of a query's rows is promised without ORDER BY.
-func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string, rows map[string]string) bool {
+// row's SQL), new ones in the order of ids, and reports whether it does;
+// a table not made is made only when create is true. No order of a
+// query's rows is promised without ORDER BY.
+func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string, rows map[string]string, create bool) bool {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	run := func(sql string) bool {
@@ -82,6 +158,9 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		return st == http.StatusOK
 	}
 	have, made := j.rows[project]
+	if !made && !create {
+		return false
+	}
 	if !made {
 		// The dataset may not be there yet (queryResults makes it for the
 		// first query result); 409 if it is.
@@ -95,6 +174,7 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 			j.rows = map[string]map[string]string{}
 		}
 		j.rows[project] = have
+		j.setMade(project, true)
 	}
 	var gone []string
 	var add []string
@@ -109,7 +189,8 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		}
 	}
 	fail := func() bool {
-		delete(j.rows, project) // made again next time
+		delete(j.rows, project) // made again by the next query
+		j.setMade(project, false)
 		return false
 	}
 	for len(gone) > 0 {
@@ -144,8 +225,9 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 }
 
 // tableJobsRows returns the subquery of the project's jobs as the table
-// (above), written from jobs, or "" when it could not be written.
-func (f front) tableJobsRows(r *http.Request, project string, jobs []map[string]any) string {
+// (above), written from jobs (made first when create is true), or ""
+// when it could not be written.
+func (f front) tableJobsRows(r *http.Request, project string, jobs []map[string]any, create bool) string {
 	if f.jobsTable == nil {
 		return ""
 	}
@@ -159,8 +241,32 @@ func (f front) tableJobsRows(r *http.Request, project string, jobs []map[string]
 		rows[id] = "(" + strings.Join(jobRow(project, job), ", ") + ")"
 		ids = append(ids, id)
 	}
-	if !f.jobsTable.sync(f, r, project, ids, rows) {
+	if !f.jobsTable.sync(f, r, project, ids, rows, create) {
 		return ""
 	}
 	return "(SELECT * FROM " + jobsTablePath() + ")"
 }
+
+// syncJobsTableSoon brings the table of the project of r, a job made
+// through the front, up to date in the background (above), when it is
+// made.
+func (f front) syncJobsTableSoon(r *http.Request) {
+	if f.jobsTable == nil || f.listJobs == nil {
+		return
+	}
+	project := projectOf(f.base)
+	// The request has been answered: its context ends, its body is read.
+	req := r.Clone(context.WithoutCancel(r.Context()))
+	req.Body, req.ContentLength = http.NoBody, 0
+	f.jobsTable.soon(project, func() {
+		ctx, cancel := context.WithTimeout(req.Context(), jobsTableSyncTimeout)
+		defer cancel()
+		r := req.WithContext(ctx)
+		if jobs, status, _ := f.allJobs(r, nil); status == 0 {
+			f.tableJobsRows(r, project, jobs, false)
+		}
+	})
+}
+
+// jobsTableSyncTimeout bounds a background sync.
+const jobsTableSyncTimeout = 2 * time.Minute

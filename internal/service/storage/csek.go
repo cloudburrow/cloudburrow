@@ -128,3 +128,34 @@ func copyKeys(r *http.Request, src objectRecord) ([]byte, error) {
 	}
 	return parseCSEK(r.Header, csekHeader)
 }
+
+// sameCSEK reports whether a patch or update body's customerEncryption
+// restates o's: AES256 and o's key SHA-256, either field left out meaning
+// unchanged. Naming a key on an object with none is a change.
+func sameCSEK(v any, o objectRecord) bool {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return false
+	}
+	for k, f := range m {
+		s, isStr := f.(string)
+		switch {
+		case !isStr && f != nil:
+			return false
+		case k == "encryptionAlgorithm":
+			if s != "" && s != csekAlgorithm {
+				return false
+			}
+		case k == "keySha256":
+			if s != "" && s != base64.StdEncoding.EncodeToString(o.KeySHA256) {
+				return false
+			}
+			if s != "" && o.KeySHA256 == nil {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return o.KeySHA256 != nil
+}

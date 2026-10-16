@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+
 	"os"
 	"slices"
 	"strings"
@@ -47,6 +49,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 	config.ServiceLogging:       {Providers: []string{"logging-metrics", "logging-sinks", "logging-exclusions", "logging-buckets", "logging-settings"}, Screen: "/logs"},
 	config.ServiceMemorystore:   {Providers: []string{"memorystore"}},
 	config.ServiceCloudSQLMySQL: {Providers: []string{"cloudsql-mysql", "cloudsql-instances"}},
+	config.ServiceBackupDR:      {Providers: []string{"backupdr"}},
 }
 
 // clusterScreens are the registry's screens that belong to no selectable
@@ -143,6 +146,8 @@ func coverageDeps(t *testing.T) consoleDeps {
 		logging:   &loggingService{},
 		// The APIs & Services page (#1352) reads the Service Usage server.
 		serviceUsage: newServiceUsageServer(cfg, projects, store.NewMemory()),
+		// The Backup and DR page (#1433) reads the Backup and DR server.
+		backupdr: backupdr.NewServer("127.0.0.1:0", nil, ""),
 	}
 	for _, s := range config.KnownServices() {
 		d.forwarders = append(d.forwarders, namedForwarder(t, string(s), "127.0.0.1:1"))

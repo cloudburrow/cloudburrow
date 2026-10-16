@@ -69,6 +69,7 @@ func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv.EnableTransfers(&fakeTransferer{}, &fakeObjects{objs: map[string][]byte{}})
+	srv.SetBackupDR(fakeBackupDR{})
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 	param := regexp.MustCompile(`\{[^}]+\}`)
@@ -84,7 +85,7 @@ func TestEveryUnservedMethodIsNotImplemented(t *testing.T) {
 		})
 		body := "{}"
 		if m.ID == "sql.instances.pointInTimeRestore" {
-			// It checks its request before refusing a datasource (#1425).
+			// It checks its request, then resolves the datasource (#1433).
 			body = `{"datasource":"projects/p/locations/us-central1/backupVaults/v/dataSources/d",` +
 				`"targetInstance":"target","pointInTime":"2026-01-01T00:00:00Z"}`
 		}

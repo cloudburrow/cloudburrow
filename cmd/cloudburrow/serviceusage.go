@@ -38,6 +38,7 @@ var serviceUsageAPIs = []struct {
 	{config.ServiceBigQuery, serviceusage.API{Name: "bigquerystorage.googleapis.com", Title: "BigQuery Storage API"}},
 	{config.ServiceMemorystore, serviceusage.API{Name: "redis.googleapis.com", Title: "Google Cloud Memorystore for Redis API"}},
 	{sqlAdminEndpoint, serviceusage.API{Name: "sqladmin.googleapis.com", Title: "Cloud SQL Admin API"}},
+	{config.ServiceBackupDR, serviceusage.API{Name: "backupdr.googleapis.com", Title: "Backup and DR Service API"}},
 }
 
 // serviceUsageCatalog splits serviceUsageAPIs into what this instance
@@ -51,6 +52,10 @@ func serviceUsageCatalog(cfg config.Config) ([]serviceusage.API, []serviceusage.
 		if e.service == sqlAdminEndpoint {
 			on = sqlAdminEnabled(cfg)
 			why = "start the instance with --services cloudsql or cloudsql-mysql"
+		}
+		if e.service == config.ServiceBackupDR {
+			on = backupDREnabled(cfg)
+			why = "start the instance with --services backupdr and cloudsql or cloudsql-mysql"
 		}
 		if on {
 			served = append(served, e.api)

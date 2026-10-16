@@ -105,6 +105,10 @@ var gcloudVerified = []struct {
 	// gcloud redis appends v1/. TestGcloudRedis creates, describes, lists,
 	// updates and deletes an instance, given --region.
 	{memorystoreAdminEndpoint, "redis", "/", false, false},
+	// The Backup and DR Service (#1433): gcloud backup-dr appends v1/.
+	// TestGcloudBackupDR drives vaults, plans, associations, data sources
+	// and backups.
+	{config.ServiceBackupDR, "backupdr", "/", false, false},
 }
 
 // gcloudFamilies is the gcloud-setup help's list of what it writes, from
@@ -153,7 +157,7 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
 		resourceManagerService: cfg.Endpoints.ResourceManager, config.ServiceRun: cfg.Endpoints.Run,
 		sqlAdminEndpoint: cfg.Endpoints.SQLAdmin, memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
-		serviceUsageService: cfg.Endpoints.ServiceUsage}
+		serviceUsageService: cfg.Endpoints.ServiceUsage, config.ServiceBackupDR: cfg.Endpoints.BackupDR}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask
@@ -166,6 +170,9 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 	for _, v := range gcloudVerified {
 		on := v.always || serviceEnabled(cfg, v.service) || (v.service == sqlAdminEndpoint && sqlAdminEnabled(cfg)) ||
 			(v.service == memorystoreAdminEndpoint && serviceEnabled(cfg, config.ServiceMemorystore))
+		if v.service == config.ServiceBackupDR {
+			on = backupDREnabled(cfg)
+		}
 		if on && ports[v.service] != 0 {
 			addr := host(ports[v.service])
 			if ip := net.ParseIP(cfg.BindAddress); v.regional && ip != nil && ip.IsLoopback() {

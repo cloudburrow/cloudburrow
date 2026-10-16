@@ -314,10 +314,12 @@ func checkDDL(sql string) ddlVerdict {
 				"does not run the statements inside IF, LOOP, WHILE, REPEAT, FOR or CASE blocks and still reports success "+
 				"(measured), so nothing was run. A BEGIN ... END block, and statements outside any block, are run.", flow)}
 	case alter != "":
-		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: ALTER TABLE in a dry run or " +
-			"in legacy SQL. CloudBurrow carries out ALTER TABLE itself in a GoogleSQL query (#1227), since the emulator " +
-			"behind it reports ADD COLUMN, DROP COLUMN, RENAME TO and SET OPTIONS as done and leaves the table unchanged " +
-			"(measured), but not in a dry run, so nothing was run."}
+		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: ALTER TABLE in a dry run of " +
+			"a script, in a script with a TEMP table or function, or in legacy SQL. CloudBurrow carries out ALTER TABLE itself " +
+			"in a GoogleSQL query (#1227), since the emulator behind it reports ADD COLUMN, DROP COLUMN, RENAME TO and SET " +
+			"OPTIONS as done and leaves the table unchanged (measured), and checks a lone one in a dry run (#1416), a " +
+			"statement at a time, which a TEMP table, lasting only for the request that made it, does not survive, so " +
+			"nothing was run."}
 	case unsupported == "OPTIONS in a script with a TEMP table":
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: a table's or view's OPTIONS " +
 			"in a multi-statement script with a TEMP table or function. The emulator behind " +

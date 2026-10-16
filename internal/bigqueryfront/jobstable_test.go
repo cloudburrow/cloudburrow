@@ -4,8 +4,17 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
+
+func init() {
+	// The fake emulators of this package's tests serve one request at a
+	// time: no background sync (jobstable.go, #1419) runs in them, but in
+	// TestJobsTableSyncsInTheBackground, which sets it short.
+	jobsTableDelay = time.Hour
+}
 
 // tableEmulator is a jobsEmulator that makes datasets.
 type tableEmulator struct{ *jobsEmulator }
@@ -80,5 +89,95 @@ func TestJobsTableWritesOnlyNewRows(t *testing.T) {
 		!strings.Contains(sent[0], "'auto1'") || !strings.Contains(sent[0], "'auto2'") ||
 		!strings.HasPrefix(sent[1], "INSERT INTO "+table) || !strings.Contains(sent[1], "'y'") {
 		t.Fatalf("JOBS query after a change sent %q", sent)
+	}
+}
+
+// lockedEmulator serves one request at a time, for a test whose front
+// sends requests in the background.
+type lockedEmulator struct {
+	mu sync.Mutex
+	e  tableEmulator
+	h  http.Handler // when set, served in place of e
+}
+
+func (l *lockedEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.h != nil {
+		l.h.ServeHTTP(w, r)
+		return
+	}
+	l.e.ServeHTTP(w, r)
+}
+
+// TestJobsTableSyncsInTheBackground (#1419): once a project's table of JOBS
+// rows is made, the jobs made after it are written to it in the background,
+// so the next unfiltered JOBS query writes nothing before reading it.
+func TestJobsTableSyncsInTheBackground(t *testing.T) {
+	saved := jobsTableDelay
+	jobsTableDelay = 10 * time.Millisecond
+	t.Cleanup(func() { jobsTableDelay = saved })
+	emu := &lockedEmulator{e: tableEmulator{&jobsEmulator{tables: map[string]string{}}}}
+	h := Wrap(emu)
+	query := func(sql string) {
+		t.Helper()
+		if code, got := do(t, h, "POST", base+"/queries", `{"query":"`+sql+`"}`); code != 200 {
+			t.Fatalf("%s: %d %v", sql, code, got)
+		}
+	}
+	const count = "SELECT COUNT(*) FROM `region-us`.INFORMATION_SCHEMA.JOBS"
+	table := "`" + resultsDataset + "`.`" + jobsTableName + "`"
+	query("SELECT 1")
+	query(count) // makes the table
+	for _, q := range []string{"SELECT 4", "SELECT 5", "SELECT 6"} {
+		query(q)
+	}
+	written := func() bool {
+		emu.mu.Lock()
+		defer emu.mu.Unlock()
+		for _, q := range emu.e.sentSince(0) {
+			if strings.HasPrefix(q, "INSERT INTO "+table) && strings.Contains(q, "SELECT 6") {
+				return true
+			}
+		}
+		return false
+	}
+	for deadline := time.Now().Add(5 * time.Second); !written(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the jobs made after the table were not written to it in the background")
+		}
+	}
+	emu.mu.Lock()
+	from := len(emu.e.log)
+	emu.mu.Unlock()
+	query(count)
+	emu.mu.Lock()
+	sent := emu.e.sentSince(from)
+	emu.mu.Unlock()
+	if len(sent) != 1 || sent[0] != "SELECT COUNT(*) FROM (SELECT * FROM "+table+") AS JOBS" {
+		t.Fatalf("the JOBS query after the background sync sent %q, want only its read of the table", sent)
+	}
+}
+
+// TestJobsTableBackgroundMakesNoTable (#1419): a project whose table is not
+// made gets none from the background.
+func TestJobsTableBackgroundMakesNoTable(t *testing.T) {
+	saved := jobsTableDelay
+	jobsTableDelay = time.Millisecond
+	t.Cleanup(func() { jobsTableDelay = saved })
+	emu := &lockedEmulator{e: tableEmulator{&jobsEmulator{tables: map[string]string{}}}}
+	h := Wrap(emu)
+	for _, q := range []string{"SELECT 1", "SELECT 2"} {
+		if code, got := do(t, h, "POST", base+"/queries", `{"query":"`+q+`"}`); code != 200 {
+			t.Fatalf("%s: %d %v", q, code, got)
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	emu.mu.Lock()
+	defer emu.mu.Unlock()
+	for _, q := range emu.e.sentSince(0) {
+		if strings.Contains(q, jobsTableName) {
+			t.Fatalf("sent %q for a project that read no JOBS", q)
+		}
 	}
 }

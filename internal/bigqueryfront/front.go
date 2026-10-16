@@ -231,6 +231,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		functions.keep(functionsStateFile(o.stateDir), o.logf)     // functionstate.go
 		texts.keep(jobTextsStateFile(o.stateDir), o.logf)          // jobtextstate.go, #1028
 		views.keep(viewTextsStateFile(o.stateDir), o.logf)         // viewtextstate.go, #1028
+		linked.keep(linkedDatasetsStateFile(o.stateDir), o.logf)   // loglinks.go, #1435
 	}
 	ids := o.ids // #1063
 	if ids == nil {
@@ -349,6 +350,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			} else {
 				withInfinities(w, r, func(w http.ResponseWriter) { f.query(w, r) }) // #1077, #1101
 			}
+			f.syncJobsTableSoon(r) // jobstable.go, #1419
 			return
 		}
 		if j := jobRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet {
@@ -402,7 +404,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
-			buffers: buffers, tables: tables, linked: linked}
+			buffers: buffers, tables: tables, linked: linked, settings: settings}
 		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
 			if r.Method == http.MethodPost {
 				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
@@ -421,6 +423,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.servePartition(w, r, dataset, table, m[5]) // #1273, partitionreads.go
 		case r.Method == http.MethodPost && m[3] == "":
 			datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base))) // #1371, location.go; #1375
+			datasetInsertDefaults(r, settings, projectOf(f.base))                 // #1417, projectdefaults.go
 			f.insertDataset(w, r)
 		case r.Method == http.MethodGet && m[3] == "":
 			f.listDatasets(w, r) // #1371, location.go
@@ -673,6 +676,9 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 		return
 	}
 	raw = legacyTableTypes(r, raw, body.Schema) // #1034, typenames.go
+	if !update && body.View == nil && body.MaterializedView == nil {
+		raw = f.defaultTableKey(r, dataset, raw) // #1417, projectdefaults.go
+	}
 	if !update {
 		id := ""
 		if body.TableReference != nil {

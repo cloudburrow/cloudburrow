@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -279,7 +280,7 @@ func viewExplorerHref(project, view string) string {
 
 // links is a bucket's links (#1292), from ListLinks.
 func (p loggingBucketsProvider) links(ctx context.Context, bucket string) console.Listing {
-	l := console.Listing{Columns: []string{"BigQuery dataset", "Description", "Created"}, NameColumn: "Link", Noun: "links",
+	l := console.Listing{Columns: []string{"BigQuery dataset", "BigQuery views", "Description", "Created"}, NameColumn: "Link", Noun: "links",
 		Note: linkNote}
 	if err := p.fault(ctx, loggingpb.ConfigServiceV2_ListLinks_FullMethodName, bucket); err != nil {
 		l.Unavailable = consoleErr(err)
@@ -295,19 +296,29 @@ func (p loggingBucketsProvider) links(ctx context.Context, bucket string) consol
 		l.Unavailable = consoleErr(err)
 		return l
 	}
+	// The dataset has a view per log view of the bucket (#1435).
+	var views []string
+	if len(resp.GetLinks()) > 0 {
+		if vr, err := a.ConfigServer().ListViews(ctx, &loggingpb.ListViewsRequest{Parent: bucket, PageSize: 1000}); err == nil {
+			for _, v := range vr.GetViews() {
+				views = append(views, v.GetName()[strings.LastIndex(v.GetName(), "/")+1:])
+			}
+			sort.Strings(views)
+		}
+	}
 	for _, k := range resp.GetLinks() {
 		id := k.GetName()[strings.LastIndex(k.GetName(), "/")+1:]
 		l.Items = append(l.Items, console.Resource{Name: id, Link: logAnalyticsLink(k.GetBigqueryDataset().GetDatasetId()),
 			Fields: map[string]string{
-				"BigQuery dataset": k.GetBigqueryDataset().GetDatasetId(), "Description": orDash(k.GetDescription()),
-				"Created": loggingTime(k.GetCreateTime())}})
+				"BigQuery dataset": k.GetBigqueryDataset().GetDatasetId(), "BigQuery views": orDash(strings.Join(views, ", ")),
+				"Description": orDash(k.GetDescription()), "Created": loggingTime(k.GetCreateTime())}})
 	}
 	l.Total = len(l.Items)
 	return l
 }
 
-const linkNote = "A link makes a read-only BigQuery dataset whose _AllLogs view holds the bucket's entries, " +
-	"kept current as entries arrive (#1423). Open a link to query it in Log Analytics: BigQuery's query editor on the dataset."
+const linkNote = "A link makes a read-only BigQuery dataset with a view per log view of the bucket (_AllLogs and each view's filter), " +
+	"kept current as entries arrive, views change, retention ages entries out and DeleteLog removes them (#1423, #1435). Open a link to query it in Log Analytics: BigQuery's query editor on the dataset."
 
 // logAnalyticsLink is the BigQuery console page of a link's dataset
 // (bigquery.googleapis.com/projects/P/datasets/D), its query editor opened

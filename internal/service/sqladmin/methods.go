@@ -58,7 +58,7 @@ var Methods = []Method{
 	{"sql.instances.list", "GET", "v1/projects/{project}/instances", true},
 	{"sql.instances.listServerCas", "GET", "v1/projects/{project}/instances/{instance}/listServerCas", true},
 	{"sql.instances.patch", "PATCH", "v1/projects/{project}/instances/{instance}", true},
-	{"sql.instances.pointInTimeRestore", "POST", "v1/projects/{projectsId}:pointInTimeRestore", false},
+	{"sql.instances.pointInTimeRestore", "POST", "v1/projects/{projectsId}:pointInTimeRestore", true},
 	{"sql.instances.preCheckMajorVersionUpgrade", "POST", "v1/projects/{project}/instances/{instance}/preCheckMajorVersionUpgrade", false},
 	{"sql.instances.promoteReplica", "POST", "v1/projects/{project}/instances/{instance}/promoteReplica", true},
 	{"sql.instances.reencrypt", "POST", "v1/projects/{project}/instances/{instance}/reencrypt", false},

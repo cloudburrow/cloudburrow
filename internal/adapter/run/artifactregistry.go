@@ -12,6 +12,7 @@ import (
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 	"github.com/cloudburrow/cloudburrow/internal/registry"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"google.golang.org/grpc"
@@ -31,7 +32,8 @@ import (
 // tags, Docker images and files are read from what that registry holds
 // (artifactregistrycontent.go). Images built on this instance are pushed
 // there too, and still loaded into the cluster as dev.local/<image URI>
-// for Cloud Run's fast path. Other formats, remote and virtual
+// for Cloud Run's fast path. A repository's IAM policy is stored, never
+// enforced (ADR-0006; artifactregistryiam.go). Other formats, remote and virtual
 // repositories and every other method are UNIMPLEMENTED.
 type ArtifactRegistryServer struct {
 	arpb.UnimplementedArtifactRegistryServer
@@ -51,7 +53,10 @@ func (a *ArtifactRegistryServer) Register(g grpc.ServiceRegistrar) {
 var repositories = struct {
 	mu    sync.Mutex
 	repos map[string]*arpb.Repository
-}{repos: map[string]*arpb.Repository{}}
+	// policies are the repositories' stored IAM policies, by repository
+	// name (artifactregistryiam.go).
+	policies map[string]iampolicy.Stored
+}{repos: map[string]*arpb.Repository{}, policies: map[string]iampolicy.Stored{}}
 
 // repositoryID is AIP-122's resource ID shape Artifact Registry enforces:
 // lower case letters, digits and hyphens, starting with a letter.
@@ -230,6 +235,10 @@ func RemoveRepository(name string) bool {
 	}
 	delete(repositories.repos, name)
 	saveRepositoriesLocked()
+	if _, ok := repositories.policies[name]; ok {
+		delete(repositories.policies, name)
+		saveRepositoryPoliciesLocked()
+	}
 	if st := RegistryStore(); st != nil {
 		_ = st.DeleteRepository(repoOf(name))
 	}
@@ -286,4 +295,5 @@ func loadRepositories(st *registry.Store) {
 	for _, r := range list.GetRepositories() {
 		repositories.repos[r.GetName()] = r
 	}
+	loadRepositoryPoliciesLocked(st)
 }

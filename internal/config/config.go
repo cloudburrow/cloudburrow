@@ -96,6 +96,10 @@ const (
 	// Cloud Tasks does. Opt-in: it fires jobs on a clock, which nobody
 	// should find happening without having asked for it.
 	ServiceScheduler Service = "scheduler"
+	// ServiceBackupDR is the Backup and DR Service (backupdr.googleapis.com,
+	// #1433) for Cloud SQL, served in the CLI process over the Cloud SQL
+	// Admin API's backups: opt-in, beside cloudsql or cloudsql-mysql.
+	ServiceBackupDR Service = "backupdr"
 )
 
 // AllServices lists the default services in a stable order, so startup
@@ -108,7 +112,7 @@ func AllServices() []Service {
 
 // OptionalServices lists the opt-in services, in a stable order.
 func OptionalServices() []Service {
-	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS}
+	return []Service{ServiceFirestore, ServiceDatastore, ServiceBigtable, ServiceSpanner, ServiceCloudSQL, ServiceBigQuery, ServiceMemorystore, ServiceCloudSQLMySQL, ServiceScheduler, ServiceLogging, ServiceKMS, ServiceBackupDR}
 }
 
 // KnownServices lists every selectable service.
@@ -164,7 +168,7 @@ func (s Service) Persistence() Persistence {
 		// Key material is in Kubernetes Secrets, like Secret Manager's
 		// payloads, which the cluster keeps.
 		return PersistenceVolume
-	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler:
+	case ServiceStorage, ServiceTasks, ServiceSecrets, ServiceScheduler, ServiceBackupDR:
 		return PersistenceVolume
 	case ServiceRun:
 		// Workload definitions live in the Kubernetes API, which the cluster
@@ -303,6 +307,9 @@ type Endpoints struct {
 	// (serviceusage.googleapis.com, #1352), served in process: which APIs
 	// each project has enabled. Always bound, as Resource Manager is.
 	ServiceUsage int `json:"serviceUsage"`
+	// BackupDR is the host port of the Backup and DR Service API
+	// (backupdr.googleapis.com, #1433), served in process.
+	BackupDR int `json:"backupdr"`
 }
 
 // NamedPort is one host endpoint and the name its --port-<name> flag uses.
@@ -359,6 +366,7 @@ func (e *Endpoints) fields() []endpointField {
 		{"cloudsql", &e.CloudSQL},
 		{"sqladmin", &e.SQLAdmin},
 		{"serviceusage", &e.ServiceUsage},
+		{"backupdr", &e.BackupDR},
 	}
 }
 
@@ -422,6 +430,8 @@ func (e Endpoints) OptionalPort(s Service) int {
 		return e.CloudSQL
 	case ServiceKMS:
 		return e.KMS
+	case ServiceBackupDR:
+		return e.BackupDR
 	default:
 		return 0
 	}
@@ -686,6 +696,8 @@ func Default() Config {
 			// The Service Usage API (#1352), always on beside Resource
 			// Manager: the next free port in the block.
 			ServiceUsage: 9023,
+			// The Backup and DR Service (#1433): the next free port.
+			BackupDR: 9024,
 			// OS-assigned. The port is not what enables local AI —
 			// LocalAI.ModelPath is. A configured port with no model binds
 			// nothing, so there is no endpoint answering every request with

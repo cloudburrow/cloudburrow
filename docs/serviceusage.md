@@ -16,7 +16,7 @@ The catalogue is every API this instance serves, under its `googleapis.com` name
 
 | Always | With `--services` |
 |---|---|
-| `cloudresourcemanager.googleapis.com`, `serviceusage.googleapis.com` | `storage`, `pubsub`, `cloudtasks` (tasks), `run`, `secretmanager`, `cloudkms` (kms), `cloudscheduler` (scheduler), `logging`, `firestore`, `datastore`, `bigtable` and `bigtableadmin`, `spanner`, `bigquery` and `bigquerystorage`, `redis` (memorystore), `sqladmin` (cloudsql or cloudsql-mysql) |
+| `cloudresourcemanager.googleapis.com`, `serviceusage.googleapis.com` | `storage`, `pubsub`, `cloudtasks` (tasks), `run`, `secretmanager`, `cloudkms` (kms), `cloudscheduler` (scheduler), `logging`, `firestore`, `datastore`, `bigtable` and `bigtableadmin`, `spanner`, `bigquery` and `bigquerystorage`, `redis` (memorystore), `sqladmin` (cloudsql or cloudsql-mysql), `backupdr` (backupdr, with cloudsql or cloudsql-mysql) |
 
 Every listed API starts ENABLED in every project: a local instance serves each of them to every
 project. A project's changes from that are stored in the project registry's store, so they are

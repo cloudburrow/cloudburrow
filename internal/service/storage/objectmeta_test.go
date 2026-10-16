@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"strings"
@@ -207,5 +209,35 @@ func TestStorageObjectUpdateAcceptsItsOwnStorageClass(t *testing.T) {
 	}
 	if code, resp := raw(t, "PUT", h.URL+"/storage/v1/b/raw/o/c", `{"storageClass":"COLDLINE"}`); code != 400 || !strings.Contains(resp, "storageClass") {
 		t.Errorf("update to COLDLINE = %d %s, want 400 naming storageClass", code, resp)
+	}
+}
+
+// A patch or update that restates the object's customer-supplied key is
+// accepted, as Terraform's update of a google_storage_bucket_object with
+// customer_encryption sends it (#1304); another key, or a key on an object
+// with none, is refused, as only a rewrite changes it.
+func TestStorageObjectUpdateAcceptsItsOwnCustomerKey(t *testing.T) {
+	h := rawServer(t)
+	key := strings.Repeat("k", 32)
+	sum := sha256.Sum256([]byte(key))
+	hdr := map[string]string{
+		"x-goog-encryption-algorithm":  "AES256",
+		"x-goog-encryption-key":        base64.StdEncoding.EncodeToString([]byte(key)),
+		"x-goog-encryption-key-sha256": base64.StdEncoding.EncodeToString(sum[:]),
+	}
+	upload(t, h, "uploadType=media&name=k", "text/plain", "x", hdr)
+	upload(t, h, "uploadType=media&name=plain", "text/plain", "x", nil)
+	own := `{"encryptionAlgorithm":"AES256","keySha256":"` + base64.StdEncoding.EncodeToString(sum[:]) + `"}`
+	if code, resp := raw(t, "PUT", h.URL+"/storage/v1/b/raw/o/k", `{"customerEncryption":`+own+`,"temporaryHold":true}`); code != 200 || !strings.Contains(resp, `"temporaryHold": true`) {
+		t.Errorf("update restating the key = %d %s", code, resp)
+	}
+	other := sha256.Sum256([]byte("other"))
+	for name, body := range map[string]string{
+		"k":     `{"customerEncryption":{"encryptionAlgorithm":"AES256","keySha256":"` + base64.StdEncoding.EncodeToString(other[:]) + `"}}`,
+		"plain": `{"customerEncryption":` + own + `}`,
+	} {
+		if code, resp := raw(t, "PATCH", h.URL+"/storage/v1/b/raw/o/"+name, body); code != 400 || !strings.Contains(resp, "customerEncryption") {
+			t.Errorf("patch of %s naming another key = %d %s, want 400 naming customerEncryption", name, code, resp)
+		}
 	}
 }

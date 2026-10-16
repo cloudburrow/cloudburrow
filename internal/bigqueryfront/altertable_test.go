@@ -40,7 +40,6 @@ func TestParseAlter(t *testing.T) {
 		t.Errorf("ADD COLUMN with rounding_mode: %+v, %q, %q", st.actions, unsupported, msg)
 	}
 	for sql, want := range map[string]string{
-		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":        "to an ARRAY",
 		"ALTER TABLE ds.t SET OPTIONS (enable_fine_grained_mutations=true)": "enable_fine_grained_mutations",
 		"ALTER TABLE ds.t ADD COLUMN a INT64 OPTIONS (x = 1) y":             "after the column's type",
 	} {
@@ -197,7 +196,21 @@ func TestCoercion(t *testing.T) {
 		{f("NUMERIC"), f("INTEGER"), 400},
 		{f("INTEGER"), f("STRING"), 400},
 		{f("BIGNUMERIC"), f("NUMERIC"), 400},
-		{f("INTEGER"), f("NUMERIC", "precision", "20"), 501},
+		// #1416: INT64 to a parameterized NUMERIC of 19 integer digits or
+		// more, an ARRAY's elements, a STRUCT's REPEATED field.
+		{f("INTEGER"), f("NUMERIC", "precision", "20"), 0},
+		{f("INTEGER"), f("NUMERIC", "precision", "29", "scale", "9"), 0},
+		{f("INTEGER"), f("BIGNUMERIC", "precision", "40", "scale", "20"), 0},
+		{f("INTEGER"), f("NUMERIC", "precision", "18"), 400},
+		{f("INTEGER"), f("NUMERIC", "precision", "20", "scale", "2"), 400},
+		{f("INTEGER", "mode", "REPEATED"), f("NUMERIC", "mode", "REPEATED"), 0},
+		{f("INTEGER", "mode", "REPEATED"), f("STRING", "mode", "REPEATED"), 400},
+		{f("INTEGER"), f("INTEGER", "mode", "REPEATED"), 400},
+		{f("INTEGER", "mode", "REPEATED"), f("NUMERIC"), 400},
+		{map[string]any{"type": "RECORD", "fields": []any{f("INTEGER", "name", "a", "mode", "REPEATED")}},
+			map[string]any{"type": "RECORD", "fields": []any{f("NUMERIC", "name", "a", "mode", "REPEATED")}}, 0},
+		{map[string]any{"type": "RECORD", "fields": []any{f("INTEGER", "name", "a", "mode", "REPEATED")}},
+			map[string]any{"type": "RECORD", "fields": []any{f("NUMERIC", "name", "a")}}, 400},
 	} {
 		if got, msg := coercion(c.old, c.next); got != c.want {
 			t.Errorf("%v to %v: %d %q, want %d", c.old, c.next, got, msg, c.want)

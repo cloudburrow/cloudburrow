@@ -30,8 +30,10 @@ import (
 //     does the same, each row's value CAST to the new type; a coercion
 //     BigQuery does not document is refused (coercion). The column keeps
 //     its name, mode, description and place, and the table its keys,
-//     unless a column is also renamed or dropped (then 501, below). Of a
-//     partitioning or clustering column it is 501.
+//     unless a column is also renamed or dropped (then 501, below). An
+//     ARRAY or a STRUCT is converted element by element and field by field
+//     (convertExpr), and a partitioning or clustering column is held to
+//     what the table needs of it (keyedRetype, #1416).
 //
 // Refused before anything is changed, as BigQuery refuses them (400; the
 // wording is CloudBurrow's, UNVERIFIED): a missing column without IF
@@ -112,7 +114,7 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 	type column struct {
 		from  string
 		field map[string]any
-		cast  string // SET DATA TYPE's type to read the old values as
+		old   map[string]any // SET DATA TYPE's field as it was, its values converted from (convertExpr)
 	}
 	var cols []column
 	for _, f := range raw {
@@ -152,11 +154,15 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 			case code != 0:
 				s.notImpl = alterNotImplemented("ALTER COLUMN SET DATA TYPE " + msg)
 				return &scriptFlow{}
-			case keyed[strings.ToLower(cols[i].from)]:
-				s.notImpl = alterNotImplemented("ALTER COLUMN SET DATA TYPE of a partitioning or clustering column")
-				return &scriptFlow{}
+			}
+			if msg := keyedRetype(meta, cols[i].from, a.field); msg != "" {
+				return failWith(http.StatusBadRequest, "invalidQuery", msg, text)
 			}
 			f := cols[i].field
+			orig := map[string]any{}
+			for k, v := range f {
+				orig[k] = v
+			}
 			old := canonicalType(str(f, "type"))
 			oldFields := f["fields"]
 			for _, k := range []string{"type", "maxLength", "precision", "scale", "fields"} {
@@ -165,14 +171,13 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 					f[k] = v
 				}
 			}
-			if nt := canonicalType(str(f, "type")); nt != old {
-				cols[i].cast = nt
-			}
 			if f["fields"] != nil {
 				// A STRUCT's fields keep their modes and descriptions,
 				// and take the new types (coercion checked them).
 				f["fields"] = retypeFields(oldFields, f["fields"])
-				cols[i].cast = recordType(f)
+			}
+			if canonicalType(str(f, "type")) != old || f["fields"] != nil {
+				cols[i].old = orig
 			}
 			changed = true
 			continue
@@ -205,7 +210,7 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 	if len(cols) == 0 {
 		return failWith(http.StatusBadRequest, "invalidQuery", "Cannot drop every column of table "+name+".", text)
 	}
-	if !changed {
+	if !changed || s.dry { // a dry run changes nothing (#1416, altertabledry.go)
 		return nil
 	}
 	fields := make([]any, len(cols))
@@ -213,8 +218,8 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 	for i, c := range cols {
 		fields[i] = c.field
 		from[i] = quoteName(c.from)
-		if c.cast != "" {
-			from[i] = "CAST(" + from[i] + " AS " + c.cast + ")"
+		if c.old != nil {
+			from[i] = convertExpr(from[i], c.old, c.field, 0)
 		}
 		n, _ := c.field["name"].(string)
 		to[i] = quoteName(n)
@@ -265,6 +270,9 @@ func (s *scriptRun) renameTable(src tableRef, to string, raw []any, meta map[str
 	}
 	if status, _ := f.get(r, tablePath(dest.DatasetID, dest.TableID)); status == http.StatusOK {
 		return failWith(http.StatusConflict, "duplicate", "Already Exists: Table "+s.project()+":"+src.DatasetID+"."+to, text)
+	}
+	if s.dry { // #1416, altertabledry.go
+		return nil
 	}
 	if msg := f.makeParquetTable(r, dest, map[string]any{"fields": raw}, carriedTableProperties(meta, true)); msg != "" {
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: "+msg, text)
@@ -318,6 +326,12 @@ func coercion(old, next map[string]any) (int, string) {
 		n, err := strconv.Atoi(v)
 		return n, err == nil
 	}
+	if (str(old, "mode") == "REPEATED") != (str(next, "mode") == "REPEATED") {
+		// An ARRAY to an ARRAY of a type its elements take, by these
+		// rules; a column made an ARRAY, or no longer one, is a change
+		// of mode SET DATA TYPE does not make (#1416).
+		return http.StatusBadRequest, refused
+	}
 	if ot == "RECORD" || nt == "RECORD" {
 		// "Changing the data type for a field": a STRUCT to a STRUCT of
 		// the same fields, each by these rules (#1389).
@@ -329,11 +343,8 @@ func coercion(old, next map[string]any) (int, string) {
 		for i := range of {
 			om, _ := of[i].(map[string]any)
 			nm, _ := nf[i].(map[string]any)
-			if !strings.EqualFold(str(om, "name"), str(nm, "name")) || (str(om, "mode") == "REPEATED") != (str(nm, "mode") == "REPEATED") {
+			if !strings.EqualFold(str(om, "name"), str(nm, "name")) {
 				return http.StatusBadRequest, refused
-			}
-			if str(nm, "mode") == "REPEATED" && canonicalType(str(om, "type")) != canonicalType(str(nm, "type")) {
-				return http.StatusNotImplemented, "of a REPEATED field of a STRUCT to another type"
 			}
 			if code, msg := coercion(om, nm); code != 0 {
 				return code, msg
@@ -364,8 +375,16 @@ func coercion(old, next map[string]any) (int, string) {
 			if npok && (np < op || ns < os) {
 				return http.StatusBadRequest, refused
 			}
-		case str(next, "precision") != "" || str(old, "precision") != "" && nt != "FLOAT64":
-			return http.StatusNotImplemented, "from INT64 to a parameterized NUMERIC or BIGNUMERIC, whose rule is not documented"
+		case ot == "INT64" && str(next, "precision") != "":
+			// INT64 to a parameterized NUMERIC or BIGNUMERIC (#1416): "less
+			// restrictive" is one that holds every INT64, of 19 digits,
+			// so one of at least 19 digits before its point (UNVERIFIED:
+			// the reference documents the unparameterized types only).
+			np, _ := num(next, "precision")
+			ns, _ := num(next, "scale")
+			if np-ns < 19 {
+				return http.StatusBadRequest, refused
+			}
 		}
 		return 0, ""
 	}
@@ -390,6 +409,14 @@ func coercion(old, next map[string]any) (int, string) {
 
 // describeType is a TableFieldSchema's type as the DDL writes it.
 func describeType(f map[string]any) string {
+	if str(f, "mode") == "REPEATED" {
+		e := map[string]any{}
+		for k, v := range f {
+			e[k] = v
+		}
+		delete(e, "mode")
+		return "ARRAY<" + describeType(e) + ">"
+	}
 	t := canonicalType(str(f, "type"))
 	switch {
 	case str(f, "maxLength") != "":
@@ -432,14 +459,87 @@ func retypeFields(old, next any) []any {
 	return out
 }
 
-// recordType is a RECORD TableFieldSchema's GoogleSQL type, its values
-// CAST to (sqlType).
+// convertExpr is expr, a value of the field old, converted to the field
+// next by SET DATA TYPE (coercion took it): a scalar CAST to its new type,
+// an ARRAY element by element in its order, a STRUCT field by field (a
+// NULL STRUCT stays NULL). The engine refuses a CAST of an ARRAY to an
+// ARRAY of another element type ("Casting between arrays with incompatible
+// element types is not supported", measured on the pinned image), so an
+// ARRAY is made again with ARRAY(SELECT ... FROM UNNEST ... WITH OFFSET
+// ORDER BY), which it reads (measured, #1416).
+func convertExpr(expr string, old, next map[string]any, depth int) string {
+	if str(next, "mode") == "REPEATED" {
+		elem := func(f map[string]any) map[string]any {
+			e := map[string]any{}
+			for k, v := range f {
+				e[k] = v
+			}
+			delete(e, "mode")
+			return e
+		}
+		v, o := fmt.Sprintf("`_cloudburrow_e%d`", depth), fmt.Sprintf("`_cloudburrow_o%d`", depth)
+		return "ARRAY(SELECT " + convertExpr(v, elem(old), elem(next), depth+1) + " FROM UNNEST(" + expr + ") AS " + v +
+			" WITH OFFSET AS " + o + " ORDER BY " + o + ")"
+	}
+	if canonicalType(str(next, "type")) == "RECORD" {
+		of, _ := old["fields"].([]any)
+		nf, _ := next["fields"].([]any)
+		parts := make([]string, len(nf))
+		for i, n := range nf {
+			nm, _ := n.(map[string]any)
+			om := nm
+			if i < len(of) {
+				om, _ = of[i].(map[string]any)
+			}
+			parts[i] = convertExpr(expr+"."+quoteName(str(om, "name")), om, nm, depth+1)
+		}
+		return "CASE WHEN " + expr + " IS NULL THEN NULL ELSE " + recordType(next) + "(" + strings.Join(parts, ", ") + ") END"
+	}
+	if nt := canonicalType(str(next, "type")); nt != canonicalType(str(old, "type")) {
+		return "CAST(" + expr + " AS " + nt + ")"
+	}
+	return expr
+}
+
+// recordType is a RECORD TableFieldSchema's GoogleSQL STRUCT type
+// (sqlType), whatever its mode.
 func recordType(f map[string]any) string {
 	b, _ := json.Marshal(f)
 	var fl field
 	_ = json.Unmarshal(b, &fl)
 	fl.Mode = ""
 	return sqlType(fl)
+}
+
+// keyedRetype is the 400 of ALTER COLUMN column SET DATA TYPE next, a
+// coercion BigQuery documents, of a table, meta, that column partitions or
+// clusters, or "" (#1416). The DDL reference sets no rule of its own for
+// such a column, so it is held to what the table needs of it: an
+// integer-range partitioning column is an INT64 ("The partitioning column
+// must be a top-level INTEGER field",
+// https://cloud.google.com/bigquery/docs/partitioned-tables#integer_range),
+// a clustering column of a type that clusters (clusterTypes, partitionddl.go); a time
+// partitioning column's DATE, TIMESTAMP or DATETIME has no coercion to
+// another type (coercion refuses it). The wording is CloudBurrow's,
+// UNVERIFIED.
+func keyedRetype(meta map[string]any, column string, next map[string]any) string {
+	nt := canonicalType(str(next, "type"))
+	if rp, ok := meta["rangePartitioning"].(map[string]any); ok {
+		if f, _ := rp["field"].(string); strings.EqualFold(f, column) && nt != "INT64" {
+			return "Cannot change the type of column " + column + " to " + describeType(next) +
+				": it partitions the table by integer range, and the partitioning column must be an INT64."
+		}
+	}
+	if cl, ok := meta["clustering"].(map[string]any); ok {
+		fs, _ := cl["fields"].([]any)
+		for _, f := range fs {
+			if n, _ := f.(string); strings.EqualFold(n, column) && !clusterTypes[nt] {
+				return "Cannot change the type of column " + column + " to " + describeType(next) +
+					": it clusters the table, and a clustering column cannot be of type " + nt + "."
+			}
+		}
+	}
+	return ""
 }
 
 // keepCreationTime gives ref, a table made again, the creationTime of

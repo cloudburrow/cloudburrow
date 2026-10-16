@@ -85,6 +85,7 @@ var targetEndpoints = []targetEndpoint{
 	{"SQLADMIN", envKey("CLOUDBURROW_SQLADMIN_ENDPOINT")},
 	{"CLOUDSQL_CONNECTOR", envKey("CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT")},
 	{"MEMORYSTORE_ADMIN", envKey("CLOUDBURROW_MEMORYSTORE_ENDPOINT")},
+	{"BACKUPDR", envKey("CLOUDBURROW_BACKUPDR_ENDPOINT")},
 }
 
 // normalizeEndpoint reduces an address to host:port, so that
@@ -199,8 +200,8 @@ var gcloudOverrides = []struct {
 	{"cloudtasks", []string{"TASKS"}},
 	{"cloudscheduler", []string{"SCHEDULER"}},
 	{"logging", []string{"LOGGING", "RUN_LOGGING", "SINK_LOGGING"}},
-	{"cloudresourcemanager", []string{"RESOURCEMANAGER", "LOGGING_RESOURCEMANAGER"}},
-	{"serviceusage", []string{"SERVICEUSAGE"}},
+	{"cloudresourcemanager", []string{"RESOURCEMANAGER", "LOGGING_RESOURCEMANAGER", "RUN_RESOURCEMANAGER"}},
+	{"serviceusage", []string{"SERVICEUSAGE", "RUN_SERVICEUSAGE"}},
 	{"run", []string{"RUN"}},
 	// Served on the Run port (#1347).
 	{"artifactregistry", []string{"RUN"}},
@@ -208,6 +209,7 @@ var gcloudOverrides = []struct {
 	{"cloudfunctions", []string{"RUN"}},
 	{"sql", []string{"SQLADMIN"}},
 	{"redis", []string{"MEMORYSTORE_ADMIN"}},
+	{"backupdr", []string{"BACKUPDR"}},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`

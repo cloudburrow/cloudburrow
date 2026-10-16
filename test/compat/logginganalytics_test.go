@@ -264,6 +264,8 @@ func TestGcloudLoggingLinks(t *testing.T) {
 	p := "--project=" + project
 	g.must("logging", "buckets", "create", bucketID, "--location=global", "--enable-analytics", p)
 	t.Cleanup(func() { _, _ = g.run(nil, "logging", "buckets", "delete", bucketID, "--location=global", "--quiet", p) })
+	// A log view made with gcloud is a view of the linked dataset (#1435).
+	g.must("logging", "views", "create", "errors", "--bucket="+bucketID, "--location=global", "--log-filter=severity>=ERROR", p)
 	g.must("logging", "links", "create", linkID, "--bucket="+bucketID, "--location=global", "--description=gcloud", p)
 	out := g.must("logging", "links", "describe", linkID, "--bucket="+bucketID, "--location=global", p, "--format=value(bigqueryDataset.datasetId)")
 	if want := "bigquery.googleapis.com/projects/" + project + "/datasets/" + linkID; strings.TrimSpace(out) != want {
@@ -272,8 +274,10 @@ func TestGcloudLoggingLinks(t *testing.T) {
 	if out := g.must("logging", "links", "list", "--bucket="+bucketID, "--location=global", p, "--format=value(name)"); !strings.Contains(out, linkID) {
 		t.Errorf("gcloud logging links list = %q", out)
 	}
-	if md, err := bq.Dataset(linkID).Table("_AllLogs").Metadata(ctx); err != nil || md.Type != bigquery.ViewTable {
-		t.Errorf("_AllLogs of the gcloud link = %v, %v", md, err)
+	for _, v := range []string{"_AllLogs", "errors"} {
+		if md, err := bq.Dataset(linkID).Table(v).Metadata(ctx); err != nil || md.Type != bigquery.ViewTable {
+			t.Errorf("%s of the gcloud link = %v, %v", v, md, err)
+		}
 	}
 	g.must("logging", "links", "delete", linkID, "--bucket="+bucketID, "--location=global", "--quiet", p)
 	var ge *googleapi.Error

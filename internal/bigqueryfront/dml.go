@@ -166,7 +166,15 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.refuseLinkedQuery(w, r, q, insert) { // #1423, loglinks.go
 		return
 	}
-	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.alterProjectOptions(w, r, q, insert) { // #1375, projectoptions.go
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.alterProjectOptions(w, r, q, insert) { // #1375, #1417, projectoptions.go
+		return
+	}
+	if q.UseLegacySQL != nil && *q.UseLegacySQL && f.onlyGoogleSQL(r, insert) { // #1417, projectoptions.go
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery",
+			Message: "Legacy SQL is not allowed: the project's default_sql_dialect_option is only_google_sql"})
+		return
+	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.withDefaultTimeZone(w, r, q, insert) { // #1417, timezone.go
 		return
 	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && r.Context().Value(optionsKey{}) == nil {
@@ -176,6 +184,10 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		}
 	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.checkReads(w, r, q, insert) { // #1390, tableoptions.go
+		return
+	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && !txnRequest(r) && schemataInTurn(q.Query) {
+		f.runScript(w, r, q, insert) // #1417, location.go: SCHEMATA read in its turn
 		return
 	}
 	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
@@ -247,6 +259,16 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.refuseSnapshotQuery(w, r, q, insert) { // #1002, snapshots.go
 		return
+	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && dryRun(r, insert) {
+		if stmt, ok := loneAlterTable(q.Query); ok { // #1416, altertabledry.go
+			f.dryRunAlter(w, r, q, stmt, insert)
+			return
+		}
+		if views, ok := scriptViewLists(q.Query, false); ok { // #1416, viewcolumnstemp.go
+			f.tempScriptViews(w, r, q, views, insert)
+			return
+		}
 	}
 	if q.UseLegacySQL != nil && *q.UseLegacySQL || dryRun(r, insert) {
 		f.serveQuery(w, r, q, insert)

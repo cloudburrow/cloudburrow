@@ -124,11 +124,12 @@ func TestBigQueryAlterTable(t *testing.T) {
 		}
 		// What CloudBurrow does not carry out, before anything of it runs
 		// (ADD COLUMN with DROP COLUMN is carried out since #1389).
-		err = bqRun(ctx, c, "ALTER TABLE "+ref+" ADD COLUMN late STRING, ALTER COLUMN note SET DATA TYPE ARRAY<STRING>", insert)
-		wantHTTPStatus(t, "SET DATA TYPE to an ARRAY", err, http.StatusNotImplemented)
+		// (SET DATA TYPE to an ARRAY is 400 since #1416: a change of mode.)
+		err = bqRun(ctx, c, "ALTER TABLE "+ref+" ADD COLUMN late STRING, SET OPTIONS (enable_fine_grained_mutations = TRUE)", insert)
+		wantHTTPStatus(t, "SET OPTIONS (enable_fine_grained_mutations)", err, http.StatusNotImplemented)
 		var e *googleapi.Error
 		if errors.As(err, &e) && (len(e.Errors) != 1 || e.Errors[0].Reason != "notImplemented") {
-			t.Errorf("SET DATA TYPE to an ARRAY: %+v", e.Errors)
+			t.Errorf("SET OPTIONS (enable_fine_grained_mutations): %+v", e.Errors)
 		}
 		if md, err := tbl.Metadata(ctx); err != nil || len(md.Schema) != len(want) {
 			t.Errorf("insert %v: after the 501 the table changed: %v %v", insert, md, err)

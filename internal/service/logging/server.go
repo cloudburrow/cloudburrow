@@ -376,9 +376,17 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 			}
 		}
 		s.store.mu.Unlock()
+		// Stored under the links' snapshot lock, so a linked dataset made
+		// again meanwhile has them once (analytics.go, #1435).
+		var gens map[string]uint64
+		release := func() {}
+		if s.admin != nil {
+			gens, release = s.admin.linkSync.hold()
+		}
 		s.store.append(out, routes)
+		release()
 		s.deliver(deliveries)
-		s.linkWrites(out, routes) // #1423, analytics.go
+		s.linkWrites(out, routes, gens) // #1423, analytics.go
 	}
 	if first != nil {
 		st, err := status.New(first.Code, fmt.Sprintf("%s (%d of %d entries not written)", first.Message, len(failed), len(req.GetEntries()))).
@@ -551,7 +559,7 @@ func (s *Server) ListLogs(_ context.Context, req *loggingpb.ListLogsRequest) (*l
 }
 
 // DeleteLog removes every entry of one log.
-func (s *Server) DeleteLog(_ context.Context, req *loggingpb.DeleteLogRequest) (*emptypb.Empty, error) {
+func (s *Server) DeleteLog(ctx context.Context, req *loggingpb.DeleteLogRequest) (*emptypb.Empty, error) {
 	p, err := parseLogName(req.GetLogName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -563,9 +571,15 @@ func (s *Server) DeleteLog(_ context.Context, req *loggingpb.DeleteLogRequest) (
 	s.store.mu.Lock()
 	kept := s.store.entries[:0]
 	removed := false
+	var gone []*loggingpb.LogEntry
+	goneRoutes := map[*loggingpb.LogEntry]*route{}
 	for _, e := range s.store.entries {
 		if e.GetLogName() == logName {
 			removed = true
+			gone = append(gone, e)
+			if r := s.store.routed[e]; r != nil {
+				goneRoutes[e] = r
+			}
 			delete(s.store.routed, e)
 			continue
 		}
@@ -576,6 +590,9 @@ func (s *Server) DeleteLog(_ context.Context, req *loggingpb.DeleteLogRequest) (
 	if !removed {
 		return nil, apierror.Wrap(apierror.NotFound("log %s not found", req.GetLogName()))
 	}
+	// The linked datasets of the buckets the log was in lose its rows
+	// (analytics.go, #1435).
+	s.resyncAfterDelete(ctx, gone, goneRoutes)
 	return &emptypb.Empty{}, nil
 }
 

@@ -782,6 +782,31 @@ func TestJobListGivesConfigurations(t *testing.T) {
 	}
 }
 
+// TestJobListGivesConfigurationsPastTheCap (#1419): with more jobs than
+// the configurations kept, each listed job has the configuration its list
+// read, though reading the others dropped it from those kept.
+func TestJobListGivesConfigurationsPastTheCap(t *testing.T) {
+	saved := maxJobConfigs
+	maxJobConfigs = 2
+	t.Cleanup(func() { maxJobConfigs = saved })
+	h := Wrap(&lockedEmulator{h: &bareListEmulator{jobsEmulator: &jobsEmulator{}}}) // jobs.get, several at once
+	for _, q := range []string{"SELECT 1", "SELECT 2", "SELECT 3", "SELECT 4", "SELECT 5"} {
+		if code, _ := do(t, h, "POST", base+"/queries", queryBody("/queries", q)); code != 200 {
+			t.Fatal(code)
+		}
+	}
+	_, list := do(t, h, "GET", base+"/jobs?projection=full&allUsers=true", "")
+	jobs, _ := list["jobs"].([]any)
+	if len(jobs) != 5 {
+		t.Fatalf("listed %d jobs, want 5", len(jobs))
+	}
+	for _, j := range jobs {
+		if j.(map[string]any)["configuration"] == nil {
+			t.Errorf("listed with no configuration: %v", j)
+		}
+	}
+}
+
 // bareListEmulator lists jobs as the emulator does: without their
 // configuration.
 type bareListEmulator struct {

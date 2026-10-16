@@ -443,3 +443,25 @@ func TestBigQueryInsertRowsOptions(t *testing.T) {
 		t.Errorf("Ignore unknown values = %+v, %v, sent %v; want the row without the field", res, err, inserted)
 	}
 }
+
+// TestTheBigQueryEditorsCarryProjectConfigurations (#1417): the read-write
+// editor sends ALTER PROJECT and ALTER ORGANIZATION SET OPTIONS, alone or
+// in a script, to the API, which decides; the read-only editor runs a
+// SELECT of the option views. The console has no BigQuery settings page,
+// so the editors are where the configurations are set and read.
+func TestTheBigQueryEditorsCarryProjectConfigurations(t *testing.T) {
+	for _, sql := range []string{
+		"ALTER PROJECT SET OPTIONS (`region-us.default_time_zone` = 'America/Chicago')",
+		"ALTER ORGANIZATION SET OPTIONS (`default_location` = 'EU')",
+		"DECLARE n INT64 DEFAULT 1;\nALTER PROJECT SET OPTIONS (`region-us.default_query_job_timeout_ms` = 1800000)",
+	} {
+		if kind, err := writableBigQuery(sql); err != nil || kind != "" {
+			t.Errorf("read-write editor, %s: %q %v", sql, kind, err)
+		}
+	}
+	for _, view := range []string{"PROJECT_OPTIONS", "ORGANIZATION_OPTIONS", "EFFECTIVE_PROJECT_OPTIONS"} {
+		if err := readOnlyBigQuery("SELECT option_name, option_value FROM `region-us`.INFORMATION_SCHEMA." + view); err != nil {
+			t.Errorf("read-only editor, %s: %v", view, err)
+		}
+	}
+}

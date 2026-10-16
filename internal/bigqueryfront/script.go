@@ -128,6 +128,27 @@ func (f front) rewriteQuery(w http.ResponseWriter, r *http.Request, q queryOptio
 		writeError(w, code, reason, msg)
 		return
 	}
+	if expanded && !txnRequest(r) {
+		if v := checkDDL(text); v.code == http.StatusNotImplemented {
+			// The statement EXECUTE IMMEDIATE gives is one checkDDL
+			// refuses but the front carries out before it (an ALTER
+			// TABLE, a view's column list, a materialized view, in a
+			// script with a TEMP table, which is not run in turn): the
+			// text it amounts to is served as a query of its own would
+			// be (#1416). It has no EXECUTE IMMEDIATE left to expand, so
+			// it is not served so again.
+			if !setQueryText(r, insert, text) {
+				writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
+				return
+			}
+			client := jobText{query: q.Query}
+			q.Query = text
+			rec := newRecorder()
+			f.runQuery(rec, r, q, insert)
+			f.clientText(w, rec, client)
+			return
+		}
+	}
 	if is, code, reason, msg := f.policyStatements(r, text, defaultDatasetOf(q)); is { // rowpolicies.go, #1218
 		if code != 0 {
 			f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
