@@ -104,6 +104,16 @@ func (s *Server) V1Handler(next http.Handler) http.Handler {
 	v1.HandleFunc("POST "+jobs, s.v1CreateJob)
 	v1.HandleFunc("GET "+jobs+"/{name}", s.v1GetJob)
 	v1.HandleFunc("DELETE "+jobs+"/{name}", s.v1DeleteJob)
+	v1.HandleFunc("PUT "+jobs+"/{name}", s.v1ReplaceJob)
+	v1.HandleFunc("POST "+jobs+"/{name}", s.v1RunJob)
+	execs := "/apis/run.googleapis.com/v1/namespaces/{ns}/executions"
+	v1.HandleFunc("GET "+execs, s.v1ListExecutions)
+	v1.HandleFunc("GET "+execs+"/{name}", s.v1GetExecution)
+	v1.HandleFunc("DELETE "+execs+"/{name}", s.v1DeleteExecution)
+	v1.HandleFunc("POST "+execs+"/{name}", s.v1CancelExecution)
+	tasks := "/apis/run.googleapis.com/v1/namespaces/{ns}/tasks"
+	v1.HandleFunc("GET "+tasks, s.v1ListTasks)
+	v1.HandleFunc("GET "+tasks+"/{name}", s.v1GetTask)
 	v1.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		rest.WriteError(w, apierror.Unimplemented("%s %s is not served by the Cloud Run v1 API locally", r.Method, r.URL.Path))
 	})
@@ -929,15 +939,7 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 			out.Ports = append(out.Ports, &runpb.ContainerPort{Name: p.Name, ContainerPort: int32(p.ContainerPort)})
 		}
 		for _, e := range c.Env {
-			ev := &runpb.EnvVar{Name: e.Name, Values: &runpb.EnvVar_Value{Value: e.Value}}
-			if src := e.ValueFrom; src != nil {
-				gap(src.ConfigMapKeyRef != nil, "container.env.valueFrom.configMapKeyRef")
-				if ref := src.SecretKeyRef; ref != nil {
-					ev.Values = &runpb.EnvVar_ValueSource{ValueSource: &runpb.EnvVarSource{
-						SecretKeyRef: &runpb.SecretKeySelector{Secret: ref.Name, Version: ref.Key}}}
-				}
-			}
-			out.Env = append(out.Env, ev)
+			out.Env = append(out.Env, fromV1Env(e, gap))
 		}
 		gap(len(c.EnvFrom) > 0, "container.envFrom")
 		out.LivenessProbe = fromV1Probe(c.LivenessProbe, "container.livenessProbe", gap)
@@ -973,6 +975,20 @@ func fromV1Service(in *runv1.Service, name string) (*runpb.Service, error) {
 }
 
 // servingPort is a container's first port, or 0.
+// fromV1Env converts a v1 environment variable: a value, or a Secret
+// Manager reference; a ConfigMap reference is a gap.
+func fromV1Env(e *runv1.EnvVar, gap func(bool, string)) *runpb.EnvVar {
+	ev := &runpb.EnvVar{Name: e.Name, Values: &runpb.EnvVar_Value{Value: e.Value}}
+	if src := e.ValueFrom; src != nil {
+		gap(src.ConfigMapKeyRef != nil, "container.env.valueFrom.configMapKeyRef")
+		if ref := src.SecretKeyRef; ref != nil {
+			ev.Values = &runpb.EnvVar_ValueSource{ValueSource: &runpb.EnvVarSource{
+				SecretKeyRef: &runpb.SecretKeySelector{Secret: ref.Name, Version: ref.Key}}}
+		}
+	}
+	return ev
+}
+
 func servingPort(c *runpb.Container) int32 {
 	if ps := c.GetPorts(); len(ps) > 0 {
 		return ps[0].GetContainerPort()
