@@ -231,6 +231,12 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		f.runScript(w, r, q, insert)
 		return
 	}
+	if !txnRequest(r) {
+		if views, ok := tempScriptViewLists(q.Query); ok { // #1335, viewcolumnstemp.go
+			f.tempScriptViews(w, r, q, views, insert)
+			return
+		}
+	}
 	if !txnRequest(r) && rowCountInOneRequest(q.Query) { // #1037, execimmediate.go
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: @@row_count in a script with a "+
 			"TEMP table or function. CloudBurrow keeps @@row_count when it runs a script a statement at a time, but a TEMP "+

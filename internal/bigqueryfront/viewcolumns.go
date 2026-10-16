@@ -51,7 +51,8 @@ import (
 // carried out as above. Its listed names are checked, with the script's
 // other statements, before anything runs (checkStatements). A script with
 // a TEMP table or function cannot be split, as a TEMP table lasts only
-// for the request that made it: its column list stays 501 (checkDDL).
+// for the request that made it: its column lists are put in its text
+// (#1335, viewcolumnstemp.go), as is the dry run of a lone one.
 
 // viewColumnList is a lone CREATE VIEW statement with a column list.
 type viewColumnList struct {
@@ -62,6 +63,7 @@ type viewColumnList struct {
 	path                 []string
 	columns              []string
 	ifNotExists          bool
+	orReplace            bool
 	// descriptions are the listed columns' OPTIONS(description = ...), by
 	// position (nil for none); badOption names a column option the front
 	// does not set.
@@ -121,6 +123,7 @@ func parseViewColumnList(sql string) (viewColumnList, bool) {
 	}
 	i := 1
 	if i+1 < end && t[i].is("OR") && t[i+1].is("REPLACE") {
+		v.orReplace = true
 		i += 2
 	}
 	if i >= end || !t[i].is("VIEW") {
@@ -244,12 +247,21 @@ func (v viewColumnList) aliasedQuery(fields []field) (string, string) {
 		v.query + "\n))", ""
 }
 
+// badOptionMessage is the 501 for a column option the front does not set.
+func (v viewColumnList) badOptionMessage() string {
+	return "Not implemented here: " + v.badOption + " on a column in the column list of CREATE VIEW. CloudBurrow " +
+		"sets a listed column's OPTIONS(description = 'literal'), the one column option BigQuery takes for a view, " +
+		"and nothing else, so nothing was run."
+}
+
 // createViewWithColumns carries out v, the lone statement of q (above).
 func (f front) createViewWithColumns(w http.ResponseWriter, r *http.Request, q queryOptions, v viewColumnList, insert bool) {
 	if v.badOption != "" {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+v.badOption+" on a column "+
-			"in the column list of CREATE VIEW. CloudBurrow sets a listed column's OPTIONS(description = 'literal'), "+
-			"the one column option BigQuery takes for a view, and nothing else, so nothing was run.")
+		writeError(w, http.StatusNotImplemented, "notImplemented", v.badOptionMessage())
+		return
+	}
+	if dryRun(r, insert) { // #1335
+		f.dryRunViewWithColumns(w, r, q, v, insert)
 		return
 	}
 	ds, table, ok := tableOf(q, v.path)
@@ -283,14 +295,25 @@ func (f front) createViewWithColumns(w http.ResponseWriter, r *http.Request, q q
 		_ = json.Unmarshal(rec.body.Bytes(), &job)
 	}
 	_, failed := queryFailure(rec, job)
-	if !failed && ok && !existed && v.hasDescriptions() {
-		if msg := f.setViewDescriptions(r, ds, table, v.descriptions); msg != "" {
-			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: the view was made, but its "+
-				"columns' descriptions could not be set: "+msg)
+	if !failed && ok && !existed {
+		if msg := f.madeViewWithColumns(r, ds, table, v); msg != "" {
+			writeError(w, http.StatusInternalServerError, "internalError", msg)
 			return
 		}
 	}
-	if !failed && ok && !existed && f.views != nil {
+	f.clientText(w, rec, client)
+}
+
+// madeViewWithColumns finishes the view dataset.table that v made: its
+// columns' descriptions set, and its query as written kept (viewTexts). It
+// returns why it could not, or "".
+func (f front) madeViewWithColumns(r *http.Request, ds, table string, v viewColumnList) string {
+	if v.hasDescriptions() {
+		if msg := f.setViewDescriptions(r, ds, table, v.descriptions); msg != "" {
+			return "cloudburrow: the view was made, but its columns' descriptions could not be set: " + msg
+		}
+	}
+	if f.views != nil {
 		status, got := f.get(r, tablePath(ds, table))
 		var meta struct {
 			View *struct {
@@ -302,7 +325,7 @@ func (f front) createViewWithColumns(w http.ResponseWriter, r *http.Request, q q
 				viewText{engine: meta.View.Query, client: strings.TrimSpace(v.query), explicit: true})
 		}
 	}
-	f.clientText(w, rec, client)
+	return ""
 }
 
 func (v viewColumnList) hasDescriptions() bool {
