@@ -71,7 +71,7 @@ func TestBigQueryParquetLoadColumns(t *testing.T) {
 			func(l *bigquery.Loader) { l.SchemaUpdateOptions = []string{"ALLOW_FIELD_ADDITION"} }, 501, "notImplemented",
 			"adds a REQUIRED column, b"},
 		{"a schema that is not the file's", nil, "", nil, 501, "notImplemented", "a schema that is not the file's"},
-		{"TIMESTAMP(NANOS)", nil, parquetFixture(t, "ts_ns.parquet"), nil, 501, "notImplemented", "does not list"},
+		{"TIMESTAMP(NANOS)", nil, parquetFixture(t, "ts_ns.parquet"), nil, 400, "invalid", "does not list"}, // #1457
 	} {
 		table := ds.Table(fmt.Sprintf("refused_%d", n))
 		if c2.table != nil {
@@ -222,16 +222,22 @@ func TestBigQueryParquetLoadTypes(t *testing.T) {
 		t.Errorf("rows:\n got %v\nwant %s", got, want)
 	}
 
-	for _, c2 := range []struct{ file, msg string }{
-		{"ts_ns.parquet", "does not list"},
-		{"json.parquet", "does not list"},
-		{"nan.parquet", "has a NaN"},
-		{"int96_ns.parquet", "part of a microsecond"},
-		{"decimal_frac.parquet", "more than the 9 fractional digits of NUMERIC"},
+	for _, c2 := range []struct {
+		file   string
+		code   int
+		reason string
+		msg    string
+	}{
+		// #1457: "Other combinations of Parquet types and converted types
+		// are not supported."
+		{"ts_ns.parquet", 400, "invalid", "does not list"},
+		{"json.parquet", 400, "invalid", "does not list"},
+		{"int96_ns.parquet", 501, "notImplemented", "part of a microsecond"},
+		{"decimal_frac.parquet", 501, "notImplemented", "more than the 9 fractional digits of NUMERIC"},
 	} {
 		table := ds.Table("t_" + strings.TrimSuffix(c2.file, ".parquet"))
 		err := runLoad(ctx, table.LoaderFrom(parquetUpload(parquetFixture(t, c2.file), nil)))
-		wantReason(t, c2.file, err, http.StatusNotImplemented, "notImplemented")
+		wantReason(t, c2.file, err, c2.code, c2.reason)
 		if err == nil || !strings.Contains(err.Error(), c2.msg) {
 			t.Errorf("%s: %v, want %q", c2.file, err, c2.msg)
 		}

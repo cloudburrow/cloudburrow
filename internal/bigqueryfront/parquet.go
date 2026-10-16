@@ -186,6 +186,10 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 		return notImplemented(msg)
 	}
 	for _, c := range cols {
+		if strings.HasSuffix(c.notHere, pqUnlisted) {
+			return invalid("Unsupported Parquet type: the file's column " + c.notHere + " (\"Other combinations of " +
+				"Parquet types and converted types are not supported\").")
+		}
 		if c.notHere != "" {
 			return notImplemented("of a file whose column " + c.notHere)
 		}

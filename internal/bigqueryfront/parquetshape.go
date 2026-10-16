@@ -257,6 +257,12 @@ func (o pqOptions) column(n *pqNode, prefix string) (*pqCol, error) {
 	return c, nil
 }
 
+// pqUnlisted ends the notHere of a column whose Parquet type BigQuery's
+// conversion table does not list, which BigQuery refuses (#1457): "Other
+// combinations of Parquet types and converted types are not supported"
+// (loading-data-cloud-storage-parquet, "Type conversions").
+const pqUnlisted = ", which BigQuery's Parquet conversion table does not list"
+
 // single maps node n as one value, whatever its repetition: its field has
 // no mode, but for a LIST or MAP read as an array, which is REPEATED.
 func (o pqOptions) single(n *pqNode, prefix string) (*pqCol, error) {
@@ -272,7 +278,7 @@ func (o pqOptions) single(n *pqNode, prefix string) (*pqCol, error) {
 		case why != "":
 			c.notHere = path + " is " + desc + ", " + why
 		case s.bq == "":
-			c.notHere = path + " is " + desc + ", which BigQuery's Parquet conversion table does not list"
+			c.notHere = path + " is " + desc + pqUnlisted
 		}
 		return c, nil
 	}
