@@ -84,7 +84,10 @@ func TestBigQueryStreamingBuffer(t *testing.T) {
 	}
 
 	// A decorator: the row goes to that partition once the buffer flushes.
-	now := time.Now().UTC()
+	// The front's clock, not this machine's: earlier tests move it forward
+	// (31 and 61 minutes at a time), and partitions are its days (land/96's
+	// run put the rows in the next UTC day).
+	now := advanceBigQueryClock(t, h, 0)
 	yesterday := now.AddDate(0, 0, -1).Format("20060102")
 	if err := ds.Table("buf$"+yesterday).Inserter().Put(ctx, []row{{3}}); err != nil {
 		t.Fatalf("insertAll into buf$%s: %v", yesterday, err)
