@@ -41,9 +41,9 @@ import (
 //     destination must not exist (409), must not be inside the source
 //     (400), and its parent must exist (400 failedPrecondition, UNVERIFIED).
 //   - Operations are kept by bucket and read with buckets.operations.get and
-//     list. cancel stays 501: an operation here is done when it is returned,
-//     so there is nothing to cancel. advanceRelocateBucket stays 501, as
-//     buckets.relocate does.
+//     list. A folder operation is done when it is returned, so cancel
+//     refuses it; an Anywhere Cache create and a relocation run for a while
+//     and can be cancelled (anywherecache.go, relocate.go, #1444).
 
 const (
 	folderPrefix    = "folder/"
@@ -71,6 +71,42 @@ type operationRecord struct {
 	Folder  *folderRecord `json:"folder,omitempty"`
 	// Restore is a bulk restore's counts.
 	Restore *bulkRestoreCounts `json:"restore,omitempty"`
+	// Pending is an operation not yet done (#1444): its work is due at Due,
+	// or, a relocation waiting on advanceRelocateBucket, when it is advanced.
+	Pending bool      `json:"pending,omitempty"`
+	Due     time.Time `json:"due,omitempty"`
+	// Error is a done operation's failure, a cancellation's included.
+	Error *opStatus `json:"error,omitempty"`
+	// Cancel is commonMetadata.requestedCancellation.
+	Cancel bool `json:"cancel,omitempty"`
+	// Cache is an Anywhere Cache operation's request, and Result the cache
+	// it returns.
+	Cache  *cacheOp     `json:"cache,omitempty"`
+	Result *cacheRecord `json:"result,omitempty"`
+	// Relocate is a relocation's state.
+	Relocate *relocation `json:"relocate,omitempty"`
+}
+
+// opStatus is a google.rpc.Status.
+type opStatus struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// finish makes op done at now, failed with st when it is not nil.
+func (op *operationRecord) finish(now time.Time, st *opStatus) {
+	op.Pending, op.Due, op.Ended, op.Error = false, time.Time{}, now, st
+}
+
+// updated is the operation's commonMetadata.updateTime.
+func (op operationRecord) updated() time.Time {
+	if !op.Ended.IsZero() {
+		return op.Ended
+	}
+	if op.Relocate != nil && !op.Relocate.Updated.IsZero() {
+		return op.Relocate.Updated
+	}
+	return op.Created
 }
 
 func folderKey(bucket, name string) string  { return folderPrefix + bucket + "/" + name }
@@ -412,11 +448,14 @@ func (s *Server) folderPage(bucket, prefix, delimiter, start, end, token string,
 }
 
 func (s *Server) readOperation(bucket, id string) (op operationRecord, err error) {
-	err = s.meta.View(func(tx Tx) error {
+	err = s.meta.Update(func(tx Tx) error {
 		if _, ok, err := s.getBucket(tx, bucket); err != nil {
 			return err
 		} else if !ok {
 			return notFound("The specified bucket does not exist.")
+		}
+		if err := s.settle(tx, bucket); err != nil {
+			return err
 		}
 		raw, ok := tx.Get(operationKey(bucket, id))
 		if !ok {
@@ -444,7 +483,23 @@ func (s *Server) folderJSON(r *http.Request, f folderRecord) map[string]any {
 // commonMetadata type strings are UNVERIFIED.
 func operationMetadata(op operationRecord) map[string]any {
 	common := map[string]any{"type": op.Type, "createTime": rfc3339(op.Created),
-		"endTime": rfc3339(op.Ended), "updateTime": rfc3339(op.Ended), "progressPercent": 100}
+		"updateTime": rfc3339(op.updated()), "progressPercent": 100}
+	if !op.Pending {
+		common["endTime"] = rfc3339(op.Ended)
+	}
+	if op.Cancel {
+		common["requestedCancellation"] = true
+	}
+	switch op.Type {
+	case createCacheType, updateCacheType:
+		if op.Pending {
+			// The create example's progressPercent (using-anywhere-cache).
+			common["progressPercent"] = -1
+		}
+		return cacheOpMetadata(op, common)
+	case relocateType:
+		return relocateMetadata(op, common)
+	}
 	if op.Type == bulkRestoreType {
 		n := bulkRestoreCounts{}
 		if op.Restore != nil {
@@ -464,6 +519,14 @@ func operationMetadata(op operationRecord) map[string]any {
 }
 
 func operationResponse(op operationRecord) map[string]any {
+	if op.Result != nil {
+		resp := cacheV2JSON(*op.Result)
+		resp["@type"] = "type.googleapis.com/google.storage.control.v2.AnywhereCache"
+		return resp
+	}
+	if op.Type == relocateType {
+		return map[string]any{"@type": "type.googleapis.com/google.storage.control.v2.RelocateBucketResponse"}
+	}
 	if op.Type == "RENAME_FOLDER" && op.Folder != nil {
 		resp := folderV2JSON(*op.Folder)
 		resp["@type"] = "type.googleapis.com/google.storage.control.v2.Folder"
@@ -473,10 +536,23 @@ func operationResponse(op operationRecord) map[string]any {
 }
 
 func (s *Server) operationJSON(r *http.Request, op operationRecord) map[string]any {
-	return map[string]any{
-		"kind": "storage#operation", "name": operationName(op), "done": true,
+	out := map[string]any{
+		"kind": "storage#operation", "name": operationName(op), "done": !op.Pending,
 		"selfLink": baseURL(r) + jsonPrefix + "b/" + escape(op.Bucket) + "/operations/" + op.ID,
-		"metadata": operationMetadata(op), "response": operationResponse(op),
+		"metadata": operationMetadata(op),
+	}
+	addOperationResult(out, op)
+	return out
+}
+
+// addOperationResult sets a done operation's response or error.
+func addOperationResult(out map[string]any, op operationRecord) {
+	switch {
+	case op.Pending:
+	case op.Error != nil:
+		out["error"] = map[string]any{"code": op.Error.Code, "message": op.Error.Message}
+	default:
+		out["response"] = operationResponse(op)
 	}
 }
 
@@ -640,11 +716,14 @@ func (s *Server) operationsList(w http.ResponseWriter, r *http.Request) {
 	after := q.Get("pageToken")
 	var items []any
 	next := ""
-	err = s.meta.View(func(tx Tx) error {
+	err = s.meta.Update(func(tx Tx) error {
 		if _, ok, err := s.getBucket(tx, bucket); err != nil {
 			return err
 		} else if !ok {
 			return notFound("The specified bucket does not exist.")
+		}
+		if err := s.settle(tx, bucket); err != nil {
+			return err
 		}
 		last := ""
 		for _, k := range tx.List(operationPrefix + bucket + "/") {
