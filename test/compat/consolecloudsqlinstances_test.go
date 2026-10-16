@@ -223,8 +223,8 @@ func TestConsoleCloudSQLInstanceEditAndBackups(t *testing.T) {
 
 // TestConsoleCloudSQLReadReplica (#1330): Create read replica on a
 // primary's page makes a replica the official client reads as one; the
-// replica's page shows its primary and offers Promote and Stop
-// replication; Stop replication and then Start replication are read back as
+// replica's page shows its primary and offers Promote, Stop replication
+// and Create read replica, a cascading replica (#1381); Stop replication and then Start replication are read back as
 // databaseReplicationEnabled, and Promote leaves a standalone primary.
 func TestConsoleCloudSQLReadReplica(t *testing.T) {
 	h := New(t)
@@ -276,7 +276,7 @@ func TestConsoleCloudSQLReadReplica(t *testing.T) {
 		return in.InstanceType == "READ_REPLICA_INSTANCE" && in.MasterInstanceName == project+":"+name
 	})
 	d := consoleDetailOf(t, addr, "cloudsql-instances", project, replica)
-	if !d.offers("promote-replica") || !d.offers("stop-replica") || d.offers("create-replica") ||
+	if !d.offers("promote-replica") || !d.offers("stop-replica") || !d.offers("create-replica") ||
 		d.summary("Primary instance") != project+":"+name {
 		t.Errorf("the replica's page: %+v", d)
 	}
@@ -355,5 +355,99 @@ func TestConsoleCloudSQLPointInTimeRestore(t *testing.T) {
 	running(name + "-pit")
 	if rows := sqlBackupRows(t, h, c, project+":us-central1:"+name+"-pit"); len(rows) != 1 || rows[0] != "1=a" {
 		t.Errorf("rows in the console's point-in-time restore: %v, want [1=a]", rows)
+	}
+}
+
+// TestConsoleCloudSQLVersionsAndUpgrade (#1381): the Create instance
+// form's version picker lists every served version of the engines this
+// instance runs; an instance created from it as POSTGRES_15 in
+// europe-west1 is read by the official client (sqladmin/v1) with that
+// version and region, its page offers Upgrade with the newer versions, and
+// Upgrade to POSTGRES_16 is read back as the new version, the server
+// reporting POSTGRES_16_15. The page of the newest version offers none.
+func TestConsoleCloudSQLVersionsAndUpgrade(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" {
+		t.Skip("needs --services cloudsql")
+	}
+	addr := consoleAddr(t, h)
+	svc := sqlAdminService(t, h)
+	project := h.Project()
+	code, body := consoleDo(t, addr, http.MethodGet, "/api/services", "")
+	if code != http.StatusOK {
+		t.Fatalf("services = %d", code)
+	}
+	var listing struct {
+		Services []struct {
+			ID     string
+			Create json.RawMessage
+		}
+	}
+	if err := json.Unmarshal([]byte(body), &listing); err != nil {
+		t.Fatal(err)
+	}
+	var picker []string
+	for _, s := range listing.Services {
+		var form struct {
+			Fields []struct {
+				Name    string
+				Options []string
+			}
+		}
+		if s.ID == "cloudsql-instances" && json.Unmarshal(s.Create, &form) == nil {
+			for _, f := range form.Fields {
+				if f.Name == "databaseVersion" {
+					picker = f.Options
+				}
+			}
+		}
+	}
+	want := []string{"POSTGRES_13", "POSTGRES_14", "POSTGRES_15", "POSTGRES_16", "POSTGRES_17", "POSTGRES_18"}
+	if os.Getenv(EnvMySQL) != "" {
+		want = append(want, "MYSQL_8_0", "MYSQL_8_4")
+	}
+	if strings.Join(picker, ",") != strings.Join(want, ",") {
+		t.Errorf("the version picker lists %v, want %v", picker, want)
+	}
+	name := fmt.Sprintf("console-v-%d", time.Now().UnixNano()%1e6)
+	code, out := consoleCreate(t, addr, "cloudsql-instances", project, map[string]string{
+		"name": name, "databaseVersion": "POSTGRES_15", "tier": "db-custom-1-3840", "region": "europe-west1"})
+	if code != http.StatusOK {
+		t.Fatalf("console create = %d: %s", code, out)
+	}
+	t.Cleanup(func() {
+		if op, err := svc.Instances.Delete(project, name).Do(); err == nil {
+			waitSQLOp(t, svc, project, op)
+		}
+	})
+	get := func(want func(*sqladmin.DatabaseInstance) bool) *sqladmin.DatabaseInstance {
+		t.Helper()
+		var in *sqladmin.DatabaseInstance
+		var err error
+		for i := 0; i < 240; i++ {
+			if in, err = svc.Instances.Get(project, name).Do(); err == nil && in.State == "RUNNABLE" && want(in) {
+				return in
+			}
+			time.Sleep(time.Second)
+		}
+		t.Fatalf("instance: %+v %v", in, err)
+		return nil
+	}
+	in := get(func(in *sqladmin.DatabaseInstance) bool { return true })
+	if in.DatabaseVersion != "POSTGRES_15" || in.Region != "europe-west1" || in.ConnectionName != project+":europe-west1:"+name {
+		t.Errorf("created: version %s region %s connection %s", in.DatabaseVersion, in.Region, in.ConnectionName)
+	}
+	if d := consoleDetailOf(t, addr, "cloudsql-instances", project, name); !d.offers("upgrade") {
+		t.Errorf("the page of a POSTGRES_15 instance offers %+v", d.Actions)
+	}
+	body2, _ := json.Marshal(map[string]any{"Path": []string{name}, "Action": "upgrade", "Values": map[string]string{"databaseVersion": "POSTGRES_16"}})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/actions/cloudsql-instances?project="+project, string(body2)); code != http.StatusOK {
+		t.Fatalf("console upgrade = %d: %s", code, out)
+	}
+	get(func(in *sqladmin.DatabaseInstance) bool {
+		return in.DatabaseVersion == "POSTGRES_16" && in.DatabaseInstalledVersion == "POSTGRES_16_15"
+	})
+	if d := consoleDetailOf(t, addr, "cloudsql-instances", project, "postgres"); d.offers("upgrade") {
+		t.Errorf("the page of the server up runs offers Upgrade")
 	}
 }

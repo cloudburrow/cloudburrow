@@ -17,6 +17,9 @@ func TestComponentImagesArePinnedByDigest(t *testing.T) {
 		"CloudSQLImage": CloudSQLImage, "MemorystoreImage": MemorystoreImage,
 		"CloudSQLMySQLImage":      CloudSQLMySQLImage,
 		"MemorystoreRedis62Image": MemorystoreRedis62Image, "MemorystoreRedis70Image": MemorystoreRedis70Image,
+		"CloudSQLPostgres13Image": CloudSQLPostgres13Image, "CloudSQLPostgres14Image": CloudSQLPostgres14Image,
+		"CloudSQLPostgres15Image": CloudSQLPostgres15Image, "CloudSQLPostgres16Image": CloudSQLPostgres16Image,
+		"CloudSQLPostgres18Image": CloudSQLPostgres18Image, "CloudSQLMySQL80Image": CloudSQLMySQL80Image,
 	} {
 		_, digest, ok := strings.Cut(image, "@sha256:")
 		if !ok || len(digest) != 64 {

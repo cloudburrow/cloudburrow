@@ -9,11 +9,8 @@ import (
 	"strings"
 )
 
-// servedVersions are the database versions CloudBurrow runs.
-var servedVersions = map[string]bool{"POSTGRES_17": true, "MYSQL_8_4": true}
-
 func listFlags(version string) (any, error) {
-	if version != "" && !servedVersions[version] {
+	if version != "" && !SupportedVersions[version] {
 		if strings.HasPrefix(version, "POSTGRES_") || strings.HasPrefix(version, "MYSQL_") || strings.HasPrefix(version, "SQLSERVER_") {
 			return map[string]any{"kind": "sql#flagsList", "items": []any{}}, nil
 		}

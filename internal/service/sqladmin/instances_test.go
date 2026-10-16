@@ -99,7 +99,8 @@ func TestInstanceWritesThroughTheGoClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, bad := range []*sqladmin.DatabaseInstance{
-		{Name: "xy", DatabaseVersion: "POSTGRES_15", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
+		{Name: "xy", DatabaseVersion: "POSTGRES_12", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
+		{Name: "xy", DatabaseVersion: "MYSQL_5_7", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
 		{Name: "xy", DatabaseVersion: "SQLSERVER_2019_STANDARD", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
 		{Name: "xy", DatabaseVersion: "POSTGRES_17", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}, MasterInstanceName: "pg",
 			ReplicaConfiguration: &sqladmin.ReplicaConfiguration{FailoverTarget: true}},

@@ -239,6 +239,114 @@
           "BQML is refused ('Statement not supported: CreateModelStatement'). DML and scripting worked in a probe but are not SDK-verified."
         ]
       },
+      "cloudSQLPostgres13": {
+        "$comment": "PostgreSQL 13.23, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
+        "image": "postgres:13-alpine",
+        "version": "13.23",
+        "digest": "sha256:fb9065b6e3e213bdc07edd372a5b2a26245840b7fb65d1fd8b6700106d51805c",
+        "source": "https://hub.docker.com/_/postgres",
+        "license": "PostgreSQL License (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A real SQL server for a created Cloud SQL instance. NOT the Cloud SQL Admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
+      "cloudSQLPostgres14": {
+        "$comment": "PostgreSQL 14.24, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
+        "image": "postgres:14-alpine",
+        "version": "14.24",
+        "digest": "sha256:4ea9e5ed06591da7ea23eb65465e8d3187fe79f4d5ec3ae976d29a33b013e77a",
+        "source": "https://hub.docker.com/_/postgres",
+        "license": "PostgreSQL License (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A real SQL server for a created Cloud SQL instance. NOT the Cloud SQL Admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
+      "cloudSQLPostgres15": {
+        "$comment": "PostgreSQL 15.19, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
+        "image": "postgres:15-alpine",
+        "version": "15.19",
+        "digest": "sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81",
+        "source": "https://hub.docker.com/_/postgres",
+        "license": "PostgreSQL License (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A real SQL server for a created Cloud SQL instance. NOT the Cloud SQL Admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
+      "cloudSQLPostgres16": {
+        "$comment": "PostgreSQL 16.15, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
+        "image": "postgres:16-alpine",
+        "version": "16.15",
+        "digest": "sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea",
+        "source": "https://hub.docker.com/_/postgres",
+        "license": "PostgreSQL License (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A real SQL server for a created Cloud SQL instance. NOT the Cloud SQL Admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
+      "cloudSQLPostgres18": {
+        "$comment": "PostgreSQL 18.6, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
+        "image": "postgres:18-alpine",
+        "version": "18.6",
+        "digest": "sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873",
+        "source": "https://hub.docker.com/_/postgres",
+        "license": "PostgreSQL License (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A real SQL server for a created Cloud SQL instance. NOT the Cloud SQL Admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
+      "cloudSQLMySQL80": {
+        "$comment": "MySQL 8.0.46, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
+        "image": "mysql:8.0",
+        "version": "8.0.46",
+        "digest": "sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b",
+        "source": "https://hub.docker.com/_/mysql",
+        "license": "GPL-2.0 with the Universal FOSS Exception (the server); the image also carries Oracle Linux and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A real SQL server for a created Cloud SQL instance. NOT the Cloud SQL Admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Re-resolve the digest with `docker buildx imagetools inspect`."
+      },
       "cloudSQLMySQL": {
         "$comment": "MySQL, run in the cluster for the Cloud SQL for MySQL service (#297). NOT a Google-published component: Google publishes no Cloud SQL emulator.",
         "image": "mysql:8.4",

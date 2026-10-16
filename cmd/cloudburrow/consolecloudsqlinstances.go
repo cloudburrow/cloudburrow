@@ -33,8 +33,8 @@ type cloudSQLInstancesProvider struct {
 func (cloudSQLInstancesProvider) ID() string    { return "cloudsql-instances" }
 func (cloudSQLInstancesProvider) Title() string { return "Cloud SQL instances" }
 
-const cloudSQLInstancesNote = "Each created instance is a server of its own, from the image `up` runs " +
-	"(PostgreSQL 17 or MySQL 8.4), reached through the connectors on port 3307. The instances `up` runs " +
+const cloudSQLInstancesNote = "Each created instance is a server of its own, from the official image of its " +
+	"database version (PostgreSQL 13 to 18, MySQL 8.0 or 8.4), reached through the connectors on port 3307. The instances `up` runs " +
 	"(postgres, mysql) cannot be edited or deleted here. A backup is a dump of the server's databases, kept on the host; " +
 	"point-in-time recovery, replicas, IAM authentication and failover do not exist here."
 
@@ -84,14 +84,18 @@ func (p cloudSQLInstancesProvider) List(ctx context.Context, project string) (co
 // CreateForm implements console.Creator: what instances.insert takes here.
 func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
 	def := ""
-	if len(p.versions) > 0 {
-		def = p.versions[0]
+	for _, v := range p.versions {
+		if def == "" || v == "POSTGRES_17" {
+			def = v
+		}
 	}
 	return "Create instance", []console.Field{
 		{Name: "name", Label: "Instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
 			Help: "Lowercase letters, digits and hyphens, starting with a letter."},
 		{Name: "databaseVersion", Label: "Database version", Type: "select", Required: true, Options: p.versions, Default: def,
-			Help: "The versions of the images this instance runs."},
+			Help: "Each version is the official image of that major version, pulled when an instance of it is first created."},
+		{Name: "region", Label: "Region", Type: "text", Default: "us-central1", Pattern: "^[a-z]+(-[a-z]+)+[0-9]+$",
+			Help: "Reported, and part of the connection name; every server runs in this cluster."},
 		{Name: "tier", Label: "Machine type (tier)", Type: "text", Required: true, Default: "db-custom-1-3840",
 			Help: "Recorded and reported; the server is not sized by it."},
 		{Name: "rootPassword", Label: "Root password (MySQL)", Type: "password",
@@ -154,7 +158,7 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 		pitrConfig(st.BackupConfiguration, v["databaseVersion"], true)
 	}
 	_, err = svc.Instances.Insert(project, &sqladminapi.DatabaseInstance{
-		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: "us-central1", Settings: st,
+		Name: name, DatabaseVersion: v["databaseVersion"], RootPassword: v["rootPassword"], Region: regionOr(v["region"]), Settings: st,
 	}).Context(ctx).Do()
 	if err != nil {
 		return "", sqlAPIError(err)
@@ -314,6 +318,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Sections = []console.Section{{ID: "backups", Label: "Backups", Kind: console.KindListing, Listing: runs},
 		{ID: "client-certificates", Label: "Client certificates", Kind: console.KindListing, Listing: certs}}
 	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
+	d.Actions = append(d.Actions, upgradeActions(in)...)
 	if pitr == "On" {
 		d.Actions = append(d.Actions, console.Action{ID: "pitr-restore", Label: "Point-in-time restore", Fields: []console.Field{
 			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
@@ -426,18 +431,39 @@ func (p cloudSQLInstancesProvider) Edit(ctx context.Context, project string, pat
 // replicaActions are Create read replica on a primary, and Promote, Stop
 // replication and Start replication on a read replica (#1330).
 func replicaActions(in *sqladminapi.DatabaseInstance) []console.Action {
+	create := console.Action{ID: "create-replica", Label: "Create read replica", Fields: []console.Field{{Name: "replica",
+		Label: "Replica instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
+		Help: "A new instance replicating from this one by the engine's own replication; it takes no writes. " +
+			"A replica of a replica is a cascading replica (#1381)."},
+		{Name: "region", Label: "Region", Type: "text", Default: in.Region, Pattern: "^[a-z]+(-[a-z]+)+[0-9]+$",
+			Help: "Another region makes a cross-region replica; the server runs in this cluster either way."}}}
 	if in.MasterInstanceName == "" {
-		return []console.Action{{ID: "create-replica", Label: "Create read replica", Fields: []console.Field{{Name: "replica",
-			Label: "Replica instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
-			Help: "A new instance replicating from this one by the engine's own replication; it takes no writes."}}}}
+		return []console.Action{create}
 	}
-	acts := []console.Action{{ID: "promote-replica", Label: "Promote", Destructive: true,
+	acts := []console.Action{create, {ID: "promote-replica", Label: "Promote", Destructive: true,
 		Confirm: "Promoting stops replication from the primary for good: the replica becomes a standalone primary that takes writes."}}
 	if st := in.Settings; st != nil && !st.DatabaseReplicationEnabled {
 		return append(acts, console.Action{ID: "start-replica", Label: "Start replication"})
 	}
 	return append(acts, console.Action{ID: "stop-replica", Label: "Stop replication",
 		Confirm: "The replica stops applying the primary's changes until replication is started again."})
+}
+
+// upgradeActions is Upgrade, a major version upgrade through
+// instances.patch with a newer databaseVersion (#1381), offered with the
+// instance's upgradableDatabaseVersions.
+func upgradeActions(in *sqladminapi.DatabaseInstance) []console.Action {
+	var opts []string
+	for _, v := range in.UpgradableDatabaseVersions {
+		opts = append(opts, v.MajorVersion)
+	}
+	if len(opts) == 0 {
+		return nil
+	}
+	return []console.Action{{ID: "upgrade", Label: "Upgrade", Destructive: true,
+		Confirm: "The server is replaced by one of the new major version and its data loaded into it; connections are closed meanwhile.",
+		Fields: []console.Field{{Name: "databaseVersion", Label: "Database version", Type: "select", Required: true,
+			Options: opts, Default: opts[len(opts)-1]}}}}
 }
 
 // transferActions are Export and Import (#1380), to and from the
@@ -574,7 +600,9 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 		_, err = svc.BackupRuns.Delete(project, name, id).Context(ctx).Do()
 	case "create-replica":
 		_, err = svc.Instances.Insert(project, &sqladminapi.DatabaseInstance{Name: strings.TrimSpace(v["replica"]),
-			MasterInstanceName: name, InstanceType: "READ_REPLICA_INSTANCE"}).Context(ctx).Do()
+			MasterInstanceName: name, InstanceType: "READ_REPLICA_INSTANCE", Region: strings.TrimSpace(v["region"])}).Context(ctx).Do()
+	case "upgrade":
+		_, err = svc.Instances.Patch(project, name, &sqladminapi.DatabaseInstance{DatabaseVersion: v["databaseVersion"]}).Context(ctx).Do()
 	case "promote-replica":
 		_, err = svc.Instances.PromoteReplica(project, name).Context(ctx).Do()
 	case "stop-replica":
@@ -622,3 +650,10 @@ var (
 	_ console.Creator     = cloudSQLInstancesProvider{}
 	_ console.Deleter     = cloudSQLInstancesProvider{}
 )
+
+func regionOr(r string) string {
+	if r = strings.TrimSpace(r); r != "" {
+		return r
+	}
+	return "us-central1"
+}

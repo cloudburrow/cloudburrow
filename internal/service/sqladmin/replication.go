@@ -198,7 +198,8 @@ func (s *Server) prepareReplica(ctx context.Context, project string, b instanceB
 			return unimplemented("failover replicas", haWhy)
 		}
 		if rc.Cascadable {
-			return unimplemented("cascadable replicas", "a replica of a replica is not served")
+			return unimplemented("cascadableReplica", "it is SQL Server's setting; a MySQL or PostgreSQL replica of a replica "+
+				"is created with masterInstanceName naming the replica")
 		}
 		if len(rc.Mysql) > 0 {
 			return unimplemented("replicas of an external server", "a replica's primary is an instance of this API")
@@ -206,9 +207,6 @@ func (s *Server) prepareReplica(ctx context.Context, project string, b instanceB
 	}
 	if b.InstanceType != "" && b.InstanceType != "READ_REPLICA_INSTANCE" {
 		return Errorf(http.StatusBadRequest, "Invalid request: an instance with masterInstanceName must have instanceType READ_REPLICA_INSTANCE.")
-	}
-	if b.Region != "" && b.Region != Region {
-		return unimplemented("cross-region replicas", "every instance is in "+Region)
 	}
 	master, err := masterName(project, b.MasterInstanceName)
 	if err != nil {
@@ -221,11 +219,21 @@ func (s *Server) prepareReplica(ctx context.Context, project string, b instanceB
 	if pe == nil || (pc != nil && pc.spec.Project != project) {
 		return Errorf(http.StatusNotFound, "The Cloud SQL instance does not exist.")
 	}
-	if pc != nil && pc.spec.MasterInstanceName != "" {
-		return unimplemented("cascading replicas", "a replica of a replica is not served; create the replica from the primary "+pc.spec.MasterInstanceName)
-	}
 	if pc != nil && pc.state != "RUNNABLE" {
 		return Errorf(http.StatusConflict, "Operation failed because the primary instance is %s.", pc.state)
+	}
+	// A cascading replica (#1381): its primary is itself a replica, and
+	// it replicates from that replica, as Cloud SQL's do.
+	cascading := pc != nil && pc.spec.MasterInstanceName != ""
+	if cascading {
+		if pc.spec.MasterUp {
+			return unimplemented("a replica of "+master, "a replica of a replica of a server `cloudburrow up` runs is not built; "+
+				"create the replicas from an instance created with instances.insert")
+		}
+		if d := s.replicaDepthLocked(project, master); d >= maxReplicaDepth {
+			return Errorf(http.StatusBadRequest, "Invalid request: %s is already at level %d of its replication chain; "+
+				"Cloud SQL allows at most %d levels of cascading replicas.", master, d, maxReplicaDepth)
+		}
 	}
 	if spec.DatabaseVersion == "" {
 		spec.DatabaseVersion = pe.DatabaseVersion()
@@ -239,6 +247,10 @@ func (s *Server) prepareReplica(ctx context.Context, project string, b instanceB
 	}
 	spec.MasterInstanceName = master
 	spec.MasterUp = pc == nil
+	if b.Region == "" && pc != nil {
+		// A replica is in its primary's region unless it is given one.
+		spec.Region = pc.spec.Region
+	}
 	if spec.Tier == "" {
 		spec.Tier = "db-custom-1-3840"
 		if pc != nil {
@@ -250,8 +262,103 @@ func (s *Server) prepareReplica(ctx context.Context, project string, b instanceB
 		spec.RootPassword = m.RootPassword
 	}
 	spec.ReplicationPassword = newReplicationPassword()
-	if err := r.PrepareReplicationSource(ctx, spec.ReplicationPassword); err != nil {
+	if cascading {
+		if c, ok := pe.(cascader); ok {
+			err = c.PrepareCascadingSource(ctx, spec.ReplicationPassword)
+		} else {
+			err = unimplemented("a replica of "+master, "its server cannot be a cascading replication source")
+		}
+	} else {
+		err = r.PrepareReplicationSource(ctx, spec.ReplicationPassword)
+	}
+	if err != nil {
 		return fmt.Errorf("prepare %s as a replication source: %w", master, err)
+	}
+	return nil
+}
+
+// maxReplicaDepth is how many levels of replicas Cloud SQL allows under a
+// primary: "up to four levels of replicas" (cascading replicas,
+// docs.cloud.google.com/sql/docs/mysql/replication/create-replica).
+const maxReplicaDepth = 4
+
+// replicaDepthLocked is name's level in its replication chain: 0 for a
+// primary, 1 for its replica, and so on. Called with emu held.
+func (s *Server) replicaDepthLocked(project, name string) int {
+	d := 0
+	for i := 0; i < 16; i++ {
+		c := s.writes.byName[name]
+		if c == nil || c.spec.Project != project || c.spec.MasterInstanceName == "" {
+			return d
+		}
+		d++
+		name = c.spec.MasterInstanceName
+	}
+	return d
+}
+
+// cascader is an Engine that, while a replica, can be the source of a
+// replica of its own.
+type cascader interface {
+	// PrepareCascadingSource lets a replica of this replica connect as
+	// ReplicaUser with password, writing nothing to the replication
+	// stream: the replica's data stays its primary's.
+	PrepareCascadingSource(ctx context.Context, password string) error
+}
+
+// PrepareCascadingSource checks a standby can be a source. Its
+// replication role and pg_hba.conf line are its primary's, copied by
+// pg_basebackup; a standby cannot write its own, and needs none, since a
+// replication connection is trusted.
+func (p *Postgres) PrepareCascadingSource(ctx context.Context, _ string) error {
+	ctx, cancel := context.WithTimeout(ctx, engineTimeout)
+	defer cancel()
+	c, err := p.conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer c.Close(context.Background())
+	var exists bool
+	if err := c.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1 AND rolreplication)", ReplicaUser).Scan(&exists); err != nil {
+		return pgError(err)
+	}
+	if !exists {
+		return Errorf(http.StatusConflict, "the replica has no replication role %s yet", ReplicaUser)
+	}
+	return nil
+}
+
+// PrepareCascadingSource creates the replication user on a MySQL replica
+// with its binary log off for the session, so the account is the
+// replica's alone and adds no GTID of its own to the stream its replicas
+// apply (an errant transaction, in MySQL's words). A replica logs the
+// transactions it applies (log_replica_updates, on by default since 8.0),
+// which is what its replicas replicate.
+func (m *MySQL) PrepareCascadingSource(ctx context.Context, password string) error {
+	ctx, cancel := context.WithTimeout(ctx, engineTimeout)
+	defer cancel()
+	db, err := m.db()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return myError(err)
+	}
+	defer conn.Close()
+	for _, st := range []string{
+		"SET SESSION sql_log_bin = 0",
+		"SET GLOBAL super_read_only = OFF",
+		"CREATE USER IF NOT EXISTS '" + ReplicaUser + "'@'%' IDENTIFIED BY " + myString(password),
+		"ALTER USER '" + ReplicaUser + "'@'%' IDENTIFIED BY " + myString(password),
+		"GRANT REPLICATION SLAVE, REPLICATION CLIENT, SELECT, RELOAD, SHOW VIEW, TRIGGER, EVENT, PROCESS ON *.* TO '" + ReplicaUser + "'@'%'",
+		"SET GLOBAL super_read_only = ON",
+	} {
+		if _, err := conn.ExecContext(ctx, st); err != nil {
+			_, _ = conn.ExecContext(ctx, "SET GLOBAL super_read_only = ON")
+			return myError(err)
+		}
 	}
 	return nil
 }

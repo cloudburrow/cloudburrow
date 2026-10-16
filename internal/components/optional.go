@@ -103,6 +103,36 @@ const (
 	CloudSQLMySQLPort  = 3306
 )
 
+// The servers of the other database versions an Admin API instance can
+// be created with (#1381): each the official image of that major version,
+// pinned by its index digest (linux/amd64 and linux/arm64), at the minor
+// version Cloud SQL lists for it (docs.cloud.google.com/sql/docs/db-versions,
+// 2026-10-16). Like CloudSQLImage, none is Google-published. A node pulls
+// one only when an instance of its version is created. MySQL 5.7 has none:
+// its official image was last built in 2023 (5.7.44, linux/amd64 only)
+// and is not maintained.
+const (
+	CloudSQLPostgres13Image = "postgres:13-alpine@sha256:fb9065b6e3e213bdc07edd372a5b2a26245840b7fb65d1fd8b6700106d51805c" // 13.23
+	CloudSQLPostgres14Image = "postgres:14-alpine@sha256:4ea9e5ed06591da7ea23eb65465e8d3187fe79f4d5ec3ae976d29a33b013e77a" // 14.24
+	CloudSQLPostgres15Image = "postgres:15-alpine@sha256:f7d23353e1b15400d22ebe31189f4d314b87a4c129cc400c8c2d8d4ca127bf81" // 15.19
+	CloudSQLPostgres16Image = "postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea" // 16.15
+	CloudSQLPostgres18Image = "postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873" // 18.6
+	CloudSQLMySQL80Image    = "mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b"          // 8.0.46
+)
+
+// CloudSQLVersionImages are the images of the Cloud SQL databaseVersion
+// values a created instance can have, by that value.
+var CloudSQLVersionImages = map[string]string{
+	"POSTGRES_13": CloudSQLPostgres13Image,
+	"POSTGRES_14": CloudSQLPostgres14Image,
+	"POSTGRES_15": CloudSQLPostgres15Image,
+	"POSTGRES_16": CloudSQLPostgres16Image,
+	"POSTGRES_17": CloudSQLImage,
+	"POSTGRES_18": CloudSQLPostgres18Image,
+	"MYSQL_8_0":   CloudSQLMySQL80Image,
+	"MYSQL_8_4":   CloudSQLMySQLImage,
+}
+
 // OptionalBackend returns the backend for an opt-in service, and whether one
 // exists.
 func OptionalBackend(s config.Service, project string, persistent bool) (Backend, bool) {
@@ -596,9 +626,11 @@ type SQLInstanceFlag struct{ Name, Value string }
 // cloudSQLBackend or CloudSQLMySQLBackend, under its own name, with
 // Cloud SQL's default user for the engine (postgres, or root with
 // rootPassword) and its database flags passed to the server, as -c
-// name=value to postgres and --name=value to mysqld. mysql is which engine.
-func CloudSQLInstanceBackend(name string, mysql, persistent bool, rootPassword string, flags []SQLInstanceFlag) Backend {
+// name=value to postgres and --name=value to mysqld, on the image of its
+// databaseVersion, version (CloudSQLVersionImages).
+func CloudSQLInstanceBackend(name, version string, persistent bool, rootPassword string, flags []SQLInstanceFlag) Backend {
 	var b Backend
+	mysql := strings.HasPrefix(version, "MYSQL_")
 	if mysql {
 		b = CloudSQLMySQLBackend(persistent, MySQLCredentials{RootPassword: rootPassword})
 		b.Env = map[string]string{"MYSQL_ROOT_PASSWORD": rootPassword}
@@ -620,6 +652,9 @@ func CloudSQLInstanceBackend(name string, mysql, persistent bool, rootPassword s
 				b.Args = append(b.Args, "-c", f.Name+"="+f.Value)
 			}
 		}
+	}
+	if img, ok := CloudSQLVersionImages[version]; ok {
+		b.Image = img
 	}
 	b.Name = SQLInstancePrefix + name
 	return b
