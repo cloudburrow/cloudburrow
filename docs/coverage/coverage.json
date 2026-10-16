@@ -4095,8 +4095,7 @@
     "Key": "vertexai",
     "Title": "Vertex AI PredictionService",
     "counts": {
-      "Unimplemented": 1,
-      "Verified": 13
+      "Verified": 14
     },
     "rows": [
       {
@@ -4123,8 +4122,11 @@
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/Explain",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/predictiongrpc_test.go:203 TestConsoleExplainMatchesThePredictionClient",
+          "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
+        ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/GenerateContent",
@@ -4137,14 +4139,14 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/Predict",
         "status": "Verified",
         "tests": [
-          "test/compat/predictiongrpc_test.go:59 TestPredictionClientReachesACustomEndpoint"
+          "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
         ]
       },
       {
         "method": "google.cloud.aiplatform.v1.PredictionService/RawPredict",
         "status": "Verified",
         "tests": [
-          "test/compat/predictiongrpc_test.go:59 TestPredictionClientReachesACustomEndpoint",
+          "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint",
           "test/compat/rawpredict_test.go:26 TestRawPredictOnTheEmbeddingModel",
           "test/compat/rawpredict_test.go:70 TestRawPredictOnTheGenerationModel"
         ]

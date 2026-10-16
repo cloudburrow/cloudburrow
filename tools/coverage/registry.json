@@ -2,7 +2,7 @@
   "google.cloud.aiplatform.v1.PredictionService/DirectPredict": "implemented",
   "google.cloud.aiplatform.v1.PredictionService/DirectRawPredict": "implemented",
   "google.cloud.aiplatform.v1.PredictionService/EmbedContent": "implemented",
-  "google.cloud.aiplatform.v1.PredictionService/Explain": "unimplemented",
+  "google.cloud.aiplatform.v1.PredictionService/Explain": "implemented",
   "google.cloud.aiplatform.v1.PredictionService/GenerateContent": "implemented",
   "google.cloud.aiplatform.v1.PredictionService/Predict": "implemented",
   "google.cloud.aiplatform.v1.PredictionService/RawPredict": "implemented",

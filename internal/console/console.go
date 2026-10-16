@@ -1079,6 +1079,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/ai/predict", s.handlePredictStatus)
 	mux.HandleFunc("POST /api/ai/predict", s.handlePredict)
 	mux.HandleFunc("POST /api/ai/predict/direct-raw", s.handleDirectRawPredict)
+	mux.HandleFunc("POST /api/ai/predict/explain", s.handleExplain)
 	mux.HandleFunc("GET /api/stream", s.handleStream)
 	mux.HandleFunc("GET /api/requests", s.handleRequests)
 	mux.HandleFunc("GET /api/faults", s.handleFaults)

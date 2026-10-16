@@ -172,7 +172,7 @@ over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`
 | Gap | Why open | Size |
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1454) | no emulator support (one text-only model) | S |
-| `Explain` (#1454) | no emulator support | L |
+| `Explain` with integrated gradients, XRAI or examples (#1454); Sampled Shapley is served | they need the model's gradients or an Example index, which a custom container's predict route does not expose | L |
 
 ## BigQuery
 
