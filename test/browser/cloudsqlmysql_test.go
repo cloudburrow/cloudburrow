@@ -14,8 +14,8 @@ import (
 	"github.com/chromedp/chromedp/kb"
 )
 
-// TestCloudSQLMySQLCreateQueryAndDropThroughThePage (#868), in the emulators
-// shard, whose instance serves Cloud SQL for MySQL. Cloud SQL is one product
+// TestCloudSQLMySQLCreateQueryAndDropThroughThePage (#868), in the sql shard
+// (#1472), whose instance serves Cloud SQL for MySQL. Cloud SQL is one product
 // whose pages are PostgreSQL and MySQL; the MySQL page lists the server's
 // databases; Create database makes one, which the list
 // shows. Its page's Query tab runs a SELECT and draws the rows, NULL as an em

@@ -7,7 +7,7 @@
 # job's matrix and COMPAT_SHARDS differ, or when the job sets these lists
 # itself. Bash 3.2 compatible: macOS runs it.
 #
-# The compatibility suite runs as four shards, each an instance with only
+# The compatibility suite runs as five shards, each an instance with only
 # its services and only their CLOUDBURROW_TEST_* variables exported, so the
 # tests for the other shards skip by the gating a developer's partial
 # instance gets, not by a maintained list of names (#565). The membership
@@ -29,23 +29,30 @@
 #              fixtures, whose startup-failure test is minutes on its own;
 #              secretmanager too, for the two tests that read a secret from
 #              a revision, so its tests run here and in storage;
-#   emulators: the upstream emulators and their restart probes.
-# A fifth, acceptance, runs no compat test: storage, pubsub and run, for
+#   emulators: the upstream emulators and their restart probes;
+#   sql:       Cloud SQL for PostgreSQL and MySQL, the Cloud SQL Admin API
+#              over them and the Backup and DR Service over their backups,
+#              with Cloud Storage for the imports and exports, and the Cloud
+#              SQL restart probes: the slowest suites of what was the
+#              emulators shard, which passed 45m with them (#1472).
+# A sixth, acceptance, runs no compat test: storage, pubsub and run, for
 # the acceptance workflow (test/e2e) and test/k8s (#596).
 
 # The shards, in the order ci.yml's matrix lists them.
-COMPAT_SHARDS="storage served run emulators acceptance"
+COMPAT_SHARDS="storage served run emulators sql acceptance"
 
-# The console's headless-browser suite (#594) runs in the storage, run and
-# emulators shards: the Cloud KMS and Cloud Run screens are served only by
-# the run shard's instance (#700), as are Cloud Logging's admin screens
-# (TestLoggingAdmin*, #1226), and the BigQuery, Firestore, Datastore
-# (#854) and Cloud SQL screens, MySQL (#868) and PostgreSQL (#995), and the
-# Bigtable screen's actions (#1198), only by the emulators shard's, so the tests these name run there and the rest in
-# storage.
-COMPAT_BROWSER_SHARDS="storage run emulators"
+# The console's headless-browser suite (#594) runs in the storage, run,
+# emulators and sql shards: the Cloud KMS and Cloud Run screens are served
+# only by the run shard's instance (#700), as are Cloud Logging's admin
+# screens (TestLoggingAdmin*, #1226); the BigQuery, Firestore, Datastore
+# (#854) and Spanner screens and the Bigtable screen's actions (#1198) only
+# by the emulators shard's; and the Cloud SQL screens, MySQL (#868) and
+# PostgreSQL (#995), only by the sql shard's (#1472). The tests these name
+# run there and the rest in storage.
+COMPAT_BROWSER_SHARDS="storage run emulators sql"
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin)'
-COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|CloudSQL|Bigtable|Spanner)'
+COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|Bigtable|Spanner)'
+COMPAT_BROWSER_SQL_SHARD_TESTS='^TestCloudSQL'
 # Browser tests no shard runs: the Studio's local models (#1396) need a
 # -tags onnx build started with -local-ai-embeddings, which no shard builds;
 # they run locally, as the compat suite's local AI tests do (ci.yml never=).
@@ -135,7 +142,7 @@ compat_shard() {
       # PREDICTION: the local AI endpoint, which Cloud Run starts, serving
       # PredictionService for the custom prediction containers (#1193).
       # RUN_SQLADMIN: the Cloud SQL volume tests (#1346), without the
-      # Cloud SQL suite, which the emulators shard runs; MYSQL_PASSWORD for
+      # Cloud SQL suite, which the sql shard runs; MYSQL_PASSWORD for
       # the MySQL one, which logs in as the cloudburrow user.
       # --cloudbuild-host-steps (#1382): Cloud Build's arbitrary steps run
       # only with it (ADR-0004), so TestCloudBuildArbitraryStepsFilterAndRetry
@@ -151,38 +158,52 @@ compat_shard() {
       # pubsub for TestEmulatorsBehindAFrontRefuseOtherPods (#1114), which
       # dials both emulators from a pod; PUBSUB is not exported, so the
       # Pub/Sub tests stay in the storage shard.
-      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql,storage,pubsub,logging,backupdr
+      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,storage,pubsub,logging
       # logging for the sinks that deliver to Cloud Storage, Pub/Sub and
       # BigQuery (#1404), as SINK_LOGGING, SINK_STORAGE and SINK_PUBSUB, so
       # those suites stay in their shards; the copies to a Cloud Storage
       # bucket (#1394) run here under the same names.
       # Spanner with its REST API for Terraform (#1331), Datastore (#307),
       # Firestore and Bigtable (#346), Memorystore
-      # (#296), Cloud SQL for MySQL with its generated password (#297),
-      # Cloud SQL for PostgreSQL (#311, #584), and BigQuery with the one
+      # (#296), and BigQuery with the one
       # project its emulator serves (#277); the pod that dials its Service
       # on an instance without Cloud Run (#902) uses the cluster. Cloud
       # Storage runs for BigQuery's loads from gs:// URIs (#919), whose
       # test finds its endpoint with `cloudburrow env`; STORAGE is not
       # exported, so the Cloud Storage tests stay in the storage shard.
-      # The Cloud SQL Admin API over both Cloud SQL servers (#1301), and
-      # the Backup and DR Service over its backups (#1433) as BACKUPDR.
+      # Cloud SQL and Backup and DR run in the sql shard (#1472).
       # Resource Manager as BIGQUERY_RESOURCEMANAGER (#1392): only
       # BigQuery's JOBS_BY_FOLDER test reads it, to move the project into a
       # folder, so the Resource Manager tests stay in storage.
-      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB
-      # Cloud SQL for PostgreSQL (#701): a table with a row.
-      SETUP_TESTS="TestCloudSQLRestartSetup"
+      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB
       # A created Memorystore instance follows the mode too (#1302), with RDB
       # persistence as well (#1384).
-      PROBE_TESTS="TestMemorystoreAcrossRestart TestMemorystoreCreatedAcrossRestart TestMemorystoreRDBAcrossRestart TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart TestDatastoreAcrossRestart"
-      PROBE_VARS=MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,MYSQL,MYSQL_PASSWORD,CLOUDSQL,DATASTORE ;;
+      PROBE_TESTS="TestMemorystoreAcrossRestart TestMemorystoreCreatedAcrossRestart TestMemorystoreRDBAcrossRestart TestDatastoreAcrossRestart"
+      PROBE_VARS=MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,DATASTORE ;;
+    sql)
+      # Cloud SQL for PostgreSQL (#311, #584) and for MySQL with its
+      # generated password (#297), the Cloud SQL Admin API over both
+      # servers (#1301), and the Backup and DR Service over their backups
+      # (#1433), split from the emulators shard (#1472). Cloud Storage for
+      # the imports, exports and Auth Proxy test's buckets, which the tests
+      # find with `cloudburrow env`; STORAGE is not exported, so the Cloud
+      # Storage tests stay in the storage shard. The connector listens at
+      # its default 3307 (no --cloudsql-connector), the one port Google's
+      # Auth Proxy dials, so TestCloudSQLAuthProxyBinary runs here with the
+      # binary ci.yml installs from `make cloud-sql-proxy` (#1421).
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR
+      # Cloud SQL for PostgreSQL (#701): a table with a row.
+      SETUP_TESTS="TestCloudSQLRestartSetup"
+      PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"
+      PROBE_VARS=MYSQL,MYSQL_PASSWORD,CLOUDSQL ;;
     *) echo "unknown shard $1" >&2; return 1 ;;
   esac
   # The pinned gcloud, in the shards whose services its tests use (#694);
-  # bq's (#696) run in the emulators shard, with BigQuery.
+  # bq's (#696) run in the emulators shard, with BigQuery, and gcloud sql's
+  # in the sql shard.
   case "$1" in
-    storage|served|run|emulators) TEST_VARS+=,GCLOUD ;;
+    storage|served|run|emulators|sql) TEST_VARS+=,GCLOUD ;;
   esac
 }
 
@@ -196,7 +217,7 @@ compat_setup_exports() {
                CLOUDBURROW_TEST_TASKS_PROBE="$2/tasks-probe.json" \
                CLOUDBURROW_TEST_SCHEDULER_PROBE="$2/scheduler-probe.json" \
                CLOUDBURROW_TEST_STORAGE_RESTART_PROBE="setup:$2/storage-restart-probe.json" ;;
-    emulators) export CLOUDBURROW_TEST_CLOUDSQL_SETUP=1 ;;
+    sql) export CLOUDBURROW_TEST_CLOUDSQL_SETUP=1 ;;
   esac
 }
 
