@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
@@ -44,7 +46,9 @@ type memorystoreAdminService struct {
 	api       *redisadmin.Server
 	db        store.Store
 	prov      *memorystoreProvisioner
-	cancel    context.CancelFunc
+	// kms is Cloud KMS, for customer_managed_key (#1463); nil without it.
+	kms    *kmsService
+	cancel context.CancelFunc
 }
 
 func newMemorystoreAdminService(cfg config.Config, tunnel func() *netfwd.Forwarder) *memorystoreAdminService {
@@ -119,6 +123,11 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 			}
 		}
 		s.api.UseStorage(memorystoreObjects{f: sf})
+	}
+	// customer_managed_key (#1463) wraps each instance's data key with
+	// this instance's Cloud KMS, in process.
+	if s.kms != nil {
+		s.api.UseKMS(memorystoreKMS{svc: s.kms})
 	}
 	if err := s.api.Restore(); err != nil {
 		return fmt.Errorf("Memorystore instances: %w", err)
@@ -346,6 +355,31 @@ func (o memorystoreObjects) Write(ctx context.Context, bucket, object string, da
 var memorystoreImages = map[string]string{
 	"REDIS_6_X": components.MemorystoreRedis62Image,
 	"REDIS_7_0": components.MemorystoreRedis70Image,
+}
+
+// Suspend stops a suspended instance's server and keeps its volume
+// (#1463): it runs again, with its data, once the instance resumes.
+func (p *memorystoreProvisioner) Suspend(ctx context.Context, server string) error {
+	return p.remove(ctx, server, false)
+}
+
+// memorystoreKMS encrypts and decrypts with the Cloud KMS server.
+type memorystoreKMS struct{ svc *kmsService }
+
+func (k memorystoreKMS) Encrypt(ctx context.Context, key string, plaintext []byte) ([]byte, error) {
+	api := k.svc.API()
+	if api == nil {
+		return nil, errors.New("Cloud KMS has not started yet")
+	}
+	r, err := api.Encrypt(ctx, &kmspb.EncryptRequest{Name: key, Plaintext: plaintext})
+	if err != nil {
+		return nil, err
+	}
+	return r.GetCiphertext(), nil
+}
+
+func (k memorystoreKMS) Decrypt(ctx context.Context, key string, ciphertext []byte) ([]byte, error) {
+	return buildKMSDecrypter(k).Decrypt(ctx, key, ciphertext)
 }
 
 // Remove closes the server's tunnel and deletes its Deployment, Service
