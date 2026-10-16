@@ -466,7 +466,6 @@ func unsupportedCreate(b *cbpb.Build) error {
 		add(len(o.GetSourceProvenanceHash()) > 0, "options.sourceProvenanceHash")
 		add(o.GetMachineType() != cbpb.BuildOptions_UNSPECIFIED, "options.machineType")
 		add(o.GetDiskSizeGb() != 0, "options.diskSizeGb")
-		add(o.GetWorkerPool() != "" || o.GetPool() != nil, "options.pool")
 		add(len(o.GetVolumes()) > 0, "options.volumes")
 		add(o.GetDynamicSubstitutions(), "options.dynamicSubstitutions")
 		add(o.GetDefaultLogsBucketBehavior() != cbpb.BuildOptions_DEFAULT_LOGS_BUCKET_BEHAVIOR_UNSPECIFIED, "options.defaultLogsBucketBehavior")
@@ -496,7 +495,7 @@ func (c *CloudBuildServer) CreateBuild(ctx context.Context, req *cbpb.CreateBuil
 	if project == "" {
 		return nil, apierror.InvalidArgument("project_id is required")
 	}
-	return c.createBuild(ctx, project, location, req.GetParent() == "", req.GetBuild())
+	return c.createBuild(ctx, project, location, req.GetParent() == "", req.GetBuild(), nil)
 }
 
 // createdBuilds keeps each CreateBuild build's request, by build name, which
@@ -504,7 +503,10 @@ func (c *CloudBuildServer) CreateBuild(ctx context.Context, req *cbpb.CreateBuil
 var createdBuilds = struct {
 	mu    sync.Mutex
 	input map[string]*cbpb.Build
-}{input: map[string]*cbpb.Build{}}
+	// trigger is the trigger a build was run from (#1422), which a retry
+	// keeps: its substitutions and buildTriggerId.
+	trigger map[string]*triggerContext
+}{input: map[string]*cbpb.Build{}, trigger: map[string]*triggerContext{}}
 
 // Retryable reports whether RetryBuild can rerun the build of that name:
 // whether CreateBuild created it.
@@ -528,18 +530,20 @@ func (c *CloudBuildServer) RetryBuild(ctx context.Context, req *cbpb.RetryBuildR
 	}
 	createdBuilds.mu.Lock()
 	in, ok := createdBuilds.input[b.GetName()]
+	trig := createdBuilds.trigger[b.GetName()]
 	createdBuilds.mu.Unlock()
 	if !ok {
 		return nil, apierror.FailedPrecondition("build %s cannot be retried: it was run by Cloud Run's SubmitBuild, "+
 			"for a source deploy or a function, not created by CreateBuild; deploy again to rebuild it", b.GetId())
 	}
 	_, location, _ := resource.ParseLocation(strings.SplitN(b.GetName(), "/builds/", 2)[0])
-	return c.createBuild(ctx, b.GetProjectId(), location, req.GetName() == "", proto.Clone(in).(*cbpb.Build))
+	return c.createBuild(ctx, b.GetProjectId(), location, req.GetName() == "", proto.Clone(in).(*cbpb.Build), trig)
 }
 
 // createBuild validates and starts a build in project and location; global
-// names its operation in the global form.
-func (c *CloudBuildServer) createBuild(ctx context.Context, project, location string, global bool, in *cbpb.Build) (*longrunning.Operation, error) {
+// names its operation in the global form. trig, when not nil, is the
+// trigger it runs from (#1422).
+func (c *CloudBuildServer) createBuild(ctx context.Context, project, location string, global bool, in *cbpb.Build, trig *triggerContext) (*longrunning.Operation, error) {
 	if in == nil {
 		return nil, apierror.InvalidArgument("build is required")
 	}
@@ -547,6 +551,10 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 		return nil, apierror.InvalidArgument("invalid build: build must have at least one step")
 	}
 	if err := unsupportedCreate(in); err != nil {
+		return nil, err
+	}
+	pool, err := buildPool(location, in.GetOptions())
+	if err != nil {
 		return nil, err
 	}
 	src := in.GetSource()
@@ -581,6 +589,11 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	subs := map[string]string{"PROJECT_ID": project, "PROJECT_NUMBER": number, "BUILD_ID": id, "LOCATION": location}
 	if s := src.GetStorageSource(); s != nil {
 		subs["_SOURCE_BUCKET"] = s.GetBucket()
+	}
+	if trig != nil {
+		for k, v := range trig.builtins() {
+			subs[k] = v
+		}
 	}
 	for k, v := range in.GetSubstitutions() {
 		subs[k] = v
@@ -687,6 +700,16 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	if b.Substitutions == nil && len(in.GetSubstitutions()) > 0 {
 		b.Substitutions = in.GetSubstitutions()
 	}
+	if trig != nil {
+		b.BuildTriggerId = trig.id
+	}
+	if pool != "" {
+		// The pool is recorded as named (#1422); the build runs on the
+		// host's Docker, as every build here does.
+		if b.Options.Pool == nil && b.Options.WorkerPool != "" {
+			b.Options.Pool = &cbpb.BuildOptions_PoolOption{Name: pool}
+		}
+	}
 	for i, st := range b.Steps {
 		st.Status, st.Timing, st.PullTiming, st.ExitCode = cbpb.Build_QUEUED, nil, nil, 0
 		st.Args = make([]string, len(in.GetSteps()[i].GetArgs()))
@@ -717,6 +740,9 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	cloudBuilds.mu.Unlock()
 	createdBuilds.mu.Lock()
 	createdBuilds.input[b.Name] = proto.Clone(in).(*cbpb.Build)
+	if trig != nil {
+		createdBuilds.trigger[b.Name] = trig
+	}
 	createdBuilds.mu.Unlock()
 	queued := proto.Clone(b).(*cbpb.Build)
 

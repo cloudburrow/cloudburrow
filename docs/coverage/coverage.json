@@ -587,7 +587,7 @@
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
-          "test/compat/terraform_cicd_test.go:134 TestTerraformRunServiceCloudSQLVolume",
+          "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -597,7 +597,7 @@
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runnames_test.go:34 TestRunNamesPerProject",
-          "test/compat/terraform_cicd_test.go:134 TestTerraformRunServiceCloudSQLVolume",
+          "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -620,7 +620,7 @@
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
-          "test/compat/terraform_cicd_test.go:134 TestTerraformRunServiceCloudSQLVolume",
+          "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -670,7 +670,7 @@
           "test/compat/run_test.go:227 TestRunUpdateService",
           "test/compat/run_test.go:320 TestRunUpdateServiceWithAMask",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
-          "test/compat/terraform_cicd_test.go:134 TestTerraformRunServiceCloudSQLVolume",
+          "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -782,7 +782,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild",
-          "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
+          "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
       {
@@ -814,7 +814,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
+          "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
       {
@@ -887,7 +887,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild",
-          "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
+          "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
       {
@@ -1006,7 +1006,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
+          "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
       {
@@ -1035,8 +1035,8 @@
     "Key": "cloudbuild",
     "Title": "Cloud Build",
     "counts": {
-      "Unimplemented": 13,
-      "Verified": 6
+      "Unimplemented": 1,
+      "Verified": 18
     },
     "rows": [
       {
@@ -1068,23 +1068,35 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateBuildTrigger",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateWorkerPool",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/DeleteBuildTrigger",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/DeleteWorkerPool",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetBuild",
@@ -1101,8 +1113,11 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetBuildTrigger",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetDefaultServiceAccount",
@@ -1113,13 +1128,18 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetWorkerPool",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuildTriggers",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuilds",
@@ -1133,13 +1153,17 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListWorkerPools",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ReceiveTriggerWebhook",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/RetryBuild",
@@ -1150,18 +1174,26 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/RunBuildTrigger",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateBuildTrigger",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateWorkerPool",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       }
     ]
   },
