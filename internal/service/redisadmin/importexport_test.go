@@ -20,7 +20,7 @@ func newIO(t *testing.T) (*Server, *fakeIO, fakeObjects, *map[string]string) {
 	io := &fakeIO{files: map[string][]byte{}, data: "REDIS0011 one"}
 	set := &map[string]string{}
 	p := shellProv{fakeProv: &fakeProv{running: map[string]Spec{}}, io: io}
-	s.EnableCreate(context.Background(), p, func(addr, pw string) DataPlane { return fakeData{set: set, io: io} }, store.NewMemory(), nil)
+	s.EnableCreate(context.Background(), p, func(addr, pw, _ string) DataPlane { return fakeData{set: set, io: io} }, store.NewMemory(), nil)
 	objs := fakeObjects{}
 	s.UseStorage(objs)
 	op, err := s.CreateInstance(context.Background(), &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "cache",

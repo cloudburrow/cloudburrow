@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -219,9 +220,30 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
-	b := components.MemorystoreServerOf(components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
+	var tlsFiles *redisadmin.TLSFiles
+	if spec.TransitCA != "" {
+		// In-transit encryption (#1413): a server certificate of the
+		// instance's CA for its Services, the instance's own among them
+		// (a Standard tier node's server is the instance's and "-nN").
+		ns := p.cfg.Cluster.Namespace
+		var names []string
+		for _, n := range []string{spec.Server, memorystoreNodeSuffix.ReplaceAllString(spec.Server, "")} {
+			names = append(names, n, n+"."+ns, n+"."+ns+".svc", n+"."+ns+".svc.cluster.local")
+		}
+		var err error
+		if tlsFiles, err = redisadmin.ServerTLS(spec, time.Now(), names...); err != nil {
+			return "", fmt.Errorf("issue %s a server certificate: %w", spec.Server, err)
+		}
+	}
+	settings := components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
 		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: spec.Configs, RDBSeconds: spec.RDBSeconds,
-		ReplicaOf: spec.ReplicaOf, Image: memorystoreImages[spec.Version]})
+		ReplicaOf: spec.ReplicaOf, Image: memorystoreImages[spec.Version]}
+	port := components.MemorystorePort
+	if tlsFiles != nil {
+		settings.TLSCert, settings.TLSKey, settings.TLSCA = tlsFiles.Cert, tlsFiles.Key, tlsFiles.CA
+		port = redisadmin.TLSPort
+	}
+	b := components.MemorystoreServerOf(settings)
 	if err := p.installer.InstallBackends(ctx, []components.Backend{b}, memorystoreReadyTimeout); err != nil {
 		return "", err
 	}
@@ -232,7 +254,7 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	if old != nil {
 		_ = old.Stop(ctx)
 	}
-	f := netfwd.New(netfwd.Target{Name: spec.Server, Namespace: p.cfg.Cluster.Namespace, ServicePort: components.MemorystorePort},
+	f := netfwd.New(netfwd.Target{Name: spec.Server, Namespace: p.cfg.Cluster.Namespace, ServicePort: port},
 		p.cfg.KubeconfigPath(), p.cfg.BindAddress)
 	if err := f.Start(p.bg); err != nil {
 		return "", fmt.Errorf("tunnel to %s: %w", spec.Server, err)
@@ -243,6 +265,9 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	return f.HostAddr(), nil
 }
 
+// memorystoreNodeSuffix ends a Standard tier node's server name.
+var memorystoreNodeSuffix = regexp.MustCompile(`-n[0-9]+$`)
+
 // ClusterAddr is where the other servers reach server inside the cluster:
 // its Service (#1385).
 func (p *memorystoreProvisioner) ClusterAddr(server string) (string, int) {
@@ -252,13 +277,13 @@ func (p *memorystoreProvisioner) ClusterAddr(server string) (string, int) {
 // Route applies the Standard tier instance's Service, service, selecting
 // the pod of node's server: the primary, which in-cluster clients of the
 // instance reach (#1385).
-func (p *memorystoreProvisioner) Route(ctx context.Context, service, node string) error {
+func (p *memorystoreProvisioner) Route(ctx context.Context, service, node string, port int) error {
 	select {
 	case <-p.ready:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	return p.installer.Apply(ctx, components.MemorystorePrimaryService(service, node, p.cfg.Cluster.Namespace, p.cfg.Name))
+	return p.installer.Apply(ctx, components.MemorystorePrimaryService(service, node, p.cfg.Cluster.Namespace, p.cfg.Name, port))
 }
 
 // Exec runs argv in the server's container, with stdin: the file copies

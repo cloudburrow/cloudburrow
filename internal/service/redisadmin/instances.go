@@ -49,6 +49,10 @@ type Spec struct {
 	// Standard tier node (#1412), which a failover or the automatic
 	// failover makes a primary.
 	ReplicaOf string
+	// TransitCA and TransitCAKey, PEM, are the instance's CA with
+	// in-transit encryption (#1413): the server serves TLS only, on
+	// TLSPort, with a certificate of it (ServerTLS). "" for none.
+	TransitCA, TransitCAKey string
 }
 
 // Provisioner runs the server of an instance CreateInstance made.
@@ -72,8 +76,9 @@ type DataPlane interface {
 	Load(ctx context.Context, host string, port int) error
 }
 
-// Dialer reaches the server at addr with an AUTH string ("" for none).
-type Dialer func(addr, password string) DataPlane
+// Dialer reaches the server at addr with an AUTH string ("" for none),
+// over TLS trusting the CA caPEM, or plain TCP for "" (#1413).
+type Dialer func(addr, password, caPEM string) DataPlane
 
 // ServerName is the name of an instance's server: "redis-" and its ID,
 // with a hash of the whole resource name, so an instance of the same ID in
@@ -114,6 +119,11 @@ type record struct {
 	Nodes                 []int  `json:"nodes,omitempty"`
 	Primary               int    `json:"primary,omitempty"`
 
+	// TransitCA and TransitCAKey are the instance's CA, PEM, with
+	// transit_encryption_mode SERVER_AUTHENTICATION (#1413).
+	TransitCA    string `json:"transitCa,omitempty"`
+	TransitCAKey string `json:"transitCaKey,omitempty"`
+
 	// Not kept: what the running server is now.
 	state   redispb.Instance_State
 	message string
@@ -128,7 +138,8 @@ type record struct {
 
 func (r *record) spec() Spec {
 	return Spec{Server: r.Server, MaxMemory: maxMemory(r.MemorySizeGB, r.RedisConfigs),
-		Password: r.AuthString, Configs: serverConfigs(r.RedisConfigs), RDBSeconds: r.Persistence.seconds(), Version: r.version()}
+		Password: r.AuthString, Configs: serverConfigs(r.RedisConfigs), RDBSeconds: r.Persistence.seconds(), Version: r.version(),
+		TransitCA: r.TransitCA, TransitCAKey: r.TransitCAKey}
 }
 
 // binary is the prefix of the server's programs: valkey-server, ...
@@ -382,9 +393,13 @@ func (c *instances) render(r *record) *redispb.Instance {
 		ConnectMode:           redispb.Instance_DIRECT_PEERING,
 		AuthEnabled:           r.AuthString != "",
 		TransitEncryptionMode: redispb.Instance_DISABLED,
+		ServerCaCerts:         r.serverCACerts(),
 		Nodes:                 []*redispb.NodeInfo{{Id: "node-0", Zone: r.LocationID}},
 		PersistenceConfig:     r.Persistence.render(c.now()),
 		MaintenancePolicy:     renderPolicy(r.Maintenance),
+	}
+	if r.tlsOn() {
+		inst.TransitEncryptionMode = redispb.Instance_SERVER_AUTHENTICATION
 	}
 	r.renderHA(inst)
 	if region == "" {
@@ -476,6 +491,13 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 		}
 		r.Persistence = pc
 	}
+	if in.GetTransitEncryptionMode() == redispb.Instance_SERVER_AUTHENTICATION {
+		cert, key, err := newCA(name, c.now())
+		if err != nil {
+			return nil, apierror.Internal(err, "generate the instance's CA")
+		}
+		r.TransitCA, r.TransitCAKey = cert, key
+	}
 	if in.GetAuthEnabled() {
 		pw, err := newAuthString()
 		if err != nil {
@@ -514,9 +536,6 @@ func checkCreate(in *redispb.Instance) error {
 	}
 	if err := checkVersion(in.GetRedisVersion()); err != nil {
 		return err
-	}
-	if in.GetTransitEncryptionMode() == redispb.Instance_SERVER_AUTHENTICATION {
-		return apierror.Unimplemented("transit_encryption_mode SERVER_AUTHENTICATION is not supported: the server speaks plain TCP")
 	}
 	if in.GetCustomerManagedKey() != "" {
 		return apierror.Unimplemented("customer_managed_key is not supported")

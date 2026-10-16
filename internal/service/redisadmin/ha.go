@@ -61,8 +61,9 @@ type Replicator interface {
 type ReplicaSet interface {
 	// ClusterAddr is where the other servers reach server.
 	ClusterAddr(server string) (host string, port int)
-	// Route points the Service service at the pod of node's server.
-	Route(ctx context.Context, service, node string) error
+	// Route points the Service service at the pod of node's server, on
+	// port (0 for the default).
+	Route(ctx context.Context, service, node string, port int) error
 }
 
 // limitedDataLoss is LIMITED_DATA_LOSS's bound on the replication offset
@@ -110,7 +111,7 @@ func (r *record) nodeSpec(n int) Spec {
 // its replicas; it follows whichever node the Service selects.
 func (r *record) haNodeSpec(rs ReplicaSet, n int) Spec {
 	s := r.nodeSpec(n)
-	host, port := rs.ClusterAddr(r.Server)
+	host, port := r.clusterAddr(rs, r.Server)
 	s.ReplicaOf = net.JoinHostPort(host, strconv.Itoa(port))
 	return s
 }
@@ -259,8 +260,8 @@ func (r *record) renderHA(inst *redispb.Instance) {
 }
 
 // replicator is the server at addr, as a Replicator.
-func (c *instances) replicator(addr, auth string) (Replicator, error) {
-	rp, ok := c.dial(addr, auth).(Replicator)
+func (c *instances) replicator(addr, auth, ca string) (Replicator, error) {
+	rp, ok := c.dial(addr, auth, ca).(Replicator)
 	if !ok {
 		return nil, apierror.Unimplemented("this instance's servers do not replicate")
 	}
@@ -321,20 +322,20 @@ func (c *instances) startHA(ctx context.Context, from record) error {
 // others its replicas, and routes the instance's Service to it; with wait
 // it returns once every replica has synced.
 func (c *instances) wire(ctx context.Context, rs ReplicaSet, r *record, addrs map[int]string, primary int, wait bool) error {
-	p, err := c.replicator(addrs[primary], r.AuthString)
+	p, err := c.replicator(addrs[primary], r.AuthString, r.caPEM())
 	if err != nil {
 		return err
 	}
 	if err := p.ReplicaOf(ctx, "", 0); err != nil {
 		return fmt.Errorf("node-%d: REPLICAOF NO ONE: %w", primary, err)
 	}
-	host, port := rs.ClusterAddr(nodeServer(r.Server, primary))
+	host, port := r.clusterAddr(rs, nodeServer(r.Server, primary))
 	var reps []Replicator
 	for _, n := range r.Nodes {
 		if n == primary {
 			continue
 		}
-		rp, err := c.replicator(addrs[n], r.AuthString)
+		rp, err := c.replicator(addrs[n], r.AuthString, r.caPEM())
 		if err != nil {
 			return err
 		}
@@ -346,7 +347,7 @@ func (c *instances) wire(ctx context.Context, rs ReplicaSet, r *record, addrs ma
 		}
 		reps = append(reps, rp)
 	}
-	if err := rs.Route(ctx, r.Server, nodeServer(r.Server, primary)); err != nil {
+	if err := rs.Route(ctx, r.Server, nodeServer(r.Server, primary), r.servicePort()); err != nil {
 		return fmt.Errorf("route the instance's Service: %w", err)
 	}
 	if !wait {
@@ -432,10 +433,10 @@ func (c *instances) removeServers(ctx context.Context, r record) error {
 // configAll changes settings on every server of r (CONFIG SET).
 func (c *instances) configAll(ctx context.Context, r *record, settings map[string]string) error {
 	if !r.ha() {
-		return c.dial(r.addr, r.AuthString).ConfigSet(ctx, settings)
+		return c.dial(r.addr, r.AuthString, r.caPEM()).ConfigSet(ctx, settings)
 	}
 	for _, n := range r.Nodes {
-		if err := c.dial(r.nodeAddrs[n], r.AuthString).ConfigSet(ctx, settings); err != nil {
+		if err := c.dial(r.nodeAddrs[n], r.AuthString, r.caPEM()).ConfigSet(ctx, settings); err != nil {
 			return fmt.Errorf("node-%d: %w", n, err)
 		}
 	}
@@ -499,7 +500,7 @@ func (c *instances) failover(ctx context.Context, rs ReplicaSet, from *record, a
 	limited := mode == redispb.FailoverInstanceRequest_LIMITED_DATA_LOSS
 	var primaryOffset int64
 	primaryUp := false
-	if p, err := c.replicator(addrs[from.Primary], from.AuthString); err != nil {
+	if p, err := c.replicator(addrs[from.Primary], from.AuthString, from.caPEM()); err != nil {
 		return err
 	} else if st, err := p.Replication(ctx); err == nil {
 		primaryOffset, primaryUp = st.Offset, true
@@ -509,7 +510,7 @@ func (c *instances) failover(ctx context.Context, rs ReplicaSet, from *record, a
 	}
 	best, bestOffset, worst := -1, int64(-1), int64(0)
 	for _, n := range from.replicas() {
-		rp, err := c.replicator(addrs[n], from.AuthString)
+		rp, err := c.replicator(addrs[n], from.AuthString, from.caPEM())
 		if err != nil {
 			return err
 		}
@@ -593,7 +594,7 @@ func (c *instances) scale(ctx context.Context, name string) error {
 	if have >= want {
 		return nil
 	}
-	host, port := rs.ClusterAddr(nodeServer(from.Server, from.Primary))
+	host, port := from.clusterAddr(rs, nodeServer(from.Server, from.Primary))
 	next := 0
 	for _, n := range from.Nodes {
 		if n >= next {
@@ -605,7 +606,7 @@ func (c *instances) scale(ctx context.Context, name string) error {
 		if err != nil {
 			return fmt.Errorf("node-%d: %w", next, err)
 		}
-		rp, err := c.replicator(addr, from.AuthString)
+		rp, err := c.replicator(addr, from.AuthString, from.caPEM())
 		if err != nil {
 			return err
 		}

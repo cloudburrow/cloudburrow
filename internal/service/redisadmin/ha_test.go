@@ -87,7 +87,7 @@ func (h *haCluster) Remove(_ context.Context, server string) error {
 
 func (h *haCluster) ClusterAddr(server string) (string, int) { return server + ".svc", 6379 }
 
-func (h *haCluster) Route(_ context.Context, service, node string) error {
+func (h *haCluster) Route(_ context.Context, service, node string, _ int) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.routes[service] = node
@@ -142,7 +142,7 @@ func newHA(t *testing.T) (*Server, *haCluster) {
 	t.Helper()
 	s := newTestServer(nil)
 	h := newHACluster(t)
-	s.EnableCreate(context.Background(), h, func(addr, _ string) DataPlane { return haData{h: h, addr: addr} }, nil, nil)
+	s.EnableCreate(context.Background(), h, func(addr, _, _ string) DataPlane { return haData{h: h, addr: addr} }, nil, nil)
 	return s, h
 }
 

@@ -490,7 +490,19 @@ type MemorystoreSettings struct {
 	// ReplicaOf, host:port, starts the server as a replica of it
 	// (--replicaof): a Memorystore Standard tier node (#1412).
 	ReplicaOf string
+	// TLSCert, TLSKey and TLSCA, PEM, are in-transit encryption (#1413):
+	// the server serves TLS only, on MemorystoreTLSPort, with this
+	// certificate, and replicates over TLS trusting the CA. "" for none.
+	TLSCert, TLSKey, TLSCA string
 }
+
+// MemorystoreTLSPort is the port a Memorystore server with in-transit
+// encryption serves TLS on, as Memorystore's does (#1413).
+const MemorystoreTLSPort = 6378
+
+// memorystoreTLSDir is where a server's TLS files are written in its
+// container, from its environment, before it starts.
+const memorystoreTLSDir = "/tmp/tls"
 
 // Redis images of Memorystore's older versions (#1386), each the last
 // release of its line, pinned by the index digest (linux/amd64 and
@@ -554,7 +566,7 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 	default:
 		args = append(args, "--save", "", "--appendonly", "no")
 	}
-	return Backend{
+	b := Backend{
 		Name:       name,
 		Image:      image,
 		Port:       MemorystorePort,
@@ -563,12 +575,32 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		MountPath:  "/data",
 		OwnsClaim:  persistent,
 	}
+	if o.TLSCert != "" {
+		// TLS only (--port 0), clients not asked for a certificate
+		// (SERVER_AUTHENTICATION), replication over TLS. The files are
+		// written from the environment, then the image's own entrypoint
+		// starts the server as it always does.
+		d := memorystoreTLSDir
+		args = append(args, "--port", "0", "--tls-port", fmt.Sprint(MemorystoreTLSPort),
+			"--tls-cert-file", d+"/server.crt", "--tls-key-file", d+"/server.key", "--tls-ca-cert-file", d+"/ca.crt",
+			"--tls-auth-clients", "no", "--tls-replication", "yes")
+		script := `set -e; mkdir -p ` + d + `; printf '%s' "$MEMORYSTORE_TLS_CERT" > ` + d + `/server.crt; ` +
+			`printf '%s' "$MEMORYSTORE_TLS_KEY" > ` + d + `/server.key; printf '%s' "$MEMORYSTORE_TLS_CA" > ` + d + `/ca.crt; ` +
+			`chmod 0755 ` + d + `; chmod 0644 ` + d + `/*; exec docker-entrypoint.sh "$@"`
+		b.Args = append([]string{"sh", "-c", script, "sh"}, args...)
+		b.Port = MemorystoreTLSPort
+		b.Env = map[string]string{"MEMORYSTORE_TLS_CERT": o.TLSCert, "MEMORYSTORE_TLS_KEY": o.TLSKey, "MEMORYSTORE_TLS_CA": o.TLSCA}
+	}
+	return b
 }
 
 // MemorystorePrimaryService is the Service of a Standard tier Memorystore
 // instance (#1385), named name, selecting the pod of node, its primary's
 // server: a failover applies it again with the new primary.
-func MemorystorePrimaryService(name, node, namespace, instance string) string {
+func MemorystorePrimaryService(name, node, namespace, instance string, port int) string {
+	if port == 0 {
+		port = MemorystorePort
+	}
 	return fmt.Sprintf(`apiVersion: v1
 kind: Service
 metadata:
@@ -585,7 +617,7 @@ spec:
     - name: api
       port: %d
       targetPort: %d
-`, name, namespace, instance, node, node, MemorystorePort, MemorystorePort)
+`, name, namespace, instance, node, node, port, port)
 }
 
 // MySQLCredentials are an instance's generated MySQL passwords.

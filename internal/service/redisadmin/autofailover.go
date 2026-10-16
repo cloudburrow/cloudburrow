@@ -59,7 +59,7 @@ func (c *instances) watch(ctx context.Context, every time.Duration) {
 // instance's primary in failed, and returns the instances whose primary
 // failed failAfter in a row.
 func (c *instances) checkPrimaries(ctx context.Context, failed map[string]int, every time.Duration) []string {
-	type target struct{ name, addr, auth string }
+	type target struct{ name, addr, auth, ca string }
 	var ts []target
 	c.mu.Lock()
 	for name, r := range c.byID {
@@ -67,13 +67,13 @@ func (c *instances) checkPrimaries(ctx context.Context, failed map[string]int, e
 			delete(failed, name)
 			continue
 		}
-		ts = append(ts, target{name, r.nodeAddrs[r.Primary], r.AuthString})
+		ts = append(ts, target{name, r.nodeAddrs[r.Primary], r.AuthString, r.caPEM()})
 	}
 	c.mu.Unlock()
 	var out []string
 	for _, tg := range ts {
 		healthy := false
-		if rp, err := c.replicator(tg.addr, tg.auth); err == nil {
+		if rp, err := c.replicator(tg.addr, tg.auth, tg.ca); err == nil {
 			cctx, cancel := context.WithTimeout(ctx, every)
 			st, err := rp.Replication(cctx)
 			cancel()
