@@ -6,10 +6,13 @@ package logging
 // storage.googleapis.com/BUCKET destination on the instance's Cloud Storage,
 // through a long-running operation.
 //
-//   - The source is projects/P/locations/L/buckets/B. Every entry is stored
-//     once, as _Default's (buckets.go), so _Default copies the project's
-//     entries and any other bucket copies none. The bucket must exist and be
-//     active; a missing one is NOT_FOUND.
+//   - The source is {parent}/locations/L/buckets/B, the parent a project, a
+//     folder, an organization or a billing account (#1411: `gcloud logging
+//     copy --folder|--organization|--billing-account`). It copies what the
+//     bucket holds (Store.bucketEntries): a parent's global _Default its own
+//     entries and what other parents' sinks routed there, and any other
+//     bucket, an aggregated sink's included, what sinks routed to it. The
+//     bucket must exist and be active; a missing one is NOT_FOUND.
 //   - The objects are named as a Cloud Storage sink names them
 //     (docs.cloud.google.com/logging/docs/export/storage): LOG_ID/YYYY/MM/DD/
 //     then the hour's window in UTC, HH:00:00_HH:59:59, and a shard suffix,
@@ -17,11 +20,12 @@ package logging
 //     _A0:UNIX.json, UNIX the copy's start in seconds, for those received in
 //     another. Each holds its entries as LogEntry JSON, one per line, in
 //     timestamp order (Google: "neither uniform nor otherwise guaranteed").
-//   - The Operation is projects/P/locations/L/operations/ID. Its metadata is
+//   - The Operation is {parent}/locations/L/operations/ID, under the
+//     source's parent (folders/F/locations/L/operations/ID). Its metadata is
 //     a CopyLogEntriesMetadata: the request, start and end time, state
 //     (SCHEDULED, RUNNING, then SUCCEEDED, FAILED or CANCELLED), progress
-//     0-100, cancellation_requested and writer_identity, the project's
-//     Logging service account (links.go). Its response is a
+//     0-100, cancellation_requested and writer_identity, the parent's
+//     Logging service agent (links.go). Its response is a
 //     CopyLogEntriesResponse with log_entries_copied_count.
 //   - Google's copy takes at least an hour; this one starts copyDelay after
 //     the call, SCHEDULED until then, so `gcloud logging operations cancel`
@@ -61,7 +65,6 @@ import (
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
-	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // copyDelay is how long a copy stays SCHEDULED before it starts.
@@ -88,7 +91,7 @@ type copies struct {
 	ops     map[string]*copyOp
 	order   []string
 	storage ObjectWriter
-	entries func() []*loggingpb.LogEntry
+	entries func(bucketRef) []*loggingpb.LogEntry
 	delay   time.Duration
 	// pace is waited between objects, for tests that cancel mid-copy.
 	pace time.Duration
@@ -101,7 +104,7 @@ func (a *Admin) UseStorage(w ObjectWriter) {
 	a.copies.mu.Unlock()
 }
 
-func (a *Admin) useEntries(fn func() []*loggingpb.LogEntry) {
+func (a *Admin) useEntries(fn func(bucketRef) []*loggingpb.LogEntry) {
 	a.copies.mu.Lock()
 	a.copies.entries = fn
 	a.copies.mu.Unlock()
@@ -138,8 +141,9 @@ type copyFile struct {
 func copyFiles(entries []*loggingpb.LogEntry, start time.Time) ([]copyFile, error) {
 	byName := map[string]*copyFile{}
 	for _, e := range entries {
-		_, logID, err := resource.ParseLogName(e.GetLogName())
-		if err != nil {
+		// Any parent's log: {parent}/logs/LOG_ID.
+		_, logID, ok := strings.Cut(e.GetLogName(), "/logs/")
+		if !ok || logID == "" {
 			continue
 		}
 		if u, err := url.PathUnescape(logID); err == nil {
@@ -189,12 +193,6 @@ func (s configServer) CopyLogEntries(_ context.Context, req *loggingpb.CopyLogEn
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if !ref.parent.isProject() {
-		// Google documents CopyLogEntries from a project's log bucket
-		// (projects/P/locations/L/buckets/B); a folder's, an
-		// organization's or a billing account's is not documented.
-		return nil, apierror.Wrap(apierror.Unimplemented("CopyLogEntries copies from a project's log bucket; %s is not one", ref.parent))
-	}
 	dest := req.GetDestination()
 	bucket, ok := strings.CutPrefix(dest, "storage.googleapis.com/")
 	if !ok || bucket == "" || strings.Contains(bucket, "/") {
@@ -219,10 +217,9 @@ func (s configServer) CopyLogEntries(_ context.Context, req *loggingpb.CopyLogEn
 	}
 	// Only entries stored when the copy starts are copied.
 	var picked []*loggingpb.LogEntry
-	if ref.bucket == bucketDefault && c.entries != nil {
-		for _, e := range c.entries() {
-			p, _, perr := resource.ParseLogName(e.GetLogName())
-			if perr == nil && p == ref.parent.id && match(e) {
+	if c.entries != nil {
+		for _, e := range c.entries(ref) {
+			if match(e) {
 				picked = append(picked, e)
 			}
 		}
@@ -240,7 +237,7 @@ func (s configServer) CopyLogEntries(_ context.Context, req *loggingpb.CopyLogEn
 	n := a.ops
 	a.mu.Unlock()
 	op := &copyOp{
-		name: fmt.Sprintf("projects/%s/locations/%s/operations/copy-%d-%d", ref.parent.id, ref.location, now.UnixNano(), n),
+		name: fmt.Sprintf("%s/locations/%s/operations/copy-%d-%d", ref.parent, ref.location, now.UnixNano(), n),
 		md: &loggingpb.CopyLogEntriesMetadata{StartTime: timestamppb.New(now), State: loggingpb.OperationState_OPERATION_STATE_SCHEDULED,
 			Request:        proto.Clone(req).(*loggingpb.CopyLogEntriesRequest),
 			WriterIdentity: "serviceAccount:" + serviceAccount(ref.parent)},

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -150,6 +151,28 @@ func (s *Store) routedTo(bucket string) []*loggingpb.LogEntry {
 	return out
 }
 
+// bucketEntries snapshots what a log bucket holds: for a parent's global
+// _Default bucket, the parent's own entries an exclusion did not keep out,
+// and, in any bucket, the entries sinks routed to it (#1395, #1404).
+func (s *Store) bucketEntries(ref bucketRef) []*loggingpb.LogEntry {
+	name := ref.name()
+	own := ref.location == "global" && ref.bucket == bucketDefault
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*loggingpb.LogEntry
+	for _, e := range s.entries {
+		r := s.routed[e]
+		if own && (r == nil || !r.hidden) && entryParent(e) == ref.parent {
+			out = append(out, e)
+			continue
+		}
+		if r != nil && slices.Contains(r.buckets, name) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // Server serves google.logging.v2.LoggingServiceV2.
 type Server struct {
 	loggingpb.UnimplementedLoggingServiceV2Server
@@ -166,7 +189,7 @@ type Server struct {
 // entry an enabled exclusion matches is accepted and not stored, as Google's
 // _Default sink drops it.
 // It also gives CopyLogEntries (copy.go) the entries it copies.
-func (s *Server) UseAdmin(a *Admin) { s.admin = a; a.useEntries(s.store.snapshot) }
+func (s *Server) UseAdmin(a *Admin) { s.admin = a; a.useEntries(s.store.bucketEntries) }
 
 // CountMatching counts project's stored entries that filter matches with a
 // timestamp at or after since, for a log-based metric's console page. The

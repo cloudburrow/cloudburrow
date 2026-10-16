@@ -18,8 +18,9 @@ import (
 // Admin does not implement (the Async bucket calls, links, settings) answer 501
 // UNIMPLEMENTED, as TailLogEntries does: the transcoder serves unary calls,
 // and the tail, a bidirectional stream, is served over gRPC only (#1215). A path Google does not bind answers 404.
-// Of logging_v2.yaml's mixins, Operations' project bindings are (#1394), for
-// CopyLogEntries' operations; Locations is not bound.
+// Of logging_v2.yaml's mixins, Operations' bindings are, for CopyLogEntries'
+// operations: projects' (#1394), and organizations', folders' and billing
+// accounts' (#1411). Locations is not bound.
 
 // Transcoder returns the Cloud Logging JSON API's configuration, with nothing
 // registered: register the same server with it as with gRPC.
@@ -39,12 +40,18 @@ func NewRESTHandler(register func(grpc.ServiceRegistrar)) http.Handler {
 	return t
 }
 
-// operationsMixins are logging_v2.yaml's Operations bindings for projects.
-var operationsMixins = []*annotations.HttpRule{
-	{Selector: "google.longrunning.Operations.GetOperation",
-		Pattern: &annotations.HttpRule_Get{Get: "/v2/{name=projects/*/locations/*/operations/*}"}},
-	{Selector: "google.longrunning.Operations.ListOperations",
-		Pattern: &annotations.HttpRule_Get{Get: "/v2/{name=projects/*/locations/*}/operations"}},
-	{Selector: "google.longrunning.Operations.CancelOperation",
-		Pattern: &annotations.HttpRule_Post{Post: "/v2/{name=projects/*/locations/*/operations/*}:cancel"}, Body: "*"},
-}
+// operationsMixins are logging_v2.yaml's Operations bindings, one set per
+// parent collection.
+var operationsMixins = func() []*annotations.HttpRule {
+	var out []*annotations.HttpRule
+	for _, coll := range []string{"projects", "organizations", "folders", "billingAccounts"} {
+		out = append(out,
+			&annotations.HttpRule{Selector: "google.longrunning.Operations.GetOperation",
+				Pattern: &annotations.HttpRule_Get{Get: "/v2/{name=" + coll + "/*/locations/*/operations/*}"}},
+			&annotations.HttpRule{Selector: "google.longrunning.Operations.ListOperations",
+				Pattern: &annotations.HttpRule_Get{Get: "/v2/{name=" + coll + "/*/locations/*}/operations"}},
+			&annotations.HttpRule{Selector: "google.longrunning.Operations.CancelOperation",
+				Pattern: &annotations.HttpRule_Post{Post: "/v2/{name=" + coll + "/*/locations/*/operations/*}:cancel"}, Body: "*"})
+	}
+	return out
+}()

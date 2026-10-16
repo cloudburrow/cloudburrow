@@ -3246,7 +3246,7 @@
         "method": "google.logging.v2.ConfigServiceV2/CopyLogEntries",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingcopy_test.go:67 TestLoggingCopyLogEntries"
+          "test/compat/loggingcopy_test.go:69 TestLoggingCopyLogEntries"
         ]
       },
       {
