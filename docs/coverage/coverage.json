@@ -234,6 +234,7 @@
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
+          "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ],
@@ -252,6 +253,7 @@
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
+          "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ]
@@ -299,6 +301,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM"
         ]
       },
@@ -313,6 +316,7 @@
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
+          "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ],
         "unverified": [
@@ -366,6 +370,7 @@
           "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_batch8_test.go:171 TestTerraformSecretManagerSecretIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM"
         ]
       },
@@ -1505,7 +1510,8 @@
         "method": "google.cloud.functions.v1.CloudFunctionsService/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
+          "test/compat/terraform_batch8_test.go:214 TestTerraformCloudFunctionsFunctionIAM"
         ]
       },
       {
@@ -1520,7 +1526,8 @@
         "method": "google.cloud.functions.v1.CloudFunctionsService/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API",
+          "test/compat/terraform_batch8_test.go:214 TestTerraformCloudFunctionsFunctionIAM"
         ]
       },
       {
@@ -1739,7 +1746,9 @@
           "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:167 TestRunV1VolumesProbesAndServiceAccount",
-          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
+          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage",
+          "test/compat/terraform_batch8_test.go:138 TestTerraformCloudRunV1ServiceIAM",
+          "test/compat/terraform_batch8_test.go:78 TestTerraformCloudRunV1Service"
         ]
       },
       {
@@ -1749,7 +1758,9 @@
           "test/compat/rungcsfuse_test.go:184 TestGcloudRunDeployCloudStorageVolume",
           "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
-          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
+          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage",
+          "test/compat/terraform_batch8_test.go:138 TestTerraformCloudRunV1ServiceIAM",
+          "test/compat/terraform_batch8_test.go:78 TestTerraformCloudRunV1Service"
         ]
       },
       {
@@ -1763,7 +1774,9 @@
           "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:167 TestRunV1VolumesProbesAndServiceAccount",
-          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
+          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage",
+          "test/compat/terraform_batch8_test.go:138 TestTerraformCloudRunV1ServiceIAM",
+          "test/compat/terraform_batch8_test.go:78 TestTerraformCloudRunV1Service"
         ]
       },
       {
@@ -1781,7 +1794,8 @@
           "test/compat/rungcsfuse_test.go:184 TestGcloudRunDeployCloudStorageVolume",
           "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
-          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
+          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage",
+          "test/compat/terraform_batch8_test.go:78 TestTerraformCloudRunV1Service"
         ]
       },
       {
@@ -1951,7 +1965,8 @@
         "method": "run.projects.locations.services.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1global_test.go:38 TestRunV1LocationsAndIAM"
+          "test/compat/runv1global_test.go:38 TestRunV1LocationsAndIAM",
+          "test/compat/terraform_batch8_test.go:138 TestTerraformCloudRunV1ServiceIAM"
         ]
       },
       {
@@ -1969,7 +1984,8 @@
         "method": "run.projects.locations.services.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1global_test.go:38 TestRunV1LocationsAndIAM"
+          "test/compat/runv1global_test.go:38 TestRunV1LocationsAndIAM",
+          "test/compat/terraform_batch8_test.go:138 TestTerraformCloudRunV1ServiceIAM"
         ]
       },
       {
@@ -9495,7 +9511,8 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/terraform_batch8_test.go:275 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -9504,7 +9521,8 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/terraform_batch8_test.go:275 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -9513,7 +9531,8 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/terraform_batch8_test.go:275 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -9527,7 +9546,8 @@
         "method": "backupdr.projects.locations.backupPlans.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews",
+          "test/compat/terraform_batch8_test.go:275 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -9550,7 +9570,8 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/terraform_batch8_test.go:275 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -9673,7 +9694,8 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/terraform_batch8_test.go:275 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -9689,7 +9711,8 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/terraform_batch8_test.go:275 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -9704,7 +9727,8 @@
         "method": "backupdr.projects.locations.backupVaults.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews",
+          "test/compat/terraform_batch8_test.go:275 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
@@ -9841,7 +9865,8 @@
         "tests": [
           "test/compat/backupdr_cli_test.go:36 TestGcloudBackupDR",
           "test/compat/backupdr_cli_test.go:91 TestTerraformBackupDR",
-          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore"
+          "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/terraform_batch8_test.go:275 TestTerraformBackupDRVaultAndPlanUpdates"
         ]
       },
       {
