@@ -104,6 +104,11 @@ const ROUTES = [
     product: "cloudsql", productTitle: "Cloud SQL" },
   { path: "/cloudsql-mysql", service: "cloudsql-mysql", title: "MySQL",      section: "Databases",
     product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
+  // Every instance the Admin API serves (#1330), with Create instance, its
+  // backups, replicas, exports and imports, Run SQL and Upgrade. It had a
+  // provider but no route, so /cloudsql-instances was "No such screen".
+  { path: "/cloudsql-instances", service: "cloudsql-instances", title: "Instances", section: "Databases",
+    product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
   // Memorystore for Redis (#1302) and the Backup and DR Service (#1433) had
   // providers, and console API pages, but no route: /memorystore and
   // /backupdr were "No such screen", so nothing of either was reachable from
@@ -189,7 +194,20 @@ const ROUTES = [
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
 
-  { path: "/projects", service: "projects", title: "Resource Manager", section: "Management tools" },
+  // Resource Manager is one product with three pages here: projects, the
+  // organization and its folders (#1294), and tags (#1295). The product key
+  // stays "projects", so a pin made before the other pages were routed keeps
+  // pointing at it. Resource hierarchy and Tags had providers but no route,
+  // so neither was reachable from the console.
+  { path: "/projects", service: "projects", title: "Projects", section: "Management tools",
+    product: "projects", productTitle: "Resource Manager" },
+  { path: "/resource-hierarchy", service: "hierarchy", icon: "hierarchy", title: "Resource hierarchy", section: "Management tools",
+    product: "projects", productTitle: "Resource Manager" },
+  { path: "/tags", service: "tags", title: "Tags", section: "Management tools",
+    product: "projects", productTitle: "Resource Manager" },
+  // APIs & Services (#1352): a project's APIs, Enable and Disable. It had a
+  // provider but no route.
+  { path: "/apis", service: "serviceusage", title: "APIs & Services", section: "Management tools" },
   // Connect (#802): what `env`, `gcloud-setup`, `terraform`, `version` and
   // `diagnose` give at a terminal. Not a Google Cloud product, so it carries
   // no product icon.
@@ -283,6 +301,12 @@ const ICONS = {
   // Resource Manager: a folder of projects.
   projects:  '<path d="M3 7h6l2 2h10v10H3z"/><path d="M3 7V5h6l2 2"/>',
   // IAM: a person beside a key.
+  // Resource hierarchy: an organization over two folders.
+  hierarchy: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>',
+  // Tags: a tag with its hole.
+  tags:      '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8" r="1.5"/>',
+  // APIs & Services: a plug.
+  serviceusage: '<path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>',
   iam:       '<circle cx="8" cy="8" r="3"/><path d="M3 19a5 5 0 0 1 10 0"/><circle cx="17" cy="13" r="2"/><path d="M17 15v5M17 18h2"/>',
   // Firestore: stacked documents.
   firestore: '<path d="M8 3h9l3 3v11H8z"/><path d="M5 7v14h11"/><path d="M11 9h6M11 13h6"/>',
