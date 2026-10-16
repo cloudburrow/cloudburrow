@@ -46,6 +46,33 @@ func (p artifactRegistryProvider) List(_ context.Context, project string) (conso
 	return out, nil
 }
 
+// Delete removes the project's repository of that ID, as DeleteRepository
+// does (#1304). An ID in two locations is refused: the page names
+// repositories by ID alone.
+func (p artifactRegistryProvider) Delete(_ context.Context, project, name string) error {
+	if project == "" {
+		project = p.defaultProject
+	}
+	var match []string
+	for _, r := range runadapter.Repositories() {
+		parts := strings.Split(r.GetName(), "/")
+		if len(parts) == 6 && parts[1] == project && parts[5] == name {
+			match = append(match, r.GetName())
+		}
+	}
+	switch len(match) {
+	case 0:
+		return fmt.Errorf("repository %q not found in project %s", name, project)
+	case 1:
+		if !runadapter.RemoveRepository(match[0]) {
+			return fmt.Errorf("repository %q not found in project %s", name, project)
+		}
+		return nil
+	default:
+		return fmt.Errorf("repository %q is in %d locations; delete it with gcloud artifacts repositories delete --location", name, len(match))
+	}
+}
+
 // runBuildsProvider is Cloud Run's build history: every source build,
 // newest first, with its status, image and digest.
 type runBuildsProvider struct {

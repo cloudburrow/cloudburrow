@@ -15,12 +15,14 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ArtifactRegistryServer serves the repository calls of
 // google.devtools.artifactregistry.v1.ArtifactRegistry that `gcloud run
-// deploy --source` makes (#1347): get, create and list. A repository is
+// deploy --source` makes (#1347): get, create and list, and the update and
+// delete Terraform's google_artifact_registry_repository makes (#1304). A repository is
 // stored metadata only. It is not a registry a docker client can push to:
 // images built on this instance (SubmitBuild, Cloud Build) are loaded into
 // the cluster as dev.local/<image URI>, and a Cloud Run service or job that
@@ -146,6 +148,74 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 	_ = a.s.ops.SetMetadata(op.Name, &arpb.OperationMetadata{})
 	_ = a.s.ops.Succeed(op.Name, proto.Clone(r))
 	return a.s.toProtoOperation(op.Name)
+}
+
+// UpdateRepository applies the update mask's description and labels, the
+// fields a stored repository can change here; any other path is refused, as
+// those fields are refused at create. An empty mask replaces both.
+func (a *ArtifactRegistryServer) UpdateRepository(_ context.Context, req *arpb.UpdateRepositoryRequest) (*arpb.Repository, error) {
+	in := req.GetRepository()
+	if _, _, err := parseRepositoryName(in.GetName()); err != nil {
+		return nil, err
+	}
+	paths := req.GetUpdateMask().GetPaths()
+	if len(paths) == 0 {
+		paths = []string{"description", "labels"}
+	}
+	for _, p := range paths {
+		switch p {
+		case "description", "labels":
+		default:
+			return nil, apierror.Unimplemented("update_mask path %q is not supported: only description and labels can change", p)
+		}
+	}
+	repositories.mu.Lock()
+	defer repositories.mu.Unlock()
+	r, ok := repositories.repos[in.GetName()]
+	if !ok {
+		return nil, apierror.NotFound("Requested entity was not found.")
+	}
+	r = proto.Clone(r).(*arpb.Repository)
+	for _, p := range paths {
+		switch p {
+		case "description":
+			r.Description = in.GetDescription()
+		case "labels":
+			r.Labels = in.GetLabels()
+		}
+	}
+	r.UpdateTime = timestamppb.New(time.Now())
+	repositories.repos[in.GetName()] = r
+	return proto.Clone(r).(*arpb.Repository), nil
+}
+
+// DeleteRepository removes a repository and returns its operation, already
+// done. Images built under its URL stay in the cluster: they are this
+// instance's build cache, not the repository's contents.
+func (a *ArtifactRegistryServer) DeleteRepository(_ context.Context, req *arpb.DeleteRepositoryRequest) (*longrunningpb.Operation, error) {
+	parent, _, err := parseRepositoryName(req.GetName())
+	if err != nil {
+		return nil, err
+	}
+	if !RemoveRepository(req.GetName()) {
+		return nil, apierror.NotFound("Requested entity was not found.")
+	}
+	op := a.s.ops.Create(parent, req.GetName())
+	_ = a.s.ops.SetMetadata(op.Name, &arpb.OperationMetadata{})
+	_ = a.s.ops.Succeed(op.Name, &emptypb.Empty{})
+	return a.s.toProtoOperation(op.Name)
+}
+
+// RemoveRepository deletes a stored repository by name, for
+// DeleteRepository and the console, and reports whether it was there.
+func RemoveRepository(name string) bool {
+	repositories.mu.Lock()
+	defer repositories.mu.Unlock()
+	if _, ok := repositories.repos[name]; !ok {
+		return false
+	}
+	delete(repositories.repos, name)
+	return true
 }
 
 // Repositories lists every stored repository, for the console.

@@ -208,12 +208,16 @@ func isSourceDeployPath(p string) bool {
 		return false
 	}
 	parts := strings.Split(rest, "/")
-	if len(parts) >= 2 && strings.HasPrefix(parts[1], "builds") {
-		return true // projects/{p}/builds
+	if len(parts) >= 2 && (strings.HasPrefix(parts[1], "builds") || strings.HasPrefix(parts[1], "triggers")) {
+		return true // projects/{p}/builds, projects/{p}/triggers
 	}
 	if len(parts) >= 4 && parts[1] == "locations" {
+		// Triggers and worker pools are Cloud Build's too (#1304): the
+		// transcoder answers them UNIMPLEMENTED here, so a client pointed at
+		// this port, such as Terraform's google_cloudbuild_trigger, gets a
+		// 501 from this instance rather than Cloud Run's 404.
 		switch strings.SplitN(parts[3], ":", 2)[0] {
-		case "builds", "repositories", "operations", "defaultServiceAccount":
+		case "builds", "repositories", "operations", "defaultServiceAccount", "triggers", "workerPools":
 			return true
 		}
 	}

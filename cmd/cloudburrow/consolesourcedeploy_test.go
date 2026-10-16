@@ -10,6 +10,9 @@ import (
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
@@ -43,6 +46,32 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 	if len(repos.Items) != 1 || repos.Items[0].Name != "console-repo" ||
 		repos.Items[0].Fields["URL"] != "us-central1-docker.pkg.dev/console-sd/console-repo" {
 		t.Errorf("repositories = %+v", repos.Items)
+	}
+	// UpdateRepository (#1304) changes the description and labels the page
+	// shows; another path is refused; the page's Delete removes it.
+	repo := "projects/console-sd/locations/us-central1/repositories/console-repo"
+	if _, err := s.ArtifactRegistry().UpdateRepository(ctx, &arpb.UpdateRepositoryRequest{
+		Repository: &arpb.Repository{Name: repo, Description: "changed", Labels: map[string]string{"env": "x"}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"description", "labels"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if repos, _ = (artifactRegistryProvider{defaultProject: "console-sd"}).List(ctx, ""); len(repos.Items) != 1 || repos.Items[0].Fields["Description"] != "changed" {
+		t.Errorf("after the update, repositories = %+v", repos.Items)
+	}
+	if _, err := s.ArtifactRegistry().UpdateRepository(ctx, &arpb.UpdateRepositoryRequest{
+		Repository: &arpb.Repository{Name: repo, KmsKeyName: "k"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"kms_key_name"}}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("an update of kms_key_name = %v; want Unimplemented", err)
+	}
+	p := artifactRegistryProvider{defaultProject: "console-sd"}
+	if err := p.Delete(ctx, "", "console-repo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ArtifactRegistry().GetRepository(ctx, &arpb.GetRepositoryRequest{Name: repo}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetRepository after the console's Delete = %v; want NotFound", err)
+	}
+	if err := p.Delete(ctx, "", "console-repo"); err == nil {
+		t.Error("deleting a deleted repository succeeded")
 	}
 	image := "us-central1-docker.pkg.dev/console-sd/console-repo/svc"
 	resp, err := s.Builds(stubSource{}, stubBuilder{}).SubmitBuild(ctx, &runpb.SubmitBuildRequest{

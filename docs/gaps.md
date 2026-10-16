@@ -33,9 +33,9 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | BigQuery | 42 | 18 | 16 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 3 | 3 | 0 | 0 | 0 |
-| Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **81** | **26** | **38** | **12** | **5** |
+| **Total** | **82** | **27** | **38** | **12** | **5** |
 
 ## Cloud Storage
 
@@ -223,6 +223,9 @@ Closed: Functions in Node.js, Python, Java, Ruby, PHP and .NET, with a dated run
 | Gap | Why open | Size |
 |---|---|---|
 | Terraform resources beyond the verified set (#1304): `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool), and the Functions, Artifact Registry and Cloud Build resources, whose endpoints the wrapper does not set | not built yet (partly verified: Pub/Sub schemas and IAM (#1367), project IAM (#1368), secret versions, Storage ACLs, ACL lists and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access, dataset IAM and row access policies, partitioned and clustered tables and query jobs, `*_iam_member`, `*_iam_binding` and `*_iam_policy` on buckets, secrets, key rings, keys and queues, Firestore documents, databases, indexes and fields, Bigtable instances and tables, Spanner instances and databases, Logging bucket configs and linked datasets, `google_project_service`) | L |
+| A dated run of the Node.js, Python, Java, Ruby, PHP and .NET Functions tests (#1319) | fixtures and gated tests for all six exist; none has run, since the builder's amd64 images cannot run on arm64 nodes | S |
+| Terraform resources beyond the verified set (#1304): `google_pubsub_*_iam_*` (Pub/Sub serves no IAM methods, #1367), `google_project_iam_*` (ADR-0006 keeps project IAM UNIMPLEMENTED; a decision is needed, #1368), `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool), `google_cloudfunctions2_function` and v1 functions (refused by the wrapper: the Cloud Functions API is not served, #1377), and `google_cloudbuild_trigger` and `_worker_pool` (refused 501: Cloud Build serves builds only) | partly verified (Artifact Registry repositories, Cloud Run services with a Cloud SQL volume, Pub/Sub schemas, secret versions, Storage ACLs, ACL lists and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access, dataset IAM and row access policies, partitioned and clustered tables and query jobs, `*_iam_member`, `*_iam_binding` and `*_iam_policy` on buckets, secrets, key rings, keys and queues, Firestore documents, databases, indexes and fields, Bigtable instances and tables, Spanner instances and databases, Logging bucket configs and linked datasets, `google_project_service`) | L |
+| Functions in languages other than Go (#1303) | not built yet | L |
 
 ## Console
 

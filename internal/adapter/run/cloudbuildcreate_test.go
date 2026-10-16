@@ -151,3 +151,22 @@ func TestCreateBuildRefusals(t *testing.T) {
 		t.Errorf("substitute = %q", got)
 	}
 }
+
+// TestSourceDeployPathsIncludeTriggersAndWorkerPools (#1304): Cloud Build's
+// trigger and worker pool paths reach the transcoder, which answers them
+// UNIMPLEMENTED, and Cloud Run's own v1 paths do not.
+func TestSourceDeployPathsIncludeTriggersAndWorkerPools(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/v1/projects/p/triggers":                              true,
+		"/v1/projects/p/locations/global/triggers":             true,
+		"/v1/projects/p/locations/us-central1/triggers/t:run":  true,
+		"/v1/projects/p/locations/us-central1/workerPools":     true,
+		"/v1/projects/p/locations/us-central1/repositories/r":  true,
+		"/v1/projects/p/locations/us-central1/services":        false,
+		"/apis/serving.knative.dev/v1/namespaces/p/services/s": false,
+	} {
+		if got := isSourceDeployPath(p); got != want {
+			t.Errorf("isSourceDeployPath(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
