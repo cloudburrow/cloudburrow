@@ -184,6 +184,9 @@ type BuildsServer struct {
 	fetch   SourceFetcher
 	builder ImageBuilder
 	timeout time.Duration
+	// hostSteps lets CreateBuild run arbitrary steps, from the host's
+	// loopback only (#1382, cloudbuildgate.go).
+	hostSteps bool
 }
 
 // Builds returns the Builds service. fetch or builder nil leaves SubmitBuild

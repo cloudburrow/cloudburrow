@@ -129,6 +129,11 @@ compat_shard() {
       # RUN_SQLADMIN: the Cloud SQL volume tests (#1346), without the
       # Cloud SQL suite, which the emulators shard runs; MYSQL_PASSWORD for
       # the MySQL one, which logs in as the cloudburrow user.
+      # --cloudbuild-host-steps (#1382): Cloud Build's arbitrary steps run
+      # only with it (ADR-0004), so TestCloudBuildArbitraryStepsFilterAndRetry
+      # and TestGcloudBuildsStepsAndList run here; the refusal without it is
+      # TestCloudBuildHostStepsOff, which skips on this instance.
+      FIXTURES=(--cloudbuild-host-steps)
       TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,MYSQL_PASSWORD,BIGQUERY_PROJECT,PREDICTION ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run

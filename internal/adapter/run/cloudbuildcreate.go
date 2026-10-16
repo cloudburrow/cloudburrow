@@ -6,8 +6,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,17 +27,53 @@ import (
 )
 
 // CreateBuild and CancelBuild (#1347): a Build whose source is a tar.gz or
-// zip in the instance's Cloud Storage and whose steps are docker build,
-// docker push and pack, run through the same local builder as SubmitBuild.
+// zip in the instance's Cloud Storage. Its docker build, docker push and pack
+// steps run through the same local builder as SubmitBuild.
 //
-// Arbitrary step containers are refused: Cloud Build runs every step on one
-// VM with the host's Docker socket, the cloudbuild network and a /workspace
-// volume each step mounts in turn, and a step's container may itself call
-// docker. A step run as a Kubernetes Job in the instance's cluster would see
-// none of that (no docker daemon, no cloudbuild network, a /workspace that
-// lives only as long as a PersistentVolume shared across nodes), so the
-// builds that work on Google would fail or differ here. They are refused,
-// naming the step, rather than run differently.
+// Any other step (#1382) runs as Google's build worker runs it: a container
+// on the host's Docker, with the Docker socket mounted, on a user-defined
+// network named cloudbuild, with the build's /workspace volume as its working
+// directory and a /builder/home volume every step shares. The builder runs
+// them when it implements StepRunner; the CLI's does.
+
+// StepRunner runs a build's arbitrary steps as containers on the host's
+// Docker (#1382). The ImageBuilder the CLI wires implements it.
+type StepRunner interface {
+	// OpenWorkspace makes the build's /workspace, a Docker volume holding the
+	// unpacked source archive (nil: empty), and the cloudbuild network.
+	OpenWorkspace(ctx context.Context, buildID string, archive io.Reader) (BuildWorkspace, error)
+}
+
+// BuildWorkspace is one build's /workspace and the volumes its steps share.
+type BuildWorkspace interface {
+	// RunStep runs one step's container to completion. A non-zero exit is an
+	// error naming the status, as Cloud Build's log does.
+	RunStep(ctx context.Context, spec StepSpec) error
+	// Archive is /workspace as a gzipped tarball, which a docker build or
+	// pack step builds: it sees what earlier steps wrote.
+	Archive(ctx context.Context) (io.ReadCloser, error)
+	// Close removes the build's containers, volumes and, when no other
+	// build uses it, the cloudbuild network.
+	Close()
+}
+
+// StepSpec is one arbitrary step, substituted and validated.
+type StepSpec struct {
+	// Index is the step's position, for the container's name.
+	Index      int
+	Image      string
+	Entrypoint string
+	Args, Env  []string
+	// Dir is the working directory relative to /workspace; empty is
+	// /workspace itself.
+	Dir     string
+	Volumes []StepVolume
+	Log     io.Writer
+}
+
+// StepVolume is a named volume a step mounts at Path; steps naming the same
+// volume share it for the build.
+type StepVolume struct{ Name, Path string }
 
 // ObjectWriter writes a build log to the instance's Cloud Storage. The
 // SourceFetcher the CLI wires implements it; without it, a build's log is
@@ -63,6 +101,7 @@ const (
 	stepDockerBuild stepKind = iota + 1
 	stepDockerPush
 	stepPack
+	stepContainer
 )
 
 // plannedStep is one validated step and what running it does.
@@ -75,6 +114,7 @@ type plannedStep struct {
 	buildArgs  []string
 	env        map[string]string // pack --env
 	timeout    time.Duration
+	step       StepSpec // stepContainer
 }
 
 // runningBuilds holds the cancel function of each build CreateBuild started.
@@ -127,14 +167,10 @@ func planStep(i int, st *cbpb.BuildStep, subs map[string]string) (plannedStep, e
 	switch {
 	case len(st.GetSecretEnv()) > 0:
 		return refuse("secretEnv is not supported: secrets come from Secret Manager, which Cloud Build reads on Google")
-	case len(st.GetVolumes()) > 0:
-		return refuse("volumes are not supported: only /workspace is shared between steps here")
 	case st.GetScript() != "":
-		return refuse("script runs in the step's container, which is not run here; only docker build, docker push and pack steps are")
+		return refuse("script is not supported; give the step an entrypoint and args")
 	case st.GetAllowFailure() || len(st.GetAllowExitCodes()) > 0:
 		return refuse("allowFailure and allowExitCodes are not supported")
-	case len(st.GetEnv()) > 0 && !packBuilders[st.GetName()]:
-		return refuse("env is not supported on a docker step: the step's container, where it would be set, is not run here")
 	}
 	args := make([]string, len(st.GetArgs()))
 	for j, a := range st.GetArgs() {
@@ -152,15 +188,29 @@ func planStep(i int, st *cbpb.BuildStep, subs map[string]string) (plannedStep, e
 	if t := st.GetTimeout(); t != nil {
 		p.timeout = t.AsDuration()
 	}
-	name := st.GetName()
+	name := substitute(st.GetName(), subs)
 	if (name == "gcr.io/cloud-builders/gcb-internal" || name == "gcr.io/cloud-builders/gcb-internal:latest") &&
 		len(args) > 0 && args[0] == "docker" {
 		// `gcloud builds submit --tag`'s step: Cloud Build's own builder
 		// image running docker, args[0] the command.
 		name, args = "gcr.io/cloud-builders/docker", args[1:]
 	}
+	local := (dockerBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "docker") && len(args) > 0 &&
+		(args[0] == "build" || args[0] == "push")) || (packBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "pack"))
+	if local {
+		// The local builder runs these steps itself, not in the step's
+		// container, so what only that container would see is refused.
+		switch {
+		case len(st.GetVolumes()) > 0:
+			return refuse("volumes are not supported on a docker build, docker push or pack step: the local builder runs it, not the step's container")
+		case len(st.GetEnv()) > 0 && !packBuilders[name]:
+			return refuse("env is not supported on a docker build or push step: the local builder runs it, not the step's container")
+		}
+	}
 	switch {
-	case dockerBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "docker"):
+	case !local:
+		return planContainer(i, st, name, args, dir, subs)
+	case dockerBuilders[name]:
 		if len(args) == 0 {
 			return refuse("a docker step needs args")
 		}
@@ -237,10 +287,8 @@ func planStep(i int, st *cbpb.BuildStep, subs map[string]string) (plannedStep, e
 				return refuse("docker push needs exactly one image, got %q", args[1:])
 			}
 			p.kind, p.push = stepDockerPush, args[1]
-		default:
-			return refuse("docker %s is not supported: only docker build and docker push run here", args[0])
 		}
-	case packBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "pack"):
+	case packBuilders[name]:
 		if len(args) < 2 || args[0] != "build" || strings.HasPrefix(args[1], "-") {
 			return refuse("a pack step must be pack build IMAGE")
 		}
@@ -293,10 +341,50 @@ func planStep(i int, st *cbpb.BuildStep, subs map[string]string) (plannedStep, e
 				return refuse("pack flag %s is not supported", flag)
 			}
 		}
-	default:
-		return refuse("only docker build, docker push (%s) and pack (%s) steps run here; "+
-			"an arbitrary step's container would run without the Docker socket, the cloudbuild network "+
-			"and the /workspace volume Cloud Build gives it", "gcr.io/cloud-builders/docker", "gcr.io/k8s-skaffold/pack")
+	}
+	return p, nil
+}
+
+// reservedStepPaths are the mounts Cloud Build gives every step, which a
+// step's own volume may not replace.
+var reservedStepPaths = map[string]bool{"/workspace": true, "/builder/home": true, "/var/run/docker.sock": true}
+
+var volumeNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+
+// planContainer plans an arbitrary step, run in its own container.
+func planContainer(i int, st *cbpb.BuildStep, name string, args []string, dir string, subs map[string]string) (plannedStep, error) {
+	if name == "" {
+		return plannedStep{}, apierror.InvalidArgument("invalid build: step %d has no name", i)
+	}
+	env := make([]string, 0, len(st.GetEnv()))
+	for _, e := range st.GetEnv() {
+		e = substitute(e, subs)
+		if k, _, ok := strings.Cut(e, "="); !ok || k == "" {
+			return plannedStep{}, apierror.InvalidArgument("invalid build: step %d env %q is not KEY=VALUE", i, e)
+		}
+		env = append(env, e)
+	}
+	var vols []StepVolume
+	seen := map[string]bool{}
+	for _, v := range st.GetVolumes() {
+		p := path.Clean(v.GetPath())
+		switch {
+		case !volumeNameRE.MatchString(v.GetName()):
+			return plannedStep{}, apierror.InvalidArgument("invalid build: step %d volume name %q is not valid", i, v.GetName())
+		case !path.IsAbs(v.GetPath()):
+			return plannedStep{}, apierror.InvalidArgument("invalid build: step %d volume path %q must be absolute", i, v.GetPath())
+		case reservedStepPaths[p] || strings.HasPrefix(p, "/workspace/"):
+			return plannedStep{}, apierror.InvalidArgument("invalid build: step %d volume path %q is reserved", i, v.GetPath())
+		case seen[p] || seen["name:"+v.GetName()]:
+			return plannedStep{}, apierror.InvalidArgument("invalid build: step %d mounts volume %q or path %q twice", i, v.GetName(), p)
+		}
+		seen[p], seen["name:"+v.GetName()] = true, true
+		vols = append(vols, StepVolume{Name: v.GetName(), Path: p})
+	}
+	p := plannedStep{kind: stepContainer, step: StepSpec{Index: i, Image: name,
+		Entrypoint: substitute(st.GetEntrypoint(), subs), Args: args, Env: env, Dir: dir, Volumes: vols}}
+	if t := st.GetTimeout(); t != nil {
+		p.timeout = t.AsDuration()
 	}
 	return p, nil
 }
@@ -333,8 +421,8 @@ func unsupportedCreate(b *cbpb.Build) error {
 }
 
 // CreateBuild starts a build and returns its operation at once, as Cloud
-// Build does: QUEUED, then WORKING while its steps run in order, then
-// SUCCESS, FAILURE, TIMEOUT or CANCELLED.
+// Build does: QUEUED, then WORKING while its steps run in the order their
+// waitFor sets, then SUCCESS, FAILURE, TIMEOUT or CANCELLED.
 func (c *CloudBuildServer) CreateBuild(ctx context.Context, req *cbpb.CreateBuildRequest) (*longrunning.Operation, error) {
 	project, location := req.GetProjectId(), "global"
 	if req.GetParent() != "" {
@@ -350,7 +438,50 @@ func (c *CloudBuildServer) CreateBuild(ctx context.Context, req *cbpb.CreateBuil
 	if project == "" {
 		return nil, apierror.InvalidArgument("project_id is required")
 	}
-	in := req.GetBuild()
+	return c.createBuild(ctx, project, location, req.GetParent() == "", req.GetBuild())
+}
+
+// createdBuilds keeps each CreateBuild build's request, by build name, which
+// RetryBuild runs again.
+var createdBuilds = struct {
+	mu    sync.Mutex
+	input map[string]*cbpb.Build
+}{input: map[string]*cbpb.Build{}}
+
+// Retryable reports whether RetryBuild can rerun the build of that name:
+// whether CreateBuild created it.
+func Retryable(name string) bool {
+	createdBuilds.mu.Lock()
+	defer createdBuilds.mu.Unlock()
+	_, ok := createdBuilds.input[name]
+	return ok
+}
+
+// RetryBuild creates a new build, with a new ID, from the request a build
+// was created with: its source, steps, substitutions and options, as Cloud
+// Build does. A Cloud Storage source without a generation is read again, so
+// the new build may see a newer object. A build CreateBuild did not create,
+// one SubmitBuild ran for a source deploy or a function, is refused: its
+// request was Cloud Run's, not Cloud Build's.
+func (c *CloudBuildServer) RetryBuild(ctx context.Context, req *cbpb.RetryBuildRequest) (*longrunning.Operation, error) {
+	b, err := c.GetBuild(ctx, &cbpb.GetBuildRequest{Name: req.GetName(), ProjectId: req.GetProjectId(), Id: req.GetId()})
+	if err != nil {
+		return nil, err
+	}
+	createdBuilds.mu.Lock()
+	in, ok := createdBuilds.input[b.GetName()]
+	createdBuilds.mu.Unlock()
+	if !ok {
+		return nil, apierror.FailedPrecondition("build %s cannot be retried: it was run by Cloud Run's SubmitBuild, "+
+			"for a source deploy or a function, not created by CreateBuild; deploy again to rebuild it", b.GetId())
+	}
+	_, location, _ := resource.ParseLocation(strings.SplitN(b.GetName(), "/builds/", 2)[0])
+	return c.createBuild(ctx, b.GetProjectId(), location, req.GetName() == "", proto.Clone(in).(*cbpb.Build))
+}
+
+// createBuild validates and starts a build in project and location; global
+// names its operation in the global form.
+func (c *CloudBuildServer) createBuild(ctx context.Context, project, location string, global bool, in *cbpb.Build) (*longrunning.Operation, error) {
 	if in == nil {
 		return nil, apierror.InvalidArgument("build is required")
 	}
@@ -397,29 +528,72 @@ func (c *CloudBuildServer) CreateBuild(ctx context.Context, req *cbpb.CreateBuil
 		subs[k] = v
 	}
 	plan := make([]plannedStep, len(in.GetSteps()))
-	ids := map[string]bool{}
+	deps := make([][]int, len(in.GetSteps()))
+	ids := map[string]int{}
+	containers, firstContainer := false, 0
 	for i, st := range in.GetSteps() {
-		for _, w := range st.GetWaitFor() {
-			// Steps run one after another, which satisfies any waitFor
-			// naming an earlier step, and "-" (start at once).
-			if w != "-" && !ids[w] {
-				return nil, apierror.InvalidArgument("invalid build: step %d waits for %q, which is not an earlier step's id", i, w)
+		switch w := st.GetWaitFor(); {
+		case len(w) == 0:
+			// A step with no waitFor waits for every step before it.
+			for j := 0; j < i; j++ {
+				deps[i] = append(deps[i], j)
+			}
+		case len(w) == 1 && w[0] == "-":
+			// "-": start when the build starts.
+		default:
+			for _, name := range w {
+				j, ok := ids[name]
+				if !ok {
+					return nil, apierror.InvalidArgument("invalid build: step %d waits for %q, which is not an earlier step's id", i, name)
+				}
+				deps[i] = append(deps[i], j)
 			}
 		}
 		if st.GetId() != "" {
-			if ids[st.GetId()] {
+			if _, dup := ids[st.GetId()]; dup {
 				return nil, apierror.InvalidArgument("invalid build: duplicate step id %q", st.GetId())
 			}
-			ids[st.GetId()] = true
+			ids[st.GetId()] = i
 		}
 		p, err := planStep(i, st, subs)
 		if err != nil {
 			return nil, err
 		}
-		if (p.kind == stepDockerBuild || p.kind == stepPack) && src == nil {
-			return nil, apierror.InvalidArgument("invalid build: step %d builds /workspace, but the build has no source", i)
+		if p.kind == stepContainer {
+			if !containers {
+				firstContainer = i
+			}
+			containers = true
+			if st.GetAutomapSubstitutions() || in.GetOptions().GetAutomapSubstitutions() {
+				keys := make([]string, 0, len(subs))
+				for k := range subs {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, k := range keys {
+					p.step.Env = append(p.step.Env, k+"="+subs[k])
+				}
+			}
 		}
 		plan[i] = p
+	}
+	var runner StepRunner
+	if containers {
+		// Refused before anything runs (#1382): the step gets the host's
+		// Docker socket.
+		if err := c.hostStepsRefusal(ctx, firstContainer, plan[firstContainer].step.Image); err != nil {
+			return nil, err
+		}
+		var ok bool
+		if runner, ok = c.builds.builder.(StepRunner); !ok {
+			return nil, apierror.Unimplemented("this instance's builder runs only docker build, docker push and pack steps; " +
+				"an arbitrary step needs the host's Docker, which runs it")
+		}
+	}
+	for i, p := range plan {
+		if (p.kind == stepDockerBuild || p.kind == stepPack) && src == nil && !containers {
+			return nil, apierror.InvalidArgument("invalid build: step %d builds /workspace, but the build has no source", i)
+		}
 	}
 
 	b := proto.Clone(in).(*cbpb.Build)
@@ -433,7 +607,7 @@ func (c *CloudBuildServer) CreateBuild(ctx context.Context, req *cbpb.CreateBuil
 		b.Substitutions = in.GetSubstitutions()
 	}
 	for i, st := range b.Steps {
-		st.Status, st.Timing, st.PullTiming = cbpb.Build_QUEUED, nil, nil
+		st.Status, st.Timing, st.PullTiming, st.ExitCode = cbpb.Build_QUEUED, nil, nil, 0
 		st.Args = make([]string, len(in.GetSteps()[i].GetArgs()))
 		for j, a := range in.GetSteps()[i].GetArgs() {
 			st.Args[j] = substitute(a, subs)
@@ -459,10 +633,13 @@ func (c *CloudBuildServer) CreateBuild(ctx context.Context, req *cbpb.CreateBuil
 	cloudBuilds.mu.Lock()
 	cloudBuilds.builds[b.Name] = b
 	cloudBuilds.mu.Unlock()
+	createdBuilds.mu.Lock()
+	createdBuilds.input[b.Name] = proto.Clone(in).(*cbpb.Build)
+	createdBuilds.mu.Unlock()
 	queued := proto.Clone(b).(*cbpb.Build)
 
 	opName := parent + "/operations/" + id
-	if req.GetParent() == "" {
+	if global {
 		// The global form's operation, operations/build/{project}/{base64 id}.
 		opName = "operations/build/" + project + "/" + base64.StdEncoding.EncodeToString([]byte(id))
 	}
@@ -474,8 +651,8 @@ func (c *CloudBuildServer) CreateBuild(ctx context.Context, req *cbpb.CreateBuil
 	runningBuilds.mu.Lock()
 	runningBuilds.cancel[b.Name] = cancel
 	runningBuilds.mu.Unlock()
-	r := &buildRun{c: c, name: b.Name, op: op.Name, project: project, plan: plan, src: src.GetStorageSource(),
-		logsBucket: b.LogsBucket, createBucket: createBucket}
+	r := &buildRun{c: c, name: b.Name, op: op.Name, project: project, plan: plan, deps: deps, src: src.GetStorageSource(),
+		runner: runner, logsBucket: b.LogsBucket, createBucket: createBucket}
 	go r.run(bctx, cancel)
 	return s.toProtoOperation(op.Name)
 }
@@ -486,11 +663,15 @@ type buildRun struct {
 	name, op     string
 	project      string
 	plan         []plannedStep
+	deps         [][]int // each step's waitFor, as step indexes
 	src          *cbpb.StorageSource
+	runner       StepRunner     // nil: no arbitrary steps
+	ws           BuildWorkspace // the build's /workspace, with runner
 	logsBucket   string
 	createBucket bool
 	mu           sync.Mutex
 	log          bytes.Buffer
+	built        map[string]string // tag -> local image, under mu
 }
 
 // stepWriter prefixes each line a step writes, as Cloud Build's log does.
@@ -582,45 +763,52 @@ func (r *buildRun) run(ctx context.Context, cancel context.CancelFunc) {
 	}()
 	id := r.name[strings.LastIndex(r.name, "/")+1:]
 	start := time.Now()
+	r.built = map[string]string{}
 	r.update(func(b *cbpb.Build) { b.Status, b.StartTime = cbpb.Build_WORKING, timestamppb.New(start) })
 	r.logf("starting build %q\n\nFETCHSOURCE\n", id)
 	if r.src != nil {
 		r.logf("Fetching storage object: gs://%s/%s#%d\n", r.src.GetBucket(), r.src.GetObject(), r.src.GetGeneration())
 	}
-	r.logf("BUILD\n")
-	r.flushLog(ctx)
-	built := map[string]string{} // tag -> local image
-	digests := map[string]string{}
-	var stepImages []string
+	var once sync.Once
 	failed := func(status cbpb.Build_Status, step int, detail string) {
-		end := time.Now()
-		r.logf("ERROR: %s\n", detail)
-		r.flushLog(ctx)
-		r.update(func(b *cbpb.Build) {
-			b.Status, b.FinishTime, b.StatusDetail = status, timestamppb.New(end), detail
-			if step >= 0 {
-				b.Steps[step].Status = status
-				if b.Steps[step].Timing == nil {
-					b.Steps[step].Timing = span(end, end)
-				} else {
-					b.Steps[step].Timing.EndTime = timestamppb.New(end)
+		once.Do(func() {
+			end := time.Now()
+			r.logf("ERROR: %s\n", detail)
+			r.flushLog(ctx)
+			r.update(func(b *cbpb.Build) {
+				b.Status, b.FinishTime, b.StatusDetail = status, timestamppb.New(end), detail
+				if step >= 0 {
+					b.Steps[step].Status = status
+					if b.Steps[step].Timing == nil {
+						b.Steps[step].Timing = span(end, end)
+					} else {
+						b.Steps[step].Timing.EndTime = timestamppb.New(end)
+					}
 				}
+				// A step that was running when the build stopped is
+				// CANCELLED; one that never started stays QUEUED.
+				for i, st := range b.Steps {
+					if i != step && st.Status == cbpb.Build_WORKING {
+						st.Status = cbpb.Build_CANCELLED
+						st.Timing.EndTime = timestamppb.New(end)
+					}
+				}
+				if status == cbpb.Build_FAILURE {
+					b.FailureInfo = &cbpb.Build_FailureInfo{Type: cbpb.Build_FailureInfo_USER_BUILD_STEP, Detail: detail}
+				}
+				b.Timing = map[string]*cbpb.TimeSpan{"BUILD": span(start, end)}
+			})
+			var err error
+			switch status {
+			case cbpb.Build_CANCELLED:
+				err = &apierror.Error{Code: codes.Canceled, Message: "Build was cancelled"}
+			case cbpb.Build_TIMEOUT:
+				err = &apierror.Error{Code: codes.DeadlineExceeded, Message: "Build timed out"}
+			default:
+				err = &apierror.Error{Code: codes.Unknown, Message: "Build failed; check build logs for details"}
 			}
-			if status == cbpb.Build_FAILURE {
-				b.FailureInfo = &cbpb.Build_FailureInfo{Type: cbpb.Build_FailureInfo_USER_BUILD_STEP, Detail: detail}
-			}
-			b.Timing = map[string]*cbpb.TimeSpan{"BUILD": span(start, end)}
+			_ = r.c.builds.s.ops.Fail(r.op, err)
 		})
-		var err error
-		switch status {
-		case cbpb.Build_CANCELLED:
-			err = &apierror.Error{Code: codes.Canceled, Message: "Build was cancelled"}
-		case cbpb.Build_TIMEOUT:
-			err = &apierror.Error{Code: codes.DeadlineExceeded, Message: "Build timed out"}
-		default:
-			err = &apierror.Error{Code: codes.Unknown, Message: "Build failed; check build logs for details"}
-		}
-		_ = r.c.builds.s.ops.Fail(r.op, err)
 	}
 	ctxStatus := func() (cbpb.Build_Status, bool) {
 		switch {
@@ -631,84 +819,164 @@ func (r *buildRun) run(ctx context.Context, cancel context.CancelFunc) {
 		}
 		return 0, false
 	}
-	for i, p := range r.plan {
-		if st, done := ctxStatus(); done {
-			failed(st, -1, "build "+strings.ToLower(st.String()))
-			return
+	if r.runner != nil {
+		var archive io.Reader
+		if r.src != nil {
+			rc, err := r.c.builds.fetch.Fetch(ctx, r.src.GetBucket(), r.src.GetObject(), r.src.GetGeneration())
+			if err != nil {
+				failed(cbpb.Build_FAILURE, -1, "failed to fetch source: "+firstLine(err.Error()))
+				return
+			}
+			defer rc.Close()
+			archive = rc
 		}
-		label := fmt.Sprintf("Step #%d", i)
-		cur := updateCloudBuild(r.name, func(*cbpb.Build) {})
-		if sid := cur.GetSteps()[i].GetId(); sid != "" {
-			label += fmt.Sprintf(" - %q", sid)
-		}
-		stepStart := time.Now()
-		r.update(func(b *cbpb.Build) {
-			b.Steps[i].Status, b.Steps[i].Timing = cbpb.Build_WORKING, &cbpb.TimeSpan{StartTime: timestamppb.New(stepStart)}
-		})
-		r.logf("Starting %s\n", label)
-		sctx, scancel := ctx, context.CancelFunc(func() {})
-		if p.timeout > 0 {
-			sctx, scancel = context.WithTimeout(ctx, p.timeout)
-		}
-		w := &stepWriter{r: r, prefix: label + ": "}
-		err := r.runStep(sctx, p, w, built)
-		w.flush()
-		stepTimedOut := p.timeout > 0 && errors.Is(sctx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
-		scancel()
+		ws, err := r.runner.OpenWorkspace(ctx, id, archive)
 		if err != nil {
-			r.logf("Finished %s\n", label)
 			if st, done := ctxStatus(); done {
-				failed(st, i, "build "+strings.ToLower(st.String()))
+				failed(st, -1, "build "+strings.ToLower(st.String()))
 				return
 			}
-			if stepTimedOut {
-				failed(cbpb.Build_TIMEOUT, i, fmt.Sprintf("build step %d %q timed out", i, cur.GetSteps()[i].GetName()))
-				return
-			}
-			w.prefix = label + ": "
-			_, _ = w.Write([]byte(err.Error() + "\n"))
-			failed(cbpb.Build_FAILURE, i, fmt.Sprintf("build step %d %q failed: %v", i, cur.GetSteps()[i].GetName(), firstLine(err.Error())))
+			failed(cbpb.Build_FAILURE, -1, "failed to prepare /workspace: "+firstLine(err.Error()))
 			return
 		}
-		stepEnd := time.Now()
-		digest := ""
-		if len(p.tags) > 0 {
-			digest = buildDigest(id + "/" + strconv.Itoa(i))
-			for _, t := range p.tags {
-				digests[tagged(t)] = digest
+		r.ws = ws
+		defer ws.Close()
+	}
+	r.logf("BUILD\n")
+	r.flushLog(ctx)
+
+	// Each step starts once the steps it waits for succeed; the first
+	// failure stops the others, as on Cloud Build.
+	stepsCtx, stopSteps := context.WithCancel(ctx)
+	defer stopSteps()
+	done := make([]chan struct{}, len(r.plan))
+	ok := make([]bool, len(r.plan))
+	for i := range done {
+		done[i] = make(chan struct{})
+	}
+	digests := make([]string, len(r.plan))
+	var wg sync.WaitGroup
+	for i := range r.plan {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			defer close(done[i])
+			for _, d := range r.deps[i] {
+				select {
+				case <-done[d]:
+				case <-stepsCtx.Done():
+					return
+				}
+				if !ok[d] {
+					return
+				}
 			}
+			if stepsCtx.Err() != nil {
+				return
+			}
+			p := r.plan[i]
+			label := fmt.Sprintf("Step #%d", i)
+			cur := updateCloudBuild(r.name, func(*cbpb.Build) {})
+			if sid := cur.GetSteps()[i].GetId(); sid != "" {
+				label += fmt.Sprintf(" - %q", sid)
+			}
+			stepStart := time.Now()
+			r.update(func(b *cbpb.Build) {
+				b.Steps[i].Status, b.Steps[i].Timing = cbpb.Build_WORKING, &cbpb.TimeSpan{StartTime: timestamppb.New(stepStart)}
+			})
+			r.logf("Starting %s\n", label)
+			sctx, scancel := stepsCtx, context.CancelFunc(func() {})
+			if p.timeout > 0 {
+				sctx, scancel = context.WithTimeout(stepsCtx, p.timeout)
+			}
+			w := &stepWriter{r: r, prefix: label + ": "}
+			err := r.runStep(sctx, p, w)
+			w.flush()
+			stepTimedOut := p.timeout > 0 && errors.Is(sctx.Err(), context.DeadlineExceeded) && stepsCtx.Err() == nil
+			scancel()
+			r.logf("Finished %s\n", label)
+			if err != nil {
+				defer stopSteps()
+				if st, isDone := ctxStatus(); isDone {
+					failed(st, i, "build "+strings.ToLower(st.String()))
+					return
+				}
+				if stepsCtx.Err() != nil {
+					return // another step failed first
+				}
+				if stepTimedOut {
+					failed(cbpb.Build_TIMEOUT, i, fmt.Sprintf("build step %d %q timed out", i, cur.GetSteps()[i].GetName()))
+					return
+				}
+				_, _ = w.Write([]byte(err.Error() + "\n"))
+				var exit *StepExitError
+				if errors.As(err, &exit) {
+					r.update(func(b *cbpb.Build) { b.Steps[i].ExitCode = int32(exit.Code) })
+				}
+				failed(cbpb.Build_FAILURE, i, fmt.Sprintf("build step %d %q failed: %v", i, cur.GetSteps()[i].GetName(), firstLine(err.Error())))
+				return
+			}
+			stepEnd := time.Now()
+			if len(p.tags) > 0 {
+				digests[i] = buildDigest(id + "/" + strconv.Itoa(i))
+			}
+			ok[i] = true
+			r.update(func(b *cbpb.Build) {
+				b.Steps[i].Status, b.Steps[i].Timing.EndTime = cbpb.Build_SUCCESS, timestamppb.New(stepEnd)
+			})
+			r.flushLog(ctx)
+		}(i)
+	}
+	wg.Wait()
+	if st, isDone := ctxStatus(); isDone {
+		failed(st, -1, "build "+strings.ToLower(st.String()))
+		return
+	}
+	for i := range ok {
+		if !ok[i] {
+			return // failed has recorded it
 		}
-		stepImages = append(stepImages, digest)
-		r.logf("Finished %s\n", label)
-		r.update(func(b *cbpb.Build) {
-			b.Steps[i].Status, b.Steps[i].Timing.EndTime = cbpb.Build_SUCCESS, timestamppb.New(stepEnd)
-		})
-		r.flushLog(ctx)
+	}
+	tagDigest := map[string]string{}
+	for i, p := range r.plan {
+		for _, t := range p.tags {
+			tagDigest[tagged(t)] = digests[i]
+		}
 	}
 	buildEnd := time.Now()
 	r.logf("PUSH\n")
 	cur := updateCloudBuild(r.name, func(*cbpb.Build) {})
 	var results []*cbpb.BuiltImage
 	for _, im := range cur.GetImages() {
-		local, ok := built[tagged(im)]
-		if !ok {
+		r.mu.Lock()
+		local, found := r.built[tagged(im)]
+		r.mu.Unlock()
+		if !found {
 			failed(cbpb.Build_FAILURE, -1, fmt.Sprintf("failed to push image %q: no step built it", im))
 			return
 		}
-		r.logf("Pushing %s\n%s: digest: %s\n", im, tagged(im), digests[tagged(im)])
-		localBuilds.record(untagged(im)+"@"+digests[tagged(im)], local)
+		r.logf("Pushing %s\n%s: digest: %s\n", im, tagged(im), tagDigest[tagged(im)])
+		localBuilds.record(untagged(im)+"@"+tagDigest[tagged(im)], local)
 		pt := time.Now()
-		results = append(results, &cbpb.BuiltImage{Name: tagged(im), Digest: digests[tagged(im)], PushTiming: span(pt, pt)})
+		results = append(results, &cbpb.BuiltImage{Name: tagged(im), Digest: tagDigest[tagged(im)], PushTiming: span(pt, pt)})
 	}
 	end := time.Now()
 	r.logf("DONE\n")
 	r.flushLog(ctx)
-	done := r.update(func(b *cbpb.Build) {
+	final := r.update(func(b *cbpb.Build) {
 		b.Status, b.FinishTime = cbpb.Build_SUCCESS, timestamppb.New(end)
-		b.Results = &cbpb.Results{Images: results, BuildStepImages: stepImages}
+		b.Results = &cbpb.Results{Images: results, BuildStepImages: digests}
 		b.Timing = map[string]*cbpb.TimeSpan{"BUILD": span(start, buildEnd), "PUSH": span(buildEnd, end)}
 	})
-	_ = r.c.builds.s.ops.Succeed(r.op, done)
+	_ = r.c.builds.s.ops.Succeed(r.op, final)
+}
+
+// StepExitError is an arbitrary step's non-zero exit, which the build
+// records as the step's exitCode.
+type StepExitError struct{ Code int }
+
+func (e *StepExitError) Error() string {
+	return fmt.Sprintf("step exited with non-zero status: %d", e.Code)
 }
 
 func firstLine(s string) string {
@@ -716,12 +984,17 @@ func firstLine(s string) string {
 	return l
 }
 
-// runStep runs one planned step; built maps each tag a step built to its
-// local image.
-func (r *buildRun) runStep(ctx context.Context, p plannedStep, w *stepWriter, built map[string]string) error {
+// runStep runs one planned step.
+func (r *buildRun) runStep(ctx context.Context, p plannedStep, w *stepWriter) error {
 	switch p.kind {
+	case stepContainer:
+		spec := p.step
+		spec.Log = w
+		return r.ws.RunStep(ctx, spec)
 	case stepDockerPush:
-		local, ok := built[tagged(p.push)]
+		r.mu.Lock()
+		local, ok := r.built[tagged(p.push)]
+		r.mu.Unlock()
 		if !ok {
 			return fmt.Errorf("An image does not exist locally with the tag: %s", p.push)
 		}
@@ -731,7 +1004,14 @@ func (r *buildRun) runStep(ctx context.Context, p plannedStep, w *stepWriter, bu
 		fmt.Fprintf(w, "%s: loaded into the cluster as %s\n", tagged(p.push), local)
 		return nil
 	case stepDockerBuild, stepPack:
-		rc, err := r.c.builds.fetch.Fetch(ctx, r.src.GetBucket(), r.src.GetObject(), r.src.GetGeneration())
+		var rc io.ReadCloser
+		var err error
+		if r.ws != nil {
+			// What earlier steps wrote to /workspace is built.
+			rc, err = r.ws.Archive(ctx)
+		} else {
+			rc, err = r.c.builds.fetch.Fetch(ctx, r.src.GetBucket(), r.src.GetObject(), r.src.GetGeneration())
+		}
 		if err != nil {
 			return err
 		}
@@ -745,10 +1025,12 @@ func (r *buildRun) runStep(ctx context.Context, p plannedStep, w *stepWriter, bu
 		if err := r.c.builds.builder.Build(ctx, spec); err != nil {
 			return err
 		}
+		r.mu.Lock()
 		for _, t := range p.tags {
-			built[tagged(t)] = spec.LocalImage
+			r.built[tagged(t)] = spec.LocalImage
 			localBuilds.record(t, spec.LocalImage)
 		}
+		r.mu.Unlock()
 		fmt.Fprintf(w, "Successfully tagged %s\n", strings.Join(p.tags, ", "))
 		return nil
 	}

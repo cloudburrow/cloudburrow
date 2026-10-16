@@ -174,6 +174,36 @@ The other service APIs CloudBurrow serves itself send no CORS headers, so a brow
 foreign page read their answers; a simple request a page can still send to them blind is not
 covered by #677, and the upstream emulators behind the tunnels were not examined for it.
 
+*Amended by #1382 (decided 2026-10-16):* **Cloud Build steps get the host's Docker socket.** A
+build step that is not a docker build, docker push or pack step runs as Google's build worker
+runs it: a container on the host's Docker, with `/var/run/docker.sock` mounted, on the
+`cloudbuild` network. Docker build, push and pack steps are run by the local builder and are
+unchanged. A container holding the Docker socket can start any other container with any of the
+host's files mounted, so a build step is as good as a shell on the developer's machine. Two
+rules follow, and both are enforced by `CreateBuild` and `RetryBuild` before anything runs:
+
+- **Opt-in.** Such steps run only when `up` was given `--cloudbuild-host-steps`
+  (`CLOUDBURROW_CLOUDBUILD_HOST_STEPS`, or `cloudbuildHostSteps` in a config file the developer
+  named; a discovered `./cloudburrow.json` cannot set it, as with `storage.corsAllowOrigins`).
+  Off, the default, a build with one is refused `FAILED_PRECONDITION`, naming the flag and the
+  socket. The build history in the console says whether the steps are on, and why.
+- **Loopback only.** With the flag on, a build with such a step is accepted only from the host's
+  loopback: the connection must come from a loopback address *and* be addressed to a loopback
+  name (`127.0.0.0/8`, `[::1]`, `localhost`, `*.localhost`). A pod's request, which names
+  `cloudburrow-host`, `host.docker.internal`, the kind gateway or the Service's cluster IP, is
+  refused `FAILED_PRECONDITION` with the reason, as is one from another machine under
+  `--allow-remote`. The SDK, gcloud through the harness, Terraform and the console's Retry all
+  dial loopback and pass. The pods' Cloud Run port is the same listener as the host's, so the
+  service APIs stay published to pods (#575); only these builds are held back.
+
+The address alone cannot tell a pod from the host: Docker Desktop delivers a pod's connection to
+`host.docker.internal` from the host's loopback (#553), and the Linux relay forwards from
+loopback too. The name dialed is what marks it, the same signal `sqladmin`'s `fromPod` uses for
+the Cloud SQL connector (#1346). **Known gap:** a program in a pod that dials the host and writes
+a loopback `Host` or `:authority` by hand is not caught. That takes code written to get around
+the check, not an application calling Cloud Build as it would on Google, and it is why the steps
+stay off unless the developer turns them on.
+
 **Never load application default credentials.** The compatibility harness (issue #10)
 additionally refuses non-local endpoints, so a misconfigured test cannot reach real GCP.
 

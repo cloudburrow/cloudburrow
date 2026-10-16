@@ -20,10 +20,10 @@ under the repository's URL, by tag or by the digest the build reports, runs it. 
 shows the repositories (Artifact Registry) and the builds (Cloud Run, Build history), each
 build's page with its steps' status and timing and its log.
 
-**Cloud Build `builds.create` and `gcloud builds submit` (#1347).** `CreateBuild` (global and
-regional) and `CancelBuild` are served on the Run port. A build's source is
-`source.storageSource`, a tar.gz or zip in the instance's Cloud Storage. Its steps run in
-order, through the same local builder as SubmitBuild:
+**Cloud Build `builds.create` and `gcloud builds submit` (#1347, #1382).** `CreateBuild` (global
+and regional), `CancelBuild` and `RetryBuild` are served on the Run port. A build's source is
+`source.storageSource`, a tar.gz or zip in the instance's Cloud Storage. These steps run through
+the same local builder as SubmitBuild, not in the step's own container:
 
 - `gcr.io/cloud-builders/docker` `build` (`-t`, `-f`, `--build-arg`, a context directory;
   `--network`, `--cache-from`, `--no-cache` and `--pull` change nothing here) builds with the
@@ -32,31 +32,97 @@ order, through the same local builder as SubmitBuild:
   `gcloud builds submit --tag` sends, is the same docker build;
 - `docker push` of a tag an earlier step built succeeds without a registry: the image is
   already in the cluster. Each of `images` gets a digest, and a service naming it by tag or
-  digest runs it;
+  digest runs it. A push is never sent to a registry, so a build never reaches Google's;
 - `gcr.io/k8s-skaffold/pack` `build IMAGE` (`--builder gcr.io/buildpacks/builder…`, `--env`,
   `--path`) builds with pack, gated as the Functions tests are.
 
+**Every other step runs in its own container (#1382)**, as Google's build worker runs it: a
+container of the step's `name` on the host's Docker (pulled when missing, logged as
+`Pulling image: …`), with
+
+- the Docker socket mounted at `/var/run/docker.sock`, so a step can run `docker` itself;
+- the user-defined network `cloudbuild`, made on the first build that needs it and removed after
+  the last, so containers a step starts with `--network cloudbuild` reach each other;
+- the build's `/workspace`, a Docker volume holding the unpacked source, as the working directory
+  (`dir` under it); what a step writes there, every later step sees, and a docker build or pack
+  step after it builds that `/workspace`, not the original archive;
+- `/builder/home` (`HOME`), shared by every step, and `/builder/outputs` (`BUILDER_OUTPUT`);
+- the step's `entrypoint`, `args`, `env` and `volumes` (named volumes, shared by the steps that
+  name them; a path must be absolute and not `/workspace`, `/builder/home` or the socket), and
+  `automapSubstitutions` (each substitution as an environment variable).
+
+A non-zero exit fails the build with `build step N "name" failed: step exited with non-zero
+status: C` and the step's `exitCode`. Steps run as `waitFor` orders them: a step without it waits
+for every earlier step, `-` starts at once, and ids name the steps to wait for, so independent
+steps run concurrently. The first failure stops the rest; a step running then is `CANCELLED`,
+one never started stays `QUEUED`. A step's `timeout`, the build's, and `CancelBuild` kill the
+step's container. The volumes and containers are removed when the build ends. Steps run on the
+host's own architecture: Google's workers are linux/amd64. The step's container reaches the
+host's network as any container does, so a step that calls a Google API, such as a
+`gcr.io/cloud-builders/gcloud` step, calls Google, not this instance.
+
+**Security: off by default, loopback only (ADR-0004, decided 2026-10-16).** A step gets the
+host's Docker socket, as on Google, where the socket belongs to a throwaway VM. Here it belongs
+to the developer's machine: a step can start any container, including a privileged one, with any
+of the host's files mounted. So these steps run only when `up` is given
+`--cloudbuild-host-steps` (`CLOUDBURROW_CLOUDBUILD_HOST_STEPS=true`, or `"cloudbuildHostSteps":
+true` in a config file you name; a discovered `./cloudburrow.json` cannot set it). Without it, a
+build with any step other than docker build, docker push or pack is refused before anything
+runs, `FAILED_PRECONDITION`:
+
+```
+build step 0 (alpine) is not a docker build, docker push or pack step, and this instance runs
+such steps only when started with --cloudbuild-host-steps: each one runs as a container on the
+host's Docker with the host's Docker socket mounted, which gives it control of the host (ADR-0004)
+```
+
+Docker build, push and pack builds, `gcloud builds submit --tag`, source deploys and functions
+are unaffected. With the flag on, such a build still runs only when it was submitted from this
+machine's loopback: from a loopback address, to `127.0.0.1`, `[::1]` or `localhost`, as the SDK,
+gcloud (through `gcloud-setup`), Terraform and the console's Retry do. A pod's `CreateBuild` or
+`RetryBuild` through `cloudburrow-host` (or `host.docker.internal`, the kind gateway or a cluster
+IP), and another machine's under `--allow-remote`, is refused `FAILED_PRECONDITION` with the
+reason. The console's build history says whether the steps are on, and why. Do not run builds
+from sources you would not run on the host.
+
 Built-in (`$PROJECT_ID`, `$PROJECT_NUMBER`, `$BUILD_ID`, `$LOCATION`) and user (`$_NAME`)
-substitutions apply, as do a step's `dir`, `id`, `waitFor` (any earlier step, or `-`: steps
-run one after another, which satisfies every such graph) and `timeout`, and the build's
-`timeout` (default ten minutes). Status goes `QUEUED`, `WORKING`, then `SUCCESS`, `FAILURE`,
-`TIMEOUT` or `CANCELLED`, with each step's status and timing; the operation answers with the
-Build, or fails (`UNKNOWN`, `CANCELLED`, `DEADLINE_EXCEEDED`). The log is written as Google
-writes it, `log-{build id}.txt` in `logsBucket`, or in the default
-`{project number}.cloudbuild-logs.googleusercontent.com` bucket, made in the instance's Cloud
-Storage on the first log; `options.logging` `NONE` or `CLOUD_LOGGING_ONLY` writes none.
-`gcloud builds submit` without `--async` tails that log from `storage.googleapis.com`
-directly, ignoring the `storage` endpoint override, so use `--async` and
+substitutions apply to a step's `name`, `args`, `env`, `dir` and `entrypoint`, and to `images`.
+So do a step's `id`, `waitFor` and `timeout`, and the build's `timeout` (default ten minutes).
+Status goes `QUEUED`, `WORKING`, then `SUCCESS`, `FAILURE`, `TIMEOUT` or `CANCELLED`, with each
+step's status and timing; the operation answers with the Build, or fails (`UNKNOWN`, `CANCELLED`,
+`DEADLINE_EXCEEDED`). The log is written as Google writes it, `log-{build id}.txt` in
+`logsBucket`, or in the default `{project number}.cloudbuild-logs.googleusercontent.com` bucket,
+made in the instance's Cloud Storage on the first log; `options.logging` `NONE` or
+`CLOUD_LOGGING_ONLY` writes none. `gcloud builds submit` without `--async` tails that log from
+`storage.googleapis.com` directly, ignoring the `storage` endpoint override, so use `--async` and
 `gcloud builds describe`, or `gsutil cat` the log.
 
-**Refused, with the reason** (`UNIMPLEMENTED`): any other step container, and `docker` other
-than build and push. Cloud Build runs every step on one VM, with the Docker socket, the
-`cloudbuild` network and a `/workspace` volume each step mounts in turn; a step run as a
-Kubernetes Job in the instance's cluster has none of those, so a build that works on Google
-would fail or differ here. Also refused: a step's `env` (outside pack), `secretEnv`,
-`volumes`, `script`, `allowFailure`; the build's `secrets`, `availableSecrets`, `artifacts`,
-`serviceAccount`, worker pools, machine types and other `options`; and sources other than
-`storageSource`. Triggers, worker pools, `RetryBuild` and `ApproveBuild` are not served.
+**`ListBuilds` (#1382)** takes the `filter` "Filtering build results" documents: `status`,
+`build_id`, `trigger_id`, `tags`, `images`, `results.images.name`, `results.images.digest`,
+`source.storage_source.bucket` and `.object`, `source.repo_source.*`,
+`source_provenance.resolved_repo_source.commit_sha`, `options.requested_verify_option`,
+`create_time`, `start_time` and `finish_time`. `=` and `!=` work on every field, and `>`, `>=`,
+`<` and `<=` on the times (RFC 3339). Terms combine with `AND`, `OR`, `NOT` (or a leading `-`)
+and parentheses; as in Google's list filters, `OR` binds tighter than `AND`. A repeated field
+matches `=` when any value does, and `field=(a OR b)` is either. An unknown field or a malformed
+filter is `INVALID_ARGUMENT`. `page_size` and `page_token` page the newest-first list; a token
+is bound to the filter and location it was issued for. The global form (`projects/{p}/builds`)
+lists every location and the regional form one. `gcloud builds list --filter` works through it.
+
+**`RetryBuild` (#1382)** creates a new build, with a new ID and a new operation, from the request
+the build was created with: its source, steps, substitutions, tags and options. A storage source
+without a generation is read again, so the retry may see a newer object, as Google documents. A
+build that SubmitBuild ran, for `gcloud run deploy --source` or a function, is refused
+`FAILED_PRECONDITION`, naming why: its request was Cloud Run's, so there is no Cloud Build request
+to rerun. Deploy again to rebuild it.
+
+**Refused, with the reason** (`UNIMPLEMENTED`): a step's `secretEnv` (Secret Manager, which
+Cloud Build reads on Google), `script`, `allowFailure` and `allowExitCodes`; `env` and `volumes`
+on a docker build, docker push or pack step (the local builder runs those, not the step's
+container); the build's `secrets`, `availableSecrets`, `artifacts`, `serviceAccount`, worker
+pools, machine types and other `options`; and sources other than `storageSource`. Triggers,
+worker pools and `ApproveBuild` are not served. The console's Build history takes the same
+filter in its filter box, and offers Retry on a finished build's page.
 
 ## Functions Framework (#32)
 
