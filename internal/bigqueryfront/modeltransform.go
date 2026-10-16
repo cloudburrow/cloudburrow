@@ -98,11 +98,25 @@ func (md bqModel) predictTransform() []string {
 	}
 	var out []string
 	for _, it := range md.Transform {
-		name := strings.ToLower(strings.Trim(it, "`"))
-		if drop[name] && !strings.ContainsAny(name, " ().") {
+		expr, name := transformItemName(it)
+		if drop[strings.ToLower(name)] && strings.EqualFold(strings.Trim(expr, "`"), name) {
 			continue
 		}
 		out = append(out, it)
 	}
 	return out
+}
+
+// transformItemName splits a TRANSFORM item into its expression and its
+// output column's name: expr AS name, or a column by itself.
+func transformItemName(it string) (expr, name string) {
+	toks, ok := lex(it)
+	if ok && len(toks) >= 3 && toks[len(toks)-2].is("AS") && (toks[len(toks)-1].kind == tokWord || toks[len(toks)-1].kind == tokQuoted) {
+		return strings.TrimSpace(it[:toks[len(toks)-2].pos]), toks[len(toks)-1].text
+	}
+	name = strings.Trim(it, "`")
+	if k := strings.LastIndex(name, "."); k >= 0 {
+		name = name[k+1:]
+	}
+	return it, name
 }
