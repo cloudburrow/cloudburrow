@@ -106,21 +106,36 @@ func (r *Ring) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"calls": r.After(after)})
 }
 
-// recordingStream notes the resource the first request names.
+// recordingStream notes the resource the first request names. A handler
+// may still be receiving on another goroutine when it returns (the Bigtable
+// front's proxy pumps requests apart from responses), so the fields are
+// read and written under mu (main run 38941061488, -race).
 type recordingStream struct {
 	grpc.ServerStream
 	name     func(any) string
+	mu       sync.Mutex
 	resource string
 	seen     bool
 }
 
 func (s *recordingStream) RecvMsg(m any) error {
 	err := s.ServerStream.RecvMsg(m)
-	if err == nil && !s.seen {
-		s.seen = true
-		s.resource = s.name(m)
+	if err == nil {
+		s.mu.Lock()
+		if !s.seen {
+			s.seen = true
+			s.resource = s.name(m)
+		}
+		s.mu.Unlock()
 	}
 	return err
+}
+
+// named is the resource the first request named, if one has been read.
+func (s *recordingStream) named() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resource
 }
 
 // StreamInterceptor records every call a front's gRPC server serves, by
@@ -136,7 +151,7 @@ func StreamInterceptor(r *Ring, name func(any) string, streaming func(method str
 		start := time.Now()
 		rs := &recordingStream{ServerStream: ss, name: name}
 		err := handler(srv, rs)
-		r.Add(Call{Method: info.FullMethod, Transport: "grpc", Code: int(status.Code(err)), Resource: rs.resource,
+		r.Add(Call{Method: info.FullMethod, Transport: "grpc", Code: int(status.Code(err)), Resource: rs.named(),
 			Stream: streaming(info.FullMethod), Time: start, Duration: time.Since(start),
 			TraceParent: traceParentOf(ss.Context())})
 		return err
