@@ -16,8 +16,9 @@ import (
 // does, so REST has no logic of its own. LoggingServiceV2, MetricsServiceV2
 // and ConfigServiceV2 are registered (#1226); the ConfigServiceV2 methods
 // Admin does not implement (the Async bucket calls, links, settings) answer 501
-// UNIMPLEMENTED, as TailLogEntries does: the transcoder serves unary calls,
-// and the tail, a bidirectional stream, is served over gRPC only (#1215). A path Google does not bind answers 404.
+// UNIMPLEMENTED. The transcoder serves unary calls; the tail, a
+// bidirectional stream, is served over gRPC (#1215) and, as a streamed JSON
+// array, at its JSON binding by tailjson.go (#1410). A path Google does not bind answers 404.
 // Of logging_v2.yaml's mixins, Operations' bindings are, for CopyLogEntries'
 // operations: projects' (#1394), and organizations', folders' and billing
 // accounts' (#1411). Locations is not bound.
@@ -34,10 +35,22 @@ func Routes() []rest.Route { return Transcoder().Routes() }
 // NewRESTHandler returns the JSON API for what register adds, which is called
 // with the transcoder as it is with the gRPC server, so both transports serve
 // the same set.
+//
+// POST /v2/entries:tail is served beside the transcoder (tailjson.go).
 func NewRESTHandler(register func(grpc.ServiceRegistrar)) http.Handler {
 	t := Transcoder()
-	register(t)
-	return t
+	rec := &tailRecorder{next: t}
+	register(rec)
+	if rec.srv == nil {
+		return t
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == tailJSONPath {
+			rec.srv.serveTailJSON(w, r)
+			return
+		}
+		t.ServeHTTP(w, r)
+	})
 }
 
 // operationsMixins are logging_v2.yaml's Operations bindings, one set per

@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +17,8 @@ import (
 // the Logging query language:
 //
 //	filter     = term { [ "AND" ] term }
-//	term       = field op value
+//	term       = [ "NOT" ] ( field op value | function )
+//	function   = "LOG_ID(" string ")" | "SOURCE(" string ")"
 //	field      = "logName" | "severity" | "resource.type" | "timestamp"
 //	           | "resource.labels." key | "labels." key
 //	key        = a bare word, or a double-quoted string (labels."a/b")
@@ -34,7 +36,15 @@ import (
 // lexicographic, and every comparison on a missing label is false, != included
 // (docs.cloud.google.com/logging/docs/view/logging-query-language).
 //
-// Anything else — OR, NOT, parentheses, a field outside these, the ":"
+// LOG_ID("ID") matches the entries of any parent's log ID (decoded), and
+// SOURCE("projects/P") those of a project, folder, organization or billing
+// account and, for a folder or an organization, of what Resource Manager
+// holds under it (#1410). These are the functions log view filters are made
+// of (docs.cloud.google.com/logging/docs/logs-views). SOURCE needs the
+// hierarchy, so only the reads that have it (compileWith) accept it. NOT
+// negates one term, as the view docs allow; not a compound one.
+//
+// Anything else — OR, parentheses, a field outside these, the ":"
 // has operator, a function — is INVALID_ARGUMENT naming the term. A filter
 // that ignored a term it did not understand would return entries the caller
 // excluded, which is worse than refusing.
@@ -90,8 +100,12 @@ func unquote(v string) string {
 	return v
 }
 
-// compile turns a filter into a predicate.
-func compile(filter string) (pred, error) {
+// compile turns a filter into a predicate; SOURCE() is refused.
+func compile(filter string) (pred, error) { return compileWith(filter, nil) }
+
+// compileWith is compile with SOURCE() accepted, ancestors answering what a
+// project or folder sits under, nearest first.
+func compileWith(filter string, ancestors func(parent) []parent) (pred, error) {
 	toks, err := tokens(filter)
 	if err != nil {
 		return nil, err
@@ -100,6 +114,33 @@ func compile(filter string) (pred, error) {
 	for i := 0; i < len(toks); {
 		if toks[i] == "AND" {
 			i++
+			continue
+		}
+		negate := false
+		if toks[i] == "NOT" {
+			negate = true
+			i++
+			if i >= len(toks) || toks[i] == "(" || toks[i] == "NOT" {
+				return nil, apierror.InvalidArgument("filter: NOT takes one term, not a compound statement")
+			}
+		}
+		add := func(p pred) {
+			if negate {
+				q := p
+				p = func(e *loggingpb.LogEntry) bool { return !q(e) }
+			}
+			preds = append(preds, p)
+		}
+		if fn := strings.ToUpper(toks[i]); (fn == "LOG_ID" || fn == "SOURCE") && i+1 < len(toks) && toks[i+1] == "(" {
+			if i+3 >= len(toks) || toks[i+3] != ")" || !strings.HasPrefix(toks[i+2], `"`) {
+				return nil, apierror.InvalidArgument("filter: %s takes one double-quoted string, %s(\"...\")", fn, fn)
+			}
+			p, err := funcPred(fn, unquote(toks[i+2]), ancestors)
+			if err != nil {
+				return nil, err
+			}
+			add(p)
+			i += 4
 			continue
 		}
 		if i+2 >= len(toks) {
@@ -122,7 +163,7 @@ func compile(filter string) (pred, error) {
 		if err != nil {
 			return nil, err
 		}
-		preds = append(preds, p)
+		add(p)
 		i += 3
 	}
 	return func(e *loggingpb.LogEntry) bool {
@@ -132,6 +173,44 @@ func compile(filter string) (pred, error) {
 			}
 		}
 		return true
+	}, nil
+}
+
+// funcPred is LOG_ID(arg) or SOURCE(arg).
+func funcPred(fn, arg string, ancestors func(parent) []parent) (pred, error) {
+	if fn == "LOG_ID" {
+		return func(e *loggingpb.LogEntry) bool {
+			_, raw, ok := strings.Cut(e.GetLogName(), "/logs/")
+			if !ok {
+				return false
+			}
+			if id, err := url.PathUnescape(raw); err == nil {
+				raw = id
+			}
+			return raw == arg
+		}, nil
+	}
+	if ancestors == nil {
+		return nil, apierror.InvalidArgument("filter: SOURCE() is supported in log view filters only")
+	}
+	want, rest, err := cutParent("SOURCE", arg)
+	if err != nil || rest != "" {
+		return nil, apierror.InvalidArgument("filter: SOURCE(%q) does not name a project, folder, organization or billing account", arg)
+	}
+	return func(e *loggingpb.LogEntry) bool {
+		p := entryParent(e)
+		if p == want {
+			return true
+		}
+		if !want.hasChildren() {
+			return false
+		}
+		for _, a := range ancestors(p) {
+			if a == want {
+				return true
+			}
+		}
+		return false
 	}, nil
 }
 

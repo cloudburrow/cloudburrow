@@ -133,22 +133,15 @@ func (s *Store) snapshot() []*loggingpb.LogEntry {
 	return out
 }
 
-// routedTo snapshots the entries sinks sent to bucket.
-func (s *Store) routedTo(bucket string) []*loggingpb.LogEntry {
+// inBucket is whether bucket holds e, as bucketEntries reads it.
+func (s *Store) inBucket(ref bucketRef, e *loggingpb.LogEntry) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []*loggingpb.LogEntry
-	for _, e := range s.entries {
-		if r := s.routed[e]; r != nil {
-			for _, b := range r.buckets {
-				if b == bucket {
-					out = append(out, e)
-					break
-				}
-			}
-		}
+	r := s.routed[e]
+	s.mu.Unlock()
+	if ref.location == "global" && ref.bucket == bucketDefault && (r == nil || !r.hidden) && entryParent(e) == ref.parent {
+		return true
 	}
-	return out
+	return r != nil && slices.Contains(r.buckets, ref.name())
 }
 
 // bucketEntries snapshots what a log bucket holds: for a parent's global
@@ -230,8 +223,9 @@ const (
 	// rejects entries more than a day in the future with INVALID_ARGUMENT.
 	MaxFutureSkew = 24 * time.Hour
 	// Retention is the _Default bucket's retention. Google accepts entries
-	// older than a bucket's retention but does not store them, so they are
-	// never listed; custom retention is not modelled.
+	// older than a bucket's retention but does not store them, so an entry
+	// older than this when written is not stored; a read applies each
+	// bucket's own retention_days (#1410).
 	Retention = 30 * 24 * time.Hour
 )
 
@@ -499,20 +493,13 @@ func (s *Server) ListLogEntries(_ context.Context, req *loggingpb.ListLogEntries
 
 	var found []*loggingpb.LogEntry
 	seen := map[*loggingpb.LogEntry]bool{}
-	add := func(e *loggingpb.LogEntry) {
-		if !seen[e] && match(e) {
-			seen[e] = true
-			found = append(found, e)
-		}
-	}
-	for _, e := range s.store.snapshot() {
-		if sources.parents[entryParent(e)] {
-			add(e)
-		}
-	}
-	for _, b := range sources.buckets {
-		for _, e := range s.store.routedTo(b) {
-			add(e)
+	now := s.clock()
+	for _, src := range sources {
+		for _, e := range s.store.bucketEntries(src.bucket) {
+			if !seen[e] && src.holds(e, now) && match(e) {
+				seen[e] = true
+				found = append(found, e)
+			}
 		}
 	}
 	less := func(a, b cursor) bool {
@@ -591,52 +578,71 @@ func (s *Server) DeleteLog(_ context.Context, req *loggingpb.DeleteLogRequest) (
 	return &emptypb.Empty{}, nil
 }
 
-// sources is what a ListLogEntries reads: the parents whose own entries it
-// lists, and the log buckets whose routed entries it lists too.
-type sources struct {
-	parents map[parent]bool
-	buckets []string
+// source is one log view a read covers (#1410): a bucket, the view's
+// filter, and the bucket's retention.
+type source struct {
+	bucket    bucketRef
+	view      pred // nil for _AllLogs or an unfiltered view
+	retention time.Duration
 }
 
-// sources resolves resource_names: parents, and bucket views. A parent's own
-// entries are those of its _Default bucket, so its _Default view is the
-// parent and what sinks routed there; another bucket's view is what sinks
-// routed to that bucket. A view's filter is not applied.
-func (s *Server) sources(names []string) (sources, error) {
-	out := sources{parents: map[parent]bool{}}
+// holds is whether e, one of the source bucket's entries, is in the view at
+// now: inside the bucket's retention and matched by the view's filter.
+// Google ages entries out of a bucket after its retention_days
+// (docs.cloud.google.com/logging/docs/buckets#retention).
+func (src source) holds(e *loggingpb.LogEntry, now time.Time) bool {
+	if src.retention > 0 && e.GetTimestamp().AsTime().Before(now.Add(-src.retention)) {
+		return false
+	}
+	return src.view == nil || src.view(e)
+}
+
+// sources resolves resource_names: a parent reads its global _Default
+// bucket (its own entries and what sinks routed there) through _AllLogs, and
+// {bucket}/views/{view} reads that bucket through the view. Each applies
+// the bucket's retention, and a view its filter (#1410); a view filter
+// outside what CloudBurrow evaluates (filter.go) is UNIMPLEMENTED, since
+// reading past it would show entries the view hides.
+func (s *Server) sources(names []string) ([]source, error) {
+	var out []source
 	for _, r := range names {
 		p, rest, err := cutParent("resource name", r)
 		if err != nil {
-			return out, err
+			return nil, err
 		}
 		if err := s.admin.check(p); err != nil {
-			return out, err
+			return nil, err
 		}
-		if rest == "" {
-			out.parents[p] = true
-			// What another project's sinks routed to this one (#1404).
-			out.buckets = append(out.buckets, bucketRef{parent: p, location: "global", bucket: bucketDefault}.name())
-			continue
+		ref, view := bucketRef{parent: p, location: "global", bucket: bucketDefault}, viewAllLogs
+		if rest != "" {
+			ref, view, err = parseView("resource name", r)
+			if err != nil {
+				return nil, apierror.InvalidArgument("resource name %q is neither a parent nor {parent}/locations/{location}/buckets/{bucket}/views/{view}", r)
+			}
 		}
-		ref, view, err := parseView("resource name", r)
-		if err != nil {
-			return out, apierror.InvalidArgument("resource name %q is neither a parent nor {parent}/locations/{location}/buckets/{bucket}/views/{view}", r)
-		}
+		src := source{bucket: ref, retention: defaultRetention * 24 * time.Hour}
 		if s.admin != nil {
 			s.admin.mu.Lock()
-			_, err := s.admin.getBucket(ref)
+			b, err := s.admin.getBucket(ref)
+			var v *loggingpb.LogView
 			if err == nil {
-				_, err = s.admin.getView(ref, view)
+				v, err = s.admin.getView(ref, view)
 			}
 			s.admin.mu.Unlock()
 			if err != nil {
-				return out, err
+				return nil, err
+			}
+			if d := b.GetRetentionDays(); d > 0 {
+				src.retention = time.Duration(d) * 24 * time.Hour
+			}
+			if f := strings.TrimSpace(v.GetFilter()); f != "" {
+				src.view, err = compileWith(f, s.admin.ancestors)
+				if err != nil {
+					return nil, apierror.Unimplemented("view %s: its filter %q is not one CloudBurrow evaluates: %s", v.GetName(), f, apierror.From(err).Message)
+				}
 			}
 		}
-		if ref.location == "global" && ref.bucket == bucketDefault {
-			out.parents[ref.parent] = true
-		}
-		out.buckets = append(out.buckets, ref.name())
+		out = append(out, src)
 	}
 	return out, nil
 }

@@ -3299,6 +3299,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
           "test/compat/terraform_logging_buckets_test.go:131 TestTerraformLoggingLogView"
         ]
       },
@@ -3526,6 +3527,7 @@
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
           "test/compat/runlogs_test.go:189 TestGcloudRunLogsRead",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
@@ -3550,7 +3552,8 @@
         "method": "google.logging.v2.LoggingServiceV2/TailLogEntries",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1215_test.go:40 TestLoggingTailLogEntries"
+          "test/compat/logging1215_test.go:40 TestLoggingTailLogEntries",
+          "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention"
         ]
       },
       {
