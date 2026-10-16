@@ -47,7 +47,7 @@ func TestCloudBuildCreateBuild(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}
-	ctx, cancel := context.WithTimeout(h.Context(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	t.Cleanup(cancel)
 	parent := runParent(h)
 	cb := cloudBuildClient(ctx, t, h)

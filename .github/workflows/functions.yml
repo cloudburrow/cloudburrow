@@ -137,6 +137,12 @@ jobs:
           # set, none a port of 0. An assignment, not eval "$(...)", so a
           # failure fails the step.
           ./bin/cloudburrow env "${CB[@]}" --format json > env.json
+          # And Service Usage and Resource Manager, which the run shard does
+          # not export: gcloud functions deploy reads both once a deploy
+          # succeeds, and the harness points gcloud at only the services it
+          # names (run 38919482569). This job runs only the Functions tests, so
+          # neither suite runs twice.
+          TEST_VARS+=,SERVICEUSAGE,RESOURCEMANAGER
           COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS" --env-json env.json \
             --cli "$PWD/bin/cloudburrow" --gcloud "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" -- "${CB[@]}")
           eval "$COMPAT_ENV"

@@ -75,7 +75,7 @@ func putSource(ctx context.Context, t *testing.T, uploadURL string, data []byte)
 // and Cloud Storage ones), a second create and a missing function are refused.
 func TestFunctionsAPI(t *testing.T) {
 	h := New(t)
-	ctx, cancel := context.WithTimeout(h.Context(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
 	parent := runParent(h)
 	fc := functionsClient(t, h)
@@ -287,7 +287,7 @@ func requireAmd64Functions(ctx context.Context, t *testing.T) {
 // build; delete removes the service too.
 func TestFunctionsAPIBuildsAndServes(t *testing.T) {
 	h := New(t)
-	ctx, cancel := context.WithTimeout(h.Context(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	t.Cleanup(cancel)
 	requireAmd64Functions(ctx, t)
 	parent := runParent(h)
@@ -362,7 +362,7 @@ func TestGcloudFunctions(t *testing.T) {
 	h := New(t)
 	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	g := newGcloudSession(t, h)
-	ctx, cancel := context.WithTimeout(h.Context(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	t.Cleanup(cancel)
 	fc := functionsClient(t, h)
 	// gcloud names the instance's project, which is what it lists.
@@ -435,7 +435,7 @@ func TestTerraformCloudFunctions2Function(t *testing.T) {
 	h := New(t)
 	m := newTFModule(t)
 	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
-	ctx, cancel := context.WithTimeout(h.Context(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	t.Cleanup(cancel)
 	fc := functionsClient(t, h)
 	suffix := strings.TrimPrefix(m.project, "cb-test-")

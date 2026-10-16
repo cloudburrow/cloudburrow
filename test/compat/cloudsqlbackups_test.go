@@ -52,7 +52,7 @@ func sqlBackupRows(t *testing.T, h *Harness, c sqlBackupCase, conn string, stmts
 		t.Fatal(err)
 	}
 	defer db.Close()
-	ctx, cancel := context.WithTimeout(h.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	for _, s := range stmts {
 		if _, err := db.ExecContext(ctx, s); err != nil {

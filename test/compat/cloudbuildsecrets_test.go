@@ -89,7 +89,7 @@ func TestCloudBuildSecretsScriptAndAllowFailure(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}
-	ctx, cancel := context.WithTimeout(h.Context(), 6*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	t.Cleanup(cancel)
 	cb := cloudBuildClient(ctx, t, h)
 	value := "s3cr3t-" + uuid.NewString()[:8]
@@ -235,7 +235,7 @@ func TestGcloudBuildsSecretsAndScript(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}
-	ctx, cancel := context.WithTimeout(h.Context(), 6*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	t.Cleanup(cancel)
 	g := newGcloudSession(t, h)
 	value := "g-s3cr3t-" + uuid.NewString()[:8]

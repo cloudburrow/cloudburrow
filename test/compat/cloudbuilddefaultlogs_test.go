@@ -49,7 +49,7 @@ func TestCloudBuildDefaultLogsBucket(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	t.Cleanup(cancel)
 	cb := cloudBuildClient(ctx, t, h)
 	op, err := cb.CreateBuild(ctx, &cbpb.CreateBuildRequest{ProjectId: h.Project(), Build: &cbpb.Build{
