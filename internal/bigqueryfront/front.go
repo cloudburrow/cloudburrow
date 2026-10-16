@@ -316,7 +316,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
 			r.URL.Query().Get("uploadType") == "resumable" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, texts: texts, storage: storage, storageHost: storageHost,
-				configs: configs, jobs: own, records: records, functions: functions}
+				configs: configs, jobs: own, records: records, functions: functions, buffers: buffers}
 			f.resumable(w, r)
 			return
 		}
@@ -324,7 +324,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
-				listJobs: listJobs, iam: iam}
+				listJobs: listJobs, iam: iam, buffers: buffers}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -721,10 +721,13 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	}
 	var pm partitionMeta
 	streamed := false
-	if json.Unmarshal(got, &pm) == nil && pm.ingestion() && f.buffers != nil {
+	if json.Unmarshal(got, &pm) == nil && (pm.TimePartitioning != nil || pm.RangePartitioning != nil) && f.buffers != nil &&
+		(pm.ingestion() || !decorated) {
+		// A table partitioned by a column streams into its buffer too
+		// (#1273, streamingbuffer.go).
 		streamed = true
 	}
-	if decorated && !streamed {
+	if decorated && !pm.ingestion() {
 		name := projectOf(f.base) + ":" + dataset + "." + table
 		if _, code, msg := partitionFilter(pm, dec, name); code != 0 {
 			writeError(w, code, reasonOf(code, "invalid"), msg)
@@ -745,6 +748,11 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	var rows []outRow
 	for i, row := range req.Rows {
 		cleaned, errs := checkRow(meta.Schema.Fields, row.JSON, req.IgnoreUnknownValues)
+		if len(errs) == 0 && streamed && !pm.ingestion() && pm.TimePartitioning != nil {
+			if msg := streamBounds(pm, cleaned[pm.TimePartitioning.Field], f.buffers.clock()); msg != "" {
+				errs = []rowError{{Reason: "invalid", Location: pm.TimePartitioning.Field, Message: msg}}
+			}
+		}
 		if len(errs) > 0 {
 			invalid = append(invalid, insertErrorEntry{Index: i, Errors: errs})
 			continue

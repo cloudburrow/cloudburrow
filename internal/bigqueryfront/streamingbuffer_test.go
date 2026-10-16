@@ -1,8 +1,10 @@
 package bigqueryfront
 
 import (
+	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -64,5 +66,49 @@ func TestStreamBuffersKept(t *testing.T) {
 	c.keep(path, nil)
 	if _, ok := c.window("p", "d", "t"); ok {
 		t.Error("a window survived reset")
+	}
+}
+
+// TestColumnStreamingBuffer (#1273): a table partitioned by a column marks
+// its streamed rows: a daily table's near today stay in their partition's
+// buffer, others go to __UNPARTITIONED__; a decorator reads accordingly;
+// a value outside 10 years back and 1 year ahead is refused.
+func TestColumnStreamingBuffer(t *testing.T) {
+	now := time.Date(2026, 10, 15, 13, 45, 0, 0, time.UTC)
+	m := func(unit string) partitionMeta {
+		var p partitionMeta
+		p.TimePartitioning = &struct {
+			Type  string `json:"type"`
+			Field string `json:"field"`
+		}{Type: unit, Field: "d"}
+		p.Schema.Fields = []field{{Name: "d", Type: "DATE"}}
+		return p
+	}
+	if got := bufferedMark(m("HOUR"), now); got != "TRUE" {
+		t.Errorf("hourly mark = %s, want TRUE", got)
+	}
+	want := "IF(TIMESTAMP(`d`) >= TIMESTAMP '2026-10-08 00:00:00' AND TIMESTAMP(`d`) < TIMESTAMP '2026-10-19 00:00:00', FALSE, TRUE)"
+	if got := bufferedMark(m("DAY"), now); got != want {
+		t.Errorf("daily mark = %s, want %s", got, want)
+	}
+	day := m("DAY")
+	day.buffered = true
+	if f, _, _ := partitionFilter(day, "__UNPARTITIONED__", "t"); !strings.Contains(f, "OR IFNULL(_PARTITION_BUFFERED, FALSE)") {
+		t.Errorf("__UNPARTITIONED__ filter = %s", f)
+	}
+	if f, _, _ := partitionFilter(day, "20261015", "t"); !strings.Contains(f, "AND NOT IFNULL(_PARTITION_BUFFERED, FALSE)") {
+		t.Errorf("partition filter = %s", f)
+	}
+	if f, _, _ := partitionFilter(m("DAY"), "20261015", "t"); strings.Contains(f, bufferedRows) {
+		t.Errorf("filter without a buffer = %s", f)
+	}
+	for v, bad := range map[any]bool{"2026-10-15": false, "2010-01-01": true, "2028-01-01": true,
+		"2026-10-15 10:00:00": false, json.Number("1760000000"): false, json.Number("1000000000"): true, "x": false} {
+		if got := streamBounds(day, v, now) != ""; got != bad {
+			t.Errorf("streamBounds(%v) refused = %v, want %v", v, got, bad)
+		}
+	}
+	if w := (streamWindow{Column: true}); w.cond() != "_PARTITION_BUFFERED IS NOT NULL" {
+		t.Errorf("cond = %s", w.cond())
 	}
 }
