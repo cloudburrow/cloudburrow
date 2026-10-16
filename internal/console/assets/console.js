@@ -8540,8 +8540,9 @@ async function renderPredict(view) {
 
   const notServed = el("details", { class: "card", id: "predict-not-served" },
     el("summary", { text: `Not served by CloudBurrow (${(status.notServed || []).length})` }),
-    el("p", { text: "The container is called directly, through the cluster ingress. These Vertex AI " +
-      "surfaces are not implemented, so this page offers none of them:" }),
+    el("p", { text: "Predict calls the container directly, through the cluster ingress; Explain goes through " +
+      "the local AI endpoint's PredictionService. These Vertex AI surfaces are not implemented, so this page " +
+      "offers none of them:" }),
     el("ul", {}, ...(status.notServed || []).map((n) => el("li", { text: n }))));
 
   if (!status.configured) {
@@ -8594,6 +8595,101 @@ async function renderPredict(view) {
     httpStatus, contract, responseText,
     el("h3", { text: "Request sent" }), requestText);
 
+  // Explain (#1454): Sampled Shapley attributions, computed by the local AI
+  // endpoint's PredictionService from this container's predictions. The
+  // explanation spec is the request's explanation_spec_override: the path
+  // count, and each feature to attribute with its input_baselines.
+  const pathCount = el("input", { id: "explain-path-count", type: "number", min: "1", max: "50", step: "1",
+    value: "10", "aria-describedby": "explain-path-count-help" });
+  const baselines = el("textarea", { id: "explain-baselines", rows: "3", spellcheck: "false",
+    class: "mono", "aria-describedby": "explain-baselines-help" });
+  baselines.value = "{\n  \"x\": []\n}";
+  const explainSend = el("button", { class: "secondary", id: "explain-send", text: "Explain" });
+  if (!status.explain) explainSend.disabled = true;
+  const explainStatus = el("p", { id: "explain-status" });
+  const explainError = el("p", { class: "unavailable", id: "explain-error", role: "alert", hidden: true });
+  const attributions = el("div", { id: "explain-attributions" });
+  const explainRequestText = el("pre", { class: "mono", id: "explain-request" });
+  const explainResponseText = el("pre", { class: "mono pg-output", id: "explain-response" });
+  const explainResult = el("section", { class: "card", id: "explain-result", hidden: true, "aria-labelledby": "explain-result-title" },
+    el("h2", { id: "explain-result-title", text: "Explanation" }),
+    explainStatus, explainError, attributions,
+    el("h3", { text: "Response" }), explainResponseText,
+    el("h3", { text: "Request sent" }), explainRequestText);
+
+  const drawAttributions = (r) => {
+    const blocks = (r.explanations || []).map((ex) => {
+      const rows = (ex.attributions || []).map((a) => {
+        const out = a.outputIndex && a.outputIndex.length ? `Output ${a.outputIndex.join(",")}` : "Output";
+        return el("div", { class: "explain-attribution" },
+          el("p", { class: "mono", text: `${out}: baseline ${a.baselineOutputValue} → instance ${a.instanceOutputValue}` }),
+          el("table", { class: "table explain-features" },
+            el("thead", {}, el("tr", {}, el("th", { text: "Feature" }), el("th", { text: "Attribution" }))),
+            el("tbody", {}, ...(a.features || []).map((f) =>
+              el("tr", {}, el("td", { class: "mono", text: f.feature }),
+                el("td", { class: "mono", text: JSON.stringify(f.attribution) }))))));
+      });
+      return el("div", { class: "explain-instance" },
+        el("h3", { text: `Instance ${ex.instance}` + (ex.prediction !== undefined ? ` — prediction ${JSON.stringify(ex.prediction)}` : "") }),
+        ...rows);
+    });
+    setChildren(attributions, ...blocks);
+  };
+
+  const runExplain = async () => {
+    formError.hidden = true;
+    stopPrediction();
+    const controller = new AbortController();
+    PREDICT_ABORT = controller;
+    send.disabled = true;
+    explainSend.disabled = true;
+    cancel.disabled = false;
+    timing.textContent = "explaining…";
+    try {
+      const res = await fetch("/api/ai/predict/explain?" + new URLSearchParams({ project }), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ endpoint: select.value, instances: instances.value, parameters: parameters.value,
+          pathCount: Number(pathCount.value), baselines: baselines.value }),
+        signal: controller.signal,
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        formError.textContent = errorMessageOf(text) || `HTTP ${res.status}`;
+        formError.hidden = false;
+        timing.textContent = "";
+        return;
+      }
+      const r = JSON.parse(text);
+      setChildren(explainStatus,
+        el("span", { class: "status", "data-state": r.status >= 200 && r.status < 300 ? "ok" : "error" },
+          el("span", { text: `HTTP ${r.status}` + (r.errorStatus ? ` ${r.errorStatus}` : "") })),
+        el("span", { class: "mono", text: r.deployedModelId ? ` deployedModelId ${r.deployedModelId}` : "" }));
+      explainError.hidden = !r.error;
+      explainError.textContent = r.error || "";
+      drawAttributions(r);
+      explainResponseText.textContent = r.body + (r.truncated ? "\n[truncated]" : "");
+      explainRequestText.textContent = `POST ${r.url}\n${r.request}`;
+      timing.textContent = `${r.durationMs} ms`;
+      result.hidden = true;
+      explainResult.hidden = false;
+    } catch (err) {
+      if (err.name === "AbortError") {
+        timing.textContent = "cancelled";
+      } else {
+        formError.textContent = String(err.message);
+        formError.hidden = false;
+        timing.textContent = "";
+      }
+    } finally {
+      send.disabled = false;
+      explainSend.disabled = !status.explain;
+      cancel.disabled = true;
+      if (PREDICT_ABORT === controller) PREDICT_ABORT = null;
+    }
+  };
+  explainSend.addEventListener("click", runExplain);
+
   const run = async () => {
     formError.hidden = true;
     stopPrediction();
@@ -8628,6 +8724,7 @@ async function renderPredict(view) {
       responseText.textContent = r.body + (r.truncated ? "\n[truncated]" : "");
       requestText.textContent = `POST ${r.url}\n${r.request}`;
       timing.textContent = `${r.durationMs} ms`;
+      explainResult.hidden = true;
       result.hidden = false;
     } catch (err) {
       if (err.name === "AbortError") {
@@ -8663,9 +8760,20 @@ async function renderPredict(view) {
         el("label", { for: "predict-parameters", text: "Parameters" }), parameters,
         el("p", { class: "form-help", id: "predict-parameters-help", text:
           "Optional JSON, sent as the request's parameters field. Leave empty to send none." })),
+      el("fieldset", { class: "form-row", id: "explain-spec" },
+        el("legend", { text: "Explanation spec (Explain, Sampled Shapley)" }),
+        el("label", { for: "explain-path-count", text: "Path count" }), pathCount,
+        el("p", { class: "form-help", id: "explain-path-count-help", text:
+          "sampled_shapley_attribution.path_count: the feature orderings sampled, 1 to 50." }),
+        el("label", { for: "explain-baselines", text: "Feature baselines" }), baselines,
+        el("p", { class: "form-help", id: "explain-baselines-help", text:
+          "metadata.inputs: a JSON object naming each feature to attribute (a key of a struct instance, or any one " +
+          "name for a non-struct instance) with its input_baselines list; [] means a baseline of 0 for a number." }),
+        status.explain ? null : el("p", { class: "unavailable", id: "explain-unavailable", text: status.explainNote || "" })),
       formError,
-      el("div", { class: "form-actions" }, send, cancel, timing)),
+      el("div", { class: "form-actions" }, send, explainSend, cancel, timing)),
     result,
+    explainResult,
     notServed);
 }
 

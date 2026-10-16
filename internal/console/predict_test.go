@@ -147,7 +147,7 @@ func TestPredictStatusListsDeployedEndpoints(t *testing.T) {
 	if !st.Configured || len(st.Endpoints) != 0 || !strings.Contains(st.Deploy, "AIP_PREDICT_ROUTE") {
 		t.Errorf("an empty page reads %+v", st)
 	}
-	for _, want := range []string{"PredictionService", "Endpoint", "Batch prediction"} {
+	for _, want := range []string{"Explain", "Endpoint", "Batch prediction"} {
 		if !strings.Contains(strings.Join(st.NotServed, "\n"), want) {
 			t.Errorf("the page does not name %q as not served: %v", want, st.NotServed)
 		}

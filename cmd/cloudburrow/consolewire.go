@@ -342,7 +342,14 @@ func predictionFor(d consoleDeps) *console.Prediction {
 	if !enabled {
 		return nil
 	}
+	var ai func() string
+	if d.localAI != nil {
+		// Explain (#1454) is computed by the local AI endpoint's
+		// PredictionService, which Cloud Run starts (#1193).
+		ai = d.localAI.Addr
+	}
 	return &console.Prediction{
+		AI: ai,
 		Source: predictionSource{run: runProvider{
 			kubeconfig:     d.cfg.KubeconfigPath(),
 			namespace:      runadapter.WorkloadNamespace,

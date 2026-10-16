@@ -1051,8 +1051,9 @@ var parityRows = []parityRow{
 			"TestConsoleLocalModelsUnloadDeleteDownloadLoad", "TestStudioManagesLocalModelsAndTestsEmbeddings"}},
 	{Resource: "Vertex AI custom prediction (serving contract)",
 		Screen: "/ai/predict", Offers: "Online prediction: the Cloud Run services configured with the contract's AIP_* variables, " +
-			"JSON instances and parameters, Predict, the container's status and body verbatim; Vertex's Endpoint, " +
-			"PredictionService and batch prediction named as not served (#869)",
+			"JSON instances and parameters, Predict, the container's status and body verbatim, and Explain with " +
+			"its Sampled Shapley spec (#1454); Vertex's Endpoint, the explanation methods that need gradients or an " +
+			"Example index, and batch prediction named as not served (#869)",
 		Tests: []string{"TestConsoleOnlinePredictionThroughTheConsoleAPI", "TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser",
 			"TestPredictRelaysThroughTheIngressAndShowsTheAnswerVerbatim", "TestPredictRefusesWhatItCannotSend"}},
 	// PredictionService over gRPC (#1193) is a protocol for the requests
@@ -1066,6 +1067,15 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleOnlinePredictionThroughTheConsoleAPI", "TestPredictionClientReachesACustomEndpoint",
 			"TestGRPCPredictEmbedsLikeTheJSONRoute", "TestEmbeddingsScreenSendsBothMethods", "TestRawPredictOnTheEmbeddingModel",
 			"TestGRPCRawPredictOnTheEmbeddingModel", "TestRawPredictREST"}},
+	{Resource: "Vertex AI PredictionService: Explain", Service: "vertexai",
+		Methods: []string{"PredictionService/Explain"},
+		Screen:  "/ai/predict", Offers: "Online prediction: Explain sends the instances and parameters with " +
+			"explanation_spec_override (Sampled Shapley path count, each feature's input_baselines) to the endpoint's " +
+			":explain, and shows the attributions per feature, the baseline and instance outputs, and the API's " +
+			"body or refusal verbatim; integrated gradients, XRAI and example-based explanations are named as not " +
+			"served (#1454)",
+		Tests: []string{"TestConsoleExplainMatchesThePredictionClient", "TestPredictionClientReachesACustomEndpoint",
+			"TestExplainSendsTheSpecOverrideAndShowsAttributionsPerFeature", "TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser"}},
 	{Resource: "Vertex AI PredictionService: EmbedContent", Service: "vertexai",
 		Methods: []string{"PredictionService/EmbedContent"},
 		Screen:  "/ai/embeddings", Offers: "Embeddings: Method EmbedContent sends each text as the :embedContent " +

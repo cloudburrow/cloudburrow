@@ -122,10 +122,10 @@ request refuses rather than producing anything.
   this screen the generation API, that one a deployed contract container — and a single form for
   both would offer each one controls the other ignores.
 - **Vertex's prediction management surface.** No `Endpoint` or `DeployedModel` resource, model
-  upload or batch prediction is served, and §8's page does not call `Explain` (`Predict`,
-  `RawPredict`, their streaming forms and Sampled Shapley `Explain` are served over gRPC on the
-  local AI endpoint, #1193, #1285, #1454) ([prediction.md](prediction.md#versus-vertex-ais-own-apis)),
-  so §8's page offers none of them and lists them as not served.
+  upload or batch prediction is served ([prediction.md](prediction.md#versus-vertex-ais-own-apis)),
+  so §8's page offers none of them and lists them as not served. Its **Explain** (#1454) is
+  Sampled Shapley only; integrated gradients, XRAI and example-based explanations are refused by
+  the API and listed as not served.
 - **Pixel parity with the Vertex reference screens.** Structural parity only, for the reason
   in [console-verification.md](console-verification.md): no dated reference screenshots exist.
 
@@ -144,7 +144,8 @@ onto Knative. The page works only on that.
 | Predict | `POST {"instances": [...], "parameters": ...}` to the endpoint's predict route, through the cluster ingress with the endpoint's host in the `Host` header — the route [prediction.md](prediction.md#reaching-the-endpoint) documents for `curl`. |
 | Response | The container's HTTP status and body, **verbatim**. An error the container returned is shown in its own words. A `200` that breaks the one-prediction-per-instance rule is shown and flagged (`prediction.ValidateResponse`). |
 | Request sent | The URL and the exact body. |
-| Not served | Vertex's `Endpoint` and `DeployedModel`, `PredictionService`, the Model Registry and batch prediction, named rather than drawn. |
+| Explain (#1454) | The same instances and parameters, with an **Explanation spec**: the Sampled Shapley **Path count** (`sampled_shapley_attribution.path_count`, 1–50) and **Feature baselines**, a JSON object naming each feature to attribute with its `input_baselines` list (`metadata.inputs`; `[]` is a baseline of 0 for a number). Sent as the `ExplainRequest` the official client sends, with `explanation_spec_override`, to `POST /v1/projects/{p}/locations/{l}/endpoints/{service}:explain` on the local AI endpoint, whose `PredictionService` perturbs the instances and calls the container ([compatibility.md](compatibility.md#vertex-ai-predictionservice--googlecloudaiplatformv1)). Shown: per instance, its prediction, each explained output's baseline and instance values, and a table of the attribution per feature, largest first; the API's body verbatim; the request sent. A refusal (a path count out of range, a feature an instance lacks) is the API's status and message. |
+| Not served | Vertex's `Endpoint` and `DeployedModel` (so no stored explanation spec), integrated gradients and XRAI attributions (they need gradients, which a predict route does not expose), example-based explanations (they need an Example index), the Model Registry and batch prediction, named rather than drawn. |
 
 With nothing deployed, the page says how to deploy one — Cloud Run's **Deploy container** here
 with the `AIP_*` variables set, or `CreateService` — and links to the form. Without Cloud Run
@@ -164,7 +165,9 @@ ends it sooner.
 |---|---|
 | Listing, relay, verbatim answers, refusals (unit) | `TestPredictStatusListsDeployedEndpoints`, `TestPredictRelaysThroughTheIngressAndShowsTheAnswerVerbatim`, `TestPredictFlagsAResponseThatBreaksTheContract`, `TestPredictRefusesWhatItCannotSend`, `TestConsoleWithoutCloudRunDoesNotOfferOnlinePrediction`, `TestPredictionEndpointsAreTheContractServices` |
 | Through the console API, against the fixture deployed with the official Cloud Run SDK | `TestConsoleOnlinePredictionThroughTheConsoleAPI` (`test/compat`) |
-| In Chrome, against the fixture deployed through the console's Cloud Run form | `TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser` (`test/browser`) |
+| Explain: the spec override sent, attributions per feature, the API's refusals (unit, against the real PredictionService) | `TestExplainSendsTheSpecOverrideAndShowsAttributionsPerFeature`, `TestExplainWithoutTheLocalAIEndpointIsNotOffered` |
+| Explain through the console API, matched against the official `aiplatform` PredictionClient | `TestConsoleExplainMatchesThePredictionClient` (`test/compat`, the Cloud Run shard) |
+| In Chrome, against the fixture deployed through the console's Cloud Run form, Predict and Explain | `TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser` (`test/browser`) |
 
 The fixture is `testdata/predictor`, the one the prediction compat tests build: it doubles each
 numeric instance and downloads nothing.
