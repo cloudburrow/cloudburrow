@@ -93,3 +93,13 @@ func TestNFSVolumeRequiresAServer(t *testing.T) {
 		t.Errorf("NFS volume with no server = %v; want InvalidArgument naming nfs.server", err)
 	}
 }
+
+// v1 reads an NFS volume back as it was set (#1448), as gcloud describes it.
+func TestNFSVolumeReadsBackOnV1(t *testing.T) {
+	t.Parallel()
+	got := toV1Volumes([]*runpb.Volume{{Name: "share", VolumeType: &runpb.Volume_Nfs{Nfs: &runpb.NFSVolumeSource{
+		Server: "10.0.0.2", Path: "/x", ReadOnly: true}}}})
+	if len(got) != 1 || got[0].Nfs == nil || got[0].Nfs.Server != "10.0.0.2" || got[0].Nfs.Path != "/x" || !got[0].Nfs.ReadOnly {
+		t.Errorf("v1 volumes = %+v", got)
+	}
+}

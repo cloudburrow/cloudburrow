@@ -156,6 +156,9 @@ func toV1Volumes(in []*runpb.Volume) []*runv1.Volume {
 			if v.GetEmptyDir().GetMedium() == runpb.EmptyDirVolumeSource_MEMORY {
 				o.EmptyDir.Medium = "Memory"
 			}
+		case v.GetNfs() != nil:
+			n := v.GetNfs()
+			o.Nfs = &runv1.NFSVolumeSource{Server: n.GetServer(), Path: n.GetPath(), ReadOnly: n.GetReadOnly()}
 		}
 		out = append(out, o)
 	}
