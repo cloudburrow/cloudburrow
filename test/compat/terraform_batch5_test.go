@@ -261,8 +261,8 @@ output "ciphertext" {
 // policy, deletion_policy = "ABANDON", keeps the rule; destroy removes the
 // instance. The provider's gc_policy uses the Go admin client, which the
 // wrapper's BIGTABLE_EMULATOR_HOST points here; google_bigtable_app_profile
-// and google_bigtable_instance_iam_* use the bigtableadmin REST API, which
-// the Bigtable front does not serve (gRPC alone), so they are not verified.
+// and google_bigtable_instance_iam_* use the bigtableadmin REST API, in
+// TestTerraformBigtableAppProfileAndIAM (#1440).
 // covers: google.bigtable.admin.v2.BigtableTableAdmin/ModifyColumnFamilies, google.bigtable.admin.v2.BigtableTableAdmin/GetTable
 func TestTerraformBigtableGCPolicy(t *testing.T) {
 	h := New(t)
