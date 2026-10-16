@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
-	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 )
 
@@ -196,8 +195,8 @@ func TestBigQueryFailedScriptLeavesTheCatalogInStep(t *testing.T) {
 // comma-separated ones (TestBigQueryExtractToCloudStorage), with the
 // delimiter, or compressed; JSON has INT64 values as strings and <, > and
 // & in unicode notation; the empty table's file is its header row. The
-// job is the front's, read back by jobs.get and jobs.list. A JSON row with
-// a NULL is 501, as BigQuery's documentation does not give its form.
+// job is the front's, read back by jobs.get and jobs.list. A JSON row's
+// NULL is left out, and a BOOL is a JSON boolean.
 func TestBigQueryExtractsTheFrontWrites(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -341,15 +340,20 @@ func TestBigQueryExtractsTheFrontWrites(t *testing.T) {
 		t.Errorf("jobs.list does not list the extract %s", job.ID())
 	}
 
-	// Not implemented: nothing is written.
-	_, err = extract("jsnull", func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.DestinationFormat = bigquery.JSON }, uri("jsnull.json"))
-	wantReason(t, "a JSON extract of a NULL", err, 501, "notImplemented")
-	_, err = extract("src", func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.DestinationFormat = bigquery.JSON }, uri("src.json"))
-	wantReason(t, "a JSON extract of a BOOL", err, 501, "notImplemented")
-	for _, name := range []string{"jsnull.json", "src.json"} {
-		if _, err := bucket.Object(name).Attrs(ctx); !errors.Is(err, storage.ErrObjectNotExist) {
-			t.Errorf("%s: %v, want it not written", name, err)
-		}
+	// A NULL is left out of a JSON row, and a BOOL is a JSON boolean
+	// (#957; how BigQuery writes a NULL is UNVERIFIED).
+	if _, err := extract("jsnull", func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.DestinationFormat = bigquery.JSON }, uri("jsnull.json")); err != nil {
+		t.Fatalf("a JSON extract of a NULL: %v", err)
+	}
+	if got := read("jsnull.json", false); got != "{\"a\":\"1\"}\n" {
+		t.Errorf("jsnull.json = %q", got)
+	}
+	if _, err := extract("src", func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.DestinationFormat = bigquery.JSON }, uri("src.json")); err != nil {
+		t.Fatalf("a JSON extract of a BOOL: %v", err)
+	}
+	if got, want := read("src.json", false), "{\"a\":\"1\",\"b\":\"x,y\",\"bo\":true,\"by_\":\"YWI=\",\"d\":\"2020-01-02\",\"nu\":\"1.25\"}\n"+
+		"{\"a\":\"2\",\"b\":\"q\\\"r\",\"n\":\"z\",\"bo\":false}\n"; got != want {
+		t.Errorf("src.json = %q, want %q", got, want)
 	}
 }
 
