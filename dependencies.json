@@ -530,6 +530,13 @@
         "license": "MIT",
         "verification": "go.sum",
         "notes": "The console terminal (#781): internal/k8s starts `kubectl exec -it` on a pseudo-terminal, which kubectl requires before it allocates one in the container, as the session leader so a resize reaches it as SIGWINCH. golang.org/x/sys has no call that opens one."
+      },
+      "goDifferentialPrivacy": {
+        "module": "github.com/google/differential-privacy/go/v4",
+        "version": "4.1.0",
+        "license": "Apache-2.0",
+        "verification": "go.sum",
+        "notes": "BigQuery differential privacy (#1455, internal/bigqueryfront/differentialprivacy.go): Laplace noise, the noisy count thresholding of groups, BoundedMean and BoundedQuantiles of Google's own library. It brings github.com/golang/glog (Apache-2.0) and gonum.org/v1/gonum (BSD-3-Clause), indirect."
       }
     },
     "apiContracts": {

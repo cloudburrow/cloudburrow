@@ -41,9 +41,11 @@ import (
 //     USING name: JOIN_ALL, JOIN_ANY, JOIN_BLOCKED and JOIN_NOT_REQUIRED
 //     with BigQuery's documented errors.
 //   - Differential privacy (differential_privacy_policy, SELECT WITH
-//     DIFFERENTIAL_PRIVACY): 501, never answered without the noise. The
-//     front has no noise mechanism or epsilon and delta budget (#1426's
-//     follow-up).
+//     DIFFERENTIAL_PRIVACY): carried out with the noise, the contribution
+//     bounding, the group thresholding and the epsilon and delta budget
+//     (#1455, differentialprivacy.go). A statement that reads a table with
+//     a differential_privacy_policy must be a lone SELECT WITH
+//     DIFFERENTIAL_PRIVACY.
 //
 // What the front cannot check is refused 501, never run as if the table
 // had no policy: a read of the table in a subquery, CTE or another view's
@@ -63,6 +65,7 @@ type privacyPolicy struct {
 	allowed   []string
 	hasJoin   bool
 	dp        bool
+	dpPolicy  dpPolicy // differentialprivacy.go (#1455)
 }
 
 // parsePrivacyPolicy reads s; why is why the front cannot use it.
@@ -137,8 +140,11 @@ func parsePrivacyPolicy(s string) (p privacyPolicy, why string) {
 			return p, "join_allowed_columns is not an array of column names"
 		}
 	}
-	if pick(raw, "differential_privacy_policy", "differentialPrivacyPolicy") != nil {
+	if dp := pick(raw, "differential_privacy_policy", "differentialPrivacyPolicy"); dp != nil {
 		p.dp = true
+		if p.dpPolicy, why = parseDPPolicy(dp); why != "" {
+			return p, why
+		}
 	}
 	if !p.hasAT && !p.hasJoin && !p.dp {
 		return p, "it has no aggregation_threshold_policy, join_restriction_policy or differential_privacy_policy"
@@ -180,11 +186,6 @@ func privacyRefusal(what, name string) string {
 		"an aggregation threshold and a join restriction only in a query that reads the table or view in its " +
 		"top-level FROM clause (docs/compatibility.md). Nothing was run."
 }
-
-// dpRefusal is the 501 of a differentially private query.
-const dpRefusal = "Not implemented here: differential privacy (SELECT WITH DIFFERENTIAL_PRIVACY, or a table or view " +
-	"with a differential_privacy_policy). CloudBurrow has no noise mechanism and keeps no epsilon or delta budget, " +
-	"and it does not answer such a query without the noise. Nothing was run."
 
 // hasPrivacyClause reports whether sql has SELECT WITH AGGREGATION_THRESHOLD
 // or SELECT WITH DIFFERENTIAL_PRIVACY.
@@ -246,8 +247,9 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 	}
 	for _, s := range stmts {
 		for i := 0; i+2 < len(s); i++ {
-			if s[i].is("SELECT") && s[i+1].is("WITH") && s[i+2].is("DIFFERENTIAL_PRIVACY") {
-				return refuse(dpRefusal)
+			if i > 0 && s[i].is("SELECT") && s[i+1].is("WITH") && s[i+2].is("DIFFERENTIAL_PRIVACY") {
+				return refuse("Not implemented here: SELECT WITH DIFFERENTIAL_PRIVACY other than as a lone query's " +
+					"top-level SELECT. Nothing was run.")
 			}
 			if i > 0 && s[i].is("SELECT") && s[i+1].is("WITH") && s[i+2].is("AGGREGATION_THRESHOLD") {
 				return refuse("Not implemented here: SELECT WITH AGGREGATION_THRESHOLD other than as a lone query's " +
@@ -255,15 +257,12 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 			}
 		}
 	}
-	var atReads []privacyRead
+	var atReads, dpReads []privacyRead
 	for _, p := range prot {
 		if createsView(p.tr.stmt) {
 			// A view's query reads nothing until the view is read, and a
 			// read of the view is checked (viewReadsPrivate).
 			continue
-		}
-		if p.pol.dp {
-			return refuse(dpRefusal)
 		}
 		s := p.tr.stmt
 		if p.tr.decorator != "" {
@@ -282,6 +281,14 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 				return fail(msg)
 			}
 		}
+		if p.pol.dp {
+			if clause(s) != "DIFFERENTIAL_PRIVACY" {
+				return fail("You must use SELECT WITH DIFFERENTIAL_PRIVACY for this query because a privacy policy " +
+					"is set on " + p.name + ".")
+			}
+			dpReads = append(dpReads, p)
+			continue
+		}
 		if p.pol.hasAT {
 			if clause(s) != "AGGREGATION_THRESHOLD" {
 				return fail("You must use SELECT WITH AGGREGATION_THRESHOLD for this query because a privacy policy " +
@@ -289,6 +296,25 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 			}
 			atReads = append(atReads, p)
 		}
+	}
+	for _, s := range stmts {
+		if clause(s) != "DIFFERENTIAL_PRIVACY" {
+			continue
+		}
+		if len(stmts) > 1 {
+			return refuse("Not implemented here: SELECT WITH DIFFERENTIAL_PRIVACY in a script; CloudBurrow carries it " +
+				"out as a lone query. Nothing was run.")
+		}
+		if len(dpReads) > 1 {
+			return refuse("Not implemented here: a SELECT WITH DIFFERENTIAL_PRIVACY of more than one table or view " +
+				"with a differential_privacy_policy. Nothing was run.")
+		}
+		var at *privacyRead
+		if len(dpReads) == 1 {
+			at = &dpReads[0]
+		}
+		f.enforceDifferentialPrivacy(w, r, q, insert, s, at)
+		return true
 	}
 	var rewrite []token
 	for _, s := range stmts {
