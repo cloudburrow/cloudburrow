@@ -211,8 +211,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	if policies == nil {
 		policies = &rowPolicies{}
 	}
-	iam := &iamPolicies{}       // iam.go, #1231
-	buffers := &streamBuffers{} // streamingbuffer.go, #1273
+	iam := &iamPolicies{}                           // iam.go, #1231
+	buffers := &streamBuffers{stamp: o.streamTimes} // streamingbuffer.go, #1273, #1370
 	if o.stateDir != "" {
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf) // streamingbuffer.go, #1273
 		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)       // iam.go, #1231
@@ -260,6 +260,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if serveUnserved(w, r) { // unserved.go, #1200
+			return
+		}
+		if buffers.serveClock(w, r) { // streamingbuffer.go, #1370
 			return
 		}
 		buffers.flushDue(next, r)      // streamingbuffer.go, #1273
@@ -475,6 +478,11 @@ type options struct {
 	// not lose (functionstate.go); empty: memory alone. logf logs.
 	stateDir string
 	logf     func(string, ...any)
+	// streamTimes is whether a table that is not partitioned streams
+	// through a scratch table, keeping its rows' stream time for DML
+	// (streamingbuffer.go, #1370): the engine behind the front has the
+	// column (bigquery-emulator patch 0018).
+	streamTimes bool
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at
@@ -692,6 +700,12 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 		(pm.ingestion() || !decorated) {
 		// A table partitioned by a column streams into its buffer too
 		// (#1273, streamingbuffer.go).
+		streamed = true
+	} else if ok := json.Unmarshal(got, &pm) == nil; ok && pm.TimePartitioning == nil && pm.RangePartitioning == nil &&
+		f.buffers != nil && f.buffers.stamp && !decorated && len(raw["templateSuffix"]) == 0 && plainTable(got) {
+		// Any other table streams through a scratch table too, so its
+		// rows keep their stream time, which DML reads (#1370,
+		// streamingbuffer.go).
 		streamed = true
 	}
 	if decorated && !pm.ingestion() {

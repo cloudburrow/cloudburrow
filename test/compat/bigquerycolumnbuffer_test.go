@@ -180,8 +180,14 @@ func TestBigQueryColumnStreamingBuffer(t *testing.T) {
 	if got := rows("SELECT CAST(n AS STRING) FROM " + p("cbrange$0")); !reflect.DeepEqual(got, []string{"5"}) {
 		t.Errorf("cbrange$0 after the flush: %v, want [5]", got)
 	}
+	// Flushed, the rows stay unmodifiable for 30 minutes from their
+	// stream (#1370, TestBigQueryDMLOfRecentlyStreamedRows).
+	if err := exec("UPDATE " + p("cbday") + " SET n = 10 WHERE n = 1"); err == nil || !strings.Contains(err.Error(), "streaming buffer") {
+		t.Errorf("UPDATE after the flush: %v, want the streaming buffer's error", err)
+	}
+	advanceBigQueryClock(t, h, 31*time.Minute)
 	if err := exec("UPDATE " + p("cbday") + " SET n = 10 WHERE n = 1"); err != nil {
-		t.Errorf("UPDATE after the flush: %v", err)
+		t.Errorf("UPDATE 31 minutes after the stream: %v", err)
 	}
 }
 

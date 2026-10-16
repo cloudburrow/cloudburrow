@@ -1,0 +1,49 @@
+CloudBurrow patch 18 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1370). Applies after patch 0016; needs
+googlesqlite patch 0030.
+
+Every table made by tables.insert is made in the engine with the
+pseudo-column _PARTITION_STREAMED TIMESTAMP, the time a row was streamed
+(googlesqlite patch 0030), and a CREATE TABLE's schema leaves the column
+out as it leaves out _PARTITIONTIME. CloudBurrow's front sets it on the
+rows tabledata.insertAll streams, and refuses DML that would change one
+streamed in the last 30 minutes, as BigQuery does
+(https://cloud.google.com/bigquery/docs/data-manipulation-language).
+
+Licence: a modification of goccy/bigquery-emulator, which is under the
+MIT License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -137,6 +137,11 @@
+ 		// (googlesqlite patch 0029).
+ 		fields = append(fields, "`_PARTITION_BUFFERED` BOOL")
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1370): every table has
++	// the pseudo-column of the time a row was streamed (googlesqlite patch
++	// 0030), which DML reads to refuse a row streamed in the last 30
++	// minutes.
++	fields = append(fields, "`_PARTITION_STREAMED` TIMESTAMP")
+ 	query := fmt.Sprintf("CREATE TABLE `%s` (%s)", tablePath, strings.Join(fields, ","))
+ 	if tp := table.TimePartitioning; tp != nil && tp.Field == "" {
+ 		// CloudBurrow patch (cloudburrow/cloudburrow#1277): an
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1860,11 +1860,12 @@
+ 	fields := make([]*bigqueryv2.TableFieldSchema, 0, len(spec.Columns))
+ 	for _, column := range spec.Columns {
+ 		if strings.EqualFold(column.Name, "_PARTITIONTIME") || strings.EqualFold(column.Name, "_PARTITIONDATE") ||
+-			strings.EqualFold(column.Name, "_PARTITION_BUFFERED") {
++			strings.EqualFold(column.Name, "_PARTITION_BUFFERED") || strings.EqualFold(column.Name, "_PARTITION_STREAMED") {
+ 			// CloudBurrow patch (cloudburrow/cloudburrow#1277): the
+ 			// pseudo-columns of an ingestion-time partitioned table are
+ 			// not in its schema, nor (#1273) the streaming buffer's mark
+-			// of a table partitioned by a column.
++			// of a table partitioned by a column, nor (#1370) the time
++			// a row was streamed.
+ 			continue
+ 		}
+ 		field := types.TableFieldSchemaFromColumnType(column.Name, column.Type)

@@ -847,8 +847,19 @@ func mergeFromSubquery(sql string) string {
 // #1273, streamingbuffer.go). The rows a statement would change are
 // counted among the buffered rows alone; an INSERT changes none.
 func (f front) bufferedChange(r *http.Request, q queryOptions, d dmlStmt, ds, table string) string {
-	win, ok := f.buffers.window(projectOf(f.base), ds, table)
-	if !ok || d.kind == "INSERT" {
+	if d.kind == "INSERT" {
+		return ""
+	}
+	// The rows in the streaming buffer, and those streamed in the last 30
+	// minutes (#1370, streamingbuffer.go).
+	var conds []string
+	if win, ok := f.buffers.window(projectOf(f.base), ds, table); ok {
+		conds = append(conds, win.cond())
+	}
+	if c := f.buffers.streamedRecently(projectOf(f.base), ds, table); c != "" {
+		conds = append(conds, c)
+	}
+	if len(conds) == 0 {
 		return ""
 	}
 	alias := strings.TrimSpace(strings.TrimPrefix(d.targetText, d.pathText))
@@ -858,7 +869,7 @@ func (f front) bufferedChange(r *http.Request, q queryOptions, d dmlStmt, ds, ta
 	if alias == "" && len(d.target) > 0 {
 		alias = quoteName(d.target[len(d.target)-1])
 	}
-	buffered := "(SELECT * FROM " + d.pathText + " WHERE " + win.cond() + ") AS " + alias
+	buffered := "(SELECT * FROM " + d.pathText + " WHERE " + strings.Join(conds, " OR ") + ") AS " + alias
 	var n int64
 	switch d.kind {
 	case "TRUNCATE_TABLE", "DELETE", "UPDATE":

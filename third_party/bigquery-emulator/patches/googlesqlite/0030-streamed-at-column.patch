@@ -1,0 +1,91 @@
+CloudBurrow patch 30 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1370). Applies after patch 0029.
+
+The gap: BigQuery refuses an UPDATE, DELETE, MERGE or TRUNCATE TABLE that
+would change a row written by tabledata.insertAll (the Storage Write API
+(REST)) "within the last 30 minutes"; "all other rows in the table remain
+modifiable" (https://cloud.google.com/bigquery/docs/data-manipulation-language).
+That needs each streamed row's time, on any table, partitioned or not.
+
+The patch makes a table column named _PARTITION_STREAMED a pseudo-column,
+as patch 0028 makes _PARTITIONTIME one: SELECT * leaves it out, an INSERT
+may give it and a query names it. bigquery-emulator patch 0018 gives every
+table made by tables.insert the column, TIMESTAMP, and CloudBurrow's front
+sets it to the time of a streamed row. BigQuery reserves the column-name
+prefix _PARTITION, so no column of a table can be named so.
+streamed_at_column_test.go fails without the patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -553,9 +553,16 @@
+ // cloudburrow/cloudburrow#1277).
+ func isIngestionPseudoColumn(name string) bool {
+ 	return strings.EqualFold(name, "_PARTITIONTIME") || strings.EqualFold(name, "_PARTITIONDATE") ||
+-		strings.EqualFold(name, streamingBufferColumn)
++		strings.EqualFold(name, streamingBufferColumn) || strings.EqualFold(name, streamedAtColumn)
+ }
+ 
++// streamedAtColumn is the pseudo-column every table made by tables.insert
++// gets: the time a row was streamed by tabledata.insertAll, NULL on any
++// other row, so that DML refuses a row streamed in the last 30 minutes
++// (CloudBurrow patch, cloudburrow/cloudburrow#1370). BigQuery reserves the
++// prefix _PARTITION for its own column names.
++const streamedAtColumn = "_PARTITION_STREAMED"
++
+ // streamingBufferColumn is the pseudo-column a table partitioned by a
+ // column or an integer range gets: TRUE on a row in the table's
+ // streaming buffer, NULL on any other (CloudBurrow patch,
+--- /dev/null
++++ b/streamed_at_column_test.go
+@@ -0,0 +1,45 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestStreamedAtColumn is CloudBurrow's regression test of its patch 0030
++// (cloudburrow/cloudburrow#1370): a table column named _PARTITION_STREAMED
++// is a pseudo-column, which SELECT * leaves out, an INSERT may give and a
++// query names.
++func TestStreamedAtColumn(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	exec := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	exec("CREATE TABLE plain (id INT64, `_PARTITION_STREAMED` TIMESTAMP)")
++	exec(`INSERT INTO plain (id) VALUES (1)`)
++	exec(`INSERT INTO plain (id, _PARTITION_STREAMED) VALUES (2, TIMESTAMP '2026-01-01 00:00:00+00')`)
++	rows, err := db.QueryContext(ctx, `SELECT * FROM plain`)
++	if err != nil {
++		t.Fatal(err)
++	}
++	cols, _ := rows.Columns()
++	rows.Close()
++	if strings.Join(cols, ",") != "id" {
++		t.Errorf("SELECT * columns = %v, want [id]", cols)
++	}
++	var id int64
++	if err := db.QueryRowContext(ctx, `SELECT id FROM plain WHERE _PARTITION_STREAMED >= TIMESTAMP '2025-12-31 23:30:00+00'`).Scan(&id); err != nil || id != 2 {
++		t.Errorf("streamed row: id %d (%v), want 2", id, err)
++	}
++}
