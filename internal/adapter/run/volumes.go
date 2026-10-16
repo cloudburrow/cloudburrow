@@ -277,9 +277,10 @@ func nfsClaimName(n *runpb.NFSVolumeSource) string {
 // PersistentVolume and a bound claim for each of its NFS volumes. The
 // volume is pre-bound to its claim (claimRef and volumeName, with no
 // storage class), so no provisioner is involved; the size is nominal, as
-// an NFS export's is not a PersistentVolume's to enforce. Both are kept
-// when the service is deleted (Retain): another service may mount the same
-// export, and the data is the NFS server's.
+// an NFS export's is not a PersistentVolume's to enforce. Every service
+// that mounts the export shares them, and they are removed once the last
+// is deleted (volumegc.go); Retain, so the data, the NFS server's, is
+// never touched.
 func nfsClaims(namespace, instance string, volumes []*runpb.Volume) string {
 	var b strings.Builder
 	seen := map[string]bool{}

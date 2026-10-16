@@ -268,6 +268,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		mysql:     mysqlCreds,
 		scheduler: schedulerSvc,
 		logging:   loggingSvc,
+		run:       runSvc,
 		projects:  func() []string { return registered() },
 		registry:  func() *resourcemanager.Registry { return projectRegistry },
 		projectStore: func() store.Store {

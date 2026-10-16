@@ -378,7 +378,12 @@ func (s *Server) deleteWorkload(ctx context.Context, w workload) error {
 			return err
 		}
 	}
-	return s.kn.deleteObject(ctx, resConfigMap, w.objectName())
+	if err := s.kn.deleteObject(ctx, resConfigMap, w.objectName()); err != nil {
+		return err
+	}
+	// Its volumes' mount pods, once no other workload uses them (#1476).
+	s.collectVolumes(ctx)
+	return nil
 }
 
 // deploymentConditions maps a Deployment's status onto Cloud Run's terminal

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -43,6 +44,9 @@ type Server struct {
 	// aliases are the metadata server's names for each workload account
 	// (#1388).
 	aliases metadataAliases
+	// volumeMu orders a collection of unused volume objects after the
+	// writes of workloads that mount them (volumegc.go).
+	volumeMu sync.RWMutex
 }
 
 // WithSecrets attaches a secret resolver, enabling secretKeyRef environment
@@ -116,6 +120,8 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	if err := s.ensureWorkloadMetadata(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()); err != nil {
 		return nil, err
 	}
+	release := s.holdVolumes(svc.GetTemplate().GetVolumes())
+	defer release()
 	if err := s.ensureGCSFuse(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetVolumes()); err != nil {
 		return nil, err
 	}
@@ -187,6 +193,8 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 	if err := s.ensureWorkloadMetadata(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()); err != nil {
 		return nil, err
 	}
+	release := s.holdVolumes(svc.GetTemplate().GetVolumes())
+	defer release()
 	if err := s.ensureGCSFuse(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetVolumes()); err != nil {
 		return nil, err
 	}
@@ -195,6 +203,8 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 	if err := s.kn.Apply(ctx, manifest); err != nil {
 		return nil, err
 	}
+	// A volume the new revision dropped goes once no revision uses it.
+	go s.collectVolumes(ctx)
 	applied, err := s.kn.Get(ctx, kname)
 	if err != nil {
 		return nil, apierror.Internal(err, "read back service %s", id)
@@ -372,6 +382,8 @@ func (s *Server) DeleteService(ctx context.Context, req *runpb.DeleteServiceRequ
 	}
 	// Its K_* names (kenv.go); a failure leaves only an unread ConfigMap.
 	_ = s.kn.Kube.Delete(ctx, "configmap", kEnvConfigMapName(existing.Metadata.Name), true)
+	// Its volumes' mount pods and claims, once no other workload uses them.
+	s.collectVolumes(ctx)
 	op := s.ops.Create(parent, req.GetName())
 	_ = s.ops.Succeed(op.Name, &runpb.Service{Name: req.GetName()})
 	return s.toProtoOperation(op.Name)

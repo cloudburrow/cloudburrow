@@ -267,6 +267,8 @@ func (p *WorkerPoolsServer) CreateWorkerPool(ctx context.Context, req *runpb.Cre
 	if req.GetValidateOnly() {
 		return s.doneOperation(req.GetParent(), wp.Name, spec)
 	}
+	release := s.holdVolumes(spec.GetTemplate().GetVolumes())
+	defer release()
 	if err := s.ensureGCSFuse(ctx, projectOf(w.name), spec.GetTemplate().GetVolumes()); err != nil {
 		return nil, err
 	}
@@ -413,6 +415,8 @@ func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.Upd
 	if req.GetValidateOnly() {
 		return s.doneOperation(parent, name, spec)
 	}
+	release := s.holdVolumes(spec.GetTemplate().GetVolumes())
+	defer release()
 	if err := s.ensureGCSFuse(ctx, projectOf(w.name), spec.GetTemplate().GetVolumes()); err != nil {
 		return nil, err
 	}
@@ -422,6 +426,8 @@ func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.Upd
 	if err := s.writeSplits(ctx, w, splits); err != nil {
 		return nil, err
 	}
+	// A volume the update dropped goes once nothing uses it (#1476).
+	go s.collectVolumes(ctx)
 	return s.workloadOperation(ctx, parent, w, s.workerPoolReady(w))
 }
 

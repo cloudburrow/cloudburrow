@@ -33,9 +33,10 @@ import (
 //
 // The mount pod is applied, and the bucket seen mounted, before the
 // workload that mounts it: otherwise the workload could write into the bare
-// host directory, under the mount that then hides it. The pod is kept when
-// the workload is deleted, as an NFS volume's claim is: another workload may
-// mount the same bucket, and the data is the bucket's.
+// host directory, under the mount that then hides it. The pod, and a
+// service's claim, are shared by every workload that mounts the same bucket
+// with the same options, and removed once the last of them is deleted
+// (volumegc.go); the data is the bucket's.
 
 // GCSFuseImage is the Cloud Storage FUSE CSI driver's sidecar mounter
 // v1.24.9-gke.2, Google's image, pinned by the index digest (linux/amd64 and
@@ -279,7 +280,8 @@ func (s *Server) awaitGCSMount(ctx context.Context, g *runpb.GCSVolumeSource) er
 // buckets is mounted on, and a claim bound to it. Knative makes a hostPath
 // mount read-only whatever the pod asks, and lets a claim be written
 // (kubernetes.podspec-persistent-volume-write). Like an NFS volume's, they
-// are pre-bound, with a nominal size, and kept when the service is deleted.
+// are pre-bound, with a nominal size, and removed once no service uses them
+// (volumegc.go).
 func gcsClaims(namespace, instance string, volumes []*runpb.Volume) string {
 	var b strings.Builder
 	seen := map[string]bool{}
