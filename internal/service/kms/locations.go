@@ -71,10 +71,11 @@ func (l locationsServer) locations(project string) ([]string, error) {
 	return ids, nil
 }
 
-// kmsLocation is one Location. Its metadata says no HSM and no EKM, since
-// neither protection level is served locally.
+// kmsLocation is one Location. Its metadata says HSM is available, since
+// HSM keys are served (without an HSM; protection.go, #1452), and EKM is
+// not, since EXTERNAL keys are not.
 func kmsLocation(project, id string) (*locationpb.Location, error) {
-	md, err := anypb.New(&kmspb.LocationMetadata{})
+	md, err := anypb.New(&kmspb.LocationMetadata{HsmAvailable: true})
 	if err != nil {
 		return nil, apierror.Internal(err, "location metadata")
 	}

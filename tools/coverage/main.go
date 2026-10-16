@@ -124,7 +124,9 @@ var areas = []area{
 	// (#428). Mixin keys are global, so only one area may list it.
 	// google.cloud.location.Locations too (#1291); Cloud Scheduler lists it
 	// as well, and both serve it, so the one registry status is true of both.
-	{Key: "kms", Title: "Cloud KMS", Own: true, Services: []string{"google.cloud.kms.v1.KeyManagementService", "google.iam.v1.IAMPolicy", "google.cloud.location.Locations"}},
+	// EkmService, Autokey, AutokeyAdmin and HsmManagement since #1452.
+	{Key: "kms", Title: "Cloud KMS", Own: true, Services: []string{"google.cloud.kms.v1.KeyManagementService", "google.cloud.kms.v1.EkmService",
+		"google.cloud.kms.v1.Autokey", "google.cloud.kms.v1.AutokeyAdmin", "google.cloud.kms.v1.HsmManagement", "google.iam.v1.IAMPolicy", "google.cloud.location.Locations"}},
 	// Liens (#1295) have no gRPC service: they are on resourcemanagerv1.
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations, Tags)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects",
 		"google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations", "google.cloud.resourcemanager.v3.TagKeys",
