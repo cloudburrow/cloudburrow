@@ -192,9 +192,16 @@ any image is pulled, with `build failed: no runtime detected` naming the files l
 `build failed: exit status 1 (runtime nodejs, detected from package.json)`, followed by the
 tail of pack's log. `SubmitBuild`'s `buildpack_build.runtime` stays `UNIMPLEMENTED`.
 
-**Not supported:** **Eventarc trigger management.** Nothing creates or routes triggers, and a
-function's `eventTrigger` is refused (below). Delivery is whatever you point at the function — a
-Pub/Sub push subscription, for instance, which sends Pub/Sub's push body rather than a CloudEvent.
+**Event triggers** (#1414): a function's `eventTrigger` on Pub/Sub
+(`google.cloud.pubsub.topic.v1.messagePublished`) or Cloud Storage
+(`google.cloud.storage.object.v1.finalized`, `deleted`, `archived`, `metadataUpdated`, filtered
+on `bucket`) is made as Eventarc makes it, once the service is deployed: an `eventarc-…` push
+subscription on the topic (for Cloud Storage, on an `eventarc-…` topic the bucket's notification
+publishes to), whose pushes this instance converts to binary-mode CloudEvents (`ce-*` headers,
+`MessagePublishedData` or the object resource) and POSTs to the function through the ingress, with
+an ID token for the trigger's service account. `eventTrigger.trigger` names the trigger. It needs
+`--services run,storage,pubsub` and a published ingress port. No Eventarc API is served, and
+other event sources are refused. See the `eventTrigger` row of `docs/compatibility.md`.
 
 ## The Cloud Functions v2 API (#1377)
 
@@ -236,8 +243,8 @@ out, `service_config.*` and `labels` roll out a new revision of the same image, 
 and never enforced (ADR-0006). `locations.list` names the regions; any well-formed region is
 accepted in a name. Functions are kept in memory, and are gone when the instance restarts.
 
-**Refused, with the reason** (`UNIMPLEMENTED`): `eventTrigger` (a 2nd-gen trigger is an Eventarc
-trigger, which delivers a CloudEvent to the service; no Eventarc is served); GEN_1 functions and
+**Refused, with the reason** (`UNIMPLEMENTED`): an `eventTrigger` other than Pub/Sub's and Cloud
+Storage's (above), or on an instance without Pub/Sub; GEN_1 functions and
 uploads; `repo_source` and `git_uri`; worker pools, `docker_repository` and a build service
 account; VPC connectors, secret environment variables and volumes, KMS keys and binary
 authorization; `ListFunctions` `filter`, `order_by` and `page_token`; `GetFunction` `revision`.

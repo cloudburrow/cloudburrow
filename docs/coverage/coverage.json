@@ -1169,14 +1169,16 @@
         "method": "google.cloud.functions.v2.FunctionService/CreateFunction",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/functionsevents_test.go:205 TestFunctionsEventTriggers"
         ]
       },
       {
         "method": "google.cloud.functions.v2.FunctionService/DeleteFunction",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/functionsevents_test.go:205 TestFunctionsEventTriggers"
         ]
       },
       {
@@ -1197,7 +1199,8 @@
         "method": "google.cloud.functions.v2.FunctionService/GetFunction",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/functionsevents_test.go:205 TestFunctionsEventTriggers"
         ]
       },
       {
@@ -1218,7 +1221,8 @@
         "method": "google.cloud.functions.v2.FunctionService/UpdateFunction",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/functionsevents_test.go:205 TestFunctionsEventTriggers"
         ]
       }
     ]
