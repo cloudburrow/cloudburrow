@@ -92,6 +92,10 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 		f.serveRESTIAM(w, r, name, verb)
 		return
 	}
+	if parent, name, verb, ok := schemaPath(r.URL.Path); ok && f.serveRESTSchema(w, r, parent, name, verb) {
+		// A Protocol Buffer schema is the front's (protobufschemas.go).
+		return
+	}
 	if name, verb, ok := topicPath(r.URL.Path); ok {
 		f.serveTopic(w, r, name, verb, next)
 		return

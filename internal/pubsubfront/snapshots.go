@@ -54,7 +54,9 @@ type keptSnapshot struct {
 
 // snapshotAdmin is the part of the emulator's Subscriber service the front
 // reads and deletes snapshots with.
-func (f *Front) snapshotAdmin() pubsubpb.SubscriberClient { return pubsubpb.NewSubscriberClient(f.upstream) }
+func (f *Front) snapshotAdmin() pubsubpb.SubscriberClient {
+	return pubsubpb.NewSubscriberClient(f.upstream)
+}
 
 // withSnapshot puts what an update set, if anything, in place of what the
 // emulator returned for a snapshot; it reports whether it changed anything.
