@@ -251,6 +251,11 @@ func TestKMSAutokeyProvisionsKeysOnDemand(t *testing.T) {
 	}
 	cfgName := folder.GetName() + "/autokeyConfig"
 	keyProject := "projects/" + h.Project()
+	cleanupAdmin := kmsAdminClient(t, h)
+	t.Cleanup(func() {
+		_, _ = cleanupAdmin.UpdateAutokeyConfig(context.Background(), &kmspb.UpdateAutokeyConfigRequest{AutokeyConfig: &kmspb.AutokeyConfig{Name: cfgName},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"key_project"}}})
+	})
 	for _, variant := range []string{"grpc", "rest"} {
 		t.Run(variant, func(t *testing.T) {
 			newAdmin, newAutokey := kms.NewAutokeyAdminClient, kms.NewAutokeyClient
@@ -267,10 +272,6 @@ func TestKMSAutokeyProvisionsKeysOnDemand(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer ak.Close()
-			t.Cleanup(func() {
-				_, _ = admin.UpdateAutokeyConfig(context.Background(), &kmspb.UpdateAutokeyConfigRequest{AutokeyConfig: &kmspb.AutokeyConfig{Name: cfgName},
-					UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"key_project"}}})
-			})
 			cfg, err := admin.UpdateAutokeyConfig(ctx, &kmspb.UpdateAutokeyConfigRequest{AutokeyConfig: &kmspb.AutokeyConfig{Name: cfgName, KeyProject: keyProject},
 				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"key_project"}}})
 			if err != nil || cfg.GetState() != kmspb.AutokeyConfig_ACTIVE || cfg.GetKeyProject() != keyProject || cfg.GetEtag() == "" {
@@ -335,4 +336,23 @@ func TestKMSAutokeyProvisionsKeysOnDemand(t *testing.T) {
 		}
 		_, _ = fc.DeleteFolder(ctx, &rmpb.DeleteFolderRequest{Name: folder.GetName()})
 	})
+}
+
+// kmsAdminClient is an AutokeyAdmin client over gRPC, closed at cleanup.
+func kmsAdminClient(t *testing.T, h *Harness) *kms.AutokeyAdminClient {
+	t.Helper()
+	c, err := kms.NewAutokeyAdminClient(h.Context(), kmsOptions(h, "grpc")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	return c
+}
+
+func newEkmClient(h *Harness) (*kms.EkmClient, error) {
+	return kms.NewEkmClient(h.Context(), kmsOptions(h, "grpc")...)
+}
+
+func newAutokeyClient(h *Harness) (*kms.AutokeyClient, error) {
+	return kms.NewAutokeyClient(h.Context(), kmsOptions(h, "grpc")...)
 }

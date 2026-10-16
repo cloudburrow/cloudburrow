@@ -154,6 +154,10 @@ const ROUTES = [
 
   { path: "/secrets", service: "secrets", title: "Secret Manager", section: "Security and identity" },
   { path: "/kms/keyrings", service: "kms", title: "Cloud KMS", section: "Security and identity" },
+  // Cloud KMS EKM connections and Autokey (#1452): stored connections, and
+  // the Autokey configurations a project resolves through, with its key handles.
+  { path: "/kms/ekm", service: "kms-ekm", icon: "kms", title: "Cloud KMS EKM connections", section: "Security and identity" },
+  { path: "/kms/autokey", service: "kms-autokey", icon: "kms", title: "Cloud KMS Autokey", section: "Security and identity" },
   // IAM & Admin > IAM (#1368): the selected project's IAM policy, stored and
   // never enforced (ADR-0006); Grant access and Remove principal on its
   // Permissions tab.

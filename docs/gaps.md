@@ -130,9 +130,9 @@ methods (#1212), and their console (#1219). Closed by this sweep: Locations (#12
 
 | Gap | Why open | Size |
 |---|---|---|
-| HSM, EXTERNAL and EXTERNAL_VPC protection levels, `crypto_key_backend`, `external_protection_level_options` | no emulator support | L |
-| EKM, Autokey, AutokeyAdmin and HSM management services | no emulator support | L |
-| `key_access_justifications_policy` on `UpdateCryptoKey` | no emulator support | S |
+| EXTERNAL, EXTERNAL_VPC and HSM_SINGLE_TENANT protection levels, `crypto_key_backend`, `external_protection_level_options` (#1469; HSM is served since #1452, without an HSM or an attestation) | no emulator support | L |
+| HsmManagement, `EkmService/VerifyConnectivity`, and IAM on `ekmConfig` and `ekmConnections` (#1469; EkmService CRUD, Autokey and AutokeyAdmin are served since #1452) | no emulator support | L |
+| `key_access_justifications_policy` is stored and returned, not enforced (#1452): no call carries an access justification locally | no emulator support | S |
 | REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` | not documented by Google | S |
 | 72 UNVERIFIED error codes ([kms.md](coverage/kms.md)) | not documented by Google | S |
 | Project-number parents are refused; whether Google accepts them, and whether an empty key ring can be deleted | needs live GCP | S |
