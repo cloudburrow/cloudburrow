@@ -515,6 +515,8 @@ type ksvcStore struct {
 	mu      sync.Mutex
 	rv      int
 	applied map[string]string // name -> JSON
+	// aliases are the metadata alias Services applied (#1388), by manifest.
+	aliases []string
 }
 
 func (s *ksvcStore) Run(_ context.Context, stdin string, args ...string) (string, error) {
@@ -522,6 +524,9 @@ func (s *ksvcStore) Run(_ context.Context, stdin string, args ...string) (string
 	defer s.mu.Unlock()
 	args = args[4:] // --kubeconfig k -n ns
 	switch {
+	case args[0] == "apply" && strings.Contains(stdin, "type: ExternalName"):
+		s.aliases = append(s.aliases, stdin)
+		return "", nil
 	case args[0] == "apply":
 		s.rv++
 		name, obj := ksvcFromManifest(stdin, s.rv)
@@ -657,12 +662,16 @@ func TestGetServiceShowsOnlyTheCallersEnvAndThePodHasBoth(t *testing.T) {
 	want := []string{
 		"STORAGE_EMULATOR_HOST=http://mine:1",
 		"TARGET=world",
-		"GCE_METADATA_HOST=cloudburrow-host.cloudburrow.svc.cluster.local:9004",
+		// The default compute account's alias of the metadata server (#1388).
+		"GCE_METADATA_HOST=" + metadataAliasLabel(DefaultComputeAccount("my-project")) + ".default.svc.cluster.local:9004",
 		"GOOGLE_CLOUD_PROJECT=my-project",
 		"PUBSUB_EMULATOR_HOST=" + pubsub,
 	}
 	if g := pod(); !slices.Equal(g, want) {
 		t.Errorf("the pod's env =\n  %v\nwant\n  %v", g, want)
+	}
+	if len(store.aliases) != 1 || !strings.Contains(store.aliases[0], "externalName: cloudburrow-host.cloudburrow.svc.cluster.local") {
+		t.Errorf("metadata aliases applied = %q, want one ExternalName to cloudburrow-host", store.aliases)
 	}
 	callers := []string{"STORAGE_EMULATOR_HOST=http://mine:1", "TARGET=world"}
 	got, err := s.GetService(ctx, &runpb.GetServiceRequest{Name: parent + "/services/app"})
@@ -740,7 +749,7 @@ func TestExecutionsAreGivenTheInjectedEnvironment(t *testing.T) {
 				"CLOUDBURROW_SECRETMANAGER_ENDPOINT": "cloudburrow-host.cloudburrow.svc.cluster.local:9003"}
 		})
 	m, err := renderExecution(spec, "nightly", "nightly-abc", tt, 1, "default", "inst", nil,
-		s.injectedFor(projectOf(spec.GetName())), nil)
+		s.injectedFor(projectOf(spec.GetName()), ""), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

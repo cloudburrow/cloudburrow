@@ -146,6 +146,13 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	comps.SetStorageSigningKeys(signingKeys)
+	if serviceEnabled(cfg, config.ServiceBigQuery) {
+		// BigQuery's front reads a project's folders and organization
+		// from Resource Manager, through cloudburrow-host (#1392,
+		// INFORMATION_SCHEMA.JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION).
+		comps.SetResourceManager(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
+			cfg.Endpoints.ResourceManager))
+	}
 	var mysqlCreds components.MySQLCredentials
 	if serviceEnabled(cfg, config.ServiceCloudSQLMySQL) {
 		if mysqlCreds, err = loadOrCreateMySQLCredentials(cfg); err != nil {
@@ -181,6 +188,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// cluster's, so it also runs in this process.
 	runSvc := newRunService(cfg)
 	if runSvc != nil { // nil without Cloud Run
+		// Each Cloud Run workload is told its own service account (#1388).
+		metaSrv.WithAccounts(runSvc.metadataAccount)
 		runSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
 	}
 	runSvc.register(coord)
@@ -199,6 +208,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	schedulerSvc.register(coord)
 	// The Memorystore admin API (#1302), over the Valkey server's tunnel.
 	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
+	if memorystoreAdminSvc != nil {
+		memorystoreAdminSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+	}
 	memorystoreAdminSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)
 	loggingSvc.register(coord)
@@ -502,7 +514,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	// hostComp publishes the CLI-hosted services to the cluster (#575); nil
-	// without Cloud Run.
+	// without Cloud Run or BigQuery.
 	var hostComp *clusterHost
 	// Every bound address, as the runtime file records it and the hooks see it.
 	liveEndpoints := func() map[string]string {
@@ -546,12 +558,18 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// cluster name when a cluster workload can need them (#575): with Cloud
 	// Run, whose containers are the reason. Registered after every service,
 	// so each has its bound address. Control and admin are never included.
-	if serviceEnabled(cfg, config.ServiceRun) {
+	// With BigQuery alone, Resource Manager alone is published: the
+	// BigQuery front reads a project's ancestry from it (#1392).
+	runEnabled := serviceEnabled(cfg, config.ServiceRun)
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,
 			"scheduler": true, "logging": true, "resourcemanager": true, "serviceusage": true, "metadata": true,
 			"sqladmin": true, "cloudsql-connector": true}
+		if !runEnabled {
+			published = map[string]bool{"resourcemanager": true}
+		}
 		hostComp = newClusterHost(cfg, stdout, func() map[string]string {
 			out := map[string]string{}
 			for k, v := range liveEndpoints() {
@@ -562,9 +580,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return out
 		})
 		coord.Register(hostComp)
-		// A revision's and a task's output in Cloud Logging, as Google
-		// writes it (#1298), while Logging is served too.
-		newRunLogFeeder(cfg.KubeconfigPath(), cfg.ClusterName()+"-control-plane", loggingSvc).register(coord)
+		if runEnabled {
+			// A revision's and a task's output in Cloud Logging, as Google
+			// writes it (#1298), while Logging is served too.
+			newRunLogFeeder(cfg.KubeconfigPath(), cfg.ClusterName()+"-control-plane", loggingSvc).register(coord)
+		}
 	}
 	// Every revision and job task is given the in-cluster addresses (#576):
 	// the tunnelled backends' Service names, known now, and the CLI-hosted
@@ -580,7 +600,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Pods have a connector listener of their own, on any port: the
 	// Service maps 3307 to it, so a Cloud SQL volume works even while
 	// another instance on this machine holds 3307.
-	if sqlAdminSrv != nil && hostComp != nil {
+	if sqlAdminSrv != nil && hostComp != nil && runEnabled {
 		sqlAdminSrv.ServeConnectorToPods(net.JoinHostPort(cfg.BindAddress, "0"), hostComp.ClusterIP)
 		runSvc.useCloudSQL(cloudSQLForPods(sqlAdminSrv, hostComp))
 	}

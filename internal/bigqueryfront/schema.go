@@ -151,3 +151,14 @@ func decimalFits(s string, precision, scale int) error {
 	}
 	return nil
 }
+
+// hasRangeField reports whether fields, or any field nested in them, is a
+// RANGE.
+func hasRangeField(fields []field) bool {
+	for _, fl := range fields {
+		if strings.EqualFold(fl.Type, "RANGE") || hasRangeField(fl.Fields) {
+			return true
+		}
+	}
+	return false
+}

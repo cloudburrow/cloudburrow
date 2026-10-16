@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
+
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -77,5 +79,44 @@ func TestWorkerPoolEditFormRoundTrips(t *testing.T) {
 	}
 	if c.GetImage() != "img:1" || strings.Join(c.GetArgs(), "|") != "sleep 1" || c.GetEnv()[0].GetValue() != "b" || count == nil || *count != 2 {
 		t.Errorf("the prefilled form reads back as %v, %v", c, count)
+	}
+}
+
+// TestConsoleRunWorkerPoolSplit (#1387): Split instances prefills the
+// pool's splits, LATEST for the latest revision, and parses its lines back
+// into instanceSplits; the revisions list gives each revision its share of
+// the instances.
+func TestConsoleRunWorkerPoolSplit(t *testing.T) {
+	four := int32(4)
+	name := "projects/p/locations/us-central1/workerPools/wp"
+	wp := &runpb.WorkerPool{Name: name, LatestCreatedRevision: name + "/revisions/wp-00002-def",
+		Scaling: &runpb.WorkerPoolScaling{ManualInstanceCount: &four},
+		InstanceSplits: []*runpb.InstanceSplit{
+			{Type: runpb.InstanceSplitAllocationType_INSTANCE_SPLIT_ALLOCATION_TYPE_LATEST, Percent: 75},
+			{Type: runpb.InstanceSplitAllocationType_INSTANCE_SPLIT_ALLOCATION_TYPE_REVISION, Revision: "wp-00001-abc", Percent: 25}}}
+	a := splitAction(wp)
+	if a.ID != actSplit || len(a.Fields) != 1 || a.Fields[0].Default != `{"LATEST":"75","wp-00001-abc":"25"}` {
+		t.Errorf("split action = %+v", a)
+	}
+	splits, err := instanceSplits(`{"latest":"60","wp-00001-abc":"40%"}`)
+	if err != nil || len(splits) != 2 {
+		t.Fatalf("instanceSplits = %v, %v", splits, err)
+	}
+	byRev := map[string]*runpb.InstanceSplit{}
+	for _, sp := range splits {
+		byRev[sp.GetRevision()] = sp
+	}
+	if l := byRev[""]; l.GetType() != runpb.InstanceSplitAllocationType_INSTANCE_SPLIT_ALLOCATION_TYPE_LATEST || l.GetPercent() != 60 {
+		t.Errorf("latest split = %v", l)
+	}
+	if r := byRev["wp-00001-abc"]; r.GetType() != runpb.InstanceSplitAllocationType_INSTANCE_SPLIT_ALLOCATION_TYPE_REVISION || r.GetPercent() != 40 {
+		t.Errorf("revision split = %v", r)
+	}
+	if _, err := instanceSplits(`{"LATEST":"half"}`); err == nil {
+		t.Error("a split that is not a percentage was accepted")
+	}
+	counts := runadapter.RevisionInstances(wp)
+	if counts[name+"/revisions/wp-00002-def"] != 3 || counts[name+"/revisions/wp-00001-abc"] != 1 {
+		t.Errorf("revision instances = %v", counts)
 	}
 }

@@ -66,3 +66,32 @@ func TestGcloudRedis(t *testing.T) {
 		t.Errorf("GetInstance after delete: %v; want NotFound", err)
 	}
 }
+
+// covers: google.cloud.redis.v1.CloudRedis/ExportInstance, google.cloud.redis.v1.CloudRedis/ImportInstance
+//
+// TestGcloudRedisExportImport (#1384): the real gcloud exports an
+// instance's data to a gs:// object of this instance's Cloud Storage
+// (`gcloud redis instances export`), and imports it back over later
+// changes (`gcloud redis instances import`), waiting on each operation.
+func TestGcloudRedisExportImport(t *testing.T) {
+	h := New(t)
+	c, _ := memorystoreAdminClient(t, h)
+	bh := bucket(t, h, instanceStorage(t, h))
+	g := newGcloudSession(t, h)
+	ctx := h.Context()
+	id := fmt.Sprintf("gcloud-io-%d", time.Now().UnixNano()%1e8)
+	parent := "projects/" + g.project + "/locations/us-central1"
+	_, rc := createBasic(t, h, c, parent, id, nil)
+	rc.Set(ctx, "k", "v1", 0)
+	uri := "gs://" + bh.BucketName() + "/gcloud.rdb"
+	p, region := "--project="+g.project, "--region=us-central1"
+	g.must("redis", "instances", "export", uri, id, p, region)
+	if _, err := bh.Object("gcloud.rdb").Attrs(ctx); err != nil {
+		t.Fatalf("the exported object: %v", err)
+	}
+	rc.Set(ctx, "k", "changed", 0)
+	g.must("redis", "instances", "import", uri, id, p, region, "--quiet")
+	if v, err := rc.Get(ctx, "k").Result(); err != nil || v != "v1" {
+		t.Errorf("after gcloud import GET k = %q, %v; want v1", v, err)
+	}
+}

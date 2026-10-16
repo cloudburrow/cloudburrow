@@ -180,3 +180,15 @@ func cloneOp(o *Operation) *Operation {
 	c := *o
 	return &c
 }
+
+// Delete forgets an operation, as google.longrunning's DeleteOperation
+// does: the work it tracks is not affected.
+func (s *Store) Delete(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.ops[name]; !ok {
+		return fmt.Errorf("%w: %s", ErrNotFound, name)
+	}
+	delete(s.ops, name)
+	return nil
+}

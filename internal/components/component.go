@@ -38,7 +38,15 @@ type LifecycleComponent struct {
 	// corsOrigins are the origins, beyond loopback, whose browser requests
 	// the storage server answers (#677).
 	corsOrigins []string
+	// resourceManager is Resource Manager's in-cluster address
+	// (host:port), which BigQuery's front reads a project's ancestry
+	// from (#1392), or "".
+	resourceManager string
 }
+
+// SetResourceManager records Resource Manager's in-cluster address, for
+// BigQuery's front (#1392).
+func (c *LifecycleComponent) SetResourceManager(addr string) { c.resourceManager = addr }
 
 // SetStorageSigningKeys records the PEM public keys, by service account
 // email, the builtin storage server accepts RSA signed URLs from.
@@ -125,6 +133,12 @@ func (c *LifecycleComponent) Backends() []Backend {
 					// the same Cloud Storage (#944), and looks an extract's
 					// bucket up there (#939): the emulator creates a missing one.
 					b.Front.Args = append(append([]string{}, b.Front.Args...), "--storage", "http://"+InClusterBuiltinStorageHost(c.installer.Namespace))
+					// INFORMATION_SCHEMA.JOBS_BY_FOLDER and
+					// JOBS_BY_ORGANIZATION read the project's ancestry
+					// (#1392).
+					if c.resourceManager != "" {
+						b.Front.Args = append(b.Front.Args, "--resourcemanager", "http://"+c.resourceManager)
+					}
 				}
 				out = append(out, b)
 			}

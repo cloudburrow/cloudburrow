@@ -116,12 +116,13 @@ func (f front) insertJob(w http.ResponseWriter, r *http.Request) {
 		project = projectOf(f.base)
 	}
 	rec := newRecorder()
-	f.checkJob(rec, r, job, project)
+	f.checkJob(rec, r, job, project, created)
 	f.records.timed(w, rec, created, project, job.JobReference.JobID, true)
 }
 
-// checkJob is insertJob's checks of job, whose project is project.
-func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, project string) {
+// checkJob is insertJob's checks of job, whose project is project,
+// received at created.
+func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, project string, created int64) {
 	f.next = f.failed.watch(f.next, project, job.JobReference.JobID)
 	if f.configs != nil {
 		f.next = f.configs.recording(f.next, project)
@@ -240,13 +241,17 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		if d := c.Query.DestinationTable; d != nil && f.refuseSnapshotWrite(w, r, d.DatasetID, d.TableID, "a query job's destinationTable") { // #1002
 			return
 		}
-		qf := &queryFailures{} // #1109, queryfailures.go
-		f.next = qf.watch(f.next)
+		qf := &queryFailures{}        // #1109, queryfailures.go
+		refused := &emulatorRefusal{} // #1397, failedjobs.go
+		raw, _ := readBody(r)
+		f.next = qf.watch(refused.watch(f.next))
 		rec := newRecorder()
 		if !f.partitionQueryWrite(rec, r, job) && !f.queryWrite(rec, r, job) { // #1273, partitionwrites.go // #1067, #1080, querywrite.go
 			f.runQuery(rec, r, c.Query.queryOptions, true) // #1008, #1014
 		}
-		noRetry(w, rec, qf)
+		answer := newRecorder()
+		noRetry(answer, rec, qf)
+		f.recordFailedInsert(w, r, raw, answer, job, project, created, refused) // #1397, failedjobs.go
 		return
 	}
 	if msg != "" {
@@ -344,7 +349,8 @@ func checkNames(fields []field, prefix string, skip *regexp.Regexp, check func(s
 func (f front) query(w http.ResponseWriter, r *http.Request) {
 	created := f.records.clock()
 	var body queryOptions
-	if _, ok := decode(r, &body); !ok {
+	raw, ok := decode(r, &body)
+	if !ok {
 		f.next.ServeHTTP(w, r)
 		return
 	}
@@ -354,6 +360,7 @@ func (f front) query(w http.ResponseWriter, r *http.Request) {
 	f.runQuery(rec, r, body, false) // #1008, #1014
 	answer := newRecorder()
 	noRetry(answer, rec, qf)
+	f.recordFailedQuery(r, raw, answer.status, answer.body.Bytes(), created) // #1397, failedjobs.go
 	f.records.timed(w, answer, created, projectOf(f.base), "", false)
 }
 

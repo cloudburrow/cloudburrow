@@ -991,3 +991,29 @@ func (f front) serveRowPolicies(w http.ResponseWriter, r *http.Request) bool {
 	}
 	return true
 }
+
+// move gives the policies of the table from to the table to, made at
+// created: ALTER TABLE RENAME TO, and an ALTER TABLE that makes the table
+// again (#1389), keep the table's policies ("Existing table ACLs and row
+// access policies are preserved").
+func (p *rowPolicies) move(from, to, created string) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	t := p.tables[from]
+	if t == nil {
+		return
+	}
+	delete(p.tables, from)
+	parts := strings.Split(to, "\x00")
+	t.Key, t.Created = to, created
+	for i := range t.Policies {
+		if len(parts) == 3 {
+			t.Policies[i].Ref.ProjectID, t.Policies[i].Ref.DatasetID, t.Policies[i].Ref.TableID = parts[0], parts[1], parts[2]
+		}
+	}
+	p.tables[to] = t
+	p.saveLocked()
+}

@@ -51,8 +51,6 @@ func TestWorkerPoolAndInstanceRefusals(t *testing.T) {
 	for name, err := range map[string]error{
 		"container.ports": checkWorkerPool(&runpb.WorkerPool{Template: &runpb.WorkerPoolRevisionTemplate{
 			Containers: []*runpb.Container{{Image: "x:1", Ports: []*runpb.ContainerPort{{ContainerPort: 80}}}}}}),
-		"instanceSplits": checkWorkerPool(&runpb.WorkerPool{Template: &runpb.WorkerPoolRevisionTemplate{Containers: c},
-			InstanceSplits: []*runpb.InstanceSplit{{Revision: "old", Percent: 50}}}),
 		"template.vpcAccess": checkWorkerPool(&runpb.WorkerPool{Template: &runpb.WorkerPoolRevisionTemplate{Containers: c,
 			VpcAccess: &runpb.VpcAccess{}}}),
 		"ingress":    checkInstance(&runpb.Instance{Containers: c, Ingress: runpb.IngressTraffic_INGRESS_TRAFFIC_INTERNAL_ONLY}),

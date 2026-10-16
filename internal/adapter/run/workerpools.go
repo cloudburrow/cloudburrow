@@ -29,8 +29,8 @@ import (
 // its template is a new revision, named {pool}-{generation}-{suffix} as
 // Cloud Run names one, and each revision is the ReplicaSet the Deployment
 // creates for that template, so a retired revision is a ReplicaSet scaled to
-// zero. The whole pool always runs its latest revision: instanceSplits
-// other than 100% to the latest are refused.
+// zero. instanceSplits run other revisions beside the latest, each as a
+// Deployment of its own (#1387, workerpoolsplits.go).
 
 const (
 	kindWorkerPool = "worker-pool"
@@ -73,11 +73,6 @@ func unsupportedWorkerPool(wp *runpb.WorkerPool) error {
 	}
 	add(wp.GetBinaryAuthorization() != nil, "binaryAuthorization", "not enforced locally")
 	add(len(wp.GetCustomAudiences()) > 0, "customAudiences", "a worker pool receives no requests")
-	for _, sp := range wp.GetInstanceSplits() {
-		latest := sp.GetType() == runpb.InstanceSplitAllocationType_INSTANCE_SPLIT_ALLOCATION_TYPE_LATEST
-		add(sp.GetPercent() != 100 || !latest && sp.GetRevision() != wp.GetTemplate().GetRevision(),
-			"instanceSplits", "every instance runs the latest revision; a split across revisions is not mapped")
-	}
 	t := wp.GetTemplate()
 	gaps = append(gaps, podTemplateGaps("template", noExecEnv{t})...)
 	gaps = append(gaps, storedSettingGaps("template", noExecEnv{t})...)
@@ -104,6 +99,9 @@ func checkWorkerPool(wp *runpb.WorkerPool) error {
 		return apierror.InvalidArgument("worker pool requires template.containers")
 	}
 	if err := checkVolumes(noExecEnv{t}); err != nil {
+		return err
+	}
+	if err := checkInstanceSplits(wp.GetInstanceSplits()); err != nil {
 		return err
 	}
 	for field, m := range map[string]map[string]string{"labels": wp.GetLabels(), "annotations": wp.GetAnnotations(),
@@ -170,8 +168,9 @@ func (s *Server) renderWorkerPool(w workload, spec *runpb.WorkerPool, revGen int
 	revID := spec.GetLatestCreatedRevision()[strings.LastIndex(spec.GetLatestCreatedRevision(), "/")+1:]
 	t := spec.GetTemplate()
 	dep, err := s.deployment(w, podSpec{containers: t.GetContainers(), volumes: t.GetVolumes(), revision: revID,
-		revisionName: spec.GetLatestCreatedRevision(), revisionSpec: t, generation: revGen},
-		spec.GetScaling().GetManualInstanceCount())
+		revisionName: spec.GetLatestCreatedRevision(), revisionSpec: t, generation: revGen,
+		serviceAccount: t.GetServiceAccount()},
+		latestShare(spec))
 	return cm, dep, err
 }
 
@@ -194,8 +193,7 @@ func workerPoolOut(cm kconfigMap, d kdeployment, found bool) (*runpb.WorkerPool,
 	if cond.State == runpb.Condition_CONDITION_SUCCEEDED {
 		wp.LatestReadyRevision = wp.LatestCreatedRevision
 	}
-	wp.InstanceSplitStatuses = []*runpb.InstanceSplitStatus{{
-		Type: runpb.InstanceSplitAllocationType_INSTANCE_SPLIT_ALLOCATION_TYPE_LATEST, Percent: 100}}
+	wp.InstanceSplitStatuses = splitStatuses(wp.InstanceSplits)
 	if len(wp.InstanceSplits) == 0 {
 		wp.InstanceSplits = []*runpb.InstanceSplit{{
 			Type: runpb.InstanceSplitAllocationType_INSTANCE_SPLIT_ALLOCATION_TYPE_LATEST, Percent: 100}}
@@ -208,7 +206,23 @@ func (s *Server) readWorkerPool(ctx context.Context, w workload, cm kconfigMap) 
 	if err != nil {
 		return nil, err
 	}
-	return workerPoolOut(cm, d, found)
+	wp, err := workerPoolOut(cm, d, found)
+	if err != nil || wp.GetTerminalCondition().GetState() != runpb.Condition_CONDITION_SUCCEEDED {
+		return wp, err
+	}
+	// A split revision's instances count too (#1387): the pool is ready
+	// once every revision's are.
+	splits, err := s.splitDeployments(ctx, w)
+	if err != nil {
+		return nil, err
+	}
+	for _, sd := range splits {
+		if cond, reconciling := deploymentConditions(sd, true, wp.GetUpdateTime().AsTime()); cond.State != runpb.Condition_CONDITION_SUCCEEDED {
+			wp.TerminalCondition, wp.Reconciling, wp.LatestReadyRevision = cond, reconciling, ""
+			break
+		}
+	}
+	return wp, nil
 }
 
 // CreateWorkerPool stores a pool and starts its instances. The operation
@@ -244,13 +258,16 @@ func (p *WorkerPoolsServer) CreateWorkerPool(ctx context.Context, req *runpb.Cre
 	if err != nil {
 		return nil, err
 	}
+	if _, err := s.renderSplits(ctx, w, spec, true); err != nil {
+		return nil, err
+	}
 	if err := s.ensureAbsent(ctx, w); err != nil {
 		return nil, err
 	}
 	if req.GetValidateOnly() {
 		return s.doneOperation(req.GetParent(), wp.Name, spec)
 	}
-	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "create"); err != nil {
+	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "create", spec.GetTemplate().GetServiceAccount()); err != nil {
 		return nil, err
 	}
 	return s.workloadOperation(ctx, req.GetParent(), w, s.workerPoolReady(w))
@@ -319,9 +336,10 @@ func (p *WorkerPoolsServer) ListWorkerPools(ctx context.Context, req *runpb.List
 }
 
 // UpdateWorkerPool replaces a pool's configuration. A changed template is
-// a new revision; a changed instance count alone rescales the current one.
-// update_mask is not read: the pool is replaced whole, as UpdateJob
-// replaces a job.
+// a new revision; a changed instance count or split alone rescales the
+// revisions there are. With an update_mask only the fields it names change
+// (#1387), merged onto the stored pool as UpdateService merges (#1260);
+// without one the pool is replaced whole.
 func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.UpdateWorkerPoolRequest) (*longrunningpb.Operation, error) {
 	s := p.s
 	if req.GetWorkerPool() == nil {
@@ -333,9 +351,6 @@ func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.Upd
 		return nil, err
 	}
 	parent := name[:strings.LastIndex(name, "/workerPools/")]
-	if len(req.GetUpdateMask().GetPaths()) > 0 {
-		return nil, apierror.Unimplemented("updateMask is not mapped for a worker pool; send the whole worker pool")
-	}
 	cm, err := s.loadSpec(ctx, w)
 	if err != nil {
 		if apierror.From(err).Code == codes.NotFound && req.GetAllowMissing() {
@@ -352,6 +367,13 @@ func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.Upd
 		return nil, err
 	}
 	wp := proto.Clone(req.GetWorkerPool()).(*runpb.WorkerPool)
+	if paths := req.GetUpdateMask().GetPaths(); len(paths) > 0 {
+		current := proto.Clone(&prev).(*runpb.WorkerPool)
+		current.Name = name
+		if wp, err = mergeWorkerPoolMask(current, wp, paths); err != nil {
+			return nil, err
+		}
+	}
 	if wp.Template == nil {
 		wp.Template = &runpb.WorkerPoolRevisionTemplate{}
 	}
@@ -381,10 +403,17 @@ func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.Upd
 	if err != nil {
 		return nil, err
 	}
+	splits, err := s.renderSplits(ctx, w, spec, false)
+	if err != nil {
+		return nil, err
+	}
 	if req.GetValidateOnly() {
 		return s.doneOperation(parent, name, spec)
 	}
-	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "replace"); err != nil {
+	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "replace", spec.GetTemplate().GetServiceAccount()); err != nil {
+		return nil, err
+	}
+	if err := s.writeSplits(ctx, w, splits); err != nil {
 		return nil, err
 	}
 	return s.workloadOperation(ctx, parent, w, s.workerPoolReady(w))
@@ -470,8 +499,10 @@ func (s *Server) workerPoolRevisions(ctx context.Context, w workload) ([]kreplic
 	return listObjects[kreplicaSet](ctx, s.kn, resReplicaSet, w.selector())
 }
 
-// fromReplicaSet maps a pool's ReplicaSet onto run.v2.Revision.
-func fromReplicaSet(rs kreplicaSet, latest string) (*runpb.Revision, error) {
+// fromReplicaSet maps a pool's ReplicaSet onto run.v2.Revision. serving
+// names the revisions with instances besides the latest: a split revision
+// is active, not retired (#1387).
+func fromReplicaSet(rs kreplicaSet, latest string, serving map[string]bool) (*runpb.Revision, error) {
 	ann := rs.Spec.Template.Metadata.Annotations
 	var t runpb.WorkerPoolRevisionTemplate
 	if err := decodeSpec(kconfigMap{Metadata: rs.Metadata, Data: map[string]string{specDataKey: ann[annRevisionSpec]}}, &t); err != nil {
@@ -493,7 +524,7 @@ func fromReplicaSet(rs kreplicaSet, latest string) (*runpb.Revision, error) {
 	ready := &runpb.Condition{Type: "Ready", LastTransitionTime: rev.CreateTime}
 	active := &runpb.Condition{Type: "Active", LastTransitionTime: rev.CreateTime}
 	switch {
-	case name != latest:
+	case name != latest && !serving[name]:
 		ready.State = runpb.Condition_CONDITION_SUCCEEDED
 		active.State = runpb.Condition_CONDITION_FAILED
 		active.Reasons = &runpb.Condition_RevisionReason_{RevisionReason: runpb.Condition_RETIRED}
@@ -510,20 +541,34 @@ func fromReplicaSet(rs kreplicaSet, latest string) (*runpb.Revision, error) {
 	return rev, nil
 }
 
-func (s *Server) loadWorkerPoolForRevisions(ctx context.Context, poolName string) (workload, string, error) {
+func (s *Server) loadWorkerPoolForRevisions(ctx context.Context, poolName string) (workload, *runpb.WorkerPool, error) {
 	w, err := parseWorkerPoolName(poolName)
 	if err != nil {
-		return workload{}, "", err
+		return workload{}, nil, err
 	}
 	cm, err := s.loadSpec(ctx, w)
 	if err != nil {
-		return workload{}, "", err
+		return workload{}, nil, err
 	}
 	var wp runpb.WorkerPool
 	if err := decodeSpec(cm, &wp); err != nil {
-		return workload{}, "", err
+		return workload{}, nil, err
 	}
-	return w, wp.GetLatestCreatedRevision(), nil
+	return w, &wp, nil
+}
+
+// revisionsByName is one ReplicaSet per revision: a split revision's own
+// Deployment's, which holds its instances, over the retired one the pool's
+// Deployment keeps of it (#1387).
+func revisionsByName(items []kreplicaSet) map[string]kreplicaSet {
+	out := map[string]kreplicaSet{}
+	for _, rs := range items {
+		name := rs.Spec.Template.Metadata.Annotations[annRunName]
+		if _, seen := out[name]; !seen || rs.Spec.Template.Metadata.Labels[labelSplitOf] != "" {
+			out[name] = rs
+		}
+	}
+	return out
 }
 
 func (s *Server) workerPoolRevision(ctx context.Context, name string) (*runpb.Revision, workload, kreplicaSet, string, error) {
@@ -531,7 +576,7 @@ func (s *Server) workerPoolRevision(ctx context.Context, name string) (*runpb.Re
 	if i < 0 {
 		return nil, workload{}, kreplicaSet{}, "", apierror.InvalidArgument("%q is not a Cloud Run revision name", name)
 	}
-	w, latest, err := s.loadWorkerPoolForRevisions(ctx, name[:i])
+	w, wp, err := s.loadWorkerPoolForRevisions(ctx, name[:i])
 	if err != nil {
 		return nil, workload{}, kreplicaSet{}, "", err
 	}
@@ -539,17 +584,16 @@ func (s *Server) workerPoolRevision(ctx context.Context, name string) (*runpb.Re
 	if err != nil {
 		return nil, workload{}, kreplicaSet{}, "", err
 	}
-	for _, rs := range items {
-		if rs.Spec.Template.Metadata.Annotations[annRunName] == name {
-			rev, err := fromReplicaSet(rs, latest)
-			return rev, w, rs, latest, err
-		}
+	latest := wp.GetLatestCreatedRevision()
+	if rs, ok := revisionsByName(items)[name]; ok {
+		rev, err := fromReplicaSet(rs, latest, servingRevisions(wp))
+		return rev, w, rs, latest, err
 	}
 	return nil, workload{}, kreplicaSet{}, "", apierror.NotFound("revision %s not found", name)
 }
 
 func (s *Server) listWorkerPoolRevisions(ctx context.Context, req *runpb.ListRevisionsRequest) (*runpb.ListRevisionsResponse, error) {
-	w, latest, err := s.loadWorkerPoolForRevisions(ctx, req.GetParent())
+	w, wp, err := s.loadWorkerPoolForRevisions(ctx, req.GetParent())
 	if err != nil {
 		return nil, err
 	}
@@ -559,8 +603,9 @@ func (s *Server) listWorkerPoolRevisions(ctx context.Context, req *runpb.ListRev
 	}
 	byKey := map[string]*runpb.Revision{}
 	keys := []string{}
-	for _, rs := range items {
-		rev, err := fromReplicaSet(rs, latest)
+	serving := servingRevisions(wp)
+	for _, rs := range revisionsByName(items) {
+		rev, err := fromReplicaSet(rs, wp.GetLatestCreatedRevision(), serving)
 		if err != nil {
 			return nil, err
 		}
@@ -590,6 +635,12 @@ func (s *Server) deleteWorkerPoolRevision(ctx context.Context, req *runpb.Delete
 	if rev.GetName() == latest {
 		return nil, apierror.FailedPrecondition(
 			"revision %s is the one worker pool %s runs and cannot be deleted; deploy another revision first", rev.GetName(), pool)
+	}
+	for _, c := range rev.GetConditions() {
+		if c.GetType() == "Active" && c.GetRevisionReason() != runpb.Condition_RETIRED {
+			return nil, apierror.FailedPrecondition(
+				"revision %s has instances in worker pool %s's instanceSplits and cannot be deleted; split it to 0%% first", rev.GetName(), pool)
+		}
 	}
 	if !req.GetValidateOnly() {
 		if err := s.kn.deleteObject(ctx, resReplicaSet, rs.Metadata.Name); err != nil {

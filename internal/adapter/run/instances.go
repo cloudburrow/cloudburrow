@@ -126,11 +126,11 @@ func (s *Server) writeInstance(ctx context.Context, w workload, spec *runpb.Inst
 		replicas = 0
 	}
 	containers, port := servingContainers(spec.GetContainers())
-	dep, err := s.deployment(w, podSpec{containers: containers, volumes: spec.GetVolumes()}, replicas)
+	dep, err := s.deployment(w, podSpec{containers: containers, volumes: spec.GetVolumes(), serviceAccount: spec.GetServiceAccount()}, replicas)
 	if err != nil {
 		return err
 	}
-	if err := s.writeWorkload(ctx, w, cm, dep, verb); err != nil {
+	if err := s.writeWorkload(ctx, w, cm, dep, verb, spec.GetServiceAccount()); err != nil {
 		return err
 	}
 	return s.applyInstanceRoute(ctx, w, port)
@@ -200,7 +200,7 @@ func (i *InstancesServer) CreateInstance(ctx context.Context, req *runpb.CreateI
 	// Render once before anything is written, so an image or secret the pod
 	// could not use is refused on create.
 	containers, _ := servingContainers(spec.GetContainers())
-	if _, err := s.deployment(w, podSpec{containers: containers, volumes: spec.GetVolumes()}, 1); err != nil {
+	if _, err := s.deployment(w, podSpec{containers: containers, volumes: spec.GetVolumes(), serviceAccount: spec.GetServiceAccount()}, 1); err != nil {
 		return nil, err
 	}
 	if err := s.ensureAbsent(ctx, w); err != nil {

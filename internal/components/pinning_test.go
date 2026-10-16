@@ -15,7 +15,8 @@ func TestComponentImagesArePinnedByDigest(t *testing.T) {
 	for name, image := range map[string]string{
 		"PubSubImage": PubSubImage, "SpannerImage": SpannerImage,
 		"CloudSQLImage": CloudSQLImage, "MemorystoreImage": MemorystoreImage,
-		"CloudSQLMySQLImage": CloudSQLMySQLImage,
+		"CloudSQLMySQLImage":      CloudSQLMySQLImage,
+		"MemorystoreRedis62Image": MemorystoreRedis62Image, "MemorystoreRedis70Image": MemorystoreRedis70Image,
 	} {
 		_, digest, ok := strings.Cut(image, "@sha256:")
 		if !ok || len(digest) != 64 {

@@ -244,7 +244,7 @@ func TestBigQueryCloneDDLOptionsAndSystemTime(t *testing.T) {
 	err = bqRun(ctx, c, "CREATE SNAPSHOT TABLE "+path("past")+" CLONE "+path("base")+
 		" FOR SYSTEM_TIME AS OF TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 SECOND)", false)
 	wantReason(t, "AS OF a time in the past", err, http.StatusNotImplemented, "notImplemented")
-	err = bqRun(ctx, c, "CREATE TABLE "+path("kms")+" CLONE "+path("base")+" OPTIONS(kms_key_name = 'k')", false)
+	err = bqRun(ctx, c, "CREATE TABLE "+path("kms")+" CLONE "+path("base")+" OPTIONS(max_staleness = INTERVAL 1 HOUR)", false)
 	wantReason(t, "an option CloudBurrow does not set", err, http.StatusNotImplemented, "notImplemented")
 	for _, name := range []string{"old", "past", "kms"} {
 		if tableExists(t, ctx, ds.Table(name)) {

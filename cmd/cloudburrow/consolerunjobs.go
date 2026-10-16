@@ -778,6 +778,7 @@ func runJobDetail(job *runpb.Job, executions console.Listing) console.Detail {
 		console.Property{Label: "Status", Value: status},
 		console.Property{Label: "Region", Value: regionOf(job.GetName())},
 		console.Property{Label: "Latest execution", Value: unsetAs(latest, "None: the job has not been executed")},
+		console.Property{Label: "Service account", Value: runAccountText(job.GetTemplate().GetTemplate().GetServiceAccount(), projectOf(job.GetName()))},
 		console.Property{Label: "Executions", Value: fmt.Sprint(job.GetExecutionCount())},
 		console.Property{Label: "Generation", Value: fmt.Sprint(job.GetGeneration())},
 		console.Property{Label: "Created", Value: stampText(job.GetCreateTime())},
@@ -890,6 +891,7 @@ func (p runJobsProvider) executionDetail(ctx context.Context, e *runpb.Execution
 	summary := stored(
 		console.Property{Label: "Status", Value: status},
 		console.Property{Label: "Job", Value: lastSegment(e.GetJob())},
+		console.Property{Label: "Service account", Value: runAccountText(e.GetTemplate().GetServiceAccount(), projectOf(e.GetName()))},
 		console.Property{Label: "Tasks", Value: fmt.Sprint(e.GetTaskCount())},
 		console.Property{Label: "Parallelism", Value: fmt.Sprint(e.GetParallelism())},
 		console.Property{Label: "Running", Value: fmt.Sprint(e.GetRunningCount())},
