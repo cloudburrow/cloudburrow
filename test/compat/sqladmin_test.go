@@ -345,9 +345,10 @@ func TestSQLAdminDatabasesAndUsersAreTheServers(t *testing.T) {
 					t.Errorf("after databases.update the server's charset is %q, want utf8mb4", cs)
 				}
 			} else {
-				// PostgreSQL fixes a database's encoding at creation.
+				// PostgreSQL fixes a database's encoding at creation, and Cloud SQL
+				// documents that the API cannot change it: 400 since #1462.
 				_, err = svc.Databases.Patch(p, e.instance, db, &sqladmin.Database{Charset: "LATIN1"}).Do()
-				wantHTTP(t, "databases.patch of a PostgreSQL encoding", err, 501)
+				wantHTTP(t, "databases.patch of a PostgreSQL encoding", err, 400)
 				op, err = svc.Databases.Update(p, e.instance, db, &sqladmin.Database{Name: db}).Do()
 				done("databases.update with nothing to change", op, err)
 			}
