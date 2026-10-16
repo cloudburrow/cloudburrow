@@ -762,6 +762,9 @@ func (f *Front) handleUpdate(ctx context.Context, ss grpc.ServerStream, method s
 	if call.labels != nil {
 		f.setLabels(call.resource, call.labels)
 	}
+	if call.schemaUpdate != nil {
+		call.schemaUpdate.apply(f)
+	}
 	resp = call.response(resp)
 	call.done(nil)
 	return ss.SendMsg(&resp)
@@ -831,6 +834,9 @@ type observed struct {
 	// topicSchema is the binding to a front-kept schema a CreateTopic
 	// names, kept once the emulator creates the topic.
 	topicSchema *pubsubpb.SchemaSettings
+	// schemaUpdate is what an UpdateTopic does to the front's bindings,
+	// applied once the emulator applies the rest.
+	schemaUpdate *topicSchemaUpdate
 	// project is the project a ListSubscriptions names.
 	project string
 }
@@ -877,10 +883,15 @@ func (o *observed) request(fr frame) (frame, error) {
 			return fr, nil
 		}
 		o.resource = r.GetTopic().GetName()
-		if err := o.f.checkTopicSchemaUpdate(&r); err != nil {
+		plan, err := o.f.planTopicSchemaUpdate(&r)
+		if err != nil {
 			return nil, err
 		}
+		o.schemaUpdate = plan
 		if !masks(r.GetUpdateMask().GetPaths(), "labels") {
+			if plan != nil {
+				return reencode(&r)
+			}
 			return fr, nil
 		}
 		if err := CheckLabels(r.GetTopic().GetLabels()); err != nil {
