@@ -185,7 +185,7 @@ func masterName(project, v string) (string, error) {
 // spec from it: the replica runs the primary's version, with its root.
 func (s *Server) prepareReplica(ctx context.Context, project string, b instanceBody, spec *Spec) error {
 	if b.FailoverReplica != nil {
-		return unimplemented("failover replicas", legacyFailoverWhy)
+		return legacyFailoverErr()
 	}
 	if b.ReplicaConfiguration != nil {
 		var rc struct {
@@ -195,14 +195,14 @@ func (s *Server) prepareReplica(ctx context.Context, project string, b instanceB
 		}
 		_ = json.Unmarshal(*b.ReplicaConfiguration, &rc)
 		if rc.FailoverTarget {
-			return unimplemented("failover replicas", legacyFailoverWhy)
+			return legacyFailoverErr()
 		}
 		if rc.Cascadable {
 			return unimplemented("cascadableReplica", "it is SQL Server's setting; a MySQL or PostgreSQL replica of a replica "+
 				"is created with masterInstanceName naming the replica")
 		}
 		if len(rc.Mysql) > 0 {
-			return unimplemented("replicas of an external server", "a replica's primary is an instance of this API")
+			return unimplemented("replicas of an external server (mysqlReplicaConfiguration)", externalPrimaryWhy)
 		}
 	}
 	if b.InstanceType != "" && b.InstanceType != "READ_REPLICA_INSTANCE" {

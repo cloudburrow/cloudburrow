@@ -93,9 +93,9 @@ func TestSQLAdminInstancesDescribeTheRunningServers(t *testing.T) {
 // pointInTimeRestore of a datasource no association made (501 without the
 // Backup and DR Service, 404 with it, #1433; a clone to a point in time of
 // the server `up` runs, which keeps no log, is a 400),
-// legacy failover replicas, IAM database authentication (an access token in
-// generateEphemeralCert) answer 501 (tiers and flags are served since
-// #1380, TestSQLAdminTiersAndFlags);
+// IAM database authentication (an access token in generateEphemeralCert)
+// answers 501, and a legacy failover replica 400, as Cloud SQL's does
+// (#1462; tiers and flags are served since #1380, TestSQLAdminTiersAndFlags);
 // the instances `up` runs refuse a patch, restart or delete with the
 // reason (instance writes act on created instances, TestCloudSQLInstanceWrites).
 // covers: sql.instances.pointInTimeRestore
@@ -131,7 +131,8 @@ func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	_, err = svc.Instances.Insert(p, &sqladmin.DatabaseInstance{Name: "replica", DatabaseVersion: "POSTGRES_17",
 		MasterInstanceName: inst, ReplicaConfiguration: &sqladmin.ReplicaConfiguration{FailoverTarget: true},
 		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
-	wantHTTP(t, "instances.insert of a failover replica", err, 501)
+	// The legacy configuration, which Cloud SQL refuses since 2025 (#1462).
+	wantHTTP(t, "instances.insert of a failover replica", err, http.StatusBadRequest)
 	_, err = svc.Connect.GenerateEphemeralCert(p, inst, &sqladmin.GenerateEphemeralCertRequest{PublicKey: "x", AccessToken: "iam"}).Do()
 	wantHTTP(t, "connect.generateEphemeralCert with an access token (IAM database authentication)", err, 501)
 }

@@ -239,6 +239,78 @@
           "BQML is refused ('Statement not supported: CreateModelStatement'). DML and scripting worked in a probe but are not SDK-verified."
         ]
       },
+      "cloudSQLPostgres96": {
+        "$comment": "PostgreSQL 9.6.24, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1462): the final release of a major version past its upstream end of life, which Cloud SQL still offers in extended support; the official image's last build. Pulled by a node only when one is created. NOT a Google-published component.",
+        "image": "postgres:9.6-alpine",
+        "version": "9.6.24",
+        "digest": "sha256:8342bcb43446694428ec6594e72e4299692854f0fc3aca090b0ab46f4c7f32a1",
+        "source": "https://hub.docker.com/_/postgres",
+        "license": "PostgreSQL License (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A real SQL server for a created Cloud SQL instance. NOT the Cloud SQL Admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Upstream builds no more images of this major version."
+      },
+      "cloudSQLPostgres10": {
+        "$comment": "PostgreSQL 10.23, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1462): the final release of a major version past its upstream end of life, which Cloud SQL still offers in extended support; the official image's last build. Pulled by a node only when one is created. NOT a Google-published component.",
+        "image": "postgres:10-alpine",
+        "version": "10.23",
+        "digest": "sha256:63cfb6eac6b362c7c994f22c3804c61b31898cf0cb52f8e7e86bd99a244f4366",
+        "source": "https://hub.docker.com/_/postgres",
+        "license": "PostgreSQL License (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A real SQL server for a created Cloud SQL instance. NOT the Cloud SQL Admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Upstream builds no more images of this major version."
+      },
+      "cloudSQLPostgres11": {
+        "$comment": "PostgreSQL 11.22, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1462): the final release of a major version past its upstream end of life, which Cloud SQL still offers in extended support; the official image's last build. Pulled by a node only when one is created. NOT a Google-published component.",
+        "image": "postgres:11-alpine",
+        "version": "11.22",
+        "digest": "sha256:ea50b9fd617b66c9135816a4536cf6e0697d4eea7014a7194479c95f6edd5ef9",
+        "source": "https://hub.docker.com/_/postgres",
+        "license": "PostgreSQL License (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A real SQL server for a created Cloud SQL instance. NOT the Cloud SQL Admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Upstream builds no more images of this major version."
+      },
+      "cloudSQLPostgres12": {
+        "$comment": "PostgreSQL 12.22, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1462): the final release of a major version past its upstream end of life, which Cloud SQL still offers in extended support; the official image's last build. Pulled by a node only when one is created. NOT a Google-published component.",
+        "image": "postgres:12-alpine",
+        "version": "12.22",
+        "digest": "sha256:7c8f4870583184ebadf7f17a6513620aac5f365a7938dc6a6911c1d5df2f481a",
+        "source": "https://hub.docker.com/_/postgres",
+        "license": "PostgreSQL License (the server); the image also carries Alpine and its packages",
+        "redistribution": "not-redistributed",
+        "redistributionPlan": "Pulled from Docker Hub by digest at run time.",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "provides": "A real SQL server for a created Cloud SQL instance. NOT the Cloud SQL Admin API.",
+        "verification": "compat-tested",
+        "updateFeed": "docker-hub-tags",
+        "skipDiscovery": "Docker Hub tag list; depcheck only discovers GitHub-sourced components. Upstream builds no more images of this major version."
+      },
       "cloudSQLPostgres13": {
         "$comment": "PostgreSQL 13.23, the server of a Cloud SQL Admin API instance created with that databaseVersion (#1381); pulled by a node only when one is created. NOT a Google-published component.",
         "image": "postgres:13-alpine",

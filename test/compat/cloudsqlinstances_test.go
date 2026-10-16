@@ -213,13 +213,14 @@ func TestCloudSQLInstanceWrites(t *testing.T) {
 	}
 	_, err := svc.Instances.Delete(project, up).Do()
 	wantHTTP(t, "delete of the instance up runs", err, http.StatusBadRequest)
-	_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "old-" + suffix, DatabaseVersion: "POSTGRES_9_6",
+	_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "old-" + suffix, DatabaseVersion: "MYSQL_5_7",
 		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
-	wantHTTP(t, "a version no image provides", err, http.StatusNotImplemented)
+	wantHTTP(t, "a version no multi-architecture image provides", err, http.StatusNotImplemented)
 	_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "rep-" + suffix, DatabaseVersion: "POSTGRES_17",
 		MasterInstanceName: up, ReplicaConfiguration: &sqladmin.ReplicaConfiguration{FailoverTarget: true},
 		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}}).Do()
-	wantHTTP(t, "a failover replica", err, http.StatusNotImplemented)
+	// Cloud SQL creates no legacy failover replica since 2025 (#1462).
+	wantHTTP(t, "a failover replica", err, http.StatusBadRequest)
 }
 
 // TestGcloudSQLInstances (#1330): `gcloud sql instances create`, describe,
