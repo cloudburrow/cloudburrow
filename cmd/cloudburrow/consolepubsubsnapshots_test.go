@@ -253,9 +253,9 @@ func TestASubscriptionPageCreatesSnapshotsAndSeeks(t *testing.T) {
 	}
 
 	acts := actionsByID(detail(sub))
-	if len(acts) != 3 || acts[actCreateSnapshot].Label != "Create snapshot" || acts[actSeekTime].Label != "Seek to time" ||
-		acts[actAdvanceClock].Label != "Advance clock (CloudBurrow extension)" {
-		t.Fatalf("a subscription whose topic has no snapshot offers %+v; want Create snapshot, Seek to time and Advance clock", acts)
+	if len(acts) != 4 || acts[actCreateSnapshot].Label != "Create snapshot" || acts[actSeekTime].Label != "Seek to time" ||
+		acts[actAdvanceClock].Label != "Advance clock (CloudBurrow extension)" || !acts[actDetachSubscription].Destructive {
+		t.Fatalf("a subscription whose topic has no snapshot offers %+v; want Create snapshot, Detach from topic, Seek to time and Advance clock", acts)
 	}
 	create := acts[actCreateSnapshot]
 	if len(create.Fields) != 1 || create.Fields[0].Name != "name" || !strings.Contains(create.Fields[0].Help, pubsubSnapshotLabelsDropped) {

@@ -45,6 +45,9 @@ import (
 
 const (
 	actCreateSnapshot = "create-snapshot"
+	// actDetachSubscription detaches the subscription from its topic
+	// (#1406), which CloudBurrow's Pub/Sub front carries out.
+	actDetachSubscription = "detach-subscription"
 	actSeekSnapshot   = "seek-snapshot"
 	actSeekTime       = "seek-time"
 )
@@ -249,8 +252,15 @@ const (
 		"redelivered."
 )
 
+// detachConfirm is what Detach from topic puts at risk, in Google's words
+// (Publisher.DetachSubscription).
+const detachConfirm = "Detaching drops every message the subscription retains, and it receives nothing published " +
+	"from now on: pulls from it fail FAILED_PRECONDITION and pushes stop. The subscription is kept, detached, " +
+	"until you delete it. This cannot be undone."
+
 // DetailActions implements console.PathActor for a subscription's page:
-// Create snapshot, Seek to one of its topic's snapshots or to a time, and
+// Create snapshot, Detach from topic (#1406), Seek to one of its topic's
+// snapshots or to a time, and
 // Advance clock (CloudBurrow extension, #1040; consolepubsubclock.go).
 //
 // Only Advance clock is offered on a subscription whose topic was deleted or
@@ -297,6 +307,10 @@ func (p pubsubSubscriptionsProvider) DetailActions(ctx context.Context, project 
 		})
 	}
 
+	actions = append(actions, console.Action{
+		ID: actDetachSubscription, Label: "Detach from topic", Destructive: true, Confirm: detachConfirm,
+	})
+
 	retained := "This subscription does not retain acknowledged messages, so seeking back replays only the unacknowledged ones."
 	if s.GetRetainAckedMessages() {
 		retained = "This subscription retains acknowledged messages, so seeking back replays them too."
@@ -330,6 +344,10 @@ func (p pubsubSubscriptionsProvider) ActAt(ctx context.Context, project string, 
 	defer func() { _ = c.Close() }()
 
 	switch action {
+	case actDetachSubscription:
+		_, err := c.TopicAdminClient.DetachSubscription(ctx, &pubsubpb.DetachSubscriptionRequest{Subscription: sub})
+		return err
+
 	case actCreateSnapshot:
 		id := strings.TrimSpace(values["name"])
 		if id == "" {

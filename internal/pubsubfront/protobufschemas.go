@@ -38,9 +38,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
-	"regexp"
 	"strings"
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
