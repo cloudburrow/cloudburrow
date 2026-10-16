@@ -19,6 +19,9 @@
 // Cloud Run to route to it, runs it so (#902). `envprobe firestore <query>`
 // (firestore.go, #1288) writes and reads a Firestore document from a pod.
 //
+// /identity and `envprobe identity` (identity.go, #1388) report the
+// service account the metadata server names to this workload.
+//
 // /log?marker=M and `envprobe log M` (#1298) write one plain line to stdout
 // and one JSON line, with a severity, to stderr, each naming M, for Cloud
 // Logging to show as Cloud Run writes them.
@@ -64,6 +67,15 @@ func main() {
 		fmt.Printf("FIRESTORE PROBE: FAIL %v\n", err)
 		os.Exit(1)
 	}
+	if len(os.Args) == 2 && os.Args[1] == "identity" {
+		out, err := identityProbe(context.Background())
+		if err != nil {
+			fmt.Printf("IDENTITY PROBE: FAIL %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("IDENTITY PROBE: OK %s\n", out)
+		return
+	}
 	if len(os.Args) == 3 && os.Args[1] == "log" {
 		writeLogLines(os.Args[2])
 		return
@@ -98,6 +110,15 @@ func main() {
 			return
 		}
 		fmt.Fprintf(w, "BIGQUERY PROBE: OK %s\n", out)
+	})
+	http.HandleFunc("/identity", func(w http.ResponseWriter, r *http.Request) {
+		out, err := identityProbe(r.Context())
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprintf(w, "IDENTITY PROBE: FAIL %v\n", err)
+			return
+		}
+		fmt.Fprintf(w, "IDENTITY PROBE: OK %s\n", out)
 	})
 	http.HandleFunc("/log", func(w http.ResponseWriter, r *http.Request) {
 		writeLogLines(r.URL.Query().Get("marker"))

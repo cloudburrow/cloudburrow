@@ -653,7 +653,7 @@ func (p runProvider) Detail(ctx context.Context, project string, path []string) 
 		// longer serving anything.
 		{ID: "revisions", Label: "Revision history", Listing: p.revisions(ctx, name, svc)},
 		{ID: "traffic", Label: "Traffic", Listing: trafficListing(svc)},
-		runConfiguration(svc),
+		runConfiguration(svc, p.defaultProject),
 	}
 	return console.Detail{
 		Summary: summary, Sections: sections,
@@ -745,6 +745,8 @@ func (p runProvider) revisionDetail(ctx context.Context, service, revision strin
 		{Label: "Requests per instance", Value: orDefault(intOf(spec["containerConcurrency"]), "unlimited")},
 		{Label: "Request timeout", Value: orDefault(intOf(spec["timeoutSeconds"]), "Knative's default") +
 			timeoutUnit(intOf(spec["timeoutSeconds"]))},
+		// The account this revision's pods are told they run as (#1388).
+		{Label: "Service account", Value: orDash(runRevisionAccount(stringMap(m["annotations"]), p.defaultProject))},
 	}
 	for _, key := range []string{"autoscaling.knative.dev/min-scale", "autoscaling.knative.dev/max-scale"} {
 		label := "Minimum instances"
@@ -815,7 +817,7 @@ const (
 //
 // The note names the one way to change any of it: a new revision, deployed
 // through the service page's edit form.
-func runConfiguration(svc *ksvcStatus) console.Section {
+func runConfiguration(svc *ksvcStatus, project string) console.Section {
 	tmpl := svc.Spec.Template
 
 	service := stored(
@@ -823,6 +825,7 @@ func runConfiguration(svc *ksvcStatus) console.Section {
 		console.Property{Label: "URL", Value: unsetAs(svc.Status.URL, runNoURL)},
 		console.Property{Label: "Created", Value: svc.Metadata.CreationTimestamp},
 		console.Property{Label: "Latest revision", Value: svc.Status.LatestCreatedRevisionName},
+		console.Property{Label: "Service account", Value: runRevisionAccount(tmpl.Metadata.Annotations, project)},
 	)
 
 	// Scaling and concurrency, which is where a service's behaviour under load

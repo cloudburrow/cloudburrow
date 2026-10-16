@@ -204,12 +204,20 @@ func (c *Credentials) MintAccessToken() string {
 // certificates, because it was not issued by Google — see
 // docs/compatibility.md.
 func (c *Credentials) MintIDToken(audience string, now time.Time, ttl time.Duration) (string, error) {
+	return c.MintIDTokenFor(c.Email, audience, now, ttl)
+}
+
+// MintIDTokenFor is MintIDToken naming email rather than the instance's own
+// account: the identity token a Cloud Run workload gets names the service
+// account it runs as (#1388). It is signed with the same key, so it
+// verifies against /certs as the instance's own does.
+func (c *Credentials) MintIDTokenFor(email, audience string, now time.Time, ttl time.Duration) (string, error) {
 	header := map[string]any{"alg": "RS256", "typ": "JWT", "kid": c.KeyID}
 	claims := map[string]any{
 		"iss":            "https://accounts.google.com",
 		"aud":            audience,
 		"sub":            "000000000000000000000",
-		"email":          c.Email,
+		"email":          email,
 		"email_verified": true,
 		"iat":            now.Unix(),
 		"exp":            now.Add(ttl).Unix(),

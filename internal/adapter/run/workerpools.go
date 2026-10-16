@@ -170,7 +170,8 @@ func (s *Server) renderWorkerPool(w workload, spec *runpb.WorkerPool, revGen int
 	revID := spec.GetLatestCreatedRevision()[strings.LastIndex(spec.GetLatestCreatedRevision(), "/")+1:]
 	t := spec.GetTemplate()
 	dep, err := s.deployment(w, podSpec{containers: t.GetContainers(), volumes: t.GetVolumes(), revision: revID,
-		revisionName: spec.GetLatestCreatedRevision(), revisionSpec: t, generation: revGen},
+		revisionName: spec.GetLatestCreatedRevision(), revisionSpec: t, generation: revGen,
+		serviceAccount: t.GetServiceAccount()},
 		spec.GetScaling().GetManualInstanceCount())
 	return cm, dep, err
 }
@@ -250,7 +251,7 @@ func (p *WorkerPoolsServer) CreateWorkerPool(ctx context.Context, req *runpb.Cre
 	if req.GetValidateOnly() {
 		return s.doneOperation(req.GetParent(), wp.Name, spec)
 	}
-	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "create"); err != nil {
+	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "create", spec.GetTemplate().GetServiceAccount()); err != nil {
 		return nil, err
 	}
 	return s.workloadOperation(ctx, req.GetParent(), w, s.workerPoolReady(w))
@@ -384,7 +385,7 @@ func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.Upd
 	if req.GetValidateOnly() {
 		return s.doneOperation(parent, name, spec)
 	}
-	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "replace"); err != nil {
+	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "replace", spec.GetTemplate().GetServiceAccount()); err != nil {
 		return nil, err
 	}
 	return s.workloadOperation(ctx, parent, w, s.workerPoolReady(w))

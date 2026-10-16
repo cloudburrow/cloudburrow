@@ -167,7 +167,8 @@ func TestCloudRunRevisionUsesInjectedMetadataADCAndServedEndpoints(t *testing.T)
 	if field("objects") != "from-the-host.txt" {
 		t.Errorf("the ADC-authenticated listing saw %q, want the host's object", field("objects"))
 	}
-	for k, want := range map[string]string{"metadata": "cloudburrow-host.", "kms": "cloudburrow-host.",
+	// The metadata server under the default compute account's name (#1388).
+	for k, want := range map[string]string{"metadata": "cloudburrow-sa-", "kms": "cloudburrow-host.",
 		"scheduler": "cloudburrow-host.", "logging": "cloudburrow-host."} {
 		if !strings.HasPrefix(field(k), want) {
 			t.Errorf("the revision used %s=%q; want the injected %s… address", k, field(k), want)

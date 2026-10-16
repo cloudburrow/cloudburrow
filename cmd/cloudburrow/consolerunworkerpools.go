@@ -450,6 +450,7 @@ func workerPoolDetail(wp *runpb.WorkerPool, revisions console.Listing) console.D
 		console.Property{Label: "Region", Value: regionOf(wp.GetName())},
 		console.Property{Label: "Instances", Value: fmt.Sprint(wp.GetScaling().GetManualInstanceCount())},
 		console.Property{Label: "Latest revision", Value: lastSegment(wp.GetLatestCreatedRevision())},
+		console.Property{Label: "Service account", Value: runAccountText(wp.GetTemplate().GetServiceAccount(), projectOf(wp.GetName()))},
 		console.Property{Label: "Message", Value: wp.GetTerminalCondition().GetMessage()},
 		console.Property{Label: "Generation", Value: fmt.Sprint(wp.GetGeneration())},
 		console.Property{Label: "Created", Value: stampText(wp.GetCreateTime())},

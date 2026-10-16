@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
@@ -47,6 +48,22 @@ type runService struct {
 	env runadapter.Environment
 	// cloudSQL serves Cloud SQL volumes (#1346); nil refuses them.
 	cloudSQL runadapter.CloudSQL
+	// adapter is the started adapter, which the metadata server asks for a
+	// workload's account (#1388); nil before Start.
+	adapter atomic.Pointer[runadapter.Server]
+}
+
+// metadataAccount is the metadata server's AccountResolver: the account a
+// workload's metadata host stands for, once the adapter has started.
+func (r *runService) metadataAccount(label string) (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	a := r.adapter.Load()
+	if a == nil {
+		return "", false
+	}
+	return a.MetadataAccount(label)
 }
 
 // useCloudSQL enables Cloud SQL volumes.
@@ -117,6 +134,7 @@ func (r *runService) Start(ctx context.Context) error {
 	if r.cloudSQL != nil {
 		adapter = adapter.WithCloudSQL(r.cloudSQL)
 	}
+	r.adapter.Store(adapter)
 
 	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))
 	r.server = grpctransport.New(addr)

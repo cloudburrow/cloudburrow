@@ -1,6 +1,9 @@
 package run
 
 import (
+	"context"
+	"net"
+
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 )
 
@@ -45,11 +48,35 @@ func (s *Server) WithEnvironment(env Environment) *Server {
 	return s
 }
 
-// injectedFor is the environment a workload in project is given, in name
-// order, so the same service renders identically. GOOGLE_CLOUD_PROJECT is
-// the workload's own project, which is what an application reading it
-// expects its resources to live under.
-func (s *Server) injectedFor(project string) []injectedEnv {
+// injectedFor is the environment a workload in project, running as
+// serviceAccount, is given, in name order, so the same service renders
+// identically. GOOGLE_CLOUD_PROJECT is the workload's own project, which is
+// what an application reading it expects its resources to live under, and
+// GCE_METADATA_HOST names its account's alias of the metadata server
+// (#1388, metadataaccount.go).
+func (s *Server) injectedFor(project, serviceAccount string) []injectedEnv {
+	return withWorkloadMetadata(s.injectedRaw(project), s.kn.namespace(), workloadAccount(project, serviceAccount))
+}
+
+// ensureWorkloadMetadata applies the alias of the metadata server that
+// injectedFor names for the account, before a workload using it is
+// applied. Without an injected metadata server there is nothing to alias.
+func (s *Server) ensureWorkloadMetadata(ctx context.Context, project, serviceAccount string) error {
+	for _, e := range s.injectedRaw(project) {
+		if e.name != "GCE_METADATA_HOST" {
+			continue
+		}
+		host, _, err := net.SplitHostPort(e.value)
+		if err != nil {
+			return nil
+		}
+		return s.ensureMetadataAlias(ctx, host, workloadAccount(project, serviceAccount))
+	}
+	return nil
+}
+
+// injectedRaw is the environment before the metadata host is the account's.
+func (s *Server) injectedRaw(project string) []injectedEnv {
 	vars := map[string]string{}
 	if s.env != nil {
 		for k, v := range s.env() {

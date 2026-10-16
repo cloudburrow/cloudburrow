@@ -40,6 +40,9 @@ type Server struct {
 	env Environment
 	// cloudSQL serves Cloud SQL volumes (#1346); nil refuses them.
 	cloudSQL CloudSQL
+	// aliases are the metadata server's names for each workload account
+	// (#1388).
+	aliases metadataAliases
 }
 
 // WithSecrets attaches a secret resolver, enabling secretKeyRef environment
@@ -84,7 +87,7 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 		return nil, apierror.AlreadyExists("service %s already exists", name)
 	}
 
-	manifest, err := renderService(svc, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(name)), s.cloudSQLConfig())
+	manifest, err := renderService(svc, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(name), svc.GetTemplate().GetServiceAccount()), s.cloudSQLConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +101,9 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 		op := s.ops.Create(req.GetParent(), name)
 		_ = s.ops.Succeed(op.Name, svc)
 		return s.toProtoOperation(op.Name)
+	}
+	if err := s.ensureWorkloadMetadata(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()); err != nil {
+		return nil, err
 	}
 	if err := s.kn.Apply(ctx, manifest); err != nil {
 		return nil, err
@@ -147,7 +153,7 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 			return nil, err
 		}
 	}
-	manifest, err := renderService(svc, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(svc.GetName())), s.cloudSQLConfig())
+	manifest, err := renderService(svc, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()), s.cloudSQLConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +164,9 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 		op := s.ops.Create(parent, svc.GetName())
 		_ = s.ops.Succeed(op.Name, FromKnative(existing, parent))
 		return s.toProtoOperation(op.Name)
+	}
+	if err := s.ensureWorkloadMetadata(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()); err != nil {
+		return nil, err
 	}
 	if err := s.kn.Apply(ctx, manifest); err != nil {
 		return nil, err

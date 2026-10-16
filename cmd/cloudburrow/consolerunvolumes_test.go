@@ -1,9 +1,13 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
+
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
+	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
 // The volume fields build a secret volume per directory and an in-memory
@@ -57,5 +61,33 @@ func TestRunVolumeFieldsRoundTrip(t *testing.T) {
 	if err != nil || job.GetTemplate().GetServiceAccount() != "j@p" ||
 		job.GetTemplate().GetVolumes()[0].GetEmptyDir().GetMedium() != runpb.EmptyDirVolumeSource_MEMORY {
 		t.Errorf("job template = %v, %v", job, err)
+	}
+}
+
+// The console shows the account each workload is told it runs as (#1388):
+// the template's, or the project's Compute Engine default account.
+func TestConsoleShowsTheWorkloadsServiceAccount(t *testing.T) {
+	if got := runAccountText("a@p.iam.gserviceaccount.com", "p"); got != "a@p.iam.gserviceaccount.com" {
+		t.Errorf("set = %q", got)
+	}
+	if got := runAccountText("", "my-project"); !strings.HasPrefix(got, runadapter.DefaultComputeAccount("my-project")) {
+		t.Errorf("unset = %q, want the default compute account", got)
+	}
+	wp := &runpb.WorkerPool{Name: "projects/my-project/locations/us-central1/workerPools/wp",
+		Template: &runpb.WorkerPoolRevisionTemplate{ServiceAccount: "pool@my-project.iam.gserviceaccount.com"}}
+	found := false
+	for _, p := range workerPoolDetail(wp, console.Listing{}).Summary {
+		found = found || (p.Label == "Service account" && p.Value == "pool@my-project.iam.gserviceaccount.com")
+	}
+	if !found {
+		t.Error("the worker pool's summary does not name its service account")
+	}
+	job := &runpb.Job{Name: "projects/my-project/locations/us-central1/jobs/j"}
+	found = false
+	for _, p := range runJobDetail(job, console.Listing{}).Summary {
+		found = found || (p.Label == "Service account" && strings.HasPrefix(p.Value, runadapter.DefaultComputeAccount("my-project")))
+	}
+	if !found {
+		t.Error("the job's summary does not name the default compute account")
 	}
 }

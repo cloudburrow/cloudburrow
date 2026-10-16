@@ -108,6 +108,15 @@ rather than for an ADC file.
 
 Point clients at it with `GCE_METADATA_HOST`.
 
+**A Cloud Run workload is told its own account** (#1388), as on Cloud Run: its template's
+`serviceAccount`, or the project's Compute Engine default account
+`{number}-compute@developer.gserviceaccount.com` when none is set. Its injected
+`GCE_METADATA_HOST` names `cloudburrow-sa-<hash>.<namespace>.svc.cluster.local`, an
+ExternalName alias of `cloudburrow-host` that the Cloud Run adapter creates per account, and the
+server answers `email`, the listing and the identity token's `email` claim as the account that
+name stands for. Every other caller, including the host and `cloudburrow-host` itself, is
+answered as the instance's `cloudburrow-local@…`. Nothing checks the account (ADR-0004).
+
 **`Metadata-Flavor: Google` is required**, and set on every response including refusals.
 Google's server requires it so that a web page cannot read tokens from `169.254.169.254` with
 a plain cross-origin request. CloudBurrow enforces it even though its tokens grant nothing:

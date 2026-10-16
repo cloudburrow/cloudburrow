@@ -181,6 +181,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// cluster's, so it also runs in this process.
 	runSvc := newRunService(cfg)
 	if runSvc != nil { // nil without Cloud Run
+		// Each Cloud Run workload is told its own service account (#1388).
+		metaSrv.WithAccounts(runSvc.metadataAccount)
 		runSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
 	}
 	runSvc.register(coord)
