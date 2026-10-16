@@ -240,7 +240,7 @@ func advanceSQLClock(t *testing.T, h *Harness, d time.Duration) {
 // earliestRecoveryTime moves past the first rows, a clone to then is
 // refused, and a clone to a time inside the window recovers from the
 // backup's base.
-// covers: sql.instances.insert, sql.instances.get, sql.backupRuns.insert, sql.backupRuns.list, sql.projects.instances.getLatestRecoveryTime, sql.instances.clone, sql.instances.failover (unimplemented)
+// covers: sql.instances.insert, sql.instances.get, sql.backupRuns.insert, sql.backupRuns.list, sql.projects.instances.getLatestRecoveryTime, sql.instances.clone
 func TestCloudSQLPointInTimeRetention(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" && os.Getenv(EnvMySQL) == "" {
@@ -360,7 +360,8 @@ func TestCloudSQLPointInTimeRetention(t *testing.T) {
 
 			// High availability stays 501, saying why.
 			_, err = svc.Instances.Failover(project, c.instance, &sqladmin.InstancesFailoverRequest{}).Do()
-			wantHTTP(t, "instances.failover", err, http.StatusNotImplemented)
+			// A ZONAL instance has no standby to fail over to (#1408).
+			wantHTTP(t, "instances.failover of a ZONAL instance", err, http.StatusBadRequest)
 		})
 	}
 }

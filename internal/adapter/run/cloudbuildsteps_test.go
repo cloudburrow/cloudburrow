@@ -138,7 +138,7 @@ func TestCreateBuildArbitrarySteps(t *testing.T) {
 		}
 	}
 	if a.Entrypoint != "sh" || a.Dir != "sub" || len(a.Volumes) != 1 || a.Volumes[0] != (StepVolume{"cache", "/cache"}) ||
-		a.Env[0] != "V=1" || !strings.Contains(strings.Join(a.Env, " "), "BUILD_ID="+res.GetId()) {
+		a.Env[len(a.Env)-1] != "V=1" || !strings.Contains(strings.Join(a.Env, " "), "BUILD_ID="+res.GetId()) {
 		t.Errorf("step 0 spec = %+v", a)
 	}
 
@@ -158,7 +158,7 @@ func TestCreateBuildArbitrarySteps(t *testing.T) {
 	}
 
 	for name, st := range map[string]*cbpb.BuildStep{
-		"secretEnv":     {Name: "alpine", SecretEnv: []string{"X"}},
+		"secretEnv":     {Name: "alpine", SecretEnv: []string{"X"}}, // not defined
 		"reserved path": {Name: "alpine", Volumes: []*cbpb.Volume{{Name: "v", Path: "/workspace"}}},
 		"relative path": {Name: "alpine", Volumes: []*cbpb.Volume{{Name: "v", Path: "rel"}}},
 		"bad env":       {Name: "alpine", Env: []string{"NOEQUALS"}},

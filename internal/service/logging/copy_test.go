@@ -209,3 +209,84 @@ func httpCode(err error) int {
 	}
 	return 0
 }
+
+// CopyLogEntries from a billing account's buckets (#1411) through the
+// official REST client: its _Default copies the account's own entries that
+// the filter matches, a bucket of its own that no sink can route to (sinks
+// route to projects' buckets) copies none, and the operation is named under
+// the account, read back through its Operations binding.
+func TestCopyLogEntriesFromBillingAccount(t *testing.T) {
+	ctx := context.Background()
+	st := NewStore(0)
+	srv := NewServer(st)
+	a := NewAdmin(store.NewMemory())
+	srv.UseAdmin(a)
+	objs := &memObjects{objects: map[string]string{}}
+	a.UseStorage(objs)
+	a.copies.delay = 10 * time.Millisecond
+	h := httptest.NewServer(NewRESTHandler(func(g grpc.ServiceRegistrar) { srv.Register(g); a.Register(g) }))
+	defer h.Close()
+	c, err := vlogging.NewConfigRESTClient(ctx, option.WithEndpoint(h.URL), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	const acct = "billingAccounts/AAAAAA-BBBBBB-CCCCCC"
+	if _, err := c.CreateBucket(ctx, &loggingpb.CreateBucketRequest{Parent: acct + "/locations/global", BucketId: "agg",
+		Bucket: &loggingpb.LogBucket{}}); err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
+	for _, sev := range []ltype.LogSeverity{ltype.LogSeverity_ERROR, ltype.LogSeverity_INFO} {
+		if _, err := srv.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{Resource: &monitoredres.MonitoredResource{Type: "global"},
+			Entries: []*loggingpb.LogEntry{{LogName: acct + "/logs/spend", Severity: sev, Payload: &loggingpb.LogEntry_TextPayload{TextPayload: sev.String()}}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for bucket, want := range map[string]int64{"_Default": 1, "agg": 0} {
+		op, err := c.CopyLogEntries(ctx, &loggingpb.CopyLogEntriesRequest{Name: acct + "/locations/global/buckets/" + bucket,
+			Destination: "storage.googleapis.com/dest-" + bucket, Filter: "severity>=ERROR"})
+		if err != nil {
+			t.Fatalf("CopyLogEntries %s: %v", bucket, err)
+		}
+		if !strings.HasPrefix(op.Name(), acct+"/locations/global/operations/") {
+			t.Errorf("operation name %q", op.Name())
+		}
+		resp, err := op.Wait(ctx)
+		if err != nil {
+			t.Fatalf("Wait %s: %v", bucket, err)
+		}
+		if resp.GetLogEntriesCopiedCount() != want {
+			t.Errorf("%s: copied %d, want %d", bucket, resp.GetLogEntriesCopiedCount(), want)
+		}
+		md, _ := op.Metadata()
+		if md.GetWriterIdentity() != "serviceAccount:service-bac-aaaaaa-bbbbbb-cccccc@gcp-sa-logging.iam.gserviceaccount.com" {
+			t.Errorf("writer identity %q", md.GetWriterIdentity())
+		}
+	}
+	objs.mu.Lock()
+	n := 0
+	for k := range objs.objects {
+		if strings.HasPrefix(k, "dest-_Default/spend/") && strings.HasSuffix(k, "_S0.json") {
+			n++
+		}
+	}
+	objs.mu.Unlock()
+	if n != 1 {
+		t.Errorf("the _Default copy wrote %d spend objects, want 1: %v", n, objs.objects)
+	}
+	it := c.ListOperations(ctx, &longrunningpb.ListOperationsRequest{Name: acct + "/locations/global"})
+	listed := 0
+	for {
+		_, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ListOperations: %v", err)
+		}
+		listed++
+	}
+	if listed != 2 {
+		t.Errorf("ListOperations listed %d, want 2", listed)
+	}
+}

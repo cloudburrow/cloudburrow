@@ -1099,6 +1099,10 @@
         "tests": [
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
+          "test/compat/cloudbuilddefaultlogs_test.go:131 TestGcloudBuildsSubmitDefaultLogsBucket",
+          "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
+          "test/compat/cloudbuildsecrets_test.go:231 TestGcloudBuildsSecretsAndScript",
+          "test/compat/cloudbuildsecrets_test.go:87 TestCloudBuildSecretsScriptAndAllowFailure",
           "test/compat/cloudbuildsteps_test.go:220 TestGcloudBuildsStepsAndList",
           "test/compat/cloudbuildsteps_test.go:283 TestCloudBuildHostStepsOff",
           "test/compat/cloudbuildsteps_test.go:66 TestCloudBuildArbitraryStepsFilterAndRetry"
@@ -1130,6 +1134,9 @@
         "tests": [
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
+          "test/compat/cloudbuilddefaultlogs_test.go:131 TestGcloudBuildsSubmitDefaultLogsBucket",
+          "test/compat/cloudbuildsecrets_test.go:231 TestGcloudBuildsSecretsAndScript",
+          "test/compat/cloudbuildsecrets_test.go:87 TestCloudBuildSecretsScriptAndAllowFailure",
           "test/compat/cloudbuildsteps_test.go:66 TestCloudBuildArbitraryStepsFilterAndRetry",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild"
         ]
@@ -1211,14 +1218,18 @@
         "method": "google.cloud.functions.v2.FunctionService/CreateFunction",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
         ]
       },
       {
         "method": "google.cloud.functions.v2.FunctionService/DeleteFunction",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
         ]
       },
       {
@@ -1239,7 +1250,9 @@
         "method": "google.cloud.functions.v2.FunctionService/GetFunction",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
         ]
       },
       {
@@ -1260,7 +1273,9 @@
         "method": "google.cloud.functions.v2.FunctionService/UpdateFunction",
         "status": "Verified",
         "tests": [
-          "test/compat/functionsapi_test.go:76 TestFunctionsAPI"
+          "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
+          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
         ]
       }
     ]
@@ -3296,7 +3311,8 @@
         "method": "google.logging.v2.ConfigServiceV2/CopyLogEntries",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingcopy_test.go:90 TestLoggingCopyLogEntries"
+          "test/compat/consoleloggingviews_test.go:177 TestConsoleLoggingCopyFromParents",
+          "test/compat/loggingcopy_test.go:92 TestLoggingCopyLogEntries"
         ]
       },
       {
@@ -3352,6 +3368,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
           "test/compat/terraform_logging_buckets_test.go:131 TestTerraformLoggingLogView"
         ]
       },
@@ -3504,6 +3521,7 @@
         "method": "google.logging.v2.ConfigServiceV2/ListViews",
         "status": "Verified",
         "tests": [
+          "test/compat/consoleloggingviews_test.go:58 TestConsoleLogsExplorerThroughView",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
@@ -3590,10 +3608,12 @@
         "method": "google.logging.v2.LoggingServiceV2/ListLogEntries",
         "status": "Verified",
         "tests": [
+          "test/compat/consoleloggingviews_test.go:58 TestConsoleLogsExplorerThroughView",
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
           "test/compat/runlogs_test.go:189 TestGcloudRunLogsRead",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
@@ -3618,7 +3638,9 @@
         "method": "google.logging.v2.LoggingServiceV2/TailLogEntries",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1215_test.go:40 TestLoggingTailLogEntries"
+          "test/compat/consoleloggingviews_test.go:58 TestConsoleLogsExplorerThroughView",
+          "test/compat/logging1215_test.go:40 TestLoggingTailLogEntries",
+          "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention"
         ]
       },
       {
@@ -3916,8 +3938,7 @@
     "Key": "pubsub",
     "Title": "Pub/Sub",
     "counts": {
-      "Refused": 2,
-      "Verified": 45
+      "Verified": 47
     },
     "rows": [
       {
@@ -3929,6 +3950,8 @@
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
           "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
+          "test/compat/pubsubprotobuf_test.go:139 TestPubSubProtobufSchemaTopic",
+          "test/compat/pubsubprotobuf_test.go:254 TestTerraformPubSubProtobufSchema",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ]
@@ -3940,17 +3963,19 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:219 TestPubSubDeleteTopic",
           "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubprotobuf_test.go:254 TestTerraformPubSubProtobufSchema",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ]
       },
       {
         "method": "google.pubsub.v1.Publisher/DetachSubscription",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:188 TestPubSubDetachSubscriptionIsRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/pubsubadmin_test.go:234 TestPubSubDetachSubscription",
+          "test/compat/pubsubprotobuf_test.go:205 TestGcloudPubSubDetachAndProtobufSchemas",
+          "test/compat/pubsubprotobuf_test.go:305 TestConsolePubSubDetachAndProtobufSchema"
+        ]
       },
       {
         "method": "google.pubsub.v1.Publisher/GetTopic",
@@ -3959,6 +3984,8 @@
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:89 TestPubSubRESTOverH2CUpgrade",
           "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubprotobuf_test.go:139 TestPubSubProtobufSchemaTopic",
+          "test/compat/pubsubprotobuf_test.go:254 TestTerraformPubSubProtobufSchema",
           "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
@@ -3967,15 +3994,15 @@
         "method": "google.pubsub.v1.Publisher/ListTopicSnapshots",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:96 TestPubSubTopicAndSnapshotListings"
+          "test/compat/pubsubadmin_test.go:97 TestPubSubTopicAndSnapshotListings"
         ]
       },
       {
         "method": "google.pubsub.v1.Publisher/ListTopicSubscriptions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:96 TestPubSubTopicAndSnapshotListings",
-          "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle"
+          "test/compat/pubsubadmin_test.go:97 TestPubSubTopicAndSnapshotListings",
+          "test/compat/pubsubexpiration_test.go:339 TestPubSubRESTSubscriptionExpiresWhenIdle"
         ]
       },
       {
@@ -3995,6 +4022,7 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
+          "test/compat/pubsubprotobuf_test.go:139 TestPubSubProtobufSchemaTopic",
           "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic"
         ]
       },
@@ -4002,7 +4030,7 @@
         "method": "google.pubsub.v1.Publisher/UpdateTopic",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:72 TestPubSubUpdateTopic",
+          "test/compat/pubsubadmin_test.go:73 TestPubSubUpdateTopic",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/pubsublabels_test.go:32 TestPubSubUpdateLabels",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
@@ -4012,17 +4040,22 @@
         "method": "google.pubsub.v1.SchemaService/CommitSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
-          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad"
+          "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
+          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad",
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/CreateSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
+          "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad",
           "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubprotobuf_test.go:205 TestGcloudPubSubDetachAndProtobufSchemas",
+          "test/compat/pubsubprotobuf_test.go:254 TestTerraformPubSubProtobufSchema",
+          "test/compat/pubsubprotobuf_test.go:305 TestConsolePubSubDetachAndProtobufSchema",
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
           "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
@@ -4031,8 +4064,11 @@
         "method": "google.pubsub.v1.SchemaService/DeleteSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
+          "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubprotobuf_test.go:205 TestGcloudPubSubDetachAndProtobufSchemas",
+          "test/compat/pubsubprotobuf_test.go:254 TestTerraformPubSubProtobufSchema",
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
       },
@@ -4040,15 +4076,19 @@
         "method": "google.pubsub.v1.SchemaService/DeleteSchemaRevision",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/GetSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
+          "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
           "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubprotobuf_test.go:205 TestGcloudPubSubDetachAndProtobufSchemas",
+          "test/compat/pubsubprotobuf_test.go:254 TestTerraformPubSubProtobufSchema",
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService",
           "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas",
           "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
@@ -4065,36 +4105,43 @@
         "method": "google.pubsub.v1.SchemaService/ListSchemaRevisions",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
-          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad"
+          "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
+          "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad",
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/ListSchemas",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/RollbackSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/ValidateMessage",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
+          "test/compat/pubsubprotobuf_test.go:205 TestGcloudPubSubDetachAndProtobufSchemas",
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
         ]
       },
       {
         "method": "google.pubsub.v1.SchemaService/ValidateSchema",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService"
+          "test/compat/pubsubadmin_test.go:320 TestPubSubSchemaService",
+          "test/compat/pubsubprotobuf_test.go:205 TestGcloudPubSubDetachAndProtobufSchemas",
+          "test/compat/pubsubprotobuf_test.go:38 TestPubSubProtobufSchemaService"
         ]
       },
       {
@@ -4103,7 +4150,7 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
-          "test/compat/pubsubexpiration_test.go:207 TestPubSubExactlyOnceDelivery"
+          "test/compat/pubsubexpiration_test.go:209 TestPubSubExactlyOnceDelivery"
         ]
       },
       {
@@ -4121,9 +4168,9 @@
           "test/compat/consolepubsubidle_test.go:35 TestConsolePubSubIdleTimeAndPushAttributes",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
-          "test/compat/pubsubexpiration_test.go:161 TestPubSubRefusesAnExpirationGoogleRefuses",
-          "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
-          "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubexpiration_test.go:163 TestPubSubRefusesAnExpirationGoogleRefuses",
+          "test/compat/pubsubexpiration_test.go:339 TestPubSubRESTSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubexpiration_test.go:79 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
@@ -4139,7 +4186,7 @@
           {
             "code": "INVALID_ARGUMENT",
             "case": "an expiration_policy.ttl under 1 day, or under message_retention_duration (Google documents the rule, not the code)",
-            "test": "test/compat/pubsubexpiration_test.go:161 TestPubSubRefusesAnExpirationGoogleRefuses"
+            "test": "test/compat/pubsubexpiration_test.go:163 TestPubSubRefusesAnExpirationGoogleRefuses"
           },
           {
             "code": "INVALID_ARGUMENT",
@@ -4169,6 +4216,7 @@
         "method": "google.pubsub.v1.Subscriber/GetSnapshot",
         "status": "Verified",
         "tests": [
+          "test/compat/pubsubadmin_test.go:132 TestPubSubUpdateSnapshot",
           "test/compat/remaining_test.go:423 TestSnapshotsAndSeekAreSupported"
         ]
       },
@@ -4179,8 +4227,8 @@
           "test/compat/consolepubsubclock_test.go:40 TestConsolePubSubAdvanceClock",
           "test/compat/consolepubsubidle_test.go:35 TestConsolePubSubIdleTimeAndPushAttributes",
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
-          "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
-          "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubexpiration_test.go:339 TestPubSubRESTSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubexpiration_test.go:79 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
           "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
@@ -4199,7 +4247,7 @@
         "method": "google.pubsub.v1.Subscriber/ListSnapshots",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:96 TestPubSubTopicAndSnapshotListings",
+          "test/compat/pubsubadmin_test.go:97 TestPubSubTopicAndSnapshotListings",
           "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad"
         ]
       },
@@ -4209,7 +4257,7 @@
         "tests": [
           "test/compat/consolepubsubclock_test.go:40 TestConsolePubSubAdvanceClock",
           "test/compat/pubsub_test.go:242 TestPubSubListTopicsAndSubscriptions",
-          "test/compat/pubsubexpiration_test.go:77 TestPubSubSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubexpiration_test.go:79 TestPubSubSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:229 TestPubSubPushSubscriptionExpiresWithoutSuccessfulPushes",
           "test/compat/pubsubfronth2c_test.go:127 TestPubSubRESTListOverFourMiB",
           "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
@@ -4231,7 +4279,7 @@
         "method": "google.pubsub.v1.Subscriber/ModifyPushConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:147 TestPubSubModifyPushConfig",
+          "test/compat/pubsubadmin_test.go:188 TestPubSubModifyPushConfig",
           "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
@@ -4244,8 +4292,8 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:90 TestPubSubPublishAndPull",
-          "test/compat/pubsubexpiration_test.go:207 TestPubSubExactlyOnceDelivery",
-          "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle"
+          "test/compat/pubsubexpiration_test.go:209 TestPubSubExactlyOnceDelivery",
+          "test/compat/pubsubexpiration_test.go:339 TestPubSubRESTSubscriptionExpiresWhenIdle"
         ]
       },
       {
@@ -4260,23 +4308,22 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsub_test.go:137 TestPubSubStreamingPull",
-          "test/compat/pubsubexpiration_test.go:207 TestPubSubExactlyOnceDelivery"
+          "test/compat/pubsubexpiration_test.go:209 TestPubSubExactlyOnceDelivery"
         ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/UpdateSnapshot",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/pubsubadmin_test.go:128 TestPubSubUpdateSnapshotIsRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/pubsubadmin_test.go:132 TestPubSubUpdateSnapshot"
+        ]
       },
       {
         "method": "google.pubsub.v1.Subscriber/UpdateSubscription",
         "status": "Verified",
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
-          "test/compat/pubsubexpiration_test.go:337 TestPubSubRESTSubscriptionExpiresWhenIdle",
+          "test/compat/pubsubexpiration_test.go:339 TestPubSubRESTSubscriptionExpiresWhenIdle",
           "test/compat/pubsubfollowups_test.go:127 TestPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubfollowups_test.go:87 TestPubSubExactlyOnceCanBeChanged",
           "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
@@ -5007,6 +5054,8 @@
         "method": "storage.objects.get",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuilddefaultlogs_test.go:131 TestGcloudBuildsSubmitDefaultLogsBucket",
+          "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
@@ -5051,6 +5100,7 @@
         "method": "storage.objects.list",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
           "test/compat/storage_test.go:136 TestStorageListWithPrefix",
           "test/compat/storagechannels_test.go:148 TestStorageObjectChangeChannelSelection",
           "test/compat/storagecontexts_test.go:223 TestGcloudStorageObjectContexts",
@@ -7632,8 +7682,8 @@
     "Key": "sqladmin",
     "Title": "Cloud SQL Admin API (v1)",
     "counts": {
-      "Unimplemented": 34,
-      "Verified": 46
+      "Unimplemented": 33,
+      "Verified": 47
     },
     "rows": [
       {
@@ -7725,6 +7775,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
+          "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlversions_test.go:104 TestCloudSQLDatabaseVersions",
@@ -7736,6 +7787,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
+          "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlversions_test.go:104 TestCloudSQLDatabaseVersions",
@@ -7752,8 +7804,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:423 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:425 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -7762,7 +7814,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -7771,8 +7823,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:423 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:425 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -7780,22 +7832,22 @@
         "method": "sql.databases.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:423 TestGcloudSQL"
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:425 TestGcloudSQL"
         ]
       },
       {
         "method": "sql.databases.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
         "method": "sql.databases.update",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -7862,6 +7914,9 @@
         "method": "sql.instances.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
+          "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
+          "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
@@ -7900,18 +7955,20 @@
       },
       {
         "method": "sql.instances.failover",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
-          "test/compat/sqladmin_test.go:101 TestSQLAdminRefusesWhatItCannotDoFaithfully"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
+          "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability"
+        ]
       },
       {
         "method": "sql.instances.get",
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlbackups_test.go:231 TestGcloudSQLBackups",
+          "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
+          "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
+          "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
@@ -7926,7 +7983,7 @@
           "test/compat/cloudsqlversions_test.go:265 TestCloudSQLCascadingAndCrossRegionReplicas",
           "test/compat/cloudsqlversions_test.go:375 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion",
-          "test/compat/sqladmin_test.go:423 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:425 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica"
         ]
@@ -7942,6 +7999,9 @@
         "method": "sql.instances.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
+          "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
+          "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
@@ -7964,9 +8024,10 @@
         "method": "sql.instances.list",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
-          "test/compat/sqladmin_test.go:423 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:425 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
         ]
       },
@@ -7981,6 +8042,8 @@
         "method": "sql.instances.patch",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
+          "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlversions_test.go:172 TestCloudSQLMajorVersionUpgrade",
@@ -8094,6 +8157,8 @@
         "tests": [
           "test/compat/cloudsqlbackups_test.go:231 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups",
+          "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
+          "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
@@ -8102,8 +8167,8 @@
           "test/compat/cloudsqlversions_test.go:172 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:375 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion",
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:423 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:425 TestGcloudSQL",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
@@ -8112,7 +8177,7 @@
         "method": "sql.operations.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -8202,8 +8267,8 @@
         "method": "sql.users.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:423 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:425 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -8211,7 +8276,7 @@
         "method": "sql.users.get",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers"
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers"
         ]
       },
       {
@@ -8219,8 +8284,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlversions_test.go:172 TestCloudSQLMajorVersionUpgrade",
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:423 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:425 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -8228,8 +8293,8 @@
         "method": "sql.users.list",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
-          "test/compat/sqladmin_test.go:423 TestGcloudSQL",
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:425 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -8237,7 +8302,7 @@
         "method": "sql.users.update",
         "status": "Verified",
         "tests": [
-          "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
+          "test/compat/sqladmin_test.go:273 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       }

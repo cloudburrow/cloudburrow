@@ -67,7 +67,7 @@ func TestPredictionClientReachesACustomEndpoint(t *testing.T) {
 	deployPredictor(t, c, h, id, routes, nil)
 	endpoint := runParent(h) + "/endpoints/" + id
 
-	ctx, cancel := context.WithTimeout(h.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	inst := func(xs ...any) []*structpb.Value {
 		out := make([]*structpb.Value, len(xs))
@@ -142,7 +142,7 @@ func TestPredictionClientReachesACustomEndpoint(t *testing.T) {
 func TestEmbeddingGemmaThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvEmbeddings)
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	name := "projects/" + h.Project() + "/locations/us-central1/publishers/google/models/" + embeddingModel
 
