@@ -445,7 +445,7 @@ browser_suite() {  # <shard> <dir> <flags...>
   # Datastore, Firestore and Bigtable emulators (#895, #1198).
   if [ "$shard" = emulators ]; then BROWSER_VARS+=,DATASTORE,FIRESTORE,BIGTABLE,SPANNER,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT; fi
   # The Logs Explorer reads entries written through the Logging API (#1410).
-  if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER; fi
+  if [ "$shard" = storage ]; then BROWSER_VARS+=,LOGGING,STORAGE,PUBSUB,TASKS,SCHEDULER,RESOURCEMANAGER,SERVICEUSAGE; fi
   # The run shard's read back through Cloud Run, Cloud KMS, Secret Manager,
   # Cloud Logging and BigQuery's official clients.
   if [ "$shard" = run ]; then BROWSER_VARS+=,RUN,KMS,SECRETS,LOGGING,BIGQUERY,BIGQUERY_PROJECT; fi

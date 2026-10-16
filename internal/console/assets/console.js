@@ -305,8 +305,8 @@ const ICONS = {
   hierarchy: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>',
   // Tags: a tag with its hole.
   tags:      '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8" r="1.5"/>',
-  // APIs & Services: a plug.
-  serviceusage: '<path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>',
+  // APIs & Services: braces around three calls (Connect has the plug).
+  serviceusage: '<path d="M8 4H5v16h3M16 4h3v16h-3"/><path d="M9 12h.01M12 12h.01M15 12h.01" stroke-width="2.5"/>',
   iam:       '<circle cx="8" cy="8" r="3"/><path d="M3 19a5 5 0 0 1 10 0"/><circle cx="17" cy="13" r="2"/><path d="M17 15v5M17 18h2"/>',
   // Firestore: stacked documents.
   firestore: '<path d="M8 3h9l3 3v11H8z"/><path d="M5 7v14h11"/><path d="M11 9h6M11 13h6"/>',
