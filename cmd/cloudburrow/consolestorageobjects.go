@@ -559,6 +559,7 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 			"Storage class", a.StorageClass,
 			"Created", stamp(a.Created),
 			"Updated", stamp(a.Updated),
+			"Finalized", finalizedText(a.Finalized),
 			"Custom time", stamp(a.CustomTime),
 			"Composite components", components,
 		)},
@@ -620,3 +621,14 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 }
 
 var _ console.PathActor = storageProvider{}
+
+// finalizedText is an object's finalize time, or, for an appendable object
+// still open (#1443), that it is not finalized: it is appended to and
+// finalized over the gRPC API's BidiWriteObject, as on Google's console,
+// which has no append either.
+func finalizedText(t time.Time) string {
+	if t.IsZero() {
+		return "Not finalized: an appendable object, open for appends over gRPC"
+	}
+	return stamp(t)
+}

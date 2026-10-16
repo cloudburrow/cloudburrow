@@ -48,7 +48,7 @@ and object IAM on the JSON API are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| gRPC `google.storage.v2`: appendable objects (Google documents them for zonal buckets only, which are not modelled; the store keeps finalized generations only), `Bucket.custom_placement_config` and `ip_filter`, and `SetIamPolicy`'s `update_mask` are `UNIMPLEMENTED` (#1443) | not built yet | M |
+| gRPC `google.storage.v2`: `Bucket.ip_filter` stays `UNIMPLEMENTED` (and `ipFilter` 400 on the JSON API): enforcing it needs the caller's VPC network and the `storage.buckets.exemptFromIpFilter` permission, which are not modelled. Appendable objects, `custom_placement_config` and `SetIamPolicy`'s `update_mask` are built (#1443) | refused by design: enforcement needs what is not modelled | S |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` (#1444) | no emulator support (no cache tier) | M |
 | `buckets.relocate`, `buckets.operations.advanceRelocateBucket` (#1444) | no emulator support (one location) | M |

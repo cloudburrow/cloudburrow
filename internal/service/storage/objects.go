@@ -65,6 +65,13 @@ type objectRecord struct {
 	KeySHA256 []byte `json:"keySha256,omitempty"`
 	// Contexts are the object's contexts.custom (contexts.go).
 	Contexts map[string]objectContext `json:"contexts,omitempty"`
+	// Unfinalized is an appendable object still open for appends
+	// (grpcappend.go, #1443), and AppendHandle the write handle of the one
+	// writer allowed to append. Finalized is when it was finalized; zero
+	// means Created, which is when every other object is finalized.
+	Unfinalized  bool      `json:"unfinalized,omitempty"`
+	AppendHandle string    `json:"appendHandle,omitempty"`
+	Finalized    time.Time `json:"finalized,omitempty"`
 }
 
 func objectKey(bucket, name string) string { return objectPrefix + bucket + "/" + name }
@@ -142,9 +149,15 @@ func (s *Server) objectJSONWith(r *http.Request, o objectRecord, b bucketRecord)
 		"timeCreated":             rfc3339(o.Created),
 		"updated":                 rfc3339(o.Updated),
 		"timeStorageClassUpdated": rfc3339(classUpdated(o)),
-		// Every object is finalized when it is created: appendable uploads,
-		// which finalize later, are not built.
-		"timeFinalized": rfc3339(o.Created),
+	}
+	// Every object but an appendable one is finalized when it is created;
+	// an unfinalized appendable object has no timeFinalized (#1443).
+	switch {
+	case o.Unfinalized:
+	case !o.Finalized.IsZero():
+		out["timeFinalized"] = rfc3339(o.Finalized)
+	default:
+		out["timeFinalized"] = rfc3339(o.Created)
 	}
 	for k, v := range map[string]string{"contentEncoding": o.ContentEncoding, "contentDisposition": o.ContentDisposition,
 		"contentLanguage": o.ContentLanguage, "cacheControl": o.CacheControl} {
@@ -278,6 +291,9 @@ type uploadMeta struct {
 	Contexts json.RawMessage `json:"contexts,omitempty"`
 	// protection is the body's holds and retention, for applyProtection.
 	protection map[string]any
+	// appendable makes the object an unfinalized appendable object
+	// (grpcappend.go, #1443).
+	appendable bool
 }
 
 // uploadFields says how each Object property is treated in an upload's
@@ -558,6 +574,11 @@ func (s *Server) finalizeObject(bucket string, meta uploadMeta, blob Blob, pre o
 		if err := setUploadACL(b, &o, meta); err != nil {
 			return err
 		}
+		if meta.appendable {
+			if err := openAppendable(b, &o); err != nil {
+				return err
+			}
+		}
 		cur, exists, err := getObject(tx, bucket, meta.Name)
 		if err != nil {
 			return err
@@ -567,6 +588,13 @@ func (s *Server) finalizeObject(bucket string, meta uploadMeta, blob Blob, pre o
 		}
 		if err := retireLive(tx, b, meta.Name, now, o.Generation); err != nil {
 			return err
+		}
+		if o.Unfinalized {
+			// OBJECT_FINALIZE is sent when an appendable object is finalized.
+			if err := objectFolders(tx, o, now); err != nil {
+				return err
+			}
+			return putObject(tx, o)
 		}
 		return finalized(tx, o, cur, exists, now)
 	})

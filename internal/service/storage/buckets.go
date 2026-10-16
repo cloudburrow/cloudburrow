@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -71,7 +72,7 @@ var storedObjects = map[string]bool{"website": true, "logging": true, "encryptio
 	"iamConfiguration": true, "autoclass": true, "customPlacementConfig": true, "hierarchicalNamespace": true}
 
 var storageClasses = map[string]bool{"STANDARD": true, "NEARLINE": true, "COLDLINE": true, "ARCHIVE": true,
-	"MULTI_REGIONAL": true, "REGIONAL": true, "DURABLE_REDUCED_AVAILABILITY": true}
+	"MULTI_REGIONAL": true, "REGIONAL": true, "DURABLE_REDUCED_AVAILABILITY": true, "RAPID": true}
 
 // bucketNameRE and the checks in validBucketName follow
 // docs.cloud.google.com/storage/docs/buckets#naming.
@@ -191,6 +192,9 @@ func validateKept(f map[string]any) error {
 		} else {
 			f["storageClass"] = strings.ToUpper(s)
 		}
+	}
+	if err := checkZonal(f); err != nil {
+		return err
 	}
 	if v, ok := f["labels"]; ok && v != nil {
 		m, isMap := v.(map[string]any)
@@ -666,6 +670,11 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 				// UNVERIFIED: Google's answer to changing a bucket's location.
 				return badRequest("The location of a bucket cannot be changed.")
 			}
+			if p, sent := next["customPlacementConfig"]; sent && !reflect.DeepEqual(dataLocations(p), dataLocations(b.Fields["customPlacementConfig"])) {
+				// Custom placement is chosen when a bucket is created.
+				// UNVERIFIED: the status and message.
+				return badRequest("Invalid argument: customPlacementConfig can only be set when a bucket is created.")
+			}
 			if ns, sent := next["hierarchicalNamespace"]; sent && hierarchical(bucketRecord{Fields: map[string]any{"hierarchicalNamespace": ns}}) != hierarchical(b) {
 				// hns-overview: the setting is chosen at creation and cannot
 				// be changed. UNVERIFIED: the status and message.
@@ -673,6 +682,9 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 			}
 			if replace {
 				next["location"] = b.Fields["location"]
+				if p, ok := b.Fields["customPlacementConfig"]; ok {
+					next["customPlacementConfig"] = p
+				}
 				if ns, ok := b.Fields["hierarchicalNamespace"]; ok {
 					next["hierarchicalNamespace"] = ns
 				}
@@ -766,3 +778,45 @@ func (s *Server) bucketsDelete(w http.ResponseWriter, r *http.Request) {
 
 // objectPrefix keys object metadata by bucket; objects are #491.
 const objectPrefix = "object/"
+
+// zoneRE is a Compute Engine zone: a region and a one-letter suffix.
+var zoneRE = regexp.MustCompile(`^[a-z]+-[a-z]+[0-9]+-[a-z]$`)
+
+// dataLocations is a customPlacementConfig's dataLocations, upper-cased.
+func dataLocations(p any) []string {
+	m, _ := p.(map[string]any)
+	l, _ := m["dataLocations"].([]any)
+	out := []string{}
+	for _, v := range l {
+		s, _ := v.(string)
+		out = append(out, strings.ToUpper(s))
+	}
+	return out
+}
+
+// checkZonal checks a Rapid storage bucket (#1443): Google's zonal bucket,
+// the only kind that holds appendable objects, is storageClass RAPID with
+// customPlacementConfig naming one zone of its region
+// (docs.cloud.google.com/storage/docs/rapid/rapid-bucket). UNVERIFIED: the
+// statuses and messages.
+func checkZonal(f map[string]any) error {
+	class, _ := f["storageClass"].(string)
+	if !strings.EqualFold(class, "RAPID") {
+		return nil
+	}
+	locs := dataLocations(f["customPlacementConfig"])
+	loc, _ := f["location"].(string)
+	if len(locs) != 1 || !zoneRE.MatchString(strings.ToLower(locs[0])) {
+		return badRequest("Invalid argument: a RAPID bucket's customPlacementConfig.dataLocations names exactly one zone.")
+	}
+	if region := locs[0][:strings.LastIndex(locs[0], "-")]; loc != "" && !strings.EqualFold(region, loc) {
+		return badRequest("Invalid argument: zone %s is not in the bucket's location %s.", strings.ToLower(locs[0]), loc)
+	}
+	return nil
+}
+
+// zonal reports a Rapid storage bucket, which holds appendable objects.
+func zonal(b bucketRecord) bool {
+	class, _ := b.Fields["storageClass"].(string)
+	return strings.EqualFold(class, "RAPID")
+}
