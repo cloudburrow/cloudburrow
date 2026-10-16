@@ -20,6 +20,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
@@ -244,10 +245,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if sqlAdminEnabled(d.cfg) {
 		var versions []string
 		if enabled[config.ServiceCloudSQL] {
-			versions = append(versions, "POSTGRES_17")
+			versions = append(versions, sqladmin.EngineVersions("POSTGRES")...)
 		}
 		if enabled[config.ServiceCloudSQLMySQL] {
-			versions = append(versions, "MYSQL_8_4")
+			versions = append(versions, sqladmin.EngineVersions("MYSQL")...)
 		}
 		host := d.cfg.BindAddress
 		if host == "" || host == "0.0.0.0" || host == "::" {
