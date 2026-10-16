@@ -7134,6 +7134,8 @@
           "test/compat/bigquerystoragewritearrow_test.go:162 TestBigQueryStorageWriteArrowRows",
           "test/compat/bigquerystoragewritearrow_test.go:263 TestBigQueryStorageWriteArrowRefusesSchemas",
           "test/compat/bigquerystoragewritearrow_test.go:306 TestBigQueryStorageWriteArrowIntervals",
+          "test/compat/bigquerystoragewritedefaults_test.go:136 TestBigQueryStorageWriteRanges",
+          "test/compat/bigquerystoragewritedefaults_test.go:38 TestBigQueryStorageWriteMissingValueDefaults",
           "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery"
         ]
       },

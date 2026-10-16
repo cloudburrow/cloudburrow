@@ -48,8 +48,7 @@ import (
 //	STRING      Utf8 (and LargeUtf8)
 //	TIMESTAMP   Timestamp, unit MICROSECOND, time zone UTC
 //	INTERVAL    Interval (YEAR_MONTH, DAY_TIME, MONTH_DAY_NANO), Utf8
-//	RANGE       Struct of start and end: not implemented here, as for
-//	            proto_rows
+//	RANGE       Struct of start and end (storagewriterange.go, #1391)
 //	REPEATED    List (and LargeList, FixedSizeList); a NULL list is the
 //	            empty array
 //	RECORD      Struct
@@ -76,6 +75,8 @@ type arrowCol struct {
 	repeated bool
 	// sub writes a RECORD column's struct.
 	sub *arrowConv
+	// rng writes a RANGE column's struct.
+	rng *arrowRange
 }
 
 // arrowWriterSchema reads arrow_rows.writer_schema.serialized_schema.
@@ -125,8 +126,11 @@ func arrowCols(afs []arrow.Field, fields []field, path string) ([]arrowCol, erro
 		}
 		switch {
 		case ac.typ == "RANGE":
-			return nil, status.Errorf(codes.Unimplemented, "Not implemented here: the Storage Write API's RANGE column '%s'. "+
-				"Nothing was written.", where)
+			rng, err := newArrowRange(dt, col, where)
+			if err != nil {
+				return nil, err
+			}
+			ac.rng = rng
 		case ac.typ == "RECORD":
 			st, ok := dt.(*arrow.StructType)
 			if !ok {
@@ -341,11 +345,14 @@ func (c arrowCol) field(arr arrow.Array, i int) (any, error) {
 // value writes the non-NULL value i of arr (an element of a list's
 // values) to the column, as insertAll's JSON gives it.
 func (c arrowCol) value(arr arrow.Array, i int) (any, error) {
-	if c.sub != nil {
+	if c.sub != nil || c.rng != nil {
 		s := arr.(*array.Struct)
 		fields := make([]arrow.Array, s.NumField())
 		for k := range fields {
 			fields[k] = s.Field(k)
+		}
+		if c.rng != nil {
+			return c.rng.value(fields, i)
 		}
 		return c.sub.row(fields, i)
 	}
