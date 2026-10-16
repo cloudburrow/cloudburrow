@@ -38,7 +38,9 @@ func UseRegistry(st *registry.Store) {
 	registryState.mu.Lock()
 	registryState.store = st
 	registryState.mu.Unlock()
-	loadRepositories(st)
+	if st != nil {
+		loadRepositories(st)
+	}
 }
 
 // RegistryStore is the registry's store, or nil when none is set.

@@ -29,7 +29,7 @@ func (artifactRegistryProvider) Title() string { return "Artifact Registry repos
 
 func (p artifactRegistryProvider) List(_ context.Context, project string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Format", "Location", "URL", "Description", "Age"},
-		NameColumn: "Repository", Noun: "repositories"}
+		NameColumn: "Repository", Noun: "repositories", RowsOpenable: true}
 	if project == "" {
 		project = p.defaultProject
 	}

@@ -23,14 +23,17 @@ import (
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 
+	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/registry"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/storage"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
 	"github.com/cloudburrow/cloudburrow/internal/store"
+	"github.com/google/go-containerregistry/pkg/v1/random"
 )
 
 // blankProject is the project every seeded resource belongs to.
@@ -401,6 +404,25 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		if fns := runadapter.Functions(blankProject); len(fns) == 1 && fns[0].GetState() == functionspb.Function_FAILED {
 			break
 		}
+	}
+
+	// An Artifact Registry repository, the sparsest CreateRepository takes,
+	// holding one untagged image pushed to its registry (#1383).
+	regStore, err := registry.Open(filepath.Join(dir, "artifactregistry"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runadapter.UseRegistry(regStore)
+	t.Cleanup(func() { runadapter.UseRegistry(nil) })
+	if _, err := fnSrv.ArtifactRegistry().CreateRepository(ctx, &arpb.CreateRepositoryRequest{
+		Parent: "projects/" + blankProject + "/locations/us-central1", RepositoryId: "blank-repo",
+		Repository: &arpb.Repository{Format: arpb.Repository_DOCKER}}); err != nil {
+		t.Fatal(err)
+	}
+	blankImage, _ := random.Image(64, 1)
+	if _, err := regStore.WriteImage(registry.Repo{Location: "us-central1", Project: blankProject, Repository: "blank-repo"},
+		"blank-image", "latest", blankImage); err != nil {
+		t.Fatal(err)
 	}
 
 	// Cloud Run and the cluster screens read through kubectl, so a kubectl
