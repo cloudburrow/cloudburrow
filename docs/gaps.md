@@ -30,12 +30,12 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 42 | 18 | 16 | 8 | 0 |
+| BigQuery | 44 | 20 | 16 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 6 | 6 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **85** | **30** | **38** | **12** | **5** |
+| **Total** | **87** | **32** | **38** | **12** | **5** |
 
 ## Cloud Storage
 
@@ -177,6 +177,8 @@ Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`),
 | Region-qualified `INFORMATION_SCHEMA.JOBS` (built, #1275) has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (Google does not document their STRUCTs, and the front knows none of their contents, #1329), nor child jobs; region `TABLE_STORAGE` has no byte counts (#1329) | not built yet | M |
 | `_PARTITIONTIME` of a row written by `tabledata.insertAll` is its partition's at once, where BigQuery reads it NULL while the row is in the streaming buffer; a table restored from state saved before #1277 keeps no ingestion time (its pseudo-columns fail 400 "Unrecognized name") (#1277) | no emulator support | S |
 | `SCHEMATA_LINKS` without a region qualifier is 501 (region `OBJECT_PRIVILEGES` and `SCHEMATA_LINKS` built, #1355; `PARTITIONS`, the constraint, snapshot, routine option and index views, #1328; `SCHEMATA_OPTIONS` and `MATERIALIZED_VIEWS`, #1351); `PARTITIONS` has no byte counts or `last_modified_time`; `COLUMNS` has no `async_generation_status` (#1286) (#1355) | not built yet | M |
+| Partition decorators: `tabledata.list` and `tables.get` of a partition, a partition as a load, copy or query destination, and a partition of an ingestion-time partitioned table are 501 (a query's read and `tables.delete` of one are built) (#1273) | not built yet | M |
+| `PARTITIONS` has no byte counts or `last_modified_time`; `COLUMNS` has no `async_generation_status` (#1286) (`SCHEMATA_LINKS` without a region qualifier built, #1392; region `OBJECT_PRIVILEGES` and `SCHEMATA_LINKS`, #1355; `PARTITIONS`, the constraint, snapshot, routine option and index views, #1328; `SCHEMATA_OPTIONS` and `MATERIALIZED_VIEWS`, #1351) (#1355) | not built yet | M |
 | Region-qualified `INFORMATION_SCHEMA.JOBS` (built, #1275) has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (Google does not document their STRUCTs, and the front knows none of their contents, #1329); region `TABLE_STORAGE` has no byte counts | not documented by Google | S |
 | A script the emulator runs whole (no control flow, no query before its last statement) makes no child jobs, as the emulator runs it as one job; a script's last DML statement has no child of its own, and a `SELECT` child names no destination table (child jobs of a script the front carries out, `jobs.list` `parentJobId` and `INFORMATION_SCHEMA.JOBS` `parent_job_id`, are built, #1353) | no emulator support | M |
 | Materialized views (`CREATE` / `DROP MATERIALIZED VIEW`) | no emulator support | L |

@@ -31,6 +31,9 @@ import (
 // WHERE is refused 400 (wording UNVERIFIED), and the rest of the filter is the
 // query's own.
 //
+// SCHEMATA_LINKS with no region qualifier is the US region's
+// (unqualifiedSchemataLinks, #1392).
+//
 // SCHEMATA_LINKS is always empty: its rows are datasets linked through
 // BigQuery sharing (Analytics Hub), which an instance does not serve; a
 // Logging bucket's link (#1292) makes no BigQuery dataset.
@@ -48,6 +51,40 @@ func init() {
 	regionViews["OBJECT_PRIVILEGES"], regionColumns["OBJECT_PRIVILEGES"] = true, objectPrivilegesColumns
 	regionViews["SCHEMATA_LINKS"], regionColumns["SCHEMATA_LINKS"] = true, schemataLinksColumns
 	// unbuiltInfoSchema keeps both: a dataset-qualified reference is 501.
+}
+
+// unqualifiedSchemataLinks returns sql's references to
+// [project.]INFORMATION_SCHEMA.SCHEMATA_LINKS with no region qualifier
+// (#1392), which BigQuery reads in the US region: each is answered as
+// `region-us`.INFORMATION_SCHEMA.SCHEMATA_LINKS (withInformationSchemaJobs).
+// A three-part name is the project's when its first part is project, the
+// request's: another is a dataset's, which stays 501.
+func unqualifiedSchemataLinks(sql, project string) []jobsRef {
+	t, ok := lex(sql)
+	if !ok {
+		return nil
+	}
+	var refs []jobsRef
+	for i := 0; i < len(t); i++ {
+		if t[i].kind != tokWord && t[i].kind != tokQuoted || i > 0 && t[i-1].punct(".") {
+			continue
+		}
+		parts, next := path(t, i)
+		n := len(parts)
+		if n < 2 || n > 3 || !strings.EqualFold(parts[n-2], "INFORMATION_SCHEMA") || !strings.EqualFold(parts[n-1], "SCHEMATA_LINKS") ||
+			n == 3 && parts[0] != project {
+			i = next - 1
+			continue
+		}
+		ref := jobsRef{pos: t[i].pos, end: t[next-1].end, region: "region-us", view: "SCHEMATA_LINKS"}
+		if next < len(t) && (t[next].is("AS") || t[next].kind == tokQuoted ||
+			t[next].kind == tokWord && !reservedWords[strings.ToUpper(t[next].text)]) {
+			ref.alias = true
+		}
+		refs = append(refs, ref)
+		i = next - 1
+	}
+	return refs
 }
 
 // legacyDatasetRoles are the dataset access roles BigQuery writes as IAM

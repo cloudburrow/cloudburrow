@@ -48,7 +48,8 @@ import (
 //	TIMESTAMP   int64 (microseconds since the epoch), int32, uint32,
 //	            google.protobuf.Timestamp
 //	INTERVAL    string (google.protobuf.Duration: not implemented here)
-//	RANGE       a message of start and end: not implemented here
+//	RANGE       a message of start and end, each of a type its element
+//	            type takes (storagewriterange.go, #1391)
 //	REPEATED    a repeated field; RECORD a message
 //
 // The sint, sfixed and fixed kinds are the int and uint ones on the wire.
@@ -80,6 +81,8 @@ type colConv struct {
 	wrapped protoreflect.FieldDescriptor
 	// timestamp: the field is a google.protobuf.Timestamp message.
 	timestamp bool
+	// rng writes a RANGE column's message of start and end.
+	rng *rangeConv
 }
 
 // writerDescriptor builds the message descriptor of a writer schema.
@@ -141,8 +144,11 @@ func newRowConv(md protoreflect.MessageDescriptor, fields []field, path string) 
 			}
 			cc.sub = sub
 		case cc.typ == "RANGE":
-			return nil, status.Errorf(codes.Unimplemented, "Not implemented here: the Storage Write API's RANGE column '%s'. "+
-				"Nothing was written.", where)
+			rng, err := newRangeConv(fd, col, where)
+			if err != nil {
+				return nil, err
+			}
+			cc.rng = rng
 		case fd.Kind() == protoreflect.MessageKind:
 			name := wellKnownName(fd.Message())
 			switch {
@@ -260,7 +266,10 @@ func kindTakes(typ string, k protoreflect.Kind) bool {
 // row decodes one serialized row and writes it as insertAll's JSON object.
 func (rc *rowConv) row(b []byte) (map[string]any, error) {
 	msg := dynamicpb.NewMessage(rc.md)
-	if err := proto.Unmarshal(b, msg); err != nil {
+	// AllowPartial: a required field of the writer schema left unset is
+	// a missing value (storagewritedefaults.go, #1391), which checkRow
+	// refuses for a REQUIRED column unless it is written its default.
+	if err := (proto.UnmarshalOptions{AllowPartial: true}).Unmarshal(b, msg); err != nil {
 		return nil, fmt.Errorf("the row does not decode as the writer schema's message: %v", err)
 	}
 	return rc.message(msg)
@@ -309,6 +318,8 @@ func (cc colConv) value(v protoreflect.Value) (any, error) {
 	switch {
 	case cc.sub != nil:
 		return cc.sub.message(v.Message())
+	case cc.rng != nil:
+		return cc.rng.value(v.Message())
 	case cc.timestamp:
 		m := v.Message()
 		secs := m.Get(m.Descriptor().Fields().ByName("seconds")).Int()

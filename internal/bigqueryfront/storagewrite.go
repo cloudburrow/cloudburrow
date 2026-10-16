@@ -86,8 +86,8 @@ import (
 //     row_errors. A COMMITTED stream's rows are in the table when the
 //     append is answered; a PENDING stream's at BatchCommitWriteStreams; a
 //     BUFFERED stream's at FlushRows. An append to a finalized stream is
-//     INVALID_ARGUMENT (STREAM_FINALIZED). missing_value_interpretations of
-//     DEFAULT_VALUE is UNIMPLEMENTED: column defaults are not applied here.
+//     INVALID_ARGUMENT (STREAM_FINALIZED). missing_value_interpretations and
+//     default_missing_value_interpretation: storagewritedefaults.go (#1391).
 //   - FinalizeWriteStream: row_count is the rows appended; the default
 //     stream cannot be finalized.
 //   - BatchCommitWriteStreams: every stream must be a finalized PENDING
@@ -677,6 +677,9 @@ type appendConn struct {
 	// serialized; arrowConvs its converters, by stream.
 	arrowSchema []byte
 	arrowConvs  map[string]arrowConvResult
+	// missing is the connection's default_missing_value_interpretation,
+	// as its last request to give one set it (#1391).
+	missing storagepb.AppendRowsRequest_MissingValueInterpretation
 }
 
 type arrowConvResult struct {
@@ -770,15 +773,15 @@ func (w *storageWrite) appendOne(ctx context.Context, c *appendConn, req *storag
 	}
 	c.stream = name
 
-	for col, mvi := range req.GetMissingValueInterpretations() {
-		if mvi == storagepb.AppendRowsRequest_DEFAULT_VALUE {
-			return appendFailed(name, status.Errorf(codes.Unimplemented, "Not implemented here: missing_value_interpretations "+
-				"DEFAULT_VALUE (column %s). CloudBurrow does not apply column default values. Nothing was written.", col)), nil
-		}
+	// default_missing_value_interpretation holds for the connection's
+	// later requests until one sets another; missing_value_interpretations
+	// for this request alone (storagewritedefaults.go, #1391).
+	if d := req.GetDefaultMissingValueInterpretation(); d != storagepb.AppendRowsRequest_MISSING_VALUE_INTERPRETATION_UNSPECIFIED {
+		c.missing = d
 	}
-	if req.GetDefaultMissingValueInterpretation() == storagepb.AppendRowsRequest_DEFAULT_VALUE {
-		return appendFailed(name, status.Error(codes.Unimplemented, "Not implemented here: default_missing_value_interpretation "+
-			"DEFAULT_VALUE. CloudBurrow does not apply column default values. Nothing was written.")), nil
+	missing, merr := missingInterpretations(c.missing, req.GetMissingValueInterpretations())
+	if merr != nil {
+		return appendFailed(name, merr), nil
 	}
 
 	var (
@@ -803,7 +806,10 @@ func (w *storageWrite) appendOne(ctx context.Context, c *appendConn, req *storag
 			return appendFailed(name, cr.err), nil
 		}
 		serialized := pr.GetRows().GetSerializedRows()
-		rows, rowErrs, err = convertRows(cr.fields, len(serialized), func(i int) (map[string]any, error) { return cr.conv.row(serialized[i]) })
+		rows, rowErrs, err = convertRows(cr.fields, len(serialized), func(i int) (map[string]any, error) {
+			obj, err := cr.conv.row(serialized[i])
+			return missing.apply(cr.fields, obj), err
+		})
 	} else {
 		cr, ok := c.arrowConvs[name]
 		if !ok {
@@ -825,7 +831,9 @@ func (w *storageWrite) appendOne(ctx context.Context, c *appendConn, req *storag
 		if derr != nil {
 			return appendFailed(name, derr), nil
 		}
-		rows, rowErrs, err = convertRows(cr.fields, len(objs), func(i int) (map[string]any, error) { return objs[i], objErrs[i] })
+		rows, rowErrs, err = convertRows(cr.fields, len(objs), func(i int) (map[string]any, error) {
+			return missing.apply(cr.fields, objs[i]), objErrs[i]
+		})
 	}
 	if err != nil {
 		return appendFailed(name, err), nil

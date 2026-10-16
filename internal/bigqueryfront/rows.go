@@ -67,6 +67,11 @@ func checkRecord(fields []field, obj map[string]any, prefix string, ignoreUnknow
 			continue
 		}
 		v, present := lookup(obj, f.Name)
+		if !present && prefix == "" && f.DefaultValueExpression != "" {
+			// The engine writes the column's default (columndefaults.go,
+			// #1340); a NULL given stays NULL, and is refused.
+			continue
+		}
 		if !present || v == nil {
 			*errs = append(*errs, rowError{Reason: "invalid", Location: prefix + f.Name,
 				Message: "Missing required field: " + prefix + f.Name + "."})

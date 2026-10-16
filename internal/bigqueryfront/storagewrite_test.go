@@ -425,9 +425,14 @@ func TestStorageWriteRefusesMalformedRequests(t *testing.T) {
 	} {
 		req := rowsReq("", false, nil, testRow(t, 3, nil))
 		req.DefaultMissingValueInterpretation, req.MissingValueInterpretations = mvi.DefaultMissingValueInterpretation, mvi.MissingValueInterpretations
-		if got := respCode(conn.send(req)); got != codes.Unimplemented {
-			t.Errorf("DEFAULT_VALUE: %s, want UNIMPLEMENTED", got)
+		if got := respCode(conn.send(req)); got != codes.OK {
+			t.Errorf("DEFAULT_VALUE (#1391): %s, want OK", got)
 		}
+	}
+	unspecified := rowsReq("", false, nil, testRow(t, 4, nil))
+	unspecified.MissingValueInterpretations = map[string]storagepb.AppendRowsRequest_MissingValueInterpretation{"s": 0}
+	if got := respCode(conn.send(unspecified)); got != codes.InvalidArgument {
+		t.Errorf("MISSING_VALUE_INTERPRETATION_UNSPECIFIED: %s, want INVALID_ARGUMENT", got)
 	}
 
 	for name, req := range map[string]*storagepb.CreateWriteStreamRequest{
@@ -545,7 +550,9 @@ func TestStorageWriteSchemaMatching(t *testing.T) {
 	opt := descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum()
 	rep := descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum()
 	fields := []field{{Name: "a", Type: "INT64"}, {Name: "r", Type: "INTEGER", Mode: "REPEATED"}, {Name: "ts", Type: "TIMESTAMP"},
-		{Name: "g", Type: "RANGE"}, {Name: "col-1", Type: "STRING"}}
+		{Name: "g", Type: "RANGE", RangeElementType: &struct {
+			Type string `json:"type"`
+		}{"DATE"}}, {Name: "col-1", Type: "STRING"}}
 	one := func(f *descriptorpb.FieldDescriptorProto, nested ...*descriptorpb.DescriptorProto) *descriptorpb.DescriptorProto {
 		f.Number = proto.Int32(1)
 		return &descriptorpb.DescriptorProto{Name: proto.String("m"), Field: []*descriptorpb.FieldDescriptorProto{f}, NestedType: nested}
@@ -563,7 +570,10 @@ func TestStorageWriteSchemaMatching(t *testing.T) {
 		"scalar to repeated":   {one(&descriptorpb.FieldDescriptorProto{Name: proto.String("r"), Type: i64, Label: opt}), codes.InvalidArgument},
 		"fixed64 to INTEGER":   {one(&descriptorpb.FieldDescriptorProto{Name: proto.String("a"), Type: descriptorpb.FieldDescriptorProto_TYPE_FIXED64.Enum(), Label: opt}), codes.InvalidArgument},
 		"string to TIMESTAMP":  {one(&descriptorpb.FieldDescriptorProto{Name: proto.String("ts"), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(), Label: opt}), codes.InvalidArgument},
-		"a RANGE":              {one(&descriptorpb.FieldDescriptorProto{Name: proto.String("g"), Type: i64, Label: opt}), codes.Unimplemented},
+		"a RANGE of a scalar":  {one(&descriptorpb.FieldDescriptorProto{Name: proto.String("g"), Type: i64, Label: opt}), codes.InvalidArgument},
+		"a RANGE":              {one(&descriptorpb.FieldDescriptorProto{Name: proto.String("g"), Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(), TypeName: proto.String("rangemessage_range_date"), Label: opt}, rangeMessage("rangemessage_range_date", descriptorpb.FieldDescriptorProto_TYPE_INT32)), codes.OK},
+		"a RANGE of strings":   {one(&descriptorpb.FieldDescriptorProto{Name: proto.String("g"), Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(), TypeName: proto.String("r"), Label: opt}, rangeMessage("r", descriptorpb.FieldDescriptorProto_TYPE_STRING)), codes.OK},
+		"a RANGE of bools":     {one(&descriptorpb.FieldDescriptorProto{Name: proto.String("g"), Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(), TypeName: proto.String("r"), Label: opt}, rangeMessage("r", descriptorpb.FieldDescriptorProto_TYPE_BOOL)), codes.InvalidArgument},
 		"column_name":          {one(&descriptorpb.FieldDescriptorProto{Name: proto.String("col_1"), Type: descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(), Label: opt, Options: colName}), codes.OK},
 		"a wrapper to INTEGER": {one(&descriptorpb.FieldDescriptorProto{Name: proto.String("a"), Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(), TypeName: proto.String("google_protobuf_Int64Value"), Label: opt}, &descriptorpb.DescriptorProto{Name: proto.String("google_protobuf_Int64Value"), Field: []*descriptorpb.FieldDescriptorProto{{Name: proto.String("value"), Number: proto.Int32(1), Type: i64, Label: opt}}}), codes.OK},
 		"a message to INTEGER": {one(&descriptorpb.FieldDescriptorProto{Name: proto.String("a"), Type: descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(), TypeName: proto.String("x"), Label: opt}, &descriptorpb.DescriptorProto{Name: proto.String("x")}), codes.InvalidArgument},

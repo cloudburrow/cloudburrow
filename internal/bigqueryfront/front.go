@@ -337,7 +337,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
-				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows}
+				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows,
+				resourceManager: o.resourceManager}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -482,6 +483,10 @@ type front struct {
 	// jobsTable is the table of INFORMATION_SCHEMA.JOBS rows
 	// (jobstable.go, #1378), or nil.
 	jobsTable *jobsTable
+	// resourceManager is the instance's Resource Manager, which
+	// JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION read the project's ancestry
+	// from (infoschemahierarchy.go, #1392), or "".
+	resourceManager string
 }
 
 // Option is an option of Wrap.
@@ -514,6 +519,9 @@ type options struct {
 	// (streamingbuffer.go, #1370): the engine behind the front has the
 	// column (bigquery-emulator patch 0018).
 	streamTimes bool
+	// resourceManager is the instance's Resource Manager
+	// (http://host:port), or "" (infoschemahierarchy.go, #1392).
+	resourceManager string
 }
 
 // WithStorage gives the front the instance's Cloud Storage JSON API, at
