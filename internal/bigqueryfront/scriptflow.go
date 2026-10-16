@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -682,6 +683,10 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 	}
 	if s.pending != "" {
 		// The last statement was a query: it is the client's request.
+		if r.Context().Value(dpMemoKey{}) != nil {
+			// Its noisy rows are its child job's (#1482, differentialprivacy.go).
+			r = r.WithContext(context.WithValue(r.Context(), dpReplayKey{}, true))
+		}
 		if !setQueryText(r, insert, s.pending) {
 			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 			return

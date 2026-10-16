@@ -260,35 +260,3 @@ func TestBigQueryPrivacyPolicyJoinRestriction(t *testing.T) {
 	_, err = privacyRows(t, c, h, "SELECT * FROM `"+anyV+"` e LEFT JOIN "+student+" USING (test_score)", false)
 	wantReason(t, "a LEFT JOIN", err, http.StatusNotImplemented, "notImplemented")
 }
-
-// TestBigQueryPrivacyPolicyDifferentialPrivacy (#1426): differential
-// privacy is not carried out: SELECT WITH DIFFERENTIAL_PRIVACY, and any
-// query of a view with a differential_privacy_policy, is 501, never
-// answered without the noise.
-//
-// covers: bigquery.jobs.query
-func TestBigQueryPrivacyPolicyDifferentialPrivacy(t *testing.T) {
-	h := New(t)
-	c, _ := bigqueryClient(t, h)
-	ds := validationDataset(t, h, c)
-	ctx := h.Context()
-	d := ds.DatasetID
-	if err := bqRun(ctx, c, "CREATE TABLE `"+d+".ExamTable` AS ("+privacyExam+")", false); err != nil {
-		t.Fatal(err)
-	}
-	if err := bqRun(ctx, c, "CREATE VIEW `"+d+".DPView` OPTIONS (privacy_policy = "+
-		`'{"differential_privacy_policy": {"privacy_unit_column": "last_name", "max_epsilon_per_query": 10, `+
-		`"delta_per_query": 0.01, "max_groups_contributed": 2, "epsilon_budget": 1000, "delta_budget": 0.1}}'`+
-		") AS (SELECT * FROM `"+d+".ExamTable`)", false); err != nil {
-		t.Fatal(err)
-	}
-	for what, sql := range map[string]string{
-		"SELECT WITH DIFFERENTIAL_PRIVACY": "SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=10, delta=.01, privacy_unit_column=last_name) " +
-			"test_id, AVG(test_score) FROM `" + d + ".ExamTable` GROUP BY test_id",
-		"a query of a differential privacy view": "SELECT WITH DIFFERENTIAL_PRIVACY test_id, COUNT(*) FROM `" + d + ".DPView` GROUP BY test_id",
-		"a plain query of it":                    "SELECT * FROM `" + d + ".DPView`",
-	} {
-		_, err := privacyRows(t, c, h, sql, false)
-		wantReason(t, what, err, http.StatusNotImplemented, "notImplemented")
-	}
-}
