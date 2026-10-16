@@ -3388,6 +3388,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
+          "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:261 TestLoggingLinkedDatasetAcrossRestarts",
           "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
         ]
@@ -3409,6 +3411,7 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateView",
         "status": "Verified",
         "tests": [
+          "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
           "test/compat/terraform_logging_buckets_test.go:148 TestTerraformLoggingLogView"
@@ -3459,6 +3462,7 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteView",
         "status": "Verified",
         "tests": [
+          "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/terraform_logging_buckets_test.go:148 TestTerraformLoggingLogView"
         ]
@@ -3582,6 +3586,7 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateBucket",
         "status": "Verified",
         "tests": [
+          "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
@@ -3636,6 +3641,7 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateView",
         "status": "Verified",
         "tests": [
+          "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/terraform_logging_buckets_test.go:148 TestTerraformLoggingLogView"
         ]
@@ -3646,6 +3652,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_test.go:106 TestConsoleDeleteLogIsSeenByTheOfficialClient",
+          "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
@@ -3697,6 +3704,7 @@
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
+          "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
@@ -7319,6 +7327,7 @@
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
+          "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
         ]
       },
@@ -7399,7 +7408,9 @@
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
           "test/compat/consolebigquerywrites_test.go:403 TestConsoleBigQueryReadWriteEditorRunsDML",
-          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset"
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
+          "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/logginganalyticsviews_test.go:261 TestLoggingLinkedDatasetAcrossRestarts"
         ]
       },
       {
@@ -7666,6 +7677,7 @@
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bqcopysnapshot_test.go:24 TestBqCopySnapshotCloneAndRestore",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
+          "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
@@ -7693,6 +7705,7 @@
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
+          "test/compat/logginganalyticsviews_test.go:261 TestLoggingLinkedDatasetAcrossRestarts",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
@@ -7703,7 +7716,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery",
-          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset"
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
+          "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog"
         ]
       },
       {
