@@ -320,6 +320,9 @@ func (s configServer) CreateBucket(_ context.Context, req *loggingpb.CreateBucke
 		return nil, apierror.Wrap(err)
 	}
 	ref := bucketRef{p.parent, p.location, id}
+	if err := checkAnalyticsParent(ref, b); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
 	if _, err := s.a.getBucket(ref); err == nil {
@@ -338,7 +341,7 @@ func (s configServer) CreateBucket(_ context.Context, req *loggingpb.CreateBucke
 }
 
 // UpdateBucket applies the update_mask, which is required.
-func (s configServer) UpdateBucket(_ context.Context, req *loggingpb.UpdateBucketRequest) (*loggingpb.LogBucket, error) {
+func (s configServer) UpdateBucket(ctx context.Context, req *loggingpb.UpdateBucketRequest) (*loggingpb.LogBucket, error) {
 	ref, err := parseBucket("name", req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -376,12 +379,23 @@ func (s configServer) UpdateBucket(_ context.Context, req *loggingpb.UpdateBucke
 	if err := checkBucket(b); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	if b.GetAnalyticsEnabled() && !old.GetAnalyticsEnabled() {
+		if err := checkAnalyticsParent(ref, b); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+	}
 	if b.GetRetentionDays() == 0 {
 		b.RetentionDays = defaultRetention
 	}
 	b.UpdateTime = timestamppb.New(s.a.now())
 	if err := s.a.putBucket(ref, b); err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	// A linked dataset holds what the bucket's retention keeps (#1435).
+	if b.GetRetentionDays() != old.GetRetentionDays() {
+		if err := s.a.resyncBucket(ctx, ref); err != nil {
+			return nil, apierror.Wrap(err)
+		}
 	}
 	return b, nil
 }
@@ -576,7 +590,7 @@ func (s configServer) GetView(_ context.Context, req *loggingpb.GetViewRequest) 
 	return v, apierror.Wrap(err)
 }
 
-func (s configServer) CreateView(_ context.Context, req *loggingpb.CreateViewRequest) (*loggingpb.LogView, error) {
+func (s configServer) CreateView(ctx context.Context, req *loggingpb.CreateViewRequest) (*loggingpb.LogView, error) {
 	ref, err := parseBucket("parent", req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -608,13 +622,20 @@ func (s configServer) CreateView(_ context.Context, req *loggingpb.CreateViewReq
 	}
 	now := timestamppb.New(s.a.now())
 	v.Name, v.CreateTime, v.UpdateTime = viewName(ref, id), now, now
+	if err := s.a.checkLinkedFilter(ref, v); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if err := s.a.putView(ref, v, id); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	// The bucket's linked dataset gets the view (#1435).
+	if err := s.a.resyncBucket(ctx, ref); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	return v, nil
 }
 
-func (s configServer) UpdateView(_ context.Context, req *loggingpb.UpdateViewRequest) (*loggingpb.LogView, error) {
+func (s configServer) UpdateView(ctx context.Context, req *loggingpb.UpdateViewRequest) (*loggingpb.LogView, error) {
 	ref, id, err := parseView("name", req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -645,13 +666,21 @@ func (s configServer) UpdateView(_ context.Context, req *loggingpb.UpdateViewReq
 		return nil, apierror.Wrap(err)
 	}
 	v.UpdateTime = timestamppb.New(s.a.now())
+	if err := s.a.checkLinkedFilter(ref, v); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	if err := s.a.putView(ref, v, id); err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if v.GetFilter() != old.GetFilter() {
+		if err := s.a.resyncBucket(ctx, ref); err != nil { // #1435
+			return nil, apierror.Wrap(err)
+		}
 	}
 	return v, nil
 }
 
-func (s configServer) DeleteView(_ context.Context, req *loggingpb.DeleteViewRequest) (*emptypb.Empty, error) {
+func (s configServer) DeleteView(ctx context.Context, req *loggingpb.DeleteViewRequest) (*emptypb.Empty, error) {
 	ref, id, err := parseView("name", req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -672,10 +701,12 @@ func (s configServer) DeleteView(_ context.Context, req *loggingpb.DeleteViewReq
 			return nil, apierror.Wrap(apierror.Internal(err, "deleting the view"))
 		}
 		_ = s.a.db.Delete(viewKey(ref, id))
-		return &emptypb.Empty{}, nil
-	}
-	if err := s.a.db.Delete(viewKey(ref, id)); err != nil {
+	} else if err := s.a.db.Delete(viewKey(ref, id)); err != nil {
 		return nil, apierror.Wrap(apierror.Internal(err, "deleting the view"))
+	}
+	// The bucket's linked dataset loses the view (#1435).
+	if err := s.a.resyncBucket(ctx, ref); err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -685,4 +716,15 @@ func (a *Admin) Buckets(project string) ([]*loggingpb.LogBucket, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.buckets(projectParent(project), "-")
+}
+
+// checkAnalyticsParent refuses Log Analytics on a bucket that is not a
+// project's: Google upgrades only a bucket "created at the Google Cloud
+// project level" (docs.cloud.google.com/logging/docs/buckets, "Upgrade a
+// bucket to use Observability Analytics"; #1435). Code UNVERIFIED.
+func checkAnalyticsParent(ref bucketRef, b *loggingpb.LogBucket) error {
+	if b.GetAnalyticsEnabled() && !ref.parent.isProject() {
+		return apierror.FailedPrecondition("bucket %s: only a bucket of a project can be upgraded to Log Analytics (analytics_enabled)", ref.name())
+	}
+	return nil
 }

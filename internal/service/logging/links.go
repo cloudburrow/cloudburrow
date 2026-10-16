@@ -8,8 +8,10 @@ package logging
 //     BucketMetadata and the bucket as its response. A client's Wait returns
 //     at once without polling; the Operations mixin is not served.
 //   - A link is stored under its bucket, which must have Log Analytics on
-//     (analytics_enabled), and makes the BigQuery dataset it names, with
-//     the _AllLogs view of the bucket's entries (analytics.go, #1423).
+//     (analytics_enabled), and makes the BigQuery dataset it names, with a
+//     view of the bucket's entries per log view (analytics.go, #1423,
+//     #1435). Only a project's bucket can have Log Analytics, as Google
+//     documents, so a link on another parent's bucket is refused.
 //     CreateLink and DeleteLink answer done Operations with a LinkMetadata.
 //   - Settings and CmekSettings are read and written per parent (#1395). A KMS key
 //     is refused UNIMPLEMENTED, as a bucket's cmek_settings is: entries are
@@ -187,10 +189,13 @@ func (s configServer) CreateLink(ctx context.Context, req *loggingpb.CreateLinkR
 		return nil, apierror.Wrap(err)
 	}
 	if !bucket.parent.isProject() {
-		// The dataset a link makes is in a project; which one Google uses for
-		// a folder's, organization's or billing account's bucket is not
-		// something this has measured.
-		return nil, apierror.Wrap(apierror.Unimplemented("parent %q: links are supported on project buckets only", req.GetParent()))
+		// A link needs a bucket upgraded to Log Analytics, and Google
+		// upgrades only a bucket "created at the Google Cloud project level"
+		// (docs.cloud.google.com/logging/docs/buckets, "Upgrade a bucket to
+		// use Observability Analytics"; #1435): a folder's, organization's or
+		// billing account's bucket never has it, so its link is refused as
+		// one on a bucket without Log Analytics is (code UNVERIFIED).
+		return nil, apierror.Wrap(apierror.FailedPrecondition("bucket %s does not have Log Analytics enabled: only a bucket of a project can be upgraded to Log Analytics, so only a project's bucket can be linked to a BigQuery dataset", strings.TrimSuffix(req.GetParent(), "/")))
 	}
 	id := req.GetLinkId()
 	if err := checkID("link", id, configIDRe); err != nil {
@@ -228,24 +233,8 @@ func (s configServer) CreateLink(ctx context.Context, req *loggingpb.CreateLinkR
 	if s.a.linked == nil {
 		return nil, apierror.Wrap(apierror.FailedPrecondition("a link makes a BigQuery dataset, and BigQuery is not served on this instance: start it with bigquery among --services"))
 	}
-	project, dataset := linkedDataset(l)
-	if err := s.a.linked.Create(ctx, project, dataset, linkDatasetDescription(ref), linkedSchema()); err != nil {
-		if errors.Is(err, ErrProjectNotServed) {
-			return nil, apierror.Wrap(apierror.FailedPrecondition("a link makes a BigQuery dataset in the bucket's project, %s, which this instance's BigQuery does not serve: it serves one project", project))
-		}
-		if errors.Is(err, ErrDatasetExists) {
-			return nil, apierror.Wrap(apierror.AlreadyExists("BigQuery dataset %s:%s already exists; a link makes its own dataset", project, dataset))
-		}
-		return nil, apierror.Wrap(&apierror.Error{Code: codes.Unavailable, Reason: "backendError", Message: fmt.Sprintf("making the linked BigQuery dataset %s:%s: %v", project, dataset, err)})
-	}
-	s.a.copies.mu.Lock()
-	entries := s.a.copies.entries
-	s.a.copies.mu.Unlock()
-	if entries != nil {
-		if err := appendLinked(ctx, s.a.linked, []*loggingpb.Link{l}, entries(bucket)); err != nil {
-			_ = s.a.linked.Delete(ctx, project, dataset)
-			return nil, apierror.Wrap(&apierror.Error{Code: codes.Unavailable, Reason: "backendError", Message: fmt.Sprintf("writing the bucket's entries into %s:%s: %v", project, dataset, err)})
-		}
+	if err := s.a.syncLink(context.WithoutCancel(ctx), bucket, l, true); err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	raw, err := protojson.Marshal(l)
 	if err != nil {

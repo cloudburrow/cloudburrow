@@ -2,8 +2,11 @@ package logging
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	mrpb "google.golang.org/genproto/googleapis/api/monitoredres"
@@ -12,6 +15,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -20,18 +24,54 @@ import (
 type fakeLinked struct {
 	mu       sync.Mutex
 	datasets map[string][]map[string]any
+	views    map[string][]LinkedView
 }
 
-func newFakeLinked() *fakeLinked { return &fakeLinked{datasets: map[string][]map[string]any{}} }
+func newFakeLinked() *fakeLinked {
+	return &fakeLinked{datasets: map[string][]map[string]any{}, views: map[string][]LinkedView{}}
+}
 
-func (f *fakeLinked) Create(_ context.Context, project, dataset, _ string, fields []Field) error {
+func (f *fakeLinked) Create(_ context.Context, project, dataset, _ string, fields []Field, views []LinkedView) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.datasets[project+":"+dataset]; ok {
 		return ErrDatasetExists
 	}
 	f.datasets[project+":"+dataset] = []map[string]any{}
+	f.views[project+":"+dataset] = views
 	return nil
+}
+
+func (f *fakeLinked) Exists(_ context.Context, project, dataset string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.datasets[project+":"+dataset]
+	return ok, nil
+}
+
+// viewIDs are the dataset's views.
+func (f *fakeLinked) viewIDs(key string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, v := range f.views[key] {
+		out = append(out, v.ID)
+	}
+	return out
+}
+
+// inView are the json_payload.msg of the rows that list view.
+func inView(rows []map[string]any, view string) []string {
+	var out []string
+	for _, r := range rows {
+		ids, _ := r[LinkedViewsColumn].([]any)
+		if slices.Contains(ids, any(view)) {
+			jp, _ := r["json_payload"].(map[string]any)
+			msg, _ := jp["msg"].(string)
+			out = append(out, msg)
+		}
+	}
+	return out
 }
 
 func (f *fakeLinked) Append(_ context.Context, project, dataset string, rows []map[string]any, _ []string) error {
@@ -45,6 +85,7 @@ func (f *fakeLinked) Delete(_ context.Context, project, dataset string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.datasets, project+":"+dataset)
+	delete(f.views, project+":"+dataset)
 	return nil
 }
 
@@ -126,5 +167,134 @@ func TestLinkedDatasets(t *testing.T) {
 	}
 	if _, ok := fake.rows("proj-1:my_link"); ok {
 		t.Error("DeleteLink left the dataset")
+	}
+}
+
+// TestLinkedDatasetsFollowTheBucket (#1435): the dataset has a view per log
+// view, made, changed and dropped with it; each row lists the views whose
+// filter matches it; DeleteLog and a retention change remove rows; a
+// dataset BigQuery lost is made again; a folder's bucket cannot have Log
+// Analytics, so cannot be linked; a filter CloudBurrow does not evaluate is
+// refused on a linked bucket.
+func TestLinkedDatasetsFollowTheBucket(t *testing.T) {
+	ctx := context.Background()
+	a := NewAdmin(store.NewMemory())
+	srv := NewServer(NewStore(100))
+	srv.UseAdmin(a)
+	cfg := a.ConfigServer()
+	fake := newFakeLinked()
+	a.UseLinkedDatasets(fake)
+	global := "projects/proj-1/locations/global"
+	bucket := global + "/buckets/la"
+	if _, err := cfg.CreateBucket(ctx, &loggingpb.CreateBucketRequest{Parent: global, BucketId: "la",
+		Bucket: &loggingpb.LogBucket{AnalyticsEnabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.CreateSink(ctx, &loggingpb.CreateSinkRequest{Parent: "projects/proj-1", Sink: &loggingpb.LogSink{
+		Name: "to-la", Destination: "logging.googleapis.com/" + bucket}}); err != nil {
+		t.Fatal(err)
+	}
+	write := func(log, msg string, sev ltype.LogSeverity) {
+		t.Helper()
+		js, _ := structpb.NewStruct(map[string]any{"msg": msg})
+		if _, err := srv.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{LogName: "projects/proj-1/logs/" + log,
+			Resource: &mrpb.MonitoredResource{Type: "global"},
+			Entries:  []*loggingpb.LogEntry{{Severity: sev, Payload: &loggingpb.LogEntry_JsonPayload{JsonPayload: js}}}}); err != nil {
+			t.Fatal(err)
+		}
+		srv.waitDelivery()
+	}
+	write("app", "a1", ltype.LogSeverity_ERROR)
+	write("other", "o1", ltype.LogSeverity_INFO)
+	if _, err := cfg.CreateView(ctx, &loggingpb.CreateViewRequest{Parent: bucket, ViewId: "errors",
+		View: &loggingpb.LogView{Filter: "severity>=ERROR"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.CreateLink(ctx, &loggingpb.CreateLinkRequest{Parent: bucket, LinkId: "la_link"}); err != nil {
+		t.Fatalf("CreateLink: %v", err)
+	}
+	key := "proj-1:la_link"
+	if got := strings.Join(fake.viewIDs(key), ","); got != "_AllLogs,errors" {
+		t.Errorf("views = %s; want _AllLogs,errors", got)
+	}
+	for _, v := range fake.views[key] {
+		if !strings.Contains(v.Query, "'"+v.ID+"' IN UNNEST(`_cloudburrow_views`)") || !strings.Contains(v.Query, "INTERVAL 30 DAY") {
+			t.Errorf("view %s query = %s", v.ID, v.Query)
+		}
+	}
+	check := func(when, view, want string) {
+		t.Helper()
+		rows, _ := fake.rows(key)
+		if got := strings.Join(inView(rows, view), ","); got != want {
+			t.Errorf("%s: %s holds %q; want %q", when, view, got, want)
+		}
+	}
+	check("after CreateLink", "_AllLogs", "a1,o1")
+	check("after CreateLink", "errors", "a1")
+	write("app", "a2", ltype.LogSeverity_CRITICAL)
+	write("other", "o2", ltype.LogSeverity_DEBUG)
+	check("after writes", "errors", "a1,a2")
+	check("after writes", "_AllLogs", "a1,o1,a2,o2")
+
+	if _, err := cfg.UpdateView(ctx, &loggingpb.UpdateViewRequest{Name: bucket + "/views/errors",
+		View: &loggingpb.LogView{Filter: "severity<=INFO"}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"filter"}}}); err != nil {
+		t.Fatal(err)
+	}
+	check("after UpdateView", "errors", "o1,o2")
+	if _, err := cfg.CreateView(ctx, &loggingpb.CreateViewRequest{Parent: bucket, ViewId: "odd",
+		View: &loggingpb.LogView{Filter: "SEARCH(\"x\")"}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("CreateView with a filter CloudBurrow does not evaluate on a linked bucket = %v; want UNIMPLEMENTED", err)
+	}
+	if _, err := cfg.DeleteView(ctx, &loggingpb.DeleteViewRequest{Name: bucket + "/views/errors"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(fake.viewIDs(key), ","); got != "_AllLogs" {
+		t.Errorf("views after DeleteView = %s", got)
+	}
+
+	if _, err := srv.DeleteLog(ctx, &loggingpb.DeleteLogRequest{LogName: "projects/proj-1/logs/other"}); err != nil {
+		t.Fatal(err)
+	}
+	check("after DeleteLog", "_AllLogs", "a1,a2")
+
+	// An entry older than a shorter retention leaves the table.
+	old, _ := structpb.NewStruct(map[string]any{"msg": "old"})
+	if _, err := srv.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{LogName: "projects/proj-1/logs/app",
+		Resource: &mrpb.MonitoredResource{Type: "global"}, Entries: []*loggingpb.LogEntry{{
+			Timestamp: timestamppb.New(time.Now().Add(-5 * 24 * time.Hour)), Payload: &loggingpb.LogEntry_JsonPayload{JsonPayload: old}}}}); err != nil {
+		t.Fatal(err)
+	}
+	srv.waitDelivery()
+	check("with an entry 5 days old", "_AllLogs", "a1,a2,old")
+	if _, err := cfg.UpdateBucket(ctx, &loggingpb.UpdateBucketRequest{Name: bucket, Bucket: &loggingpb.LogBucket{RetentionDays: 3},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"retention_days"}}}); err != nil {
+		t.Fatal(err)
+	}
+	check("after a 3-day retention", "_AllLogs", "a1,a2")
+	if q := fake.views[key][0].Query; !strings.Contains(q, "INTERVAL 3 DAY") {
+		t.Errorf("_AllLogs after a 3-day retention = %s", q)
+	}
+
+	// BigQuery lost the dataset (an emulator restart): it is made again.
+	_ = fake.Delete(ctx, "proj-1", "la_link")
+	if n := a.EnsureLinkedDatasets(ctx); n != 1 {
+		t.Errorf("EnsureLinkedDatasets made %d; want 1", n)
+	}
+	check("after the dataset was made again", "_AllLogs", "a1,a2")
+	if n := a.EnsureLinkedDatasets(ctx); n != 0 {
+		t.Errorf("EnsureLinkedDatasets with every dataset there made %d; want 0", n)
+	}
+
+	// Only a project's bucket can have Log Analytics.
+	a.UseHierarchy(fakeHierarchy{})
+	folder := "folders/10/locations/global/buckets/_Default"
+	if _, err := cfg.UpdateBucket(ctx, &loggingpb.UpdateBucketRequest{Name: folder, Bucket: &loggingpb.LogBucket{AnalyticsEnabled: true},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"analytics_enabled"}}}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("Log Analytics on a folder's bucket = %v; want FAILED_PRECONDITION", err)
+	}
+	for _, p := range []string{folder, "organizations/1/locations/global/buckets/_Default"} {
+		if _, err := cfg.CreateLink(ctx, &loggingpb.CreateLinkRequest{Parent: p, LinkId: "x"}); status.Code(err) != codes.FailedPrecondition {
+			t.Errorf("CreateLink on %s = %v; want FAILED_PRECONDITION", p, err)
+		}
 	}
 }

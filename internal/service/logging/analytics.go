@@ -1,6 +1,6 @@
 package logging
 
-// Log Analytics linked datasets (#1423), to
+// Log Analytics linked datasets (#1423, #1435), to
 // docs.cloud.google.com/logging/docs/analyze/query-linked-dataset: "A
 // linked BigQuery dataset is a read-only pointer to your log bucket", and
 // "any log views within the log bucket are automatically mapped to virtual
@@ -11,11 +11,13 @@ package logging
 //
 //   - a table the Logging server fills, LinkedEntriesTable, which holds the
 //     bucket's entries in Log Analytics' schema (linkedSchema): every entry
-//     the bucket held when the link was made, and, as each is written,
-//     every entry written to it after;
-//   - the view _AllLogs, SELECT * of that table, which is what a query
-//     names. Log views with a filter are not mapped (a Logging filter is
-//     not translated into SQL here); only _AllLogs is made.
+//     the bucket holds, inside its retention, when the link is made, and,
+//     as each is written, every entry written to it after. Each row also
+//     lists, in LinkedViewsColumn, the bucket's log views whose filter
+//     matches it (filter.go evaluates the filter);
+//   - a view for each of the bucket's log views, named as it (_AllLogs and
+//     each view made with CreateView), which selects the rows its log view
+//     holds: those listing it, inside the bucket's retention.
 //
 // An entry reaches the table by a streaming insert made in the background
 // after WriteLogEntries answers, as sink delivery is (deliver.go): it is
@@ -23,22 +25,44 @@ package logging
 // Google documents no delay of its own beyond "it might take several
 // minutes before BigQuery recognizes the dataset".
 //
+// The dataset follows the bucket (resyncBucket): CreateView, UpdateView
+// and DeleteView, a change of the bucket's retention, and DeleteLog of a
+// log with entries in it make the dataset again, with the views the bucket
+// now has and the entries it now holds, so an entry DeleteLog removed, or
+// one past the retention, is gone from its table too. Between those, an
+// entry that ages past the retention leaves every view as it leaves the
+// bucket, by the views' own timestamp condition. A log view filter
+// CloudBurrow does not evaluate is refused UNIMPLEMENTED on a linked bucket
+// (by CreateLink, CreateView and UpdateView), since its view could not
+// hold what the log view holds.
+//
+// The datasets outlive restarts (KeepLinkedDatasets): the links are kept
+// in the Logging store, and each link's dataset BigQuery no longer has, as
+// after an emulator restart (the emulator keeps its data in memory), is
+// made again and filled.
+//
 // The dataset is read-only to clients: the BigQuery front refuses every
-// write to a dataset with the LinkedDatasetLabel label but the Logging
-// server's own (bigqueryfront/loglinks.go). DeleteLink deletes the dataset.
-// A bucket's retention and a view's deletion are not applied to the rows
-// already in the table.
+// write to a linked dataset but the Logging server's own
+// (bigqueryfront/loglinks.go). DeleteLink deletes the dataset.
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
 // LinkedEntriesTable is the table of a linked dataset that holds the
@@ -61,16 +85,29 @@ var ErrDatasetExists = errors.New("dataset already exists")
 // instance's BigQuery does not serve the project.
 var ErrProjectNotServed = errors.New("project not served by BigQuery")
 
+// LinkedViewsColumn is the column of LinkedEntriesTable that lists, for
+// each row, the IDs of the bucket's log views that hold the entry.
+const LinkedViewsColumn = "_cloudburrow_views"
+
+// LinkedView is one view of a linked dataset: its ID, the log view's, and
+// its query.
+type LinkedView struct {
+	ID, Query string
+}
+
 // LinkedDatasets makes and fills linked datasets in the instance's
 // BigQuery.
 type LinkedDatasets interface {
 	// Create makes dataset in project with LinkedEntriesTable, of
-	// linkedSchema's fields, and the _AllLogs view over it.
-	Create(ctx context.Context, project, dataset, description string, fields []Field) error
+	// fields, and views over it.
+	Create(ctx context.Context, project, dataset, description string, fields []Field, views []LinkedView) error
 	// Append streams rows into the dataset's LinkedEntriesTable.
 	Append(ctx context.Context, project, dataset string, rows []map[string]any, insertIDs []string) error
-	// Delete deletes the dataset and what it holds.
+	// Delete deletes the dataset and what it holds; a missing one is no
+	// error.
 	Delete(ctx context.Context, project, dataset string) error
+	// Exists reports whether the dataset exists.
+	Exists(ctx context.Context, project, dataset string) (bool, error)
 }
 
 // UseLinkedDatasets sets where links make their datasets; nil (the
@@ -113,6 +150,7 @@ func linkedSchema() []Field {
 		s("trace"), s("span_id"), b("trace_sampled"),
 		r("source_location", s("file"), i("line"), s("function")),
 		r("split", s("uid"), i("index"), i("total_splits")),
+		{Name: LinkedViewsColumn, Type: "STRING", Repeated: true},
 	}
 }
 
@@ -246,63 +284,349 @@ func unescapeLogID(id string) string {
 	return strings.NewReplacer("%2F", "/", "%2f", "/").Replace(id)
 }
 
-// appendLinked streams es into the dataset of each link.
-func appendLinked(ctx context.Context, l LinkedDatasets, links []*loggingpb.Link, es []*loggingpb.LogEntry) error {
-	if len(es) == 0 {
-		return nil
+// linkSync keeps links' datasets in step with their buckets (#1435).
+type linkSync struct {
+	// mu makes one change of a linked dataset, or one append to it, at a
+	// time, in write order.
+	mu sync.Mutex
+	// snap orders WriteLogEntries' storing of entries against a resync's
+	// read of a bucket's entries, and guards gen: a resync bumps a
+	// dataset's gen as it reads the entries, so the background append of
+	// entries stored before (which the resync wrote) is skipped, and that of
+	// entries stored after is not.
+	snap sync.RWMutex
+	gen  map[string]uint64
+}
+
+// hold read-locks snap, for WriteLogEntries to store entries under, and
+// returns the datasets' generations and the release.
+func (l *linkSync) hold() (map[string]uint64, func()) {
+	l.snap.RLock()
+	return maps.Clone(l.gen), l.snap.RUnlock
+}
+
+func (l *linkSync) current(key string) uint64 {
+	l.snap.RLock()
+	defer l.snap.RUnlock()
+	return l.gen[key]
+}
+
+// bucketView is one of a bucket's log views and its filter, nil when it
+// has none.
+type bucketView struct {
+	id    string
+	match pred
+}
+
+// bucketViews lists the bucket's log views, in ID order, with their
+// filters compiled. The caller holds a.mu.
+func (a *Admin) bucketViews(ref bucketRef) ([]bucketView, error) {
+	keys, err := a.db.List(viewPrefix(ref))
+	if err != nil {
+		return nil, apierror.Internal(err, "listing views")
 	}
-	rows := make([]map[string]any, len(es))
-	ids := make([]string, len(es))
-	for i, e := range es {
-		rows[i], ids[i] = linkedRow(e), e.GetInsertId()
+	ids := map[string]bool{}
+	if !a.allLogsDeleted(ref) {
+		ids[viewAllLogs] = true
 	}
-	var first error
-	for _, link := range links {
-		project, dataset := linkedDataset(link)
-		if dataset == "" {
+	for _, k := range keys {
+		if raw, err := hex.DecodeString(strings.TrimPrefix(k, viewPrefix(ref))); err == nil {
+			ids[string(raw)] = true
+		}
+	}
+	var out []bucketView
+	for _, id := range slices.Sorted(maps.Keys(ids)) {
+		v, err := a.getView(ref, id)
+		if err != nil {
 			continue
 		}
-		for start := 0; start < len(rows); start += 500 { // insertAll's recommended batch
-			end := min(start+500, len(rows))
-			if err := l.Append(ctx, project, dataset, rows[start:end], ids[start:end]); err != nil && first == nil {
-				first = err
+		bv := bucketView{id: id}
+		if f := strings.TrimSpace(v.GetFilter()); f != "" {
+			if bv.match, err = compileWith(f, a.ancestors); err != nil {
+				return nil, linkedFilterRefusal(v.GetName(), f, err)
 			}
+		}
+		out = append(out, bv)
+	}
+	return out, nil
+}
+
+func linkedFilterRefusal(view, filter string, err error) error {
+	return apierror.Unimplemented("view %s: its filter %q is not one CloudBurrow evaluates, so the bucket's linked BigQuery dataset cannot hold its view: %s",
+		view, filter, apierror.From(err).Message)
+}
+
+// checkLinkedFilter refuses a log view filter CloudBurrow does not
+// evaluate on a bucket with a link. The caller holds a.mu.
+func (a *Admin) checkLinkedFilter(ref bucketRef, v *loggingpb.LogView) error {
+	f := strings.TrimSpace(v.GetFilter())
+	if f == "" || a.linked == nil {
+		return nil
+	}
+	if ls, err := a.links(ref); err != nil || len(ls) == 0 {
+		return nil
+	}
+	if _, err := compileWith(f, a.ancestors); err != nil {
+		return linkedFilterRefusal(v.GetName(), f, err)
+	}
+	return nil
+}
+
+// retentionDays is the bucket's retention. The caller holds a.mu.
+func (a *Admin) retentionDays(ref bucketRef) int32 {
+	if b, err := a.getBucket(ref); err == nil && b.GetRetentionDays() > 0 {
+		return b.GetRetentionDays()
+	}
+	return defaultRetention
+}
+
+// linkedColumns are the columns a linked dataset's views select.
+func linkedColumns() string {
+	var cols []string
+	for _, f := range linkedSchema() {
+		if f.Name != LinkedViewsColumn {
+			cols = append(cols, "`"+f.Name+"`")
+		}
+	}
+	return strings.Join(cols, ", ")
+}
+
+// viewQueries are the dataset's views: one per log view, of the rows that
+// list it, inside the bucket's retention.
+func viewQueries(project, dataset string, views []bucketView, days int32) []LinkedView {
+	out := make([]LinkedView, 0, len(views))
+	for _, v := range views {
+		out = append(out, LinkedView{ID: v.id, Query: fmt.Sprintf(
+			"SELECT %s FROM `%s.%s.%s` WHERE '%s' IN UNNEST(`%s`) AND `timestamp` >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL %d DAY)",
+			linkedColumns(), project, dataset, LinkedEntriesTable, v.id, LinkedViewsColumn, days)})
+	}
+	return out
+}
+
+// linkedRows are es, those inside the retention at now, as rows of the
+// bucket's dataset, each listing the views that hold it.
+func linkedRows(es []*loggingpb.LogEntry, views []bucketView, now time.Time, days int32) (rows []map[string]any, ids []string) {
+	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
+	for _, e := range es {
+		if e.GetTimestamp().AsTime().Before(cutoff) {
+			continue
+		}
+		in := []any{}
+		for _, v := range views {
+			if v.match == nil || v.match(e) {
+				in = append(in, v.id)
+			}
+		}
+		row := linkedRow(e)
+		row[LinkedViewsColumn] = in
+		rows, ids = append(rows, row), append(ids, e.GetInsertId())
+	}
+	return rows, ids
+}
+
+// appendRows streams rows into a dataset, in insertAll's recommended
+// batches.
+func appendRows(ctx context.Context, l LinkedDatasets, project, dataset string, rows []map[string]any, ids []string) error {
+	var first error
+	for start := 0; start < len(rows); start += 500 {
+		end := min(start+500, len(rows))
+		if err := l.Append(ctx, project, dataset, rows[start:end], ids[start:end]); err != nil && first == nil {
+			first = err
 		}
 	}
 	return first
 }
 
-// linksOf returns the links of each bucket (by name) any of the routed
-// entries is in, reading each bucket's links once.
-func (a *Admin) linksOf(buckets map[string]bucketRef) map[string][]*loggingpb.Link {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+// linkError is err, from making or filling a link's dataset, as the
+// caller's error.
+func linkError(project, dataset string, err error) error {
+	var ae *apierror.Error
+	switch {
+	case errors.As(err, &ae):
+		return err
+	case errors.Is(err, ErrProjectNotServed):
+		return apierror.FailedPrecondition("a link makes a BigQuery dataset in the bucket's project, %s, which this instance's BigQuery does not serve: it serves one project", project)
+	case errors.Is(err, ErrDatasetExists):
+		return apierror.AlreadyExists("BigQuery dataset %s:%s already exists; a link makes its own dataset", project, dataset)
+	}
+	return &apierror.Error{Code: codes.Unavailable, Reason: "backendError", Message: fmt.Sprintf("the linked BigQuery dataset %s:%s: %v", project, dataset, err)}
+}
+
+// syncLink makes link l's dataset, of bucket ref, with the bucket's views
+// and the entries it holds: for the first time when fresh (an existing
+// dataset is ErrDatasetExists), else again, in place of the one there. The
+// caller holds a.mu.
+func (a *Admin) syncLink(ctx context.Context, ref bucketRef, l *loggingpb.Link, fresh bool) error {
+	project, dataset := linkedDataset(l)
+	lr, err := parseLink("name", l.GetName())
+	if dataset == "" || err != nil {
+		return nil
+	}
+	views, err := a.bucketViews(ref)
+	if err != nil {
+		return err
+	}
+	days := a.retentionDays(ref)
+	key := project + "." + dataset
+	a.linkSync.mu.Lock()
+	defer a.linkSync.mu.Unlock()
+	a.copies.mu.Lock()
+	entriesOf := a.copies.entries
+	a.copies.mu.Unlock()
+	a.linkSync.snap.Lock()
+	if a.linkSync.gen == nil {
+		a.linkSync.gen = map[string]uint64{}
+	}
+	a.linkSync.gen[key]++
+	var entries []*loggingpb.LogEntry
+	if entriesOf != nil {
+		entries = entriesOf(ref)
+	}
+	a.linkSync.snap.Unlock()
+	if !fresh {
+		if err := a.linked.Delete(ctx, project, dataset); err != nil {
+			return linkError(project, dataset, err)
+		}
+	}
+	if err := a.linked.Create(ctx, project, dataset, linkDatasetDescription(lr), linkedSchema(), viewQueries(project, dataset, views, days)); err != nil {
+		return linkError(project, dataset, err)
+	}
+	rows, ids := linkedRows(entries, views, a.now(), days)
+	if err := appendRows(ctx, a.linked, project, dataset, rows, ids); err != nil {
+		if fresh {
+			_ = a.linked.Delete(ctx, project, dataset)
+		}
+		return linkError(project, dataset, fmt.Errorf("writing the bucket's entries: %w", err))
+	}
+	return nil
+}
+
+// resyncBucket makes the datasets of the bucket's links again, after a
+// change of its views, its retention or its entries. The caller holds
+// a.mu.
+func (a *Admin) resyncBucket(ctx context.Context, ref bucketRef) error {
 	if a.linked == nil {
 		return nil
 	}
-	out := map[string][]*loggingpb.Link{}
-	for name, ref := range buckets {
-		if ls, err := a.links(ref); err == nil && len(ls) > 0 {
-			out[name] = ls
+	ls, err := a.links(ref)
+	if err != nil {
+		return err
+	}
+	ctx = context.WithoutCancel(ctx) // a dataset left half made helps no one
+	var first error
+	for _, l := range ls {
+		if err := a.syncLink(ctx, ref, l, false); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+// allLinks are every link the store holds, with its bucket. The caller
+// holds a.mu.
+func (a *Admin) allLinks() []linkRef {
+	keys, err := a.db.List("logging/links/")
+	if err != nil {
+		return nil
+	}
+	var out []linkRef
+	for _, k := range keys {
+		raw, err := a.db.Get(k)
+		if err != nil {
+			continue
+		}
+		l := &loggingpb.Link{}
+		if protojson.Unmarshal(raw, l) != nil {
+			continue
+		}
+		if ref, err := parseLink("name", l.GetName()); err == nil {
+			out = append(out, ref)
 		}
 	}
 	return out
 }
 
-// linkWrites streams the entries just stored into the linked datasets of
-// the buckets they are in, in the background.
-func (s *Server) linkWrites(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route) {
-	if s.admin == nil || len(es) == 0 {
-		return
-	}
-	s.admin.mu.Lock()
-	l := s.admin.linked
-	s.admin.mu.Unlock()
+// EnsureLinkedDatasets makes again, and fills, each link's dataset that
+// BigQuery no longer has: after an emulator restart, which loses what the
+// emulator held, or an instance's restart with a new emulator. It reports
+// how many it made.
+func (a *Admin) EnsureLinkedDatasets(ctx context.Context) int {
+	a.mu.Lock()
+	l, refs := a.linked, a.allLinks()
+	a.mu.Unlock()
 	if l == nil {
-		return
+		return 0
 	}
-	// The buckets each entry is in: its parent's _Default unless an
-	// exclusion kept it out, and those sinks routed it to.
+	made := 0
+	for _, ref := range refs {
+		a.mu.Lock()
+		link, err := a.getLink(ref)
+		a.mu.Unlock()
+		if err != nil {
+			continue
+		}
+		project, dataset := linkedDataset(link)
+		if ok, err := l.Exists(ctx, project, dataset); err != nil || ok {
+			continue // BigQuery not answering (yet), or the dataset is there
+		}
+		a.mu.Lock()
+		if _, err := a.getLink(ref); err == nil && a.syncLink(ctx, ref.bucket, link, true) == nil {
+			made++
+		}
+		a.mu.Unlock()
+	}
+	return made
+}
+
+// KeepLinkedDatasets runs EnsureLinkedDatasets now and every period until
+// ctx is done.
+func (a *Admin) KeepLinkedDatasets(ctx context.Context, period time.Duration) {
+	t := time.NewTicker(period)
+	defer t.Stop()
+	for {
+		a.EnsureLinkedDatasets(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// linkTarget is what one bucket's entries are appended to: its links, and
+// what its rows need.
+type linkTarget struct {
+	links []*loggingpb.Link
+	views []bucketView
+	days  int32
+}
+
+// linksOf returns the links of each bucket (by name) any of the routed
+// entries is in, reading each bucket's links once.
+func (a *Admin) linksOf(buckets map[string]bucketRef) map[string]linkTarget {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.linked == nil {
+		return nil
+	}
+	out := map[string]linkTarget{}
+	for name, ref := range buckets {
+		ls, err := a.links(ref)
+		if err != nil || len(ls) == 0 {
+			continue
+		}
+		views, err := a.bucketViews(ref)
+		if err != nil {
+			continue
+		}
+		out[name] = linkTarget{links: ls, views: views, days: a.retentionDays(ref)}
+	}
+	return out
+}
+
+// bucketsOf are the buckets each entry is in: its parent's _Default unless
+// an exclusion kept it out, and those sinks routed it to.
+func bucketsOf(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route) (map[*loggingpb.LogEntry][]string, map[string]bucketRef) {
 	in := map[*loggingpb.LogEntry][]string{}
 	buckets := map[string]bucketRef{}
 	for _, e := range es {
@@ -321,27 +645,67 @@ func (s *Server) linkWrites(es []*loggingpb.LogEntry, routes map[*loggingpb.LogE
 			}
 		}
 	}
-	links := s.admin.linksOf(buckets)
-	if len(links) == 0 {
+	return in, buckets
+}
+
+// linkWrites streams the entries just stored into the linked datasets of
+// the buckets they are in, in the background; gens are the datasets'
+// generations when they were stored.
+func (s *Server) linkWrites(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route, gens map[string]uint64) {
+	if s.admin == nil || len(es) == 0 {
+		return
+	}
+	s.admin.mu.Lock()
+	l := s.admin.linked
+	s.admin.mu.Unlock()
+	if l == nil {
+		return
+	}
+	in, buckets := bucketsOf(es, routes)
+	targets := s.admin.linksOf(buckets)
+	if len(targets) == 0 {
 		return
 	}
 	byBucket := map[string][]*loggingpb.LogEntry{}
 	for _, e := range es {
 		for _, b := range in[e] {
-			if links[b] != nil {
+			if _, ok := targets[b]; ok {
 				byBucket[b] = append(byBucket[b], e)
 			}
 		}
 	}
+	now := s.now()
 	s.d.wg.Add(1)
 	go func() {
 		defer s.d.wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		s.d.linkMu.Lock()
-		defer s.d.linkMu.Unlock()
+		s.admin.linkSync.mu.Lock()
+		defer s.admin.linkSync.mu.Unlock()
 		for b, entries := range byBucket {
-			_ = appendLinked(ctx, l, links[b], entries)
+			t := targets[b]
+			rows, ids := linkedRows(entries, t.views, now, t.days)
+			for _, link := range t.links {
+				project, dataset := linkedDataset(link)
+				if dataset == "" || s.admin.linkSync.current(project+"."+dataset) != gens[project+"."+dataset] {
+					continue // made again since, with these entries
+				}
+				_ = appendRows(ctx, l, project, dataset, rows, ids)
+			}
 		}
 	}()
+}
+
+// resyncAfterDelete makes again the datasets of the links of the buckets
+// es, entries DeleteLog just removed, were in.
+func (s *Server) resyncAfterDelete(ctx context.Context, es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route) {
+	if s.admin == nil || len(es) == 0 {
+		return
+	}
+	_, buckets := bucketsOf(es, routes)
+	s.admin.mu.Lock()
+	defer s.admin.mu.Unlock()
+	for _, name := range slices.Sorted(maps.Keys(buckets)) {
+		_ = s.admin.resyncBucket(ctx, buckets[name])
+	}
 }

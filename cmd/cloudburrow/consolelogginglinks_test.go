@@ -61,6 +61,14 @@ func TestConsoleLoggingLinks(t *testing.T) {
 	if err != nil || !strings.Contains(fmt.Sprint(d.Sections), "my_link") {
 		t.Errorf("the bucket page = %+v, %v; want the link's dataset", d.Sections, err)
 	}
+	// The link's row lists the dataset's views, one per log view (#1435).
+	if _, err := svc.admin.ConfigServer().CreateView(ctx, &loggingpb.CreateViewRequest{Parent: name, ViewId: "errors",
+		View: &loggingpb.LogView{Filter: "severity>=ERROR"}}); err != nil {
+		t.Fatal(err)
+	}
+	if l := p.links(ctx, name); len(l.Items) != 1 || l.Items[0].Fields["BigQuery views"] != "_AllLogs, errors" {
+		t.Errorf("the link row = %+v; want the views _AllLogs, errors", l.Items)
+	}
 	if !made[project+":my_link"] {
 		t.Errorf("Create link made no dataset: %v", made)
 	}
@@ -89,13 +97,17 @@ func TestConsoleLoggingLinks(t *testing.T) {
 // consoleLinked is logging.LinkedDatasets over a set of made datasets.
 type consoleLinked map[string]bool
 
-func (c consoleLinked) Create(_ context.Context, project, dataset, _ string, _ []logging.Field) error {
+func (c consoleLinked) Create(_ context.Context, project, dataset, _ string, _ []logging.Field, _ []logging.LinkedView) error {
 	c[project+":"+dataset] = true
 	return nil
 }
 
 func (c consoleLinked) Append(context.Context, string, string, []map[string]any, []string) error {
 	return nil
+}
+
+func (c consoleLinked) Exists(_ context.Context, project, dataset string) (bool, error) {
+	return c[project+":"+dataset], nil
 }
 
 func (c consoleLinked) Delete(_ context.Context, project, dataset string) error {

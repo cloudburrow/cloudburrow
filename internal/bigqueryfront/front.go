@@ -231,6 +231,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		functions.keep(functionsStateFile(o.stateDir), o.logf)     // functionstate.go
 		texts.keep(jobTextsStateFile(o.stateDir), o.logf)          // jobtextstate.go, #1028
 		views.keep(viewTextsStateFile(o.stateDir), o.logf)         // viewtextstate.go, #1028
+		linked.keep(linkedDatasetsStateFile(o.stateDir), o.logf)   // loglinks.go, #1435
 	}
 	ids := o.ids // #1063
 	if ids == nil {

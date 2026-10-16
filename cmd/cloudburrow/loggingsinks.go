@@ -213,7 +213,7 @@ func (t linkedTables) client(ctx context.Context, project string) (*bigquery.Cli
 	return bigquery.NewClient(ctx, project, option.WithEndpoint("http://"+f.HostAddr()), option.WithHTTPClient(hc))
 }
 
-func (t linkedTables) Create(ctx context.Context, project, dataset, description string, fields []logging.Field) error {
+func (t linkedTables) Create(ctx context.Context, project, dataset, description string, fields []logging.Field, views []logging.LinkedView) error {
 	c, err := t.client(ctx, project)
 	if err != nil {
 		return err
@@ -236,12 +236,30 @@ func (t linkedTables) Create(ctx context.Context, project, dataset, description 
 		_ = ds.DeleteWithContents(ctx)
 		return err
 	}
-	view := fmt.Sprintf("SELECT * FROM `%s.%s.%s`", project, dataset, logging.LinkedEntriesTable)
-	if err := ds.Table("_AllLogs").Create(ctx, &bigquery.TableMetadata{ViewQuery: view}); err != nil {
-		_ = ds.DeleteWithContents(ctx)
-		return err
+	// A view per log view of the bucket (#1435).
+	for _, v := range views {
+		if err := ds.Table(v.ID).Create(ctx, &bigquery.TableMetadata{ViewQuery: v.Query,
+			Description: "The log view " + v.ID + " of the linked log bucket."}); err != nil {
+			_ = ds.DeleteWithContents(ctx)
+			return err
+		}
 	}
 	return nil
+}
+
+func (t linkedTables) Exists(ctx context.Context, project, dataset string) (bool, error) {
+	c, err := t.client(ctx, project)
+	if err != nil {
+		return false, err
+	}
+	defer c.Close()
+	if _, err := c.Dataset(dataset).Metadata(ctx); err != nil {
+		if isNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func (t linkedTables) Append(ctx context.Context, project, dataset string, rows []map[string]any, ids []string) error {

@@ -125,3 +125,26 @@ func jsonString(m map[string]any) string {
 	}
 	return b.String()
 }
+
+// TestLinkedDatasetsOutliveAFrontRestart (#1435): the linked datasets are
+// kept in the state directory, so a front started again over it still
+// knows them; an emulator restart forgets them there too.
+func TestLinkedDatasetsOutliveAFrontRestart(t *testing.T) {
+	path := linkedDatasetsStateFile(t.TempDir())
+	l := &linkedDatasets{}
+	l.keep(path, t.Logf)
+	l.set("p", "logs", true)
+	l.set("p", "gone", true)
+	l.set("p", "gone", false)
+	again := &linkedDatasets{}
+	again.keep(path, t.Logf)
+	if !again.has("p", "logs") || again.has("p", "gone") {
+		t.Fatalf("after a restart: logs %v, gone %v; want logs alone", again.has("p", "logs"), again.has("p", "gone"))
+	}
+	again.reset()
+	third := &linkedDatasets{}
+	third.keep(path, t.Logf)
+	if third.has("p", "logs") {
+		t.Error("an emulator restart's reset left the dataset kept")
+	}
+}
