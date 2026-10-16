@@ -1,0 +1,138 @@
+CloudBurrow patch 29 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1273). Applies after patch 0028.
+
+The gap: BigQuery keeps a streaming buffer for a table partitioned by a
+column too: rows streamed by tabledata.insertAll are read by queries at
+once, but sit in the __UNPARTITIONED__ partition until BigQuery extracts
+them, are not counted in the table's numRows, are not copied, and cannot
+be changed by DML (https://cloud.google.com/bigquery/docs/streaming-data-into-bigquery,
+https://cloud.google.com/bigquery/docs/data-manipulation-language#limitations).
+Unlike an ingestion-time partitioned table's, whose buffered rows have
+_PARTITIONTIME NULL (patch 0028), such a table has no column that tells
+a buffered row from the others.
+
+The patch gives a CREATE TABLE with a column list and a PARTITION BY that
+is not ingestion time the column _PARTITION_BUFFERED BOOL, a pseudo-column
+as patch 0028 makes _PARTITIONTIME one: SELECT * leaves it out, an INSERT
+may give it and a query names it. CloudBurrow's front sets it TRUE on a
+streamed row and NULL when the buffer flushes. BigQuery reserves the
+column-name prefix _PARTITION, so no column of a table can be named so.
+streaming_buffer_mark_test.go fails without the patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -552,9 +552,17 @@
+ // ingestion-time partitioned table (CloudBurrow patch,
+ // cloudburrow/cloudburrow#1277).
+ func isIngestionPseudoColumn(name string) bool {
+-	return strings.EqualFold(name, "_PARTITIONTIME") || strings.EqualFold(name, "_PARTITIONDATE")
++	return strings.EqualFold(name, "_PARTITIONTIME") || strings.EqualFold(name, "_PARTITIONDATE") ||
++		strings.EqualFold(name, streamingBufferColumn)
+ }
+ 
++// streamingBufferColumn is the pseudo-column a table partitioned by a
++// column or an integer range gets: TRUE on a row in the table's
++// streaming buffer, NULL on any other (CloudBurrow patch,
++// cloudburrow/cloudburrow#1273). BigQuery reserves the prefix _PARTITION
++// for its own column names, so no table's column can be named so.
++const streamingBufferColumn = "_PARTITION_BUFFERED"
++
+ // ingestionPartitionUnit returns the partitioning unit of a PARTITION
+ // BY expression of ingestion time, or "" when expr is not one.
+ func ingestionPartitionUnit(expr string) string {
+@@ -578,9 +586,6 @@
+ // one (CREATE TABLE ... AS SELECT) is left as it is.
+ func addIngestionPseudoColumns(query string, pos int, expr string) string {
+ 	unit := ingestionPartitionUnit(expr)
+-	if unit == "" {
+-		return query
+-	}
+ 	k := pos
+ 	for k > 0 && (query[k-1] == ' ' || query[k-1] == '\t' || query[k-1] == '\n' || query[k-1] == '\r') {
+ 		k--
+@@ -591,9 +596,15 @@
+ 	start := strings.LastIndexByte(query[:k], ';') + 1
+ 	head := strings.ToUpper(query[start:k])
+ 	if !strings.Contains(head, "CREATE") || !strings.Contains(head, "TABLE") ||
+-		strings.Contains(head, "_PARTITIONTIME") {
++		strings.Contains(head, "_PARTITIONTIME") || strings.Contains(head, streamingBufferColumn) {
+ 		return query
+ 	}
++	if unit == "" {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1273): a table
++		// partitioned by a column or an integer range marks the rows of
++		// its streaming buffer.
++		return query[:k-1] + ", `" + streamingBufferColumn + "` BOOL" + query[k-1:]
++	}
+ 	cols := ", `_PARTITIONTIME` TIMESTAMP DEFAULT TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), " + unit + ")"
+ 	if unit == "DAY" {
+ 		cols += ", `_PARTITIONDATE` DATE DEFAULT CURRENT_DATE()"
+--- /dev/null
++++ b/streaming_buffer_mark_test.go
+@@ -0,0 +1,60 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestStreamingBufferMark is CloudBurrow's regression test of its patch
++// 0029 (cloudburrow/cloudburrow#1273): a table partitioned by a column or
++// an integer range has the pseudo-column _PARTITION_BUFFERED, which
++// SELECT * leaves out, an INSERT may give and a query names; a table that
++// is not partitioned has none.
++func TestStreamingBufferMark(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	exec := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	exec(`CREATE TABLE by_day (d DATE, id INT64) PARTITION BY d`)
++	exec(`CREATE TABLE by_range (n INT64) PARTITION BY RANGE_BUCKET(n, GENERATE_ARRAY(0, 100, 10))`)
++	exec(`CREATE TABLE plain (id INT64)`)
++	exec(`INSERT INTO by_day (d, id) VALUES (DATE '2024-01-01', 1)`)
++	exec(`INSERT INTO by_day (d, id, _PARTITION_BUFFERED) VALUES (DATE '2024-01-01', 2, TRUE)`)
++	exec(`INSERT INTO by_range (n, _PARTITION_BUFFERED) SELECT 5, TRUE`)
++
++	rows, err := db.QueryContext(ctx, `SELECT * FROM by_day`)
++	if err != nil {
++		t.Fatal(err)
++	}
++	cols, _ := rows.Columns()
++	rows.Close()
++	if strings.Join(cols, ",") != "d,id" {
++		t.Errorf("SELECT * columns = %v, want [d id]", cols)
++	}
++	var id, n int64
++	if err := db.QueryRowContext(ctx, `SELECT id FROM by_day WHERE _PARTITION_BUFFERED`).Scan(&id); err != nil || id != 2 {
++		t.Errorf("buffered row: id %d (%v), want 2", id, err)
++	}
++	exec(`UPDATE by_day SET _PARTITION_BUFFERED = NULL WHERE _PARTITION_BUFFERED`)
++	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM by_day WHERE _PARTITION_BUFFERED IS NULL`).Scan(&n); err != nil || n != 2 {
++		t.Errorf("after the flush: %d unbuffered rows (%v), want 2", n, err)
++	}
++	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM by_range WHERE _PARTITION_BUFFERED`).Scan(&n); err != nil || n != 1 {
++		t.Errorf("by_range: %d buffered rows (%v), want 1", n, err)
++	}
++	if _, err := db.QueryContext(ctx, `SELECT _PARTITION_BUFFERED FROM plain`); err == nil {
++		t.Error("_PARTITION_BUFFERED of a table that is not partitioned: no error")
++	}
++}

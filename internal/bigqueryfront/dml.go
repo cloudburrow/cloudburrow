@@ -334,6 +334,10 @@ func (f front) serveDML(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		}
 		d, base = md, d.asMerge
 	}
+	if msg := f.bufferedChange(r, q, d, ds, table); msg != "" {
+		f.failBeforeRun(w, r, q, insert, ds, http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
+		return
+	}
 	text := base
 	var before int64
 	switch d.kind {
@@ -570,6 +574,15 @@ func parseDML(sql string) (dmlStmt, bool) {
 			d.kind = "TRUNCATE_TABLE"
 		}
 		d.target, d.pathText = parts, text(i, j)
+		if d.kind == "DELETE" {
+			// Its alias and WHERE, for the streaming buffer's check
+			// (#1273, bufferedChange).
+			k := aliasEnd(t, j, "WHERE")
+			d.targetText = text(i, k)
+			if k < len(t) && t[k].is("WHERE") && k+1 < len(t) {
+				d.where = text(k+1, len(t))
+			}
+		}
 		return d, true
 	case "UPDATE":
 		parts, j, ok := readPath(1)
@@ -823,4 +836,74 @@ func mergeFromSubquery(sql string) string {
 		}
 	}
 	return ""
+}
+
+// bufferedChange returns the error of the DML statement d of the table
+// ds.table when it would change a row in the table's streaming buffer, or
+// "": "rows that were recently written ... can't be modified with data
+// manipulation language (DML), such as UPDATE, DELETE, MERGE, or TRUNCATE
+// statements. ... All other rows in the table remain modifiable"
+// (https://cloud.google.com/bigquery/docs/data-manipulation-language;
+// #1273, streamingbuffer.go). The rows a statement would change are
+// counted among the buffered rows alone; an INSERT changes none.
+func (f front) bufferedChange(r *http.Request, q queryOptions, d dmlStmt, ds, table string) string {
+	win, ok := f.buffers.window(projectOf(f.base), ds, table)
+	if !ok || d.kind == "INSERT" {
+		return ""
+	}
+	alias := strings.TrimSpace(strings.TrimPrefix(d.targetText, d.pathText))
+	if len(alias) > 3 && strings.EqualFold(alias[:3], "AS ") {
+		alias = strings.TrimSpace(alias[3:])
+	}
+	if alias == "" && len(d.target) > 0 {
+		alias = quoteName(d.target[len(d.target)-1])
+	}
+	buffered := "(SELECT * FROM " + d.pathText + " WHERE " + win.cond() + ") AS " + alias
+	var n int64
+	switch d.kind {
+	case "TRUNCATE_TABLE", "DELETE", "UPDATE":
+		sel := "SELECT COUNT(*) FROM " + buffered
+		if d.where != "" {
+			sel += " WHERE " + d.where
+		} else if d.kind != "TRUNCATE_TABLE" {
+			return "" // BigQuery requires a WHERE: the emulator answers it
+		}
+		c, ok := f.countRows1(r, q, sel)
+		if !ok || len(c) != 1 {
+			return ""
+		}
+		n = c[0]
+	case "MERGE":
+		if d.subquery != "" || len(d.clauses) == 0 {
+			// The source subquery runs once, in serveDML: a MERGE of one
+			// whose target has a buffer is checked against every buffered
+			// row it could match.
+			c, ok := f.countRows1(r, q, "SELECT COUNT(*) FROM "+buffered)
+			if !ok || len(c) != 1 {
+				return ""
+			}
+			n = c[0]
+			break
+		}
+		bd := d
+		bd.targetText = buffered
+		c, ok := f.countRows1(r, q, mergeCounts(bd, d.source))
+		if !ok || len(c) != len(d.clauses) {
+			return ""
+		}
+		for i, cl := range d.clauses {
+			if cl.group != notMatchedByTarget && cl.action != "INSERT" {
+				n += c[i]
+			}
+		}
+	default:
+		return ""
+	}
+	if n == 0 {
+		return ""
+	}
+	// BigQuery's message as users have reported it, for UPDATE, DELETE
+	// and MERGE alike.
+	return "UPDATE or DELETE statement over table " + projectOf(f.base) + "." + ds + "." + table +
+		" would affect rows in the streaming buffer, which is not supported" // UNVERIFIED wording
 }

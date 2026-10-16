@@ -3,6 +3,7 @@ package bigqueryfront
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -49,6 +50,38 @@ import (
 // directory, so a restart of the front loses none; the emulator's restart
 // empties them with the tables.
 
+// The streaming buffer of a table partitioned by a column or an integer
+// range (#1273). BigQuery documents that "when you stream data to a
+// time-partitioned table, each partition has a streaming buffer", that a
+// streamed row of a table partitioned by a DATE, DATETIME or TIMESTAMP
+// column "is initially placed in the __UNPARTITIONED__ partition", that
+// for a daily partitioned table "only data outside of the date range
+// (last 7 days to future 3 days) is extracted to the UNPARTITIONED
+// partition", and that a value of the column more than 10 years in the
+// past or 1 year in the future is rejected
+// (https://cloud.google.com/bigquery/docs/streaming-data-into-bigquery).
+// Such a table has no column that tells a buffered row from the others,
+// so the engine gives it the pseudo-column _PARTITION_BUFFERED (googlesqlite
+// patch 0029, bigquery-emulator patch 0016), which no query of the client
+// names: TRUE on a buffered row of __UNPARTITIONED__, FALSE on one
+// buffered in its own partition, NULL on every other row. The rows are
+// read by queries at once, as BigQuery reads them; a partition decorator
+// reads __UNPARTITIONED__ with the TRUE ones and the other partitions
+// without them (partitionFilter); tables.get leaves them out of numRows
+// and answers streamingBuffer; a copy leaves them out; and an UPDATE,
+// DELETE, MERGE or TRUNCATE TABLE that would change one fails, as
+// "rows that were recently written ... can't be modified with data
+// manipulation language" (https://cloud.google.com/bigquery/docs/data-manipulation-language).
+// The window flushes as an ingestion-time table's does, giving every row
+// NULL. A table made before the engine had the column streams as it did,
+// its rows partitioned at once. An integer-range partitioned table's rows
+// go to __UNPARTITIONED__ too: BigQuery's documentation does not set them
+// apart.
+
+// bufferedRows is the engine's pseudo-column of a table partitioned by a
+// column that marks the rows of its streaming buffer (above).
+const bufferedRows = "_PARTITION_BUFFERED"
+
 // streamBufferFor is how long a streamed row of an ingestion-time
 // partitioned table stays in the buffer: BigQuery gives "typically a few
 // minutes" and no SLA.
@@ -63,6 +96,18 @@ type streamWindow struct {
 	Target  time.Time `json:"target"` // the partition's start
 	Oldest  time.Time `json:"oldest"`
 	Rows    int64     `json:"rows"`
+	// Column is whether the table is partitioned by a column or an
+	// integer range, whose buffered rows _PARTITION_BUFFERED marks.
+	Column bool `json:"column,omitempty"`
+}
+
+// cond is the condition of the rows of w's table that are in its
+// streaming buffer.
+func (w streamWindow) cond() string {
+	if w.Column {
+		return bufferedRows + " IS NOT NULL"
+	}
+	return "_PARTITIONTIME IS NULL"
 }
 
 // streamBuffers are the tables' streaming buffers.
@@ -206,6 +251,10 @@ func (s *streamBuffers) flushDue(next http.Handler, r *http.Request) {
 
 // flushWindow gives the buffered rows of w's table their partition time.
 func (f front) flushWindow(r *http.Request, w streamWindow) string {
+	if w.Column {
+		return f.runDML(r, "UPDATE "+quotePath([]string{projectOf(f.base), w.Dataset, w.Table})+" SET "+bufferedRows+
+			" = NULL WHERE "+bufferedRows+" IS NOT NULL")
+	}
 	t := "TIMESTAMP '" + w.Target.Format(sqlTimestamp) + "'"
 	set := "_PARTITIONTIME = " + t
 	if w.Unit == "DAY" {
@@ -265,10 +314,15 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 		name += "$" + dec
 	}
 	now := f.buffers.clock()
-	target, code, msg := streamTarget(m, dec, name, now)
-	if code != 0 {
-		writeError(w, code, reasonOf(code, "invalid"), msg)
-		return false
+	column := !m.ingestion()
+	var target time.Time
+	if !column {
+		var code int
+		var msg string
+		if target, code, msg = streamTarget(m, dec, name, now); code != 0 {
+			writeError(w, code, reasonOf(code, "invalid"), msg)
+			return false
+		}
 	}
 	schema, err := json.Marshal(m.Schema)
 	if err != nil {
@@ -299,7 +353,11 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 	}
 	list := strings.Join(cols, ", ")
 	pcols, pvals := ", _PARTITIONTIME", ", CAST(NULL AS TIMESTAMP)"
-	if m.ingestionUnit() == "DAY" {
+	unit := m.ingestionUnit()
+	switch {
+	case column:
+		pcols, pvals, unit = ", "+bufferedRows, ", "+bufferedMark(m, now), ""
+	case unit == "DAY":
 		pcols, pvals = pcols+", _PARTITIONDATE", pvals+", CAST(NULL AS DATE)"
 	}
 	// A window for another partition flushes first (above).
@@ -319,8 +377,19 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 			return false
 		}
 	}
-	if why := f.runDML(r, "INSERT INTO "+quotePath([]string{project, dataset, base})+" ("+list+pcols+") SELECT "+list+
-		pvals+" FROM "+quotePath([]string{project, dataset, scratch.TableID})); why != "" {
+	insert := func(pcols, pvals string) string {
+		return f.runDML(r, "INSERT INTO "+quotePath([]string{project, dataset, base})+" ("+list+pcols+") SELECT "+list+
+			pvals+" FROM "+quotePath([]string{project, dataset, scratch.TableID}))
+	}
+	why = insert(pcols, pvals)
+	if why != "" && column && strings.Contains(why, bufferedRows) {
+		// A table made before the engine marked the buffer (above): its
+		// rows are partitioned at once, as they were.
+		if why = insert("", ""); why == "" {
+			return true
+		}
+	}
+	if why != "" {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not stream the rows: "+why)
 		return false
 	}
@@ -331,8 +400,8 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 	if cur, ok := f.buffers.wins[key]; ok && cur.Target.Equal(target) {
 		cur.Rows += n
 	} else {
-		f.buffers.wins[key] = &streamWindow{Base: f.base, Dataset: dataset, Table: base, Unit: m.ingestionUnit(),
-			Target: target, Oldest: now, Rows: n}
+		f.buffers.wins[key] = &streamWindow{Base: f.base, Dataset: dataset, Table: base, Unit: unit,
+			Target: target, Oldest: now, Rows: n, Column: column}
 	}
 	f.buffers.saveLocked()
 	f.buffers.mu.Unlock()
@@ -348,7 +417,7 @@ func (f front) withStreamingBuffer(r *http.Request, dataset, table string, meta 
 		return false
 	}
 	n, why := f.scalar(r, "SELECT COUNT(*) FROM "+quotePath([]string{projectOf(f.base), dataset, table})+
-		" WHERE _PARTITIONTIME IS NULL")
+		" WHERE "+win.cond())
 	if why != "" || n == 0 {
 		return false
 	}
@@ -362,4 +431,65 @@ func (f front) withStreamingBuffer(r *http.Request, dataset, table string, meta 
 		}
 	}
 	return true
+}
+
+// bufferedMark is the SQL value of _PARTITION_BUFFERED for a row streamed
+// now into the table m, partitioned by a column, read from the row's
+// columns: FALSE when its partition is a day's from 7 days ago to 3 days
+// ahead, which keeps it in its own partition's buffer; TRUE, in
+// __UNPARTITIONED__, otherwise (above).
+func bufferedMark(m partitionMeta, now time.Time) string {
+	tp := m.TimePartitioning
+	if tp == nil || tp.Field == "" || tp.Type != "" && !strings.EqualFold(tp.Type, "DAY") {
+		return "TRUE"
+	}
+	expr := quoteName(tp.Field)
+	for _, fl := range m.Schema.Fields {
+		if strings.EqualFold(fl.Name, tp.Field) && !strings.EqualFold(fl.Type, "TIMESTAMP") {
+			expr = "TIMESTAMP(" + expr + ")"
+		}
+	}
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	return "IF(" + expr + " >= TIMESTAMP '" + today.AddDate(0, 0, -7).Format(sqlTimestamp) + "' AND " + expr +
+		" < TIMESTAMP '" + today.AddDate(0, 0, 4).Format(sqlTimestamp) + "', FALSE, TRUE)"
+}
+
+// streamBounds checks the value v of the partitioning column of a row
+// streamed now into a table partitioned by a DATE, DATETIME or TIMESTAMP
+// column: "between 10 years in the past and 1 year in the future. Data
+// outside this range is rejected" (above). It returns the row error's
+// message, or "" when the value is in bounds or is not one it reads.
+func streamBounds(m partitionMeta, v any, now time.Time) string {
+	tp := m.TimePartitioning
+	if tp == nil || tp.Field == "" {
+		return ""
+	}
+	var t time.Time
+	switch x := v.(type) {
+	case string:
+		ok := false
+		for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999Z07:00", "2006-01-02 15:04:05.999999999",
+			"2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05.999999999 MST", "2006-01-02"} {
+			if p, err := time.Parse(layout, x); err == nil {
+				t, ok = p, true
+				break
+			}
+		}
+		if !ok {
+			return ""
+		}
+	case json.Number:
+		sec, err := x.Float64()
+		if err != nil {
+			return ""
+		}
+		t = time.Unix(0, int64(sec*1e9))
+	default:
+		return ""
+	}
+	if t.Before(now.AddDate(-10, 0, 0)) || t.After(now.AddDate(1, 0, 0)) {
+		return "Value " + fmt.Sprint(v) + " for field " + tp.Field + " is outside the allowed bounds: you can stream " +
+			"data between 10 years in the past and 1 year in the future." // UNVERIFIED wording
+	}
+	return ""
 }

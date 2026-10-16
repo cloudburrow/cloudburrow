@@ -89,6 +89,10 @@ type copyTable struct {
 	// snapshot is the table's snapshotDefinition, nil when it is not a
 	// snapshot (#1002, snapshots.go).
 	snapshot map[string]any
+	// where is the condition of the rows copied, or "": a table
+	// partitioned by a column leaves out its streaming buffer's (#1273,
+	// streamingbuffer.go).
+	where string
 }
 
 // copyJob carries out a copy job (above).
@@ -166,6 +170,11 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 	sources := make([]copyTable, len(srcs))
 	for i, s := range srcs {
 		sources[i] = f.copyTableMeta(r, s)
+		if win, ok := f.buffers.window(project, s.DatasetID, s.TableID); ok && win.Column {
+			// "Recent streaming data isn't present in the destination
+			// table" (#1273, streamingbuffer.go).
+			sources[i].where = bufferedRows + " IS NULL"
+		}
 	}
 	dest := f.copyTableMeta(r, *c.DestinationTable)
 	if dest.exists && isView(dest.kind) {
@@ -415,6 +424,9 @@ func selectAll(fields []field, sources []copyTable) string {
 	parts := make([]string, len(sources))
 	for i, s := range sources {
 		parts[i] = "SELECT " + list + " FROM " + quotePath([]string{s.ref.DatasetID, s.ref.TableID})
+		if s.where != "" {
+			parts[i] += " WHERE " + s.where
+		}
 	}
 	return strings.Join(parts, " UNION ALL ")
 }
