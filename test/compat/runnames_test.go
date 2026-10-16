@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,7 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// covers: google.cloud.run.v2.WorkerPools/CreateWorkerPool, google.cloud.run.v2.WorkerPools/GetWorkerPool, google.cloud.run.v2.WorkerPools/ListWorkerPools, google.cloud.run.v2.WorkerPools/DeleteWorkerPool, google.cloud.run.v2.Jobs/CreateJob, google.cloud.run.v2.Jobs/GetJob, google.cloud.run.v2.Jobs/ListJobs, google.cloud.run.v2.Jobs/RunJob, google.cloud.run.v2.Jobs/DeleteJob, google.cloud.run.v2.Executions/ListExecutions, google.cloud.run.v2.Instances/CreateInstance, google.cloud.run.v2.Instances/GetInstance, google.cloud.run.v2.Instances/ListInstances, google.cloud.run.v2.Instances/DeleteInstance, google.cloud.run.v2.Services/CreateService, google.cloud.run.v2.Services/GetService, google.cloud.run.v2.Services/ListServices, google.cloud.run.v2.Services/DeleteService
+// covers: google.cloud.run.v2.WorkerPools/CreateWorkerPool, google.cloud.run.v2.WorkerPools/GetWorkerPool, google.cloud.run.v2.WorkerPools/ListWorkerPools, google.cloud.run.v2.WorkerPools/DeleteWorkerPool, google.cloud.run.v2.Jobs/CreateJob, google.cloud.run.v2.Jobs/GetJob, google.cloud.run.v2.Jobs/ListJobs, google.cloud.run.v2.Jobs/RunJob, google.cloud.run.v2.Jobs/DeleteJob, google.cloud.run.v2.Executions/ListExecutions, google.cloud.run.v2.Instances/CreateInstance, google.cloud.run.v2.Instances/GetInstance, google.cloud.run.v2.Instances/ListInstances, google.cloud.run.v2.Instances/DeleteInstance, google.cloud.run.v2.Services/CreateService, google.cloud.run.v2.Services/GetService, google.cloud.run.v2.Services/ListServices, google.cloud.run.v2.Services/DeleteService, google.cloud.run.v2.Revisions/GetRevision
 //
 // TestRunNamesPerProject (#1399): through the official clients, two projects
 // each create a worker pool, a job and an instance of one ID. They are two
@@ -25,9 +27,10 @@ import (
 // own URL with its own greeting), and counts only its own executions.
 // Deleting one project's leaves the other's ready.
 //
-// A service is the exception (#1400): a second project's service of an ID
-// in use is refused as UNIMPLEMENTED, and the other project neither sees
-// nor deletes the first's.
+// Each also creates a service of the ID (#1400): each serves its own
+// response at its own URL, its revision reads back as <id>-00001-<suffix>,
+// it lists only in its own project, and deleting one leaves the other
+// serving.
 func TestRunNamesPerProject(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -44,6 +47,11 @@ func TestRunNamesPerProject(t *testing.T) {
 	t.Cleanup(func() { _ = ic.Close() })
 	jc, xc := runJobClients(t, h)
 	sc := runClient(t, h)
+	rc, err := run.NewRevisionsClient(ctx, opts...)
+	if err != nil {
+		t.Fatalf("run.NewRevisionsClient: %v", err)
+	}
+	t.Cleanup(func() { _ = rc.Close() })
 	if os.Getenv(envKubeconfig) == "" {
 		if cli := os.Getenv(EnvCLI); cli != "" {
 			t.Setenv(envKubeconfig, filepath.Join(instanceDirFrom(t, cliArgs()), "kubeconfig"))
@@ -191,44 +199,79 @@ func TestRunNamesPerProject(t *testing.T) {
 	check("a", 1)
 	check("b", 0)
 
-	// A service: project a's is served; project b may not have one of the
-	// same ID, and does not see or delete a's (#1400).
-	svcA := parents["a"] + "/services/" + id
-	svcB := parents["b"] + "/services/" + id
-	sop, err := sc.CreateService(ctx, &runpb.CreateServiceRequest{Parent: parents["a"], ServiceId: id,
-		Service: &runpb.Service{Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{
-			Image: "ghcr.io/knative/helloworld-go:latest"}}}}})
-	if err != nil {
-		t.Fatalf("CreateService: %v", err)
-	}
-	t.Cleanup(func() { _, _ = sc.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: svcA}) })
-	if _, err := sop.Wait(ctx); err != nil {
-		t.Fatalf("waiting for CreateService: %v", err)
-	}
-	if _, err := sc.CreateService(ctx, &runpb.CreateServiceRequest{Parent: parents["b"], ServiceId: id,
-		Service: &runpb.Service{Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{
-			Image: "ghcr.io/knative/helloworld-go:latest"}}}}}); status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), svcA) {
-		t.Errorf("CreateService of a's ID in b = %v; want Unimplemented naming %s", err, svcA)
-	}
-	if _, err := sc.GetService(ctx, &runpb.GetServiceRequest{Name: svcB}); status.Code(err) != codes.NotFound {
-		t.Errorf("GetService in b = %v; want NotFound", err)
-	}
-	if _, err := sc.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: svcB}); status.Code(err) != codes.NotFound {
-		t.Errorf("DeleteService in b = %v; want NotFound", err)
-	}
-	for sit := sc.ListServices(ctx, &runpb.ListServicesRequest{Parent: parents["b"]}); ; {
-		x, err := sit.Next()
-		if err == iterator.Done {
-			break
-		}
+	// A service of the ID in each project (#1400): two services, each
+	// serving its own response at its own URL, with revisions named as
+	// Cloud Run names them, each listed only in its own project.
+	svcs := map[string]*runpb.Service{}
+	for _, side := range []string{"a", "b"} {
+		name := parents[side] + "/services/" + id
+		sop, err := sc.CreateService(ctx, &runpb.CreateServiceRequest{Parent: parents[side], ServiceId: id,
+			Service: &runpb.Service{Labels: map[string]string{"side": side}, Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{
+				Image: "ghcr.io/knative/helloworld-go:latest",
+				Env:   []*runpb.EnvVar{{Name: "TARGET", Values: &runpb.EnvVar_Value{Value: "service " + side}}}}}}}})
 		if err != nil {
-			t.Fatalf("ListServices: %v", err)
+			t.Fatalf("CreateService in %s: %v", parents[side], err)
 		}
-		t.Errorf("ListServices in b listed %s", x.GetName())
+		t.Cleanup(func() {
+			if op, err := sc.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: name}); err == nil {
+				_, _ = op.Wait(ctx)
+			}
+		})
+		if svcs[side], err = sop.Wait(ctx); err != nil {
+			t.Fatalf("waiting for CreateService in %s: %v", parents[side], err)
+		}
 	}
-	if got, err := sc.GetService(ctx, &runpb.GetServiceRequest{Name: svcA}); err != nil || got.GetName() != svcA {
-		t.Errorf("GetService in a = %v, %v; want it still there", got, err)
+	if svcs["a"].GetUri() == "" || svcs["a"].GetUri() == svcs["b"].GetUri() {
+		t.Errorf("the two services' URLs are %q and %q; want one each", svcs["a"].GetUri(), svcs["b"].GetUri())
 	}
+	revRE := regexp.MustCompile("^" + id + `-00001-[a-z0-9]{3}$`)
+	checkService := func(side string) {
+		t.Helper()
+		name := parents[side] + "/services/" + id
+		got, err := sc.GetService(ctx, &runpb.GetServiceRequest{Name: name})
+		if err != nil || got.GetName() != name || got.GetLabels()["side"] != side || !revRE.MatchString(got.GetLatestReadyRevision()) {
+			t.Fatalf("GetService in %s = %v, %v; want its own, revision %s-00001-xxx", parents[side], got, err, id)
+		}
+		if body, code := secretEnvGet(t, ingress(t), hostOf(t, got.GetUri())); code != http.StatusOK || !strings.Contains(body, "Hello service "+side) {
+			t.Errorf("GET %s = %d %q; want Hello service %s", got.GetUri(), code, body, side)
+		}
+		rev, err := rc.GetRevision(ctx, &runpb.GetRevisionRequest{Name: name + "/revisions/" + got.GetLatestReadyRevision()})
+		if err != nil || rev.GetService() != name || rev.GetGeneration() != 1 {
+			t.Errorf("GetRevision %s = %v, %v", got.GetLatestReadyRevision(), rev, err)
+		}
+		var listed []string
+		for sit := sc.ListServices(ctx, &runpb.ListServicesRequest{Parent: parents[side]}); ; {
+			x, err := sit.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				t.Fatalf("ListServices: %v", err)
+			}
+			listed = append(listed, x.GetName())
+		}
+		if !slices.Contains(listed, name) || slices.Contains(listed, parents[otherSide(side)]+"/services/"+id) {
+			t.Errorf("ListServices in %s = %v; want its own service only", parents[side], listed)
+		}
+	}
+	checkService("a")
+	checkService("b")
+	if _, err := sc.CreateService(ctx, &runpb.CreateServiceRequest{Parent: parents["b"], ServiceId: id,
+		Service: svcs["b"]}); status.Code(err) != codes.AlreadyExists {
+		t.Errorf("a second CreateService in b = %v; want AlreadyExists", err)
+	}
+	// Deleting a's leaves b's, serving.
+	dsop, err := sc.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: parents["a"] + "/services/" + id})
+	if err != nil {
+		t.Fatalf("DeleteService in a: %v", err)
+	}
+	if _, err := dsop.Wait(ctx); err != nil {
+		t.Fatalf("waiting for DeleteService in a: %v", err)
+	}
+	if _, err := sc.GetService(ctx, &runpb.GetServiceRequest{Name: parents["a"] + "/services/" + id}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetService of a's deleted service = %v; want NotFound", err)
+	}
+	checkService("b")
 
 	// Deleting project a's leaves project b's, ready and serving.
 	dop, err := pc.DeleteWorkerPool(ctx, &runpb.DeleteWorkerPoolRequest{Name: parents["a"] + "/workerPools/" + id})
@@ -267,4 +310,12 @@ func TestRunNamesPerProject(t *testing.T) {
 		}
 	}
 	check("b", 0)
+}
+
+// otherSide is the other of TestRunNamesPerProject's two projects.
+func otherSide(side string) string {
+	if side == "a" {
+		return "b"
+	}
+	return "a"
 }

@@ -155,13 +155,14 @@ type SecretResolver interface {
 }
 
 func ToKnative(svc *runpb.Service, namespace, instance string, secrets SecretResolver) (string, error) {
-	return renderService(svc, namespace, instance, secrets, nil, nil)
+	return renderService(svc, serviceKName(svc.GetName()), namespace, instance, secrets, nil, nil)
 }
 
-// renderService is ToKnative with the environment CloudBurrow injects into
-// every container (#576), after the caller's and never over a name the
-// caller set.
-func renderService(svc *runpb.Service, namespace, instance string, secrets SecretResolver,
+// renderService is ToKnative as the Knative Service kname (#1400: the
+// scoped name of a new service, or the ID an older version's service has),
+// with the environment CloudBurrow injects into every container (#576),
+// after the caller's and never over a name the caller set.
+func renderService(svc *runpb.Service, kname, namespace, instance string, secrets SecretResolver,
 	injected []injectedEnv, sql *CloudSQLConfig) (string, error) {
 	if err := Unsupported(svc); err != nil {
 		return "", err
@@ -169,8 +170,7 @@ func renderService(svc *runpb.Service, namespace, instance string, secrets Secre
 	if err := validateTraffic(svc.GetTraffic()); err != nil {
 		return "", err
 	}
-	id, err := ServiceID(svc.GetName())
-	if err != nil {
+	if _, err := ServiceID(svc.GetName()); err != nil {
 		return "", err
 	}
 	tmpl := svc.GetTemplate()
@@ -200,7 +200,7 @@ metadata:
     cloudburrow.dev/instance: %q
   annotations:
     cloudburrow.dev/cloud-run-name: %q
-`, id, namespace, instance, svc.GetName())
+`, kname, namespace, instance, svc.GetName())
 	jsonAnnotation(&b, "    ", annServiceLabels, svc.GetLabels(), len(svc.GetLabels()) == 0)
 	jsonAnnotation(&b, "    ", annServiceAnnotations, svc.GetAnnotations(), len(svc.GetAnnotations()) == 0)
 	if d := svc.GetDescription(); d != "" {
@@ -261,7 +261,7 @@ metadata:
 		return "", err
 	}
 	renderCloudSQLProxies(&b, tmpl.GetVolumes(), o, false)
-	renderTraffic(&b, svc.GetTraffic())
+	renderTraffic(&b, svc.GetTraffic(), func(rev string) string { return kRevisionName(svc.GetName(), kname, rev) })
 	return b.String(), nil
 }
 
@@ -441,14 +441,21 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 		name = fmt.Sprintf("%s/services/%s", parent, k.Metadata.Name)
 	}
 
+	// Revisions read back as Cloud Run names them (#1400).
+	rev := func(krev string) string {
+		if krev == "" {
+			return ""
+		}
+		return RevisionID(name, k.Metadata.Name, krev)
+	}
 	svc := &runpb.Service{
 		Name:                  name,
 		Uri:                   k.Status.URL,
 		Generation:            k.Metadata.Generation,
 		ObservedGeneration:    k.Status.ObservedGeneration,
 		Template:              &runpb.RevisionTemplate{},
-		LatestReadyRevision:   k.Status.LatestReadyRevisionName,
-		LatestCreatedRevision: k.Status.LatestCreatedRevisionName,
+		LatestReadyRevision:   rev(k.Status.LatestReadyRevisionName),
+		LatestCreatedRevision: rev(k.Status.LatestCreatedRevisionName),
 		// What a Terraform refresh or a GitOps controller compares (#581):
 		// the etag is the object's resourceVersion, so it changes on every
 		// write and a stale one is refused on update and delete.
@@ -541,7 +548,7 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 		cond.Message = reason
 	}
 	svc.TerminalCondition = cond
-	svc.Traffic, svc.TrafficStatuses = fromKnativeTraffic(k)
+	svc.Traffic, svc.TrafficStatuses = fromKnativeTraffic(k, rev)
 	return svc
 }
 

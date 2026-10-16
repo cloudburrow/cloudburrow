@@ -60,7 +60,9 @@ func (s *Server) serviceOwner(ctx context.Context, name string) (iamOwner, error
 	if err != nil {
 		return iamOwner{}, err
 	}
-	return iamOwner{kind: "service", id: id, name: name, apiVersion: "serving.knative.dev/v1",
+	// By its Knative name: the ID for an older version's service, as its
+	// policy was named then, and <id>-<scope> since (#1400).
+	return iamOwner{kind: "service", id: k.Metadata.Name, name: name, apiVersion: "serving.knative.dev/v1",
 		objKind: "Service", objName: k.Metadata.Name, uid: k.Metadata.UID}, nil
 }
 

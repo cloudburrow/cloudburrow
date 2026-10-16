@@ -30,7 +30,7 @@ func TestCloudSQLVolumeRendersTheAuthProxy(t *testing.T) {
 			VolumeMounts: []*runpb.VolumeMount{{Name: "cloudsql", MountPath: "/cloudsql"}}}}}}
 	injected := []injectedEnv{{name: "GCE_METADATA_HOST", value: "cloudburrow-host.cloudburrow.svc.cluster.local:8085"},
 		{name: "STORAGE_EMULATOR_HOST", value: "x"}}
-	m, err := renderService(svc, "cloudburrow", "inst", nil, injected, testCloudSQL)
+	m, err := renderService(svc, serviceKName(svc.GetName()), "cloudburrow", "inst", nil, injected, testCloudSQL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestCloudSQLVolumeRefusals(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			svc := &runpb.Service{Name: "projects/proj-1/locations/us-central1/services/web", Template: &runpb.RevisionTemplate{
 				Volumes: []*runpb.Volume{cloudSQLVolume(c.names...)}, Containers: []*runpb.Container{{Image: "example.com/app:1"}}}}
-			_, err := renderService(svc, "cloudburrow", "inst", nil, nil, c.sql)
+			_, err := renderService(svc, serviceKName(svc.GetName()), "cloudburrow", "inst", nil, nil, c.sql)
 			if status.Code(err) != c.code || !strings.Contains(err.Error(), c.want) {
 				t.Errorf("= %v; want %v naming %q", err, c.code, c.want)
 			}

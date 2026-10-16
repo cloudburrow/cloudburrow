@@ -51,7 +51,7 @@ func (p runProvider) editForm(ctx context.Context, service string, svc *ksvcStat
 	tmpl := svc.Spec.Template
 	source := "Prefilled from the service's latest configuration: no revision is serving yet."
 	if serving := svc.Status.LatestReadyRevisionName; serving != "" {
-		rev, err := p.revisionTemplate(ctx, service, serving)
+		rev, err := p.revisionTemplate(ctx, svc, serving)
 		if err == nil {
 			tmpl, source = rev, "Prefilled from the serving revision, "+serving+"."
 		} else {
@@ -76,8 +76,9 @@ func (p runProvider) editForm(ctx context.Context, service string, svc *ksvcStat
 	return form
 }
 
-// revisionTemplate reads one Knative revision of a service.
-func (p runProvider) revisionTemplate(ctx context.Context, service, revision string) (knTemplate, error) {
+// revisionTemplate reads one Knative revision of a service, by its Cloud
+// Run ID.
+func (p runProvider) revisionTemplate(ctx context.Context, svc *ksvcStatus, revision string) (knTemplate, error) {
 	raw, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "revisions")
 	if err != nil {
 		return knTemplate{}, err
@@ -89,7 +90,7 @@ func (p runProvider) revisionTemplate(ctx context.Context, service, revision str
 		return knTemplate{}, fmt.Errorf("decode revisions: %w", err)
 	}
 	for _, item := range list.Items {
-		if item.Metadata.Name == revision && item.Metadata.Labels["serving.knative.dev/service"] == service {
+		if item.Metadata.Labels["serving.knative.dev/service"] == svc.KName && svc.revisionID(item.Metadata.Name) == revision {
 			return item, nil
 		}
 	}

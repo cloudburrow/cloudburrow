@@ -2,12 +2,16 @@ package run
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/cloudburrow/cloudburrow/internal/k8s"
 )
 
 // TestJobsOfOneIDInTwoProjects (#1399): two projects' jobs of one ID are
@@ -148,5 +152,115 @@ func TestWorkloadNamesAreScoped(t *testing.T) {
 	}
 	if h := s.instanceHost(long); len(strings.SplitN(h, ".", 2)[0]) > 63 {
 		t.Errorf("host label of %s is over 63 characters", h)
+	}
+}
+
+// TestServicesOfOneIDInTwoProjects (#1400): two projects' services of one
+// ID are two Knative Services, each read, listed and deleted by its own
+// name, and deleting one leaves the other.
+func TestServicesOfOneIDInTwoProjects(t *testing.T) {
+	ctx := context.Background()
+	store := &ksvcStore{applied: map[string]string{}}
+	s := NewServer(&Knative{Kube: k8s.NewWith(store, "k", "", "default")}, "inst", time.Second)
+	const a, b = "projects/proj-a/locations/us-central1", "projects/proj-b/locations/us-central1"
+	for _, parent := range []string{a, b} {
+		if _, err := s.CreateService(ctx, &runpb.CreateServiceRequest{Parent: parent, ServiceId: "x",
+			Service: &runpb.Service{Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{Image: "example.com/app:v1"}}}}}); err != nil {
+			t.Fatalf("CreateService in %s: %v", parent, err)
+		}
+	}
+	if len(store.applied) != 2 || serviceKName(a+"/services/x") == serviceKName(b+"/services/x") {
+		t.Fatalf("Knative Services = %d, want one per project", len(store.applied))
+	}
+	if _, err := s.CreateService(ctx, &runpb.CreateServiceRequest{Parent: a, ServiceId: "x",
+		Service: &runpb.Service{Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{Image: "example.com/app:v1"}}}}}); status.Code(err) != codes.AlreadyExists {
+		t.Errorf("second create in one project = %v, want AlreadyExists", err)
+	}
+	for _, parent := range []string{a, b} {
+		got, err := s.GetService(ctx, &runpb.GetServiceRequest{Name: parent + "/services/x"})
+		if err != nil || got.GetName() != parent+"/services/x" {
+			t.Errorf("GetService in %s = %v, %v", parent, got.GetName(), err)
+		}
+		list, err := s.ListServices(ctx, &runpb.ListServicesRequest{Parent: parent})
+		if err != nil || len(list.GetServices()) != 1 || list.GetServices()[0].GetName() != parent+"/services/x" {
+			t.Errorf("ListServices in %s = %v, %v; want its one service", parent, list, err)
+		}
+	}
+	if _, err := s.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: b + "/services/x"}); err != nil {
+		t.Fatalf("DeleteService: %v", err)
+	}
+	if _, err := s.GetService(ctx, &runpb.GetServiceRequest{Name: a + "/services/x"}); err != nil || len(store.applied) != 1 {
+		t.Errorf("after deleting b's, a's = %v (%d left)", err, len(store.applied))
+	}
+	if _, err := s.GetService(ctx, &runpb.GetServiceRequest{Name: b + "/services/x"}); status.Code(err) != codes.NotFound {
+		t.Errorf("deleted service = %v, want NotFound", err)
+	}
+}
+
+// TestServiceUnderTheUnscopedName: a service an older version created, a
+// Knative Service named by its ID, still reads back, keeps Knative's
+// revision names, updates in place and deletes; another project's service
+// of its ID is not it.
+func TestServiceUnderTheUnscopedName(t *testing.T) {
+	ctx := context.Background()
+	store := &ksvcStore{applied: map[string]string{}}
+	s := NewServer(&Knative{Kube: k8s.NewWith(store, "k", "", "default")}, "inst", time.Second)
+	name := "projects/proj-a/locations/us-central1/services/old"
+	m, err := renderService(&runpb.Service{Name: name, Template: &runpb.RevisionTemplate{
+		Containers: []*runpb.Container{{Image: "example.com/app:v1"}}}}, "old", "default", "inst", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.kn.Apply(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetService(ctx, &runpb.GetServiceRequest{Name: name})
+	if err != nil || got.GetName() != name {
+		t.Fatalf("GetService of the unscoped service = %v, %v", got, err)
+	}
+	if _, err := s.GetService(ctx, &runpb.GetServiceRequest{Name: "projects/proj-b/locations/us-central1/services/old"}); status.Code(err) != codes.NotFound {
+		t.Errorf("another project's service of its ID = %v, want NotFound", err)
+	}
+	if RevisionID(name, "old", "old-00001") != "old-00001" || kRevisionName(name, "old", "old-00001") != "old-00001" {
+		t.Errorf("an unscoped service's revisions are renamed")
+	}
+	got.Labels = map[string]string{"team": "ops"}
+	if _, err := s.UpdateService(ctx, &runpb.UpdateServiceRequest{Service: got}); err != nil {
+		t.Fatalf("UpdateService: %v", err)
+	}
+	if _, ok := store.applied["old"]; !ok || len(store.applied) != 1 {
+		t.Errorf("the update moved the service: %d Knative Services", len(store.applied))
+	}
+	if _, err := s.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: name}); err != nil || len(store.applied) != 0 {
+		t.Errorf("DeleteService = %v, %d left", err, len(store.applied))
+	}
+}
+
+// TestServiceNamesAndRevisionIDs: a service's Knative name carries its
+// scope and fits, its revisions read back in Cloud Run's form and are found
+// again from it, and Knative's own form is not an ID.
+func TestServiceNamesAndRevisionIDs(t *testing.T) {
+	name := "projects/a/locations/us-central1/services/x"
+	kn := serviceKName(name)
+	if kn == serviceKName("projects/b/locations/us-central1/services/x") || kn == serviceKName("projects/a/locations/europe-west1/services/x") ||
+		!strings.HasPrefix(kn, "x-") {
+		t.Errorf("serviceKName = %s", kn)
+	}
+	long := strings.Repeat("y", 49)
+	l1, l2 := serviceKName("projects/a/locations/l/services/"+long), serviceKName("projects/a/locations/l/services/"+long[:48]+"z")
+	if len(l1) > maxKServiceName || len(l2) > maxKServiceName || l1 == l2 {
+		t.Errorf("long names %s, %s", l1, l2)
+	}
+	id := RevisionID(name, kn, kn+"-00002")
+	if !regexp.MustCompile(`^x-00002-[a-z0-9]{3}$`).MatchString(id) || RevisionID(name, kn, kn+"-00002") != id {
+		t.Errorf("RevisionID = %s", id)
+	}
+	if got := kRevisionName(name, kn, id); got != kn+"-00002" {
+		t.Errorf("kRevisionName(%s) = %s", id, got)
+	}
+	for _, bad := range []string{"x-00002", "x-00002-zzz", "y-00002-abc"} {
+		if bad != id && kRevisionName(name, kn, bad) == kn+"-00002" {
+			t.Errorf("%s resolves to the revision", bad)
+		}
 	}
 }

@@ -678,7 +678,7 @@ func TestRunRevisionDeleteIsOfferedOnlyWhereTheAPIAccepts(t *testing.T) {
 			t.Errorf("%v offers %v, want %v", c.path, got, c.want)
 		}
 	}
-	svc, err := p.service(ctx, "api")
+	svc, err := p.service(ctx, "demo", "api")
 	if err != nil {
 		t.Fatal(err)
 	}
