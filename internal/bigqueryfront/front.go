@@ -777,6 +777,9 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	}
 	var meta struct {
 		Schema tableSchema `json:"schema"`
+		// DefaultRoundingMode rounds the rows' NUMERIC and BIGNUMERIC
+		// values (#1401, decimalrows.go).
+		DefaultRoundingMode string `json:"defaultRoundingMode"`
 	}
 	if err := json.Unmarshal(got, &meta); err != nil {
 		f.next.ServeHTTP(w, r)
@@ -820,6 +823,9 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	var rows []outRow
 	for i, row := range req.Rows {
 		cleaned, errs := checkRow(meta.Schema.Fields, row.JSON, req.IgnoreUnknownValues)
+		if len(errs) == 0 { // #1401, decimalrows.go
+			errs = decimalOverflow(meta.Schema.Fields, cleaned, meta.DefaultRoundingMode)
+		}
 		if len(errs) == 0 && streamed && !pm.ingestion() && pm.TimePartitioning != nil {
 			if msg := streamBounds(pm, cleaned[pm.TimePartitioning.Field], f.buffers.clock()); msg != "" {
 				errs = []rowError{{Reason: "invalid", Location: pm.TimePartitioning.Field, Message: msg}}

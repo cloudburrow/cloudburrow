@@ -447,7 +447,9 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 			return false
 		}
 	}
-	schema, err := json.Marshal(m.Schema)
+	// The table rounds its NUMERIC and BIGNUMERIC values, the scratch
+	// table does not (#1401, decimalrows.go).
+	schema, err := json.Marshal(scratchSchema(m.Schema.Fields))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internalError", err.Error())
 		return false
@@ -525,6 +527,12 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 			}
 			return true
 		}
+	}
+	if why != "" && strings.Contains(why, "OUT_OF_RANGE") {
+		// A value the table's NUMERIC or BIGNUMERIC column refuses
+		// (#1401): the client's error, not one to retry.
+		writeError(w, http.StatusBadRequest, "invalid", why)
+		return false
 	}
 	if why != "" {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not stream the rows: "+why)

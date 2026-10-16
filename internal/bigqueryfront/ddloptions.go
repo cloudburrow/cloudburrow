@@ -44,7 +44,8 @@ import (
 // In a multi-statement script with no TEMP table or function, each such
 // statement is set so too (#1390, hasDDLOptions). Not carried out: options
 // in a script with a TEMP table or function, which the emulator still
-// drops, and a column's OPTIONS in a column definition.
+// drops, and a column's OPTIONS in a column definition, but for a NUMERIC
+// or BIGNUMERIC column's rounding_mode (#1401, decimalddl.go).
 
 // ddlOptions is a lone DDL statement's table OPTIONS.
 type ddlOptions struct {
@@ -75,6 +76,9 @@ type ddlOptions struct {
 	columns            []token
 	query              string
 	spec               partitionSpec
+	// decimals are the column list's parameterized NUMERIC and
+	// BIGNUMERIC columns and rounding modes (#1401, decimalddl.go).
+	decimals []decimalColumn
 }
 
 // optionsKey marks a request whose options the front is already setting,
@@ -149,6 +153,10 @@ func parseDDLOptionsOf(sql string, mv bool) (d ddlOptions, msg string, ok bool) 
 	}
 	if !d.alter && !d.view && i < end && t[i].punct("(") {
 		d.columns = t[i+1 : skipTo(t, i+1, ")")]
+		var invalid string
+		if d.decimals, invalid = readDecimalColumns(d.columns); invalid != "" { // #1401
+			d.invalid = invalid
+		}
 	}
 	// The OPTIONS at the statement's own level, before its query, and the
 	// PARTITION BY and CLUSTER BY before them.
@@ -196,7 +204,7 @@ func parseDDLOptionsOf(sql string, mv bool) (d ddlOptions, msg string, ok bool) 
 	if clus >= 0 {
 		d.cluster = clause(clus)
 	}
-	if opt < 0 && (part >= 0 || clus >= 0) {
+	if opt < 0 && (part >= 0 || clus >= 0 || len(d.decimals) > 0 || d.invalid != "") {
 		return d, "", true
 	}
 	if d.alter {
@@ -347,7 +355,7 @@ func (d *ddlOptions) readOptions(sql string, t []token) string {
 func (d ddlOptions) sets() bool {
 	return d.description != nil || d.clearDescription || d.friendlyName != nil || d.clearFriendly ||
 		d.hasLabels || d.expiration != "" || d.partition != nil || d.cluster != nil || d.partitionMs != "" || d.isKMS ||
-		len(d.more) > 0
+		len(d.more) > 0 || len(d.decimals) > 0
 }
 
 // partitionExpirationMs reads partition_expiration_days, a FLOAT64
@@ -568,6 +576,7 @@ func (f front) setTableOptions(r *http.Request, dataset, table string, d ddlOpti
 	if d.mv != nil {
 		d.mv.put(meta)
 	}
+	putDecimalColumns(meta, d.decimals) // #1401, decimalddl.go
 	body, err := json.Marshal(meta)
 	if err != nil {
 		return err.Error()
@@ -600,5 +609,5 @@ func hasDDLOptions(sql string, body []token) bool {
 	d, msg, ok := parseDDLOptions(sql[body[0].pos:body[len(body)-1].end])
 	// PARTITION BY and CLUSTER BY alone are left as they were.
 	return ok && (msg != "" || d.description != nil || d.clearDescription || d.friendlyName != nil || d.clearFriendly || d.hasLabels ||
-		d.expiration != "" || d.partitionMs != "" || d.isKMS || len(d.more) > 0)
+		d.expiration != "" || d.partitionMs != "" || d.isKMS || len(d.more) > 0 || len(d.decimals) > 0 || d.invalid != "")
 }
