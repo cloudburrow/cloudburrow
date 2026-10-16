@@ -145,6 +145,9 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 			", whose schema CloudBurrow does not check the file's columns against")
 	}
 	opts := pqOptions{decimalTypes: el.DecimalTargetTypes}
+	if m := strings.ToUpper(l.ColumnNameCharacterMap); m == "V1" || m == "V2" {
+		opts.charMap = m // the file's names, renamed (#1373)
+	}
 	if po := el.ParquetOptions; po != nil {
 		opts.enumAsString, opts.listInference = po.EnumAsString, po.EnableListInference
 		switch strings.ToUpper(po.MapTargetType) {
@@ -170,14 +173,22 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 		writeError(w, status, "notFound", msg)
 		return false
 	}
+	file := make([]field, len(cols))
+	for i, c := range cols {
+		file[i] = c.field
+	}
+	// A name the load's columnNameCharacterMap refuses (#1336), once V1 or
+	// V2 has replaced its characters (#1373, charmap.go).
+	switch status, msg := parquetCharMapNames(file, l.ColumnNameCharacterMap); status {
+	case http.StatusBadRequest:
+		return invalid(msg)
+	case http.StatusNotImplemented:
+		return notImplemented(msg)
+	}
 	for _, c := range cols {
 		if c.notHere != "" {
 			return notImplemented("of a file whose column " + c.notHere)
 		}
-	}
-	file := make([]field, len(cols))
-	for i, c := range cols {
-		file[i] = c.field
 	}
 	if l.Schema != nil && !givenFits(l.Schema.Fields, file) {
 		return notImplemented("whose job gives a schema that is not the file's (" + describeFields(l.Schema.Fields) +
@@ -191,6 +202,12 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 	passes := true
 	for _, c := range cols {
 		if c.how != pqHowValue || !c.passes || legacyType(c.Type) == "FLOAT" {
+			passes = false
+		}
+		// The emulator reads a file's values by the schema's names, so a
+		// column renamed by columnNameCharacterMap (#1373), or with a
+		// flexible name it was not measured reading, is the front's.
+		if c.Name != c.node.e.Name || !bqColumnName.MatchString(c.Name) {
 			passes = false
 		}
 	}

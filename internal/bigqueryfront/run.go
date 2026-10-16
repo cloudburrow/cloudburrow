@@ -70,6 +70,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	handler := Wrap(results, WithStorage(*storage), func(o *options) {
 		o.restarts, o.ids, o.records, o.stateDir, o.logf = watch, ids, records, *stateDir, logger.Printf
 		o.policies = policies
+		o.streamTimes = true // streamingbuffer.go, #1370
 	})
 	// The emulator listens on the pod's loopback alone (#1114), so its
 	// container's readiness is asked of the front.

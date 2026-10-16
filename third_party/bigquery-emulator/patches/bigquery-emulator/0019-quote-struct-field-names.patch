@@ -1,0 +1,30 @@
+CloudBurrow patch 19 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1373). Applies after patch 0018.
+
+tables.insert made a table's RECORD fields in the engine with their
+names unquoted (STRUCT<in ner INT64>), so a RECORD whose field has a
+flexible column name, which BigQuery allows (a Parquet load under
+columnNameCharacterMap V2 makes one: "in ner!" becomes "in ner_"), or is
+a keyword, failed "Syntax error: Expected ">" but got keyword IN". The
+field's name is now quoted, as a top-level column's is.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the
+MIT License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -200,7 +200,10 @@
+ 	if field.Type == "RECORD" {
+ 		types := make([]string, 0, len(field.Fields))
+ 		for _, f := range field.Fields {
+-			types = append(types, fmt.Sprintf("%s %s", f.Name, r.encodeSchemaField(f)))
++			// CloudBurrow patch (cloudburrow/cloudburrow#1373): the field's
++			// name quoted, as a column's is, so a flexible name ("in ner")
++			// or a keyword makes the table.
++			types = append(types, fmt.Sprintf("`%s` %s", f.Name, r.encodeSchemaField(f)))
+ 		}
+ 		elem = fmt.Sprintf("STRUCT<%s>", strings.Join(types, ","))
+ 	} else {

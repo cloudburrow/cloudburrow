@@ -155,7 +155,11 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 			w = rec
 			defer finish(out, rec)
 		}
-		legacyLoadTypes(r, c.Load.Schema)                                      // #1034, typenames.go
+		legacyLoadTypes(r, c.Load.Schema)                                                        // #1034, typenames.go
+		if msg := charMapFormat(c.Load.ColumnNameCharacterMap, c.Load.SourceFormat); msg != "" { // #1336, charmap.go
+			writeError(w, http.StatusBadRequest, "invalid", msg)
+			return
+		}
 		if check(c.Load.DestinationTable) == "" && !f.jsonDetect(w, r, &job) { // #1324, jsondetect.go
 			return
 		}

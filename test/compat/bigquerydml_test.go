@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	bq "google.golang.org/api/bigquery/v2"
@@ -32,6 +33,9 @@ func TestBigQueryPlainDMLThroughTheFront(t *testing.T) {
 	c, project := bigqueryClient(t, h)
 	ctx := h.Context()
 	ds, _ := seedOrders(t, h, c)
+	// The rows were streamed, which DML refuses for 30 minutes, as
+	// BigQuery does (#1370).
+	advanceBigQueryClock(t, h, 31*time.Minute)
 	type want struct {
 		typ                        string
 		affected                   int64
@@ -387,6 +391,9 @@ func TestBigQueryUpdateFrom(t *testing.T) {
 	c, project := bigqueryClient(t, h)
 	ctx := h.Context()
 	ds, _ := seedOrders(t, h, c)
+	// The rows were streamed, which DML refuses for 30 minutes, as
+	// BigQuery does (#1370).
+	advanceBigQueryClock(t, h, 31*time.Minute)
 	run := func(sql string) *bigquery.QueryStatistics {
 		t.Helper()
 		q := c.Query(sql)
@@ -441,6 +448,9 @@ func TestBigQueryDMLErrorsNameTheClientsTable(t *testing.T) {
 	c, project := bigqueryClient(t, h)
 	ctx := h.Context()
 	ds, _ := seedOrders(t, h, c)
+	// The rows were streamed, which DML refuses for 30 minutes, as
+	// BigQuery does (#1370).
+	advanceBigQueryClock(t, h, 31*time.Minute)
 	err := runIn(ctx, c, project, ds.DatasetID, "INSERT INTO orders (nosuch) VALUES (1)", false)
 	if err == nil || !strings.Contains(err.Error(), ds.DatasetID+".orders") || strings.Contains(err.Error(), project+"_") {
 		t.Errorf("INSERT of a column the table lacks: %v, want it to name %s.orders", err, ds.DatasetID)

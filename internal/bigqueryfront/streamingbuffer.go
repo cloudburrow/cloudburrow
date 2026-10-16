@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -78,6 +79,35 @@ import (
 // go to __UNPARTITIONED__ too: BigQuery's documentation does not set them
 // apart.
 
+// DML and rows streamed in the last 30 minutes (#1370). BigQuery documents
+// that "rows that were recently written using the BigQuery Storage Write
+// API (REST)" (tabledata.insertAll, "previously known as the legacy
+// tabledata.insertAll method") "can't be modified" by UPDATE, DELETE,
+// MERGE or TRUNCATE: "the recent writes are those that occurred within the
+// last 30 minutes. All other rows in the table remain modifiable"
+// (https://cloud.google.com/bigquery/docs/data-manipulation-language), on
+// any table, partitioned or not, and apart from the streaming buffer's
+// flush. So every table made by tables.insert has the engine pseudo-column
+// _PARTITION_STREAMED TIMESTAMP (googlesqlite patch 0030, bigquery-emulator
+// patch 0018), NULL on every row but a streamed one, whose time the front
+// gives it: every insertAll of a table goes through a scratch table as an
+// ingestion-time partitioned table's does (streamIngestion). The front
+// keeps each table's last stream time (recent), so DML of a table not
+// streamed to in 30 minutes reads nothing more, and bufferedChange counts
+// the rows the statement would change among those streamed within
+// dmlLockFor of the clock. A table made by a CREATE TABLE statement, or
+// before the engine had the column, has none: its streamed rows are held
+// only while in the buffer, as before. The clock is the front's, which
+// the CloudBurrow extension POST /cloudburrow/bigquery/v2/clock:advance
+// moves forward (serveClock), so a test passes the 30 minutes at once.
+
+// streamedAt is the engine's pseudo-column of the time a row was streamed
+// (above).
+const streamedAt = "_PARTITION_STREAMED"
+
+// dmlLockFor is how long DML refuses a streamed row (above).
+const dmlLockFor = 30 * time.Minute
+
 // bufferedRows is the engine's pseudo-column of a table partitioned by a
 // column that marks the rows of its streaming buffer (above).
 const bufferedRows = "_PARTITION_BUFFERED"
@@ -115,8 +145,15 @@ type streamBuffers struct {
 	mu   sync.Mutex
 	wins map[string]*streamWindow
 	now  func() time.Time
-	path string
-	logf func(string, ...any)
+	// offset is how far the clock was advanced (serveClock), in
+	// nanoseconds.
+	offset atomic.Int64
+	// stamp is options.streamTimes.
+	stamp bool
+	// recent is each table's last stream time, by streamKey (above).
+	recent map[string]time.Time
+	path   string
+	logf   func(string, ...any)
 }
 
 func streamBuffersStateFile(dir string) string { return filepath.Join(dir, "streambuffers.json") }
@@ -126,10 +163,74 @@ func streamKey(project, dataset, table string) string {
 }
 
 func (s *streamBuffers) clock() time.Time {
-	if s != nil && s.now != nil {
-		return s.now().UTC()
+	if s == nil {
+		return time.Now().UTC()
 	}
-	return time.Now().UTC()
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	return now().Add(time.Duration(s.offset.Load())).UTC()
+}
+
+// streamedRecently returns the condition of the rows of the table that
+// DML refuses as streamed within dmlLockFor, or "" when it was not
+// streamed to in that time (above).
+func (s *streamBuffers) streamedRecently(project, dataset, table string) string {
+	if s == nil {
+		return ""
+	}
+	now := s.clock()
+	s.mu.Lock()
+	last, ok := s.recent[streamKey(project, dataset, table)]
+	s.mu.Unlock()
+	if !ok || !now.Before(last.Add(dmlLockFor)) {
+		return ""
+	}
+	return streamedAt + " > TIMESTAMP '" + now.Add(-dmlLockFor).Format(streamStamp) + "'"
+}
+
+// streamStamp is the form of a stream time in SQL.
+const streamStamp = "2006-01-02 15:04:05.000000+00"
+
+// streamed records that the table was streamed to at t.
+func (s *streamBuffers) streamed(project, dataset, table string, t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.recent == nil {
+		s.recent = map[string]time.Time{}
+	}
+	s.recent[streamKey(project, dataset, table)] = t
+	s.saveLocked()
+}
+
+// recentFile is where the stream times are kept, beside the windows.
+func (s *streamBuffers) recentFile() string {
+	return strings.TrimSuffix(s.path, ".json") + "-recent.json"
+}
+
+// serveClock serves the CloudBurrow extension that moves the front's
+// clock forward (above), POST /cloudburrow/bigquery/v2/clock:advance
+// with {"seconds": n}, n not negative (0 reads the clock). It answers
+// {"time": RFC 3339}. Windows due by then flush before the next request.
+func (s *streamBuffers) serveClock(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Path != "/cloudburrow/bigquery/v2/clock:advance" {
+		return false
+	}
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "invalid", "clock:advance takes POST")
+		return true
+	}
+	var body struct {
+		Seconds float64 `json:"seconds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Seconds < 0 {
+		writeError(w, http.StatusBadRequest, "invalid", `the body must be {"seconds": n}, n not negative: the clock only moves forward`)
+		return true
+	}
+	s.offset.Add(int64(body.Seconds * float64(time.Second)))
+	writeJSON(w, http.StatusOK, map[string]string{"time": s.clock().Format(time.RFC3339Nano)})
+	return true
 }
 
 // keep restores the windows from path and from then on keeps them there.
@@ -157,6 +258,12 @@ func (s *streamBuffers) keep(path string, logf func(string, ...any)) {
 		s.wins[streamKey(projectOf(w.Base), w.Dataset, w.Table)] = &w
 	}
 	s.path, s.logf = path, logf
+	if b, err := os.ReadFile(s.recentFile()); err == nil {
+		var recent map[string]time.Time
+		if json.Unmarshal(b, &recent) == nil {
+			s.recent = recent
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		logf("bigquery front: %v", err)
 	}
@@ -173,13 +280,25 @@ func (s *streamBuffers) saveLocked() {
 	}
 	sort.Slice(saved, func(a, b int) bool { return saved[a].Oldest.Before(saved[b].Oldest) })
 	b, _ := json.Marshal(saved)
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		s.logf("bigquery front: %v", err)
-		return
+	now := s.clock()
+	for k, t := range s.recent {
+		if !now.Before(t.Add(dmlLockFor)) {
+			delete(s.recent, k)
+		}
 	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		s.logf("bigquery front: %v", err)
+	rb, _ := json.Marshal(s.recent)
+	for _, f := range []struct {
+		path string
+		b    []byte
+	}{{s.path, b}, {s.recentFile(), rb}} {
+		tmp := f.path + ".tmp"
+		if err := os.WriteFile(tmp, f.b, 0o600); err != nil {
+			s.logf("bigquery front: %v", err)
+			return
+		}
+		if err := os.Rename(tmp, f.path); err != nil {
+			s.logf("bigquery front: %v", err)
+		}
 	}
 }
 
@@ -189,7 +308,7 @@ func (s *streamBuffers) reset() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.wins = nil
+	s.wins, s.recent = nil, nil
 	s.saveLocked()
 }
 
@@ -214,8 +333,11 @@ func (s *streamBuffers) drop(project, dataset, table string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.wins[streamKey(project, dataset, table)]; ok {
+	_, ok := s.wins[streamKey(project, dataset, table)]
+	_, rok := s.recent[streamKey(project, dataset, table)]
+	if ok || rok {
 		delete(s.wins, streamKey(project, dataset, table))
+		delete(s.recent, streamKey(project, dataset, table))
 		s.saveLocked()
 	}
 }
@@ -314,9 +436,10 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 		name += "$" + dec
 	}
 	now := f.buffers.clock()
+	plain := m.TimePartitioning == nil && m.RangePartitioning == nil
 	column := !m.ingestion()
 	var target time.Time
-	if !column {
+	if !column && !plain {
 		var code int
 		var msg string
 		if target, code, msg = streamTarget(m, dec, name, now); code != 0 {
@@ -353,7 +476,9 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 	}
 	list := strings.Join(cols, ", ")
 	pcols, pvals, unit := ", "+bufferedRows, ", "+bufferedMark(m, now), ""
-	if !column {
+	if plain {
+		pcols, pvals = "", ""
+	} else if !column {
 		pcols, pvals, unit = ", _PARTITIONTIME", ", CAST(NULL AS TIMESTAMP)", m.ingestionUnit()
 	}
 	switch {
@@ -365,7 +490,7 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 	f.buffers.mu.Lock()
 	old, had := f.buffers.wins[key]
 	var flush *streamWindow
-	if had && !old.Target.Equal(target) {
+	if !plain && had && !old.Target.Equal(target) {
 		flush = old
 		delete(f.buffers.wins, key)
 		had = false
@@ -381,17 +506,35 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 		return f.runDML(r, "INSERT INTO "+quotePath([]string{project, dataset, base})+" ("+list+pcols+") SELECT "+list+
 			pvals+" FROM "+quotePath([]string{project, dataset, scratch.TableID}))
 	}
-	why = insert(pcols, pvals)
-	if why != "" && column && strings.Contains(why, bufferedRows) {
+	// The time of the rows, which DML reads (#1370, above).
+	stamp := ", TIMESTAMP '" + now.Format(streamStamp) + "'"
+	why = insert(pcols+", "+streamedAt, pvals+stamp)
+	stamped := why == ""
+	if why != "" && strings.Contains(why, streamedAt) {
+		// A table with no stream time (above): its rows are held only
+		// while in the buffer.
+		why = insert(pcols, pvals)
+	}
+	if why != "" && column && !plain && strings.Contains(why, bufferedRows) {
 		// A table made before the engine marked the buffer (above): its
 		// rows are partitioned at once, as they were.
-		if why = insert("", ""); why == "" {
+		why = insert("", "")
+		if why == "" {
+			if stamped {
+				f.buffers.streamed(project, dataset, base, now)
+			}
 			return true
 		}
 	}
 	if why != "" {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not stream the rows: "+why)
 		return false
+	}
+	if stamped {
+		f.buffers.streamed(project, dataset, base, now)
+	}
+	if plain {
+		return true
 	}
 	f.buffers.mu.Lock()
 	if f.buffers.wins == nil {
@@ -492,4 +635,13 @@ func streamBounds(m partitionMeta, v any, now time.Time) string {
 			"data between 10 years in the past and 1 year in the future." // UNVERIFIED wording
 	}
 	return ""
+}
+
+// plainTable is whether got, a table's tables.get answer, is a table (not
+// a view or an external table).
+func plainTable(got []byte) bool {
+	var t struct {
+		Type string `json:"type"`
+	}
+	return json.Unmarshal(got, &t) == nil && (t.Type == "" || t.Type == "TABLE")
 }

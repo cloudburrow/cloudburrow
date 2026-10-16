@@ -156,6 +156,26 @@ type pqOptions struct {
 	enumAsString  bool
 	mapArray      bool // mapTargetType ARRAY_OF_STRUCT
 	decimalTypes  []string
+	// charMap is the load's columnNameCharacterMap when it renames
+	// columns, "V1" or "V2", else "" (#1373, name).
+	charMap string
+}
+
+// name is the BigQuery name of a Parquet field named raw: under
+// columnNameCharacterMap V1 or V2, raw with each character the map's rule
+// does not take replaced with "_", "except periods in Parquet file column
+// names" (BigQuery's load reference, column_name_character_map), at every
+// depth, as the rule is for column names and a RECORD's fields are named
+// by the same rules; otherwise raw (#1373).
+func (o pqOptions) name(raw string) string {
+	if o.charMap != "V1" && o.charMap != "V2" {
+		return raw
+	}
+	parts := strings.Split(raw, ".")
+	for i := range parts {
+		parts[i] = mapColumnName(parts[i], o.charMap)
+	}
+	return strings.Join(parts, ".")
 }
 
 // parquetColumns returns a Parquet schema's top-level columns, as BigQuery
@@ -173,10 +193,13 @@ func parquetColumns(elems []pqElement, opts pqOptions) ([]*pqCol, error) {
 }
 
 // fields maps a group's children, which must have names BigQuery tells
-// apart.
+// apart. Two the file tells apart that are the same once
+// columnNameCharacterMap replaces their characters are 501, as the CSV
+// path's are (charmap.go): BigQuery does not document how it names them.
 func (o pqOptions) fields(kids []*pqNode, prefix string) ([]*pqCol, error) {
 	var cols []*pqCol
 	seen := map[string]string{}
+	mapped := map[string]string{}
 	for _, k := range kids {
 		if prev, ok := seen[strings.ToLower(k.e.Name)]; ok {
 			return nil, fmt.Errorf("duplicate column names %s%s and %s%s (BigQuery's column names do not differ by case alone)",
@@ -187,6 +210,13 @@ func (o pqOptions) fields(kids []*pqNode, prefix string) ([]*pqCol, error) {
 		if err != nil {
 			return nil, err
 		}
+		key := strings.ToLower(c.Name)
+		if prev, ok := mapped[key]; ok && c.notHere == "" {
+			c.notHere = fmt.Sprintf("%s%s and %s%s are both %q once columnNameCharacterMap %s replaces their unsupported "+
+				"characters, and BigQuery does not document how it names such columns", prefix, prev, prefix, k.e.Name,
+				c.Name, o.charMap)
+		}
+		mapped[key] = k.e.Name
 		cols = append(cols, c)
 	}
 	return cols, nil
@@ -195,16 +225,18 @@ func (o pqOptions) fields(kids []*pqNode, prefix string) ([]*pqCol, error) {
 // column maps node n, a field of its parent.
 func (o pqOptions) column(n *pqNode, prefix string) (*pqCol, error) {
 	path := prefix + n.e.Name
-	if !bqColumnName.MatchString(n.e.Name) {
-		return &pqCol{field: field{Name: n.e.Name, Mode: "NULLABLE"}, node: n, notHere: fmt.Sprintf("%q is not a column "+
-			"name BigQuery takes without flexible column names, which CloudBurrow does not implement", path)}, nil
+	name := o.name(n.e.Name)
+	if !bqColumnName.MatchString(name) && checkColumnName(name) != "" {
+		// A name the rules refuse: parquetCharMapNames answers it.
+		return &pqCol{field: field{Name: name, Mode: "NULLABLE"}, node: n, notHere: fmt.Sprintf("%q is not a column "+
+			"name BigQuery takes", path)}, nil
 	}
 	if n.e.Repetition == pqRepeated {
 		elem, err := o.single(n, prefix)
 		if err != nil {
 			return nil, err
 		}
-		c := &pqCol{field: field{Name: n.e.Name, Type: elem.Type, Mode: "REPEATED", Fields: elem.Fields}, node: n,
+		c := &pqCol{field: field{Name: name, Type: elem.Type, Mode: "REPEATED", Fields: elem.Fields}, node: n,
 			how: pqHowRepeated, elem: elem, notHere: elem.notHere}
 		if elem.Mode == "REPEATED" && c.notHere == "" {
 			c.notHere = path + " is a repeated list, an array of arrays, which BigQuery does not have; its documentation " +
@@ -229,7 +261,7 @@ func (o pqOptions) column(n *pqNode, prefix string) (*pqCol, error) {
 // no mode, but for a LIST or MAP read as an array, which is REPEATED.
 func (o pqOptions) single(n *pqNode, prefix string) (*pqCol, error) {
 	path := prefix + n.e.Name
-	c := &pqCol{field: field{Name: n.e.Name}, node: n}
+	c := &pqCol{field: field{Name: o.name(n.e.Name)}, node: n}
 	desc := describeParquet(n.e)
 	if n.e.Children < 0 {
 		c.how = pqHowValue
@@ -291,7 +323,7 @@ func (o pqOptions) single(n *pqNode, prefix string) (*pqCol, error) {
 		if err != nil {
 			return nil, err
 		}
-		e := &pqCol{field: field{Name: n.e.Name, Type: "RECORD"}, node: kv, how: pqHowGroup, kids: kids}
+		e := &pqCol{field: field{Name: o.name(n.e.Name), Type: "RECORD"}, node: kv, how: pqHowGroup, kids: kids}
 		for _, k := range kids {
 			e.Fields = append(e.Fields, k.field)
 			if e.notHere == "" {
