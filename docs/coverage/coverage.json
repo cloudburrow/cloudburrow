@@ -769,8 +769,9 @@
     "Key": "artifactregistry",
     "Title": "Artifact Registry",
     "counts": {
-      "Unimplemented": 30,
-      "Verified": 20
+      "Implemented": 1,
+      "Unimplemented": 27,
+      "Verified": 22
     },
     "rows": [
       {
@@ -875,8 +876,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/terraform_batch5_test.go:362 TestTerraformArtifactRegistryRepositoryIAM"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetMavenArtifact",
@@ -1018,13 +1021,15 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/SetIamPolicy",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/terraform_batch5_test.go:362 TestTerraformArtifactRegistryRepositoryIAM"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/TestIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Implemented",
+        "note": "no official-SDK test proves it yet"
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateFile",
@@ -1909,7 +1914,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/kms_test.go:614 TestKMSDecrypt",
-          "test/compat/kms_test.go:713 TestKMSDecryptFollowsTheVersionLifecycle"
+          "test/compat/kms_test.go:713 TestKMSDecryptFollowsTheVersionLifecycle",
+          "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext"
         ],
         "unverified": [
           {
@@ -2001,7 +2007,8 @@
         "method": "google.cloud.kms.v1.KeyManagementService/Encrypt",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:495 TestKMSEncrypt"
+          "test/compat/kms_test.go:495 TestKMSEncrypt",
+          "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext"
         ],
         "unverified": [
           {
@@ -4919,6 +4926,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
+          "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
         "unverified": [
@@ -4934,6 +4942,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
+          "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
@@ -4943,6 +4952,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:340 TestConsolePermissionsOnAManagedFolder",
           "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM",
+          "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
       },
@@ -4951,6 +4961,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
+          "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
         "unverified": [
@@ -4975,6 +4986,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:340 TestConsolePermissionsOnAManagedFolder",
           "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM",
+          "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
         "unverified": [
@@ -5112,6 +5124,7 @@
           "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
           "test/compat/storageversioning_test.go:87 TestStorageVersioningDeleteKeepsNoncurrent",
+          "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
           "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
         ]
@@ -5126,6 +5139,7 @@
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
+          "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ],
         "unverified": [
@@ -5152,6 +5166,7 @@
           "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
           "test/compat/storagexmlpost_test.go:120 TestStorageXMLFormPostPolicyV4",
+          "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ],
         "unverified": [
@@ -5202,6 +5217,7 @@
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
+          "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_iam_more_test.go:169 TestTerraformStorageACLLists",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
@@ -6345,7 +6361,8 @@
           "test/compat/consolebigtableactions_test.go:37 TestConsoleBigtableTableAndCellActions",
           "test/compat/consolebigtableedit_test.go:103 TestConsoleBigtableFamiliesAndRowWrites",
           "test/compat/consolebigtablepicker_test.go:33 TestConsoleBigtableInstancePicker",
-          "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable"
+          "test/compat/consoledatabases_test.go:47 TestConsoleBigtableCreateAndDeleteTable",
+          "test/compat/terraform_batch5_test.go:267 TestTerraformBigtableGCPolicy"
         ]
       },
       {
@@ -6392,7 +6409,8 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ModifyColumnFamilies",
         "status": "Verified",
         "tests": [
-          "test/compat/optional_test.go:197 TestBigtableTableAndRows"
+          "test/compat/optional_test.go:197 TestBigtableTableAndRows",
+          "test/compat/terraform_batch5_test.go:267 TestTerraformBigtableGCPolicy"
         ]
       },
       {
