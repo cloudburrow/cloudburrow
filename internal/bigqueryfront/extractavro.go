@@ -101,7 +101,8 @@ func avroExportSchema(typ string, logical bool) (any, string) {
 		// export section does not name GEOGRAPHY (UNVERIFIED against BigQuery).
 		return map[string]any{"type": "string", "sqlType": "GEOGRAPHY"}, "string"
 	case "NUMERIC":
-		// The precision and scale of an unparameterized NUMERIC and
+		// (A parameterized one's are its own: avroFields.) The precision
+		// and scale of an unparameterized NUMERIC and
 		// BIGNUMERIC are not documented for Avro (only "NUMERIC(P[, S]) ...
 		// precision and scale are passed to the decimal logical type"):
 		// BigQuery's own maximums (38, 9) and (76, 38), as for Parquet,
@@ -137,6 +138,12 @@ func avroFields(fields []field, logical bool, path string) []any {
 			typ = map[string]any{"type": "record", "name": path + "__" + fl.Name, "fields": avroFields(fl.Fields, logical, path+"__"+fl.Name)}
 		} else {
 			typ, _ = avroExportSchema(fl.Type, logical)
+			// "Parameterized NUMERIC(P[, S]) and BIGNUMERIC(P[, S]) data
+			// types transfer their precision and scale type parameters to
+			// the Avro decimal logical type" (Avro export details).
+			if p, sc, param := decimalParams(fl); param {
+				typ = map[string]any{"type": "bytes", "logicalType": "decimal", "precision": p, "scale": sc}
+			}
 		}
 		switch strings.ToUpper(fl.Mode) {
 		case "REQUIRED":
@@ -218,6 +225,11 @@ func avroFieldValue(fl field, raw any, logical bool, path string) (any, string) 
 	}
 	s, _ := raw.(string)
 	_, name := avroExportSchema(fl.Type, logical)
+	if p, sc, param := decimalParams(fl); param {
+		if err := decimalFits(s, p, sc); err != nil {
+			return nil, fmt.Sprintf("column %s: %v", fl.Name, err)
+		}
+	}
 	v, err := avroValue(name, s)
 	if err != nil {
 		return nil, fmt.Sprintf("column %s: %v", fl.Name, err)
