@@ -43,9 +43,9 @@ import (
 //     (engine patches googlesqlite 0031 and bigquery-emulator 0020, #1401;
 //     a CREATE TABLE's columns, decimalddl.go).
 //   - enable_change_history: CHANGES and APPENDS are not served (501).
-//   - privacy_policy: a query of the table is refused 501, since the
-//     front does not enforce the policy, and reading the table as if it
-//     had none would show what the policy hides.
+//   - privacy_policy: enforced in the front's query rewrite: an
+//     aggregation threshold and a join restriction as BigQuery does,
+//     differential privacy 501 (#1426, privacypolicy.go). A view's too.
 //   - storage_uri: the table's data stays in the engine, never written to
 //     Cloud Storage as Apache Iceberg files.
 
@@ -436,22 +436,33 @@ func (f front) evalString(r *http.Request, q queryOptions, expr string) (*string
 }
 
 // checkReads answers q when a table it reads refuses it (a missing
-// partition filter, a privacy policy), having refreshed each materialized
+// partition filter, a privacy policy, privacypolicy.go), having refreshed each materialized
 // view it reads that is due (materializedviews.go); false when it is left
 // to the rest of runQuery. Only the tables the front watches are read.
 func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
-	if !f.tables.anyWatched() {
+	clause := hasPrivacyClause(q.Query) // #1426, privacypolicy.go
+	if !f.tables.anyWatched() && !clause {
 		return false
 	}
 	project := projectOf(f.base)
-	reads, _, ok := tableReads(q.Query, project, defaultDatasetOf(q))
+	reads, stmts, ok := tableReads(q.Query, project, defaultDatasetOf(q))
 	if !ok {
 		return false
 	}
+	checked := r.Context().Value(privacyCheckedKey{}) != nil
 	seen := map[string]bool{}
+	var prot []privacyRead
 	for _, tr := range reads {
 		key := streamKey(project, tr.dataset, tr.table)
-		if tr.decorator != "" || !f.tables.watched(key) {
+		if !f.tables.watched(key) {
+			if !checked && f.tables.anyWatched() {
+				if meta, ok := f.metaOf(r, tr.dataset, tr.table); ok {
+					if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why != "" {
+						writeError(w, http.StatusNotImplemented, "notImplemented", why)
+						return true
+					}
+				}
+			}
 			continue
 		}
 		st, got := f.get(r, tablePath(tr.dataset, tr.table))
@@ -459,22 +470,41 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 		if st != http.StatusOK || json.Unmarshal(got, &meta) != nil {
 			continue
 		}
+		name := project + "." + tr.dataset + "." + tr.table
+		if text := f.privacyOf(project, tr.dataset, tr.table, meta); text != "" && !checked { // #1426
+			pol, why := parsePrivacyPolicy(text)
+			if why != "" {
+				writeError(w, http.StatusNotImplemented, "notImplemented", privacyRefusal("a query", name)+
+					" The policy could not be read: "+why+".")
+				return true
+			}
+			if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why != "" {
+				writeError(w, http.StatusNotImplemented, "notImplemented", why)
+				return true
+			}
+			prot = append(prot, privacyRead{tr: tr, name: tr.dataset + "." + tr.table, pol: pol, columns: schemaColumns(meta)})
+			continue
+		}
+		if !checked {
+			if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why != "" {
+				writeError(w, http.StatusNotImplemented, "notImplemented", why)
+				return true
+			}
+		}
+		if tr.decorator != "" {
+			continue
+		}
 		if !seen[key] && str(meta, "type") == "MATERIALIZED_VIEW" {
 			f.syncMV(r, tr.dataset, tr.table, meta, true)
 		}
 		seen[key] = true
-		name := project + "." + tr.dataset + "." + tr.table
-		if s := f.tables.get(key, str(meta, "creationTime")); s.PrivacyPolicy != nil {
-			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a query of "+name+
-				", which has a privacy_policy. CloudBurrow keeps the policy but does not enforce it (an aggregation "+
-				"threshold, differential privacy or a join restriction), and reading the table without it would show "+
-				"what it hides. Nothing was run.")
-			return true
-		}
 		if msg := partitionFilterRefusal(tr, meta, name); msg != "" {
 			f.failBeforeRun(w, r, q, insert, tr.dataset, http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
 			return true
 		}
+	}
+	if (len(prot) > 0 || clause) && f.enforcePrivacy(w, r, q, insert, stmts, prot) {
+		return true
 	}
 	return false
 }

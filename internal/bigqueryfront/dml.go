@@ -205,6 +205,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.changeReads(w, r, q, insert) { // #1418, changehistory.go
+		return
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.partitionReads(w, r, q, insert) { // #1273, #1276, #1277, partitionreads.go
 		return
 	}
