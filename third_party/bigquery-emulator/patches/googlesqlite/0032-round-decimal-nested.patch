@@ -1,0 +1,250 @@
+CloudBurrow patch 32 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1409). Applies after patch 0031.
+
+The gap: googlesqlite_round_decimal (patch 0031) rounds a top-level
+NUMERIC or BIGNUMERIC column's value; a parameterized NUMERIC(P, S) field
+of a STRUCT column, an element of an ARRAY<NUMERIC(P, S)> column and a
+field of an ARRAY<STRUCT<...>> column are kept at their full scale, and
+one with more than P digits is kept. BigQuery rounds them by the field's
+roundingMode, as a top-level column's
+(https://cloud.google.com/bigquery/docs/schemas#rounding_mode,
+https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#parameterized_decimal_type).
+
+The patch adds the SQLite function googlesqlite_round_decimal_nested(v,
+spec): v, a STRUCT or ARRAY value as googlesqlite stores it (base64 of
+its JSON layout), decoded, each value spec names rounded as
+googlesqlite_round_decimal rounds one, at any depth, and encoded again;
+OUT_OF_RANGE past a field's precision. spec is JSON: {"n": path, "p":
+precision, "s": scale, "m": mode} for a decimal, {"f": {field: spec}}
+for a STRUCT; an ARRAY's elements take the ARRAY's spec. The emulator
+(its patch 0021) calls it from the column's triggers.
+round_decimal_nested_test.go fails without the patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/function_register.go
++++ b/internal/function_register.go
+@@ -176,6 +176,13 @@
+ 		return fmt.Errorf("failed to register round_decimal function: %w", err)
+ 	}
+ 
++	// CloudBurrow patch (cloudburrow/cloudburrow#1409): the same, for the
++	// parameterized NUMERIC and BIGNUMERIC fields of a STRUCT or ARRAY
++	// column (round_decimal_nested.go).
++	if err := sqlitex.RegisterFunc(conn, "googlesqlite_round_decimal_nested", roundDecimalNested, deterministic); err != nil {
++		return fmt.Errorf("failed to register round_decimal_nested function: %w", err)
++	}
++
+ 	if err := sqlitex.RegisterFunc(conn, "googlesqlite_group_by", func(v any) (any, error) {
+ 		decoded, err := DecodeValue(v)
+ 		if err != nil {
+--- /dev/null
++++ b/internal/round_decimal_nested.go
+@@ -0,0 +1,129 @@
++package internal
++
++import (
++	"encoding/json"
++	"fmt"
++	"strings"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// decimalSpec is where, in a STRUCT or ARRAY column's value, the
++// parameterized NUMERIC and BIGNUMERIC fields are: a leaf (Name set) is one
++// such field, its precision, scale and rounding mode; else Fields names the
++// STRUCT fields that hold one. An ARRAY's elements take the spec of the
++// ARRAY itself (BigQuery has no ARRAY of ARRAY). CloudBurrow patch
++// (cloudburrow/cloudburrow#1409).
++type decimalSpec struct {
++	Name      string                  `json:"n,omitempty"`
++	Precision int64                   `json:"p,omitempty"`
++	Scale     int64                   `json:"s,omitempty"`
++	Mode      string                  `json:"m,omitempty"`
++	Fields    map[string]*decimalSpec `json:"f,omitempty"`
++}
++
++// roundDecimalNested is googlesqlite_round_decimal_nested(v, spec): v, a
++// STRUCT, an ARRAY or an ARRAY of STRUCT as googlesqlite stores it, with
++// each parameterized NUMERIC or BIGNUMERIC value spec (a decimalSpec in
++// JSON) names, at any depth, rounded as googlesqlite_round_decimal rounds a
++// top-level column's, and refused OUT_OF_RANGE as it refuses one. BigQuery
++// rounds a STRUCT's field and an ARRAY's element by the field's
++// roundingMode (https://cloud.google.com/bigquery/docs/schemas#rounding_mode);
++// the emulator calls it from the column's triggers. v is returned as it is
++// when nothing in it changes. CloudBurrow patch
++// (cloudburrow/cloudburrow#1409).
++func roundDecimalNested(v any, spec string) (any, error) {
++	if v == nil {
++		return nil, nil
++	}
++	var s decimalSpec
++	if err := json.Unmarshal([]byte(spec), &s); err != nil {
++		return nil, fmt.Errorf("googlesqlite_round_decimal_nested: spec %q: %w", spec, err)
++	}
++	decoded, err := value.DecodeValue(v)
++	if err != nil || decoded == nil {
++		return v, err
++	}
++	out, changed, err := roundIn(decoded, &s)
++	if err != nil || !changed {
++		return v, err
++	}
++	return value.EncodeValue(out)
++}
++
++// roundIn rounds what s names in v, and reports whether it changed it.
++func roundIn(v value.Value, s *decimalSpec) (value.Value, bool, error) {
++	if v == nil || s == nil {
++		return v, false, nil
++	}
++	if sv, ok := v.(*value.SafeValue); ok {
++		return roundIn(sv.Value, s)
++	}
++	switch vv := v.(type) {
++	case *value.ArrayValue:
++		changed := false
++		out := &value.ArrayValue{Values: make([]value.Value, len(vv.Values))}
++		for i, e := range vv.Values {
++			r, c, err := roundIn(e, s)
++			if err != nil {
++				return nil, false, err
++			}
++			out.Values[i], changed = r, changed || c
++		}
++		return out, changed, nil
++	case *value.StructValue:
++		if len(s.Fields) == 0 {
++			return v, false, nil
++		}
++		changed := false
++		out := &value.StructValue{Keys: vv.Keys, Values: make([]value.Value, len(vv.Values)), M: map[string]value.Value{}}
++		for i, e := range vv.Values {
++			r := e
++			if i < len(vv.Keys) {
++				if fs := fieldSpec(s.Fields, vv.Keys[i]); fs != nil {
++					var c bool
++					var err error
++					if r, c, err = roundIn(e, fs); err != nil {
++						return nil, false, err
++					}
++					changed = changed || c
++				}
++				out.M[vv.Keys[i]] = r
++			}
++			out.Values[i] = r
++		}
++		return out, changed, nil
++	case *value.NumericValue:
++		if s.Name == "" {
++			return v, false, nil
++		}
++		rounded := RoundRat(vv.Rat, s.Scale, s.Mode)
++		typ := "NUMERIC"
++		if vv.IsBigNumeric {
++			typ = "BIGNUMERIC"
++		}
++		if !RatFits(rounded, s.Precision, s.Scale) {
++			return nil, false, fmt.Errorf("OUT_OF_RANGE: Value %s is out of range for column %s of type %s(%d, %d)",
++				vv.Rat.FloatString(int(s.Scale)), s.Name, typ, s.Precision, s.Scale)
++		}
++		if rounded.Cmp(vv.Rat) == 0 {
++			return v, false, nil
++		}
++		return &value.NumericValue{Rat: rounded, IsBigNumeric: vv.IsBigNumeric}, true, nil
++	}
++	return v, false, nil
++}
++
++// fieldSpec is the spec of the STRUCT field key: BigQuery's field names
++// are case-insensitive.
++func fieldSpec(fields map[string]*decimalSpec, key string) *decimalSpec {
++	if s, ok := fields[key]; ok {
++		return s
++	}
++	for k, s := range fields {
++		if strings.EqualFold(k, key) {
++			return s
++		}
++	}
++	return nil
++}
+--- /dev/null
++++ b/round_decimal_nested_test.go
+@@ -0,0 +1,71 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// TestRoundDecimalNested is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1409): googlesqlite_round_decimal_nested, called
++// from a trigger, rounds the NUMERIC field of a STRUCT column, the elements
++// of an ARRAY<NUMERIC> column and a field of an ARRAY<STRUCT> column to
++// their scales by their rounding modes, and refuses a value with more
++// digits than its precision.
++func TestRoundDecimalNested(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=round_decimal_nested")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	exec := func(q string) error { _, err := db.ExecContext(ctx, q); return err }
++	trigger := func(col, spec string) string {
++		return googlesqlite.RawSQLitePrefix + "CREATE TRIGGER `r_" + col + "` AFTER INSERT ON `p_d_t` FOR EACH ROW WHEN NEW.`" + col +
++			"` IS NOT NULL BEGIN UPDATE `p_d_t` SET `" + col + "` = googlesqlite_round_decimal_nested(NEW.`" + col + "`, '" + spec +
++			"') WHERE rowid = NEW.rowid; END"
++	}
++	for _, q := range []string{
++		"CREATE TABLE `p.d.t` (id INT64, s STRUCT<a NUMERIC, b STRING>, r ARRAY<NUMERIC>, x ARRAY<STRUCT<e NUMERIC>>)",
++		trigger("s", `{"f":{"a":{"n":"s.a","p":2,"m":"ROUND_HALF_AWAY_FROM_ZERO"}}}`),
++		trigger("r", `{"n":"r","p":3,"s":1,"m":"ROUND_HALF_EVEN"}`),
++		trigger("x", `{"f":{"e":{"n":"x.e","p":2,"m":"ROUND_HALF_EVEN"}}}`),
++		"INSERT INTO `p.d.t` (id, s, r, x) VALUES (1, STRUCT(NUMERIC '2.5' AS a, 'k' AS b), [NUMERIC '0.25', 0.35], [STRUCT(NUMERIC '2.5' AS e), STRUCT(3.5 AS e)])",
++		"INSERT INTO `p.d.t` (id, s, r, x) VALUES (2, STRUCT(NUMERIC '-3.5' AS a, 'l' AS b), [], NULL)",
++	} {
++		if err := exec(q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	rows, err := db.QueryContext(ctx, "SELECT TO_JSON_STRING(STRUCT(s, r, x)) FROM `p.d.t` ORDER BY id")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var got []string
++	for rows.Next() {
++		var s string
++		if err := rows.Scan(&s); err != nil {
++			t.Fatal(err)
++		}
++		got = append(got, s)
++	}
++	rows.Close()
++	want := `{"s":{"a":3,"b":"k"},"r":["0.2","0.4"],"x":[{"e":2},{"e":4}]}` + "\n" +
++		`{"s":{"a":-4,"b":"l"},"r":[],"x":null}`
++	if strings.Join(got, "\n") != want {
++		t.Errorf("rows\n%s\nwant\n%s", strings.Join(got, "\n"), want)
++	}
++	for _, q := range []string{
++		"INSERT INTO `p.d.t` (id, s) VALUES (3, STRUCT(NUMERIC '99.5' AS a, 'm' AS b))",
++		"INSERT INTO `p.d.t` (id, r) VALUES (3, [NUMERIC '1', 99.95])",
++		"INSERT INTO `p.d.t` (id, x) VALUES (3, [STRUCT(NUMERIC '1' AS e), STRUCT(99.5 AS e)])",
++	} {
++		if err := exec(q); err == nil || !strings.Contains(err.Error(), "OUT_OF_RANGE") {
++			t.Errorf("%s: %v, want OUT_OF_RANGE", q, err)
++		}
++	}
++}

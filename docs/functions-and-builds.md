@@ -171,6 +171,27 @@ build, docker push or pack step (the local builder runs those, not the step's co
 worker pools and `ApproveBuild` are not served. The console's Build history takes the same
 filter in its filter box, and offers Retry on a finished build's page.
 
+**Build triggers and private worker pools (#1422).** A trigger is a stored build. A manual
+trigger (`RunBuildTrigger`, `gcloud builds triggers run`) and a webhook trigger
+(`webhookConfig.secret`, `POST …/triggers/{trigger}:webhook?secret=…`) run their inline `build`
+as `CreateBuild` does, with the trigger's substitutions, the run's `source.substitutions` over
+them, `$TRIGGER_NAME` and `buildTriggerId`. A webhook's `secret` must equal the Secret Manager
+version the trigger names (403 otherwise), and `$(body.field)` bindings take the payload's
+values. Make one with `gcloud builds triggers create manual --inline-config=build.yaml` or
+`create webhook --secret=projects/P/secrets/S/versions/1 --inline-config=build.yaml`, Terraform's
+`google_cloudbuild_trigger` with a `build` block, or the console's Cloud Build Triggers page.
+
+What needs a live service is refused with the reason: GitHub, GitLab, Bitbucket and Cloud
+Source Repositories events, a build read from a repository (`filename`, `gitFileSource`,
+`sourceToBuild`), since Google clones those from a hosted git service and not from a path on
+your machine, and `pubsubConfig`, whose subscription Google owns. To build on a Pub/Sub message,
+point a push subscription at the webhook URL.
+
+A worker pool (`gcloud builds worker-pools create`, `google_cloudbuild_worker_pool`, the console's
+Worker pools page) is stored with its long-running operations. A build that names it in
+`options.pool.name` runs on the host's Docker like any other, with the pool recorded on the build.
+Its machine type, disk and network are stored and not acted on.
+
 ## Artifact Registry's Docker registry (#1383)
 
 Each `DOCKER` repository is a Docker registry: the Docker Registry HTTP API v2 (the OCI

@@ -14,9 +14,18 @@ import (
 // in upgrade order, each a server image whose INFO reports that version:
 // Redis 6.2.24 (REDIS_6_X), Redis 7.0.15 (REDIS_7_0), both BSD-3-Clause,
 // and Valkey 8.1 (REDIS_7_2, which reports Redis 7.2.4). Memorystore's
-// other versions (REDIS_3_2, REDIS_4_0, REDIS_5_0) are 501: no image of
-// them is served.
+// other versions (REDIS_3_2, REDIS_4_0, REDIS_5_0) are 501: they are end
+// of life, and no maintained image of them exists (eolVersions).
 var Versions = []string{"REDIS_6_X", "REDIS_7_0", DefaultRedisVersion}
+
+// eolVersions are Memorystore's versions with no maintained image (#1413):
+// the release and month of the Docker official redis image's last build
+// of each line, which the library no longer builds.
+var eolVersions = map[string][2]string{
+	"REDIS_3_2": {"3.2", "October 2018"},
+	"REDIS_4_0": {"4.0", "April 2020"},
+	"REDIS_5_0": {"5.0", "November 2022"},
+}
 
 func versionRank(v string) int {
 	for i, x := range Versions {
@@ -33,7 +42,8 @@ func checkVersion(v string) error {
 	}
 	switch v {
 	case "REDIS_3_2", "REDIS_4_0", "REDIS_5_0":
-		return apierror.Unimplemented("redis_version %s is not supported: CloudBurrow serves %v", v, Versions)
+		return apierror.Unimplemented("redis_version %s is not supported: Redis %s is end of life and has no maintained image (the Docker official redis image of %s was last built in %s; the library builds only 6.2 and later); CloudBurrow serves %v",
+			v, eolVersions[v][0], eolVersions[v][0], eolVersions[v][1], Versions)
 	}
 	return apierror.InvalidArgument("redis_version %q is not a Memorystore for Redis version", v)
 }
@@ -102,7 +112,7 @@ func (s *Server) UpgradeInstance(ctx context.Context, req *redispb.UpgradeInstan
 }
 
 func (c *instances) upgrade(ctx context.Context, sh Shell, from *record, v string) error {
-	data, err := c.snapshot(ctx, sh, from.dataServer(), from.addr, from.AuthString)
+	data, err := c.snapshot(ctx, sh, from.dataServer(), from.addr, from.access())
 	if err != nil {
 		return err
 	}
@@ -122,7 +132,7 @@ func (c *instances) upgrade(ctx context.Context, sh Shell, from *record, v strin
 			_ = c.save(r)
 		}
 		c.mu.Unlock()
-		return c.load(ctx, sh, next.dataServer(), next.binary(), addr, next.AuthString, data)
+		return c.load(ctx, sh, next.dataServer(), next.binary(), addr, next.access(), data)
 	}
 	addr, err := c.prov.Provision(ctx, next.spec())
 	if err != nil {
@@ -134,5 +144,5 @@ func (c *instances) upgrade(ctx context.Context, sh Shell, from *record, v strin
 		_ = c.save(r)
 	}
 	c.mu.Unlock()
-	return c.load(ctx, sh, next.Server, next.binary(), addr, next.AuthString, data)
+	return c.load(ctx, sh, next.Server, next.binary(), addr, next.access(), data)
 }

@@ -31,6 +31,14 @@ func TestParseAlter(t *testing.T) {
 		st.actions[5].kind != "column options" {
 		t.Errorf("actions = %+v", st.actions)
 	}
+	// #1409: ADD COLUMN's rounding_mode, and a STRUCT field's.
+	toks, _ = lex("ALTER TABLE ds.t ADD COLUMN c NUMERIC(4, 1) OPTIONS (description = 'd', rounding_mode = 'ROUND_HALF_EVEN'), " +
+		"ADD COLUMN s ARRAY<STRUCT<x BIGNUMERIC(3) OPTIONS (rounding_mode = 'ROUND_HALF_AWAY_FROM_ZERO')>>")
+	if st, unsupported, msg := parseAlter(toks); unsupported != "" || msg != "" || len(st.actions) != 2 ||
+		st.actions[0].field["roundingMode"] != "ROUND_HALF_EVEN" || st.actions[0].field["scale"] != "1" || st.actions[0].description == nil ||
+		st.actions[1].field["fields"].([]any)[0].(map[string]any)["roundingMode"] != "ROUND_HALF_AWAY_FROM_ZERO" {
+		t.Errorf("ADD COLUMN with rounding_mode: %+v, %q, %q", st.actions, unsupported, msg)
+	}
 	for sql, want := range map[string]string{
 		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":        "to an ARRAY",
 		"ALTER TABLE ds.t SET OPTIONS (enable_fine_grained_mutations=true)": "enable_fine_grained_mutations",
@@ -50,6 +58,10 @@ func TestParseAlter(t *testing.T) {
 		"ALTER TABLE ds.t ALTER COLUMN s.x SET DATA TYPE NUMERIC":           "top-level column",
 		"ALTER TABLE ds.t ALTER COLUMN s.x SET OPTIONS (description = 'd')": "top-level column",
 		"ALTER TABLE ds.t RENAME COLUMN a TO b, ADD COLUMN c INT64":         "RENAME COLUMN cannot be used with other",
+		// #1409: rounding_mode, BigQuery's two modes, on a NUMERIC or BIGNUMERIC.
+		"ALTER TABLE ds.t ADD COLUMN c NUMERIC(2) OPTIONS (rounding_mode = 'UP')":                    "Invalid value for rounding_mode",
+		"ALTER TABLE ds.t ADD COLUMN c INT64 OPTIONS (rounding_mode = 'ROUND_HALF_EVEN')":            "not a NUMERIC or BIGNUMERIC",
+		"ALTER TABLE ds.t ADD COLUMN c STRUCT<x STRING OPTIONS (rounding_mode = 'ROUND_HALF_EVEN')>": "not a NUMERIC or BIGNUMERIC",
 	} {
 		toks, _ := lex(sql)
 		if _, unsupported, msg := parseAlter(toks); unsupported != "" || !strings.Contains(msg, want) {

@@ -29,8 +29,10 @@ import (
 // BuildOperationMetadata while it runs and answers with the Build, which is
 // what `gcloud run deploy --source` reconstructs and polls. GetBuild and
 // ListBuilds read them back; CreateBuild, CancelBuild and RetryBuild
-// (cloudbuildcreate.go) run, stop and rerun builds of their own. The other
-// methods are UNIMPLEMENTED.
+// (cloudbuildcreate.go) run, stop and rerun builds of their own; triggers
+// and worker pools are cloudbuildtriggers.go's (#1422). The other methods,
+// approvals and GitHub Enterprise and Bitbucket Server configs, are
+// UNIMPLEMENTED.
 
 // BuildLogURLBase, when set, is where a build's logUrl points: the
 // instance's console, which the CLI sets. A build's log is the builder's
@@ -254,9 +256,17 @@ func SourceDeployHandler(register func(grpc.ServiceRegistrar), next http.Handler
 		Packages: []string{"google.devtools.cloudbuild.v1", "google.devtools.artifactregistry.v1"},
 		Mixins:   sourceDeployMixins,
 	}
-	register(t)
+	reg := &captureCloudBuild{ServiceRegistrar: t}
+	register(reg)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isSourceDeployPath(r.URL.Path) && serveWebhook(reg.c, w, r) {
+			return // ReceiveTriggerWebhook's raw body (#1422)
+		}
 		if isSourceDeployPath(r.URL.Path) {
+			if err := stripApprovalConfig(r); err != nil {
+				apierror.WriteJSON(w, err)
+				return
+			}
 			// The caller's Host and address go with the request: CreateBuild
 			// runs arbitrary steps only from the host's loopback (#1382).
 			t.ServeHTTP(w, withCaller(r))
@@ -281,10 +291,7 @@ func isSourceDeployPath(p string) bool {
 		return true // projects/{p}/builds, projects/{p}/triggers
 	}
 	if len(parts) >= 4 && parts[1] == "locations" {
-		// Triggers and worker pools are Cloud Build's too (#1304): the
-		// transcoder answers them UNIMPLEMENTED here, so a client pointed at
-		// this port, such as Terraform's google_cloudbuild_trigger, gets a
-		// 501 from this instance rather than Cloud Run's 404.
+		// Triggers and worker pools are Cloud Build's too (#1304, #1422).
 		switch strings.SplitN(parts[3], ":", 2)[0] {
 		case "builds", "repositories", "operations", "defaultServiceAccount", "triggers", "workerPools":
 			return true
