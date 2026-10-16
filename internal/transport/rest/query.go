@@ -228,7 +228,9 @@ func scalar(fd protoreflect.FieldDescriptor, name, v string, newMsg func() proto
 	case protoreflect.StringKind:
 		return protoreflect.ValueOfString(v), nil
 	case protoreflect.BoolKind:
-		switch v {
+		// gcloud, being Python, sends True and False (#1395:
+		// uniqueWriterIdentity=True), which Google accepts.
+		switch strings.ToLower(v) {
 		case "true":
 			return protoreflect.ValueOfBool(true), nil
 		case "false":

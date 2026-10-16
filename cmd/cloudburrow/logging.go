@@ -26,6 +26,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -60,6 +61,9 @@ type loggingService struct {
 	// (#1394), or nil; without Cloud Storage on the instance, the copy says
 	// so.
 	storage func() *netfwd.Forwarder
+	// hierarchy is Resource Manager's registry, whose folders and
+	// organization are Logging parents (#1395); nil when it is not open.
+	hierarchy *resourcemanager.Registry
 }
 
 // storageObjectWriter uploads an object to the instance's Cloud Storage
@@ -90,6 +94,53 @@ func (w storageObjectWriter) WriteObject(ctx context.Context, bucket, name, cont
 		msg = resp.Status
 	}
 	return fmt.Errorf("gs://%s/%s: %s", bucket, name, msg)
+}
+
+// useHierarchy makes the registry's folders and organization Logging
+// parents. It is called before Start.
+func (s *loggingService) useHierarchy(reg *resourcemanager.Registry) {
+	if s != nil {
+		s.hierarchy = reg
+	}
+}
+
+// loggingHierarchy is logging.Hierarchy over Resource Manager's registry.
+type loggingHierarchy struct{ reg *resourcemanager.Registry }
+
+func (h loggingHierarchy) Exists(name string) error {
+	switch {
+	case name == resourcemanager.OrganizationName:
+		return nil
+	case strings.HasPrefix(name, "folders/"):
+		_, err := h.reg.Folder(name)
+		return err
+	}
+	return fmt.Errorf("%s is not a folder or the organization %s", name, resourcemanager.OrganizationName)
+}
+
+func (h loggingHierarchy) Ancestors(name string) ([]string, error) {
+	var out []string
+	if id, ok := strings.CutPrefix(name, "projects/"); ok {
+		chain, err := h.reg.Ancestry(id)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range chain[1:] {
+			out = append(out, a.Type+"s/"+a.ID)
+		}
+		return out, nil
+	}
+	for parent, i := name, 0; strings.HasPrefix(parent, "folders/") && i <= resourcemanager.MaxFolderDepth+1; i++ {
+		f, err := h.reg.Folder(parent)
+		if err != nil {
+			return nil, err
+		}
+		parent = f.Parent
+		if parent != "" {
+			out = append(out, parent)
+		}
+	}
+	return out, nil
 }
 
 // Admin is the metrics, sinks and exclusions server, or nil before Start.
@@ -131,7 +182,12 @@ func (s *loggingService) toConsole(rec *console.Recorder) {
 		return
 	}
 	s.store.Observe(func(e *loggingpb.LogEntry) {
-		project, _, _ := strings.Cut(strings.TrimPrefix(e.GetLogName(), "projects/"), "/")
+		// A folder's, organization's or billing account's entry (#1395) has
+		// no project; its Resource is its log name, which names the parent.
+		project := ""
+		if rest, ok := strings.CutPrefix(e.GetLogName(), "projects/"); ok {
+			project, _, _ = strings.Cut(rest, "/")
+		}
 		rec.Log(console.Entry{
 			Timestamp: e.GetTimestamp().AsTime(),
 			Severity:  consoleSeverity(e.GetSeverity().String()),
@@ -216,6 +272,9 @@ func (s *loggingService) Start(ctx context.Context) error {
 	}
 	s.db = db
 	s.admin = logging.NewAdmin(db)
+	if s.hierarchy != nil {
+		s.admin.UseHierarchy(loggingHierarchy{s.hierarchy})
+	}
 	s.api.UseAdmin(s.admin)
 	if serviceEnabled(s.cfg, config.ServiceStorage) {
 		src := storageSourceFetcher{cfg: s.cfg}

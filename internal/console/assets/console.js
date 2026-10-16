@@ -7314,7 +7314,9 @@ async function renderLogs(view) {
   // The scope is now the user's, stated on screen and carried in the URL.
   // All sources is the default, because the alternative is a screen that
   // hides the logs it exists to show.
-  let scope = params.get("scope") === "project" ? "project" : "all";
+  // Or a folder or the organization (#1395), as Google's Logs Explorer
+  // refines its scope to one: that parent's own Cloud Logging entries.
+  let scope = ["project", "parent"].includes(params.get("scope")) ? params.get("scope") : "all";
   // Followed from a failed operation in Activity. The server has always
   // supported the filter; the client simply never read it, so the one path
   // built to explain a failure landed on the unfiltered stream of the whole
@@ -7324,8 +7326,13 @@ async function renderLogs(view) {
   const scopeSelect = el("select", { id: "log-scope", "aria-label": "Log scope" },
     el("option", { value: "all", text: "All sources" }),
     el("option", { value: "project", text: project ? `Project ${project}` : "This project",
-                   disabled: project ? null : "disabled" }));
+                   disabled: project ? null : "disabled" }),
+    el("option", { value: "parent", text: "A folder or organization" }));
   scopeSelect.value = scope;
+  const parentInput = el("input", { class: "filter", type: "search", id: "log-parent",
+    placeholder: "folders/123 or organizations/…", "aria-label": "Folder or organization to scope to" });
+  parentInput.value = params.get("parent") || "";
+  parentInput.hidden = scope !== "parent";
 
   const severity = el("select", { id: "severity", "aria-label": "Minimum severity" },
     ...["", "INFO", "WARNING", "ERROR"].map((v) =>
@@ -7428,6 +7435,7 @@ async function renderLogs(view) {
   const filterQuery = () => {
     const query = new URLSearchParams();
     if (scope === "project" && project) query.set("project", project);
+    if (scope === "parent" && parentInput.value.trim()) query.set("parent", parentInput.value.trim());
     if (operation) query.set("operation", operation);
     if (severity.value) query.set("severity", severity.value);
     if (source.value) query.set("source", source.value);
@@ -7524,13 +7532,18 @@ async function renderLogs(view) {
     scopeSelect.value = next;
     census = null;
     const url = new URL(location.href);
-    if (next === "project") url.searchParams.set("scope", "project");
-    else url.searchParams.delete("scope");
+    if (next === "all") url.searchParams.delete("scope");
+    else url.searchParams.set("scope", next);
+    if (next === "parent" && parentInput.value.trim()) url.searchParams.set("parent", parentInput.value.trim());
+    else url.searchParams.delete("parent");
     history.replaceState({}, "", url);
+    parentInput.hidden = next !== "parent";
     connect();
-    announce(next === "project" ? `Scoped to project ${project}` : "Showing all sources");
+    announce(next === "project" ? `Scoped to project ${project}`
+      : next === "parent" ? `Scoped to ${parentInput.value.trim() || "a folder or organization"}` : "Showing all sources");
   };
   scopeSelect.addEventListener("change", () => setScope(scopeSelect.value));
+  parentInput.addEventListener("change", () => setScope("parent"));
 
   // A `logging/<log>` entry of the toolbar's project is one Cloud Logging
   // holds, and its log can be deleted through DeleteLog. Nothing else can:
@@ -7712,7 +7725,7 @@ async function renderLogs(view) {
           text: "Delete log is on the Cloud Logging entries (source logging/…) of the selected project. " +
                 "Pod logs and CloudBurrow's own request log are not held by the Logging API, so they cannot be deleted here." })
       : null,
-    el("div", { class: "actions" }, scopeSelect, severity, source, resource, contains,
+    el("div", { class: "actions" }, scopeSelect, parentInput, severity, source, resource, contains,
        pauseButton, reconnectButton, status),
     chips,
     timeline,

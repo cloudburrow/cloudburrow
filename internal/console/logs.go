@@ -216,7 +216,10 @@ func (r *Recorder) Entries(f Filter) []Entry {
 
 // Filter narrows a log query.
 type Filter struct {
-	Project     string
+	Project string
+	// Parent is a folder or organization (folders/{n}, organizations/{n}):
+	// its own Cloud Logging entries, whose resource is a log of it (#1395).
+	Parent      string
 	Source      string
 	Resource    string
 	OperationID string
@@ -233,6 +236,9 @@ func (f Filter) matches(e Entry) bool {
 	// Project scoping is strict: an entry with no project never appears
 	// under a specific one, because attributing it would be a guess.
 	if f.Project != "" && e.Project != f.Project {
+		return false
+	}
+	if f.Parent != "" && !strings.HasPrefix(e.Resource, strings.TrimSuffix(f.Parent, "/")+"/logs/") {
 		return false
 	}
 	if f.Source != "" && !strings.HasPrefix(e.Source, f.Source) {
@@ -383,6 +389,7 @@ func filterFrom(r *http.Request) Filter {
 	q := r.URL.Query()
 	f := Filter{
 		Project:     q.Get("project"),
+		Parent:      q.Get("parent"),
 		Source:      q.Get("source"),
 		Resource:    q.Get("resource"),
 		OperationID: q.Get("operation"),

@@ -189,6 +189,12 @@ func (s configServer) CopyLogEntries(_ context.Context, req *loggingpb.CopyLogEn
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	if !ref.parent.isProject() {
+		// Google documents CopyLogEntries from a project's log bucket
+		// (projects/P/locations/L/buckets/B); a folder's, an
+		// organization's or a billing account's is not documented.
+		return nil, apierror.Wrap(apierror.Unimplemented("CopyLogEntries copies from a project's log bucket; %s is not one", ref.parent))
+	}
 	dest := req.GetDestination()
 	bucket, ok := strings.CutPrefix(dest, "storage.googleapis.com/")
 	if !ok || bucket == "" || strings.Contains(bucket, "/") {
@@ -216,7 +222,7 @@ func (s configServer) CopyLogEntries(_ context.Context, req *loggingpb.CopyLogEn
 	if ref.bucket == bucketDefault && c.entries != nil {
 		for _, e := range c.entries() {
 			p, _, perr := resource.ParseLogName(e.GetLogName())
-			if perr == nil && p == ref.project && match(e) {
+			if perr == nil && p == ref.parent.id && match(e) {
 				picked = append(picked, e)
 			}
 		}
@@ -234,10 +240,10 @@ func (s configServer) CopyLogEntries(_ context.Context, req *loggingpb.CopyLogEn
 	n := a.ops
 	a.mu.Unlock()
 	op := &copyOp{
-		name: fmt.Sprintf("projects/%s/locations/%s/operations/copy-%d-%d", ref.project, ref.location, now.UnixNano(), n),
+		name: fmt.Sprintf("projects/%s/locations/%s/operations/copy-%d-%d", ref.parent.id, ref.location, now.UnixNano(), n),
 		md: &loggingpb.CopyLogEntriesMetadata{StartTime: timestamppb.New(now), State: loggingpb.OperationState_OPERATION_STATE_SCHEDULED,
 			Request:        proto.Clone(req).(*loggingpb.CopyLogEntriesRequest),
-			WriterIdentity: "serviceAccount:" + serviceAccount(ref.project)},
+			WriterIdentity: "serviceAccount:" + serviceAccount(ref.parent)},
 		stop: make(chan struct{}),
 	}
 	c.ops[op.name] = op
