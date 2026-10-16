@@ -169,6 +169,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.alterProjectOptions(w, r, q, insert) { // #1375, #1417, projectoptions.go
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && (f.modelStatements(w, r, q, insert) || f.mlFunctions(w, r, q, insert)) { // #1465, models.go, modelfuncs.go
+		return
+	}
 	if q.UseLegacySQL != nil && *q.UseLegacySQL && f.onlyGoogleSQL(r, insert) { // #1417, projectoptions.go
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery",
 			Message: "Legacy SQL is not allowed: the project's default_sql_dialect_option is only_google_sql"})
