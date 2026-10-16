@@ -68,6 +68,7 @@ import (
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
+	_ "cloud.google.com/go/functions/apiv1/functionspb"
 	_ "cloud.google.com/go/functions/apiv2/functionspb"
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
@@ -114,6 +115,7 @@ var areas = []area{
 	// SubmitBuild buildpacks build and a Cloud Run service. Its IAM and
 	// Locations mixins are KMS's keys, which are global.
 	{Key: "functions", Title: "Cloud Functions v2", Own: true, Services: []string{"google.cloud.functions.v2.FunctionService"}},
+	{Key: "functionsv1", Title: "Cloud Functions v1", Own: true, Services: []string{"google.cloud.functions.v1.CloudFunctionsService"}},
 	// The v1 (Knative-shaped) API gcloud run calls (#1293): no proto, so
 	// its methods are the official generated client's, and a method is
 	// Verified only by an annotated official-client test.

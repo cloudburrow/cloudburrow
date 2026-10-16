@@ -76,11 +76,28 @@ func (p functionsProvider) List(_ context.Context, project string) (console.List
 	for _, fn := range runadapter.Functions(p.project(project)) {
 		parts := strings.Split(fn.GetName(), "/")
 		out.Items = append(out.Items, console.Resource{Name: parts[5], Status: functionStatus(fn), Fields: map[string]string{
-			"Environment": "2nd gen", "Region": parts[3], "Runtime": fn.GetBuildConfig().GetRuntime(),
-			"Trigger": "HTTP", "URL": orDash(fn.GetUrl()), "Last deployed": stampAge(fn.GetUpdateTime())}})
+			"Environment": functionGeneration(fn), "Region": parts[3], "Runtime": fn.GetBuildConfig().GetRuntime(),
+			"Trigger": functionTrigger(fn), "URL": orDash(fn.GetUrl()), "Last deployed": stampAge(fn.GetUpdateTime())}})
 	}
 	out.Total = len(out.Items)
 	return out, nil
+}
+
+// functionGeneration is a function's environment as Google's console words
+// it: one made through the v1 API is 1st gen (#1428).
+func functionGeneration(fn *functionspb.Function) string {
+	if fn.GetEnvironment() == functionspb.Environment_GEN_1 {
+		return "1st gen"
+	}
+	return "2nd gen"
+}
+
+// functionTrigger is a function's trigger: HTTP, or its event type.
+func functionTrigger(fn *functionspb.Function) string {
+	if t := fn.GetEventTrigger().GetEventType(); t != "" {
+		return t
+	}
+	return "HTTP"
 }
 
 // functionStatus is a function's state as the console's list words it.

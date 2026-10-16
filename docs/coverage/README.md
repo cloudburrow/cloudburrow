@@ -14,6 +14,7 @@ Do not edit these files by hand.
 | [Artifact Registry](artifactregistry.md) | 50 | 5 | 0 | 45 | 0 | 0 | 0 | 0 |
 | [Cloud Build](cloudbuild.md) | 19 | 6 | 0 | 13 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 35 | 0 | 0 | 0 | 0 | 41 | 0 |
 | [Cloud KMS](kms.md) | 40 | 38 | 0 | 2 | 0 | 0 | 0 | 82 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 46 | 0 | 6 | 0 | 0 | 0 | 0 |

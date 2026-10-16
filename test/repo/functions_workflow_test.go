@@ -47,8 +47,8 @@ func TestFunctionsWorkflowIsDispatchOnly(t *testing.T) {
 // TestGcloudFunctions and TestTerraformCloudFunctions2Function, whose
 // deploys from source are gated the same way (#1377), and
 // TestGcloudFunctionsEventTriggers, gcloud's deploys with event triggers
-// (#1414).
-const functionsSelection = `TestFunctions|^TestGcloudFunctions$|^TestGcloudFunctionsEventTriggers$|^TestTerraformCloudFunctions2Function$`
+// (#1414), and TestGcloudFunctionsV1, gcloud's 1st-gen deploys (#1428).
+const functionsSelection = `TestFunctions|^TestGcloudFunctions$|^TestGcloudFunctionsEventTriggers$|^TestGcloudFunctionsV1$|^TestTerraformCloudFunctions2Function$`
 
 // TestFunctionsWorkflowRunsTheGatedTests: it installs the pinned pack,
 // checksum-verified, brings up an instance, runs the Functions tests with
@@ -106,9 +106,10 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 		t.Error("functions.yml does not check pack's tarball against a pinned SHA-256")
 	}
 
-	// The selection names exactly the twelve gated tests, the ungated
-	// TestFunctionsAPI and TestFunctionsEventTriggers, and gcloud's and
-	// Terraform's Functions tests (#1377, #1414), so a renamed one cannot
+	// The selection names exactly the thirteen gated tests, the ungated
+	// TestFunctionsAPI, TestFunctionsEventTriggers and TestFunctionsV1API,
+	// and gcloud's and Terraform's Functions tests (#1377, #1414, #1428),
+	// so a renamed one cannot
 	// drop out unnoticed.
 	files, err := filepath.Glob(filepath.Join("..", "compat", "*_test.go"))
 	if err != nil {
@@ -132,7 +133,8 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 		"TestFunctionsNodejsBuiltWithBuildpacks", "TestFunctionsPythonBuiltWithBuildpacks",
 		"TestFunctionsJavaBuiltWithBuildpacks", "TestFunctionsRubyBuiltWithBuildpacks", "TestFunctionsPHPBuiltWithBuildpacks", "TestFunctionsDotnetBuiltWithBuildpacks",
 		"TestFunctionsAPIBuildsAndServes", "TestFunctionsAPI", "TestGcloudFunctions", "TestTerraformCloudFunctions2Function",
-		"TestFunctionsEventTriggers", "TestFunctionsEventTriggerBuilds", "TestGcloudFunctionsEventTriggers"} {
+		"TestFunctionsEventTriggers", "TestFunctionsEventTriggerBuilds", "TestGcloudFunctionsEventTriggers",
+		"TestFunctionsV1API", "TestFunctionsV1BuildsAndServes", "TestGcloudFunctionsV1"} {
 		found := false
 		for _, g := range got {
 			found = found || g == want
@@ -141,9 +143,10 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 			t.Errorf("-run %s does not select %s; it selects %q", functionsSelection, want, got)
 		}
 	}
-	if len(got) != 17 {
-		t.Errorf("-run %s selects %q; want the twelve gated Functions tests, TestFunctionsAPI, TestFunctionsEventTriggers, "+
-			"TestGcloudFunctions, TestGcloudFunctionsEventTriggers and TestTerraformCloudFunctions2Function", functionsSelection, got)
+	if len(got) != 20 {
+		t.Errorf("-run %s selects %q; want the thirteen gated Functions tests, TestFunctionsAPI, TestFunctionsEventTriggers, "+
+			"TestFunctionsV1API, TestGcloudFunctions, TestGcloudFunctionsEventTriggers, TestGcloudFunctionsV1 and "+
+			"TestTerraformCloudFunctions2Function", functionsSelection, got)
 	}
 }
 

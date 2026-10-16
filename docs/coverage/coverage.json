@@ -1232,6 +1232,101 @@
     ]
   },
   {
+    "Key": "functionsv1",
+    "Title": "Cloud Functions v1",
+    "counts": {
+      "Verified": 11
+    },
+    "rows": [
+      {
+        "method": "google.cloud.functions.v1.CloudFunctionsService/CallFunction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsv1_test.go:249 TestFunctionsV1BuildsAndServes",
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v1.CloudFunctionsService/CreateFunction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsv1_test.go:249 TestFunctionsV1BuildsAndServes",
+          "test/compat/functionsv1_test.go:320 TestGcloudFunctionsV1",
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v1.CloudFunctionsService/DeleteFunction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsv1_test.go:249 TestFunctionsV1BuildsAndServes",
+          "test/compat/functionsv1_test.go:320 TestGcloudFunctionsV1",
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v1.CloudFunctionsService/GenerateDownloadUrl",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v1.CloudFunctionsService/GenerateUploadUrl",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsv1_test.go:320 TestGcloudFunctionsV1",
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v1.CloudFunctionsService/GetFunction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsv1_test.go:320 TestGcloudFunctionsV1",
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v1.CloudFunctionsService/GetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v1.CloudFunctionsService/ListFunctions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsv1_test.go:320 TestGcloudFunctionsV1",
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v1.CloudFunctionsService/SetIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v1.CloudFunctionsService/TestIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+        ]
+      },
+      {
+        "method": "google.cloud.functions.v1.CloudFunctionsService/UpdateFunction",
+        "status": "Verified",
+        "tests": [
+          "test/compat/functionsv1_test.go:249 TestFunctionsV1BuildsAndServes",
+          "test/compat/functionsv1_test.go:56 TestFunctionsV1API"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "runv1",
     "Title": "Cloud Run v1 (Knative API)",
     "counts": {
