@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/localai"
 )
 
 // Event is an observable thing that happened, recorded for inspection.
@@ -213,6 +214,9 @@ type API struct {
 	faults *Faults
 	// token, when set, is required on every admin route (#553).
 	token string
+	// localModels manages the local AI models (#1396), the same manager
+	// the console's Local models page drives; nil until `up` sets it.
+	localModels localai.Actions
 }
 
 // NewAPI returns an admin API.
@@ -242,6 +246,8 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/state/import", a.authorized(a.handleStateImport))
 	mux.HandleFunc("GET /admin/instance", a.authorized(a.handleInstance))
 	a.faults.routes(mux, a.authorized)
+	mux.HandleFunc("GET /admin/local-models", a.authorized(a.handleLocalModels))
+	mux.HandleFunc("POST /admin/local-models/{id}/{action}", a.authorized(a.handleLocalModelAction))
 }
 
 type resetResponse struct {

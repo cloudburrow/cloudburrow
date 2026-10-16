@@ -29,15 +29,18 @@ import (
 // service: it is handed the same objects the services use, so there is no way
 // for it to answer from anywhere else.
 type consoleDeps struct {
-	cfg       config.Config
-	localAI   *vertexai.Server
-	projects  *resourcemanager.Registry
-	coord     *lifecycle.Coordinator
-	cluster   interface{ ServerVersion() string }
-	tasks     *tasksService
-	secrets   *secretsService
-	kms       *kmsService
-	scheduler *schedulerService
+	cfg     config.Config
+	localAI *vertexai.Server
+	// localModels manages the local AI models, shared with the admin API
+	// (#1396); nil makes one for the console alone.
+	localModels *localai.Manager
+	projects    *resourcemanager.Registry
+	coord       *lifecycle.Coordinator
+	cluster     interface{ ServerVersion() string }
+	tasks       *tasksService
+	secrets     *secretsService
+	kms         *kmsService
+	scheduler   *schedulerService
 	// memorystore is the Memorystore admin API (#1302), whose instances the
 	// Memorystore page creates, edits and deletes.
 	memorystore *memorystoreAdminService
@@ -91,7 +94,10 @@ func buildConsole(d consoleDeps) *console.Server {
 	srv := console.New(addr, consoleStatus(d), providers...)
 	srv.SetPlayground(playgroundFor(d))
 	srv.SetPrediction(predictionFor(d))
-	srv.SetLocalModels(localModelsFor(d.cfg, d.localAI))
+	if d.localModels == nil {
+		d.localModels = localModelsFor(d.cfg, d.localAI)
+	}
+	srv.SetLocalModels(d.localModels)
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how

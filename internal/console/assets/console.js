@@ -8037,9 +8037,11 @@ async function renderPlayground(view) {
   cancel.addEventListener("click", stopGeneration);
 
   renderHistory();
+  const models = await playgroundModelsCard();
   setChildren(view, 
     pageHeader(PLAYGROUND_TITLE, PLAYGROUND_SUBTITLE),
     header,
+    ...(models ? [models] : []),
     refused,
     el("div", { class: "card" },
       prompt,
@@ -8169,7 +8171,9 @@ async function renderEmbeddings(view) {
     sent.length = 0;
     setChildren(result, el("p", { class: "unavailable", text: "running…" }));
     try {
-      // Each result as [values, token count].
+      // Each result as [values, token count, truncated], as the API
+      // returned them (#1396): EmbedContent's usageMetadata.promptTokenCount
+      // and truncated, :predict's statistics.token_count and truncated.
       let got, displayName = "";
       if (method.value === "embedContent") {
         got = [];
@@ -8178,7 +8182,9 @@ async function renderEmbeddings(view) {
             content: { role: "user", parts: [{ text }] },
             embedContentConfig: { taskType: task.value, outputDimensionality: Number(dim.value) },
           });
-          got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? ""]);
+          got.push([data.embedding?.values || [], data.usageMetadata?.promptTokenCount ?? "",
+            // proto3 JSON leaves a false truncated out.
+            data.truncated === true]);
         }
         displayName = "EmbedContent: " + status.model + " — " + status.note;
       } else {
@@ -8187,14 +8193,16 @@ async function renderEmbeddings(view) {
           instances: lines.map((content) => ({ content, task_type: task.value })),
           parameters: { outputDimensionality: Number(dim.value) },
         });
-        got = (data.predictions || []).map((p) => [p.embeddings?.values || [], p.embeddings?.statistics?.token_count ?? ""]);
+        got = (data.predictions || []).map((p) => [p.embeddings?.values || [],
+          p.embeddings?.statistics?.token_count ?? "", p.embeddings?.statistics?.truncated === true]);
         displayName = data.modelDisplayName || "";
       }
-      const rows = got.map(([v, tokens], i) => {
+      const rows = got.map(([v, tokens, truncated], i) => {
         return el("tr", {},
           el("td", { text: lines[i].length > 60 ? lines[i].slice(0, 60) + "…" : lines[i] }),
           el("td", { class: "mono", text: String(v.length) }),
           el("td", { class: "mono", text: String(tokens) }),
+          el("td", { text: truncated ? "Yes" : "No" }),
           el("td", { class: "mono", text: v.length ? embeddingNorm(v).toFixed(4) : "" }),
           el("td", { class: "mono", text: v.slice(0, 6).map((x) => x.toFixed(4)).join(", ") + (v.length > 6 ? ", …" : "") }));
       });
@@ -8227,7 +8235,8 @@ async function renderEmbeddings(view) {
         el("table", { id: "emb-results" },
           el("thead", {}, el("tr", {},
             el("th", { text: "Text" }), el("th", { text: "Dimensions" }),
-            el("th", { text: "Tokens" }), el("th", { text: "L2 norm" }), el("th", { text: "First values" }))),
+            el("th", { text: "Tokens" }), el("th", { text: "Truncated" }),
+            el("th", { text: "L2 norm" }), el("th", { text: "First values" }))),
           el("tbody", {}, ...rows)),
         ...(similarity ? [similarity] : []),
         ...vectors, request);
@@ -8244,6 +8253,35 @@ async function renderEmbeddings(view) {
       el("div", {}, el("label", { text: "Model " }), model, models, el("label", { text: " Method " }), method, el("label", { text: " Task type " }), task,
         el("label", { text: " Dimensions " }), dim, " ", send)),
     result);
+}
+
+// playgroundModelsCard is the Studio's view of the local models (#1396):
+// each one's state, as the Local models page reports it, with the way to
+// that page — where Download, Load, Unload and Delete are — and to the
+// Embeddings test view. null when the instance offers no model management.
+async function playgroundModelsCard() {
+  let status;
+  try { status = await api("/api/ai/local-models"); } catch { return null; }
+  if (!status.configured) return null;
+  const embeddings = (SERVICES || []).some((s) => s.id === "ai-embed");
+  const rows = status.models.filter((m) => m.pinned || m.loaded).map((m) => el("tr", { "data-model": m.id },
+    el("td", { class: "mono", text: m.id }),
+    el("td", { text: m.modality }),
+    el("td", { "data-state": m.state, text: (LOCAL_MODEL_STATES[m.state] || m.state) +
+      (m.state === "downloading" && m.bytes ? ` ${Math.floor((100 * m.downloaded) / m.bytes)}%` : "") }),
+    el("td", { text: m.loaded ? "Loaded" : (m.loadable ? "Not loaded" : "—") })));
+  const others = status.models.length - rows.length;
+  return el("div", { class: "card", id: "pg-local-models" },
+    el("h2", { text: "Local models" }),
+    el("table", {},
+      el("thead", {}, el("tr", {}, ["Model", "Modality", "Download state", "Runtime"].map((c) =>
+        el("th", { scope: "col", text: c })))),
+      el("tbody", {}, ...rows)),
+    others > 0 ? el("p", { class: "unavailable",
+      text: `${others} more catalogued model${others === 1 ? " is" : "s are"} not pinned, so never downloaded here.` }) : null,
+    el("p", {},
+      el("a", { href: "/ai/local-models", text: "Download, load, unload or delete a model" }),
+      ...(embeddings ? [" · ", el("a", { href: "/ai/embeddings", text: "Test embeddings" })] : [])));
 }
 
 // Local models (#1306) lists the catalogue with each model's download state
