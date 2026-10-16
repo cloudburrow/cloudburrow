@@ -286,3 +286,65 @@ func TestConsoleMemorystoreUpgrade(t *testing.T) {
 		t.Errorf("after Upgrade GET k = %q, %v", v, err)
 	}
 }
+
+// TestConsoleMemorystoreStandardTier (#1385): Create instance's Tier,
+// read replicas and Replicas make a STANDARD_HA instance with two
+// replicas, whose page shows its read endpoint, zones and nodes and
+// offers Failover; Failover runs FailoverInstance and waits for it, and
+// the endpoint keeps the data on a new primary; Edit's Replicas scales
+// the instance through UpdateInstance.
+func TestConsoleMemorystoreStandardTier(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c, project := memorystoreAdminClient(t, h)
+	ctx := h.Context()
+	id := fmt.Sprintf("console-ha-%d", time.Now().UnixNano()%1e8)
+	name := "projects/" + project + "/locations/us-central1/instances/" + id
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = op.Wait(context.Background())
+		}
+	})
+	q := "?project=" + url.QueryEscape(project)
+	body, _ := json.Marshal(map[string]string{"id": id, "region": "us-central1", "memorySizeGb": "5",
+		"tier": "STANDARD_HA", "readReplicas": "true", "replicaCount": "2"})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/memorystore"+q, string(body)); code != http.StatusOK {
+		t.Fatalf("console create = %d: %s", code, out)
+	}
+	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil || inst.GetTier() != redispb.Instance_STANDARD_HA || inst.GetReplicaCount() != 2 ||
+		inst.GetReadReplicasMode() != redispb.Instance_READ_REPLICAS_ENABLED {
+		t.Fatalf("created from the console: %v, %v", inst, err)
+	}
+	rc := redisAt(inst, "")
+	defer rc.Close()
+	if err := rc.Set(ctx, "k", "v", 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := rc.Do(ctx, "WAIT", 2, 5000).Int(); err != nil || n < 2 {
+		t.Fatalf("WAIT 2 = %d, %v", n, err)
+	}
+	code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/memorystore"+q+"&name="+id, "")
+	if code != http.StatusOK || !strings.Contains(out, `"id":"failover"`) || !strings.Contains(out, "Read endpoint") ||
+		!strings.Contains(out, inst.GetReadEndpoint()) || !strings.Contains(out, "node-2") {
+		t.Fatalf("instance page = %d: %s; want Failover, the read endpoint and the nodes", code, out)
+	}
+	if code, out := consoleAct(t, addr, "memorystore", project, []string{id}, "failover",
+		map[string]string{"dataProtectionMode": "LIMITED_DATA_LOSS"}); code != http.StatusOK {
+		t.Fatalf("console Failover = %d: %s", code, out)
+	}
+	after, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil || after.GetCurrentLocationId() == inst.GetCurrentLocationId() || after.GetPort() != inst.GetPort() {
+		t.Fatalf("after console Failover: %v, %v", after, err)
+	}
+	if v, err := rc.Get(ctx, "k").Result(); err != nil || v != "v" {
+		t.Errorf("after console Failover GET k = %q, %v", v, err)
+	}
+	if code, out := consoleEdit(t, addr, "memorystore", project, []string{id}, map[string]string{
+		"displayName": "", "memorySizeGb": "5", "labels": "{}", "redisConfigs": "{}", "replicaCount": "1"}); code != http.StatusOK {
+		t.Fatalf("console edit = %d: %s", code, out)
+	}
+	if got, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); err != nil || got.GetReplicaCount() != 1 || len(got.GetNodes()) != 2 {
+		t.Errorf("after Edit's Replicas, GetInstance = %v, %v", got, err)
+	}
+}

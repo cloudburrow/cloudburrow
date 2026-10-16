@@ -2,8 +2,8 @@ package redisadmin
 
 import (
 	"bufio"
-	"errors"
 	"context"
+	"errors"
 	"net"
 	"strconv"
 	"strings"

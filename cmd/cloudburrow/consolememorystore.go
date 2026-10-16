@@ -49,7 +49,7 @@ func (memorystoreProvider) ID() string    { return "memorystore" }
 func (memorystoreProvider) Title() string { return "Memorystore" }
 
 const memorystoreNote = "The instance memorystore is the Valkey server --services memorystore runs; it cannot be edited or deleted. " +
-	"Each instance created here is a server of its own, BASIC tier (REDIS_6_X Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey), without in-transit encryption."
+	"Each instance created here is a server of its own, BASIC tier, or a primary and replicas, STANDARD_HA (REDIS_6_X Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey), without in-transit encryption."
 
 // List implements console.Provider: the project's instances.
 func (p memorystoreProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -89,6 +89,15 @@ func memorystoreEndpoint(inst *redispb.Instance) string {
 		return "—"
 	}
 	return net.JoinHostPort(inst.GetHost(), strconv.Itoa(int(inst.GetPort())))
+}
+
+// memorystoreReadEndpoint is a Standard tier instance's read endpoint,
+// host:port, "" for none.
+func memorystoreReadEndpoint(inst *redispb.Instance) string {
+	if inst.GetReadEndpoint() == "" {
+		return ""
+	}
+	return net.JoinHostPort(inst.GetReadEndpoint(), strconv.Itoa(int(inst.GetReadEndpointPort())))
 }
 
 // memorystoreID is the console's name for an instance: its ID, with its
@@ -142,8 +151,8 @@ func (p memorystoreProvider) Act(ctx context.Context, project, name, action stri
 }
 
 // CreateForm implements console.Creator: CreateInstance's fields that work
-// here. Standard tier and other versions are refused by the API, so they
-// are not offered.
+// here: BASIC or STANDARD_HA (#1385), with read replicas. Versions the
+// API refuses are not offered.
 func (memorystoreProvider) CreateForm() (string, []console.Field) {
 	return "Create instance", []console.Field{
 		{Name: "id", Label: "Instance ID", Type: "text", Required: true, Pattern: `^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$`,
@@ -153,6 +162,12 @@ func (memorystoreProvider) CreateForm() (string, []console.Field) {
 			Help: "CloudBurrow does not place instances geographically."},
 		{Name: "memorySizeGb", Label: "Capacity (GB)", Type: "number", Required: true, Default: "1", Pattern: `^[0-9]{1,3}$`,
 			Help: "1 to 300: the server's maxmemory."},
+		{Name: "tier", Label: "Tier", Type: "select", Default: "BASIC", Options: []string{"BASIC", "STANDARD_HA"},
+			Help: "STANDARD_HA is a primary and replicas, each a server of its own, with failover."},
+		{Name: "readReplicas", Label: "Enable read replicas", Type: "checkbox",
+			Help: "STANDARD_HA only, 5 GB or more: a read endpoint over the replicas. It cannot be turned off later."},
+		{Name: "replicaCount", Label: "Replicas", Type: "number", Pattern: `^[0-5]?$`,
+			Help: "STANDARD_HA: 1 without read replicas, 1 to 5 with them (default 2)."},
 		{Name: "redisVersion", Label: "Version", Type: "select", Default: redisadmin.DefaultRedisVersion, Options: redisadmin.Versions,
 			Help: "REDIS_6_X is Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey 8.1."},
 		{Name: "authEnabled", Label: "Enable AUTH", Type: "checkbox",
@@ -183,10 +198,23 @@ func (p memorystoreProvider) Create(ctx context.Context, project string, values 
 		return "", err
 	}
 	region := strings.TrimSpace(values["region"])
+	in := &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: int32(size), DisplayName: values["displayName"],
+		AuthEnabled: values["authEnabled"] == "true", Labels: labels, RedisConfigs: configs, RedisVersion: values["redisVersion"]}
+	if values["tier"] == "STANDARD_HA" {
+		in.Tier = redispb.Instance_STANDARD_HA
+		if values["readReplicas"] == "true" {
+			in.ReadReplicasMode = redispb.Instance_READ_REPLICAS_ENABLED
+		}
+	}
+	if rc := strings.TrimSpace(values["replicaCount"]); rc != "" {
+		n, err := strconv.Atoi(rc)
+		if err != nil {
+			return "", fmt.Errorf("replicas %q is not a number", rc)
+		}
+		in.ReplicaCount = int32(n)
+	}
 	op, err := p.api().CreateInstance(ctx, &redispb.CreateInstanceRequest{
-		Parent: "projects/" + project + "/locations/" + region, InstanceId: strings.TrimSpace(values["id"]),
-		Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: int32(size), DisplayName: values["displayName"],
-			AuthEnabled: values["authEnabled"] == "true", Labels: labels, RedisConfigs: configs, RedisVersion: values["redisVersion"]}})
+		Parent: "projects/" + project + "/locations/" + region, InstanceId: strings.TrimSpace(values["id"]), Instance: in})
 	if err != nil {
 		return "", err
 	}
@@ -261,6 +289,19 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 		{Label: "Redis configs", Value: orDash(memorystorePairs(inst.GetRedisConfigs()))},
 		{Label: "Persistence", Value: memorystorePersistence(inst.GetPersistenceConfig())},
 	}
+	if inst.GetTier() == redispb.Instance_STANDARD_HA {
+		var nodes []string
+		for _, n := range inst.GetNodes() {
+			nodes = append(nodes, n.GetId()+" ("+n.GetZone()+")")
+		}
+		props = append(props,
+			console.Property{Label: "Replicas", Value: strconv.Itoa(int(inst.GetReplicaCount()))},
+			console.Property{Label: "Read replicas", Value: inst.GetReadReplicasMode().String()},
+			console.Property{Label: "Read endpoint", Value: orDash(memorystoreReadEndpoint(inst))},
+			console.Property{Label: "Primary zone", Value: inst.GetCurrentLocationId()},
+			console.Property{Label: "Alternative zone", Value: inst.GetAlternativeLocationId()},
+			console.Property{Label: "Nodes", Value: strings.Join(nodes, ", ")})
+	}
 	if inst.GetAuthEnabled() {
 		if a, err := p.api().GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: name}); err == nil {
 			props = append(props, console.Property{Label: "AUTH string", Value: orDash(a.GetAuthString())})
@@ -288,6 +329,14 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 				Help:    "RDB snapshots every period (the server's save point), or none; set on the running server."},
 		},
 		Note: "Saved through UpdateInstance. The ID, region, tier, version and AUTH cannot be changed here.",
+	}
+	switch {
+	case inst.GetReadReplicasMode() == redispb.Instance_READ_REPLICAS_ENABLED:
+		d.Edit.Fields = append(d.Edit.Fields, console.Field{Name: "replicaCount", Label: "Replicas", Type: "number", Required: true,
+			Pattern: `^[1-5]$`, Default: strconv.Itoa(int(inst.GetReplicaCount())), Help: "1 to 5: replicas are started or removed, and the read endpoint follows."})
+	case inst.GetTier() == redispb.Instance_STANDARD_HA:
+		d.Edit.Fields = append(d.Edit.Fields, console.Field{Name: "readReplicas", Label: "Enable read replicas", Type: "checkbox",
+			Help: "5 GB or more: a read endpoint over the replicas (2 by default). It cannot be turned off later."})
 	}
 	return d, nil
 }
@@ -329,6 +378,16 @@ func (p memorystoreProvider) Edit(ctx context.Context, project string, path []st
 			paths, in.PersistenceConfig = append(paths, "persistence_config"), pc
 		}
 	}
+	if values["readReplicas"] == "true" {
+		paths, in.ReadReplicasMode = append(paths, "read_replicas_mode"), redispb.Instance_READ_REPLICAS_ENABLED
+	}
+	if v := strings.TrimSpace(values["replicaCount"]); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("replicas %q is not a number", v)
+		}
+		paths, in.ReplicaCount = append(paths, "replica_count"), int32(n)
+	}
 	op, err := p.api().UpdateInstance(ctx, &redispb.UpdateInstanceRequest{
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: paths}, Instance: in})
 	if err != nil {
@@ -360,7 +419,8 @@ func (p memorystoreProvider) DetailActions(ctx context.Context, project string, 
 		return nil
 	}
 	var upgrade []console.Action
-	if inst, err := p.api().GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); err == nil {
+	inst, ierr := p.api().GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if ierr == nil {
 		var later []string
 		seen := false
 		for _, v := range redisadmin.Versions {
@@ -373,6 +433,13 @@ func (p memorystoreProvider) DetailActions(ctx context.Context, project string, 
 			upgrade = []console.Action{{ID: "upgrade", Label: "Upgrade", Confirm: "The instance's server is started again on the new version, with its data; an instance cannot be downgraded.",
 				Fields: []console.Field{{Name: "redisVersion", Label: "Version", Type: "select", Required: true, Options: later, Default: later[0]}}}}
 		}
+	}
+	if ierr == nil && inst.GetTier() == redispb.Instance_STANDARD_HA {
+		upgrade = append(upgrade, console.Action{ID: "failover", Label: "Failover", Destructive: true,
+			Confirm: "A replica becomes the primary; the endpoint stays the same and its connections are dropped (FailoverInstance).",
+			Fields: []console.Field{{Name: "dataProtectionMode", Label: "Data protection mode", Type: "select", Required: true,
+				Options: []string{"LIMITED_DATA_LOSS", "FORCE_DATA_LOSS"}, Default: "LIMITED_DATA_LOSS",
+				Help: "LIMITED_DATA_LOSS aborts when a replica is 30 MB or more behind the primary; FORCE_DATA_LOSS does not check."}}})
 	}
 	return append(upgrade, []console.Action{
 		{ID: "export", Label: "Export", Fields: []console.Field{{Name: "uri", Label: "Destination", Type: "text", Required: true,
@@ -404,6 +471,13 @@ func (p memorystoreProvider) ActAt(ctx context.Context, project string, path []s
 	case "import":
 		op, err := p.api().ImportInstance(ctx, &redispb.ImportInstanceRequest{Name: name,
 			InputConfig: &redispb.InputConfig{Source: &redispb.InputConfig_GcsSource{GcsSource: &redispb.GcsSource{Uri: uri}}}})
+		if err != nil {
+			return err
+		}
+		opName = op.GetName()
+	case "failover":
+		mode := redispb.FailoverInstanceRequest_DataProtectionMode(redispb.FailoverInstanceRequest_DataProtectionMode_value[values["dataProtectionMode"]])
+		op, err := p.api().FailoverInstance(ctx, &redispb.FailoverInstanceRequest{Name: name, DataProtectionMode: mode})
 		if err != nil {
 			return err
 		}
