@@ -26,7 +26,9 @@ emulator's rounding triggers, bigquery-emulator patch 0020) is part of
 the INSERT record. A CREATE TABLE ... AS SELECT's rows are recorded as inserted
 when it is made; DROP TABLE drops the change table; CREATE OR REPLACE
 TABLE starts it again; CREATE TABLE IF NOT EXISTS of a table that is
-there keeps it. A change older than seven days (BigQuery's longest time
+there keeps it, in the catalog or not (CloudBurrow's front takes a table
+out of the catalog and adds it again to put it in step after a failed
+script). A change older than seven days (BigQuery's longest time
 travel window) is deleted as each new change is recorded. No BigQuery
 table id has a `$`, a wildcard leaves change tables out, and so does
 INFORMATION_SCHEMA. CloudBurrow's front reads them for APPENDS and
@@ -41,7 +43,7 @@ Authors.
 
 --- /dev/null
 +++ b/change_history_test.go
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,162 @@
 +package googlesqlite_test
 +
 +import (
@@ -181,6 +183,24 @@ Authors.
 +	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.ctas$changes`"); got != "apples 10 INSERT false" {
 +		t.Errorf("after CREATE TABLE IF NOT EXISTS: %s", got)
 +	}
++	// A table taken out of the catalog by a DROP TABLE rolled back, and
++	// added again by CREATE TABLE IF NOT EXISTS (CloudBurrow's front's
++	// catalog resync), keeps its history.
++	tx, err = db.BeginTx(ctx, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err := tx.ExecContext(ctx, "DROP TABLE `p.d.ctas`"); err != nil {
++		t.Fatal(err)
++	}
++	if err := tx.Rollback(); err != nil {
++		t.Fatal(err)
++	}
++	exec("CREATE TABLE IF NOT EXISTS `p.d.ctas` (product STRING, inventory INT64)")
++	exec("INSERT INTO `p.d.ctas` VALUES ('pears', 3)")
++	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.ctas$changes` ORDER BY _CHANGE_TIMESTAMP"); got != "apples 10 INSERT false; pears 3 INSERT false" {
++		t.Errorf("after a rolled-back DROP TABLE and CREATE TABLE IF NOT EXISTS: %s", got)
++	}
 +	exec("DROP TABLE `p.d.ctas`")
 +	if _, err := db.QueryContext(ctx, "SELECT * FROM `p.d.ctas$changes`"); err == nil {
 +		t.Error("the change table of a dropped table is still there")
@@ -188,7 +208,7 @@ Authors.
 +}
 --- /dev/null
 +++ b/internal/change_history.go
-@@ -0,0 +1,250 @@
+@@ -0,0 +1,263 @@
 +package internal
 +
 +import (
@@ -310,9 +330,18 @@ Authors.
 +		return nil
 +	}
 +	base, change := spec.TableName(), cs.TableName()
-+	if _, exists := catalog.tableMap[change]; exists &&
-+		spec.CreateMode == googlesql.ResolvedCreateStatementEnums_CreateModeCreateIfNotExists {
-+		return nil // the table was there, and so is its change table
++	if spec.CreateMode == googlesql.ResolvedCreateStatementEnums_CreateModeCreateIfNotExists {
++		if _, exists := catalog.tableMap[change]; exists {
++			return nil // the table was there, and so is its change table
++		}
++		// The table and its change table may be there without the change
++		// table in the catalog (CloudBurrow's front takes a table out of
++		// the catalog and adds it again to put the catalog in step after a
++		// failed script): it keeps its history.
++		var one int
++		if err := conn.QueryRowContext(ctx, "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", change).Scan(&one); err == nil {
++			return catalog.AddNewTableSpec(ctx, conn, cs)
++		}
 +	}
 +	n := len(cs.Columns) - 3
 +	cols := make([]string, n)
@@ -368,6 +397,10 @@ Authors.
 +	}
 +	stmts := []string{
 +		fmt.Sprintf("DROP TABLE IF EXISTS `%s`", change),
++		fmt.Sprintf("DROP TRIGGER IF EXISTS `%s$insert`", change),
++		fmt.Sprintf("DROP TRIGGER IF EXISTS `%s$delete`", change),
++		fmt.Sprintf("DROP TRIGGER IF EXISTS `%s$update`", change),
++		fmt.Sprintf("DROP TRIGGER IF EXISTS `%s$fold`", change),
 +		fmt.Sprintf("CREATE TABLE `%s` (%s)", change, strings.Join(defs, ",")),
 +		fmt.Sprintf("CREATE INDEX `%s$time` ON `%s`(`%s`)", change, change, changeMicrosColumn),
 +		fmt.Sprintf("CREATE INDEX `%s$row` ON `%s`(`%s`)", change, change, changeRowidColumn),
