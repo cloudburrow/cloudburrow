@@ -13,12 +13,11 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/locations"
 	"github.com/cloudburrow/cloudburrow/internal/paging"
-	"github.com/cloudburrow/cloudburrow/internal/service/scheduler"
 )
 
 // LocationsServer serves google.cloud.location.Locations, the mixin
 // redis_v1.yaml binds (#1386): the regions every project has (the list
-// Cloud Scheduler answers, scheduler.Regions), and any region holding one
+// Cloud Scheduler answers, locations.Regions), and any region holding one
 // of the project's instances, since any is accepted. Each carries
 // google.cloud.redis.v1.LocationMetadata with zones a, b and c; which
 // zones Google lists per region is UNVERIFIED.
@@ -40,7 +39,7 @@ var (
 
 func (l *LocationsServer) regions(ctx context.Context, project string) []string {
 	seen := map[string]bool{}
-	for _, r := range scheduler.Regions {
+	for _, r := range locations.Regions {
 		seen[r] = true
 	}
 	seen[Region] = true

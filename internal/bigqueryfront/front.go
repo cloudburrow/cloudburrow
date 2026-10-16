@@ -771,10 +771,13 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 		// (#1273, streamingbuffer.go).
 		streamed = true
 	} else if ok := json.Unmarshal(got, &pm) == nil; ok && pm.TimePartitioning == nil && pm.RangePartitioning == nil &&
-		f.buffers != nil && f.buffers.stamp && !decorated && len(raw["templateSuffix"]) == 0 && plainTable(got) {
+		f.buffers != nil && f.buffers.stamp && !decorated && len(raw["templateSuffix"]) == 0 && plainTable(got) &&
+		!hasRangeField(pm.Schema.Fields) {
 		// Any other table streams through a scratch table too, so its
 		// rows keep their stream time, which DML reads (#1370,
-		// streamingbuffer.go).
+		// streamingbuffer.go). Not one with a RANGE column, which the
+		// emulator's tables.insert cannot make a scratch copy of: its rows
+		// stream straight in, held from DML only while in the buffer.
 		streamed = true
 	}
 	if decorated && !pm.ingestion() {

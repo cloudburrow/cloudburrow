@@ -179,8 +179,9 @@ func TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts(t *testing.T) {
 	if n := countRows(t, h, orders); n != 4 {
 		t.Errorf("after DROP COLUMN the table has %d rows, want 4", n)
 	}
+	// BigQuery refuses a nested field's ALTER COLUMN (#1389), in its words.
 	refused("read-write", "ALTER TABLE orders ALTER COLUMN id.x SET DEFAULT 1",
-		"Not implemented here: ALTER TABLE ALTER COLUMN of a nested field")
+		"ALTER COLUMN takes a top-level column")
 	refused("", "CREATE TABLE never AS SELECT 1 AS a", "Switch it to Read-write")
 	if _, err := ds.Table("never").Metadata(ctx); !isNotFound(err) {
 		t.Errorf("a CREATE refused in Read-only made the table: %v", err)

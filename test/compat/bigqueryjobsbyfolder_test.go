@@ -113,7 +113,11 @@ func TestBigQueryJobsByFolderAndOrganization(t *testing.T) {
 			t.Errorf("JOBS_BY_ORGANIZATION has no column %s", col)
 		}
 	}
-	_, _, err = read("SELECT job_id FROM `region-eu`.INFORMATION_SCHEMA.JOBS_BY_FOLDER")
+	// A query that names no location runs in the region it reads (#1375),
+	// so the 404 is for a query in US reading region-eu.
+	eu := c.Query("SELECT job_id FROM `region-eu`.INFORMATION_SCHEMA.JOBS_BY_FOLDER")
+	eu.Location = "US"
+	_, err = eu.Read(ctx)
 	wantCode(t, "JOBS_BY_FOLDER of another region", err, http.StatusNotFound, "region-eu")
 
 	// In the organization, in no folder.
