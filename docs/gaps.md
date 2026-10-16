@@ -50,10 +50,8 @@ and object IAM on the JSON API are excluded (below).
 |---|---|---|
 | gRPC `google.storage.v2`: `Bucket.ip_filter` stays `UNIMPLEMENTED` (and `ipFilter` 400 on the JSON API): enforcing it needs the caller's VPC network and the `storage.buckets.exemptFromIpFilter` permission, which are not modelled. Appendable objects, `custom_placement_config` and `SetIamPolicy`'s `update_mask` are built (#1443) | refused by design: enforcement needs what is not modelled | S |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) | no emulator support (no cache tier) | S |
-| `anywhereCaches.*`, `rapidCaches.*` (#1444) | no emulator support (no cache tier) | M |
-| `buckets.relocate`, `buckets.operations.advanceRelocateBucket` (#1444) | no emulator support (one location) | M |
-| `buckets.operations.cancel`: every operation is done when returned (#1444) | no emulator support | S |
-| Notifications: the server with no Pub/Sub refuses a configuration (501) (#1444) | no emulator support (needs Pub/Sub) | S |
+| `rapidCaches.*` (#1444; Anywhere Caches, as records with no cache tier, `buckets.relocate`, `advanceRelocateBucket` and `operations.cancel` are built) | no emulator support (no cache tier) | M |
+| Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444) | no emulator support (needs Pub/Sub) | S |
 | UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
 
 ## Pub/Sub

@@ -3387,6 +3387,10 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 			if ops := p.operationsSection(ctx, bucket); hns || len(ops.Listing.Items) > 0 || ops.Listing.Unavailable != "" {
 				sections = append(sections, ops)
 			}
+			// Its Anywhere Caches, and the cache, relocation and cancel
+			// actions (#1444).
+			sections = append(sections, p.cachesSection(ctx, bucket))
+			actions = append(actions, cacheActions()...)
 		}
 		// Its notifications, and Create notification (#791).
 		notifications, create := p.notificationsSection(ctx, project, bucket)
