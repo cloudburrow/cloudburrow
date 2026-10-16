@@ -21,8 +21,10 @@ import (
 // resource holds: description, friendly_name, labels,
 // default_table_expiration_days, default_partition_expiration_days,
 // max_time_travel_hours and default_kms_key_name, each value written as
-// SQL, as TABLE_OPTIONS writes a table's. MATERIALIZED_VIEWS is always
-// empty: the engine makes no materialized view.
+// SQL, as TABLE_OPTIONS writes a table's. MATERIALIZED_VIEWS has a row per
+// materialized view the front made (materializedviews.go, #1390): its last
+// refresh time as last_refresh_time and refresh_watermark, and a NULL
+// last_refresh_status, as of a refresh that succeeded.
 //
 // OBJECT_PRIVILEGES and SCHEMATA_LINKS, region-qualified: infoschemaprivileges.go (#1355).
 
@@ -35,7 +37,7 @@ const materializedViewsColumns = "STRUCT<table_catalog STRING, table_schema STRI
 
 func init() {
 	infoSchemaBuilders["SCHEMATA_OPTIONS"] = front.schemataOptionsRows
-	infoSchemaBuilders["MATERIALIZED_VIEWS"] = emptyRows(materializedViewsColumns)
+	infoSchemaBuilders["MATERIALIZED_VIEWS"] = tableRowsOf(materializedViewsColumns, materializedViewRows) // #1390
 	for view, columns := range map[string]string{
 		"SCHEMATA_OPTIONS":   schemataOptionsColumns,
 		"MATERIALIZED_VIEWS": materializedViewsColumns,
@@ -108,4 +110,18 @@ func datasetOptions(ds map[string]any) [][3]string {
 		add("max_time_travel_hours", "INT64", strconv.FormatInt(h, 10))
 	}
 	return out
+}
+
+// materializedViewRows is t's row of MATERIALIZED_VIEWS, when t is one.
+func materializedViewRows(project, dataset string, t infoTable) [][]string {
+	def, _ := t["materializedView"].(map[string]any)
+	if str(t, "type") != "MATERIALIZED_VIEW" || def == nil {
+		return nil
+	}
+	refreshed := "NULL"
+	if ms, err := strconv.ParseInt(str(def, "lastRefreshTime"), 10, 64); err == nil {
+		refreshed = "TIMESTAMP_MILLIS(" + strconv.FormatInt(ms, 10) + ")"
+	}
+	return [][]string{{sqlString(project), sqlString(dataset), sqlString(str(t, "tableId")), refreshed, refreshed,
+		"CAST(NULL AS STRUCT<reason STRING, location STRING, debug_info STRING, message STRING>)"}}
 }

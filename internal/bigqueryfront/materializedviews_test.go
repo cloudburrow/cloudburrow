@@ -1,0 +1,83 @@
+package bigqueryfront
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestParseMVStatement(t *testing.T) {
+	for _, c := range []struct {
+		sql, kind, path, query, msg string
+		ok, replace, ifCheck        bool
+	}{
+		{sql: "CREATE MATERIALIZED VIEW ds.mv AS SELECT k, SUM(v) s FROM ds.t GROUP BY k", ok: true, kind: "create",
+			path: "ds.mv", query: "SELECT k, SUM(v) s FROM ds.t GROUP BY k"},
+		{sql: "CREATE OR REPLACE MATERIALIZED VIEW ds.mv OPTIONS (enable_refresh = false, refresh_interval_minutes = 60) AS SELECT 1 FROM ds.t;",
+			ok: true, kind: "create", path: "ds.mv", replace: true, query: "SELECT 1 FROM ds.t"},
+		{sql: "CREATE MATERIALIZED VIEW IF NOT EXISTS ds.mv AS SELECT 1 FROM ds.t", ok: true, kind: "create", path: "ds.mv", ifCheck: true,
+			query: "SELECT 1 FROM ds.t"},
+		{sql: "CREATE MATERIALIZED VIEW ds.mv OPTIONS (refresh_interval_minutes = 0) AS SELECT 1 FROM ds.t", ok: true, kind: "create",
+			path: "ds.mv", query: "SELECT 1 FROM ds.t", msg: "refresh_interval_minutes"},
+		{sql: "ALTER MATERIALIZED VIEW IF EXISTS ds.mv SET OPTIONS (enable_refresh = TRUE)", ok: true, kind: "alter", path: "ds.mv", ifCheck: true},
+		{sql: "DROP MATERIALIZED VIEW ds.mv", ok: true, kind: "drop", path: "ds.mv"},
+		{sql: "CALL BQ.REFRESH_MATERIALIZED_VIEW('p.ds.mv')", ok: true, kind: "refresh", path: "p.ds.mv"},
+		{sql: "CREATE VIEW ds.v AS SELECT 1"},
+		{sql: "SELECT 'MATERIALIZED'"},
+		{sql: "CREATE MATERIALIZED VIEW ds.mv AS SELECT 1 FROM ds.t; SELECT 1"},
+	} {
+		st, ok := parseMVStatement(c.sql)
+		if ok != c.ok {
+			t.Errorf("%s: ok %v", c.sql, ok)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if st.kind != c.kind || strings.Join(st.path, ".") != c.path || st.replace != c.replace || st.ifCheck != c.ifCheck ||
+			strings.TrimSpace(st.d.query) != c.query || (c.msg == "") != (st.msg == "") || !strings.Contains(st.msg, c.msg) {
+			t.Errorf("%s: %+v", c.sql, st)
+		}
+	}
+}
+
+func TestMVQueryLimit(t *testing.T) {
+	for q, want := range map[string]string{
+		"SELECT k, SUM(v) FROM ds.t GROUP BY k":           "",
+		"SELECT k, CURRENT_TIMESTAMP() FROM ds.t":         "CURRENT_TIMESTAMP",
+		"SELECT k FROM ds.t ORDER BY k":                   "ORDER BY",
+		"SELECT k, ROW_NUMBER() OVER (ORDER BY k) FROM t": "analytic",
+		"SELECT COUNT(DISTINCT k) FROM ds.t":              "COUNT(DISTINCT)",
+		"SELECT 1":                                        "base table",
+	} {
+		got := mvQueryLimit(q, false)
+		if (want == "") != (got == "") || !strings.Contains(got, want) {
+			t.Errorf("%s: %q, want %q", q, got, want)
+		}
+	}
+	if got := mvQueryLimit("SELECT k FROM ds.t ORDER BY k", true); got != "" {
+		t.Errorf("non-incremental ORDER BY: %q", got)
+	}
+}
+
+func TestPartitionFilterRefusal(t *testing.T) {
+	meta := map[string]any{"requirePartitionFilter": true, "timePartitioning": map[string]any{"type": "DAY", "field": "day"}}
+	for sql, refused := range map[string]bool{
+		"SELECT * FROM ds.t":                                 true,
+		"SELECT * FROM ds.t WHERE day = '2024-01-01'":        false,
+		"SELECT * FROM ds.t WHERE x = 1":                     true,
+		"SELECT day FROM ds.t":                               true,
+		"SELECT * FROM ds.t WHERE `day` > DATE '2024-01-01'": false,
+	} {
+		reads, _, ok := tableReads(sql, "p", "")
+		if !ok || len(reads) != 1 {
+			t.Fatalf("%s: reads %v", sql, reads)
+		}
+		msg := partitionFilterRefusal(reads[0], meta, "p.ds.t")
+		if (msg != "") != refused {
+			t.Errorf("%s: %q", sql, msg)
+		}
+	}
+	if msg := partitionFilterRefusal(tableRead{}, map[string]any{"timePartitioning": map[string]any{"type": "DAY"}}, "x"); msg != "" {
+		t.Errorf("without the option: %q", msg)
+	}
+}
