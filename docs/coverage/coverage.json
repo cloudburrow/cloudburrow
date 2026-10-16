@@ -8246,34 +8246,52 @@
     "Key": "sqladmin",
     "Title": "Cloud SQL Admin API (v1)",
     "counts": {
-      "Unimplemented": 32,
-      "Verified": 48
+      "Unimplemented": 24,
+      "Verified": 56
     },
     "rows": [
       {
         "method": "sql.Backups.CreateBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
+          "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
+        ]
       },
       {
         "method": "sql.Backups.DeleteBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
+          "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
+        ]
       },
       {
         "method": "sql.Backups.GetBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
+          "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
+        ]
       },
       {
         "method": "sql.Backups.ListBackups",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
+          "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
+        ]
       },
       {
         "method": "sql.Backups.UpdateBackup",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
+          "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
+        ]
       },
       {
         "method": "sql.backupRuns.delete",
@@ -8304,6 +8322,7 @@
         "method": "sql.backupRuns.list",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
           "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention"
@@ -8312,26 +8331,41 @@
       {
         "method": "sql.blueGreenDeployments.create",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.blueGreenDeployments.delete",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.blueGreenDeployments.get",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.blueGreenDeployments.list",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.blueGreenDeployments.switchover",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -8363,6 +8397,9 @@
       {
         "method": "sql.connect.resolve",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -8427,31 +8464,49 @@
       {
         "method": "sql.instances.ListEntraIdCertificates",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.instances.ListServerCertificates",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.instances.RotateEntraIdCertificate",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.instances.RotateServerCertificate",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.instances.acquireSsrsLease",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.instances.addEntraIdCertificate",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -8464,6 +8519,9 @@
       {
         "method": "sql.instances.addServerCertificate",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -8482,6 +8540,7 @@
         "method": "sql.instances.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
@@ -8496,23 +8555,33 @@
           "test/compat/cloudsqlversions_test.go:265 TestCloudSQLCascadingAndCrossRegionReplicas",
           "test/compat/cloudsqlversions_test.go:375 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion",
+          "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica"
         ]
       },
       {
         "method": "sql.instances.demote",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.instances.demoteMaster",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.instances.executeSql",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
+        ]
       },
       {
         "method": "sql.instances.export",
@@ -8575,6 +8644,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
@@ -8641,8 +8711,11 @@
       },
       {
         "method": "sql.instances.preCheckMajorVersionUpgrade",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
+        ]
       },
       {
         "method": "sql.instances.promoteReplica",
@@ -8656,11 +8729,17 @@
       {
         "method": "sql.instances.reencrypt",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.instances.releaseSsrsLease",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -8682,8 +8761,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
           "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
-          "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups"
+          "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
+          "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
         ]
       },
       {
@@ -8710,12 +8791,18 @@
       {
         "method": "sql.instances.switchover",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.instances.truncateLog",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups"
+        ]
       },
       {
         "method": "sql.instances.update",
@@ -8736,6 +8823,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/backupdr_test.go:87 TestBackupDRCloudSQLRestore",
+          "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
+          "test/compat/cloudsqladminverbs_test.go:25 TestCloudSQLProjectBackups",
           "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
           "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
@@ -8764,6 +8853,9 @@
       {
         "method": "sql.projects.instances.getDiskShrinkConfig",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -8777,26 +8869,41 @@
       {
         "method": "sql.projects.instances.performDiskShrink",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.projects.instances.rescheduleMaintenance",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.projects.instances.resetReplicaSize",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.projects.instances.startExternalSync",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "sql.projects.instances.verifyExternalSyncSettings",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/cloudsqladminverbs_test.go:304 TestCloudSQLRefusedMethods"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -8864,6 +8971,7 @@
         "method": "sql.users.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqladminverbs_test.go:137 TestCloudSQLDataAPIAndFinalBackup",
           "test/compat/cloudsqlversions_test.go:172 TestCloudSQLMajorVersionUpgrade",
           "test/compat/sqladmin_test.go:278 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:430 TestGcloudSQL",
@@ -8977,18 +9085,24 @@
     "Key": "backupdr",
     "Title": "Backup and DR Service API (v1)",
     "counts": {
-      "Unimplemented": 39,
-      "Verified": 22
+      "Unimplemented": 23,
+      "Verified": 38
     },
     "rows": [
       {
         "method": "backupdr.folders.locations.resourceBackupConfigs.fetch",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.organizations.locations.resourceBackupConfigs.fetch",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -9011,8 +9125,10 @@
       },
       {
         "method": "backupdr.projects.locations.backupPlanAssociations.fetchForResourceType",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupPlanAssociations.get",
@@ -9032,8 +9148,10 @@
       },
       {
         "method": "backupdr.projects.locations.backupPlanAssociations.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupPlanAssociations.triggerBackup",
@@ -9079,18 +9197,24 @@
       },
       {
         "method": "backupdr.projects.locations.backupPlans.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupPlans.revisions.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupPlans.revisions.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupVaults.create",
@@ -9104,6 +9228,9 @@
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.abandonBackup",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -9115,8 +9242,10 @@
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.backups.fetchForResourceType",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.backups.get",
@@ -9135,8 +9264,10 @@
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.backups.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.backups.restore",
@@ -9149,11 +9280,17 @@
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.fetchAccessToken",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.finalizeBackup",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -9166,6 +9303,9 @@
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.initiateBackup",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -9178,17 +9318,25 @@
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.remove",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.backupVaults.dataSources.setInternalStatus",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -9202,8 +9350,10 @@
       },
       {
         "method": "backupdr.projects.locations.backupVaults.fetchUsable",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupVaults.get",
@@ -9224,28 +9374,38 @@
       },
       {
         "method": "backupdr.projects.locations.backupVaults.patch",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.backupVaults.testIamPermissions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.dataSourceReferences.fetchForResourceType",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.dataSourceReferences.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.dataSourceReferences.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.get",
@@ -9257,6 +9417,9 @@
       {
         "method": "backupdr.projects.locations.getTrial",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
@@ -9269,52 +9432,80 @@
       {
         "method": "backupdr.projects.locations.managementServers.create",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.managementServers.delete",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.managementServers.get",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.managementServers.getIamPolicy",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.managementServers.list",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.managementServers.msComplianceMetadata",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.managementServers.setIamPolicy",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.managementServers.testIamPermissions",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.operations.cancel",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.operations.delete",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/backupdr1462_test.go:34 TestBackupDRUpdatesAndViews"
+        ]
       },
       {
         "method": "backupdr.projects.locations.operations.get",
@@ -9335,26 +9526,41 @@
       {
         "method": "backupdr.projects.locations.resourceBackupConfigs.fetch",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.resourceBackupConfigs.list",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.serviceConfig.initialize",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.trial.end",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "backupdr.projects.locations.trial.subscribe",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/backupdr1462_test.go:231 TestBackupDRRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       }
     ]

@@ -661,8 +661,12 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 }
 
 // deleteInstance is instances.delete.
-func (s *Server) deleteInstance(base, project, name string) (any, error) {
+func (s *Server) deleteInstance(r *http.Request, base, project, name string) (any, error) {
 	c, err := s.createdFor(project, name, "instances.delete")
+	if err != nil {
+		return nil, err
+	}
+	fb, err := s.finalBackupOf(r)
 	if err != nil {
 		return nil, err
 	}
@@ -687,7 +691,19 @@ func (s *Server) deleteInstance(base, project, name string) (any, error) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 		defer cancel()
-		err := s.writes.prov.Remove(ctx, name)
+		var err error
+		if fb.enabled {
+			// The final backup is taken before the server is removed; when
+			// it fails, the instance is kept, as on Cloud SQL.
+			if err = s.takeFinalBackup(project, c.engine, fb); err != nil {
+				s.emu.Lock()
+				c.state = "RUNNABLE"
+				s.emu.Unlock()
+				s.finish(id, fmt.Errorf("the final backup: %w", err))
+				return
+			}
+		}
+		err = s.writes.prov.Remove(ctx, name)
 		s.emu.Lock()
 		if err == nil {
 			if s.writes.byName[name] == c {

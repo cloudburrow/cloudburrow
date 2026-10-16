@@ -330,6 +330,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
+	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
 	if pitr == "On" && strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
 		d.Actions = append(d.Actions, console.Action{ID: "binlog-clone", Label: "Clone to binary log position", Fields: []console.Field{
 			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
@@ -608,6 +609,14 @@ func (p cloudSQLInstancesProvider) ActAt(ctx context.Context, project string, pa
 // answers with the certificate, its private key and the server CA, which
 // sslCerts.insert returns once; every other action with nothing.
 func (p cloudSQLInstancesProvider) ActAtResult(ctx context.Context, project string, path []string, action string, v map[string]string) (*console.Listing, error) {
+	if (action == "run-sql" || action == "precheck-upgrade") && len(path) == 1 {
+		svc, err := p.api(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out, _, err := dataAPIResult(ctx, svc, project, path[0], action, v)
+		return out, err
+	}
 	if action != "create-client-cert" || len(path) != 1 {
 		return nil, p.actAt(ctx, project, path, action, v)
 	}
@@ -741,6 +750,9 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 	case "rotate-server-ca":
 		_, err = svc.Instances.RotateServerCa(project, name, &sqladminapi.InstancesRotateServerCaRequest{}).Context(ctx).Do()
 	default:
+		if ok, err := dataAPIAct(ctx, svc, project, name, action, v); ok {
+			return err
+		}
 		return fmt.Errorf("unknown action %q", action)
 	}
 	if err != nil {
