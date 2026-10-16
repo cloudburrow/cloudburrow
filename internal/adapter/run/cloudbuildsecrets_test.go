@@ -171,3 +171,34 @@ func TestCreateBuildSecretsScriptAndAllowFailure(t *testing.T) {
 		t.Errorf("secretEnv on a docker build step = %v; want UNIMPLEMENTED", err)
 	}
 }
+
+// failingLogs is a fetcher whose log writes fail.
+type failingLogs struct{ fakeFetcher }
+
+func (failingLogs) Put(context.Context, string, string, string, []byte, bool) error {
+	return fmt.Errorf("write gs://x: HTTP 503 unavailable")
+}
+
+// TestCreateBuildLogWriteErrorIsRecorded (#1430): a build without
+// logsBucket names Cloud Build's default one, and a log that cannot be
+// written there is recorded for the build, not dropped.
+func TestCreateBuildLogWriteErrorIsRecorded(t *testing.T) {
+	s := NewServer(&Knative{}, "t", time.Minute)
+	b := &stepBuilder{fakeBuilder: fakeBuilder{got: make(chan BuildSpec, 2)}}
+	cb := s.Builds(failingLogs{fakeFetcher{objects: map[string]string{}}}, b).AllowHostSteps(true).CloudBuild()
+	op, err := cb.CreateBuild(fromLoopback(), &cbpb.CreateBuildRequest{ProjectId: "proj-1", Build: &cbpb.Build{
+		Steps: []*cbpb.BuildStep{{Name: "alpine", Args: []string{"echo"}}}}})
+	if err != nil {
+		t.Fatalf("CreateBuild: %v", err)
+	}
+	res, err := buildResult(t, s, op.GetName())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(res.GetLogsBucket(), ".cloudbuild-logs.googleusercontent.com") {
+		t.Errorf("logsBucket = %q; want the default", res.GetLogsBucket())
+	}
+	if e := BuildLogError(res.GetName()); !strings.Contains(e, "HTTP 503") {
+		t.Errorf("BuildLogError = %q", e)
+	}
+}

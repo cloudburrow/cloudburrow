@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path"
 	"regexp"
 	"sort"
@@ -700,8 +701,9 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	writeLogs := logging != cbpb.BuildOptions_NONE && logging != cbpb.BuildOptions_CLOUD_LOGGING_ONLY
 	createBucket := false
 	if writeLogs && b.LogsBucket == "" {
-		// Cloud Build's default logs bucket, which Google owns; here it is
-		// made in the instance's Cloud Storage on the first log.
+		// Cloud Build's default logs bucket, which Google owns; here the
+		// instance's Cloud Storage makes it on the first log, read-only to
+		// users (#1430, internal/service/storage/cloudbuildlogs.go).
 		b.LogsBucket, createBucket = "gs://"+number+".cloudbuild-logs.googleusercontent.com", true
 	}
 	if !writeLogs {
@@ -810,7 +812,10 @@ func (r *buildRun) logf(format string, a ...any) {
 var buildLogs = struct {
 	mu   sync.Mutex
 	logs map[string]string
-}{logs: map[string]string{}}
+	// errs is why a build's log could not last be written to its logs
+	// bucket (#1430).
+	errs map[string]string
+}{logs: map[string]string{}, errs: map[string]string{}}
 
 // BuildLog is a build's log so far, by its name, and whether it has one.
 func BuildLog(name string) (string, bool) {
@@ -829,16 +834,41 @@ func (r *buildRun) flushLog(ctx context.Context) {
 	buildLogs.mu.Lock()
 	buildLogs.logs[r.name] = string(data)
 	buildLogs.mu.Unlock()
-	w, ok := r.c.builds.fetch.(ObjectWriter)
-	if r.logsBucket == "" || !ok {
+	if r.logsBucket == "" {
 		return
 	}
 	bucket, prefix, _ := strings.Cut(strings.TrimPrefix(r.logsBucket, "gs://"), "/")
 	id := r.name[strings.LastIndex(r.name, "/")+1:]
 	object := path.Join(prefix, "log-"+id+".txt")
-	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	_ = w.Put(wctx, r.project, bucket, object, data, r.createBucket)
+	var err error
+	if w, ok := r.c.builds.fetch.(ObjectWriter); ok {
+		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		err = w.Put(wctx, r.project, bucket, object, data, r.createBucket)
+		cancel()
+	} else {
+		err = errors.New("this instance does not run Cloud Storage: start it with storage in --services")
+	}
+	buildLogs.mu.Lock()
+	if err != nil {
+		// Google documents no field a log-write failure is reported in, so
+		// it goes to the instance log, once per build, and the console's
+		// build page shows it.
+		if _, seen := buildLogs.errs[r.name]; !seen {
+			slog.Warn("Cloud Build could not write the build log", "build", r.name, "log", "gs://"+bucket+"/"+object, "err", err)
+		}
+		buildLogs.errs[r.name] = err.Error()
+	} else {
+		delete(buildLogs.errs, r.name)
+	}
+	buildLogs.mu.Unlock()
+}
+
+// BuildLogError is why a build's log could not last be written to its logs
+// bucket, or "".
+func BuildLogError(name string) string {
+	buildLogs.mu.Lock()
+	defer buildLogs.mu.Unlock()
+	return buildLogs.errs[name]
 }
 
 func (r *buildRun) update(f func(*cbpb.Build)) *cbpb.Build {

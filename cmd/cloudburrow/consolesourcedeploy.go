@@ -284,6 +284,7 @@ func (p runBuildsProvider) Detail(_ context.Context, project string, path []stri
 	}
 	add("Images", strings.Join(b.GetImages(), ", "))
 	add("Logs bucket", b.GetLogsBucket())
+	add("Log write error", runadapter.BuildLogError(b.GetName()))
 	add("Status detail", b.GetStatusDetail())
 	if b.GetStartTime() != nil && b.GetFinishTime() != nil {
 		add("Duration", b.GetFinishTime().AsTime().Sub(b.GetStartTime().AsTime()).Round(time.Millisecond).String())

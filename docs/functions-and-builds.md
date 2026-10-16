@@ -91,11 +91,29 @@ So do a step's `id`, `waitFor` and `timeout`, and the build's `timeout` (default
 Status goes `QUEUED`, `WORKING`, then `SUCCESS`, `FAILURE`, `TIMEOUT` or `CANCELLED`, with each
 step's status and timing; the operation answers with the Build, or fails (`UNKNOWN`, `CANCELLED`,
 `DEADLINE_EXCEEDED`). The log is written as Google writes it, `log-{build id}.txt` in
-`logsBucket`, or in the default `{project number}.cloudbuild-logs.googleusercontent.com` bucket,
-made in the instance's Cloud Storage on the first log; `options.logging` `NONE` or
-`CLOUD_LOGGING_ONLY` writes none. `gcloud builds submit` without `--async` tails that log from
-`storage.googleapis.com` directly, ignoring the `storage` endpoint override, so use `--async` and
-`gcloud builds describe`, or `gsutil cat` the log.
+`logsBucket`; `options.logging` `NONE` or `CLOUD_LOGGING_ONLY` writes none.
+
+**The default logs bucket (#1430).** A build without `logsBucket` reports Google's default,
+`gs://{project number}.cloudbuild-logs.googleusercontent.com`, and its log is written there, as
+on Google. Google owns that bucket, in a project of its own, and the instance's Cloud Storage
+treats it the same way: Cloud Build makes it on the first log, through a path of the storage
+server's own (`/_cloudburrow/cloudbuild-logs`) that skips the bucket-name check, since no user
+may create a name containing `google` (or a domain name they cannot verify). Through the APIs
+(JSON, XML, gRPC) it is read-only: `buckets.get`, `objects.list`, `objects.get` and downloads
+are served, so the official client, `gcloud storage cat` and `gsutil cat` read the log, and any
+write, delete, patch or copy into it is 403 Forbidden. It is not in the project's `buckets.list`,
+nor on the console's Cloud Storage page. A log that cannot be written (a `logsBucket` that does
+not exist, or Cloud Storage not running) is not dropped: Google documents no build field for it,
+so it goes to the instance log (`Cloud Build could not write the build log`) once per build, and
+the console's build page shows it as **Log write error**.
+
+**`gcloud builds submit` without `--async`**, and `gcloud builds log`, read the log from
+`https://storage.{core/universe_domain}/BUCKET/OBJECT` themselves, which no
+`api_endpoint_overrides` property changes (gcloud's `GCSLogTailer`). `--suppress-logs` does not
+help: it only stops printing, and the log is still polled from Google. So use `--async`, wait
+with `gcloud builds describe`, and read the log with `gcloud storage cat
+gs://BUCKET/log-ID.txt`, which honours the `storage` override `gcloud-setup` writes
+(`TestGcloudBuildsSubmitDefaultLogsBucket`), or the console's build page.
 
 **`ListBuilds` (#1382)** takes the `filter` "Filtering build results" documents: `status`,
 `build_id`, `trigger_id`, `tags`, `images`, `results.images.name`, `results.images.digest`,

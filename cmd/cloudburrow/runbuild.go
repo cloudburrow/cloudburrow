@@ -24,6 +24,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/buildpacks"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/images"
+	"github.com/cloudburrow/cloudburrow/internal/service/storage"
 )
 
 // storageSourceFetcher reads SubmitBuild's source archive from this
@@ -77,11 +78,17 @@ func (f storageSourceFetcher) Fetch(ctx context.Context, bucket, object string, 
 }
 
 // Put writes a Cloud Build log to this instance's Cloud Storage (#1347).
-// With create, a missing bucket is made first in project: the build's
-// default logs bucket, which Google owns and here is the instance's.
+// With create, a missing bucket is made first in project. The build's
+// default logs bucket, {number}.cloudbuild-logs.googleusercontent.com,
+// which Google owns, is written through the server's Cloud Build path
+// (#1430): no user may create that name or write to it.
 func (f storageSourceFetcher) Put(ctx context.Context, project, bucket, object string, data []byte, create bool) error {
 	put := func() (int, string, error) {
 		u := f.base() + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=media&name=" + url.QueryEscape(object)
+		if storage.IsCloudBuildLogsBucket(bucket) {
+			u = f.base() + storage.CloudBuildLogsPath + "?" +
+				url.Values{"project": {project}, "bucket": {bucket}, "name": {object}}.Encode()
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
 		if err != nil {
 			return 0, "", err

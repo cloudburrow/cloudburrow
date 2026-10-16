@@ -1057,8 +1057,10 @@
         "tests": [
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
-          "test/compat/cloudbuildsecrets_test.go:207 TestGcloudBuildsSecretsAndScript",
-          "test/compat/cloudbuildsecrets_test.go:85 TestCloudBuildSecretsScriptAndAllowFailure",
+          "test/compat/cloudbuilddefaultlogs_test.go:131 TestGcloudBuildsSubmitDefaultLogsBucket",
+          "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
+          "test/compat/cloudbuildsecrets_test.go:231 TestGcloudBuildsSecretsAndScript",
+          "test/compat/cloudbuildsecrets_test.go:87 TestCloudBuildSecretsScriptAndAllowFailure",
           "test/compat/cloudbuildsteps_test.go:220 TestGcloudBuildsStepsAndList",
           "test/compat/cloudbuildsteps_test.go:283 TestCloudBuildHostStepsOff",
           "test/compat/cloudbuildsteps_test.go:66 TestCloudBuildArbitraryStepsFilterAndRetry"
@@ -1090,8 +1092,9 @@
         "tests": [
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
-          "test/compat/cloudbuildsecrets_test.go:207 TestGcloudBuildsSecretsAndScript",
-          "test/compat/cloudbuildsecrets_test.go:85 TestCloudBuildSecretsScriptAndAllowFailure",
+          "test/compat/cloudbuilddefaultlogs_test.go:131 TestGcloudBuildsSubmitDefaultLogsBucket",
+          "test/compat/cloudbuildsecrets_test.go:231 TestGcloudBuildsSecretsAndScript",
+          "test/compat/cloudbuildsecrets_test.go:87 TestCloudBuildSecretsScriptAndAllowFailure",
           "test/compat/cloudbuildsteps_test.go:66 TestCloudBuildArbitraryStepsFilterAndRetry",
           "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
         ]
@@ -4934,6 +4937,8 @@
         "method": "storage.objects.get",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuilddefaultlogs_test.go:131 TestGcloudBuildsSubmitDefaultLogsBucket",
+          "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
@@ -4978,6 +4983,7 @@
         "method": "storage.objects.list",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuilddefaultlogs_test.go:47 TestCloudBuildDefaultLogsBucket",
           "test/compat/storage_test.go:136 TestStorageListWithPrefix",
           "test/compat/storagechannels_test.go:148 TestStorageObjectChangeChannelSelection",
           "test/compat/storagecontexts_test.go:223 TestGcloudStorageObjectContexts",

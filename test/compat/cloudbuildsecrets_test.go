@@ -226,8 +226,8 @@ func runShardEndpointIfSet(h *Harness, own, shared string) string {
 // build is SUCCESS, the allowFailure step FAILURE, and its log shows the
 // secret's hash, the value the step echoed (unmasked, as on Google) and the
 // script's output. The
-// build names a logsBucket: the default one, *.cloudbuild-logs.
-// googleusercontent.com, is a name the instance's Cloud Storage refuses.
+// build names a logsBucket; TestGcloudBuildsSubmitDefaultLogsBucket covers
+// the default one (#1430).
 func TestGcloudBuildsSecretsAndScript(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvRun)
