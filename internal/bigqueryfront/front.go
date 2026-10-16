@@ -144,6 +144,11 @@
 //     storagerows.go); which table IDs are shared is kept between
 //     requests, and tabledata.list of such a table reads each page by
 //     LIMIT and OFFSET (tableids.go, qualify.go).
+//   - (#1371) a dataset made without a location is in the default, US,
+//     and datasets.get, datasets.list, tables.get, every job and
+//     INFORMATION_SCHEMA.SCHEMATA say so (location.go); the default is
+//     the project's default_location, ALTER PROJECT SET OPTIONS
+//     (projectoptions.go, #1375).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -211,15 +216,17 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	if policies == nil {
 		policies = &rowPolicies{}
 	}
-	iam := &iamPolicies{}       // iam.go, #1231
-	buffers := &streamBuffers{} // streamingbuffer.go, #1273
+	iam := &iamPolicies{}         // iam.go, #1231
+	buffers := &streamBuffers{}   // streamingbuffer.go, #1273
+	settings := &projectOptions{} // projectoptions.go, #1375
 	if o.stateDir != "" {
-		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf) // streamingbuffer.go, #1273
-		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)       // iam.go, #1231
-		policies.keep(rowPoliciesStateFile(o.stateDir), o.logf)  // rowpolicies.go, #1218
-		functions.keep(functionsStateFile(o.stateDir), o.logf)   // functionstate.go
-		texts.keep(jobTextsStateFile(o.stateDir), o.logf)        // jobtextstate.go, #1028
-		views.keep(viewTextsStateFile(o.stateDir), o.logf)       // viewtextstate.go, #1028
+		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
+		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)         // iam.go, #1231
+		settings.keep(projectOptionsStateFile(o.stateDir), o.logf) // projectoptions.go, #1375
+		policies.keep(rowPoliciesStateFile(o.stateDir), o.logf)    // rowpolicies.go, #1218
+		functions.keep(functionsStateFile(o.stateDir), o.logf)     // functionstate.go
+		texts.keep(jobTextsStateFile(o.stateDir), o.logf)          // jobtextstate.go, #1028
+		views.keep(viewTextsStateFile(o.stateDir), o.logf)         // viewtextstate.go, #1028
 	}
 	ids := o.ids // #1063
 	if ids == nil {
@@ -239,6 +246,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			policies.reset()
 			iam.reset()
 			buffers.reset()
+			settings.reset()
 		})
 	}
 	// listJobs serves jobs.list, r a GET of a project's jobs: here, and
@@ -258,7 +266,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			})
 		})
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if serveUnserved(w, r) { // unserved.go, #1200
 			return
 		}
@@ -324,7 +332,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
-				listJobs: listJobs, iam: iam, buffers: buffers}
+				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -385,7 +393,10 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		case m[4] != "" && strings.Contains(table, "$") && strings.Index(table, "$") > 0 && (m[5] == "" || m[5] == "data"):
 			f.servePartition(w, r, dataset, table, m[5]) // #1273, partitionreads.go
 		case r.Method == http.MethodPost && m[3] == "":
+			datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base))) // #1371, location.go; #1375
 			f.insertDataset(w, r)
+		case r.Method == http.MethodGet && m[3] == "":
+			f.listDatasets(w, r) // #1371, location.go
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
 			f.insertTable(w, r, dataset, "", false)
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
@@ -404,6 +415,12 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.listTableData(w, r, dataset, table) // #1015
 		default:
 			next.ServeHTTP(w, r)
+		}
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Every job the front answers has a location (#1371, location.go).
+		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
+			inner.ServeHTTP(w, r)
 		}
 	})
 }
@@ -451,6 +468,9 @@ type front struct {
 	// iam are the tables' and routines' IAM policies (iam.go, #1231),
 	// which OBJECT_PRIVILEGES reads (#1355), or nil.
 	iam *iamPolicies
+	// settings are the projects' options, default_location
+	// (projectoptions.go, #1375), or nil.
+	settings *projectOptions
 }
 
 // Option is an option of Wrap.

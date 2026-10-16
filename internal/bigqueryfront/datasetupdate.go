@@ -60,12 +60,14 @@ func datasetEtag(content map[string]json.RawMessage) string {
 	return base64.StdEncoding.EncodeToString(sum[:12])
 }
 
-// withDatasetEtag returns the dataset resource body with the front's etag.
+// withDatasetEtag returns the dataset resource body with the front's etag,
+// and its location (the default for one stored without one, #1371).
 func withDatasetEtag(body []byte) ([]byte, bool) {
 	var content map[string]json.RawMessage
 	if json.Unmarshal(body, &content) != nil || content == nil {
 		return nil, false
 	}
+	withLocation(content) // #1371, location.go: a dataset stored without one is in the default
 	etag, _ := json.Marshal(datasetEtag(content))
 	content["etag"] = etag
 	b, err := json.Marshal(content)
@@ -108,6 +110,7 @@ func (f front) updateDataset(w http.ResponseWriter, r *http.Request, dataset str
 		f.next.ServeHTTP(w, r) // the emulator's own answer: 404 for a dataset it does not have
 		return
 	}
+	withLocation(current) // #1371: as datasets.get gives it, so its etag and location hold
 	name := projectOf(f.base) + ":" + dataset
 	if match := r.Header.Get("If-Match"); match != "" && match != "*" && strings.Trim(match, `"`) != datasetEtag(current) {
 		writePreconditionFailed(w, "Precondition check failed. The etag given does not match dataset "+name+"'s etag. Nothing was changed.")

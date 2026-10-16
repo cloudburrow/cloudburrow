@@ -30,7 +30,7 @@ import (
 //
 // The instance's jobs are in one location, US (the emulator gives jobs and
 // datasets none; BigQuery's default). A region other than the query's
-// location (US when the request names none) is refused 404 "Not found"
+// location (the region read when the request names none, #1375) is refused 404 "Not found"
 // (wording UNVERIFIED), as BigQuery refuses a view of another region than
 // the job's. JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION are 501: an instance
 // has neither.
@@ -334,10 +334,12 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 			switch {
 			case key == "JOBS":
 				sub, status, msg = f.jobsRows(r, pushedJobsFilter(q.Query, refs, time.Now()))
+			case projectViews[key] != nil: // #1375, projectoptions.go
+				sub = projectViews[key](f)
 			case key == "TABLE_STORAGE":
-				sub, status, msg = f.regionRows(r, meta, "TABLE_STORAGE", storageColumns, front.storageRows)
-			default:
-				sub, status, msg = f.regionRows(r, meta, key, "", infoSchemaBuilders[key])
+				sub, status, msg = f.regionRows(r, meta, "TABLE_STORAGE", storageColumns, inRegion(location, front.storageRows))
+			default: // the region's datasets alone (#1375, projectoptions.go)
+				sub, status, msg = f.regionRows(r, meta, key, "", inRegion(location, infoSchemaBuilders[key]))
 			}
 			if status != 0 {
 				reason := map[int]string{http.StatusNotFound: "notFound", http.StatusNotImplemented: "notImplemented"}[status]

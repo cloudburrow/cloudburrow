@@ -164,6 +164,14 @@ func (f front) getTable(w http.ResponseWriter, r *http.Request, dataset, table s
 		rec.copyTo(w)
 		return
 	}
+	// A table's location is its dataset's (#1371, location.go); the
+	// emulator gives none.
+	located := false
+	if loc, _ := meta["location"].(string); loc == "" {
+		if loc = f.datasetLocation(r, dataset); loc != "" {
+			meta["location"], located = loc, true
+		}
+	}
 	if view, _ := meta["view"].(map[string]any); ok && view != nil && view["query"] == t.engine {
 		view["query"] = t.client
 		if t.explicit {
@@ -176,7 +184,9 @@ func (f front) getTable(w http.ResponseWriter, r *http.Request, dataset, table s
 		writeRecorded(w, rec, snapshotTyped(meta))
 		return
 	}
-	if f.withStreamingBuffer(r, dataset, table, meta) { // #1273, streamingbuffer.go
+	// The streaming buffer (#1273) and a filled-in location (#1375) each
+	// change meta; withStreamingBuffer runs whatever the location did.
+	if buffered := f.withStreamingBuffer(r, dataset, table, meta); buffered || located {
 		writeRecorded(w, rec, meta)
 		return
 	}

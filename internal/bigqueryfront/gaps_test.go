@@ -344,7 +344,7 @@ func TestCSVHeaderDetection(t *testing.T) {
 func TestResumableUploads(t *testing.T) {
 	emu := &scriptEmulator{tables: map[string]string{}}
 	h := Wrap(emu)
-	job := `{"jobReference":{"jobId":"up"},"configuration":{"load":{"destinationTable":{"datasetId":"ds","tableId":"t"},"sourceFormat":"CSV"}}}`
+	job := `{"jobReference":{"jobId":"up","location":"US"},"configuration":{"load":{"destinationTable":{"datasetId":"ds","tableId":"t"},"sourceFormat":"CSV"}}}`
 	r := httptest.NewRequest("POST", "/upload"+base+"/jobs?uploadType=resumable", strings.NewReader(job))
 	r.Host = "bq.test:9050"
 	w := httptest.NewRecorder()

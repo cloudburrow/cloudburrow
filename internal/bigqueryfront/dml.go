@@ -162,6 +162,9 @@ func (d dmlCounts) patch(obj map[string]any) {
 // 501, a query with CREATE VIEW through keepViewTexts (#1014), anything
 // else through serveQuery.
 func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.alterProjectOptions(w, r, q, insert) { // #1375, projectoptions.go
+		return
+	}
 	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
 		if refs := informationSchemaJobs(q.Query); len(refs) > 0 { // #1275, infoschemajobs.go
 			f.withInformationSchemaJobs(w, r, q, refs, insert)
