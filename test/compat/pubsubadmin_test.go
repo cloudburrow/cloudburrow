@@ -142,7 +142,9 @@ func TestPubSubUpdateSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSnapshot: %v", err)
 	}
-	expire := time.Now().Add(time.Hour).Truncate(time.Second)
+	// The front's clock, which other tests advance, is what "in the future"
+	// is measured against.
+	expire := advancePubSubClock(t, h, 0).Add(time.Hour).Truncate(time.Second)
 	paths := []string{"labels", "expire_time"}
 	if cur.GetExpireTime() == nil || !expire.Before(cur.GetExpireTime().AsTime()) {
 		paths = []string{"labels"}
