@@ -222,13 +222,13 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.serveControl(w, r)
 	case strings.HasPrefix(path, jsonPrefix):
 		if err := checkSystemParams(r); err != nil {
-			apierror.WriteJSON(w, err)
+			apierror.WriteStorageJSON(w, err)
 			return
 		}
 		s.serveJSON(w, r, strings.TrimPrefix(path, jsonPrefix), false)
 	case strings.HasPrefix(path, uploadPrefix), strings.HasPrefix(path, resumablePrefix):
 		if err := checkSystemParams(r); err != nil {
-			apierror.WriteJSON(w, err)
+			apierror.WriteStorageJSON(w, err)
 			return
 		}
 		rest := strings.TrimPrefix(strings.TrimPrefix(path, resumablePrefix), uploadPrefix)
@@ -288,10 +288,10 @@ func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, 
 		if upload {
 			what += " (media upload)"
 		}
-		apierror.WriteJSON(w, apierror.Unimplemented("%s is not implemented", what))
+		apierror.WriteStorageJSON(w, apierror.Unimplemented("%s is not implemented", what))
 		return
 	}
-	apierror.WriteJSON(w, apierror.NotFound("no Cloud Storage JSON API method is bound to %s %s", r.Method, r.URL.Path))
+	apierror.WriteStorageJSON(w, apierror.NotFound("no Cloud Storage JSON API method is bound to %s %s", r.Method, r.URL.Path))
 }
 
 // checkSystemParams accepts the system parameters the discovery document
@@ -315,7 +315,7 @@ func writeResponse(w http.ResponseWriter, r *http.Request, status int, v any) {
 	if spec := q.Get("fields"); spec != "" {
 		sel, err := parseFields(spec)
 		if err != nil {
-			apierror.WriteJSON(w, err)
+			apierror.WriteStorageJSON(w, err)
 			return
 		}
 		v = sel.apply(toGeneric(v))

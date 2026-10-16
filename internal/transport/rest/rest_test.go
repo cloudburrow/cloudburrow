@@ -24,12 +24,12 @@ func TestUnknownMethodReturnsNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
-	code, message, reason, err := apierror.DecodeJSON(rec.Body)
+	code, message, status, _, err := apierror.DecodeStatusJSON(rec.Body)
 	if err != nil {
 		t.Fatalf("response was not a Google error envelope: %v", err)
 	}
-	if code != 404 || reason != "notFound" {
-		t.Errorf("code=%d reason=%q, want 404/notFound", code, reason)
+	if code != 404 || status != "NOT_FOUND" {
+		t.Errorf("code=%d status=%q, want 404/NOT_FOUND", code, status)
 	}
 	if !strings.Contains(message, "/v2/unknown") {
 		t.Errorf("message should name the method, got %q", message)
@@ -56,12 +56,14 @@ func TestHandlerErrorsRenderAsGoogleErrors(t *testing.T) {
 		name     string
 		err      error
 		wantCode int
-		reason   string
+		status   string
 	}{
-		{"not found", apierror.NotFound("no such queue"), 404, "notFound"},
-		{"already exists", apierror.AlreadyExists("queue exists"), 409, "alreadyExists"},
-		{"invalid", apierror.InvalidArgument("bad name"), 400, "invalid"},
-		{"unimplemented", apierror.Unimplemented("not yet"), 501, "notImplemented"},
+		{"not found", apierror.NotFound("no such queue"), 404, "NOT_FOUND"},
+		{"already exists", apierror.AlreadyExists("queue exists"), 409, "ALREADY_EXISTS"},
+		{"aborted", apierror.Aborted("stale etag"), 409, "ABORTED"},
+		{"invalid", apierror.InvalidArgument("bad name"), 400, "INVALID_ARGUMENT"},
+		{"failed precondition", apierror.FailedPrecondition("disabled"), 400, "FAILED_PRECONDITION"},
+		{"unimplemented", apierror.Unimplemented("not yet"), 501, "UNIMPLEMENTED"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -73,12 +75,15 @@ func TestHandlerErrorsRenderAsGoogleErrors(t *testing.T) {
 			if rec.Code != tt.wantCode {
 				t.Errorf("status = %d, want %d", rec.Code, tt.wantCode)
 			}
-			_, _, reason, err := apierror.DecodeJSON(rec.Body)
+			// Google's JSON mapping of google.rpc.Status, which tells
+			// FAILED_PRECONDITION from INVALID_ARGUMENT and ABORTED from
+			// ALREADY_EXISTS where the HTTP code cannot (#1470).
+			_, _, status, _, err := apierror.DecodeStatusJSON(rec.Body)
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
-			if reason != tt.reason {
-				t.Errorf("reason = %q, want %q", reason, tt.reason)
+			if status != tt.status {
+				t.Errorf("status = %q, want %q", status, tt.status)
 			}
 		})
 	}

@@ -188,6 +188,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
@@ -206,6 +207,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
@@ -339,6 +341,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:230 TestConsolePermissionsOnASecret",
+          "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretsiam_test.go:22 TestSecretIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM"
         ]
@@ -2924,14 +2927,16 @@
         "method": "google.cloud.resourcemanager.v3.TagKeys/CreateTagKey",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags",
+          "test/compat/resterrorstatus_test.go:126 TestGcloudResourceManagerErrorStatus"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.TagKeys/DeleteTagKey",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags"
+          "test/compat/resourcemanagertags_test.go:95 TestResourceManagerV3Tags",
+          "test/compat/resterrorstatus_test.go:126 TestGcloudResourceManagerErrorStatus"
         ]
       },
       {
@@ -3319,7 +3324,8 @@
         "tests": [
           "test/compat/resourcemanageriam_test.go:207 TestGcloudProjectIAM",
           "test/compat/resourcemanageriam_test.go:253 TestTerraformProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM"
+          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
+          "test/compat/resterrorstatus_test.go:126 TestGcloudResourceManagerErrorStatus"
         ]
       },
       {
