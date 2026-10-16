@@ -9,12 +9,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"google.golang.org/genproto/googleapis/api/metric"
 	mrpb "google.golang.org/genproto/googleapis/api/monitoredres"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
@@ -318,5 +320,74 @@ func TestConsoleLoggingViews(t *testing.T) {
 	if code, _ := consolePost(t, acts, map[string]any{"Path": []string{"projects/other-1/locations/global/buckets/_Default"}, "Action": viewCreate,
 		"Values": map[string]string{"id": "x"}}); code == http.StatusOK {
 		t.Error("creating a view on another project's bucket was accepted")
+	}
+}
+
+// memTables is an in-memory BigQuery for sink delivery.
+type memTables struct {
+	mu     sync.Mutex
+	tables map[string][]logging.Field
+	rows   map[string]int
+}
+
+func (m *memTables) TableSchema(_ context.Context, _, _, table string) ([]logging.Field, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f, ok := m.tables[table]
+	return f, ok, nil
+}
+
+func (m *memTables) CreateTable(_ context.Context, _, _, table string, fields []logging.Field, _ bool) error {
+	return m.ExtendTable(context.Background(), "", "", table, fields)
+}
+
+func (m *memTables) ExtendTable(_ context.Context, _, _, table string, fields []logging.Field) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tables[table] = fields
+	return nil
+}
+
+func (m *memTables) InsertRows(_ context.Context, _, _, table string, rows []map[string]any, _ []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rows[table] += len(rows)
+	return nil
+}
+
+// TestConsoleSinkShowsExportErrors (#1451): a BigQuery sink's page counts
+// the entries written to the dataset's export_errors table, and the sink
+// note says where they go.
+func TestConsoleSinkShowsExportErrors(t *testing.T) {
+	srv, svc := loggingConsole(t)
+	ctx := context.Background()
+	bq := &memTables{tables: map[string][]logging.Field{}, rows: map[string]int{}}
+	svc.api.UseDestinations(logging.Destinations{BigQuery: bq})
+	sinks := srv.URL + "/api/resources/logging-sinks?project=proj-1"
+	if code, out := consolePost(t, sinks, map[string]string{"name": "to-bq", "destination": "bigquery.googleapis.com/projects/proj-1/datasets/ds"}); code != http.StatusOK {
+		t.Fatalf("create sink = %d %s", code, out)
+	}
+	num, _ := structpb.NewStruct(map[string]any{"n": 1})
+	str, _ := structpb.NewStruct(map[string]any{"n": "one"})
+	if _, err := svc.api.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{LogName: "projects/proj-1/logs/app",
+		Resource: &mrpb.MonitoredResource{Type: "global"}, Entries: []*loggingpb.LogEntry{
+			{Payload: &loggingpb.LogEntry_JsonPayload{JsonPayload: num}}, {Payload: &loggingpb.LogEntry_JsonPayload{JsonPayload: str}}}}); err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		var sd console.Detail
+		getJSON200(t, srv.URL+"/api/detail/logging-sinks?project=proj-1&name="+url.QueryEscape("projects/proj-1/sinks/to-bq"), &sd)
+		if text = loggingDetailText(sd); strings.Contains(text, "1 in the dataset's export_errors table") {
+			break
+		}
+	}
+	if !strings.Contains(text, "1 delivered") || !strings.Contains(text, "1 in the dataset's export_errors table") || !strings.Contains(text, "schema_mismatch") {
+		t.Errorf("the sink page = %s", text)
+	}
+	var l console.Listing
+	getJSON200(t, sinks, &l)
+	if !strings.Contains(l.Note, "export_errors") {
+		t.Errorf("the sinks note = %q", l.Note)
 	}
 }

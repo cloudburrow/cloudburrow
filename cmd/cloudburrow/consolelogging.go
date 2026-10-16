@@ -401,7 +401,7 @@ type loggingSinksProvider struct{ loggingAdminScreen }
 func (loggingSinksProvider) ID() string    { return "logging-sinks" }
 func (loggingSinksProvider) Title() string { return "Log router sinks" }
 
-const sinkNote = "A sink delivers each matching entry: to a log bucket and a Pub/Sub topic at once, to a BigQuery dataset streamed in, to a Cloud Storage bucket in hourly files, and to another project's _Default bucket and sinks. A destination that is missing is a sink error, in the project's logging.googleapis.com/sink_error log."
+const sinkNote = "A sink delivers each matching entry: to a log bucket and a Pub/Sub topic at once, to a BigQuery dataset streamed in, to a Cloud Storage bucket in hourly files, and to another project's _Default bucket and sinks. A destination that is missing is a sink error, in the project's logging.googleapis.com/sink_error log. An entry that does not fit its BigQuery table's schema is written to the dataset's export_errors table (export_errors_YYYYMMDD for date-sharded tables)."
 
 // sinkDelivery is a sink's delivery status, for its row and its page.
 func (s loggingAdminScreen) sinkDelivery(name string) (state, lastErr string) {
@@ -418,6 +418,9 @@ func (s loggingAdminScreen) sinkDelivery(name string) (state, lastErr string) {
 	}
 	if st.Pending > 0 {
 		state += fmt.Sprintf(", %d waiting for the hourly file", st.Pending)
+	}
+	if st.ErrorRows > 0 {
+		state += fmt.Sprintf(", %d in the dataset's export_errors table", st.ErrorRows)
 	}
 	if st.LastError != "" {
 		lastErr = st.LastErrorAt.UTC().Format(time.RFC3339) + " " + st.LastError
