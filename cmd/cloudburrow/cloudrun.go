@@ -136,6 +136,7 @@ func (r *runService) Addr() string {
 func (r *runService) Start(ctx context.Context) error {
 	kn := &runadapter.Knative{Kube: k8s.New(r.cfg.KubeconfigPath(), "", runadapter.WorkloadNamespace)}
 	adapter := runadapter.NewServer(kn, r.cfg.Name, time.Duration(r.cfg.ReadyTimeout))
+	adapter.CollectVolumesInTheBackground()
 	if r.secrets != nil {
 		adapter = adapter.WithSecrets(r.secrets)
 	}

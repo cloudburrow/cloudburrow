@@ -295,3 +295,19 @@ func (s *Server) collectVolumes(ctx context.Context) {
 		slog.Warn("Cloud Run could not remove unused volume objects", "err", err)
 	}
 }
+
+// CollectVolumesInTheBackground makes the passes after a create or update
+// run apart from the request, as an instance does; without it they run in
+// the request, so a test's Kubernetes fake is never called from two
+// goroutines (Landing 98's -race run).
+func (s *Server) CollectVolumesInTheBackground() { s.volumeGCAsync = true }
+
+// collectVolumesAfter runs a pass after a create or update: in the
+// background on an instance, in the request otherwise.
+func (s *Server) collectVolumesAfter(ctx context.Context) {
+	if s.volumeGCAsync {
+		go s.collectVolumes(ctx)
+		return
+	}
+	s.collectVolumes(ctx)
+}

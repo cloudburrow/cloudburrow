@@ -28,6 +28,9 @@ type Server struct {
 	runpb.UnimplementedServicesServer
 	kn  *Knative
 	ops *lro.Store
+	// volumeGCAsync runs the volume passes after a create or update apart
+	// from the request (CollectVolumesInTheBackground).
+	volumeGCAsync bool
 	// instance labels everything this adapter creates.
 	instance string
 	// readyTimeout bounds how long a create waits for the revision.
@@ -204,7 +207,7 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 		return nil, err
 	}
 	// A volume the new revision dropped goes once no revision uses it.
-	go s.collectVolumes(ctx)
+	s.collectVolumesAfter(ctx)
 	applied, err := s.kn.Get(ctx, kname)
 	if err != nil {
 		return nil, apierror.Internal(err, "read back service %s", id)

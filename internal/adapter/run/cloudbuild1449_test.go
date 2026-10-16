@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -78,13 +79,16 @@ func TestCreateBuildDynamicSubstitutionsAndSecretBuildArg(t *testing.T) {
 // PENDING; ApproveBuild runs one, rejects another, and CancelBuild ends a
 // third.
 func TestBuildApproval(t *testing.T) {
+	// Triggers are kept in a package-level store, so -count>1 meets the
+	// last run's: each run names its own.
+	gated := fmt.Sprintf("gated-%d", time.Now().UnixNano()%1e9)
 	s := NewServer(&Knative{}, "t", time.Minute)
 	b := &fakeBuilder{got: make(chan BuildSpec, 4)}
 	f := &logFetcher{fakeFetcher: fakeFetcher{objects: map[string]string{"b/src.tgz": "archive"}}, logs: map[string]string{}}
 	cb := s.Builds(f, b).CloudBuild()
 	ctx := context.WithValue(context.Background(), approvalCtxKey{}, true)
 	tr, err := cb.CreateBuildTrigger(ctx, &cbpb.CreateBuildTriggerRequest{Parent: "projects/proj-a/locations/global",
-		Trigger: &cbpb.BuildTrigger{Name: "gated", BuildTemplate: &cbpb.BuildTrigger_Build{Build: &cbpb.Build{Source: cbSource(),
+		Trigger: &cbpb.BuildTrigger{Name: gated, BuildTemplate: &cbpb.BuildTrigger_Build{Build: &cbpb.Build{Source: cbSource(),
 			Steps: []*cbpb.BuildStep{{Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", "x/y", "."}}}}}}})
 	if err != nil {
 		t.Fatal(err)
