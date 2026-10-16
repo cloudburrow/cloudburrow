@@ -30,12 +30,12 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 34 | 13 | 16 | 5 | 0 |
+| BigQuery | 39 | 18 | 16 | 5 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 3 | 3 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **73** | **21** | **38** | **9** | **5** |
+| **Total** | **78** | **26** | **38** | **9** | **5** |
 
 ## Cloud Storage
 
@@ -156,6 +156,11 @@ Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`),
 |---|---|---|
 | `ALTER TABLE` is 501 for `RENAME TO` with another action, a nested field, `RENAME TO` another dataset, a table with row access policies, `RENAME COLUMN` of a partitioning or clustering column, `RENAME COLUMN` or `DROP COLUMN` of a table with keys, and `RENAME COLUMN`, `DROP COLUMN` or `SET DATA TYPE` with an action that is not one of them (`ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` are carried out since #1227, `RENAME TO`, `RENAME COLUMN` and `DROP COLUMN` since #1322, `SET DATA TYPE` and primary and foreign keys since #1334, `ALTER COLUMN SET DEFAULT` and `DROP DEFAULT` since #1340) | not built yet | M |
 | A view's column list inside a multi-statement script with a `TEMP` table or function, or in a dry run, and a column option other than a `description` literal in the list, are 501 (a list in any other script, and a column's description, are carried out since #1323) (#1335) | not built yet | S |
+| A view's column list in a script given a dry run or by `EXECUTE IMMEDIATE`, a dry run of a plain `CREATE VIEW` with a list of a view that exists, and a column option other than a `description` literal in the list, are 501 (a list in a script with a `TEMP` table or function, and a dry run of a lone one, are carried out since #1335) (#1335) | not built yet | S |
+| A view's column list inside a multi-statement script, and a column's `OPTIONS` in the list (a lone `CREATE VIEW v (c, d) AS …` is carried out, #1240) (#1323) | not built yet | S |
+| `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) (#1324) | not built yet | M |
+| CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 (#1325) | not built yet | M |
+| `ALTER TABLE` `ALTER COLUMN SET DEFAULT` / `DROP DEFAULT` are 501: the engine applies a column default only from the `CREATE TABLE` that made its table, never from the table's `defaultValueExpression` (measured, #1340); and so are `RENAME TO` with another action, a nested field, `RENAME TO` another dataset, a table with row access policies, `RENAME COLUMN` of a partitioning or clustering column, `RENAME COLUMN` or `DROP COLUMN` of a table with keys, and `RENAME COLUMN`, `DROP COLUMN` or `SET DATA TYPE` with an action that is not one of them (`ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` are carried out since #1227, `RENAME TO`, `RENAME COLUMN` and `DROP COLUMN` since #1322, `SET DATA TYPE` and primary and foreign keys since #1334) (#1340) | not built yet | M |
 | `columnNameCharacterMap` `V1` / `V2` when a detected name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix), names the same once replaced, and a load that is not CSV, are 501 (renaming by replacing characters is built since #1326) (#1336) | not built yet | S |
 | Partition decorators: through a partition, a schema change BigQuery does not document (a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order, a RECORD's fields changed), `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination and a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, none documented by BigQuery, are 501; a streamed row is modifiable by DML after the 20-second flush, not BigQuery's 30 minutes (#1370) (the rest of #1273 is built: the streaming buffer of column- and range-partitioned tables, DML refused on buffered rows, a REQUIRED column left out with `ALLOW_FIELD_RELAXATION`, #1273) | not documented by Google | S |
 | A query of region-qualified `INFORMATION_SCHEMA.JOBS` with no filter the front pushes down (#1369: `job_id`, `state`, `job_type`, `project_id`, `parent_job_id`, `creation_time`, `ORDER BY creation_time LIMIT`) still inlines a row per job: `SELECT COUNT(*)` took 13 s at 5,000 jobs (54 s before #1369); a table of the job rows kept in the engine would make it a scan | not built yet (partly built, #1369) | M |

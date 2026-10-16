@@ -88,3 +88,38 @@ func TestViewColumnListInAScript(t *testing.T) {
 		}
 	}
 }
+
+// A view's column list in a script with a TEMP table is put in the
+// script's text, and a dry run of a lone one answers as BigQuery's (#1335).
+func TestViewColumnListInATempScript(t *testing.T) {
+	for sql, want := range map[string]int{
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; CREATE VIEW ds.v (c) AS SELECT 1":                                1,
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; BEGIN CREATE VIEW ds.v (c) AS SELECT 1; END":                     1,
+		"CREATE TEMP FUNCTION f() AS (1); CREATE VIEW ds.v (c) AS SELECT f(); CREATE VIEW ds.w (d) AS SELECT 2": 2,
+		"SELECT 1; CREATE VIEW ds.v (c) AS SELECT 1":                                                            0,
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; CREATE VIEW ds.v AS SELECT 1 AS c":                               0,
+		"CREATE VIEW ds.v (c) AS SELECT 'TEMP'":                                                                 0,
+	} {
+		views, ok := tempScriptViewLists(sql)
+		if len(views) != want || ok != (want > 0) {
+			t.Errorf("tempScriptViewLists(%q) = %d, %v; want %d", sql, len(views), ok, want)
+		}
+		for _, v := range views {
+			if got := sql[v.pos:v.end]; !strings.HasPrefix(got, "CREATE VIEW") || strings.HasSuffix(got, ";") {
+				t.Errorf("tempScriptViewLists(%q) found %q", sql, got)
+			}
+		}
+	}
+	v, _ := parseViewColumnList("CREATE VIEW ds.v (c, `d e`) AS SELECT a, b FROM ds.t")
+	if got, want := v.untypedQuery(), "SELECT * FROM (SELECT NULL AS `c`, NULL AS `d e` FROM (SELECT 1) WHERE FALSE UNION ALL (\nSELECT a, b FROM ds.t\n))"; got != want {
+		t.Errorf("untypedQuery = %q, want %q", got, want)
+	}
+	job := string(dryViewAnswer([]byte(`{"kind":"bigquery#job","statistics":{"query":{"statementType":"SELECT","schema":{"fields":[]}}}}`)))
+	if job != `{"kind":"bigquery#job","statistics":{"query":{"statementType":"CREATE_VIEW","totalBytesProcessed":"0"},"totalBytesProcessed":"0"}}` {
+		t.Errorf("dryViewAnswer of a job = %s", job)
+	}
+	resp := string(dryViewAnswer([]byte(`{"jobComplete":true,"rows":[],"schema":{},"totalRows":"0"}`)))
+	if resp != `{"jobComplete":true,"totalBytesProcessed":"0"}` {
+		t.Errorf("dryViewAnswer of a jobs.query response = %s", resp)
+	}
+}
