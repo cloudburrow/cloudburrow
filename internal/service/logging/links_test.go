@@ -24,6 +24,7 @@ import (
 func TestSettingsAndLinksOverREST(t *testing.T) {
 	ctx := context.Background()
 	a := NewAdmin(store.NewMemory())
+	a.UseLinkedDatasets(newFakeLinked())
 	srv := httptest.NewServer(NewRESTHandler(func(g grpc.ServiceRegistrar) { a.Register(g) }))
 	defer srv.Close()
 	c, err := vlogging.NewConfigRESTClient(ctx, option.WithEndpoint(srv.URL), option.WithoutAuthentication())

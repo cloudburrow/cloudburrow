@@ -6,10 +6,12 @@ package sqladmin
 // EXPORT and IMPORT that operations.cancel can stop while they run.
 
 import (
+	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -31,6 +33,30 @@ type SQLExport struct {
 	SchemaOnly bool
 	// Clean and IfExists are postgresExportOptions'.
 	Clean, IfExists bool
+	// MasterData is mysqlExportOptions.masterData: 1 writes the binary log
+	// coordinates as a CHANGE REPLICATION SOURCE TO statement, 2 as a
+	// comment (mysqldump --source-data).
+	MasterData int
+	// Threads is a parallel export's threads.
+	Threads int
+}
+
+// SQLImport is what a parallel SQL import restores.
+type SQLImport struct {
+	Database, User string
+	Threads        int
+	// Clean and IfExists are postgresImportOptions' (pg_restore's flags).
+	Clean, IfExists bool
+}
+
+// ParallelTransferer is a Transferer that also runs parallel exports and
+// imports (#1421): a directory of files, which ExportParallel writes and
+// ImportParallel reads as a tar stream of the directory's files: pg_dump's
+// directory format (-Fd -j) for PostgreSQL, MySQL Shell's dump
+// (util.dumpSchemas) for MySQL, as Cloud SQL writes them.
+type ParallelTransferer interface {
+	ExportParallel(ctx context.Context, t DumpTarget, x SQLExport, w io.Writer) error
+	ImportParallel(ctx context.Context, t DumpTarget, x SQLImport, r io.Reader) error
 }
 
 // Transferer runs the dumps and loads of imports and exports in a server.
@@ -50,6 +76,8 @@ type Objects interface {
 	Read(ctx context.Context, bucket, object string) ([]byte, error)
 	// Create writes a new object, and fails if it already exists.
 	Create(ctx context.Context, bucket, object string, data []byte) error
+	// List names the objects whose names start with prefix.
+	List(ctx context.Context, bucket, prefix string) ([]string, error)
 }
 
 type transfers struct {
@@ -182,16 +210,37 @@ func (s *Server) exportInstance(r *http.Request, base, project string, e Engine)
 	case "SQL":
 		sx := SQLExport{Databases: x.Databases}
 		if o := x.SQLExportOptions; o != nil {
-			if o.Parallel || o.Threads > 0 {
-				return nil, unimplemented("parallel exports", "they write a directory of pg_dump's or mysqlsh's per-table files, which CloudBurrow does not produce; export without parallel")
+			if o.Threads < 0 {
+				return nil, Errorf(http.StatusBadRequest, "Invalid request: sqlExportOptions.threads must be positive.")
 			}
-			if o.MysqlExportOptions != nil && o.MysqlExportOptions.MasterData != 0 {
-				return nil, unimplemented("mysqlExportOptions.masterData", "the servers CloudBurrow runs keep no binary log coordinates to write")
+			if o.Threads > 0 && !o.Parallel {
+				return nil, Errorf(http.StatusBadRequest, "Invalid request: sqlExportOptions.threads applies only to a parallel export (sqlExportOptions.parallel).")
+			}
+			if o.Parallel {
+				sx.Threads = int(o.Threads)
+				if sx.Threads == 0 {
+					sx.Threads = defaultThreads
+				}
+			}
+			if m := o.MysqlExportOptions; m != nil && m.MasterData != 0 {
+				if !t.MySQL {
+					return nil, Errorf(http.StatusBadRequest, "Invalid request: mysqlExportOptions are for MySQL instances only.")
+				}
+				if m.MasterData != 1 && m.MasterData != 2 {
+					return nil, Errorf(http.StatusBadRequest, "Invalid request: mysqlExportOptions.masterData must be 1 or 2 (mysqldump --source-data), not %d.", m.MasterData)
+				}
+				if o.Parallel {
+					return nil, Errorf(http.StatusBadRequest, "Invalid request: mysqlExportOptions.masterData applies to a mysqldump export, not a parallel one.")
+				}
+				sx.MasterData = int(m.MasterData)
 			}
 			sx.Tables, sx.SchemaOnly = o.Tables, o.SchemaOnly
 			if p := o.PostgresExportOptions; p != nil {
 				sx.Clean, sx.IfExists = p.Clean, p.IfExists
 			}
+		}
+		if sx.Threads > 0 {
+			return s.exportParallel(base, project, e, t, raw, bucket, object, sx)
 		}
 		if !t.MySQL && len(sx.Databases) != 1 {
 			return nil, Errorf(http.StatusBadRequest, "Invalid request: a PostgreSQL SQL export names exactly one database "+
@@ -276,8 +325,12 @@ func (s *Server) importInstance(r *http.Request, base, project string, e Engine)
 			ImportUser       string       `json:"importUser"`
 			CSVImportOptions *csvOptsJSON `json:"csvImportOptions"`
 			SQLImportOptions *struct {
-				Parallel bool  `json:"parallel"`
-				Threads  int64 `json:"threads"`
+				Parallel              bool  `json:"parallel"`
+				Threads               int64 `json:"threads"`
+				PostgresImportOptions *struct {
+					Clean    bool `json:"clean"`
+					IfExists bool `json:"ifExists"`
+				} `json:"postgresImportOptions"`
 			} `json:"sqlImportOptions"`
 		} `json:"importContext"`
 	}
@@ -309,8 +362,27 @@ func (s *Server) importInstance(r *http.Request, base, project string, e Engine)
 	case "BAK", "TDE":
 		return nil, unimplemented("imports of fileType "+ft, bakWhy)
 	case "SQL":
-		if o := x.SQLImportOptions; o != nil && (o.Parallel || o.Threads > 0) {
-			return nil, unimplemented("parallel imports", "they read a directory of per-table files, which CloudBurrow's exports do not write; import without parallel")
+		if o := x.SQLImportOptions; o != nil {
+			if o.Threads < 0 {
+				return nil, Errorf(http.StatusBadRequest, "Invalid request: sqlImportOptions.threads must be positive.")
+			}
+			if o.Threads > 0 && !o.Parallel {
+				return nil, Errorf(http.StatusBadRequest, "Invalid request: sqlImportOptions.threads applies only to a parallel import (sqlImportOptions.parallel).")
+			}
+			pg := o.PostgresImportOptions
+			if pg != nil && (pg.Clean || pg.IfExists) && (!o.Parallel || t.MySQL) {
+				return nil, Errorf(http.StatusBadRequest, "Invalid request: postgresImportOptions.clean and ifExists apply only to a parallel import into a PostgreSQL instance.")
+			}
+			if o.Parallel {
+				xi := SQLImport{Database: x.Database, User: x.ImportUser, Threads: int(o.Threads)}
+				if xi.Threads == 0 {
+					xi.Threads = defaultThreads
+				}
+				if pg != nil {
+					xi.Clean, xi.IfExists = pg.Clean, pg.IfExists
+				}
+				return s.importParallel(base, project, e, t, raw, bucket, object, xi)
+			}
 		}
 		if !t.MySQL && x.Database == "" {
 			return nil, Errorf(http.StatusBadRequest, "Invalid request: importContext.database is required for a PostgreSQL SQL import.")
@@ -440,4 +512,183 @@ func decodeBytes(b []byte, v any) error {
 	}
 	r, _ := http.NewRequest(http.MethodPost, "/", bytes.NewReader(b))
 	return decode(r, v)
+}
+
+// defaultThreads is a parallel export's or import's threads when the
+// request names none.
+const defaultThreads = 4
+
+// maxParallelFiles bounds the files a parallel import reads.
+const maxParallelFiles = 10000
+
+func (s *Server) parallelTransferer(what string) (ParallelTransferer, error) {
+	p, ok := s.transfers.t.(ParallelTransferer)
+	if !ok {
+		return nil, unimplemented(what, "this server's transferer runs no parallel dumps")
+	}
+	return p, nil
+}
+
+// folder is a parallel transfer's uri as a folder: the object name prefix
+// the directory's files are written under, ending in a slash.
+func folder(object string) string { return strings.TrimRight(object, "/") + "/" }
+
+// exportParallel is a parallel export (#1421): the dump directory's files
+// are written under the uri, a folder, which must be empty, as Cloud SQL
+// requires.
+func (s *Server) exportParallel(base, project string, e Engine, t DumpTarget, raw []byte, bucket, object string, x SQLExport) (any, error) {
+	p, err := s.parallelTransferer("parallel exports")
+	if err != nil {
+		return nil, err
+	}
+	if !t.MySQL && len(x.Databases) != 1 {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: a PostgreSQL parallel export names exactly one database.")
+	}
+	if len(x.Tables) > 0 && len(x.Databases) != 1 {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: tables are exported from one and only one database.")
+	}
+	if strings.HasSuffix(object, ".gz") {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: a parallel export's uri is a folder, not a file: %s.", object)
+	}
+	if err := s.busy(e.Instance()); err != nil {
+		return nil, err
+	}
+	dir := folder(object)
+	return s.transfer(base, project, e, "EXPORT", "exportContext", transferContext(raw, "exportContext", "sql#exportContext"), func(ctx context.Context) error {
+		names, err := s.transfers.obj.List(ctx, bucket, dir)
+		if err != nil {
+			return err
+		}
+		if len(names) > 0 {
+			return Errorf(http.StatusConflict, "The folder gs://%s/%s is not empty; a parallel export writes to an empty folder.", bucket, dir)
+		}
+		pr, pw := io.Pipe()
+		done := make(chan error, 1)
+		go func() {
+			err := p.ExportParallel(ctx, t, x, pw)
+			pw.CloseWithError(err)
+			done <- err
+		}()
+		files, rerr := untar(pr)
+		if rerr == nil {
+			// tar pads its archive past the end marker untar stops at.
+			_, _ = io.Copy(io.Discard, pr)
+		}
+		_ = pr.CloseWithError(rerr)
+		if err := <-done; err != nil {
+			return err
+		}
+		if rerr != nil {
+			return rerr
+		}
+		if err := ctx.Err(); err != nil {
+			return errCancelled
+		}
+		for _, f := range files {
+			if err := s.transfers.obj.Create(ctx, bucket, dir+f.name, f.data); err != nil {
+				return err
+			}
+		}
+		return nil
+	}), nil
+}
+
+// importParallel is a parallel import (#1421) of the folder a parallel
+// export wrote.
+func (s *Server) importParallel(base, project string, e Engine, t DumpTarget, raw []byte, bucket, object string, x SQLImport) (any, error) {
+	p, err := s.parallelTransferer("parallel imports")
+	if err != nil {
+		return nil, err
+	}
+	if !t.MySQL && x.Database == "" {
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: importContext.database is required for a PostgreSQL SQL import.")
+	}
+	if err := s.busy(e.Instance()); err != nil {
+		return nil, err
+	}
+	dir := folder(object)
+	return s.transfer(base, project, e, "IMPORT", "importContext", transferContext(raw, "importContext", "sql#importContext"), func(ctx context.Context) error {
+		names, err := s.transfers.obj.List(ctx, bucket, dir)
+		if err != nil {
+			return err
+		}
+		if len(names) == 0 {
+			return Errorf(http.StatusNotFound, "The folder gs://%s/%s holds no files to import.", bucket, dir)
+		}
+		if len(names) > maxParallelFiles {
+			return Errorf(http.StatusBadRequest, "The folder gs://%s/%s holds more than %d files.", bucket, dir, maxParallelFiles)
+		}
+		var buf bytes.Buffer
+		tw := tar.NewWriter(&buf)
+		for _, n := range names {
+			rel := strings.TrimPrefix(n, dir)
+			if rel == "" || strings.HasSuffix(rel, "/") || strings.Contains(rel, "..") {
+				continue
+			}
+			data, err := s.transfers.obj.Read(ctx, bucket, n)
+			if err != nil {
+				return err
+			}
+			if err := tw.WriteHeader(&tar.Header{Name: rel, Mode: 0o644, Size: int64(len(data)), Typeflag: tar.TypeReg}); err != nil {
+				return err
+			}
+			if _, err := tw.Write(data); err != nil {
+				return err
+			}
+		}
+		if err := tw.Close(); err != nil {
+			return err
+		}
+		if err := p.ImportParallel(ctx, t, x, &buf); err != nil {
+			if ctx.Err() != nil {
+				return errCancelled
+			}
+			return err
+		}
+		return nil
+	}), nil
+}
+
+// transferContext is the request's context, as the operation reports it.
+func transferContext(raw []byte, key, kind string) map[string]any {
+	m := map[string]any{}
+	var wrap map[string]json.RawMessage
+	if decodeBytes(raw, &wrap) == nil {
+		_ = json.Unmarshal(wrap[key], &m)
+	}
+	m["kind"] = kind
+	m["fileType"] = "SQL"
+	return m
+}
+
+type tarFile struct {
+	name string
+	data []byte
+}
+
+// untar reads a tar stream's regular files, by their paths in it.
+func untar(r io.Reader) ([]tarFile, error) {
+	tr := tar.NewReader(r)
+	var out []tarFile
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if h.Typeflag != tar.TypeReg {
+			continue
+		}
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, err
+		}
+		name := strings.TrimPrefix(h.Name, "./")
+		if name == "" || strings.Contains(name, "..") {
+			continue
+		}
+		out = append(out, tarFile{name, data})
+	}
 }

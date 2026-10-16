@@ -182,6 +182,9 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			sources[i].where = bufferedRows + " IS NULL"
 		}
 	}
+	if f.refuseLinkedWrite(w, r, c.DestinationTable.DatasetID, "a copy job") { // #1423, loglinks.go
+		return
+	}
 	dest := f.copyTableMeta(r, *c.DestinationTable)
 	if dest.exists && isView(dest.kind) {
 		notImplemented(fmt.Sprintf("into %s, which is a %s.", tableName(project, dest.ref), dest.kind))

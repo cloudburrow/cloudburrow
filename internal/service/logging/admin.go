@@ -27,6 +27,7 @@ package logging
 // folder, organization and billing-account parents in parent.go (#1395).
 
 import (
+	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -83,6 +84,13 @@ type Admin struct {
 	ops int // operations answered, for unique names (#1292)
 	// copies are the CopyLogEntries operations (copy.go, #1394).
 	copies copies
+	// linked makes and fills links' BigQuery datasets (analytics.go,
+	// #1423), or is nil.
+	linked LinkedDatasets
+	// done are the done operations doneOp answered, by name, and their
+	// order (links.go).
+	done      map[string]*longrunningpb.Operation
+	doneOrder []string
 }
 
 // NewAdmin returns the admin services over db.

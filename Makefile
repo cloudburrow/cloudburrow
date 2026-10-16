@@ -162,6 +162,32 @@ compat-node: build
 	cd $(COMPAT_NODE_DIR) && CLOUDBURROW_BIN=$(abspath $(BIN_DIR)/$(BINARY)) CLOUDBURROW_ARGS="$(CLOUDBURROW_ARGS)" \
 		$(NODE) --import ./guard.mjs --test --test-concurrency=1 --test-timeout=300000 --test-reporter=spec $(COMPAT_NODE_FLAGS) $(COMPAT_NODE_TESTS)
 
+## cloud-sql-proxy: Fetch Google's pinned Cloud SQL Auth Proxy binary, checked against its SHA-256, for the compat test (#1421)
+# The release the Cloud Run adapter's sidecar image is (internal/adapter/run
+# /cloudsql.go), from Google's release bucket; the SHA-256 of each asset is
+# the one Google's release page lists
+# (github.com/GoogleCloudPlatform/cloud-sql-proxy/releases/tag/v2.19.0).
+# Downloaded once, checked before it is made executable, and kept under bin/.
+# TestCloudSQLAuthProxyBinary runs it when CLOUDBURROW_TEST_CLOUD_SQL_PROXY
+# names it: export CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$$(make -s cloud-sql-proxy).
+CLOUD_SQL_PROXY_VERSION := v2.19.0
+CLOUD_SQL_PROXY_PLATFORM := $(shell go env GOOS).$(shell go env GOARCH)
+CLOUD_SQL_PROXY_SHA256_linux.amd64 := 218ae2a18ef8295c48809b73962f326caca1270aad4623f16c4ff5fa1e9f7d3e
+CLOUD_SQL_PROXY_SHA256_linux.arm64 := a58e9e0d4f10f368dbe2e24079597eb005dd9352b43fb18726f7983f913e6c1f
+CLOUD_SQL_PROXY_SHA256_darwin.arm64 := 0b8d095a3808a50253c31825b24e30c63d34a9122977de2244749b8da49ad7f7
+CLOUD_SQL_PROXY_BIN := $(BIN_DIR)/cloud-sql-proxy/$(CLOUD_SQL_PROXY_VERSION)/$(CLOUD_SQL_PROXY_PLATFORM)/cloud-sql-proxy
+.PHONY: cloud-sql-proxy
+cloud-sql-proxy: $(CLOUD_SQL_PROXY_BIN)
+	@echo $(abspath $(CLOUD_SQL_PROXY_BIN))
+
+$(BIN_DIR)/cloud-sql-proxy/$(CLOUD_SQL_PROXY_VERSION)/%/cloud-sql-proxy:
+	@test -n "$(CLOUD_SQL_PROXY_SHA256_$*)" || { echo "cloud-sql-proxy: no pinned binary for $*" >&2; exit 1; }
+	@mkdir -p $(@D)
+	@curl --retry 5 --retry-all-errors -fsSL -o $@.download \
+		https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/$(CLOUD_SQL_PROXY_VERSION)/cloud-sql-proxy.$*
+	@echo "$(CLOUD_SQL_PROXY_SHA256_$*)  $@.download" | shasum -a 256 -c - >&2 || { rm -f $@.download; exit 1; }
+	@chmod +x $@.download && mv $@.download $@
+
 ## fmt: Format all Go source
 .PHONY: fmt
 fmt:

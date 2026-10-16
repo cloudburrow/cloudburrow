@@ -41,6 +41,17 @@ func mysqlRegister(n string, o ...cloudsqlconn.Option) (func() error, error) {
 // it finds, so every check dials again.
 func sqlBackupRows(t *testing.T, h *Harness, c sqlBackupCase, conn string, stmts ...string) []string {
 	t.Helper()
+	return sqlBackupQuery(t, h, c, conn, true, stmts...)
+}
+
+// sqlBackupExec runs stmts as sqlBackupRows does, reading nothing back.
+func sqlBackupExec(t *testing.T, h *Harness, c sqlBackupCase, conn string, stmts ...string) {
+	t.Helper()
+	sqlBackupQuery(t, h, c, conn, false, stmts...)
+}
+
+func sqlBackupQuery(t *testing.T, h *Harness, c sqlBackupCase, conn string, read bool, stmts ...string) []string {
+	t.Helper()
 	drv := fmt.Sprintf("cloudsql-bk-%d", time.Now().UnixNano())
 	cleanup, err := c.register(drv, connectorOptions(h)...)
 	if err != nil {
@@ -58,6 +69,9 @@ func sqlBackupRows(t *testing.T, h *Harness, c sqlBackupCase, conn string, stmts
 		if _, err := db.ExecContext(ctx, s); err != nil {
 			t.Fatalf("%s: %v", s, err)
 		}
+	}
+	if !read {
+		return nil
 	}
 	rows, err := db.QueryContext(ctx, "SELECT CONCAT(id, '=', name) FROM "+c.table+" ORDER BY id")
 	if err != nil {
@@ -148,7 +162,9 @@ func TestCloudSQLBackups(t *testing.T) {
 			if got := sqlBackupRows(t, h, c, conn, stmts...); !reflect.DeepEqual(got, want) {
 				t.Fatalf("rows written: %v", got)
 			}
-			defer sqlBackupRows(t, h, c, conn, "DELETE FROM "+c.table)
+			// The table goes with the test: an instance's other tests share
+			// its database, and a parallel export dumps all of it (#1421).
+			defer sqlBackupExec(t, h, c, conn, "DROP TABLE IF EXISTS "+c.table)
 
 			op, err := svc.BackupRuns.Insert(project, c.instance, &sqladmin.BackupRun{Description: "compat"}).Do()
 			if err != nil {

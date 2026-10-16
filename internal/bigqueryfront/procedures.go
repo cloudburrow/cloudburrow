@@ -408,6 +408,9 @@ func (s *scriptRun) call(toks []token) *scriptFlow {
 	}
 	stmt := s.text(toks)
 	parts, i := path(toks, 1)
+	if len(parts) == 2 && strings.EqualFold(parts[0], "BQ") && strings.EqualFold(parts[1], "REFRESH_MATERIALIZED_VIEW") {
+		return s.runText(stmt) // #1415, materializedviews.go
+	}
 	if len(parts) == 0 || i >= len(toks) || !toks[i].punct("(") || closing(toks, i) != len(toks)-1 {
 		return failWith(http.StatusBadRequest, "invalidQuery", "Syntax error in CALL", stmt)
 	}

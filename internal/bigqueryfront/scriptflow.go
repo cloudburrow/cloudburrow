@@ -134,7 +134,8 @@ func hasControlFlow(sql string) bool {
 		if body, block, handler := stripControlFlow(stmt); block != "" || handler || len(body) > 0 && body[0].is("RAISE") ||
 			isProcedureStatement(body) || isAlterTable(body) || // #1217, procedures.go; #1227, altertable.go
 			!temp && isViewColumnList(sql, body) || // #1323, viewcolumns.go
-			!temp && stmts > 1 && hasDDLOptions(sql, body) { // #1390, ddloptions.go; a lone one is runQuery's
+			!temp && stmts > 1 && hasDDLOptions(sql, body) || // #1390, ddloptions.go; a lone one is runQuery's
+			!temp && stmts > 1 && isMVBody(sql, body) { // #1415, materializedviews.go
 			return true
 		}
 	}
@@ -749,6 +750,13 @@ func checkStatements(sql string, nodes []scriptNode) ddlVerdict {
 			// Carried out by the front (#1253, assert).
 			if _, _, _, msg := assertParts(n.toks); msg != "" {
 				return ddlVerdict{code: http.StatusBadRequest, reason: "invalidQuery", msg: msg}
+			}
+		} else if n.kind == nodeStmt && isMVBody(sql, n.toks) {
+			// Carried out in its turn by the front (#1415,
+			// materializedviews.go): what it does not set is 501.
+			if st, _ := parseMVStatement(sql[n.toks[0].pos:n.toks[len(n.toks)-1].end]); st.notImpl {
+				return ddlVerdict{code: http.StatusNotImplemented, reason: "notImplemented", msg: "Not implemented here: " +
+					st.msg + " in a script. Nothing was run."}
 			}
 		} else if vc, ok := scriptViewColumnList(sql, n); ok {
 			// Carried out alone in its turn (#1323, viewcolumns.go): its

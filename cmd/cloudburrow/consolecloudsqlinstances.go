@@ -330,6 +330,13 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
+	if pitr == "On" && strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
+		d.Actions = append(d.Actions, console.Action{ID: "binlog-clone", Label: "Clone to binary log position", Fields: []console.Field{
+			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
+				Help: "A new instance with this instance's databases as they were at the binary log position below."},
+			{Name: "binLogFileName", Label: "Binary log file", Type: "text", Required: true, Help: "As SHOW BINARY LOG STATUS names it, such as binlog.000002."},
+			{Name: "binLogPosition", Label: "Position", Type: "number", Required: true, Help: "Every transaction that starts before it is cloned."}}})
+	}
 	if pitr == "On" {
 		d.Actions = append(d.Actions, console.Action{ID: "pitr-restore", Label: "Point-in-time restore", Fields: []console.Field{
 			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9-]{0,53}[a-z0-9]$",
@@ -478,7 +485,9 @@ func upgradeActions(in *sqladminapi.DatabaseInstance) []console.Action {
 	return []console.Action{{ID: "upgrade", Label: "Upgrade", Destructive: true,
 		Confirm: "The server is replaced by one of the new major version and its data loaded into it; connections are closed meanwhile.",
 		Fields: []console.Field{{Name: "databaseVersion", Label: "Database version", Type: "select", Required: true,
-			Options: opts, Default: opts[len(opts)-1]}}}}
+			Options: opts, Default: opts[len(opts)-1]},
+			{Name: "includeReplicas", Label: "Include replicas", Type: "checkbox", Default: "false",
+				Help: "Upgrade the read replicas too, after the primary (includeReplicasForMajorVersionUpgrade); an instance with replicas needs it."}}}}
 }
 
 // failoverActions is Failover on a REGIONAL instance (#1408): its standby
@@ -507,13 +516,36 @@ func transferActions() []console.Action {
 	fileType := console.Field{Name: "fileType", Label: "Format", Type: "select", Required: true, Options: []string{"SQL", "CSV"}, Default: "SQL"}
 	db := console.Field{Name: "database", Label: "Database", Type: "text",
 		Help: "Required on PostgreSQL, and for CSV; a MySQL SQL export without one exports every database."}
+	parallel := console.Field{Name: "parallel", Label: "Parallel (SQL)", Type: "checkbox", Default: "false",
+		Help: "A folder of files, pg_dump's directory format or MySQL Shell's dump, written or read with several threads; the file above is the folder."}
+	threads := console.Field{Name: "threads", Label: "Threads (parallel)", Type: "number", Help: "Empty is 4."}
 	return []console.Action{
 		{ID: "export", Label: "Export", Fields: []console.Field{uri, fileType, db,
-			{Name: "selectQuery", Label: "SQL query (CSV)", Type: "text", Help: "The SELECT whose rows a CSV export writes."}}},
+			{Name: "selectQuery", Label: "SQL query (CSV)", Type: "text", Help: "The SELECT whose rows a CSV export writes."},
+			parallel, threads,
+			{Name: "masterData", Label: "Binary log coordinates (MySQL SQL)", Type: "select", Options: []string{"0", "1", "2"}, Default: "0",
+				Help: "masterData: 1 writes a CHANGE REPLICATION SOURCE TO statement, 2 the same as a comment."}}},
 		{ID: "import", Label: "Import", Confirm: "The file's statements or rows are run in, or loaded into, the database.",
 			Fields: []console.Field{uri, fileType, db,
-				{Name: "table", Label: "Table (CSV)", Type: "text", Help: "The table a CSV import loads its rows into."}}},
+				{Name: "table", Label: "Table (CSV)", Type: "text", Help: "The table a CSV import loads its rows into."},
+				parallel, threads,
+				{Name: "clean", Label: "Clean (PostgreSQL parallel)", Type: "checkbox", Default: "false", Help: "pg_restore --clean: drop each object before it is restored."},
+				{Name: "ifExists", Label: "If exists (PostgreSQL parallel)", Type: "checkbox", Default: "false", Help: "pg_restore --if-exists, with Clean."}}},
 	}
+}
+
+// consoleThreads is a parallel transfer's Threads field: empty is the
+// server's default.
+func consoleThreads(v string) (int64, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("threads %q is not a positive number", v)
+	}
+	return n, nil
 }
 
 // certActions are Create client certificate, Delete client certificate and
@@ -630,13 +662,22 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 		_, err = svc.Instances.Clone(project, name, &sqladminapi.InstancesCloneRequest{
 			CloneContext: &sqladminapi.CloneContext{DestinationInstanceName: strings.TrimSpace(v["destination"]),
 				PointInTime: strings.TrimSpace(v["pointInTime"])}}).Context(ctx).Do()
+	case "binlog-clone":
+		var pos int64
+		if pos, err = strconv.ParseInt(strings.TrimSpace(v["binLogPosition"]), 10, 64); err != nil {
+			return fmt.Errorf("position %q is not a number", v["binLogPosition"])
+		}
+		_, err = svc.Instances.Clone(project, name, &sqladminapi.InstancesCloneRequest{
+			CloneContext: &sqladminapi.CloneContext{DestinationInstanceName: strings.TrimSpace(v["destination"]),
+				BinLogCoordinates: &sqladminapi.BinLogCoordinates{BinLogFileName: strings.TrimSpace(v["binLogFileName"]), BinLogPosition: pos}}}).Context(ctx).Do()
 	case "delete-backup":
 		_, err = svc.BackupRuns.Delete(project, name, id).Context(ctx).Do()
 	case "create-replica":
 		_, err = svc.Instances.Insert(project, &sqladminapi.DatabaseInstance{Name: strings.TrimSpace(v["replica"]),
 			MasterInstanceName: name, InstanceType: "READ_REPLICA_INSTANCE", Region: strings.TrimSpace(v["region"])}).Context(ctx).Do()
 	case "upgrade":
-		_, err = svc.Instances.Patch(project, name, &sqladminapi.DatabaseInstance{DatabaseVersion: v["databaseVersion"]}).Context(ctx).Do()
+		_, err = svc.Instances.Patch(project, name, &sqladminapi.DatabaseInstance{DatabaseVersion: v["databaseVersion"],
+			IncludeReplicasForMajorVersionUpgrade: v["includeReplicas"] == "true"}).Context(ctx).Do()
 	case "failover":
 		var in *sqladminapi.DatabaseInstance
 		if in, err = svc.Instances.Get(project, name).Context(ctx).Do(); err == nil {
@@ -660,12 +701,35 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 		}
 		if x.FileType == "CSV" {
 			x.CsvExportOptions = &sqladminapi.ExportContextCsvExportOptions{SelectQuery: strings.TrimSpace(v["selectQuery"])}
+		} else {
+			o := &sqladminapi.ExportContextSqlExportOptions{Parallel: v["parallel"] == "true"}
+			if o.Parallel {
+				if o.Threads, err = consoleThreads(v["threads"]); err != nil {
+					return err
+				}
+			}
+			if md := strings.TrimSpace(v["masterData"]); md == "1" || md == "2" {
+				o.MysqlExportOptions = &sqladminapi.ExportContextSqlExportOptionsMysqlExportOptions{MasterData: int64(md[0] - '0')}
+			}
+			if o.Parallel || o.MysqlExportOptions != nil {
+				x.SqlExportOptions = o
+			}
 		}
 		_, err = svc.Instances.Export(project, name, &sqladminapi.InstancesExportRequest{ExportContext: x}).Context(ctx).Do()
 	case "import":
 		x := &sqladminapi.ImportContext{Uri: strings.TrimSpace(v["uri"]), FileType: v["fileType"], Database: strings.TrimSpace(v["database"])}
 		if x.FileType == "CSV" {
 			x.CsvImportOptions = &sqladminapi.ImportContextCsvImportOptions{Table: strings.TrimSpace(v["table"])}
+		} else if v["parallel"] == "true" {
+			o := &sqladminapi.ImportContextSqlImportOptions{Parallel: true}
+			if o.Threads, err = consoleThreads(v["threads"]); err != nil {
+				return err
+			}
+			if v["clean"] == "true" || v["ifExists"] == "true" {
+				o.PostgresImportOptions = &sqladminapi.ImportContextSqlImportOptionsPostgresImportOptions{
+					Clean: v["clean"] == "true", IfExists: v["ifExists"] == "true"}
+			}
+			x.SqlImportOptions = o
 		}
 		_, err = svc.Instances.Import(project, name, &sqladminapi.InstancesImportRequest{ImportContext: x}).Context(ctx).Do()
 	case "delete-client-cert":

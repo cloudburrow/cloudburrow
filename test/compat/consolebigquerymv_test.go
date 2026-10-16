@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 )
@@ -15,8 +16,9 @@ import (
 // TestConsoleBigQueryMaterializedViews (#1390): a materialized view is in
 // its dataset's Tables with its type; its page shows its definition (the
 // query, automatic refresh, last refreshed) and offers Refresh, which runs
-// CALL BQ.REFRESH_MATERIALIZED_VIEW: a row inserted into the base table is
-// in the view after it, read through the official Go client. Create table
+// CALL BQ.REFRESH_MATERIALIZED_VIEW and moves Last refreshed; a row
+// inserted into the base table is in the view before and after it (#1415),
+// read through the official Go client. Create table
 // makes one with the MATERIALIZED_VIEW type.
 func TestConsoleBigQueryMaterializedViews(t *testing.T) {
 	h := New(t)
@@ -80,14 +82,20 @@ func TestConsoleBigQueryMaterializedViews(t *testing.T) {
 		}
 		return got[0][0].(int64)
 	}
-	if got := sum("mv"); got != 1 {
-		t.Fatalf("before Refresh: %d, want 1", got)
+	// A read sees the base table's change before a refresh (#1415).
+	if got := sum("mv"); got != 11 {
+		t.Fatalf("before Refresh: %d, want 11 (current)", got)
 	}
+	before := mv.property("Table", "Last refreshed")
+	advanceBigQueryClock(t, h, time.Minute)
 	if code, out := consoleAct(t, addr, "bigquery", project, []string{ds.DatasetID, "mv"}, "refreshmv", nil); code != http.StatusOK {
 		t.Fatalf("Refresh = %d: %s", code, out)
 	}
 	if got := sum("mv"); got != 11 {
 		t.Errorf("after Refresh: %d, want 11", got)
+	}
+	if after := page(ds.DatasetID, "mv").property("Table", "Last refreshed"); after == before {
+		t.Errorf("Last refreshed %q unchanged by Refresh", after)
 	}
 
 	// Create table with the MATERIALIZED_VIEW type.

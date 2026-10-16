@@ -233,6 +233,9 @@ func checkDDL(sql string) ddlVerdict {
 				switch {
 				case kind == "MATERIALIZED VIEW" && unsupported == "":
 					unsupported = "CREATE MATERIALIZED VIEW"
+					if v.statements > 1 && tokensHaveTemp(toks) {
+						unsupported = "CREATE MATERIALIZED VIEW in a script with a TEMP table or function"
+					}
 				case (kind == "SNAPSHOT TABLE" || strings.HasPrefix(kind, "TABLE ")) && unsupported == "":
 					// TABLE LIKE, TABLE COPY, TABLE CLONE (#937).
 					unsupported = "CREATE " + kind
@@ -258,6 +261,16 @@ func checkDDL(sql string) ddlVerdict {
 		case len(body) > 2 && body[0].is("DROP") && body[1].is("MATERIALIZED") && body[2].is("VIEW"):
 			if unsupported == "" {
 				unsupported = "DROP MATERIALIZED VIEW"
+				if v.statements > 1 && tokensHaveTemp(toks) {
+					unsupported = "DROP MATERIALIZED VIEW in a script with a TEMP table or function"
+				}
+			}
+		case len(body) > 2 && body[0].is("ALTER") && body[1].is("MATERIALIZED") && body[2].is("VIEW"):
+			if unsupported == "" {
+				unsupported = "ALTER MATERIALIZED VIEW"
+				if v.statements > 1 && tokensHaveTemp(toks) {
+					unsupported = "ALTER MATERIALIZED VIEW in a script with a TEMP table or function"
+				}
 			}
 		case len(body) > 2 && body[0].is("DROP") && body[1].is("TABLE") && body[2].is("FUNCTION"):
 			// Not a DROP TABLE: functionStatement reads it. The engine
@@ -326,6 +339,11 @@ func checkDDL(sql string) ddlVerdict {
 			hint = "A query that is one CREATE VIEW with a column list is carried out (#1240), and so is one in a script " +
 				"with no TEMP table or function, which CloudBurrow runs a statement at a time (#1323), or with one (#1335), " +
 				"and a dry run of a lone one, but not a script in a dry run, nor one given by EXECUTE IMMEDIATE."
+		case "CREATE MATERIALIZED VIEW in a script with a TEMP table or function",
+			"ALTER MATERIALIZED VIEW in a script with a TEMP table or function",
+			"DROP MATERIALIZED VIEW in a script with a TEMP table or function":
+			hint = "CloudBurrow carries out a materialized view's statements alone, and in a script with no TEMP table or " +
+				"function, which it runs a statement at a time (#1415); a TEMP table lasts only for the request that made it."
 		case "CREATE TABLE LIKE":
 			hint = "CREATE TABLE ... AS SELECT * FROM the source LIMIT 0 makes a table with its columns (not its options)."
 		case "CREATE TABLE COPY", "CREATE TABLE CLONE", "CREATE SNAPSHOT TABLE", "DROP SNAPSHOT TABLE":
