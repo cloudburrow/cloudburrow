@@ -333,6 +333,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			if j[3] == "jobs" && own.serveJobAction(w, r, project, j[4], "") {
 				return
 			}
+			if j[3] == "queries" && own.failedJobResults(w, project, j[4]) { // #1397, failedjobs.go
+				return
+			}
 			serve := func(w http.ResponseWriter) {
 				texts.serveJob(w, project, j[4], func(w http.ResponseWriter) { failed.getJob(next, w, r, project, j[4], j[3] == "queries") })
 			}
