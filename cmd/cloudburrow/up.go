@@ -456,6 +456,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if sqlAdminSrv != nil {
 		coord.Register(sqlAdminSrv)
 	}
+	// The Backup and DR Service (#1433), over the Admin API's backups.
+	backupDRSrv := newBackupDRServer(cfg, sqlAdminSrv)
+	if backupDRSrv != nil {
+		coord.Register(backupDRSrv)
+	}
 
 	// Built before the console so the console can offer its playground, and
 	// registered after it for the same reason the other components are:
@@ -500,6 +505,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		ingress:      ingressAddr,
 		mysql:        mysqlCreds,
 		serviceUsage: serviceUsageSrv,
+		backupdr:     backupDRSrv,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.
@@ -563,6 +569,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if a := serviceUsageSrv.Addr(); a != "" {
 			live["serviceusage"] = a
+		}
+		if backupDRSrv != nil && backupDRSrv.Addr() != "" {
+			live["backupdr"] = backupDRSrv.Addr()
 		}
 		if sqlAdminSrv != nil && sqlAdminSrv.Addr() != "" {
 			live["sqladmin"] = sqlAdminSrv.Addr()

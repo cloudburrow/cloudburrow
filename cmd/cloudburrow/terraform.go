@@ -90,6 +90,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// google_sql_user on an instance `up` runs apply, plan clean and destroy
 	// in TestTerraformSQLDatabaseAndUser. The provider calls v1beta4.
 	{sqlAdminEndpoint, "sql_custom_endpoint", "GOOGLE_SQL_CUSTOM_ENDPOINT", "/sql/v1beta4/", true},
+	// The Backup and DR Service (#1433): google_backup_dr_backup_vault,
+	// _backup_plan and _backup_plan_association apply, plan clean and
+	// destroy in TestTerraformBackupDR.
+	{config.ServiceBackupDR, "backup_dr_custom_endpoint", "GOOGLE_BACKUP_DR_CUSTOM_ENDPOINT", "/v1/", true},
 	// Firestore (#1331): google_firestore_document applies, plans clean,
 	// updates its fields and destroys in TestTerraformFirestoreDocument,
 	// over the documents REST API the emulator serves on its port. On the
@@ -176,12 +180,14 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		config.ServiceSpanner: cfg.Endpoints.SpannerREST,
 		// The admin API's port, not the RESP one.
 		memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
+		config.ServiceBackupDR:   cfg.Endpoints.BackupDR,
 	}
 	enabled := map[config.Service]bool{resourceManagerEndpoint: true, serviceUsageService: true, sqlAdminEndpoint: sqlAdminEnabled(cfg),
 		memorystoreAdminEndpoint: serviceEnabled(cfg, config.ServiceMemorystore)}
 	for _, s := range cfg.EnabledServices() {
 		enabled[s] = true
 	}
+	enabled[config.ServiceBackupDR] = backupDREnabled(cfg)
 	var set []terraformURL
 	var skipped []config.Service
 	for _, e := range terraformEndpoints {

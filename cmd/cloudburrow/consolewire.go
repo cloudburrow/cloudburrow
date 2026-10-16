@@ -18,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/localai"
 	"github.com/cloudburrow/cloudburrow/internal/metadata"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -62,6 +63,8 @@ type consoleDeps struct {
 	// serviceUsage is the Service Usage API (#1352), whose APIs & Services
 	// page reads and changes the same server.
 	serviceUsage *serviceusage.Server
+	// backupdr is the Backup and DR Service (#1433), nil unless enabled.
+	backupdr *backupdr.Server
 }
 
 // runAddrOf is the adapter's live address, or nothing when there is no
@@ -478,6 +481,7 @@ var serviceTitles = map[config.Service]string{
 	config.ServiceScheduler:     "Cloud Scheduler",
 	config.ServiceLogging:       "Cloud Logging",
 	config.ServiceKMS:           "Cloud KMS",
+	config.ServiceBackupDR:      "Backup and DR",
 }
 
 func serviceTitle(s config.Service) string {

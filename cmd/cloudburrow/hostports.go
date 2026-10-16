@@ -66,6 +66,9 @@ func hostPorts(cfg config.Config) map[string]int {
 	if sqlAdminEnabled(cfg) {
 		ports["sqladmin"] = e.SQLAdmin
 	}
+	if !backupDREnabled(cfg) {
+		delete(ports, "backupdr")
+	}
 	for name, port := range ports {
 		// 0 is OS-assigned; a negative console port disables the console.
 		if port <= 0 {

@@ -109,6 +109,9 @@ type Server struct {
 	writes *instances
 	// backups are the backup runs, nil unless EnableBackups was called.
 	backups *backupStore
+	// backupdr resolves Backup and DR names (#1433), nil unless
+	// SetBackupDR was called; emu guards it.
+	backupdr BackupDR
 	// transfers are imports and exports, nil unless EnableTransfers was
 	// called (#1380).
 	transfers *transfers
@@ -297,7 +300,8 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 	}
 	if len(p) == 2 && p[0] == "projects" && strings.HasSuffix(p[1], ":pointInTimeRestore") &&
 		strings.TrimSuffix(p[1], ":pointInTimeRestore") != "" && r.Method == http.MethodPost {
-		return "sql.instances.pointInTimeRestore", nil, s.pointInTimeRestore(r)
+		out, err := s.pointInTimeRestore(r, base, strings.TrimSuffix(p[1], ":pointInTimeRestore"))
+		return "sql.instances.pointInTimeRestore", out, err
 	}
 	if len(p) < 2 || p[0] != "projects" || p[1] == "" || strings.Contains(p[1], ":") || len(p) == 2 {
 		// flags and locations.
