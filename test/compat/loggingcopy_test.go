@@ -86,7 +86,9 @@ func copyClients(t *testing.T, h *Harness) ([]option.ClientOption, *storage.Clie
 // (SUCCEEDED, progress 100, the request, writer_identity) and its response
 // the copied count. A copy cancelled through the client's CancelOperation
 // while it is still scheduled ends CANCELLED, and a copy to a missing bucket
-// fails "Failed to write export data".
+// fails "Failed to write export data". A folder's and the organization's
+// _Default buckets copy their own entries, under operations named for the
+// parent, written as its Logging service agent (#1411).
 func TestLoggingCopyLogEntries(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -199,13 +201,60 @@ func TestLoggingCopyLogEntries(t *testing.T) {
 	}
 	_, err = cc.CopyLogEntries(ctx, &loggingpb.CopyLogEntriesRequest{Name: source, Destination: "bigquery.googleapis.com/projects/" + project + "/datasets/d"})
 	wantLoggingCode(t, "a BigQuery destination", err, codes.InvalidArgument)
+
+	// A folder's and the organization's _Default buckets (#1411): their own
+	// entries, the operation named under the parent and the writer identity
+	// the parent's service agent.
+	folder, _ := loggingParentsFixture(t, h, "lcp-")
+	for _, pc := range []struct{ parent, agent string }{
+		{folder, "service-fld-" + strings.TrimPrefix(folder, "folders/") + "@"},
+		{localOrg, "service-org-" + strings.TrimPrefix(localOrg, "organizations/") + "@"},
+	} {
+		// A log ID of each parent's own: objects are named by log ID and
+		// hour, so a second copy of the same log ID would replace the first.
+		log := pc.parent + "/logs/copy-" + strings.SplitN(pc.parent, "/", 2)[0] + "-" + suffix
+		if _, err := lc.WriteLogEntries(ctx, &loggingpb.WriteLogEntriesRequest{LogName: log, Resource: &mrpb.MonitoredResource{Type: "global"},
+			Entries: []*loggingpb.LogEntry{{Payload: &loggingpb.LogEntry_TextPayload{TextPayload: "from " + pc.parent}}}}); err != nil {
+			t.Fatal(err)
+		}
+		op, err := cc.CopyLogEntries(ctx, &loggingpb.CopyLogEntriesRequest{Name: pc.parent + "/locations/global/buckets/_Default",
+			Filter: fmt.Sprintf(`logName="%s"`, log), Destination: "storage.googleapis.com/" + project + "-logcopy"})
+		if err != nil {
+			t.Fatalf("CopyLogEntries from %s: %v", pc.parent, err)
+		}
+		if !strings.HasPrefix(op.Name(), pc.parent+"/locations/global/operations/") {
+			t.Errorf("operation %q is not under %s", op.Name(), pc.parent)
+		}
+		resp, err := op.Wait(ctx)
+		if err != nil || resp.GetLogEntriesCopiedCount() != 1 {
+			t.Errorf("the copy from %s = %v, %v; want 1 entry copied", pc.parent, resp, err)
+		}
+		if md, _ := op.Metadata(); !strings.HasPrefix(md.GetWriterIdentity(), "serviceAccount:"+pc.agent) {
+			t.Errorf("the copy from %s has writer identity %q, want %s...", pc.parent, md.GetWriterIdentity(), pc.agent)
+		}
+		got, err := cc.GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: op.Name()})
+		if err != nil || !got.GetDone() {
+			t.Errorf("GetOperation(%s) = %v, %v", op.Name(), got, err)
+		}
+	}
+	objs = copyBucketObjects(t, ctx, dest)
+	for _, want := range []string{"from " + folder, "from " + localOrg} {
+		found := false
+		for _, body := range objs {
+			found = found || strings.Contains(body, want)
+		}
+		if !found {
+			t.Errorf("no copied object holds %q", want)
+		}
+	}
 }
 
 // TestGcloudLoggingCopy (#1394): `gcloud logging copy` starts a copy of the
 // _Default bucket's entries to a Cloud Storage bucket on the instance, and
 // `gcloud logging operations describe` and `list` read its operation back,
 // through the configuration `cloudburrow gcloud-setup` writes. The official
-// Storage client reads the objects.
+// Storage client reads the objects. `--folder` and `--organization` copy
+// those parents' _Default buckets (#1411).
 func TestGcloudLoggingCopy(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -264,6 +313,39 @@ func TestGcloudLoggingCopy(t *testing.T) {
 	for name, body := range objs {
 		if m := copyObjectRe.FindStringSubmatch(name); m == nil || m[1] != logID || !strings.Contains(body, `"copied by gcloud"`) {
 			t.Errorf("object %s holds %s", name, body)
+		}
+	}
+
+	// --folder and --organization (#1411): the parent's _Default bucket,
+	// its operation described under the same flag.
+	folder, _ := loggingParentsFixture(t, h, "gcp-")
+	for _, flag := range []string{"--folder=" + strings.TrimPrefix(folder, "folders/"), "--organization=" + strings.TrimPrefix(localOrg, "organizations/")} {
+		parent := map[bool]string{true: folder, false: localOrg}[strings.HasPrefix(flag, "--folder")]
+		plog := fmt.Sprint("gcloud-pcopy-", time.Now().UnixNano())
+		g.must("logging", "write", plog, "copied from "+parent, flag)
+		out := g.must("logging", "copy", "_Default", "storage.googleapis.com/"+project+"-gcloudcopy", "--location=global",
+			`--log-filter=logName="`+parent+`/logs/`+plog+`"`, flag)
+		m := regexp.MustCompile(regexp.QuoteMeta(parent) + `/locations/global/operations/([^\s"']+)`).FindStringSubmatch(out)
+		if m == nil {
+			t.Fatalf("gcloud logging copy %s named no operation under %s:\n%s", flag, parent, out)
+		}
+		var desc string
+		for i := 0; i < 30; i++ {
+			desc = g.must("logging", "operations", "describe", m[1], "--location=global", flag, "--format=json")
+			if strings.Contains(desc, "OPERATION_STATE_SUCCEEDED") {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		if !strings.Contains(desc, "OPERATION_STATE_SUCCEEDED") || !strings.Contains(desc, `"logEntriesCopiedCount": "1"`) {
+			t.Errorf("operations describe %s = %s", flag, desc)
+		}
+		found := false
+		for name, body := range copyBucketObjects(t, ctx, dest) {
+			found = found || (strings.HasPrefix(name, plog+"/") && strings.Contains(body, "copied from "+parent))
+		}
+		if !found {
+			t.Errorf("gcloud logging copy %s wrote no %s object", flag, plog)
 		}
 	}
 }

@@ -522,6 +522,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if d := loggingSvc.logDeleter(faults); d != nil {
 			consoleSrv.SetLogDeleter(d)
 		}
+		// And the Explorer reads through a log view (#1410).
+		if v := loggingSvc.logViewReader(faults); v != nil {
+			consoleSrv.SetLogViewReader(v)
+		}
 	}
 
 	if localAISrv != nil {

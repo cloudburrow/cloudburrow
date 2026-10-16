@@ -21,7 +21,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
 | Cloud Storage | 7 | 1 | 5 | 1 | 0 |
-| Pub/Sub | 3 | 0 | 2 | 1 | 0 |
+| Pub/Sub | 1 | 0 | 0 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 21 | 14 | 5 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 9 | 9 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **103** | **46** | **39** | **13** | **5** |
+| **Total** | **101** | **46** | **37** | **13** | **5** |
 
 ## Cloud Storage
 
@@ -115,6 +115,7 @@ Closed by this sweep: Locations (#1237).
 
 Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394); the Terraform folder, organization and billing-account resources (#1403).
 Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394). Closed: sink delivery to Cloud Storage, Pub/Sub, BigQuery and another project, and `writer_identity` (#1404).
+Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394). Closed: sink delivery to Cloud Storage, Pub/Sub, BigQuery and another project, and `writer_identity` (#1404). Closed: `CopyLogEntries` from folder, organization and billing-account buckets, with their Operations JSON bindings (#1411); in the console, Log storage's Parent picker reaches those buckets, a billing account once Logging holds an entry or configuration for it or when named as `?parent=billingAccounts/ID` (Cloud Billing is not served, so nothing else lists one). Closed: log view filters and bucket retention applied on read, and TailLogEntries on views and over JSON (#1410); in the console, the Logs Explorer reads and tails through a chosen bucket and view.
 
 | Gap | Why open | Size |
 |---|---|---|
