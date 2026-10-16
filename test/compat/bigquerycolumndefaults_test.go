@@ -211,7 +211,7 @@ func TestBigQueryColumnDefaults(t *testing.T) {
 		for sql, code := range map[string]int{
 			"ALTER TABLE " + name + " ADD COLUMN n INT64 DEFAULT 1":     http.StatusBadRequest,
 			"ALTER TABLE " + name + " ALTER COLUMN nope SET DEFAULT 1":  http.StatusBadRequest,
-			"ALTER TABLE " + name + " ALTER COLUMN s.x SET DEFAULT 'a'": http.StatusNotImplemented,
+			"ALTER TABLE " + name + " ALTER COLUMN s.x SET DEFAULT 'a'": http.StatusBadRequest, // a subfield, #1389
 		} {
 			wantHTTPStatus(t, sql, bqRun(ctx, c, sql, insert), code)
 		}

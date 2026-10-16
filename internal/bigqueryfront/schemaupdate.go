@@ -233,7 +233,7 @@ func inTableOrder(old []field, next []any) ([]any, bool) {
 // kept are the settings of a table that its remaking keeps (addColumns);
 // the rest of a tables.get answer is the server's own.
 var kept = []string{"description", "friendlyName", "labels", "expirationTime", "timePartitioning", "rangePartitioning",
-	"clustering", "requirePartitionFilter", "encryptionConfiguration", "defaultCollation"}
+	"clustering", "requirePartitionFilter", "encryptionConfiguration", "defaultCollation", "tableConstraints"}
 
 // addColumns makes dataset.table again with schema (the request's, raw,
 // in the table's order), which adds columns or RECORD fields to its

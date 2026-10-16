@@ -49,16 +49,45 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not read "+name, text)
 	}
 	project := s.project()
-	if p, _ := s.f.policies.list(policyKey(project, ds, table)); len(p) > 0 {
-		s.notImpl = alterNotImplemented(strings.ToUpper(strings.Fields(st.actions[0].kind)[0]) +
-			" of a table with row access policies, which would not follow the table made again")
-		return &scriptFlow{}
-	}
+	policies := len(s.f.livePolicies(s.r, project, ds, table)) > 0
 	schema, _ := meta["schema"].(map[string]any)
 	raw, _ := schema["fields"].([]any)
 	src := tableRef{DatasetID: ds, TableID: table}
 	if a := st.actions[0]; a.kind == "rename table" {
 		return s.renameTable(src, a.newName, raw, meta, text)
+	}
+	// "You cannot use this statement to rename [or drop] ... Columns in a
+	// table that has row access policies"; SET DATA TYPE keeps them
+	// (#1389, moved to the table made again below).
+	for _, a := range st.actions {
+		if policies && (a.kind == "rename column" || a.kind == "drop column") {
+			return failWith(http.StatusBadRequest, "invalidQuery", "Cannot "+strings.Fields(a.kind)[0]+" column "+a.column+
+				" of table "+name+": the table has row access policies.", text)
+		}
+	}
+	// keys: the columns of the table's primary and foreign keys, which
+	// "cannot" be renamed or dropped.
+	keys := map[string]bool{}
+	if tc, ok := meta["tableConstraints"].(map[string]any); ok {
+		if pk, ok := tc["primaryKey"].(map[string]any); ok {
+			cs, _ := pk["columns"].([]any)
+			for _, c := range cs {
+				if n, _ := c.(string); n != "" {
+					keys[strings.ToLower(n)] = true
+				}
+			}
+		}
+		fks, _ := tc["foreignKeys"].([]any)
+		for _, fk := range fks {
+			m, _ := fk.(map[string]any)
+			refs, _ := m["columnReferences"].([]any)
+			for _, r := range refs {
+				rm, _ := r.(map[string]any)
+				if n, _ := rm["referencingColumn"].(string); n != "" {
+					keys[strings.ToLower(n)] = true
+				}
+			}
+		}
 	}
 	// keyed columns: partitioning and clustering.
 	keyed := map[string]bool{}
@@ -106,7 +135,7 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 		}
 		return -1
 	}
-	changed, renames := false, false
+	changed := false
 	for _, a := range st.actions {
 		i := find(a.column)
 		if i < 0 {
@@ -129,7 +158,8 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 			}
 			f := cols[i].field
 			old := canonicalType(str(f, "type"))
-			for _, k := range []string{"type", "maxLength", "precision", "scale"} {
+			oldFields := f["fields"]
+			for _, k := range []string{"type", "maxLength", "precision", "scale", "fields"} {
 				delete(f, k)
 				if v, ok := a.field[k]; ok {
 					f[k] = v
@@ -138,10 +168,19 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 			if nt := canonicalType(str(f, "type")); nt != old {
 				cols[i].cast = nt
 			}
+			if f["fields"] != nil {
+				// A STRUCT's fields keep their modes and descriptions,
+				// and take the new types (coercion checked them).
+				f["fields"] = retypeFields(oldFields, f["fields"])
+				cols[i].cast = recordType(f)
+			}
 			changed = true
 			continue
 		}
-		renames = true
+		if keys[strings.ToLower(cols[i].from)] {
+			return failWith(http.StatusBadRequest, "invalidQuery", "Cannot "+strings.Fields(a.kind)[0]+" column "+a.column+
+				" of table "+name+": it is a column of the table's primary or foreign key.", text)
+		}
 		if a.kind == "drop column" {
 			if keyed[strings.ToLower(cols[i].from)] {
 				return failWith(http.StatusBadRequest, "invalidQuery", "Cannot drop column "+a.column+
@@ -155,8 +194,10 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 			return failWith(http.StatusBadRequest, "invalidQuery", "Column already exists: "+a.newName, text)
 		}
 		if keyed[strings.ToLower(cols[i].from)] {
-			s.notImpl = alterNotImplemented("RENAME COLUMN of a partitioning or clustering column")
-			return &scriptFlow{}
+			// "You cannot use this statement to rename ... Partitioning
+			// columns, Clustering columns" (#1389).
+			return failWith(http.StatusBadRequest, "invalidQuery", "Cannot rename column "+a.column+
+				" of table "+name+": it partitions or clusters the table.", text)
 		}
 		cols[i].field["name"] = a.newName
 		changed = true
@@ -165,11 +206,7 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 		return failWith(http.StatusBadRequest, "invalidQuery", "Cannot drop every column of table "+name+".", text)
 	}
 	if !changed {
-		return s.assigned()
-	}
-	if _, ok := meta["tableConstraints"]; ok && renames {
-		s.notImpl = alterNotImplemented("RENAME COLUMN or DROP COLUMN of a table with a primary or foreign key")
-		return &scriptFlow{}
+		return nil
 	}
 	fields := make([]any, len(cols))
 	from, to := make([]string, len(cols)), make([]string, len(cols))
@@ -204,16 +241,19 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 			errorMessage(got, status), text)
 	}
 	held := "; its rows are in " + scratch.DatasetID + "." + scratch.TableID
-	if msg := f.makeParquetTable(r, src, newSchema, carriedTableProperties(meta, !renames)); msg != "" {
+	if msg := f.makeParquetTable(r, src, newSchema, carriedTableProperties(meta, true)); msg != "" {
 		keep = true
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: "+msg+held, text)
 	}
+	// The table made again keeps its creationTime, as addColumns' does,
+	// and so its row access policies (SET DATA TYPE alone, above).
+	f.keepCreationTime(r, src, meta)
 	if msg := f.runDML(r, "INSERT INTO "+quotePath([]string{ds, table})+" ("+list+") SELECT "+list+" FROM "+
 		quotePath([]string{scratch.DatasetID, scratch.TableID})); msg != "" {
 		keep = true
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: "+msg+held, text)
 	}
-	return s.assigned()
+	return nil
 }
 
 // renameTable carries out ALTER TABLE src RENAME TO to (above).
@@ -242,12 +282,20 @@ func (s *scriptRun) renameTable(src tableRef, to string, raw []any, meta map[str
 		f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not copy the rows: "+msg, text)
 	}
+	// "recreates the table in the destination dataset with the creation
+	// timestamp of the original table"; "Existing table ACLs and row
+	// access policies are preserved" (#1389).
+	f.keepCreationTime(r, dest, meta)
+	if pols := f.livePolicies(r, s.project(), src.DatasetID, src.TableID); len(pols) > 0 {
+		created, _ := meta["creationTime"].(string)
+		f.policies.move(policyKey(s.project(), src.DatasetID, src.TableID), policyKey(s.project(), dest.DatasetID, dest.TableID), created)
+	}
 	if status, got := f.send(r, http.MethodDelete, tablePath(src.DatasetID, src.TableID), nil); status != http.StatusOK &&
 		status != http.StatusNoContent {
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: "+dest.TableID+" is made, but "+
 			src.TableID+" could not be deleted: "+errorMessage(got, status), text)
 	}
-	return s.assigned()
+	return nil
 }
 
 // coercion reports whether BigQuery's ALTER COLUMN SET DATA TYPE takes
@@ -270,14 +318,54 @@ func coercion(old, next map[string]any) (int, string) {
 		n, err := strconv.Atoi(v)
 		return n, err == nil
 	}
+	if ot == "RECORD" || nt == "RECORD" {
+		// "Changing the data type for a field": a STRUCT to a STRUCT of
+		// the same fields, each by these rules (#1389).
+		of, _ := old["fields"].([]any)
+		nf, _ := next["fields"].([]any)
+		if ot != nt || len(of) != len(nf) {
+			return http.StatusBadRequest, refused
+		}
+		for i := range of {
+			om, _ := of[i].(map[string]any)
+			nm, _ := nf[i].(map[string]any)
+			if !strings.EqualFold(str(om, "name"), str(nm, "name")) || (str(om, "mode") == "REPEATED") != (str(nm, "mode") == "REPEATED") {
+				return http.StatusBadRequest, refused
+			}
+			if str(nm, "mode") == "REPEATED" && canonicalType(str(om, "type")) != canonicalType(str(nm, "type")) {
+				return http.StatusNotImplemented, "of a REPEATED field of a STRUCT to another type"
+			}
+			if code, msg := coercion(om, nm); code != 0 {
+				return code, msg
+			}
+		}
+		return 0, ""
+	}
 	if ot != nt {
 		widens := ot == "INT64" && (nt == "NUMERIC" || nt == "BIGNUMERIC" || nt == "FLOAT64") ||
 			ot == "NUMERIC" && (nt == "BIGNUMERIC" || nt == "FLOAT64")
 		switch {
 		case !widens:
 			return http.StatusBadRequest, refused
-		case str(next, "precision") != "" || str(old, "precision") != "":
-			return http.StatusNotImplemented, "from or to a parameterized NUMERIC or BIGNUMERIC of another type, whose rule is not documented"
+		case ot == "NUMERIC" && nt == "BIGNUMERIC":
+			// "NUMERIC to BIGNUMERIC(40, 20)" is the documented example:
+			// a BIGNUMERIC of no less precision and scale than the
+			// NUMERIC's (38 and 9 when it has no parameters) (#1389).
+			op, ok := num(old, "precision")
+			if !ok {
+				op = 38
+			}
+			os, ok := num(old, "scale")
+			if !ok && str(old, "precision") == "" {
+				os = 9
+			}
+			np, npok := num(next, "precision")
+			ns, _ := num(next, "scale")
+			if npok && (np < op || ns < os) {
+				return http.StatusBadRequest, refused
+			}
+		case str(next, "precision") != "" || str(old, "precision") != "" && nt != "FLOAT64":
+			return http.StatusNotImplemented, "from INT64 to a parameterized NUMERIC or BIGNUMERIC, whose rule is not documented"
 		}
 		return 0, ""
 	}
@@ -312,4 +400,54 @@ func describeType(f map[string]any) string {
 		return t + "(" + str(f, "precision") + ")"
 	}
 	return t
+}
+
+// retypeFields is a STRUCT's new fields, next, with the modes and
+// descriptions of its old ones, old.
+func retypeFields(old, next any) []any {
+	of, _ := old.([]any)
+	nf, _ := next.([]any)
+	out := make([]any, len(nf))
+	for i, n := range nf {
+		nm, _ := n.(map[string]any)
+		m := map[string]any{}
+		if i < len(of) {
+			if om, ok := of[i].(map[string]any); ok {
+				for k, v := range om {
+					m[k] = v
+				}
+			}
+		}
+		for _, k := range []string{"type", "maxLength", "precision", "scale"} {
+			delete(m, k)
+			if v, ok := nm[k]; ok {
+				m[k] = v
+			}
+		}
+		if nm["fields"] != nil {
+			m["fields"] = retypeFields(m["fields"], nm["fields"])
+		}
+		out[i] = m
+	}
+	return out
+}
+
+// recordType is a RECORD TableFieldSchema's GoogleSQL type, its values
+// CAST to (sqlType).
+func recordType(f map[string]any) string {
+	b, _ := json.Marshal(f)
+	var fl field
+	_ = json.Unmarshal(b, &fl)
+	fl.Mode = ""
+	return sqlType(fl)
+}
+
+// keepCreationTime gives ref, a table made again, the creationTime of
+// meta, the table it was, as addColumns does (schemaupdate.go).
+func (f front) keepCreationTime(r *http.Request, ref tableRef, meta map[string]any) {
+	if created, ok := meta["creationTime"]; ok {
+		if patch, err := json.Marshal(map[string]any{"creationTime": created}); err == nil {
+			f.send(r, http.MethodPatch, tablePath(ref.DatasetID, ref.TableID), patch)
+		}
+	}
 }
