@@ -194,7 +194,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("the Spanner instance front: %w", err)
 		}
-		icpts = append(icpts, si)
+		icpts = append(icpts, si, spannerfront.NewRefusals())
 	}
 	var icpt Intercept
 	if len(icpts) > 0 {

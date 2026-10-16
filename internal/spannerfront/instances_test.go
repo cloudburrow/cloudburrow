@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -47,6 +48,8 @@ func (f *fakeEmulator) DeleteInstance(_ context.Context, r *instancepb.DeleteIns
 	return &emptypb.Empty{}, nil
 }
 
+var lastConn *grpc.ClientConn
+
 func serve(t *testing.T) (string, instancepb.InstanceAdminClient) {
 	t.Helper()
 	emu := &fakeEmulator{insts: map[string]*instancepb.Instance{
@@ -61,7 +64,7 @@ func serve(t *testing.T) (string, instancepb.InstanceAdminClient) {
 		t.Fatal(err)
 	}
 	fl, _ := net.Listen("tcp", "127.0.0.1:0")
-	srv := callfront.Server(callfront.HandlerWith(el.Addr().String(), &calllog.Ring{}, t.Logf, si), t.Logf)
+	srv := callfront.Server(callfront.HandlerWith(el.Addr().String(), &calllog.Ring{}, t.Logf, callfront.Intercepts{si, spannerfront.NewRefusals()}), t.Logf)
 	go func() { _ = srv.Serve(fl) }()
 	t.Cleanup(func() { _ = srv.Close() })
 	conn, err := grpc.NewClient(fl.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -69,6 +72,7 @@ func serve(t *testing.T) (string, instancepb.InstanceAdminClient) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
+	lastConn = conn
 	return fl.Addr().String(), instancepb.NewInstanceAdminClient(conn)
 }
 
@@ -91,7 +95,8 @@ func TestUpdateInstanceOverGRPC(t *testing.T) {
 		t.Fatalf("ListInstances = %v, %v", list, err)
 	}
 	for mask, want := range map[string]codes.Code{"autoscaling_config": codes.Unimplemented, "config": codes.Unimplemented, "state": codes.InvalidArgument} {
-		_, err := c.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{Instance: &instancepb.Instance{Name: name},
+		_, err := c.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{Instance: &instancepb.Instance{Name: name, Config: "projects/p/instanceConfigs/other",
+			AutoscalingConfig: &instancepb.AutoscalingConfig{}},
 			FieldMask: &fieldmaskpb.FieldMask{Paths: []string{mask}}})
 		if status.Code(err) != want {
 			t.Errorf("mask %s: %v, want %v", mask, err, want)
@@ -125,7 +130,8 @@ func TestUpdateInstanceOverREST(t *testing.T) {
 		_ = json.NewDecoder(resp.Body).Decode(&m)
 		return resp.StatusCode, m
 	}
-	code, op := do("PATCH", "/v1/projects/p/instances/i", `{"instance":{"nodeCount":3,"displayName":"by rest"},"fieldMask":"nodeCount,displayName"}`)
+	// As gcloud sends it: autoscaling cleared beside the node count.
+	code, op := do("PATCH", "/v1/projects/p/instances/i", `{"instance":{"nodeCount":3,"displayName":"by rest"},"fieldMask":"nodeCount,displayName,autoscalingConfig"}`)
 	if code != 200 || op["done"] != true {
 		t.Fatalf("patch = %d %v", code, op)
 	}
@@ -133,7 +139,25 @@ func TestUpdateInstanceOverREST(t *testing.T) {
 	if code != 200 || got["nodeCount"] != float64(3) || got["processingUnits"] != float64(3000) || got["displayName"] != "by rest" {
 		t.Fatalf("get = %d %v", code, got)
 	}
-	if code, got = do("PATCH", "/v1/projects/p/instances/i", `{"instance":{},"fieldMask":"autoscalingConfig"}`); code != 501 {
+	if code, got = do("PATCH", "/v1/projects/p/instances/i", `{"instance":{"autoscalingConfig":{}},"fieldMask":"autoscalingConfig"}`); code != 501 {
 		t.Errorf("autoscaling = %d %v, want 501", code, got)
+	}
+}
+
+func TestRefusalsNameWhy(t *testing.T) {
+	addr, _ := serve(t)
+	ctx := context.Background()
+	_, err := databasepb.NewDatabaseAdminClient(lastConn).GetBackup(ctx, &databasepb.GetBackupRequest{Name: "projects/p/instances/i/backups/b"})
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "snapshot") {
+		t.Errorf("GetBackup: %v, want UNIMPLEMENTED naming why", err)
+	}
+	req, _ := http.NewRequest("GET", "http://"+addr+"/v1/projects/p/instances/i/databases/d/backupSchedules", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 501 {
+		t.Errorf("REST backup schedules = %d, want 501", resp.StatusCode)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigtable"
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
@@ -167,11 +168,10 @@ resource "google_bigtable_table" "t" {
 // second table in the database's DDL), plan clean again and destroy, all
 // with egress blocked.
 //
-// The emulator does not update instances: UpdateInstance answers
-// UNIMPLEMENTED, "Cloud Spanner Emulator does not support updating
-// instances", over REST as 501. So a change to the instance's display name
-// or node count is planned in place and fails at apply, locally, naming
-// that; the instance is left as it was and the old configuration plans clean.
+// The emulator does not update instances, but the call front in its pod
+// answers UpdateInstance over REST (#1461): a change to the instance's
+// display name and node count applies in place, reads back over gRPC and
+// plans clean.
 func TestTerraformSpannerInstanceAndDatabase(t *testing.T) {
 	h := New(t)
 	if _, err := exec.LookPath("terraform"); err != nil {
@@ -297,15 +297,15 @@ resource "google_spanner_database" "d" {
 	check("after the update", "tf one", 1, 2)
 	cleanPlan("after the update")
 
-	// The emulator's refusal to update an instance, locally.
+	// An instance update, which the call front answers (#1461).
 	write("tf two", 2, 2)
-	out, err = tf("apply", "-auto-approve", "-input=false", "-no-color")
-	if err == nil || !strings.Contains(out, "does not support updating instances") {
-		t.Errorf("an instance update = %v, want the emulator's refusal:\n%s", err, lastLines(out, 20))
+	out, err = tf("plan", "-input=false", "-no-color")
+	if err != nil || !strings.Contains(out, "0 to add, 1 to change, 0 to destroy") {
+		t.Errorf("the instance update is not planned in place (%v):\n%s", err, lastLines(out, 20))
 	}
-	check("after the refused instance update", "tf one", 1, 2)
-	write("tf one", 1, 2)
-	cleanPlan("after the refused instance update")
+	run("apply", "-auto-approve", "-input=false", "-no-color")
+	check("after the instance update", "tf two", 2, 2)
+	cleanPlan("after the instance update")
 
 	run("destroy", "-auto-approve", "-input=false", "-no-color")
 	if _, err := dc.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: dbName}); status.Code(err) != codes.NotFound {
@@ -317,8 +317,10 @@ resource "google_spanner_database" "d" {
 }
 
 // TestTerraformFirestoreDatabaseIndexAndField (#1331), in the emulators
-// shard: a google_firestore_database, a google_firestore_index on it and a
+// shard: a google_firestore_database, a google_firestore_index on it, a
 // google_firestore_field (a TTL policy and a single-field index exemption)
+// and a google_firestore_backup_schedule (#1461, whose retention is updated
+// in place)
 // apply through `cloudburrow terraform` with the official hashicorp/google
 // provider, read back through the official Firestore Admin client, plan
 // clean, take an in-place update (the database's concurrency mode), plan
@@ -348,7 +350,7 @@ func TestTerraformFirestoreDatabaseIndexAndField(t *testing.T) {
 	const dbID = "tf-database"
 	dbName := "projects/" + h.Project() + "/databases/" + dbID
 
-	write := func(mode string) {
+	write := func(mode, retention string) {
 		t.Helper()
 		module := googleProviderRequirement + fmt.Sprintf(`resource "google_firestore_database" "db" {
   project          = %q
@@ -379,7 +381,13 @@ resource "google_firestore_field" "ttl" {
   ttl_config {}
   index_config {}
 }
-`, h.Project(), dbID, mode, h.Project(), h.Project())
+resource "google_firestore_backup_schedule" "daily" {
+  project   = %q
+  database  = google_firestore_database.db.name
+  retention = %q
+  daily_recurrence {}
+}
+`, h.Project(), dbID, mode, h.Project(), h.Project(), h.Project(), retention)
 		if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -409,8 +417,13 @@ resource "google_firestore_field" "ttl" {
 			t.Errorf("plan %s is not clean (%v):\n%s", when, err, lastLines(out, 40))
 		}
 	}
-	check := func(when string, mode adminpb.Database_ConcurrencyMode) {
+	check := func(when string, mode adminpb.Database_ConcurrencyMode, retention time.Duration) {
 		t.Helper()
+		ss, err := c.ListBackupSchedules(ctx, &adminpb.ListBackupSchedulesRequest{Parent: dbName})
+		if err != nil || len(ss.GetBackupSchedules()) != 1 || ss.BackupSchedules[0].GetDailyRecurrence() == nil ||
+			ss.BackupSchedules[0].GetRetention().AsDuration() != retention {
+			t.Errorf("the backup schedules %s = %v, %v, want one daily with %v", when, ss, err, retention)
+		}
 		db, err := c.GetDatabase(ctx, &adminpb.GetDatabaseRequest{Name: dbName})
 		if err != nil {
 			t.Fatalf("the database %s: %v", when, err)
@@ -429,20 +442,20 @@ resource "google_firestore_field" "ttl" {
 		}
 	}
 
-	write("OPTIMISTIC")
+	write("OPTIMISTIC", "604800s")
 	useGoogleProviderLock(t, dir)
 	run("init", "-input=false", "-no-color")
 	run("apply", "-auto-approve", "-input=false", "-no-color")
-	check("after apply", adminpb.Database_OPTIMISTIC)
+	check("after apply", adminpb.Database_OPTIMISTIC, 7*24*time.Hour)
 	cleanPlan("right after apply")
 
-	write("PESSIMISTIC")
+	write("PESSIMISTIC", "259200s")
 	out, err := tf("plan", "-input=false", "-no-color")
-	if err != nil || !strings.Contains(out, "0 to add, 1 to change, 0 to destroy") {
-		t.Errorf("the update is not planned in place (%v):\n%s", err, lastLines(out, 20))
+	if err != nil || !strings.Contains(out, "0 to add, 2 to change, 0 to destroy") {
+		t.Errorf("the updates are not planned in place (%v):\n%s", err, lastLines(out, 20))
 	}
 	run("apply", "-auto-approve", "-input=false", "-no-color")
-	check("after the update", adminpb.Database_PESSIMISTIC)
+	check("after the update", adminpb.Database_PESSIMISTIC, 3*24*time.Hour)
 	cleanPlan("after the update")
 
 	run("destroy", "-auto-approve", "-input=false", "-no-color")

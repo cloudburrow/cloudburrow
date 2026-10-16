@@ -180,9 +180,15 @@ func (s *Instances) UpdateInstance(ctx context.Context, req *instancepb.UpdateIn
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid UpdateInstance request: instance.name %q is not projects/{project}/instances/{instance}.", in.GetName())
 	}
 	paths := map[string]bool{}
+	named := len(req.GetFieldMask().GetPaths()) > 0
 	for _, p := range req.GetFieldMask().GetPaths() {
 		p = snake(p)
 		if why, ok := refused[p]; ok {
+			// Clearing what the emulator never has is no change: gcloud
+			// clears autoscaling_config when it sets a node count.
+			if unset(in, p) {
+				continue
+			}
 			return nil, status.Errorf(codes.Unimplemented, "UpdateInstance of %s is not served here: %s", p, why)
 		}
 		switch p {
@@ -192,7 +198,7 @@ func (s *Instances) UpdateInstance(ctx context.Context, req *instancepb.UpdateIn
 			return nil, status.Errorf(codes.InvalidArgument, "Invalid UpdateInstance request: field_mask path %q is not a field of Instance that can be updated.", p)
 		}
 	}
-	if len(paths) == 0 {
+	if !named {
 		return nil, status.Error(codes.InvalidArgument, "Invalid UpdateInstance request: field_mask must name at least one field.")
 	}
 	if paths["display_name"] {
@@ -250,6 +256,20 @@ func (s *Instances) UpdateInstance(ctx context.Context, req *instancepb.UpdateIn
 	}
 	return &longrunningpb.Operation{Name: in.GetName() + "/operations/" + opID(), Metadata: meta, Done: true,
 		Result: &longrunningpb.Operation_Response{Response: resp}}, nil
+}
+
+// unset reports whether in leaves the refused field p at its zero value,
+// which is what an emulator instance has.
+func unset(in *instancepb.Instance, p string) bool {
+	switch p {
+	case "autoscaling_config":
+		return in.GetAutoscalingConfig() == nil
+	case "edition":
+		return in.GetEdition() == instancepb.Instance_EDITION_UNSPECIFIED
+	case "default_backup_schedule_type":
+		return in.GetDefaultBackupScheduleType() == instancepb.Instance_DEFAULT_BACKUP_SCHEDULE_TYPE_UNSPECIFIED
+	}
+	return false
 }
 
 func opID() string {

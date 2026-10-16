@@ -80,12 +80,9 @@ func (s *Instances) serveREST(w http.ResponseWriter, r *http.Request) {
 		if req.Instance == nil {
 			req.Instance = &instancepb.Instance{}
 		}
-		if req.Instance.Name == "" {
-			req.Instance.Name = name
-		} else if req.Instance.Name != name {
-			writeError(w, status.Errorf(codes.InvalidArgument, "instance.name %q does not match the URL's %q", req.Instance.Name, name))
-			return
-		}
+		// The URL names the instance: the Terraform provider's body names
+		// it with a formatting error ("instances/%!s(<nil>)").
+		req.Instance.Name = name
 		reply(s.UpdateInstance(ctx, req))
 	}
 }
@@ -107,4 +104,3 @@ func writeError(w http.ResponseWriter, err error) {
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(body)
 }
-
