@@ -223,7 +223,7 @@ func (s *Server) v1ListDomainMappings(w http.ResponseWriter, r *http.Request) {
 			v1Write(w, err, nil)
 			return
 		}
-		if (sc.location != "" && dm.Metadata.Labels[v1LocationLabel] != sc.location) || !selected(dm.Metadata.Labels, sel) {
+		if (sc.location != "" && dm.Metadata.Labels[v1LocationLabel] != sc.location) || !selected(dm.Metadata, sel) {
 			continue
 		}
 		byName[dm.Metadata.Name] = dm

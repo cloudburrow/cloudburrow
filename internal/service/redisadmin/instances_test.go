@@ -59,6 +59,7 @@ type fakeIO struct {
 	loaded string // the host:port Load replicated
 	argv   [][]string
 	badRDB bool // check-rdb refuses the file
+	short  int  // this many copies to the server end short
 }
 
 func (d fakeData) Save(context.Context) (string, error) {
@@ -85,7 +86,13 @@ func (f *fakeIO) Exec(_ context.Context, _ string, stdin []byte, argv ...string)
 	switch {
 	case argv[0] == "cat":
 		return f.files[argv[1]], nil
+	case argv[0] == "sh" && strings.HasPrefix(argv[2], "wc -c < "):
+		return []byte(fmt.Sprintf("%d\n", len(f.files[strings.TrimPrefix(argv[2], "wc -c < ")]))), nil
 	case argv[0] == "sh":
+		if f.short > 0 {
+			f.short--
+			stdin = stdin[:len(stdin)/2]
+		}
 		f.files[strings.TrimPrefix(argv[2], "cat > ")] = stdin
 	case strings.HasSuffix(argv[0], "-check-rdb") && f.badRDB:
 		return []byte("--- RDB ERROR DETECTED ---\n[offset 0] Wrong signature trying to load DB from file"), errors.New("exit status 1")
@@ -135,7 +142,7 @@ func newCreating(t *testing.T, db store.Store) (*Server, *fakeProv, *map[string]
 	s := newTestServer(nil)
 	p := &fakeProv{running: map[string]Spec{}}
 	set := &map[string]string{}
-	s.EnableCreate(context.Background(), p, func(addr, pw string) DataPlane { return fakeData{set: set} }, db, nil)
+	s.EnableCreate(context.Background(), p, func(addr, pw, _ string) DataPlane { return fakeData{set: set} }, db, nil)
 	return s, p, set
 }
 

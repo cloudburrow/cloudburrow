@@ -49,7 +49,7 @@ func (memorystoreProvider) ID() string    { return "memorystore" }
 func (memorystoreProvider) Title() string { return "Memorystore" }
 
 const memorystoreNote = "The instance memorystore is the Valkey server --services memorystore runs; it cannot be edited or deleted. " +
-	"Each instance created here is a server of its own, BASIC tier, or a primary and replicas, STANDARD_HA (REDIS_6_X Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey), without in-transit encryption."
+	"Each instance created here is a server of its own, BASIC tier, or a primary and replicas, STANDARD_HA (REDIS_6_X Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey), with or without in-transit encryption (TLS, with a CA of its own)."
 
 // List implements console.Provider: the project's instances.
 func (p memorystoreProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -172,6 +172,8 @@ func (memorystoreProvider) CreateForm() (string, []console.Field) {
 			Help: "REDIS_6_X is Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey 8.1."},
 		{Name: "authEnabled", Label: "Enable AUTH", Type: "checkbox",
 			Help: "Clients must AUTH with the instance's AUTH string, which GetInstanceAuthString returns."},
+		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",
+			Help: "SERVER_AUTHENTICATION: the server serves TLS only, with a certificate of the instance's own CA, which its page shows. It cannot be changed later."},
 		{Name: "labels", Label: "Labels", Type: "map", Help: "Optional. One key=value per line."},
 		{Name: "redisConfigs", Label: "Redis configs", Type: "map",
 			Help: "Optional. One key=value per line: maxmemory-policy, notify-keyspace-events, activedefrag, " +
@@ -200,6 +202,9 @@ func (p memorystoreProvider) Create(ctx context.Context, project string, values 
 	region := strings.TrimSpace(values["region"])
 	in := &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: int32(size), DisplayName: values["displayName"],
 		AuthEnabled: values["authEnabled"] == "true", Labels: labels, RedisConfigs: configs, RedisVersion: values["redisVersion"]}
+	if values["transitEncryption"] == "true" {
+		in.TransitEncryptionMode = redispb.Instance_SERVER_AUTHENTICATION
+	}
 	if values["tier"] == "STANDARD_HA" {
 		in.Tier = redispb.Instance_STANDARD_HA
 		if values["readReplicas"] == "true" {
@@ -284,6 +289,7 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 		{Label: "Tier", Value: inst.GetTier().String()},
 		{Label: "Capacity", Value: fmt.Sprintf("%d GB", inst.GetMemorySizeGb())},
 		{Label: "AUTH", Value: map[bool]string{true: "Enabled", false: "Disabled"}[inst.GetAuthEnabled()]},
+		{Label: "In-transit encryption", Value: memorystoreTransit(inst)},
 		{Label: "Display name", Value: orDash(inst.GetDisplayName())},
 		{Label: "Labels", Value: orDash(memorystorePairs(inst.GetLabels()))},
 		{Label: "Redis configs", Value: orDash(memorystorePairs(inst.GetRedisConfigs()))},
@@ -312,6 +318,16 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 	}
 	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}}}}}
+	if cas := inst.GetServerCaCerts(); len(cas) > 0 {
+		// The server CA its clients trust, as the Memorystore console's
+		// Security tab offers it for download (#1413).
+		var text strings.Builder
+		for _, ca := range cas {
+			fmt.Fprintf(&text, "# Serial %s, SHA-1 %s, expires %s\n%s\n", ca.GetSerialNumber(), ca.GetSha1Fingerprint(),
+				ca.GetExpireTime().AsTime().Format("2006-01-02"), strings.TrimSpace(ca.GetCert()))
+		}
+		d.Sections = append(d.Sections, console.Section{ID: "server-ca", Label: "Server CA", Kind: console.KindText, Text: text.String()})
+	}
 	if memorystoreID(name) == redisadmin.InstanceID {
 		return d, nil
 	}
@@ -511,4 +527,13 @@ func memorystorePersistence(pc *redispb.PersistenceConfig) string {
 		return "Disabled"
 	}
 	return fmt.Sprintf("RDB every %s, next %s", pc.GetRdbSnapshotPeriod(), pc.GetRdbNextSnapshotTime().AsTime().UTC().Format(time.RFC3339))
+}
+
+// memorystoreTransit is an instance's in-transit encryption, as its page
+// shows it (#1413).
+func memorystoreTransit(inst *redispb.Instance) string {
+	if inst.GetTransitEncryptionMode() == redispb.Instance_SERVER_AUTHENTICATION {
+		return "Server authentication (TLS, port " + strconv.Itoa(redisadmin.TLSPort) + " in the cluster)"
+	}
+	return "Disabled"
 }

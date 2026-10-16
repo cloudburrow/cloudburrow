@@ -87,7 +87,7 @@ func (h *haCluster) Remove(_ context.Context, server string) error {
 
 func (h *haCluster) ClusterAddr(server string) (string, int) { return server + ".svc", 6379 }
 
-func (h *haCluster) Route(_ context.Context, service, node string) error {
+func (h *haCluster) Route(_ context.Context, service, node string, _ int) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.routes[service] = node
@@ -142,7 +142,7 @@ func newHA(t *testing.T) (*Server, *haCluster) {
 	t.Helper()
 	s := newTestServer(nil)
 	h := newHACluster(t)
-	s.EnableCreate(context.Background(), h, func(addr, _ string) DataPlane { return haData{h: h, addr: addr} }, nil, nil)
+	s.EnableCreate(context.Background(), h, func(addr, _, _ string) DataPlane { return haData{h: h, addr: addr} }, nil, nil)
 	return s, h
 }
 
@@ -344,5 +344,46 @@ func TestParseReplication(t *testing.T) {
 	}
 	if st := parseReplication("role:master\nmaster_repl_offset:99\n"); !st.Primary || st.Offset != 99 {
 		t.Fatalf("%+v", st)
+	}
+}
+
+// TestAutomaticFailover (#1412): a STANDARD_HA instance whose primary
+// stops answering fails over on its own, after failAfter failed health
+// checks: the replica is promoted, the endpoint stays at the same address
+// and reaches it, the Service selects it, and the instance is READY; a
+// BASIC instance is never failed over.
+func TestAutomaticFailover(t *testing.T) {
+	old := healthEvery
+	healthEvery = 10 * time.Millisecond
+	t.Cleanup(func() { healthEvery = old })
+	s, h := newHA(t)
+	inst := createHA(t, s, "auto", &redispb.Instance{Tier: redispb.Instance_STANDARD_HA, MemorySizeGb: 1})
+	name := haParent + "/instances/auto"
+	srv := ServerName(name)
+	h.mu.Lock()
+	h.nodes[srv+"-n0"].down = true
+	h.mu.Unlock()
+	var after *redispb.Instance
+	for i := 0; i < 300; i++ {
+		after, _ = s.GetInstance(context.Background(), &redispb.GetInstanceRequest{Name: name})
+		if after.GetCurrentLocationId() == "us-central1-b" && after.GetState() == redispb.Instance_READY {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if after.GetCurrentLocationId() != "us-central1-b" || after.GetState() != redispb.Instance_READY {
+		t.Fatalf("after the primary failed: %s %s", after.GetCurrentLocationId(), after.GetState())
+	}
+	if after.GetHost() != inst.GetHost() || after.GetPort() != inst.GetPort() {
+		t.Fatalf("the endpoint moved: %s:%d", after.GetHost(), after.GetPort())
+	}
+	if got := greet(t, after.GetHost(), after.GetPort()); got != srv+"-n1" {
+		t.Fatalf("the endpoint reaches %s, want node 1", got)
+	}
+	h.mu.Lock()
+	route := h.routes[srv]
+	h.mu.Unlock()
+	if route != srv+"-n1" {
+		t.Fatalf("the Service selects %s", route)
 	}
 }

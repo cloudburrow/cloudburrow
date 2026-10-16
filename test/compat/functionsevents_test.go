@@ -390,11 +390,12 @@ func functionLogLine(ctx context.Context, t *testing.T, ac *logadmin.Client, ser
 }
 
 // functionsLogClient is the official logadmin client on the instance's
-// Cloud Logging, which the run shard serves.
-func functionsLogClient(ctx context.Context, t *testing.T, h *Harness) *logadmin.Client {
+// Cloud Logging, which the run shard serves, reading project's logs: a
+// function's Cloud Run service writes them in its own project (#1400).
+func functionsLogClient(ctx context.Context, t *testing.T, h *Harness, project string) *logadmin.Client {
 	t.Helper()
 	logAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_LOGGING", EnvLogging)
-	ac, err := logadmin.NewClient(ctx, "projects/"+h.Project(), option.WithEndpoint(logAddr), option.WithoutAuthentication(),
+	ac, err := logadmin.NewClient(ctx, "projects/"+project, option.WithEndpoint(logAddr), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
 	if err != nil {
 		t.Fatal(err)
@@ -417,7 +418,7 @@ func TestFunctionsEventTriggerBuilds(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	t.Cleanup(cancel)
 	requireAmd64Functions(ctx, t)
-	ac := functionsLogClient(ctx, t, h)
+	ac := functionsLogClient(ctx, t, h, h.Project())
 	t.Setenv("PUBSUB_EMULATOR_HOST", pubsubAddr)
 	pc, err := pubsub.NewClient(ctx, h.Project())
 	if err != nil {
@@ -642,7 +643,7 @@ func TestGcloudFunctionsEventTriggers(t *testing.T) {
 	}
 
 	requireAmd64Functions(ctx, t)
-	ac := functionsLogClient(ctx, t, h)
+	ac := functionsLogClient(ctx, t, h, g.project)
 	src := filepath.Join(moduleRoot(t), "testdata", "function")
 	for _, id := range []string{"gcloud-ev-topic", "gcloud-ev-storage"} {
 		t.Cleanup(func() { _, _ = g.run(nil, "functions", "delete", id, "--gen2", "--region=us-central1", "--quiet") })

@@ -48,8 +48,11 @@ the volume.
 ## 3. What you do not get
 
 **Not all of the Memorystore admin API (`redis.googleapis.com`).** Instances are BASIC or
-STANDARD_HA tier (§5) and `REDIS_6_X`, `REDIS_7_0` or `REDIS_7_2`: no in-transit encryption,
-no maintenance windows and no IAM. Each is 501. Export and import to and from Cloud Storage RDB
+STANDARD_HA tier (§5) and `REDIS_6_X`, `REDIS_7_0` or `REDIS_7_2`, with or without in-transit
+encryption (§6): no customer-managed keys, no maintenance windows and no IAM. Each is 501.
+`REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` are 501 too: they are end of life, and the Docker official
+`redis` image no longer builds them (3.2 last in October 2018, 4.0 in April 2020, 5.0 in November
+2022), so there is no maintained image to run. Export and import to and from Cloud Storage RDB
 files, and RDB persistence, are served (#1384) when the instance runs `storage` too.
 
 **No authentication on the server `up` runs.** Protected mode is off and there is no password,
@@ -98,6 +101,7 @@ gcloud redis instances create cache --region=us-central1 --size=2 --tier=basic -
 | `replica_count`, `read_replicas_mode`, `alternative_location_id` | STANDARD_HA only (§5) |
 | `memory_size_gb` | 1 to 300: the server's `maxmemory` |
 | `redis_version` | empty or `REDIS_7_2`, what Valkey 8.1 is; any other is 501 |
+| `transit_encryption_mode` | `SERVER_AUTHENTICATION`: TLS only, with a CA of the instance's own, which `server_ca_certs` lists (§6) |
 | `auth_enabled` | `--requirepass` with a generated string (a UUID, as Google's), which `GetInstanceAuthString` returns. It is in the server's Deployment arguments in the cluster |
 | `redis_configs` | `maxmemory-policy` (default `volatile-lru`), `notify-keyspace-events`, `activedefrag`, `lfu-decay-time`, `lfu-log-factor`, `stream-node-max-bytes`, `stream-node-max-entries`, and `maxmemory-gb` (a `maxmemory` below the size); another is INVALID_ARGUMENT |
 | `display_name`, `labels`, `location_id` | kept and returned; placement is not real, so any region is accepted |
@@ -150,8 +154,22 @@ the others in the region's zones in turn; `current_location_id` is the primary's
   `LIMITED_DATA_LOSS` (the default) aborts the operation FAILED_PRECONDITION when the greatest
   offset delta between the primary and a replica is 30 MB or more, or a replica is not
   replicating, as Memorystore documents; `FORCE_DATA_LOSS` does not check. The instance is
-  FAILING_OVER meanwhile. Nothing fails over on its own: a node whose pod restarts comes back
-  in the role it had.
+  FAILING_OVER meanwhile.
+- **Automatic failover** (#1412): when the primary fails, the instance fails over on its own, as
+  Memorystore's does, to the replica with the least replication lag (the greatest offset). The
+  primary is checked every second, INFO replication through its tunnel; once it has not answered
+  as a primary three checks in a row (its pod is gone or not Ready, or it came back as a replica)
+  the replica is promoted as `FailoverInstance` promotes one with `FORCE_DATA_LOSS`, since the
+  primary cannot be asked its offset. The instance is REPAIRING meanwhile and READY after; `host`
+  and `port` stay the same and drop their connections; `current_location_id` moves. Writes the
+  replicas had not received are lost, as Memorystore documents of its asynchronous replication.
+  No operation is recorded (Memorystore records none for an automated repair); `up.log` has a
+  line. Google documents no detection window, and says an instance is unavailable for 30 seconds
+  on average during one; here it is a few seconds. Every node starts as a replica of the
+  instance's Service, so a node whose pod restarts, the old primary among them, comes back as a
+  replica of the current primary and syncs from it: a restarted primary never comes back empty as
+  the primary, which would empty its replicas. A BASIC instance never fails over: its server
+  restarts, empty or from its persistence.
 
 ```sh
 gcloud redis instances create ha --region=us-central1 --tier=standard --size=5 \
@@ -165,3 +183,37 @@ protection mode, and Edit has **Replicas** (or **Enable read replicas**).
 
 `ImportInstance`, `ExportInstance` and `UpgradeInstance` act on the primary, whose replicas sync
 its data; an upgrade starts every node again on the new version.
+
+## 6. In-transit encryption (#1413)
+
+`transit_encryption_mode: SERVER_AUTHENTICATION` serves TLS only, as Memorystore does: the server
+listens on port 6378 in the cluster (`--port 0 --tls-port 6378`) and refuses plain TCP. Its
+certificate is issued by a Certificate Authority of the instance's own, generated at create as the
+Cloud SQL connector's are (ECDSA P-256), valid ten years as Memorystore's; the server certificate is
+valid 180 days and is issued again each time the server starts. `server_ca_certs` lists the CA, and
+a client trusts it:
+
+```go
+inst, _ := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+pool := x509.NewCertPool()
+pool.AppendCertsFromPEM([]byte(inst.ServerCaCerts[0].Cert))
+rdb := goredis.NewClient(&goredis.Options{Addr: fmt.Sprintf("%s:%d", inst.Host, inst.Port),
+	TLSConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}})
+```
+
+```sh
+gcloud redis instances create secure --region=us-central1 --size=1 --transit-encryption-mode=server-authentication
+gcloud redis instances describe secure --region=us-central1 --format='value(serverCaCerts[0].cert)' > server-ca.pem
+redis-cli -h "$HOST" -p "$PORT" --tls --cacert server-ca.pem PING
+```
+
+Terraform's `transit_encryption_mode = "SERVER_AUTHENTICATION"` does the same, and
+`server_ca_certs[0].cert` is the CA. The certificate names the host's loopback (`127.0.0.1`, where
+`host` and `port` are) and the instance's Services in the cluster. A Standard tier instance's nodes
+replicate over TLS. Clients are not asked for a certificate, as SERVER_AUTHENTICATION has none;
+the mode is set at create and cannot be changed; no CA rotation is served. The CA and its key are
+kept with the instance's record in persistent mode; the server's certificate and key are in its
+Deployment's environment in the cluster, as the AUTH string is in its arguments.
+
+The console's Create instance has **Enable in-transit encryption**, and the instance's page shows
+**In-transit encryption** and a **Server CA** tab with the CA's PEM.
