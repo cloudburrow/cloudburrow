@@ -629,7 +629,9 @@ type sinkRoute struct {
 	partitioned bool
 }
 
-func (r sinkRoute) isBucket() bool  { return strings.Contains(r.dest, "/buckets/") && !strings.Contains(r.dest, ".googleapis.com/") }
+func (r sinkRoute) isBucket() bool {
+	return strings.Contains(r.dest, "/buckets/") && !strings.Contains(r.dest, ".googleapis.com/")
+}
 func (r sinkRoute) project() string { p, _ := strings.CutPrefix(r.dest, "projects/"); return p }
 func (r sinkRoute) isProject() bool {
 	return strings.HasPrefix(r.dest, "projects/") && !strings.Contains(r.project(), "/")

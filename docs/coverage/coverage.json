@@ -3271,7 +3271,7 @@
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3287,9 +3287,11 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
+          "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3315,7 +3317,7 @@
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3331,9 +3333,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3367,7 +3370,7 @@
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3391,9 +3394,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3476,7 +3480,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3494,7 +3498,7 @@
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3554,6 +3558,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
+          "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
@@ -3564,7 +3569,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3572,7 +3577,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3580,7 +3585,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3595,7 +3600,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       }
     ]
