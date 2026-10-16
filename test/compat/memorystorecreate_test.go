@@ -48,8 +48,6 @@ func memorystoreAdminClient(t *testing.T, h *Harness) (*redisadmin.CloudRedisCli
 // server's config. UpdateInstance resizes it and changes its labels and
 // configs on the running server, which keeps its keys; DeleteInstance
 // removes it, and the server with it.
-//
-// unverified: google.cloud.redis.v1.CloudRedis/CreateInstance UNIMPLEMENTED: tier STANDARD_HA (CloudBurrow's own)
 func TestMemorystoreCreateConnectUpdateDelete(t *testing.T) {
 	h := New(t)
 	c, project := memorystoreAdminClient(t, h)
@@ -158,8 +156,8 @@ func TestMemorystoreCreateConnectUpdateDelete(t *testing.T) {
 	}
 
 	if _, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: parent, InstanceId: id + "-ha",
-		Instance: &redispb.Instance{Tier: redispb.Instance_STANDARD_HA, MemorySizeGb: 1}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("CreateInstance(STANDARD_HA) = %v, want UNIMPLEMENTED", err)
+		Instance: &redispb.Instance{Tier: redispb.Instance_STANDARD_HA, MemorySizeGb: 1, ReplicaCount: 3}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("CreateInstance(STANDARD_HA, 3 replicas without read replicas) = %v, want INVALID_ARGUMENT", err)
 	}
 
 	dop, err := c.DeleteInstance(ctx, &redispb.DeleteInstanceRequest{Name: name})
