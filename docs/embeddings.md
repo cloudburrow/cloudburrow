@@ -25,7 +25,8 @@
 >   `-local-ai-embeddings` does, each verified by SHA-256; **Load** and **Unload** change what
 >   the running endpoint serves (the embedding runtime only; a generation model is the
 >   container `-local-ai-model` starts, which has no unload); **Delete** removes the local copy.
-> - Not yet measured against the real model: see docs/compatibility.md.
+> - Measured against the real model on 2026-10-15 and 2026-10-16: see the Local AI section of
+>   [compatibility.md](compatibility.md#local-ai).
 >
 > Everything below records why the official LiteRT route is still blocked.
 

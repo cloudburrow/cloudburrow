@@ -27,11 +27,12 @@ import (
 // Storage's builtin server, its HTTP handler). Building a service's
 // Interceptor is what makes its rules accepted, so the set of services a rule
 // may name is exactly the set that applies rules, with no list beside it to
-// fall out of step (#600). Pub/Sub and the opt-in emulators are reached
-// through a raw port-forward to an upstream process that CloudBurrow never
-// sees a request of, and a service that is not enabled has no server at all,
-// so a rule for either is refused with the reason rather than accepted and
-// never applied.
+// fall out of step (#600). Pub/Sub, Bigtable, Spanner, Firestore and
+// Datastore are served in the cluster, by the emulator behind a front in
+// its pod (inCluster): CloudBurrow records their calls, which it scrapes from
+// the front, but a rule held by this process cannot reach them. A service
+// that is not enabled has no server at all. A rule for either is refused
+// with the reason rather than accepted and never applied.
 
 // FaultRule is one rule, as the API takes and lists it.
 type FaultRule struct {
@@ -277,6 +278,12 @@ func codeByName(name string) (codes.Code, bool) {
 	return 0, false
 }
 
+// inCluster are the services served in the cluster by an emulator behind a
+// front in its pod (#1266, #1267, #1288), whose calls this process sees only
+// after the fact, scraped from the front, and so cannot fault.
+var inCluster = map[string]bool{"pubsub": true, "bigtable": true, "spanner": true,
+	"firestore": true, "datastore": true}
+
 // validate completes a rule, or says why it cannot be applied. interposed
 // are the services this process applies rules to; see Interpose.
 func (r *FaultRule) validate(interposed map[string]bool) error {
@@ -291,10 +298,14 @@ func (r *FaultRule) validate(interposed map[string]bool) error {
 			return fmt.Errorf("service \"storage\" cannot be interposed: its server runs in the cluster, where "+
 				"CloudBurrow's fault rules do not reach. Faults apply to %s", list)
 		}
+		if inCluster[r.Service] {
+			return fmt.Errorf("service %q cannot be interposed: it is served in the cluster, by its emulator "+
+				"behind a front in the emulator's pod, where CloudBurrow's fault rules do not reach (its calls "+
+				"are still recorded in /admin/events). Faults apply to %s", r.Service, list)
+		}
 		return fmt.Errorf("service %q cannot be interposed on this instance: faults apply only to the services "+
 			"CloudBurrow serves in its own process and has enabled (%s). A service that is not enabled has no "+
-			"server to fault, and Pub/Sub and the opt-in emulators are reached through a port-forward to an "+
-			"upstream process whose requests CloudBurrow never sees", r.Service, list)
+			"server to fault", r.Service, list)
 	}
 	if r.Method == "" {
 		r.Method = "*"

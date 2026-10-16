@@ -121,7 +121,9 @@ func notCapturedReasons(s config.Service) string {
 		return "a real MySQL: use mysqldump, which captures what a snapshot here could only approximate"
 	case config.ServiceMemorystore:
 		return "a real Valkey: use its own BGSAVE or the append-only file on its volume"
-	case config.ServiceFirestore, config.ServiceDatastore, config.ServiceBigtable, config.ServiceSpanner, config.ServiceBigQuery:
+	case config.ServiceDatastore:
+		return "an emulator with no export: in persistent mode its store is on its volume, which the archive does not include"
+	case config.ServiceFirestore, config.ServiceBigtable, config.ServiceSpanner, config.ServiceBigQuery:
 		return "an in-memory emulator with no export"
 	default:
 		return "not captured"
