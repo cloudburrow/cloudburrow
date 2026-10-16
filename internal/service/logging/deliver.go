@@ -134,6 +134,7 @@ type deliverer struct {
 	reported map[string]time.Time
 	flushMu  sync.Mutex // one flush at a time
 	bqMu     sync.Mutex // one schema change at a time
+	linkMu   sync.Mutex // linked datasets' rows in write order (analytics.go)
 	wg       sync.WaitGroup
 	offset   atomic.Int64 // how far the clock was advanced
 }

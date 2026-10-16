@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 )
 
 // TestConsoleLoggingLinks (#1292): Edit bucket turns Log Analytics on through
@@ -18,6 +20,8 @@ import (
 // neither.
 func TestConsoleLoggingLinks(t *testing.T) {
 	_, svc := loggingConsole(t)
+	made := map[string]bool{}
+	svc.admin.UseLinkedDatasets(consoleLinked(made))
 	ctx := context.Background()
 	const project = "proj-1"
 	p := loggingBucketsProvider{loggingAdminScreen{svc: svc}}
@@ -57,6 +61,16 @@ func TestConsoleLoggingLinks(t *testing.T) {
 	if err != nil || !strings.Contains(fmt.Sprint(d.Sections), "my_link") {
 		t.Errorf("the bucket page = %+v, %v; want the link's dataset", d.Sections, err)
 	}
+	if !made[project+":my_link"] {
+		t.Errorf("Create link made no dataset: %v", made)
+	}
+	// The link opens Log Analytics: BigQuery's query editor on the
+	// dataset, on a query of _AllLogs (#1423).
+	l := p.links(ctx, name)
+	if len(l.Items) != 1 || !strings.HasPrefix(l.Items[0].Link, "/bigquery/my_link?") ||
+		!strings.Contains(l.Items[0].Link, "query=") || !strings.Contains(l.Items[0].Link, "_AllLogs") {
+		t.Errorf("the link row = %+v; want a link to the dataset's query editor", l.Items)
+	}
 	acts = links()
 	if len(acts) != 2 || acts[1].ID != "delete-link" || acts[1].Fields[0].Options[0] != "my-link" {
 		t.Fatalf("actions = %+v; want Create link and Delete link", acts)
@@ -67,4 +81,24 @@ func TestConsoleLoggingLinks(t *testing.T) {
 	if resp, _ := svc.admin.ConfigServer().ListLinks(ctx, &loggingpb.ListLinksRequest{Parent: name}); len(resp.GetLinks()) != 0 {
 		t.Errorf("after Delete link, ListLinks = %v", resp)
 	}
+	if made[project+":my_link"] {
+		t.Error("Delete link left the dataset")
+	}
+}
+
+// consoleLinked is logging.LinkedDatasets over a set of made datasets.
+type consoleLinked map[string]bool
+
+func (c consoleLinked) Create(_ context.Context, project, dataset, _ string, _ []logging.Field) error {
+	c[project+":"+dataset] = true
+	return nil
+}
+
+func (c consoleLinked) Append(context.Context, string, string, []map[string]any, []string) error {
+	return nil
+}
+
+func (c consoleLinked) Delete(_ context.Context, project, dataset string) error {
+	delete(c, project+":"+dataset)
+	return nil
 }

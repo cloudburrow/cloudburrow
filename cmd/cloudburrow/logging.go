@@ -285,6 +285,10 @@ func (s *loggingService) Start(ctx context.Context) error {
 	// Sinks deliver to the instance's Cloud Storage, Pub/Sub and BigQuery
 	// (#1404).
 	s.api.UseDestinations(s.destinations())
+	// Links make Log Analytics datasets in the instance's BigQuery (#1423).
+	if serviceEnabled(s.cfg, config.ServiceBigQuery) && s.bigquery != nil {
+		s.admin.UseLinkedDatasets(linkedTables{tunnel: s.bigquery})
+	}
 	dctx, cancel := context.WithCancel(context.Background())
 	s.stopDelivery = cancel
 	go s.api.RunDelivery(dctx)

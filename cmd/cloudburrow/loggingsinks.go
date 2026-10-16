@@ -189,3 +189,82 @@ func (t sinkTables) InsertRows(ctx context.Context, project, dataset, table stri
 	}
 	return c.Dataset(dataset).Table(table).Inserter().Put(ctx, savers)
 }
+
+// linkedTables makes and fills Log Analytics linked datasets (#1423). Its
+// requests carry logging.LinkedWriterHeader, the only writes the BigQuery
+// front lets into a linked dataset (bigqueryfront/loglinks.go).
+type linkedTables struct{ tunnel func() *netfwd.Forwarder }
+
+// linkedTransport adds logging.LinkedWriterHeader to each request.
+type linkedTransport struct{ next http.RoundTripper }
+
+func (t linkedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set(logging.LinkedWriterHeader, "1")
+	return t.next.RoundTrip(r)
+}
+
+func (t linkedTables) client(ctx context.Context, project string) (*bigquery.Client, error) {
+	f := t.tunnel()
+	if f == nil || f.HostAddr() == "" {
+		return nil, errors.New("BigQuery has not started on this instance")
+	}
+	hc := &http.Client{Transport: linkedTransport{next: http.DefaultTransport}, Timeout: 2 * time.Minute}
+	return bigquery.NewClient(ctx, project, option.WithEndpoint("http://"+f.HostAddr()), option.WithHTTPClient(hc))
+}
+
+func (t linkedTables) Create(ctx context.Context, project, dataset, description string, fields []logging.Field) error {
+	c, err := t.client(ctx, project)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	ds := c.Dataset(dataset)
+	if err := ds.Create(ctx, &bigquery.DatasetMetadata{Description: description,
+		Labels: map[string]string{logging.LinkedDatasetLabel: "true"}}); err != nil {
+		var ge *googleapi.Error
+		if errors.As(err, &ge) && ge.Code == http.StatusConflict {
+			return fmt.Errorf("%s:%s: %w", project, dataset, logging.ErrDatasetExists)
+		}
+		if errors.As(err, &ge) && ge.Code == http.StatusNotFound {
+			return fmt.Errorf("%s: %w", project, logging.ErrProjectNotServed)
+		}
+		return err
+	}
+	if err := ds.Table(logging.LinkedEntriesTable).Create(ctx, &bigquery.TableMetadata{Schema: toSchema(fields),
+		Description: "The log bucket's entries, which the _AllLogs view reads."}); err != nil {
+		_ = ds.DeleteWithContents(ctx)
+		return err
+	}
+	view := fmt.Sprintf("SELECT * FROM `%s.%s.%s`", project, dataset, logging.LinkedEntriesTable)
+	if err := ds.Table("_AllLogs").Create(ctx, &bigquery.TableMetadata{ViewQuery: view}); err != nil {
+		_ = ds.DeleteWithContents(ctx)
+		return err
+	}
+	return nil
+}
+
+func (t linkedTables) Append(ctx context.Context, project, dataset string, rows []map[string]any, ids []string) error {
+	c, err := t.client(ctx, project)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	savers := make([]bigquery.ValueSaver, len(rows))
+	for i := range rows {
+		savers[i] = sinkRow{values: rows[i], id: ids[i]}
+	}
+	return c.Dataset(dataset).Table(logging.LinkedEntriesTable).Inserter().Put(ctx, savers)
+}
+
+func (t linkedTables) Delete(ctx context.Context, project, dataset string) error {
+	c, err := t.client(ctx, project)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if err := c.Dataset(dataset).DeleteWithContents(ctx); err != nil && !isNotFound(err) {
+		return err
+	}
+	return nil
+}
