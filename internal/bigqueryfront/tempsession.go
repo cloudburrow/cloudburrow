@@ -42,18 +42,30 @@ type tempSession struct {
 	tables, funcs   []string // the hidden names made
 	pairs           [][2]string
 	readsTempFromMV bool
+	// mv: the script has a materialized view statement (#1434).
+	mv bool
+	// tableNames and funcNames are the hidden paths, by lower-case name
+	// (rename).
+	tableNames, funcNames map[string]string
 }
 
 // sessionKey marks the request of a session's script (tempSession), its
 // value the *tempSession.
 type sessionKey struct{}
 
+// tempEdit replaces sql[pos:end] with with.
+type tempEdit struct {
+	pos, end int
+	with     string
+}
+
 // tempSessionScript reads sql as a script of several statements with a
-// TEMP table or function and a materialized view statement, and returns
-// it as the text it amounts to (above), or false for any other query.
+// TEMP table or function and no transaction, and returns it as the text it
+// amounts to (above), or false for any other query. Whether it is run so
+// is useSession's verdict.
 func tempSessionScript(sql string) (*tempSession, bool) {
 	upper := strings.ToUpper(sql)
-	if !strings.Contains(upper, "MATERIALIZED") || !strings.Contains(upper, "TEMP") || !strings.Contains(sql, ";") {
+	if !strings.Contains(upper, "TEMP") || !strings.Contains(sql, ";") {
 		return nil, false
 	}
 	toks, ok := lex(sql)
@@ -66,6 +78,9 @@ func tempSessionScript(sql string) (*tempSession, bool) {
 		if len(st) == 0 || len(st) == 1 && st[0].punct(";") {
 			continue
 		}
+		if isTransaction(body) {
+			return nil, false // transactions.go keeps its own TEMP tables
+		}
 		stmts++
 		if len(body) > 0 {
 			if ms, ok := parseMVStatement(sql[body[0].pos:body[len(body)-1].end]); ok && ms.kind != "" {
@@ -73,19 +88,16 @@ func tempSessionScript(sql string) (*tempSession, bool) {
 			}
 		}
 	}
-	if stmts < 2 || !mv {
+	if stmts < 2 {
 		return nil, false
 	}
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
 	prefix := scratchPrefix + "session_" + hex.EncodeToString(b) + "_"
-	s := &tempSession{orig: sql}
+	s := &tempSession{orig: sql, mv: mv}
 	tables, funcs := map[string]string{}, map[string]string{} // lower-case name: hidden name
-	type edit struct {
-		pos, end int
-		with     string
-	}
-	var edits []edit
+	created := map[string]int{}                               // lower-case table name: where it is first made
+	var edits []tempEdit
 	hidden := func(name string) string { return quotePath([]string{resultsDataset, prefix + strings.ToLower(name)}) }
 	// The TEMP tables' and functions' statements.
 	for _, st := range splitStatements(toks) {
@@ -127,6 +139,7 @@ func tempSessionScript(sql string) (*tempSession, bool) {
 		if kind == "table" {
 			if _, seen := tables[strings.ToLower(name)]; !seen {
 				s.tables = append(s.tables, prefix+strings.ToLower(name))
+				created[strings.ToLower(name)] = body[0].pos
 			}
 			tables[strings.ToLower(name)] = h
 		} else {
@@ -138,13 +151,14 @@ func tempSessionScript(sql string) (*tempSession, bool) {
 		// "TEMP " goes, and the name is the hidden one.
 		with := sql[tempTok.end:body[i].pos] + h
 		with = strings.TrimLeft(with, " \t\n")
-		edits = append(edits, edit{tempTok.pos, body[next-1].end, with})
+		edits = append(edits, tempEdit{tempTok.pos, body[next-1].end, with})
 		s.pairs = append(s.pairs, [2]string{with, sql[tempTok.pos:body[next-1].end]})
 		s.pairs = append(s.pairs, [2]string{h, name})
 	}
 	if len(tables) == 0 && len(funcs) == 0 {
 		return nil, false
 	}
+	s.tableNames, s.funcNames = tables, funcs
 	skip := map[int]bool{}
 	for _, e := range edits {
 		for k, t := range toks {
@@ -153,6 +167,48 @@ func tempSessionScript(sql string) (*tempSession, bool) {
 			}
 		}
 	}
+	refs, pairs, readsMV := renameTemps(sql, toks, skip, tables, funcs, created)
+	edits = append(edits, refs...)
+	s.pairs = append(s.pairs, pairs...)
+	s.readsTempFromMV = readsMV
+	s.text = applyTempEdits(sql, edits)
+	if rt, ok := lex(s.text); !ok || tokensHaveTemp(rt) {
+		return nil, false // a TEMP form not read here stays as it was (checkDDL)
+	}
+	s.sortPairs()
+	return s, true
+}
+
+// sortPairs puts the pairs longest first, so that "path AS t" is restored
+// as t, not "t AS t".
+func (s *tempSession) sortPairs() {
+	sort.SliceStable(s.pairs, func(i, j int) bool { return len(s.pairs[i][0]) > len(s.pairs[j][0]) })
+}
+
+// applyTempEdits is sql with edits made.
+func applyTempEdits(sql string, edits []tempEdit) string {
+	sort.SliceStable(edits, func(i, j int) bool { return edits[i].pos < edits[j].pos })
+	var out strings.Builder
+	last := 0
+	for _, e := range edits {
+		if e.pos < last {
+			continue
+		}
+		out.WriteString(sql[last:e.pos])
+		out.WriteString(e.with)
+		last = e.end
+	}
+	out.WriteString(sql[last:])
+	return out.String()
+}
+
+// renameTemps are the edits naming each TEMP table of tables where toks
+// name a table, and calling each TEMP function of funcs, as their hidden
+// paths; with the pairs that restore them. A table named before created
+// gives its position (where the script first makes it) is another table
+// of that name, and kept. readsMV: a materialized view's statement names
+// one.
+func renameTemps(sql string, toks []token, skip map[int]bool, tables, funcs map[string]string, created map[string]int) (edits []tempEdit, pairs [][2]string, readsMV bool) {
 	// The names of a TEMP table where a table is named, and the calls of
 	// a TEMP function.
 	type frame struct{ from bool }
@@ -199,7 +255,7 @@ func tempSessionScript(sql string) (*tempSession, bool) {
 			continue
 		}
 		if h, ok := funcs[name]; ok && k+1 < len(toks) && toks[k+1].punct("(") {
-			edits = append(edits, edit{toks[start].pos, t.end, h})
+			edits = append(edits, tempEdit{toks[start].pos, t.end, h})
 			if start != k {
 				edits[len(edits)-1].end = toks[k].end
 			}
@@ -208,6 +264,9 @@ func tempSessionScript(sql string) (*tempSession, bool) {
 		h, ok := tables[name]
 		if !ok || start == 0 {
 			continue
+		}
+		if at, made := created[name]; made && toks[start].pos < at {
+			continue // before the script makes it: another table of that name
 		}
 		prev := toks[start-1]
 		alias := false
@@ -224,34 +283,33 @@ func tempSessionScript(sql string) (*tempSession, bool) {
 			continue
 		}
 		if inMV {
-			s.readsTempFromMV = true
+			readsMV = true
 		}
 		with := h
 		if alias && !tableAliased(toks, k+1) {
 			with += " AS " + quotePath([]string{toks[k].text})
 		}
-		edits = append(edits, edit{toks[start].pos, toks[k].end, with})
-		s.pairs = append(s.pairs, [2]string{with, sql[toks[start].pos:toks[k].end]})
+		edits = append(edits, tempEdit{toks[start].pos, toks[k].end, with})
+		pairs = append(pairs, [2]string{with, sql[toks[start].pos:toks[k].end]})
 	}
-	sort.Slice(edits, func(i, j int) bool { return edits[i].pos < edits[j].pos })
-	var out strings.Builder
-	last := 0
-	for _, e := range edits {
-		if e.pos < last {
-			continue
-		}
-		out.WriteString(sql[last:e.pos])
-		out.WriteString(e.with)
-		last = e.end
+	return edits, pairs, readsMV
+}
+
+// rename is text, a statement the script runs that is not in its text
+// (EXECUTE IMMEDIATE's), with the session's TEMP tables and functions
+// named as they are in the session's text (#1459).
+func (s *tempSession) rename(text string) string {
+	toks, ok := lex(text)
+	if !ok {
+		return text
 	}
-	out.WriteString(sql[last:])
-	s.text = out.String()
-	if rt, ok := lex(s.text); !ok || tokensHaveTemp(rt) {
-		return nil, false // a TEMP form not read here stays as it was (checkDDL)
+	edits, pairs, _ := renameTemps(text, toks, nil, s.tableNames, s.funcNames, nil)
+	if len(edits) == 0 {
+		return text
 	}
-	// Restored longest first, so that "path AS t" is t, not "t AS t".
-	sort.SliceStable(s.pairs, func(i, j int) bool { return len(s.pairs[i][0]) > len(s.pairs[j][0]) })
-	return s, true
+	s.pairs = append(s.pairs, pairs...)
+	s.sortPairs()
+	return applyTempEdits(text, edits)
 }
 
 // tableAliased reports whether toks[k] begins an alias of the table named
@@ -314,7 +372,9 @@ func (f front) runTempSession(w http.ResponseWriter, r *http.Request, q queryOpt
 	client := jobText{query: q.Query}
 	q.Query = s.text
 	rec := newRecorder()
-	f.runQuery(rec, r, q, insert)
+	// A statement at a time (#1459), each its own request and child job,
+	// as the hidden tables last for the script.
+	f.runScript(rec, r, q, insert)
 	for _, t := range s.tables {
 		f.send(r, http.MethodDelete, tablePath(resultsDataset, t), nil)
 	}
@@ -325,4 +385,22 @@ func (f front) runTempSession(w http.ResponseWriter, r *http.Request, q queryOpt
 	rec.body.Reset()
 	rec.body.WriteString(body)
 	f.clientText(w, rec, client)
+}
+
+// useSession reports whether s's script is run as its session's text
+// (#1459): when it has a materialized view statement (#1434), when the
+// front carries the text out a statement at a time (control flow, an
+// ALTER TABLE, a query before the last statement, an ASSERT, EXECUTE
+// IMMEDIATE, @@row_count, OPTIONS, a view's column list), or when the
+// script as written is refused (checkDDL) and its statements are not
+// when each runs alone (splitCures): a CREATE OR REPLACE TEMP TABLE or a
+// DROP TABLE of the script's TEMP table. A TEMP table or
+// function lasts only for the engine request that made it, and the
+// hidden tables and functions of the session for the script. Any other
+// script with a TEMP table goes to the emulator whole, as before.
+func (s *tempSession) useSession() bool {
+	if s.mv || hasControlFlow(s.text) || runsInTurn(s.text) || earlierQuery(s.text) == scriptSplits {
+		return true
+	}
+	return checkDDL(s.orig).code == http.StatusNotImplemented && splitCures(s.text)
 }

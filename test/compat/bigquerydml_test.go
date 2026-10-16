@@ -157,8 +157,9 @@ func TestBigQueryPlainDMLThroughTheFront(t *testing.T) {
 }
 
 // TestBigQueryMergeFromASubqueryInAScript (#1008): the front runs a MERGE
-// from a subquery from a table of its own only when it is run alone;
-// inside a script of several statements it is 501, and nothing is run.
+// from a subquery from a table of its own only when it is run alone; a
+// script of several statements with one was 501, and since #1459 it is
+// carried out a statement at a time, the MERGE run alone in its turn.
 //
 // covers: bigquery.jobs.query
 func TestBigQueryMergeFromASubqueryInAScript(t *testing.T) {
@@ -166,21 +167,17 @@ func TestBigQueryMergeFromASubqueryInAScript(t *testing.T) {
 	c, _ := bigqueryClient(t, h)
 	ctx := h.Context()
 	ds, _ := seedOrders(t, h, c)
-	q := c.Query("INSERT INTO orders (id, region, amount) VALUES (9, 'x', 1); " +
-		"MERGE orders o USING (SELECT 9 AS id) s ON o.id = s.id WHEN MATCHED THEN DELETE")
+	q := c.Query("CREATE TABLE merged AS SELECT 9 AS id UNION ALL SELECT 10; " +
+		"MERGE merged o USING (SELECT 9 AS id) s ON o.id = s.id WHEN MATCHED THEN DELETE; " +
+		"SELECT COUNT(*) FROM merged")
 	q.DefaultDatasetID = ds.DatasetID
-	_, err := q.Read(ctx)
-	var gerr *googleapi.Error
-	if !errors.As(err, &gerr) || gerr.Code != http.StatusNotImplemented || !strings.Contains(gerr.Message, "MERGE") {
-		t.Fatalf("a script with a MERGE from a subquery: %v, want 501 naming it", err)
-	}
-	it, err := c.Query("SELECT COUNT(*) FROM `" + ds.DatasetID + ".orders`").Read(ctx)
+	it, err := q.Read(ctx)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("a script with a MERGE from a subquery: %v", err)
 	}
 	var n []bigquery.Value
-	if err := it.Next(&n); err != nil || n[0] != int64(4) {
-		t.Errorf("after the refused script the table has %v rows (%v), want 4", n, err)
+	if err := it.Next(&n); err != nil || n[0] != int64(1) {
+		t.Errorf("after the script's MERGE the table has %v rows (%v), want 1", n, err)
 	}
 }
 

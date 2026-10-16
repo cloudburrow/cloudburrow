@@ -737,6 +737,46 @@ func unsupportedInScript(nodes []scriptNode) string {
 	return ""
 }
 
+// splitCures reports whether sql, a script of several statements that
+// checkDDL refuses 501 or that has a MERGE from a subquery, is carried out
+// by the front a statement at a time instead (#1459): it has no TEMP table
+// or function (a session's, tempsession.go, has none), and no statement of
+// it is refused when it runs alone (checkStatements). What the emulator
+// cannot run inside a script, but can as a statement of its own (CREATE
+// OR REPLACE TABLE of a table that exists, CREATE TABLE ... LIKE, COPY or
+// CLONE, CREATE SCHEMA of a dataset that exists, DROP SCHEMA of a dataset
+// the script names, CREATE FUNCTION of one that exists, DROP FUNCTION,
+// MERGE from a subquery), is so run in its turn, each its own child job,
+// as BigQuery runs each statement of a script.
+func splitCures(sql string) bool {
+	if !strings.Contains(sql, ";") {
+		return false
+	}
+	toks, ok := lex(sql)
+	if !ok || tokensHaveTemp(toks) {
+		return false
+	}
+	n := 0
+	for _, st := range splitStatements(toks) {
+		body, _, _ := stripControlFlow(st)
+		if isTransaction(body) {
+			return false
+		}
+		if len(st) > 0 && !(len(st) == 1 && st[0].punct(";")) {
+			n++
+		}
+	}
+	if n < 2 {
+		return false
+	}
+	p := &scriptParser{toks: toks}
+	nodes := p.block()
+	if p.err != "" || unsupportedInScript(nodes) != "" {
+		return false
+	}
+	return checkStatements(sql, nodes).code == 0
+}
+
 // checkStatements is checkDDL's verdict on each statement of nodes, the
 // first refusal.
 func checkStatements(sql string, nodes []scriptNode) ddlVerdict {
@@ -773,7 +813,20 @@ func checkStatements(sql string, nodes []scriptNode) ddlVerdict {
 				return v
 			}
 		} else if n.kind == nodeStmt && len(n.toks) > 0 && !n.toks[0].is("RAISE") {
-			if v := checkDDL(sql[n.toks[0].pos:n.toks[len(n.toks)-1].end]); v.code != 0 {
+			text := sql[n.toks[0].pos:n.toks[len(n.toks)-1].end]
+			if like, ok := rewriteTableLikeCopy(text); ok {
+				// Sent on alone as CREATE TABLE AS SELECT (#1239,
+				// tablelikecopy.go), in its turn (#1459).
+				text = like
+			} else if _, unsupported, ok := parseCloneDDL(text); ok {
+				// Carried out alone by the front (#1002, cloneddl.go).
+				if unsupported != "" {
+					return ddlVerdict{code: http.StatusNotImplemented, reason: "notImplemented",
+						msg: "Not implemented here: " + unsupported + ". Nothing was run."}
+				}
+				text = ""
+			}
+			if v := checkDDL(text); text != "" && v.code != 0 {
 				return v
 			}
 		}
@@ -1777,6 +1830,9 @@ func (s *scriptRun) executeImmediate(toks []token) *scriptFlow {
 	}
 	if code != 0 {
 		return &scriptFlow{failed: true, status: code, msg: msg, text: stmt}
+	}
+	if sess := sessionOf(s.r); sess != nil { // #1459, tempsession.go: the TEMP tables it names
+		bound = sess.rename(bound)
 	}
 	if intoAt >= 0 {
 		intoEnd := len(rest)

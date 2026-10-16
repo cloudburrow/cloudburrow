@@ -274,8 +274,9 @@ func TestBigQueryCreateIfNotExistsOfAnExistingOne(t *testing.T) {
 
 // TestBigQueryCreateTableLikeCopyCloneNotImplemented (#937): CREATE TABLE
 // ... CLONE and CREATE SNAPSHOT TABLE are 501 notImplemented, naming the
-// statement, through jobs.query and jobs.insert, and make nothing; so are
-// LIKE and COPY inside a multi-statement script. Measured first: the
+// statement, through jobs.query and jobs.insert, and make nothing (LIKE
+// and COPY inside a multi-statement script were too, until #1459 carried
+// them out in their turn: TestBigQueryStatementsLaterInAScript). Measured first: the
 // emulator answered each 400 "CREATE TABLE LIKE is not supported" (COPY,
 // CLONE, with or without OR REPLACE) or "Statement not supported:
 // CreateSnapshotTableStatement". A lone LIKE or COPY is carried out since
@@ -294,8 +295,6 @@ func TestBigQueryCreateTableLikeCopyCloneNotImplemented(t *testing.T) {
 	}
 	for _, insert := range []bool{false, true} {
 		for table, sql := range map[string]string{
-			"like":  "SELECT 1; CREATE TABLE " + path("like") + " LIKE " + path("src"),
-			"copy":  "SELECT 1; CREATE TABLE " + path("copy") + " COPY " + path("src"),
 			"clone": "CREATE OR REPLACE TABLE " + path("clone") + " CLONE " + path("src"),
 			"snap":  "CREATE SNAPSHOT TABLE " + path("snap") + " CLONE " + path("src") + " FOR SYSTEM_TIME AS OF TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)",
 		} {

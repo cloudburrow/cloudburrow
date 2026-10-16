@@ -49,8 +49,36 @@ func TestTempSessionScript(t *testing.T) {
 	if s, _ := tempSessionScript("CREATE TEMP TABLE t AS SELECT 1 AS a; CREATE MATERIALIZED VIEW ds.mv AS SELECT a FROM t"); s == nil || !s.readsTempFromMV {
 		t.Error("a materialized view of a TEMP table is not refused")
 	}
+	if s, ok := tempSessionScript("CREATE TEMP TABLE t AS SELECT 1 AS a; SELECT * FROM t"); !ok || s.useSession() {
+		t.Error("a script the emulator runs whole is run as a session's script")
+	}
+	// #1459: what the emulator cannot run whole with a TEMP table is.
+	for _, sql := range []string{
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; ALTER TABLE ds.x ADD COLUMN b INT64; SELECT * FROM t",
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; SELECT * FROM t; SELECT 2",
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; ASSERT (SELECT COUNT(*) FROM t) = 1",
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; IF TRUE THEN INSERT INTO t VALUES (2); END IF",
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; CREATE OR REPLACE TEMP TABLE t AS SELECT 2 AS a",
+		"CREATE TEMP TABLE t AS SELECT 1 AS a; DROP TABLE t",
+	} {
+		if s, ok := tempSessionScript(sql); !ok || !s.useSession() {
+			t.Errorf("%s: not run as a session's script", sql)
+		}
+	}
+	// A table named before the script makes its TEMP table of that name
+	// is another.
+	if s, _ := tempSessionScript("DROP TABLE t; CREATE TEMP TABLE t AS SELECT 1 AS a; SELECT * FROM t"); s == nil ||
+		!strings.HasPrefix(s.text, "DROP TABLE t; CREATE TABLE `") || strings.HasSuffix(s.text, "FROM t") {
+		t.Errorf("before its CREATE: %v", s)
+	}
+	if s, _ := tempSessionScript("BEGIN TRANSACTION; CREATE TEMP TABLE t AS SELECT 1 AS a; COMMIT TRANSACTION"); s != nil {
+		t.Error("a transaction's TEMP table read as a session's")
+	}
+	if s, _ := tempSessionScript("CREATE TEMP TABLE t AS SELECT 1 AS a; SELECT 1"); s == nil ||
+		!strings.Contains(s.rename("INSERT INTO t VALUES (2)"), "_cloudburrow_session_") {
+		t.Error("EXECUTE IMMEDIATE's statement is not renamed")
+	}
 	for _, other := range []string{
-		"CREATE TEMP TABLE t AS SELECT 1 AS a; SELECT * FROM t",
 		"CREATE MATERIALIZED VIEW ds.mv AS SELECT 1 AS a FROM ds.t; SELECT 1",
 		"CREATE MATERIALIZED VIEW ds.mv AS SELECT 1 AS a FROM ds.t",
 	} {

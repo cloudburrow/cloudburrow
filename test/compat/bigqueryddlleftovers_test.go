@@ -340,14 +340,18 @@ func TestBigQueryDDLThroughExecuteImmediate(t *testing.T) {
 		if err != nil || md.Schema[0].Type != bigquery.FloatFieldType || !md.Schema[0].Repeated || md.Schema[1].RoundingMode != bigquery.RoundHalfEven {
 			t.Errorf("insert %v: the ALTER TABLEs EXECUTE IMMEDIATE gave: %v (%v)", insert, md, err)
 		}
-		for _, sql := range []string{
+		// #1459: beside a TEMP table too, the script run as its
+		// session's text (tempsession.go), a statement at a time.
+		for i, sql := range []string{
 			"CREATE TEMP TABLE tt AS SELECT 1 AS k; EXECUTE IMMEDIATE 'ALTER TABLE " + path(name) + " ADD COLUMN late STRING'; SELECT k FROM tt",
-			"CREATE TEMP TABLE tt AS SELECT 1 AS k; ALTER TABLE `" + path(name) + "` ADD COLUMN late STRING; SELECT k FROM tt",
+			"CREATE TEMP TABLE tt AS SELECT 1 AS k; ALTER TABLE `" + path(name) + "` ADD COLUMN later STRING; SELECT k FROM tt",
 		} {
-			wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusNotImplemented, "notImplemented")
-		}
-		if md, err := tbl.Metadata(ctx); err != nil || len(md.Schema) != 2 {
-			t.Errorf("insert %v: a refused script changed the table: %v (%v)", insert, md, err)
+			if err := bqRun(ctx, c, sql, insert); err != nil {
+				t.Errorf("%s (insert %v): %v", sql, insert, err)
+			}
+			if md, err := tbl.Metadata(ctx); err != nil || len(md.Schema) != 3+i {
+				t.Errorf("insert %v: %s: the table %v (%v)", insert, sql, md, err)
+			}
 		}
 	}
 }
