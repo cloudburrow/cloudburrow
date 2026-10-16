@@ -51,10 +51,10 @@ func schedulerEditBlocked(j scheduler.Job) string {
 		return "Edit is not offered: this job's body is not UTF-8 text, which the form cannot hold. Use the API."
 	case j.PubSub != nil && !utf8.Valid(j.PubSub.Data):
 		return "Edit is not offered: this job's message data is not UTF-8 text, which the form cannot hold. Use the API."
-	case j.AppEngine != nil:
-		return "Edit is not offered for an App Engine job: change it with UpdateJob, or delete it and create it again."
-	case j.HTTP == nil && j.PubSub == nil:
-		return "Edit is not offered: this job has no HTTP or Pub/Sub target."
+	case j.AppEngine != nil && !utf8.Valid(j.AppEngine.Body):
+		return "Edit is not offered: this job's body is not UTF-8 text, which the form cannot hold. Use the API."
+	case j.HTTP == nil && j.PubSub == nil && j.AppEngine == nil:
+		return "Edit is not offered: this job has no HTTP, Pub/Sub or App Engine target."
 	}
 	return ""
 }
@@ -117,6 +117,8 @@ func schedulerEditForm(j scheduler.Job) *console.EditForm {
 			tok = authToken{kind: "oauth", email: j.HTTP.OAuthToken.ServiceAccountEmail, scope: j.HTTP.OAuthToken.Scope}
 		}
 		fields = append(fields, authTokenFieldsFor(target, tok)...)
+	} else if a := j.AppEngine; a != nil {
+		fields = append(fields, schedulerAppEngineEditFields(a, j.AttemptDeadline, target)...)
 	} else {
 		fields = append(fields,
 			console.Field{Name: "targetType", Label: "Target type", Type: "text", Default: "Pub/Sub", Immutable: true,
@@ -227,6 +229,11 @@ func (p schedulerProvider) Edit(ctx context.Context, project string, path []stri
 		job.Target = &schedulerpb.Job_HttpTarget{HttpTarget: h}
 		job.AttemptDeadline = durationpb.New(schedulerDuration(values, "attemptDeadline", "Attempt deadline", &errs))
 		paths = append(paths, "http_target", "attempt_deadline")
+	} else if cur.AppEngine != nil {
+		job.Target = &schedulerpb.Job_AppEngineHttpTarget{
+			AppEngineHttpTarget: schedulerAppEngineFromForm(values, cur.AppEngine, &errs)}
+		job.AttemptDeadline = durationpb.New(schedulerDuration(values, "attemptDeadline", "Attempt deadline", &errs))
+		paths = append(paths, "app_engine_http_target", "attempt_deadline")
 	} else {
 		attrs, err := console.ParseMap(values["attributes"])
 		if err != nil {
@@ -289,6 +296,75 @@ func schedulerDuration(values map[string]string, key, label string, errs *[]erro
 		*errs = append(*errs, fmt.Errorf("%s: %q is not a duration; %s", label, values[key], schedulerDurationHelp))
 	}
 	return d
+}
+
+// schedulerAppEngineEditFields are an App Engine job's target on Edit job
+// (#1447): the relative URI, method, headers, body and routing UpdateJob
+// takes. The routing's host is output only and is shown on the job's page.
+func schedulerAppEngineEditFields(a *scheduler.AppEngineTarget, deadline time.Duration, section string) []console.Field {
+	shown := map[string]string{}
+	for k, v := range a.Headers {
+		if !schedulerSensitiveHeader(k) {
+			shown[k] = v
+		}
+	}
+	return []console.Field{
+		{Name: "targetType", Label: "Target type", Type: "text", Default: "App Engine", Immutable: true,
+			Section: section, Help: "A job's target type cannot be changed from the console."},
+		{Name: "relativeUri", Label: "Relative URI", Type: "text", Required: true, Default: a.RelativeURI,
+			Section: section, Pattern: `^/.*$`,
+			Help: "The path and query, beginning with /. This instance has no App Engine, so each attempt " +
+				"fails with NOT_FOUND (HTTP 404)."},
+		{Name: "httpMethod", Label: "HTTP method", Type: "text", Required: true, Default: a.Method,
+			Section: section, Pattern: `^(POST|GET|HEAD|PUT|DELETE|PATCH|OPTIONS)$`,
+			Help: "One of " + schedulerHTTPMethods + ", in capitals."},
+		{Name: "headers", Label: "Headers", Type: "map", Default: console.FormatMap(shown), Section: section,
+			Help: "Optional. One Name=value per line. Authorization and headers naming a token, secret or API key " +
+				"are not shown and are kept as they are; name one here to replace its value."},
+		{Name: "body", Label: "Body", Type: "textarea", Default: string(a.Body), Section: section,
+			Help: "Optional. Allowed only with POST or PUT."},
+		{Name: "appEngineService", Label: "App Engine service", Type: "text", Default: a.Routing.Service,
+			Section: section, Help: "Optional; empty is the default service."},
+		{Name: "appEngineVersion", Label: "App Engine version", Type: "text", Default: a.Routing.Version,
+			Section: section, Help: "Optional; empty is the default version."},
+		{Name: "appEngineInstance", Label: "App Engine instance", Type: "text", Default: a.Routing.Instance,
+			Section: section, Help: "Optional; empty is any available instance."},
+		{Name: "attemptDeadline", Label: "Attempt deadline", Type: "text", Required: true,
+			Default: deadline.String(), Section: section,
+			Help: "How long one attempt may take, 15s to 30m. " + schedulerDurationHelp},
+	}
+}
+
+// schedulerAppEngineFromForm is the App Engine target Edit job sends. The
+// redacted headers were not in the form; they are kept unless it names one.
+func schedulerAppEngineFromForm(values map[string]string, cur *scheduler.AppEngineTarget, errs *[]error) *schedulerpb.AppEngineHttpTarget {
+	method, ok := schedulerpb.HttpMethod_value[strings.ToUpper(strings.TrimSpace(values["httpMethod"]))]
+	if !ok || method == int32(schedulerpb.HttpMethod_HTTP_METHOD_UNSPECIFIED) {
+		*errs = append(*errs, fmt.Errorf("HTTP method %q is not one of %s", values["httpMethod"], schedulerHTTPMethods))
+	}
+	headers, err := console.ParseMap(values["headers"])
+	if err != nil {
+		*errs = append(*errs, fmt.Errorf("headers: %w", err))
+	}
+	if headers == nil {
+		headers = map[string]string{}
+	}
+	for k, v := range cur.Headers {
+		if _, named := headers[k]; !named && schedulerSensitiveHeader(k) {
+			headers[k] = v
+		}
+	}
+	return &schedulerpb.AppEngineHttpTarget{
+		HttpMethod:  schedulerpb.HttpMethod(method),
+		RelativeUri: strings.TrimSpace(values["relativeUri"]),
+		Headers:     headers,
+		Body:        []byte(values["body"]),
+		AppEngineRouting: &schedulerpb.AppEngineRouting{
+			Service:  strings.TrimSpace(values["appEngineService"]),
+			Version:  strings.TrimSpace(values["appEngineVersion"]),
+			Instance: strings.TrimSpace(values["appEngineInstance"]),
+		},
+	}
 }
 
 var _ console.Editor = schedulerProvider{}

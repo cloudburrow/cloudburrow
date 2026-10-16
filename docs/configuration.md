@@ -892,9 +892,26 @@ are not taken.
   field or a malformed value is a 400 that names the component and the field, and nothing is
   seeded.
 - **Fields the emulator is not known to honour are refused by name**, never dropped: Pub/Sub
-  `kmsKeyName`, `bigqueryConfig` and `cloudStorageConfig`, and a Scheduler job's `appEngineHttpTarget`,
-  which the API itself refuses as `UNIMPLEMENTED`. An `httpTarget` may set `oidcToken` or `oauthToken`
+  `kmsKeyName`, `bigqueryConfig` and `cloudStorageConfig`. An `httpTarget` may set `oidcToken` or `oauthToken`
   (#1243), minted locally at each attempt as for a job created through the API. Bucket `labels`, `location` and `storageClass` are seeded and kept (#503).
+- **App Engine targets** (#1447), as the API takes them. A Scheduler job may have an
+  `appEngineHttpTarget` (`httpMethod`, `relativeUri`, `headers`, `body` or `bodyBase64`, and
+  `appEngineRouting` with `service`, `version` and `instance`), checked by `CreateJob`'s validation: a
+  `relativeUri` must begin with `/`, and a body is allowed only with POST or PUT. A Cloud Tasks queue may
+  be an object instead of a name, `{"name": ..., "appEngineRoutingOverride": {"service": ..., "version":
+  ..., "instance": ...}}`. A routing's `host` is output only, computed as Google computes it, and is
+  refused. This instance has no App Engine, so every attempt of such a job, or of an App Engine task in
+  such a queue, fails `NOT_FOUND` (HTTP 404) and is retried by its retry config
+  (`TestAppEngineSeedIsReadBackByTheOfficialClients`).
+
+  ```json
+  "tasks": {"queues": ["projects/dev-project/locations/us-central1/queues/plain",
+    {"name": "projects/dev-project/locations/us-central1/queues/routed",
+     "appEngineRoutingOverride": {"service": "worker", "version": "v1"}}]},
+  "scheduler": {"jobs": [{"name": "projects/dev-project/locations/us-central1/jobs/cron",
+    "schedule": "0 * * * *",
+    "appEngineHttpTarget": {"relativeUri": "/cron", "appEngineRouting": {"service": "worker"}}}]}
+  ```
 - **Pub/Sub schemas** (#890). `pubsub.schemas` declares schemas, each a `name`
   (`projects/{project}/schemas/{schema}`), a `type` and a `definition`, created with one revision
   before any topic. The type must be `AVRO`: the emulator refuses Protocol Buffer schemas as

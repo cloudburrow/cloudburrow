@@ -82,6 +82,8 @@
         "tests": [
           "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
+          "test/compat/consoleappengine1447_test.go:137 TestAppEngineSeedIsReadBackByTheOfficialClients",
+          "test/compat/consoleappengine1447_test.go:28 TestConsoleTasksEditQueueAppEngineRouting",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
@@ -177,6 +179,7 @@
         "tests": [
           "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
+          "test/compat/consoleappengine1447_test.go:28 TestConsoleTasksEditQueueAppEngineRouting",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
@@ -3394,6 +3397,7 @@
           "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
           "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
           "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/consoleappengine1447_test.go:76 TestConsoleSchedulerEditAppEngineJob",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens",
@@ -3420,6 +3424,8 @@
           "test/compat/appengine1447_test.go:114 TestSchedulerAppEngineTarget",
           "test/compat/appengine1447_test.go:157 TestGcloudAppEngineTargets",
           "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/consoleappengine1447_test.go:137 TestAppEngineSeedIsReadBackByTheOfficialClients",
+          "test/compat/consoleappengine1447_test.go:76 TestConsoleSchedulerEditAppEngineJob",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
           "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens",
@@ -3468,6 +3474,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
+          "test/compat/consoleappengine1447_test.go:76 TestConsoleSchedulerEditAppEngineJob",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"

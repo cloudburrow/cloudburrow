@@ -51,10 +51,33 @@
         "queues": {
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^projects/[^/]+/locations/[^/]+/queues/[^/]+$"
+            "description": "A queue's full resource name, or a queue object with its App Engine routing override.",
+            "oneOf": [
+              { "type": "string", "pattern": "^projects/[^/]+/locations/[^/]+/queues/[^/]+$" },
+              { "$ref": "#/$defs/queue" }
+            ]
           }
         }
+      }
+    },
+    "queue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "description": "A Cloud Tasks queue in the REST API's field names. This instance has no App Engine: the override is stored and sets each App Engine task's host, and every App Engine attempt fails NOT_FOUND (HTTP 404).",
+      "properties": {
+        "name": { "type": "string", "pattern": "^projects/[^/]+/locations/[^/]+/queues/[^/]+$" },
+        "appEngineRoutingOverride": { "$ref": "#/$defs/appEngineRouting" }
+      }
+    },
+    "appEngineRouting": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "An AppEngineRouting. Its host is output only, computed from the service, version and instance, so it is not taken.",
+      "properties": {
+        "service": { "type": "string" },
+        "version": { "type": "string" },
+        "instance": { "type": "string" }
       }
     },
     "storage": {
@@ -216,8 +239,8 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["name", "schedule"],
-            "description": "Exactly one of httpTarget and pubsubTarget.",
-            "oneOf": [{ "required": ["httpTarget"] }, { "required": ["pubsubTarget"] }],
+            "description": "Exactly one of httpTarget, pubsubTarget and appEngineHttpTarget.",
+            "oneOf": [{ "required": ["httpTarget"] }, { "required": ["pubsubTarget"] }, { "required": ["appEngineHttpTarget"] }],
             "properties": {
               "name": {
                 "type": "string",
@@ -278,6 +301,24 @@
                   "data": { "type": "string" },
                   "dataBase64": { "type": "string", "contentEncoding": "base64" },
                   "attributes": { "$ref": "#/$defs/labels" }
+                }
+              },
+              "appEngineHttpTarget": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "An App Engine target, validated as CreateJob validates it: relativeUri begins with / (empty is /), and a body is allowed only with POST or PUT. At most one of body and bodyBase64. This instance has no App Engine, so every attempt fails NOT_FOUND (HTTP 404).",
+                "not": { "required": ["body", "bodyBase64"] },
+                "properties": {
+                  "httpMethod": {
+                    "type": "string",
+                    "enum": ["POST", "GET", "HEAD", "PUT", "DELETE", "PATCH", "OPTIONS"],
+                    "default": "POST"
+                  },
+                  "relativeUri": { "type": "string", "pattern": "^(/.*)?$", "default": "/" },
+                  "headers": { "$ref": "#/$defs/labels" },
+                  "appEngineRouting": { "$ref": "#/$defs/appEngineRouting" },
+                  "body": { "type": "string" },
+                  "bodyBase64": { "type": "string", "contentEncoding": "base64" }
                 }
               },
               "retryConfig": {

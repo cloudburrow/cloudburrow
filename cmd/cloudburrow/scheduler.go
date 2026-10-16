@@ -253,8 +253,21 @@ type jobSeed struct {
 	RetryConfig     *retryConfigSeed  `json:"retryConfig,omitempty"`
 	AttemptDeadline string            `json:"attemptDeadline,omitempty"`
 
-	// Refused by name; see refuse.
-	AppEngineHTTPTarget json.RawMessage `json:"appEngineHttpTarget,omitempty"`
+	// An App Engine target (#1447): stored, and each attempt fails NOT_FOUND
+	// (HTTP 404), as a job created through the API does.
+	AppEngineHTTPTarget *appEngineTargetSeed `json:"appEngineHttpTarget,omitempty"`
+}
+
+// appEngineTargetSeed is an AppEngineHttpTarget in the REST API's field
+// names; appEngineRouting's host is output only, so it is not taken.
+type appEngineTargetSeed struct {
+	HTTPMethod       string                `json:"httpMethod,omitempty"`
+	RelativeURI      string                `json:"relativeUri,omitempty"`
+	Headers          map[string]string     `json:"headers,omitempty"`
+	AppEngineRouting *appEngineRoutingSeed `json:"appEngineRouting,omitempty"`
+	// At most one of Body and BodyBase64.
+	Body       *string `json:"body,omitempty"`
+	BodyBase64 *string `json:"bodyBase64,omitempty"`
 }
 
 type httpTargetSeed struct {
@@ -316,12 +329,34 @@ func seedBytes(field string, plain, b64 *string) ([]byte, error) {
 
 // job converts one seed job to the proto an SDK client would send.
 func (j jobSeed) job() (*schedulerpb.Job, error) {
-	if err := refuse("job", map[string]bool{"appEngineHttpTarget": len(j.AppEngineHTTPTarget) > 0}); err != nil {
-		return nil, err
-	}
 	out := &schedulerpb.Job{Name: j.Name, Description: j.Description, Schedule: j.Schedule, TimeZone: j.TimeZone}
-	if j.HTTPTarget != nil && j.PubsubTarget != nil {
-		return nil, errors.New("httpTarget and pubsubTarget are exclusive")
+	targets := 0
+	for _, set := range []bool{j.HTTPTarget != nil, j.PubsubTarget != nil, j.AppEngineHTTPTarget != nil} {
+		if set {
+			targets++
+		}
+	}
+	if targets > 1 {
+		return nil, errors.New("httpTarget, pubsubTarget and appEngineHttpTarget are exclusive")
+	}
+	if a := j.AppEngineHTTPTarget; a != nil {
+		method := schedulerpb.HttpMethod_HTTP_METHOD_UNSPECIFIED
+		if a.HTTPMethod != "" {
+			v, ok := schedulerpb.HttpMethod_value[a.HTTPMethod]
+			if !ok || v == 0 {
+				return nil, fmt.Errorf("appEngineHttpTarget.httpMethod %q is not an HTTP method such as POST", a.HTTPMethod)
+			}
+			method = schedulerpb.HttpMethod(v)
+		}
+		body, err := seedBytes("body", a.Body, a.BodyBase64)
+		if err != nil {
+			return nil, fmt.Errorf("appEngineHttpTarget.%w", err)
+		}
+		target := &schedulerpb.AppEngineHttpTarget{HttpMethod: method, RelativeUri: a.RelativeURI, Headers: a.Headers, Body: body}
+		if r := a.AppEngineRouting; r != nil {
+			target.AppEngineRouting = &schedulerpb.AppEngineRouting{Service: r.Service, Version: r.Version, Instance: r.Instance}
+		}
+		out.Target = &schedulerpb.Job_AppEngineHttpTarget{AppEngineHttpTarget: target}
 	}
 	if h := j.HTTPTarget; h != nil {
 		if h.OAuthToken != nil && h.OIDCToken != nil {
