@@ -221,6 +221,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	memorystoreAdminSvc := newMemorystoreAdminService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "memorystore") })
 	if memorystoreAdminSvc != nil {
 		memorystoreAdminSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		memorystoreAdminSvc.kms = kmsSvc
 	}
 	memorystoreAdminSvc.register(coord)
 	loggingSvc := newLoggingService(cfg)

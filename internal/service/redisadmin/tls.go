@@ -53,8 +53,10 @@ type TLSFiles struct {
 // tlsOn is whether r serves TLS.
 func (r *record) tlsOn() bool { return r.TransitCA != "" }
 
-// caPEM is r's CA certificate, "" without in-transit encryption.
-func (r *record) caPEM() string { return r.TransitCA }
+// caPEM is r's CA certificates, "" without in-transit encryption: its CA
+// and, after a server CA rotation, the ones it replaced that are still
+// valid, which a client trusts too (#1463).
+func (r *record) caPEM() string { return r.TransitCA + r.PreviousCAs }
 
 // clusterAddr is where r's server (or Service) server is reached in the
 // cluster: on TLSPort with in-transit encryption.
@@ -164,30 +166,41 @@ func ServerTLS(spec Spec, now time.Time, names ...string) (*TLSFiles, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &TLSFiles{Cert: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), Key: key, CA: spec.TransitCA}, nil
+	trust := spec.TransitTrust
+	if trust == "" {
+		trust = spec.TransitCA
+	}
+	return &TLSFiles{Cert: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), Key: key, CA: trust}, nil
 }
 
-// serverCACerts is server_ca_certs: r's CA, as Google lists one.
+// serverCACerts is server_ca_certs: r's CAs, as Google lists them, the
+// newest first; an expired one a rotation replaced is no longer listed.
 func (r *record) serverCACerts() []*redispb.TlsCertificate {
-	if !r.tlsOn() {
-		return nil
+	return listCAs(r.caPEM(), time.Now())
+}
+
+func listCAs(bundle string, now time.Time) []*redispb.TlsCertificate {
+	var out []*redispb.TlsCertificate
+	rest := []byte(bundle)
+	for {
+		var b *pem.Block
+		b, rest = pem.Decode(rest)
+		if b == nil {
+			return out
+		}
+		cert, err := x509.ParseCertificate(b.Bytes)
+		if err != nil || (len(out) > 0 && now.After(cert.NotAfter)) {
+			continue
+		}
+		sum := sha1.Sum(cert.Raw)
+		out = append(out, &redispb.TlsCertificate{
+			SerialNumber:    cert.SerialNumber.String(),
+			Cert:            string(pem.EncodeToMemory(b)),
+			CreateTime:      timestamppb.New(cert.NotBefore.Add(time.Hour)),
+			ExpireTime:      timestamppb.New(cert.NotAfter),
+			Sha1Fingerprint: hex.EncodeToString(sum[:]),
+		})
 	}
-	b, _ := pem.Decode([]byte(r.TransitCA))
-	if b == nil {
-		return nil
-	}
-	cert, err := x509.ParseCertificate(b.Bytes)
-	if err != nil {
-		return nil
-	}
-	sum := sha1.Sum(cert.Raw)
-	return []*redispb.TlsCertificate{{
-		SerialNumber:    cert.SerialNumber.String(),
-		Cert:            r.TransitCA,
-		CreateTime:      timestamppb.New(cert.NotBefore.Add(time.Hour)),
-		ExpireTime:      timestamppb.New(cert.NotAfter),
-		Sha1Fingerprint: hex.EncodeToString(sum[:]),
-	}}
 }
 
 // ClientTLS is the TLS configuration of a client of a server with the CA

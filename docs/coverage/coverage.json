@@ -2550,7 +2550,9 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion"
+          "test/compat/consolememorystore_test.go:430 TestConsoleMemorystoreCustomerManagedKey",
+          "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion",
+          "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey"
         ],
         "unverified": [
           {
@@ -3979,10 +3981,13 @@
         "method": "google.cloud.redis.v1.CloudRedis/CreateInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/consolememorystore_test.go:359 TestConsoleMemorystoreInTransitEncryption",
+          "test/compat/consolememorystore_test.go:361 TestConsoleMemorystoreInTransitEncryption",
+          "test/compat/consolememorystore_test.go:430 TestConsoleMemorystoreCustomerManagedKey",
           "test/compat/gcloudredis_test.go:105 TestGcloudRedisInTransitEncryption",
+          "test/compat/gcloudredis_test.go:143 TestGcloudRedisCustomerManagedKey",
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
+          "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
@@ -3994,6 +3999,7 @@
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
+          "test/compat/terraform_redis_test.go:230 TestTerraformRedisCustomerManagedKey",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },
@@ -4006,6 +4012,7 @@
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
+          "test/compat/terraform_redis_test.go:230 TestTerraformRedisCustomerManagedKey",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
         "unverified": [
@@ -4036,17 +4043,22 @@
         "method": "google.cloud.redis.v1.CloudRedis/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/consolememorystore_test.go:359 TestConsoleMemorystoreInTransitEncryption",
+          "test/compat/consolememorystore_test.go:361 TestConsoleMemorystoreInTransitEncryption",
+          "test/compat/consolememorystore_test.go:430 TestConsoleMemorystoreCustomerManagedKey",
+          "test/compat/consolememorystore_test.go:483 TestConsoleMemorystoreRotateServerCA",
           "test/compat/gcloudredis_test.go:105 TestGcloudRedisInTransitEncryption",
+          "test/compat/gcloudredis_test.go:143 TestGcloudRedisCustomerManagedKey",
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
+          "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
+          "test/compat/terraform_redis_test.go:230 TestTerraformRedisCustomerManagedKey",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },

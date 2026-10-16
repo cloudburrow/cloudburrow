@@ -15,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	kmspb "cloud.google.com/go/kms/apiv1/kmspb"
 	redispb "cloud.google.com/go/redis/apiv1/redispb"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // TestConsoleMemorystoreFlush (#1302): the Memorystore page lists the one
@@ -415,5 +417,119 @@ func TestConsoleMemorystoreInTransitEncryption(t *testing.T) {
 	defer rc.Close()
 	if err := rc.Ping(ctx).Err(); err != nil {
 		t.Errorf("PING over TLS with the CA the page shows: %v", err)
+	}
+}
+
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance, google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion
+//
+// TestConsoleMemorystoreCustomerManagedKey (#1463): the console's Create
+// instance with a customer-managed key creates an instance with it, which
+// the official client reads back; its page shows the key as Encryption,
+// and, once the official KMS client disables the key's version, the
+// suspension reason CUSTOMER_MANAGED_KEY_ISSUE.
+func TestConsoleMemorystoreCustomerManagedKey(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c, project := memorystoreAdminClient(t, h)
+	kc := kmsClients(t, h)["grpc"]
+	ctx := h.Context()
+	key := memorystoreKey(t, h, project)
+	id := fmt.Sprintf("console-cmek-%d", time.Now().UnixNano()%1e8)
+	name := "projects/" + project + "/locations/us-central1/instances/" + id
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = op.Wait(context.Background())
+		}
+	})
+	q := "?project=" + url.QueryEscape(project)
+	body, _ := json.Marshal(map[string]string{"id": id, "region": "us-central1", "memorySizeGb": "1", "tier": "BASIC",
+		"customerManagedKey": key})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/memorystore"+q, string(body)); code != http.StatusOK {
+		t.Fatalf("console create = %d: %s", code, out)
+	}
+	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil || inst.GetCustomerManagedKey() != key {
+		t.Fatalf("created from the console: %v, %v", inst, err)
+	}
+	if code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/memorystore"+q+"&name="+id, ""); code != http.StatusOK ||
+		!strings.Contains(out, "Customer-managed key "+key) {
+		t.Fatalf("instance page = %d: %s; want the customer-managed key", code, out)
+	}
+	if _, err := kc.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{
+		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: key + "/cryptoKeyVersions/1", State: kmspb.CryptoKeyVersion_DISABLED},
+		UpdateMask:       &fieldmaskpb.FieldMask{Paths: []string{"state"}}}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Minute)
+	for {
+		code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/memorystore"+q+"&name="+id, "")
+		if code == http.StatusOK && strings.Contains(out, "Suspension reasons") && strings.Contains(out, "CUSTOMER_MANAGED_KEY_ISSUE") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("instance page with the key disabled = %d: %s", code, out)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// covers: google.cloud.redis.v1.CloudRedis/GetInstance
+//
+// TestConsoleMemorystoreRotateServerCA (#1463): Rotate server CA on the
+// page of an instance with in-transit encryption (Memorystore's rotation
+// on request) lists a second CA in server_ca_certs, which the official
+// client reads back, and the server then serves a certificate of the new
+// CA, which a go-redis TLS client trusting only the new CA verifies.
+func TestConsoleMemorystoreRotateServerCA(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c, project := memorystoreAdminClient(t, h)
+	ctx := h.Context()
+	id := fmt.Sprintf("console-rot-%d", time.Now().UnixNano()%1e8)
+	name := "projects/" + project + "/locations/us-central1/instances/" + id
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = op.Wait(context.Background())
+		}
+	})
+	op, err := c.CreateInstance(ctx, &redispb.CreateInstanceRequest{Parent: "projects/" + project + "/locations/us-central1", InstanceId: id,
+		Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: 1, TransitEncryptionMode: redispb.Instance_SERVER_AUTHENTICATION}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := op.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := "?project=" + url.QueryEscape(project)
+	if code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/memorystore"+q+"&name="+id, ""); code != http.StatusOK || !strings.Contains(out, `"id":"rotate-ca"`) {
+		t.Fatalf("instance page = %d: %s; want Rotate server CA", code, out)
+	}
+	if code, out := consoleAct(t, addr, "memorystore", project, []string{id}, "rotate-ca", nil); code != http.StatusOK {
+		t.Fatalf("console Rotate server CA = %d: %s", code, out)
+	}
+	after, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil || len(after.GetServerCaCerts()) != 2 || after.GetServerCaCerts()[1].GetCert() != before.GetServerCaCerts()[0].GetCert() {
+		t.Fatalf("after rotation, server_ca_certs = %v, %v", after.GetServerCaCerts(), err)
+	}
+	onlyNew := &redispb.Instance{ServerCaCerts: after.GetServerCaCerts()[:1]}
+	deadline := time.Now().Add(3 * time.Minute)
+	for {
+		cur, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+		if err == nil && cur.GetState() == redispb.Instance_READY {
+			onlyNew.Host, onlyNew.Port = cur.GetHost(), cur.GetPort()
+			rc := tlsRedisAt(t, onlyNew, "")
+			pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			err = rc.Ping(pctx).Err()
+			cancel()
+			_ = rc.Close()
+			if err == nil {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the server does not serve a certificate of the new CA: %v", err)
+		}
+		time.Sleep(time.Second)
 	}
 }
