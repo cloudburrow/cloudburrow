@@ -31,6 +31,7 @@ import (
 	"unicode/utf8"
 
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -55,6 +56,7 @@ type Instances struct {
 	longrunningpb.UnimplementedOperationsServer
 
 	emu    instancepb.InstanceAdminClient
+	emuDB  databasepb.DatabaseAdminClient
 	emuOps longrunningpb.OperationsClient
 	grpc   *grpc.Server
 	now    func() time.Time
@@ -67,6 +69,8 @@ type Instances struct {
 	// polls one even when it is returned done. Their names, oldest first.
 	ops     map[string]*longrunningpb.Operation
 	opOrder []string
+	// protected are the databases with drop protection on, by name.
+	protected map[string]bool
 }
 
 type change struct {
@@ -81,10 +85,12 @@ func New(emulator string) (*Instances, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Instances{emu: instancepb.NewInstanceAdminClient(conn), emuOps: longrunningpb.NewOperationsClient(conn),
-		now: func() time.Time { return time.Now().UTC() }, changes: map[string]*change{}, ops: map[string]*longrunningpb.Operation{}}
+	s := &Instances{emu: instancepb.NewInstanceAdminClient(conn), emuDB: databasepb.NewDatabaseAdminClient(conn),
+		emuOps: longrunningpb.NewOperationsClient(conn), now: func() time.Time { return time.Now().UTC() },
+		changes: map[string]*change{}, ops: map[string]*longrunningpb.Operation{}, protected: map[string]bool{}}
 	s.grpc = grpc.NewServer()
 	instancepb.RegisterInstanceAdminServer(s.grpc, s)
+	databasepb.RegisterDatabaseAdminServer(s.grpc, databases{s: s})
 	longrunningpb.RegisterOperationsServer(s.grpc, s)
 	return s, nil
 }
@@ -116,6 +122,9 @@ func (s *Instances) Claims(r *http.Request) bool {
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		if r.URL.Path == getOperation {
 			return true
+		}
+		if m, ok := strings.CutPrefix(r.URL.Path, databaseService); ok {
+			return databaseClaimed[m]
 		}
 		m, ok := strings.CutPrefix(r.URL.Path, instanceService)
 		return ok && claimed[m]
@@ -183,6 +192,12 @@ func (s *Instances) ListInstances(ctx context.Context, req *instancepb.ListInsta
 }
 
 func (s *Instances) DeleteInstance(ctx context.Context, req *instancepb.DeleteInstanceRequest) (*emptypb.Empty, error) {
+	s.mu.Lock()
+	db := s.protectedIn(req.GetName())
+	s.mu.Unlock()
+	if db != "" {
+		return nil, status.Errorf(codes.FailedPrecondition, "Instance %s holds %s, which has drop protection enabled: disable it before deleting the instance.", req.GetName(), db)
+	}
 	resp, err := s.emu.DeleteInstance(ctx, req)
 	if err != nil {
 		return nil, err
@@ -285,18 +300,8 @@ func (s *Instances) UpdateInstance(ctx context.Context, req *instancepb.UpdateIn
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "operation response: %v", err)
 	}
-	op := &longrunningpb.Operation{Name: in.GetName() + "/operations/" + opID(), Metadata: meta, Done: true,
-		Result: &longrunningpb.Operation_Response{Response: resp}}
-	s.mu.Lock()
-	s.ops[op.Name] = op
-	s.opOrder = append(s.opOrder, op.Name)
-	// Keep the last 1000, so a long-lived instance does not grow forever.
-	if len(s.opOrder) > 1000 {
-		delete(s.ops, s.opOrder[0])
-		s.opOrder = s.opOrder[1:]
-	}
-	s.mu.Unlock()
-	return proto.Clone(op).(*longrunningpb.Operation), nil
+	return s.record(&longrunningpb.Operation{Name: in.GetName() + "/operations/" + opID(), Metadata: meta, Done: true,
+		Result: &longrunningpb.Operation_Response{Response: resp}}), nil
 }
 
 // unset reports whether in leaves the refused field p at its zero value,

@@ -50,6 +50,18 @@ func (f *fakeEmulator) DeleteInstance(_ context.Context, r *instancepb.DeleteIns
 
 var lastConn *grpc.ClientConn
 
+// fakeDatabases keeps one database, d.
+type fakeDatabases struct {
+	databasepb.UnimplementedDatabaseAdminServer
+}
+
+func (fakeDatabases) GetDatabase(_ context.Context, r *databasepb.GetDatabaseRequest) (*databasepb.Database, error) {
+	if r.Name == "projects/p/instances/i/databases/d" {
+		return &databasepb.Database{Name: r.Name}, nil
+	}
+	return nil, status.Error(codes.NotFound, "Database not found")
+}
+
 func serve(t *testing.T) (string, instancepb.InstanceAdminClient) {
 	t.Helper()
 	emu := &fakeEmulator{insts: map[string]*instancepb.Instance{
@@ -57,6 +69,7 @@ func serve(t *testing.T) (string, instancepb.InstanceAdminClient) {
 	el, _ := net.Listen("tcp", "127.0.0.1:0")
 	gs := grpc.NewServer()
 	instancepb.RegisterInstanceAdminServer(gs, emu)
+	databasepb.RegisterDatabaseAdminServer(gs, fakeDatabases{})
 	go func() { _ = gs.Serve(el) }()
 	t.Cleanup(gs.Stop)
 	si, err := spannerfront.New(el.Addr().String())
@@ -141,6 +154,10 @@ func TestUpdateInstanceOverREST(t *testing.T) {
 	code, got := do("GET", "/v1/projects/p/instances/i", "")
 	if code != 200 || got["nodeCount"] != float64(3) || got["processingUnits"] != float64(3000) || got["displayName"] != "by rest" {
 		t.Fatalf("get = %d %v", code, got)
+	}
+	// As the Terraform provider sends it.
+	if code, got = do("PATCH", "/v1/projects/p/instances/i/databases/d?updateMask=enableDropProtection", `{"enableDropProtection":true}`); code != 200 || got["done"] != true {
+		t.Errorf("UpdateDatabase over REST = %d %v", code, got)
 	}
 	if code, got = do("PATCH", "/v1/projects/p/instances/i", `{"instance":{"autoscalingConfig":{}},"fieldMask":"autoscalingConfig"}`); code != 501 {
 		t.Errorf("autoscaling = %d %v, want 501", code, got)

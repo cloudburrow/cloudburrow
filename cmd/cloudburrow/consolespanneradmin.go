@@ -378,6 +378,11 @@ func spannerPartitionName(project, instanceID, partitionID string) string {
 func (p spannerProvider) spannerAdminAct(ctx context.Context, project string, path []string, action string,
 	values map[string]string) (handled bool, err error) {
 	switch action {
+	case "dropprotection":
+		if len(path) != 2 || isSpannerPartitionPath(path) {
+			return true, errors.New("Drop protection is a database's action")
+		}
+		return true, p.spannerSetDropProtection(ctx, project, path[0], path[1], values["enabled"] == "true")
 	case "editinstance":
 		if len(path) != 1 {
 			return true, errors.New("Edit instance is an instance's action")
@@ -503,6 +508,43 @@ func (p spannerProvider) spannerEditInstance(ctx context.Context, project, insta
 		Instance: &instancepb.Instance{Name: fmt.Sprintf("projects/%s/instances/%s", project, instanceID),
 			DisplayName: strings.TrimSpace(values["displayName"]), ProcessingUnits: int32(pu)},
 		FieldMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name", "processing_units"}}})
+	if err != nil {
+		return err
+	}
+	_, err = op.Wait(ctx)
+	return err
+}
+
+// spannerDropProtectionAction is Drop protection on a database's page
+// (#1461), prefilled from the database: UpdateDatabase's
+// enable_drop_protection, which the call front answers and enforces.
+func (p spannerProvider) spannerDropProtectionAction(ctx context.Context, project, instanceID, dbID string) (console.Action, bool) {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return console.Action{}, false
+	}
+	defer dbAdmin.Close()
+	db, err := dbAdmin.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, dbID)})
+	if err != nil {
+		return console.Action{}, false
+	}
+	return console.Action{ID: "dropprotection", Label: "Drop protection", Fields: []console.Field{
+		{Name: "enabled", Label: "Protect the database from being dropped", Type: "checkbox", Default: strconv.FormatBool(db.GetEnableDropProtection()),
+			Help: "While it is on, Drop database, and Delete instance of its instance, are refused."},
+	}}, true
+}
+
+func (p spannerProvider) spannerSetDropProtection(ctx context.Context, project, instanceID, dbID string, on bool) error {
+	dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return fmt.Errorf("cannot reach Spanner: %w", err)
+	}
+	defer dbAdmin.Close()
+	op, err := dbAdmin.UpdateDatabase(ctx, &databasepb.UpdateDatabaseRequest{
+		Database:   &databasepb.Database{Name: fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, dbID), EnableDropProtection: on},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"enable_drop_protection"}}})
 	if err != nil {
 		return err
 	}

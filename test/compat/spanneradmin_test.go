@@ -284,7 +284,6 @@ func TestSpannerDatabaseAdminSchemaListAndDrop(t *testing.T) {
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/GetIamPolicy (unimplemented)
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/SetIamPolicy (unimplemented)
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/TestIamPermissions (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabase (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseOperations (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseRoles (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints (unimplemented)
@@ -391,16 +390,6 @@ func TestSpannerAdminRefusals(t *testing.T) {
 		"InstanceAdmin/TestIamPermissions": func(ctx context.Context) error {
 			_, err := ia.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{
 				Resource: f.instance, Permissions: []string{"spanner.instances.get"}})
-			return err
-		},
-		"DatabaseAdmin/UpdateDatabase": func(ctx context.Context) error {
-			op, err := da.UpdateDatabase(ctx, &databasepb.UpdateDatabaseRequest{
-				Database:   &databasepb.Database{Name: f.database, EnableDropProtection: true},
-				UpdateMask: mask("enable_drop_protection")})
-			if err != nil {
-				return err
-			}
-			_, err = op.Wait(ctx)
 			return err
 		},
 		"DatabaseAdmin/ListDatabaseOperations": func(ctx context.Context) error {
@@ -527,7 +516,7 @@ func TestSpannerAdminRefusals(t *testing.T) {
 		}
 		t.Logf("%s: %v", n, err)
 	}
-	if want := 30; len(calls) != want {
+	if want := 29; len(calls) != want {
 		t.Errorf("%d refusals are called, want %d, one per covers line", len(calls), want)
 	}
 }
@@ -594,5 +583,48 @@ func TestSpannerUpdateInstance(t *testing.T) {
 		Instance: &instancepb.Instance{Name: f.instance, AutoscalingConfig: &instancepb.AutoscalingConfig{}}, FieldMask: mask("autoscaling_config")})
 	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "autoscale") {
 		t.Errorf("autoscaling: %v, want UNIMPLEMENTED naming why", err)
+	}
+}
+
+// TestSpannerDatabaseDropProtection (#1461): UpdateDatabase, which the
+// emulator refuses, sets enable_drop_protection through the official
+// database admin client (the call front answers it); GetDatabase reads it
+// back, DropDatabase and DeleteInstance are refused FAILED_PRECONDITION while
+// it is on, as Google refuses them, and the database drops once it is off.
+// Another field is UNIMPLEMENTED, naming why.
+//
+// covers: google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabase
+func TestSpannerDatabaseDropProtection(t *testing.T) {
+	f := newSpannerAdmin(t, "cb-protect", "protectdb")
+	ctx := f.ctx
+	set := func(on bool) {
+		t.Helper()
+		op, err := f.db.UpdateDatabase(ctx, &databasepb.UpdateDatabaseRequest{
+			Database:   &databasepb.Database{Name: f.database, EnableDropProtection: on},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"enable_drop_protection"}}})
+		if err != nil {
+			t.Fatalf("UpdateDatabase(%v): %v", on, err)
+		}
+		if db, err := op.Wait(ctx); err != nil || db.GetEnableDropProtection() != on {
+			t.Fatalf("the operation's database = %v, %v", db, err)
+		}
+	}
+	set(true)
+	if db, err := f.db.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: f.database}); err != nil || !db.GetEnableDropProtection() {
+		t.Fatalf("GetDatabase = %v, %v", db, err)
+	}
+	if err := f.db.DropDatabase(ctx, &databasepb.DropDatabaseRequest{Database: f.database}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("DropDatabase of a protected database: %v, want FAILED_PRECONDITION", err)
+	}
+	if err := f.inst.DeleteInstance(ctx, &instancepb.DeleteInstanceRequest{Name: f.instance}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("DeleteInstance holding a protected database: %v, want FAILED_PRECONDITION", err)
+	}
+	if _, err := f.db.UpdateDatabase(ctx, &databasepb.UpdateDatabaseRequest{Database: &databasepb.Database{Name: f.database},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"encryption_config"}}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("UpdateDatabase of encryption_config: %v, want UNIMPLEMENTED", err)
+	}
+	set(false)
+	if err := f.db.DropDatabase(ctx, &databasepb.DropDatabaseRequest{Database: f.database}); err != nil {
+		t.Errorf("DropDatabase once unprotected: %v", err)
 	}
 }

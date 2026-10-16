@@ -1779,9 +1779,13 @@ func (p spannerProvider) DetailActions(ctx context.Context, project string, path
 		}
 		return acts
 	case 2:
-		return []console.Action{spannerDDLAction(path[0], path[1]), {
+		acts := []console.Action{spannerDDLAction(path[0], path[1]), {
 			ID: "dropdatabase", Label: "Drop database", Destructive: true,
 		}}
+		if edit, ok := p.spannerDropProtectionAction(ctx, project, path[0], path[1]); ok {
+			acts = append(acts, edit)
+		}
+		return acts
 	}
 	return nil
 }

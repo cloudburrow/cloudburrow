@@ -206,6 +206,7 @@ func TestTerraformSpannerInstanceAndDatabase(t *testing.T) {
 		"CREATE TABLE Tags (\n  Id INT64 NOT NULL,\n) PRIMARY KEY(Id)",
 	}
 
+	protect := false // the database's enable_drop_protection (#1461)
 	write := func(display string, nodes int, statements int) {
 		t.Helper()
 		var d strings.Builder
@@ -224,10 +225,11 @@ resource "google_spanner_database" "d" {
   instance            = google_spanner_instance.i.name
   name                = %q
   deletion_protection = false
+  enable_drop_protection = %t
   ddl = [
 %s  ]
 }
-`, h.Project(), instanceID, display, nodes, h.Project(), dbID, d.String())
+`, h.Project(), instanceID, display, nodes, h.Project(), dbID, protect, d.String())
 		if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -297,15 +299,23 @@ resource "google_spanner_database" "d" {
 	check("after the update", "tf one", 1, 2)
 	cleanPlan("after the update")
 
-	// An instance update, which the call front answers (#1461).
+	// An instance update and the database's drop protection, which the
+	// call front answers (#1461).
+	protect = true
 	write("tf two", 2, 2)
 	out, err = tf("plan", "-input=false", "-no-color")
-	if err != nil || !strings.Contains(out, "0 to add, 1 to change, 0 to destroy") {
-		t.Errorf("the instance update is not planned in place (%v):\n%s", err, lastLines(out, 20))
+	if err != nil || !strings.Contains(out, "0 to add, 2 to change, 0 to destroy") {
+		t.Errorf("the instance and database updates are not planned in place (%v):\n%s", err, lastLines(out, 20))
 	}
 	run("apply", "-auto-approve", "-input=false", "-no-color")
 	check("after the instance update", "tf two", 2, 2)
+	if db, err := dc.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: dbName}); err != nil || !db.GetEnableDropProtection() {
+		t.Errorf("the database's drop protection after apply = %v, %v", db, err)
+	}
 	cleanPlan("after the instance update")
+	protect = false
+	write("tf two", 2, 2)
+	run("apply", "-auto-approve", "-input=false", "-no-color")
 
 	run("destroy", "-auto-approve", "-input=false", "-no-color")
 	if _, err := dc.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: dbName}); status.Code(err) != codes.NotFound {

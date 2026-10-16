@@ -35,7 +35,6 @@ var refusedMethods = map[string]string{
 	databaseService + "UpdateBackupSchedule":         noSchedules,
 	databaseService + "DeleteBackupSchedule":         noSchedules,
 	databaseService + "ListBackupSchedules":          noSchedules,
-	databaseService + "UpdateDatabase":               "the emulator does not update a database's settings (drop protection, encryption): change its schema with UpdateDatabaseDdl",
 	databaseService + "ListDatabaseOperations":       "the emulator does not list operations: get one by name with GetOperation",
 	databaseService + "ListDatabaseRoles":            "the emulator does not list database roles",
 	databaseService + "AddSplitPoints":               "the emulator does not split databases",
@@ -58,7 +57,6 @@ var refusedREST = []struct {
 	{http.MethodGet, regexp.MustCompile(`^/v1/projects/[^/]+/instances/[^/]+/backupOperations$`), "ListBackupOperations"},
 	{http.MethodPost, regexp.MustCompile(`^/v1/projects/[^/]+/instances/[^/]+/databases:restore$`), "RestoreDatabase"},
 	{"", regexp.MustCompile(`^/v1/projects/[^/]+/instances/[^/]+/databases/[^/]+/backupSchedules(/[^/:]+)?$`), "Backup schedules"},
-	{http.MethodPatch, regexp.MustCompile(`^/v1/projects/[^/]+/instances/[^/]+/databases/[^/:]+$`), "UpdateDatabase"},
 	{http.MethodGet, regexp.MustCompile(`^/v1/projects/[^/]+/instances/[^/]+/databaseOperations$`), "ListDatabaseOperations"},
 	{http.MethodGet, regexp.MustCompile(`^/v1/projects/[^/]+/instances/[^/]+/databases/[^/]+/databaseRoles$`), "ListDatabaseRoles"},
 	{http.MethodPost, regexp.MustCompile(`^/v1/projects/[^/]+/instances/[^/]+/databases/[^/]+:addSplitPoints$`), "AddSplitPoints"},
@@ -72,7 +70,6 @@ var refusedREST = []struct {
 var restReasons = map[string]string{
 	"Backups": noBackups, "CopyBackup": noBackups, "ListBackupOperations": noBackups, "RestoreDatabase": noBackups,
 	"Backup schedules":       noSchedules,
-	"UpdateDatabase":         refusedMethods[databaseService+"UpdateDatabase"],
 	"ListDatabaseOperations": refusedMethods[databaseService+"ListDatabaseOperations"],
 	"ListDatabaseRoles":      refusedMethods[databaseService+"ListDatabaseRoles"],
 	"AddSplitPoints":         refusedMethods[databaseService+"AddSplitPoints"],

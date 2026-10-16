@@ -263,9 +263,11 @@ func TestConsoleSpannerSchemaConfigurationsAndPartitions(t *testing.T) {
 // page, prefilled from it, changes its display name and processing units
 // through the official admin client's UpdateInstance, which the call front
 // in the Spanner pod answers; GetInstance reads the change back, and a
-// capacity Google refuses is refused with the API's message.
+// capacity Google refuses is refused with the API's message. Drop
+// protection on a database's page sets and clears enable_drop_protection
+// through UpdateDatabase, which GetDatabase reads back.
 //
-// covers: google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstance
+// covers: google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstance, google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabase
 func TestConsoleSpannerEditInstance(t *testing.T) {
 	h := New(t)
 	spAddr := h.Endpoint(EnvSpanner)
@@ -306,5 +308,27 @@ func TestConsoleSpannerEditInstance(t *testing.T) {
 	}
 	if code, out := act(map[string]string{"displayName": "edited in console", "processingUnits": "1500"}); code == http.StatusOK || !strings.Contains(out, "processing_units") {
 		t.Errorf("1500 processing units = %d %s, want the API's refusal", code, out)
+	}
+
+	// Drop protection on the database's page.
+	dbName := instName + "/databases/editdb"
+	protect := func(on string) (int, string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"Path": []string{instanceID, "editdb"}, "Action": "dropprotection", "Values": map[string]string{"enabled": on}})
+		return consoleDo(t, addr, http.MethodPost, "/api/actions/spanner?project="+project, string(body))
+	}
+	if code, out := protect("true"); code != http.StatusOK {
+		t.Fatalf("Drop protection on = %d %s", code, out)
+	}
+	dbAdmin, err := database.NewDatabaseAdminClient(ctx, spannerOpts(spAddr)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dbAdmin.Close()
+	if db, err := dbAdmin.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: dbName}); err != nil || !db.GetEnableDropProtection() {
+		t.Errorf("after Drop protection on = %v, %v", db, err)
+	}
+	if code, out := protect("false"); code != http.StatusOK {
+		t.Fatalf("Drop protection off = %d %s", code, out)
 	}
 }

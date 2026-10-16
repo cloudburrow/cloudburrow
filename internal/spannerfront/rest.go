@@ -9,12 +9,14 @@ import (
 	"strings"
 
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	rpccode "google.golang.org/genproto/googleapis/rpc/code"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
@@ -22,6 +24,8 @@ import (
 var (
 	restInstances = regexp.MustCompile(`^/v1/(projects/[^/:]+)/instances$`)
 	restInstance  = regexp.MustCompile(`^/v1/(projects/[^/:]+/instances/[^/:]+)$`)
+	restDatabases = regexp.MustCompile(`^/v1/(projects/[^/:]+/instances/[^/:]+)/databases$`)
+	restDatabase  = regexp.MustCompile(`^/v1/(projects/[^/:]+/instances/[^/:]+/databases/[^/:]+)$`)
 )
 
 // restCall is the method a REST request is, and whether the front answers it.
@@ -30,6 +34,17 @@ func restCall(r *http.Request) (string, bool) {
 	switch {
 	case restInstances.MatchString(p) && r.Method == http.MethodGet:
 		return "ListInstances", true
+	case restDatabases.MatchString(p) && r.Method == http.MethodGet:
+		return "ListDatabases", true
+	case restDatabase.MatchString(p):
+		switch r.Method {
+		case http.MethodGet:
+			return "GetDatabase", true
+		case http.MethodPatch:
+			return "UpdateDatabase", true
+		case http.MethodDelete:
+			return "DropDatabase", true
+		}
 	case restInstance.MatchString(p):
 		switch r.Method {
 		case http.MethodGet:
@@ -65,6 +80,33 @@ func (s *Instances) serveREST(w http.ResponseWriter, r *http.Request) {
 	switch method {
 	case "GetOperation":
 		reply(s.GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: strings.TrimPrefix(r.URL.Path, "/v1/")}))
+	case "ListDatabases":
+		n, _ := strconv.Atoi(q.Get("pageSize"))
+		reply(databases{s: s}.ListDatabases(ctx, &databasepb.ListDatabasesRequest{Parent: restDatabases.FindStringSubmatch(r.URL.Path)[1],
+			PageSize: int32(n), PageToken: q.Get("pageToken")}))
+	case "GetDatabase":
+		reply(databases{s: s}.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: restDatabase.FindStringSubmatch(r.URL.Path)[1]}))
+	case "DropDatabase":
+		reply(databases{s: s}.DropDatabase(ctx, &databasepb.DropDatabaseRequest{Database: restDatabase.FindStringSubmatch(r.URL.Path)[1]}))
+	case "UpdateDatabase":
+		db := &databasepb.Database{}
+		b, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err == nil && len(b) > 0 {
+			err = protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(b, db)
+		}
+		if err != nil {
+			writeError(w, status.Errorf(codes.InvalidArgument, "Invalid JSON payload received. %v", err))
+			return
+		}
+		db.Name = restDatabase.FindStringSubmatch(r.URL.Path)[1]
+		var mask *fieldmaskpb.FieldMask
+		if v := q.Get("updateMask"); v != "" {
+			mask = &fieldmaskpb.FieldMask{}
+			for _, p := range strings.Split(v, ",") {
+				mask.Paths = append(mask.Paths, snake(p))
+			}
+		}
+		reply(databases{s: s}.UpdateDatabase(ctx, &databasepb.UpdateDatabaseRequest{Database: db, UpdateMask: mask}))
 	case "ListInstances":
 		n, _ := strconv.Atoi(q.Get("pageSize"))
 		reply(s.ListInstances(ctx, &instancepb.ListInstancesRequest{Parent: restInstances.FindStringSubmatch(r.URL.Path)[1],
