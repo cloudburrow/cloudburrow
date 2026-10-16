@@ -746,3 +746,99 @@ func (a *ArtifactRegistryServer) ImportAptArtifacts(context.Context, *arpb.Impor
 func (a *ArtifactRegistryServer) ImportYumArtifacts(context.Context, *arpb.ImportYumArtifactsRequest) (*longrunningpb.Operation, error) {
 	return nil, apierror.Unimplemented(noFormat, "YUM")
 }
+
+// ConfigServer serves, for the console, the methods above that complete
+// at once with no operation: rules, project settings, VPC-SC config, and
+// UpdatePackage, UpdateVersion and UpdateFile. Calling one that returns
+// an operation on it panics.
+func ConfigServer() *ArtifactRegistryServer { return &ArtifactRegistryServer{} }
+
+// exportWriter writes ExportArtifact's files to the instance's Cloud
+// Storage; nil when Cloud Storage is not served.
+var exportWriter struct {
+	mu sync.Mutex
+	w  ObjectWriter
+}
+
+// UseExportWriter sets the Cloud Storage writer ExportArtifact uses.
+func UseExportWriter(w ObjectWriter) {
+	exportWriter.mu.Lock()
+	exportWriter.w = w
+	exportWriter.mu.Unlock()
+}
+
+// ExportArtifact copies a version's files, named by version or by tag, to
+// gcs_path (bucket[/dir]) in this instance's Cloud Storage, one object per
+// file named by its ID, and returns its operation, already done, with the
+// exported files in its metadata. The bucket must exist, as on Google.
+func (a *ArtifactRegistryServer) ExportArtifact(ctx context.Context, req *arpb.ExportArtifactRequest) (*longrunningpb.Operation, error) {
+	exportWriter.mu.Lock()
+	w := exportWriter.w
+	exportWriter.mu.Unlock()
+	if w == nil {
+		return nil, apierror.FailedPrecondition("ExportArtifact writes to Cloud Storage, which is not enabled on this instance: start it with storage in --services")
+	}
+	if err := repoExists(req.GetRepository()); err != nil {
+		return nil, err
+	}
+	version := req.GetSourceVersion()
+	if tag := req.GetSourceTag(); tag != "" {
+		t, err := a.GetTag(ctx, &arpb.GetTagRequest{Name: tag})
+		if err != nil {
+			return nil, err
+		}
+		version = t.GetVersion()
+	}
+	if version == "" {
+		return nil, apierror.InvalidArgument("source_version or source_tag is required")
+	}
+	if _, r, _, _, err := parseVersionName(version); err != nil || r != req.GetRepository() {
+		return nil, apierror.InvalidArgument("source %q must be a version in %s", version, req.GetRepository())
+	}
+	v, err := a.GetVersion(ctx, &arpb.GetVersionRequest{Name: version})
+	if err != nil {
+		return nil, err
+	}
+	bucket, dir, _ := strings.Cut(strings.Trim(strings.TrimPrefix(req.GetGcsPath(), "gs://"), "/"), "/")
+	if bucket == "" {
+		return nil, apierror.InvalidArgument("gcs_path is required: bucket, or bucket/dir")
+	}
+	st := RegistryStore()
+	project := strings.Split(req.GetRepository(), "/")[1]
+	meta := &arpb.ExportArtifactMetadata{}
+	for _, f := range repoFiles(st, req.GetRepository()) {
+		if f.GetOwner() != version {
+			continue
+		}
+		_, id, _ := splitChild(f.GetName(), "files")
+		b, err := st.ReadBlob(id)
+		if err != nil {
+			if mb, _, _, merr := st.GetManifest(repoOf(req.GetRepository()), registry.UnescapePackage(pkgIDOf(version)), id); merr == nil {
+				b = mb
+			} else {
+				return nil, apierror.Internal(err, "read file %s", f.GetName())
+			}
+		}
+		object := id
+		if dir != "" {
+			object = dir + "/" + id
+		}
+		if err := w.Put(ctx, project, bucket, object, b, false); err != nil {
+			return nil, apierror.FailedPrecondition("write gs://%s/%s: %v", bucket, object, err)
+		}
+		meta.ExportedFiles = append(meta.ExportedFiles, &arpb.ExportArtifactMetadata_ExportedFile{Name: f.GetName(), Hashes: f.GetHashes(),
+			Destination: &arpb.ExportArtifactMetadata_ExportedFile_GcsObjectPath{GcsObjectPath: bucket + "/" + object}})
+	}
+	loc := req.GetRepository()[:strings.Index(req.GetRepository(), "/repositories/")]
+	op := a.s.ops.Create(loc, req.GetRepository())
+	_ = a.s.ops.SetMetadata(op.Name, meta)
+	_ = a.s.ops.Succeed(op.Name, &arpb.ExportArtifactResponse{ExportedVersion: v})
+	return a.s.toProtoOperation(op.Name)
+}
+
+// pkgIDOf is a version name's package ID.
+func pkgIDOf(version string) string {
+	pkg, _, _ := splitChild(version, "versions")
+	_, id, _ := splitChild(pkg, "packages")
+	return id
+}

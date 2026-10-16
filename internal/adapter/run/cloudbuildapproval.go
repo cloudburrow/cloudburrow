@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
@@ -84,7 +85,13 @@ func (c *CloudBuildServer) ApproveBuild(ctx context.Context, req *cbpb.ApproveBu
 	if res == nil || res.GetDecision() == cbpb.ApprovalResult_DECISION_UNSPECIFIED {
 		return nil, apierror.InvalidArgument("approval_result.decision is required: APPROVED or REJECTED")
 	}
-	b, err := c.GetBuild(ctx, &cbpb.GetBuildRequest{Name: req.GetName()})
+	get := &cbpb.GetBuildRequest{Name: req.GetName()}
+	if parts := strings.Split(req.GetName(), "/"); len(parts) == 4 && parts[0] == "projects" && parts[2] == "builds" {
+		// The global form, projects/{project}/builds/{id}, which gcloud
+		// sends for a build in any location.
+		get = &cbpb.GetBuildRequest{ProjectId: parts[1], Id: parts[3]}
+	}
+	b, err := c.GetBuild(ctx, get)
 	if err != nil {
 		return nil, err
 	}

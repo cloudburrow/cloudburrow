@@ -11,9 +11,11 @@ import (
 
 	artifactregistry "cloud.google.com/go/artifactregistry/apiv1"
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
+	"cloud.google.com/go/storage"
 	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/uuid"
+	"google.golang.org/api/option"
 	"google.golang.org/genproto/googleapis/type/expr"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -55,7 +57,7 @@ func arRepoWithImage(ctx context.Context, t *testing.T, h *Harness, repoID strin
 	return ar, repo, repo + "/packages/app/versions/" + d.String()
 }
 
-// covers: google.devtools.artifactregistry.v1.ArtifactRegistry/UpdatePackage, google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateVersion, google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateFile, google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteFile, google.devtools.artifactregistry.v1.ArtifactRegistry/BatchDeleteVersions, google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRule, google.devtools.artifactregistry.v1.ArtifactRegistry/GetRule, google.devtools.artifactregistry.v1.ArtifactRegistry/ListRules, google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateRule, google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRule, google.devtools.artifactregistry.v1.ArtifactRegistry/CreateAttachment, google.devtools.artifactregistry.v1.ArtifactRegistry/GetAttachment, google.devtools.artifactregistry.v1.ArtifactRegistry/ListAttachments, google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteAttachment, google.devtools.artifactregistry.v1.ArtifactRegistry/GetProjectSettings, google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateProjectSettings, google.devtools.artifactregistry.v1.ArtifactRegistry/GetVPCSCConfig, google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateVPCSCConfig
+// covers: google.devtools.artifactregistry.v1.ArtifactRegistry/UpdatePackage, google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateVersion, google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateFile, google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteFile, google.devtools.artifactregistry.v1.ArtifactRegistry/BatchDeleteVersions, google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRule, google.devtools.artifactregistry.v1.ArtifactRegistry/GetRule, google.devtools.artifactregistry.v1.ArtifactRegistry/ListRules, google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateRule, google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRule, google.devtools.artifactregistry.v1.ArtifactRegistry/CreateAttachment, google.devtools.artifactregistry.v1.ArtifactRegistry/GetAttachment, google.devtools.artifactregistry.v1.ArtifactRegistry/ListAttachments, google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteAttachment, google.devtools.artifactregistry.v1.ArtifactRegistry/GetProjectSettings, google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateProjectSettings, google.devtools.artifactregistry.v1.ArtifactRegistry/GetVPCSCConfig, google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateVPCSCConfig, google.devtools.artifactregistry.v1.ArtifactRegistry/ExportArtifact
 //
 // TestArtifactRegistryConfigAndMetadata (#1449), with the official client
 // over gRPC on the Run port, over an image crane pushed:
@@ -68,6 +70,8 @@ func arRepoWithImage(ctx context.Context, t *testing.T, h *Harness, repoID strin
 //   - project settings read with gcr.io redirection off, take pull_percent,
 //     and refuse turning redirection on, with the reason;
 //   - the location's VPC-SC config reads DENY and changes to ALLOW;
+//   - ExportArtifact, by tag, writes each of the version's files to a
+//     bucket in the instance's Cloud Storage;
 //   - BatchDeleteVersions with validate_only deletes nothing, then deletes
 //     the tagged version; ListMavenArtifacts is UNIMPLEMENTED with the
 //     reason.
@@ -197,6 +201,35 @@ func TestArtifactRegistryConfigAndMetadata(t *testing.T) {
 		_, _ = ar.UpdateVPCSCConfig(context.Background(), &arpb.UpdateVPCSCConfigRequest{VpcscConfig: &arpb.VPCSCConfig{Name: vpcsc, VpcscPolicy: arpb.VPCSCConfig_DENY}})
 	})
 
+	// ExportArtifact copies the version's files, by tag, to Cloud Storage.
+	sc, err := storage.NewClient(ctx, option.WithoutAuthentication(),
+		option.WithEndpoint(runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)+"/storage/v1/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	bh := bucket(t, h, sc)
+	eop, err := ar.ExportArtifact(ctx, &arpb.ExportArtifactRequest{Repository: repo,
+		SourceArtifact: &arpb.ExportArtifactRequest_SourceTag{SourceTag: pkg + "/tags/v1"},
+		Destination:    &arpb.ExportArtifactRequest_GcsPath{GcsPath: bh.BucketName() + "/export"}})
+	if err != nil {
+		t.Fatalf("ExportArtifact: %v", err)
+	}
+	er, err := eop.Wait(ctx)
+	if err != nil || er.GetExportedVersion().GetName() != version {
+		t.Fatalf("ExportArtifact.Wait = %v, %v", er, err)
+	}
+	emd, _ := eop.Metadata()
+	if len(emd.GetExportedFiles()) != len(files) {
+		t.Errorf("exported %d files; the version has %d", len(emd.GetExportedFiles()), len(files))
+	}
+	for _, ef := range emd.GetExportedFiles() {
+		obj := strings.TrimPrefix(ef.GetGcsObjectPath(), bh.BucketName()+"/")
+		if a, err := bh.Object(obj).Attrs(ctx); err != nil || a.Size == 0 {
+			t.Errorf("exported object %s = %v, %v", obj, a, err)
+		}
+	}
+
 	bop, err := ar.BatchDeleteVersions(ctx, &arpb.BatchDeleteVersionsRequest{Parent: pkg, Names: []string{version}, ValidateOnly: true})
 	if err != nil {
 		t.Fatalf("BatchDeleteVersions(validate_only): %v", err)
@@ -227,7 +260,7 @@ func TestArtifactRegistryConfigAndMetadata(t *testing.T) {
 //
 // TestGcloudArtifactsVPCSCAndVersions (#1449): `gcloud artifacts
 // vpcsc-config describe`, `allow` and `deny`, `gcloud artifacts versions
-// update --update-annotations` and `gcloud artifacts versions delete`,
+// update --annotations` and `gcloud artifacts versions delete`,
 // through the configuration `cloudburrow gcloud-setup` writes, egress
 // blocked.
 func TestGcloudArtifactsVPCSCAndVersions(t *testing.T) {
@@ -237,19 +270,19 @@ func TestGcloudArtifactsVPCSCAndVersions(t *testing.T) {
 	repoID := "gv-" + uuid.NewString()[:8]
 	ar, _, version := arRepoWithImage(ctx, t, h, repoID)
 	g := newGcloudSession(t, h)
-	loc := "--location=us-central1"
-	if out := g.must("artifacts", "vpcsc-config", "describe", loc, "--format=value(vpcscPolicy)"); lastLine(out) != "DENY" {
+	loc, proj := "--location=us-central1", "--project="+h.Project()
+	if out := g.must("artifacts", "vpcsc-config", "describe", loc, proj, "--format=value(vpcscPolicy)"); lastLine(out) != "DENY" {
 		t.Errorf("vpcsc-config describe = %q", out)
 	}
-	g.must("artifacts", "vpcsc-config", "allow", loc, "--quiet")
+	g.must("artifacts", "vpcsc-config", "allow", loc, proj, "--quiet")
 	if c, err := ar.GetVPCSCConfig(ctx, &arpb.GetVPCSCConfigRequest{Name: runParent(h) + "/vpcscConfig"}); err != nil || c.GetVpcscPolicy() != arpb.VPCSCConfig_ALLOW {
 		t.Errorf("after allow, the config = %v, %v", c, err)
 	}
-	g.must("artifacts", "vpcsc-config", "deny", loc, "--quiet")
+	g.must("artifacts", "vpcsc-config", "deny", loc, proj, "--quiet")
 
 	digest := version[strings.LastIndex(version, "/")+1:]
-	common := []string{loc, "--repository=" + repoID, "--package=app"}
-	g.must(append([]string{"artifacts", "versions", "update", digest, "--update-annotations=reviewed=yes"}, common...)...)
+	common := []string{loc, proj, "--repository=" + repoID, "--package=app"}
+	g.must(append([]string{"artifacts", "versions", "update", digest, "--annotations=reviewed=yes"}, common...)...)
 	if v, err := ar.GetVersion(ctx, &arpb.GetVersionRequest{Name: version}); err != nil || v.GetAnnotations()["reviewed"] != "yes" {
 		t.Errorf("after versions update, the version = %v, %v", v, err)
 	}

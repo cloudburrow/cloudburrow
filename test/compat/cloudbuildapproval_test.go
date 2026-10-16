@@ -238,8 +238,8 @@ func pendingBuildOf(ctx context.Context, t *testing.T, cb *cloudbuild.Client, pa
 // covers: google.devtools.cloudbuild.v1.CloudBuild/ApproveBuild, google.devtools.cloudbuild.v1.CloudBuild/CreateBuildTrigger, google.devtools.cloudbuild.v1.CloudBuild/RunBuildTrigger
 //
 // TestGcloudBuildsApproveAndReject (#1449): `gcloud builds triggers create
-// manual --require-approval`, `gcloud builds triggers run`, `gcloud builds
-// approve` and `gcloud builds reject`, through the configuration
+// manual --require-approval`, `gcloud builds triggers run`, `gcloud alpha builds
+// approve` and `gcloud beta builds reject`, through the configuration
 // `cloudburrow gcloud-setup` writes, egress blocked: the trigger describes
 // with approvalConfig, an approved build runs to SUCCESS, and a rejected
 // one is CANCELLED with approval REJECTED.
@@ -270,7 +270,8 @@ func TestGcloudBuildsApproveAndReject(t *testing.T) {
 		t.Fatalf("gcloud builds triggers run: %v\n%s", err, out)
 	}
 	b := pendingBuildOf(ctx, t, cb, parent, id, 1)
-	out, err := g.run(nil, "builds", "approve", b.GetId(), "--region=us-central1", "--comment=from gcloud")
+	// approve takes --location only in gcloud's alpha track.
+	out, err := g.run(nil, "alpha", "builds", "approve", b.GetId(), "--location=us-central1", "--comment=from gcloud")
 	if err != nil {
 		t.Fatalf("gcloud builds approve: %v\n%s", err, out)
 	}
@@ -279,11 +280,16 @@ func TestGcloudBuildsApproveAndReject(t *testing.T) {
 		t.Errorf("the approved build's approval = %v", done.GetApproval())
 	}
 
-	if out, err := g.run(nil, "builds", "triggers", "run", name, "--region=us-central1"); err != nil {
+	// reject takes no --location in any track: a global trigger's build.
+	global := name + "-g"
+	g.must("builds", "triggers", "create", "manual", "--name="+global, "--inline-config="+inline, "--require-approval")
+	t.Cleanup(func() { _, _ = g.run(nil, "builds", "triggers", "delete", global, "--quiet") })
+	gid := lastLine(g.must("builds", "triggers", "describe", global, "--format=value(id)"))
+	if out, err := g.run(nil, "builds", "triggers", "run", global); err != nil {
 		t.Fatalf("gcloud builds triggers run: %v\n%s", err, out)
 	}
-	b = pendingBuildOf(ctx, t, cb, parent, id, 2)
-	if out, err := g.run(nil, "builds", "reject", b.GetId(), "--region=us-central1", "--comment=not now"); err != nil {
+	b = pendingBuildOf(ctx, t, cb, "projects/"+g.project+"/locations/global", gid, 1)
+	if out, err := g.run(nil, "beta", "builds", "reject", b.GetId(), "--comment=not now"); err != nil {
 		t.Fatalf("gcloud builds reject: %v\n%s", err, out)
 	}
 	if r := waitBuildStatus(ctx, t, cb, b.GetName(), cbpb.Build_CANCELLED); r.GetApproval().GetState() != cbpb.BuildApproval_REJECTED {

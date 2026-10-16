@@ -276,6 +276,22 @@ func (t *Transcoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.serve(w, r, rt, m[1:])
 		return
 	}
+	// A resource ID with a colon, such as an Artifact Registry version
+	// named by its digest (sha256:...), which gcloud sends unescaped
+	// (#1449): with no route matched, the path is matched again with its
+	// colons escaped, so `*` takes the ID whole.
+	if esc := strings.ReplaceAll(path, ":", "%3A"); esc != path {
+		for i := range t.routes {
+			rt := &t.routes[i]
+			if rt.Method != r.Method {
+				continue
+			}
+			if m := rt.re.FindStringSubmatch(esc); m != nil {
+				t.serve(w, r, rt, m[1:])
+				return
+			}
+		}
+	}
 	writeStatusError(w, apierror.NotFound("no method is bound to %s %s", r.Method, r.URL.Path))
 }
 
