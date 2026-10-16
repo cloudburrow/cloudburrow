@@ -76,6 +76,7 @@ type jsonObject struct {
 	Owner                                                               *struct{ Entity, EntityID string }
 	Acl                                                                 []jsonACE
 	Retention                                                           *struct{ Mode, RetainUntilTime string }
+	CustomerEncryption                                                  *struct{ EncryptionAlgorithm, KeySha256 string }
 }
 
 func (o jsonObject) proto() *pb.Object {
@@ -104,6 +105,10 @@ func (o jsonObject) proto() *pb.Object {
 		sums.Md5Hash = b
 	}
 	out.Checksums = sums
+	if ce := o.CustomerEncryption; ce != nil {
+		sum, _ := base64.StdEncoding.DecodeString(ce.KeySha256)
+		out.CustomerEncryption = &pb.CustomerEncryption{EncryptionAlgorithm: ce.EncryptionAlgorithm, KeySha256Bytes: sum}
+	}
 	if o.Owner != nil {
 		out.Owner = &pb.Owner{Entity: o.Owner.Entity, EntityId: o.Owner.EntityID}
 	}
@@ -171,9 +176,6 @@ func objectToJSON(o *pb.Object, paths []string) (map[string]any, error) {
 	}
 	if o.GetContexts() != nil {
 		return nil, grpcstatus.Error(codes.Unimplemented, "object contexts are not implemented: the JSON API does not serve them")
-	}
-	if o.GetCustomerEncryption() != nil {
-		return nil, grpcstatus.Error(codes.Unimplemented, "customer-supplied encryption keys are not implemented: the JSON API does not serve them")
 	}
 	if paths == nil {
 		return all, nil
