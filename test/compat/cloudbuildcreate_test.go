@@ -41,7 +41,7 @@ func cloudBuildClient(ctx context.Context, t *testing.T, h *Harness) *cloudbuild
 // SUCCESS with each step's status and timing, its image's digest, and its
 // log at logsBucket/log-{id}.txt; a service naming the image by digest runs
 // it. A push of an image no step built is FAILURE; a running build is
-// CANCELLED by CancelBuild; an arbitrary step's container is UNIMPLEMENTED.
+// CANCELLED by CancelBuild; a step's script is UNIMPLEMENTED.
 func TestCloudBuildCreateBuild(t *testing.T) {
 	h := New(t)
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -157,11 +157,12 @@ func TestCloudBuildCreateBuild(t *testing.T) {
 		t.Errorf("the cancelled build's operation = %v; want CANCELLED", err)
 	}
 
-	// An arbitrary step's container is refused, with the reason.
+	// A step's script is refused, with the reason (arbitrary steps run,
+	// #1382: TestCloudBuildArbitraryStepsFilterAndRetry).
 	_, err = cb.CreateBuild(ctx, &cbpb.CreateBuildRequest{Parent: parent, ProjectId: h.Project(), Build: &cbpb.Build{
-		Source: src, Steps: []*cbpb.BuildStep{{Name: "ubuntu", Args: []string{"echo", "hi"}}}}})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "only docker build") {
-		t.Errorf("an arbitrary step = %v; want UNIMPLEMENTED with the reason", err)
+		Source: src, Steps: []*cbpb.BuildStep{{Name: "ubuntu", Script: "echo hi"}}}})
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "script is not supported") {
+		t.Errorf("a script step = %v; want UNIMPLEMENTED with the reason", err)
 	}
 }
 

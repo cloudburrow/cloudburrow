@@ -127,7 +127,8 @@ func (blockingBuilder) Build(ctx context.Context, _ runadapter.BuildSpec) error 
 
 // TestConsoleRunBuildAndCancel (#1347): Run build on the Build history page
 // creates a build through the official Cloud Build client on the Run port,
-// and Cancel on its page cancels it.
+// and Cancel on its page cancels it; the filter box narrows the history and
+// Retry reruns a finished build (#1382).
 func TestConsoleRunBuildAndCancel(t *testing.T) {
 	ctx := context.Background()
 	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
@@ -153,8 +154,25 @@ func TestConsoleRunBuildAndCancel(t *testing.T) {
 		t.Fatalf("Cancel: %v", err)
 	}
 	d, _ := p.Detail(ctx, "", []string{id})
-	if len(d.Summary) == 0 || d.Summary[0].Value != "CANCELLED" || len(p.DetailActions(ctx, "", []string{id})) != 0 {
-		t.Errorf("after Cancel: %+v", d.Summary)
+	if acts := p.DetailActions(ctx, "", []string{id}); len(d.Summary) == 0 || d.Summary[0].Value != "CANCELLED" ||
+		len(acts) != 1 || acts[0].ID != "retry" {
+		t.Errorf("after Cancel: %+v, actions %+v", d.Summary, acts)
+	}
+	// The filter box narrows the history with ListBuilds' filter (#1382),
+	// and Retry reruns the build as a new one.
+	if l, _ := p.ListFiltered(ctx, "", `status="CANCELLED"`); len(l.Items) != 1 || l.Items[0].Name != id || l.ServerFilter == nil {
+		t.Errorf("filtered = %+v", l)
+	}
+	if l, _ := p.ListFiltered(ctx, "", `status=`); l.ServerFilter == nil || l.ServerFilter.Error == "" {
+		t.Errorf("a bad filter = %+v", l.ServerFilter)
+	}
+	if err := p.ActAt(ctx, "", []string{id}, "retry", nil); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	if l, _ := p.ListFiltered(ctx, "", `status="QUEUED" OR status="WORKING"`); len(l.Items) != 1 || l.Items[0].Name == id {
+		t.Errorf("after Retry, running = %+v", l.Items)
+	} else {
+		_ = p.ActAt(ctx, "", []string{l.Items[0].Name}, "cancel", nil)
 	}
 	if _, err := p.Create(ctx, "", map[string]string{"source": "b/o", "image": "x"}); err == nil {
 		t.Errorf("a source without gs:// was accepted")
