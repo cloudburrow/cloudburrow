@@ -23,7 +23,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Storage | 7 | 1 | 5 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 19 | 12 | 5 | 0 | 2 |
+| Cloud Run | 20 | 13 | 5 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 9 | 9 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **104** | **45** | **41** | **13** | **5** |
+| **Total** | **105** | **46** | **41** | **13** | **5** |
 
 ## Cloud Storage
 
@@ -82,6 +82,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 |---|---|---|
 | Refused service and job fields (#1346): Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, Cloud SQL volumes served by the Cloud SQL Auth Proxy sidecar, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346, with v1's `run.googleapis.com/cloudsql-instances` annotation as the same volume) | no emulator support (Knative refuses FUSE and NFS volumes) | M |
 | `gcloud run deploy --source` and `gcloud builds submit` are served since #1347 (Artifact Registry repositories, Cloud Build `builds.create`, `CancelBuild` and operations on the Run port, verified with gcloud on Dockerfile sources and a two-step cloudbuild.yaml); since #1382 steps of any image run as containers on the host's Docker (socket, `cloudbuild` network, shared `/workspace`), and `ListBuilds` `filter` and paging and `RetryBuild` are served; left: a step's `secretEnv`, `script` and `allowFailure`, and no image is pushed to a registry a docker client can reach | not built yet | S |
+| `gcloud run deploy --source` and `gcloud builds submit` are served since #1347 (Artifact Registry repositories, Cloud Build `builds.create`, `CancelBuild` and operations on the Run port, verified with gcloud on Dockerfile sources and a two-step cloudbuild.yaml); left: arbitrary step containers (only docker build, docker push and pack steps run) (a build's images are pushed to the instance's Artifact Registry since #1383) | not built yet | M |
 | A worker pool's `update_mask` and instance splits across revisions are refused (served since #1300 and #1299; operations wait for the instances and an instance has a URL since #1348) | not built yet | M |
 | Refused service and job fields: VPC access, Cloud SQL, Cloud Storage FUSE and NFS volumes, `subPath`, encryption keys, binary authorization, execution environment, session affinity (the service account named to its workload by the metadata server in #1388; secret and in-memory volumes, the service account and v1 probes mapped in #1297) (#1346) | not built yet | L |
 | `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` (#1347) | not built yet | M |

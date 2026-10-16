@@ -955,6 +955,14 @@ func (r *buildRun) run(ctx context.Context, cancel context.CancelFunc) {
 			failed(cbpb.Build_FAILURE, -1, fmt.Sprintf("failed to push image %q: no step built it", im))
 			return
 		}
+		// Pushed to its repository when this instance holds it (#1383);
+		// the digest is then the manifest's, not the derived one.
+		if d, pushed, err := pushBuilt(ctx, r.c.builds.builder, local, tagged(im)); err != nil {
+			failed(cbpb.Build_FAILURE, -1, fmt.Sprintf("failed to push image %q: %v", im, err))
+			return
+		} else if pushed {
+			tagDigest[tagged(im)] = d
+		}
 		r.logf("Pushing %s\n%s: digest: %s\n", im, tagged(im), tagDigest[tagged(im)])
 		localBuilds.record(untagged(im)+"@"+tagDigest[tagged(im)], local)
 		pt := time.Now()
@@ -998,9 +1006,18 @@ func (r *buildRun) runStep(ctx context.Context, p plannedStep, w *stepWriter) er
 		if !ok {
 			return fmt.Errorf("An image does not exist locally with the tag: %s", p.push)
 		}
-		// The image is loaded into the instance's cluster, where Cloud
-		// Run runs it; there is no registry to push it to.
+		// The image is pushed to its repository when this instance holds
+		// it (#1383), and is loaded into the cluster either way, where
+		// Cloud Run runs it.
 		fmt.Fprintf(w, "The push refers to repository [%s]\n", untagged(p.push))
+		d, pushed, err := pushBuilt(ctx, r.c.builds.builder, local, tagged(p.push))
+		if err != nil {
+			return err
+		}
+		if pushed {
+			fmt.Fprintf(w, "%s: digest: %s\n", tagged(p.push), d)
+			return nil
+		}
 		fmt.Fprintf(w, "%s: loaded into the cluster as %s\n", tagged(p.push), local)
 		return nil
 	case stepDockerBuild, stepPack:

@@ -74,7 +74,7 @@ func TestGcloudRunDeploySource(t *testing.T) {
 	}
 }
 
-// covers: google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRepository, google.devtools.artifactregistry.v1.ArtifactRegistry/GetRepository, google.devtools.artifactregistry.v1.ArtifactRegistry/ListRepositories, google.devtools.cloudbuild.v1.CloudBuild/GetBuild, google.devtools.cloudbuild.v1.CloudBuild/ListBuilds, google.devtools.cloudbuild.v1.CloudBuild/GetDefaultServiceAccount
+// covers: google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRepository, google.devtools.artifactregistry.v1.ArtifactRegistry/GetRepository, google.devtools.artifactregistry.v1.ArtifactRegistry/ListRepositories, google.devtools.artifactregistry.v1.ArtifactRegistry/GetDockerImage, google.devtools.cloudbuild.v1.CloudBuild/GetBuild, google.devtools.cloudbuild.v1.CloudBuild/ListBuilds, google.devtools.cloudbuild.v1.CloudBuild/GetDefaultServiceAccount
 //
 // TestSourceDeployArtifactRegistryAndCloudBuild (#1347): the official
 // Artifact Registry and Cloud Build clients, over gRPC on the Run port.
@@ -83,7 +83,9 @@ func TestGcloudRunDeploySource(t *testing.T) {
 // of the sourcebuild fixture is a Cloud Build build: its operation is
 // projects/*/locations/*/operations/{build id}, polled to completion, and
 // GetBuild and ListBuilds read it back SUCCESS with its steps, its image's
-// digest and its logUrl; a service deployed with image@digest runs it.
+// digest and its logUrl; the image is pushed to the repository (#1383),
+// whose GetDockerImage reads it by that digest; a service deployed with
+// image@digest runs it.
 func TestSourceDeployArtifactRegistryAndCloudBuild(t *testing.T) {
 	h := New(t)
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -174,6 +176,12 @@ func TestSourceDeployArtifactRegistryAndCloudBuild(t *testing.T) {
 	if err != nil || got.GetStatus() != cbpb.Build_SUCCESS || len(got.GetSteps()) != 1 || got.GetLogUrl() == "" ||
 		len(got.GetResults().GetImages()) != 1 || !strings.HasPrefix(got.GetResults().GetImages()[0].GetDigest(), "sha256:") {
 		t.Fatalf("GetBuild = %v, %v", got, err)
+	}
+	// The build pushed its image to the repository (#1383): the digest is
+	// its manifest's, which Artifact Registry lists.
+	if di, err := ar.GetDockerImage(ctx, &arpb.GetDockerImageRequest{Name: repo.GetName() + "/dockerImages/sdk-built@" +
+		got.GetResults().GetImages()[0].GetDigest()}); err != nil || !contains(di.GetTags(), "latest") {
+		t.Errorf("the pushed image's GetDockerImage = %v, %v", di, err)
 	}
 	if g2, err := cb.GetBuild(ctx, &cbpb.GetBuildRequest{ProjectId: h.Project(), Id: b.GetId()}); err != nil || g2.GetName() != b.GetName() {
 		t.Errorf("GetBuild by project and id = %v, %v", g2, err)
