@@ -223,11 +223,5 @@ func (s *scriptRun) failedChild(text string, rec *recorder, msg string) {
 	}
 	s.f.failed.add(project, id, rowError{Reason: reason, Message: msg})
 	s.f.records.markInternal(project, id)
-	kind := "STATEMENT"
-	if s.expr > 0 {
-		kind = "EXPRESSION"
-	}
-	c := scriptChild{project: project, id: id, kind: kind, text: text}
-	c.line, c.col, c.endLine, c.endCol = childAt(s.sql, text)
-	*s.children = append(*s.children, c)
+	*s.children = append(*s.children, s.child(project, id, text))
 }

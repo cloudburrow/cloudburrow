@@ -227,8 +227,15 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		f.serveQuery(w, r, q, insert)
 		return
 	}
-	if !txnRequest(r) && hasControlFlow(q.Query) { // #1201, scriptflow.go; a transaction's probe is the emulator's (transactions.go)
+	if !txnRequest(r) && (hasControlFlow(q.Query) || runsInTurn(q.Query)) { // #1201, scriptflow.go; a transaction's probe is the emulator's (transactions.go); #1037, execimmediate.go
 		f.runScript(w, r, q, insert)
+		return
+	}
+	if !txnRequest(r) && rowCountInOneRequest(q.Query) { // #1037, execimmediate.go
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: @@row_count in a script with a "+
+			"TEMP table or function. CloudBurrow keeps @@row_count when it runs a script a statement at a time, but a TEMP "+
+			"table or function lasts only for the request that made it, and the emulator behind CloudBurrow does not know "+
+			"@@row_count. Nothing was run.")
 		return
 	}
 	if sent, changed, code, msg := bytesParameters(q); code != 0 { // #1078, bytesparams.go

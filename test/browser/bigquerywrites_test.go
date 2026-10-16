@@ -248,3 +248,37 @@ func TestBigQueryEditorRunsAScriptWithIF(t *testing.T) {
 		t.Errorf("after the script with IF the dataset lists %v, want big and not small", tables)
 	}
 }
+
+// TestBigQueryEditorRunsExecuteImmediate (#1037), in the emulators shard:
+// the Read-write editor runs a script whose EXECUTE IMMEDIATE has SQL built
+// by FORMAT() from a variable, with a USING value, which the front carries
+// out in its turn: the table the statement names is made, with the row
+// the USING value gives.
+func TestBigQueryEditorRunsExecuteImmediate(t *testing.T) {
+	needService(t, "bigquery")
+	p := open(t)
+	project := servedProject(t)
+	ds := fmt.Sprintf("browser_ei_%d", time.Now().UnixNano()%1e12)
+	q := "?project=" + url.QueryEscape(project)
+	if code, body := consoleDo(t, http.MethodPost, "/api/resources/bigquery"+q, `{"datasetId":"`+ds+`"}`); code != http.StatusOK {
+		t.Fatalf("create a dataset through the console API = %d: %s", code, body)
+	}
+	t.Cleanup(func() { consoleDo(t, http.MethodDelete, "/api/resources/bigquery"+q+"&name="+ds, "") })
+
+	p.navigate("/bigquery/" + ds + q)
+	p.waitFor(`document.querySelector("#tab-query") !== null`)
+	p.run(chromedp.Click(`#tab-query`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector("#view .query-editor") !== null && document.querySelector("#view .query-mode") !== null`)
+	p.run(chromedp.Click(`#view .query-mode input[value="read-write"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector("#view .query-pane button.primary").textContent === "Run statement"`)
+	p.eval(`(() => { const e = document.querySelector("#view .query-editor"); e.value = ""; return true; })()`, nil)
+	p.run(chromedp.SendKeys(`#view .query-editor`, "DECLARE name STRING DEFAULT 'dynamic';\n"+
+		"EXECUTE IMMEDIATE FORMAT('CREATE TABLE %s AS SELECT @n AS n', name) USING 7 AS n", chromedp.ByQuery))
+	p.clickText("#view .query-pane button.primary", "Run statement")
+	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
+	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("The statement ran")`)
+	if tables := readDataPage(t, "bigquery", project, ds).rows("tables"); tables["dynamic"] == nil {
+		t.Errorf("after the EXECUTE IMMEDIATE the dataset lists %v, want dynamic", tables)
+	}
+}

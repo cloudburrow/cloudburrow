@@ -268,7 +268,12 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 		{"DECLARE s STRING DEFAULT (SELECT 'x'); EXECUTE IMMEDIATE s", "", immediateInTurn},
 		{"EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a", "", immediateInTurn},
 		{"EXECUTE IMMEDIATE 'SELECT 1; SELECT 2'", "", 501},
-		{"EXECUTE IMMEDIATE \"EXECUTE IMMEDIATE 'SELECT 1'\"", "", 501},
+		{"EXECUTE IMMEDIATE \"EXECUTE IMMEDIATE 'SELECT 1'\"", "", 400},
+		{"EXECUTE IMMEDIATE 'IF TRUE THEN SELECT 1; END IF'", "", 400},
+		{"EXECUTE IMMEDIATE 'CALL ds.p()'", "", 400},
+		{"EXECUTE IMMEDIATE 'l: LOOP LEAVE l; END LOOP'", "", 400},
+		{"EXECUTE IMMEDIATE 'BEGIN SELECT 1; END'", "", 400},
+		{"EXECUTE IMMEDIATE 'SELECT CASE WHEN TRUE THEN 1 END'", "SELECT CASE WHEN TRUE THEN 1 END", 0},
 		{"EXECUTE IMMEDIATE b'SELECT 1'", "", immediateInTurn},
 		{"EXECUTE IMMEDIATE 'SELECT @b' USING 1 AS a", "", 400},
 		{"EXECUTE IMMEDIATE 'SELECT ?, ?' USING 1", "", 400},
@@ -292,10 +297,13 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 	// table keeps the script in one request: 501 (#1037).
 	emu := &jobsEmulator{}
 	h := Wrap(emu)
+	// The statement is a child job of its own, run in its turn (#1037).
 	code, got := do(t, h, "POST", base+"/jobs", `{"jobReference":{"jobId":"e1"},"configuration":{"query":{"query":"EXECUTE IMMEDIATE 'CREATE TABLE ds.t (x INT64)'"}}}`)
-	if code != 200 || emu.sentQuery(t) != "CREATE TABLE ds.t (x INT64)" ||
-		got["configuration"].(map[string]any)["query"].(map[string]any)["query"] != "EXECUTE IMMEDIATE 'CREATE TABLE ds.t (x INT64)'" {
-		t.Errorf("jobs.insert: %d %v, sent %q", code, got, emu.sentQuery(t))
+	sent := strings.Join(emu.log, "\n")
+	if code != 200 || !strings.Contains(sent, `"query":"CREATE TABLE ds.t (x INT64)"`) ||
+		got["configuration"].(map[string]any)["query"].(map[string]any)["query"] != "EXECUTE IMMEDIATE 'CREATE TABLE ds.t (x INT64)'" ||
+		got["statistics"].(map[string]any)["numChildJobs"] != "1" {
+		t.Errorf("jobs.insert: %d %v, sent %s", code, got, sent)
 	}
 	n := len(emu.log)
 	for _, path := range []string{"/queries", "/jobs"} {
