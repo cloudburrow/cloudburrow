@@ -18,13 +18,15 @@
 //     and TTL). They are stored and returned READY at once, but change
 //     nothing: the emulator answers any query without an index, and does
 //     not delete expired documents.
+//   - Backup schedules (#1461), with Google's limits. They take no backups:
+//     the emulator cannot snapshot a database.
 //
 // Operations are done when they are returned, as Google's are once they
 // have finished, with the metadata Google documents for each.
 //
-// ImportDocuments, ExportDocuments, BulkDeleteDocuments, backups, backup
-// schedules, restores, clones and user credentials answer UNIMPLEMENTED
-// (501 over REST), each naming why.
+// ImportDocuments, ExportDocuments, BulkDeleteDocuments, backups, restores,
+// clones and user credentials answer UNIMPLEMENTED (501 over REST), each
+// naming why.
 package firestoreadmin
 
 import (
@@ -82,8 +84,9 @@ type Admin struct {
 	// not been touched, and gets `(default)` when it is.
 	databases map[string]*adminpb.Database
 	seeded    map[string]bool
-	indexes   map[string]*adminpb.Index // by name
-	fields    map[string]*adminpb.Field // overrides, by name
+	indexes   map[string]*adminpb.Index          // by name
+	fields    map[string]*adminpb.Field          // overrides, by name
+	schedules map[string]*adminpb.BackupSchedule // by name
 	ops       map[string]*longrunningpb.Operation
 	opOrder   []string
 }
@@ -98,6 +101,7 @@ func New(emulator string) *Admin {
 		seeded:    map[string]bool{},
 		indexes:   map[string]*adminpb.Index{},
 		fields:    map[string]*adminpb.Field{},
+		schedules: map[string]*adminpb.BackupSchedule{},
 		ops:       map[string]*longrunningpb.Operation{},
 	}
 	a.grpc = grpc.NewServer()
@@ -402,6 +406,11 @@ func (a *Admin) DeleteDatabase(ctx context.Context, req *adminpb.DeleteDatabaseR
 	for n := range a.fields {
 		if strings.HasPrefix(n, db.Name+"/") {
 			delete(a.fields, n)
+		}
+	}
+	for n := range a.schedules {
+		if strings.HasPrefix(n, db.Name+"/") {
+			delete(a.schedules, n)
 		}
 	}
 	gone := a.describe(db)
@@ -820,7 +829,7 @@ func (a *Admin) ListFields(_ context.Context, req *adminpb.ListFieldsRequest) (*
 
 const (
 	noExport  = "is not served here: the emulator has no managed export or import, and an export it could write would not be in Firestore's own format. Use the emulator's export (gcloud emulators firestore start --export-on-exit) instead"
-	noBackups = "is not served here: the emulator keeps no backups or versions to restore from"
+	noBackups = "is not served here: the emulator cannot snapshot a database, so no backups are taken (backup schedules are stored, and take none) and there are no backups or versions to restore or clone from"
 	noCreds   = "is not served here: user credentials are for Firestore with MongoDB compatibility, which the emulator is not"
 )
 
@@ -851,21 +860,6 @@ func (a *Admin) RestoreDatabase(context.Context, *adminpb.RestoreDatabaseRequest
 }
 func (a *Admin) CloneDatabase(context.Context, *adminpb.CloneDatabaseRequest) (*longrunningpb.Operation, error) {
 	return nil, refuse("CloneDatabase", noBackups)
-}
-func (a *Admin) CreateBackupSchedule(context.Context, *adminpb.CreateBackupScheduleRequest) (*adminpb.BackupSchedule, error) {
-	return nil, refuse("CreateBackupSchedule", noBackups)
-}
-func (a *Admin) GetBackupSchedule(context.Context, *adminpb.GetBackupScheduleRequest) (*adminpb.BackupSchedule, error) {
-	return nil, refuse("GetBackupSchedule", noBackups)
-}
-func (a *Admin) ListBackupSchedules(context.Context, *adminpb.ListBackupSchedulesRequest) (*adminpb.ListBackupSchedulesResponse, error) {
-	return nil, refuse("ListBackupSchedules", noBackups)
-}
-func (a *Admin) UpdateBackupSchedule(context.Context, *adminpb.UpdateBackupScheduleRequest) (*adminpb.BackupSchedule, error) {
-	return nil, refuse("UpdateBackupSchedule", noBackups)
-}
-func (a *Admin) DeleteBackupSchedule(context.Context, *adminpb.DeleteBackupScheduleRequest) (*emptypb.Empty, error) {
-	return nil, refuse("DeleteBackupSchedule", noBackups)
 }
 func (a *Admin) CreateUserCreds(context.Context, *adminpb.CreateUserCredsRequest) (*adminpb.UserCreds, error) {
 	return nil, refuse("CreateUserCreds", noCreds)

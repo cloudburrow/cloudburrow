@@ -172,9 +172,41 @@ func (a *Admin) serveREST(w http.ResponseWriter, r *http.Request) {
 			reply(a.CancelOperation(ctx, &longrunningpb.CancelOperationRequest{Name: p}))
 			return
 		}
-	// backups and backup schedules
-	case strings.Contains(p, "/backups") || strings.Contains(p, "/backupSchedules"):
-		writeError(w, refuse("Backups and backup schedules", noBackups))
+	// backup schedules
+	case strings.HasSuffix(p, "/backupSchedules") && restDatabase.MatchString(strings.TrimSuffix(p, "/backupSchedules")) && v == "":
+		parent := strings.TrimSuffix(p, "/backupSchedules")
+		switch m {
+		case http.MethodGet:
+			reply(a.ListBackupSchedules(ctx, &adminpb.ListBackupSchedulesRequest{Parent: parent}))
+			return
+		case http.MethodPost:
+			s := &adminpb.BackupSchedule{}
+			if !body(s) {
+				return
+			}
+			reply(a.CreateBackupSchedule(ctx, &adminpb.CreateBackupScheduleRequest{Parent: parent, BackupSchedule: s}))
+			return
+		}
+	case scheduleNameRe.MatchString(p) && v == "":
+		switch m {
+		case http.MethodGet:
+			reply(a.GetBackupSchedule(ctx, &adminpb.GetBackupScheduleRequest{Name: p}))
+			return
+		case http.MethodPatch:
+			s := &adminpb.BackupSchedule{}
+			if !body(s) {
+				return
+			}
+			s.Name = p
+			reply(a.UpdateBackupSchedule(ctx, &adminpb.UpdateBackupScheduleRequest{BackupSchedule: s, UpdateMask: mask()}))
+			return
+		case http.MethodDelete:
+			reply(a.DeleteBackupSchedule(ctx, &adminpb.DeleteBackupScheduleRequest{Name: p}))
+			return
+		}
+	// backups
+	case strings.Contains(p, "/backups"):
+		writeError(w, refuse("Backups", noBackups))
 		return
 	case strings.Contains(p, "/userCreds"):
 		writeError(w, refuse("User credentials", noCreds))

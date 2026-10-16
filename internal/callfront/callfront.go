@@ -38,14 +38,16 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/queryfront"
+	"github.com/cloudburrow/cloudburrow/internal/spannerfront"
 )
 
 // ErrUsage means the arguments were refused; the reason has been written.
 var ErrUsage = errors.New("usage")
 
 // Intercept answers some calls itself instead of the emulator: the
-// Firestore Admin API (internal/firestoreadmin, #1331), and the query RPCs
-// (internal/queryfront, #1405), which the emulators do not serve.
+// Firestore Admin API (internal/firestoreadmin, #1331), the query RPCs
+// (internal/queryfront, #1405) and Spanner's instance updates
+// (internal/spannerfront, #1461), which the emulators do not serve.
 type Intercept interface {
 	http.Handler
 	Claims(r *http.Request) bool
@@ -154,6 +156,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	firestoreAdmin := fs.Bool("firestore-admin", false, "serve the Firestore Admin API in front of the Firestore emulator")
 	// The query RPCs the emulator does not serve, answered by the front
 	// from calls it does (#1405).
+	// The Spanner instance updates the emulator refuses, answered by the
+	// front over both ports (#1461).
+	spannerInstances := fs.Bool("spanner-instances", false, "answer the Spanner instance updates the emulator does not serve")
 	queries := fs.String("queries", "", "answer the query RPCs the emulator does not serve: datastore (RunAggregationQuery) or firestore (PartitionQuery)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -184,11 +189,18 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if *firestoreAdmin {
 		icpts = append(icpts, firestoreadmin.New(*upstream))
 	}
+	if *spannerInstances {
+		si, err := spannerfront.New(*upstream)
+		if err != nil {
+			return fmt.Errorf("the Spanner instance front: %w", err)
+		}
+		icpts = append(icpts, si)
+	}
 	var icpt Intercept
 	if len(icpts) > 0 {
 		icpt = icpts
 	}
-	for i, p := range pairs {
+	for _, p := range pairs {
 		l, err := net.Listen("tcp", p[0])
 		if err != nil {
 			for _, l := range listeners {
@@ -197,13 +209,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("listen on %s: %w", p[0], err)
 		}
 		listeners = append(listeners, l)
-		var h http.Handler
-		if i == 0 {
-			h = HandlerWith(p[1], ring, logger.Printf, icpt)
-		} else {
-			h = Handler(p[1], ring, logger.Printf)
-		}
-		servers = append(servers, Server(h, logger.Printf))
+		// Both ports carry the intercepts: Spanner's REST port is the
+		// same API as its gRPC one.
+		servers = append(servers, Server(HandlerWith(p[1], ring, logger.Printf, icpt), logger.Printf))
 		logger.Printf("call front: serving %s for the emulator at %s", l.Addr(), p[1])
 	}
 	go func() {
