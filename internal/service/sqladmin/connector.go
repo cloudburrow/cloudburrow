@@ -558,7 +558,7 @@ func (s *Server) connectSettings(r *http.Request, project string, e Engine) (any
 		"kind":            "sql#connectSettings",
 		"serverCaCert":    sslCertJSON(project, e.Instance(), ca.cert, ca.certPEM),
 		"ipAddresses":     []any{map[string]any{"type": "PRIMARY", "ipAddress": host}},
-		"region":          Region,
+		"region":          s.regionOf(e.Instance()),
 		"databaseVersion": e.DatabaseVersion(),
 		"backendType":     "SECOND_GEN",
 		"pscEnabled":      false,
@@ -640,4 +640,17 @@ func (s *Server) Instances() []string {
 		out = append(out, e.Instance())
 	}
 	return out
+}
+
+// regionOf is the region instance reports: a created instance's own
+// (#1381), or Region.
+func (s *Server) regionOf(instance string) string {
+	s.emu.RLock()
+	defer s.emu.RUnlock()
+	if s.writes != nil {
+		if c := s.writes.byName[instance]; c != nil {
+			return c.spec.region()
+		}
+	}
+	return Region
 }

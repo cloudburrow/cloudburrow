@@ -44,7 +44,8 @@ import (
 // In a multi-statement script with no TEMP table or function, each such
 // statement is set so too (#1390, hasDDLOptions). Not carried out: options
 // in a script with a TEMP table or function, which the emulator still
-// drops, and a column's OPTIONS in a column definition.
+// drops, and a column's OPTIONS in a column definition, but for a NUMERIC
+// or BIGNUMERIC column's rounding_mode (#1401, decimalddl.go).
 
 // ddlOptions is a lone DDL statement's table OPTIONS.
 type ddlOptions struct {
@@ -60,6 +61,12 @@ type ddlOptions struct {
 	partitionMs     string
 	kmsKey          *string
 	clearKMS, isKMS bool
+	// more are the options of tableoptions.go (#1390), and mv the
+	// options of a materialized view (materializedviews.go).
+	more []moreOption
+	mv   *mvOptions
+	// invalid is why BigQuery refuses an option's value (400), or "".
+	invalid string
 	// unsupported names the first option the front does not set.
 	unsupported string
 	// The statement's PARTITION BY and CLUSTER BY (#1272,
@@ -69,6 +76,9 @@ type ddlOptions struct {
 	columns            []token
 	query              string
 	spec               partitionSpec
+	// decimals are the column list's parameterized NUMERIC and
+	// BIGNUMERIC columns and rounding modes (#1401, decimalddl.go).
+	decimals []decimalColumn
 }
 
 // optionsKey marks a request whose options the front is already setting,
@@ -80,6 +90,15 @@ type optionsKey struct{}
 // query (ALTER TABLE among them: altertable.go), and for one with no
 // OPTIONS.
 func parseDDLOptions(sql string) (d ddlOptions, msg string, ok bool) {
+	return parseDDLOptionsOf(sql, false)
+}
+
+// parseDDLOptionsOf is parseDDLOptions; with mv, of a materialized view's
+// CREATE written as a CREATE TABLE (materializedviews.go).
+func parseDDLOptionsOf(sql string, mv bool) (d ddlOptions, msg string, ok bool) {
+	if mv {
+		d.mv = &mvOptions{}
+	}
 	t, lexed := lex(sql)
 	if !lexed || len(t) < 4 {
 		return d, "", false
@@ -134,6 +153,10 @@ func parseDDLOptions(sql string) (d ddlOptions, msg string, ok bool) {
 	}
 	if !d.alter && !d.view && i < end && t[i].punct("(") {
 		d.columns = t[i+1 : skipTo(t, i+1, ")")]
+		var invalid string
+		if d.decimals, invalid = readDecimalColumns(d.columns); invalid != "" { // #1401
+			d.invalid = invalid
+		}
 	}
 	// The OPTIONS at the statement's own level, before its query, and the
 	// PARTITION BY and CLUSTER BY before them.
@@ -181,7 +204,7 @@ func parseDDLOptions(sql string) (d ddlOptions, msg string, ok bool) {
 	if clus >= 0 {
 		d.cluster = clause(clus)
 	}
-	if opt < 0 && (part >= 0 || clus >= 0) {
+	if opt < 0 && (part >= 0 || clus >= 0 || len(d.decimals) > 0 || d.invalid != "") {
 		return d, "", true
 	}
 	if d.alter {
@@ -278,8 +301,31 @@ func (d *ddlOptions) readOptions(sql string, t []token) string {
 				return "the option partition_expiration_days set to other than a number literal, which CloudBurrow does not read"
 			}
 			d.partitionMs = ms
+		case "enable_refresh", "refresh_interval_minutes", "allow_non_incremental_definition":
+			if d.mv == nil {
+				if d.unsupported == "" {
+					d.unsupported = name
+				}
+				break
+			}
+			if msg := d.mv.read(name, val); msg != "" && d.invalid == "" {
+				d.invalid = msg
+			}
 		default:
-			if d.unsupported == "" {
+			switch {
+			case d.mv != nil && name == "max_staleness":
+				o, msg := readMoreOption(name, val, sql)
+				if msg != "" && d.invalid == "" {
+					d.invalid = msg
+				}
+				d.mv.staleness = &o
+			case moreOptionNames[name] && !d.view:
+				o, msg := readMoreOption(name, val, sql)
+				if msg != "" && d.invalid == "" {
+					d.invalid = msg
+				}
+				d.more = append(d.more, o)
+			case d.unsupported == "":
 				d.unsupported = name
 			}
 		}
@@ -295,7 +341,8 @@ func (d *ddlOptions) readOptions(sql string, t []token) string {
 		}
 		also := ""
 		if !d.view {
-			also = ", partition_expiration_days and kms_key_name (stored)"
+			also = ", partition_expiration_days, kms_key_name (stored), max_staleness, default_rounding_mode, tags, " +
+				"require_partition_filter, enable_change_history, storage_uri and privacy_policy"
 		}
 		return fmt.Sprintf("the %s option %s. CloudBurrow sets a %s's description, friendly_name, labels, "+
 			"expiration_timestamp%s from OPTIONS; the emulator behind it does not carry out what %s does", kind,
@@ -307,7 +354,8 @@ func (d *ddlOptions) readOptions(sql string, t []token) string {
 // sets reports whether d sets anything.
 func (d ddlOptions) sets() bool {
 	return d.description != nil || d.clearDescription || d.friendlyName != nil || d.clearFriendly ||
-		d.hasLabels || d.expiration != "" || d.partition != nil || d.cluster != nil || d.partitionMs != "" || d.isKMS
+		d.hasLabels || d.expiration != "" || d.partition != nil || d.cluster != nil || d.partitionMs != "" || d.isKMS ||
+		len(d.more) > 0 || len(d.decimals) > 0
 }
 
 // partitionExpirationMs reads partition_expiration_days, a FLOAT64
@@ -398,6 +446,20 @@ func (f front) ddlWithOptions(w http.ResponseWriter, r *http.Request, q queryOpt
 	if _, failed := queryFailure(rec, job); failed || (d.ifNotExists && existed) {
 		f.clientText(w, rec, client)
 		return
+	}
+	for i, o := range d.more { // #1390, tableoptions.go
+		if o.eval == "" {
+			continue
+		}
+		v, msg := f.evalString(r, q, o.eval)
+		if msg != "" {
+			writeError(w, http.StatusBadRequest, "invalidQuery", o.name+": "+msg)
+			return
+		}
+		d.more[i].value, d.more[i].eval = nil, ""
+		if v != nil {
+			d.more[i].value = *v
+		}
 	}
 	if msg := f.setTableOptions(r, ds, table, d, expiration, set); msg != "" {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: the statement ran, but its "+
@@ -505,12 +567,31 @@ func (f front) setTableOptions(r *http.Request, dataset, table string, d ddlOpti
 	case d.clearKMS:
 		delete(meta, "encryptionConfiguration")
 	}
+	for _, o := range d.more { // #1390, tableoptions.go
+		o.put(meta)
+		if o.name == "require_partition_filter" && o.value == true {
+			f.tables.watchTable(streamKey(projectOf(f.base), dataset, table))
+		}
+	}
+	if d.mv != nil {
+		d.mv.put(meta)
+	}
+	putDecimalColumns(meta, d.decimals) // #1401, decimalddl.go
 	body, err := json.Marshal(meta)
 	if err != nil {
 		return err.Error()
 	}
 	if status, got := f.send(r, http.MethodPut, tablePath(dataset, table), body); status != http.StatusOK {
 		return errorMessage(got, status)
+	}
+	var created struct {
+		CreationTime string `json:"creationTime"`
+	}
+	_ = json.Unmarshal(meta["creationTime"], &created.CreationTime)
+	for _, o := range d.more {
+		if o.setting {
+			f.tables.set(streamKey(projectOf(f.base), dataset, table), created.CreationTime, o)
+		}
 	}
 	return ""
 }
@@ -528,5 +609,5 @@ func hasDDLOptions(sql string, body []token) bool {
 	d, msg, ok := parseDDLOptions(sql[body[0].pos:body[len(body)-1].end])
 	// PARTITION BY and CLUSTER BY alone are left as they were.
 	return ok && (msg != "" || d.description != nil || d.clearDescription || d.friendlyName != nil || d.clearFriendly || d.hasLabels ||
-		d.expiration != "" || d.partitionMs != "" || d.isKMS)
+		d.expiration != "" || d.partitionMs != "" || d.isKMS || len(d.more) > 0 || len(d.decimals) > 0 || d.invalid != "")
 }

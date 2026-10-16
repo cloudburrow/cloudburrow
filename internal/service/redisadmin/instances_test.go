@@ -247,7 +247,7 @@ func TestCreateRefusals(t *testing.T) {
 		{"bad id", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "Bad_ID", Instance: basic(nil)}, codes.InvalidArgument},
 		{"no tier", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: &redispb.Instance{MemorySizeGb: 1}}, codes.InvalidArgument},
 		{"no size", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.MemorySizeGb = 0 })}, codes.InvalidArgument},
-		{"standard", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.Tier = redispb.Instance_STANDARD_HA })}, codes.Unimplemented},
+		{"standard on servers that do not replicate", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.Tier = redispb.Instance_STANDARD_HA })}, codes.Unimplemented},
 		{"version", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.RedisVersion = "REDIS_5_0" })}, codes.Unimplemented},
 		{"persistence period", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
 			i.PersistenceConfig = &redispb.PersistenceConfig{PersistenceMode: redispb.PersistenceConfig_RDB, RdbSnapshotPeriod: 99}
@@ -269,7 +269,7 @@ func TestCreateRefusals(t *testing.T) {
 		Instance: &redispb.Instance{Name: def}}); code(err) != codes.FailedPrecondition {
 		t.Errorf("update the server up runs: %v", err)
 	}
-	if _, err := s.FailoverInstance(ctx, &redispb.FailoverInstanceRequest{Name: def}); code(err) != codes.Unimplemented {
+	if _, err := s.FailoverInstance(ctx, &redispb.FailoverInstanceRequest{Name: def}); code(err) != codes.FailedPrecondition {
 		t.Errorf("failover: %v", err)
 	}
 }
@@ -288,7 +288,7 @@ func TestUpdateRefusals(t *testing.T) {
 	}{
 		{nil, &redispb.Instance{Name: name}, codes.InvalidArgument},
 		{[]string{"tier"}, &redispb.Instance{Name: name}, codes.InvalidArgument},
-		{[]string{"replica_count"}, &redispb.Instance{Name: name}, codes.Unimplemented},
+		{[]string{"replica_count"}, &redispb.Instance{Name: name}, codes.InvalidArgument},
 		{[]string{"memory_size_gb"}, &redispb.Instance{Name: name, MemorySizeGb: 0}, codes.InvalidArgument},
 		{[]string{"redis_configs"}, &redispb.Instance{Name: name, RedisConfigs: map[string]string{"maxmemory-gb": "2"}}, codes.InvalidArgument},
 	} {

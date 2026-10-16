@@ -57,7 +57,22 @@ type Spec struct {
 	ReplicationPassword string `json:"replicationPassword,omitempty"`
 	// ReplicationStopped is set by stopReplica.
 	ReplicationStopped bool `json:"replicationStopped,omitempty"`
+	// Region is the region the instance was created in, "" for Region
+	// (#1381): a cross-region replica's differs from its primary's. Every
+	// server runs in the one cluster; the region is what the instance
+	// reports, in its connection name too.
+	Region string `json:"region,omitempty"`
 }
+
+// region is the instance's region.
+func (s Spec) region() string {
+	if s.Region == "" {
+		return Region
+	}
+	return s.Region
+}
+
+var regionRE = regexp.MustCompile(`^[a-z]+(-[a-z]+)+[0-9]+$`)
 
 // MySQL reports whether the spec is a MySQL instance.
 func (s Spec) MySQL() bool { return strings.HasPrefix(s.DatabaseVersion, "MYSQL_") }
@@ -78,11 +93,6 @@ type Provisioner interface {
 	// earlier run left that this one does not keep.
 	Prune(ctx context.Context, keep []string) error
 }
-
-// SupportedVersions are the databaseVersion values a created instance can
-// have: the versions of the images CloudBurrow runs. A server of another
-// version would be a different image, which is not pinned or loaded.
-var SupportedVersions = map[string]bool{"POSTGRES_17": true, "MYSQL_8_4": true}
 
 type created struct {
 	spec   Spec
@@ -408,8 +418,7 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	}
 	if b.DatabaseVersion != "" && !SupportedVersions[b.DatabaseVersion] {
 		if strings.HasPrefix(b.DatabaseVersion, "POSTGRES_") || strings.HasPrefix(b.DatabaseVersion, "MYSQL_") {
-			return nil, unimplemented("databaseVersion "+b.DatabaseVersion,
-				"a created instance runs the image `up` runs for its engine, PostgreSQL 17 (POSTGRES_17) or MySQL 8.4 (MYSQL_8_4)")
+			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, unservedVersionWhy(b.DatabaseVersion))
 		}
 		if strings.HasPrefix(b.DatabaseVersion, "SQLSERVER_") {
 			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, "SQL Server is not run by CloudBurrow")
@@ -422,6 +431,14 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 	spec := Spec{Name: b.Name, Project: project, DatabaseVersion: b.DatabaseVersion, RootPassword: b.RootPassword,
 		CreateTime: time.Now().UTC().Format(time.RFC3339Nano), SettingsVersion: 1, AvailabilityType: "ZONAL"}
 	b.apply(&spec, false)
+	if b.Region != "" {
+		if !regionRE.MatchString(b.Region) {
+			return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid value for region: %s.", b.Region)
+		}
+		if b.Region != Region {
+			spec.Region = b.Region
+		}
+	}
 	if replica {
 		if s.engine(b.Name) != nil {
 			return nil, Errorf(http.StatusConflict, "The Cloud SQL instance already exists.")
@@ -515,9 +532,7 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 	if err := b.unsupported(); err != nil {
 		return nil, err
 	}
-	if b.DatabaseVersion != "" && b.DatabaseVersion != c.spec.DatabaseVersion {
-		return nil, unimplemented("changing databaseVersion", "a major version upgrade would be a different image")
-	}
+	upgrade := b.DatabaseVersion != "" && b.DatabaseVersion != c.spec.DatabaseVersion
 	if b.Name != "" && b.Name != name {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: an instance cannot be renamed.")
 	}
@@ -526,6 +541,33 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		st := c.state
 		s.emu.Unlock()
 		return nil, Errorf(http.StatusConflict, "Operation failed because another operation was already in progress (the instance is %s).", st)
+	}
+	if upgrade {
+		if err := s.checkUpgrade(c, b.DatabaseVersion); err != nil {
+			s.emu.Unlock()
+			return nil, err
+		}
+		if c.state != "RUNNABLE" {
+			s.emu.Unlock()
+			return nil, Errorf(http.StatusConflict, "Operation failed because the instance is %s.", c.state)
+		}
+		from := c.spec
+		to := c.spec
+		// Settings sent with the new version apply to the new server.
+		b.apply(&to, replace)
+		to.DatabaseVersion = b.DatabaseVersion
+		to.SettingsVersion++
+		c.spec = to
+		c.engine = s.writes.prov.Engine(to)
+		c.state = "MAINTENANCE"
+		err = s.saveLocked()
+		s.emu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		op := s.pending(base, project, name, "MAJOR_VERSION_UPGRADE")
+		go s.upgrade(name, from, to, op["name"].(string))
+		return op, nil
 	}
 	next := c.spec
 	b.apply(&next, replace)
@@ -655,6 +697,13 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 		in["state"] = state
 	}
 	in["createTime"] = spec.CreateTime
+	if r := spec.region(); r != Region {
+		in["region"], in["gceZone"] = r, r+"-a"
+		in["connectionName"] = spec.Project + ":" + r + ":" + spec.Name
+	}
+	if up := upgradable(spec.DatabaseVersion); len(up) > 0 && spec.MasterInstanceName == "" {
+		in["upgradableDatabaseVersions"] = up
+	}
 	if spec.MySQL() {
 		in["instanceType"] = "CLOUD_SQL_INSTANCE"
 	}

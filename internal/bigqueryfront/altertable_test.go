@@ -32,9 +32,9 @@ func TestParseAlter(t *testing.T) {
 		t.Errorf("actions = %+v", st.actions)
 	}
 	for sql, want := range map[string]string{
-		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":   "to an ARRAY",
-		"ALTER TABLE ds.t SET OPTIONS (require_partition_filter=true)": "require_partition_filter",
-		"ALTER TABLE ds.t ADD COLUMN a INT64 OPTIONS (x = 1) y":        "after the column's type",
+		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":        "to an ARRAY",
+		"ALTER TABLE ds.t SET OPTIONS (enable_fine_grained_mutations=true)": "enable_fine_grained_mutations",
+		"ALTER TABLE ds.t ADD COLUMN a INT64 OPTIONS (x = 1) y":             "after the column's type",
 	} {
 		toks, _ := lex(sql)
 		if got := alterUnsupported(toks); !strings.Contains(got, want) {

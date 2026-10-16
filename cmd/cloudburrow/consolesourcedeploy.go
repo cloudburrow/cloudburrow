@@ -80,6 +80,23 @@ type runBuildsProvider struct {
 	// runAddr is the Run port, where Cloud Build is served; the console's
 	// Run build and Cancel go through the official client there.
 	runAddr func() string
+	// hostSteps is --cloudbuild-host-steps (#1382): whether CreateBuild runs
+	// steps other than docker build, docker push and pack. The history says
+	// which, and why.
+	hostSteps bool
+}
+
+// buildStepsNote is what the build history says about arbitrary steps
+// (#1382, ADR-0004).
+func buildStepsNote(on bool) string {
+	if on {
+		return "Build steps other than docker build, docker push and pack are on (--cloudbuild-host-steps): each runs as a " +
+			"container on the host's Docker with the host's Docker socket mounted, so they run only for builds submitted " +
+			"from this machine's loopback, never from a pod."
+	}
+	return "Build steps other than docker build, docker push and pack are off: each would run as a container on the " +
+		"host's Docker with the host's Docker socket mounted, which gives it control of the host, so a build with one is " +
+		"refused. Start the instance with --cloudbuild-host-steps to run them, for builds submitted from this machine's loopback only."
 }
 
 // withClient dials Cloud Build on the Run port as an SDK would.
@@ -147,20 +164,28 @@ func (p runBuildsProvider) Create(ctx context.Context, project string, values ma
 	return id, err
 }
 
-// DetailActions offers Cancel on a build that has not finished.
+// DetailActions offers Cancel on a build that has not finished, and Retry
+// on a finished one CreateBuild created (#1382), as Google's build page does.
 func (p runBuildsProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
 	if len(path) != 1 {
 		return nil
 	}
-	if b := p.build(project, path[0]); b != nil && (b.GetStatus() == cbpb.Build_QUEUED || b.GetStatus() == cbpb.Build_WORKING) {
+	b := p.build(project, path[0])
+	switch {
+	case b == nil:
+		return nil
+	case b.GetStatus() == cbpb.Build_QUEUED || b.GetStatus() == cbpb.Build_WORKING:
 		return []console.Action{{ID: "cancel", Label: "Cancel", Confirm: "the build stops and is CANCELLED"}}
+	case runadapter.Retryable(b.GetName()):
+		return []console.Action{{ID: "retry", Label: "Retry", Confirm: "a new build, with a new ID, runs the same source and steps"}}
 	}
 	return nil
 }
 
-// ActAt cancels the build through CancelBuild.
+// ActAt cancels the build through CancelBuild, or reruns it through
+// RetryBuild.
 func (p runBuildsProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
-	if action != "cancel" || len(path) != 1 {
+	if (action != "cancel" && action != "retry") || len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
 	}
 	b := p.build(project, path[0])
@@ -168,6 +193,10 @@ func (p runBuildsProvider) ActAt(ctx context.Context, project string, path []str
 		return fmt.Errorf("build %s not found", path[0])
 	}
 	return p.withClient(ctx, func(c *cloudbuild.Client) error {
+		if action == "retry" {
+			_, err := c.RetryBuild(ctx, &cbpb.RetryBuildRequest{Name: b.GetName(), ProjectId: b.GetProjectId(), Id: b.GetId()})
+			return err
+		}
 		_, err := c.CancelBuild(ctx, &cbpb.CancelBuildRequest{Name: b.GetName(), ProjectId: b.GetProjectId(), Id: b.GetId()})
 		return err
 	})
@@ -189,13 +218,29 @@ func (p runBuildsProvider) build(project, id string) *cbpb.Build {
 func (runBuildsProvider) ID() string    { return "run-builds" }
 func (runBuildsProvider) Title() string { return "Cloud Run build history" }
 
-func (p runBuildsProvider) List(_ context.Context, project string) (console.Listing, error) {
+func (p runBuildsProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	return p.ListFiltered(ctx, project, "")
+}
+
+const buildsFilterHelp = `ListBuilds' filter, as "Filtering build results" documents: status, build_id, trigger_id, tags, images, ` +
+	`results.images.name, results.images.digest, source.storage_source.bucket/object, create_time, start_time, finish_time; ` +
+	`= and != (and > >= < <= for times, RFC 3339), combined with AND, OR, NOT and parentheses`
+
+// ListFiltered is the build history narrowed by a ListBuilds filter
+// (#1382), evaluated by the same code as the API.
+func (p runBuildsProvider) ListFiltered(_ context.Context, project, filter string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Location", "Image", "Digest", "Source", "Age"},
-		NameColumn: "Build", Noun: "builds", AlwaysStatus: true}
+		NameColumn: "Build", Noun: "builds", AlwaysStatus: true, Note: buildStepsNote(p.hostSteps),
+		ServerFilter: &console.ServerFilter{Value: filter, Placeholder: `status="FAILURE" OR status="TIMEOUT"`, Help: buildsFilterHelp}}
 	if project == "" {
 		project = p.defaultProject
 	}
-	for _, b := range runadapter.CloudBuilds(project, "") {
+	builds, err := runadapter.ListBuildsFiltered(project, "", filter)
+	if err != nil {
+		out.ServerFilter.Error = err.Error()
+		return out, nil
+	}
+	for _, b := range builds {
 		parts := strings.Split(b.GetName(), "/")
 		location, image, digest, source := "global", "", "", ""
 		if len(parts) == 6 {
@@ -286,9 +331,10 @@ func buildStatus(b *cbpb.Build) string {
 }
 
 var (
-	_ console.Provider  = artifactRegistryProvider{}
-	_ console.Provider  = runBuildsProvider{}
-	_ console.Driller   = runBuildsProvider{}
-	_ console.Creator   = runBuildsProvider{}
-	_ console.PathActor = runBuildsProvider{}
+	_ console.Provider     = artifactRegistryProvider{}
+	_ console.Provider     = runBuildsProvider{}
+	_ console.Driller      = runBuildsProvider{}
+	_ console.Creator      = runBuildsProvider{}
+	_ console.PathActor    = runBuildsProvider{}
+	_ console.FilterLister = runBuildsProvider{}
 )

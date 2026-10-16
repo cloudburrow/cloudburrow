@@ -30,8 +30,8 @@ import (
 // precision and scale type parameters to the Avro decimal logical type";
 // the Parquet table's DECIMAL (precision = P, scale = S)). Each file is
 // read back from the instance's Cloud Storage with goavro and Arrow. A
-// value the column's type cannot hold, which the emulator keeps and
-// BigQuery would not, is 501 and writes nothing.
+// value written with more digits after the point is stored rounded
+// (#1401), and extracts.
 //
 // covers: bigquery.tables.insert, bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.get
 func TestBigQueryExtractOfParameterizedDecimals(t *testing.T) {
@@ -63,8 +63,8 @@ func TestBigQueryExtractOfParameterizedDecimals(t *testing.T) {
 	}
 	for _, sql := range []string{
 		"INSERT `" + ds.DatasetID + ".dec` (n, b, i) VALUES (NUMERIC '-123.45', BIGNUMERIC '12345678901234567890123456789012345.12345', NUMERIC '42')",
-		// 1.234 has three digits after the point: the emulator keeps it
-		// (measured), where BigQuery's NUMERIC(5, 2) holds two.
+		// 1.234 has three digits after the point: stored rounded to 1.23,
+		// as BigQuery's NUMERIC(5, 2) holds two (#1401).
 		"INSERT `" + ds.DatasetID + ".wide` (n, b, i) VALUES (NUMERIC '1.234', NULL, NULL)",
 	} {
 		if err := bqRun(ctx, c, sql, false); err != nil {
@@ -202,12 +202,11 @@ func TestBigQueryExtractOfParameterizedDecimals(t *testing.T) {
 		t.Errorf("PARQUET values %q, want %q", cells, w)
 	}
 
-	// A value the column's type cannot hold: 501, nothing written.
+	// 1.234 written to the NUMERIC(5, 2) column is stored rounded, 1.23
+	// (#1401), so its extracts succeed as BigQuery's would.
 	for name, format := range map[string]bigquery.DataFormat{"wide.avro": bigquery.Avro, "wide.parquet": bigquery.Parquet} {
-		err := extract("wide", name, format)
-		wantReason(t, "an extract of a NUMERIC(5, 2) holding 1.234 ("+name+")", err, 501, "notImplemented")
-		if _, err := bucket.Object(name).Attrs(ctx); err == nil {
-			t.Errorf("a refused extract wrote %s", name)
+		if err := extract("wide", name, format); err != nil {
+			t.Errorf("an extract of a NUMERIC(5, 2) written 1.234, stored 1.23 (%s): %v", name, err)
 		}
 	}
 }

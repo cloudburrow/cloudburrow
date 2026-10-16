@@ -1,0 +1,182 @@
+CloudBurrow patch 20 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1401). Applies after patch 0019; needs
+googlesqlite patch 0031.
+
+The gap: a value written to a parameterized NUMERIC(P, S) or
+BIGNUMERIC(P, S) column is kept at its full scale, and one with more than
+P digits is kept. BigQuery rounds it to S digits by the column's
+roundingMode, else the table's defaultRoundingMode, else
+ROUND_HALF_AWAY_FROM_ZERO, and raises OUT_OF_RANGE past the precision
+(https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#parameterized_decimal_type,
+https://cloud.google.com/bigquery/docs/schemas#rounding_mode).
+
+The patch makes, each time a table's resource is written (tables.insert,
+update, patch, a query's DDL) and when its engine table is made, SQLite
+triggers AFTER INSERT and AFTER UPDATE OF each such top-level column that
+call googlesqlite_round_decimal, so every write path (DML, insertAll,
+loads, the Storage Write API, query destinations) rounds.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the
+MIT License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- /dev/null
++++ b/internal/metadata/rounding.go
+@@ -0,0 +1,110 @@
++package metadata
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++	"fmt"
++	"strings"
++
++	"github.com/goccy/googlesqlite"
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++)
++
++// SyncDecimalRounding makes the engine round a value written to each
++// parameterized NUMERIC(P, S) or BIGNUMERIC(P, S) column of the table to
++// its scale, by the column's roundingMode, else the table's
++// defaultRoundingMode, else ROUND_HALF_AWAY_FROM_ZERO, and refuse one with
++// more than P digits OUT_OF_RANGE, as BigQuery does
++// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#parameterized_decimal_type,
++// https://cloud.google.com/bigquery/docs/schemas#rounding_mode).
++//
++// It does so with SQLite triggers on the engine's table, AFTER INSERT and
++// AFTER UPDATE OF the column, that call googlesqlite_round_decimal
++// (googlesqlite patch 0031): every write reaches the table through them,
++// DML, tabledata.insertAll, loads, the Storage Write API and a query's
++// destination alike, and an error aborts the statement. The triggers are
++// made again each time the table's resource is written, so a change of
++// schema or of a rounding mode takes effect. A table the engine does not
++// have yet (the resource is written before it) is left alone; its
++// CreateTable calls this again. Top-level columns only. CloudBurrow patch
++// (cloudburrow/cloudburrow#1401).
++func SyncDecimalRounding(ctx context.Context, tx *sql.Tx, projectID, datasetID string, table *bigqueryv2.Table) error {
++	if table == nil || table.TableReference == nil || table.View != nil || table.MaterializedView != nil {
++		return nil
++	}
++	ref := table.TableReference
++	if ref.ProjectId != "" {
++		projectID = ref.ProjectId
++	}
++	if ref.DatasetId != "" {
++		datasetID = ref.DatasetId
++	}
++	sqliteTable := quoteSQLite(strings.Join([]string{projectID, datasetID, ref.TableId}, "_"))
++	exec := func(q string) error {
++		_, err := tx.ExecContext(ctx, googlesqlite.RawSQLitePrefix+q)
++		return err
++	}
++	if table.Schema == nil {
++		return nil
++	}
++	// Triggers are named by the column, so a column made again of a name
++	// gets its own.
++	for _, f := range table.Schema.Fields {
++		name := triggerName(projectID, datasetID, ref.TableId, f.Name)
++		for _, suffix := range []string{"_ins", "_upd"} {
++			if err := exec("DROP TRIGGER IF EXISTS " + quoteSQLite(name+suffix)); err != nil {
++				return fmt.Errorf("rounding triggers of %s: %w", f.Name, err)
++			}
++		}
++		typ := strings.ToUpper(f.Type)
++		if (typ != "NUMERIC" && typ != "BIGNUMERIC") || f.Precision <= 0 || f.Mode == "REPEATED" {
++			continue
++		}
++		mode := f.RoundingMode
++		if mode == "" || mode == "ROUNDING_MODE_UNSPECIFIED" {
++			mode = table.DefaultRoundingMode
++		}
++		if mode != "ROUND_HALF_EVEN" {
++			mode = "ROUND_HALF_AWAY_FROM_ZERO"
++		}
++		col := quoteSQLite(f.Name)
++		call := fmt.Sprintf("googlesqlite_round_decimal(NEW.%s, %d, %d, '%s', '%s')",
++			col, f.Precision, f.Scale, mode, strings.ReplaceAll(f.Name, "'", "''"))
++		for _, event := range []struct{ suffix, on string }{{"_ins", "INSERT"}, {"_upd", "UPDATE OF " + col}} {
++			q := fmt.Sprintf("CREATE TRIGGER %s AFTER %s ON %s FOR EACH ROW WHEN NEW.%s IS NOT NULL BEGIN "+
++				"UPDATE %s SET %s = %s WHERE rowid = NEW.rowid; END",
++				quoteSQLite(name+event.suffix), event.on, sqliteTable, col, sqliteTable, col, call)
++			if err := exec(q); err != nil {
++				if strings.Contains(err.Error(), "no such table") {
++					return nil
++				}
++				return fmt.Errorf("rounding triggers of %s: %w", f.Name, err)
++			}
++		}
++	}
++	return nil
++}
++
++func triggerName(projectID, datasetID, tableID, column string) string {
++	return "cb_round_" + strings.Join([]string{projectID, datasetID, tableID, column}, "_")
++}
++
++func quoteSQLite(name string) string { return "`" + strings.ReplaceAll(name, "`", "``") + "`" }
++
++// syncTableRounding is SyncDecimalRounding of a table's resource.
++func syncTableRounding(ctx context.Context, tx *sql.Tx, t *Table) error {
++	b, err := json.Marshal(t.metadata)
++	if err != nil {
++		return err
++	}
++	var content bigqueryv2.Table
++	if err := json.Unmarshal(b, &content); err != nil {
++		return nil
++	}
++	if content.TableReference == nil {
++		content.TableReference = &bigqueryv2.TableReference{}
++	}
++	content.TableReference.ProjectId, content.TableReference.DatasetId, content.TableReference.TableId = t.ProjectID, t.DatasetID, t.ID
++	return SyncDecimalRounding(ctx, tx, t.ProjectID, t.DatasetID, &content)
++}
+--- a/internal/metadata/repository.go
++++ b/internal/metadata/repository.go
+@@ -1237,7 +1237,9 @@
+ 	); err != nil {
+ 		return err
+ 	}
+-	return nil
++	// CloudBurrow patch (cloudburrow/cloudburrow#1401): the table's
++	// parameterized NUMERIC and BIGNUMERIC columns round what is written.
++	return syncTableRounding(ctx, tx, table)
+ }
+ 
+ func (r *Repository) UpdateTable(ctx context.Context, tx *sql.Tx, table *Table) error {
+@@ -1254,7 +1256,9 @@
+ 	); err != nil {
+ 		return err
+ 	}
+-	return nil
++	// CloudBurrow patch (cloudburrow/cloudburrow#1401): the table's
++	// parameterized NUMERIC and BIGNUMERIC columns round what is written.
++	return syncTableRounding(ctx, tx, table)
+ }
+ 
+ func (r *Repository) DeleteTable(ctx context.Context, tx *sql.Tx, table *Table) error {
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -17,6 +17,7 @@
+ 
+ 	"github.com/goccy/bigquery-emulator/internal/connection"
+ 	"github.com/goccy/bigquery-emulator/internal/logger"
++	"github.com/goccy/bigquery-emulator/internal/metadata"
+ 	internaltypes "github.com/goccy/bigquery-emulator/internal/types"
+ 	"github.com/goccy/bigquery-emulator/types"
+ )
+@@ -159,7 +160,9 @@
+ 	if _, err := tx.Tx().ExecContext(ctx, query); err != nil {
+ 		return fmt.Errorf("failed to create table %s: %w", query, err)
+ 	}
+-	return nil
++	// CloudBurrow patch (cloudburrow/cloudburrow#1401): its parameterized
++	// NUMERIC and BIGNUMERIC columns round what is written.
++	return metadata.SyncDecimalRounding(ctx, tx.Tx(), ref.ProjectId, ref.DatasetId, table)
+ }
+ 
+ func (r *Repository) CreateView(ctx context.Context, tx *connection.Tx, table *bigqueryv2.Table) error {

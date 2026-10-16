@@ -25,7 +25,7 @@ func TestConsoleStorageChannels(t *testing.T) {
 	if _, err := p.Create(ctx, "p", map[string]string{"name": "watched"}); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.Post(h.URL+"/storage/v1/b/watched/o/watch", "application/json",
+	resp, err := http.Post(h.URL+"/storage/v1/b/watched/o/watch?prefix=logs/&matchGlob=**.json", "application/json",
 		strings.NewReader(`{"id":"console-ch","type":"web_hook","address":"http://127.0.0.1:9/hook"}`))
 	if err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("watchAll: %v %v", resp, err)
@@ -43,7 +43,8 @@ func TestConsoleStorageChannels(t *testing.T) {
 				}
 				var names []string
 				for _, it := range s.Listing.Items {
-					if it.Fields["Channel ID"] != "console-ch" || it.Fields["Address"] != "http://127.0.0.1:9/hook" {
+					if it.Fields["Channel ID"] != "console-ch" || it.Fields["Address"] != "http://127.0.0.1:9/hook" ||
+						it.Fields["Watches"] != "prefix=logs/, matchGlob=**.json" { // #1393
 						t.Errorf("row %+v", it.Fields)
 					}
 					names = append(names, it.Name)

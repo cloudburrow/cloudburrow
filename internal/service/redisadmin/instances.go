@@ -101,10 +101,25 @@ type record struct {
 	// Persistence is persistence_config, as last set; nil when never set.
 	Persistence *persistence `json:"persistence,omitempty"`
 
+	// Standard tier (#1385): Tier is "STANDARD_HA", "" for BASIC; Nodes
+	// are the node numbers, Primary the primary's.
+	Tier                  string `json:"tier,omitempty"`
+	AlternativeLocationID string `json:"alternativeLocationId,omitempty"`
+	ReplicaCount          int32  `json:"replicaCount,omitempty"`
+	ReadReplicas          bool   `json:"readReplicas,omitempty"`
+	Nodes                 []int  `json:"nodes,omitempty"`
+	Primary               int    `json:"primary,omitempty"`
+
 	// Not kept: what the running server is now.
 	state   redispb.Instance_State
 	message string
-	addr    string
+	// addr is the server's address: the primary's, of a Standard tier
+	// instance, whose nodes are at nodeAddrs and whose clients connect
+	// to primaryEP and readEP.
+	addr      string
+	nodeAddrs map[int]string
+	primaryEP *endpoint
+	readEP    *endpoint
 }
 
 func (r *record) spec() Spec {
@@ -181,7 +196,7 @@ func (s *Server) Servers() []string {
 	defer s.created.mu.Unlock()
 	var out []string
 	for _, r := range s.created.byID {
-		out = append(out, r.Server)
+		out = append(out, r.servers()...)
 	}
 	sort.Strings(out)
 	return out
@@ -232,7 +247,19 @@ func (c *instances) save(r *record) error {
 // run provisions name's server, then marks it READY and completes op, or
 // FAILED with why.
 func (c *instances) run(name, op string, spec Spec) {
-	addr, err := c.prov.Provision(c.bg, spec)
+	c.mu.Lock()
+	var snap record
+	if r, ok := c.byID[name]; ok {
+		snap = *r
+	}
+	c.mu.Unlock()
+	var addr string
+	var err error
+	if snap.ha() {
+		err = c.startHA(c.bg, snap) // which keeps the addresses
+	} else {
+		addr, err = c.prov.Provision(c.bg, spec)
+	}
 	c.mu.Lock()
 	r, ok := c.byID[name]
 	if ok && err != nil && op != "" {
@@ -242,13 +269,18 @@ func (c *instances) run(name, op string, spec Spec) {
 			_ = c.db.Delete(recordPrefix + r.Server)
 		}
 		ok = false
-		go func() { _ = c.prov.Remove(c.bg, spec.Server) }()
+		r.closeEndpoints()
+		gone := *r
+		go func() { _ = c.removeServers(c.bg, gone) }()
 	}
 	if ok {
 		if err != nil {
 			r.state, r.message = redispb.Instance_STATE_UNSPECIFIED, "the server did not start: "+err.Error()
 		} else {
-			r.state, r.message, r.addr = redispb.Instance_READY, "", addr
+			r.state, r.message = redispb.Instance_READY, ""
+			if !r.ha() {
+				r.addr = addr
+			}
 		}
 	}
 	delete(c.busy, name)
@@ -349,6 +381,7 @@ func (c *instances) render(r *record) *redispb.Instance {
 		PersistenceConfig:     r.Persistence.render(c.now()),
 		MaintenancePolicy:     renderPolicy(r.Maintenance),
 	}
+	r.renderHA(inst)
 	if region == "" {
 		inst.LocationId = ""
 	}
@@ -423,6 +456,14 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 		}
 		r.Maintenance = kept
 	}
+	if err := standard(in, r); err != nil {
+		return nil, err
+	}
+	if r.ha() {
+		if _, err := c.replicaSet(); err != nil {
+			return nil, err
+		}
+	}
 	if p := in.GetPersistenceConfig(); p != nil {
 		pc, err := newPersistence(p, nil, c.now())
 		if err != nil {
@@ -460,21 +501,17 @@ func checkCreate(in *redispb.Instance) error {
 	switch in.GetTier() {
 	case redispb.Instance_BASIC:
 	case redispb.Instance_STANDARD_HA:
-		return apierror.Unimplemented("tier STANDARD_HA is not supported: CloudBurrow runs one server per instance, with no replica or failover; use BASIC")
 	default:
 		return apierror.InvalidArgument("tier is required: BASIC or STANDARD_HA")
 	}
 	if in.GetMemorySizeGb() < 1 || in.GetMemorySizeGb() > 300 {
-		return apierror.InvalidArgument("memory_size_gb must be between 1 and 300 for a BASIC instance, not %d", in.GetMemorySizeGb())
+		return apierror.InvalidArgument("memory_size_gb must be between 1 and 300, not %d", in.GetMemorySizeGb())
 	}
 	if err := checkVersion(in.GetRedisVersion()); err != nil {
 		return err
 	}
 	if in.GetTransitEncryptionMode() == redispb.Instance_SERVER_AUTHENTICATION {
 		return apierror.Unimplemented("transit_encryption_mode SERVER_AUTHENTICATION is not supported: the server speaks plain TCP")
-	}
-	if in.GetReplicaCount() > 0 || in.GetReadReplicasMode() == redispb.Instance_READ_REPLICAS_ENABLED {
-		return apierror.Unimplemented("read replicas are not supported: CloudBurrow runs one server per instance")
 	}
 	if in.GetCustomerManagedKey() != "" {
 		return apierror.Unimplemented("customer_managed_key is not supported")
@@ -530,8 +567,14 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 			set["maintenance_policy"] = true
 		case "auth_enabled", "authEnabled":
 			set["auth_enabled"] = true
-		case "replica_count", "replicaCount", "read_replicas_mode", "readReplicasMode", "secondary_ip_range", "secondaryIpRange":
-			return nil, apierror.Unimplemented("updating %s is not supported", p)
+		case "replica_count", "replicaCount":
+			set["replica_count"] = true
+		case "read_replicas_mode", "readReplicasMode":
+			set["read_replicas_mode"] = true
+		case "secondary_ip_range", "secondaryIpRange":
+			// The /28 range read replicas need: there are no VPC
+			// addresses here, so it is accepted and not kept.
+			set["secondary_ip_range"] = true
 		default:
 			return nil, apierror.InvalidArgument("update_mask path %q is not an updatable field of Instance", p)
 		}
@@ -562,6 +605,32 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 	if err := checkConfigs(next.RedisConfigs, next.MemorySizeGB); err != nil {
 		return nil, err
 	}
+	rescale := false
+	if set["replica_count"] || set["read_replicas_mode"] || (r.ReadReplicas && set["memory_size_gb"]) {
+		if !r.ha() {
+			return nil, apierror.InvalidArgument("replica_count and read_replicas_mode apply only to a STANDARD_HA instance")
+		}
+		if set["read_replicas_mode"] {
+			switch in.GetReadReplicasMode() {
+			case redispb.Instance_READ_REPLICAS_ENABLED:
+				next.ReadReplicas = true
+			default:
+				if r.ReadReplicas {
+					return nil, apierror.InvalidArgument("read replicas cannot be disabled once they are enabled")
+				}
+			}
+		}
+		if set["replica_count"] {
+			next.ReplicaCount = in.GetReplicaCount()
+		}
+		if next.ReadReplicas && !r.ReadReplicas && !set["replica_count"] {
+			next.ReplicaCount = 0 // enabling read replicas: their default count
+		}
+		if err := checkReplicas(next.ReadReplicas, &next.ReplicaCount, next.MemorySizeGB); err != nil {
+			return nil, err
+		}
+		rescale = next.ReplicaCount != r.ReplicaCount
+	}
 	if set["memory_size_gb"] || set["redis_configs"] {
 		// The running server first: a value it refuses changes nothing.
 		settings := serverConfigs(next.RedisConfigs)
@@ -571,7 +640,7 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 			}
 		}
 		settings["maxmemory"] = strconv.FormatInt(maxMemory(next.MemorySizeGB, next.RedisConfigs), 10)
-		if err := c.dial(r.addr, r.AuthString).ConfigSet(ctx, settings); err != nil {
+		if err := c.configAll(ctx, r, settings); err != nil {
 			return nil, apierror.InvalidArgument("the server refused the change: %v", err)
 		}
 	}
@@ -594,7 +663,11 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 				return nil, apierror.Internal(err, "generate the AUTH string")
 			}
 		}
-		if err := c.dial(r.addr, r.AuthString).ConfigSet(ctx, map[string]string{"requirepass": pw}); err != nil {
+		settings := map[string]string{"requirepass": pw}
+		if r.ha() {
+			settings["masterauth"] = pw // the replicas authenticate to the primary with it
+		}
+		if err := c.configAll(ctx, r, settings); err != nil {
 			return nil, apierror.InvalidArgument("the server refused the change: %v", err)
 		}
 		next.AuthString = pw
@@ -612,8 +685,26 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 	if err := c.save(&next); err != nil {
 		return nil, apierror.Internal(err, "keep instance %s", r.Name)
 	}
+	enabled := next.ReadReplicas != r.ReadReplicas
 	*r = next
+	if enabled {
+		if err := c.points(r, false); err != nil {
+			return nil, apierror.Internal(err, "open the read endpoint of %s", r.Name)
+		}
+	}
 	op := c.newOperation(r.Name, "update")
+	if rescale {
+		// Nodes are started or removed: the instance is UPDATING until
+		// they are.
+		r.state = redispb.Instance_UPDATING
+		c.busy[r.Name] = op
+		go func() {
+			ctx, cancel := context.WithTimeout(c.bg, haWait)
+			defer cancel()
+			c.done(r.Name, op, redispb.Instance_READY, c.scale(ctx, r.Name))
+		}()
+		return s.operation(op)
+	}
 	c.finish(op, c.render(r))
 	return s.operation(op)
 }
@@ -638,8 +729,9 @@ func (s *Server) DeleteInstance(ctx context.Context, req *redispb.DeleteInstance
 	op := c.newOperation(r.Name, "delete")
 	c.busy[r.Name] = op
 	c.mu.Unlock()
+	gone := *r
 	go func() {
-		err := c.prov.Remove(c.bg, r.Server)
+		err := c.removeServers(c.bg, gone)
 		c.mu.Lock()
 		delete(c.busy, r.Name)
 		if err == nil {
@@ -650,6 +742,7 @@ func (s *Server) DeleteInstance(ctx context.Context, req *redispb.DeleteInstance
 				}
 			}
 			delete(c.byID, r.Name)
+			r.closeEndpoints()
 		} else {
 			r.state, r.message = redispb.Instance_READY, "delete failed: "+err.Error()
 		}

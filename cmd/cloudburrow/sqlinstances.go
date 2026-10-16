@@ -122,7 +122,7 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 	for _, f := range spec.Flags {
 		flags = append(flags, components.SQLInstanceFlag{Name: f.Name, Value: f.Value})
 	}
-	b := components.CloudSQLInstanceBackend(spec.Name, spec.MySQL(), p.persistent, spec.RootPassword, flags)
+	b := components.CloudSQLInstanceBackend(spec.Name, spec.DatabaseVersion, p.persistent, spec.RootPassword, flags)
 	if spec.PITREnabled() && !spec.MySQL() {
 		if len(b.Args) == 0 {
 			b.Args = []string{"postgres"}

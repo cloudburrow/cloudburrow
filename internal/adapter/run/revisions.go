@@ -23,9 +23,9 @@ import (
 //
 // Knative models revisions natively — every change to a Service's template
 // creates an immutable Revision — so these map onto what the cluster already
-// holds rather than onto anything CloudBurrow keeps. A revision's name is
-// Knative's; its service is the Cloud Run service it belongs to, named the way
-// the caller named it.
+// holds rather than onto anything CloudBurrow keeps. A revision's ID is
+// Cloud Run's form of Knative's name (RevisionID, #1400); its service is the
+// Cloud Run service it belongs to, named the way the caller named it.
 
 // krev is the subset of a Knative Revision this reads.
 type krev struct {
@@ -133,7 +133,7 @@ func parseRevisionName(name string) (serviceName, service, revision string, err 
 // FromKnativeRevision maps a Knative Revision onto run.v2.Revision.
 func FromKnativeRevision(r krev, serviceName string) *runpb.Revision {
 	out := &runpb.Revision{
-		Name:               serviceName + "/revisions/" + r.Metadata.Name,
+		Name:               serviceName + "/revisions/" + RevisionID(serviceName, r.Metadata.Labels[labelService], r.Metadata.Name),
 		Uid:                r.Metadata.UID,
 		Service:            serviceName,
 		CreateTime:         timestamppb.New(r.Metadata.CreationTimestamp),
@@ -216,7 +216,12 @@ func (r *RevisionsServer) GetRevision(ctx context.Context, req *runpb.GetRevisio
 	if err != nil {
 		return nil, err
 	}
-	kr, err := r.s.kn.Revision(ctx, service, revision)
+	k, err := r.s.service(ctx, serviceName, service)
+	if err != nil {
+		return nil, apierror.NotFound("revision %s not found", req.GetName())
+	}
+	kname := k.Metadata.Name
+	kr, err := r.s.kn.Revision(ctx, kname, kRevisionName(serviceName, kname, revision))
 	if err != nil {
 		return nil, apierror.NotFound("revision %s not found", req.GetName())
 	}
@@ -233,10 +238,11 @@ func (r *RevisionsServer) ListRevisions(ctx context.Context, req *runpb.ListRevi
 	}
 	// The service first: listing the revisions of a service that does not
 	// exist is NOT_FOUND, not an empty page.
-	if _, err := r.s.kn.Get(ctx, service); err != nil {
-		return nil, apierror.NotFound("service %s not found", req.GetParent())
+	k, err := r.s.service(ctx, req.GetParent(), service)
+	if err != nil {
+		return nil, err
 	}
-	items, err := r.s.kn.Revisions(ctx, service)
+	items, err := r.s.kn.Revisions(ctx, k.Metadata.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -275,19 +281,20 @@ func (r *RevisionsServer) DeleteRevision(ctx context.Context, req *runpb.DeleteR
 	if err != nil {
 		return nil, err
 	}
-	k, err := r.s.kn.Get(ctx, service)
+	k, err := r.s.service(ctx, serviceName, service)
 	if err != nil {
-		return nil, apierror.NotFound("service %s not found", serviceName)
+		return nil, err
 	}
 	if k.Metadata.Labels[k8s.OwnedLabel] != k8s.OwnedValue {
 		return nil, apierror.FailedPrecondition(
 			"service %s was not created by CloudBurrow and its revisions will not be deleted", serviceName)
 	}
-	kr, err := r.s.kn.Revision(ctx, service, revision)
+	krevision := kRevisionName(serviceName, k.Metadata.Name, revision)
+	kr, err := r.s.kn.Revision(ctx, k.Metadata.Name, krevision)
 	if err != nil {
 		return nil, apierror.NotFound("revision %s not found", req.GetName())
 	}
-	if k.servingRevisions()[revision] || k.Status.LatestReadyRevisionName == revision && len(k.Status.Traffic) == 0 {
+	if k.servingRevisions()[krevision] || k.Status.LatestReadyRevisionName == krevision && len(k.Status.Traffic) == 0 {
 		return nil, apierror.FailedPrecondition(
 			"revision %s is serving traffic for %s and cannot be deleted; route its traffic to another revision first",
 			revision, serviceName)
@@ -297,7 +304,7 @@ func (r *RevisionsServer) DeleteRevision(ctx context.Context, req *runpb.DeleteR
 		_ = r.s.ops.Succeed(op.Name, FromKnativeRevision(kr, serviceName))
 		return r.s.toProtoOperation(op.Name)
 	}
-	if err := r.s.kn.DeleteRevision(ctx, revision); err != nil {
+	if err := r.s.kn.DeleteRevision(ctx, krevision); err != nil {
 		return nil, err
 	}
 	op := r.s.ops.Create(serviceName, req.GetName())

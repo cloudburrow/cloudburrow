@@ -20,6 +20,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/service/vertexai"
 )
 
@@ -29,15 +30,18 @@ import (
 // service: it is handed the same objects the services use, so there is no way
 // for it to answer from anywhere else.
 type consoleDeps struct {
-	cfg       config.Config
-	localAI   *vertexai.Server
-	projects  *resourcemanager.Registry
-	coord     *lifecycle.Coordinator
-	cluster   interface{ ServerVersion() string }
-	tasks     *tasksService
-	secrets   *secretsService
-	kms       *kmsService
-	scheduler *schedulerService
+	cfg     config.Config
+	localAI *vertexai.Server
+	// localModels manages the local AI models, shared with the admin API
+	// (#1396); nil makes one for the console alone.
+	localModels *localai.Manager
+	projects    *resourcemanager.Registry
+	coord       *lifecycle.Coordinator
+	cluster     interface{ ServerVersion() string }
+	tasks       *tasksService
+	secrets     *secretsService
+	kms         *kmsService
+	scheduler   *schedulerService
 	// memorystore is the Memorystore admin API (#1302), whose instances the
 	// Memorystore page creates, edits and deletes.
 	memorystore *memorystoreAdminService
@@ -91,7 +95,10 @@ func buildConsole(d consoleDeps) *console.Server {
 	srv := console.New(addr, consoleStatus(d), providers...)
 	srv.SetPlayground(playgroundFor(d))
 	srv.SetPrediction(predictionFor(d))
-	srv.SetLocalModels(localModelsFor(d.cfg, d.localAI))
+	if d.localModels == nil {
+		d.localModels = localModelsFor(d.cfg, d.localAI)
+	}
+	srv.SetLocalModels(d.localModels)
 	srv.SetMetrics(metrics)
 	// The history is the console's, not a browser tab's. Kept server-side so
 	// it survives a reload and so the sampling rate does not depend on how
@@ -176,7 +183,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
 			readyTimeout:   time.Duration(d.cfg.ReadyTimeout),
-		}, runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)},
+		}, runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run), hostSteps: d.cfg.CloudBuildHostSteps},
 			// Artifact Registry's repositories are served on the Run port (#1347).
 			artifactRegistryProvider{defaultProject: d.cfg.DefaultProject()},
 			// Cloud Functions v2 is served on the Run port too (#1377).
@@ -248,10 +255,10 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if sqlAdminEnabled(d.cfg) {
 		var versions []string
 		if enabled[config.ServiceCloudSQL] {
-			versions = append(versions, "POSTGRES_17")
+			versions = append(versions, sqladmin.EngineVersions("POSTGRES")...)
 		}
 		if enabled[config.ServiceCloudSQLMySQL] {
-			versions = append(versions, "MYSQL_8_4")
+			versions = append(versions, sqladmin.EngineVersions("MYSQL")...)
 		}
 		host := d.cfg.BindAddress
 		if host == "" || host == "0.0.0.0" || host == "::" {

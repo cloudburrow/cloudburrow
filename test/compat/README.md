@@ -91,6 +91,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_RUN_STORAGE`, `CLOUDBURROW_TEST_RUN_PUBSUB` | as `STORAGE` and `PUBSUB` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER`, `CLOUDBURROW_TEST_RUN_LOGGING` | as `KMS`, `SCHEDULER` and `LOGGING` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_TASKS_LOGGING` | as `LOGGING` | the Cloud Tasks dispatch log (#1256), in the storage shard, so the Logging tests stay in served |
+| `CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER` | as `RESOURCEMANAGER` | BigQuery's `JOBS_BY_FOLDER` and `JOBS_BY_ORGANIZATION` (#1392), in the emulators shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_RUN_BIGQUERY` | as `BIGQUERY` | the Cloud Run revision refused by the BigQuery front (#874); see below |
 | `CLOUDBURROW_TEST_RUN_SQLADMIN` | as `SQLADMIN` | the Cloud Run services and job with a Cloud SQL volume (#1346), without the Cloud SQL suite |
 | `CLOUDBURROW_TEST_SPANNER` | `SPANNER_EMULATOR_HOST` | Spanner |
@@ -108,7 +109,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_BIGQUERY`, `CLOUDBURROW_TEST_BIGQUERY_STORAGE`, `CLOUDBURROW_TEST_BIGQUERY_PROJECT` | `CLOUDBURROW_BIGQUERY_ENDPOINT`, `CLOUDBURROW_BIGQUERY_STORAGE_ENDPOINT`, `GOOGLE_CLOUD_PROJECT` | BigQuery, whose emulator serves the instance's one project |
 | `CLOUDBURROW_TEST_LOCALAI` | the `local AI:` line of `up.log` | the generation tests; only with `--local-ai-model` |
 | `CLOUDBURROW_TEST_PREDICTION` | the `local AI:` line of `up.log` | `TestPredictionClientReachesACustomEndpoint`; any instance with Cloud Run, which starts the local AI endpoint for PredictionService (#1193) |
-| `CLOUDBURROW_TEST_EMBEDDINGS` | the `local AI:` line of `up.log` | `TestEmbeddingGemmaThroughTheOfficialSDK`, `TestEmbeddingGemmaThroughThePredictionClient`, `TestEmbedContentThroughThePredictionClient`, `TestRawPredictOnTheEmbeddingModel`, `TestStreamingPredictOnTheEmbeddingModel` and, with `CLOUDBURROW_TEST_CONSOLE`, `TestConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK` (#1305) and `TestConsoleLocalModelsUnloadDeleteDownloadLoad` (#1306, which downloads the model again); only from a `make build-onnx` binary started with `--local-ai-embeddings` and `ONNXRUNTIME_LIB` set (#41) |
+| `CLOUDBURROW_TEST_EMBEDDINGS` | the `local AI:` line of `up.log` | `TestEmbeddingGemmaThroughTheOfficialSDK`, `TestEmbeddingGemmaThroughThePredictionClient`, `TestEmbedContentThroughThePredictionClient`, `TestRawPredictOnTheEmbeddingModel`, `TestStreamingPredictOnTheEmbeddingModel` and, with `CLOUDBURROW_TEST_CONSOLE`, `TestConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK` (#1305) and `TestConsoleLocalModelsUnloadDeleteDownloadLoad` (#1306, which downloads the model again) and `TestConsoleLocalModelsLoadEmbedUnload` (#1396, with `CLOUDBURROW_TEST_CONTROL` and the admin token); only from a `make build-onnx` binary started with `--local-ai-embeddings` and `ONNXRUNTIME_LIB` set (#41) |
 | `CLOUDBURROW_TEST_GCLOUD` | `--gcloud`, else `gcloud` on PATH | the gcloud and gsutil tests |
 | `CLOUDBURROW_TEST_TOFU` | `--tofu`, else `tofu` on PATH | the `TestTofu*` tests |
 
@@ -125,6 +126,7 @@ neither list.
 | `CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE` | `TestStorageVersioningPersistentMode`, against the builtin `storage-server` |
 | `CLOUDBURROW_TEST_SIGNING_KEY`, `CLOUDBURROW_TEST_SIGNING_EMAIL` | the signed URL tests, against a builtin `storage-server` started with `--signing-cert` |
 | `CLOUDBURROW_TEST_FUNCTIONS` | `TestFunctionsFrameworkBuiltWithBuildpacks`, `TestFunctionsRebuildReusesLayers` and `TestFunctionsBuildBrokenModulePathFails`, which run only when it is `1` |
+| `CLOUDBURROW_TEST_STEP_IMAGE` | the Cloud Build arbitrary-step tests (#1382): the shell image their steps run, instead of `alpine:3.20`, for one already on the host |
 | `CLOUDBURROW_TEST_NAMESPACE` | the Spanner restart and in-cluster tests; defaults to `cloudburrow`, the namespace every instance uses |
 
 The restart probes are driven by ci.yml's compat job, which runs each setup, stops the

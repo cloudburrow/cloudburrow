@@ -83,15 +83,26 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	name := fmt.Sprintf("%s/services/%s", req.GetParent(), id)
 	svc.Name = name
 
-	if _, err := s.kn.Get(ctx, id); err == nil {
+	if _, err := s.service(ctx, name, id); err == nil {
 		return nil, apierror.AlreadyExists("service %s already exists", name)
 	}
+	// Its Knative Service carries the project and location (#1400), so
+	// another project's or region's service of this ID is another object.
+	kname := serviceKName(name)
+	if k, err := s.kn.Get(ctx, kname); err == nil {
+		// Only an older version's service whose ID is this name can hold it.
+		holder := k.Metadata.Annotations[annRunName]
+		if holder == "" {
+			holder = "another service"
+		}
+		return nil, apierror.FailedPrecondition("the Knative Service %s this service would be created as is held by %s", kname, holder)
+	}
 
-	manifest, err := renderService(svc, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(name), svc.GetTemplate().GetServiceAccount()), s.cloudSQLConfig())
+	manifest, err := renderService(svc, kname, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(name), svc.GetTemplate().GetServiceAccount()), s.cloudSQLConfig())
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkTrafficRevisions(ctx, id, svc.GetTraffic()); err != nil {
+	if err := s.checkTrafficRevisions(ctx, name, kname, svc.GetTraffic()); err != nil {
 		return nil, err
 	}
 	// validate_only: the request was checked in full, including the
@@ -110,7 +121,7 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	}
 
 	op := s.ops.Create(req.GetParent(), name)
-	go s.awaitReady(context.WithoutCancel(ctx), op.Name, id, req.GetParent(), 0)
+	go s.awaitReady(context.WithoutCancel(ctx), op.Name, kname, req.GetParent(), 0)
 	return s.toProtoOperation(op.Name)
 }
 
@@ -133,7 +144,7 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 		return nil, err
 	}
 	parent := strings.TrimSuffix(svc.GetName(), "/services/"+id)
-	existing, err := s.kn.Get(ctx, id)
+	existing, err := s.service(ctx, svc.GetName(), id)
 	if err != nil {
 		if !req.GetAllowMissing() {
 			return nil, apierror.NotFound("service %s not found", svc.GetName())
@@ -153,11 +164,14 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 			return nil, err
 		}
 	}
-	manifest, err := renderService(svc, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()), s.cloudSQLConfig())
+	// Updated in place, under the name it has: an older version's service
+	// keeps its ID as its Knative name (#1400).
+	kname := existing.Metadata.Name
+	manifest, err := renderService(svc, kname, s.kn.namespace(), s.instance, s.secrets, s.injectedFor(projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()), s.cloudSQLConfig())
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkTrafficRevisions(ctx, id, svc.GetTraffic()); err != nil {
+	if err := s.checkTrafficRevisions(ctx, svc.GetName(), kname, svc.GetTraffic()); err != nil {
 		return nil, err
 	}
 	if req.GetValidateOnly() {
@@ -171,16 +185,17 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 	if err := s.kn.Apply(ctx, manifest); err != nil {
 		return nil, err
 	}
-	applied, err := s.kn.Get(ctx, id)
+	applied, err := s.kn.Get(ctx, kname)
 	if err != nil {
 		return nil, apierror.Internal(err, "read back service %s", id)
 	}
 	op := s.ops.Create(parent, svc.GetName())
-	go s.awaitReady(context.WithoutCancel(ctx), op.Name, id, parent, applied.Metadata.Generation)
+	go s.awaitReady(context.WithoutCancel(ctx), op.Name, kname, parent, applied.Metadata.Generation)
 	return s.toProtoOperation(op.Name)
 }
 
-// awaitReady polls Knative until the service is ready or the bound elapses.
+// awaitReady polls Knative until the service, Knative Service kname, is
+// ready or the bound elapses.
 //
 // This is bounded polling, not an injected clock: Knative is an external
 // component whose clock we cannot advance (architecture §9).
@@ -188,10 +203,10 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 // minGeneration, when set, is the spec generation that must have been
 // reconciled first: after an update, Ready=True can still describe the
 // previous revision until Knative observes the new spec.
-func (s *Server) awaitReady(ctx context.Context, opName, id, parent string, minGeneration int64) {
+func (s *Server) awaitReady(ctx context.Context, opName, kname, parent string, minGeneration int64) {
 	deadline := time.Now().Add(s.readyTimeout)
 	for time.Now().Before(deadline) {
-		k, err := s.kn.Get(ctx, id)
+		k, err := s.kn.Get(ctx, kname)
 		// Only once the new spec is observed do the conditions describe it.
 		if err == nil && k.Status.ObservedGeneration >= minGeneration {
 			ready, reason := k.Ready()
@@ -219,8 +234,12 @@ func (s *Server) awaitReady(ctx context.Context, opName, id, parent string, minG
 		case <-time.After(time.Second):
 		}
 	}
+	target := kname
+	if op, err := s.ops.Get(opName); err == nil && op.Target != "" {
+		target = op.Target
+	}
 	_ = s.ops.Fail(opName, apierror.FailedPrecondition(
-		"service %s did not become ready within %s", id, s.readyTimeout))
+		"service %s did not become ready within %s", target, s.readyTimeout))
 }
 
 // toProtoOperation renders a tracked operation.
@@ -258,12 +277,31 @@ func (s *Server) GetService(ctx context.Context, req *runpb.GetServiceRequest) (
 	if err != nil {
 		return nil, err
 	}
-	k, err := s.kn.Get(ctx, id)
+	k, err := s.service(ctx, req.GetName(), id)
 	if err != nil {
-		return nil, apierror.NotFound("service %s not found", req.GetName())
+		return nil, err
 	}
 	parent := strings.TrimSuffix(req.GetName(), "/services/"+id)
 	return FromKnative(k, parent), nil
+}
+
+// service reads the Knative Service behind a Cloud Run service name: the
+// scoped one (#1400), or one an older version created under the ID alone,
+// and only if it is that name's, so another project's or region's service
+// of the same ID is NOT_FOUND here, not returned under the wrong name.
+// Callers reach Knative by the returned object's own name.
+func (s *Server) service(ctx context.Context, name, id string) (ksvc, error) {
+	for _, kname := range []string{serviceKName(name), id} {
+		k, err := s.kn.Get(ctx, kname)
+		if err != nil {
+			continue
+		}
+		if n := k.Metadata.Annotations[annRunName]; n != "" && n != name {
+			continue
+		}
+		return k, nil
+	}
+	return ksvc{}, apierror.NotFound("service %s not found", name)
 }
 
 // ListServices lists services under a parent.
@@ -279,6 +317,11 @@ func (s *Server) ListServices(ctx context.Context, req *runpb.ListServicesReques
 	names := make([]string, 0, len(items))
 	for _, k := range items {
 		svc := FromKnative(k, req.GetParent())
+		// Only the parent's: every project's services are in the one
+		// namespace (#1399).
+		if !strings.HasPrefix(svc.GetName(), req.GetParent()+"/services/") {
+			continue
+		}
 		byName[svc.GetName()] = svc
 		names = append(names, svc.GetName())
 	}
@@ -299,16 +342,14 @@ func (s *Server) DeleteService(ctx context.Context, req *runpb.DeleteServiceRequ
 	if err != nil {
 		return nil, err
 	}
-	// validate_only and etag need the service as it is (#581); a plain
-	// delete does not, and keeps its old behaviour for a missing one.
-	if req.GetValidateOnly() || req.GetEtag() != "" {
-		existing, err := s.kn.Get(ctx, id)
-		if err != nil {
-			return nil, apierror.NotFound("service %s not found", req.GetName())
-		}
-		if err := checkEtag(req.GetEtag(), existing); err != nil {
-			return nil, err
-		}
+	// The service as it is: for validate_only and etag (#581), and so a
+	// delete never removes another project's service of the same ID (#1399).
+	existing, err := s.service(ctx, req.GetName(), id)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkEtag(req.GetEtag(), existing); err != nil {
+		return nil, err
 	}
 	parent := strings.TrimSuffix(req.GetName(), "/services/"+id)
 	if req.GetValidateOnly() {
@@ -316,7 +357,7 @@ func (s *Server) DeleteService(ctx context.Context, req *runpb.DeleteServiceRequ
 		_ = s.ops.Succeed(op.Name, &runpb.Service{Name: req.GetName()})
 		return s.toProtoOperation(op.Name)
 	}
-	if err := s.kn.Delete(ctx, id); err != nil {
+	if err := s.kn.Delete(ctx, existing.Metadata.Name); err != nil {
 		return nil, err
 	}
 	op := s.ops.Create(parent, req.GetName())

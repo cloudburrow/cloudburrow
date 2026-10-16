@@ -546,6 +546,11 @@ func (s *ksvcStore) Run(_ context.Context, stdin string, args ...string) (string
 		if j, ok := s.applied[args[2]]; ok {
 			return j, nil
 		}
+	case args[0] == "delete" && args[1] == "ksvc":
+		if _, ok := s.applied[args[2]]; ok {
+			delete(s.applied, args[2])
+			return "", nil
+		}
 	}
 	return "", errors.New("NotFound")
 }
@@ -554,7 +559,7 @@ func (s *ksvcStore) Run(_ context.Context, stdin string, args ...string) (string
 // FromKnative reports on env: the name, the template's annotations, and
 // each container's image and env.
 func ksvcFromManifest(m string, rv int) (string, map[string]any) {
-	var name string
+	var name, runName string
 	ann := map[string]string{}
 	var containers []map[string]any
 	var env []map[string]any
@@ -575,6 +580,8 @@ func ksvcFromManifest(m string, rv int) (string, map[string]any) {
 		switch {
 		case strings.HasPrefix(line, "  name: ") && name == "":
 			name = strings.TrimPrefix(line, "  name: ")
+		case strings.HasPrefix(line, "    "+annRunName+": "):
+			runName = unq(strings.TrimPrefix(line, "    "+annRunName+": "))
 		case line == "      annotations:":
 			section = "annotations"
 		case line == "    spec:":
@@ -596,7 +603,7 @@ func ksvcFromManifest(m string, rv int) (string, map[string]any) {
 	flush()
 	return name, map[string]any{
 		"metadata": map[string]any{"name": name, "resourceVersion": strconv.Itoa(rv), "generation": rv,
-			"labels": map[string]string{"cloudburrow.dev/owned": "true"}},
+			"labels": map[string]string{"cloudburrow.dev/owned": "true"}, "annotations": map[string]string{annRunName: runName}},
 		"spec": map[string]any{"template": map[string]any{
 			"metadata": map[string]any{"annotations": ann},
 			"spec":     map[string]any{"containers": containers}}},
@@ -650,7 +657,7 @@ func TestGetServiceShowsOnlyTheCallersEnvAndThePodHasBoth(t *testing.T) {
 	pod := func() []string {
 		t.Helper()
 		var k ksvc
-		if err := json.Unmarshal([]byte(store.applied["app"]), &k); err != nil {
+		if err := json.Unmarshal([]byte(store.applied[serviceKName(parent+"/services/app")]), &k); err != nil {
 			t.Fatal(err)
 		}
 		var out []string

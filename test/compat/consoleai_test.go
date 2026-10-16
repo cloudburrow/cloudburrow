@@ -166,3 +166,111 @@ func TestConsoleLocalModelsUnloadDeleteDownloadLoad(t *testing.T) {
 		t.Fatalf("after load: %d values, want 768", len(v))
 	}
 }
+
+// TestConsoleLocalModelsLoadEmbedUnload (#1396) needs the real model, as the
+// embeddings tests do, and downloads nothing. The console's Local models API
+// unloads the served model, and the genai SDK's EmbedContent is refused;
+// /admin/local-models refuses a request without the admin token and, with
+// it, lists the model unloaded — one manager behind both — and loads it
+// again. The console's embedding view then sends :embedContent and gets the
+// SDK's vector, with the token count the API returns. The console unloads
+// it and loads it again, and the SDK embeds again.
+func TestConsoleLocalModelsLoadEmbedUnload(t *testing.T) {
+	h := New(t)
+	cl := genaiClientAt(t, h, EnvEmbeddings)
+	addr := consoleAddr(t, h)
+	control := h.Endpoint(EnvControl)
+	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	defer cancel()
+	act := func(action string) (int, string) {
+		return consoleDo(t, addr, http.MethodPost, "/api/ai/local-models/"+embeddingModel+"/"+action, "{}")
+	}
+	if m := consoleLocalModelState(t, addr, embeddingModel); m.State != "downloaded" || !m.Loaded {
+		t.Fatalf("served model on the page: %+v", m)
+	}
+	t.Cleanup(func() {
+		if s := consoleLocalModelState(t, addr, embeddingModel); s.State == "downloaded" && !s.Loaded {
+			_, _ = act("load")
+		}
+	})
+
+	if code, body := act("unload"); code != http.StatusOK || !strings.Contains(body, `"loaded":false`) {
+		t.Fatalf("console unload = %d %s", code, body)
+	}
+	contents := []*genai.Content{genai.NewContentFromText("unloaded", genai.RoleUser)}
+	if _, err := cl.Models.EmbedContent(ctx, embeddingModel, contents, nil); err == nil ||
+		!strings.Contains(err.Error(), "unloaded") {
+		t.Fatalf("EmbedContent after the console's unload: %v, want the unload refusal", err)
+	}
+
+	// The admin API: the token is required, and it sees the console's unload.
+	req, _ := http.NewRequest(http.MethodGet, "http://"+control+"/admin/local-models", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("/admin/local-models without the token = %d, want 401", resp.StatusCode)
+	}
+	if adminToken(t) == "" {
+		t.Skipf("%s is not set and no instance directory is known; /admin/local-models needs the token", EnvAdminToken)
+	}
+	code, body := adminDo(t, http.MethodGet, "http://"+control+"/admin/local-models", "", nil)
+	var list struct {
+		Models []consoleLocalModel `json:"models"`
+	}
+	if err := json.Unmarshal([]byte(body), &list); code != http.StatusOK || err != nil {
+		t.Fatalf("/admin/local-models = %d %s", code, body)
+	}
+	for _, m := range list.Models {
+		if m.ID == embeddingModel && (m.Loaded || m.State != "downloaded") {
+			t.Errorf("admin API after the console's unload: %+v, want downloaded and not loaded", m)
+		}
+	}
+	if code, body := adminDo(t, http.MethodPost, "http://"+control+"/admin/local-models/"+embeddingModel+"/load",
+		"application/json", strings.NewReader("{}")); code != http.StatusOK || !strings.Contains(body, `"loaded":true`) {
+		t.Fatalf("admin load = %d %s", code, body)
+	}
+	if m := consoleLocalModelState(t, addr, embeddingModel); !m.Loaded {
+		t.Fatalf("the console after the admin API's load: %+v", m)
+	}
+
+	// The embedding view's :embedContent is the SDK's EmbedContent.
+	const text = "Local models are loaded from the console."
+	sdk, err := cl.Models.EmbedContent(ctx, embeddingModel, genai.Text(text), nil)
+	if err != nil || len(sdk.Embeddings) != 1 {
+		t.Fatalf("SDK EmbedContent: %v", err)
+	}
+	code, body = consoleDo(t, addr, http.MethodPost, "/api/ai/embeddings?method=embedContent&model="+embeddingModel,
+		`{"content":{"role":"user","parts":[{"text":"`+text+`"}]}}`)
+	var got struct {
+		Embedding struct {
+			Values []float32 `json:"values"`
+		} `json:"embedding"`
+		UsageMetadata struct {
+			PromptTokenCount int `json:"promptTokenCount"`
+		} `json:"usageMetadata"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); code != http.StatusOK || err != nil {
+		t.Fatalf("console :embedContent = %d %s", code, body)
+	}
+	if v := got.Embedding.Values; len(v) != 768 || len(v) != len(sdk.Embeddings[0].Values) {
+		t.Fatalf("console vector has %d values, the SDK's %d, want 768", len(v), len(sdk.Embeddings[0].Values))
+	} else if c := cosine(v, sdk.Embeddings[0].Values); c < 0.9999 {
+		t.Errorf("console and SDK vectors differ: cosine %.6f", c)
+	}
+	if got.UsageMetadata.PromptTokenCount <= 0 {
+		t.Errorf("console :embedContent has no promptTokenCount: %s", body)
+	}
+
+	if code, body := act("unload"); code != http.StatusOK {
+		t.Fatalf("console unload = %d %s", code, body)
+	}
+	if code, body := act("load"); code != http.StatusOK || !strings.Contains(body, `"loaded":true`) {
+		t.Fatalf("console load = %d %s", code, body)
+	}
+	if v := embed(t, ctx, cl, nil, "loaded from the console")[0]; len(v) != 768 {
+		t.Fatalf("after the console's load: %d values, want 768", len(v))
+	}
+}

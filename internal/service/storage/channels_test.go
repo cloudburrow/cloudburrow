@@ -136,3 +136,101 @@ func TestChannelLifecycle(t *testing.T) {
 }
 
 func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }
+
+// watchAll's objects.list parameters select which objects' changes a
+// channel delivers, as they select what objects.list lists (#1393), and
+// versions=true adds noncurrent versions' changes.
+func TestChannelSelection(t *testing.T) {
+	var mu sync.Mutex
+	got := map[string][]string{} // channel id: "state name#generation"
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var o struct {
+			Name       string `json:"name"`
+			Generation string `json:"generation"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&o)
+		mu.Lock()
+		defer mu.Unlock()
+		if st := r.Header.Get("X-Goog-Resource-State"); st != "sync" {
+			id := r.Header.Get("X-Goog-Channel-ID")
+			got[id] = append(got[id], st+" "+o.Name)
+		}
+	}))
+	defer hook.Close()
+	s, err := NewServer(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(s)
+	defer h.Close()
+	do := func(method, path, body string) (int, map[string]any) {
+		t.Helper()
+		req, _ := http.NewRequest(method, h.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	if code, _ := do("POST", "/storage/v1/b?project=p", `{"name":"sel","versioning":{"enabled":true}}`); code != 200 {
+		t.Fatalf("bucket insert %d", code)
+	}
+	watch := func(id, query string) int {
+		code, _ := do("POST", "/storage/v1/b/sel/o/watch?"+query, `{"id":"`+id+`","type":"web_hook","address":"`+hook.URL+`"}`)
+		return code
+	}
+	for id, q := range map[string]string{
+		"delim":  "delimiter=/&includeTrailingDelimiter=true",
+		"under":  "prefix=d/&delimiter=/",
+		"range":  "startOffset=b&endOffset=d",
+		"glob":   "matchGlob=**.json",
+		"live":   "prefix=v/",
+		"vers":   "prefix=v/&versions=true",
+		"paging": "maxResults=5&projection=full&pageToken=x",
+	} {
+		if code := watch(id, q); code != 200 {
+			t.Fatalf("watchAll %s (%s) = %d", id, q, code)
+		}
+	}
+	if code := watch("bad", "matchGlob=a["); code != 400 {
+		t.Errorf("watchAll with a malformed matchGlob = %d, want 400", code)
+	}
+	put := func(name string) map[string]any {
+		_, o := do("POST", "/upload/storage/v1/b/sel/o?uploadType=media&name="+name, "x")
+		return o
+	}
+	for _, n := range []string{"a.txt", "b.json", "c.txt", "d.txt", "d/", "d/e.json", "d/f/g.txt"} {
+		put(n)
+	}
+	first := put("v/x")
+	put("v/x") // archives the first
+	gen, _ := first["generation"].(string)
+	do("PATCH", "/storage/v1/b/sel/o/v%2Fx?generation="+gen, `{"metadata":{"k":"v"}}`)
+	do("DELETE", "/storage/v1/b/sel/o/v%2Fx?generation="+gen, "")
+	do("DELETE", "/storage/v1/b/sel/o/v%2Fx", "") // archives the live one
+	s.DispatchChannels(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := map[string][]string{
+		"delim": {"exists a.txt", "exists b.json", "exists c.txt", "exists d.txt", "exists d/"},
+		"under": {"exists d/", "exists d/e.json"},
+		"range": {"exists b.json", "exists c.txt"},
+		"glob":  {"exists b.json", "exists d/e.json"},
+		"live":  {"exists v/x", "exists v/x", "not_exists v/x"},
+		"vers": {"exists v/x", "not_exists v/x", "exists v/x", "exists v/x", "not_exists v/x",
+			"not_exists v/x"},
+	}
+	for id, w := range want {
+		if strings.Join(got[id], ", ") != strings.Join(w, ", ") {
+			t.Errorf("channel %s got [%s], want [%s]", id, strings.Join(got[id], ", "), strings.Join(w, ", "))
+		}
+	}
+	if len(got["paging"]) != 10 {
+		t.Errorf("paging and projection narrowed a channel: %d messages, want 10", len(got["paging"]))
+	}
+}

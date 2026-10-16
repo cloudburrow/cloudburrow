@@ -585,6 +585,15 @@ type Config struct {
 	// beyond the fixed allow-list (#598). Hooks get nothing else of it.
 	HookEnv []string `json:"hookEnv,omitempty"`
 
+	// CloudBuildHostSteps lets Cloud Build's CreateBuild and RetryBuild run
+	// a step that is not a docker build, docker push or pack step (#1382).
+	// Such a step runs as a container on the host's Docker with the Docker
+	// socket mounted, which gives it control of the host, so it is opt-in,
+	// and even then only for builds submitted from the host's loopback,
+	// never from a pod (ADR-0004). A discovered ./cloudburrow.json cannot
+	// set it.
+	CloudBuildHostSteps bool `json:"cloudbuildHostSteps,omitempty"`
+
 	// SeedFile is a seed document, the /admin/seed body, that `up` applies
 	// once the services start and before the instance reports ready (#286).
 	// Empty applies nothing.

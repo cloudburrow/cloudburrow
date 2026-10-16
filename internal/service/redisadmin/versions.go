@@ -102,12 +102,28 @@ func (s *Server) UpgradeInstance(ctx context.Context, req *redispb.UpgradeInstan
 }
 
 func (c *instances) upgrade(ctx context.Context, sh Shell, from *record, v string) error {
-	data, err := c.snapshot(ctx, sh, from.Server, from.addr, from.AuthString)
+	data, err := c.snapshot(ctx, sh, from.dataServer(), from.addr, from.AuthString)
 	if err != nil {
 		return err
 	}
 	next := *from
 	next.Version = v
+	if from.ha() {
+		// Every node on the new image, the primary where it was, then the
+		// data loaded into the primary, which its replicas sync.
+		if err := c.startHA(ctx, next); err != nil {
+			return err
+		}
+		c.mu.Lock()
+		addr := from.addr
+		if r, ok := c.byID[from.Name]; ok {
+			r.Version = v
+			addr = r.addr
+			_ = c.save(r)
+		}
+		c.mu.Unlock()
+		return c.load(ctx, sh, next.dataServer(), next.binary(), addr, next.AuthString, data)
+	}
 	addr, err := c.prov.Provision(ctx, next.spec())
 	if err != nil {
 		return err

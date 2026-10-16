@@ -350,17 +350,19 @@ func logSources(ctx context.Context, cfg config.Config, o logsOptions, k *kubect
 		if err != nil {
 			return nil, err
 		}
-		for runName, ksvc := range services {
+		for runName, ksvcs := range services {
 			if o.resource != "" && runName != o.resource {
 				continue
 			}
-			pods, err := ownedPods(ctx, k, runadapter.WorkloadNamespace, "serving.knative.dev/service="+ksvc)
-			if err != nil {
-				return nil, err
-			}
-			for _, p := range pods {
-				p.source = "run/" + runName
-				out = append(out, podSources(k, p, o)...)
+			for _, ksvc := range ksvcs {
+				pods, err := ownedPods(ctx, k, runadapter.WorkloadNamespace, "serving.knative.dev/service="+ksvc)
+				if err != nil {
+					return nil, err
+				}
+				for _, p := range pods {
+					p.source = "run/" + runName
+					out = append(out, podSources(k, p, o)...)
+				}
 			}
 		}
 		if o.resource != "" && len(services) > 0 {
@@ -412,16 +414,18 @@ func ownedPods(ctx context.Context, k *kubectl, namespace, selector string) ([]p
 	return out, nil
 }
 
-// ownedRunServices maps each of this instance's Cloud Run services to its
-// Knative Service. Knative's pods carry no ownership label of CloudBurrow's,
-// so ownership is checked on the Service, and only its pods are read.
-func ownedRunServices(ctx context.Context, k *kubectl, instance string) (map[string]string, error) {
+// ownedRunServices maps each of this instance's Cloud Run service IDs to
+// its Knative Services: one per project and region that has a service of
+// the ID, each named for its scope (#1400). Knative's pods carry no
+// ownership label of CloudBurrow's, so ownership is checked on the Service,
+// and only its pods are read.
+func ownedRunServices(ctx context.Context, k *kubectl, instance string) (map[string][]string, error) {
 	b, err := k.run(ctx, "-n", runadapter.WorkloadNamespace, "get", "ksvc",
 		"-l", "cloudburrow.dev/owned=true,cloudburrow.dev/instance="+instance, "-o", "json")
 	if err != nil {
 		// Knative is installed only when Cloud Run is enabled; without it
 		// there are simply no services.
-		return map[string]string{}, nil
+		return map[string][]string{}, nil
 	}
 	var list struct {
 		Items []struct {
@@ -434,7 +438,7 @@ func ownedRunServices(ctx context.Context, k *kubectl, instance string) (map[str
 	if err := json.Unmarshal(b, &list); err != nil {
 		return nil, err
 	}
-	out := map[string]string{}
+	out := map[string][]string{}
 	for _, it := range list.Items {
 		name := it.Metadata.Annotations["cloudburrow.dev/cloud-run-name"]
 		if i := strings.LastIndex(name, "/"); i >= 0 {
@@ -443,7 +447,7 @@ func ownedRunServices(ctx context.Context, k *kubectl, instance string) (map[str
 		if name == "" {
 			name = it.Metadata.Name
 		}
-		out[name] = it.Metadata.Name
+		out[name] = append(out[name], it.Metadata.Name)
 	}
 	return out, nil
 }

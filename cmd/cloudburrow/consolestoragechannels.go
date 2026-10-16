@@ -36,6 +36,8 @@ type channelJSON struct {
 	Expiration     string `json:"expiration"`
 	Created        string `json:"created"`
 	MessagesQueued int64  `json:"messagesQueued"`
+	// Watches is the objects.list selection the channel watches (#1393).
+	Watches string `json:"watches"`
 }
 
 func channelPath(path []string) (bucket, resourceID string, ok bool) {
@@ -88,17 +90,18 @@ func (p storageProvider) channelsSection(ctx context.Context, bucket string) con
 		return sec
 	}
 	list := console.Listing{
-		Columns:    []string{"Channel ID", "Address", "Expires", "Messages sent or queued", "Created"},
+		Columns:    []string{"Channel ID", "Address", "Watches", "Expires", "Messages sent or queued", "Created"},
 		NameColumn: "Resource ID",
 		Noun:       "channels",
 		Items:      []console.Resource{},
 		Note: "Object change notification channels, registered with objects.watchAll. Each gets a sync " +
-			"message, then a POST per object change. Stop ends one, as channels.stop does.",
+			"message, then a POST per change of an object a listing with its watchAll parameters (Watches) shows. " +
+			"Stop ends one, as channels.stop does.",
 	}
 	for _, c := range cs {
 		list.Items = append(list.Items, console.Resource{
 			Name: channelSegment + c.ResourceID,
-			Fields: map[string]string{"Channel ID": c.ID, "Address": c.Address, "Expires": channelExpiry(c.Expiration),
+			Fields: map[string]string{"Channel ID": c.ID, "Address": c.Address, "Watches": orDash(c.Watches), "Expires": channelExpiry(c.Expiration),
 				"Messages sent or queued": strconv.FormatInt(c.MessagesQueued, 10), "Created": c.Created},
 			Actions: []console.Action{channelStopAction()},
 		})

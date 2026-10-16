@@ -1,0 +1,208 @@
+CloudBurrow patch 31 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1401). Applies after patch 0030.
+
+The gap: nothing rounds a value written to a parameterized NUMERIC(P, S)
+or BIGNUMERIC(P, S) column to its scale, or refuses one with more than P
+digits (2.5 and 3.5 into a NUMERIC(2, 0) read back 2.5 and 3.5). BigQuery
+rounds it by the column's rounding mode and raises OUT_OF_RANGE past the
+precision (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#parameterized_decimal_type).
+
+The patch adds the SQLite function googlesqlite_round_decimal(v,
+precision, scale, mode, column), and RawSQLitePrefix: a statement
+starting with it is run as SQLite SQL, so the emulator (its patch 0020)
+can make, through a *sql.Tx, the triggers that call the function on each
+write. round_decimal_test.go fails without the patch and passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/driver.go
++++ b/driver.go
+@@ -478,9 +478,24 @@
+ 	return stmt, nil
+ }
+ 
++// RawSQLitePrefix starts a statement ExecContext runs as SQLite SQL, not
++// GoogleSQL: the emulator makes the triggers that round a value written to
++// a parameterized NUMERIC or BIGNUMERIC column with it, through a
++// *sql.Tx. CloudBurrow patch (cloudburrow/cloudburrow#1401).
++const RawSQLitePrefix = "/*googlesqlite:raw*/"
++
+ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (r driver.Result, e error) {
+ 	defer func() { e = c.translateConnDone(e) }()
+ 	defer recoverPanicAsError(&e)
++	if raw, ok := strings.CutPrefix(query, RawSQLitePrefix); ok {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1401): SQLite SQL,
++		// run as it is, in the connection's transaction if it has one.
++		vals := make([]any, 0, len(args))
++		for _, a := range args {
++			vals = append(vals, a.Value)
++		}
++		return c.conn.ExecContext(ctx, raw, vals...)
++	}
+ 	conn := internal.NewConnWithOptions(c.conn, nil, c.systemVars, c.scriptVars, c.materializeCTE)
+ 	actionFuncs, err := c.analyzer.Analyze(ctx, conn, query, args)
+ 	if err != nil {
+--- a/internal/function_register.go
++++ b/internal/function_register.go
+@@ -168,6 +168,12 @@
+ 		return string(b), err
+ 	}, deterministic); err != nil {
+ 		return fmt.Errorf("failed to register decode_array function: %w", err)
++	}
++
++	// CloudBurrow patch (cloudburrow/cloudburrow#1401): what a write to a
++	// parameterized NUMERIC or BIGNUMERIC column stores (round_decimal.go).
++	if err := sqlitex.RegisterFunc(conn, "googlesqlite_round_decimal", roundDecimal, deterministic); err != nil {
++		return fmt.Errorf("failed to register round_decimal function: %w", err)
+ 	}
+ 
+ 	if err := sqlitex.RegisterFunc(conn, "googlesqlite_group_by", func(v any) (any, error) {
+--- /dev/null
++++ b/internal/round_decimal.go
+@@ -0,0 +1,74 @@
++package internal
++
++import (
++	"fmt"
++	"math/big"
++	"strings"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// roundDecimal is googlesqlite_round_decimal(v, precision, scale, mode):
++// the NUMERIC or BIGNUMERIC v, as googlesqlite stores it, rounded to scale
++// digits after the point by mode (ROUND_HALF_EVEN, else
++// ROUND_HALF_AWAY_FROM_ZERO), and refused with an OUT_OF_RANGE error when
++// it then has more than precision digits. It is what a write to a
++// parameterized NUMERIC(P, S) or BIGNUMERIC(P, S) column stores
++// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#parameterized_decimal_type):
++// the emulator calls it from the column's triggers. CloudBurrow patch
++// (cloudburrow/cloudburrow#1401).
++func roundDecimal(v any, precision, scale int64, mode string, column string) (any, error) {
++	if v == nil {
++		return nil, nil
++	}
++	decoded, err := value.DecodeValue(v)
++	if err != nil || decoded == nil {
++		return v, err
++	}
++	nv, ok := decoded.(*value.NumericValue)
++	if !ok {
++		return v, nil
++	}
++	rounded := RoundRat(nv.Rat, scale, mode)
++	typ := "NUMERIC"
++	if nv.IsBigNumeric {
++		typ = "BIGNUMERIC"
++	}
++	if !RatFits(rounded, precision, scale) {
++		return nil, fmt.Errorf("OUT_OF_RANGE: Value %s is out of range for column %s of type %s(%d, %d)",
++			nv.Rat.FloatString(int(scale)), column, typ, precision, scale)
++	}
++	return value.EncodeValue(&value.NumericValue{Rat: rounded, IsBigNumeric: nv.IsBigNumeric})
++}
++
++func pow10(n int64) *big.Int { return new(big.Int).Exp(big.NewInt(10), big.NewInt(n), nil) }
++
++// RoundRat rounds r to scale digits after the point: halves away from zero,
++// or to even under ROUND_HALF_EVEN. CloudBurrow patch (#1401).
++func RoundRat(r *big.Rat, scale int64, mode string) *big.Rat {
++	m := new(big.Rat).Mul(r, new(big.Rat).SetInt(pow10(scale)))
++	neg := m.Sign() < 0
++	abs := new(big.Rat).Abs(m)
++	q, rem := new(big.Int).QuoRem(abs.Num(), abs.Denom(), new(big.Int))
++	// Compare twice the remainder with the denominator.
++	cmp := new(big.Int).Mul(rem, big.NewInt(2)).Cmp(abs.Denom())
++	switch {
++	case cmp > 0:
++		q.Add(q, big.NewInt(1))
++	case cmp == 0:
++		if !strings.EqualFold(mode, "ROUND_HALF_EVEN") || q.Bit(0) == 1 {
++			q.Add(q, big.NewInt(1))
++		}
++	}
++	if neg {
++		q.Neg(q)
++	}
++	return new(big.Rat).SetFrac(q, pow10(scale))
++}
++
++// RatFits is whether r, with at most scale digits after the point, has at
++// most precision digits in all. CloudBurrow patch (#1401).
++func RatFits(r *big.Rat, precision, scale int64) bool {
++	m := new(big.Rat).Mul(r, new(big.Rat).SetInt(pow10(scale)))
++	return new(big.Int).Abs(m.Num()).Cmp(pow10(precision)) < 0
++}
+--- /dev/null
++++ b/round_decimal_test.go
+@@ -0,0 +1,65 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// TestRoundDecimal is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1401): googlesqlite_round_decimal, called from a
++// trigger made by a RawSQLitePrefix statement, rounds a value written to a
++// NUMERIC column to its scale by the rounding mode, on INSERT and UPDATE,
++// and refuses one with more digits than its precision.
++func TestRoundDecimal(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=round_decimal")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	exec := func(q string) error { _, err := db.ExecContext(ctx, q); return err }
++	for _, q := range []string{
++		"CREATE TABLE `p.d.t` (id INT64, a NUMERIC, e NUMERIC)",
++		googlesqlite.RawSQLitePrefix + "CREATE TRIGGER `r_a` AFTER INSERT ON `p_d_t` FOR EACH ROW WHEN NEW.`a` IS NOT NULL BEGIN " +
++			"UPDATE `p_d_t` SET `a` = googlesqlite_round_decimal(NEW.`a`, 2, 0, 'ROUND_HALF_AWAY_FROM_ZERO', 'a') WHERE rowid = NEW.rowid; END",
++		googlesqlite.RawSQLitePrefix + "CREATE TRIGGER `r_e` AFTER INSERT ON `p_d_t` FOR EACH ROW WHEN NEW.`e` IS NOT NULL BEGIN " +
++			"UPDATE `p_d_t` SET `e` = googlesqlite_round_decimal(NEW.`e`, 3, 1, 'ROUND_HALF_EVEN', 'e') WHERE rowid = NEW.rowid; END",
++		googlesqlite.RawSQLitePrefix + "CREATE TRIGGER `u_a` AFTER UPDATE OF `a` ON `p_d_t` FOR EACH ROW WHEN NEW.`a` IS NOT NULL BEGIN " +
++			"UPDATE `p_d_t` SET `a` = googlesqlite_round_decimal(NEW.`a`, 2, 0, 'ROUND_HALF_AWAY_FROM_ZERO', 'a') WHERE rowid = NEW.rowid; END",
++		"INSERT INTO `p.d.t` (id, a, e) VALUES (1, 2.5, 0.25), (2, -3.5, 0.35), (3, NULL, -0.25)",
++		"UPDATE `p.d.t` SET a = 4.5 WHERE id = 3",
++	} {
++		if err := exec(q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	rows, err := db.QueryContext(ctx, "SELECT CAST(a AS STRING), CAST(e AS STRING) FROM `p.d.t` ORDER BY id")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var got []string
++	for rows.Next() {
++		var a, e sql.NullString
++		if err := rows.Scan(&a, &e); err != nil {
++			t.Fatal(err)
++		}
++		got = append(got, a.String+" "+e.String)
++	}
++	rows.Close()
++	if want := "3 0.2,-4 0.4,5 -0.2"; strings.Join(got, ",") != want {
++		t.Errorf("rows %q, want %q", strings.Join(got, ","), want)
++	}
++	err = exec("INSERT INTO `p.d.t` (id, a) VALUES (4, 99.5)")
++	if err == nil || !strings.Contains(err.Error(), "OUT_OF_RANGE") {
++		t.Errorf("99.5 into NUMERIC(2, 0): %v, want OUT_OF_RANGE", err)
++	}
++	var n int
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `p.d.t`").Scan(&n); err != nil || n != 3 {
++		t.Errorf("rows after the refused insert: %d, %v; want 3", n, err)
++	}
++}

@@ -106,7 +106,7 @@ _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "or
 ```
 
 What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource), failover
-replicas and high availability, cascading, cross-region and external-primary replicas, the project-level Backups API, and parallel or BAK imports and exports. See
+replicas and high availability, external-primary replicas, `MYSQL_5_7` and versions Cloud SQL no longer lists, the project-level Backups API, and parallel or BAK imports and exports. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
 ### Imports and exports (#1380)
@@ -146,7 +146,9 @@ signs with (connectors pick it up from `connectSettings` on their next dial), an
 `listServerCas` lists the active, upcoming and rotated-out CAs; the console shows them, with
 Add server CA and Rotate server CA. The servers are reached through the connector path, so the certificates
 are records the servers do not check on a direct connection. `tiers.list` and `flags.list`
-answer the lists Google documents for the versions served (`POSTGRES_17`, `MYSQL_8_4`).
+answer the lists Google documents for each version served (`POSTGRES_13` to `POSTGRES_18`,
+`MYSQL_8_0`, `MYSQL_8_4`, #1381): a flag lists every served version it applies to, from the
+version notes in Google's flag tables.
 
 ### Creating instances (#1330)
 
@@ -154,13 +156,14 @@ answer the lists Google documents for the versions served (`POSTGRES_17`, `MYSQL
 `gcloud sql instances create` and Terraform's `google_sql_database_instance` work. Each
 created instance is **a server of its own**: a Deployment in the cluster named
 `sqlinst-<name>`, from the same image and the same component code as the server `up` runs
-for `--services cloudsql` or `cloudsql-mysql`, with its own host tunnel, its own
-`connectionName` (`{project}:us-central1:{name}`), its own server CA, and an address the
-connectors reach through 3307.
+for `--services cloudsql` or `cloudsql-mysql` on the image of its `databaseVersion`, with its
+own host tunnel, its own `connectionName` (`{project}:{region}:{name}`), its own server CA,
+and an address the connectors reach through 3307.
 
 | Field | What happens |
 |---|---|
-| `databaseVersion` | `POSTGRES_17` or `MYSQL_8_4`, the versions of the images CloudBurrow pins; the engine's service must be enabled (412 otherwise). Any other `POSTGRES_*` or `MYSQL_*` is 501 saying so; another value is 400. |
+| `databaseVersion` | `POSTGRES_13` to `POSTGRES_18`, `MYSQL_8_0` or `MYSQL_8_4` (#1381): see [Database versions](#database-versions-and-major-version-upgrades-1381). The engine's service must be enabled (412 otherwise). `MYSQL_5_7` and any other `POSTGRES_*` or `MYSQL_*` are 501 saying why; another value is 400. |
+| `region` | Recorded and answered, and in the connection name (`us-central1` when left out). Every server runs in the one cluster. |
 | `rootPassword` | MySQL's `root` password (empty leaves `root` with none, as Cloud SQL does). PostgreSQL's user is `postgres`, trusted locally like the server `up` runs. |
 | `settings.tier` | Required, recorded and answered. The server is not sized by it. |
 | `settings.databaseFlags` | Passed to the server: `-c name=value` to `postgres`, `--name=value` to `mysqld`. A patch that changes them starts the server again with them; a flag the server rejects fails the operation with its words. `cloudsql.*` flags (IAM authentication, Cloud SQL's extensions) are 501. |
@@ -201,8 +204,74 @@ and **Start replication**.
 The primary may be a created instance or a server `up` runs (`postgres` or `mysql`): their
 config allows it (PostgreSQL's `wal_level` is `replica` by default; MySQL's binary log is on,
 and GTIDs are turned on online, persisted in the server's data directory). A replica of a
-replica, of another project's or region's instance, or a failover replica is 501.
+replica of another project's instance, of an external server, or a failover replica is 501.
 Point-in-time recovery is served for created instances (below).
+
+#### Cascading and cross-region replicas (#1381)
+
+A replica's `masterInstanceName` may name a replica: a **cascading replica**, which replicates
+from that replica, as Cloud SQL's do, up to Cloud SQL's four levels under a primary (a fifth
+is 400). PostgreSQL's is a `pg_basebackup` of the standby, streaming from it (cascading
+replication; the standby's replication role and `pg_hba.conf` line are its primary's). MySQL's
+replicates by GTID from the replica, which logs what it applies (`log_replica_updates`); its
+`cloudsqlreplica` user is created there with the binary log off for the session, so the
+replica gains no GTID of its own. Promoting a replica that has replicas makes it a primary
+they go on replicating from (PostgreSQL's standbys follow the new timeline), as Cloud SQL
+documents. A replica of a replica of a server `up` runs is 501.
+
+A replica's `region` may differ from its primary's: a **cross-region replica**. It answers
+that `region`, `gceZone` (`{region}-a`) and connection name (`{project}:{region}:{name}`),
+and `connectSettings` its region, so the connectors reach it by that name; a replica created
+without one is in its primary's region. The server runs in the same cluster as every other:
+the region is not a place here, and replication has none of the latency a real cross-region
+replica has. On the console, a replica's page also offers **Create read replica**, with a
+**Region** field.
+
+### Database versions and major version upgrades (#1381)
+
+A created instance's `databaseVersion` picks its server's image, the official image of that
+major version at the minor version Cloud SQL lists for it, each pinned by digest
+(`internal/components.CloudSQLVersionImages`). A node pulls an image the first time an instance
+of its version is created, so that create takes longer.
+
+| `databaseVersion` | Image | `databaseInstalledVersion` |
+|---|---|---|
+| `POSTGRES_13` | `postgres:13-alpine` | `POSTGRES_13_23` |
+| `POSTGRES_14` | `postgres:14-alpine` | `POSTGRES_14_24` |
+| `POSTGRES_15` | `postgres:15-alpine` | `POSTGRES_15_19` |
+| `POSTGRES_16` | `postgres:16-alpine` | `POSTGRES_16_15` |
+| `POSTGRES_17` | `postgres:17-alpine` (the server `up` runs) | `POSTGRES_17_11` |
+| `POSTGRES_18` | `postgres:18-alpine` | `POSTGRES_18_6` |
+| `MYSQL_8_0` | `mysql:8.0` | `MYSQL_8_0_46` |
+| `MYSQL_8_4` | `mysql:8.4` (the server `up` runs) | `MYSQL_8_4_11` |
+
+`databaseInstalledVersion` is read from the server. `maintenanceVersion` and
+`availableMaintenanceVersions` are not answered: they name Cloud SQL's own releases
+(`POSTGRES_17_11.R20250727.00_00`), which no server here is. `MYSQL_5_7` is 501: its official
+image was last built in December 2023 (5.7.44, linux/amd64 only) and is not maintained. Versions
+Cloud SQL lists that are past their end of life upstream (PostgreSQL 9.6 to 12, MySQL 5.6) and
+`MYSQL_9_7` are 501 too.
+
+A created primary answers `upgradableDatabaseVersions`, every newer served version of its
+engine, and **`instances.patch` with a newer `databaseVersion` is a major version upgrade**, as
+Cloud SQL's in-place upgrade (`gcloud sql instances patch --database-version`, Terraform's
+`database_version`): a `MAJOR_VERSION_UPGRADE` operation, the instance `MAINTENANCE` meanwhile.
+The server's data is dumped in its pod and kept on the host, the server is replaced by one of
+the new version on a fresh volume, and the dump is loaded into it:
+
+- **PostgreSQL:** `pg_dumpall`, so every role with its password hash and every database with its
+  owners and privileges carry over, as they do through `pg_upgrade`.
+- **MySQL:** the accounts (`SHOW CREATE USER` with the authentication string, `SHOW GRANTS`)
+  and `mysqldump` of every database but the system schemas, which the new server initialises as
+  its own version's. MySQL 8.4 removed `SET_USER_ID`; as its in-place upgrade does, it becomes
+  `SET_ANY_DEFINER` and `ALLOW_NONEXISTENT_DEFINER`.
+
+If the new server cannot start or load the dump, the old version is started again from the same
+dump and the operation fails with the reason, so the instance keeps its data. A downgrade or a
+change of engine is 400. An instance with read replicas, or a replica, is 501: CloudBurrow
+upgrades a primary with none (delete the replicas, upgrade, and create them again). The
+console's instance page offers **Upgrade** with the versions the instance can go to, and the
+Create instance form's version picker lists every served version.
 
 **The instances `up` runs stay as they are:** `postgres` and `mysql` cannot be patched,
 restarted or deleted through the API; each answers 400 naming the `--services` flag that

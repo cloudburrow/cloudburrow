@@ -32,7 +32,8 @@
         "patches/bigquery-emulator/0016-streaming-buffer-mark.patch",
         "patches/bigquery-emulator/0017-list-jobs-in-one-scan.patch",
         "patches/bigquery-emulator/0018-streamed-at-column.patch",
-        "patches/bigquery-emulator/0019-quote-struct-field-names.patch"
+        "patches/bigquery-emulator/0019-quote-struct-field-names.patch",
+        "patches/bigquery-emulator/0020-round-decimal-columns.patch"
       ]
     },
     {
@@ -71,7 +72,8 @@
         "patches/googlesqlite/0027-column-defaults.patch",
         "patches/googlesqlite/0028-ingestion-partition-time.patch",
         "patches/googlesqlite/0029-streaming-buffer-mark.patch",
-        "patches/googlesqlite/0030-streamed-at-column.patch"
+        "patches/googlesqlite/0030-streamed-at-column.patch",
+        "patches/googlesqlite/0031-round-decimal.patch"
       ]
     },
     {

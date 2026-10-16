@@ -3,10 +3,12 @@ package run
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -26,9 +28,9 @@ import (
 // operation, projects/{p}/locations/{l}/operations/{build id}, carries
 // BuildOperationMetadata while it runs and answers with the Build, which is
 // what `gcloud run deploy --source` reconstructs and polls. GetBuild and
-// ListBuilds read them back; CreateBuild and CancelBuild
-// (cloudbuildcreate.go) run and stop builds of their own. The other methods
-// are UNIMPLEMENTED.
+// ListBuilds read them back; CreateBuild, CancelBuild and RetryBuild
+// (cloudbuildcreate.go) run, stop and rerun builds of their own. The other
+// methods are UNIMPLEMENTED.
 
 // BuildLogURLBase, when set, is where a build's logUrl points: the
 // instance's console, which the CLI sets. A build's log is the builder's
@@ -137,20 +139,78 @@ func (c *CloudBuildServer) GetDefaultServiceAccount(_ context.Context, req *cbpb
 }
 
 // ListBuilds lists a project's builds, newest first, in one location when
-// parent names one.
+// parent names one and in every location otherwise, that match filter
+// (cloudbuildfilter.go), page_size at a time. A page token is the offset of
+// the next page, bound to the filter it was issued for.
 func (c *CloudBuildServer) ListBuilds(_ context.Context, req *cbpb.ListBuildsRequest) (*cbpb.ListBuildsResponse, error) {
-	if req.GetPageToken() != "" || req.GetFilter() != "" {
-		return nil, apierror.Unimplemented("ListBuilds page_token and filter are not supported")
-	}
 	project, prefix := req.GetProjectId(), ""
 	if req.GetParent() != "" {
 		p, _, err := resource.ParseLocation(req.GetParent())
 		if err != nil {
 			return nil, apierror.InvalidArgument("%v", err)
 		}
+		if project != "" && project != p {
+			return nil, apierror.InvalidArgument("project_id %q does not match parent %q", project, req.GetParent())
+		}
 		project, prefix = p, req.GetParent()+"/builds/"
 	}
-	return &cbpb.ListBuildsResponse{Builds: CloudBuilds(project, prefix)}, nil
+	if project == "" {
+		return nil, apierror.InvalidArgument("project_id is required")
+	}
+	if req.GetPageSize() < 0 {
+		return nil, apierror.InvalidArgument("page_size must not be negative")
+	}
+	match, err := parseBuildFilter(req.GetFilter())
+	if err != nil {
+		return nil, err
+	}
+	offset := 0
+	if t := req.GetPageToken(); t != "" {
+		raw, err := base64.RawURLEncoding.DecodeString(t)
+		f, n, ok := strings.Cut(string(raw), "\x00")
+		if err == nil && ok && f == req.GetFilter()+"|"+prefix {
+			offset, err = strconv.Atoi(n)
+		} else {
+			err = fmt.Errorf("bad token")
+		}
+		if err != nil || offset < 0 {
+			return nil, apierror.InvalidArgument("invalid page_token %q", t)
+		}
+	}
+	var all []*cbpb.Build
+	for _, b := range CloudBuilds(project, prefix) {
+		if match(b) {
+			all = append(all, b)
+		}
+	}
+	if offset > len(all) {
+		offset = len(all)
+	}
+	end := len(all)
+	if n := int(req.GetPageSize()); n > 0 && offset+n < end {
+		end = offset + n
+	}
+	resp := &cbpb.ListBuildsResponse{Builds: all[offset:end]}
+	if end < len(all) {
+		resp.NextPageToken = base64.RawURLEncoding.EncodeToString([]byte(req.GetFilter() + "|" + prefix + "\x00" + strconv.Itoa(end)))
+	}
+	return resp, nil
+}
+
+// ListBuildsFiltered is the console's build history: CloudBuilds narrowed
+// by a ListBuilds filter.
+func ListBuildsFiltered(project, prefix, filter string) ([]*cbpb.Build, error) {
+	match, err := parseBuildFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	var out []*cbpb.Build
+	for _, b := range CloudBuilds(project, prefix) {
+		if match(b) {
+			out = append(out, b)
+		}
+	}
+	return out, nil
 }
 
 // CloudBuilds lists a project's recorded builds whose names start with
@@ -164,7 +224,14 @@ func CloudBuilds(project, prefix string) []*cbpb.Build {
 			out = append(out, proto.Clone(b).(*cbpb.Build))
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].GetCreateTime().AsTime().After(out[j].GetCreateTime().AsTime()) })
+	// Ties break by name, so pages of ListBuilds never overlap.
+	sort.Slice(out, func(i, j int) bool {
+		ti, tj := out[i].GetCreateTime().AsTime(), out[j].GetCreateTime().AsTime()
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return out[i].GetName() < out[j].GetName()
+	})
 	return out
 }
 
@@ -190,7 +257,9 @@ func SourceDeployHandler(register func(grpc.ServiceRegistrar), next http.Handler
 	register(t)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSourceDeployPath(r.URL.Path) {
-			t.ServeHTTP(w, r)
+			// The caller's Host and address go with the request: CreateBuild
+			// runs arbitrary steps only from the host's loopback (#1382).
+			t.ServeHTTP(w, withCaller(r))
 			return
 		}
 		next.ServeHTTP(w, r)

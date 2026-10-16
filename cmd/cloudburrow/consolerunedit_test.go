@@ -266,6 +266,7 @@ func TestRunEditFormReadsTheServingRevisionNotTheLatestTemplate(t *testing.T) {
 		"spec": {"template": {"spec": {"containers": [{"image": "example.com/api:broken"}]}}}}`), &svc); err != nil {
 		t.Fatal(err)
 	}
+	svc.asCloudRun()
 	p := runProvider{kubeconfig: "/instance/kubeconfig", namespace: "default", runAddr: fixedAddr("127.0.0.1:1")}
 	form := p.editForm(context.Background(), "api", &svc)
 	if form == nil {

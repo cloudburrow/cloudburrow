@@ -55,7 +55,7 @@ func parseInstanceName(name string) (workload, string, error) {
 	if err != nil || n.Collection != "instances" || n.ParentCollection != "" {
 		return workload{}, "", apierror.InvalidArgument("%q is not a Cloud Run instance name", name)
 	}
-	return workload{kind: kindInstance, id: n.ID, name: name}, n.LocationName(), nil
+	return newWorkload(kindInstance, n.ID, name), n.LocationName(), nil
 }
 
 // checkInstance refuses what one Deployment pod does not render.
@@ -195,7 +195,7 @@ func (i *InstancesServer) CreateInstance(ctx context.Context, req *runpb.CreateI
 	if err := checkInstance(in); err != nil {
 		return nil, err
 	}
-	w := workload{kind: kindInstance, id: id, name: in.Name}
+	w := newWorkload(kindInstance, id, in.Name)
 	spec := instanceSpec(in, 1)
 	// Render once before anything is written, so an image or secret the pod
 	// could not use is refused on create.
@@ -231,7 +231,7 @@ func (i *InstancesServer) GetInstance(ctx context.Context, req *runpb.GetInstanc
 	if err != nil {
 		return nil, err
 	}
-	cm, err := i.s.loadSpec(ctx, w)
+	cm, err := i.s.loadSpec(ctx, &w)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +260,7 @@ func (i *InstancesServer) ListInstances(ctx context.Context, req *runpb.ListInst
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		w := workload{kind: kindInstance, id: strings.TrimPrefix(name, prefix), name: name}
+		w := workloadOf(kindInstance, strings.TrimPrefix(name, prefix), name, cm)
 		in, _, err := s.readInstance(ctx, w, cm)
 		if err != nil {
 			return nil, err
@@ -287,7 +287,7 @@ func (i *InstancesServer) DeleteInstance(ctx context.Context, req *runpb.DeleteI
 	if err != nil {
 		return nil, err
 	}
-	cm, err := s.loadSpec(ctx, w)
+	cm, err := s.loadSpec(ctx, &w)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +315,7 @@ func (i *InstancesServer) setStopped(ctx context.Context, name, etag string, val
 	if err != nil {
 		return nil, err
 	}
-	cm, err := s.loadSpec(ctx, w)
+	cm, err := s.loadSpec(ctx, &w)
 	if err != nil {
 		return nil, err
 	}

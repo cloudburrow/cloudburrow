@@ -108,10 +108,15 @@ request refuses rather than producing anything.
 
 ## 7. Not done
 
-- **Model download / load / unload from the UI.** Acquisition is a CLI concern today
-  (`internal/localai`); the screen reports what is configured and does not manage artifacts.
-- **Embedding test view.** Blocked on a model — see [embeddings.md](embeddings.md). An
-  embedding view with nothing behind it would be a screen that cannot work.
+- **Model download / load / unload on this screen.** They are on Vertex AI → **Local
+  models** (#1306): this screen lists each pinned or served model's state — not downloaded,
+  downloading with its progress, downloaded, loaded — and links there (#1396), rather than
+  repeating the download's size confirmation here. The same operations are
+  `/admin/local-models` on the control port, with the admin token ([embeddings.md](embeddings.md)).
+- **An embedding view on this screen.** It is Vertex AI → **Embeddings** (#1305), linked from
+  this screen's Local models card when embeddings are served: each vector's dimension, first
+  values, token count and `truncated` flag as the API returns them, and the pairwise cosine
+  similarity (#1396).
 - **Prediction on this screen.** Custom prediction is its own page, Vertex AI → **Online
   prediction** (§8), not a mode of the generation playground: the two call different things —
   this screen the generation API, that one a deployed contract container — and a single form for

@@ -101,3 +101,66 @@ output "auth" {
 		t.Errorf("GetInstance after destroy = %v, want NOT_FOUND", err)
 	}
 }
+
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance, google.cloud.redis.v1.CloudRedis/UpdateInstance, google.cloud.redis.v1.CloudRedis/DeleteInstance
+//
+// TestTerraformRedisStandardTier (#1385): a google_redis_instance of tier
+// STANDARD_HA with read replicas and replica_count 2 applies with the
+// official provider; the official client reads three nodes and a read
+// endpoint, which the provider's read_endpoint output names, the second
+// plan is empty, replica_count 3 applies in place with a fourth node, and
+// destroy removes it.
+func TestTerraformRedisStandardTier(t *testing.T) {
+	h := New(t)
+	c, _ := memorystoreAdminClient(t, h)
+	m := newTFModule(t)
+	ctx := h.Context()
+	id := fmt.Sprintf("tf-ha-%d", time.Now().UnixNano()%1e8)
+	name := "projects/" + m.project + "/locations/us-central1/instances/" + id
+	module := func(replicas int) string {
+		return fmt.Sprintf(`
+resource "google_redis_instance" "ha" {
+  project                 = %q
+  region                  = "us-central1"
+  name                    = %q
+  tier                    = "STANDARD_HA"
+  memory_size_gb          = 5
+  location_id             = "us-central1-a"
+  alternative_location_id = "us-central1-b"
+  read_replicas_mode      = "READ_REPLICAS_ENABLED"
+  replica_count           = %d
+}
+output "read_endpoint" {
+  value = google_redis_instance.ha.read_endpoint
+}
+`, m.project, id, replicas)
+	}
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = op.Wait(h.Context())
+		}
+	})
+	m.write(module(2))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil {
+		t.Fatalf("GetInstance after apply: %v", err)
+	}
+	if inst.GetTier() != redispb.Instance_STANDARD_HA || inst.GetReplicaCount() != 2 || len(inst.GetNodes()) != 3 || inst.GetReadEndpoint() == "" {
+		t.Errorf("after apply, the instance reads back as %v", inst)
+	}
+	if out := m.must("output", "-raw", "read_endpoint"); out != inst.GetReadEndpoint() {
+		t.Errorf("the provider's read_endpoint is %q, the instance's %q", out, inst.GetReadEndpoint())
+	}
+	m.planClean()
+	m.write(module(3))
+	m.apply()
+	if inst, err = c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); err != nil || inst.GetReplicaCount() != 3 || len(inst.GetNodes()) != 4 {
+		t.Errorf("after replica_count 3, GetInstance = %v, %v", inst, err)
+	}
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetInstance after destroy = %v, want NOT_FOUND", err)
+	}
+}

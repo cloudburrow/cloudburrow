@@ -211,10 +211,30 @@ func kubectlGet(t *testing.T, kind, name string) (string, error) {
 	if kubeconfig == "" {
 		t.Skipf("%s is not set", envKubeconfig)
 	}
+	if kind == "ksvc" {
+		name = ksvcName(kubeconfig, name)
+	}
 	raw, err := exec.Command("kubectl", "--kubeconfig", kubeconfig,
 		"-n", "default", "get", kind, name, "-o", "yaml").CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("kubectl get %s %s: %w\n%s", kind, name, err, raw)
 	}
 	return string(raw), nil
+}
+
+// ksvcName is the Knative Service behind the Cloud Run service of an ID:
+// <id>-<scope> since #1400, found by the Cloud Run name it records, or the
+// ID itself for one an older version created.
+func ksvcName(kubeconfig, id string) string {
+	raw, err := exec.Command("kubectl", "--kubeconfig", kubeconfig, "-n", "default", "get", "ksvc", "-o",
+		`jsonpath={range .items[*]}{.metadata.name}{" "}{.metadata.annotations.cloudburrow\.dev/cloud-run-name}{"\n"}{end}`).Output()
+	if err != nil {
+		return id
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if kname, full, ok := strings.Cut(line, " "); ok && strings.HasSuffix(full, "/services/"+id) {
+			return kname
+		}
+	}
+	return id
 }

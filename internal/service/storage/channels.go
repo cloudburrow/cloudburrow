@@ -70,9 +70,13 @@ type channelRecord struct {
 	Token      string            `json:"token,omitempty"`
 	Expiration int64             `json:"expiration,omitempty"` // Unix ms; 0 is none
 	Params     map[string]string `json:"params,omitempty"`
-	Prefix     string            `json:"prefix,omitempty"`
-	Next       int64             `json:"next"` // the next message number
-	Created    time.Time         `json:"created"`
+	// Select is the objects.list selection the channel watches (#1393);
+	// its prefix stays in Prefix, where channels before #1393 kept it.
+	Select   nameSelector `json:"select,omitzero"`
+	Prefix   string       `json:"prefix,omitempty"`
+	Versions bool         `json:"versions,omitempty"`
+	Next     int64        `json:"next"` // the next message number
+	Created  time.Time    `json:"created"`
 }
 
 func (c channelRecord) expired(now time.Time) bool {
@@ -131,13 +135,17 @@ func queueChannelMessage(tx Tx, c *channelRecord, state string, o *objectRecord,
 // emitChannels queues ev for every live channel on its bucket. A version
 // another replaced is not a not_exists: the object still exists, and the
 // replacing version's exists follows.
+//
+// With versions=true a channel also gets the changes of noncurrent versions
+// (#1393): a noncurrent version's metadata update is exists, its deletion
+// not_exists, and a live version an overwrite archives is not_exists, its
+// generation no longer live, ahead of the replacing version's exists
+// (UNVERIFIED: Google's watchAll and object change notification pages are
+// withdrawn, and the states for noncurrent versions were never documented).
 func emitChannels(tx Tx, ev objectEvent) error {
 	state := "exists"
 	switch ev.Type {
 	case EventDelete, EventArchive:
-		if ev.OverwrittenBy != 0 {
-			return nil
-		}
 		state = "not_exists"
 	}
 	for _, c := range channelsOf(tx, ev.Object.Bucket) {
@@ -145,7 +153,7 @@ func emitChannels(tx Tx, ev objectEvent) error {
 			removeChannel(tx, c)
 			continue
 		}
-		if c.Prefix != "" && !strings.HasPrefix(ev.Object.Name, c.Prefix) {
+		if !c.watches(ev) {
 			continue
 		}
 		o := ev.Object
@@ -154,6 +162,54 @@ func emitChannels(tx Tx, ev objectEvent) error {
 		}
 	}
 	return nil
+}
+
+// watches reports whether c delivers ev: the object is one an objects.list
+// with the channel's parameters would list, and the change is to a live
+// version, or, with versions=true, to any version.
+func (c *channelRecord) watches(ev objectEvent) bool {
+	sel := c.Select
+	sel.Prefix = c.Prefix
+	if sel.compile() != nil || !sel.selects(ev.Object.Name) {
+		return false
+	}
+	c.Select.glob = sel.glob
+	if c.Versions {
+		return true
+	}
+	// Without versions, a version an overwrite retired is not a change: the
+	// object still exists, and the replacing version's exists follows; nor
+	// is a change to a version already noncurrent.
+	if (ev.Type == EventDelete || ev.Type == EventArchive) && ev.OverwrittenBy != 0 {
+		return false
+	}
+	return ev.Type == EventArchive || ev.Object.Deleted.IsZero()
+}
+
+// watchesText says which objects' changes c delivers, as its watchAll
+// query selected them (#1393), for the console.
+func (c channelRecord) watchesText() string {
+	var parts []string
+	add := func(k, v string) {
+		if v != "" {
+			parts = append(parts, k+"="+v)
+		}
+	}
+	add("prefix", c.Prefix)
+	add("delimiter", c.Select.Delimiter)
+	if c.Select.Trailing {
+		add("includeTrailingDelimiter", "true")
+	}
+	add("startOffset", c.Select.Start)
+	add("endOffset", c.Select.End)
+	add("matchGlob", c.Select.Glob)
+	if c.Versions {
+		add("versions", "true")
+	}
+	if len(parts) == 0 {
+		return "Every object"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // removeChannel deletes c and every message still pending for it.
@@ -191,24 +247,18 @@ func (s *Server) channelJSON(c channelRecord) map[string]any {
 	return out
 }
 
-// unsupportedWatchParams are objects.watchAll's listing parameters that
-// would narrow what is watched and are not built. Paging and projection
-// change nothing about notifications and are accepted.
-var unsupportedWatchParams = []string{"delimiter", "startOffset", "endOffset", "includeTrailingDelimiter", "matchGlob"}
-
+// objectsWatchAll registers a channel. Its query takes objects.list's
+// parameters (#1393): prefix, delimiter, includeTrailingDelimiter,
+// startOffset, endOffset and matchGlob select which objects' changes it
+// delivers, as they select what objects.list lists, and versions=true adds
+// noncurrent versions' changes. Paging and projection change nothing about
+// notifications and are accepted.
 func (s *Server) objectsWatchAll(w http.ResponseWriter, r *http.Request) {
 	bucket := pathVar(r, jsonPrefix, 1)
 	q := r.URL.Query()
-	for _, p := range unsupportedWatchParams {
-		if q.Get(p) != "" {
-			writeError(w, errorf(http.StatusNotImplemented, "notImplemented",
-				"storage.objects.watchAll with %s is not implemented: a channel watches every object, or those under prefix", p))
-			return
-		}
-	}
-	if q.Get("versions") == "true" {
-		writeError(w, errorf(http.StatusNotImplemented, "notImplemented",
-			"storage.objects.watchAll with versions=true is not implemented: a channel watches live versions"))
+	sel, err := parseNameSelector(q)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 	body, err := readBody(r)
@@ -218,7 +268,9 @@ func (s *Server) objectsWatchAll(w http.ResponseWriter, r *http.Request) {
 	}
 	str := func(k string) string { v, _ := body[k].(string); return v }
 	c := channelRecord{ID: str("id"), Bucket: bucket, Address: str("address"), Token: str("token"),
-		Prefix: q.Get("prefix"), Created: s.now()}
+		Prefix: sel.Prefix, Versions: q.Get("versions") == "true", Created: s.now()}
+	sel.Prefix, sel.glob = "", nil
+	c.Select = sel
 	switch {
 	case c.ID == "":
 		writeError(w, required("resource.id"))
@@ -336,6 +388,7 @@ func (s *Server) serveChannels(w http.ResponseWriter, r *http.Request) {
 		}
 		j := s.channelJSON(c)
 		j["messagesQueued"] = c.Next
+		j["watches"] = c.watchesText()
 		j["created"] = c.Created.UTC().Format(time.RFC3339)
 		items = append(items, j)
 	}

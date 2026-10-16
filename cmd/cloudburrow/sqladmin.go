@@ -64,8 +64,16 @@ func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds compon
 	// Imports and exports (#1380) go to and from the instance's own Cloud
 	// Storage; without it they answer 501.
 	if serviceEnabled(cfg, config.ServiceStorage) {
-		srv.EnableTransfers(sqlTransferer{d: dumper},
-			sqlObjects{f: storageSourceFetcher{cfg: cfg, client: &http.Client{Timeout: 10 * time.Minute}}})
+		// The storage tunnel's bound address, read at each transfer: with an
+		// OS-assigned port (--port-storage 0) the configured one is 0.
+		sf := storageSourceFetcher{cfg: cfg, client: &http.Client{Timeout: 10 * time.Minute},
+			addr: func() string {
+				if f := forwarderFor(fwds, "storage"); f != nil {
+					return f.HostAddr()
+				}
+				return ""
+			}}
+		srv.EnableTransfers(sqlTransferer{d: dumper}, sqlObjects{f: sf})
 	}
 	return srv
 }

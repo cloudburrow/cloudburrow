@@ -189,6 +189,7 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 				}}}, Note: bucketNote},
 			{ID: "views", Label: "Views", Listing: views},
 			{ID: "links", Label: "Linked datasets", Listing: p.links(ctx, path[0])},
+			{ID: "copies", Label: "Copy operations", Listing: p.copies(ctx, path[0])},
 		},
 	}
 	if !strings.HasSuffix(path[0], "/buckets/_Required") && b.GetLifecycleState() == loggingpb.LifecycleState_ACTIVE {

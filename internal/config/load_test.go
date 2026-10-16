@@ -528,3 +528,50 @@ func TestHookEnvPrecedenceAndValidation(t *testing.T) {
 		t.Errorf("an invalid hookEnv name was accepted: %v", err)
 	}
 }
+
+// TestCloudBuildHostSteps (#1382): off by default; on by the flag, the
+// variable or a file the developer named; a discovered ./cloudburrow.json
+// cannot turn it on, since each such step gets the host's Docker socket.
+func TestCloudBuildHostSteps(t *testing.T) {
+	t.Parallel()
+	named := writeFile(t, t.TempDir(), "cb.json", `{"cloudbuildHostSteps":true}`)
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		env     map[string]string
+		file    string // discovered
+		want    bool
+		wantErr string
+	}{
+		{name: "default off"},
+		{name: "flag", args: []string{"--cloudbuild-host-steps"}, want: true},
+		{name: "env", env: map[string]string{EnvPrefix + "CLOUDBUILD_HOST_STEPS": "true"}, want: true},
+		{name: "flag beats env", args: []string{"--cloudbuild-host-steps=false"},
+			env: map[string]string{EnvPrefix + "CLOUDBUILD_HOST_STEPS": "true"}},
+		{name: "bad env", env: map[string]string{EnvPrefix + "CLOUDBUILD_HOST_STEPS": "maybe"}, wantErr: "must be a boolean"},
+		{name: "named file", env: map[string]string{EnvPrefix + "CONFIG": named}, want: true},
+		{name: "discovered file", file: `{"cloudbuildHostSteps":true}`, wantErr: "cannot let builds run containers with the host's Docker socket"},
+		{name: "discovered false is harmless", file: `{"cloudbuildHostSteps":false}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if tc.file != "" {
+				writeFile(t, dir, DefaultFileName, tc.file)
+			}
+			cfg, err := Load(Options{Args: tc.args, Getenv: envMap(tc.env), WorkDir: dir})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Load = %v; want an error containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.CloudBuildHostSteps != tc.want {
+				t.Errorf("CloudBuildHostSteps = %v, want %v", cfg.CloudBuildHostSteps, tc.want)
+			}
+		})
+	}
+}

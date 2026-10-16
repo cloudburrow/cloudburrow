@@ -214,6 +214,13 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 				deleteTable,
 			}
 		}
+		if err == nil && md.Type == bigquery.MaterializedView { // #1390, consolebigquerymv.go
+			return []console.Action{
+				{ID: actRefreshMV, Label: "Refresh"},
+				{ID: "edittable", Label: "Edit table", Fields: bigqueryEditFields(md)},
+				deleteTable,
+			}
+		}
 		if err == nil && md.Type == bigquery.Snapshot {
 			// A table snapshot is read-only: its page offers what Google's
 			// does, Restore among them (#1002).
@@ -260,7 +267,7 @@ func (p bigqueryProvider) DetailActions(ctx context.Context, project string, pat
 // bigqueryTableTypes are what Create table makes: a table with the schema
 // the editor holds, or a view with its query (tables.insert with a view,
 // #916).
-var bigqueryTableTypes = []string{"TABLE", "VIEW"}
+var bigqueryTableTypes = []string{"TABLE", "VIEW", "MATERIALIZED_VIEW"}
 
 // bigqueryFieldNameHelp is the column name rule in words, for the schema
 // editors.
@@ -274,7 +281,8 @@ func bigqueryTableFields() []console.Field {
 			Help: "Letters, numbers, underscores, dashes and spaces, at most 1,024."},
 		{Name: "tableType", Label: "Table type", Type: "select", Options: bigqueryTableTypes,
 			Help: "TABLE holds rows, in the schema below. VIEW is a saved query: its columns are the query's, " +
-				"so it takes the view query and no schema."},
+				"so it takes the view query and no schema. MATERIALIZED_VIEW keeps its query's results as of its " +
+				"last refresh, every 30 minutes by default."},
 		{Name: "description", Label: "Description", Type: "textarea"},
 		{Name: "schema", Label: "Schema", Type: "schema", Options: bigqueryColumnTypes,
 			Pattern: bigqueryFieldNamePattern,
@@ -417,6 +425,8 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 	case action == "insertrows" && len(path) == 2:
 		_, err := p.insertRows(ctx, path[0], path[1], values)
 		return err
+	case action == actRefreshMV && len(path) == 2: // #1390, consolebigquerymv.go
+		return p.refreshMaterializedView(ctx, path[0], path[1])
 	case action == "edittable" && len(path) == 2:
 		return p.editTable(ctx, path[0], path[1], values)
 	case action == actCreateRowPolicy && len(path) == 2: // #1218, consolebigquerypolicies.go
@@ -510,8 +520,17 @@ func (p bigqueryProvider) createTable(ctx context.Context, datasetID string, val
 		}
 		// Sent as GoogleSQL: the client sends useLegacySql false.
 		md.ViewQuery = viewQuery
+	case "MATERIALIZED_VIEW": // #1390
+		if viewQuery == "" {
+			return errors.New("a materialized view needs its query")
+		}
+		if strings.TrimSpace(values["schema"]) != "" {
+			return errors.New("a materialized view's columns are its query's: leave the schema empty")
+		}
+		md.MaterializedView = &bigquery.MaterializedViewDefinition{Query: viewQuery, EnableRefresh: true,
+			RefreshInterval: 30 * time.Minute}
 	default:
-		return fmt.Errorf("unknown table type %q: TABLE or VIEW", kind)
+		return fmt.Errorf("unknown table type %q: TABLE, VIEW or MATERIALIZED_VIEW", kind)
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()

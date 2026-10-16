@@ -220,7 +220,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	buffers := &streamBuffers{stamp: o.streamTimes} // streamingbuffer.go, #1273, #1370
 	settings := &projectOptions{}                   // projectoptions.go, #1375
 	jobRows := &jobsTable{}                         // jobstable.go, #1378
+	tables := &tableSettings{}                      // tableoptions.go, #1390
 	if o.stateDir != "" {
+		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
 		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)         // iam.go, #1231
 		settings.keep(projectOptionsStateFile(o.stateDir), o.logf) // projectoptions.go, #1375
@@ -249,6 +251,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			buffers.reset()
 			settings.reset()
 			jobRows.reset()
+			tables.reset()
 		})
 	}
 	// listJobs serves jobs.list, r a GET of a project's jobs: here, and
@@ -338,7 +341,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows,
-				resourceManager: o.resourceManager}
+				resourceManager: o.resourceManager, tables: tables}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -397,7 +400,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
-			buffers: buffers}
+			buffers: buffers, tables: tables}
 		switch {
 		case m[4] != "" && strings.Contains(table, "$") && strings.Index(table, "$") > 0 && (m[5] == "" || m[5] == "data"):
 			f.servePartition(w, r, dataset, table, m[5]) // #1273, partitionreads.go
@@ -422,6 +425,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.insertAll(w, r, dataset, table)
 		case r.Method == http.MethodGet && m[5] == "data":
 			f.listTableData(w, r, dataset, table) // #1015
+		case r.Method == http.MethodDelete && m[4] != "" && m[5] == "" && f.tables.watched(streamKey(projectOf(f.base), dataset, table)):
+			f.deleteWatched(w, r, dataset, table) // #1390, materializedviews.go
 		default:
 			next.ServeHTTP(w, r)
 		}
@@ -436,6 +441,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 
 type front struct {
 	next http.Handler
+	// tables are the table settings the front keeps, and the tables whose
+	// reads it checks (tableoptions.go, #1390), or nil.
+	tables *tableSettings
 	// base is the path up to and including the project, as the client sent
 	// it: reads the front makes go to the same prefix.
 	base string
@@ -687,6 +695,17 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 			return
 		}
 	}
+	if !update && body.MaterializedView != nil && body.View == nil { // #1390, materializedviews.go
+		f.insertMV(w, r, dataset, raw)
+		return
+	}
+	if bytes.Contains(raw, []byte(`"requirePartitionFilter"`)) { // #1390, tableoptions.go
+		key := table
+		if body.TableReference != nil && key == "" {
+			key = body.TableReference.TableID
+		}
+		f.tables.watchTable(streamKey(projectOf(f.base), dataset, key))
+	}
 	if !update && body.View == nil && body.MaterializedView == nil && body.Schema != nil &&
 		f.createTableFloat64(w, r, dataset, raw, body.Schema.Fields) {
 		return
@@ -758,6 +777,9 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	}
 	var meta struct {
 		Schema tableSchema `json:"schema"`
+		// DefaultRoundingMode rounds the rows' NUMERIC and BIGNUMERIC
+		// values (#1401, decimalrows.go).
+		DefaultRoundingMode string `json:"defaultRoundingMode"`
 	}
 	if err := json.Unmarshal(got, &meta); err != nil {
 		f.next.ServeHTTP(w, r)
@@ -801,6 +823,9 @@ func (f front) insertAll(w http.ResponseWriter, r *http.Request, dataset, table 
 	var rows []outRow
 	for i, row := range req.Rows {
 		cleaned, errs := checkRow(meta.Schema.Fields, row.JSON, req.IgnoreUnknownValues)
+		if len(errs) == 0 { // #1401, decimalrows.go
+			errs = decimalOverflow(meta.Schema.Fields, cleaned, meta.DefaultRoundingMode)
+		}
 		if len(errs) == 0 && streamed && !pm.ingestion() && pm.TimePartitioning != nil {
 			if msg := streamBounds(pm, cleaned[pm.TimePartitioning.Field], f.buffers.clock()); msg != "" {
 				errs = []rowError{{Reason: "invalid", Location: pm.TimePartitioning.Field, Message: msg}}

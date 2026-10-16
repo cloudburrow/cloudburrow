@@ -181,6 +181,7 @@ type rawFlags struct {
 	bindAddress      string
 	cloudsqlConn     string
 	allowRemote      bool
+	cbHostSteps      bool
 	portBase         int
 	control          int
 	storage          int
@@ -303,6 +304,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.DurationVar(&r.shutdownTimeout, "shutdown-timeout", 0, "bounded time to drain on shutdown")
 	fs.DurationVar(&r.readyTimeout, "ready-timeout", 0, "bounded time to wait for cluster components to become ready")
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
+	fs.BoolVar(&r.cbHostSteps, "cloudbuild-host-steps", false, "let Cloud Build run steps other than docker build, docker push and pack, for builds submitted from this machine's loopback only; each runs as a container with the host's Docker socket, which gives it control of the host (unsafe)")
 	fs.Var(&r.corsOrigins, "cors-allow-origin", "web origin (scheme://host[:port]) whose browser requests Cloud Storage answers, beyond loopback ones; repeatable or comma-separated (default: loopback origins only)")
 
 	return fs, r
@@ -400,6 +402,11 @@ func refuseFileExposure(cfg *Config, path string, explicit bool, keys map[string
 		return fmt.Errorf("config file %s, found in the working directory, sets storage.corsAllowOrigins; "+
 			"a discovered file cannot let other web sites call the emulator (#677): pass --cors-allow-origin "+
 			"(or %sCORS_ALLOW_ORIGIN, or name the file with --config), and remove the key", path, EnvPrefix)
+	}
+	if !explicit && cfg.CloudBuildHostSteps {
+		return fmt.Errorf("config file %s, found in the working directory, sets cloudbuildHostSteps; "+
+			"a discovered file cannot let builds run containers with the host's Docker socket (#1382): pass "+
+			"--cloudbuild-host-steps (or %sCLOUDBUILD_HOST_STEPS=true, or name the file with --config), and remove the key", path, EnvPrefix)
 	}
 	if _, ok := keys["bindAddress"]; ok && !explicit {
 		if ip := net.ParseIP(cfg.BindAddress); ip != nil && !ip.IsLoopback() {
@@ -524,6 +531,13 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	}
 
 	str("LOG_LEVEL", &cfg.LogLevel)
+	if v := getenv(EnvPrefix + "CLOUDBUILD_HOST_STEPS"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("%sCLOUDBUILD_HOST_STEPS: must be a boolean (got %q)", EnvPrefix, v)
+		}
+		cfg.CloudBuildHostSteps = b
+	}
 	if v := getenv(EnvPrefix + "CORS_ALLOW_ORIGIN"); v != "" {
 		cfg.Storage.CORSAllowOrigins = splitList(v)
 	}
@@ -639,6 +653,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["log-level"] {
 		cfg.LogLevel = raw.logLevel
+	}
+	if set["cloudbuild-host-steps"] {
+		cfg.CloudBuildHostSteps = raw.cbHostSteps
 	}
 	if set["cors-allow-origin"] {
 		cfg.Storage.CORSAllowOrigins = append([]string(nil), raw.corsOrigins...)

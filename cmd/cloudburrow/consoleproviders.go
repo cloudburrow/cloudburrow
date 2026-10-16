@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/admin"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/localai"
@@ -564,34 +565,88 @@ type runProvider struct {
 func (runProvider) ID() string    { return "run" }
 func (runProvider) Title() string { return "Cloud Run" }
 
-func (p runProvider) List(ctx context.Context, _ string) (console.Listing, error) {
-	out, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "ksvc")
+func (p runProvider) List(ctx context.Context, project string) (console.Listing, error) {
+	svcs, err := p.services(ctx, project)
 	if err != nil {
 		return console.Listing{}, err
 	}
-	var list struct {
-		Items []ksvcStatus `json:"items"`
-	}
-	if err := json.Unmarshal(out, &list); err != nil {
-		return console.Listing{}, fmt.Errorf("decode services: %w", err)
-	}
-
-	items := make([]console.Resource, 0, len(list.Items))
-	for _, s := range list.Items {
+	items := make([]console.Resource, 0, len(svcs))
+	for _, s := range svcs {
 		items = append(items, s.resource())
 	}
 	return console.Listing{
 		Columns: runColumns, Noun: "services", Items: items, Total: len(items),
 		AlwaysStatus: true,
-		// Deploying uses the selected project; listing does not scope by it.
-		// A Knative Service carries the Cloud Run name it was created under as
-		// an annotation, and CloudBurrow runs every project's services in one
-		// namespace — so filtering here would hide services created before the
-		// annotation existed and claim the project was empty.
-		Note: "Not scoped by project: every service in this instance runs in one " +
-			"namespace, so all of them are listed whatever the toolbar has " +
-			"selected. Deploying uses the selected project.",
+		// The selected project's services (#1400): two projects can each
+		// have a service of one ID. A service created before its Knative
+		// Service carried the Cloud Run name it was created under has no
+		// project to scope by, so it is listed whatever is selected.
+		Note: "The selected project's services, and any created before services " +
+			"recorded their project.",
 	}, nil
+}
+
+// services reads the Knative Services as Cloud Run services of project:
+// each named by its service ID and its revisions by their Cloud Run IDs
+// (#1400), not by the Knative names, which carry the project and location.
+// A service of another project is left out; with no project, none is.
+func (p runProvider) services(ctx context.Context, project string) ([]ksvcStatus, error) {
+	out, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "ksvc")
+	if err != nil {
+		return nil, err
+	}
+	var list struct {
+		Items []ksvcStatus `json:"items"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return nil, fmt.Errorf("decode services: %w", err)
+	}
+	if project == "" {
+		project = p.defaultProject
+	}
+	svcs := make([]ksvcStatus, 0, len(list.Items))
+	for _, s := range list.Items {
+		s.asCloudRun()
+		if parts := strings.Split(s.FullName, "/"); len(parts) > 1 && project != "" && parts[1] != project {
+			continue
+		}
+		svcs = append(svcs, s)
+	}
+	return svcs, nil
+}
+
+// asCloudRun renames a Knative Service as the Cloud Run API names it: the
+// service by its ID and every revision by its Cloud Run ID. KName keeps the
+// Knative name, which the Service's revisions and pods are labelled with.
+func (s *ksvcStatus) asCloudRun() {
+	s.KName = s.Metadata.Name
+	s.FullName = s.Metadata.Annotations["cloudburrow.dev/cloud-run-name"]
+	if s.FullName == "" {
+		return
+	}
+	s.Metadata.Name = s.FullName[strings.LastIndex(s.FullName, "/")+1:]
+	st := &s.Status
+	st.LatestReadyRevisionName, st.LatestCreatedRevisionName = s.revisionID(st.LatestReadyRevisionName), s.revisionID(st.LatestCreatedRevisionName)
+	for i := range st.Traffic {
+		st.Traffic[i].RevisionName = s.revisionID(st.Traffic[i].RevisionName)
+	}
+	for i := range s.Spec.Traffic {
+		s.Spec.Traffic[i].RevisionName = s.revisionID(s.Spec.Traffic[i].RevisionName)
+	}
+}
+
+// revisionID is the Cloud Run ID of one of the service's Knative revisions.
+func (s ksvcStatus) revisionID(krev string) string {
+	if krev == "" || s.FullName == "" {
+		return krev
+	}
+	return runadapter.RevisionID(s.FullName, s.KName, krev)
+}
+
+// ownsRevision reports whether a Knative revision, by its labels, is the
+// service's.
+func (s ksvcStatus) ownsRevision(labels map[string]any) bool {
+	return str(labels, "serving.knative.dev/service") == s.KName
 }
 
 // Detail implements console.Driller for one service.
@@ -606,23 +661,9 @@ func (p runProvider) Detail(ctx context.Context, project string, path []string) 
 		return console.DeeperThan(2, path), nil
 	}
 	name := path[0]
-	out, err := kubectlJSON(ctx, p.kubeconfig, p.namespace, "ksvc")
+	svc, err := p.service(ctx, project, name)
 	if err != nil {
 		return console.Detail{Unavailable: "cannot read services: " + err.Error()}, nil
-	}
-	var list struct {
-		Items []ksvcStatus `json:"items"`
-	}
-	if err := json.Unmarshal(out, &list); err != nil {
-		return console.Detail{Unavailable: "decode services: " + err.Error()}, nil
-	}
-
-	var svc *ksvcStatus
-	for i := range list.Items {
-		if list.Items[i].Metadata.Name == name {
-			svc = &list.Items[i]
-			break
-		}
 	}
 	if svc == nil {
 		return console.Detail{Unavailable: "no service named " + name}, nil
@@ -687,7 +728,7 @@ func (p runProvider) revisionDetail(ctx context.Context, service, revision strin
 		// Scoped by service as well as by name: two services in one namespace
 		// can hold revisions whose names differ only by their own prefix, and
 		// matching on the name alone would open the wrong one.
-		if str(m, "name") == revision && str(labels, "serving.knative.dev/service") == service {
+		if svc.ownsRevision(labels) && svc.revisionID(str(m, "name")) == revision {
 			item = candidate
 			break
 		}
@@ -986,7 +1027,7 @@ func (p runProvider) revisions(ctx context.Context, service string, svc *ksvcSta
 	for _, item := range list.Items {
 		m := meta(item)
 		labels, _ := m["labels"].(map[string]any)
-		if str(labels, "serving.knative.dev/service") != service {
+		if !svc.ownsRevision(labels) {
 			continue
 		}
 		status := "Unknown"
@@ -1021,7 +1062,7 @@ func (p runProvider) revisions(ctx context.Context, service string, svc *ksvcSta
 				digest = shortDigest(str(c, "imageDigest"))
 			}
 		}
-		name := str(m, "name")
+		name := svc.revisionID(str(m, "name"))
 		// Which revision is serving goes in a column of its own. It used to be
 		// appended to the name, which read well and meant the name in the table
 		// was not the revision's name — so the row could not be opened and a
@@ -1100,7 +1141,10 @@ var runColumns = []string{"URL", "Image", "Revision", "Deploying", "Reason", "De
 
 // ksvcStatus is the part of a Knative Service the console reads.
 type ksvcStatus struct {
-	Metadata struct {
+	// KName is the Knative Service's own name and FullName the Cloud Run
+	// service's, set by asCloudRun, which renames Metadata.Name to the ID.
+	KName, FullName string `json:"-"`
+	Metadata        struct {
 		Name              string            `json:"name"`
 		CreationTimestamp string            `json:"creationTimestamp"`
 		Labels            map[string]string `json:"labels"`

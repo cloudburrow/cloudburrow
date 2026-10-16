@@ -1,25 +1,32 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/cloudburrow/cloudburrow/internal/admin"
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -50,6 +57,90 @@ type loggingService struct {
 	// in persistent mode; set by Start.
 	admin *logging.Admin
 	db    store.Store
+	// storage is the Cloud Storage tunnel CopyLogEntries writes through
+	// (#1394), or nil; without Cloud Storage on the instance, the copy says
+	// so.
+	storage func() *netfwd.Forwarder
+	// hierarchy is Resource Manager's registry, whose folders and
+	// organization are Logging parents (#1395); nil when it is not open.
+	hierarchy *resourcemanager.Registry
+}
+
+// storageObjectWriter uploads an object to the instance's Cloud Storage
+// with the JSON API's media upload, as any client would.
+type storageObjectWriter struct {
+	src    storageSourceFetcher // for its base(): the tunnel, else the port
+	client *http.Client
+}
+
+func (w storageObjectWriter) WriteObject(ctx context.Context, bucket, name, contentType string, data []byte) error {
+	u := w.src.base() + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=media&name=" + url.QueryEscape(name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", contentType)
+	resp, err := w.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	_, msg, _, _ := apierror.DecodeJSON(io.LimitReader(resp.Body, 1<<16))
+	if msg == "" {
+		msg = resp.Status
+	}
+	return fmt.Errorf("gs://%s/%s: %s", bucket, name, msg)
+}
+
+// useHierarchy makes the registry's folders and organization Logging
+// parents. It is called before Start.
+func (s *loggingService) useHierarchy(reg *resourcemanager.Registry) {
+	if s != nil {
+		s.hierarchy = reg
+	}
+}
+
+// loggingHierarchy is logging.Hierarchy over Resource Manager's registry.
+type loggingHierarchy struct{ reg *resourcemanager.Registry }
+
+func (h loggingHierarchy) Exists(name string) error {
+	switch {
+	case name == resourcemanager.OrganizationName:
+		return nil
+	case strings.HasPrefix(name, "folders/"):
+		_, err := h.reg.Folder(name)
+		return err
+	}
+	return fmt.Errorf("%s is not a folder or the organization %s", name, resourcemanager.OrganizationName)
+}
+
+func (h loggingHierarchy) Ancestors(name string) ([]string, error) {
+	var out []string
+	if id, ok := strings.CutPrefix(name, "projects/"); ok {
+		chain, err := h.reg.Ancestry(id)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range chain[1:] {
+			out = append(out, a.Type+"s/"+a.ID)
+		}
+		return out, nil
+	}
+	for parent, i := name, 0; strings.HasPrefix(parent, "folders/") && i <= resourcemanager.MaxFolderDepth+1; i++ {
+		f, err := h.reg.Folder(parent)
+		if err != nil {
+			return nil, err
+		}
+		parent = f.Parent
+		if parent != "" {
+			out = append(out, parent)
+		}
+	}
+	return out, nil
 }
 
 // Admin is the metrics, sinks and exclusions server, or nil before Start.
@@ -91,7 +182,12 @@ func (s *loggingService) toConsole(rec *console.Recorder) {
 		return
 	}
 	s.store.Observe(func(e *loggingpb.LogEntry) {
-		project, _, _ := strings.Cut(strings.TrimPrefix(e.GetLogName(), "projects/"), "/")
+		// A folder's, organization's or billing account's entry (#1395) has
+		// no project; its Resource is its log name, which names the parent.
+		project := ""
+		if rest, ok := strings.CutPrefix(e.GetLogName(), "projects/"); ok {
+			project, _, _ = strings.Cut(rest, "/")
+		}
 		rec.Log(console.Entry{
 			Timestamp: e.GetTimestamp().AsTime(),
 			Severity:  consoleSeverity(e.GetSeverity().String()),
@@ -176,7 +272,22 @@ func (s *loggingService) Start(ctx context.Context) error {
 	}
 	s.db = db
 	s.admin = logging.NewAdmin(db)
+	if s.hierarchy != nil {
+		s.admin.UseHierarchy(loggingHierarchy{s.hierarchy})
+	}
 	s.api.UseAdmin(s.admin)
+	if serviceEnabled(s.cfg, config.ServiceStorage) {
+		src := storageSourceFetcher{cfg: s.cfg}
+		if s.storage != nil {
+			src.addr = func() string {
+				if f := s.storage(); f != nil {
+					return f.HostAddr()
+				}
+				return ""
+			}
+		}
+		s.admin.UseStorage(storageObjectWriter{src: src, client: &http.Client{Timeout: 2 * time.Minute}})
+	}
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Logging))
 	s.server = grpctransport.New(addr)
 	s.server.Observe(s.calls)

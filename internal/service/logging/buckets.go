@@ -70,52 +70,60 @@ var bucketUpdatable = map[string]bool{
 // viewUpdatable are the view fields an update_mask may name.
 var viewUpdatable = map[string]bool{"description": true, "filter": true}
 
-// bucketRef is projects/{project}/locations/{location}/buckets/{bucket}.
-type bucketRef struct{ project, location, bucket string }
+// bucketRef is {parent}/locations/{location}/buckets/{bucket}.
+type bucketRef struct {
+	parent           parent
+	location, bucket string
+}
 
 func (b bucketRef) name() string {
-	return "projects/" + b.project + "/locations/" + b.location + "/buckets/" + b.bucket
+	return b.parent.String() + "/locations/" + b.location + "/buckets/" + b.bucket
 }
 
 func (b bucketRef) key() string {
-	return "logging/buckets/" + b.project + "/" + hex.EncodeToString([]byte(b.location+"/"+b.bucket))
+	return "logging/buckets/" + b.parent.seg() + "/" + hex.EncodeToString([]byte(b.location+"/"+b.bucket))
 }
 
 func builtinBucket(id string) bool { return id == bucketDefault || id == bucketRequired }
 
-// splitName checks a name against projects/{p}/locations/{l}[/buckets/{b}[/views/{v}]]:
-// want is the number of segments after the project.
-func splitName(field, name string, collections ...string) ([]string, error) {
-	for _, p := range []string{"organizations/", "folders/", "billingAccounts/"} {
-		if strings.HasPrefix(name, p) {
-			return nil, apierror.Unimplemented("%s %q: only projects/{project}/... is supported", field, name)
-		}
-	}
-	parts := strings.Split(name, "/")
-	shape := "projects/{project}/locations/{location}"
+// nameParts is a parsed {parent}/locations/{l}[/{collection}/{id}...].
+type nameParts struct {
+	parent   parent
+	location string
+	ids      []string
+}
+
+// splitName checks a name against {parent}/locations/{l}[/buckets/{b}[/views/{v}]],
+// collections naming the segments after the location. The parent's existence
+// is not checked here.
+func splitName(field, name string, collections ...string) (nameParts, error) {
+	shape := "{parent}/locations/{location}"
 	for _, c := range collections {
 		shape += "/" + c + "/{" + strings.TrimSuffix(c, "s") + "}"
 	}
-	if len(parts) != 4+2*len(collections) || parts[0] != "projects" || parts[2] != "locations" {
-		return nil, apierror.InvalidArgument("%s %q is not %s", field, name, shape)
+	p, rest, err := cutParent(field, name)
+	if err != nil {
+		return nameParts{}, err
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2+2*len(collections) || parts[0] != "locations" {
+		return nameParts{}, apierror.InvalidArgument("%s %q is not %s", field, name, shape)
 	}
 	for i, c := range collections {
-		if parts[4+2*i] != c {
-			return nil, apierror.InvalidArgument("%s %q is not %s", field, name, shape)
+		if parts[2+2*i] != c {
+			return nameParts{}, apierror.InvalidArgument("%s %q is not %s", field, name, shape)
 		}
 	}
-	out := []string{}
+	out := nameParts{parent: p}
 	for i := 1; i < len(parts); i += 2 {
 		if parts[i] == "" {
-			return nil, apierror.InvalidArgument("%s %q is not %s", field, name, shape)
+			return nameParts{}, apierror.InvalidArgument("%s %q is not %s", field, name, shape)
 		}
-		out = append(out, parts[i])
+		out.ids = append(out.ids, parts[i])
 	}
-	if _, err := parseProjectParent(field, "projects/"+out[0]); err != nil {
-		return nil, err
-	}
-	if out[1] != "-" && !locationRe.MatchString(out[1]) {
-		return nil, apierror.InvalidArgument("%s %q: %q is not a location", field, name, out[1])
+	out.location, out.ids = out.ids[0], out.ids[1:]
+	if out.location != "-" && !locationRe.MatchString(out.location) {
+		return nameParts{}, apierror.InvalidArgument("%s %q: %q is not a location", field, name, out.location)
 	}
 	return out, nil
 }
@@ -125,10 +133,10 @@ func parseBucket(field, name string) (bucketRef, error) {
 	if err != nil {
 		return bucketRef{}, err
 	}
-	if p[1] == "-" {
+	if p.location == "-" {
 		return bucketRef{}, apierror.InvalidArgument("%s %q: name a location, not -", field, name)
 	}
-	return bucketRef{p[0], p[1], p[2]}, nil
+	return bucketRef{p.parent, p.location, p.ids[0]}, nil
 }
 
 func (a *Admin) defaultBucket(ref bucketRef) *loggingpb.LogBucket {
@@ -151,6 +159,9 @@ func (a *Admin) defaultBucket(ref bucketRef) *loggingpb.LogBucket {
 // getBucket reads a bucket, the synthesized built-ins included. A deleted
 // bucket past its purge time is removed and NOT_FOUND.
 func (a *Admin) getBucket(ref bucketRef) (*loggingpb.LogBucket, error) {
+	if err := a.check(ref.parent); err != nil {
+		return nil, err
+	}
 	raw, err := a.db.Get(ref.key())
 	if errors.Is(err, store.ErrNotFound) {
 		if ref.location == "global" && builtinBucket(ref.bucket) {
@@ -207,15 +218,18 @@ func checkBucket(b *loggingpb.LogBucket) error {
 
 // buckets lists the buckets of a project in one location, or every location
 // for "-", the built-ins first-class among them, in name order.
-func (a *Admin) buckets(project, location string) ([]*loggingpb.LogBucket, error) {
-	keys, err := a.db.List("logging/buckets/" + project + "/")
+func (a *Admin) buckets(project parent, location string) ([]*loggingpb.LogBucket, error) {
+	if err := a.check(project); err != nil {
+		return nil, err
+	}
+	keys, err := a.db.List("logging/buckets/" + project.seg() + "/")
 	if err != nil {
 		return nil, apierror.Internal(err, "listing buckets")
 	}
 	seen := map[string]bool{}
 	var out []*loggingpb.LogBucket
 	for _, k := range keys {
-		raw, err := hex.DecodeString(strings.TrimPrefix(k, "logging/buckets/"+project+"/"))
+		raw, err := hex.DecodeString(strings.TrimPrefix(k, "logging/buckets/"+project.seg()+"/"))
 		if err != nil {
 			continue
 		}
@@ -249,7 +263,7 @@ func (s configServer) ListBuckets(_ context.Context, req *loggingpb.ListBucketsR
 		return nil, apierror.Wrap(err)
 	}
 	s.a.mu.Lock()
-	all, err := s.a.buckets(p[0], p[1])
+	all, err := s.a.buckets(p.parent, p.location)
 	s.a.mu.Unlock()
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -287,7 +301,7 @@ func (s configServer) CreateBucket(_ context.Context, req *loggingpb.CreateBucke
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if p[1] == "-" {
+	if p.location == "-" {
 		return nil, apierror.Wrap(apierror.InvalidArgument("parent %q: name a location, not -", req.GetParent()))
 	}
 	id := req.GetBucketId()
@@ -304,7 +318,7 @@ func (s configServer) CreateBucket(_ context.Context, req *loggingpb.CreateBucke
 	if err := checkBucket(b); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	ref := bucketRef{p[0], p[1], id}
+	ref := bucketRef{p.parent, p.location, id}
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
 	if _, err := s.a.getBucket(ref); err == nil {
@@ -424,7 +438,7 @@ func (s configServer) UndeleteBucket(_ context.Context, req *loggingpb.UndeleteB
 // ---- Views ----
 
 func viewPrefix(b bucketRef) string {
-	return "logging/views/" + b.project + "/" + hex.EncodeToString([]byte(b.location+"/"+b.bucket)) + "/"
+	return "logging/views/" + b.parent.seg() + "/" + hex.EncodeToString([]byte(b.location+"/"+b.bucket)) + "/"
 }
 
 func viewKey(b bucketRef, view string) string {
@@ -438,10 +452,10 @@ func parseView(field, name string) (bucketRef, string, error) {
 	if err != nil {
 		return bucketRef{}, "", err
 	}
-	if p[1] == "-" {
+	if p.location == "-" {
 		return bucketRef{}, "", apierror.InvalidArgument("%s %q: name a location, not -", field, name)
 	}
-	return bucketRef{p[0], p[1], p[2]}, p[3], nil
+	return bucketRef{p.parent, p.location, p.ids[0]}, p.ids[1], nil
 }
 
 func allLogsView(b bucketRef) *loggingpb.LogView {
@@ -669,5 +683,5 @@ func (s configServer) DeleteView(_ context.Context, req *loggingpb.DeleteViewReq
 func (a *Admin) Buckets(project string) ([]*loggingpb.LogBucket, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.buckets(project, "-")
+	return a.buckets(projectParent(project), "-")
 }

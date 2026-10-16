@@ -30,7 +30,9 @@ func TestBigQueryJobsByFolderAndOrganization(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
 	ctx := h.Context()
-	fc, _, pc := foldersClients(t, h)
+	// Resource Manager under the emulators shard's own name, so its suite
+	// stays in the storage shard; a developer's instance sets either.
+	fc, _, pc := foldersClientsAt(t, h, rmOptionsAt(runShardEndpoint(h, "CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER", EnvResourceManager)))
 	folder := func(parent, name string) string {
 		t.Helper()
 		op, err := fc.CreateFolder(ctx, &rmpb.CreateFolderRequest{Folder: &rmpb.Folder{Parent: parent, DisplayName: name}})

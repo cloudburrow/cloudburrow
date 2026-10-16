@@ -10,7 +10,8 @@ package logging
 //     time series: Cloud Monitoring is not emulated, so nothing reads one.
 //     CountMatching counts the entries its filter matches over a window, for
 //     the console.
-//   - A sink stores its destination and filter and delivers nothing.
+//   - A sink stores its destination and filter. Only a log-bucket destination
+//     is delivered to (server.go routeOf, #1395); nothing else is.
 //   - An enabled exclusion is applied as Google applies a project exclusion to
 //     the _Default sink: a matching entry written after it is not stored, so it
 //     is never listed. Only the _Default bucket is modelled, so that is every
@@ -20,10 +21,9 @@ package logging
 // filter the store could not evaluate is INVALID_ARGUMENT naming the term,
 // rather than stored and silently never matching.
 //
-// Buckets and views are in buckets.go (#1264). Every other ConfigServiceV2
-// method (the Async bucket calls, links, settings, CMEK)
-// stays UNIMPLEMENTED, as does a sink or exclusion of an organization, folder
-// or billing account.
+// Buckets and views are in buckets.go (#1264), the Async bucket calls, links
+// and settings in links.go (#1292), CopyLogEntries in copy.go (#1394), and
+// folder, organization and billing-account parents in parent.go (#1395).
 
 import (
 	"context"
@@ -76,9 +76,12 @@ var (
 // ConfigServiceV2 over one store.
 type Admin struct {
 	mu  sync.Mutex
+	h   Hierarchy // folders and the organization, or nil (#1395)
 	db  store.Store
 	now func() time.Time
 	ops int // operations answered, for unique names (#1292)
+	// copies are the CopyLogEntries operations (copy.go, #1394).
+	copies copies
 }
 
 // NewAdmin returns the admin services over db.
@@ -89,6 +92,7 @@ func NewAdmin(db store.Store) *Admin { return &Admin{db: db, now: time.Now} }
 func (a *Admin) Register(g grpc.ServiceRegistrar) {
 	loggingpb.RegisterMetricsServiceV2Server(g, metricsServer{a})
 	loggingpb.RegisterConfigServiceV2Server(g, configServer{a: a})
+	a.registerOperations(g)
 }
 
 // kind is one stored collection.
@@ -106,54 +110,56 @@ var (
 
 // key is the store key of one resource. IDs are hex-encoded: a metric ID may
 // hold a slash or a percent sign, which a key must not.
-func (k kind) key(project, id string) string {
-	return "logging/" + k.collection + "/" + project + "/" + hex.EncodeToString([]byte(id))
+func (k kind) key(p parent, id string) string {
+	return k.prefix(p) + hex.EncodeToString([]byte(id))
 }
 
-func (k kind) prefix(project string) string { return "logging/" + k.collection + "/" + project + "/" }
+func (k kind) prefix(p parent) string { return "logging/" + k.collection + "/" + p.seg() + "/" }
 
 // name is the resource name. A metric's ID is escaped as Google escapes it
 // (projects/my-project/metrics/nginx%2Frequests).
-func (k kind) name(project, id string) string {
-	return "projects/" + project + "/" + k.collection + "/" + url.PathEscape(id)
+func (k kind) name(p parent, id string) string {
+	return p.String() + "/" + k.collection + "/" + url.PathEscape(id)
 }
 
-// parseName splits projects/{p}/{collection}/{id}. The ID may be escaped; a
-// metric's may also be given raw, slashes and all.
-func (k kind) parseName(field, name string) (project, id string, err error) {
-	bare := strings.TrimPrefix(name, "/")
-	for _, p := range []string{"organizations/", "folders/", "billingAccounts/"} {
-		if strings.HasPrefix(bare, p) {
-			return "", "", apierror.Unimplemented("%s %q: only projects/{project}/%s/{id} is supported", field, name, k.collection)
-		}
+// parseName splits {parent}/{collection}/{id}. The ID may be escaped; a
+// metric's may also be given raw, slashes and all. A metric's parent is a
+// project, the only one Google documents for it.
+func (a *Admin) parseName(k kind, field, name string) (parent, string, error) {
+	shape := "{parent}/" + k.collection + "/{id}"
+	if k.collection == kindMetric.collection {
+		shape = "projects/{project}/metrics/{id}"
 	}
-	rest, ok := strings.CutPrefix(bare, "projects/")
-	project, raw, ok2 := strings.Cut(rest, "/"+k.collection+"/")
-	if !ok || !ok2 || project == "" || strings.Contains(project, "/") || raw == "" {
-		return "", "", apierror.InvalidArgument("%s %q is not projects/{project}/%s/{id}", field, name, k.collection)
+	p, rest, err := cutParent(field, name)
+	if err != nil {
+		return parent{}, "", err
 	}
-	if _, perr := parseProjectParent(field, "projects/"+project); perr != nil {
-		return "", "", perr
+	raw, ok := strings.CutPrefix(rest, k.collection+"/")
+	if !ok || raw == "" {
+		return parent{}, "", apierror.InvalidArgument("%s %q is not %s", field, name, shape)
+	}
+	if k.collection == kindMetric.collection && !p.isProject() {
+		return parent{}, "", apierror.InvalidArgument("%s %q: log-based metrics belong to projects only (projects/{project}/metrics/{id}), as Google documents", field, name)
 	}
 	id, uerr := url.PathUnescape(raw)
 	if uerr != nil {
-		return "", "", apierror.InvalidArgument("%s %q: %v", field, name, uerr)
+		return parent{}, "", apierror.InvalidArgument("%s %q: %v", field, name, uerr)
 	}
-	return project, id, nil
+	return p, id, a.check(p)
 }
 
-// parseParent checks projects/{p}, refusing the other parents as
-// UNIMPLEMENTED: they are real parents CloudBurrow does not model.
-func parseParent(parent string) (string, error) {
-	for _, p := range []string{"organizations/", "folders/", "billingAccounts/"} {
-		if strings.HasPrefix(parent, p) {
-			return "", apierror.Unimplemented("parent %q: only projects/{project} is supported", parent)
-		}
+// parseParent checks a sink's or an exclusion's parent: any of the four.
+func (a *Admin) parseParent(name string) (parent, error) { return a.resolve("parent", name) }
+
+// parseMetricParent checks a metric's parent, which is a project only.
+func (a *Admin) parseMetricParent(name string) (parent, error) {
+	if p, _, err := cutParent("parent", name); err == nil && !p.isProject() {
+		return parent{}, apierror.InvalidArgument("parent %q: log-based metrics belong to projects only (projects/{project}), as Google documents", name)
 	}
-	return parseProjectParent("parent", parent)
+	return a.resolve("parent", name)
 }
 
-func (a *Admin) get(k kind, project, id string) (proto.Message, error) {
+func (a *Admin) get(k kind, project parent, id string) (proto.Message, error) {
 	b, err := a.db.Get(k.key(project, id))
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, apierror.NotFound("%s %s does not exist", k.noun, k.name(project, id))
@@ -168,7 +174,7 @@ func (a *Admin) get(k kind, project, id string) (proto.Message, error) {
 	return m, nil
 }
 
-func (a *Admin) put(k kind, project, id string, m proto.Message) error {
+func (a *Admin) put(k kind, project parent, id string, m proto.Message) error {
 	b, err := protojson.Marshal(m)
 	if err != nil {
 		return apierror.Internal(err, "encoding the %s", k.noun)
@@ -179,7 +185,7 @@ func (a *Admin) put(k kind, project, id string, m proto.Message) error {
 	return nil
 }
 
-func (a *Admin) delete(k kind, project, id string) error {
+func (a *Admin) delete(k kind, project parent, id string) error {
 	if _, err := a.get(k, project, id); err != nil {
 		return err
 	}
@@ -190,7 +196,7 @@ func (a *Admin) delete(k kind, project, id string) error {
 }
 
 // list returns one page of a project's resources, in ID order.
-func (a *Admin) list(k kind, project, token string, size int32) ([]proto.Message, string, error) {
+func (a *Admin) list(k kind, project parent, token string, size int32) ([]proto.Message, string, error) {
 	keys, err := a.db.List(k.prefix(project))
 	if err != nil {
 		return nil, "", apierror.Internal(err, "listing %s", k.collection)
@@ -202,7 +208,7 @@ func (a *Admin) list(k kind, project, token string, size int32) ([]proto.Message
 			ids = append(ids, string(raw))
 		}
 	}
-	page, next, err := paging.Page("logging-"+k.collection+"|"+project, ids, token, int(size))
+	page, next, err := paging.Page("logging-"+k.collection+"|"+project.String(), ids, token, int(size))
 	if err != nil {
 		return nil, "", apierror.InvalidArgument("page_token: %v", err)
 	}
@@ -317,10 +323,11 @@ func checkBuckets(b *distribution.Distribution_BucketOptions) error {
 
 // prepareMetric validates a metric and fills its output-only fields. old is
 // the stored metric an update replaces, or nil.
-func (a *Admin) prepareMetric(project string, in, old *loggingpb.LogMetric) (*loggingpb.LogMetric, error) {
+func (a *Admin) prepareMetric(p parent, in, old *loggingpb.LogMetric) (*loggingpb.LogMetric, error) {
 	if in == nil {
 		return nil, apierror.InvalidArgument("metric is required")
 	}
+	project := p.id
 	m := proto.Clone(in).(*loggingpb.LogMetric)
 	id := m.GetName()
 	if err := checkID("metric", id, metricIDRe); err != nil {
@@ -435,7 +442,7 @@ func (a *Admin) prepareMetric(project string, in, old *loggingpb.LogMetric) (*lo
 }
 
 func (s metricsServer) ListLogMetrics(_ context.Context, req *loggingpb.ListLogMetricsRequest) (*loggingpb.ListLogMetricsResponse, error) {
-	project, err := parseParent(req.GetParent())
+	project, err := s.a.parseMetricParent(req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -451,7 +458,7 @@ func (s metricsServer) ListLogMetrics(_ context.Context, req *loggingpb.ListLogM
 }
 
 func (s metricsServer) GetLogMetric(_ context.Context, req *loggingpb.GetLogMetricRequest) (*loggingpb.LogMetric, error) {
-	project, id, err := kindMetric.parseName("metric_name", req.GetMetricName())
+	project, id, err := s.a.parseName(kindMetric, "metric_name", req.GetMetricName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -463,7 +470,7 @@ func (s metricsServer) GetLogMetric(_ context.Context, req *loggingpb.GetLogMetr
 }
 
 func (s metricsServer) CreateLogMetric(_ context.Context, req *loggingpb.CreateLogMetricRequest) (*loggingpb.LogMetric, error) {
-	project, err := parseParent(req.GetParent())
+	project, err := s.a.parseMetricParent(req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -485,7 +492,7 @@ func (s metricsServer) CreateLogMetric(_ context.Context, req *loggingpb.CreateL
 // UpdateLogMetric replaces a metric, or creates it when it does not exist, as
 // the proto documents. The metric's name must be the one in metric_name.
 func (s metricsServer) UpdateLogMetric(_ context.Context, req *loggingpb.UpdateLogMetricRequest) (*loggingpb.LogMetric, error) {
-	project, id, err := kindMetric.parseName("metric_name", req.GetMetricName())
+	project, id, err := s.a.parseName(kindMetric, "metric_name", req.GetMetricName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -512,7 +519,7 @@ func (s metricsServer) UpdateLogMetric(_ context.Context, req *loggingpb.UpdateL
 }
 
 func (s metricsServer) DeleteLogMetric(_ context.Context, req *loggingpb.DeleteLogMetricRequest) (*emptypb.Empty, error) {
-	project, id, err := kindMetric.parseName("metric_name", req.GetMetricName())
+	project, id, err := s.a.parseName(kindMetric, "metric_name", req.GetMetricName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -568,7 +575,7 @@ func (a *Admin) checkExclusion(e *loggingpb.LogExclusion) error {
 }
 
 // checkSink validates a sink, its embedded exclusions included.
-func (a *Admin) checkSink(sk *loggingpb.LogSink) error {
+func (a *Admin) checkSink(p parent, sk *loggingpb.LogSink) error {
 	if err := checkID("sink", sk.GetName(), configIDRe); err != nil {
 		return err
 	}
@@ -581,8 +588,8 @@ func (a *Admin) checkSink(sk *loggingpb.LogSink) error {
 	if err := checkDescription(sk.GetDescription()); err != nil {
 		return err
 	}
-	if sk.GetIncludeChildren() {
-		return apierror.InvalidArgument("include_children applies only to sinks of organizations and folders")
+	if sk.GetIncludeChildren() && !p.hasChildren() {
+		return apierror.InvalidArgument("include_children applies only to sinks of organizations and folders, not of %s", p)
 	}
 	seen := map[string]bool{}
 	for i, e := range sk.GetExclusions() {
@@ -628,7 +635,7 @@ var sinkUpdatable = map[string]bool{
 var exclusionUpdatable = map[string]bool{"description": true, "filter": true, "disabled": true}
 
 func (s configServer) ListSinks(_ context.Context, req *loggingpb.ListSinksRequest) (*loggingpb.ListSinksResponse, error) {
-	project, err := parseParent(req.GetParent())
+	project, err := s.a.parseParent(req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -644,7 +651,7 @@ func (s configServer) ListSinks(_ context.Context, req *loggingpb.ListSinksReque
 }
 
 func (s configServer) GetSink(_ context.Context, req *loggingpb.GetSinkRequest) (*loggingpb.LogSink, error) {
-	project, id, err := kindSink.parseName("sink_name", req.GetSinkName())
+	project, id, err := s.a.parseName(kindSink, "sink_name", req.GetSinkName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -677,7 +684,7 @@ func (a *Admin) stampSink(sk *loggingpb.LogSink, old *loggingpb.LogSink) {
 }
 
 func (s configServer) CreateSink(_ context.Context, req *loggingpb.CreateSinkRequest) (*loggingpb.LogSink, error) {
-	project, err := parseParent(req.GetParent())
+	project, err := s.a.parseParent(req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -685,7 +692,7 @@ func (s configServer) CreateSink(_ context.Context, req *loggingpb.CreateSinkReq
 		return nil, apierror.Wrap(apierror.InvalidArgument("sink is required"))
 	}
 	sk := proto.Clone(req.GetSink()).(*loggingpb.LogSink)
-	if err := s.a.checkSink(sk); err != nil {
+	if err := s.a.checkSink(project, sk); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	s.a.mu.Lock()
@@ -704,7 +711,7 @@ func (s configServer) CreateSink(_ context.Context, req *loggingpb.CreateSinkReq
 // destination,filter,include_children, as the proto documents for backwards
 // compatibility.
 func (s configServer) UpdateSink(_ context.Context, req *loggingpb.UpdateSinkRequest) (*loggingpb.LogSink, error) {
-	project, id, err := kindSink.parseName("sink_name", req.GetSinkName())
+	project, id, err := s.a.parseName(kindSink, "sink_name", req.GetSinkName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -726,7 +733,7 @@ func (s configServer) UpdateSink(_ context.Context, req *loggingpb.UpdateSinkReq
 	if err := applyMask(sk, req.GetSink(), mask, sinkUpdatable); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if err := s.a.checkSink(sk); err != nil {
+	if err := s.a.checkSink(project, sk); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	s.a.stampSink(sk, old)
@@ -737,7 +744,7 @@ func (s configServer) UpdateSink(_ context.Context, req *loggingpb.UpdateSinkReq
 }
 
 func (s configServer) DeleteSink(_ context.Context, req *loggingpb.DeleteSinkRequest) (*emptypb.Empty, error) {
-	project, id, err := kindSink.parseName("sink_name", req.GetSinkName())
+	project, id, err := s.a.parseName(kindSink, "sink_name", req.GetSinkName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -750,7 +757,7 @@ func (s configServer) DeleteSink(_ context.Context, req *loggingpb.DeleteSinkReq
 }
 
 func (s configServer) ListExclusions(_ context.Context, req *loggingpb.ListExclusionsRequest) (*loggingpb.ListExclusionsResponse, error) {
-	project, err := parseParent(req.GetParent())
+	project, err := s.a.parseParent(req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -766,7 +773,7 @@ func (s configServer) ListExclusions(_ context.Context, req *loggingpb.ListExclu
 }
 
 func (s configServer) GetExclusion(_ context.Context, req *loggingpb.GetExclusionRequest) (*loggingpb.LogExclusion, error) {
-	project, id, err := kindExclusion.parseName("name", req.GetName())
+	project, id, err := s.a.parseName(kindExclusion, "name", req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -778,7 +785,7 @@ func (s configServer) GetExclusion(_ context.Context, req *loggingpb.GetExclusio
 }
 
 func (s configServer) CreateExclusion(_ context.Context, req *loggingpb.CreateExclusionRequest) (*loggingpb.LogExclusion, error) {
-	project, err := parseParent(req.GetParent())
+	project, err := s.a.parseParent(req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -804,7 +811,7 @@ func (s configServer) CreateExclusion(_ context.Context, req *loggingpb.CreateEx
 
 // UpdateExclusion applies the update_mask, which is required.
 func (s configServer) UpdateExclusion(_ context.Context, req *loggingpb.UpdateExclusionRequest) (*loggingpb.LogExclusion, error) {
-	project, id, err := kindExclusion.parseName("name", req.GetName())
+	project, id, err := s.a.parseName(kindExclusion, "name", req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -835,7 +842,7 @@ func (s configServer) UpdateExclusion(_ context.Context, req *loggingpb.UpdateEx
 }
 
 func (s configServer) DeleteExclusion(_ context.Context, req *loggingpb.DeleteExclusionRequest) (*emptypb.Empty, error) {
-	project, id, err := kindExclusion.parseName("name", req.GetName())
+	project, id, err := s.a.parseName(kindExclusion, "name", req.GetName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -849,7 +856,7 @@ func (s configServer) DeleteExclusion(_ context.Context, req *loggingpb.DeleteEx
 
 // excluder returns a predicate matching the entries an enabled exclusion of
 // project drops, or nil when there is none.
-func (a *Admin) excluder(project string) pred {
+func (a *Admin) excluder(project parent) pred {
 	if a == nil {
 		return nil
 	}
@@ -885,7 +892,7 @@ func (a *Admin) Metrics(project string) ([]*loggingpb.LogMetric, error) {
 	var out []*loggingpb.LogMetric
 	token := ""
 	for {
-		page, next, err := a.list(kindMetric, project, token, 1000)
+		page, next, err := a.list(kindMetric, projectParent(project), token, 1000)
 		if err != nil {
 			return nil, err
 		}
@@ -909,4 +916,47 @@ func (a *Admin) MetricsServer() loggingpb.MetricsServiceV2Server { return metric
 func (a *Admin) ConfigServer() loggingpb.ConfigServiceV2Server { return configServer{a: a} }
 
 // MetricName is a metric's resource name.
-func MetricName(project, id string) string { return kindMetric.name(project, id) }
+func MetricName(project, id string) string { return kindMetric.name(projectParent(project), id) }
+
+// sinkRoutes are p's enabled sinks whose destination is a log bucket;
+// children selects the include_children ones, for an entry below p.
+func (a *Admin) sinkRoutes(p parent, children bool) []sinkRoute {
+	page, _, err := a.list(kindSink, p, "", 1000)
+	if err != nil {
+		return nil
+	}
+	var out []sinkRoute
+	for _, m := range page {
+		sk := m.(*loggingpb.LogSink)
+		if sk.GetDisabled() || (children && !sk.GetIncludeChildren()) {
+			continue
+		}
+		bucket, ok := strings.CutPrefix(sk.GetDestination(), "logging.googleapis.com/")
+		if !ok || !strings.Contains(bucket, "/buckets/") {
+			continue
+		}
+		match, err := compile(sk.GetFilter())
+		if err != nil {
+			continue
+		}
+		r := sinkRoute{match: match, bucket: bucket}
+		var ex []pred
+		for _, e := range sk.GetExclusions() {
+			if c, err := compile(e.GetFilter()); err == nil && !e.GetDisabled() {
+				ex = append(ex, c)
+			}
+		}
+		if len(ex) > 0 {
+			r.excluded = func(e *loggingpb.LogEntry) bool {
+				for _, p := range ex {
+					if p(e) {
+						return true
+					}
+				}
+				return false
+			}
+		}
+		out = append(out, r)
+	}
+	return out
+}

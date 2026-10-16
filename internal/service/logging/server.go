@@ -4,16 +4,18 @@
 // Google publishes no Logging emulator. This keeps entries in a bounded
 // in-memory store: WriteLogEntries, ListLogEntries with a documented filter
 // subset (see filter.go), ListLogs, DeleteLog, TailLogEntries (tail.go) and
-// ListMonitoredResourceDescriptors (descriptors.go). Log-based metrics, and
-// project sinks and exclusions, are stored by Admin (admin.go, #1226); buckets,
-// views, links and settings answer UNIMPLEMENTED. Entries do not survive a
-// restart, in any mode.
+// ListMonitoredResourceDescriptors (descriptors.go). Log-based metrics, sinks,
+// exclusions, buckets, views, links and settings are stored by Admin
+// (admin.go, buckets.go, links.go). Entries may belong to any of the four
+// parents (parent.go, #1395). Entries do not survive a restart, in any mode.
 package logging
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,7 +43,10 @@ type Store struct {
 	mu      sync.Mutex
 	limit   int
 	entries []*loggingpb.LogEntry
-	seq     uint64
+	// routed is where sinks sent an entry beyond its own parent's _Default
+	// bucket (#1395), for the entries that went anywhere else.
+	routed map[*loggingpb.LogEntry]*route
+	seq    uint64
 	// observe is told about every written entry, for the console.
 	observe func(*loggingpb.LogEntry)
 	// tails are the open TailLogEntries streams, each told about every
@@ -74,13 +79,29 @@ func NewStore(limit int) *Store {
 // Observe sets who is told about each written entry.
 func (s *Store) Observe(fn func(*loggingpb.LogEntry)) { s.mu.Lock(); s.observe = fn; s.mu.Unlock() }
 
-// Reset removes every entry.
-func (s *Store) Reset() { s.mu.Lock(); s.entries = nil; s.mu.Unlock() }
+// route is where one entry went: the log buckets sinks sent it to, and
+// whether an exclusion kept it out of its own parent's _Default bucket.
+type route struct {
+	buckets []string // projects/{p}/locations/{l}/buckets/{b}
+	hidden  bool
+}
 
-func (s *Store) append(es []*loggingpb.LogEntry) {
+// Reset removes every entry.
+func (s *Store) Reset() { s.mu.Lock(); s.entries, s.routed = nil, nil; s.mu.Unlock() }
+
+func (s *Store) append(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route) {
 	s.mu.Lock()
 	s.entries = append(s.entries, es...)
+	if len(routes) > 0 && s.routed == nil {
+		s.routed = map[*loggingpb.LogEntry]*route{}
+	}
+	for e, r := range routes {
+		s.routed[e] = r
+	}
 	if over := len(s.entries) - s.limit; over > 0 {
+		for _, e := range s.entries[:over] {
+			delete(s.routed, e)
+		}
 		s.entries = append([]*loggingpb.LogEntry(nil), s.entries[over:]...)
 	}
 	obs := s.observe
@@ -102,7 +123,31 @@ func (s *Store) append(es []*loggingpb.LogEntry) {
 func (s *Store) snapshot() []*loggingpb.LogEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]*loggingpb.LogEntry(nil), s.entries...)
+	out := make([]*loggingpb.LogEntry, 0, len(s.entries))
+	for _, e := range s.entries {
+		if r := s.routed[e]; r == nil || !r.hidden {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// routedTo snapshots the entries sinks sent to bucket.
+func (s *Store) routedTo(bucket string) []*loggingpb.LogEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*loggingpb.LogEntry
+	for _, e := range s.entries {
+		if r := s.routed[e]; r != nil {
+			for _, b := range r.buckets {
+				if b == bucket {
+					out = append(out, e)
+					break
+				}
+			}
+		}
+	}
+	return out
 }
 
 // Server serves google.logging.v2.LoggingServiceV2.
@@ -117,7 +162,8 @@ type Server struct {
 // UseAdmin makes the project exclusions admin stores apply to writes: an
 // entry an enabled exclusion matches is accepted and not stored, as Google's
 // _Default sink drops it.
-func (s *Server) UseAdmin(a *Admin) { s.admin = a }
+// It also gives CopyLogEntries (copy.go) the entries it copies.
+func (s *Server) UseAdmin(a *Admin) { s.admin = a; a.useEntries(s.store.snapshot) }
 
 // CountMatching counts project's stored entries that filter matches with a
 // timestamp at or after since, for a log-based metric's console page. The
@@ -163,19 +209,31 @@ const (
 	Retention = 30 * 24 * time.Hour
 )
 
-// parseLogName checks a log name, returning its project, as an API error.
-func parseLogName(name string) (string, error) {
-	bare := strings.TrimPrefix(name, "/")
-	for _, p := range []string{"organizations/", "folders/", "billingAccounts/"} {
-		if strings.HasPrefix(bare, p) {
-			return "", apierror.InvalidArgument("log name %q: only projects/{project}/logs/{log_id} is supported", name)
-		}
-	}
-	project, _, err := resource.ParseLogName(name)
+// logIDRe is a decoded log ID's documented alphabet and length.
+var logIDRe = regexp.MustCompile(`^[A-Za-z0-9/_.-]{1,511}$`)
+
+// parseLogName checks a log name, {parent}/logs/{log_id} with the log ID
+// URL-encoded, returning its parent, as an API error. The parent's existence
+// is not checked.
+func parseLogName(name string) (parent, error) {
+	p, rest, err := cutParent("log name", name)
 	if err != nil {
-		return "", apierror.InvalidArgument("log name: %v", err)
+		return parent{}, err
 	}
-	return project, nil
+	raw, ok := strings.CutPrefix(rest, "logs/")
+	if !ok || raw == "" || strings.Contains(raw, "/") {
+		return parent{}, apierror.InvalidArgument("log name %q is not {parent}/logs/{log_id} with a URL-encoded log_id", name)
+	}
+	if id, uerr := url.PathUnescape(raw); uerr != nil || !logIDRe.MatchString(id) {
+		return parent{}, apierror.InvalidArgument("log name %q: the log ID must be fewer than 512 characters of letters, digits, '/', '_', '-' and '.'", name)
+	}
+	return p, nil
+}
+
+// entryParent is the parent of a stored entry's log.
+func entryParent(e *loggingpb.LogEntry) parent {
+	p, _ := parseLogName(e.GetLogName())
+	return p
 }
 
 // parseProjectParent checks a "projects/{project}" parent or resource name.
@@ -214,7 +272,11 @@ func (s *Server) prepare(req *loggingpb.WriteLogEntriesRequest, in *loggingpb.Lo
 		}
 		e.Labels = labels
 	}
-	if _, err := parseLogName(e.GetLogName()); err != nil {
+	p, err := parseLogName(e.GetLogName())
+	if err != nil {
+		return nil, false, err
+	}
+	if err := s.admin.check(p); err != nil {
 		return nil, false, err
 	}
 	// Listing never shows the leading slash Google tolerates.
@@ -247,7 +309,9 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 		return nil, apierror.Wrap(apierror.InvalidArgument("the request is %d bytes, over the %d-byte (10 MB) limit", n, MaxRequestBytes))
 	}
 	now := s.now()
-	exclusions := map[string]pred{}
+	exclusions := map[parent]pred{}
+	sinks := map[parent][]sinkRoute{}
+	routes := map[*loggingpb.LogEntry]*route{}
 	out := make([]*loggingpb.LogEntry, 0, len(req.GetEntries()))
 	failed := map[int32]*spb.Status{}
 	var first *apierror.Error
@@ -264,9 +328,18 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 			failed[int32(i)] = status.New(ae.Code, ae.Message).Proto()
 			continue
 		}
-		if keep && !s.excluded(e, exclusions) {
-			out = append(out, e)
+		if !keep {
+			continue
 		}
+		hidden := s.excluded(e, exclusions)
+		buckets := s.routeOf(e, sinks)
+		if hidden && len(buckets) == 0 {
+			continue
+		}
+		if hidden || len(buckets) > 0 {
+			routes[e] = &route{buckets: buckets, hidden: hidden}
+		}
+		out = append(out, e)
 	}
 	if first != nil && len(failed) == len(req.GetEntries()) {
 		return nil, first
@@ -280,7 +353,7 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 			}
 		}
 		s.store.mu.Unlock()
-		s.store.append(out)
+		s.store.append(out, routes)
 	}
 	if first != nil {
 		st, err := status.New(first.Code, fmt.Sprintf("%s (%d of %d entries not written)", first.Message, len(failed), len(req.GetEntries()))).
@@ -293,16 +366,15 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 	return &loggingpb.WriteLogEntriesResponse{}, nil
 }
 
-// excluded reports whether an enabled exclusion of the entry's project
-// matches it. Each project's exclusions are read once per request.
-func (s *Server) excluded(e *loggingpb.LogEntry, cache map[string]pred) bool {
+// excluded reports whether an enabled exclusion of the entry's own parent
+// matches it. Exclusions keep an entry out of that parent's _Default bucket
+// only, as Google documents: sinks of the folders and organization above it
+// still see it. Each parent's exclusions are read once per request.
+func (s *Server) excluded(e *loggingpb.LogEntry, cache map[parent]pred) bool {
 	if s.admin == nil {
 		return false
 	}
-	project, _, err := resource.ParseLogName(e.GetLogName())
-	if err != nil {
-		return false
-	}
+	project := entryParent(e)
 	p, ok := cache[project]
 	if !ok {
 		p = s.admin.excluder(project)
@@ -358,13 +430,12 @@ func (s *Server) ListLogEntries(_ context.Context, req *loggingpb.ListLogEntries
 	if len(req.GetResourceNames()) == 0 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("resource_names is required"))
 	}
-	projects := map[string]bool{}
-	for _, r := range req.GetResourceNames() {
-		p, err := parseProjectParent("resource name", r)
-		if err != nil {
-			return nil, apierror.Wrap(err)
-		}
-		projects[p] = true
+	if len(req.GetResourceNames()) > 100 {
+		return nil, apierror.Wrap(apierror.InvalidArgument("resource_names: at most 100 resources, not %d", len(req.GetResourceNames())))
+	}
+	sources, err := s.sources(req.GetResourceNames())
+	if err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	match, err := compile(req.GetFilter())
 	if err != nil {
@@ -397,10 +468,21 @@ func (s *Server) ListLogEntries(_ context.Context, req *loggingpb.ListLogEntries
 	}
 
 	var found []*loggingpb.LogEntry
-	for _, e := range s.store.snapshot() {
-		p, _, err := resource.ParseLogName(e.GetLogName())
-		if err == nil && projects[p] && match(e) {
+	seen := map[*loggingpb.LogEntry]bool{}
+	add := func(e *loggingpb.LogEntry) {
+		if !seen[e] && match(e) {
+			seen[e] = true
 			found = append(found, e)
+		}
+	}
+	for _, e := range s.store.snapshot() {
+		if sources.parents[entryParent(e)] {
+			add(e)
+		}
+	}
+	for _, b := range sources.buckets {
+		for _, e := range s.store.routedTo(b) {
+			add(e)
 		}
 	}
 	less := func(a, b cursor) bool {
@@ -434,14 +516,14 @@ func (s *Server) ListLogEntries(_ context.Context, req *loggingpb.ListLogEntries
 }
 
 func (s *Server) ListLogs(_ context.Context, req *loggingpb.ListLogsRequest) (*loggingpb.ListLogsResponse, error) {
-	project, err := parseProjectParent("parent", req.GetParent())
+	project, err := s.admin.resolve("parent", req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	seen := map[string]bool{}
 	var names []string
 	for _, e := range s.store.snapshot() {
-		if p, _, err := resource.ParseLogName(e.GetLogName()); err == nil && p == project && !seen[e.GetLogName()] {
+		if entryParent(e) == project && !seen[e.GetLogName()] {
 			seen[e.GetLogName()] = true
 			names = append(names, e.GetLogName())
 		}
@@ -452,7 +534,11 @@ func (s *Server) ListLogs(_ context.Context, req *loggingpb.ListLogsRequest) (*l
 
 // DeleteLog removes every entry of one log.
 func (s *Server) DeleteLog(_ context.Context, req *loggingpb.DeleteLogRequest) (*emptypb.Empty, error) {
-	if _, err := parseLogName(req.GetLogName()); err != nil {
+	p, err := parseLogName(req.GetLogName())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	if err := s.admin.check(p); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	logName := strings.TrimPrefix(req.GetLogName(), "/")
@@ -462,6 +548,7 @@ func (s *Server) DeleteLog(_ context.Context, req *loggingpb.DeleteLogRequest) (
 	for _, e := range s.store.entries {
 		if e.GetLogName() == logName {
 			removed = true
+			delete(s.store.routed, e)
 			continue
 		}
 		kept = append(kept, e)
@@ -472,4 +559,92 @@ func (s *Server) DeleteLog(_ context.Context, req *loggingpb.DeleteLogRequest) (
 		return nil, apierror.Wrap(apierror.NotFound("log %s not found", req.GetLogName()))
 	}
 	return &emptypb.Empty{}, nil
+}
+
+// sources is what a ListLogEntries reads: the parents whose own entries it
+// lists, and the log buckets whose routed entries it lists too.
+type sources struct {
+	parents map[parent]bool
+	buckets []string
+}
+
+// sources resolves resource_names: parents, and bucket views. A parent's own
+// entries are those of its _Default bucket, so its _Default view is the
+// parent and what sinks routed there; another bucket's view is what sinks
+// routed to that bucket. A view's filter is not applied.
+func (s *Server) sources(names []string) (sources, error) {
+	out := sources{parents: map[parent]bool{}}
+	for _, r := range names {
+		p, rest, err := cutParent("resource name", r)
+		if err != nil {
+			return out, err
+		}
+		if err := s.admin.check(p); err != nil {
+			return out, err
+		}
+		if rest == "" {
+			out.parents[p] = true
+			continue
+		}
+		ref, view, err := parseView("resource name", r)
+		if err != nil {
+			return out, apierror.InvalidArgument("resource name %q is neither a parent nor {parent}/locations/{location}/buckets/{bucket}/views/{view}", r)
+		}
+		if s.admin != nil {
+			s.admin.mu.Lock()
+			_, err := s.admin.getBucket(ref)
+			if err == nil {
+				_, err = s.admin.getView(ref, view)
+			}
+			s.admin.mu.Unlock()
+			if err != nil {
+				return out, err
+			}
+		}
+		if ref.location == "global" && ref.bucket == bucketDefault {
+			out.parents[ref.parent] = true
+		}
+		out.buckets = append(out.buckets, ref.name())
+	}
+	return out, nil
+}
+
+// sinkRoute is one sink that can send an entry to a log bucket.
+type sinkRoute struct {
+	match, excluded pred
+	bucket          string
+}
+
+// routeOf is the log buckets the sinks of the entry's own parent, and the
+// include_children sinks of the folders and organization above it, send it
+// to. Only a destination that is a log bucket is delivered to; Cloud
+// Storage, BigQuery, Pub/Sub and project destinations receive nothing.
+func (s *Server) routeOf(e *loggingpb.LogEntry, cache map[parent][]sinkRoute) []string {
+	if s.admin == nil {
+		return nil
+	}
+	own := entryParent(e)
+	var routes []sinkRoute
+	for i, p := range append([]parent{own}, s.admin.ancestors(own)...) {
+		key := p
+		if i > 0 {
+			key.id += "/children" // an ancestor's routes: include_children sinks only
+		}
+		rs, ok := cache[key]
+		if !ok {
+			rs = s.admin.sinkRoutes(p, i > 0)
+			cache[key] = rs
+		}
+		routes = append(routes, rs...)
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range routes {
+		if seen[r.bucket] || !r.match(e) || (r.excluded != nil && r.excluded(e)) {
+			continue
+		}
+		seen[r.bucket] = true
+		out = append(out, r.bucket)
+	}
+	return out
 }

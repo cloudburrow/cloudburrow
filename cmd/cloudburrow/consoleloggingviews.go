@@ -59,8 +59,9 @@ func viewRowActions(v *loggingpb.LogView) []console.Action {
 	}
 }
 
-// DetailActions implements console.PathActor: Create view and the link
-// actions (#1292, consoleloggingbuckets.go) on a bucket's page, and Edit and
+// DetailActions implements console.PathActor: Create view, the link
+// actions (#1292, consoleloggingbuckets.go) and Copy log entries (#1394,
+// consoleloggingcopy.go) on a bucket's page, and Edit and
 // Delete on a view.
 func (p loggingBucketsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if len(path) < 1 || len(path) > 2 {
@@ -75,7 +76,8 @@ func (p loggingBucketsProvider) DetailActions(ctx context.Context, project strin
 		if viewsChangeable(b) {
 			out = append(out, createViewAction())
 		}
-		return append(out, p.linkActions(ctx, project, path)...)
+		out = append(out, p.linkActions(ctx, project, path)...)
+		return append(out, p.copyActions(ctx, project, path)...) // #1394
 	}
 	if !viewsChangeable(b) {
 		return nil
@@ -109,6 +111,9 @@ func (p loggingBucketsProvider) ActAt(ctx context.Context, project string, path 
 	}
 	if action == "create-link" || action == "delete-link" {
 		return p.actOnLink(ctx, project, path, action, values)
+	}
+	if action == copyEntriesAction || action == cancelCopyAction {
+		return p.actOnCopy(ctx, project, path, action, values)
 	}
 	if err := bucketOfProject(project, path[0]); err != nil {
 		return err

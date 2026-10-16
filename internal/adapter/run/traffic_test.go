@@ -18,10 +18,14 @@ const (
 // tag become Knative's traffic block, one target each.
 func TestTrafficRendersOntoKnative(t *testing.T) {
 	s := svc("app", &runpb.Container{Image: "gcr.io/p/app:v1"})
+	// Revisions are named as the API names them, and rendered as the
+	// Knative revisions they are (#1400).
+	kname := serviceKName(s.GetName())
+	rev := func(gen string) string { return RevisionID(s.GetName(), kname, kname+"-"+gen) }
 	s.Traffic = []*runpb.TrafficTarget{
 		{Type: tLatest, Percent: 50, Tag: "next"},
-		{Type: tRevision, Revision: "app-00001", Percent: 50},
-		{Revision: "projects/p/locations/l/services/app/revisions/app-00002", Tag: "old"},
+		{Type: tRevision, Revision: rev("00001"), Percent: 50},
+		{Revision: "projects/p/locations/l/services/app/revisions/" + rev("00002"), Tag: "old"},
 	}
 	m, err := ToKnative(s, "default", "test", nil)
 	if err != nil {
@@ -32,10 +36,10 @@ func TestTrafficRendersOntoKnative(t *testing.T) {
       percent: 50
       tag: "next"
     - latestRevision: false
-      revisionName: "app-00001"
+      revisionName: "` + kname + `-00001"
       percent: 50
     - latestRevision: false
-      revisionName: "app-00002"
+      revisionName: "` + kname + `-00002"
       percent: 0
       tag: "old"
 `
