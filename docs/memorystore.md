@@ -49,7 +49,8 @@ the volume.
 
 **Not all of the Memorystore admin API (`redis.googleapis.com`).** Instances are BASIC or
 STANDARD_HA tier (§5) and `REDIS_6_X`, `REDIS_7_0` or `REDIS_7_2`, with or without in-transit
-encryption (§6): no customer-managed keys, no maintenance windows and no IAM. Each is 501.
+encryption (§6) and with or without a customer-managed key (§7): no maintenance windows and no IAM.
+Each is 501.
 `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` are 501 too: they are end of life, and the Docker official
 `redis` image no longer builds them (3.2 last in October 2018, 4.0 in April 2020, 5.0 in November
 2022), so there is no maintained image to run. Export and import to and from Cloud Storage RDB
@@ -211,9 +212,49 @@ Terraform's `transit_encryption_mode = "SERVER_AUTHENTICATION"` does the same, a
 `server_ca_certs[0].cert` is the CA. The certificate names the host's loopback (`127.0.0.1`, where
 `host` and `port` are) and the instance's Services in the cluster. A Standard tier instance's nodes
 replicate over TLS. Clients are not asked for a certificate, as SERVER_AUTHENTICATION has none;
-the mode is set at create and cannot be changed; no CA rotation is served. The CA and its key are
+the mode is set at create and cannot be changed. The CA and its key are
 kept with the instance's record in persistent mode; the server's certificate and key are in its
 Deployment's environment in the cluster, as the AUTH string is in its arguments.
 
 The console's Create instance has **Enable in-transit encryption**, and the instance's page shows
 **In-transit encryption** and a **Server CA** tab with the CA's PEM.
+
+**Server CA rotation (#1463).** As Memorystore documents: five years after an instance is created
+a new CA is made and listed in `server_ca_certs` beside the old one, which stays valid until it
+expires (ten years after its creation) and is then no longer listed; the server's certificate is
+issued by the new CA when it is next issued, which here is when the server starts again. Install
+every listed CA on your clients (a bundle of all of them, in any order). Google has no API to
+rotate sooner, only a support request; the console's **Rotate server CA**, on the page of an
+instance with in-transit encryption, is that request: the new CA is listed at once and the server
+is started again with a certificate of it (a short connection drop, as Memorystore's certificate
+rotation is). `RescheduleMaintenance` has nothing to do with it.
+
+## 7. Customer-managed encryption keys (#1463)
+
+`customer_managed_key` (gcloud `--customer-managed-key`, Terraform `customer_managed_key`, the
+console's **Customer-managed encryption key**) names a Cloud KMS key, which must be in the
+instance's region (`projects/P/locations/us-central1/keyRings/R/cryptoKeys/K`; another region is
+INVALID_ARGUMENT, as Google's rule is). It is set at create only. Run `up` with `kms` in
+`--services`; without it the create is FAILED_PRECONDITION. Each instance gets a 256-bit data key
+of its own, which Cloud KMS `Encrypt` wraps with that key; only the wrapped data key is kept. As
+Memorystore encrypts "metadata related to security features like AUTH and in-transit
+encryption" with the key, the instance's AUTH string and its CA's private key are kept sealed
+with the data key (AES-256-GCM) in the instance's record, never in the clear.
+
+The key is checked (the data key unwrapped by `Decrypt`) at create, each time CloudBurrow starts
+the instance again, and every two seconds. While the key version that wrapped the data key is
+disabled or destroyed, or the key cannot be used, the instance is **suspended**, as Memorystore
+suspends one: no READY state (`STATE_UNSPECIFIED`, the console's "No state"),
+`suspension_reasons: [CUSTOMER_MANAGED_KEY_ISSUE]`, a status message saying why, and its server
+stopped, so no client reaches the data; updates, imports, exports and failovers are
+FAILED_PRECONDITION, and delete still works. Once the version is enabled again the instance
+resumes on its own: its server runs again (REPAIRING) and it is READY. In persistent mode the
+server's volume is kept while it is suspended, so the data comes back; in ephemeral mode it has
+none and comes back empty. A destroyed version cannot be restored, so the instance stays
+suspended, as Memorystore's does (a new instance and an import are the way back).
+
+What is not encrypted with the key: the RDB snapshots and append-only file on the server's own
+volume are written by Valkey, in the cluster, and are not encrypted by CloudBurrow (they are only
+served while the key can be used); an export is a plain RDB file, as Memorystore protects an
+export with the destination bucket's own CMEK, not the instance's. The console's instance page
+shows **Encryption** (the key) and, while suspended, **Suspension reasons**.

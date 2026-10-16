@@ -60,7 +60,7 @@ const softDeletedLimit = 1000
 // bucketStorageClasses are the default storage classes buckets.patch
 // accepts on this instance, legacy ones included, so a bucket made with one
 // can be edited without the form refusing its own value.
-const bucketStorageClassPattern = `^(STANDARD|NEARLINE|COLDLINE|ARCHIVE|MULTI_REGIONAL|REGIONAL|DURABLE_REDUCED_AVAILABILITY)$`
+const bucketStorageClassPattern = `^(STANDARD|NEARLINE|COLDLINE|ARCHIVE|MULTI_REGIONAL|REGIONAL|DURABLE_REDUCED_AVAILABILITY|RAPID)$`
 
 // bucketMeta is a bucket as buckets.get returns it: what the configuration
 // tab shows and the edit form is prefilled from. The lifecycle rules and CORS
@@ -106,6 +106,19 @@ type bucketMeta struct {
 	HierarchicalNamespace *struct {
 		Enabled bool `json:"enabled"`
 	} `json:"hierarchicalNamespace"`
+	// CustomPlacementConfig is set only at creation; one zone makes a
+	// Rapid storage (zonal) bucket, which holds appendable objects (#1443).
+	CustomPlacementConfig *struct {
+		DataLocations []string `json:"dataLocations"`
+	} `json:"customPlacementConfig"`
+}
+
+// placement is the bucket's custom placement, or "None".
+func (b bucketMeta) placement() string {
+	if b.CustomPlacementConfig == nil || len(b.CustomPlacementConfig.DataLocations) == 0 {
+		return "None"
+	}
+	return strings.Join(b.CustomPlacementConfig.DataLocations, ", ")
 }
 
 func (b bucketMeta) hierarchical() bool {

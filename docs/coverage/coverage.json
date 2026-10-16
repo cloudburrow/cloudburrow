@@ -2563,7 +2563,9 @@
         "method": "google.cloud.kms.v1.KeyManagementService/UpdateCryptoKeyVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion"
+          "test/compat/consolememorystore_test.go:430 TestConsoleMemorystoreCustomerManagedKey",
+          "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion",
+          "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey"
         ],
         "unverified": [
           {
@@ -3992,10 +3994,13 @@
         "method": "google.cloud.redis.v1.CloudRedis/CreateInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/consolememorystore_test.go:359 TestConsoleMemorystoreInTransitEncryption",
+          "test/compat/consolememorystore_test.go:361 TestConsoleMemorystoreInTransitEncryption",
+          "test/compat/consolememorystore_test.go:430 TestConsoleMemorystoreCustomerManagedKey",
           "test/compat/gcloudredis_test.go:105 TestGcloudRedisInTransitEncryption",
+          "test/compat/gcloudredis_test.go:143 TestGcloudRedisCustomerManagedKey",
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
+          "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
@@ -4007,6 +4012,7 @@
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
+          "test/compat/terraform_redis_test.go:230 TestTerraformRedisCustomerManagedKey",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },
@@ -4019,6 +4025,7 @@
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
+          "test/compat/terraform_redis_test.go:230 TestTerraformRedisCustomerManagedKey",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
         "unverified": [
@@ -4049,17 +4056,22 @@
         "method": "google.cloud.redis.v1.CloudRedis/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/consolememorystore_test.go:359 TestConsoleMemorystoreInTransitEncryption",
+          "test/compat/consolememorystore_test.go:361 TestConsoleMemorystoreInTransitEncryption",
+          "test/compat/consolememorystore_test.go:430 TestConsoleMemorystoreCustomerManagedKey",
+          "test/compat/consolememorystore_test.go:483 TestConsoleMemorystoreRotateServerCA",
           "test/compat/gcloudredis_test.go:105 TestGcloudRedisInTransitEncryption",
+          "test/compat/gcloudredis_test.go:143 TestGcloudRedisCustomerManagedKey",
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
+          "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
+          "test/compat/terraform_redis_test.go:230 TestTerraformRedisCustomerManagedKey",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },
@@ -5476,7 +5488,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
-          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
+          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
+          "test/compat/storagegrpcappend_test.go:28 TestStorageGRPCAppendableObjects"
         ]
       },
       {
@@ -5499,7 +5512,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
-          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
+          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
+          "test/compat/storagegrpcappend_test.go:28 TestStorageGRPCAppendableObjects"
         ]
       },
       {
@@ -5521,7 +5535,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
-          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
+          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
+          "test/compat/storagegrpcappend_test.go:28 TestStorageGRPCAppendableObjects"
         ]
       },
       {
@@ -5603,7 +5618,8 @@
         "method": "google.storage.v2.Storage/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets"
+          "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
+          "test/compat/storagegrpcappend_test.go:131 TestStorageGRPCSetIamPolicyUpdateMask"
         ]
       },
       {
@@ -5625,7 +5641,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
-          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
+          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
+          "test/compat/storagegrpcappend_test.go:131 TestStorageGRPCSetIamPolicyUpdateMask"
         ]
       },
       {
@@ -7366,12 +7383,13 @@
           "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
           "test/compat/bigqueryextracttypes_test.go:36 TestBigQueryExtractOfEveryType",
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",
+          "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryjsonunknown_test.go:27 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
           "test/compat/bigqueryparquetcharmap_test.go:64 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
-          "test/compat/bigquerypartitionrest_test.go:136 TestBigQueryPartitionDestinationsRest",
+          "test/compat/bigquerypartitionrest_test.go:142 TestBigQueryPartitionDestinationsRest",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
           "test/compat/bigqueryscriptchildren_test.go:27 TestBigQueryScriptChildJobs",
           "test/compat/bigqueryscriptfailedchildren_test.go:27 TestBigQueryScriptFailedChildJobs",
@@ -7442,6 +7460,7 @@
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
           "test/compat/bigqueryextracttypes_test.go:36 TestBigQueryExtractOfEveryType",
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",
+          "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryinfoschema_test.go:28 TestBigQueryInformationSchemaDatasetViews",
           "test/compat/bigqueryinfoschemajobs_test.go:27 TestBigQueryInformationSchemaJobs",
           "test/compat/bigqueryinfoschemamore_test.go:75 TestBigQueryInformationSchemaPartitionsAndConstraints",
@@ -7467,7 +7486,7 @@
           "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
-          "test/compat/bigquerypartitionrest_test.go:136 TestBigQueryPartitionDestinationsRest",
+          "test/compat/bigquerypartitionrest_test.go:142 TestBigQueryPartitionDestinationsRest",
           "test/compat/bigquerypartitionrest_test.go:34 TestBigQueryStreamingBuffer",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
           "test/compat/bigqueryprivacypolicy_test.go:189 TestBigQueryPrivacyPolicyJoinRestriction",
@@ -7546,6 +7565,7 @@
           "test/compat/bigqueryextractdecimal_test.go:37 TestBigQueryExtractOfParameterizedDecimals",
           "test/compat/bigqueryextracttypes_test.go:36 TestBigQueryExtractOfEveryType",
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",
+          "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryinfoschema_test.go:28 TestBigQueryInformationSchemaDatasetViews",
           "test/compat/bigqueryinfoschemajobs_test.go:27 TestBigQueryInformationSchemaJobs",
           "test/compat/bigqueryinfoschemajobsscale_test.go:32 TestBigQueryInformationSchemaJobsAtScale",
@@ -7774,6 +7794,7 @@
           "test/compat/bigquerychangehistory_test.go:120 TestBigQueryChangeHistoryWritePaths",
           "test/compat/bigquerycolumnbuffer_test.go:34 TestBigQueryColumnStreamingBuffer",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
+          "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
@@ -7848,6 +7869,7 @@
           "test/compat/bigquerydml_test.go:196 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:338 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryextractformats_test.go:37 TestBigQueryExtractCompressionsEachFormatAllows",
+          "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
           "test/compat/bigqueryjsonunknown_test.go:27 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
@@ -7862,7 +7884,7 @@
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
-          "test/compat/bigquerypartitionrest_test.go:136 TestBigQueryPartitionDestinationsRest",
+          "test/compat/bigquerypartitionrest_test.go:142 TestBigQueryPartitionDestinationsRest",
           "test/compat/bigquerypartitionrest_test.go:34 TestBigQueryStreamingBuffer",
           "test/compat/bigquerypartitionwrites_test.go:263 TestConsoleBigQueryPartitions",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
@@ -7897,6 +7919,7 @@
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigqueryddlleftovers_test.go:31 TestBigQueryAlterTableSetDataTypeArraysAndKeyedColumns",
           "test/compat/bigqueryextractdecimal_test.go:37 TestBigQueryExtractOfParameterizedDecimals",
+          "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
           "test/compat/bigqueryjsonunknown_test.go:27 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigquerymaterializedviews_test.go:142 TestBigQueryMaterializedViews",

@@ -20,7 +20,7 @@ tracks it; a closed issue is named only where it says what was built.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 7 | 1 | 5 | 1 | 0 |
+| Cloud Storage | 7 | 0 | 6 | 1 | 0 |
 | Pub/Sub | 2 | 0 | 0 | 2 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 4 | 2 | 1 | 0 | 1 |
@@ -32,10 +32,10 @@ tracks it; a closed issue is named only where it says what was built.
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
 | BigQuery | 28 | 5 | 16 | 7 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
-| Cloud SQL, Memorystore | 3 | 3 | 0 | 0 | 0 |
+| Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **66** | **13** | **35** | **13** | **5** |
+| **Total** | **66** | **11** | **37** | **13** | **5** |
 
 ## Cloud Storage
 
@@ -48,7 +48,7 @@ and object IAM on the JSON API are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| gRPC `google.storage.v2`: appendable objects (Google documents them for zonal buckets only, which are not modelled; the store keeps finalized generations only), `Bucket.custom_placement_config` and `ip_filter`, and `SetIamPolicy`'s `update_mask` are `UNIMPLEMENTED` (#1443) | not built yet | M |
+| gRPC `google.storage.v2`: `Bucket.ip_filter` stays `UNIMPLEMENTED` (and `ipFilter` 400 on the JSON API): enforcing it needs the caller's VPC network and the `storage.buckets.exemptFromIpFilter` permission, which are not modelled, and a filter stored without effect would look like a control that is not there. Appendable objects, `custom_placement_config` and `SetIamPolicy`'s `update_mask` are built (#1443) | no emulator support: enforcement needs what is not modelled | S |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` (#1444) | no emulator support (no cache tier) | M |
 | `buckets.relocate`, `buckets.operations.advanceRelocateBucket` (#1444) | no emulator support (one location) | M |
@@ -259,14 +259,14 @@ and exports, client certificates and server CA rotation, `tiers.list`, `flags.li
 replicas (#1381), high availability (#1408), Google's Auth Proxy binary (#1421),
 `pointInTimeRestore` and Backup and DR backups through the Backup and DR Service (#1425, #1433);
 the Memorystore admin API over Valkey (#1302), exports, imports and RDB persistence (#1384),
-STANDARD_HA and failover (#1385), versions, upgrades and maintenance (#1386), and in-transit
-encryption (#1413). IAM database authentication is excluded (below).
+STANDARD_HA and failover (#1385), versions, upgrades and maintenance (#1386), in-transit
+encryption (#1413), and customer-managed keys and server CA rotation (#1463). IAM database authentication is excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
 | Cloud SQL: legacy failover replicas and external-primary replicas; `MYSQL_5_7`, `POSTGRES_12` and other versions; upgrading a replica on its own; a PostgreSQL database's charset change; `BAK` and `TDE` files; 32 methods 501 (`Backups.*`, blue-green deployments, `connect.resolve`, server and Entra ID certificates, `demote`, `switchover`, `executeSql`, `reencrypt`, disk shrink, external sync and others; [sqladmin.md](coverage/sqladmin.md)) (#1462) | not built yet | L |
 | Backup and DR: workload types other than Cloud SQL instances, `encryptionConfig`, `patch`, plan revisions, data source references, resource backup configs, management servers and trials (39 methods 501; [backupdr.md](coverage/backupdr.md)) (#1462) | not built yet | L |
-| Memorystore for Redis: customer-managed keys are 501; `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image; no server CA rotation for in-transit encryption (#1463) | not built yet | M |
+| Memorystore for Redis: `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image (the Docker official `redis` image last built them in 2018, 2020 and 2022); with a customer-managed key, the RDB snapshots and AOF Valkey writes on a server's own volume are not encrypted with it, and are served only while the key can be used (#1463) | no emulator support: no maintained image; Valkey writes its own files | S |
 
 ## Functions, credentials, tooling
 

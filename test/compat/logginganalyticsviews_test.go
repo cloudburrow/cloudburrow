@@ -260,8 +260,10 @@ func TestLoggingLinkedDatasetViewsRetentionAndDeleteLog(t *testing.T) {
 // read-only (403).
 func TestLoggingLinkedDatasetAcrossRestarts(t *testing.T) {
 	h := New(t)
-	restart := bigQueryEmulatorRestarter(t)
+	// The fixture first: it skips where BigQuery is not served, before the
+	// restarter looks for the emulator's pod (main run 38946612957).
 	f := newLinkFixture(t, h, "lar")
+	restart := bigQueryEmulatorRestarter(t)
 	f.write("before", ltype.LogSeverity_ERROR, time.Time{})
 	if _, err := f.cfg.CreateView(f.ctx, &loggingpb.CreateViewRequest{Parent: f.bucket, ViewId: "errors",
 		View: &loggingpb.LogView{Filter: "severity>=ERROR"}}); err != nil {

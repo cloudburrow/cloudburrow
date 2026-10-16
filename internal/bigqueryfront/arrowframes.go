@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/apache/arrow/go/v15/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
 )
 
 // The Storage Read API's Arrow messages as BigQuery frames them (#1046).
