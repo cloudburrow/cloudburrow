@@ -129,7 +129,7 @@ func TestTrainRefusals(t *testing.T) {
 	cols = []mlColumn{{"x", "FLOAT"}, {"label", "STRING"}}
 	o.ModelType = "LOGISTIC_REG"
 	rows := [][]*string{{sp("1"), sp("a")}, {sp("2"), sp("b")}, {sp("3"), sp("c")}}
-	if _, f := trainModel(o, cols, rows); f == nil || f.code != 501 {
+	if m, f := trainModel(o, cols, rows); f != nil || len(m.ClassWeights) != 3 {
 		t.Errorf("multiclass: %v", f)
 	}
 	if _, f := trainModel(o, []mlColumn{{"x", "FLOAT"}}, rows); f == nil || f.code != 400 {
@@ -149,8 +149,9 @@ func TestParseModelDDL(t *testing.T) {
 		t.Errorf("%+v", d)
 	}
 	for _, bad := range []string{
-		"CREATE MODEL ds.m OPTIONS(model_type='kmeans') AS SELECT 1",
-		"CREATE MODEL ds.m TRANSFORM(x) OPTIONS(model_type='linear_reg') AS SELECT 1",
+		"CREATE MODEL ds.m OPTIONS(model_type='boosted_tree_regressor') AS SELECT 1",
+		"CREATE MODEL ds.m TRANSFORM(ML.STANDARD_SCALER(x) OVER () AS x, y) OPTIONS(model_type='linear_reg') AS SELECT 1",
+		"CREATE MODEL ds.m OPTIONS(model_type='pca', num_principal_components=2, pca_solver='randomized') AS SELECT 1",
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION `us.c` OPTIONS(endpoint='gemini')",
 		"CREATE MODEL ds.m OPTIONS(model_type='linear_reg', warm_start=true) AS SELECT 1",
 	} {

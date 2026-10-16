@@ -58,12 +58,37 @@ type mlOptions struct {
 	SplitMethod    string   `json:"dataSplitMethod"`
 	SplitEvalFrac  float64  `json:"dataSplitEvalFraction"`
 	SplitCol       string   `json:"dataSplitCol,omitempty"`
+	// KMEANS (modelcluster.go): NumClusters 0 is the documented default,
+	// log10 of the training rows.
+	NumClusters   int    `json:"numClusters,omitempty"`
+	KMeansInit    string `json:"kmeansInitMethod,omitempty"`
+	KMeansInitCol string `json:"kmeansInitCol,omitempty"`
+	DistanceType  string `json:"distanceType,omitempty"`
+	Standardize   bool   `json:"standardizeFeatures"`
+	// PCA (modelcluster.go).
+	NumPC         int     `json:"numPrincipalComponents,omitempty"`
+	PCAVarRatio   float64 `json:"pcaExplainedVarianceRatio,omitempty"`
+	ScaleFeatures bool    `json:"scaleFeatures"`
+	PCASolver     string  `json:"pcaSolver,omitempty"`
+	// Set are the options CREATE MODEL gave, lower case.
+	Set []string `json:"set,omitempty"`
+}
+
+// given reports whether CREATE MODEL gave option name.
+func (o mlOptions) given(name string) bool {
+	for _, s := range o.Set {
+		if s == name {
+			return true
+		}
+	}
+	return false
 }
 
 // defaultMLOptions are BigQuery's documented defaults.
 func defaultMLOptions() mlOptions {
 	return mlOptions{Strategy: "AUTO_STRATEGY", MaxIterations: 20, LearnRateStrat: "LINE_SEARCH", LearnRate: 0.1,
-		InitLearnRate: 0.1, EarlyStop: true, MinRelProgress: 0.01, SplitMethod: "AUTO_SPLIT", SplitEvalFrac: 0.2}
+		InitLearnRate: 0.1, EarlyStop: true, MinRelProgress: 0.01, SplitMethod: "AUTO_SPLIT", SplitEvalFrac: 0.2,
+		KMeansInit: "RANDOM", DistanceType: "EUCLIDEAN", Standardize: true, ScaleFeatures: true, PCASolver: "AUTO"}
 }
 
 // mlFeature is one input column of a model and what training learned of
@@ -137,7 +162,33 @@ type mlTrained struct {
 	Strategy string              `json:"strategy"`
 	Rows     int                 `json:"rows"`
 	EvalRows int                 `json:"evalRows"`
+	// ClassWeights are a multiclass logistic model's weights, one vector
+	// a class (in Classes' order), each laid out as the encoded row:
+	// the intercept, then each feature's columns.
+	ClassWeights [][]float64 `json:"classWeights,omitempty"`
+	// Scaling is how numeric features are encoded: "" standardized,
+	// "raw" as they are, "center" less their mean (modelcluster.go).
+	Scaling string `json:"scaling,omitempty"`
+	// KMEANS: the centroids in the encoded space, their row counts, and
+	// the distance type.
+	Centroids    [][]float64 `json:"centroids,omitempty"`
+	ClusterSizes []int       `json:"clusterSizes,omitempty"`
+	Distance     string      `json:"distance,omitempty"`
+	// PCA: the components (rows, in the encoded space), their
+	// eigenvalues, and the sum of every eigenvalue.
+	Components    [][]float64 `json:"components,omitempty"`
+	Eigenvalues   []float64   `json:"eigenvalues,omitempty"`
+	TotalVariance float64     `json:"totalVariance,omitempty"`
+	// EvalY and EvalScore are a classifier's evaluation rows (as Eval
+	// was computed on), for ML.CONFUSION_MATRIX and ML.ROC_CURVE with no
+	// input: the class index, and the positive class's probability
+	// (binary) or the predicted class index (multiclass).
+	EvalY     []float64 `json:"evalY,omitempty"`
+	EvalScore []float64 `json:"evalScore,omitempty"`
 }
+
+// multiclass reports whether t is a multiclass logistic model.
+func (t mlTrained) multiclass() bool { return len(t.Classes) > 2 }
 
 // mlColumn is a column of a query's result: its name and BigQuery type.
 type mlColumn struct{ Name, Type string }
@@ -181,6 +232,12 @@ func mlUnimplemented(format string, a ...any) *mlFail {
 // trainModel trains a model of opts on rows, whose columns are cols, each
 // value a string or nil as the REST API gives it.
 func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *mlFail) {
+	switch opts.ModelType {
+	case "KMEANS":
+		return trainKMeans(opts, cols, rows)
+	case "PCA":
+		return trainPCA(opts, cols, rows)
+	}
 	var t mlTrained
 	label := "label"
 	if len(opts.LabelCols) > 1 {
@@ -247,15 +304,17 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 			t.Classes = append(t.Classes, c)
 		}
 		sortLabels(t.Classes, t.LabelType)
-		if len(t.Classes) != 2 {
-			if len(t.Classes) < 2 {
-				return t, mlInvalid("Classification model requires at least 2 unique labels and the label column had only %d unique label", len(t.Classes))
-			}
-			return t, mlUnimplemented("a multiclass LOGISTIC_REG model (%d labels): CloudBurrow trains binary logistic regression only", len(t.Classes))
+		if len(t.Classes) < 2 {
+			return t, mlInvalid("Classification model requires at least 2 unique labels and the label column had only %d unique label", len(t.Classes))
+		}
+		if len(t.Classes) > 50 {
+			return t, mlInvalid("Logistic regression supports at most 50 unique labels; the label column had %d", len(t.Classes))
 		}
 		for i, row := range kept {
-			if *row[li] == t.Classes[1] {
-				y[i] = 1
+			for k, c := range t.Classes {
+				if *row[li] == c {
+					y[i] = float64(k)
+				}
 			}
 		}
 	} else {
@@ -311,36 +370,8 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		return t, mlInvalid("No training data after the data split")
 	}
 	t.Rows, t.EvalRows = len(train), len(eval)
-	// Feature statistics over the training rows.
-	for k := range t.Features {
-		ft := &t.Features[k]
-		var vals []float64
-		cats := map[string]bool{}
-		for _, i := range train {
-			v := kept[i][fidx[k]]
-			if v == nil {
-				ft.NullCount++
-				continue
-			}
-			if ft.numeric() {
-				x, err := strconv.ParseFloat(*v, 64)
-				if err != nil {
-					return t, mlInvalid("Feature value %q of %s is not numeric", *v, ft.Name)
-				}
-				vals = append(vals, x)
-			} else {
-				cats[*v] = true
-			}
-		}
-		if ft.numeric() {
-			ft.Mean, ft.Stddev, ft.Min, ft.Max, ft.Median = stats(vals)
-		} else {
-			for c := range cats {
-				ft.Categories = append(ft.Categories, c)
-			}
-			sort.Strings(ft.Categories)
-			ft.NullSeen = ft.NullCount > 0
-		}
+	if fe := learnFeatures(t.Features, fidx, kept, train); fe != nil {
+		return t, fe
 	}
 	encode := func(i int) []float64 {
 		x := []float64{1}
@@ -361,6 +392,7 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		EX, EY = append(EX, encode(i)), append(EY, y[i])
 	}
 	dim := len(X[0])
+	multi := logistic && len(t.Classes) > 2
 	strategy := opts.Strategy
 	if strategy == "AUTO_STRATEGY" {
 		strategy = "BATCH_GRADIENT_DESCENT"
@@ -372,7 +404,11 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		return t, mlInvalid("NORMAL_EQUATION is not supported with l1_reg or for model type %s", opts.ModelType)
 	}
 	t.Strategy = strategy
+	K := len(t.Classes)
 	loss := func(w []float64, X [][]float64, Y []float64) float64 {
+		if multi {
+			return softmaxLoss(w, X, Y, K, opts.L1, opts.L2)
+		}
 		return mlLoss(w, X, Y, logistic, opts.L1, opts.L2)
 	}
 	var w []float64
@@ -386,94 +422,324 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		}
 		t.Iterations = []mlIteration{it}
 	} else {
-		w = make([]float64, dim)
-		rate := opts.InitLearnRate
-		if opts.LearnRateStrat == "CONSTANT" {
-			rate = opts.LearnRate
+		params := dim
+		if multi {
+			params = K * dim
 		}
-		prev := loss(w, X, Y)
-		prevEval := prev
+		var evalLoss func([]float64) float64
 		if len(EX) > 0 {
-			prevEval = loss(w, EX, EY)
+			evalLoss = func(w []float64) float64 { return loss(w, EX, EY) }
 		}
-		for iter := 0; iter < opts.MaxIterations; iter++ {
-			itStart := time.Now()
-			g := mlGradient(w, X, Y, logistic, opts.L2)
-			step := func(rate float64) []float64 {
-				nw := make([]float64, dim)
-				for j := range w {
-					nw[j] = w[j] - rate*g[j]
-					if j > 0 && opts.L1 > 0 {
-						nw[j] = softThreshold(nw[j], rate*opts.L1)
-					}
+		w, t.Iterations = descend(params, opts, func(w []float64) float64 { return loss(w, X, Y) }, evalLoss,
+			func(w []float64) []float64 {
+				if multi {
+					return softmaxGradient(w, X, Y, K, opts.L2)
 				}
-				return nw
-			}
-			nw := step(rate)
-			cur := loss(nw, X, Y)
-			if opts.LearnRateStrat != "CONSTANT" {
-				halved := false
-				for k := 0; k < 40 && cur > prev; k++ {
-					rate /= 2
-					halved = true
-					nw = step(rate)
-					cur = loss(nw, X, Y)
-				}
-				t.Iterations = append(t.Iterations, mlIteration{Index: iter, Loss: cur, LearnRate: rate})
-				if !halved {
-					rate *= 2
-				}
-			} else {
-				t.Iterations = append(t.Iterations, mlIteration{Index: iter, Loss: cur, LearnRate: rate})
-			}
-			w = nw
-			last := &t.Iterations[len(t.Iterations)-1]
-			cmp, prevCmp := cur, prev
-			if len(EX) > 0 {
-				e := loss(w, EX, EY)
-				last.EvalLoss = &e
-				cmp, prevCmp = e, prevEval
-				prevEval = e
-			}
-			last.DurationMs = time.Since(itStart).Milliseconds()
-			prev = cur
-			if opts.EarlyStop && iter > 0 && prevCmp > 0 && (prevCmp-cmp)/prevCmp < opts.MinRelProgress {
-				break
-			}
-		}
+				return mlGradient(w, X, Y, logistic, opts.L2)
+			}, func(j int) bool { return j%dim != 0 })
 	}
 	// BigQuery lists training iterations newest first.
 	sort.Slice(t.Iterations, func(a, b int) bool { return t.Iterations[a].Index > t.Iterations[b].Index })
-	t.Intercept = w[0]
-	j := 1
-	for k := range t.Features {
-		ft := &t.Features[k]
-		if ft.numeric() {
-			ft.Weight = w[j]
-			j++
-			continue
+	if multi {
+		for k := 0; k < K; k++ {
+			t.ClassWeights = append(t.ClassWeights, append([]float64(nil), w[k*dim:(k+1)*dim]...))
 		}
-		ft.CategoryWeights = append([]float64(nil), w[j:j+ft.dims()]...)
-		j += ft.dims()
+	} else {
+		t.Intercept = w[0]
+		j := 1
+		for k := range t.Features {
+			ft := &t.Features[k]
+			if ft.numeric() {
+				ft.Weight = w[j]
+				j++
+				continue
+			}
+			ft.CategoryWeights = append([]float64(nil), w[j:j+ft.dims()]...)
+			j += ft.dims()
+		}
 	}
 	// The evaluation metrics.
 	evX, evY := EX, EY
 	if len(evX) == 0 {
 		evX, evY = X, Y
 	}
-	pred := make([]float64, len(evX))
-	for i, x := range evX {
-		pred[i] = dot(w, x)
+	switch {
+	case multi:
+		probs := make([][]float64, len(evX))
+		for i, x := range evX {
+			probs[i] = softmax(t.ClassWeights, x)
+		}
+		t.Eval = multiclassMetrics(evY, probs)
+		t.EvalY = evY
+		for _, p := range probs {
+			t.EvalScore = append(t.EvalScore, float64(argmax(p)))
+		}
+	default:
+		pred := make([]float64, len(evX))
+		for i, x := range evX {
+			pred[i] = dot(w, x)
+			if logistic {
+				pred[i] = sigmoid(pred[i])
+			}
+		}
 		if logistic {
-			pred[i] = sigmoid(pred[i])
+			t.Eval = classificationMetrics(evY, pred, 0.5)
+			t.EvalY, t.EvalScore = evY, pred
+		} else {
+			t.Eval = regressionMetrics(evY, pred)
 		}
 	}
-	if logistic {
-		t.Eval = classificationMetrics(evY, pred, 0.5)
-	} else {
-		t.Eval = regressionMetrics(evY, pred)
-	}
 	return t, nil
+}
+
+// learnFeatures learns each feature's statistics or categories over the
+// rows use of rows, fidx the features' columns.
+func learnFeatures(fts []mlFeature, fidx []int, rows [][]*string, use []int) *mlFail {
+	for k := range fts {
+		ft := &fts[k]
+		var vals []float64
+		cats := map[string]bool{}
+		for _, i := range use {
+			v := rows[i][fidx[k]]
+			if v == nil {
+				ft.NullCount++
+				continue
+			}
+			if ft.numeric() {
+				x, err := strconv.ParseFloat(*v, 64)
+				if err != nil {
+					return mlInvalid("Feature value %q of %s is not numeric", *v, ft.Name)
+				}
+				vals = append(vals, x)
+			} else {
+				cats[*v] = true
+			}
+		}
+		if ft.numeric() {
+			ft.Mean, ft.Stddev, ft.Min, ft.Max, ft.Median = stats(vals)
+		} else {
+			for c := range cats {
+				ft.Categories = append(ft.Categories, c)
+			}
+			sort.Strings(ft.Categories)
+			ft.NullSeen = ft.NullCount > 0
+		}
+	}
+	return nil
+}
+
+// descend is batch gradient descent over params parameters from zero,
+// with opts' learn rate strategy, early stop and L1 (a proximal step on
+// the parameters regularized reports), loss and grad the training loss
+// and its smooth part's gradient, evalLoss the evaluation loss or nil.
+func descend(params int, opts mlOptions, loss func([]float64) float64, evalLoss func([]float64) float64,
+	grad func([]float64) []float64, regularized func(int) bool) ([]float64, []mlIteration) {
+	var its []mlIteration
+	w := make([]float64, params)
+	rate := opts.InitLearnRate
+	if opts.LearnRateStrat == "CONSTANT" {
+		rate = opts.LearnRate
+	}
+	prev := loss(w)
+	prevEval := prev
+	if evalLoss != nil {
+		prevEval = evalLoss(w)
+	}
+	for iter := 0; iter < opts.MaxIterations; iter++ {
+		itStart := time.Now()
+		g := grad(w)
+		step := func(rate float64) []float64 {
+			nw := make([]float64, params)
+			for j := range w {
+				nw[j] = w[j] - rate*g[j]
+				if opts.L1 > 0 && regularized(j) {
+					nw[j] = softThreshold(nw[j], rate*opts.L1)
+				}
+			}
+			return nw
+		}
+		nw := step(rate)
+		cur := loss(nw)
+		if opts.LearnRateStrat != "CONSTANT" {
+			halved := false
+			for k := 0; k < 40 && cur > prev; k++ {
+				rate /= 2
+				halved = true
+				nw = step(rate)
+				cur = loss(nw)
+			}
+			its = append(its, mlIteration{Index: iter, Loss: cur, LearnRate: rate})
+			if !halved {
+				rate *= 2
+			}
+		} else {
+			its = append(its, mlIteration{Index: iter, Loss: cur, LearnRate: rate})
+		}
+		w = nw
+		last := &its[len(its)-1]
+		cmp, prevCmp := cur, prev
+		if evalLoss != nil {
+			e := evalLoss(w)
+			last.EvalLoss = &e
+			cmp, prevCmp = e, prevEval
+			prevEval = e
+		}
+		last.DurationMs = time.Since(itStart).Milliseconds()
+		prev = cur
+		if opts.EarlyStop && iter > 0 && prevCmp > 0 && (prevCmp-cmp)/prevCmp < opts.MinRelProgress {
+			break
+		}
+	}
+	return w, its
+}
+
+// softmax is the class probabilities of the encoded row x under the
+// class weights cw.
+func softmax(cw [][]float64, x []float64) []float64 {
+	z := make([]float64, len(cw))
+	m := math.Inf(-1)
+	for k := range cw {
+		z[k] = dot(cw[k], x)
+		m = math.Max(m, z[k])
+	}
+	var sum float64
+	for k := range z {
+		z[k] = math.Exp(z[k] - m)
+		sum += z[k]
+	}
+	for k := range z {
+		z[k] /= sum
+	}
+	return z
+}
+
+// splitClasses is w, K class vectors laid end to end, as one a class.
+func splitClasses(w []float64, K int) [][]float64 {
+	d := len(w) / K
+	out := make([][]float64, K)
+	for k := range out {
+		out[k] = w[k*d : (k+1)*d]
+	}
+	return out
+}
+
+// softmaxLoss is a multiclass model's training loss: the mean cross
+// entropy, plus the regularization of every weight but the intercepts.
+func softmaxLoss(w []float64, X [][]float64, Y []float64, K int, l1, l2 float64) float64 {
+	cw := splitClasses(w, K)
+	var s float64
+	for i, x := range X {
+		p := softmax(cw, x)[int(Y[i])]
+		s -= math.Log(math.Max(p, 1e-15))
+	}
+	s /= float64(len(X))
+	d := len(w) / K
+	for j, v := range w {
+		if j%d != 0 {
+			s += l2*v*v + l1*math.Abs(v)
+		}
+	}
+	return s
+}
+
+// softmaxGradient is the gradient of softmaxLoss's smooth part.
+func softmaxGradient(w []float64, X [][]float64, Y []float64, K int, l2 float64) []float64 {
+	cw := splitClasses(w, K)
+	d := len(w) / K
+	g := make([]float64, len(w))
+	for i, x := range X {
+		p := softmax(cw, x)
+		for k := 0; k < K; k++ {
+			r := p[k]
+			if int(Y[i]) == k {
+				r--
+			}
+			for j := range x {
+				g[k*d+j] += r * x[j]
+			}
+		}
+	}
+	for j := range g {
+		g[j] /= float64(len(X))
+		if j%d != 0 {
+			g[j] += 2 * l2 * w[j]
+		}
+	}
+	return g
+}
+
+// multiclassMetrics are a multiclass model's ML.EVALUATE metrics, y the
+// class indexes and probs each row's class probabilities, the predicted
+// class the most probable (the first on a tie): precision, recall,
+// f1_score, log_loss and roc_auc macro-averaged over the classes, each
+// class one against the rest, and accuracy the fraction predicted right,
+// as BigQuery documents. A class's metric that is undefined (no row
+// predicted or labeled it) is left out of the average (UNVERIFIED).
+func multiclassMetrics(y []float64, probs [][]float64) map[string]*float64 {
+	K := len(probs[0])
+	pred := make([]int, len(y))
+	right := 0
+	for i, p := range probs {
+		pred[i] = argmax(p)
+		if pred[i] == int(y[i]) {
+			right++
+		}
+	}
+	var sums [5]float64
+	var counts [5]int
+	add := func(m int, v float64) {
+		if !math.IsNaN(v) && !math.IsInf(v, 0) {
+			sums[m] += v
+			counts[m]++
+		}
+	}
+	for k := 0; k < K; k++ {
+		var tp, fp, fn, ll float64
+		yk := make([]float64, len(y))
+		pk := make([]float64, len(y))
+		for i := range y {
+			is := int(y[i]) == k
+			if is {
+				yk[i] = 1
+			}
+			pk[i] = probs[i][k]
+			switch {
+			case pred[i] == k && is:
+				tp++
+			case pred[i] == k:
+				fp++
+			case is:
+				fn++
+			}
+			q := math.Min(math.Max(pk[i], 1e-15), 1-1e-15)
+			ll -= yk[i]*math.Log(q) + (1-yk[i])*math.Log(1-q)
+		}
+		prec, rec := tp/(tp+fp), tp/(tp+fn)
+		add(0, prec)
+		add(1, rec)
+		add(2, 2*prec*rec/(prec+rec))
+		add(3, ll/float64(len(y)))
+		add(4, rocAUC(yk, pk))
+	}
+	avg := func(m int) *float64 {
+		if counts[m] == 0 {
+			return nil
+		}
+		return f64(sums[m] / float64(counts[m]))
+	}
+	return map[string]*float64{"precision": avg(0), "recall": avg(1), "accuracy": f64(float64(right) / float64(len(y))),
+		"f1_score": avg(2), "log_loss": avg(3), "roc_auc": avg(4)}
+}
+
+// argmax is the index of p's largest value, the first on a tie.
+func argmax(p []float64) int {
+	best := 0
+	for k := range p {
+		if p[k] > p[best] {
+			best = k
+		}
+	}
+	return best
 }
 
 // sortLabels sorts a classification model's labels: numbers as numbers,
@@ -489,13 +755,27 @@ func sortLabels(l []string, typ string) {
 	})
 }
 
-// encodeFeature is a feature value's encoded columns.
-func encodeFeature(ft mlFeature, v *string) []float64 {
+// encodeFeature is a feature value's encoded columns, numbers
+// standardized.
+func encodeFeature(ft mlFeature, v *string) []float64 { return encodeFeatureMode(ft, v, "") }
+
+// encodeFeatureMode is a feature value's encoded columns, numbers as
+// scaling says (mlTrained.Scaling); a NULL number takes the mean.
+func encodeFeatureMode(ft mlFeature, v *string, scaling string) []float64 {
 	if ft.numeric() {
-		if v == nil || ft.Stddev == 0 {
+		x := ft.Mean
+		if v != nil {
+			x, _ = strconv.ParseFloat(*v, 64)
+		}
+		switch scaling {
+		case "raw":
+			return []float64{x}
+		case "center":
+			return []float64{x - ft.Mean}
+		}
+		if ft.Stddev == 0 {
 			return []float64{0}
 		}
-		x, _ := strconv.ParseFloat(*v, 64)
 		return []float64{(x - ft.Mean) / ft.Stddev}
 	}
 	out := make([]float64, ft.dims())
@@ -854,4 +1134,32 @@ func (t mlTrained) predictRow(vals map[string]*string) float64 {
 		return sigmoid(z)
 	}
 	return z
+}
+
+// encodeRow is a row's encoded columns, the intercept's 1 first.
+func (t mlTrained) encodeRow(vals map[string]*string) []float64 {
+	x := []float64{1}
+	for _, ft := range t.Features {
+		x = append(x, encodeFeatureMode(ft, vals[strings.ToLower(ft.Name)], t.Scaling)...)
+	}
+	return x
+}
+
+// classProbs is a multiclass model's class probabilities for a row.
+func (t mlTrained) classProbs(vals map[string]*string) []float64 {
+	return softmax(t.ClassWeights, t.encodeRow(vals))
+}
+
+// weightVector is a linear or binary model's weights, laid out as the
+// encoded row.
+func (t mlTrained) weightVector() []float64 {
+	w := []float64{t.Intercept}
+	for _, ft := range t.Features {
+		if ft.numeric() {
+			w = append(w, ft.Weight)
+		} else {
+			w = append(w, ft.CategoryWeights...)
+		}
+	}
+	return w
 }

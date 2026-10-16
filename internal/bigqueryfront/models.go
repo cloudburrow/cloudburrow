@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -52,6 +53,9 @@ type bqModel struct {
 	Options      mlOptions         `json:"options"`
 	Trained      mlTrained         `json:"trained"`
 	Query        string            `json:"query,omitempty"`
+	// Transform is the TRANSFORM clause's items, * expanded
+	// (modeltransform.go).
+	Transform []string `json:"transform,omitempty"`
 }
 
 func modelKey(project, dataset, id string) string { return project + "\x00" + dataset + "\x00" + id }
@@ -236,7 +240,7 @@ func (md bqModel) resource(full bool) map[string]any {
 		"modelReference":   map[string]string{"projectId": md.Project, "datasetId": md.Dataset, "modelId": md.ID},
 		"creationTime":     ms(md.Created),
 		"lastModifiedTime": ms(md.Modified),
-		"modelType":        map[string]string{"LINEAR_REG": "LINEAR_REGRESSION", "LOGISTIC_REG": "LOGISTIC_REGRESSION"}[md.Options.ModelType],
+		"modelType":        map[string]string{"LINEAR_REG": "LINEAR_REGRESSION", "LOGISTIC_REG": "LOGISTIC_REGRESSION", "KMEANS": "KMEANS", "PCA": "PCA"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -261,58 +265,135 @@ func (md bqModel) resource(full bool) map[string]any {
 		feats = append(feats, map[string]any{"name": ft.Name, "type": map[string]string{"typeKind": bqTypeName(ft.Type)}})
 	}
 	res["featureColumns"] = feats
-	res["labelColumns"] = []map[string]any{{"name": "predicted_" + md.Trained.Label, "type": map[string]string{"typeKind": bqTypeName(md.Trained.LabelType)}}}
 	o := md.Options
-	opts := map[string]any{
-		"maxIterations":         ms(int64(o.MaxIterations)),
-		"l1Regularization":      o.L1,
-		"l2Regularization":      o.L2,
-		"minRelativeProgress":   o.MinRelProgress,
-		"earlyStop":             o.EarlyStop,
-		"inputLabelColumns":     []string{md.Trained.Label},
-		"dataSplitMethod":       o.SplitMethod,
-		"dataSplitEvalFraction": o.SplitEvalFrac,
-		"learnRateStrategy":     o.LearnRateStrat,
-		"optimizationStrategy":  md.Trained.Strategy,
-	}
-	if o.LearnRateStrat == "CONSTANT" {
-		opts["learnRate"] = o.LearnRate
-	} else {
-		opts["initialLearnRate"] = o.InitLearnRate
-	}
-	if o.SplitCol != "" {
-		opts["dataSplitColumn"] = o.SplitCol
-	}
-	if o.ModelType == "LOGISTIC_REG" {
-		opts["lossType"] = "MEAN_LOG_LOSS"
-	} else {
-		opts["lossType"] = "MEAN_SQUARED_LOSS"
-	}
+	t := md.Trained
+	var opts, metrics map[string]any
 	var results []map[string]any
-	for _, it := range md.Trained.Iterations {
-		r := map[string]any{"index": it.Index, "durationMs": ms(it.DurationMs), "trainingLoss": it.Loss, "learnRate": it.LearnRate}
+	for _, it := range t.Iterations {
+		r := map[string]any{"index": it.Index, "durationMs": ms(it.DurationMs), "trainingLoss": it.Loss}
+		if o.ModelType != "KMEANS" {
+			r["learnRate"] = it.LearnRate
+		}
 		if it.EvalLoss != nil {
 			r["evalLoss"] = *it.EvalLoss
 		}
 		results = append(results, r)
 	}
-	var metrics map[string]any
-	e := md.Trained.Eval
 	num := func(k string) any {
-		if v := e[k]; v != nil {
+		if v := t.Eval[k]; v != nil {
 			return *v
 		}
 		return nil
 	}
-	if o.ModelType == "LOGISTIC_REG" {
-		metrics = map[string]any{"binaryClassificationMetrics": map[string]any{
-			"aggregateClassificationMetrics": map[string]any{"precision": num("precision"), "recall": num("recall"),
-				"accuracy": num("accuracy"), "threshold": 0.5, "f1Score": num("f1_score"), "logLoss": num("log_loss"), "rocAuc": num("roc_auc")},
-			"negativeLabel": md.Trained.Classes[0], "positiveLabel": md.Trained.Classes[1]}}
-	} else {
-		metrics = map[string]any{"regressionMetrics": map[string]any{"meanAbsoluteError": num("mean_absolute_error"),
-			"meanSquaredError": num("mean_squared_error"), "meanSquaredLogError": num("mean_squared_log_error"),
-			"medianAbsoluteError": num("median_absolute_error"), "rSquared": num("r2_score")}}
+	switch o.ModelType {
+	case "KMEANS":
+		res["labelColumns"] = []map[string]any{{"name": "centroid_id", "type": map[string]string{"typeKind": "INT64"}}}
+		opts = map[string]any{"numClusters": ms(int64(len(t.Centroids))), "kmeansInitializationMethod": o.KMeansInit,
+			"distanceType": o.DistanceType, "standardizeFeatures": o.Standardize, "maxIterations": ms(int64(o.MaxIterations)),
+			"earlyStop": o.EarlyStop, "minRelativeProgress": o.MinRelProgress}
+		if o.KMeansInitCol != "" {
+			opts["kmeansInitializationColumn"] = o.KMeansInitCol
+		}
+		var clusters []map[string]any
+		for k, cen := range t.Centroids {
+			var fvs []map[string]any
+			j := 0
+			for _, ft := range t.Features {
+				if ft.numeric() {
+					v := cen[j]
+					j++
+					if t.Scaling == "" {
+						v = v*ft.Stddev + ft.Mean
+					}
+					fvs = append(fvs, map[string]any{"featureColumn": ft.Name, "numericalValue": v})
+					continue
+				}
+				var cc []map[string]any
+				size := 0
+				if k < len(t.ClusterSizes) {
+					size = t.ClusterSizes[k]
+				}
+				for _, cat := range ft.Categories {
+					cc = append(cc, map[string]any{"category": cat, "count": ms(int64(math.Round(cen[j] * float64(size))))})
+					j++
+				}
+				if ft.NullSeen {
+					j++
+				}
+				fvs = append(fvs, map[string]any{"featureColumn": ft.Name, "categoricalValue": map[string]any{"categoryCounts": cc}})
+			}
+			cl := map[string]any{"centroidId": ms(int64(k + 1)), "featureValues": fvs}
+			if k < len(t.ClusterSizes) {
+				cl["count"] = ms(int64(t.ClusterSizes[k]))
+			}
+			clusters = append(clusters, cl)
+		}
+		metrics = map[string]any{"clusteringMetrics": map[string]any{"daviesBouldinIndex": num("davies_bouldin_index"),
+			"meanSquaredDistance": num("mean_squared_distance"), "clusters": clusters}}
+	case "PCA":
+		var lc []map[string]any
+		for k := range t.Components {
+			lc = append(lc, map[string]any{"name": fmt.Sprintf("principal_component_%d", k+1), "type": map[string]string{"typeKind": "FLOAT64"}})
+		}
+		res["labelColumns"] = lc
+		opts = map[string]any{"scaleFeatures": o.ScaleFeatures, "pcaSolver": o.PCASolver}
+		if o.NumPC > 0 {
+			opts["numPrincipalComponents"] = ms(int64(o.NumPC))
+		} else {
+			opts["pcaExplainedVarianceRatio"] = o.PCAVarRatio
+		}
+		metrics = map[string]any{"dimensionalityReductionMetrics": map[string]any{"totalExplainedVarianceRatio": num("total_explained_variance_ratio")}}
+	default:
+		res["labelColumns"] = []map[string]any{{"name": "predicted_" + t.Label, "type": map[string]string{"typeKind": bqTypeName(t.LabelType)}}}
+		opts = map[string]any{
+			"maxIterations":         ms(int64(o.MaxIterations)),
+			"l1Regularization":      o.L1,
+			"l2Regularization":      o.L2,
+			"minRelativeProgress":   o.MinRelProgress,
+			"earlyStop":             o.EarlyStop,
+			"inputLabelColumns":     []string{t.Label},
+			"dataSplitMethod":       o.SplitMethod,
+			"dataSplitEvalFraction": o.SplitEvalFrac,
+			"learnRateStrategy":     o.LearnRateStrat,
+			"optimizationStrategy":  t.Strategy,
+		}
+		if o.LearnRateStrat == "CONSTANT" {
+			opts["learnRate"] = o.LearnRate
+		} else {
+			opts["initialLearnRate"] = o.InitLearnRate
+		}
+		if o.SplitCol != "" {
+			opts["dataSplitColumn"] = o.SplitCol
+		}
+		if o.ModelType == "LOGISTIC_REG" {
+			opts["lossType"] = "MEAN_LOG_LOSS"
+		} else {
+			opts["lossType"] = "MEAN_SQUARED_LOSS"
+		}
+		switch {
+		case t.multiclass():
+			metrics = map[string]any{"multiClassClassificationMetrics": map[string]any{
+				"aggregateClassificationMetrics": map[string]any{"precision": num("precision"), "recall": num("recall"),
+					"accuracy": num("accuracy"), "f1Score": num("f1_score"), "logLoss": num("log_loss"), "rocAuc": num("roc_auc")}}}
+		case o.ModelType == "LOGISTIC_REG":
+			metrics = map[string]any{"binaryClassificationMetrics": map[string]any{
+				"aggregateClassificationMetrics": map[string]any{"precision": num("precision"), "recall": num("recall"),
+					"accuracy": num("accuracy"), "threshold": 0.5, "f1Score": num("f1_score"), "logLoss": num("log_loss"), "rocAuc": num("roc_auc")},
+				"negativeLabel": t.Classes[0], "positiveLabel": t.Classes[1]}}
+		default:
+			metrics = map[string]any{"regressionMetrics": map[string]any{"meanAbsoluteError": num("mean_absolute_error"),
+				"meanSquaredError": num("mean_squared_error"), "meanSquaredLogError": num("mean_squared_log_error"),
+				"medianAbsoluteError": num("median_absolute_error"), "rSquared": num("r2_score")}}
+		}
+	}
+	if len(md.Transform) > 0 {
+		// The TRANSFORM's output features (UNVERIFIED: BigQuery's
+		// featureColumns are then the input's, and it gives transformSql).
+		var tc []map[string]any
+		for _, ft := range t.Features {
+			tc = append(tc, map[string]any{"name": ft.Name, "type": map[string]string{"typeKind": bqTypeName(ft.Type)}})
+		}
+		res["transformColumns"] = tc
 	}
 	res["trainingRuns"] = []map[string]any{{
 		"trainingOptions":   opts,
@@ -483,12 +564,12 @@ type modelDDL struct {
 	path                                 []string
 	opts                                 mlOptions
 	query                                string
+	transform                            []string
 }
 
 // unsupportedModelTypes are the model types CloudBurrow refuses, and
 // why.
 var unsupportedModelTypes = map[string]string{
-	"KMEANS":                         "its k-means++ initialization is random and its stopping rule undocumented in the detail a faithful result needs",
 	"BOOSTED_TREE_REGRESSOR":         "it is XGBoost trained by Google, with tree-building details BigQuery does not document",
 	"BOOSTED_TREE_CLASSIFIER":        "it is XGBoost trained by Google, with tree-building details BigQuery does not document",
 	"RANDOM_FOREST_REGRESSOR":        "its training is random and Google's",
@@ -503,13 +584,12 @@ var unsupportedModelTypes = map[string]string{
 	"ARIMA_PLUS":                     "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
 	"ARIMA_PLUS_XREG":                "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
 	"MATRIX_FACTORIZATION":           "its alternating least squares training is Google's, on reserved slots",
-	"PCA":                            "its randomized solver is Google's",
 	"TENSORFLOW":                     "an imported TensorFlow model runs on Google's infrastructure",
 	"TENSORFLOW_LITE":                "an imported TensorFlow Lite model runs on Google's infrastructure",
 	"ONNX":                           "an imported ONNX model runs on Google's infrastructure",
 	"XGBOOST":                        "an imported XGBoost model runs on Google's infrastructure",
 	"CONTRIBUTION_ANALYSIS":          "its analysis is Google's",
-	"TRANSFORM_ONLY":                 "TRANSFORM clauses are not carried out",
+	"TRANSFORM_ONLY":                 "a model of a TRANSFORM alone is not carried out; CloudBurrow applies a TRANSFORM as part of a model it trains",
 }
 
 // parseModelDDL reads stmt as CREATE MODEL or DROP MODEL. isModel is
@@ -556,7 +636,19 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	if i < len(stmt) {
 		switch {
 		case stmt[i].is("TRANSFORM"):
-			return d, true, 501, "Not implemented here: CREATE MODEL with a TRANSFORM clause; CloudBurrow applies BigQuery's automatic preprocessing only. Nothing was run."
+			if i+1 >= len(stmt) || !stmt[i+1].punct("(") {
+				return d, true, 400, "Syntax error: expected ( after TRANSFORM"
+			}
+			end := matchParen(stmt, i+1)
+			if end < 0 {
+				return d, true, 400, "Syntax error: unclosed TRANSFORM"
+			}
+			items, c, m := transformItems(stmt[i+2:end], sql)
+			if c != 0 {
+				return d, true, c, m
+			}
+			d.transform = items
+			i = end + 1
 		case stmt[i].is("INPUT"), stmt[i].is("OUTPUT"), stmt[i].is("REMOTE"):
 			return d, true, 501, "Not implemented here: a remote model (REMOTE WITH CONNECTION): it calls a Vertex AI or Cloud AI endpoint through a " +
 				"Cloud resource connection, which CloudBurrow has none of. Nothing was run."
@@ -581,10 +673,10 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	}
 	if why, ok := unsupportedModelTypes[d.opts.ModelType]; ok {
 		return d, true, 501, "Not implemented here: model_type " + d.opts.ModelType + ": " + why +
-			". CloudBurrow trains LINEAR_REG and binary LOGISTIC_REG models. Nothing was run."
+			". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS and PCA models. Nothing was run."
 	}
-	if d.opts.ModelType != "LINEAR_REG" && d.opts.ModelType != "LOGISTIC_REG" {
-		return d, true, 400, "Invalid model_type: " + d.opts.ModelType
+	if c, m := checkModelOptions(d.opts); c != 0 {
+		return d, true, c, m
 	}
 	if i >= len(stmt) || !stmt[i].is("AS") {
 		return d, true, 400, "CREATE MODEL of model_type " + d.opts.ModelType + " requires a query (AS SELECT ...)"
@@ -695,6 +787,7 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			return false, false
 		}
 		bad := func() (int, string) { return 400, "Invalid value for option " + name }
+		o.Set = append(o.Set, name)
 		switch name {
 		case "model_type":
 			s, ok := str()
@@ -716,6 +809,70 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 					return bad()
 				}
 				o.LabelCols = append(o.LabelCols, s)
+			}
+		case "num_clusters", "num_principal_components":
+			v, ok := num()
+			if !ok || v != float64(int(v)) || v < 1 {
+				return bad()
+			}
+			if name == "num_clusters" {
+				if v < 2 || v > 100 {
+					return 400, "num_clusters must be between 2 and 100"
+				}
+				o.NumClusters = int(v)
+			} else {
+				o.NumPC = int(v)
+			}
+		case "pca_explained_variance_ratio":
+			v, ok := num()
+			if !ok || v <= 0 || v >= 1 {
+				return 400, "pca_explained_variance_ratio must be in (0, 1)"
+			}
+			o.PCAVarRatio = v
+		case "kmeans_init_method", "distance_type", "pca_solver":
+			s, ok := str()
+			if !ok {
+				return bad()
+			}
+			s = strings.ToUpper(s)
+			allowed := map[string][]string{
+				"kmeans_init_method": {"RANDOM", "KMEANS++", "CUSTOM"},
+				"distance_type":      {"EUCLIDEAN", "COSINE"},
+				"pca_solver":         {"FULL", "RANDOMIZED", "AUTO"},
+			}[name]
+			found := false
+			for _, a := range allowed {
+				found = found || a == s
+			}
+			if !found {
+				return bad()
+			}
+			switch name {
+			case "kmeans_init_method":
+				o.KMeansInit = s
+			case "distance_type":
+				o.DistanceType = s
+			default:
+				if s == "RANDOMIZED" {
+					return 501, "Not implemented here: pca_solver RANDOMIZED: its randomized solver is Google's; CloudBurrow solves PCA in full (FULL, AUTO). Nothing was run."
+				}
+				o.PCASolver = s
+			}
+		case "kmeans_init_col":
+			s, ok := str()
+			if !ok {
+				return bad()
+			}
+			o.KMeansInitCol = s
+		case "standardize_features", "scale_features":
+			b, ok := boolv()
+			if !ok {
+				return bad()
+			}
+			if name == "standardize_features" {
+				o.Standardize = b
+			} else {
+				o.ScaleFeatures = b
 			}
 		case "optimize_strategy", "learn_rate_strategy", "data_split_method":
 			s, ok := str()
@@ -801,7 +958,52 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 		default:
 			return 501, "Not implemented here: CREATE MODEL option " + name + "; CloudBurrow carries out model_type, input_label_cols, " +
 				"optimize_strategy, l1_reg, l2_reg, max_iterations, learn_rate_strategy, learn_rate, ls_init_learn_rate, early_stop, " +
-				"min_rel_progress, data_split_method, data_split_eval_fraction, data_split_col and category_encoding_method. Nothing was run."
+				"min_rel_progress, data_split_method, data_split_eval_fraction, data_split_col, category_encoding_method, num_clusters, " +
+				"kmeans_init_method, kmeans_init_col, distance_type, standardize_features, num_principal_components, " +
+				"pca_explained_variance_ratio, scale_features and pca_solver. Nothing was run."
+		}
+	}
+	return 0, ""
+}
+
+// modelTypeOptions are the options each served model type takes, besides
+// model_type.
+var modelTypeOptions = map[string][]string{
+	"LINEAR_REG": {"input_label_cols", "optimize_strategy", "l1_reg", "l2_reg", "max_iterations", "learn_rate_strategy", "learn_rate",
+		"ls_init_learn_rate", "early_stop", "min_rel_progress", "data_split_method", "data_split_eval_fraction", "data_split_col",
+		"category_encoding_method", "enable_global_explain", "calculate_p_values", "warm_start"},
+	"KMEANS": {"num_clusters", "kmeans_init_method", "kmeans_init_col", "distance_type", "standardize_features", "max_iterations",
+		"early_stop", "min_rel_progress", "warm_start"},
+	"PCA": {"num_principal_components", "pca_explained_variance_ratio", "scale_features", "pca_solver"},
+}
+
+// checkModelOptions refuses an option the model type does not take, and
+// a combination BigQuery documents as invalid.
+func checkModelOptions(o mlOptions) (int, string) {
+	allowed, ok := modelTypeOptions[o.ModelType]
+	if o.ModelType == "LOGISTIC_REG" {
+		allowed, ok = append(append([]string(nil), modelTypeOptions["LINEAR_REG"]...), "auto_class_weights"), true
+	}
+	if !ok {
+		return 400, "Invalid model_type: " + o.ModelType
+	}
+	for _, s := range o.Set {
+		found := s == "model_type"
+		for _, a := range allowed {
+			found = found || a == s
+		}
+		if !found {
+			return 400, "Option " + s + " is not supported for model type " + o.ModelType
+		}
+	}
+	switch o.ModelType {
+	case "KMEANS":
+		if (o.KMeansInit == "CUSTOM") != (o.KMeansInitCol != "") {
+			return 400, "kmeans_init_col must be set exactly when kmeans_init_method is CUSTOM"
+		}
+	case "PCA":
+		if (o.NumPC > 0) == (o.PCAVarRatio > 0) {
+			return 400, "Exactly one of num_principal_components and pca_explained_variance_ratio must be set for a PCA model"
 		}
 	}
 	return 0, ""
@@ -922,7 +1124,27 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		fail(409, fmt.Sprintf("Already Exists: Model %s:%s.%s", project, dataset, id))
 		return true
 	default:
-		cols, rows, c, m := f.queryAllRows(r, q, d.query)
+		trainSQL := d.query
+		if len(d.transform) > 0 {
+			for _, it := range d.transform {
+				if strings.HasPrefix(it, "*") {
+					qc, _, c, m := f.queryAllRows(r, q, "SELECT * FROM ("+d.query+") LIMIT 0")
+					if c != 0 {
+						fail(c, m)
+						return true
+					}
+					items, why := expandTransform(d.transform, qc)
+					if why != "" {
+						fail(501, why)
+						return true
+					}
+					d.transform = items
+					break
+				}
+			}
+			trainSQL = "SELECT " + strings.Join(d.transform, ", ") + " FROM (" + d.query + ")"
+		}
+		cols, rows, c, m := f.queryAllRows(r, q, trainSQL)
 		if c != 0 {
 			fail(c, m)
 			return true
@@ -939,7 +1161,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		if !dry {
 			now := time.Now().UnixMilli()
 			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: d.opts.ModelType, Created: now, Modified: now,
-				Location: loc, Options: d.opts, Trained: trained, Query: d.query})
+				Location: loc, Options: d.opts, Trained: trained, Query: d.query, Transform: d.transform})
 		}
 	}
 	// The emulator runs a statement that does nothing in its place, which
