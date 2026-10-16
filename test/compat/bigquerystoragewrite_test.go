@@ -207,7 +207,8 @@ func appendResult(t *testing.T, h *Harness, ms *managedwriter.ManagedStream, row
 // TestBigQueryStorageWriteDefaultStreamOfEveryType: the managed writer's
 // default stream writes a row of every column type, in the protocol buffer
 // types BigQuery documents, and a row of NULLs; Table.Read reads each
-// value as it was written. The default stream's results carry no offset
+// value as it was written (INTERVAL in a table of its own, as a string and
+// as a google.protobuf.Duration). The default stream's results carry no offset
 // (managedwriter.NoStreamOffset), as storage.proto says. Measured first
 // against the pinned emulator: the NUMERIC was stored as 0, the DATETIME
 // as 6483-06-17T05:36:51.664 and the TIME as 03:40:39.224, and each
@@ -252,6 +253,10 @@ func TestBigQueryStorageWriteDefaultStreamOfEveryType(t *testing.T) {
 	if got := readRows(t, c.Dataset(tbl.DatasetID).Table(tbl.TableID).Read(h.Context()), "Table.Read"); !reflect.DeepEqual(got, want) {
 		t.Errorf("Table.Read after a non-UTF-8 BYTES value:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
+
+	// INTERVAL, as a string and as a google.protobuf.Duration, in a table
+	// of its own (#1424; bigquerystoragewriteinterval_test.go).
+	writeIntervalsToDefaultStream(t, h, c, project, c.Dataset(tbl.DatasetID))
 }
 
 // TestBigQueryStorageWriteCommittedStreamsKeepTheirTables: two COMMITTED
