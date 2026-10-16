@@ -227,3 +227,24 @@ func TestBucketRelocation(t *testing.T) {
 		t.Errorf("dual-region after relocation = %v", b)
 	}
 }
+
+// TestAnywhereCacheInsertTrailingSlash (#1304): Terraform's
+// google_storage_anywhere_cache POSTs to b/{bucket}/anywhereCaches/, which
+// is anywhereCaches.insert; another method's path with a slash is not.
+func TestAnywhereCacheInsertTrailingSlash(t *testing.T) {
+	h, _ := clockedServer(t)
+	base := h.URL + "/storage/v1/b"
+	if st, _ := doJSON(t, "POST", base+"?project=p", `{"name":"cbk","location":"US-CENTRAL1"}`); st != 200 {
+		t.Fatalf("bucket insert = %d", st)
+	}
+	st, op := doJSON(t, "POST", base+"/cbk/anywhereCaches/", `{"zone":"us-central1-a"}`)
+	if st != 200 || op["kind"] != "storage#operation" {
+		t.Fatalf("insert with a trailing slash = %d %v; want an operation", st, op)
+	}
+	if st, c := doJSON(t, "GET", base+"/cbk/anywhereCaches/us-central1-a", ""); st != 200 || c["zone"] != "us-central1-a" {
+		t.Errorf("get = %d %v", st, c)
+	}
+	if st, _ := doJSON(t, "POST", base+"/cbk/anywhereCaches/us-central1-a/pause/", ""); st != 404 {
+		t.Errorf("pause with a trailing slash = %d; want 404", st)
+	}
+}
