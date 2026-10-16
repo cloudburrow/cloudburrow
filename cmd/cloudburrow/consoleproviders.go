@@ -695,6 +695,7 @@ func (p runProvider) Detail(ctx context.Context, project string, path []string) 
 		{ID: "revisions", Label: "Revision history", Listing: p.revisions(ctx, name, svc)},
 		{ID: "traffic", Label: "Traffic", Listing: trafficListing(svc)},
 		runConfiguration(svc, p.defaultProject),
+		p.domainsSection(ctx, project, serviceIDOf(name)),
 	}
 	return console.Detail{
 		Summary: summary, Sections: sections,

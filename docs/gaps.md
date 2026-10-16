@@ -82,7 +82,8 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 `update_mask` (#1260); container logs in Cloud Logging as `cloud_run_revision` and
 `cloud_run_job` (#1298); the v1 (Knative) API, with `gcloud run services list`, `describe` and
 `deploy --image` (#1293, #1297), its locations, IAM, jobs and domain mappings (#1349), job runs,
-executions and tasks (#1379), and selectors, `overrides.delayExecution` and job IAM (#1420);
+executions and tasks (#1379), and selectors, `overrides.delayExecution` and job IAM (#1420), and
+domain mappings the gateway routes and `delayExecution` kept on jobs and executions (#1450);
 `Builds.SubmitBuild` (#1268); `Instances.*` (#1299) and `WorkerPools.*` (#1300), with operations
 that wait for readiness and an instance's URL (#1348), and a worker pool's `update_mask` and
 instance splits (#1387); secret and in-memory volumes, the service account and v1 probes (#1297),
@@ -100,7 +101,6 @@ and the default logs bucket (#1430).
 | A service's container sees `K_SERVICE`, `K_CONFIGURATION` and `K_REVISION` as the scoped Knative names, not Cloud Run's service and revision IDs, which the API reports (#1448) | no emulator support (Knative reserves the three variables) | S |
 | `CancelOperation`: a deployment in flight cannot be recalled (#1448) | no emulator support | S |
 | Cloud Build: `options.dynamicSubstitutions`, `secretEnv` on a docker build, docker push or pack step, `ApproveBuild` and `approvalRequired`, and triggers with a repository or Pub/Sub source or a `filename` are refused; Artifact Registry: 27 methods `UNIMPLEMENTED` (rules, attachments, Maven, npm, Python, Apt and Yum artifacts, project and VPC-SC settings, package, version and file updates; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | not built yet | M |
-| v1 (Knative) API: a domain mapping never becomes Ready, as no DNS is served and no certificate issued; a job's own `spec.template.spec.delayExecution` is 501, and a run's `overrides.delayExecution` is not read back on the execution, as v2 has no field for either (#1450) | not built yet | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
 
 ## Cloud Scheduler

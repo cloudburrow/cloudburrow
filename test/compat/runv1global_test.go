@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"google.golang.org/api/googleapi"
@@ -180,51 +181,135 @@ func TestGcloudRunJobs(t *testing.T) {
 
 // covers: run.namespaces.domainmappings.create, run.namespaces.domainmappings.get, run.namespaces.domainmappings.list, run.namespaces.domainmappings.delete, run.projects.locations.domainmappings.list
 //
-// TestRunV1DomainMappings (#1349): the official v1 client maps a domain to
-// a service. The mapping is stored and reports the CNAME record Google
-// documents for a subdomain; it never becomes Ready, as no DNS is served.
-// It is listed both ways and deleted.
+// TestRunV1DomainMappings (#1349, #1450): the official v1 client maps a
+// domain to a service. The mapping reports the CNAME record Google
+// documents for a subdomain, and the instance's gateway routes the domain:
+// a request with it as the Host header reaches the service. With
+// certificateMode NONE the mapping becomes Ready; with AUTOMATIC it is
+// routable but ends Ready False, CertificateProvisioned False
+// (CertificateNotIssued), as no certificate is issued locally. A
+// certificateMode outside the enum is INVALID_ARGUMENT. It is listed both
+// ways and deleted, and the gateway stops routing it.
 func TestRunV1DomainMappings(t *testing.T) {
 	h := New(t)
 	c := runV1Client(t, h)
+	base := ingress(t)
 	runV1Service(t, c, h.Project(), "v1-domain")
 	ns := "namespaces/" + h.Project()
 	domain := "www.cloudburrow-test.example.com"
-	t.Cleanup(func() { _, _ = c.Namespaces.Domainmappings.Delete(ns + "/domainmappings/" + domain).Do() })
+	auto := "auto.cloudburrow-test.example.com"
+	t.Cleanup(func() {
+		_, _ = c.Namespaces.Domainmappings.Delete(ns + "/domainmappings/" + domain).Do()
+		_, _ = c.Namespaces.Domainmappings.Delete(ns + "/domainmappings/" + auto).Do()
+	})
+	loc := map[string]string{"cloud.googleapis.com/location": "us-central1"}
 	dm, err := c.Namespaces.Domainmappings.Create(ns, &runv1.DomainMapping{ApiVersion: "domains.cloudrun.com/v1", Kind: "DomainMapping",
-		Metadata: &runv1.ObjectMeta{Name: domain, Labels: map[string]string{"cloud.googleapis.com/location": "us-central1"}},
-		Spec:     &runv1.DomainMappingSpec{RouteName: "v1-domain"}}).Do()
+		Metadata: &runv1.ObjectMeta{Name: domain, Labels: loc},
+		Spec:     &runv1.DomainMappingSpec{RouteName: "v1-domain", CertificateMode: "NONE"}}).Do()
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if rr := dm.Status.ResourceRecords; len(rr) != 1 || rr[0].Type != "CNAME" || rr[0].Rrdata != "ghs.googlehosted.com." || rr[0].Name != "www.cloudburrow-test" {
 		t.Errorf("resourceRecords = %+v", dm.Status.ResourceRecords)
 	}
-	for _, cond := range dm.Status.Conditions {
-		if cond.Type == "Ready" && cond.Status == "True" {
-			t.Errorf("mapping is Ready: %+v", cond)
-		}
+	got := domainMappingSettled(t, c, ns+"/domainmappings/"+domain)
+	if cond := v1Cond(got.Status.Conditions, "Ready"); cond == nil || cond.Status != "True" {
+		t.Errorf("NONE mapping Ready = %+v; want True", cond)
+	}
+	if cond := v1Cond(got.Status.Conditions, "CertificateProvisioned"); cond == nil || cond.Status != "True" {
+		t.Errorf("NONE mapping CertificateProvisioned = %+v; want True (no certificate wanted)", cond)
+	}
+	if code, body := httpGet(t, base, domain, "/"); code != http.StatusOK || !strings.Contains(body, "Hello") {
+		t.Errorf("GET / with Host %s = %d %q; want the service's answer", domain, code, body)
+	}
+
+	if _, err := c.Namespaces.Domainmappings.Create(ns, &runv1.DomainMapping{
+		Metadata: &runv1.ObjectMeta{Name: auto, Labels: loc}, Spec: &runv1.DomainMappingSpec{RouteName: "v1-domain"}}).Do(); err != nil {
+		t.Fatalf("Create AUTOMATIC: %v", err)
+	}
+	got = domainMappingSettled(t, c, ns+"/domainmappings/"+auto)
+	if got.Spec.CertificateMode != "AUTOMATIC" {
+		t.Errorf("certificateMode = %q; want the default, AUTOMATIC", got.Spec.CertificateMode)
+	}
+	if cond := v1Cond(got.Status.Conditions, "CertificateProvisioned"); cond == nil || cond.Status != "False" || cond.Reason != "CertificateNotIssued" || cond.Message == "" {
+		t.Errorf("AUTOMATIC mapping CertificateProvisioned = %+v; want False, CertificateNotIssued, saying why", cond)
+	}
+	if cond := v1Cond(got.Status.Conditions, "Ready"); cond == nil || cond.Status != "False" || cond.Reason != "CertificateNotIssued" {
+		t.Errorf("AUTOMATIC mapping Ready = %+v; want False, CertificateNotIssued", cond)
+	}
+	if cond := v1Cond(got.Status.Conditions, "DomainRoutable"); cond == nil || cond.Status != "True" {
+		t.Errorf("AUTOMATIC mapping DomainRoutable = %+v; want True", cond)
+	}
+	if code, _ := httpGet(t, base, auto, "/"); code != http.StatusOK {
+		t.Errorf("GET / with Host %s = %d; want the service's answer over HTTP", auto, code)
+	}
+
+	var ge *googleapi.Error
+	if _, err := c.Namespaces.Domainmappings.Create(ns, &runv1.DomainMapping{
+		Metadata: &runv1.ObjectMeta{Name: "bad.cloudburrow-test.example.com", Labels: loc},
+		Spec:     &runv1.DomainMappingSpec{RouteName: "v1-domain", CertificateMode: "MANUAL"}}).Do(); !errors.As(err, &ge) || ge.Code != http.StatusBadRequest {
+		t.Errorf("certificateMode MANUAL = %v; want 400", err)
 	}
 	if got, err := c.Namespaces.Domainmappings.Get(ns + "/domainmappings/" + domain).Do(); err != nil || got.Spec.RouteName != "v1-domain" {
 		t.Errorf("Get = %+v, %v", got, err)
 	}
-	if l, err := c.Namespaces.Domainmappings.List(ns).Do(); err != nil || len(l.Items) != 1 {
+	if l, err := c.Namespaces.Domainmappings.List(ns).Do(); err != nil || len(l.Items) != 2 {
 		t.Errorf("List = %+v, %v", l, err)
+	} else {
+		for _, item := range l.Items {
+			if item.Metadata.Name == domain && v1Cond(item.Status.Conditions, "Ready").Status != "True" {
+				t.Errorf("List: %s Ready = %+v", domain, v1Cond(item.Status.Conditions, "Ready"))
+			}
+		}
 	}
-	if l, err := c.Projects.Locations.Domainmappings.List("projects/" + h.Project() + "/locations/us-central1").Do(); err != nil || len(l.Items) != 1 {
+	if l, err := c.Projects.Locations.Domainmappings.List("projects/" + h.Project() + "/locations/us-central1").Do(); err != nil || len(l.Items) != 2 {
 		t.Errorf("projects.locations.domainmappings.list = %+v, %v", l, err)
 	}
 	if _, err := c.Namespaces.Domainmappings.Create(ns, &runv1.DomainMapping{
-		Metadata: &runv1.ObjectMeta{Name: "api.cloudburrow-test.example.com", Labels: map[string]string{"cloud.googleapis.com/location": "us-central1"}},
+		Metadata: &runv1.ObjectMeta{Name: "api.cloudburrow-test.example.com", Labels: loc},
 		Spec:     &runv1.DomainMappingSpec{RouteName: "no-such-service"}}).Do(); err == nil {
 		t.Error("a mapping to a missing service was accepted")
 	}
 	if _, err := c.Namespaces.Domainmappings.Delete(ns + "/domainmappings/" + domain).Do(); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	var ge *googleapi.Error
 	if _, err := c.Namespaces.Domainmappings.Get(ns + "/domainmappings/" + domain).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotFound {
 		t.Errorf("Get after delete = %v; want 404", err)
+	}
+	deadline := time.Now().Add(time.Minute)
+	for {
+		code, _ := httpGet(t, base, domain, "/")
+		if code == http.StatusNotFound {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("GET / with Host %s after delete = %d; want 404 from the gateway", domain, code)
+			break
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// domainMappingSettled waits for a domain mapping's DomainRoutable to leave
+// Unknown, as the gateway takes the route, and returns the mapping.
+func domainMappingSettled(t *testing.T, c *runv1.APIService, name string) *runv1.DomainMapping {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		dm, err := c.Namespaces.Domainmappings.Get(name).Do()
+		if err != nil {
+			t.Fatalf("Get %s: %v", name, err)
+		}
+		if cond := v1Cond(dm.Status.Conditions, "DomainRoutable"); cond != nil && cond.Status != "Unknown" {
+			if cond.Status != "True" {
+				t.Fatalf("%s DomainRoutable = %+v", name, cond)
+			}
+			return dm
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s never became routable: %+v", name, dm.Status.Conditions)
+		}
+		time.Sleep(2 * time.Second)
 	}
 }
 
