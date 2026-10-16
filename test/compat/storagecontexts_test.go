@@ -213,3 +213,62 @@ func TestStorageObjectContexts(t *testing.T) {
 		t.Errorf("dropContextGroups=google: %s; want 400", resp.Status)
 	}
 }
+
+// TestGcloudStorageObjectContexts (#1345): `gcloud storage objects update`
+// with --custom-contexts, --update-custom-contexts, --remove-custom-contexts
+// and --clear-custom-contexts, and `gcloud storage objects list
+// --metadata-filter` on them, through the harness with egress blocked.
+//
+// covers: storage.objects.patch, storage.objects.list
+func TestGcloudStorageObjectContexts(t *testing.T) {
+	h := New(t)
+	g := newGcloudSession(t, h)
+	c := storageClient(t, h)
+	name := h.Project() + "-contexts"
+	g.must("storage", "buckets", "create", "gs://"+name)
+	t.Cleanup(func() { _, _ = g.run(nil, "storage", "rm", "-r", "gs://"+name) })
+	for _, o := range []string{"a.txt", "b.txt"} {
+		if err := writeObject(h, c, name, o, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	values := func(o string) map[string]string {
+		t.Helper()
+		a, err := c.Bucket(name).Object(o).Attrs(h.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		if a.Contexts != nil {
+			for k, v := range a.Contexts.Custom {
+				out[k] = v.Value
+			}
+		}
+		return out
+	}
+	g.must("storage", "objects", "update", "gs://"+name+"/a.txt", "--custom-contexts=team=red,tier=gold")
+	if v := values("a.txt"); len(v) != 2 || v["team"] != "red" || v["tier"] != "gold" {
+		t.Errorf("after --custom-contexts: %v", v)
+	}
+	g.must("storage", "objects", "update", "gs://"+name+"/a.txt", "--update-custom-contexts=team=blue,zone=east", "--remove-custom-contexts=tier")
+	if v := values("a.txt"); len(v) != 2 || v["team"] != "blue" || v["zone"] != "east" {
+		t.Errorf("after --update/--remove-custom-contexts: %v", v)
+	}
+	ls := func(filter string) string {
+		t.Helper()
+		return g.must("storage", "objects", "list", "gs://"+name, "--metadata-filter="+filter, "--format=value(name)")
+	}
+	if got := ls(`contexts."team"="blue"`); !strings.Contains(got, "a.txt") || strings.Contains(got, "b.txt") {
+		t.Errorf("list contexts.\"team\"=\"blue\":\n%s", got)
+	}
+	if got := ls(`-contexts."team":*`); strings.Contains(got, "a.txt") || !strings.Contains(got, "b.txt") {
+		t.Errorf("list -contexts.\"team\":*:\n%s", got)
+	}
+	if out, err := g.run(nil, "storage", "objects", "list", "gs://"+name, "--metadata-filter=contexts.team AND x"); err == nil {
+		t.Errorf("a bad filter listed:\n%s", out)
+	}
+	g.must("storage", "objects", "update", "gs://"+name+"/a.txt", "--clear-custom-contexts")
+	if v := values("a.txt"); len(v) != 0 {
+		t.Errorf("after --clear-custom-contexts: %v", v)
+	}
+}

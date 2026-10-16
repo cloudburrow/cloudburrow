@@ -20,7 +20,8 @@ import (
 //     and hold no ' " \ or /; keys under google: are reserved;
 //   - a patch sets the keys it names, a key set to null (or to a payload
 //     with no value, which the official Go client sends) is deleted, and
-//     contexts (or contexts.custom) set to null deletes them all; an update
+//     contexts (or contexts.custom) set to null or empty deletes them all
+//     (gcloud's --clear-custom-contexts sends {"custom": {}}); an update
 //     replaces them; neither creates a new generation;
 //   - copy, rewrite and compose transfer the source's contexts unless the
 //     request body gives contexts (which override them all) or
@@ -126,7 +127,9 @@ func applyContexts(o *objectRecord, v any, replace bool, now time.Time) {
 	if m, ok := v.(map[string]any); ok {
 		custom, _ = m["custom"].(map[string]any)
 	}
-	if custom == nil {
+	// An empty custom clears them too: gcloud's --clear-custom-contexts
+	// patches contexts {"custom": {}}.
+	if len(custom) == 0 {
 		o.Contexts = nil
 		return
 	}
