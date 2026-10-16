@@ -9,8 +9,8 @@ of the emulator or its dependencies is committed here, only the pins and the pat
 
 | Module | Version | Commit the tag names | Licence | Changed |
 |---|---|---|---|---|
-| [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | nineteen patches |
-| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT (one file Apache-2.0, below) | thirty patches |
+| [`github.com/goccy/bigquery-emulator`](https://github.com/goccy/bigquery-emulator) | v0.8.1 | `a531d3deb716eaba4972f9afa88e03e2c0f1a1af` | MIT | twenty-two patches |
+| [`github.com/goccy/googlesqlite`](https://github.com/goccy/googlesqlite) | v0.3.1 | `36f6275991c003cde752014fa886eae33df6615d` | MIT (one file Apache-2.0, below) | thirty-four patches |
 | [`github.com/goccy/go-googlesql`](https://github.com/goccy/go-googlesql) | v0.3.0 | `eb229fca73e7dca3fc9e8e8be733d14a565f912c` | MIT | two patches |
 | every other module the emulator links | v0.8.1's `go.sum` | | each its own | no |
 
@@ -120,6 +120,7 @@ GOFLAGS=-mod=readonly GOWORK=off go test -tags http2legacy github.com/goccy/bigq
 | [googlesqlite 0031](patches/googlesqlite/0031-round-decimal.patch) | Adds the SQLite function `googlesqlite_round_decimal` (a NUMERIC or BIGNUMERIC rounded to a scale by ROUND_HALF_AWAY_FROM_ZERO or ROUND_HALF_EVEN, OUT_OF_RANGE past a precision) and `RawSQLitePrefix`, which runs a statement as SQLite SQL, for the emulator's rounding triggers (#1401) | CloudBurrow's, MIT |
 | [googlesqlite 0032](patches/googlesqlite/0032-round-decimal-nested.patch) | Adds the SQLite function `googlesqlite_round_decimal_nested`, which rounds the NUMERIC and BIGNUMERIC values a spec names inside an encoded STRUCT or ARRAY, at any depth, as `googlesqlite_round_decimal` rounds one, for the emulator's rounding triggers (#1409) | CloudBurrow's, MIT |
 | [googlesqlite 0035](patches/googlesqlite/0035-interval-arithmetic.patch) | INTERVAL + INTERVAL failed "unsupported add operator for interval value", as did -, * INT64, / INT64 and unary minus; DATE '2021-01-31' + INTERVAL 1 MONTH was 2021-03-03; JUSTIFY_* changed their argument and left mixed signs; EXTRACT read uncanonical parts. Arithmetic part by part (months, days, nanoseconds) with GoogleSQL's range errors (#1437) | CloudBurrow's, MIT |
+| [googlesqlite 0036](patches/googlesqlite/0036-change-history.patch) | Gives every `project.dataset.table` a CREATE TABLE makes a change table, `table$changes`, of each row inserted, deleted and updated, with `_CHANGE_TYPE`, `_CHANGE_TIMESTAMP` (the transaction's time) and `_CHANGE_IS_FOR_UPDATE`, filled by SQLite triggers, so every write path is recorded; kept seven days; left out of wildcards and INFORMATION_SCHEMA; the front reads it for `APPENDS` and `CHANGES` (#1418) | CloudBurrow's, MIT |
 | [go-googlesql 0001](patches/go-googlesql/0001-unsigned-wasm-addresses.patch) | Once the engine's WebAssembly heap passed 2 GiB, every call panicked "slice bounds out of range", addressing it with signed 32-bit offsets (#989) | CloudBurrow's, MIT |
 | [go-googlesql 0002](patches/go-googlesql/0002-utc-time-zone.patch) | The bindings could not build a TimeZone, so the analyzer's default zone could not be set; adds UTCTimeZone() (#1189) | CloudBurrow's, MIT |
 

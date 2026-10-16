@@ -83,7 +83,7 @@ func tableReads(sql, project, defaultDataset string) (reads []tableRead, stmts [
 				continue
 			}
 			tr := tableRead{stmt: body, at: j, next: next, dataset: dataset, table: table}
-			if i := strings.Index(table, "$"); i > 0 {
+			if i := strings.Index(table, "$"); i > 0 && !strings.HasSuffix(table, changeTableSuffix) { // #1418, changehistory.go
 				tr.table, tr.decorator = table[:i], table[i+1:]
 			}
 			reads = append(reads, tr)

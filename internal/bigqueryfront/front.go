@@ -408,6 +408,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
 			if r.Method == http.MethodPost {
 				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
+				datasetInsertDefaults(r, settings, projectOf(f.base)) // #1417, projectdefaults.go
 				f.insertDataset(w, r)
 				return
 			}
