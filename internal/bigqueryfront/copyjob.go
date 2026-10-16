@@ -57,11 +57,15 @@ import (
 // SNAPSHOT and RESTORE (#1002) are carried out as snapshots.go describes.
 // The same through DDL, CREATE TABLE ... CLONE and CREATE SNAPSHOT TABLE,
 // is cloneddl.go's.
+// destinationExpirationTime (#1002) is given to a new destination as its
+// expirationTime, which tables.get answers; the emulator does not delete a
+// table when its expiration passes (as a table's own expirationTime).
 // 501, and nothing is copied: a CLONE, SNAPSHOT or RESTORE of several
 // sources, a CLONE into a table that exists (BigQuery's documentation
 // implies a clone may overwrite one, "If the table clone overwrites an
 // existing table", but gives no writeDisposition rule for it), destinationEncryptionConfiguration,
-// destinationExpirationTime, a table of another project, and a WRITE_APPEND (or
+// destinationExpirationTime into a table that exists (whether it changes
+// that table's expiration is not documented), a table of another project, and a WRITE_APPEND (or
 // a WRITE_EMPTY into an empty table) whose destination's schema differs
 // from the source's (BigQuery's rules for which differences it accepts
 // are not given in its documentation). A dry run is 501 (startOwnJob).
@@ -117,9 +121,6 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 	case len(c.DestinationEncryptionConfiguration) > 0 && string(c.DestinationEncryptionConfiguration) != "null":
 		notImplemented("with destinationEncryptionConfiguration. The emulator behind CloudBurrow has no customer-managed keys.")
 		return
-	case len(c.DestinationExpirationTime) > 0 && string(c.DestinationExpirationTime) != "null":
-		notImplemented("with destinationExpirationTime. The emulator behind CloudBurrow does not expire tables.")
-		return
 	case len(srcs) == 0 || c.DestinationTable == nil:
 		invalid("Required parameter is missing: a copy job needs sourceTable or sourceTables, and destinationTable.")
 		return
@@ -129,6 +130,11 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			writeError(w, http.StatusNotImplemented, "notImplemented", why)
 			return
 		}
+	}
+	expiration, hasExpiration, expOK := copyExpiration(c.DestinationExpirationTime)
+	if !expOK {
+		invalid("Invalid value for destinationExpirationTime: " + string(c.DestinationExpirationTime))
+		return
 	}
 	write := strings.ToUpper(c.WriteDisposition)
 	if write == "" {
@@ -181,6 +187,12 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 	if clone && dest.exists {
 		notImplemented(fmt.Sprintf("with operationType CLONE into %s, which exists. BigQuery's documentation does not "+
 			"give how a clone replaces or adds to a table; CloudBurrow clones into a table that does not exist.",
+			tableName(project, dest.ref)))
+		return
+	}
+	if hasExpiration && dest.exists {
+		notImplemented(fmt.Sprintf("with destinationExpirationTime into %s, which exists. BigQuery's documentation does "+
+			"not say whether it changes the expiration of a table that exists; CloudBurrow sets it on a new destination.",
 			tableName(project, dest.ref)))
 		return
 	}
@@ -285,6 +297,12 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 				"cloneTime": j.start.UTC().Format(time.RFC3339Nano),
 			}}
 		}
+		if hasExpiration {
+			if extra == nil {
+				extra = map[string]any{}
+			}
+			extra["expirationTime"] = expiration
+		}
 		if err = f.makeTableWith(r, dest.ref, sources[0].schema, extra); err == "" {
 			if err = f.insertSelect(r, dest.ref, sources); err != "" {
 				f.send(r, http.MethodDelete, tablePath(dest.ref.DatasetID, dest.ref.TableID), nil)
@@ -307,6 +325,32 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		return
 	}
 	f.finishOwnJob(w, r, j, "COPY", "copy", map[string]any{"copiedRows": strconv.FormatInt(rows, 10)}, nil)
+}
+
+// copyExpiration reads a copy job's destinationExpirationTime, a Timestamp
+// (RFC 3339) or, as a table's expirationTime is written, milliseconds since
+// the epoch: the milliseconds as a string, whether one is given, and
+// whether it could be read.
+func copyExpiration(raw json.RawMessage) (millis string, set, ok bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false, true
+	}
+	var v string
+	if json.Unmarshal(raw, &v) != nil {
+		var n json.Number
+		if json.Unmarshal(raw, &n) != nil {
+			return "", true, false
+		}
+		v = n.String()
+	}
+	if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
+		return strconv.FormatInt(ms, 10), true, true
+	}
+	t, err := time.Parse(time.RFC3339Nano, v)
+	if err != nil {
+		return "", true, false
+	}
+	return strconv.FormatInt(t.UnixMilli(), 10), true, true
 }
 
 // copyTableMeta reads a table through tables.get.

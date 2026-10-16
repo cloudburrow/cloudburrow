@@ -11,6 +11,7 @@ import (
 func TestParseCloneDDL(t *testing.T) {
 	for _, c := range []struct {
 		sql, kind, dest, src, unsupported string
+		asOf, expiration                  string
 		ifClause, ok                      bool
 	}{
 		{sql: "CREATE TABLE ds.c CLONE ds.t", kind: "clone", dest: "ds.c", src: "ds.t", ok: true},
@@ -19,9 +20,15 @@ func TestParseCloneDDL(t *testing.T) {
 		{sql: "CREATE SNAPSHOT TABLE ds.s CLONE ds.t", kind: "snapshot", dest: "ds.s", src: "ds.t", ok: true},
 		{sql: "DROP SNAPSHOT TABLE IF EXISTS ds.s", kind: "drop", dest: "ds.s", ifClause: true, ok: true},
 		{sql: "CREATE TABLE ds.c CLONE ds.t FOR SYSTEM_TIME AS OF CURRENT_TIMESTAMP()", kind: "clone", dest: "ds.c",
-			src: "ds.t", unsupported: "FOR SYSTEM_TIME", ok: true},
-		{sql: "CREATE SNAPSHOT TABLE ds.s CLONE ds.t OPTIONS(expiration_timestamp = CURRENT_TIMESTAMP())",
-			kind: "snapshot", dest: "ds.s", src: "ds.t", unsupported: "OPTIONS", ok: true},
+			src: "ds.t", asOf: "CURRENT_TIMESTAMP()", ok: true},
+		{sql: "CREATE SNAPSHOT TABLE ds.s CLONE ds.t FOR SYSTEM_TIME AS OF TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR) " +
+			"OPTIONS(expiration_timestamp = TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR), description = 'd')",
+			kind: "snapshot", dest: "ds.s", src: "ds.t", asOf: "TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)",
+			expiration: "TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)", ok: true},
+		{sql: "CREATE TABLE ds.c CLONE ds.t OPTIONS(kms_key_name = 'k')", kind: "clone", dest: "ds.c", src: "ds.t",
+			unsupported: "kms_key_name", ok: true},
+		{sql: "CREATE TABLE ds.c CLONE ds.t FOR SYSTEM_TIME AS OF"},
+		{sql: "CREATE TABLE ds.c CLONE ds.t OPTIONS(description = 'd') extra"},
 		{sql: "CREATE OR REPLACE TABLE ds.c CLONE ds.t", kind: "clone", dest: "ds.c", src: "ds.t",
 			unsupported: "OR REPLACE", ok: true},
 		{sql: "SELECT 1; CREATE TABLE ds.c CLONE ds.t"},
@@ -41,6 +48,13 @@ func TestParseCloneDDL(t *testing.T) {
 		if st.kind != c.kind || strings.Join(st.dest, ".") != c.dest || strings.Join(st.src, ".") != c.src ||
 			st.ifClause != c.ifClause {
 			t.Errorf("%q: %+v, want %s %s %s %v", c.sql, st, c.kind, c.dest, c.src, c.ifClause)
+		}
+		exp := ""
+		if st.options != nil {
+			exp = st.options.expiration
+		}
+		if st.asOf != c.asOf || exp != c.expiration {
+			t.Errorf("%q: asOf %q expiration %q, want %q %q", c.sql, st.asOf, exp, c.asOf, c.expiration)
 		}
 		if c.unsupported == "" && unsupported != "" || !strings.Contains(unsupported, c.unsupported) {
 			t.Errorf("%q: unsupported %q, want %q", c.sql, unsupported, c.unsupported)

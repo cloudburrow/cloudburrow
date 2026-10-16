@@ -180,3 +180,75 @@ func TestBigQueryCloneAndSnapshotDDL(t *testing.T) {
 	err = bqRun(ctx, c, "DROP SNAPSHOT TABLE "+path("snap"), false)
 	wantReason(t, "DROP SNAPSHOT TABLE of a dropped snapshot", err, http.StatusNotFound, "notFound")
 }
+
+// covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.get
+//
+// TestBigQueryCloneDDLOptionsAndSystemTime (#1002), through the official Go
+// client: CREATE SNAPSHOT TABLE ... CLONE ... FOR SYSTEM_TIME AS OF
+// CURRENT_TIMESTAMP() OPTIONS(expiration_timestamp, description, labels)
+// makes a SNAPSHOT that tables.get reads back with each option, and
+// CREATE TABLE ... CLONE ... OPTIONS(friendly_name) a clone with it. FOR
+// SYSTEM_TIME AS OF a time before the table's time travel window fails
+// invalidQuery, as https://cloud.google.com/bigquery/docs/time-travel
+// documents; a time in the past within it is 501 (the emulator keeps no
+// history), and so is an option CloudBurrow does not set; neither makes a
+// table.
+func TestBigQueryCloneDDLOptionsAndSystemTime(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	path := func(table string) string { return "`" + ds.DatasetID + "." + table + "`" }
+	schema := bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType, Required: true}}
+	if err := ds.Table("base").Create(ctx, &bigquery.TableMetadata{Schema: schema}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bqRun(ctx, c, "INSERT INTO "+path("base")+" VALUES (1), (2)", false); err != nil {
+		t.Fatal(err)
+	}
+
+	sql := "CREATE SNAPSHOT TABLE " + path("snap") + " CLONE " + path("base") +
+		" FOR SYSTEM_TIME AS OF CURRENT_TIMESTAMP() OPTIONS(expiration_timestamp = " +
+		"TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR), description = 'two rows', labels = [('team', 'data')])"
+	if err := bqRun(ctx, c, sql, true); err != nil {
+		t.Fatalf("CREATE SNAPSHOT TABLE with OPTIONS: %v", err)
+	}
+	md, err := ds.Table("snap").Metadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Type != bigquery.Snapshot || md.SnapshotDefinition == nil || md.SnapshotDefinition.BaseTableReference.TableID != "base" {
+		t.Errorf("the snapshot reads back type %q, %+v", md.Type, md.SnapshotDefinition)
+	}
+	if want := time.Now().Add(48 * time.Hour); md.ExpirationTime.Before(want.Add(-5*time.Minute)) || md.ExpirationTime.After(want.Add(5*time.Minute)) {
+		t.Errorf("the snapshot expires %v, want about %v", md.ExpirationTime, want)
+	}
+	if md.Description != "two rows" || md.Labels["team"] != "data" {
+		t.Errorf("the snapshot's description %q, labels %v", md.Description, md.Labels)
+	}
+	if got := fmt.Sprint(rows(t, ctx, c, "SELECT COUNT(*) FROM "+path("snap"))); got != "[[2]]" {
+		t.Errorf("the snapshot holds %s rows", got)
+	}
+
+	if err := bqRun(ctx, c, "CREATE TABLE "+path("cl")+" CLONE "+path("base")+" OPTIONS(friendly_name = 'the clone')", false); err != nil {
+		t.Fatalf("CREATE TABLE CLONE with OPTIONS: %v", err)
+	}
+	if md, err := ds.Table("cl").Metadata(ctx); err != nil || md.Name != "the clone" || md.CloneDefinition == nil || md.Type != bigquery.RegularTable {
+		t.Errorf("the clone reads back %+v, %v", md, err)
+	}
+
+	err = bqRun(ctx, c, "CREATE TABLE "+path("old")+" CLONE "+path("base")+
+		" FOR SYSTEM_TIME AS OF TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)", false)
+	wantReason(t, "AS OF before the time travel window", err, http.StatusBadRequest, "invalidQuery")
+	time.Sleep(2 * time.Second) // the base is older than the time read below
+	err = bqRun(ctx, c, "CREATE SNAPSHOT TABLE "+path("past")+" CLONE "+path("base")+
+		" FOR SYSTEM_TIME AS OF TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 SECOND)", false)
+	wantReason(t, "AS OF a time in the past", err, http.StatusNotImplemented, "notImplemented")
+	err = bqRun(ctx, c, "CREATE TABLE "+path("kms")+" CLONE "+path("base")+" OPTIONS(kms_key_name = 'k')", false)
+	wantReason(t, "an option CloudBurrow does not set", err, http.StatusNotImplemented, "notImplemented")
+	for _, name := range []string{"old", "past", "kms"} {
+		if tableExists(t, ctx, ds.Table(name)) {
+			t.Errorf("a refused statement made %s", name)
+		}
+	}
+}
