@@ -23,7 +23,8 @@ import (
 // export details", https://cloud.google.com/bigquery/docs/exporting-data#parquet_export_details):
 // INTEGER as INT64; BOOLEAN as BOOLEAN; STRING as BYTE_ARRAY with the
 // STRING (UTF8) annotation; BYTES as BYTE_ARRAY; NUMERIC and BIGNUMERIC as
-// FIXED_LEN_BYTE_ARRAY DECIMAL (38, 9) and (76, 38); DATE as INT32 DATE;
+// FIXED_LEN_BYTE_ARRAY DECIMAL (38, 9) and (76, 38), a parameterized
+// NUMERIC(P[, S]) or BIGNUMERIC(P[, S]) as DECIMAL (P, S) (parquetFieldLeaf); DATE as INT32 DATE;
 // DATETIME and TIMESTAMP as INT64 TIMESTAMP (isAdjustedToUTC false,
 // MICROS); TIME as INT64 TIME (isAdjustedToUTC true, MICROS); a RECORD as
 // a group ("represents nested data as a group"); JSON as a STRING ("it is
@@ -36,8 +37,8 @@ import (
 // the REST reference): BYTE_ARRAY GEOGRAPHY "(edges = spherical)", as the
 // table gives it, with values in WKB (parquetGeography). 501 for the rest:
 // GEOGRAPHY without it (GeoParquet metadata, whose bytes the
-// documentation does not give), INTERVAL and RANGE (not in the table), and a parameterized
-// NUMERIC. The file's writer metadata, page and row group sizes and
+// documentation does not give), and INTERVAL and RANGE (not in the
+// table). The file's writer metadata, page and row group sizes and
 // encodings are the writer's, not BigQuery's (UNVERIFIED): a Parquet
 // reader reads the same rows and types, not the same bytes.
 
@@ -48,7 +49,10 @@ type parquetLeaf struct {
 	phys    parquet.Type
 	logical pqschema.LogicalType
 	length  int
-	scale   int
+	// precision and scale are a DECIMAL's; parameterized, a
+	// NUMERIC(P[, S]) or BIGNUMERIC(P[, S]) column's (parquetFieldLeaf).
+	precision, scale int
+	parameterized    bool
 	// geography is a GEOGRAPHY column: BYTE_ARRAY written with no logical
 	// type, which parquetGeography then sets to GEOGRAPHY in the footer.
 	geography bool
@@ -78,9 +82,9 @@ func parquetExportType(typ string) (parquetLeaf, bool) {
 	case "GEOGRAPHY":
 		return parquetLeaf{phys: parquet.Types.ByteArray, logical: pqschema.NoLogicalType{}, geography: true}, true
 	case "NUMERIC":
-		return parquetLeaf{phys: parquet.Types.FixedLenByteArray, logical: pqschema.NewDecimalLogicalType(38, 9), length: 16, scale: 9}, true
+		return parquetLeaf{phys: parquet.Types.FixedLenByteArray, logical: pqschema.NewDecimalLogicalType(38, 9), length: 16, precision: 38, scale: 9}, true
 	case "BIGNUMERIC":
-		return parquetLeaf{phys: parquet.Types.FixedLenByteArray, logical: pqschema.NewDecimalLogicalType(76, 38), length: 32, scale: 38}, true
+		return parquetLeaf{phys: parquet.Types.FixedLenByteArray, logical: pqschema.NewDecimalLogicalType(76, 38), length: 32, precision: 76, scale: 38}, true
 	case "DATE":
 		return parquetLeaf{phys: parquet.Types.Int32, logical: pqschema.DateLogicalType{}}, true
 	case "DATETIME", "TIMESTAMP":
@@ -89,6 +93,22 @@ func parquetExportType(typ string) (parquetLeaf, bool) {
 		return parquetLeaf{phys: parquet.Types.Int64, logical: pqschema.NewTimeLogicalType(true, pqschema.TimeUnitMicros)}, true
 	}
 	return parquetLeaf{}, false
+}
+
+// parquetFieldLeaf is parquetExportType of fl's type, a parameterized
+// NUMERIC(P[, S]) or BIGNUMERIC(P[, S]) with its own precision and scale:
+// the Parquet export details give "NUMERIC(P[, S])" and "BIGNUMERIC(P[,
+// S])" as DECIMAL (precision = P, scale = S). It stays in the
+// unparameterized type's FIXED_LEN_BYTE_ARRAY length (16 or 32 bytes),
+// which holds any such precision; the length BigQuery writes is not
+// documented (UNVERIFIED against BigQuery).
+func parquetFieldLeaf(fl field) (parquetLeaf, bool) {
+	leaf, ok := parquetExportType(fl.Type)
+	if p, sc, param := decimalParams(fl); ok && param {
+		leaf.precision, leaf.scale, leaf.parameterized = p, sc, true
+		leaf.logical = pqschema.NewDecimalLogicalType(int32(p), int32(sc))
+	}
+	return leaf, ok
 }
 
 // parquetUnwritten returns the first column of fields, by its path below
@@ -181,7 +201,7 @@ func parquetNodes(fields []field, rep int16, cols *[]*parquetColumn) (pqschema.F
 			}
 			pn = g
 		} else {
-			leaf, _ := parquetExportType(fl.Type)
+			leaf, _ := parquetFieldLeaf(fl)
 			prim, err := pqschema.NewPrimitiveNodeLogical(name, r, leaf.logical, leaf.phys, leaf.length, -1)
 			if err != nil {
 				return nil, nil, err
@@ -305,6 +325,13 @@ func parquetValue(typ string, leaf parquetLeaf, s string) (any, error) {
 		b, err := wktToWKB(s) // wkb.go
 		return parquet.ByteArray(b), err
 	case "NUMERIC", "BIGNUMERIC":
+		// An unparameterized BIGNUMERIC can hold 39 digits before the
+		// point, past the documented precision 76, which its 32 bytes hold.
+		if leaf.parameterized {
+			if err := decimalFits(s, leaf.precision, leaf.scale); err != nil {
+				return nil, err
+			}
+		}
 		n, err := unscaled(s, leaf.scale) // avrorows.go
 		if err != nil {
 			return nil, err
