@@ -6,12 +6,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	fv1 "cloud.google.com/go/functions/apiv1/functionspb"
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"cloud.google.com/go/iam/apiv1/iampb"
@@ -194,26 +197,28 @@ func (f *FunctionsServer) ListFunctions(_ context.Context, req *functionspb.List
 	return out, nil
 }
 
-// unsupportedFunction names the first field of a function that this
-// instance cannot honour, so it is refused rather than ignored.
+// unsupportedFunction refuses the fields of a function that this instance
+// cannot honour, naming each and why, so none is silently ignored.
 func unsupportedFunction(fn *functionspb.Function) error {
+	bc, sc := fn.GetBuildConfig(), fn.GetServiceConfig()
+	if bc.GetSource().GetRepoSource() != nil {
+		return apierror.Unimplemented("build_config.source.repo_source is not supported: it names a Cloud Source Repositories " +
+			"repository, a hosted repository this instance does not serve; upload the source to a GenerateUploadUrl URL " +
+			"or name a Cloud Storage object in storage_source")
+	}
+	if sc.GetVpcConnector() != "" || sc.GetVpcConnectorEgressSettings() != functionspb.ServiceConfig_VPC_CONNECTOR_EGRESS_SETTINGS_UNSPECIFIED {
+		return apierror.Unimplemented("service_config.vpc_connector is not supported: it names a Serverless VPC Access connector, " +
+			"which this instance does not serve; a function here reaches what the cluster reaches")
+	}
 	var fields []string
 	add := func(set bool, field string) {
 		if set {
 			fields = append(fields, field)
 		}
 	}
-	bc, sc := fn.GetBuildConfig(), fn.GetServiceConfig()
-	add(bc.GetWorkerPool() != "", "build_config.worker_pool")
 	add(bc.GetDockerRepository() != "", "build_config.docker_repository")
 	add(bc.GetServiceAccount() != "", "build_config.service_account")
-	add(bc.GetSource().GetRepoSource() != nil, "build_config.source.repo_source")
 	add(bc.GetSource().GetGitUri() != "", "build_config.source.git_uri")
-	add(sc.GetVpcConnector() != "", "service_config.vpc_connector")
-	add(len(sc.GetSecretEnvironmentVariables()) > 0, "service_config.secret_environment_variables")
-	add(len(sc.GetSecretVolumes()) > 0, "service_config.secret_volumes")
-	add(sc.GetBinaryAuthorizationPolicy() != "", "service_config.binary_authorization_policy")
-	add(fn.GetKmsKeyName() != "", "kms_key_name")
 	if e := fn.GetEnvironment(); e == functionspb.Environment_GEN_1 {
 		fields = append(fields, "environment GEN_1")
 	}
@@ -221,6 +226,83 @@ func unsupportedFunction(fn *functionspb.Function) error {
 		return apierror.Unimplemented("function field %s is not supported on this instance", strings.Join(fields, ", "))
 	}
 	return nil
+}
+
+// kmsKeyRE is a Cloud KMS CryptoKey's resource name, the form kms_key_name
+// takes.
+var kmsKeyRE = regexp.MustCompile(`^projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+$`)
+
+// checkKMSKey checks a kms_key_name. The key is stored on the function and
+// reads back as set; it encrypts nothing here, as this instance's Cloud
+// Storage stores a bucket's default key without encrypting objects with it,
+// and its Cloud Build writes no encrypted artifacts.
+func checkKMSKey(field, key string) error {
+	if key != "" && !kmsKeyRE.MatchString(key) {
+		return apierror.InvalidArgument("%s %q must be projects/{project}/locations/{location}/keyRings/{key_ring}/cryptoKeys/{key}", field, key)
+	}
+	return nil
+}
+
+// checkBuildPool checks a build's worker pool against Cloud Build's
+// private pools (#1422): it must exist and be in the function's region. It
+// is recorded on the function; the build runs on this machine, as every
+// Cloud Build build here does.
+func checkBuildPool(field, pool, location string) error {
+	if pool == "" {
+		return nil
+	}
+	if _, err := buildPool(location, &cbpb.BuildOptions{WorkerPool: pool}); err != nil {
+		msg := strings.TrimPrefix(apierror.From(err).Message, "invalid build: ")
+		msg = strings.Replace(msg, "options.pool.name", field, 1)
+		return &apierror.Error{Code: apierror.From(err).Code, Message: msg}
+	}
+	return nil
+}
+
+// checkSecrets checks a function's secret environment variables and
+// volumes, which its Cloud Run service mounts from the instance's Secret
+// Manager as Cloud Run's secretKeyRef and secret volumes do.
+func checkSecrets(sc *functionspb.ServiceConfig) error {
+	for i, s := range sc.GetSecretEnvironmentVariables() {
+		if s.GetKey() == "" || s.GetSecret() == "" {
+			return apierror.InvalidArgument("service_config.secret_environment_variables[%d]: key and secret are required", i)
+		}
+	}
+	mounts := map[string]bool{}
+	for i, v := range sc.GetSecretVolumes() {
+		if v.GetMountPath() == "" || v.GetSecret() == "" {
+			return apierror.InvalidArgument("service_config.secret_volumes[%d]: mount_path and secret are required", i)
+		}
+		if !path.IsAbs(v.GetMountPath()) || path.Clean(v.GetMountPath()) == "/" {
+			return apierror.InvalidArgument("service_config.secret_volumes[%d].mount_path %q must be an absolute path other than /", i, v.GetMountPath())
+		}
+		if mounts[path.Clean(v.GetMountPath())] {
+			return apierror.InvalidArgument("service_config.secret_volumes[%d].mount_path %q is mounted twice", i, v.GetMountPath())
+		}
+		mounts[path.Clean(v.GetMountPath())] = true
+		for j, ver := range v.GetVersions() {
+			p := ver.GetPath()
+			if p == "" || path.IsAbs(p) || path.Clean(p) != p || p == ".." || strings.HasPrefix(p, "../") {
+				return apierror.InvalidArgument("service_config.secret_volumes[%d].versions[%d].path %q must be a relative path under the mount path", i, j, p)
+			}
+		}
+	}
+	return nil
+}
+
+// checkFunction checks the fields of a function this instance serves, past
+// the refusals of unsupportedFunction.
+func checkFunction(location string, fn *functionspb.Function) error {
+	if err := unsupportedFunction(fn); err != nil {
+		return err
+	}
+	if err := checkBuildPool("build_config.worker_pool", fn.GetBuildConfig().GetWorkerPool(), location); err != nil {
+		return err
+	}
+	if err := checkKMSKey("kms_key_name", fn.GetKmsKeyName()); err != nil {
+		return err
+	}
+	return checkSecrets(fn.GetServiceConfig())
 }
 
 // sourceOf is the archive a function's build reads: build_config's
@@ -263,7 +345,8 @@ func (f *FunctionsServer) CreateFunction(ctx context.Context, req *functionspb.C
 	if err := ValidateServiceID(id); err != nil {
 		return nil, apierror.InvalidArgument("invalid function_id %q: it must start with a lower case letter and contain only lower case letters, digits and hyphens, at most 63", id)
 	}
-	if err := unsupportedFunction(in); err != nil {
+	_, location, _ := resource.ParseLocation(req.GetParent())
+	if err := checkFunction(location, in); err != nil {
 		return nil, err
 	}
 	if err := f.checkEventTrigger(in.GetEventTrigger()); err != nil {
@@ -431,18 +514,15 @@ func (f *FunctionsServer) deploy(ctx context.Context, opName, name string, build
 		for k, v := range fn.GetBuildConfig().GetEnvironmentVariables() {
 			env[k] = v
 		}
-		// Google's builder reads the runtime, as nodejs22 or python312,
-		// from GOOGLE_RUNTIME; a value the caller set wins.
-		if _, set := env["GOOGLE_RUNTIME"]; !set {
-			env["GOOGLE_RUNTIME"] = fn.GetBuildConfig().GetRuntime()
-		}
+		// The runtime is SubmitBuild's buildpack_build.runtime, which
+		// Google's builder reads as GOOGLE_RUNTIME.
 		image = imageURI(name)
 		resp, err := f.builds.SubmitBuild(ctx, &runpb.SubmitBuildRequest{
 			Parent:   parent,
 			Source:   &runpb.SubmitBuildRequest_StorageSource{StorageSource: &runpb.StorageSource{Bucket: bucket, Object: object, Generation: generation}},
 			ImageUri: image,
 			BuildType: &runpb.SubmitBuildRequest_BuildpackBuild{BuildpackBuild: &runpb.SubmitBuildRequest_BuildpacksBuild{
-				FunctionTarget: fn.GetBuildConfig().GetEntryPoint(), EnvironmentVariables: env}},
+				Runtime: fn.GetBuildConfig().GetRuntime(), FunctionTarget: fn.GetBuildConfig().GetEntryPoint(), EnvironmentVariables: env}},
 		})
 		if err != nil {
 			e := apierror.From(err)
@@ -556,6 +636,31 @@ func functionService(fn *functionspb.Function, image string) *runpb.Service {
 	for _, k := range keys {
 		c.Env = append(c.Env, &runpb.EnvVar{Name: k, Values: &runpb.EnvVar_Value{Value: sc.GetEnvironmentVariables()[k]}})
 	}
+	project := projectOf(fn.GetName())
+	for _, s := range sc.GetSecretEnvironmentVariables() {
+		version := s.GetVersion()
+		if version == "" {
+			version = "latest"
+		}
+		c.Env = append(c.Env, &runpb.EnvVar{Name: s.GetKey(), Values: &runpb.EnvVar_ValueSource{ValueSource: &runpb.EnvVarSource{
+			SecretKeyRef: &runpb.SecretKeySelector{Secret: secretRef(project, s.GetProjectId(), s.GetSecret()), Version: version}}}})
+	}
+	var volumes []*runpb.Volume
+	for i, v := range sc.GetSecretVolumes() {
+		vol := &runpb.SecretVolumeSource{Secret: secretRef(project, v.GetProjectId(), v.GetSecret())}
+		// No versions is the latest, in a file named after the secret,
+		// as Google documents and as Cloud Run's default is.
+		for _, ver := range v.GetVersions() {
+			version := ver.GetVersion()
+			if version == "" {
+				version = "latest"
+			}
+			vol.Items = append(vol.Items, &runpb.VersionToPath{Path: ver.GetPath(), Version: version})
+		}
+		vname := fmt.Sprintf("secret-volume-%d", i)
+		volumes = append(volumes, &runpb.Volume{Name: vname, VolumeType: &runpb.Volume_Secret{Secret: vol}})
+		c.VolumeMounts = append(c.VolumeMounts, &runpb.VolumeMount{Name: vname, MountPath: v.GetMountPath()})
+	}
 	limits := map[string]string{}
 	if m := sc.GetAvailableMemory(); m != "" {
 		limits["memory"] = memoryQuantity(m)
@@ -572,12 +677,37 @@ func functionService(fn *functionspb.Function, image string) *runpb.Service {
 		ServiceAccount:                sc.GetServiceAccountEmail(),
 		MaxInstanceRequestConcurrency: sc.GetMaxInstanceRequestConcurrency(),
 		Scaling:                       &runpb.RevisionScaling{MinInstanceCount: sc.GetMinInstanceCount(), MaxInstanceCount: sc.GetMaxInstanceCount()},
+		Volumes:                       volumes,
 	}
 	labels := map[string]string{"goog-managed-by": "cloudfunctions"}
 	for k, v := range fn.GetLabels() {
 		labels[k] = v
 	}
-	return &runpb.Service{Template: t, Labels: labels}
+	svc := &runpb.Service{Template: t, Labels: labels}
+	// The policy is the service's binaryAuthorization, stored and returned
+	// as Cloud Run's is and not enforced: no attestation is checked here.
+	switch p := sc.GetBinaryAuthorizationPolicy(); p {
+	case "":
+	case "default":
+		svc.BinaryAuthorization = &runpb.BinaryAuthorization{BinauthzMethod: &runpb.BinaryAuthorization_UseDefault{UseDefault: true}}
+	default:
+		svc.BinaryAuthorization = &runpb.BinaryAuthorization{BinauthzMethod: &runpb.BinaryAuthorization_Policy{Policy: p}}
+	}
+	return svc
+}
+
+// secretRef is the Secret Manager secret a function's secret names: the
+// secret's own resource name, or projects/{project_id}/secrets/{secret},
+// project_id defaulting to the function's project, and the function's
+// project number, which Google prefers there, read as its ID.
+func secretRef(fnProject, projectID, secret string) string {
+	if strings.HasPrefix(secret, "projects/") {
+		return secret
+	}
+	if projectID == "" || projectID == strconv.FormatInt(resource.ProjectNumber(fnProject), 10) {
+		projectID = fnProject
+	}
+	return "projects/" + projectID + "/secrets/" + secret
 }
 
 // memoryQuantity turns Cloud Functions' memory ("256M", "1G", "512Mi")
@@ -650,6 +780,11 @@ func (f *FunctionsServer) UpdateFunction(ctx context.Context, req *functionspb.U
 		case p == "event_trigger" || strings.HasPrefix(p, "event_trigger.") || p == "eventTrigger" || strings.HasPrefix(p, "eventTrigger."):
 			trig = true
 		}
+	}
+	_, location, _ := resource.ParseLocation(parent)
+	if err := checkFunction(location, fn); err != nil {
+		functions.mu.Unlock()
+		return nil, err
 	}
 	if build {
 		if err := checkRuntime(fn.GetBuildConfig().GetRuntime()); err != nil {
@@ -834,8 +969,10 @@ func (f *FunctionsServer) GenerateUploadUrl(_ context.Context, req *functionspb.
 	if err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
-	if req.GetKmsKeyName() != "" {
-		return nil, apierror.Unimplemented("kms_key_name is not supported")
+	// The key is checked, not used: the upload is stored as this
+	// instance's Cloud Storage stores every object, unencrypted by a key.
+	if err := checkKMSKey("kms_key_name", req.GetKmsKeyName()); err != nil {
+		return nil, err
 	}
 	bucket, object := uploadBucket(project, location), uuid.NewString()+".zip"
 	return &functionspb.GenerateUploadUrlResponse{
