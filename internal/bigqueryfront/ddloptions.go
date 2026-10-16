@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -39,8 +41,10 @@ import (
 // ALTER TABLE is not read here: altertable.go carries it out (#1227),
 // SET OPTIONS among the rest, alone and in a script.
 //
-// Not carried out: options in a multi-statement script, which the
-// emulator still drops, and a column's OPTIONS in a column definition.
+// In a multi-statement script with no TEMP table or function, each such
+// statement is set so too (#1390, hasDDLOptions). Not carried out: options
+// in a script with a TEMP table or function, which the emulator still
+// drops, and a column's OPTIONS in a column definition.
 
 // ddlOptions is a lone DDL statement's table OPTIONS.
 type ddlOptions struct {
@@ -51,6 +55,11 @@ type ddlOptions struct {
 	labels                             map[string]string
 	hasLabels                          bool
 	expiration                         string // the expression's text; "NULL" clears
+	// partitionMs is partition_expiration_days in milliseconds, "NULL"
+	// to clear it; kmsKey is kms_key_name (#1390).
+	partitionMs     string
+	kmsKey          *string
+	clearKMS, isKMS bool
 	// unsupported names the first option the front does not set.
 	unsupported string
 	// The statement's PARTITION BY and CLUSTER BY (#1272,
@@ -243,6 +252,32 @@ func (d *ddlOptions) readOptions(sql string, t []token) string {
 			d.labels = labels
 		case "expiration_timestamp":
 			d.expiration = sql[val[0].pos:val[len(val)-1].end]
+		case "partition_expiration_days", "kms_key_name":
+			if d.view {
+				if d.unsupported == "" {
+					d.unsupported = name
+				}
+				break
+			}
+			if name == "kms_key_name" {
+				s, ok := "", isNull
+				if !isNull && len(val) == 1 {
+					s, ok = stringLiteral(val[0])
+				}
+				if !ok {
+					return "the option kms_key_name set to other than a string literal, which CloudBurrow does not read"
+				}
+				d.isKMS, d.clearKMS = true, isNull
+				if !isNull {
+					d.kmsKey = &s
+				}
+				break
+			}
+			ms, ok := partitionExpirationMs(val)
+			if !ok {
+				return "the option partition_expiration_days set to other than a number literal, which CloudBurrow does not read"
+			}
+			d.partitionMs = ms
 		default:
 			if d.unsupported == "" {
 				d.unsupported = name
@@ -258,9 +293,13 @@ func (d *ddlOptions) readOptions(sql string, t []token) string {
 		if d.view {
 			kind = "view"
 		}
-		return fmt.Sprintf("the %s option %s. CloudBurrow sets a %s's description, friendly_name, labels and "+
-			"expiration_timestamp from OPTIONS; the emulator behind it does not carry out what %s does", kind,
-			d.unsupported, kind, d.unsupported)
+		also := ""
+		if !d.view {
+			also = ", partition_expiration_days and kms_key_name (stored)"
+		}
+		return fmt.Sprintf("the %s option %s. CloudBurrow sets a %s's description, friendly_name, labels, "+
+			"expiration_timestamp%s from OPTIONS; the emulator behind it does not carry out what %s does", kind,
+			d.unsupported, kind, also, d.unsupported)
 	}
 	return ""
 }
@@ -268,8 +307,29 @@ func (d *ddlOptions) readOptions(sql string, t []token) string {
 // sets reports whether d sets anything.
 func (d ddlOptions) sets() bool {
 	return d.description != nil || d.clearDescription || d.friendlyName != nil || d.clearFriendly ||
-		d.hasLabels || d.expiration != "" || d.partition != nil || d.cluster != nil
+		d.hasLabels || d.expiration != "" || d.partition != nil || d.cluster != nil || d.partitionMs != "" || d.isKMS
 }
+
+// partitionExpirationMs reads partition_expiration_days, a FLOAT64
+// literal (or NULL), as timePartitioning.expirationMs (#1390).
+func partitionExpirationMs(val []token) (string, bool) {
+	if len(val) == 1 && val[0].is("NULL") {
+		return "NULL", true
+	}
+	if len(val) != 1 || val[0].kind != tokWord {
+		return "", false
+	}
+	days, err := strconv.ParseFloat(val[0].text, 64)
+	if err != nil || days < 0 {
+		return "", false
+	}
+	return strconv.FormatInt(int64(math.Round(days*86400000)), 10), true
+}
+
+// partitionExpirationRefused is the 400 of partition_expiration_days on a
+// table that is not time-partitioned (wording CloudBurrow's, UNVERIFIED).
+const partitionExpirationRefused = "partition_expiration_days is only valid for a table partitioned by a date or time column " +
+	"or by ingestion time."
 
 // ddlWithOptions carries out d, the lone statement of q (above).
 func (f front) ddlWithOptions(w http.ResponseWriter, r *http.Request, q queryOptions, d ddlOptions, insert bool) {
@@ -294,6 +354,10 @@ func (f front) ddlWithOptions(w http.ResponseWriter, r *http.Request, q queryOpt
 		return
 	}
 	d.spec = spec
+	if d.partitionMs != "" && d.partitionMs != "NULL" && spec.time == nil {
+		writeError(w, http.StatusBadRequest, "invalidQuery", partitionExpirationRefused)
+		return
+	}
 	existed := false
 	if d.ifNotExists || d.alter {
 		st, _ := f.get(r, tablePath(ds, table))
@@ -423,6 +487,24 @@ func (f front) setTableOptions(r *http.Request, dataset, table string, d ddlOpti
 			put(key, v)
 		}
 	}
+	if d.partitionMs != "" { // #1390
+		var tp map[string]any
+		_ = json.Unmarshal(meta["timePartitioning"], &tp)
+		if tp != nil {
+			if d.partitionMs == "NULL" {
+				delete(tp, "expirationMs")
+			} else {
+				tp["expirationMs"] = d.partitionMs
+			}
+			put("timePartitioning", tp)
+		}
+	}
+	switch {
+	case d.kmsKey != nil:
+		put("encryptionConfiguration", map[string]string{"kmsKeyName": *d.kmsKey})
+	case d.clearKMS:
+		delete(meta, "encryptionConfiguration")
+	}
 	body, err := json.Marshal(meta)
 	if err != nil {
 		return err.Error()
@@ -431,4 +513,20 @@ func (f front) setTableOptions(r *http.Request, dataset, table string, d ddlOpti
 		return errorMessage(got, status)
 	}
 	return ""
+}
+
+// hasDDLOptions reports whether body, a statement of the script sql, is a
+// CREATE TABLE, CREATE VIEW or ALTER VIEW with table OPTIONS (#1390): the
+// emulator drops them from a script it runs, so the script is carried out
+// by the front a statement at a time (hasControlFlow), each statement's
+// OPTIONS set as a lone statement's are (ddlWithOptions), and one the
+// front does not set is 501 there.
+func hasDDLOptions(sql string, body []token) bool {
+	if len(body) < 4 || !body[0].is("CREATE") && !body[0].is("ALTER") {
+		return false
+	}
+	d, msg, ok := parseDDLOptions(sql[body[0].pos:body[len(body)-1].end])
+	// PARTITION BY and CLUSTER BY alone are left as they were.
+	return ok && (msg != "" || d.description != nil || d.clearDescription || d.friendlyName != nil || d.clearFriendly || d.hasLabels ||
+		d.expiration != "" || d.partitionMs != "" || d.isKMS)
 }

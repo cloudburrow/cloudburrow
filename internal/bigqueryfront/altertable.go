@@ -51,9 +51,12 @@ import (
 // NULL is DROP DEFAULT. ADD COLUMN ... DEFAULT is refused, 400, as
 // BigQuery refuses it: "You cannot add a new column with a default value
 // to an existing table" (https://cloud.google.com/bigquery/docs/default-values).
-// A nested field, a remaking action with one that is not,
-// and the table options that change how the table behaves, stay 501
-// before anything of the statement is changed (alterUnsupported).
+// An action on a nested field is refused, 400, as BigQuery refuses it
+// (#1389), and so is RENAME COLUMN with an action that does not remake the
+// table and RENAME TO a path; actions of different ways in one statement
+// are carried out a run at a time (alterGroups). The table options that
+// change how the table behaves stay 501 before anything of the statement
+// is changed (alterUnsupported).
 //
 // A script with an ALTER TABLE is carried out by the front's script
 // interpreter (hasControlFlow, scriptflow.go), each ALTER TABLE in its
@@ -103,7 +106,8 @@ func alterUnsupported(t []token) string {
 func alterNotImplemented(what string) string {
 	return "Not implemented here: ALTER TABLE " + what + ". BigQuery runs it, but the emulator behind CloudBurrow " +
 		"reports ALTER TABLE done and leaves the table unchanged (measured), and CloudBurrow carries out only ADD COLUMN, " +
-		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp), ALTER COLUMN SET OPTIONS (description), " +
+		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp, partition_expiration_days, kms_key_name), " +
+		"ALTER COLUMN SET OPTIONS (description), " +
 		"ALTER COLUMN DROP NOT NULL, ALTER COLUMN SET DATA TYPE, ALTER COLUMN SET DEFAULT and DROP DEFAULT, RENAME TO, RENAME COLUMN, " +
 		"DROP COLUMN and primary and foreign keys, " +
 		"so nothing of the statement was run."
@@ -171,7 +175,7 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 			}
 			for _, o := range opts {
 				switch o.name {
-				case "description", "friendly_name", "labels", "expiration_timestamp":
+				case "description", "friendly_name", "labels", "expiration_timestamp", "partition_expiration_days", "kms_key_name":
 				default:
 					return st, "SET OPTIONS (" + o.name + "), which changes how the table behaves", ""
 				}
@@ -205,7 +209,7 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 				}
 				act.kind, act.options = "column options", opts
 			case len(rest) > 0 && rest[0].punct("."):
-				return st, "ALTER COLUMN of a nested field", ""
+				return st, "", nestedRefused("ALTER COLUMN", act.column)
 			case len(rest) > 2 && rest[0].is("SET") && rest[1].is("DATA") && rest[2].is("TYPE"):
 				f, next, what := fieldType(rest, 3)
 				switch {
@@ -213,8 +217,8 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 					return st, "ALTER COLUMN SET DATA TYPE " + what, ""
 				case next != len(rest):
 					return st, "", fmt.Sprintf("Syntax error: unexpected %q after SET DATA TYPE", rest[next].text)
-				case f["type"] == "RECORD" || f["mode"] == "REPEATED":
-					return st, "ALTER COLUMN SET DATA TYPE to a STRUCT or an ARRAY", ""
+				case f["mode"] == "REPEATED":
+					return st, "ALTER COLUMN SET DATA TYPE to an ARRAY", ""
 				}
 				act.kind, act.field = "set type", f
 			case len(rest) == 2 && rest[0].is("DROP") && rest[1].is("DEFAULT"):
@@ -238,7 +242,10 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 			case len(to) == 0 || next != len(a):
 				return st, "", "Syntax error: RENAME TO without a table name"
 			case len(to) > 1:
-				return st, "RENAME TO a name with a dataset", ""
+				// "The value of new_table_name must only include the name
+				// of the table, not the full table path syntax."
+				return st, "", "ALTER TABLE RENAME TO takes the new name of the table alone, not a path: " +
+					strings.Join(to, ".") + " names a dataset."
 			}
 			act.kind, act.newName = "rename table", to[0]
 		case len(a) > 1 && a[0].is("RENAME") && a[1].is("COLUMN"):
@@ -249,7 +256,7 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 			}
 			if j+2 >= len(a) || !isName(a[j]) || !a[j+1].is("TO") || !isName(a[j+2]) {
 				if j+1 < len(a) && a[j+1].punct(".") {
-					return st, "RENAME COLUMN of a nested field", ""
+					return st, "", nestedRefused("RENAME COLUMN", a[j].text)
 				}
 				return st, "", "Syntax error: RENAME COLUMN takes a column name, TO and a new name"
 			}
@@ -268,7 +275,7 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 			}
 			if j+1 != len(a) {
 				if a[j+1].punct(".") {
-					return st, "DROP COLUMN of a nested field", ""
+					return st, "", nestedRefused("DROP COLUMN", a[j].text)
 				}
 				return st, "", fmt.Sprintf("Syntax error: unexpected %q after DROP COLUMN", a[j+1].text)
 			}
@@ -288,25 +295,65 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 			i++
 		}
 	}
-	remakes, others, renames := 0, 0, 0
+	// "RENAME COLUMN cannot be used with other ALTER TABLE actions in one
+	// statement" (#1389); DROP COLUMN and SET DATA TYPE with it are kept
+	// as #1322 and #1334 carried them out.
+	rename, patches := false, false
 	for _, a := range st.actions {
-		switch a.kind {
-		case "rename table":
-			renames++
-		case "rename column", "drop column", "set type":
-			remakes++
-		default:
-			others++
+		switch actionGroup(a.kind) {
+		case "rename column":
+			rename = true
+		case "patch":
+			patches = true
 		}
 	}
-	switch {
-	case renames > 0 && len(st.actions) > 1:
-		return st, "RENAME TO with other actions in the same statement", ""
-	case remakes > 0 && others > 0:
-		return st, "RENAME COLUMN, DROP COLUMN or ALTER COLUMN SET DATA TYPE with ADD COLUMN, SET OPTIONS, another ALTER COLUMN " +
-			"or a key in the same statement", ""
+	if rename && patches {
+		return st, "", "RENAME COLUMN cannot be used with other ALTER TABLE actions in one statement."
 	}
 	return st, "", ""
+}
+
+// nestedRefused is the 400 of an action on a nested field: BigQuery's
+// RENAME COLUMN, DROP COLUMN and ALTER COLUMN take a top-level column
+// ("Modifying subfields, such as nested columns in a STRUCT, is not
+// supported").
+func nestedRefused(action, column string) string {
+	return action + " takes a top-level column: modifying subfields, such as the nested columns of the STRUCT " +
+		column + ", is not supported."
+}
+
+// actionGroup is how alterTable carries out an action of kind: "rename
+// table" (renameTable), "rename column" and "remake" (remakeTable), or
+// "patch" (the tables.patch path).
+func actionGroup(kind string) string {
+	switch kind {
+	case "rename table", "rename column":
+		return kind
+	case "drop column", "set type":
+		return "remake"
+	}
+	return "patch"
+}
+
+// alterGroups splits actions into runs alterTable carries out in turn:
+// consecutive actions of one way (actionGroup), RENAME COLUMN with DROP
+// COLUMN and SET DATA TYPE.
+func alterGroups(actions []alterAction) [][]alterAction {
+	var out [][]alterAction
+	way := func(k string) string {
+		if g := actionGroup(k); g != "rename column" {
+			return g
+		}
+		return "remake"
+	}
+	for _, a := range actions {
+		if n := len(out); n > 0 && way(out[n-1][0].kind) == way(a.kind) && a.kind != "rename table" {
+			out[n-1] = append(out[n-1], a)
+			continue
+		}
+		out = append(out, []alterAction{a})
+	}
+	return out
 }
 
 // isName reports whether t can be a column or table name.
@@ -499,12 +546,33 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 		return failWith(http.StatusBadRequest, "invalidQuery", "Table \""+strings.Join(st.path, ".")+
 			"\" must be qualified with a dataset (e.g. dataset.table).", text)
 	}
+	// A statement whose actions go different ways (actionGroup: RENAME
+	// TO, the remaking ones, the tables.patch ones) is carried out a run
+	// of them at a time, in its order, each run on the table as the one
+	// before left it (#1389).
+	groups := alterGroups(st.actions)
+	for i, g := range groups {
+		sub := st
+		sub.actions, sub.ifExists = g, st.ifExists && i == 0
+		if flow := s.alterRun(sub, ds, table, text); flow != nil {
+			return flow
+		}
+		if g[0].kind == "rename table" {
+			table = g[0].newName
+		}
+	}
+	return s.assigned()
+}
+
+// alterRun carries out st's actions, all of one way (alterGroups), on
+// ds.table; nil when done.
+func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 	project := s.project()
 	name := project + ":" + ds + "." + table
 	status, got := s.f.get(s.r, tablePath(ds, table))
 	if status == http.StatusNotFound {
 		if st.ifExists {
-			return s.assigned()
+			return nil
 		}
 		return failWith(http.StatusNotFound, "notFound", "Not found: Table "+name, text)
 	}
@@ -515,6 +583,7 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 			Fields []map[string]any `json:"fields"`
 		} `json:"schema"`
 		TableConstraints *tableConstraints `json:"tableConstraints"`
+		TimePartitioning map[string]any    `json:"timePartitioning"`
 	}
 	if status != http.StatusOK || json.Unmarshal(got, &current) != nil {
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not read "+name, text)
@@ -523,8 +592,7 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 		return failWith(http.StatusBadRequest, "invalidQuery", "ALTER TABLE is not supported for "+name+
 			", a "+current.Type+".", text)
 	}
-	switch st.actions[0].kind {
-	case "rename table", "rename column", "drop column", "set type": // alone, parseAlter
+	if actionGroup(st.actions[0].kind) != "patch" { // all of one way, alterGroups
 		return s.remakeTable(st, ds, table, name, got, text)
 	}
 	fields := current.Schema.Fields
@@ -588,6 +656,16 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 				}
 				continue
 			}
+			if cons.PrimaryKey != nil {
+				for _, c := range cons.PrimaryKey.Columns {
+					if strings.EqualFold(c, a.column) {
+						// "You can't set default values on columns that
+						// are primary keys" (#1389).
+						return failWith(http.StatusBadRequest, "invalidQuery", "Cannot set a default value on column "+
+							a.column+" of table "+name+": it is a column of the table's primary key.", text)
+					}
+				}
+			}
 			f["defaultValueExpression"] = exprText(text, a.options[0].val)
 			schemaChanged = true
 		case "drop not null", "column options":
@@ -650,6 +728,34 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 						}
 					}
 					patch["labels"] = labels
+				case "partition_expiration_days": // #1390
+					ms, ok := partitionExpirationMs(o.val)
+					switch {
+					case !ok:
+						s.notImpl = alterNotImplemented("SET OPTIONS (partition_expiration_days) set to other than a number literal")
+						return &scriptFlow{}
+					case current.TimePartitioning == nil:
+						return failWith(http.StatusBadRequest, "invalidQuery", partitionExpirationRefused, text)
+					}
+					tp := map[string]any{}
+					for k, v := range current.TimePartitioning {
+						tp[k] = v
+					}
+					delete(tp, "expirationMs")
+					if ms != "NULL" {
+						tp["expirationMs"] = ms
+					}
+					patch["timePartitioning"] = tp
+				case "kms_key_name": // #1390, stored
+					v, flow := s.stringOption(o, text)
+					if flow != nil {
+						return flow
+					}
+					if v == nil {
+						patch["encryptionConfiguration"] = nil
+					} else {
+						patch["encryptionConfiguration"] = map[string]any{"kmsKeyName": *v}
+					}
 				case "expiration_timestamp":
 					if len(o.val) == 1 && o.val[0].is("NULL") {
 						patch["expirationTime"] = nil
@@ -679,12 +785,9 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 		}
 	}
 	if len(patch) == 0 {
-		return s.assigned()
+		return nil
 	}
-	if flow := s.patchTable(ds, table, patch, text); flow != nil {
-		return flow
-	}
-	return s.assigned()
+	return s.patchTable(ds, table, patch, text)
 }
 
 // exprText is the text of the tokens val, a part of text.

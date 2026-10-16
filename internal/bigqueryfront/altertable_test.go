@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -31,21 +32,42 @@ func TestParseAlter(t *testing.T) {
 		t.Errorf("actions = %+v", st.actions)
 	}
 	for sql, want := range map[string]string{
-		"ALTER TABLE ds.t RENAME TO u, SET OPTIONS (description = 'x')":             "RENAME TO with other actions",
-		"ALTER TABLE ds.t RENAME TO other.u":                                        "RENAME TO a name with a dataset",
-		"ALTER TABLE ds.t ADD COLUMN a INT64, DROP COLUMN b":                        "SET DATA TYPE with ADD COLUMN",
-		"ALTER TABLE ds.t DROP COLUMN s.x":                                          "nested field",
-		"ALTER TABLE ds.t RENAME COLUMN s.x TO y":                                   "nested field",
-		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":                "STRUCT or an ARRAY",
-		"ALTER TABLE ds.t ALTER COLUMN s.x SET DATA TYPE NUMERIC":                   "nested field",
-		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE NUMERIC, ADD COLUMN b INT64": "SET DATA TYPE with ADD COLUMN",
-		"ALTER TABLE ds.t SET OPTIONS (partition_expiration_days=1)":                "partition_expiration_days",
-		"ALTER TABLE ds.t ADD COLUMN a INT64 OPTIONS (x = 1) y":                     "after the column's type",
+		"ALTER TABLE ds.t ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":   "to an ARRAY",
+		"ALTER TABLE ds.t SET OPTIONS (require_partition_filter=true)": "require_partition_filter",
+		"ALTER TABLE ds.t ADD COLUMN a INT64 OPTIONS (x = 1) y":        "after the column's type",
 	} {
 		toks, _ := lex(sql)
 		if got := alterUnsupported(toks); !strings.Contains(got, want) {
 			t.Errorf("%s: %q, want %q", sql, got, want)
 		}
+	}
+	// #1389: what BigQuery refuses is 400; actions of different ways are
+	// carried out a run at a time.
+	for sql, want := range map[string]string{
+		"ALTER TABLE ds.t RENAME TO other.u":                                "not a path",
+		"ALTER TABLE ds.t DROP COLUMN s.x":                                  "top-level column",
+		"ALTER TABLE ds.t RENAME COLUMN s.x TO y":                           "top-level column",
+		"ALTER TABLE ds.t ALTER COLUMN s.x SET DATA TYPE NUMERIC":           "top-level column",
+		"ALTER TABLE ds.t ALTER COLUMN s.x SET OPTIONS (description = 'd')": "top-level column",
+		"ALTER TABLE ds.t RENAME COLUMN a TO b, ADD COLUMN c INT64":         "RENAME COLUMN cannot be used with other",
+	} {
+		toks, _ := lex(sql)
+		if _, unsupported, msg := parseAlter(toks); unsupported != "" || !strings.Contains(msg, want) {
+			t.Errorf("%s: %q %q, want 400 %q", sql, unsupported, msg, want)
+		}
+	}
+	toks, _ = lex("ALTER TABLE ds.t ADD COLUMN a INT64, DROP COLUMN b, ALTER COLUMN c SET DATA TYPE NUMERIC, " +
+		"RENAME TO u, SET OPTIONS (description = 'x'), ALTER COLUMN s SET DATA TYPE STRUCT<x NUMERIC>")
+	st, unsupported, msg = parseAlter(toks)
+	if unsupported != "" || msg != "" {
+		t.Fatalf("parseAlter = %q %q", unsupported, msg)
+	}
+	var ways []string
+	for _, g := range alterGroups(st.actions) {
+		ways = append(ways, fmt.Sprintf("%s*%d", actionGroup(g[0].kind), len(g)))
+	}
+	if got := strings.Join(ways, " "); got != "patch*1 remake*2 rename table*1 patch*1 remake*1" {
+		t.Errorf("groups = %s", got)
 	}
 	// RENAME TO, RENAME COLUMN and DROP COLUMN are carried out (#1322).
 	toks, _ = lex("ALTER TABLE ds.t RENAME COLUMN IF EXISTS a TO b, DROP COLUMN IF EXISTS c, DROP COLUMN `d`")

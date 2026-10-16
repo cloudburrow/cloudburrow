@@ -58,7 +58,12 @@ func (f front) updateTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 	_, hasName := patch["friendlyName"]
 	_, hasExpiry := patch["expirationTime"]
 	_, hasKeys := patch["tableConstraints"] // replaced whole; null clears them (#1334, alterkeys.go)
-	patching := r.Method == http.MethodPatch && (hasLabels || hasDesc || hasName || hasExpiry || hasKeys)
+	// encryptionConfiguration and timePartitioning: ALTER TABLE SET
+	// OPTIONS (kms_key_name, partition_expiration_days), #1390; null
+	// clears the first.
+	_, hasKMS := patch["encryptionConfiguration"]
+	_, hasTP := patch["timePartitioning"]
+	patching := r.Method == http.MethodPatch && (hasLabels || hasDesc || hasName || hasExpiry || hasKeys || hasKMS || hasTP)
 	if schema == nil && !patching {
 		f.next.ServeHTTP(w, r)
 		return

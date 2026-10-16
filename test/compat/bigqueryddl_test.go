@@ -60,8 +60,9 @@ func tableExists(t *testing.T, ctx context.Context, tbl *bigquery.Table) bool {
 // TestBigQueryAlterTableNamesAndNotImplemented (#901): ALTER TABLE's new
 // names are held to the rules, 400 invalidQuery: an ADD COLUMN named a!,
 // a STRUCT field named q?, a RENAME TO t!, a RENAME COLUMN to c!. An ALTER
-// TABLE BigQuery would run but the front does not carry out (#1322 carries
-// out RENAME TO, RENAME COLUMN and DROP COLUMN alone) is 501, through jobs.query and jobs.insert
+// TABLE BigQuery would run but the front does not carry out (SET DATA TYPE
+// to an ARRAY) is 501; a subfield's SET DEFAULT and RENAME COLUMN with
+// ADD COLUMN are 400, as BigQuery refuses them (#1389),, through jobs.query and jobs.insert
 // alike, since the emulator would report it done and leave the table as it
 // was; the table's schema is unchanged and it is not renamed. A table
 // option the front does not set (max_staleness) is 501 too (#1251).
@@ -77,14 +78,14 @@ func TestBigQueryAlterTableNamesAndNotImplemented(t *testing.T) {
 	ref := "`" + ds.DatasetID + ".altered`"
 	for _, insert := range []bool{false, true} {
 		for sql, code := range map[string]int{
-			"ALTER TABLE " + ref + " ADD COLUMN `b!` STRING":                             http.StatusBadRequest,
-			"ALTER TABLE " + ref + " ADD COLUMN s STRUCT<`q?` INT64>":                    http.StatusBadRequest,
-			"ALTER TABLE " + ref + " RENAME TO `t!`":                                     http.StatusBadRequest,
-			"ALTER TABLE " + ref + " RENAME COLUMN a TO `c!`":                            http.StatusBadRequest,
-			"ALTER TABLE " + ref + " RENAME TO renamed, SET OPTIONS (description = 'x')": http.StatusNotImplemented,
-			"ALTER TABLE " + ref + " ALTER COLUMN a.x SET DEFAULT 1":                     http.StatusNotImplemented,
-			"ALTER TABLE " + ref + " ADD COLUMN b STRING, RENAME COLUMN a TO c":          http.StatusNotImplemented,
-			"ALTER TABLE " + ref + " SET OPTIONS (max_staleness = INTERVAL 1 HOUR)":      http.StatusNotImplemented,
+			"ALTER TABLE " + ref + " ADD COLUMN `b!` STRING":                        http.StatusBadRequest,
+			"ALTER TABLE " + ref + " ADD COLUMN s STRUCT<`q?` INT64>":               http.StatusBadRequest,
+			"ALTER TABLE " + ref + " RENAME TO `t!`":                                http.StatusBadRequest,
+			"ALTER TABLE " + ref + " RENAME COLUMN a TO `c!`":                       http.StatusBadRequest,
+			"ALTER TABLE " + ref + " ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":     http.StatusNotImplemented,
+			"ALTER TABLE " + ref + " ALTER COLUMN a.x SET DEFAULT 1":                http.StatusBadRequest, // #1389
+			"ALTER TABLE " + ref + " ADD COLUMN b STRING, RENAME COLUMN a TO c":     http.StatusBadRequest, // #1389
+			"ALTER TABLE " + ref + " SET OPTIONS (max_staleness = INTERVAL 1 HOUR)": http.StatusNotImplemented,
 		} {
 			err := bqRun(ctx, c, sql, insert)
 			wantHTTPStatus(t, sql, err, code)
