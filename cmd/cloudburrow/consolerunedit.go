@@ -159,10 +159,13 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 		}
 		plain[e.Name] = e.Value
 	}
-	port := ""
+	port, http2 := "", "false"
 	for _, p := range c.Ports {
 		if p.ContainerPort != 0 {
 			port = fmt.Sprint(p.ContainerPort)
+			if p.Name == "h2c" {
+				http2 = "true"
+			}
 			break
 		}
 	}
@@ -184,6 +187,7 @@ func runEditForm(service string, tmpl knTemplate, source string) *console.EditFo
 		"name":              service,
 		"image":             c.Image,
 		"port":              port,
+		"useHttp2":          http2,
 		"command":           strings.Join(c.Command, " "),
 		"args":              strings.Join(c.Args, " "),
 		"env":               console.FormatMap(plain),

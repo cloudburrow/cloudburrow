@@ -350,6 +350,15 @@ func renderContainers(b *strings.Builder, containers []*runpb.Container, o conta
 			b.WriteString("          ports:\n")
 			for _, p := range ports {
 				fmt.Fprintf(b, "            - containerPort: %d\n", p.GetContainerPort())
+				// Cloud Run's port names, which are Knative's (#1475): h2c
+				// serves the container end to end over HTTP/2 cleartext.
+				switch p.GetName() {
+				case "":
+				case "h2c", "http1":
+					fmt.Fprintf(b, "              name: %s\n", p.GetName())
+				default:
+					return apierror.InvalidArgument("container port name %q must be http1 or h2c", p.GetName())
+				}
 			}
 		} else if o.defaultPort && len(containers) == 1 {
 			b.WriteString("          ports:\n            - containerPort: 8080\n")
@@ -530,7 +539,7 @@ func FromKnative(k ksvc, parent string) *runpb.Service {
 			container.Env = append(container.Env, ev)
 		}
 		for _, p := range c.Ports {
-			container.Ports = append(container.Ports, &runpb.ContainerPort{ContainerPort: int32(p.ContainerPort)})
+			container.Ports = append(container.Ports, &runpb.ContainerPort{Name: p.Name, ContainerPort: int32(p.ContainerPort)})
 		}
 		svc.Template.Containers = append(svc.Template.Containers, container)
 	}
