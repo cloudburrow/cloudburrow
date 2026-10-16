@@ -207,6 +207,13 @@ type Front struct {
 	// iam are the IAM policies set on topics, subscriptions, snapshots and
 	// schemas (iam.go, #1367), by resource name: stored, never enforced.
 	iam map[string]iampolicy.Stored
+	// detached are the subscriptions DetachSubscription detached, which
+	// the emulator no longer holds (detach.go, #1406), by name: each as it
+	// reads back.
+	detached map[string]*pubsubpb.Subscription
+	// snapshots are what UpdateSnapshot set on snapshots, which the
+	// emulator refuses (snapshots.go, #1406), by snapshot name.
+	snapshots map[string]keptSnapshot
 	// exists, when set, replaces the emulator lookup iam.go makes to check
 	// a policy's resource exists (tests).
 	exists func(ctx context.Context, kind, name string) error
@@ -249,7 +256,8 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		topics: pubsubpb.NewPublisherClient(conn), clock: &OffsetClock{}, logf: logf,
 		pushClient: &http.Client{}, subs: map[string]*subState{}, projects: map[string]bool{},
 		policies: map[string]*pubsubpb.ExpirationPolicy{}, labels: map[string]map[string]string{},
-		iam: map[string]iampolicy.Stored{}}, nil
+		iam: map[string]iampolicy.Stored{}, detached: map[string]*pubsubpb.Subscription{},
+		snapshots: map[string]keptSnapshot{}}, nil
 }
 
 // Close releases the connection to the emulator.
@@ -413,10 +421,12 @@ func (f *Front) forget(name string) {
 	f.mu.Lock()
 	_, kept := f.policies[name]
 	_, keptLabels := f.labels[name]
-	kept = f.dropIAMLocked(name) || kept || keptLabels
+	_, keptSnapshot := f.snapshots[name]
+	kept = f.dropIAMLocked(name) || kept || keptLabels || keptSnapshot
 	delete(f.subs, name)
 	delete(f.policies, name)
 	delete(f.labels, name)
+	delete(f.snapshots, name)
 	f.mu.Unlock()
 	f.markDirty()
 	if kept {
@@ -471,6 +481,7 @@ func (f *Front) withPolicy(s *pubsubpb.Subscription) bool {
 func (f *Front) Sweep(ctx context.Context) {
 	f.sweeping.Lock()
 	defer f.sweeping.Unlock()
+	f.sweepSnapshots(ctx)
 	type candidate struct {
 		name string
 		last time.Time
@@ -625,6 +636,31 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 		// The emulator serves no IAM; the front stores policies (iam.go).
 		return f.handleIAM(ctx, ss, method)
 	}
+	switch method {
+	case publisher + "DetachSubscription":
+		// The emulator refuses it; the front detaches (detach.go, #1406).
+		return f.handleDetach(ctx, ss)
+	case subscriber + "UpdateSnapshot":
+		// The emulator refuses it; the front applies it (snapshots.go).
+		return f.handleUpdateSnapshot(ctx, ss)
+	}
+	if strings.HasPrefix(method, subscriber) {
+		// A call on a detached subscription is answered by the front
+		// (detach.go); any other goes on with its first request.
+		var first frame
+		if err := ss.RecvMsg(&first); err != nil {
+			return err
+		}
+		resp, handled, err := f.detachedCall(method, first)
+		if handled {
+			f.sawProject(first)
+			if err != nil {
+				return err
+			}
+			return sendProto(ss, resp)
+		}
+		ss = &replayStream{ServerStream: ss, first: first}
+	}
 	if method == subscriber+"UpdateSubscription" || method == publisher+"UpdateTopic" {
 		return f.handleUpdate(ctx, ss, method)
 	}
@@ -773,6 +809,8 @@ type observed struct {
 	policy *pubsubpb.ExpirationPolicy
 	labels map[string]string
 	local  bool
+	// project is the project a ListSubscriptions names.
+	project string
 }
 
 // pumpRequests copies the client's requests to the emulator, checking and
@@ -944,6 +982,12 @@ func (o *observed) request(fr frame) (frame, error) {
 			o.sub = r.GetSubscription()
 			o.streaming = true
 			o.f.stream(o.sub, +1)
+		}
+		return fr, nil
+	case "ListSubscriptions":
+		var r pubsubpb.ListSubscriptionsRequest
+		if proto.Unmarshal(fr, &r) == nil {
+			o.project = r.GetProject()
 		}
 		return fr, nil
 	default:
@@ -1130,12 +1174,14 @@ func (o *observed) response(fr frame) frame {
 		if b, err := proto.Marshal(&s); err == nil {
 			return b
 		}
+	case "GetSnapshot", "ListSnapshots", "CreateSnapshot":
+		return o.f.snapshotResponse(m, fr)
 	case "ListSubscriptions":
 		var l pubsubpb.ListSubscriptionsResponse
 		if proto.Unmarshal(fr, &l) != nil {
 			return fr
 		}
-		changed := false
+		changed := o.f.withDetached(o.project, &l)
 		for _, s := range l.GetSubscriptions() {
 			changed = o.f.fromRelay(s) || changed
 			changed = o.f.withPolicy(s) || changed
@@ -1291,6 +1337,27 @@ func (f *Front) handleClock(ss grpc.ServerStream) error {
 	}
 	out := frame(b)
 	return ss.SendMsg(&out)
+}
+
+// replayStream is a server stream whose first request has been read
+// already: RecvMsg gives it again, once, then reads on.
+type replayStream struct {
+	grpc.ServerStream
+	first frame
+	done  bool
+}
+
+func (r *replayStream) RecvMsg(m any) error {
+	if r.done {
+		return r.ServerStream.RecvMsg(m)
+	}
+	r.done = true
+	fr, ok := m.(*frame)
+	if !ok {
+		return r.ServerStream.RecvMsg(m)
+	}
+	*fr = append((*fr)[:0], r.first...)
+	return nil
 }
 
 // frame is one message as it travels: its encoded bytes, never decoded on the

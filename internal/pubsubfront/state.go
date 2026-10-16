@@ -2,7 +2,8 @@ package pubsubfront
 
 // The front's own state, kept in a file (#898). What the front knows and the
 // emulator does not (the expiration policies and labels updates set, the
-// IAM policies (iam.go, #1367), the clock's offset, when each subscription
+// IAM policies (iam.go, #1367), the detached subscriptions and snapshot
+// updates (#1406), the clock's offset, when each subscription
 // was last active, and the projects calls have named) would otherwise live only in the front's memory, so a
 // restart of the front's container alone, with the emulator still running
 // and holding every subscription, would give the subscriptions and topics
@@ -56,6 +57,12 @@ type savedState struct {
 	// IAMPolicies are the stored IAM policies (iam.go, #1367), by topic,
 	// subscription, snapshot or schema name.
 	IAMPolicies map[string]iampolicy.Stored `json:"iamPolicies,omitempty"`
+	// Detached are the detached subscriptions (detach.go, #1406), as
+	// protojson, by name.
+	Detached map[string]json.RawMessage `json:"detached,omitempty"`
+	// Snapshots are what UpdateSnapshot set (snapshots.go, #1406), by
+	// snapshot name.
+	Snapshots map[string]keptSnapshot `json:"snapshots,omitempty"`
 }
 
 // KeepState restores the front's state from path, when the file exists, and
@@ -97,6 +104,14 @@ func (f *Front) restore(b []byte) error {
 		}
 		policies[name] = p
 	}
+	detached := make(map[string]*pubsubpb.Subscription, len(s.Detached))
+	for name, raw := range s.Detached {
+		d := &pubsubpb.Subscription{}
+		if err := protojson.Unmarshal(raw, d); err != nil {
+			return fmt.Errorf("the detached subscription %s: %w", name, err)
+		}
+		detached[name] = d
+	}
 	if s.ClockOffsetNanos < 0 {
 		return fmt.Errorf("a negative clock offset, %d", s.ClockOffsetNanos)
 	}
@@ -117,6 +132,12 @@ func (f *Front) restore(b []byte) error {
 	}
 	for name, p := range s.IAMPolicies {
 		f.iam[name] = p
+	}
+	for name, d := range detached {
+		f.detached[name] = d
+	}
+	for name, k := range s.Snapshots {
+		f.snapshots[name] = k
 	}
 	return nil
 }
@@ -188,6 +209,21 @@ func (f *Front) save() error {
 	}
 	for name, p := range f.iam {
 		s.IAMPolicies[name] = p
+	}
+	if len(f.detached) > 0 {
+		s.Detached = make(map[string]json.RawMessage, len(f.detached))
+	}
+	for name, d := range f.detached {
+		if s.Detached[name], err = protojson.Marshal(d); err != nil {
+			f.mu.Unlock()
+			return fmt.Errorf("encode the detached subscription %s: %w", name, err)
+		}
+	}
+	if len(f.snapshots) > 0 {
+		s.Snapshots = make(map[string]keptSnapshot, len(f.snapshots))
+	}
+	for name, k := range f.snapshots {
+		s.Snapshots[name] = k
 	}
 	f.mu.Unlock()
 	sort.Strings(s.Projects)
