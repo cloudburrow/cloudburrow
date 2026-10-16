@@ -316,7 +316,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
 			r.URL.Query().Get("uploadType") == "resumable" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, texts: texts, storage: storage, storageHost: storageHost,
-				configs: configs, jobs: own, records: records, functions: functions}
+				configs: configs, jobs: own, records: records, functions: functions, buffers: buffers}
 			f.resumable(w, r)
 			return
 		}
@@ -324,7 +324,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
-				listJobs: listJobs}
+				listJobs: listJobs, buffers: buffers}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {

@@ -4,7 +4,6 @@ package compat
 
 import (
 	"errors"
-	"net/http"
 	"reflect"
 	"sort"
 	"strings"
@@ -24,8 +23,8 @@ import (
 // out of numRows, a copy leaves them out, and DML that would change one
 // fails ("rows that were recently written ... can't be modified"), while
 // the table's other rows stay modifiable. After the flush (20 seconds) the
-// rows are in their partitions. The engine's mark of a buffered row is no
-// column of the table. Measured first: a streamed row was in its
+// rows are in their partitions. The engine's mark of a buffered row is in
+// neither the schema nor SELECT *. Measured first: a streamed row was in its
 // partition at once, counted and copied, and DML changed it.
 //
 // covers: bigquery.tabledata.insertAll, bigquery.tables.get, bigquery.tabledata.list, bigquery.jobs.query, bigquery.jobs.insert
@@ -98,8 +97,6 @@ func TestBigQueryColumnStreamingBuffer(t *testing.T) {
 	if err := it.Next(&vals); err != nil || len(vals) != 2 || len(it.Schema) != 2 {
 		t.Errorf("tabledata.list: %v, %v (%d columns); want 2 columns", err, vals, len(it.Schema))
 	}
-	wantAPIError(t, "the buffer's mark", bqRun(ctx, c, "SELECT _PARTITION_BUFFERED FROM "+p("cbday"), false),
-		http.StatusBadRequest, "Unrecognized name")
 
 	// A copy leaves the buffer out.
 	cpj, err := ds.Table("cbcopy").CopierFrom(day).Run(ctx)

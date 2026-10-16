@@ -352,12 +352,12 @@ func (f front) streamIngestion(w http.ResponseWriter, r *http.Request, dataset, 
 		cols[i] = quoteName(fl.Name)
 	}
 	list := strings.Join(cols, ", ")
-	pcols, pvals := ", _PARTITIONTIME", ", CAST(NULL AS TIMESTAMP)"
-	unit := m.ingestionUnit()
+	pcols, pvals, unit := ", "+bufferedRows, ", "+bufferedMark(m, now), ""
+	if !column {
+		pcols, pvals, unit = ", _PARTITIONTIME", ", CAST(NULL AS TIMESTAMP)", m.ingestionUnit()
+	}
 	switch {
-	case column:
-		pcols, pvals, unit = ", "+bufferedRows, ", "+bufferedMark(m, now), ""
-	case unit == "DAY":
+	case !column && unit == "DAY":
 		pcols, pvals = pcols+", _PARTITIONDATE", pvals+", CAST(NULL AS DATE)"
 	}
 	// A window for another partition flushes first (above).

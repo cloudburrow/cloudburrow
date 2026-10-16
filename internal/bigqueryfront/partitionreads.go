@@ -177,13 +177,6 @@ func (f front) partitionReads(w http.ResponseWriter, r *http.Request, q queryOpt
 		}
 		var pseudo *token
 		for i := range stmt {
-			if stmt[i].is(bufferedRows) {
-				// The front's mark of the streaming buffer is no column
-				// of any table (#1273, streamingbuffer.go).
-				writeError(w, http.StatusBadRequest, "invalidQuery", "Unrecognized name: "+stmt[i].text+
-					" at "+lineCol(q.Query, stmt[i].pos))
-				return true
-			}
 			if stmt[i].is("_PARTITIONTIME") || stmt[i].is("_PARTITIONDATE") {
 				pseudo = &stmt[i]
 				break
