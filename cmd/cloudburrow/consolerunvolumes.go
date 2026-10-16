@@ -33,7 +33,8 @@ func runVolumeFields(section string) []console.Field {
 		{Name: "cloudSqlInstances", Label: "Cloud SQL connections", Type: "text", Section: section,
 			Help: "Optional. Comma-separated connection names, project:us-central1:postgres or project:us-central1:mysql, " +
 				"as gcloud's --add-cloudsql-instances takes them. Each is a Unix socket at /cloudsql/<connection name>, " +
-				"served by the Cloud SQL Auth Proxy beside the container (#1346)."},
+				"served by the Cloud SQL Auth Proxy beside the container (#1346). It is the volume Cloud Run v1's " +
+				"run.googleapis.com/cloudsql-instances annotation makes, so a service gcloud deployed shows its instances here."},
 	}
 }
 

@@ -151,3 +151,129 @@ func renderCloudSQLProxies(b *strings.Builder, volumes []*runpb.Volume, o contai
 			v.GetName(), cloudSQLSocketDir)
 	}
 }
+
+// Cloud Run v1 names a revision's Cloud SQL instances in one template
+// annotation, which `gcloud run deploy --add-cloudsql-instances`,
+// --set-cloudsql-instances and --remove-cloudsql-instances write: a
+// comma-separated list of connection names, each served, as Google
+// documents, as a socket at /cloudsql/<connection name> in every container.
+// v2 reads that as a Cloud SQL volume named cloudsql that every container
+// mounts at /cloudsql, and v1 reads a v2 template's Cloud SQL volumes back
+// as the annotation (v1 has no Cloud SQL volume of its own).
+const (
+	v1CloudSQLInstances = "run.googleapis.com/cloudsql-instances"
+	v1CloudSQLVolume    = "cloudsql"
+)
+
+// fromV1CloudSQL adds the annotation's connection names to a template as
+// the Cloud SQL volume, mounted at /cloudsql in each container.
+func fromV1CloudSQL(field, value string, volumes []*runpb.Volume, containers []*runpb.Container) ([]*runpb.Volume, error) {
+	var conns []string
+	for _, c := range strings.Split(value, ",") {
+		if c = strings.TrimSpace(c); c != "" {
+			conns = append(conns, c)
+		}
+	}
+	if len(conns) == 0 {
+		return volumes, nil
+	}
+	for _, v := range volumes {
+		if v.GetName() == v1CloudSQLVolume {
+			return nil, apierror.InvalidArgument("%s: a volume named %q already exists; "+
+				"Cloud SQL instances are mounted as that volume", field, v1CloudSQLVolume)
+		}
+	}
+	for _, c := range containers {
+		for _, m := range c.GetVolumeMounts() {
+			if m.GetMountPath() == cloudSQLSocketDir {
+				return nil, apierror.InvalidArgument("%s: container %q already mounts %s; "+
+					"Cloud SQL instances are mounted there", field, c.GetName(), cloudSQLSocketDir)
+			}
+		}
+		c.VolumeMounts = append(c.VolumeMounts, &runpb.VolumeMount{Name: v1CloudSQLVolume, MountPath: cloudSQLSocketDir})
+	}
+	return append(volumes, newCloudSQLVolume(v1CloudSQLVolume, conns)), nil
+}
+
+func newCloudSQLVolume(name string, conns []string) *runpb.Volume {
+	return &runpb.Volume{Name: name, VolumeType: &runpb.Volume_CloudSqlInstance{
+		CloudSqlInstance: &runpb.CloudSqlInstance{Instances: conns}}}
+}
+
+// cloudSQLConns are the connection names a template's Cloud SQL volumes
+// list, each once, in order.
+func cloudSQLConns(volumes []*runpb.Volume) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, v := range cloudSQLVolumes(volumes) {
+		for _, c := range v.GetCloudSqlInstance().GetInstances() {
+			if !seen[c] {
+				seen[c] = true
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+// toV1CloudSQL sets the annotation from a template's Cloud SQL volumes.
+func toV1CloudSQL(ann map[string]string, volumes []*runpb.Volume) map[string]string {
+	conns := cloudSQLConns(volumes)
+	if len(conns) == 0 {
+		return ann
+	}
+	if ann == nil {
+		ann = map[string]string{}
+	}
+	ann[v1CloudSQLInstances] = strings.Join(conns, ",")
+	return ann
+}
+
+// keepCloudSQLLayout keeps a template's Cloud SQL volumes and mounts as
+// they were when a v1 replace names the same connections: v1 cannot say
+// which volume or path a v2 template mounted them at, so a gcloud update
+// that leaves the instances alone leaves their layout alone too.
+func keepCloudSQLLayout(next, prior *runpb.RevisionTemplate) {
+	was := cloudSQLConns(prior.GetVolumes())
+	now := cloudSQLConns(next.GetVolumes())
+	if len(was) == 0 || len(was) != len(now) {
+		return
+	}
+	set := map[string]bool{}
+	for _, c := range was {
+		set[c] = true
+	}
+	for _, c := range now {
+		if !set[c] {
+			return
+		}
+	}
+	var vols []*runpb.Volume
+	for _, v := range next.GetVolumes() {
+		if v.GetCloudSqlInstance() == nil {
+			vols = append(vols, v)
+		}
+	}
+	names := map[string]bool{}
+	for _, v := range cloudSQLVolumes(prior.GetVolumes()) {
+		names[v.GetName()] = true
+		vols = append(vols, v)
+	}
+	next.Volumes = vols
+	for i, c := range next.GetContainers() {
+		var mounts []*runpb.VolumeMount
+		for _, m := range c.GetVolumeMounts() {
+			if m.GetName() != v1CloudSQLVolume {
+				mounts = append(mounts, m)
+			}
+		}
+		if i < len(prior.GetContainers()) {
+			for _, m := range prior.GetContainers()[i].GetVolumeMounts() {
+				if names[m.GetName()] {
+					mounts = append(mounts, m)
+				}
+			}
+		}
+		c.VolumeMounts = mounts
+	}
+}

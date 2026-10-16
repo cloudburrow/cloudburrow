@@ -306,6 +306,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"RUN_SCHEDULER":       "127.0.0.1:9008",
 		"RUN_LOGGING":         "127.0.0.1:9009",
 		"RUN_BIGQUERY":        "http://127.0.0.1:9014",
+		"RUN_SQLADMIN":        "127.0.0.1:9020",
 		"TASKS_LOGGING":       "127.0.0.1:9009",
 		"SPANNER":             "127.0.0.1:9013",
 		"DATASTORE":           "127.0.0.1:9011",

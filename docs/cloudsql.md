@@ -413,14 +413,31 @@ In a service the proxy is a second container. In a job's task it is a Kubernetes
 so the task completes when its container exits. The connection names must be
 `project:us-central1:postgres` or `project:us-central1:mysql`, of an enabled server. Anything
 else is `INVALID_ARGUMENT` when the service or job is written; with Cloud SQL off, it is
-`FAILED_PRECONDITION`. Worker pools and instances refuse the volume, and so does v1's
-`run.googleapis.com/cloudsql-instances` annotation. The console's deploy, edit and job forms
-have a **Cloud SQL connections** field, which mounts the volume at `/cloudsql`, as
+`FAILED_PRECONDITION`. Worker pools and instances refuse the volume. The console's deploy, edit
+and job forms have a **Cloud SQL connections** field, which mounts the volume at `/cloudsql`, as
 `gcloud run deploy --add-cloudsql-instances` does.
 
-Verified for PostgreSQL by `TestRunServiceCloudSQLVolume` and `TestRunJobCloudSQLVolume`. MySQL
-renders the same way, with its socket at `/cloudsql/<connection name>`, but no compat test runs
-it yet.
+`gcloud run deploy --add-cloudsql-instances`, `--set-cloudsql-instances` and
+`--remove-cloudsql-instances` work too. gcloud writes Cloud Run v1's
+`run.googleapis.com/cloudsql-instances` annotation on the revision template, and that is the same
+volume: named `cloudsql`, mounted at `/cloudsql` in every container, with the same proxy beside
+it. `services describe` shows the annotation; the v2 API shows the volume, and the console's
+Cloud SQL connections field shows its instances.
+
+```sh
+gcloud run deploy web --image=$IMAGE --region=us-central1 \
+  --add-cloudsql-instances=$PROJECT:us-central1:postgres
+```
+
+MySQL's socket is `/cloudsql/<connection name>` itself:
+
+```sh
+mysql -S /cloudsql/$PROJECT:us-central1:mysql -u cloudburrow cloudburrow
+```
+
+Verified by `TestRunServiceCloudSQLVolume` and `TestRunJobCloudSQLVolume` (PostgreSQL),
+`TestRunServiceCloudSQLMySQLVolume` (MySQL) and `TestGcloudRunDeployCloudSQL` (gcloud and the v1
+annotation).
 
 ## 4. Authentication is trust, on purpose
 

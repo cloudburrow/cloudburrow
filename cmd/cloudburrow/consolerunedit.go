@@ -106,6 +106,16 @@ func (p runProvider) revisionTemplate(ctx context.Context, service, revision str
 // spaces, so `sh -c "echo hi"` would come back as four arguments and deploy a
 // different command from the one that was serving.
 func runEditForm(service string, tmpl knTemplate, source string) *console.EditForm {
+	// The Cloud SQL Auth Proxy a Cloud SQL volume runs beside the container
+	// (#1346) is not one of the service's containers: the Cloud SQL
+	// connections field describes it.
+	own := tmpl.Spec.Containers[:0:0]
+	for _, c := range tmpl.Spec.Containers {
+		if c.Image != runadapter.CloudSQLProxyImage {
+			own = append(own, c)
+		}
+	}
+	tmpl.Spec.Containers = own
 	if len(tmpl.Spec.Containers) != 1 {
 		return nil
 	}

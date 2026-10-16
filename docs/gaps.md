@@ -23,7 +23,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Storage | 7 | 1 | 5 | 1 | 0 |
 | Pub/Sub | 3 | 0 | 2 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 16 | 12 | 2 | 0 | 2 |
+| Cloud Run | 17 | 12 | 3 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 0 | 0 | 0 | 0 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 6 | 6 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **92** | **39** | **40** | **8** | **5** |
+| **Total** | **93** | **39** | **41** | **8** | **5** |
 
 ## Cloud Storage
 
@@ -87,6 +87,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` with a partial `update_mask` (#1260); container logs in Cloud Logging as `cloud_run_revision` and `cloud_run_job` (#1298); the v1 (Knative) API, with `gcloud run services list`, `describe` and `deploy --image` (#1293, #1297), and its locations, IAM, jobs and domain mappings (#1349); `Builds.SubmitBuild` (#1268).
 | Refused service and job fields (#1346): Cloud SQL volumes (needs a Cloud SQL Auth Proxy sidecar and the 3307 connector published to pods), Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346) | not built yet | M |
 | Refused service and job fields (#1346): Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, Cloud SQL volumes served by the Cloud SQL Auth Proxy sidecar, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346; v1's `run.googleapis.com/cloudsql-instances` annotation is still refused) | no emulator support (Knative refuses FUSE and NFS volumes) | M |
+| Refused service and job fields (#1346): Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, Cloud SQL volumes served by the Cloud SQL Auth Proxy sidecar, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346, with v1's `run.googleapis.com/cloudsql-instances` annotation as the same volume) | no emulator support (Knative refuses FUSE and NFS volumes) | M |
 | `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` | not built yet | M |
 | Refused service and job fields: VPC access, Cloud SQL, Cloud Storage FUSE and NFS volumes, `subPath`, encryption keys, binary authorization, execution environment, session affinity; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297) | not built yet | L |
 | `gcloud run deploy --source` and `gcloud builds submit` are served since #1347 (Artifact Registry repositories, Cloud Build `builds.create`, `CancelBuild` and operations on the Run port, verified with gcloud on Dockerfile sources and a two-step cloudbuild.yaml); left: arbitrary step containers (only docker build, docker push and pack steps run), and no image is pushed to a registry a docker client can reach | not built yet | M |
