@@ -77,11 +77,12 @@ func TestGcloudLoggingFolderAndOrganizationSinks(t *testing.T) {
 }
 
 // TestTerraformLoggingFolderAndOrganizationSinks (#1395):
-// google_logging_folder_sink (include_children) and
-// google_logging_organization_sink apply with the official hashicorp/google
-// provider through `cloudburrow terraform` (egress blocked), are read back
-// with the official ConfigClient, plan clean, take a filter change in place,
-// plan clean again, and are destroyed and confirmed NOT_FOUND.
+// google_logging_folder_sink and google_logging_organization_sink, both
+// include_children with a description and an embedded exclusion (#1403),
+// apply with the official hashicorp/google provider through `cloudburrow
+// terraform` (egress blocked), are read back with the official ConfigClient,
+// plan clean, take a filter and description change in place, plan clean
+// again, and are destroyed and confirmed NOT_FOUND.
 // covers: google.logging.v2.ConfigServiceV2/CreateSink, google.logging.v2.ConfigServiceV2/GetSink, google.logging.v2.ConfigServiceV2/UpdateSink, google.logging.v2.ConfigServiceV2/DeleteSink
 func TestTerraformLoggingFolderAndOrganizationSinks(t *testing.T) {
 	h := New(t)
@@ -103,13 +104,24 @@ resource "google_logging_folder_sink" "f" {
   folder           = %[1]q
   destination      = %[2]q
   filter           = %[3]q
+  description      = %[3]q
   include_children = true
+  exclusions {
+    name   = "no-debug"
+    filter = "severity=DEBUG"
+  }
 }
 resource "google_logging_organization_sink" "o" {
-  name        = %[4]q
-  org_id      = %[5]q
-  destination = %[2]q
-  filter      = %[3]q
+  name             = %[4]q
+  org_id           = %[5]q
+  destination      = %[2]q
+  filter           = %[3]q
+  description      = %[3]q
+  include_children = true
+  exclusions {
+    name   = "no-debug"
+    filter = "severity=DEBUG"
+  }
 }
 `, folder, dest, filter, orgSink, strings.TrimPrefix(localOrg, "organizations/"))
 	}
@@ -120,7 +132,8 @@ resource "google_logging_organization_sink" "o" {
 			if err != nil {
 				t.Fatalf("%s: GetSink %s: %v", when, name, err)
 			}
-			if s.GetFilter() != filter || s.GetDestination() != dest || s.GetIncludeChildren() != strings.HasPrefix(name, "folders/") {
+			if s.GetFilter() != filter || s.GetDescription() != filter || s.GetDestination() != dest || !s.GetIncludeChildren() ||
+				len(s.GetExclusions()) != 1 || s.GetExclusions()[0].GetFilter() != "severity=DEBUG" {
 				t.Errorf("%s: sink %s = %v", when, name, s)
 			}
 		}

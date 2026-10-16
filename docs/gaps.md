@@ -112,7 +112,7 @@ Closed by this sweep: Locations (#1237).
 
 ## Cloud Logging
 
-Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394).
+Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394); the Terraform folder, organization and billing-account resources (#1403).
 
 No gap is left open here.
 
