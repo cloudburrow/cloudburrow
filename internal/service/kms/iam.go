@@ -11,9 +11,10 @@ import (
 )
 
 // iamServer serves the google.iam.v1.IAMPolicy mixin on the KMS port (#428).
-// Policies on key rings and crypto keys are stored on their records and never
-// enforced: no KMS RPC, Encrypt and Decrypt included, reads one (ADR-0006, as
-// amended by #421). Nothing is inherited: a key's policy is its own.
+// Policies on key rings, crypto keys, a location's ekmConfig and EKM
+// connections (#1469) are stored on their records and never enforced: no KMS
+// RPC, Encrypt and Decrypt included, reads one (ADR-0006, as amended by
+// #421). Nothing is inherited: a key's policy is its own.
 type iamServer struct {
 	iampb.UnimplementedIAMPolicyServer
 	s *Server
@@ -24,18 +25,32 @@ type iamServer struct {
 // methods an SDK's call reaches (#793).
 func (s *Server) IAMPolicy() iampb.IAMPolicyServer { return &iamServer{s: s} }
 
+// iamKind is the kind of record a policy is stored on.
+type iamKind int
+
+const (
+	iamKeyRing iamKind = iota
+	iamCryptoKey
+	iamEkmConfig
+	iamEkmConnection
+)
+
 // iamResource is what a resource name routes to.
 type iamResource struct {
-	key  string // the store key of the ring or key record
-	kind string // "key ring" or "crypto key"
-	ring bool
+	key  string // the store key of the record
+	name string // the resource name
+	kind iamKind
+}
+
+func (r iamResource) label() string {
+	return [...]string{"key ring", "crypto key", "EkmConfig", "EkmConnection"}[r.kind]
 }
 
 // iamTarget routes resource. Google serves IAM on key rings, crypto keys,
 // import jobs, ekmConfig and ekmConnections (cloudkms_v1.yaml:75-105);
-// IAM on the last three is UNIMPLEMENTED, never an empty policy: their
-// records (import.go, ekm.go) keep no policy yet. Anything else, a CryptoKeyVersion included, has no
-// IAM on Google and is INVALID_ARGUMENT (UNVERIFIED).
+// IAM on import jobs is UNIMPLEMENTED, never an empty policy, as
+// CloudBurrow keeps no policy on them. Anything else, a CryptoKeyVersion
+// included, has no IAM on Google and is INVALID_ARGUMENT (UNVERIFIED).
 func iamTarget(resource string) (iamResource, error) {
 	if resource == "" {
 		return iamResource{}, apierror.InvalidArgument("resource is required")
@@ -46,33 +61,92 @@ func iamTarget(resource string) (iamResource, error) {
 		if err := parseKeyRing("resource", resource); err != nil {
 			return iamResource{}, err
 		}
-		return iamResource{key: dbKey(ringPrefix, resource), kind: "key ring", ring: true}, nil
+		return iamResource{key: dbKey(ringPrefix, resource), name: resource, kind: iamKeyRing}, nil
 	case len(parts) == 8 && parts[6] == "cryptoKeys":
 		if err := parseCryptoKey("resource", resource); err != nil {
 			return iamResource{}, err
 		}
-		return iamResource{key: dbKey(keyPrefix, resource), kind: "crypto key"}, nil
+		return iamResource{key: dbKey(keyPrefix, resource), name: resource, kind: iamCryptoKey}, nil
 	case len(parts) == 8 && parts[6] == "importJobs":
-		return iamResource{}, apierror.Unimplemented("IAM on import jobs is not implemented: CloudBurrow serves no import jobs")
+		return iamResource{}, apierror.Unimplemented("IAM on import jobs is not implemented: an ImportJob keeps no IAM policy locally")
 	case len(parts) == 5 && parts[4] == "ekmConfig":
-		return iamResource{}, apierror.Unimplemented("IAM on ekmConfig is not implemented: an EkmConfig keeps no IAM policy locally")
+		if _, err := parseEkmConfig("resource", resource); err != nil {
+			return iamResource{}, err
+		}
+		return iamResource{key: dbKey(ekmConfigPrefix, resource), name: resource, kind: iamEkmConfig}, nil
 	case len(parts) == 6 && parts[4] == "ekmConnections":
-		return iamResource{}, apierror.Unimplemented("IAM on ekmConnections is not implemented: an EkmConnection keeps no IAM policy locally")
+		if err := parseEkmConnection("resource", resource); err != nil {
+			return iamResource{}, err
+		}
+		return iamResource{key: dbKey(ekmConnectionPrefix, resource), name: resource, kind: iamEkmConnection}, nil
 	}
-	return iamResource{}, apierror.InvalidArgument("resource %q is not a key ring or crypto key name", resource)
+	return iamResource{}, apierror.InvalidArgument("resource %q is not a key ring, crypto key, ekmConfig or EkmConnection name", resource)
 }
 
 // policyOf reads the resource's stored policy. found is false only for a
-// record that is absent; a failed read is an error (#389).
+// record that is absent; a failed read is an error (#389). A location's
+// ekmConfig always exists ("the EkmConfig singleton", GetEkmConfig), with
+// an empty policy until one is set.
 func (i *iamServer) policyOf(r iamResource) (policy *iampolicy.Stored, found bool, err error) {
-	if r.ring {
+	switch r.kind {
+	case iamKeyRing:
 		var rec keyRing
 		found, err = i.s.get(r.key, &rec)
 		return rec.IAMPolicy, found, err
+	case iamCryptoKey:
+		var rec cryptoKey
+		found, err = i.s.get(r.key, &rec)
+		return rec.IAMPolicy, found, err
+	case iamEkmConfig:
+		var rec ekmConfig
+		_, err = i.s.get(r.key, &rec)
+		return rec.IAMPolicy, err == nil, err
 	}
-	var rec cryptoKey
+	var rec ekmConnection
 	found, err = i.s.get(r.key, &rec)
 	return rec.IAMPolicy, found, err
+}
+
+// setPolicy applies req to the record r names and writes it back. The
+// caller holds the server's lock.
+func (i *iamServer) setPolicy(r iamResource, req *iampb.SetIamPolicyRequest) (iampolicy.Stored, error) {
+	switch r.kind {
+	case iamKeyRing:
+		var rec keyRing
+		return setOn(i.s, r, &rec, &rec.IAMPolicy, req)
+	case iamCryptoKey:
+		var rec cryptoKey
+		return setOn(i.s, r, &rec, &rec.IAMPolicy, req)
+	case iamEkmConfig:
+		rec := ekmConfig{Name: r.name}
+		if _, err := i.s.get(r.key, &rec); err != nil {
+			return iampolicy.Stored{}, apierror.Wrap(err)
+		}
+		return apply(i.s, r, &rec, &rec.IAMPolicy, req)
+	}
+	var rec ekmConnection
+	return setOn(i.s, r, &rec, &rec.IAMPolicy, req)
+}
+
+// setOn loads the record, which must exist, and applies req to it.
+func setOn(s *Server, r iamResource, rec any, policy **iampolicy.Stored, req *iampb.SetIamPolicyRequest) (iampolicy.Stored, error) {
+	if err := s.load(r.key, rec, r.label(), r.name); err != nil {
+		return iampolicy.Stored{}, err
+	}
+	return apply(s, r, rec, policy, req)
+}
+
+// apply sets *policy from req and writes rec back.
+func apply(s *Server, r iamResource, rec any, policy **iampolicy.Stored, req *iampb.SetIamPolicyRequest) (iampolicy.Stored, error) {
+	next, err := iampolicy.Set(*policy, req)
+	if err != nil {
+		return iampolicy.Stored{}, apierror.Wrap(err)
+	}
+	*policy = &next
+	if err := s.put(r.key, rec); err != nil {
+		return iampolicy.Stored{}, apierror.Wrap(err)
+	}
+	return next, nil
 }
 
 func (i *iamServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
@@ -86,7 +160,7 @@ func (i *iamServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyReque
 	}
 	if !found {
 		// The code is UNVERIFIED.
-		return nil, apierror.Wrap(apierror.NotFound("%s %s not found", r.kind, req.GetResource()))
+		return nil, apierror.Wrap(apierror.NotFound("%s %s not found", r.label(), req.GetResource()))
 	}
 	p, err := iampolicy.Get(policy, req.GetOptions())
 	return p, apierror.Wrap(err)
@@ -101,37 +175,15 @@ func (i *iamServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyReque
 	}
 	i.s.mu.Lock()
 	defer i.s.mu.Unlock()
-	var next iampolicy.Stored
-	if r.ring {
-		var rec keyRing
-		if err := i.s.load(r.key, &rec, r.kind, req.GetResource()); err != nil {
-			return nil, err
-		}
-		if next, err = iampolicy.Set(rec.IAMPolicy, req); err != nil {
-			return nil, apierror.Wrap(err)
-		}
-		rec.IAMPolicy = &next
-		if err := i.s.put(r.key, rec); err != nil {
-			return nil, apierror.Wrap(err)
-		}
-	} else {
-		var rec cryptoKey
-		if err := i.s.load(r.key, &rec, r.kind, req.GetResource()); err != nil {
-			return nil, err
-		}
-		if next, err = iampolicy.Set(rec.IAMPolicy, req); err != nil {
-			return nil, apierror.Wrap(err)
-		}
-		rec.IAMPolicy = &next
-		if err := i.s.put(r.key, rec); err != nil {
-			return nil, apierror.Wrap(err)
-		}
+	next, err := i.setPolicy(r, req)
+	if err != nil {
+		return nil, err
 	}
 	return next.Proto(), nil
 }
 
-// TestIamPermissions returns every requested permission on a ring or key
-// that exists, since nothing is enforced. On a well-formed name that does not
+// TestIamPermissions returns every requested permission on a ring, key or
+// EkmConnection that exists, or on any location's ekmConfig, since nothing is enforced. On a well-formed name that does not
 // exist it returns an empty set, as Google documents: "If the resource does
 // not exist, this will return an empty set of permissions, not a NOT_FOUND
 // error" (cloudkms_v1.yaml:59-64; measured behaviour UNVERIFIED). Cloud Tasks

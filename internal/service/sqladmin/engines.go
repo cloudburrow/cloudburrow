@@ -153,8 +153,14 @@ func (p *Postgres) CreateDatabase(ctx context.Context, d Database) error {
 }
 
 func (p *Postgres) UpdateDatabase(ctx context.Context, d Database) error {
-	return unimplemented("changing a PostgreSQL database's charset or collation",
-		"PostgreSQL fixes both when a database is created, so there is no statement to run")
+	// Cloud SQL for PostgreSQL documents that the character set and
+	// collation are not set through the API, the console, gcloud or
+	// Terraform, only with CREATE DATABASE in psql
+	// (docs.cloud.google.com/sql/docs/postgres/create-manage-databases),
+	// and PostgreSQL fixes both when a database is created (#1462).
+	return Errorf(http.StatusBadRequest, "Invalid request: the charset and collation of PostgreSQL database %s can't be changed: "+
+		"PostgreSQL sets both when a database is created, and Cloud SQL sets them only with CREATE DATABASE ... ENCODING ... "+
+		"LC_COLLATE ... TEMPLATE template0 in a PostgreSQL client.", d.Name)
 }
 
 func (p *Postgres) DeleteDatabase(ctx context.Context, name string) error {

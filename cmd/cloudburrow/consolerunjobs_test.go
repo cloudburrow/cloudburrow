@@ -670,8 +670,9 @@ func TestRunRevisionDeleteIsOfferedOnlyWhereTheAPIAccepts(t *testing.T) {
 		{[]string{"api", "api-00001"}, []string{runDeleteRevision}},
 		{[]string{"api", "api-00002"}, nil},
 		{[]string{"foreign", "foreign-00001"}, nil},
-		// A service's page offers Manage traffic (#1224), on one CloudBurrow owns.
-		{[]string{"api"}, []string{runManageTraffic}},
+		// A service's page offers Manage traffic (#1224) and its domain
+		// mappings (#1450), on one CloudBurrow owns.
+		{[]string{"api"}, []string{runManageTraffic, runMapDomain, runUnmapDomain}},
 		{[]string{"foreign"}, nil},
 	} {
 		if got := actionIDs(p.DetailActions(ctx, "demo", c.path)); !reflect.DeepEqual(got, c.want) {

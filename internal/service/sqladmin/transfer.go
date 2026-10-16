@@ -153,7 +153,10 @@ func (s *Server) noTransfers(what string) error {
 	return unimplemented(what, "this server was started without the instance's Cloud Storage (docs/cloudsql.md)")
 }
 
-const bakWhy = "BAK and TDE files are SQL Server's, and CloudBurrow serves PostgreSQL and MySQL only"
+// bakWhy is why BAK and TDE files are refused (#1462): each is read and
+// written only by a SQL Server server, which is not run.
+const bakWhy = "BAK (a SQL Server backup) and TDE (a SQL Server Transparent Data Encryption certificate) files are imported and " +
+	"exported by a SQL Server instance's server, and none runs: " + sqlServerVersionWhy
 
 func (s *Server) exportInstance(r *http.Request, base, project string, e Engine) (any, error) {
 	if s.transfers == nil {

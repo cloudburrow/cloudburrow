@@ -127,6 +127,10 @@ func (runBuildsProvider) CreateForm() (string, []console.Field) {
 		{Name: "image", Label: "Image", Type: "text", Required: true,
 			Help: "the image to build and push, e.g. us-central1-docker.pkg.dev/PROJECT/REPO/IMAGE:TAG; a Cloud Run service naming it runs it"},
 		{Name: "region", Label: "Region", Type: "text", Default: "global", Help: "global, or a region such as us-central1"},
+		{Name: "substitutions", Label: "Substitutions", Type: "text",
+			Help: "optional: _NAME=VALUE pairs, comma separated, which the image may name as ${_NAME}"},
+		{Name: "dynamic", Label: "Dynamic substitutions", Type: "checkbox",
+			Help: "options.dynamicSubstitutions: substitutions may name others, and bash expansions such as ${_VER#v} apply"},
 	}
 }
 
@@ -144,12 +148,24 @@ func (p runBuildsProvider) Create(ctx context.Context, project string, values ma
 	if region == "" {
 		region = "global"
 	}
+	subs := map[string]string{}
+	for _, kv := range strings.Split(values["substitutions"], ",") {
+		if kv = strings.TrimSpace(kv); kv == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || !strings.HasPrefix(k, "_") {
+			return "", fmt.Errorf("substitution %q must be _NAME=VALUE", kv)
+		}
+		subs[k] = v
+	}
 	var id string
 	err := p.withClient(ctx, func(c *cloudbuild.Client) error {
 		op, err := c.CreateBuild(ctx, &cbpb.CreateBuildRequest{ProjectId: project,
 			Parent: "projects/" + project + "/locations/" + region, Build: &cbpb.Build{
-				Source: &cbpb.Source{Source: &cbpb.Source_StorageSource{StorageSource: &cbpb.StorageSource{Bucket: bucket, Object: object}}},
-				Steps:  []*cbpb.BuildStep{{Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", image, "."}}},
+				Source:        &cbpb.Source{Source: &cbpb.Source_StorageSource{StorageSource: &cbpb.StorageSource{Bucket: bucket, Object: object}}},
+				Steps:         []*cbpb.BuildStep{{Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", image, "."}}},
+				Substitutions: subs, Options: &cbpb.BuildOptions{DynamicSubstitutions: values["dynamic"] == "true" || values["dynamic"] == "on"},
 				Images: []string{image}}})
 		if err != nil {
 			return err
@@ -174,6 +190,13 @@ func (p runBuildsProvider) DetailActions(_ context.Context, project string, path
 	switch {
 	case b == nil:
 		return nil
+	case b.GetStatus() == cbpb.Build_PENDING && b.GetApproval().GetState() == cbpb.BuildApproval_PENDING:
+		comment := []console.Field{{Name: "comment", Label: "Comment", Type: "text", Help: "optional: recorded on the build's approval"}}
+		return []console.Action{
+			{ID: "approve", Label: "Approve", Fields: comment},
+			{ID: "reject", Label: "Reject", Fields: comment, Destructive: true},
+			{ID: "cancel", Label: "Cancel", Confirm: "the build never runs and is CANCELLED"},
+		}
 	case b.GetStatus() == cbpb.Build_QUEUED || b.GetStatus() == cbpb.Build_WORKING:
 		return []console.Action{{ID: "cancel", Label: "Cancel", Confirm: "the build stops and is CANCELLED"}}
 	case runadapter.Retryable(b.GetName()):
@@ -184,8 +207,8 @@ func (p runBuildsProvider) DetailActions(_ context.Context, project string, path
 
 // ActAt cancels the build through CancelBuild, or reruns it through
 // RetryBuild.
-func (p runBuildsProvider) ActAt(ctx context.Context, project string, path []string, action string, _ map[string]string) error {
-	if (action != "cancel" && action != "retry") || len(path) != 1 {
+func (p runBuildsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
+	if (action != "cancel" && action != "retry" && action != "approve" && action != "reject") || len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
 	}
 	b := p.build(project, path[0])
@@ -193,6 +216,20 @@ func (p runBuildsProvider) ActAt(ctx context.Context, project string, path []str
 		return fmt.Errorf("build %s not found", path[0])
 	}
 	return p.withClient(ctx, func(c *cloudbuild.Client) error {
+		if action == "approve" || action == "reject" {
+			// ApproveBuild (#1449), as gcloud builds approve and reject do.
+			d := cbpb.ApprovalResult_APPROVED
+			if action == "reject" {
+				d = cbpb.ApprovalResult_REJECTED
+			}
+			op, err := c.ApproveBuild(ctx, &cbpb.ApproveBuildRequest{Name: b.GetName(),
+				ApprovalResult: &cbpb.ApprovalResult{Decision: d, Comment: values["comment"]}})
+			if err != nil {
+				return err
+			}
+			_, err = op.Wait(ctx)
+			return err
+		}
 		if action == "retry" {
 			_, err := c.RetryBuild(ctx, &cbpb.RetryBuildRequest{Name: b.GetName(), ProjectId: b.GetProjectId(), Id: b.GetId()})
 			return err
@@ -286,6 +323,16 @@ func (p runBuildsProvider) Detail(_ context.Context, project string, path []stri
 	add("Logs bucket", b.GetLogsBucket())
 	add("Log write error", runadapter.BuildLogError(b.GetName()))
 	add("Status detail", b.GetStatusDetail())
+	if a := b.GetApproval(); a != nil {
+		v := a.GetState().String()
+		if c := a.GetResult().GetComment(); c != "" {
+			v += ": " + c
+		}
+		add("Approval", v)
+	}
+	if b.GetOptions().GetDynamicSubstitutions() {
+		add("Dynamic substitutions", "on")
+	}
 	if b.GetStartTime() != nil && b.GetFinishTime() != nil {
 		add("Duration", b.GetFinishTime().AsTime().Sub(b.GetStartTime().AsTime()).Round(time.Millisecond).String())
 	}
@@ -327,6 +374,8 @@ func buildStatus(b *cbpb.Build) string {
 		return "Running"
 	case cbpb.Build_CANCELLED, cbpb.Build_EXPIRED:
 		return "Cancelled"
+	case cbpb.Build_PENDING:
+		return "Awaiting approval"
 	}
 	return "Queued"
 }

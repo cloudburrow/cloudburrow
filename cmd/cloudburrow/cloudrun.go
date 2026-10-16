@@ -136,6 +136,7 @@ func (r *runService) Addr() string {
 func (r *runService) Start(ctx context.Context) error {
 	kn := &runadapter.Knative{Kube: k8s.New(r.cfg.KubeconfigPath(), "", runadapter.WorkloadNamespace)}
 	adapter := runadapter.NewServer(kn, r.cfg.Name, time.Duration(r.cfg.ReadyTimeout))
+	adapter.CollectVolumesInTheBackground()
 	if r.secrets != nil {
 		adapter = adapter.WithSecrets(r.secrets)
 	}
@@ -182,6 +183,8 @@ func (r *runService) Start(ctx context.Context) error {
 			}
 		}
 		fetch = sf
+		// ExportArtifact writes a version's files there (#1449).
+		runadapter.UseExportWriter(sf)
 	}
 	// Arbitrary steps run only with --cloudbuild-host-steps, from loopback (#1382).
 	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg)).AllowHostSteps(r.cfg.CloudBuildHostSteps)

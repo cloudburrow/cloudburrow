@@ -48,6 +48,10 @@ type Endpoint struct {
 	// Routes are the contract routes the container was configured with, so a
 	// console can show the predict path without guessing the default.
 	Routes Routes
+	// GRPCPort is the container port the model serves gRPC on — Vertex AI's
+	// containerSpec.grpcPorts, deployed as the Cloud Run port named h2c — or
+	// 0 when it serves none (#1477).
+	GRPCPort int
 	// Replicas is the observed replica count.
 	Replicas int
 	// UpdatedAt is when the runtime last changed this status.

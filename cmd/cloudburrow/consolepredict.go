@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -110,6 +111,11 @@ func predictionEndpoint(svc *runpb.Service) (prediction.Endpoint, bool) {
 		src.Ready = "Unknown"
 	}
 	ep := prediction.NewEndpoint(svc.GetName(), routes, src)
+	for _, p := range containers[0].GetPorts() {
+		if p.GetName() == prediction.GRPCPortName {
+			ep.GRPCPort = int(p.GetContainerPort())
+		}
+	}
 	if ep.State != prediction.EndpointFailed && ep.State != prediction.EndpointPending {
 		// A ready endpoint's condition message says nothing a caller needs.
 		ep.Message = ""
@@ -126,30 +132,62 @@ type endpointResolver struct {
 }
 
 func (r endpointResolver) PredictURL(ctx context.Context, project, location, endpoint string) (string, error) {
+	ep, err := r.find(ctx, project, location, endpoint)
+	if err != nil {
+		return "", err
+	}
+	u, err := ep.PredictURL()
+	if err != nil {
+		return "", notYet(endpoint, ep)
+	}
+	return u, nil
+}
+
+// GRPCHost returns the host the model's gRPC server is routed on: its
+// service's host, when the service's port is named h2c (#1477).
+func (r endpointResolver) GRPCHost(ctx context.Context, project, location, endpoint string) (string, error) {
+	ep, err := r.find(ctx, project, location, endpoint)
+	if err != nil {
+		return "", err
+	}
+	if ep.GRPCPort == 0 {
+		return "", apierror.FailedPrecondition("endpoint %s serves no gRPC: its model declares no grpcPorts. "+
+			"A model's gRPC port is its Cloud Run service's container port named h2c (gcloud run deploy --use-http2); "+
+			"see docs/prediction.md", endpoint)
+	}
+	u, err := url.Parse(ep.URI)
+	if err != nil || u.Host == "" {
+		return "", notYet(endpoint, ep)
+	}
+	return u.Host, nil
+}
+
+func notYet(endpoint string, ep prediction.Endpoint) error {
+	msg := fmt.Sprintf("endpoint %s is %s and has no URL yet", endpoint, ep.State)
+	if ep.Message != "" {
+		msg += ": " + ep.Message
+	}
+	return apierror.FailedPrecondition("%s", msg)
+}
+
+// find returns the deployed endpoint named endpoint.
+func (r endpointResolver) find(ctx context.Context, project, location, endpoint string) (prediction.Endpoint, error) {
 	if loc := r.src.run.location(); location != loc {
-		return "", apierror.NotFound("endpoint %s: location %q is not served; Cloud Run services on this instance are in %q",
+		return prediction.Endpoint{}, apierror.NotFound("endpoint %s: location %q is not served; Cloud Run services on this instance are in %q",
 			endpoint, location, loc)
 	}
 	eps, err := r.src.PredictionEndpoints(ctx, project)
 	if err != nil {
-		return "", &apierror.Error{Code: codes.Unavailable, Reason: "backendError",
+		return prediction.Endpoint{}, &apierror.Error{Code: codes.Unavailable, Reason: "backendError",
 			Message: "cannot list prediction endpoints: " + err.Error()}
 	}
 	for _, ep := range eps {
 		if ep.Name[strings.LastIndex(ep.Name, "/")+1:] != endpoint {
 			continue
 		}
-		u, err := ep.PredictURL()
-		if err != nil {
-			msg := fmt.Sprintf("endpoint %s is %s and has no URL yet", endpoint, ep.State)
-			if ep.Message != "" {
-				msg += ": " + ep.Message
-			}
-			return "", apierror.FailedPrecondition("%s", msg)
-		}
-		return u, nil
+		return ep, nil
 	}
-	return "", apierror.NotFound("no custom prediction endpoint %q is deployed in projects/%s/locations/%s: "+
+	return prediction.Endpoint{}, apierror.NotFound("no custom prediction endpoint %q is deployed in projects/%s/locations/%s: "+
 		"an endpoint is a Cloud Run service whose container sets the AIP_* contract variables (docs/prediction.md)",
 		endpoint, project, location)
 }

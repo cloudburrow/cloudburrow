@@ -33,8 +33,11 @@ import (
 // (artifactregistrycontent.go). Images built on this instance are pushed
 // there too, and still loaded into the cluster as dev.local/<image URI>
 // for Cloud Run's fast path. A repository's IAM policy is stored, never
-// enforced (ADR-0006; artifactregistryiam.go). Other formats, remote and virtual
-// repositories and every other method are UNIMPLEMENTED.
+// enforced (ADR-0006; artifactregistryiam.go). Rules, attachments, project
+// settings, VPC-SC config and annotations are stored (#1449,
+// artifactregistryconfig.go). Other formats, and remote and virtual
+// repositories, are UNIMPLEMENTED: they need upstream registries or
+// package formats nothing here serves.
 type ArtifactRegistryServer struct {
 	arpb.UnimplementedArtifactRegistryServer
 	s *Server
@@ -242,6 +245,7 @@ func RemoveRepository(name string) bool {
 	if st := RegistryStore(); st != nil {
 		_ = st.DeleteRepository(repoOf(name))
 	}
+	forgetUnder(name)
 	return true
 }
 
@@ -296,4 +300,5 @@ func loadRepositories(st *registry.Store) {
 		repositories.repos[r.GetName()] = r
 	}
 	loadRepositoryPoliciesLocked(st)
+	loadARConfig(st)
 }

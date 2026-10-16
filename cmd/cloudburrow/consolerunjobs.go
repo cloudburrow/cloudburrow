@@ -310,12 +310,12 @@ func executionActions(e *runpb.Execution) []console.Action {
 	return []console.Action{{ID: "delete", Label: "Delete", Destructive: true}}
 }
 
-// DetailActions implements console.PathActor: a job's Execute, and an
-// execution's Cancel or Delete.
+// DetailActions implements console.PathActor: a job's Execute and Set
+// delayed execution (#1450), and an execution's Cancel or Delete.
 func (p runJobsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	switch len(path) {
 	case 1:
-		return append(runJobActions(), executeOverridesAction())
+		return append(append(runJobActions(), executeOverridesAction()), p.delayAction(ctx, project, path[0])...)
 	case 2:
 		var actions []console.Action
 		_ = p.withClients(ctx, func(_ *runclient.JobsClient, xc *runclient.ExecutionsClient) error {
@@ -338,6 +338,8 @@ func (p runJobsProvider) ActAt(ctx context.Context, project string, path []strin
 	case len(path) == 1 && action == "execute":
 		_, err := p.execute(ctx, project, path[0])
 		return err
+	case len(path) == 1 && action == actSetDelay:
+		return p.setDelay(ctx, project, path[0], values)
 	case len(path) == 1 && action == actExecuteOverrides:
 		o, err := runJobOverrides(values)
 		if err != nil {

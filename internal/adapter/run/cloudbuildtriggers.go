@@ -1,7 +1,6 @@
 package run
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
@@ -63,6 +62,8 @@ var triggerStore = struct {
 // triggerContext is the trigger a build runs from.
 type triggerContext struct {
 	id, name string
+	// approval is the trigger's approvalConfig.approvalRequired (#1449).
+	approval bool
 }
 
 // builtins are the substitutions Cloud Build adds to a triggered build.
@@ -159,7 +160,7 @@ func unsupportedTrigger(t *cbpb.BuildTrigger) error {
 }
 
 // CreateBuildTrigger stores a trigger.
-func (c *CloudBuildServer) CreateBuildTrigger(_ context.Context, req *cbpb.CreateBuildTriggerRequest) (*cbpb.BuildTrigger, error) {
+func (c *CloudBuildServer) CreateBuildTrigger(ctx context.Context, req *cbpb.CreateBuildTriggerRequest) (*cbpb.BuildTrigger, error) {
 	project, location, _, err := triggerLocation(req.GetParent(), req.GetProjectId())
 	if err != nil {
 		return nil, err
@@ -186,6 +187,9 @@ func (c *CloudBuildServer) CreateBuildTrigger(_ context.Context, req *cbpb.Creat
 		}
 	}
 	triggerStore.triggers[t.ResourceName] = t
+	if required, ok := approvalFrom(ctx); ok {
+		setApprovalLocked(t.ResourceName, required)
+	}
 	return proto.Clone(t).(*cbpb.BuildTrigger), nil
 }
 
@@ -306,6 +310,7 @@ func (c *CloudBuildServer) DeleteBuildTrigger(_ context.Context, req *cbpb.Delet
 		return nil, err
 	}
 	delete(triggerStore.triggers, t.GetResourceName())
+	delete(triggerApprovals, t.GetResourceName())
 	return &emptypb.Empty{}, nil
 }
 
@@ -351,7 +356,7 @@ func applyMask(dst, src proto.Message, mask *fieldmaskpb.FieldMask, keep map[str
 
 // UpdateBuildTrigger replaces a trigger's fields, those update_mask names
 // or, with none, all of them.
-func (c *CloudBuildServer) UpdateBuildTrigger(_ context.Context, req *cbpb.UpdateBuildTriggerRequest) (*cbpb.BuildTrigger, error) {
+func (c *CloudBuildServer) UpdateBuildTrigger(ctx context.Context, req *cbpb.UpdateBuildTriggerRequest) (*cbpb.BuildTrigger, error) {
 	if req.GetTrigger() == nil {
 		return nil, apierror.InvalidArgument("trigger is required")
 	}
@@ -372,6 +377,10 @@ func (c *CloudBuildServer) UpdateBuildTrigger(_ context.Context, req *cbpb.Updat
 		wc.State = cbpb.WebhookConfig_OK
 	}
 	triggerStore.triggers[t.GetResourceName()] = next
+	// An update whose body has no approvalConfig keeps the trigger's.
+	if required, ok := approvalFrom(ctx); ok {
+		setApprovalLocked(t.GetResourceName(), required)
+	}
 	return proto.Clone(next).(*cbpb.BuildTrigger), nil
 }
 
@@ -391,8 +400,10 @@ func (c *CloudBuildServer) RunBuildTrigger(ctx context.Context, req *cbpb.RunBui
 func (c *CloudBuildServer) runTrigger(ctx context.Context, name, project, triggerID string, extra map[string]string, body any) (*longrunning.Operation, error) {
 	triggerStore.mu.Lock()
 	t, err := triggerOf(name, project, triggerID)
+	approval := false
 	if err == nil {
 		t = proto.Clone(t).(*cbpb.BuildTrigger)
+		approval = triggerApprovals[t.GetResourceName()]
 	}
 	triggerStore.mu.Unlock()
 	if err != nil {
@@ -417,7 +428,7 @@ func (c *CloudBuildServer) runTrigger(ctx context.Context, name, project, trigge
 		b.Substitutions[k] = v
 	}
 	p, l, _ := resource.ParseLocation(strings.SplitN(t.GetResourceName(), "/triggers/", 2)[0])
-	return c.createBuild(ctx, p, l, l == "global", b, &triggerContext{id: t.GetId(), name: t.GetName()})
+	return c.createBuild(ctx, p, l, l == "global", b, &triggerContext{id: t.GetId(), name: t.GetName(), approval: approval})
 }
 
 // bindBody resolves a substitution's $(body.a.b) payload bindings against
@@ -756,38 +767,3 @@ func buildPool(location string, o *cbpb.BuildOptions) (string, error) {
 // triggerPath matches a trigger's create or update path, global or
 // regional.
 var triggerPath = regexp.MustCompile(`^/v1/projects/[^/]+(/locations/[^/]+)?/triggers(/[^/:]+)?$`)
-
-// stripApprovalConfig drops a trigger body's approvalConfig, which this
-// release of the Cloud Build API's protos lacks, when it asks for no
-// approval: Terraform's google_cloudbuild_trigger sends an empty one on
-// update. A trigger whose builds need approval is refused.
-func stripApprovalConfig(r *http.Request) error {
-	if (r.Method != http.MethodPost && r.Method != http.MethodPatch) || !triggerPath.MatchString(r.URL.Path) || r.Body == nil {
-		return nil
-	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
-	if err != nil {
-		return apierror.InvalidArgument("the request body could not be read")
-	}
-	r.Body = io.NopCloser(bytes.NewReader(raw))
-	var body map[string]json.RawMessage
-	if json.Unmarshal(raw, &body) != nil {
-		return nil // the transcoder reports it
-	}
-	ac, ok := body["approvalConfig"]
-	if !ok {
-		return nil
-	}
-	var cfg struct {
-		ApprovalRequired bool `json:"approvalRequired"`
-	}
-	_ = json.Unmarshal(ac, &cfg)
-	if cfg.ApprovalRequired {
-		return apierror.Unimplemented("BuildTrigger field approvalConfig.approvalRequired is not supported: build approvals are not served")
-	}
-	delete(body, "approvalConfig")
-	raw, _ = json.Marshal(body)
-	r.Body = io.NopCloser(bytes.NewReader(raw))
-	r.ContentLength = int64(len(raw))
-	return nil
-}

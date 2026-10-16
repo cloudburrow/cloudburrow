@@ -21,7 +21,12 @@ import (
 //
 // EXTERNAL and EXTERNAL_VPC keys are kept in an external key manager that
 // Cloud KMS reaches over the Cloud EKM protocol, which no local key manager
-// speaks; they stay UNIMPLEMENTED, and so do crypto_key_backend (an
+// speaks. #1469 looked for one to run: Google publishes no specification or
+// reference server of that protocol, its EKM partners' managers are
+// commercial, and no open-source implementation exists (Cosmian KMS serves
+// Workspace client-side encryption and Azure's EKM proxy, not Cloud EKM).
+// A key manager built here would be guessed behaviour, so they stay
+// UNIMPLEMENTED, and so do crypto_key_backend (an
 // EkmConnection for EXTERNAL_VPC, or a single-tenant HSM instance) and
 // external_protection_level_options. HSM_SINGLE_TENANT needs a single-tenant
 // HSM instance, which the HsmManagement service would create; it is

@@ -177,6 +177,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.withDefaultTimeZone(w, r, q, insert) { // #1417, timezone.go
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.withDefaultTableKey(w, r, q, insert) { // #1456, projectdefaults.go
+		return
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && r.Context().Value(optionsKey{}) == nil {
 		if st, ok := parseMVStatement(q.Query); ok { // #1390, materializedviews.go
 			f.serveMV(w, r, q, insert, st)
@@ -287,7 +290,7 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		return
 	}
 	if !txnRequest(r) && sessionOf(r) == nil {
-		if s, ok := tempSessionScript(q.Query); ok { // #1434, tempsession.go
+		if s, ok := tempSessionScript(q.Query); ok && s.useSession() { // #1434, #1459, tempsession.go
 			f.runTempSession(w, r, q, insert, s)
 			return
 		}
@@ -321,6 +324,10 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		return
 	}
 	v := checkDDL(q.Query)
+	if v.code == http.StatusNotImplemented && !txnRequest(r) && splitCures(q.Query) { // #1459, scriptflow.go
+		f.runScript(w, r, q, insert)
+		return
+	}
 	if v.code != 0 {
 		f.serveQuery(w, r, q, insert)
 		return
@@ -352,6 +359,10 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	} else if msg := mergeFromSubquery(q.Query); msg != "" {
+		if !txnRequest(r) && splitCures(q.Query) { // #1459: each MERGE run on its own
+			f.runScript(w, r, q, insert)
+			return
+		}
 		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
 		return
 	}

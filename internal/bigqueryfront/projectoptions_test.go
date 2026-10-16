@@ -114,6 +114,13 @@ func TestRewriteTimeZone(t *testing.T) {
 		"SELECT CAST(x AS DATE), DATE '2020-01-01', d.date(1) AS current_date": "",
 		"SELECT STRING(CAST('2020-01-01 00:00:00+00' AS TIMESTAMP))":           "SELECT STRING(CAST('2020-01-01 00:00:00+00' AS TIMESTAMP), 'America/Chicago')",
 		"SELECT 'CURRENT_DATE()'":                                              "",
+		// #1456: a TIMESTAMP literal with no zone is read in the default.
+		"SELECT TIMESTAMP '2020-01-01 03:00:00'":             "SELECT TIMESTAMP '2020-01-01 03:00:00 America/Chicago'",
+		"SELECT TIMESTAMP '2020-01-01'":                      "SELECT TIMESTAMP '2020-01-01 00:00:00 America/Chicago'",
+		"SELECT TIMESTAMP '2020-01-01 03:00:00Z'":            "",
+		"SELECT TIMESTAMP '2020-01-01 03:00:00 UTC'":         "",
+		"SELECT DATE(TIMESTAMP '2020-01-01 03:00:00.5')":     "SELECT DATE(TIMESTAMP '2020-01-01 03:00:00.5 America/Chicago', 'America/Chicago')",
+		"SELECT * FROM d.t WHERE ts > '2020-01-01 03:00:00'": "",
 	} {
 		got, ok := rewriteTimeZone(in, "America/Chicago")
 		if want == "" {
@@ -128,6 +135,9 @@ func TestRewriteTimeZone(t *testing.T) {
 		if _, again := rewriteTimeZone(got, "America/Chicago"); again {
 			t.Errorf("%s: rewritten twice", got)
 		}
+	}
+	if got, _ := rewriteTimeZone("SELECT TIMESTAMP '2020-01-01 03:00'", "UTC+3"); got != "SELECT TIMESTAMP '2020-01-01 03:00+3'" {
+		t.Errorf("offset zone: %s", got)
 	}
 	for _, z := range []string{"America/Los_Angeles", "UTC", "+05:30", "-08"} {
 		if !validTimeZone(z) {

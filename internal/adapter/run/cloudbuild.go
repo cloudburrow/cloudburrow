@@ -263,12 +263,17 @@ func SourceDeployHandler(register func(grpc.ServiceRegistrar), next http.Handler
 			return // ReceiveTriggerWebhook's raw body (#1422)
 		}
 		if isSourceDeployPath(r.URL.Path) {
-			if err := stripApprovalConfig(r); err != nil {
+			r, err := takeApprovalConfig(r)
+			if err != nil {
 				apierror.WriteJSON(w, err)
 				return
 			}
 			// The caller's Host and address go with the request: CreateBuild
 			// runs arbitrary steps only from the host's loopback (#1382).
+			if triggerPath.MatchString(r.URL.Path) {
+				serveTriggerJSON(t, w, withCaller(r))
+				return
+			}
 			t.ServeHTTP(w, withCaller(r))
 			return
 		}
@@ -287,13 +292,13 @@ func isSourceDeployPath(p string) bool {
 		return false
 	}
 	parts := strings.Split(rest, "/")
-	if len(parts) >= 2 && (strings.HasPrefix(parts[1], "builds") || strings.HasPrefix(parts[1], "triggers")) {
+	if len(parts) >= 2 && (strings.HasPrefix(parts[1], "builds") || strings.HasPrefix(parts[1], "triggers") || parts[1] == "projectSettings") {
 		return true // projects/{p}/builds, projects/{p}/triggers
 	}
 	if len(parts) >= 4 && parts[1] == "locations" {
 		// Triggers and worker pools are Cloud Build's too (#1304, #1422).
 		switch strings.SplitN(parts[3], ":", 2)[0] {
-		case "builds", "repositories", "operations", "defaultServiceAccount", "triggers", "workerPools":
+		case "builds", "repositories", "operations", "defaultServiceAccount", "triggers", "workerPools", "vpcscConfig":
 			return true
 		}
 	}

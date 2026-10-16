@@ -98,9 +98,11 @@ func eventually(t *testing.T, what string, f func() error) {
 // it reports the version, the databaseInstalledVersion its server reports
 // and its upgradableDatabaseVersions, flags.list answers that version's
 // flags, and through the official connector, with pgx or the MySQL driver,
-// SELECT version() is that major version's server. MYSQL_5_7 and a
-// version Cloud SQL no longer offers are 501.
-// covers: sql.instances.insert, sql.instances.get, sql.instances.delete, sql.flags.list, sql.connect.get, sql.connect.generateEphemeral
+// SELECT version() is that major version's server. PostgreSQL 9.6 to 12
+// are served (#1462), and 9.6 to 11 refuse high availability and read
+// replicas with why; MYSQL_5_7, MYSQL_5_6 and SQL Server (whose images
+// are linux/amd64 only) and a version Cloud SQL no longer offers are 501.
+// covers: sql.instances.insert, sql.instances.get, sql.instances.patch, sql.instances.delete, sql.flags.list, sql.databases.insert, sql.databases.get, sql.connect.get, sql.connect.generateEphemeral
 func TestCloudSQLDatabaseVersions(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvCloudSQL) == "" && os.Getenv(EnvMySQL) == "" {
@@ -116,6 +118,10 @@ func TestCloudSQLDatabaseVersions(t *testing.T) {
 	var versions []version
 	if os.Getenv(EnvCloudSQL) != "" {
 		versions = append(versions,
+			version{"POSTGRES_9_6", "POSTGRES_9_6_24", "PostgreSQL 9.6.24", 9},
+			version{"POSTGRES_10", "POSTGRES_10_23", "PostgreSQL 10.23", 8},
+			version{"POSTGRES_11", "POSTGRES_11_22", "PostgreSQL 11.22", 7},
+			version{"POSTGRES_12", "POSTGRES_12_22", "PostgreSQL 12.22", 6},
 			version{"POSTGRES_13", "POSTGRES_13_23", "PostgreSQL 13.23", 5},
 			version{"POSTGRES_14", "POSTGRES_14_24", "PostgreSQL 14.24", 4},
 			version{"POSTGRES_15", "POSTGRES_15_19", "PostgreSQL 15.19", 3},
@@ -125,7 +131,7 @@ func TestCloudSQLDatabaseVersions(t *testing.T) {
 	if os.Getenv(EnvMySQL) != "" {
 		versions = append(versions, version{"MYSQL_8_0", "MYSQL_8_0_46", "8.0.46", 1})
 	}
-	for _, bad := range []string{"MYSQL_5_7", "POSTGRES_12"} {
+	for _, bad := range []string{"MYSQL_5_7", "MYSQL_5_6", "SQLSERVER_2022_STANDARD", "POSTGRES_8_4"} {
 		_, err := svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: "bad-" + suffix, DatabaseVersion: bad,
 			Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
 		wantHTTP(t, "insert "+bad, err, 501)
@@ -142,8 +148,13 @@ func TestCloudSQLDatabaseVersions(t *testing.T) {
 				t.Errorf("instance: version %s installed %s state %s upgradable %d", in.DatabaseVersion,
 					in.DatabaseInstalledVersion, in.State, len(in.UpgradableDatabaseVersions))
 			}
+			old := map[string]bool{"POSTGRES_9_6": true, "POSTGRES_10": true, "POSTGRES_11": true, "POSTGRES_12": true}[v.name]
 			flags, err := svc.Flags.List().DatabaseVersion(v.name).Do()
-			if err != nil || len(flags.Items) < 100 {
+			if old {
+				// The flag table here is Cloud SQL's for PostgreSQL 13 and later.
+				wantHTTP(t, "flags.list "+v.name, err, 501)
+				flags = &sqladmin.FlagsListResponse{}
+			} else if err != nil || len(flags.Items) < 100 {
 				t.Errorf("flags.list %s: %v", v.name, err)
 			}
 			for _, f := range flags.Items {
@@ -157,6 +168,25 @@ func TestCloudSQLDatabaseVersions(t *testing.T) {
 			eventually(t, "SELECT version()", func() error { return db.QueryRow("SELECT version()").Scan(&got) })
 			if !strings.Contains(got, v.server) {
 				t.Errorf("SELECT version() = %q, want %q", got, v.server)
+			}
+			if v.name == "POSTGRES_9_6" || v.name == "POSTGRES_11" {
+				// Before PostgreSQL 12 (no pg_promote, no recovery.signal):
+				// high availability and read replicas are 501 with why.
+				_, err := svc.Instances.Patch(project, name, &sqladmin.DatabaseInstance{
+					Settings: &sqladmin.Settings{AvailabilityType: "REGIONAL"}}).Do()
+				wantHTTP(t, "REGIONAL on "+v.name, err, 501)
+				_, err = svc.Instances.Insert(project, &sqladmin.DatabaseInstance{Name: name + "-r", MasterInstanceName: name,
+					Settings: &sqladmin.Settings{Tier: "db-custom-1-3840"}}).Do()
+				wantHTTP(t, "a read replica of "+v.name, err, 501)
+				// Its databases and users are served.
+				op, err := svc.Databases.Insert(project, name, &sqladmin.Database{Name: "app"}).Do()
+				if err != nil {
+					t.Fatal(err)
+				}
+				waitSQLOpDone(t, svc, project, op)
+				if d, err := svc.Databases.Get(project, name, "app").Do(); err != nil || d.Charset != "UTF8" {
+					t.Errorf("databases.get app: %+v %v", d, err)
+				}
 			}
 		})
 	}

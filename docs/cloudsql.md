@@ -105,8 +105,13 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), legacy
-failover replicas (`failoverReplica`, `failoverTarget`), external-primary replicas, `MYSQL_5_7` and versions Cloud SQL no longer lists, BAK and TDE imports and exports, and upgrading a read replica on its own. See
+What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), external-primary replicas
+(no source representation instance is kept, so there is no outside server to replicate from), `MYSQL_5_6`, `MYSQL_5_7`
+and SQL Server versions (their images are linux/amd64 only), BAK and TDE imports and exports (SQL Server's files),
+upgrading a PostgreSQL read replica on its own (streaming replication does not cross major versions), and high
+availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (#1462). A legacy failover replica
+(`failoverReplica`, `failoverTarget`) is 400, as Cloud SQL refuses one since 2025, and so is changing a PostgreSQL
+database's charset or collation, which Cloud SQL documents is not set through the API. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method, and the next section for the
 methods #1462 refuses and why.
 
@@ -171,7 +176,8 @@ The server's own tools do the work, in its pod: `pg_dump` and `psql`, or `mysqld
 export names exactly one database; a MySQL one without databases exports every application
 database. An import or export runs in the background, and `operations.cancel` stops it while
 it runs; a cancelled MySQL import can leave the rows it
-already loaded, as Google warns. BAK and TDE files answer 501. The console's instance page
+already loaded, as Google warns. BAK and TDE files answer 501: they are SQL Server's, read and
+written only by a SQL Server server, and SQL Server's image is linux/amd64 only (#1462). The console's instance page
 has Export and Import, with the parallel and `masterData` options below.
 
 **Parallel imports and exports (#1421).** `sqlExportOptions.parallel` (with `threads`, 4 when
@@ -221,7 +227,7 @@ and an address the connectors reach through 3307.
 
 | Field | What happens |
 |---|---|
-| `databaseVersion` | `POSTGRES_13` to `POSTGRES_18`, `MYSQL_8_0` or `MYSQL_8_4` (#1381): see [Database versions](#database-versions-and-major-version-upgrades-1381). The engine's service must be enabled (412 otherwise). `MYSQL_5_7` and any other `POSTGRES_*` or `MYSQL_*` are 501 saying why; another value is 400. |
+| `databaseVersion` | `POSTGRES_9_6` to `POSTGRES_18`, `MYSQL_8_0` or `MYSQL_8_4` (#1381, #1462): see [Database versions](#database-versions-and-major-version-upgrades-1381). The engine's service must be enabled (412 otherwise). `MYSQL_5_6`, `MYSQL_5_7`, `MYSQL_8_0_*` minor pins, `SQLSERVER_*` and any other `POSTGRES_*` or `MYSQL_*` are 501 saying why; another value is 400. |
 | `region` | Recorded and answered, and in the connection name (`us-central1` when left out). Every server runs in the one cluster. |
 | `rootPassword` | MySQL's `root` password (empty leaves `root` with none, as Cloud SQL does). PostgreSQL's user is `postgres`, trusted locally like the server `up` runs. |
 | `settings.tier` | Required, recorded and answered. The server is not sized by it. |
@@ -229,7 +235,7 @@ and an address the connectors reach through 3307.
 | `settings.userLabels`, `deletionProtectionEnabled`, other settings | Recorded and answered. `delete` of a protected instance is 400, as on Cloud SQL. |
 | `masterInstanceName` | A read replica: see [Read replicas](#read-replicas-1330). |
 | `settings.availabilityType` | `ZONAL` (the default) or `REGIONAL`, a high-availability instance with a synchronous standby: see [High availability](#high-availability-1408). Another value is 400. |
-| `replicaConfiguration.failoverTarget`, `failoverReplica` | 501: the legacy MySQL failover replica, which `REGIONAL` replaced. |
+| `replicaConfiguration.failoverTarget`, `failoverReplica` | 400, as Cloud SQL answers (#1462): the legacy high-availability configuration, deprecated for every instance on 2025-01-13, with which "you can't create instances" ([configure-legacy-ha](https://docs.cloud.google.com/sql/docs/mysql/configure-legacy-ha)). `REGIONAL` is high availability. |
 
 The operation `insert` returns is `RUNNING` until the server serves through its tunnel, then
 `DONE` (or `DONE` with the server's error, and the instance `FAILED`). `delete` removes the
@@ -264,7 +270,7 @@ and **Start replication**.
 The primary may be a created instance or a server `up` runs (`postgres` or `mysql`): their
 config allows it (PostgreSQL's `wal_level` is `replica` by default; MySQL's binary log is on,
 and GTIDs are turned on online, persisted in the server's data directory). A replica of a
-replica of another project's instance, of an external server, or a failover replica is 501.
+replica of another project's instance or of an external server is 501; a failover replica is 400 (#1462).
 Point-in-time recovery is served for created instances (below).
 
 #### Cascading and cross-region replicas (#1381)
@@ -296,6 +302,10 @@ of its version is created, so that create takes longer.
 
 | `databaseVersion` | Image | `databaseInstalledVersion` |
 |---|---|---|
+| `POSTGRES_9_6` | `postgres:9.6-alpine` | `POSTGRES_9_6_24` |
+| `POSTGRES_10` | `postgres:10-alpine` | `POSTGRES_10_23` |
+| `POSTGRES_11` | `postgres:11-alpine` | `POSTGRES_11_22` |
+| `POSTGRES_12` | `postgres:12-alpine` | `POSTGRES_12_22` |
 | `POSTGRES_13` | `postgres:13-alpine` | `POSTGRES_13_23` |
 | `POSTGRES_14` | `postgres:14-alpine` | `POSTGRES_14_24` |
 | `POSTGRES_15` | `postgres:15-alpine` | `POSTGRES_15_19` |
@@ -305,12 +315,29 @@ of its version is created, so that create takes longer.
 | `MYSQL_8_0` | `mysql:8.0` | `MYSQL_8_0_46` |
 | `MYSQL_8_4` | `mysql:8.4` (the server `up` runs) | `MYSQL_8_4_11` |
 
+
+**PostgreSQL 9.6 to 12 (#1462)** are past their end of life upstream; Cloud SQL still offers them
+(in extended support), and so does CloudBurrow, on each official image's last build, the final
+minor release, whose index still carries linux/amd64 and linux/arm64. On 9.6, 10 and 11, high
+availability (`REGIONAL`), read replicas and point-in-time recovery are 501: CloudBurrow promotes
+a standby with `pg_promote()` and recovers to a point in time with `recovery.signal`, both new in
+PostgreSQL 12. Everything else (databases, users, backups, imports and exports, major version
+upgrades) is served, and an upgrade to 12 or later gives the instance the rest. `flags.list` for
+9.6 to 12 is 501: the flag table here is Cloud SQL's for 13 to 18; `databaseFlags` are passed to
+the server, which checks them.
+
 `databaseInstalledVersion` is read from the server. `maintenanceVersion` and
 `availableMaintenanceVersions` are not answered: they name Cloud SQL's own releases
-(`POSTGRES_17_11.R20250727.00_00`), which no server here is. `MYSQL_5_7` is 501: its official
-image was last built in December 2023 (5.7.44, linux/amd64 only) and is not maintained. Versions
-Cloud SQL lists that are past their end of life upstream (PostgreSQL 9.6 to 12, MySQL 5.6) and
-`MYSQL_9_7` are 501 too.
+(`POSTGRES_17_11.R20250727.00_00`), which no server here is.
+
+What is 501, each checked with `docker buildx imagetools inspect` on 2026-10-16 rather than assumed:
+
+| `databaseVersion` | Why |
+|---|---|
+| `MYSQL_5_7` | `mysql:5.7` is linux/amd64 only, last built 2023-12 (5.7.44), and no longer built |
+| `MYSQL_5_6` | `mysql:5.6` is linux/amd64 only, last built 2021-12 (5.6.51) |
+| `MYSQL_8_0_18` to `MYSQL_8_0_4x` | one 8.0 minor runs, `MYSQL_8_0` (8.0.46, the official image's); the 501 says to use it |
+| `SQLSERVER_2017_*`, `SQLSERVER_2019_*`, `SQLSERVER_2022_*` | SQL Server has no Docker Hub official image; Microsoft's `mcr.microsoft.com/mssql/server` (2017, 2019, 2022) is linux/amd64 only |
 
 A created primary answers `upgradableDatabaseVersions`, every newer served version of its
 engine, and **`instances.patch` with a newer `databaseVersion` is a major version upgrade**, as
@@ -336,9 +363,14 @@ a replica on the older version is 400 saying so; with it the primary is upgraded
 every replica under it, level by level for cascading replicas, is rebuilt on the new version
 from its upgraded primary (Cloud SQL "recreates the replicas"), each `MAINTENANCE` meanwhile.
 A replica that fails is `FAILED` and the operation's error names it; the primary stays
-upgraded. **Upgrading a replica on its own is 501**: a replica here replicates its primary's
-server by the engine's own replication (streaming for PostgreSQL), which does not run across
-major versions; upgrade the primary with its replicas instead. The console's instance page
+upgraded. **A MySQL replica is upgraded on its own (#1462)**, before its primary, as Cloud SQL
+documents: `instances.patch` of the replica with the newer version is a `MAJOR_VERSION_UPGRADE`
+that rebuilds it on that version from its primary, which goes on replicating to it (MySQL
+replicates from a source to a replica of the next version). The primary is then upgraded
+without `includeReplicasForMajorVersionUpgrade`, and each of its replicas is rebuilt from the
+new server. **Upgrading a PostgreSQL replica on its own is 501**: it is a physical standby
+streaming its primary's WAL, which PostgreSQL does not replicate across major versions; upgrade
+the primary with its replicas instead. The console's instance page
 offers **Upgrade** with the versions the instance can go to and **Include replicas**, and the
 Create instance form's version picker lists every served version.
 
