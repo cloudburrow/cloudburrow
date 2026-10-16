@@ -442,12 +442,16 @@ wait for the standby, as on Google. The design:
   the server it was left on.
 - **Backups, import and export, point-in-time recovery, upgrades** run in the server the Service
   selects, so in the primary after a failover. Read replicas follow the primary: they replicate
-  from the Service (PostgreSQL follows the new timeline). A read replica cannot be `REGIONAL`
-  itself (501).
+  from the Service (PostgreSQL follows the new timeline: the old primary is shut down fast, so
+  it has sent every replica the same WAL as the standby, and an HA primary keeps
+  `wal_keep_size = 256MB`, so a replica reconnecting finds the new timeline's WAL). A read
+  replica cannot be `REGIONAL` itself (501).
 - **Not built:** automatic failover when the primary's pod fails (a pod that fails is restarted
   in place, as for a `ZONAL` instance; fail over with `instances.failover`), and the
   point-in-time recovery log of the old primary is not carried to the new one (a recovery to a
-  time before the failover recovers from a base taken after it, or is 400).
+  time before the failover recovers from a base taken after it, or is 400). A MySQL standby
+  whose server restarts without its volume (an ephemeral instance) starts empty and is filled
+  again only by the next failover or `REGIONAL` patch; until then its primary's commits wait.
 
 `TestCloudSQLHighAvailability` checks it on both engines through the official client and
 connector: rows written before a failover are all there after it, through the same connection
