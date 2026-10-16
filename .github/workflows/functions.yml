@@ -1,10 +1,12 @@
-# The thirteen gated Functions tests, with the ungated TestFunctionsAPI and
+# The fourteen gated Functions tests, with the ungated TestFunctionsAPI and
 # TestFunctionsEventTriggers, and the gated halves of TestGcloudFunctions and
 # TestTerraformCloudFunctions2Function (#1377) and TestGcloudFunctionsEventTriggers
 # (#1414) (#678; TestFunctionsSubmitBuildBuildpacks since #1268;
 # TestFunctionsEventTriggerBuilds since #1414; TestFunctionsV1BuildsAndServes,
 # with the ungated TestFunctionsV1API and the gated halves of TestGcloudFunctionsV1,
 # TestConsoleFunctionsV1 and TestTerraformCloudFunctionsFunction, since #1428;
+# TestFunctionsSecretsBuildsAndMounts, with the ungated TestFunctionsFields and
+# TestFunctionsV1Fields, since #1464;
 # TestFunctionsNodejsBuiltWithBuildpacks and TestFunctionsPythonBuiltWithBuildpacks
 # since #1303; the Java, Ruby, PHP and .NET ones since #1319), on demand:
 # TestFunctionsFrameworkBuiltWithBuildpacks builds testdata/function with the
@@ -45,8 +47,8 @@ jobs:
     # 165: ten tests, eight of which build their fixture twice (#1319),
     # gcloud's and Terraform's builds of testdata/function (#1377), and four
     # more of it with event triggers, two through the client and two through
-    # gcloud (#1414).
-    timeout-minutes: 165
+    # gcloud (#1414), and one that mounts Secret Manager secrets (#1464).
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -156,7 +158,7 @@ jobs:
           TESTS='TestFunctions|^TestGcloudFunctions$|^TestGcloudFunctionsEventTriggers$|^TestGcloudFunctionsV1$|^TestTerraformCloudFunctions2Function$|^TestConsoleFunctionsV1$|^TestTerraformCloudFunctionsFunction$'
           set -o pipefail
           rc=0
-          CLOUDBURROW_TEST_FUNCTIONS=1 go test -tags compat -count=1 -timeout 145m -run "$TESTS" -v ./test/compat/ | tee functions.log || rc=1
+          CLOUDBURROW_TEST_FUNCTIONS=1 go test -tags compat -count=1 -timeout 160m -run "$TESTS" -v ./test/compat/ | tee functions.log || rc=1
           # go test exits 0 when a test skips, and each of these skips
           # without the gate, a tool or amd64 nodes, so every selected test
           # must have passed: the acceptance shard's all_passed in ci.yml,
