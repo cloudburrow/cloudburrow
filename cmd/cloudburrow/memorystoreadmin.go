@@ -243,6 +243,24 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	return f.HostAddr(), nil
 }
 
+// ClusterAddr is where the other servers reach server inside the cluster:
+// its Service (#1385).
+func (p *memorystoreProvisioner) ClusterAddr(server string) (string, int) {
+	return server + "." + p.cfg.Cluster.Namespace + ".svc.cluster.local", components.MemorystorePort
+}
+
+// Route applies the Standard tier instance's Service, service, selecting
+// the pod of node's server: the primary, which in-cluster clients of the
+// instance reach (#1385).
+func (p *memorystoreProvisioner) Route(ctx context.Context, service, node string) error {
+	select {
+	case <-p.ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return p.installer.Apply(ctx, components.MemorystorePrimaryService(service, node, p.cfg.Cluster.Namespace, p.cfg.Name))
+}
+
 // Exec runs argv in the server's container, with stdin: the file copies
 // and server processes import and export run (#1384).
 func (p *memorystoreProvisioner) Exec(ctx context.Context, server string, stdin []byte, argv ...string) ([]byte, error) {

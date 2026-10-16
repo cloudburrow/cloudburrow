@@ -201,3 +201,49 @@ func (v Valkey) Load(ctx context.Context, host string, port int) error {
 	}
 	return c.Do(ctx, "REPLICAOF", "NO", "ONE").Err()
 }
+
+// ReplicaOf makes the server a replica of host:port, or a primary with
+// host "" (REPLICAOF NO ONE): a Standard tier node (#1385).
+func (v Valkey) ReplicaOf(ctx context.Context, host string, port int) error {
+	c, err := v.client()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if host == "" {
+		return c.Do(ctx, "REPLICAOF", "NO", "ONE").Err()
+	}
+	return c.Do(ctx, "REPLICAOF", host, strconv.Itoa(port)).Err()
+}
+
+// Replication reads INFO replication: the server's role, how much of the
+// primary's stream it has, and whether a replica's link is up.
+func (v Valkey) Replication(ctx context.Context) (Replication, error) {
+	c, err := v.client()
+	if err != nil {
+		return Replication{}, err
+	}
+	defer c.Close()
+	raw, err := c.Info(ctx, "replication").Result()
+	if err != nil {
+		return Replication{}, err
+	}
+	return parseReplication(raw), nil
+}
+
+func parseReplication(raw string) Replication {
+	f := map[string]string{}
+	for _, line := range strings.Split(raw, "\n") {
+		if k, val, ok := strings.Cut(strings.TrimSpace(line), ":"); ok {
+			f[k] = val
+		}
+	}
+	st := Replication{Primary: f["role"] == "master"}
+	key := "master_repl_offset"
+	if !st.Primary {
+		key = "slave_repl_offset"
+		st.LinkUp = f["master_link_status"] == "up"
+	}
+	st.Offset, _ = strconv.ParseInt(f[key], 10, 64)
+	return st
+}

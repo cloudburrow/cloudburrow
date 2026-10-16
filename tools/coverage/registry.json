@@ -61,7 +61,7 @@
   "google.cloud.redis.v1.CloudRedis/CreateInstance": "implemented",
   "google.cloud.redis.v1.CloudRedis/DeleteInstance": "implemented",
   "google.cloud.redis.v1.CloudRedis/ExportInstance": "implemented",
-  "google.cloud.redis.v1.CloudRedis/FailoverInstance": "unimplemented",
+  "google.cloud.redis.v1.CloudRedis/FailoverInstance": "implemented",
   "google.cloud.redis.v1.CloudRedis/GetInstance": "implemented",
   "google.cloud.redis.v1.CloudRedis/GetInstanceAuthString": "implemented",
   "google.cloud.redis.v1.CloudRedis/ImportInstance": "implemented",

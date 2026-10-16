@@ -3656,8 +3656,7 @@
     "Key": "memorystore",
     "Title": "Memorystore for Redis",
     "counts": {
-      "Unimplemented": 1,
-      "Verified": 10
+      "Verified": 11
     },
     "rows": [
       {
@@ -3665,19 +3664,15 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
-          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
-          "test/compat/memorystorecreate_test.go:208 TestMemorystoreRDBAcrossRestart",
-          "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
+          "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/memorystoreha_test.go:170 TestGcloudRedisFailover",
+          "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
           "test/compat/memorystoreupgrade_test.go:27 TestMemorystoreVersionsAndUpgrade",
+          "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
-        ],
-        "unverified": [
-          {
-            "code": "UNIMPLEMENTED",
-            "case": "tier STANDARD_HA (CloudBurrow's own)",
-            "test": "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete"
-          }
         ]
       },
       {
@@ -3685,7 +3680,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
-          "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
         "unverified": [
@@ -3706,8 +3702,11 @@
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/FailoverInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystoreha_test.go:170 TestGcloudRedisFailover",
+          "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover"
+        ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/GetInstance",
@@ -3715,8 +3714,9 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
-          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
-          "test/compat/memorystorecreate_test.go:208 TestMemorystoreRDBAcrossRestart",
+          "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
+          "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },
@@ -3726,7 +3726,7 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
-          "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
         "unverified": [
@@ -3765,9 +3765,11 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
-          "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
+          "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },

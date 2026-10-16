@@ -113,12 +113,13 @@ func (p *persistence) render(now time.Time) *redispb.PersistenceConfig {
 func (c *instances) persist(ctx context.Context, r *record, p *persistence) error {
 	dp := c.dial(r.addr, r.AuthString)
 	settings := map[string]string{"save": "", "appendonly": "no"}
+	dpAll := func(ctx context.Context, s map[string]string) error { return c.configAll(ctx, r, s) }
 	if s := p.seconds(); s > 0 {
 		settings["save"] = strconv.Itoa(s) + " 1"
 	} else if c.aof {
 		settings["appendonly"] = "yes"
 	}
-	if err := dp.ConfigSet(ctx, settings); err != nil {
+	if err := dpAll(ctx, settings); err != nil {
 		return apierror.InvalidArgument("the server refused the change: %v", err)
 	}
 	if p.seconds() > 0 {

@@ -47,8 +47,8 @@ the volume.
 
 ## 3. What you do not get
 
-**Not all of the Memorystore admin API (`redis.googleapis.com`).** Instances are BASIC tier and
-`REDIS_6_X`, `REDIS_7_0` or `REDIS_7_2`: no Standard tier, replicas or failover, no in-transit encryption,
+**Not all of the Memorystore admin API (`redis.googleapis.com`).** Instances are BASIC or
+STANDARD_HA tier (§5) and `REDIS_6_X`, `REDIS_7_0` or `REDIS_7_2`: no in-transit encryption,
 no maintenance windows and no IAM. Each is 501. Export and import to and from Cloud Storage RDB
 files, and RDB persistence, are served (#1384) when the instance runs `storage` too.
 
@@ -94,7 +94,8 @@ gcloud redis instances create cache --region=us-central1 --size=2 --tier=basic -
 
 | Field | What it does |
 |---|---|
-| `tier` | BASIC. STANDARD_HA is 501: one server, no replica |
+| `tier` | BASIC, one server; or STANDARD_HA, a primary and replicas (§5) |
+| `replica_count`, `read_replicas_mode`, `alternative_location_id` | STANDARD_HA only (§5) |
 | `memory_size_gb` | 1 to 300: the server's `maxmemory` |
 | `redis_version` | empty or `REDIS_7_2`, what Valkey 8.1 is; any other is 501 |
 | `auth_enabled` | `--requirepass` with a generated string (a UUID, as Google's), which `GetInstanceAuthString` returns. It is in the server's Deployment arguments in the cluster |
@@ -119,6 +120,48 @@ to a `gs://` object; `ImportInstance` replaces the instance's data with an RDB f
 the server itself (`--services memorystore,storage`). `persistence_config` RDB sets the server's
 save point to the snapshot period, in place of the append-only file. `UpgradeInstance` moves an instance to a later version (REDIS_6_X is Redis 6.2, REDIS_7_0 Redis
 7.0, REDIS_7_2 Valkey 8.1) with its data, and **Upgrade** on its page does too (#1386).
-`FailoverInstance` is 501; `RescheduleMaintenance` is FAILED_PRECONDITION, since no maintenance
-is ever scheduled. See
+`FailoverInstance` promotes a Standard tier instance's replica (§5); `RescheduleMaintenance` is
+FAILED_PRECONDITION, since no maintenance is ever scheduled. See
 [compatibility.md](compatibility.md#memorystore-for-redis--googlecloudredisv1).
+
+## 5. Standard tier, read replicas and failover (#1385)
+
+A `STANDARD_HA` instance is a primary and its replicas, each a server of its own: a Deployment
+and Service per node (`<server>-n0`, `-n1`, ...), kept in step by the servers' own asynchronous
+replication (`REPLICAOF`, with `masterauth` when AUTH is on). `nodes` lists them, `node-0` in
+`location_id`, `node-1` in `alternative_location_id` (default another zone of the region), and
+the others in the region's zones in turn; `current_location_id` is the primary's zone.
+
+- **host and port** are an endpoint on the host that carries every connection to the current
+  primary. In the cluster, the instance's Service (`<server>`) selects the primary's pod.
+- **Read replicas**: `read_replicas_mode: READ_REPLICAS_ENABLED`, `replica_count` 1 to 5
+  (default 2), on an instance of 5 GB or more, as Memorystore requires. `read_endpoint` and
+  `read_endpoint_port` are a second host endpoint that spreads connections over the replicas, one
+  each in turn; a replica refuses writes (`READONLY`). Without read replicas `replica_count` is 1
+  and there is no read endpoint. Once enabled, read replicas cannot be disabled.
+- **`UpdateInstance`** of `replica_count` starts replicas, which sync from the primary, or removes
+  the highest numbered; the instance is UPDATING until they are. `read_replicas_mode` enables
+  read replicas on a Standard tier instance. `secondary_ip_range` is accepted and not kept: there
+  are no VPC addresses here.
+- **`FailoverInstance`** (`gcloud redis instances failover`) promotes the replica with the
+  greatest replication offset: `REPLICAOF NO ONE` on it, `REPLICAOF` it on every other node, the
+  old primary among them, the Service re-pointed. The endpoint stays at the same host and port
+  and drops the connections it carried, so clients reconnect and reach the new primary.
+  `LIMITED_DATA_LOSS` (the default) aborts the operation FAILED_PRECONDITION when the greatest
+  offset delta between the primary and a replica is 30 MB or more, or a replica is not
+  replicating, as Memorystore documents; `FORCE_DATA_LOSS` does not check. The instance is
+  FAILING_OVER meanwhile. Nothing fails over on its own: a node whose pod restarts comes back
+  in the role it had.
+
+```sh
+gcloud redis instances create ha --region=us-central1 --tier=standard --size=5 \
+  --read-replicas-mode=read-replicas-enabled --replica-count=2
+gcloud redis instances failover ha --region=us-central1 --data-protection-mode=limited-data-loss
+```
+
+The console's Create instance has **Tier**, **Enable read replicas** and **Replicas**; a Standard
+tier instance's page shows its read endpoint, zones and nodes, offers **Failover** with the data
+protection mode, and Edit has **Replicas** (or **Enable read replicas**).
+
+`ImportInstance`, `ExportInstance` and `UpgradeInstance` act on the primary, whose replicas sync
+its data; an upgrade starts every node again on the new version.

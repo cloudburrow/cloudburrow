@@ -518,6 +518,29 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 	}
 }
 
+// MemorystorePrimaryService is the Service of a Standard tier Memorystore
+// instance (#1385), named name, selecting the pod of node, its primary's
+// server: a failover applies it again with the new primary.
+func MemorystorePrimaryService(name, node, namespace, instance string) string {
+	return fmt.Sprintf(`apiVersion: v1
+kind: Service
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    cloudburrow.dev/owned: "true"
+    cloudburrow.dev/instance: %q
+    cloudburrow.dev/memorystore-primary: %s
+spec:
+  selector:
+    app: %s
+  ports:
+    - name: api
+      port: %d
+      targetPort: %d
+`, name, namespace, instance, node, node, MemorystorePort, MemorystorePort)
+}
+
 // MySQLCredentials are an instance's generated MySQL passwords.
 type MySQLCredentials struct {
 	Password     string `json:"password"`
