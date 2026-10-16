@@ -57,6 +57,11 @@ type BuildSpec struct {
 	Context string
 	// BuildArgs are a BuildDocker build's --build-arg values, NAME=VALUE.
 	BuildArgs []string
+	// Secrets are a Cloud Build step's secretEnv values (#1449), by name:
+	// a BuildDocker build's --build-arg NAME, and a BuildBuildpacks
+	// build's --env NAME, read them from the builder's environment, so no
+	// value is on a command line or in a log.
+	Secrets map[string]string
 	// Log, when set, receives the builder's output as it runs: a Cloud
 	// Build build's log (#1347).
 	Log io.Writer

@@ -30,7 +30,7 @@ func (p buildTriggersProvider) project(project string) string {
 }
 
 func (p buildTriggersProvider) List(_ context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Region", "Event", "Description", "Pool", "Age"},
+	out := console.Listing{Columns: []string{"Region", "Event", "Description", "Pool", "Approval", "Age"},
 		NameColumn: "Trigger", Noun: "triggers", AlwaysStatus: true,
 		Note: "Manual and webhook triggers run an inline build. GitHub, GitLab, Bitbucket and Cloud Source Repositories " +
 			"events, and builds read from a repository, need a hosted git service and are refused."}
@@ -45,7 +45,8 @@ func (p buildTriggersProvider) List(_ context.Context, project string) (console.
 		}
 		out.Items = append(out.Items, console.Resource{Name: t.GetName(), Status: st, Fields: map[string]string{
 			"Region": region, "Event": event, "Description": orDash(t.GetDescription()),
-			"Pool": orDash(t.GetBuild().GetOptions().GetPool().GetName()), "Age": stampAge(t.GetCreateTime())}})
+			"Pool": orDash(t.GetBuild().GetOptions().GetPool().GetName()), "Approval": approvalLabel(t.GetResourceName()),
+			"Age": stampAge(t.GetCreateTime())}})
 	}
 	out.Total = len(out.Items)
 	return out, nil
@@ -80,7 +81,18 @@ func (buildTriggersProvider) CreateForm() (string, []console.Field) {
 		{Name: "pool", Label: "Worker pool", Type: "text", Help: "optional: projects/PROJECT/locations/REGION/workerPools/POOL"},
 		{Name: "secret", Label: "Webhook secret", Type: "text",
 			Help: "optional: a Secret Manager version, projects/PROJECT/secrets/SECRET/versions/N, which makes a webhook trigger"},
+		{Name: "approval", Label: "Require approval", Type: "checkbox",
+			Help: "approvalConfig.approvalRequired: each build waits, PENDING, until it is approved on its build page"},
 	}
+}
+
+// approvalLabel is the Approval column: whether the trigger's builds wait
+// for approval (#1449).
+func approvalLabel(resourceName string) string {
+	if runadapter.TriggerNeedsApproval(resourceName) {
+		return "Required"
+	}
+	return "-"
 }
 
 func (p buildTriggersProvider) Create(ctx context.Context, project string, v map[string]string) (string, error) {
@@ -98,9 +110,14 @@ func (p buildTriggersProvider) Create(ctx context.Context, project string, v map
 		t.WebhookConfig = &cbpb.WebhookConfig{AuthMethod: &cbpb.WebhookConfig_Secret{Secret: s}}
 	}
 	err := p.b.withClient(ctx, func(c *cloudbuild.Client) error {
-		_, err := c.CreateBuildTrigger(ctx, &cbpb.CreateBuildTriggerRequest{ProjectId: project,
+		made, err := c.CreateBuildTrigger(ctx, &cbpb.CreateBuildTriggerRequest{ProjectId: project,
 			Parent: "projects/" + project + "/locations/" + region, Trigger: t})
-		return err
+		if err != nil || (v["approval"] != "true" && v["approval"] != "on") {
+			return err
+		}
+		// The Go client's protos have no approvalConfig; the JSON API
+		// carries it, and the console sets it as that API does.
+		return runadapter.SetTriggerApproval(made.GetResourceName(), true)
 	})
 	return t.GetName(), err
 }

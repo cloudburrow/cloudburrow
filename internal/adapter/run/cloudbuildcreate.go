@@ -131,8 +131,14 @@ type plannedStep struct {
 	// the step's FAILURE, not the build's.
 	allowFailure   bool
 	allowExitCodes []int32
-	// secretEnv names the secrets the step gets (stepContainer).
+	// secretEnv names the secrets the step gets.
 	secretEnv []string
+	// bareArgs are a docker build's --build-arg NAME and a pack step's
+	// --env NAME, which take their value from the step's environment: its
+	// secretEnv, else options.env (#1449).
+	bareArgs []string
+	// optionsEnv is the build's options.env, substituted, by name.
+	optionsEnv map[string]string
 }
 
 // allows reports whether the step's failure err leaves the build going:
@@ -166,7 +172,12 @@ var substRE = regexp.MustCompile(`\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z
 // the built-in and user (_NAME) substitutions; $$ is a literal $. A
 // variable with no substitution is left as written, as Cloud Build does
 // for environment variables a step's shell expands.
+// With options.dynamicSubstitutions, bash parameter expansion applies too
+// (#1449, cloudbuilddynamic.go).
 func substitute(s string, subs map[string]string) string {
+	if _, dynamic := subs[dynamicKey]; dynamic {
+		return expandDynamic(s, subs)
+	}
 	return substRE.ReplaceAllStringFunc(s, func(m string) string {
 		if m == "$$" {
 			return "$"
@@ -253,10 +264,11 @@ func planStepKind(i int, st *cbpb.BuildStep, subs map[string]string, refuse func
 			return refuse("volumes are not supported on a docker build, docker push or pack step: the local builder runs it, not the step's container")
 		case len(st.GetEnv()) > 0 && !packBuilders[name]:
 			return refuse("env is not supported on a docker build or push step: the local builder runs it, not the step's container")
-		case len(st.GetSecretEnv()) > 0:
-			return refuse("secretEnv is not supported on a docker build, docker push or pack step: the local builder runs it, " +
-				"not the step's container; run docker in a step with entrypoint bash, as Cloud Build's examples do")
 		}
+		// secretEnv (#1449) reaches what the builder's docker or pack
+		// reads from its environment: docker build --build-arg NAME and
+		// pack --env NAME, as in the step's container.
+		p.secretEnv = st.GetSecretEnv()
 	}
 	switch {
 	case !local:
@@ -303,6 +315,9 @@ func planStepKind(i int, st *cbpb.BuildStep, subs map[string]string, refuse func
 					v, ok := next()
 					if !ok {
 						return refuse("--build-arg needs a value")
+					}
+					if !strings.Contains(v, "=") {
+						p.bareArgs = append(p.bareArgs, v)
 					}
 					p.buildArgs = append(p.buildArgs, v)
 				case "--network", "--cache-from":
@@ -375,8 +390,11 @@ func planStepKind(i int, st *cbpb.BuildStep, subs map[string]string, refuse func
 				if !ok {
 					return refuse("--env needs a value")
 				}
-				k, ev, _ := strings.Cut(v, "=")
+				k, ev, hasValue := strings.Cut(v, "=")
 				p.env[k] = ev
+				if !hasValue {
+					p.bareArgs = append(p.bareArgs, k)
+				}
 			case "--path", "-p":
 				v, ok := next()
 				if !ok {
@@ -467,7 +485,6 @@ func unsupportedCreate(b *cbpb.Build) error {
 		add(o.GetMachineType() != cbpb.BuildOptions_UNSPECIFIED, "options.machineType")
 		add(o.GetDiskSizeGb() != 0, "options.diskSizeGb")
 		add(len(o.GetVolumes()) > 0, "options.volumes")
-		add(o.GetDynamicSubstitutions(), "options.dynamicSubstitutions")
 		add(o.GetDefaultLogsBucketBehavior() != cbpb.BuildOptions_DEFAULT_LOGS_BUCKET_BEHAVIOR_UNSPECIFIED, "options.defaultLogsBucketBehavior")
 	}
 	if len(fields) == 0 {
@@ -598,6 +615,9 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	for k, v := range in.GetSubstitutions() {
 		subs[k] = v
 	}
+	if in.GetOptions().GetDynamicSubstitutions() {
+		resolveDynamic(subs)
+	}
 	for _, e := range in.GetOptions().GetEnv() {
 		if k, _, ok := strings.Cut(substitute(e, subs), "="); !ok || k == "" {
 			return nil, apierror.InvalidArgument("invalid build: options.env %q is not KEY=VALUE", e)
@@ -656,7 +676,9 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 			if automap {
 				keys := make([]string, 0, len(subs))
 				for k := range subs {
-					keys = append(keys, k)
+					if k != dynamicKey {
+						keys = append(keys, k)
+					}
 				}
 				sort.Strings(keys)
 				for _, k := range keys {
@@ -668,6 +690,13 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 			}
 			p.step.Env = append(env, p.step.Env...)
 			p.secretEnv = mergeNames(in.GetOptions().GetSecretEnv(), p.secretEnv)
+		} else if p.kind == stepDockerBuild || p.kind == stepPack {
+			p.secretEnv = mergeNames(in.GetOptions().GetSecretEnv(), p.secretEnv)
+			p.optionsEnv = map[string]string{}
+			for _, e := range in.GetOptions().GetEnv() {
+				k, v, _ := strings.Cut(substitute(e, subs), "=")
+				p.optionsEnv[k] = v
+			}
 		}
 		plan[i] = p
 	}
@@ -692,6 +721,13 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 
 	b := proto.Clone(in).(*cbpb.Build)
 	b.Name, b.Id, b.ProjectId, b.Status = parent+"/builds/"+id, id, project, cbpb.Build_QUEUED
+	needsApproval := trig != nil && trig.approval
+	b.Approval = nil
+	if needsApproval {
+		// Nothing runs until ApproveBuild approves it (#1449).
+		b.Status = cbpb.Build_PENDING
+		b.Approval = &cbpb.BuildApproval{State: cbpb.BuildApproval_PENDING, Config: &cbpb.ApprovalConfig{ApprovalRequired: true}}
+	}
 	b.CreateTime, b.StartTime, b.FinishTime, b.Results, b.StatusDetail, b.FailureInfo = timestamppb.Now(), nil, nil, nil, "", nil
 	b.Timeout = durationpb.New(timeout)
 	if b.QueueTtl == nil {
@@ -755,13 +791,27 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	op := s.ops.CreateNamed(opName, b.Name)
 	_ = s.ops.SetMetadata(op.Name, &cbpb.BuildOperationMetadata{Build: queued})
 
-	bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
-	runningBuilds.mu.Lock()
-	runningBuilds.cancel[b.Name] = cancel
-	runningBuilds.mu.Unlock()
 	r := &buildRun{c: c, name: b.Name, op: op.Name, project: project, plan: plan, deps: deps, src: src.GetStorageSource(),
 		runner: runner, logsBucket: b.LogsBucket, createBucket: createBucket, secretDefs: secretDefs}
-	go r.run(bctx, cancel)
+	base := context.WithoutCancel(ctx)
+	start := func() {
+		// The build's timeout starts when it runs, not while it waits.
+		bctx, cancel := context.WithTimeout(base, timeout)
+		runningBuilds.mu.Lock()
+		runningBuilds.cancel[b.Name] = cancel
+		runningBuilds.mu.Unlock()
+		go r.run(bctx, cancel)
+	}
+	if needsApproval {
+		pendingBuilds.mu.Lock()
+		pendingBuilds.start[b.Name] = start
+		pendingBuilds.mu.Unlock()
+		pendingOp.mu.Lock()
+		pendingOp.ops[b.Name] = op.Name
+		pendingOp.mu.Unlock()
+		return s.toProtoOperation(op.Name)
+	}
+	start()
 	return s.toProtoOperation(op.Name)
 }
 
@@ -1219,10 +1269,38 @@ func (r *buildRun) runStep(ctx context.Context, p plannedStep, w *stepWriter) er
 		}
 		defer rc.Close()
 		spec := BuildSpec{Archive: rc, LocalImage: localImageFor(p.tags[0]), Context: p.context, Log: w}
+		secrets, plain := r.bareValues(p)
 		if p.kind == stepDockerBuild {
-			spec.Kind, spec.Dockerfile, spec.BuildArgs = BuildDocker, p.dockerfile, p.buildArgs
+			// A bare --build-arg NAME is a secret's, passed by name, or
+			// options.env's, passed with its value; with neither, docker
+			// leaves it unset, so it is dropped.
+			var args []string
+			for _, a := range p.buildArgs {
+				if strings.Contains(a, "=") {
+					args = append(args, a)
+				} else if _, ok := secrets[a]; ok {
+					args = append(args, a)
+				} else if v, ok := plain[a]; ok {
+					args = append(args, a+"="+v)
+				}
+			}
+			spec.Kind, spec.Dockerfile, spec.BuildArgs = BuildDocker, p.dockerfile, args
 		} else {
-			spec.Kind, spec.Env, spec.FunctionTarget = BuildBuildpacks, p.env, p.env["GOOGLE_FUNCTION_TARGET"]
+			env := make(map[string]string, len(p.env))
+			for k, v := range p.env {
+				env[k] = v
+			}
+			for _, k := range p.bareArgs {
+				if v, ok := plain[k]; ok {
+					env[k] = v
+				} else if _, ok := secrets[k]; !ok {
+					delete(env, k)
+				}
+			}
+			spec.Kind, spec.Env, spec.FunctionTarget = BuildBuildpacks, env, env["GOOGLE_FUNCTION_TARGET"]
+		}
+		if len(secrets) > 0 {
+			spec.Secrets = secrets
 		}
 		if err := r.c.builds.builder.Build(ctx, spec); err != nil {
 			return err
@@ -1239,12 +1317,35 @@ func (r *buildRun) runStep(ctx context.Context, p plannedStep, w *stepWriter) er
 	return fmt.Errorf("unknown step")
 }
 
+// bareValues splits a docker build's or pack step's bare names into the
+// secrets the step has, by value, and the options.env values the rest get.
+func (r *buildRun) bareValues(p plannedStep) (secrets, plain map[string]string) {
+	secrets, plain = map[string]string{}, map[string]string{}
+	has := map[string]bool{}
+	for _, n := range p.secretEnv {
+		has[n] = true
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, n := range p.bareArgs {
+		if has[n] {
+			secrets[n] = r.secrets[n]
+		} else if v, ok := p.optionsEnv[n]; ok {
+			plain[n] = v
+		}
+	}
+	return secrets, plain
+}
+
 // CancelBuild cancels a build that has not finished; a finished build is
 // returned as it is.
 func (c *CloudBuildServer) CancelBuild(ctx context.Context, req *cbpb.CancelBuildRequest) (*cbpb.Build, error) {
 	b, err := c.GetBuild(ctx, &cbpb.GetBuildRequest{Name: req.GetName(), ProjectId: req.GetProjectId(), Id: req.GetId()})
 	if err != nil {
 		return nil, err
+	}
+	if cur, ok := c.cancelPending(b.GetName()); ok {
+		return cur, nil
 	}
 	runningBuilds.mu.Lock()
 	cancel, ok := runningBuilds.cancel[b.GetName()]

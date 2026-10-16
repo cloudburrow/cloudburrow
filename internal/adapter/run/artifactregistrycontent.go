@@ -186,8 +186,10 @@ func (a *ArtifactRegistryServer) packageOf(st *registry.Store, repoName, image s
 		return nil, apierror.NotFound("Requested entity was not found.")
 	}
 	oldest, newest := ms[len(ms)-1].Uploaded, ms[0].Uploaded
-	return &arpb.Package{Name: repoName + "/packages/" + registry.EscapePackage(image), DisplayName: image,
-		CreateTime: timestamppb.New(oldest), UpdateTime: timestamppb.New(newest)}, nil
+	p := &arpb.Package{Name: repoName + "/packages/" + registry.EscapePackage(image), DisplayName: image,
+		CreateTime: timestamppb.New(oldest), UpdateTime: timestamppb.New(newest)}
+	decorate(p.Name, func(a map[string]string) { p.Annotations = a }, func(d string) { p.DisplayName = d })
+	return p, nil
 }
 
 // ListPackages lists a repository's images.
@@ -238,6 +240,7 @@ func (a *ArtifactRegistryServer) DeletePackage(_ context.Context, req *arpb.Dele
 	if err := st.DeleteImage(repoOf(repoName), image); err != nil {
 		return nil, storeErr(err)
 	}
+	forgetUnder(req.GetName())
 	return a.doneEmpty(repoName, req.GetName())
 }
 
@@ -258,6 +261,7 @@ func versionOf(pkgName string, m registry.ManifestInfo, full bool) *arpb.Version
 	if h, err := hex.DecodeString(strings.TrimPrefix(m.Digest, "sha256:")); err == nil {
 		v.Fingerprints = []*arpb.Hash{{Type: arpb.Hash_SHA256, Value: h}}
 	}
+	decorate(v.Name, func(a map[string]string) { v.Annotations = a }, nil)
 	if full {
 		for _, t := range m.Tags {
 			v.RelatedTags = append(v.RelatedTags, &arpb.Tag{Name: pkgName + "/tags/" + t, Version: v.Name})
@@ -343,6 +347,7 @@ func (a *ArtifactRegistryServer) DeleteVersion(_ context.Context, req *arpb.Dele
 	if err := st.DeleteManifest(repoOf(repoName), image, digest); err != nil {
 		return nil, storeErr(err)
 	}
+	forgetUnder(req.GetName())
 	return a.doneEmpty(repoName, req.GetName())
 }
 
@@ -582,7 +587,9 @@ func repoFiles(st *registry.Store, repoName string) []*arpb.File {
 	sort.Strings(order)
 	out := make([]*arpb.File, len(order))
 	for i, d := range order {
-		out[i] = seen[d]
+		f := seen[d]
+		decorate(f.Name, func(a map[string]string) { f.Annotations = a }, nil)
+		out[i] = f
 	}
 	return out
 }

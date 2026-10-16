@@ -163,13 +163,28 @@ to rerun. Deploy again to rebuild it.
   nothing else fails; steps waiting for it start. A step that times out still fails the build.
 - `options.env` is given to every arbitrary step, a step's own `env` overriding it.
 
-**Refused, with the reason** (`UNIMPLEMENTED`): `env`, `volumes` and `secretEnv` on a docker
-build, docker push or pack step (the local builder runs those, not the step's container: run
-`docker` from a step with `entrypoint: bash` to give it a secret); the build's `artifacts`,
-`serviceAccount`, worker pools, machine types, `options.dynamicSubstitutions` and other
-`options`; and sources other than `storageSource`. Triggers,
-worker pools and `ApproveBuild` are not served. The console's Build history takes the same
-filter in its filter box, and offers Retry on a finished build's page.
+**Dynamic substitutions and secrets on docker and pack steps (#1449).** With
+`options.dynamicSubstitutions`, a user substitution may name others (`_REPO:
+us-docker.pkg.dev/${PROJECT_ID}/r`), and the bash expansions Google documents apply:
+`${V:offset}`, `${V:offset:length}`, `${V#glob}`, `${V##glob}`, `${V%glob}`, `${V%%glob}`,
+`${V/glob/rep}` and `${V//glob/rep}`. A docker build step's `secretEnv` gives
+`--build-arg NAME` the secret, and a pack step's `--env NAME`: the builder passes the bare
+name and the value in its own environment, never on a command line. A bare name that is no
+secret takes `options.env`'s value, else is dropped.
+
+**Approvals (#1449).** A trigger whose `approvalConfig.approvalRequired` is true starts each
+build `PENDING`, with `approval.state` `PENDING`; nothing runs until `ApproveBuild` (`gcloud
+alpha builds approve --location`, or Approve on the build's console page) approves it, which
+queues it. Rejecting it (`gcloud beta builds reject`, or Reject) ends it `CANCELLED` with
+`approval.state` `REJECTED`; cancelling it ends it `CANCELLED` too. This release of the Go
+client's protos has no `approvalConfig` on a trigger: gcloud, Terraform and the console set it
+through the JSON API, which carries it.
+
+**Refused, with the reason** (`UNIMPLEMENTED`): `env` and `volumes` on a docker build, docker
+push or pack step (the local builder runs those, not the step's container); the build's
+`artifacts`, `serviceAccount`, machine types and other `options`; and sources other than
+`storageSource`. The console's Build history takes the same filter in its filter box, offers
+Retry on a finished build's page, and Approve, Reject and Cancel on a pending one's.
 
 **Build triggers and private worker pools (#1422).** A trigger is a stored build. A manual
 trigger (`RunBuildTrigger`, `gcloud builds triggers run`) and a webhook trigger

@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"sort"
@@ -83,6 +84,10 @@ type Request struct {
 	// forces the runtime, as on Google; without it the builder detects one
 	// from the source (see Detect).
 	Env map[string]string
+	// SecretEnv are build environment variables whose values are secrets
+	// (#1449): pack gets each as --env NAME and reads its value from its
+	// own environment, so no value is on its command line.
+	SecretEnv map[string]string
 }
 
 // SupportedHere reports whether buildpacks can run on this machine, and why
@@ -112,6 +117,20 @@ type Runner interface {
 
 // ExecRunner is the real runner.
 type ExecRunner struct{}
+
+// EnvRunner is a Runner that can add variables to the command's
+// environment, which a build with SecretEnv needs.
+type EnvRunner interface {
+	RunEnv(ctx context.Context, env []string, name string, args ...string) (string, error)
+}
+
+// RunEnv runs the command with env added to this process's environment.
+func (ExecRunner) RunEnv(ctx context.Context, env []string, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = append(os.Environ(), env...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
 
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -163,7 +182,12 @@ func Args(req Request) ([]string, error) {
 	}
 	// Deterministic order so the command is reproducible and testable.
 	for _, k := range sortedKeys(req.Env) {
-		args = append(args, "--env", k+"="+req.Env[k])
+		if _, secret := req.SecretEnv[k]; !secret {
+			args = append(args, "--env", k+"="+req.Env[k])
+		}
+	}
+	for _, k := range sortedKeys(req.SecretEnv) {
+		args = append(args, "--env", k)
 	}
 	return args, nil
 }
@@ -204,7 +228,20 @@ func (b *Builder) Build(ctx context.Context, req Request) error {
 	if r == nil {
 		r = ExecRunner{}
 	}
-	out, err := r.Run(ctx, "pack", args...)
+	var out string
+	if len(req.SecretEnv) > 0 {
+		er, ok := r.(EnvRunner)
+		if !ok {
+			return fmt.Errorf("%w: this runner cannot pass secret build variables", ErrBuildFailed)
+		}
+		env := make([]string, 0, len(req.SecretEnv))
+		for _, k := range sortedKeys(req.SecretEnv) {
+			env = append(env, k+"="+req.SecretEnv[k])
+		}
+		out, err = er.RunEnv(ctx, env, "pack", args...)
+	} else {
+		out, err = r.Run(ctx, "pack", args...)
+	}
 	if err != nil {
 		// Surface the tail of the build log: a buildpack failure is
 		// self-explanatory, but only if the caller can see it.
