@@ -45,9 +45,8 @@ import (
 //     its one answer.
 //
 // DirectRawPredict, StreamDirectRawPredict and StreamingRawPredict call
-// method_name on a gRPC model server. Nothing here is one — the local models
-// are served by this process and custom containers speak HTTP — so they are
-// UNIMPLEMENTED, naming method_name.
+// method_name on a gRPC model server: a custom endpoint's model that declares
+// grpcPorts (directraw.go, #1477).
 
 // tensorValue converts an input Tensor to the JSON value it carries. path
 // names the field in refusals.
@@ -476,37 +475,6 @@ func (p *predictionService) StreamRawPredict(req *aiplatformpb.StreamRawPredictR
 		return sent(stream.Send(&httpbody.HttpBody{ContentType: ct, Data: data}))
 	})
 	return streamError(err)
-}
-
-// gRPC model server methods: nothing here is one.
-func noModelServer(method, name string) error {
-	return apierror.Unimplemented("%s calls method_name %q on a gRPC model server, and none is served here: "+
-		"the local models answer Predict, RawPredict and their streaming forms, and a custom endpoint is a Cloud Run service, "+
-		"whose container is reached over HTTP/1.1 at its predict route (a port named h2c is not honoured, so no gRPC server in it can be called); "+
-		"see docs/compatibility.md", method, name)
-}
-
-// DirectRawPredict is UNIMPLEMENTED, naming method_name.
-func (p *predictionService) DirectRawPredict(_ context.Context, req *aiplatformpb.DirectRawPredictRequest) (*aiplatformpb.DirectRawPredictResponse, error) {
-	return nil, grpcError(noModelServer("DirectRawPredict", req.GetMethodName()))
-}
-
-// StreamDirectRawPredict is UNIMPLEMENTED, naming method_name.
-func (p *predictionService) StreamDirectRawPredict(stream aiplatformpb.PredictionService_StreamDirectRawPredictServer) error {
-	req, err := stream.Recv()
-	if err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-	return grpcError(noModelServer("StreamDirectRawPredict", req.GetMethodName()))
-}
-
-// StreamingRawPredict is UNIMPLEMENTED, naming method_name.
-func (p *predictionService) StreamingRawPredict(stream aiplatformpb.PredictionService_StreamingRawPredictServer) error {
-	req, err := stream.Recv()
-	if err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-	return grpcError(noModelServer("StreamingRawPredict", req.GetMethodName()))
 }
 
 // streamRawPredictREST serves POST .../{model}:streamRawPredict and

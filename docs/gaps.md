@@ -172,7 +172,8 @@ No gap is left open here.
 Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244);
 `PredictionService.StreamGenerateContent` over gRPC, and an official-SDK test of `GenerateContent`
 over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`, `DirectPredict`,
-`ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285).
+`ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285); `DirectRawPredict`,
+`StreamDirectRawPredict` and `StreamingRawPredict`, relayed to a model's gRPC server on its `h2c` port (#1477).
 
 | Gap | Why open | Size |
 |---|---|---|
@@ -181,6 +182,7 @@ over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`
 | `Explain` with integrated gradients, XRAI or examples (#1454); Sampled Shapley is served | no emulator support: they need the model's gradients or an Example index, which a custom container's predict route does not expose | L |
 | `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served: Cloud Run serves an `h2c` port (#1475), but a model's `grpcPorts` are not deployed (#1454) | no emulator support (no gRPC model server) | M |
 | `Explain` (#1454) | no emulator support | L |
+| `Explain` with integrated gradients, XRAI or examples (#1454); Sampled Shapley is served | they need the model's gradients or an Example index, which a custom container's predict route does not expose | L |
 
 ## BigQuery
 

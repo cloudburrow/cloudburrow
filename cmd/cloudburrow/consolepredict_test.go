@@ -73,3 +73,20 @@ func TestPredictionEndpointsAreTheContractServices(t *testing.T) {
 		})
 	}
 }
+
+// A model's grpcPorts are its service's port named h2c (#1477).
+func TestPredictionEndpointReadsTheGRPCPort(t *testing.T) {
+	svc := func(name string) *runpb.Service {
+		return &runpb.Service{Name: "projects/p/locations/l/services/m", Uri: "http://m.default.cloudburrow.localhost:9080",
+			Template: &runpb.RevisionTemplate{Containers: []*runpb.Container{{
+				Env:   []*runpb.EnvVar{{Name: "AIP_MODEL_NAME", Values: &runpb.EnvVar_Value{Value: "m"}}},
+				Ports: []*runpb.ContainerPort{{Name: name, ContainerPort: 8500}},
+			}}}}
+	}
+	if ep, ok := predictionEndpoint(svc("h2c")); !ok || ep.GRPCPort != 8500 {
+		t.Errorf("h2c port: %+v %v; want GRPCPort 8500", ep, ok)
+	}
+	if ep, _ := predictionEndpoint(svc("http1")); ep.GRPCPort != 0 {
+		t.Errorf("http1 port: GRPCPort %d; want 0", ep.GRPCPort)
+	}
+}
