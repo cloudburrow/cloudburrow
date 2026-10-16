@@ -41,8 +41,11 @@ import (
 // FOR SYSTEM_TIME AS OF the source is read as a query's is
 // (partitionreads.go, #1276): a time before the table's time travel window
 // fails 400 as BigQuery documents it, CURRENT_TIMESTAMP() (the engine's
-// now) clones the table as it is, and any other time is 501, as the
-// emulator keeps no history of a table's rows. OPTIONS(...) after the
+// now) clones the table as it is, and a past time inside the window
+// copies the table's rows as they were then, read from its change history
+// as a query's are (timetravel.go, #1460), the new table's snapshotTime or
+// cloneTime being that time; a future time, and a past time the history
+// cannot answer, are 501 (timetravel.go). OPTIONS(...) after the
 // source sets description, friendly_name, labels and expiration_timestamp
 // on the new table as CREATE TABLE's OPTIONS does (ddloptions.go); the
 // emulator does not delete a table when its expiration passes. Any other
@@ -288,26 +291,32 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 		failed(http.StatusNotFound, "notFound", "Not found: Dataset "+project+":"+dest.DatasetID)
 		return
 	}
+	asOf := time.Time{}
 	if st.asOf != "" {
 		// Read as a query's FOR SYSTEM_TIME AS OF is (partitionreads.go):
 		// before the time travel window fails, now is the table as it is,
-		// and any other time is 501 (a past one is not copied yet, #1460).
+		// and a past time inside it is read from the table's change
+		// history (timetravel.go, #1460).
 		var m partitionMeta
 		if status, got := f.get(r, tablePath(src.DatasetID, src.TableID)); status == http.StatusOK {
 			_ = json.Unmarshal(got, &m)
 		}
-		switch past, code, msg := f.systemTime(r, q, src.DatasetID, tableName(project, src), m, st.asOf); {
-		case code == 0 && past != 0:
-			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a "+st.kind+
-				" of a table as it was at a past time. CloudBurrow reads a past time of a table in a query's FOR SYSTEM_TIME AS OF, "+
-				"but does not copy one into a new table yet (docs/compatibility.md). Nothing was run.")
-			return
+		past, code, msg := f.systemTime(r, q, src.DatasetID, tableName(project, src), m, st.asOf)
+		switch {
 		case code == http.StatusNotImplemented:
 			writeError(w, code, "notImplemented", msg)
 			return
 		case code != 0:
 			failed(code, "invalidQuery", msg)
 			return
+		case past != 0:
+			sub, code, msg := f.historySubquery(r, src.DatasetID, src.TableID, m, tableName(project, src), past, "TRUE")
+			if code != 0 {
+				writeError(w, code, "notImplemented", msg)
+				return
+			}
+			s.from = sub
+			asOf = time.UnixMicro(past).UTC()
 		}
 	}
 	var expiration string
@@ -325,6 +334,9 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 		}
 	}
 	start := time.Now().UTC().Format(time.RFC3339Nano)
+	if !asOf.IsZero() {
+		start = asOf.Format(time.RFC3339Nano) // the snapshot's or clone's time (#1460)
+	}
 	base := map[string]string{"projectId": project, "datasetId": src.DatasetID, "tableId": src.TableID}
 	var extra map[string]any
 	switch {

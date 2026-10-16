@@ -175,9 +175,21 @@ func (f front) dropDataset(r *http.Request, d dropSchema) (int, []byte) {
 	if d.cascade {
 		p += "?deleteContents=true"
 	}
+	var kept []droppedTable
+	var ds *droppedDataset
+	if f.dropped != nil { // kept for its time travel window (#1460, dropped.go)
+		f.expireDropped(r)
+		kept, ds = f.keepDataset(r, d.ds)
+	}
 	status, got := f.send(r, http.MethodDelete, p, nil)
 	if status != http.StatusOK && status != http.StatusNoContent {
+		if f.dropped != nil {
+			f.commitDropped(r, kept, nil)
+		}
 		return status, got
+	}
+	if f.dropped != nil {
+		f.commitDropped(r, kept, ds)
 	}
 	for _, fn := range d.funcs {
 		f.sendDDL(r, "DROP FUNCTION IF EXISTS "+functionName(fn))

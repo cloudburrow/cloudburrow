@@ -93,6 +93,9 @@ type copyTable struct {
 	// snapshot is the table's snapshotDefinition, nil when it is not a
 	// snapshot (#1002, snapshots.go).
 	snapshot map[string]any
+	// from is a subquery read in place of the table, or "": its rows at
+	// a past time (#1460, dropped.go).
+	from string
 	// where is the condition of the rows copied, or "": a table
 	// partitioned by a column leaves out its streaming buffer's (#1273,
 	// streamingbuffer.go).
@@ -128,6 +131,22 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 	case len(srcs) == 0 || c.DestinationTable == nil:
 		invalid("Required parameter is missing: a copy job needs sourceTable or sourceTables, and destinationTable.")
 		return
+	}
+	// A source table@time is read as it was then, from the table's
+	// change history or from a deleted table the front kept (#1460,
+	// dropped.go).
+	past := map[int]copyTable{}
+	srcs = append([]tableRef{}, srcs...)
+	for i, s := range srcs {
+		if !strings.Contains(s.TableID, "@") {
+			continue
+		}
+		t, code, reason, msg := f.copySourceAt(r, s)
+		if code != 0 {
+			writeError(w, code, reason, msg)
+			return
+		}
+		past[i], srcs[i] = t, t.ref
 	}
 	for _, src := range srcs { // #1218
 		if why := f.protectedRead(r, project, src.DatasetID, src.TableID, "a copy job"); why != "" {
@@ -168,13 +187,17 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 		}
 	}
 
-	if f.partitionCopy(w, r, c, srcs, write, create) { // #1273, partitionwrites.go
+	if len(past) == 0 && f.partitionCopy(w, r, c, srcs, write, create) { // #1273, partitionwrites.go
 		return
 	}
 
 	// The tables, before anything is done.
 	sources := make([]copyTable, len(srcs))
 	for i, s := range srcs {
+		if t, ok := past[i]; ok {
+			sources[i] = t
+			continue
+		}
 		sources[i] = f.copyTableMeta(r, s)
 		if win, ok := f.buffers.window(project, s.DatasetID, s.TableID); ok && win.Column {
 			// "Recent streaming data isn't present in the destination
@@ -471,6 +494,9 @@ func selectAll(fields []field, sources []copyTable) string {
 	parts := make([]string, len(sources))
 	for i, s := range sources {
 		parts[i] = "SELECT " + list + " FROM " + quotePath([]string{s.ref.DatasetID, s.ref.TableID})
+		if s.from != "" {
+			parts[i] = "SELECT " + list + " FROM " + s.from + " AS _cloudburrow_past"
+		}
 		if s.where != "" {
 			parts[i] += " WHERE " + s.where
 		}

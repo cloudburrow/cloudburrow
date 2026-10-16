@@ -130,23 +130,3 @@ func TestBigQueryTimeTravelHistory(t *testing.T) {
 		t.Errorf("after the rebuild: %v, want [1 c NULL 3 d NULL]", got)
 	}
 }
-
-// TestBigQueryUndropSchemaNotImplemented (#1460): UNDROP SCHEMA of a
-// dropped dataset is 501, through jobs.query and jobs.insert: the
-// emulator drops a dataset's tables, rows and change history with it.
-// Measured first: the engine failed it 400, a syntax error.
-//
-// covers: bigquery.jobs.query, bigquery.jobs.insert
-func TestBigQueryUndropSchemaNotImplemented(t *testing.T) {
-	h := New(t)
-	c, _ := bigqueryClient(t, h)
-	ctx := h.Context()
-	ds := validationDataset(t, h, c)
-	if err := bqRun(ctx, c, "DROP SCHEMA "+ds.DatasetID+" CASCADE", false); err != nil {
-		t.Fatal(err)
-	}
-	for _, insert := range []bool{false, true} {
-		wantAPIError(t, fmt.Sprintf("UNDROP SCHEMA (insert %v)", insert), bqRun(ctx, c, "UNDROP SCHEMA "+ds.DatasetID, insert),
-			http.StatusNotImplemented, "UNDROP SCHEMA")
-	}
-}

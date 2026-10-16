@@ -223,7 +223,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	tables := &tableSettings{}                      // tableoptions.go, #1390
 	linked := &linkedDatasets{}                     // loglinks.go, #1423
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
+	dropped := &droppedStore{}                      // dropped.go, #1460
 	if o.stateDir != "" {
+		dropped.keep(droppedStateFile(o.stateDir), o.logf)         // dropped.go, #1460
 		icebergs.keep(o.stateDir, o.logf)                          // iceberg.go, #1427
 		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
@@ -277,6 +279,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		})
 	}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if (front{next: next, buffers: buffers, dropped: dropped}).serveUndelete(w, r) { // dropped.go, #1460
+			return
+		}
 		if serveUnserved(w, r) { // unserved.go, #1200
 			return
 		}
@@ -346,7 +351,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows,
-				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs}
+				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -406,7 +411,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
-			buffers: buffers, tables: tables, linked: linked, settings: settings, icebergs: icebergs, storageHost: storageHost}
+			buffers: buffers, tables: tables, linked: linked, settings: settings, icebergs: icebergs, storageHost: storageHost,
+			dropped: dropped}
 		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
 			if r.Method == http.MethodPost {
 				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
@@ -448,6 +454,10 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.listTableData(w, r, dataset, table) // #1015
 		case r.Method == http.MethodDelete && m[4] != "" && m[5] == "" && f.tables.watched(streamKey(projectOf(f.base), dataset, table)):
 			f.deleteWatched(w, r, dataset, table) // #1390, materializedviews.go
+		case r.Method == http.MethodDelete && m[4] != "" && m[5] == "":
+			f.deleteTableKeeping(w, r, dataset, table) // #1460, dropped.go
+		case r.Method == http.MethodDelete && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
+			f.deleteDatasetKeeping(w, r, dataset) // #1460, dropped.go
 		default:
 			next.ServeHTTP(w, r)
 		}
@@ -540,6 +550,9 @@ type front struct {
 	// linked are the Log Analytics linked datasets, read-only to clients
 	// (loglinks.go, #1423), or nil.
 	linked *linkedDatasets
+	// dropped are the deleted tables and datasets kept for their time
+	// travel window (dropped.go, #1460), or nil.
+	dropped *droppedStore
 }
 
 // Option is an option of Wrap.

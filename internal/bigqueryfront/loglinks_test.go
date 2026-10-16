@@ -78,7 +78,8 @@ func TestLinkedDatasetIsReadOnly(t *testing.T) {
 	}
 	// A plain dataset is written.
 	emu = &linkedEmulator{}
-	if code, got := do(t, linkedFront(t, emu), "DELETE", base+"/datasets/mine/tables/t", ""); code == http.StatusForbidden || len(emu.sent) != 1 {
+	if code, got := do(t, linkedFront(t, emu), "DELETE", base+"/datasets/mine/tables/t", ""); code == http.StatusForbidden || len(emu.sent) == 0 ||
+		!strings.HasPrefix(emu.sent[len(emu.sent)-1], "DELETE ") { // the front reads the table first, to keep it (#1460)
 		t.Errorf("tables.delete in a plain dataset = %d %v, sent %v", code, got, emu.sent)
 	}
 	// tables.list shows _AllLogs alone.

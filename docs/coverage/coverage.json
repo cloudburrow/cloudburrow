@@ -7754,8 +7754,7 @@
     "Key": "bigquery",
     "Title": "BigQuery (REST API v2)",
     "counts": {
-      "Refused": 1,
-      "Verified": 46
+      "Verified": 47
     },
     "rows": [
       {
@@ -7763,6 +7762,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigqueryundelete_test.go:45 TestBigQueryUndeleteAndRestore",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_more_test.go:271 TestTerraformBigQueryDatasetIAM",
@@ -7825,11 +7825,11 @@
       },
       {
         "method": "bigquery.datasets.undelete",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:170 TestBigQueryDatasetUpdatesAreSaved"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigquerymethods_test.go:170 TestBigQueryDatasetUpdatesAreSaved",
+          "test/compat/bigqueryundelete_test.go:45 TestBigQueryUndeleteAndRestore"
+        ]
       },
       {
         "method": "bigquery.datasets.update",
@@ -7993,11 +7993,11 @@
           "test/compat/bigquerytempscriptstatements_test.go:109 TestBigQueryStatementsLaterInAScript",
           "test/compat/bigquerytempscriptstatements_test.go:30 TestBigQueryStatementsInTempScripts",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
-          "test/compat/bigquerytimetravel_test.go:140 TestBigQueryUndropSchemaNotImplemented",
           "test/compat/bigquerytimetravel_test.go:31 TestBigQueryTimeTravelHistory",
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
+          "test/compat/bigqueryundelete_test.go:45 TestBigQueryUndeleteAndRestore",
           "test/compat/bigqueryviewcolumns_test.go:139 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:234 TestBigQueryViewColumnListInATempScriptAndADryRun",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
@@ -8110,11 +8110,11 @@
           "test/compat/bigquerystreamdml_test.go:54 TestBigQueryDMLOfRecentlyStreamedRows",
           "test/compat/bigquerytempscriptstatements_test.go:109 TestBigQueryStatementsLaterInAScript",
           "test/compat/bigquerytempscriptstatements_test.go:30 TestBigQueryStatementsInTempScripts",
-          "test/compat/bigquerytimetravel_test.go:140 TestBigQueryUndropSchemaNotImplemented",
           "test/compat/bigquerytimetravel_test.go:31 TestBigQueryTimeTravelHistory",
           "test/compat/bigquerytransactions_test.go:118 TestBigQueryScriptTransactionsMore",
           "test/compat/bigquerytransactions_test.go:236 TestBigQueryScriptRangeVariables",
           "test/compat/bigquerytransactions_test.go:24 TestBigQueryScriptTransactions",
+          "test/compat/bigqueryundelete_test.go:45 TestBigQueryUndeleteAndRestore",
           "test/compat/bigqueryviewcolumns_test.go:139 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:234 TestBigQueryViewColumnListInATempScriptAndADryRun",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
@@ -8157,7 +8157,7 @@
         "method": "bigquery.projects.getServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:248 TestBigQueryServiceAccount",
+          "test/compat/bigquerymethods_test.go:250 TestBigQueryServiceAccount",
           "test/compat/consolebigqueryserviceaccount_test.go:17 TestConsoleBigQueryNamesTheServiceAccount"
         ]
       },
@@ -8231,21 +8231,21 @@
         "method": "bigquery.routines.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:413 TestBigQueryRoutineUpdate"
+          "test/compat/bigquerymethods_test.go:415 TestBigQueryRoutineUpdate"
         ]
       },
       {
         "method": "bigquery.rowAccessPolicies.batchDelete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies"
+          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies"
         ]
       },
       {
         "method": "bigquery.rowAccessPolicies.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies",
+          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess"
         ]
       },
@@ -8253,7 +8253,7 @@
         "method": "bigquery.rowAccessPolicies.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies",
+          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess"
         ]
       },
@@ -8268,7 +8268,7 @@
         "method": "bigquery.rowAccessPolicies.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies",
+          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess"
         ]
       },
@@ -8276,7 +8276,7 @@
         "method": "bigquery.rowAccessPolicies.list",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies"
+          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies"
         ]
       },
       {
@@ -8290,7 +8290,7 @@
         "method": "bigquery.rowAccessPolicies.update",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquerymethods_test.go:272 TestBigQueryRowAccessPolicies",
+          "test/compat/bigquerymethods_test.go:274 TestBigQueryRowAccessPolicies",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess"
         ]
       },
@@ -8346,6 +8346,7 @@
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
+          "test/compat/bigqueryundelete_test.go:45 TestBigQueryUndeleteAndRestore",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"

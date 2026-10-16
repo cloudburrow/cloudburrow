@@ -166,7 +166,7 @@ func TestBigQueryModelsOfADatasetWithNone(t *testing.T) {
 // The emulator answered both 200 and kept nothing (#1200); bigquery-emulator
 // patch 0010 and the front (datasetupdate.go) now save them.
 //
-// covers: bigquery.datasets.patch, bigquery.datasets.update, bigquery.datasets.undelete (unimplemented)
+// covers: bigquery.datasets.patch, bigquery.datasets.update, bigquery.datasets.undelete
 func TestBigQueryDatasetUpdatesAreSaved(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
@@ -237,7 +237,9 @@ func TestBigQueryDatasetUpdatesAreSaved(t *testing.T) {
 	}
 
 	_, err = svc.Datasets.Undelete(project, ds.DatasetID+"_gone", &bq.UndeleteDatasetRequest{}).Context(ctx).Do()
-	wantNotImplemented(t, "bigquery.datasets.undelete", err)
+	// Served since #1460 (TestBigQueryUndeleteAndRestore): a dataset never
+	// deleted is not found.
+	wantAPIError(t, "bigquery.datasets.undelete", err, http.StatusNotFound, "Not found")
 }
 
 // TestBigQueryServiceAccount reads the project's BigQuery service agent
