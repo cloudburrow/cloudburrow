@@ -1,0 +1,105 @@
+CloudBurrow patch 16 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1369). Needs patches 0002 and 0009 and
+googlesqlite patch 0019.
+
+The bug: jobs.list (Project.Jobs, findProjectJobs) read the project's
+jobs with a GoogleSQL `id IN UNNEST(@jobIDs)`, which googlesqlite
+compiles to a function call per row and element, so a list cost more
+with every job: 8.7 s for 5,000 jobs (measured through CloudBurrow's
+front, 2026-10-15, arm64 kind node). INFORMATION_SCHEMA.JOBS reads the
+list, and passed a minute after about 3,000 jobs.
+
+The patch reads the project's rows of the jobs table with one SQLite
+scan (googlesqlite's Conn.QueryRawContext, as patch 0009 reads one job),
+decodes them as googlesqlite would, and lists them in the order
+cloudburrow_job_order keeps, as before.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/metadata/repository.go
++++ b/internal/metadata/repository.go
+@@ -718,7 +718,79 @@
+ 		return nil, err
+ 	}
+ 	rows.Close()
+-	return r.findJobsMetadataTx(ctx, tx, projectID, ids)
++	if err := tx.Commit(); err != nil {
++		return nil, err
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1369): the jobs' rows are
++	// read with one SQLite scan of the project's rows (findProjectJobRows),
++	// not a GoogleSQL id IN UNNEST(@jobIDs), which took 8.7 s for 5,000
++	// jobs and grew with every job.
++	byID, err := r.findProjectJobRows(ctx, conn, projectID)
++	if err != nil {
++		return nil, err
++	}
++	jobs := make([]*Job, 0, len(ids))
++	for _, id := range ids {
++		row, ok := byID[id]
++		if !ok {
++			continue
++		}
++		var content bigqueryv2.Job
++		if len(row.metadata) > 0 {
++			if err := json.Unmarshal([]byte(row.metadata), &content); err != nil {
++				return nil, fmt.Errorf("failed to decode metadata content %s: %w", row.metadata, err)
++			}
++		}
++		var resErr error
++		if row.err != "" {
++			resErr = errors.New(row.err)
++		}
++		jobs = append(jobs, NewJob(r, projectID, id, &content, nil, resErr))
++	}
++	return jobs, nil
++}
++
++// findProjectJobRows reads the metadata and error of every row of the jobs
++// table of projectID, by job ID, as SQLite SQL (googlesqlite patch 0019),
++// as findJobRow reads one.
++func (r *Repository) findProjectJobRows(ctx context.Context, conn *sql.Conn, projectID string) (map[string]*jobRow, error) {
++	encProject, err := googlesqlite.EncodeString(projectID)
++	if err != nil {
++		return nil, err
++	}
++	out := map[string]*jobRow{}
++	err = conn.Raw(func(c interface{}) error {
++		gsqlConn, ok := c.(*googlesqlite.Conn)
++		if !ok {
++			return fmt.Errorf("failed to get *googlesqlite.Conn from %T", c)
++		}
++		rows, err := gsqlConn.QueryRawContext(ctx,
++			"SELECT `id`, `metadata`, `error` FROM `jobs` WHERE `projectID` = ?", encProject)
++		if err != nil {
++			return fmt.Errorf("failed to read the jobs of %s: %w", projectID, err)
++		}
++		defer rows.Close()
++		for rows.Next() {
++			var cols [3]any
++			if err := rows.Scan(&cols[0], &cols[1], &cols[2]); err != nil {
++				return err
++			}
++			var dec [3]string
++			for i, v := range cols {
++				s, _, err := googlesqlite.DecodeString(v)
++				if err != nil {
++					return fmt.Errorf("failed to decode a job of %s: %w", projectID, err)
++				}
++				dec[i] = s
++			}
++			out[dec[0]] = &jobRow{metadata: dec[1], err: dec[2]}
++		}
++		return rows.Err()
++	})
++	if err != nil {
++		return nil, err
++	}
++	return out, nil
+ }
+ 
+ // findJobsMetadata reads the jobs given, by ID, with their metadata and

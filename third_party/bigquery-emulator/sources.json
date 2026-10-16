@@ -28,7 +28,8 @@
         "patches/bigquery-emulator/0012-query-error-without-scan-prefix.patch",
         "patches/bigquery-emulator/0013-times-in-milliseconds.patch",
         "patches/bigquery-emulator/0014-column-defaults.patch",
-        "patches/bigquery-emulator/0015-ingestion-partition-time.patch"
+        "patches/bigquery-emulator/0015-ingestion-partition-time.patch",
+        "patches/bigquery-emulator/0016-list-jobs-in-one-scan.patch"
       ]
     },
     {
