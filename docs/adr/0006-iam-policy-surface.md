@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -301,10 +301,29 @@ it in place, as #421 and #504 did.
    `cloudburrow terraform`, which sets `big_query_custom_endpoint` for it.
 7. Every compatibility.md row for these methods reads ***Stored, not enforced***.
 
-Every service other than these six (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
-Storage's buckets and their ACLs, Cloud Run's services and jobs, and BigQuery's tables, routines and row
-access policies) keeps its current behaviour, Pub/Sub and Resource Manager projects included.
-Pub/Sub's IAM belongs to the upstream emulator and is not interposed.
+### Pub/Sub (amended by #1367)
+
+Pub/Sub's topic, subscription, snapshot and schema IAM are stored and returned, **not
+enforced**, as on Secret Manager, Cloud Tasks, Cloud KMS, Cloud Storage, Cloud Run and BigQuery
+(#1231), following the maintainer's "store, not enforce" decisions for BigQuery IAM (#1231) and
+Cloud Storage ACLs (#1233). The decision is unchanged: option (b), no enforcement. The emulator
+serves no IAM (over REST its answer was a plain-text 404), so CloudBurrow's Pub/Sub front
+(`internal/pubsubfront/iam.go`) answers `google.iam.v1.IAMPolicy` `GetIamPolicy`, `SetIamPolicy`
+and `TestIamPermissions` on `projects/*/topics/*`, `projects/*/subscriptions/*`,
+`projects/*/snapshots/*` and `projects/*/schemas/*`, over gRPC and REST, through the shared
+`internal/iampolicy`, with Secret Manager's etag, version and condition handling (rules 1-3). On
+a resource the emulator does not have, the three methods are NOT_FOUND. `TestIamPermissions`
+returns, of the permissions asked, those Pub/Sub defines on that kind of resource; nothing is
+denied, and a permission Pub/Sub does not define there is not one a caller could hold on it.
+A policy is kept in the front's state file, and goes with its resource: a delete, an expiry or a
+create of the same name through the front drops it, so `/admin/reset`, which deletes Pub/Sub's
+resources through the front, clears them (rule 5). Every compatibility.md row for these methods
+reads ***Stored, not enforced***.
+
+Every service other than these seven (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
+Storage's buckets and their ACLs, Cloud Run's services and jobs, BigQuery's tables, routines and row
+access policies, and Pub/Sub's topics, subscriptions, snapshots and schemas) keeps its current
+behaviour, Resource Manager projects included.
 
 ## Consequences
 

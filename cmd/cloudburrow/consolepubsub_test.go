@@ -82,10 +82,11 @@ func TestATopicPageDeletesItsSubscriptionRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Subscriptions, then the topic's snapshots (#787).
-	if len(detail.Sections) != 2 || detail.Sections[0].ID != "subscriptions" || len(detail.Sections[0].Listing.Items) != 1 ||
-		detail.Sections[1].ID != "snapshots" || detail.Sections[1].Listing.Unavailable != "" {
-		t.Fatalf("topic page sections = %+v, want one subscription row and the snapshots", detail.Sections)
+	// Subscriptions, then the topic's snapshots (#787), then its
+	// Permissions tab (#1367; pstest serves no IAM, so the tab says so).
+	if len(detail.Sections) != 3 || detail.Sections[0].ID != "subscriptions" || len(detail.Sections[0].Listing.Items) != 1 ||
+		detail.Sections[1].ID != "snapshots" || detail.Sections[1].Listing.Unavailable != "" || detail.Sections[2].ID != "permissions" {
+		t.Fatalf("topic page sections = %+v, want one subscription row, the snapshots and the permissions", detail.Sections)
 	}
 	row := detail.Sections[0].Listing.Items[0]
 	if row.Name != sub || len(row.Actions) != 1 || row.Actions[0].ID != actDeleteSubscription || !row.Actions[0].Destructive {

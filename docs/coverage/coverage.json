@@ -3132,7 +3132,7 @@
     "Title": "Pub/Sub",
     "counts": {
       "Refused": 2,
-      "Verified": 33
+      "Verified": 45
     },
     "rows": [
       {
@@ -3142,6 +3142,7 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
@@ -3153,6 +3154,7 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsub_test.go:219 TestPubSubDeleteTopic",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ]
@@ -3171,6 +3173,7 @@
         "tests": [
           "test/compat/pubsub_test.go:65 TestPubSubTopicLifecycle",
           "test/compat/pubsubfronth2c_test.go:89 TestPubSubRESTOverH2CUpgrade",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
@@ -3234,6 +3237,7 @@
         "tests": [
           "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
           "test/compat/pubsubfollowups_test.go:325 TestPubSubStateSaveAndLoad",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
@@ -3243,6 +3247,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
         ]
       },
@@ -3258,6 +3263,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/pubsubadmin_test.go:225 TestPubSubSchemaService",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/pubsubresetseed_test.go:28 TestPubSubResetDeletesSchemas",
           "test/compat/pubsubresetseed_test.go:84 TestPubSubSeedSchemaAndBoundTopic",
           "test/compat/terraform_more_test.go:33 TestTerraformPubSubSchema"
@@ -3338,6 +3344,7 @@
           "test/compat/pubsubfronth2c_test.go:27 TestPubSubRESTOverH2CPriorKnowledge",
           "test/compat/pubsubfrontstate_test.go:212 TestPubSubSeedExpirationAndRetention",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
@@ -3369,6 +3376,7 @@
         "tests": [
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
         ]
       },
@@ -3393,6 +3401,7 @@
           "test/compat/pubsubfrontstate_test.go:142 TestPubSubFrontRestartKeepsItsState",
           "test/compat/pubsubfrontstate_test.go:212 TestPubSubSeedExpirationAndRetention",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
           "test/compat/pubsubresetseed_test.go:153 TestPubSubExpirationCanBeUpdated",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:293 TestGcloudPubSubStateSave",
@@ -3502,6 +3511,106 @@
             "case": "an expiration_policy.ttl under 1 day, or under message_retention_duration (Google documents the rule, not the code)",
             "test": "test/compat/pubsubresetseed_test.go:153 TestPubSubExpirationCanBeUpdated"
           }
+        ]
+      },
+      {
+        "method": "pubsub.projects.schemas.getIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM"
+        ]
+      },
+      {
+        "method": "pubsub.projects.schemas.setIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM"
+        ]
+      },
+      {
+        "method": "pubsub.projects.schemas.testIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema"
+        ]
+      },
+      {
+        "method": "pubsub.projects.snapshots.getIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema"
+        ]
+      },
+      {
+        "method": "pubsub.projects.snapshots.setIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema"
+        ]
+      },
+      {
+        "method": "pubsub.projects.snapshots.testIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:133 TestPubSubIAMOnASnapshotAndASchema"
+        ]
+      },
+      {
+        "method": "pubsub.projects.subscriptions.getIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:188 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
+        ]
+      },
+      {
+        "method": "pubsub.projects.subscriptions.setIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:188 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
+        ]
+      },
+      {
+        "method": "pubsub.projects.subscriptions.testIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
+        ]
+      },
+      {
+        "method": "pubsub.projects.topics.getIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:188 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
+        ]
+      },
+      {
+        "method": "pubsub.projects.topics.setIamPolicy",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:188 TestGcloudPubSubIAM",
+          "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
+          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
+        ]
+      },
+      {
+        "method": "pubsub.projects.topics.testIamPermissions",
+        "status": "Verified",
+        "tests": [
+          "test/compat/pubsubiam_test.go:324 TestConsolePermissionsOnATopicAndASubscription",
+          "test/compat/pubsubiam_test.go:48 TestPubSubIAMHandle"
         ]
       }
     ]
