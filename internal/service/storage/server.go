@@ -301,8 +301,18 @@ func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, 
 		apierror.WriteStorageJSON(w, apierror.Unimplemented("%s is not implemented", what))
 		return
 	}
+	// Terraform's google_storage_anywhere_cache creates its cache with a
+	// POST to b/{bucket}/anywhereCaches/, a trailing slash the discovery
+	// path has not, and the provider's create works against Google (#1304).
+	if !upload && r.Method == http.MethodPost && anywhereCachesSlashRE.MatchString(rest) {
+		s.serveJSON(w, r, strings.TrimSuffix(rest, "/"), false)
+		return
+	}
 	apierror.WriteStorageJSON(w, apierror.NotFound("no Cloud Storage JSON API method is bound to %s %s", r.Method, r.URL.Path))
 }
+
+// anywhereCachesSlashRE is anywhereCaches.insert's path with a trailing slash.
+var anywhereCachesSlashRE = pathRE("b/{bucket}/anywhereCaches/")
 
 // checkSystemParams accepts the system parameters the discovery document
 // lists. alt is json or media (media only where a method serves it); fields

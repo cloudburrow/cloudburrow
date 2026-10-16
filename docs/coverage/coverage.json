@@ -192,6 +192,7 @@
           "test/compat/secretcmek_test.go:243 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
+          "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
@@ -298,6 +299,7 @@
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ],
         "unverified": [
@@ -730,7 +732,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerunworkerpools_test.go:26 TestConsoleRunWorkerPoolDeployEditScaleDelete",
-          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
+          "test/compat/terraform_batch6_test.go:262 TestTerraformRunWorkerPoolIAM"
         ]
       },
       {
@@ -756,7 +759,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolerunworkerpools_test.go:26 TestConsoleRunWorkerPoolDeployEditScaleDelete",
-          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
+          "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
+          "test/compat/terraform_batch6_test.go:262 TestTerraformRunWorkerPoolIAM"
         ]
       },
       {
@@ -2202,7 +2206,8 @@
           "test/compat/kms_hsm_ekm_autokey_test.go:49 TestKMSHSMKeysAndKeyAccessJustifications",
           "test/compat/kms_test.go:614 TestKMSDecrypt",
           "test/compat/kms_test.go:713 TestKMSDecryptFollowsTheVersionLifecycle",
-          "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext"
+          "test/compat/terraform_batch5_test.go:189 TestTerraformKMSSecretCiphertext",
+          "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources"
         ],
         "unverified": [
           {
@@ -2361,6 +2366,7 @@
           "test/compat/kms_test.go:199 TestKMSNamesAreValidatedBeforeLookup",
           "test/compat/kms_test.go:221 TestKMSVersionCanStartDisabled",
           "test/compat/kms_test.go:46 TestKMSResources",
+          "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
           "test/compat/terraform_kms_purposes_test.go:27 TestTerraformKMSPurposesAndImportJob"
         ],
         "unverified": [
@@ -4572,7 +4578,8 @@
           "test/compat/pubsublabels_test.go:144 TestPubSubLabelsAreHeldToGoogleRules",
           "test/compat/pubsubrest_test.go:143 TestGcloudPubSubRefusesExactlyOnceWithPush",
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
-          "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription"
+          "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
+          "test/compat/terraform_batch6_test.go:396 TestTerraformPubSubSubscriptionDeadLetterAndRetry"
         ],
         "unverified": [
           {
@@ -4601,7 +4608,8 @@
           "test/compat/gcloudpubsub_test.go:29 TestGcloudPubSub",
           "test/compat/pubsubfrontstate_test.go:271 TestTerraformPubSubPushAndExpiration",
           "test/compat/pubsubiam_test.go:256 TestTerraformPubSubIAM",
-          "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete",
+          "test/compat/terraform_batch6_test.go:396 TestTerraformPubSubSubscriptionDeadLetterAndRetry"
         ]
       },
       {
@@ -4633,7 +4641,8 @@
           "test/compat/pubsubrest_test.go:293 TestGcloudPubSubStateSave",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
           "test/compat/pubsubrestexpiry_test.go:24 TestGcloudPubSubUpdateExpiration",
-          "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete",
+          "test/compat/terraform_batch6_test.go:396 TestTerraformPubSubSubscriptionDeadLetterAndRetry"
         ]
       },
       {
@@ -4735,7 +4744,8 @@
           "test/compat/pubsubrest_test.go:191 TestPubSubRESTPushAndExactlyOnce",
           "test/compat/pubsubrest_test.go:72 TestGcloudPubSubPushSubscription",
           "test/compat/pubsubrestexpiry_test.go:24 TestGcloudPubSubUpdateExpiration",
-          "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete"
+          "test/compat/remaining_test.go:278 TestSubscriptionGetUpdateDelete",
+          "test/compat/terraform_batch6_test.go:396 TestTerraformPubSubSubscriptionDeadLetterAndRetry"
         ],
         "unverified": [
           {
@@ -4861,7 +4871,8 @@
         "tests": [
           "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
           "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON",
+          "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ]
       },
       {
@@ -4870,7 +4881,8 @@
         "tests": [
           "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
           "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON",
+          "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ]
       },
       {
@@ -4879,7 +4891,8 @@
         "tests": [
           "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
           "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON",
+          "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ],
         "unverified": [
           {
@@ -4933,7 +4946,8 @@
         "tests": [
           "test/compat/storageanywherecache_test.go:201 TestStorageAnywhereCachesControl",
           "test/compat/storageanywherecache_test.go:377 TestGcloudStorageAnywhereCachesRelocate",
-          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON"
+          "test/compat/storageanywherecache_test.go:93 TestStorageAnywhereCachesJSON",
+          "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ],
         "unverified": [
           {
@@ -5117,7 +5131,8 @@
         "method": "storage.buckets.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/terraform_batch6_test.go:43 TestTerraformStorageAnywhereCache"
         ]
       },
       {
@@ -5276,7 +5291,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/terraform_batch6_test.go:107 TestTerraformStorageFolder"
         ],
         "unverified": [
           {
@@ -5299,7 +5315,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/terraform_batch6_test.go:107 TestTerraformStorageFolder"
         ]
       },
       {
@@ -5307,7 +5324,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagefolders_test.go:102 TestStorageFoldersControl",
-          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI"
+          "test/compat/storagefolders_test.go:216 TestStorageFoldersJSONAPI",
+          "test/compat/terraform_batch6_test.go:107 TestTerraformStorageFolder"
         ],
         "unverified": [
           {
@@ -5543,6 +5561,7 @@
           "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
           "test/compat/storageversioning_test.go:87 TestStorageVersioningDeleteKeepsNoncurrent",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
+          "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
           "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
         ]
@@ -5558,6 +5577,8 @@
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
+          "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
+          "test/compat/terraform_batch6_test.go:477 TestTerraformDataSources",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ],
         "unverified": [
@@ -5585,6 +5606,7 @@
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
           "test/compat/storagexmlpost_test.go:120 TestStorageXMLFormPostPolicyV4",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
+          "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ],
         "unverified": [
@@ -5636,6 +5658,7 @@
           "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
+          "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
           "test/compat/terraform_iam_more_test.go:169 TestTerraformStorageACLLists",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
@@ -7565,6 +7588,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_more_test.go:271 TestTerraformBigQueryDatasetIAM",
@@ -7583,6 +7607,7 @@
           "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
+          "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_more_test.go:271 TestTerraformBigQueryDatasetIAM",
@@ -7599,6 +7624,7 @@
           "test/compat/bigqueryprojectconfig_test.go:34 TestBigQueryProjectConfigurations",
           "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
+          "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_more_test.go:271 TestTerraformBigQueryDatasetIAM",
@@ -7621,6 +7647,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerymethods_test.go:170 TestBigQueryDatasetUpdatesAreSaved",
+          "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_iam_more_test.go:271 TestTerraformBigQueryDatasetIAM"
         ]
@@ -8131,6 +8158,7 @@
         "tests": [
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
+          "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
@@ -8192,6 +8220,7 @@
           "test/compat/bqcopysnapshot_test.go:24 TestBqCopySnapshotCloneAndRestore",
           "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
+          "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
@@ -8224,6 +8253,7 @@
           "test/compat/bigqueryprojectconfig_test.go:34 TestBigQueryProjectConfigurations",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/logginganalyticsviews_test.go:261 TestLoggingLinkedDatasetAcrossRestarts",
+          "test/compat/terraform_batch6_test.go:318 TestTerraformBigQueryDatasetCMEK",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
