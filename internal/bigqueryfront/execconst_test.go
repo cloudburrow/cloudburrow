@@ -51,12 +51,19 @@ func TestExecuteImmediateOfAConstant(t *testing.T) {
 		// The emulator does not SET a name that must be quoted, nor
 		// does the front's own run read one (#1037).
 		"DECLARE a INT64; EXECUTE IMMEDIATE 'SELECT 1, 2' INTO a, `select`",
-		// The numbers of variables and columns differ (#1037).
-		"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2, 3' INTO a, b",
-		"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1' INTO a, b",
 	} {
 		if _, _, code, _ := expandExecuteImmediate(sql, nil); code != 501 {
 			t.Errorf("%s: %d, want 501", sql, code)
+		}
+	}
+	// The numbers of variables and columns differ: an error, as the
+	// columns are assigned by position, one per variable (#1037).
+	for _, sql := range []string{
+		"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1, 2, 3' INTO a, b",
+		"DECLARE a, b INT64; EXECUTE IMMEDIATE 'SELECT 1' INTO a, b",
+	} {
+		if _, _, code, _ := expandExecuteImmediate(sql, nil); code != 400 {
+			t.Errorf("%s: %d, want 400", sql, code)
 		}
 	}
 }
