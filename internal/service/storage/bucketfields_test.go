@@ -91,8 +91,8 @@ func TestStorageBucketFieldsNeverSilentlyDropped(t *testing.T) {
 		code, resp = raw(t, "PATCH", h.URL+"/storage/v1/b/"+name+"-p?prettyPrint=false&projection=full", fmt.Sprintf(`{%q:%s}`, k, sample))
 		// A bucket's location is fixed at creation; a change is refused by
 		// name, which is not a silent drop either.
-		// So is hierarchical namespace (#1203).
-		if (k == "location" || k == "hierarchicalNamespace") && code == 400 && strings.Contains(resp, k) {
+		// So are hierarchical namespace (#1203) and custom placement (#1443).
+		if (k == "location" || k == "hierarchicalNamespace" || k == "customPlacementConfig") && code == 400 && strings.Contains(resp, k) {
 			continue
 		}
 		if code != 200 || !strings.Contains(resp, `"`+k+`":`) {

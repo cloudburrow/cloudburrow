@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/apache/arrow/go/v15/parquet"
-	"github.com/apache/arrow/go/v15/parquet/compress"
-	"github.com/apache/arrow/go/v15/parquet/file"
-	pqschema "github.com/apache/arrow/go/v15/parquet/schema"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	pqschema "github.com/apache/arrow-go/v18/parquet/schema"
 )
 
 // PARQUET extracts (#957).

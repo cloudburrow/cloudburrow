@@ -134,3 +134,31 @@ func TestGcloudRedisInTransitEncryption(t *testing.T) {
 		t.Errorf("SET over TLS with the CA gcloud describes: %v", err)
 	}
 }
+
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance
+//
+// TestGcloudRedisCustomerManagedKey (#1463): the real gcloud creates an
+// instance with --customer-managed-key, a Cloud KMS key the official KMS
+// client made in its region, and describe prints the key back.
+func TestGcloudRedisCustomerManagedKey(t *testing.T) {
+	h := New(t)
+	c, _ := memorystoreAdminClient(t, h)
+	g := newGcloudSession(t, h)
+	key := memorystoreKey(t, h, g.project)
+	id := fmt.Sprintf("gcloud-cmek-%d", time.Now().UnixNano()%1e8)
+	p, region := "--project="+g.project, "--region=us-central1"
+	name := "projects/" + g.project + "/locations/us-central1/instances/" + id
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = op.Wait(h.Context())
+		}
+	})
+	g.must("redis", "instances", "create", id, p, region, "--size=1", "--tier=basic", "--customer-managed-key="+key)
+	inst, err := c.GetInstance(h.Context(), &redispb.GetInstanceRequest{Name: name})
+	if err != nil || inst.GetCustomerManagedKey() != key || inst.GetState() != redispb.Instance_READY {
+		t.Fatalf("GetInstance: %v, %v", inst, err)
+	}
+	if got := g.must("redis", "instances", "describe", id, p, region, "--format=value(customerManagedKey)"); strings.TrimSpace(got) != key {
+		t.Errorf("describe customerManagedKey = %q, want %q", got, key)
+	}
+}

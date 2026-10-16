@@ -174,6 +174,9 @@ func (memorystoreProvider) CreateForm() (string, []console.Field) {
 			Help: "Clients must AUTH with the instance's AUTH string, which GetInstanceAuthString returns."},
 		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",
 			Help: "SERVER_AUTHENTICATION: the server serves TLS only, with a certificate of the instance's own CA, which its page shows. It cannot be changed later."},
+		{Name: "customerManagedKey", Label: "Customer-managed encryption key (CMEK)", Type: "text",
+			Pattern: `^(projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+)?$`,
+			Help:    "Optional. projects/{project}/locations/{region}/keyRings/{ring}/cryptoKeys/{key}: a Cloud KMS key in the instance's region. It cannot be changed later; while the key is disabled or destroyed the instance is suspended."},
 		{Name: "labels", Label: "Labels", Type: "map", Help: "Optional. One key=value per line."},
 		{Name: "redisConfigs", Label: "Redis configs", Type: "map",
 			Help: "Optional. One key=value per line: maxmemory-policy, notify-keyspace-events, activedefrag, " +
@@ -205,6 +208,7 @@ func (p memorystoreProvider) Create(ctx context.Context, project string, values 
 	if values["transitEncryption"] == "true" {
 		in.TransitEncryptionMode = redispb.Instance_SERVER_AUTHENTICATION
 	}
+	in.CustomerManagedKey = strings.TrimSpace(values["customerManagedKey"])
 	if values["tier"] == "STANDARD_HA" {
 		in.Tier = redispb.Instance_STANDARD_HA
 		if values["readReplicas"] == "true" {
@@ -290,6 +294,7 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 		{Label: "Capacity", Value: fmt.Sprintf("%d GB", inst.GetMemorySizeGb())},
 		{Label: "AUTH", Value: map[bool]string{true: "Enabled", false: "Disabled"}[inst.GetAuthEnabled()]},
 		{Label: "In-transit encryption", Value: memorystoreTransit(inst)},
+		{Label: "Encryption", Value: memorystoreEncryption(inst)},
 		{Label: "Display name", Value: orDash(inst.GetDisplayName())},
 		{Label: "Labels", Value: orDash(memorystorePairs(inst.GetLabels()))},
 		{Label: "Redis configs", Value: orDash(memorystorePairs(inst.GetRedisConfigs()))},
@@ -312,6 +317,13 @@ func (p memorystoreProvider) Detail(ctx context.Context, project string, path []
 		if a, err := p.api().GetInstanceAuthString(ctx, &redispb.GetInstanceAuthStringRequest{Name: name}); err == nil {
 			props = append(props, console.Property{Label: "AUTH string", Value: orDash(a.GetAuthString())})
 		}
+	}
+	if rs := inst.GetSuspensionReasons(); len(rs) > 0 {
+		var names []string
+		for _, r := range rs {
+			names = append(names, r.String())
+		}
+		props = append(props, console.Property{Label: "Suspension reasons", Value: strings.Join(names, ", ")})
 	}
 	if m := inst.GetStatusMessage(); m != "" {
 		props = append(props, console.Property{Label: "Status", Value: m})
@@ -457,6 +469,10 @@ func (p memorystoreProvider) DetailActions(ctx context.Context, project string, 
 				Options: []string{"LIMITED_DATA_LOSS", "FORCE_DATA_LOSS"}, Default: "LIMITED_DATA_LOSS",
 				Help: "LIMITED_DATA_LOSS aborts when a replica is 30 MB or more behind the primary; FORCE_DATA_LOSS does not check."}}})
 	}
+	if ierr == nil && inst.GetTransitEncryptionMode() == redispb.Instance_SERVER_AUTHENTICATION {
+		upgrade = append(upgrade, console.Action{ID: "rotate-ca", Label: "Rotate server CA",
+			Confirm: "A new server CA is listed beside the current one, which stays valid until it expires; the server is started again with a certificate of the new CA. Install every listed CA on your clients first. (Memorystore rotates five years after creation, or on a support request.)"})
+	}
 	return append(upgrade, []console.Action{
 		{ID: "export", Label: "Export", Fields: []console.Field{{Name: "uri", Label: "Destination", Type: "text", Required: true,
 			Pattern: "^gs://[^/]+/.+$", Help: "gs://bucket/object: the RDB file ExportInstance writes, in this instance's Cloud Storage."}}},
@@ -498,6 +514,8 @@ func (p memorystoreProvider) ActAt(ctx context.Context, project string, path []s
 			return err
 		}
 		opName = op.GetName()
+	case "rotate-ca":
+		return p.api().RotateServerCA(ctx, name)
 	case "upgrade":
 		op, err := p.api().UpgradeInstance(ctx, &redispb.UpgradeInstanceRequest{Name: name, RedisVersion: values["redisVersion"]})
 		if err != nil {
@@ -527,6 +545,15 @@ func memorystorePersistence(pc *redispb.PersistenceConfig) string {
 		return "Disabled"
 	}
 	return fmt.Sprintf("RDB every %s, next %s", pc.GetRdbSnapshotPeriod(), pc.GetRdbNextSnapshotTime().AsTime().UTC().Format(time.RFC3339))
+}
+
+// memorystoreEncryption is an instance's encryption at rest, as its page
+// shows it: Google-managed, or the customer-managed key (#1463).
+func memorystoreEncryption(inst *redispb.Instance) string {
+	if k := inst.GetCustomerManagedKey(); k != "" {
+		return "Customer-managed key " + k
+	}
+	return "Google-managed key"
 }
 
 // memorystoreTransit is an instance's in-transit encryption, as its page

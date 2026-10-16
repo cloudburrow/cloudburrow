@@ -222,7 +222,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	jobRows := &jobsTable{}                         // jobstable.go, #1378
 	tables := &tableSettings{}                      // tableoptions.go, #1390
 	linked := &linkedDatasets{}                     // loglinks.go, #1423
+	icebergs := &icebergTables{}                    // iceberg.go, #1427
 	if o.stateDir != "" {
+		icebergs.keep(o.stateDir, o.logf)                          // iceberg.go, #1427
 		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
 		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)         // iam.go, #1231
@@ -344,7 +346,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows,
-				resourceManager: o.resourceManager, tables: tables, linked: linked}
+				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -404,7 +406,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
-			buffers: buffers, tables: tables, linked: linked, settings: settings}
+			buffers: buffers, tables: tables, linked: linked, settings: settings, icebergs: icebergs, storageHost: storageHost}
 		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
 			if r.Method == http.MethodPost {
 				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
@@ -429,7 +431,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		case r.Method == http.MethodGet && m[3] == "":
 			f.listDatasets(w, r) // #1371, location.go
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
-			f.insertTable(w, r, dataset, "", false)
+			f.insertIcebergTable(w, r, dataset) // #1427, iceberg.go
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
 			f.updateDataset(w, r, dataset) // #1205, datasetupdate.go
 		case r.Method == http.MethodGet && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
@@ -451,6 +453,24 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The files of the tables for Apache Iceberg whose rows the
+		// request changed are written before it is answered; a failure is
+		// its answer (#1427, iceberg.go).
+		if icebergs.any() && (r.Method != http.MethodGet || strings.Contains(r.URL.Path, "/jobs/") || strings.Contains(r.URL.Path, "/queries/")) {
+			rec := newRecorder()
+			if !serveJobLocations(rec, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
+				inner.ServeHTTP(rec, r)
+			}
+			status, why := icebergs.syncAll(r, func(base string) front {
+				return front{next: next, base: base, ids: ids, storageHost: storageHost, icebergs: icebergs}
+			})
+			if status != 0 && (rec.status == 0 || rec.status/100 == 2) {
+				writeError(w, status, why.Reason, why.Message)
+				return
+			}
+			rec.copyTo(w)
+			return
+		}
 		// Every job the front answers has a location (#1371, location.go).
 		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
 			inner.ServeHTTP(w, r)
@@ -460,6 +480,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 
 type front struct {
 	next http.Handler
+	// icebergs are the BigQuery tables for Apache Iceberg (iceberg.go,
+	// #1427), or nil.
+	icebergs *icebergTables
 	// tables are the table settings the front keeps, and the tables whose
 	// reads it checks (tableoptions.go, #1390), or nil.
 	tables *tableSettings

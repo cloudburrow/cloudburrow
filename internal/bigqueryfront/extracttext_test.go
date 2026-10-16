@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/apache/arrow/go/v15/arrow/memory"
-	"github.com/apache/arrow/go/v15/parquet/file"
-	"github.com/apache/arrow/go/v15/parquet/pqarrow"
+	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 )
 
 // TestExtractText (#957): each type's CSV and JSON text, from the value
@@ -165,7 +165,10 @@ func TestParquetExtractOfIntervalRangeAndWKT(t *testing.T) {
 	}
 	defer tbl.Release()
 	if s := tbl.Schema().String(); !strings.Contains(s, "i: type=utf8") || !strings.Contains(s, "g: type=utf8") ||
-		!strings.Contains(s, "r: type=struct<start: timestamp[us, tz=UTC], end: timestamp[us, tz=UTC]>") {
+		// arrow-go v18's reader: the bounds are written isAdjustedToUTC false
+		// (extractparquet.go), which v18 reads as no time zone and v15 read
+		// as UTC; the file is the same.
+		!strings.Contains(s, "r: type=struct<start: timestamp[us] nullable, end: timestamp[us] nullable>") {
 		t.Errorf("schema %s", s)
 	}
 	var got []string

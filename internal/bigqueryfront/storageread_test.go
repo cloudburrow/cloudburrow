@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery/storage/apiv1/storagepb"
-	"github.com/apache/arrow/go/v15/arrow"
-	"github.com/apache/arrow/go/v15/arrow/array"
-	"github.com/apache/arrow/go/v15/arrow/ipc"
-	"github.com/apache/arrow/go/v15/arrow/memory"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/linkedin/goavro/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -325,8 +325,10 @@ func TestStorageReadRowsAreWrittenByTheFront(t *testing.T) {
 		t.Fatalf("ReadRows: %d answers, %v", len(resps), err)
 	}
 	want := []string{
-		`1|1.5|0.123456789|-2.5|true|x|AP9hYg==|2024-01-02|2024-01-02 03:04:05.123456Z|03:04:05.500000|2024-01-02 03:04:05.123456Z|` +
-			`{"a":3,"r":["p","q"],"ts":"2020-01-01 00:00:00"}|[7,8]|[{"x":1,"y":"a"}]`,
+		// arrow-go v18's text of the values: a timestamp in RFC 3339, a
+		// DATETIME (no time zone) without the Z.
+		`1|1.5|0.123456789|-2.5|true|x|AP9hYg==|2024-01-02|2024-01-02T03:04:05.123456|03:04:05.500000|2024-01-02T03:04:05.123456Z|` +
+			`{"a":3,"r":["p","q"],"ts":"2020-01-01T00:00:00Z"}|[7,8]|[{"x":1,"y":"a"}]`,
 		`2|+Inf|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|[9]|[]`,
 	}
 	got := arrowValues(t, schema, resps[0].GetArrowRecordBatch().GetSerializedRecordBatch())

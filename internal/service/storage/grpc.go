@@ -473,12 +473,43 @@ func (g *grpcStorage) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyR
 	if err != nil {
 		return nil, err
 	}
-	if req.GetUpdateMask() != nil {
-		return nil, grpcstatus.Error(codes.Unimplemented, "SetIamPolicy update_mask is not implemented")
-	}
 	p := req.GetPolicy()
+	// update_mask names the policy fields to change; the rest keep the
+	// stored policy's values. Without one, Google's default is
+	// "bindings, etag" (google/iam/v1/iam_policy.proto), and version is
+	// set too, as the JSON API's setIamPolicy sets it.
+	mask := map[string]bool{"bindings": true, "etag": true, "version": true}
+	if m := req.GetUpdateMask(); m != nil {
+		mask = map[string]bool{}
+		for _, path := range m.GetPaths() {
+			switch path {
+			case "bindings", "etag", "version":
+				mask[path] = true
+			case "audit_configs":
+				return nil, grpcstatus.Error(codes.Unimplemented, "audit_configs is not implemented: Cloud Storage policies have no audit configs")
+			default:
+				return nil, grpcstatus.Errorf(codes.InvalidArgument, "update_mask path %q is not a Policy field", path)
+			}
+		}
+	}
+	if !mask["bindings"] || !mask["version"] {
+		cur, err := g.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: req.GetResource(),
+			Options: &iampb.GetPolicyOptions{RequestedPolicyVersion: 3}})
+		if err != nil {
+			return nil, err
+		}
+		merged := &iampb.Policy{Version: cur.GetVersion(), Bindings: cur.GetBindings()}
+		if mask["version"] {
+			merged.Version = p.GetVersion()
+		}
+		if mask["bindings"] {
+			merged.Bindings = p.GetBindings()
+		}
+		merged.Etag = p.GetEtag()
+		p = merged
+	}
 	body := map[string]any{"version": p.GetVersion()}
-	if len(p.GetEtag()) > 0 {
+	if len(p.GetEtag()) > 0 && mask["etag"] {
 		body["etag"] = base64.StdEncoding.EncodeToString(p.GetEtag())
 	}
 	var bindings []map[string]any
@@ -955,7 +986,9 @@ func (g *grpcStorage) StartResumableWrite(ctx context.Context, req *pb.StartResu
 
 func (g *grpcStorage) startWrite(ctx context.Context, spec *pb.WriteObjectSpec, sums *pb.ObjectChecksums, key http.Header) (string, error) {
 	if spec.GetAppendable() {
-		return "", grpcstatus.Error(codes.Unimplemented, "appendable objects are not implemented: they exist only in zonal (Rapid storage) buckets, which CloudBurrow does not model (custom_placement_config is refused), and its store holds only finalized generations")
+		// Appendable objects are written with BidiWriteObject only
+		// (grpcappend.go). UNVERIFIED: the status and message.
+		return "", grpcstatus.Error(codes.InvalidArgument, "an appendable object is written with BidiWriteObject")
 	}
 	r := spec.GetResource()
 	b, err := bucketID(r.GetBucket())
@@ -1227,8 +1260,8 @@ func (g *grpcStorage) BidiWriteObject(stream pb.Storage_BidiWriteObjectServer) e
 		if err != nil {
 			return err
 		}
-		if req.GetAppendObjectSpec() != nil {
-			return grpcstatus.Error(codes.Unimplemented, "appendable objects are not implemented: they exist only in zonal (Rapid storage) buckets, which CloudBurrow does not model (custom_placement_config is refused), and its store holds only finalized generations")
+		if w == nil && (req.GetAppendObjectSpec() != nil || req.GetWriteObjectSpec().GetAppendable()) {
+			return g.bidiAppend(stream, req)
 		}
 		m := writeMsg{uploadID: req.GetUploadId(), spec: req.GetWriteObjectSpec(), params: req.GetCommonObjectRequestParams(),
 			offset: req.GetWriteOffset(), data: req.GetChecksummedData(), sums: req.GetObjectChecksums(),

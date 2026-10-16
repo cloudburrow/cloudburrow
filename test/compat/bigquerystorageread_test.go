@@ -15,9 +15,9 @@ import (
 	"cloud.google.com/go/bigquery"
 	bqstorage "cloud.google.com/go/bigquery/storage/apiv1"
 	"cloud.google.com/go/bigquery/storage/apiv1/storagepb"
-	"github.com/apache/arrow/go/v15/arrow"
-	"github.com/apache/arrow/go/v15/arrow/array"
-	"github.com/apache/arrow/go/v15/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/ipc"
 	"github.com/linkedin/goavro/v2"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
@@ -169,9 +169,11 @@ func TestBigQueryStorageReadOfRepeatedAndRecordColumnsInArrow(t *testing.T) {
 		"bn: type=decimal256(76, 38), nullable", "b: type=bool, nullable", "s: type=utf8, nullable", "y: type=binary, nullable",
 		"d: type=date32, nullable", "dt: type=timestamp[us], nullable", "tm: type=time64[us], nullable",
 		"ts: type=timestamp[us, tz=UTC], nullable", "j: type=utf8, nullable",
-		"rec: type=struct<a: int64, ts: timestamp[us, tz=UTC], r: list<r: utf8>>, nullable",
+		// arrow-go v18 prints a nullable struct field's "nullable", which
+		// v15 left out; the schema is the same.
+		"rec: type=struct<a: int64 nullable, ts: timestamp[us, tz=UTC] nullable, r: list<r: utf8>>, nullable",
 		"r: type=list<r: int64>", "rts: type=list<rts: timestamp[us, tz=UTC]>",
-		"rr: type=list<rr: struct<x: int64, y: utf8, z: list<z: float64>>>",
+		"rr: type=list<rr: struct<x: int64 nullable, y: utf8 nullable, z: list<z: float64>>>",
 	}
 	r, err := ipc.NewReader(bytes.NewReader(s.GetArrowSchema().GetSerializedSchema()))
 	if err != nil {
@@ -184,9 +186,11 @@ func TestBigQueryStorageReadOfRepeatedAndRecordColumnsInArrow(t *testing.T) {
 	}
 	r.Release()
 	got := arrowRowValues(t, s, resps)
+	// arrow-go v18's text of the values (the schema's zones are checked
+	// above): a timestamp in RFC 3339, a DATETIME (no zone) without the Z.
 	want := []string{
-		`1|1.5|123.456789012|-2.5|true|x|AP9hYg==|2024-01-02|2024-01-02 03:04:05.123456Z|03:04:05.500000|2024-01-02 03:04:05.123456Z|{"k":1}|` +
-			`{"a":3,"r":["p","q"],"ts":"2020-01-01 00:00:00"}|[7,8]|["2021-01-01 00:00:01.5"]|` +
+		`1|1.5|123.456789012|-2.5|true|x|AP9hYg==|2024-01-02|2024-01-02T03:04:05.123456|03:04:05.500000|2024-01-02T03:04:05.123456Z|{"k":1}|` +
+			`{"a":3,"r":["p","q"],"ts":"2020-01-01T00:00:00Z"}|[7,8]|["2021-01-01T00:00:01.5Z"]|` +
 			`[{"x":1,"y":"a","z":[0.5,-1]},{"x":2,"y":null,"z":[]}]`,
 		`2|-2.25|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|[9]|[]|[]`,
 		`3|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|[9]|[]|[]`,
