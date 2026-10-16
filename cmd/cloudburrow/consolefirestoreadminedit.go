@@ -221,7 +221,7 @@ func (p firestoreDatabasesProvider) dbName(project, db string) string {
 
 // DetailActions implements console.PathActor.
 func (p firestoreDatabasesProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
-	if project == "" || (len(path) != 1 && len(path) != 4) {
+	if project == "" || (len(path) != 1 && len(path) != 3 && len(path) != 4) {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
@@ -246,7 +246,18 @@ func (p firestoreDatabasesProvider) DetailActions(ctx context.Context, project s
 			{ID: "editdatabase", Label: "Edit database", Fields: databaseEditFields(d)},
 			{ID: "createindex", Label: "Create index", Fields: createIndexFields()},
 			{ID: "addfield", Label: "Add field override", Fields: add},
+			{ID: "createschedule", Label: "Create backup schedule", Fields: createScheduleFields()},
 		}
+	}
+	if len(path) == 3 {
+		if path[1] != firestoreSchedulesSegment {
+			return nil
+		}
+		sch, err := c.GetBackupSchedule(ctx, &adminpb.GetBackupScheduleRequest{Name: db + "/backupSchedules/" + path[2]})
+		if err != nil {
+			return nil
+		}
+		return scheduleActions(sch)
 	}
 	switch path[1] {
 	case firestoreIndexesSegment:
@@ -277,6 +288,9 @@ func (p firestoreDatabasesProvider) ActAt(ctx context.Context, project string, p
 	}
 	defer c.Close()
 	db := p.dbName(project, path[0])
+	if ok, err := actSchedule(ctx, c, db, path, action, values); ok {
+		return err
+	}
 	switch {
 	case action == "editdatabase" && len(path) == 1:
 		mode, ok := adminpb.Database_ConcurrencyMode_value[values["concurrency"]]

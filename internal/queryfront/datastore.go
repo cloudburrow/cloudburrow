@@ -234,11 +234,19 @@ func property(e *pb.Entity, name string) *pb.Value {
 }
 
 func (d *Datastore) runAggregation(ctx context.Context, req *pb.RunAggregationQueryRequest) (*pb.RunAggregationQueryResponse, error) {
-	if req.GetGqlQuery() != nil {
-		return nil, status.Error(codes.Unimplemented, "a GQL aggregation query is not served here: the Datastore emulator does not serve RunAggregationQuery, and CloudBurrow answers a structured aggregation_query alone; send the aggregation as aggregation_query")
-	}
 	if req.GetExplainOptions() != nil {
 		return nil, status.Error(codes.Unimplemented, "explain_options are not served here: the Datastore emulator does not plan queries, so there are no query plan or execution statistics to return")
+	}
+	if req.GetGqlQuery() != nil {
+		structured, err := d.fromGQL(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := d.runAggregation(ctx, structured)
+		if err == nil {
+			resp.Query = structured.GetAggregationQuery()
+		}
+		return resp, err
 	}
 	aq := req.GetAggregationQuery()
 	nested := aq.GetNestedQuery()

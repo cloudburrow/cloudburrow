@@ -113,7 +113,20 @@ var gcloudVerified = []struct {
 	// gcloud bigtable appends v2/. TestGcloudBigtableAppProfiles creates,
 	// lists, updates and deletes app profiles.
 	{config.ServiceBigtable, "bigtableadmin", "/", false, false},
+	// Spanner's admin REST API (#1461), on the Spanner front's REST port;
+	// gcloud spanner appends v1/. TestGcloudSpannerInstances lists,
+	// describes and updates an instance.
+	{spannerRESTEndpoint, "spanner", "/", false, false},
+	// The Firestore Admin API (#1461), on the Firestore port, which the
+	// front in its pod serves beside the emulator's documents API; gcloud
+	// firestore appends v1/. TestGcloudFirestoreBackupSchedules lists
+	// databases and drives backup schedules.
+	{config.ServiceFirestore, "firestore", "/", false, false},
 }
+
+// spannerRESTEndpoint keys the Spanner admin REST row (#1461): Spanner's
+// second port, served when Spanner is.
+const spannerRESTEndpoint config.Service = "spanner-rest"
 
 // gcloudFamilies is the gcloud-setup help's list of what it writes, from
 // gcloudVerified, so the help names every override (#708).
@@ -162,7 +175,8 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		resourceManagerService: cfg.Endpoints.ResourceManager, config.ServiceRun: cfg.Endpoints.Run,
 		sqlAdminEndpoint: cfg.Endpoints.SQLAdmin, memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 		serviceUsageService: cfg.Endpoints.ServiceUsage, config.ServiceBackupDR: cfg.Endpoints.BackupDR,
-		config.ServiceBigtable: cfg.Endpoints.Bigtable}
+		config.ServiceBigtable: cfg.Endpoints.Bigtable, spannerRESTEndpoint: cfg.Endpoints.SpannerREST,
+		config.ServiceFirestore: cfg.Endpoints.Firestore}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask
@@ -175,6 +189,9 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 	for _, v := range gcloudVerified {
 		on := v.always || serviceEnabled(cfg, v.service) || (v.service == sqlAdminEndpoint && sqlAdminEnabled(cfg)) ||
 			(v.service == memorystoreAdminEndpoint && serviceEnabled(cfg, config.ServiceMemorystore))
+		if v.service == spannerRESTEndpoint {
+			on = serviceEnabled(cfg, config.ServiceSpanner)
+		}
 		if v.service == config.ServiceBackupDR {
 			on = backupDREnabled(cfg)
 		}

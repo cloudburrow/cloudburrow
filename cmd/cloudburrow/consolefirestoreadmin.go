@@ -129,6 +129,7 @@ func (p firestoreDatabasesProvider) Detail(ctx context.Context, project string, 
 	return console.Detail{Summary: summary, Sections: []console.Section{
 		{ID: "indexes", Label: "Indexes", Listing: p.indexes(ctx, c, name, path[0])},
 		{ID: "fields", Label: "Field overrides", Listing: p.fields(ctx, c, name, path[0])},
+		{ID: "schedules", Label: "Backup schedules", Listing: p.schedules(ctx, c, name, path[0])},
 	}}, nil
 }
 

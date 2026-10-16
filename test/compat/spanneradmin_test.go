@@ -262,17 +262,19 @@ func TestSpannerDatabaseAdminSchemaListAndDrop(t *testing.T) {
 
 // TestSpannerAdminRefusals records what Google's emulator answers for the
 // admin RPCs it does not implement, as its README documents for backups,
-// backup schedules, IAM, instance configurations and instance updates: each
-// is called through the official admin client, with a well-formed request on
-// a real instance and database, and must answer UNIMPLEMENTED. The IAM RPCs
-// and the two updates say why ("Cloud Spanner Emulator does not support IAM
-// policies.", "... does not support updating instances.", "... updating
-// instance partitions."); the rest answer with an empty message.
+// backup schedules, IAM, instance configurations and instance partition
+// updates: each is called through the official admin client, with a
+// well-formed request on a real instance and database, and must answer
+// UNIMPLEMENTED, saying why. The IAM RPCs and the partition update are the
+// emulator's own refusals ("Cloud Spanner Emulator does not support IAM
+// policies.", "... updating instance partitions."); the rest, which the
+// emulator answers with an empty message, the call front refuses itself
+// since #1461, naming the reason (internal/spannerfront). Instance updates,
+// which the emulator refuses too, the front serves (TestSpannerUpdateInstance).
 //
-// A method the emulator starts serving fails this test, which is the signal
+// A method the front starts serving fails this test, which is the signal
 // to move it to a test that verifies it.
 //
-// covers: google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstance (unimplemented)
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/MoveInstance (unimplemented)
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/CreateInstanceConfig (unimplemented)
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstanceConfig (unimplemented)
@@ -282,7 +284,6 @@ func TestSpannerDatabaseAdminSchemaListAndDrop(t *testing.T) {
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/GetIamPolicy (unimplemented)
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/SetIamPolicy (unimplemented)
 // covers: google.spanner.admin.instance.v1.InstanceAdmin/TestIamPermissions (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabase (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseOperations (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseRoles (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints (unimplemented)
@@ -321,16 +322,6 @@ func TestSpannerAdminRefusals(t *testing.T) {
 	ia, da := f.inst, f.db
 
 	calls := map[string]func(context.Context) error{
-		"InstanceAdmin/UpdateInstance": func(ctx context.Context) error {
-			op, err := ia.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{
-				Instance:  &instancepb.Instance{Name: f.instance, DisplayName: "renamed"},
-				FieldMask: mask("display_name")})
-			if err != nil {
-				return err
-			}
-			_, err = op.Wait(ctx)
-			return err
-		},
 		"InstanceAdmin/MoveInstance": func(ctx context.Context) error {
 			op, err := ia.MoveInstance(ctx, &instancepb.MoveInstanceRequest{Name: f.instance, TargetConfig: f.config()})
 			if err != nil {
@@ -399,16 +390,6 @@ func TestSpannerAdminRefusals(t *testing.T) {
 		"InstanceAdmin/TestIamPermissions": func(ctx context.Context) error {
 			_, err := ia.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{
 				Resource: f.instance, Permissions: []string{"spanner.instances.get"}})
-			return err
-		},
-		"DatabaseAdmin/UpdateDatabase": func(ctx context.Context) error {
-			op, err := da.UpdateDatabase(ctx, &databasepb.UpdateDatabaseRequest{
-				Database:   &databasepb.Database{Name: f.database, EnableDropProtection: true},
-				UpdateMask: mask("enable_drop_protection")})
-			if err != nil {
-				return err
-			}
-			_, err = op.Wait(ctx)
 			return err
 		},
 		"DatabaseAdmin/ListDatabaseOperations": func(ctx context.Context) error {
@@ -530,9 +511,120 @@ func TestSpannerAdminRefusals(t *testing.T) {
 			t.Errorf("%s = %v, want Unimplemented", n, err)
 			continue
 		}
+		if len(status.Convert(err).Message()) < 20 {
+			t.Errorf("%s = %v, want a reason", n, err)
+		}
 		t.Logf("%s: %v", n, err)
 	}
-	if want := 31; len(calls) != want {
+	if want := 29; len(calls) != want {
 		t.Errorf("%d refusals are called, want %d, one per covers line", len(calls), want)
+	}
+}
+
+// TestSpannerUpdateInstance (#1461): the call front in the Spanner pod
+// answers UpdateInstance, which the emulator refuses, for the display name,
+// compute capacity and labels; the official client's operation is done,
+// GetInstance and ListInstances return the changes, and what an emulator
+// instance cannot carry (autoscaling) is refused UNIMPLEMENTED, naming why.
+// A capacity Google refuses (1500 processing units) is INVALID_ARGUMENT.
+//
+// covers: google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstance
+func TestSpannerUpdateInstance(t *testing.T) {
+	f := newSpannerAdmin(t, "cb-update", "updatedb")
+	ctx := f.ctx
+	mask := func(paths ...string) *fieldmaskpb.FieldMask { return &fieldmaskpb.FieldMask{Paths: paths} }
+	op, err := f.inst.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{
+		Instance:  &instancepb.Instance{Name: f.instance, DisplayName: "updated by sdk", NodeCount: 3, Labels: map[string]string{"env": "test"}},
+		FieldMask: mask("display_name", "node_count", "labels")})
+	if err != nil {
+		t.Fatalf("UpdateInstance: %v", err)
+	}
+	got, err := op.Wait(ctx)
+	if err != nil || got.GetDisplayName() != "updated by sdk" || got.GetNodeCount() != 3 || got.GetProcessingUnits() != 3000 {
+		t.Fatalf("the operation's instance = %v, %v", got, err)
+	}
+	in, err := f.inst.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: f.instance})
+	if err != nil || in.GetDisplayName() != "updated by sdk" || in.GetNodeCount() != 3 || in.GetLabels()["env"] != "test" || in.GetConfig() != f.config() {
+		t.Fatalf("GetInstance after the update = %v, %v", in, err)
+	}
+	found := false
+	it := f.inst.ListInstances(ctx, &instancepb.ListInstancesRequest{Parent: "projects/" + f.project})
+	for {
+		i, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			t.Fatalf("ListInstances: %v", err)
+		}
+		if i.GetName() == f.instance {
+			found = i.GetDisplayName() == "updated by sdk" && i.GetNodeCount() == 3
+		}
+	}
+	if !found {
+		t.Error("ListInstances does not show the update")
+	}
+	op, err = f.inst.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{
+		Instance: &instancepb.Instance{Name: f.instance, ProcessingUnits: 500}, FieldMask: mask("processing_units")})
+	if err == nil {
+		_, err = op.Wait(ctx)
+	}
+	if err != nil {
+		t.Fatalf("UpdateInstance to 500 processing units: %v", err)
+	}
+	if in, err := f.inst.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: f.instance}); err != nil || in.GetProcessingUnits() != 500 || in.GetNodeCount() != 0 {
+		t.Errorf("after 500 processing units = %v, %v", in, err)
+	}
+	if _, err := f.inst.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{
+		Instance: &instancepb.Instance{Name: f.instance, ProcessingUnits: 1500}, FieldMask: mask("processing_units")}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("1500 processing units: %v, want InvalidArgument", err)
+	}
+	_, err = f.inst.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{
+		Instance: &instancepb.Instance{Name: f.instance, AutoscalingConfig: &instancepb.AutoscalingConfig{}}, FieldMask: mask("autoscaling_config")})
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "autoscale") {
+		t.Errorf("autoscaling: %v, want UNIMPLEMENTED naming why", err)
+	}
+}
+
+// TestSpannerDatabaseDropProtection (#1461): UpdateDatabase, which the
+// emulator refuses, sets enable_drop_protection through the official
+// database admin client (the call front answers it); GetDatabase reads it
+// back, DropDatabase and DeleteInstance are refused FAILED_PRECONDITION while
+// it is on, as Google refuses them, and the database drops once it is off.
+// Another field is UNIMPLEMENTED, naming why.
+//
+// covers: google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabase
+func TestSpannerDatabaseDropProtection(t *testing.T) {
+	f := newSpannerAdmin(t, "cb-protect", "protectdb")
+	ctx := f.ctx
+	set := func(on bool) {
+		t.Helper()
+		op, err := f.db.UpdateDatabase(ctx, &databasepb.UpdateDatabaseRequest{
+			Database:   &databasepb.Database{Name: f.database, EnableDropProtection: on},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"enable_drop_protection"}}})
+		if err != nil {
+			t.Fatalf("UpdateDatabase(%v): %v", on, err)
+		}
+		if db, err := op.Wait(ctx); err != nil || db.GetEnableDropProtection() != on {
+			t.Fatalf("the operation's database = %v, %v", db, err)
+		}
+	}
+	set(true)
+	if db, err := f.db.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: f.database}); err != nil || !db.GetEnableDropProtection() {
+		t.Fatalf("GetDatabase = %v, %v", db, err)
+	}
+	if err := f.db.DropDatabase(ctx, &databasepb.DropDatabaseRequest{Database: f.database}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("DropDatabase of a protected database: %v, want FAILED_PRECONDITION", err)
+	}
+	if err := f.inst.DeleteInstance(ctx, &instancepb.DeleteInstanceRequest{Name: f.instance}); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("DeleteInstance holding a protected database: %v, want FAILED_PRECONDITION", err)
+	}
+	if _, err := f.db.UpdateDatabase(ctx, &databasepb.UpdateDatabaseRequest{Database: &databasepb.Database{Name: f.database},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"encryption_config"}}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("UpdateDatabase of encryption_config: %v, want UNIMPLEMENTED", err)
+	}
+	set(false)
+	if err := f.db.DropDatabase(ctx, &databasepb.DropDatabaseRequest{Database: f.database}); err != nil {
+		t.Errorf("DropDatabase once unprotected: %v", err)
 	}
 }

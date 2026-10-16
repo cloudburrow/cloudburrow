@@ -1759,7 +1759,7 @@ func (p spannerProvider) Create(ctx context.Context, project string, values map[
 // meant "delete this instance" — which drops every database inside it. Dropping
 // a database belongs on the database's own page, where the thing being dropped
 // is the thing being looked at.
-func (p spannerProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
+func (p spannerProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if project == "" {
 		return nil
 	}
@@ -1771,13 +1771,21 @@ func (p spannerProvider) DetailActions(_ context.Context, project string, path [
 	}
 	switch len(path) {
 	case 1:
-		return []console.Action{spannerCreatePartitionAction(), {
+		acts := []console.Action{spannerCreatePartitionAction(), {
 			ID: "dropinstance", Label: "Delete instance", Destructive: true,
 		}}
+		if edit, ok := p.spannerEditInstanceAction(ctx, project, path[0]); ok {
+			acts = append([]console.Action{edit}, acts...)
+		}
+		return acts
 	case 2:
-		return []console.Action{spannerDDLAction(path[0], path[1]), {
+		acts := []console.Action{spannerDDLAction(path[0], path[1]), {
 			ID: "dropdatabase", Label: "Drop database", Destructive: true,
 		}}
+		if edit, ok := p.spannerDropProtectionAction(ctx, project, path[0], path[1]); ok {
+			acts = append(acts, edit)
+		}
+		return acts
 	}
 	return nil
 }

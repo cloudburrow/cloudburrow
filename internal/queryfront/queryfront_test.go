@@ -27,6 +27,12 @@ type fakeDatastore struct {
 }
 
 func (f *fakeDatastore) RunQuery(_ context.Context, req *dspb.RunQueryRequest) (*dspb.RunQueryResponse, error) {
+	if g := req.GetGqlQuery(); g != nil {
+		// The emulator's answer to GQL: the parsed query, here its kind.
+		kind := g.GetQueryString()[strings.LastIndex(g.GetQueryString(), " ")+1:]
+		return &dspb.RunQueryResponse{Batch: &dspb.QueryResultBatch{MoreResults: dspb.QueryResultBatch_NO_MORE_RESULTS},
+			Query: &dspb.Query{Kind: []*dspb.KindExpression{{Name: kind}}}}, nil
+	}
 	f.calls++
 	q := req.GetQuery()
 	start := 0
@@ -192,11 +198,33 @@ func TestAggregationRefusals(t *testing.T) {
 		"six":       {aggReq(&dspb.Query{}, count("a", nil), count("b", nil), count("c", nil), count("d", nil), count("e", nil), count("f", nil)), codes.InvalidArgument},
 		"duplicate": {aggReq(&dspb.Query{}, count("a", nil), count("a", nil)), codes.InvalidArgument},
 		"negative":  {aggReq(&dspb.Query{}, count("a", &neg)), codes.InvalidArgument},
-		"gql":       {&dspb.RunAggregationQueryRequest{QueryType: &dspb.RunAggregationQueryRequest_GqlQuery{GqlQuery: &dspb.GqlQuery{QueryString: "SELECT COUNT(*) FROM k"}}}, codes.Unimplemented},
+		"gql":       {&dspb.RunAggregationQueryRequest{QueryType: &dspb.RunAggregationQueryRequest_GqlQuery{GqlQuery: &dspb.GqlQuery{QueryString: "SELECT name FROM k"}}}, codes.InvalidArgument},
+		"gql count": {&dspb.RunAggregationQueryRequest{QueryType: &dspb.RunAggregationQueryRequest_GqlQuery{GqlQuery: &dspb.GqlQuery{QueryString: "SELECT COUNT(x) FROM k"}}}, codes.InvalidArgument},
+		"explain":   {&dspb.RunAggregationQueryRequest{ExplainOptions: &dspb.ExplainOptions{}, QueryType: &dspb.RunAggregationQueryRequest_GqlQuery{GqlQuery: &dspb.GqlQuery{QueryString: "SELECT COUNT(*) FROM k"}}}, codes.Unimplemented},
 	} {
 		if _, err := d.RunAggregationQuery(ctx, c.req); status.Code(err) != c.code {
 			t.Errorf("%s: err = %v, want %v", name, err, c.code)
 		}
+	}
+}
+
+// A GQL aggregation (#1461), in both of Google's forms, is answered over
+// the query the emulator parses.
+func TestGQLAggregation(t *testing.T) {
+	d, _ := newDatastore(t, ent(map[string]*dspb.Value{"i": ival(4)}), ent(map[string]*dspb.Value{"i": ival(6)}))
+	gql := func(q string) *dspb.RunAggregationQueryRequest {
+		return &dspb.RunAggregationQueryRequest{QueryType: &dspb.RunAggregationQueryRequest_GqlQuery{GqlQuery: &dspb.GqlQuery{QueryString: q, AllowLiterals: true}}}
+	}
+	got := results(t)(d.RunAggregationQuery(context.Background(), gql("AGGREGATE COUNT(*) AS n, SUM(i), AVG(i) AS a OVER (SELECT * FROM k)")))
+	if got["n"] != "int 2" || got["property_2"] != "int 10" || got["a"] != "double 5" {
+		t.Errorf("AGGREGATE ... OVER = %v", got)
+	}
+	resp, err := d.RunAggregationQuery(context.Background(), gql("SELECT COUNT_UP_TO(1) AS c FROM k"))
+	if err != nil || resp.GetQuery().GetNestedQuery().GetKind()[0].GetName() != "k" {
+		t.Fatalf("SELECT COUNT_UP_TO = %v, %v", resp, err)
+	}
+	if got := results(t)(resp, err); got["c"] != "int 1" {
+		t.Errorf("SELECT COUNT_UP_TO(1) = %v", got)
 	}
 }
 
@@ -225,8 +253,8 @@ func TestAggregationTransactionAndREST(t *testing.T) {
 	w = httptest.NewRecorder()
 	gql := httptest.NewRequest(http.MethodPost, "/v1/projects/p:runAggregationQuery", strings.NewReader(`{"gqlQuery":{"queryString":"x"}}`))
 	d.ServeHTTP(w, gql)
-	if w.Code != 501 {
-		t.Errorf("REST GQL aggregation = %d, want 501", w.Code)
+	if w.Code != 400 {
+		t.Errorf("REST GQL aggregation that is not one = %d, want 400", w.Code)
 	}
 }
 

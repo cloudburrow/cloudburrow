@@ -6149,110 +6149,139 @@
     "Key": "firestoreadmin",
     "Title": "Firestore Admin API",
     "counts": {
-      "Unimplemented": 20,
-      "Verified": 12
+      "Unimplemented": 15,
+      "Verified": 17
     },
     "rows": [
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/BulkDeleteDocuments",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/CloneDatabase",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateBackupSchedule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateIndex",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+          "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateUserCreds",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteBackup",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteBackupSchedule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteIndex",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+          "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteUserCreds",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/DisableUserCreds",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/EnableUserCreds",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ExportDocuments",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackup",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackupSchedule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetDatabase",
         "status": "Verified",
         "tests": [
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
-          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases"
         ]
       },
       {
@@ -6260,39 +6289,45 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
-          "test/compat/firestoreadmin_test.go:213 TestFirestoreAdminFields"
+          "test/compat/firestoreadmin_test.go:217 TestFirestoreAdminFields"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetIndex",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+          "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetUserCreds",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ImportDocuments",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackupSchedules",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackups",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:275 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6300,14 +6335,15 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListDatabases",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListFields",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:213 TestFirestoreAdminFields"
+          "test/compat/firestoreadmin_test.go:217 TestFirestoreAdminFields"
         ]
       },
       {
@@ -6315,41 +6351,53 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
-          "test/compat/firestoreadmin_test.go:141 TestFirestoreAdminIndexes"
+          "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListUserCreds",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ResetUserPassword",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/RestoreDatabase",
         "status": "Unimplemented",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+        ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateBackupSchedule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:43 TestFirestoreAdminDatabases"
+          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateField",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:213 TestFirestoreAdminFields"
+          "test/compat/firestoreadmin_test.go:217 TestFirestoreAdminFields"
         ]
       }
     ]
@@ -6410,6 +6458,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledatastoreaggregate_test.go:25 TestConsoleDatastoreAggregate",
+          "test/compat/datastoregql_test.go:24 TestDatastoreGQLAggregation",
           "test/compat/datastoremethods_test.go:92 TestDatastoreAggregation"
         ]
       },
@@ -7098,15 +7147,15 @@
     "Key": "spanner",
     "Title": "Spanner",
     "counts": {
-      "Refused": 32,
-      "Verified": 33
+      "Refused": 30,
+      "Verified": 35
     },
     "rows": [
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7114,7 +7163,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7122,7 +7171,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackup",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7130,7 +7179,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackupSchedule",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7147,7 +7196,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackup",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7155,7 +7204,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackupSchedule",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7170,7 +7219,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackup",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7178,7 +7227,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackupSchedule",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7202,7 +7251,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7210,7 +7259,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/InternalUpdateGraphOperation",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7218,7 +7267,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupOperations",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7226,7 +7275,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupSchedules",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7234,7 +7283,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackups",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7242,7 +7291,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseOperations",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7250,7 +7299,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseRoles",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7265,7 +7314,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/RestoreDatabase",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7273,7 +7322,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/SetIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7281,7 +7330,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/TestIamPermissions",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7289,7 +7338,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackup",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7297,17 +7346,17 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackupSchedule",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabase",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/consolespanneradmin_test.go:271 TestConsoleSpannerEditInstance",
+          "test/compat/spanneradmin_test.go:597 TestSpannerDatabaseDropProtection"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabaseDdl",
@@ -7329,7 +7378,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstanceConfig",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7351,7 +7400,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstanceConfig",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7366,7 +7415,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7374,7 +7423,8 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase"
+          "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
+          "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances"
         ]
       },
       {
@@ -7397,7 +7447,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigOperations",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7428,6 +7478,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstances",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances",
           "test/compat/spanneradmin_test.go:75 TestSpannerInstanceAdminListsAndDeletes"
         ]
       },
@@ -7435,7 +7486,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/MoveInstance",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7443,7 +7494,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/SetIamPolicy",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7451,23 +7502,24 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/TestIamPermissions",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstance",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/consolespanneradmin_test.go:271 TestConsoleSpannerEditInstance",
+          "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances",
+          "test/compat/spanneradmin_test.go:532 TestSpannerUpdateInstance"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstanceConfig",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7475,7 +7527,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstancePartition",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:306 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:307 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
