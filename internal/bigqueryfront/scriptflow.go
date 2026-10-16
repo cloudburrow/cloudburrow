@@ -57,7 +57,10 @@ import (
 //
 // EXECUTE IMMEDIATE runs its SQL, evaluated in its turn, with its USING
 // values each evaluated once, and INTO sets the variables to the query's one
-// row's columns (NULL with no row, an error with more than one); SET (a, b)
+// row's columns (NULL with no row, an error with more than one row or a
+// number of columns other than the variables'), each statement it runs a
+// child job of its own (#1037); @@row_count is the last DML statement's
+// count (rowCountEdits); SET (a, b)
 // = expr sets each variable to a field of the STRUCT expr gives. In an
 // EXCEPTION handler @@error.stack_trace holds the failed statement's line
 // and column in the script, and @@error.formatted_stack_trace reads
@@ -631,6 +634,11 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 	}
 	if flow != nil && flow.failed {
 		if !insert {
+			if len(flow.body) == 0 {
+				// A failure of the front's own, with its message only.
+				writeError(w, flow.status, "invalidQuery", flow.msg)
+				return
+			}
 			writeRaw(w, flow.status, flow.body)
 			return
 		}
@@ -1665,7 +1673,10 @@ func (s *scriptRun) setColumns(names []string, q, stmt string, into bool) *scrip
 // and the statement is run with each query parameter replaced by its
 // value's literal (bindImmediate).
 func (s *scriptRun) executeImmediate(toks []token) *scriptFlow {
-	stmt := s.text(toks)
+	// The statement as written, for its errors: its parts are read with
+	// the variables (s.text) each in its own scope, as INTO names
+	// variables a query of the SQL may not.
+	stmt := s.sql[toks[0].pos:toks[len(toks)-1].end]
 	if len(toks) < 3 || !toks[1].is("IMMEDIATE") {
 		return &scriptFlow{failed: true, status: http.StatusBadRequest, msg: "Syntax error: EXECUTE IMMEDIATE expected", text: stmt}
 	}
@@ -1755,6 +1766,13 @@ func (s *scriptRun) executeImmediate(toks []token) *scriptFlow {
 		}
 		var names []string
 		for _, t := range rest[intoAt+1 : intoEnd] {
+			if t.kind == tokQuoted && !plainIdentifier(t.text) {
+				// The front's run of a script does not read such a
+				// variable (expandExecuteImmediate).
+				s.notImpl = "Not implemented here: EXECUTE IMMEDIATE ... INTO " + t.text + ", a quoted name that must be " +
+					"quoted, which CloudBurrow does not keep as a script variable. What the statements before it did was kept."
+				return &scriptFlow{}
+			}
 			if !t.punct(",") {
 				names = append(names, t.text)
 			}

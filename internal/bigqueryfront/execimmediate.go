@@ -1211,3 +1211,23 @@ func (s *scriptRun) frameAt(text string, toks []token) {
 	c.endLine, c.endCol = lineColumn(s.sql, toks[len(toks)-1].end-1)
 	s.frames[text] = c
 }
+
+// rowCountInOneRequest reports whether sql reads @@row_count but has a
+// TEMP table or function, which keeps it in one request (runsInTurn): the
+// emulator does not know @@row_count (measured: "Unrecognized name:
+// @@row_count"), so such a script is 501.
+func rowCountInOneRequest(sql string) bool {
+	if !strings.Contains(strings.ToUpper(sql), "ROW_COUNT") {
+		return false
+	}
+	toks, ok := lex(sql)
+	if !ok || !tokensHaveTemp(toks) {
+		return false
+	}
+	for i := range toks {
+		if isRowCount(toks, i) {
+			return true
+		}
+	}
+	return false
+}
