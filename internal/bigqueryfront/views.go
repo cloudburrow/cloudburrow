@@ -152,6 +152,9 @@ func (f front) keepViewTexts(w http.ResponseWriter, r *http.Request, q queryOpti
 // getTable answers tables.get, with the client's text of a view's query
 // when the front kept it (above).
 func (f front) getTable(w http.ResponseWriter, r *http.Request, dataset, table string) {
+	if f.tables.watched(streamKey(projectOf(f.base), dataset, table)) { // #1415, materializedviews.go
+		f.syncGot(r, dataset, table)
+	}
 	var t viewText
 	ok := false
 	if f.views != nil {

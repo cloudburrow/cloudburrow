@@ -3,12 +3,14 @@
 package compat
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"cloud.google.com/go/bigquery"
+	"google.golang.org/api/iterator"
 )
 
 // TestBigQueryDDLMoreTableOptions (#1390): the table options max_staleness,
@@ -123,12 +125,16 @@ func TestBigQueryDDLMoreTableOptions(t *testing.T) {
 // BigQuery documents it
 // (https://cloud.google.com/bigquery/docs/materialized-views-create), makes
 // a table of type MATERIALIZED_VIEW with its materializedView definition;
-// a query of it reads its query's results as of the last refresh, which
-// CALL BQ.REFRESH_MATERIALIZED_VIEW and the refresh interval (the front's
-// clock moved forward) bring up to date; ALTER MATERIALIZED VIEW SET
+// a query of it reads its query's current results, even after a change to
+// a base table before a refresh, unless max_staleness allows the last
+// refresh's (#1415); CALL BQ.REFRESH_MATERIALIZED_VIEW and the automatic
+// refresh, once a base table changed and the refresh interval passed (the
+// front's clock moved forward), set lastRefreshTime; ALTER MATERIALIZED VIEW SET
 // OPTIONS changes it; INFORMATION_SCHEMA.MATERIALIZED_VIEWS lists it;
 // tables.insert with a materializedView makes one; DROP MATERIALIZED VIEW
-// deletes it. A query BigQuery refuses as a materialized view's (a
+// deletes it. Its statements, and ALTER TABLE SET OPTIONS, run in a
+// multi-statement script, each a child job (#1415); in a script with a
+// TEMP table they are 501. A query BigQuery refuses as a materialized view's (a
 // non-deterministic function, ORDER BY) is 400.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.tables.get, bigquery.tables.insert
@@ -174,17 +180,41 @@ func TestBigQueryMaterializedViews(t *testing.T) {
 		t.Errorf("SUM of the view: %d, want 3", got)
 	}
 
-	// As of the last refresh, until a refresh.
-	run("INSERT INTO "+path("base")+" (k, v) VALUES ('a', 10)", false)
-	if got := sum("mv"); got != 3 {
-		t.Errorf("before a refresh: %d, want 3 (the last refresh's)", got)
+	lastRefresh := func(table string) time.Time {
+		t.Helper()
+		md, err := ds.Table(table).Metadata(ctx)
+		if err != nil || md.MaterializedView == nil {
+			t.Fatalf("%s: %v %+v", table, err, md)
+		}
+		return md.MaterializedView.LastRefreshTime
 	}
+	created := lastRefresh("mv")
+
+	// #1415: a read after a change to a base table sees it, as BigQuery's
+	// read of the base tables does, before any refresh.
+	run("INSERT INTO "+path("base")+" (k, v) VALUES ('a', 10)", false)
+	if got := sum("mv"); got != 13 {
+		t.Errorf("after a change to the base table: %d, want 13 (current)", got)
+	}
+	if got := lastRefresh("mv"); !got.Equal(created) {
+		t.Errorf("lastRefreshTime %v moved from %v within the refresh interval", got, created)
+	}
+	advanceBigQueryClock(t, h, time.Minute)
 	run("CALL BQ.REFRESH_MATERIALIZED_VIEW('"+ds.DatasetID+".mv')", false)
+	refreshed := lastRefresh("mv")
+	if !refreshed.After(created) {
+		t.Errorf("lastRefreshTime %v after CALL BQ.REFRESH_MATERIALIZED_VIEW, want after %v", refreshed, created)
+	}
 	if got := sum("mv"); got != 13 {
 		t.Errorf("after CALL BQ.REFRESH_MATERIALIZED_VIEW: %d, want 13", got)
 	}
+	// The automatic refresh: a base table changed, and the interval passed.
 	run("INSERT INTO "+path("base")+" (k, v) VALUES ('b', 100)", false)
 	advanceBigQueryClock(t, h, 61*time.Minute)
+	auto := lastRefresh("mv")
+	if !auto.After(refreshed) {
+		t.Errorf("lastRefreshTime %v after the refresh interval, want after %v", auto, refreshed)
+	}
 	if got := sum("mv"); got != 113 {
 		t.Errorf("after the refresh interval: %d, want 113", got)
 	}
@@ -199,10 +229,19 @@ func TestBigQueryMaterializedViews(t *testing.T) {
 		md.MaxStaleness.String() != "0-0 0 2:0:0" {
 		t.Errorf("after ALTER: %+v, maxStaleness %v", md.MaterializedView, md.MaxStaleness)
 	}
+	// Within max_staleness, the last refresh's results; past it, current
+	// ones; with enable_refresh false, no refresh.
 	run("INSERT INTO "+path("base")+" (k, v) VALUES ('b', 1000)", false)
 	advanceBigQueryClock(t, h, 61*time.Minute)
 	if got := sum("mv"); got != 113 {
-		t.Errorf("with enable_refresh false: %d, want 113", got)
+		t.Errorf("within max_staleness: %d, want 113 (the last refresh's)", got)
+	}
+	advanceBigQueryClock(t, h, 60*time.Minute)
+	if got := sum("mv"); got != 1113 {
+		t.Errorf("past max_staleness: %d, want 1113 (current)", got)
+	}
+	if got := lastRefresh("mv"); !got.Equal(auto) {
+		t.Errorf("lastRefreshTime %v with enable_refresh false, want %v", got, auto)
 	}
 
 	// INFORMATION_SCHEMA.MATERIALIZED_VIEWS.
@@ -234,6 +273,59 @@ func TestBigQueryMaterializedViews(t *testing.T) {
 	}
 	if got := sum("mv2"); got != 1113 {
 		t.Errorf("SUM of mv2: %d, want 1113", got)
+	}
+
+	// #1415: in a multi-statement script, each a child job of the script's.
+	script := "CREATE TABLE " + path("sbase") + " AS SELECT 1 AS v;\n" +
+		"CREATE MATERIALIZED VIEW " + path("smv") + " OPTIONS (enable_refresh = FALSE) AS SELECT SUM(v) AS s FROM " + path("sbase") + ";\n" +
+		"ALTER MATERIALIZED VIEW " + path("smv") + " SET OPTIONS (description = 'scripted');\n" +
+		"ALTER TABLE " + path("sbase") + " SET OPTIONS (description = 'base');\n" +
+		"INSERT INTO " + path("sbase") + " VALUES (2);\n" +
+		"CALL BQ.REFRESH_MATERIALIZED_VIEW('" + ds.DatasetID + ".smv');\n" +
+		"SELECT s FROM " + path("smv")
+	job, err := c.Query(script).Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	it, err := job.Read(ctx)
+	if err != nil {
+		t.Fatalf("the script: %v", err)
+	}
+	var out []bigquery.Value
+	if err := it.Next(&out); err != nil || len(out) != 1 || out[0] != int64(3) {
+		t.Errorf("the script's rows: %v %v, want [3]", out, err)
+	}
+	md, err = ds.Table("smv").Metadata(ctx)
+	if err != nil || md.Type != bigquery.MaterializedView || md.Description != "scripted" || md.MaterializedView.EnableRefresh {
+		t.Errorf("the script's materialized view: %v %+v", err, md)
+	}
+	if md, err := ds.Table("sbase").Metadata(ctx); err != nil || md.Description != "base" {
+		t.Errorf("the script's ALTER TABLE SET OPTIONS: %v %+v", err, md)
+	}
+	types := map[string]bool{}
+	kids := job.Children(ctx)
+	for {
+		k, err := kids.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if qs, ok := k.LastStatus().Statistics.Details.(*bigquery.QueryStatistics); ok {
+			types[qs.StatementType] = true
+		}
+	}
+	for _, want := range []string{"CREATE_MATERIALIZED_VIEW", "ALTER_MATERIALIZED_VIEW", "CALL"} {
+		if !types[want] {
+			t.Errorf("no child job of statementType %s: %v", want, types)
+		}
+	}
+	err = bqRun(ctx, c, "CREATE TEMP TABLE x AS SELECT 1 AS a; DROP MATERIALIZED VIEW "+path("smv"), false)
+	wantReason(t, "a materialized view in a script with a TEMP table", err, http.StatusNotImplemented, "notImplemented")
+	run("DROP MATERIALIZED VIEW "+path("smv")+"; DROP TABLE "+path("sbase"), false)
+	if tableExists(t, ctx, ds.Table("smv")) {
+		t.Error("the script's DROP MATERIALIZED VIEW left smv")
 	}
 
 	// DROP MATERIALIZED VIEW.
