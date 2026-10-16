@@ -291,12 +291,17 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 	if st.asOf != "" {
 		// Read as a query's FOR SYSTEM_TIME AS OF is (partitionreads.go):
 		// before the time travel window fails, now is the table as it is,
-		// and any other time is 501.
+		// and any other time is 501 (a past one is not copied yet, #1460).
 		var m partitionMeta
 		if status, got := f.get(r, tablePath(src.DatasetID, src.TableID)); status == http.StatusOK {
 			_ = json.Unmarshal(got, &m)
 		}
-		switch code, msg := f.systemTime(r, q, src.DatasetID, tableName(project, src), m, st.asOf); {
+		switch past, code, msg := f.systemTime(r, q, src.DatasetID, tableName(project, src), m, st.asOf); {
+		case code == 0 && past != 0:
+			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a "+st.kind+
+				" of a table as it was at a past time. CloudBurrow reads a past time of a table in a query's FOR SYSTEM_TIME AS OF, "+
+				"but does not copy one into a new table yet (docs/compatibility.md). Nothing was run.")
+			return
 		case code == http.StatusNotImplemented:
 			writeError(w, code, "notImplemented", msg)
 			return

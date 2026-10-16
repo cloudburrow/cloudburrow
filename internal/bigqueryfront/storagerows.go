@@ -64,38 +64,15 @@ func (s *storageRead) serveRows(ctx context.Context, ss grpc.ServerStream, st *r
 	if offset < 0 {
 		return status.Errorf(codes.InvalidArgument, "offset %d is negative", offset)
 	}
-	var enc rowEncoder
-	var columns []string
-	switch {
-	case st.arrowSchema != nil:
-		a, err := newArrowRows(st.arrowSchema)
-		if err != nil {
-			return status.Errorf(codes.Internal, "read the session's Arrow schema: %v", err)
-		}
-		enc = a
-		for _, f := range a.schema.Fields() {
-			columns = append(columns, f.Name)
-		}
-	case st.avroSchema != "":
-		a, err := newAvroRows(st.avroSchema)
-		if err != nil {
-			return status.Errorf(codes.Internal, "read the session's Avro schema: %v", err)
-		}
-		enc = a
-		for _, f := range a.root.fields {
-			columns = append(columns, f.name)
-		}
-	default:
-		return status.Errorf(codes.Internal, "the session of %s.%s has no schema", st.table.dataset, st.table.table)
-	}
-	if len(columns) == 0 {
-		return status.Errorf(codes.InvalidArgument, "the session of %s.%s reads no column: read_options.selected_fields names "+
-			"none of the table's top-level columns", st.table.dataset, st.table.table)
+	enc, columns, err := st.encoder()
+	if err != nil {
+		return err
 	}
 	rows, err := s.queryRows(ctx, st, columns)
 	if err != nil {
 		return err
 	}
+	rows = st.span(rows) // a stream SplitReadStream made, storagereadstate.go
 	if offset > int64(len(rows)) {
 		return status.Errorf(codes.OutOfRange, "offset %d is past the stream's %d rows", offset, len(rows))
 	}
@@ -117,6 +94,40 @@ func (s *storageRead) serveRows(ctx context.Context, ss grpc.ServerStream, st *r
 		}
 	}
 	return nil
+}
+
+// encoder returns the row encoder of st's session format and the columns
+// it reads.
+func (st *readStream) encoder() (rowEncoder, []string, error) {
+	var enc rowEncoder
+	var columns []string
+	switch {
+	case st.arrowSchema != nil:
+		a, err := newArrowRows(st.arrowSchema)
+		if err != nil {
+			return nil, nil, status.Errorf(codes.Internal, "read the session's Arrow schema: %v", err)
+		}
+		enc = a
+		for _, f := range a.schema.Fields() {
+			columns = append(columns, f.Name)
+		}
+	case st.avroSchema != "":
+		a, err := newAvroRows(st.avroSchema)
+		if err != nil {
+			return nil, nil, status.Errorf(codes.Internal, "read the session's Avro schema: %v", err)
+		}
+		enc = a
+		for _, f := range a.root.fields {
+			columns = append(columns, f.name)
+		}
+	default:
+		return nil, nil, status.Errorf(codes.Internal, "the session of %s.%s has no schema", st.table.dataset, st.table.table)
+	}
+	if len(columns) == 0 {
+		return nil, nil, status.Errorf(codes.InvalidArgument, "the session of %s.%s reads no column: read_options.selected_fields names "+
+			"none of the table's top-level columns", st.table.dataset, st.table.table)
+	}
+	return enc, columns, nil
 }
 
 // rowEncoder writes rows in a session's format.
