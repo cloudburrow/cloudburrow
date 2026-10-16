@@ -347,6 +347,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			} else {
 				withInfinities(w, r, func(w http.ResponseWriter) { f.query(w, r) }) // #1077, #1101
 			}
+			f.syncJobsTableSoon(r) // jobstable.go, #1419
 			return
 		}
 		if j := jobRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet {
