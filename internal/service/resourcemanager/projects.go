@@ -373,6 +373,5 @@ func (r *Registry) Move(id, parent string) (Project, error) {
 // ErrNotImplemented names a Resource Manager capability this does not provide.
 func ErrNotImplemented(what string) error {
 	return apierror.Unimplemented(
-		"%s is not implemented: this is a local project registry, not Resource Manager. "+
-			"billing is out of scope", what)
+		"%s is not implemented: this is a local project registry, not Resource Manager", what)
 }

@@ -37,14 +37,14 @@ func v1ID(h *Harness, prefix string) string {
 	return strings.TrimRight(id, "-")
 }
 
-// covers: cloudresourcemanager.projects.create, cloudresourcemanager.projects.get, cloudresourcemanager.projects.list, cloudresourcemanager.projects.update, cloudresourcemanager.projects.delete, cloudresourcemanager.projects.undelete
+// covers: cloudresourcemanager.projects.create, cloudresourcemanager.projects.get, cloudresourcemanager.projects.list, cloudresourcemanager.projects.update, cloudresourcemanager.projects.delete, cloudresourcemanager.projects.undelete, cloudresourcemanager.operations.get
 //
 // TestResourceManagerV1Projects.
 //
 // The v1 REST surface (#301) through google.golang.org/api/
 // cloudresourcemanager/v1: create, get, list, update (#1265) and delete,
-// with the project visible through v3 and in the console, and the other v1
-// methods UNIMPLEMENTED. update is the call Terraform's google_project makes
+// with the project visible through v3 and in the console, and the create's
+// completed operation read back with operations.get. update is the call Terraform's google_project makes
 // to change a name or labels: both are replaced, the project number and
 // create time kept, and v3 reads the change.
 func TestResourceManagerV1Projects(t *testing.T) {
@@ -61,6 +61,9 @@ func TestResourceManagerV1Projects(t *testing.T) {
 		t.Errorf("v1 create operation not done: %+v", op)
 	}
 	t.Cleanup(func() { _, _ = c.Projects.Delete(id).Do() })
+	if got, err := c.Operations.Get(op.Name).Context(ctx).Do(); err != nil || !got.Done || got.Name != op.Name {
+		t.Errorf("v1 operations.get(%s) = %+v, %v; want the create's operation, done", op.Name, got, err)
+	}
 	if p, err := c.Projects.Get(id).Context(ctx).Do(); err != nil || p.Name != "From v1" || p.LifecycleState != "ACTIVE" {
 		t.Errorf("v1 projects.get = %+v, %v", p, err)
 	}
@@ -120,6 +123,92 @@ func TestResourceManagerV1Projects(t *testing.T) {
 	}
 	if p, err := c.Projects.Get(id).Context(ctx).Do(); err != nil || p.LifecycleState != "ACTIVE" {
 		t.Errorf("v1 get after undelete = %+v, %v; want ACTIVE", p, err)
+	}
+}
+
+// covers: cloudresourcemanager.folders.getOrgPolicy (unimplemented), cloudresourcemanager.folders.getEffectiveOrgPolicy (unimplemented), cloudresourcemanager.folders.setOrgPolicy (unimplemented), cloudresourcemanager.folders.clearOrgPolicy (unimplemented), cloudresourcemanager.folders.listOrgPolicies (unimplemented), cloudresourcemanager.folders.listAvailableOrgPolicyConstraints (unimplemented)
+// covers: cloudresourcemanager.organizations.getOrgPolicy (unimplemented), cloudresourcemanager.organizations.getEffectiveOrgPolicy (unimplemented), cloudresourcemanager.organizations.setOrgPolicy (unimplemented), cloudresourcemanager.organizations.clearOrgPolicy (unimplemented), cloudresourcemanager.organizations.listOrgPolicies (unimplemented), cloudresourcemanager.organizations.listAvailableOrgPolicyConstraints (unimplemented)
+//
+// TestResourceManagerV1FolderAndOrganizationOrgPolicy: org policy is stored
+// on projects alone (#1296), so v1's folder and organization org policy
+// methods are UNIMPLEMENTED (501) through the official v1 client. A folder's
+// used to be the 404 of a path nothing serves.
+func TestResourceManagerV1FolderAndOrganizationOrgPolicy(t *testing.T) {
+	h := New(t)
+	ctx := h.Context()
+	c := rmV1(t, h)
+	const constraint = "constraints/compute.disableSerialPortAccess"
+	for _, res := range []string{"folders/123456789012", "organizations/100000000001"} {
+		var calls []struct {
+			verb string
+			do   func() error
+		}
+		add := func(verb string, do func() error) {
+			calls = append(calls, struct {
+				verb string
+				do   func() error
+			}{verb, do})
+		}
+		if strings.HasPrefix(res, "folders/") {
+			f := c.Folders
+			add("getOrgPolicy", func() error {
+				_, err := f.GetOrgPolicy(res, &crmv1.GetOrgPolicyRequest{Constraint: constraint}).Context(ctx).Do()
+				return err
+			})
+			add("getEffectiveOrgPolicy", func() error {
+				_, err := f.GetEffectiveOrgPolicy(res, &crmv1.GetEffectiveOrgPolicyRequest{Constraint: constraint}).Context(ctx).Do()
+				return err
+			})
+			add("setOrgPolicy", func() error {
+				_, err := f.SetOrgPolicy(res, &crmv1.SetOrgPolicyRequest{Policy: &crmv1.OrgPolicy{Constraint: constraint}}).Context(ctx).Do()
+				return err
+			})
+			add("clearOrgPolicy", func() error {
+				_, err := f.ClearOrgPolicy(res, &crmv1.ClearOrgPolicyRequest{Constraint: constraint}).Context(ctx).Do()
+				return err
+			})
+			add("listOrgPolicies", func() error {
+				_, err := f.ListOrgPolicies(res, &crmv1.ListOrgPoliciesRequest{}).Context(ctx).Do()
+				return err
+			})
+			add("listAvailableOrgPolicyConstraints", func() error {
+				_, err := f.ListAvailableOrgPolicyConstraints(res, &crmv1.ListAvailableOrgPolicyConstraintsRequest{}).Context(ctx).Do()
+				return err
+			})
+		} else {
+			o := c.Organizations
+			add("getOrgPolicy", func() error {
+				_, err := o.GetOrgPolicy(res, &crmv1.GetOrgPolicyRequest{Constraint: constraint}).Context(ctx).Do()
+				return err
+			})
+			add("getEffectiveOrgPolicy", func() error {
+				_, err := o.GetEffectiveOrgPolicy(res, &crmv1.GetEffectiveOrgPolicyRequest{Constraint: constraint}).Context(ctx).Do()
+				return err
+			})
+			add("setOrgPolicy", func() error {
+				_, err := o.SetOrgPolicy(res, &crmv1.SetOrgPolicyRequest{Policy: &crmv1.OrgPolicy{Constraint: constraint}}).Context(ctx).Do()
+				return err
+			})
+			add("clearOrgPolicy", func() error {
+				_, err := o.ClearOrgPolicy(res, &crmv1.ClearOrgPolicyRequest{Constraint: constraint}).Context(ctx).Do()
+				return err
+			})
+			add("listOrgPolicies", func() error {
+				_, err := o.ListOrgPolicies(res, &crmv1.ListOrgPoliciesRequest{}).Context(ctx).Do()
+				return err
+			})
+			add("listAvailableOrgPolicyConstraints", func() error {
+				_, err := o.ListAvailableOrgPolicyConstraints(res, &crmv1.ListAvailableOrgPolicyConstraintsRequest{}).Context(ctx).Do()
+				return err
+			})
+		}
+		for _, call := range calls {
+			var ge *googleapi.Error
+			err := call.do()
+			if !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented || !strings.Contains(ge.Message, call.verb) {
+				t.Errorf("v1 %s %s = %v; want 501 naming the method", res, call.verb, err)
+			}
+		}
 	}
 }
 
@@ -216,7 +305,9 @@ func TestTerraformGoogleProject(t *testing.T) {
 // configured by `cloudburrow gcloud-setup` alone, create, describe, list and
 // delete a project here. Every proxy variable points at the egress guard, so
 // a request bound anywhere but loopback fails the test. --no-enable-cloud-apis
-// because enabling APIs calls Service Usage, which is not served.
+// was chosen before Service Usage was served (#1352): enabling APIs now
+// reaches it through the override gcloud-setup writes, which this test does
+// not exercise (TestGcloudServices does).
 func TestGcloudProjectsThroughGcloudSetup(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvResourceManager)

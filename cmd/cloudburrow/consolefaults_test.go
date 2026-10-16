@@ -281,7 +281,7 @@ func TestConsoleFaultsActThroughTheAdminAPI(t *testing.T) {
 	if strings.Join(p.Interposed, ",") != "secretmanager,tasks" || len(p.Faults) != 0 || len(p.Recent) != 0 {
 		t.Errorf("an empty instance's page = %+v", p)
 	}
-	if len(p.Refused) != 1 || p.Refused[0].Service != "pubsub" || !strings.Contains(p.Refused[0].Reason, "port-forward") {
+	if len(p.Refused) != 1 || p.Refused[0].Service != "pubsub" || !strings.Contains(p.Refused[0].Reason, "served in the cluster") {
 		t.Errorf("refused = %+v, want pubsub with the admin API's reason", p.Refused)
 	}
 	if !slices.Contains(p.Codes, "UNAVAILABLE") || !slices.Contains(p.HTTPStatuses, 503) {

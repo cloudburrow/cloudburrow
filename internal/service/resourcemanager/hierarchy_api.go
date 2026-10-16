@@ -733,6 +733,17 @@ func (s *ProjectsServer) v1OrgRoutes(r *rest.Router, orgs OrganizationsServer) {
 		}
 		return ErrNotImplemented("organizations." + verb)
 	})
+	// v1 has six folder methods, all org policy, which is stored on projects
+	// alone: each is 501, as the organization's are, not the 404 of a path
+	// nothing serves.
+	r.Handle("POST /v1/folders/{folder}", func(w http.ResponseWriter, req *http.Request) error {
+		raw, err := rest.PathValue(req, "folder")
+		if err != nil {
+			return err
+		}
+		_, verb, _ := strings.Cut(raw, ":")
+		return ErrNotImplemented("folders." + verb)
+	})
 }
 
 // v1Ancestry is projects.getAncestry: the project, its folders, and the
