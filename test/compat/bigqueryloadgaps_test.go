@@ -181,3 +181,55 @@ func TestBigQueryParquetLoadNaNAndUnlistedTypes(t *testing.T) {
 		}
 	}
 }
+
+// TestBigQueryLoadBadValuesUnderMaxBadRecords (#1457): with maxBadRecords,
+// a CSV or JSON record holding a value its column's type refuses is a
+// bad record ("the maximum number of rows containing errors that can be
+// ignored"), left out and counted; a BOOL in each documented form loads.
+// covers: bigquery.jobs.insert, bigquery.jobs.get, bigquery.jobs.query
+func TestBigQueryLoadBadValuesUnderMaxBadRecords(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	schema := bigquery.Schema{
+		{Name: "i", Type: bigquery.IntegerFieldType},
+		{Name: "b", Type: bigquery.BooleanFieldType},
+		{Name: "d", Type: bigquery.DateFieldType},
+	}
+	csvSrc := bigquery.NewReaderSource(strings.NewReader("1,yes,2024-01-02\nx,t,2024-01-02\n2,maybe,2024-01-02\n" +
+		"3,N,2024-02-30\n4,F,\n"))
+	csvSrc.Schema, csvSrc.MaxBadRecords = schema, 3
+	jsonSrc := bigquery.NewReaderSource(strings.NewReader(`{"i":1,"b":"yes","d":"2024-01-02"}` + "\n" + `{"i":"x"}` +
+		"\n" + `{"i":2,"b":"maybe"}` + "\n" + `{"i":3,"d":"2024-02-30"}` + "\n" + `{"i":4,"b":"F"}` + "\n"))
+	jsonSrc.SourceFormat, jsonSrc.Schema, jsonSrc.MaxBadRecords = bigquery.JSON, schema, 3
+	for _, c2 := range []struct {
+		table string
+		src   *bigquery.ReaderSource
+	}{{"csv_bad", csvSrc}, {"json_bad", jsonSrc}} {
+		job, err := ds.Table(c2.table).LoaderFrom(c2.src).Run(ctx)
+		if err != nil {
+			t.Fatalf("%s: %v", c2.table, err)
+		}
+		st, err := job.Wait(ctx)
+		if err == nil {
+			err = st.Err()
+		}
+		if err != nil {
+			t.Errorf("%s: %v", c2.table, err)
+			continue
+		}
+		if ls, ok := st.Statistics.Details.(*bigquery.LoadStatistics); !ok || ls.OutputRows != 2 || len(st.Errors) != 3 {
+			t.Errorf("%s: statistics %+v and %d errors, want 2 rows and 3 bad records", c2.table, st.Statistics.Details, len(st.Errors))
+		}
+		q := "SELECT i, b, d IS NULL FROM `" + ds.DatasetID + "." + c2.table + "` ORDER BY i"
+		if got := fmt.Sprint(rows(t, ctx, c, q)); got != "[[1 true false] [4 false true]]" {
+			t.Errorf("%s: rows %s, want [[1 true false] [4 false true]]", c2.table, got)
+		}
+	}
+	csv := bigquery.NewReaderSource(strings.NewReader("x,t,2024-01-02\n1,t,2024-01-02\n"))
+	csv.Schema = schema
+	if err := runLoad(ctx, ds.Table("csv_no_max").LoaderFrom(csv)); err == nil {
+		t.Error("a bad value without maxBadRecords loaded")
+	}
+}

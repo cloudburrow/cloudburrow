@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 )
 
@@ -661,6 +664,9 @@ func dialectRecords(cw *csv.Writer, data io.Reader, d csvDialect, cols []field, 
 		if bad == "" && d.times != nil {
 			bad = d.times.convert(rec, cols) // #1325, csvtimes.go
 		}
+		if bad == "" && d.maxBad > 0 {
+			bad = badValue(rec, cols, d.times != nil) // #1457
+		}
 		if bad != "" {
 			st.bad++
 			if st.bad > d.maxBad {
@@ -815,4 +821,78 @@ func csvValues(rec []string, cols []field, line int) error {
 		}
 	}
 	return nil
+}
+
+// badValue returns why a record of a CSV load with maxBadRecords is bad
+// for a value its column's type refuses, or "" (#1457). BigQuery's
+// "Number of errors allowed" is "the maximum number of rows containing
+// errors that can be ignored" (loading-data-cloud-storage-csv), and the
+// CSV loading page's "Data types" says what each type takes: a BOOL "1 or
+// 0, true or false, t or f, yes or no, or y or n (all case insensitive)",
+// which badValue writes as true or false for the emulator, whose reader
+// takes fewer; a DATE "must be in the format YYYY-MM-DD"; a TIME "must be
+// in the format HH:MM:SS[.SSSSSS]". An INT64 that is no number at all,
+// and a FLOAT64, NUMERIC or BIGNUMERIC that is not one, are bad too. A
+// value it passes that the emulator still refuses (an INT64 written as a
+// fraction, an exponent or in hex, which the page does not document, or a
+// DATETIME or TIMESTAMP it does not read) leaves the load 501, as before
+// (reportFailure). With a format or timeZone set (formatted), DATE and
+// TIME values are csvTimes's.
+func badValue(rec []string, cols []field, formatted bool) string {
+	for i := 0; i < len(rec) && i < len(cols); i++ {
+		v := rec[i]
+		if v == "" || v == emptyStringMark {
+			continue
+		}
+		bad := func(what string) string {
+			return fmt.Sprintf("the value %q of the %s column %s is not %s", v, strings.ToUpper(cols[i].Type), cols[i].Name, what)
+		}
+		switch strings.ToUpper(cols[i].Type) {
+		case "BOOL", "BOOLEAN":
+			switch strings.ToLower(v) {
+			case "1", "true", "t", "yes", "y":
+				rec[i] = "true"
+			case "0", "false", "f", "no", "n":
+				rec[i] = "false"
+			default:
+				return bad("a boolean (1 or 0, true or false, t or f, yes or no, y or n)")
+			}
+		case "INTEGER", "INT64":
+			if _, err := strconv.ParseInt(v, 10, 64); err != nil && !looksNumeric(v) {
+				return bad("an integer")
+			}
+		case "FLOAT", "FLOAT64", "NUMERIC", "BIGNUMERIC":
+			if !looksNumeric(v) {
+				return bad("a number")
+			}
+		case "DATE":
+			if _, err := time.Parse("2006-01-02", v); !formatted && (err != nil || !csvDate.MatchString(v)) {
+				return bad("a date in the format YYYY-MM-DD")
+			}
+		case "TIME":
+			if !formatted && !validTime(csvTime.FindStringSubmatch(v)) {
+				return bad("a time in the format HH:MM:SS[.SSSSSS]")
+			}
+		}
+	}
+	return ""
+}
+
+var (
+	csvDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	csvTime = regexp.MustCompile(`^(\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?$`)
+)
+
+// looksNumeric reports whether v reads as a number: a decimal or float
+// (Go's ParseFloat, Inf and NaN among them) or a hex integer.
+func looksNumeric(v string) bool {
+	if _, err := strconv.ParseFloat(v, 64); err == nil || errors.Is(err, strconv.ErrRange) {
+		return true
+	}
+	t := strings.TrimLeft(v, "+-")
+	if len(t) > 2 && (t[:2] == "0x" || t[:2] == "0X") {
+		_, err := strconv.ParseUint(t[2:], 16, 64)
+		return err == nil || errors.Is(err, strconv.ErrRange)
+	}
+	return false
 }

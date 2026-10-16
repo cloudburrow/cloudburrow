@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 )
 
 // A NEWLINE_DELIMITED_JSON load into BYTES columns (#1065, #1075).
@@ -59,7 +61,7 @@ func (f front) jsonLoad(w http.ResponseWriter, r *http.Request, job jobBody, nex
 		}
 		opts.maxBad = n
 	}
-	read := storedValues(fields) || stamps || opts.unknown
+	read := storedValues(fields) || stamps || opts.unknown || opts.maxBad > 0 && len(fields) > 0 // #1457: badJSONValue
 	if !read && (len(l.SourceURIs) == 0 || f.storage == nil && !severalObjects(l.SourceURIs)) {
 		// #1079: a load from Cloud Storage is read here, as one.
 		return r, next, nil, true
@@ -248,23 +250,19 @@ func jsonRecord(w io.Writer, text []byte, o jsonReadOptions, st *jsonState, loc,
 					"Set ignoreUnknownValues, or leave the field out.", where, name)}
 		}
 		if name != "" {
-			st.bad++
-			bad := fmt.Sprintf("JSON parsing error in %s: No such field: %s.", where, name)
-			if st.bad > o.maxBad {
-				return &loadDataError{code: http.StatusBadRequest, reason: "invalid", msg: fmt.Sprintf(
-					"Error while reading data, error message: JSON table encountered too many errors, giving up. "+
-						"%s ignoreUnknownValues is false, so the record is bad (%d bad records, and maxBadRecords "+
-						"is %d). Nothing was loaded.", bad, st.bad, o.maxBad)}
-			}
-			if len(st.errs) < maxListedBadRecords {
-				st.errs = append(st.errs, rowError{Reason: "invalid", Location: loc, Message: fmt.Sprintf(
-					"Error while reading data, error message: %s It was left out (%d of maxBadRecords %d).",
-					bad, st.bad, o.maxBad)})
-			}
-			return nil
+			return st.badRecord(o, loc, fmt.Sprintf("JSON parsing error in %s: No such field: %s. "+
+				"ignoreUnknownValues is false, so the record is bad", where, name))
+		}
+	}
+	boolsChanged := false
+	if o.maxBad > 0 {
+		var bad string
+		if bad, boolsChanged = badJSONValue(o.fields, obj); bad != "" {
+			return st.badRecord(o, loc, fmt.Sprintf("JSON parsing error in %s: %s", where, bad))
 		}
 	}
 	changed, p := fixValues(o.fields, obj, "a load's record, "+where, "")
+	changed = changed || boolsChanged
 	if p != nil {
 		return p.loadError()
 	}
@@ -287,4 +285,110 @@ func jsonRecord(w io.Writer, text []byte, o jsonReadOptions, st *jsonState, loc,
 	}
 	_, err = w.Write(append(out, '\n'))
 	return err
+}
+
+// badRecord counts a bad record, why it is bad, of the file at loc: it
+// is left out, or, one more than o.maxBad, fails the load.
+func (st *jsonState) badRecord(o jsonReadOptions, loc, why string) error {
+	st.bad++
+	if st.bad > o.maxBad {
+		return &loadDataError{code: http.StatusBadRequest, reason: "invalid", msg: fmt.Sprintf(
+			"Error while reading data, error message: JSON table encountered too many errors, giving up. "+
+				"%s (%d bad records, and maxBadRecords is %d). Nothing was loaded.", why, st.bad, o.maxBad)}
+	}
+	if len(st.errs) < maxListedBadRecords {
+		st.errs = append(st.errs, rowError{Reason: "invalid", Location: loc, Message: fmt.Sprintf(
+			"Error while reading data, error message: %s. It was left out (%d of maxBadRecords %d).",
+			why, st.bad, o.maxBad)})
+	}
+	return nil
+}
+
+// badJSONValue returns why a record of a JSON load with maxBadRecords is
+// bad for a top-level value its column refuses, or "", and whether it
+// rewrote a BOOL (#1457). "Number of errors allowed" is "the maximum
+// number of rows containing errors that can be ignored", and the JSON
+// loading page's "Data types" says what each type takes: a BOOL "1 or 0,
+// true or false, t or f, yes or no, or y or n (all case insensitive)",
+// written as a JSON boolean for the emulator; a DATE "must be in the
+// format YYYY-MM-DD"; a TIME "HH:MM:SS[.SSSSSS]"; and a repeated field
+// "must be a JSON array or null ... The array itself cannot contain null
+// values". An object or array for a column that is neither a RECORD nor
+// REPEATED, and an INTEGER, FLOAT, NUMERIC or BIGNUMERIC that is no
+// number, are bad too. A value it passes that the emulator still refuses
+// leaves the load 501, as before (reportFailure).
+func badJSONValue(fields []field, obj map[string]any) (string, bool) {
+	changed := false
+	for k, v := range obj {
+		var f *field
+		for i := range fields {
+			if strings.EqualFold(fields[i].Name, k) {
+				f = &fields[i]
+				break
+			}
+		}
+		if f == nil || v == nil {
+			continue
+		}
+		typ := strings.ToUpper(f.Type)
+		if typ == "RECORD" || typ == "STRUCT" || typ == "JSON" || typ == "GEOGRAPHY" || typ == "RANGE" {
+			continue
+		}
+		values := []any{v}
+		if strings.EqualFold(f.Mode, "REPEATED") {
+			arr, ok := v.([]any)
+			if !ok {
+				return fmt.Sprintf("the REPEATED field %s is not a JSON array", k), changed
+			}
+			values = arr
+		}
+		for i, e := range values {
+			why := ""
+			switch e := e.(type) {
+			case nil:
+				why = "null inside an array, which \"cannot contain null values\""
+			case map[string]any, []any:
+				why = "a JSON object or array"
+			default:
+				text := fmt.Sprint(e)
+				switch typ {
+				case "BOOL", "BOOLEAN":
+					var b bool
+					switch strings.ToLower(text) {
+					case "1", "true", "t", "yes", "y":
+						b = true
+					case "0", "false", "f", "no", "n":
+					default:
+						why = "not a boolean (1 or 0, true or false, t or f, yes or no, y or n)"
+					}
+					if why == "" {
+						if _, isBool := e.(bool); !isBool {
+							changed = true
+							if strings.EqualFold(f.Mode, "REPEATED") {
+								values[i] = b
+							} else {
+								obj[k] = b
+							}
+						}
+					}
+				case "INTEGER", "INT64", "FLOAT", "FLOAT64", "NUMERIC", "BIGNUMERIC":
+					if _, isBool := e.(bool); isBool || !looksNumeric(text) {
+						why = "not a number"
+					}
+				case "DATE":
+					if _, err := time.Parse("2006-01-02", text); err != nil || !csvDate.MatchString(text) {
+						why = "not a date in the format YYYY-MM-DD"
+					}
+				case "TIME":
+					if !validTime(csvTime.FindStringSubmatch(text)) {
+						why = "not a time in the format HH:MM:SS[.SSSSSS]"
+					}
+				}
+			}
+			if why != "" {
+				return fmt.Sprintf("the value of the %s field %s is %s", typ, k, why), changed
+			}
+		}
+	}
+	return "", changed
 }
