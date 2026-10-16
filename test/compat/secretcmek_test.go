@@ -78,12 +78,9 @@ func TestSecretManagerCMEK(t *testing.T) {
 	for transport, c := range map[string]*secretmanager.Client{"grpc": secretsClient(t, h), "rest": secretsRESTClient(t, h)} {
 		t.Run(transport, func(t *testing.T) {
 			code := func(err error) codes.Code { return kmsCode(transport, err) }
-			// FAILED_PRECONDITION is HTTP 400, as on Google, and over REST
-			// the official client maps the HTTP status alone.
+			// FAILED_PRECONDITION over REST too: the JSON error carries Google's
+			// status since #1470, which kmsCode reads.
 			failedPrecondition := codes.FailedPrecondition
-			if transport == "rest" {
-				failedPrecondition = codes.InvalidArgument
-			}
 			id := "cmek-" + transport
 			name := secretsParent(h) + "/secrets/" + id
 			t.Cleanup(func() { _ = c.DeleteSecret(context.Background(), &secretmanagerpb.DeleteSecretRequest{Name: name}) })
