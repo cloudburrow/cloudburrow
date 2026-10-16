@@ -23,7 +23,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Storage | 5 | 0 | 4 | 1 | 0 |
 | Pub/Sub | 2 | 0 | 0 | 1 | 1 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 6 | 2 | 3 | 0 | 1 |
+| Cloud Run | 7 | 3 | 3 | 0 | 1 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
@@ -35,7 +35,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **65** | **12** | **34** | **13** | **6** |
+| **Total** | **66** | **13** | **34** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -82,7 +82,8 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 `update_mask` (#1260); container logs in Cloud Logging as `cloud_run_revision` and
 `cloud_run_job` (#1298); the v1 (Knative) API, with `gcloud run services list`, `describe` and
 `deploy --image` (#1293, #1297), its locations, IAM, jobs and domain mappings (#1349), job runs,
-executions and tasks (#1379), and selectors, `overrides.delayExecution` and job IAM (#1420);
+executions and tasks (#1379), and selectors, `overrides.delayExecution` and job IAM (#1420), and
+domain mappings the gateway routes and `delayExecution` kept on jobs and executions (#1450);
 `Builds.SubmitBuild` (#1268); `Instances.*` (#1299) and `WorkerPools.*` (#1300), with operations
 that wait for readiness and an instance's URL (#1348), and a worker pool's `update_mask` and
 instance splits (#1387); secret and in-memory volumes, the service account and v1 probes (#1297),
@@ -103,6 +104,7 @@ and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_R
 | `CancelOperation`: a deployment in flight cannot be recalled (#1448) | no emulator support | S |
 | Cloud Build: triggers with a repository or Pub/Sub source or a `filename` are refused 501 with the reason (they need a hosted git service or a Google-owned subscription). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | built; the rest is refused with its reason (a hosted git service, a Google-owned subscription, or package formats not served) | M |
 | v1 (Knative) API: a domain mapping never becomes Ready, as no DNS is served and no certificate issued; a job's own `spec.template.spec.delayExecution` is 501, and a run's `overrides.delayExecution` is not read back on the execution, as v2 has no field for either (#1450) | not built yet | S |
+| Cloud Build: `options.dynamicSubstitutions`, `secretEnv` on a docker build, docker push or pack step, `ApproveBuild` and `approvalRequired`, and triggers with a repository or Pub/Sub source or a `filename` are refused; Artifact Registry: 27 methods `UNIMPLEMENTED` (rules, attachments, Maven, npm, Python, Apt and Yum artifacts, project and VPC-SC settings, package, version and file updates; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | not built yet | M |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
 
 ## Cloud Scheduler

@@ -18,14 +18,18 @@ const v1FailingTaskScript = `test "$CLOUD_RUN_TASK_INDEX" != 1`
 
 // covers: run.projects.locations.jobs.getIamPolicy, run.projects.locations.jobs.setIamPolicy, run.projects.locations.jobs.testIamPermissions
 //
-// TestRunV1SelectorsDelayAndJobIAM (#1420): the official v1 client runs a
-// job of two tasks, one failing, with overrides.delayExecution, which starts
-// it at once; lists its tasks with set-based label selectors (in, notin,
-// !=, existence and !key) and its executions with in and a fieldSelector on
-// metadata.name; is refused a gt selector and an unsupported field as
-// INVALID_ARGUMENT, and a job-level delayExecution as 501; and stores, reads
-// and tests the job's IAM policy through projects.locations.jobs, the
-// policy v2's Jobs IAM serves.
+// TestRunV1SelectorsDelayAndJobIAM (#1420, #1450): the official v1 client
+// creates a job of two tasks, one failing, with the job's own
+// delayExecution, which reads back on the job, on the global endpoint's
+// jobs list (every region's jobs, with their location label) and on the
+// executions it runs; replaces it without the flag, which clears it; runs
+// it with overrides.delayExecution, which starts it at once and reads back
+// on that execution; lists its tasks with set-based label selectors (in,
+// notin, !=, existence and !key) and its executions with in and a
+// fieldSelector on metadata.name; is refused a gt selector and an
+// unsupported field as INVALID_ARGUMENT; and stores, reads and tests the
+// job's IAM policy through projects.locations.jobs, the policy v2's Jobs
+// IAM serves.
 func TestRunV1SelectorsDelayAndJobIAM(t *testing.T) {
 	h := New(t)
 	c := runV1Regional(t, h)
@@ -39,17 +43,49 @@ func TestRunV1SelectorsDelayAndJobIAM(t *testing.T) {
 					Containers: []*runv1.Container{{Image: jobImage, Command: []string{"sh", "-c"}, Args: []string{v1FailingTaskScript}}}}}}}}}
 	}
 	var ge *googleapi.Error
-	if _, err := c.Namespaces.Jobs.Create(ns, spec(true)).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented ||
-		!strings.Contains(ge.Message, "spec.template.spec.delayExecution") {
-		t.Fatalf("Create with the job's own delayExecution = %v; want 501 naming it", err)
+	if j, err := c.Namespaces.Jobs.Create(ns, spec(true)).Do(); err != nil || !j.Spec.Template.Spec.DelayExecution {
+		t.Fatalf("Create with the job's own delayExecution = %v; want it stored", err)
 	}
-	if _, err := c.Namespaces.Jobs.Create(ns, spec(false)).Do(); err != nil {
-		t.Fatalf("Create: %v", err)
+	j, err := c.Namespaces.Jobs.Get(ns + "/jobs/" + id).Do()
+	if err != nil || !j.Spec.Template.Spec.DelayExecution {
+		t.Fatalf("Get = %v; want delayExecution read back", err)
+	}
+	// The global endpoint (no region) lists every region's jobs, which is
+	// how gcloud finds a job's region.
+	all, err := runV1Client(t, h).Namespaces.Jobs.List(ns).Do()
+	if err != nil {
+		t.Fatalf("global jobs.list: %v", err)
+	}
+	var listed *runv1.Job
+	for _, item := range all.Items {
+		if item.Metadata.Name == id {
+			listed = item
+		}
+	}
+	if listed == nil || listed.Metadata.Labels["cloud.googleapis.com/location"] != "us-central1" || !listed.Spec.Template.Spec.DelayExecution {
+		t.Errorf("global jobs.list = %+v; want %s in us-central1 with delayExecution", listed, id)
+	}
+	ex, err := c.Namespaces.Jobs.Run(ns+"/jobs/"+id, &runv1.RunJobRequest{}).Do()
+	if err != nil || !ex.Spec.DelayExecution {
+		t.Fatalf("Run of a delayed job = %v; want its execution delayed", err)
+	}
+	first := ns + "/executions/" + ex.Metadata.Name
+	t.Cleanup(func() { _, _ = c.Namespaces.Executions.Delete(first).Do() })
+	if e, err := c.Namespaces.Executions.Get(first).Do(); err != nil || !e.Spec.DelayExecution {
+		t.Errorf("executions.get = %v; want spec.delayExecution", err)
+	}
+	v1AwaitExecution(t, c, first, "completed", func(e *runv1.Execution) bool { return e.Status.CompletionTime != "" })
+	if _, err := c.Namespaces.Executions.Delete(first).Do(); err != nil {
+		t.Fatalf("delete the first execution: %v", err)
+	}
+	j.Spec.Template.Spec.DelayExecution = false
+	if j, err := c.Namespaces.Jobs.ReplaceJob(ns+"/jobs/"+id, j).Do(); err != nil || j.Spec.Template.Spec.DelayExecution {
+		t.Fatalf("replaceJob without delayExecution = %v; want it cleared", err)
 	}
 
-	ex, err := c.Namespaces.Jobs.Run(ns+"/jobs/"+id, &runv1.RunJobRequest{Overrides: &runv1.Overrides{DelayExecution: true}}).Do()
-	if err != nil {
-		t.Fatalf("Run with overrides.delayExecution: %v", err)
+	ex, err = c.Namespaces.Jobs.Run(ns+"/jobs/"+id, &runv1.RunJobRequest{Overrides: &runv1.Overrides{DelayExecution: true}}).Do()
+	if err != nil || !ex.Spec.DelayExecution {
+		t.Fatalf("Run with overrides.delayExecution: %v; want its execution delayed", err)
 	}
 	exec := ex.Metadata.Name
 	execName := ns + "/executions/" + exec
@@ -90,8 +126,8 @@ func TestRunV1SelectorsDelayAndJobIAM(t *testing.T) {
 	}
 
 	list, err := c.Namespaces.Executions.List(ns).LabelSelector("run.googleapis.com/job in (" + id + ",other)").Do()
-	if err != nil || len(list.Items) != 1 || list.Items[0].Metadata.Name != exec {
-		t.Errorf("executions.list with in = %+v, %v", list, err)
+	if err != nil || len(list.Items) != 1 || list.Items[0].Metadata.Name != exec || !list.Items[0].Spec.DelayExecution {
+		t.Errorf("executions.list with in = %+v, %v; want the delayed execution", list, err)
 	}
 	list, err = c.Namespaces.Executions.List(ns).FieldSelector("metadata.name=" + exec).Do()
 	if err != nil || len(list.Items) != 1 || list.Items[0].Metadata.Name != exec {
@@ -201,5 +237,36 @@ func TestGcloudRunJobsTaskFiltersAndIAM(t *testing.T) {
 	out, err = g.run(nil, "beta", "run", "services", "describe", "gcloud-field-sel", "--quiet")
 	if err == nil || !strings.Contains(out, "found in region us-central1") {
 		t.Errorf("gcloud beta run services describe with no region = %v:\n%s\nwant the region found through fieldSelector", err, out)
+	}
+}
+
+// TestGcloudRunJobsDelayExecution (#1450): the pinned gcloud, through
+// gcloud-setup alone, creates a job with `gcloud beta run jobs create
+// --delay-execution`, which describe reads back; `gcloud beta run jobs
+// describe` with no region finds the job's region through the global
+// endpoint's namespaces.jobs.list; `gcloud beta run jobs update
+// --no-delay-execution` clears the flag; and the delayed job runs.
+func TestGcloudRunJobsDelayExecution(t *testing.T) {
+	h := New(t)
+	h.Endpoint(EnvRun)
+	g := newGcloudSession(t, h)
+	id := "gcloud-v1-delay"
+	region := "--region=us-central1"
+	t.Cleanup(func() { _, _ = g.run(nil, "run", "jobs", "delete", id, region, "--quiet") })
+	g.must("beta", "run", "jobs", "create", id, "--image="+jobImage, region, "--delay-execution", "--command=true")
+	delay := func() string {
+		return strings.TrimSpace(g.must("run", "jobs", "describe", id, region, "--format=value(spec.template.spec.delayExecution)"))
+	}
+	if got := delay(); got != "True" {
+		t.Errorf("describe after create --delay-execution: delayExecution = %q; want True", got)
+	}
+	out, err := g.run(nil, "beta", "run", "jobs", "describe", id, "--quiet")
+	if err == nil || !strings.Contains(out, "found in region us-central1") {
+		t.Errorf("gcloud beta run jobs describe with no region = %v:\n%s\nwant the region found through the global jobs list", err, out)
+	}
+	g.must("beta", "run", "jobs", "execute", id, region, "--wait")
+	g.must("beta", "run", "jobs", "update", id, region, "--no-delay-execution")
+	if got := delay(); got != "" && got != "False" {
+		t.Errorf("describe after update --no-delay-execution: delayExecution = %q; want unset", got)
 	}
 }

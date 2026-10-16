@@ -106,6 +106,7 @@ func (s *Server) v1ReplaceJob(w http.ResponseWriter, r *http.Request) {
 	}
 	job.Name = parent + "/jobs/" + id
 	job.Etag = in.Metadata.ResourceVersion
+	delay := in.Spec.Template.Spec.DelayExecution
 	validateOnly := r.URL.Query().Get("dryRun") == "all"
 	op, err := s.Jobs().UpdateJob(r.Context(), &runpb.UpdateJobRequest{Job: job, ValidateOnly: validateOnly})
 	if err != nil {
@@ -118,11 +119,15 @@ func (s *Server) v1ReplaceJob(w http.ResponseWriter, r *http.Request) {
 			v1Write(w, apierror.Internal(err, "decode job %s", job.Name), nil)
 			return
 		}
-		v1Write(w, nil, toV1Job(&out))
+		v1Write(w, nil, v1JobOf(&out, delay))
 		return
 	}
-	got, err := s.Jobs().GetJob(r.Context(), &runpb.GetJobRequest{Name: job.Name})
-	v1Write(w, err, toV1Job(got))
+	// The v2 update rewrote the job's ConfigMap without the flag.
+	if err := s.setV1JobDelay(r.Context(), job.Name, delay); err != nil {
+		v1Write(w, err, nil)
+		return
+	}
+	s.v1WriteJob(w, r, job.Name)
 }
 
 // v1RunJob is POST jobs/{name}:run. It answers with the new execution as
@@ -157,7 +162,17 @@ func (s *Server) v1RunJob(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	op, err := s.Jobs().RunJob(r.Context(), &runpb.RunJobRequest{Name: parent + "/jobs/" + id, Overrides: overrides})
+	jobName := parent + "/jobs/" + id
+	// An execution is delayed when the run asks for it or the job's
+	// template does (v1delay.go, #1450).
+	delay := in.Overrides != nil && in.Overrides.DelayExecution
+	if !delay {
+		if delay, err = s.v1JobDelay(r.Context(), jobName); err != nil {
+			v1Write(w, err, nil)
+			return
+		}
+	}
+	op, err := s.Jobs().RunJob(r.Context(), &runpb.RunJobRequest{Name: jobName, Overrides: overrides})
 	if err != nil {
 		v1Write(w, err, nil)
 		return
@@ -167,7 +182,14 @@ func (s *Server) v1RunJob(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, apierror.Internal(err, "decode the execution of job %s", id), nil)
 		return
 	}
-	v1Write(w, nil, toV1Execution(&exec))
+	if delay {
+		_, execID, _ := strings.Cut(exec.GetName(), "/executions/")
+		if err := s.setV1Delay(r.Context(), resBatchJob, execID, true); err != nil {
+			v1Write(w, err, nil)
+			return
+		}
+	}
+	v1Write(w, nil, v1ExecutionOf(&exec, delay))
 }
 
 // fromV1Overrides converts v1's execution overrides to v2's.
@@ -175,11 +197,8 @@ func fromV1Overrides(in *runv1.Overrides) (*runpb.RunJobRequest_Overrides, error
 	if in == nil {
 		return nil, nil
 	}
-	// delayExecution lets Cloud Run start the execution "within the next
-	// 12 hours depending on available capacity" (the v1 discovery
-	// document). Locally capacity is never waited for, so the execution
-	// starts at once, which keeps that promise (#1420). It is not read
-	// back: the v2 Execution this adapter stores has no field for it.
+	// delayExecution has no v2 field; v1RunJob stores it beside the
+	// execution (v1delay.go, #1450).
 	var gaps []string
 	gap := func(b bool, field string) {
 		if b {
@@ -211,8 +230,18 @@ func (s *Server) v1GetExecution(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
+	s.v1WriteExecution(w, r, name)
+}
+
+// v1WriteExecution answers with an execution, its delayExecution too.
+func (s *Server) v1WriteExecution(w http.ResponseWriter, r *http.Request, name string) {
 	e, err := s.Executions().GetExecution(r.Context(), &runpb.GetExecutionRequest{Name: name})
-	v1Write(w, err, toV1Execution(e))
+	if err != nil {
+		v1Write(w, err, nil)
+		return
+	}
+	delay, err := s.v1ExecutionDelay(r.Context(), name)
+	v1Write(w, err, v1ExecutionOf(e, delay))
 }
 
 func (s *Server) v1DeleteExecution(w http.ResponseWriter, r *http.Request) {
@@ -249,8 +278,7 @@ func (s *Server) v1CancelExecution(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	e, err := s.Executions().GetExecution(r.Context(), &runpb.GetExecutionRequest{Name: name})
-	v1Write(w, err, toV1Execution(e))
+	s.v1WriteExecution(w, r, name)
 }
 
 // v1Executions is the region's executions, newest first: one job's, when
@@ -310,10 +338,15 @@ func (s *Server) v1ListExecutions(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
+	delays, err := s.v1ExecutionDelays(r.Context())
+	if err != nil {
+		v1Write(w, err, nil)
+		return
+	}
 	byName := map[string]*runv1.Execution{}
 	var names []string
 	for i, e := range execs {
-		v := toV1Execution(e)
+		v := v1ExecutionOf(e, delays[e.GetName()])
 		if selected(v.Metadata, sel) {
 			// Paging sorts its keys, so the key keeps the order.
 			key := strconv.Itoa(100000000+i) + "/" + v.Metadata.Name
@@ -501,8 +534,9 @@ func v1RunMeta(name, collection, uid, etag string, generation int64, created *ti
 		SelfLink: "/apis/run.googleapis.com/v1/namespaces/" + project + "/" + collection + "/" + id}
 }
 
-// toV1Execution renders a v2 execution in v1's shape; nil for nil.
-func toV1Execution(e *runpb.Execution) *runv1.Execution {
+// v1ExecutionOf renders a v2 execution in v1's shape, with its
+// delayExecution, which v2 does not hold (v1delay.go); nil for nil.
+func v1ExecutionOf(e *runpb.Execution, delay bool) *runv1.Execution {
 	if e == nil {
 		return nil
 	}
@@ -515,7 +549,7 @@ func toV1Execution(e *runpb.Execution) *runv1.Execution {
 	return &runv1.Execution{ApiVersion: "run.googleapis.com/v1", Kind: "Execution",
 		Metadata: v1RunMeta(e.GetName(), "executions", e.GetUid(), e.GetEtag(), e.GetGeneration(), e.GetCreateTime(),
 			labels, toV1CloudSQL(cloneAnn(e.GetAnnotations()), tt.GetVolumes())),
-		Spec: &runv1.ExecutionSpec{Parallelism: int64(e.GetParallelism()), TaskCount: int64(e.GetTaskCount()),
+		Spec: &runv1.ExecutionSpec{Parallelism: int64(e.GetParallelism()), TaskCount: int64(e.GetTaskCount()), DelayExecution: delay,
 			Template: &runv1.TaskTemplateSpec{Spec: toV1TaskSpec(tt)}},
 		Status: &runv1.ExecutionStatus{ObservedGeneration: e.GetObservedGeneration(), Conditions: v1RunConditions(e.GetConditions()),
 			StartTime: v1Time(e.GetStartTime()), CompletionTime: v1Time(e.GetCompletionTime()),

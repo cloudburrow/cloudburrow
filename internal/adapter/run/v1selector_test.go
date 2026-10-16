@@ -74,9 +74,10 @@ func TestV1Selectors(t *testing.T) {
 	}
 }
 
-// A run's overrides.delayExecution starts the execution at once (#1420),
-// a job's own delayExecution is refused naming it, and the job's IAM
-// policy is served at projects.locations.jobs.
+// delayExecution (#1450): a job's own is stored and read back on the job
+// and on every execution it runs; a run's overrides.delayExecution is read
+// back on its execution; replaceJob without it clears it. The job's IAM
+// policy is served at projects.locations.jobs (#1420).
 func TestV1DelayExecution(t *testing.T) {
 	js, _, _, _ := jobsServer(fakeSecrets{})
 	h := js.s.V1Handler(http.NotFoundHandler())
@@ -85,21 +86,56 @@ func TestV1DelayExecution(t *testing.T) {
 		Spec: &runv1.JobSpec{Template: &runv1.ExecutionTemplateSpec{Spec: &runv1.ExecutionSpec{TaskCount: 1, DelayExecution: true,
 			Template: &runv1.TaskTemplateSpec{Spec: &runv1.TaskSpec{
 				Containers: []*runv1.Container{{Image: "busybox:1.36"}}}}}}}}
-	if code := v1Do(t, h, http.MethodPost, ns+"/jobs", job, nil); code != http.StatusNotImplemented {
-		t.Errorf("create with spec.template.spec.delayExecution = %d; want 501", code)
+	var got runv1.Job
+	if code := v1Do(t, h, http.MethodPost, ns+"/jobs", job, &got); code != 200 || !got.Spec.Template.Spec.DelayExecution {
+		t.Fatalf("create with spec.template.spec.delayExecution = %d %+v", code, got.Spec)
 	}
-	job.Spec.Template.Spec.DelayExecution = false
-	if code := v1Do(t, h, http.MethodPost, ns+"/jobs", job, nil); code != 200 {
-		t.Fatalf("create = %d", code)
+	if code := v1Do(t, h, http.MethodGet, ns+"/jobs/later", nil, &got); code != 200 || !got.Spec.Template.Spec.DelayExecution {
+		t.Errorf("get = %d, delayExecution %v; want true", code, got.Spec.Template.Spec.DelayExecution)
 	}
+	var jobs runv1.ListJobsResponse
+	if code := v1Do(t, h, http.MethodGet, ns+"/jobs", nil, &jobs); code != 200 || len(jobs.Items) != 1 || !jobs.Items[0].Spec.Template.Spec.DelayExecution {
+		t.Errorf("jobs.list = %d %+v", code, jobs.Items)
+	}
+	// The job's flag delays the executions it runs.
 	var exec runv1.Execution
-	if code := v1Do(t, h, http.MethodPost, ns+"/jobs/later:run", &runv1.RunJobRequest{Overrides: &runv1.Overrides{DelayExecution: true, TaskCount: 1}}, &exec); code != 200 ||
-		exec.Metadata.Labels[v1JobLabel] != "later" {
-		t.Fatalf("run with overrides.delayExecution = %d %+v", code, exec.Metadata)
+	if code := v1Do(t, h, http.MethodPost, ns+"/jobs/later:run", &runv1.RunJobRequest{}, &exec); code != 200 || !exec.Spec.DelayExecution {
+		t.Fatalf("run of a delayed job = %d %+v", code, exec.Spec)
 	}
+	first := exec.Metadata.Name
+	if code := v1Do(t, h, http.MethodGet, ns+"/executions/"+first, nil, &exec); code != 200 || !exec.Spec.DelayExecution {
+		t.Errorf("executions.get = %d, delayExecution %v; want true", code, exec.Spec.DelayExecution)
+	}
+	// replaceJob without the flag clears it, and a run is no longer delayed.
+	got.Spec.Template.Spec.DelayExecution = false
+	in := got
+	got = runv1.Job{}
+	if code := v1Do(t, h, http.MethodPut, ns+"/jobs/later", &in, &got); code != 200 || got.Spec.Template.Spec.DelayExecution {
+		t.Fatalf("replaceJob without delayExecution = %d %+v", code, got.Spec.Template.Spec)
+	}
+	exec = runv1.Execution{}
+	if code := v1Do(t, h, http.MethodPost, ns+"/jobs/later:run", &runv1.RunJobRequest{}, &exec); code != 200 || exec.Spec.DelayExecution {
+		t.Errorf("run of an undelayed job = %d, delayExecution %v; want false", code, exec.Spec.DelayExecution)
+	}
+	plain := exec.Metadata.Name
+	// A run's overrides.delayExecution delays that execution alone.
+	if code := v1Do(t, h, http.MethodPost, ns+"/jobs/later:run", &runv1.RunJobRequest{Overrides: &runv1.Overrides{DelayExecution: true, TaskCount: 1}}, &exec); code != 200 ||
+		exec.Metadata.Labels[v1JobLabel] != "later" || !exec.Spec.DelayExecution {
+		t.Fatalf("run with overrides.delayExecution = %d %+v %+v", code, exec.Metadata, exec.Spec)
+	}
+	overridden := exec.Metadata.Name
 	var list runv1.ListExecutionsResponse
-	if code := v1Do(t, h, http.MethodGet, ns+"/executions?labelSelector="+url.QueryEscape("run.googleapis.com/job in (later)"), nil, &list); code != 200 || len(list.Items) != 1 {
-		t.Errorf("executions.list = %d %d", code, len(list.Items))
+	if code := v1Do(t, h, http.MethodGet, ns+"/executions?labelSelector="+url.QueryEscape("run.googleapis.com/job in (later)"), nil, &list); code != 200 || len(list.Items) != 3 {
+		t.Fatalf("executions.list = %d %d", code, len(list.Items))
+	}
+	for _, e := range list.Items {
+		want := e.Metadata.Name == first || e.Metadata.Name == overridden
+		if e.Metadata.Name == plain {
+			want = false
+		}
+		if e.Spec.DelayExecution != want {
+			t.Errorf("executions.list: %s delayExecution = %v; want %v", e.Metadata.Name, e.Spec.DelayExecution, want)
+		}
 	}
 	// projects.locations.jobs: the job's v2 IAM policy (#1420).
 	var pol map[string]any
