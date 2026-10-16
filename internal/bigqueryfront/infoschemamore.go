@@ -113,10 +113,10 @@ func partitionIDExpr(m partitionMeta) (string, bool) {
 	expr := col
 	for _, fl := range m.Schema.Fields {
 		if strings.EqualFold(fl.Name, tp.Field) && (strings.EqualFold(fl.Type, "DATE") || strings.EqualFold(fl.Type, "DATETIME")) {
-			expr = "TIMESTAMP(" + col + ")"
+			expr = "TIMESTAMP(" + col + ", 'UTC')" // in UTC whatever the default_time_zone (#1456)
 		}
 	}
-	return fmt.Sprintf("CASE WHEN %s IS NULL THEN '__NULL__' WHEN %s < TIMESTAMP '1960-01-01' OR %s >= TIMESTAMP '2160-01-01' "+
+	return fmt.Sprintf("CASE WHEN %s IS NULL THEN '__NULL__' WHEN %s < TIMESTAMP '1960-01-01 00:00:00+00' OR %s >= TIMESTAMP '2160-01-01 00:00:00+00' "+
 		"THEN '__UNPARTITIONED__' ELSE FORMAT_TIMESTAMP('%s', %s, 'UTC') END", col, expr, expr, format, expr), true
 }
 

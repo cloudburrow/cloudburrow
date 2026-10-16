@@ -391,7 +391,7 @@ func (f front) flushWindow(r *http.Request, w streamWindow) string {
 	t := "TIMESTAMP '" + w.Target.Format(sqlTimestamp) + "'"
 	set := "_PARTITIONTIME = " + t
 	if w.Unit == "DAY" {
-		set += ", _PARTITIONDATE = DATE(" + t + ")"
+		set += ", _PARTITIONDATE = DATE(" + t + ", 'UTC')"
 	}
 	return f.runDML(r, "UPDATE "+quotePath([]string{projectOf(f.base), w.Dataset, w.Table})+" SET "+set+
 		" WHERE _PARTITIONTIME IS NULL")

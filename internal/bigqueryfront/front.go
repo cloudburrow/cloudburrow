@@ -1011,7 +1011,9 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 	if body != nil {
 		rd = bytes.NewReader(body)
 	}
-	req, err := http.NewRequestWithContext(r.Context(), method, u.String(), rd)
+	// The front's own request runs in UTC, whatever the client query's
+	// default_time_zone (timezone.go, #1456).
+	req, err := http.NewRequestWithContext(inUTC(r.Context()), method, u.String(), rd)
 	if err != nil {
 		return 0, nil
 	}

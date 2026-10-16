@@ -1,0 +1,55 @@
+CloudBurrow patch 37 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1456). Needs googlesqlite patch 0047.
+
+The bug: a request had no way to give the engine a default time zone, so
+BigQuery's project option default_time_zone reached no query. The patch
+reads the header X-Cloudburrow-Default-Time-Zone, which CloudBurrow's front
+sends with a query of a project that sets the option (a tz database name
+or an offset, "+05:30"), and runs the request's queries with
+googlesqlite.WithDefaultTimeZone. A request without it is unchanged.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/middleware.go
++++ b/server/middleware.go
+@@ -8,6 +8,7 @@
+ 	"strings"
+ 	"sync"
+ 
++	"github.com/goccy/googlesqlite"
+ 	"github.com/gorilla/mux"
+ 	"go.uber.org/zap"
+ 
+@@ -113,14 +114,24 @@
+ func withServerMiddleware(s *Server) func(http.Handler) http.Handler {
+ 	return func(next http.Handler) http.Handler {
+ 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+-			next.ServeHTTP(
+-				w,
+-				r.WithContext(withServer(r.Context(), s)),
+-			)
++			ctx := withServer(r.Context(), s)
++			// CloudBurrow patch (cloudburrow/cloudburrow#1456): the
++			// project's default_time_zone, which CloudBurrow's front sends
++			// with a query, is the default time zone of the engine's time
++			// functions, casts and literals for that request.
++			if zone := r.Header.Get(DefaultTimeZoneHeader); zone != "" {
++				ctx = googlesqlite.WithDefaultTimeZone(ctx, zone)
++			}
++			next.ServeHTTP(w, r.WithContext(ctx))
+ 		})
+ 	}
+ }
+ 
++// DefaultTimeZoneHeader carries a request's default time zone, a tz
++// database name or an offset ("+05:30"). CloudBurrow patch
++// (cloudburrow/cloudburrow#1456).
++const DefaultTimeZoneHeader = "X-Cloudburrow-Default-Time-Zone"
++
+ func projectIDFromParams(params map[string]string) (string, bool) {
+ 	projectID, exists := params["projectId"]
+ 	if exists {

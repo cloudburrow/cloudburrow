@@ -30,12 +30,12 @@ tracks it; a closed issue is named only where it says what was built.
 | Secret Manager | 2 | 1 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 2 | 0 | 2 | 0 | 0 |
-| BigQuery | 29 | 10 | 11 | 8 | 0 |
+| BigQuery | 30 | 11 | 11 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **60** | **13** | **28** | **13** | **6** |
+| **Total** | **61** | **14** | **28** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -216,6 +216,7 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | What #1426 leaves of `privacy_policy`: differential privacy (`SELECT WITH DIFFERENTIAL_PRIVACY`, a `differential_privacy_policy`) is 501, no noise mechanism or epsilon/delta budget (#1455); a read of a policy table or view in a subquery, CTE, another view, a script or a non-INNER join is 501 | not built yet | L |
 | What #1466 leaves of change history: `CHANGES` of a table that had a multi-statement transaction committed to it within the range is not refused; changes are kept seven days whatever the dataset's time travel window (only the window's are read) | not built yet | S |
 | Project configurations: `default_time_zone` does not reach `DATE`, `DATETIME`, `TIME`, `STRING` or `EXTRACT` given a column or other expression whose type the text does not show, `DATE_TRUNC` and the like, or a `TIMESTAMP` literal with no offset; the job and queue timeouts are stored, not enforced; `default_kms_key_name` reaches `tables.insert` only; `ALTER PROJECT` / `ALTER ORGANIZATION` inside a block, `IF` or loop of a script is 501; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows (#1456) | not built yet | S |
+| Project configurations: `default_time_zone` does not reach a string literal the analyzer coerces to a `TIMESTAMP` (`ts > '2020-01-01 00:00:00'` reads it in UTC); `default_kms_key_name` reaches `tables.insert` and a lone `CREATE TABLE`, not a table a script or a query, load or copy job makes; `ALTER PROJECT` / `ALTER ORGANIZATION` inside a block, `IF` or loop of a script is carried out in its turn (#1459), and 501 only in a dry run; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows, which Google does not document (#1456) | not built yet | S |
 | `columnNameCharacterMap` `V1` / `V2` when a detected CSV or Parquet name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix, an empty or too long name, a Parquet name with a period) and names the same once replaced are 501: BigQuery documents only that "invalid column names will be normalized" (#1457) | not documented by Google | S |
 | Autodetect: a JSON column whose values mix types BigQuery does not document detecting, `skipLeadingRows` other than 1 into a new table, and a sample with a format or `timeZone` that BigQuery's detection is not documented for, are 501; CSV header detection where BigQuery and the emulator disagree (every column `STRING`, a name that reads as a number, boolean, date or timestamp) is 501 (#1457) | not documented by Google | S |
 | CSV: a multi-character delimiter, a non-ASCII delimiter or quote in data that is not ISO-8859-1, an empty `STRING` with a `nullMarker`, a `maxBadRecords` load the emulator fails, `sourceColumnMatch` `NAME` with no row skipped (ISO-8859-1 delimiters and quotes, a quote's first byte, `skipLeadingRows` N and the header with `autodetect`, and `NAME` after skipped rows are built, #1457); JSON: a null field outside the schema, a `maxBadRecords` load the emulator fails (#1457) | no emulator support | M |
