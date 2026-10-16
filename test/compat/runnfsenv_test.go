@@ -200,15 +200,14 @@ exec httpd -f -p 8080 -h /www`
 	}
 }
 
-// covers: google.longrunning.Operations/CancelOperation
-//
 // TestRunCancelOperationAsGoogle (#1448): Cloud Run's Operations mixin
 // (run_v2.yaml) binds get, list, wait and delete, and no cancel, so the
 // official run clients have no CancelOperation. Through Google's
 // longrunning OperationsClient on the Cloud Run port it is UNIMPLEMENTED,
 // as google.longrunning documents for a server without the method, and the
 // operation it named is left as it was; REST's :cancel is a path Google does
-// not bind, 404.
+// not bind, 404. It names no covers: line, as CancelOperation is not a
+// method of Cloud Run's surface.
 func TestRunCancelOperationAsGoogle(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
