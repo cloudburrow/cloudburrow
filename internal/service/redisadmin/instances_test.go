@@ -135,7 +135,7 @@ func newCreating(t *testing.T, db store.Store) (*Server, *fakeProv, *map[string]
 	s := newTestServer(nil)
 	p := &fakeProv{running: map[string]Spec{}}
 	set := &map[string]string{}
-	s.EnableCreate(context.Background(), p, func(addr, pw string) DataPlane { return fakeData{set: set} }, db, nil)
+	s.EnableCreate(context.Background(), p, func(addr, pw, _ string) DataPlane { return fakeData{set: set} }, db, nil)
 	return s, p, set
 }
 

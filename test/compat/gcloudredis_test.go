@@ -95,3 +95,42 @@ func TestGcloudRedisExportImport(t *testing.T) {
 		t.Errorf("after gcloud import GET k = %q, %v; want v1", v, err)
 	}
 }
+
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance
+//
+// TestGcloudRedisInTransitEncryption (#1413): the real gcloud creates an
+// instance with `--transit-encryption-mode=server-authentication`, and
+// `describe` shows SERVER_AUTHENTICATION and the server CA, which a
+// go-redis TLS client trusts to reach the instance.
+func TestGcloudRedisInTransitEncryption(t *testing.T) {
+	h := New(t)
+	c, _ := memorystoreAdminClient(t, h)
+	g := newGcloudSession(t, h)
+	ctx := h.Context()
+	id := fmt.Sprintf("gcloud-tls-%d", time.Now().UnixNano()%1e8)
+	p, region := "--project="+g.project, "--region=us-central1"
+	name := "projects/" + g.project + "/locations/us-central1/instances/" + id
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = op.Wait(h.Context())
+		}
+	})
+	g.must("redis", "instances", "create", id, p, region, "--size=1", "--tier=basic", "--transit-encryption-mode=server-authentication")
+	if got := g.must("redis", "instances", "describe", id, p, region, "--format=value(transitEncryptionMode)"); strings.TrimSpace(got) != "SERVER_AUTHENTICATION" {
+		t.Errorf("describe transitEncryptionMode = %q", got)
+	}
+	ca := g.must("redis", "instances", "describe", id, p, region, "--format=value(serverCaCerts[0].cert)")
+	if !strings.Contains(ca, "BEGIN CERTIFICATE") {
+		t.Fatalf("describe serverCaCerts[0].cert = %q", ca)
+	}
+	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst.ServerCaCerts = []*redispb.TlsCertificate{{Cert: ca}} // the CA gcloud printed
+	rc := tlsRedisAt(t, inst, "")
+	defer rc.Close()
+	if err := rc.Set(ctx, "k", "v", 0).Err(); err != nil {
+		t.Errorf("SET over TLS with the CA gcloud describes: %v", err)
+	}
+}

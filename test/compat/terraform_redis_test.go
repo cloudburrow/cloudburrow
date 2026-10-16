@@ -164,3 +164,59 @@ output "read_endpoint" {
 		t.Errorf("GetInstance after destroy = %v, want NOT_FOUND", err)
 	}
 }
+
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance, google.cloud.redis.v1.CloudRedis/DeleteInstance
+//
+// TestTerraformRedisInTransitEncryption (#1413): a google_redis_instance
+// with transit_encryption_mode SERVER_AUTHENTICATION applies with the
+// official provider, its server_ca_certs output is the instance's CA, a
+// go-redis TLS client trusting it reaches the instance, the second plan
+// is empty, and destroy removes it.
+func TestTerraformRedisInTransitEncryption(t *testing.T) {
+	h := New(t)
+	c, _ := memorystoreAdminClient(t, h)
+	m := newTFModule(t)
+	ctx := h.Context()
+	id := fmt.Sprintf("tf-tls-%d", time.Now().UnixNano()%1e8)
+	name := "projects/" + m.project + "/locations/us-central1/instances/" + id
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = op.Wait(h.Context())
+		}
+	})
+	m.write(fmt.Sprintf(`
+resource "google_redis_instance" "tls" {
+  project                 = %q
+  region                  = "us-central1"
+  name                    = %q
+  tier                    = "BASIC"
+  memory_size_gb          = 1
+  transit_encryption_mode = "SERVER_AUTHENTICATION"
+}
+output "ca" {
+  value = google_redis_instance.tls.server_ca_certs[0].cert
+}
+`, m.project, id))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil {
+		t.Fatalf("GetInstance after apply: %v", err)
+	}
+	if inst.GetTransitEncryptionMode() != redispb.Instance_SERVER_AUTHENTICATION || len(inst.GetServerCaCerts()) != 1 {
+		t.Fatalf("after apply, the instance reads back as %v", inst)
+	}
+	if out := m.must("output", "-raw", "ca"); out != inst.GetServerCaCerts()[0].GetCert() {
+		t.Errorf("the provider's server_ca_certs[0].cert is not the instance's CA: %q", out)
+	}
+	rc := tlsRedisAt(t, inst, "")
+	defer rc.Close()
+	if err := rc.Set(ctx, "tf", "1", 0).Err(); err != nil {
+		t.Errorf("SET over TLS: %v", err)
+	}
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetInstance after destroy = %v, want NOT_FOUND", err)
+	}
+}

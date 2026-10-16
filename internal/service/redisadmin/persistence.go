@@ -111,7 +111,7 @@ func (p *persistence) render(now time.Time) *redispb.PersistenceConfig {
 // append-only file, and a snapshot now, so the file on disk has the data
 // at once; or, DISABLED, no save point and the mode's own AOF back.
 func (c *instances) persist(ctx context.Context, r *record, p *persistence) error {
-	dp := c.dial(r.addr, r.AuthString)
+	dp := c.dial(r.addr, r.AuthString, r.caPEM())
 	settings := map[string]string{"save": "", "appendonly": "no"}
 	dpAll := func(ctx context.Context, s map[string]string) error { return c.configAll(ctx, r, s) }
 	if s := p.seconds(); s > 0 {

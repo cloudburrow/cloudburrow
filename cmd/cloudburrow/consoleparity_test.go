@@ -422,8 +422,8 @@ var parityRows = []parityRow{
 	// Memorystore for Redis (#1302)
 	{Resource: "Memorystore instances", Service: "memorystore",
 		Methods:  []string{"CloudRedis/ListInstances", "CloudRedis/GetInstance", "CloudRedis/CreateInstance", "CloudRedis/UpdateInstance", "CloudRedis/DeleteInstance"},
-		Provider: "memorystore", Offers: "Instances list (location, version, endpoint, tier, capacity, AUTH, state) read through ListInstances; an instance's page; Create instance (ID, display name, region, capacity, AUTH, labels, Redis configs); Edit (display name, capacity, labels, Redis configs); Delete; and Flush (FLUSHALL, confirmed) on the instance `up` runs",
-		Tests: []string{"TestConsoleMemorystoreFlush", "TestConsoleMemorystoreCreateEditDelete"}},
+		Provider: "memorystore", Offers: "Instances list (location, version, endpoint, tier, capacity, AUTH, state) read through ListInstances; an instance's page; Create instance (ID, display name, region, capacity, AUTH, labels, Redis configs); Edit (display name, capacity, labels, Redis configs); Delete; and Flush (FLUSHALL, confirmed) on the instance `up` runs; Create instance's Enable in-transit encryption (SERVER_AUTHENTICATION), and an instance's In-transit encryption and Server CA tab with server_ca_certs' PEM, serial, fingerprint and expiry (#1413)",
+		Tests: []string{"TestConsoleMemorystoreFlush", "TestConsoleMemorystoreCreateEditDelete", "TestConsoleMemorystoreInTransitEncryption"}},
 	{Resource: "Memorystore AUTH string", Service: "memorystore",
 		Methods:  []string{"CloudRedis/GetInstanceAuthString"},
 		Provider: "memorystore", Offers: "the AUTH string on the page of an instance with AUTH",

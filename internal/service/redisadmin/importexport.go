@@ -114,7 +114,7 @@ func (s *Server) ExportInstance(ctx context.Context, req *redispb.ExportInstance
 	c.mu.Lock()
 	r := c.byID[req.GetName()]
 	op, err := c.claim(r, "export")
-	addr, auth, server := r.addr, r.AuthString, r.dataServer()
+	addr, auth, server := r.addr, r.access(), r.dataServer()
 	c.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func (s *Server) ExportInstance(ctx context.Context, req *redispb.ExportInstance
 
 // snapshot is the server's data as an RDB file: BGSAVE, then the file.
 func (c *instances) snapshot(ctx context.Context, sh Shell, server, addr, auth string) ([]byte, error) {
-	file, err := c.dial(addr, auth).Save(ctx)
+	file, err := c.dialKey(addr, auth).Save(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (s *Server) ImportInstance(ctx context.Context, req *redispb.ImportInstance
 	if err == nil {
 		r.state = redispb.Instance_IMPORTING
 	}
-	addr, auth, server, bin := r.addr, r.AuthString, r.dataServer(), r.binary()
+	addr, auth, server, bin := r.addr, r.access(), r.dataServer(), r.binary()
 	c.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -204,7 +204,7 @@ func (c *instances) load(ctx context.Context, sh Shell, server, bin, addr, auth 
 		case <-time.After(savePoll):
 		}
 	}
-	return c.dial(addr, auth).Load(ctx, "127.0.0.1", importPort)
+	return c.dialKey(addr, auth).Load(ctx, "127.0.0.1", importPort)
 }
 
 // lastLine is the last line of a program's output, or its error.
@@ -268,4 +268,13 @@ func (c *instances) cancel(op string) bool {
 		f()
 	}
 	return ok
+}
+
+// access is the AUTH string and CA of r, as snapshot and load take them.
+func (r *record) access() string { return r.AuthString + "\x00" + r.caPEM() }
+
+// dialKey dials addr with an access key.
+func (c *instances) dialKey(addr, key string) DataPlane {
+	auth, ca, _ := strings.Cut(key, "\x00")
+	return c.dial(addr, auth, ca)
 }
