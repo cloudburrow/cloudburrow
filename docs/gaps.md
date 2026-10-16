@@ -23,19 +23,19 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Storage | 5 | 0 | 4 | 1 | 0 |
 | Pub/Sub | 2 | 0 | 0 | 1 | 1 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 7 | 3 | 3 | 0 | 1 |
+| Cloud Run | 2 | 0 | 1 | 0 | 1 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 1 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
-| Vertex AI | 5 | 0 | 5 | 0 | 0 |
+| Vertex AI | 2 | 0 | 2 | 0 | 0 |
 | BigQuery | 27 | 7 | 12 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
-| Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **66** | **13** | **34** | **13** | **6** |
+| **Total** | **60** | **12** | **29** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -98,13 +98,7 @@ and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_R
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud Build: `options.dynamicSubstitutions`, `secretEnv` on a docker build, docker push or pack step, `ApproveBuild` and `approvalRequired`, and triggers with a repository or Pub/Sub source or a `filename` are refused; Artifact Registry: 27 methods `UNIMPLEMENTED` (rules, attachments, Maven, npm, Python, Apt and Yum artifacts, project and VPC-SC settings, package, version and file updates; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | not built yet | M |
-| Cloud Storage FUSE and NFS volumes on services and jobs are refused `UNIMPLEMENTED` naming the field (#1448) | no emulator support (Knative refuses a privileged container and CSI volumes) | M |
-| A service's container sees `K_SERVICE`, `K_CONFIGURATION` and `K_REVISION` as the scoped Knative names, not Cloud Run's service and revision IDs, which the API reports (#1448) | no emulator support (Knative reserves the three variables) | S |
-| `CancelOperation`: a deployment in flight cannot be recalled (#1448) | no emulator support | S |
-| Cloud Build: triggers with a repository or Pub/Sub source or a `filename` are refused 501 with the reason (they need a hosted git service or a Google-owned subscription). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | built; the rest is refused with its reason (a hosted git service, a Google-owned subscription, or package formats not served) | M |
-| v1 (Knative) API: a domain mapping never becomes Ready, as no DNS is served and no certificate issued; a job's own `spec.template.spec.delayExecution` is 501, and a run's `overrides.delayExecution` is not read back on the execution, as v2 has no field for either (#1450) | not built yet | S |
-| Cloud Build: `options.dynamicSubstitutions`, `secretEnv` on a docker build, docker push or pack step, `ApproveBuild` and `approvalRequired`, and triggers with a repository or Pub/Sub source or a `filename` are refused; Artifact Registry: 27 methods `UNIMPLEMENTED` (rules, attachments, Maven, npm, Python, Apt and Yum artifacts, project and VPC-SC settings, package, version and file updates; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | not built yet | M |
+| Cloud Build: triggers with a repository or Pub/Sub source or a `filename` are refused 501 with the reason (they need a hosted git service or a Google-owned subscription). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | no emulator support: built; the rest is refused with its reason (a hosted git service, a Google-owned subscription, or package formats not served) | M |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
 
 ## Cloud Scheduler
@@ -178,11 +172,7 @@ over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`
 | Gap | Why open | Size |
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1454) | no emulator support (one text-only model) | S |
-| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served (#1454, #1477) | no emulator support: a model's container is deployed with its HTTP ports only; its `grpcPorts` are not deployed (#1477) | M |
 | `Explain` with integrated gradients, XRAI or examples (#1454); Sampled Shapley is served | no emulator support: they need the model's gradients or an Example index, which a custom container's predict route does not expose | L |
-| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served: Cloud Run serves an `h2c` port (#1475), but a model's `grpcPorts` are not deployed (#1454) | no emulator support (no gRPC model server) | M |
-| `Explain` (#1454) | no emulator support | L |
-| `Explain` with integrated gradients, XRAI or examples (#1454); Sampled Shapley is served | they need the model's gradients or an Example index, which a custom container's predict route does not expose | L |
 
 ## BigQuery
 
