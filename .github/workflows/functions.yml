@@ -1,5 +1,8 @@
-# The eleven gated Functions tests, with the ungated TestFunctionsAPI and
-# the gated halves of TestGcloudFunctions and TestTerraformCloudFunctions2Function (#1377) (#678; TestFunctionsSubmitBuildBuildpacks since #1268;
+# The twelve gated Functions tests, with the ungated TestFunctionsAPI and
+# TestFunctionsEventTriggers, and the gated halves of TestGcloudFunctions and
+# TestTerraformCloudFunctions2Function (#1377) and TestGcloudFunctionsEventTriggers
+# (#1414) (#678; TestFunctionsSubmitBuildBuildpacks since #1268;
+# TestFunctionsEventTriggerBuilds since #1414;
 # TestFunctionsNodejsBuiltWithBuildpacks and TestFunctionsPythonBuiltWithBuildpacks
 # since #1303; the Java, Ruby, PHP and .NET ones since #1319), on demand:
 # TestFunctionsFrameworkBuiltWithBuildpacks builds testdata/function with the
@@ -37,9 +40,11 @@ jobs:
     # amd64: the Google builder publishes linux/amd64 only, and
     # TestFunctionsFrameworkBuiltWithBuildpacks skips on any other node.
     runs-on: ubuntu-latest
-    # 140: ten tests, eight of which build their fixture twice (#1319), and
-    # gcloud's and Terraform's builds of testdata/function (#1377).
-    timeout-minutes: 140
+    # 165: ten tests, eight of which build their fixture twice (#1319),
+    # gcloud's and Terraform's builds of testdata/function (#1377), and four
+    # more of it with event triggers, two through the client and two through
+    # gcloud (#1414).
+    timeout-minutes: 165
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -132,16 +137,23 @@ jobs:
           # set, none a port of 0. An assignment, not eval "$(...)", so a
           # failure fails the step.
           ./bin/cloudburrow env "${CB[@]}" --format json > env.json
+          # And Service Usage and Resource Manager, which the run shard does
+          # not export: gcloud functions deploy reads both once a deploy
+          # succeeds, and the harness points gcloud at only the services it
+          # names (run 38919482569). This job runs only the Functions tests, so
+          # neither suite runs twice.
+          TEST_VARS+=,SERVICEUSAGE,RESOURCEMANAGER
           COMPAT_ENV=$(scripts/compat-env.sh --strict --only "$TEST_VARS" --env-json env.json \
             --cli "$PWD/bin/cloudburrow" --gcloud "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" -- "${CB[@]}")
           eval "$COMPAT_ENV"
 
-          # The Functions tests, and gcloud's and Terraform's deploys of the
-          # same fixture (#1377).
-          TESTS='TestFunctions|^TestGcloudFunctions$|^TestTerraformCloudFunctions2Function$'
+          # The Functions tests, gcloud's and Terraform's deploys of the
+          # same fixture (#1377), and its event triggers through the client
+          # and gcloud (#1414).
+          TESTS='TestFunctions|^TestGcloudFunctions$|^TestGcloudFunctionsEventTriggers$|^TestTerraformCloudFunctions2Function$'
           set -o pipefail
           rc=0
-          CLOUDBURROW_TEST_FUNCTIONS=1 go test -tags compat -count=1 -timeout 120m -run "$TESTS" -v ./test/compat/ | tee functions.log || rc=1
+          CLOUDBURROW_TEST_FUNCTIONS=1 go test -tags compat -count=1 -timeout 145m -run "$TESTS" -v ./test/compat/ | tee functions.log || rc=1
           # go test exits 0 when a test skips, and each of these skips
           # without the gate, a tool or amd64 nodes, so every selected test
           # must have passed: the acceptance shard's all_passed in ci.yml,

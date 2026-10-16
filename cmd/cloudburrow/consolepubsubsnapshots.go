@@ -15,8 +15,9 @@ package main
 //   - CreateSnapshot answers with the snapshot and an expiry, and does not
 //     keep labels: a snapshot created with labels reads back with none. The
 //     form therefore asks for no labels and its help says why.
-//   - UpdateSnapshot is UNIMPLEMENTED (TestPubSubUpdateSnapshotIsRefused), so
-//     a snapshot page offers no edit and says so.
+//   - UpdateSnapshot is UNIMPLEMENTED in the emulator; CloudBurrow's
+//     Pub/Sub front applies its labels and an earlier expiry (#1406,
+//     TestPubSubUpdateSnapshot), so a snapshot page offers Edit snapshot.
 //   - Seek to a snapshot marks unacknowledged the messages the snapshot held
 //     unacknowledged and every message published after it, so they are
 //     redelivered; a snapshot of another topic is refused FAILED_PRECONDITION.
@@ -38,6 +39,7 @@ import (
 	vkit "cloud.google.com/go/pubsub/v2/apiv1"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/api/iterator"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -45,13 +47,12 @@ import (
 
 const (
 	actCreateSnapshot = "create-snapshot"
-	actSeekSnapshot   = "seek-snapshot"
-	actSeekTime       = "seek-time"
+	// actDetachSubscription detaches the subscription from its topic
+	// (#1406), which CloudBurrow's Pub/Sub front carries out.
+	actDetachSubscription = "detach-subscription"
+	actSeekSnapshot       = "seek-snapshot"
+	actSeekTime           = "seek-time"
 )
-
-// pubsubSnapshotEditRefusal is the emulator's answer to UpdateSnapshot, word
-// for word, as TestPubSubUpdateSnapshotIsRefused asserts it.
-const pubsubSnapshotEditRefusal = "Method google.pubsub.v1.Subscriber/UpdateSnapshot is unimplemented"
 
 // pubsubSnapshotLabelsDropped is why Create snapshot asks for no labels.
 const pubsubSnapshotLabelsDropped = "Labels are not asked for: this emulator's CreateSnapshot accepts them " +
@@ -168,16 +169,13 @@ func (p pubsubSnapshotsProvider) Detail(ctx context.Context, project string, pat
 	subs.Total = len(subs.Items)
 	subs.Note = "Seek to this snapshot from a subscription's page. Only subscriptions of the snapshot's topic can seek to it."
 
-	config := []console.Property{
-		{Label: "Edit", Value: "Not offered: this emulator's UpdateSnapshot answers UNIMPLEMENTED (\"" +
-			pubsubSnapshotEditRefusal + "\"), so a snapshot's labels and expiry cannot be changed."},
-	}
-	groups := []console.PropertyGroup{{Heading: "Snapshot", Properties: config}}
+	var groups []console.PropertyGroup
 	if len(s.GetLabels()) > 0 {
 		groups = append(groups, console.PropertyGroup{Heading: "Labels", Properties: sortedPairs(s.GetLabels())})
 	}
 
 	return console.Detail{
+		Edit: snapshotEditForm(s),
 		Summary: []console.Property{
 			{Label: "Snapshot", Value: s.GetName()},
 			{Label: "Topic", Value: orDash(s.GetTopic())},
@@ -249,8 +247,15 @@ const (
 		"redelivered."
 )
 
+// detachConfirm is what Detach from topic puts at risk, in Google's words
+// (Publisher.DetachSubscription).
+const detachConfirm = "Detaching drops every message the subscription retains, and it receives nothing published " +
+	"from now on: pulls from it fail FAILED_PRECONDITION and pushes stop. The subscription is kept, detached, " +
+	"until you delete it. This cannot be undone."
+
 // DetailActions implements console.PathActor for a subscription's page:
-// Create snapshot, Seek to one of its topic's snapshots or to a time, and
+// Create snapshot, Detach from topic (#1406), Seek to one of its topic's
+// snapshots or to a time, and
 // Advance clock (CloudBurrow extension, #1040; consolepubsubclock.go).
 //
 // Only Advance clock is offered on a subscription whose topic was deleted or
@@ -297,6 +302,10 @@ func (p pubsubSubscriptionsProvider) DetailActions(ctx context.Context, project 
 		})
 	}
 
+	actions = append(actions, console.Action{
+		ID: actDetachSubscription, Label: "Detach from topic", Destructive: true, Confirm: detachConfirm,
+	})
+
 	retained := "This subscription does not retain acknowledged messages, so seeking back replays only the unacknowledged ones."
 	if s.GetRetainAckedMessages() {
 		retained = "This subscription retains acknowledged messages, so seeking back replays them too."
@@ -330,6 +339,10 @@ func (p pubsubSubscriptionsProvider) ActAt(ctx context.Context, project string, 
 	defer func() { _ = c.Close() }()
 
 	switch action {
+	case actDetachSubscription:
+		_, err := c.TopicAdminClient.DetachSubscription(ctx, &pubsubpb.DetachSubscriptionRequest{Subscription: sub})
+		return err
+
 	case actCreateSnapshot:
 		id := strings.TrimSpace(values["name"])
 		if id == "" {
@@ -376,3 +389,67 @@ var (
 	_ console.Deleter   = pubsubSnapshotsProvider{}
 	_ console.PathActor = pubsubSubscriptionsProvider{}
 )
+
+// snapshotEditForm is Edit snapshot (#1406): its labels and its expiry,
+// which UpdateSnapshot changes. The emulator refuses UpdateSnapshot;
+// CloudBurrow's Pub/Sub front applies it.
+func snapshotEditForm(s *pubsubpb.Snapshot) *console.EditForm {
+	expiry := ""
+	if t := s.GetExpireTime(); t != nil {
+		expiry = t.AsTime().UTC().Format(time.RFC3339)
+	}
+	return &console.EditForm{
+		Label: "Edit snapshot",
+		Fields: []console.Field{
+			labelsField(s.GetLabels(), ""),
+			{Name: "expireTime", Label: "Expires (RFC 3339)", Type: "text", Default: expiry,
+				Help: "Such as 2026-01-02T15:04:05Z: in the future, and no later than the snapshot's current expiry, " +
+					"since Google keeps a snapshot at most 7 days from its creation. The snapshot is deleted then. " +
+					"Applied by CloudBurrow's Pub/Sub front, since the emulator refuses UpdateSnapshot."},
+		},
+		Note: "A snapshot's topic and the messages it holds are fixed when it is created.",
+	}
+}
+
+// Edit implements console.Editor for a snapshot through UpdateSnapshot,
+// naming in its mask only what the form changed.
+func (p pubsubSnapshotsProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
+	if len(path) != 1 || !strings.HasPrefix(path[0], "projects/"+project+"/snapshots/") {
+		return fmt.Errorf("%v is not a snapshot of project %s", path, project)
+	}
+	c, err := p.topics().client(ctx, project)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Close() }()
+	cur, err := c.SubscriptionAdminClient.GetSnapshot(ctx, &pubsubpb.GetSnapshotRequest{Snapshot: path[0]})
+	if err != nil {
+		return err
+	}
+	next := &pubsubpb.Snapshot{Name: path[0]}
+	var paths []string
+	l, changed, err := changedLabels(values, cur.GetLabels())
+	if err != nil {
+		return err
+	}
+	if changed {
+		next.Labels = l
+		paths = append(paths, "labels")
+	}
+	if raw, ok := values["expireTime"]; ok && strings.TrimSpace(raw) != "" {
+		at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw))
+		if err != nil {
+			return fmt.Errorf("expires: %q is not an RFC 3339 time", raw)
+		}
+		if cur.GetExpireTime() == nil || !at.Equal(cur.GetExpireTime().AsTime()) {
+			next.ExpireTime = timestamppb.New(at)
+			paths = append(paths, "expire_time")
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	_, err = c.SubscriptionAdminClient.UpdateSnapshot(ctx, &pubsubpb.UpdateSnapshotRequest{
+		Snapshot: next, UpdateMask: &fieldmaskpb.FieldMask{Paths: paths}})
+	return err
+}

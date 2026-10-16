@@ -182,7 +182,7 @@ func (f *Front) restAnswer(resp *http.Response) error {
 	rewrite := f.rewriteJSON
 	name, _, one := topicPath(resp.Request.URL.Path)
 	if kind == "topics" {
-		rewrite = f.withLabelsJSON
+		rewrite = f.withTopicJSON
 	} else {
 		_, name, _, one = restPath(resp.Request.URL.Path)
 	}

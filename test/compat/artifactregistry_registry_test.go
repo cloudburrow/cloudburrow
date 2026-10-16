@@ -98,7 +98,7 @@ func registryOptions(h *Harness) []crane.Option {
 // the registry no longer knows the name.
 func TestArtifactRegistryDockerRegistry(t *testing.T) {
 	h := New(t)
-	ctx, cancel := context.WithTimeout(h.Context(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	t.Cleanup(cancel)
 	parent := runParent(h)
 	ar, err := artifactregistry.NewClient(ctx, runClientOptions(h)...)
@@ -316,7 +316,7 @@ func collectAll[T any](t *testing.T, next func() (T, error)) []T {
 // same digest.
 func TestGcloudArtifactsDockerImages(t *testing.T) {
 	h := New(t)
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	t.Cleanup(cancel)
 	parent := runParent(h)
 	ar, err := artifactregistry.NewClient(ctx, runClientOptions(h)...)

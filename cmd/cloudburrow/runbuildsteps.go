@@ -175,14 +175,28 @@ func (w *hostWorkspace) RunStep(ctx context.Context, spec runadapter.StepSpec) e
 	for _, e := range spec.Env {
 		args = append(args, "-e", e)
 	}
+	// A secret is passed as -e NAME, which docker reads from its own
+	// environment, so its value is on no command line (#1407).
+	secretEnv := os.Environ()
+	for _, k := range sortedKeys(spec.Secrets) {
+		args = append(args, "-e", k)
+		secretEnv = append(secretEnv, k+"="+spec.Secrets[k])
+	}
 	if spec.Entrypoint != "" {
 		args = append(args, "--entrypoint", spec.Entrypoint)
 	}
 	args = append(append(args, spec.Image), spec.Args...)
-	if _, err := w.b.dockerOut(ctx, args...); err != nil {
-		return err
+	create := exec.CommandContext(ctx, "docker", args...)
+	create.Env = secretEnv
+	if out, err := create.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker create: %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	defer exec.Command("docker", "rm", "-f", "-v", name).Run()
+	if spec.Script != "" {
+		if err := copyScript(ctx, name, spec.Script); err != nil {
+			return fmt.Errorf("write the step's script: %w", err)
+		}
+	}
 	// docker start -a ends with the container's exit; a cancelled build or
 	// timed-out step kills the container, which the CLI alone would not.
 	start := exec.Command("docker", "start", "-a", name)
@@ -289,4 +303,31 @@ func (w *hostWorkspace) Close() {
 		_, _ = w.b.dockerOut(ctx, "volume", "rm", "-f", v)
 	}
 	releaseStepNetwork(w.b)
+}
+
+// copyScript writes a step's script into its created container at
+// runadapter.ScriptPath, executable, so its #! line is honoured.
+func copyScript(ctx context.Context, container, script string) error {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	dir, file := path.Split(strings.TrimPrefix(runadapter.ScriptPath, "/"))
+	now := time.Now()
+	if err := tw.WriteHeader(&tar.Header{Name: dir, Typeflag: tar.TypeDir, Mode: 0o755, ModTime: now}); err != nil {
+		return err
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: dir + file, Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(script)), ModTime: now}); err != nil {
+		return err
+	}
+	if _, err := tw.Write([]byte(script)); err != nil {
+		return err
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	cp := exec.CommandContext(ctx, "docker", "cp", "-", container+":/")
+	cp.Stdin = &buf
+	if out, err := cp.CombinedOutput(); err != nil {
+		return fmt.Errorf("docker cp: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }

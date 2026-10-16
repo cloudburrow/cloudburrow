@@ -24,8 +24,10 @@ const (
 
 // TailLogEntries streams entries as they are written (#1215).
 //
-// The first request on the stream sets resource_names (parents, whose own
-// entries are sent, #1395: a bucket view is INVALID_ARGUMENT here), filter (the same subset as
+// The first request on the stream sets resource_names (parents, whose
+// _Default bucket's entries are sent, #1395, or bucket views, whose
+// bucket's entries the view's filter matches, #1410, resolved as
+// ListLogEntries resolves them), filter (the same subset as
 // ListLogEntries, filter.go) and buffer_window. Only entries written after
 // the stream opened are sent: a tail is not a read of history. Matching
 // entries are held for buffer_window and sent as one response ordered by
@@ -43,42 +45,65 @@ func (s *Server) TailLogEntries(stream loggingpb.LoggingServiceV2_TailLogEntries
 	if err != nil {
 		return err
 	}
-	if len(req.GetResourceNames()) == 0 {
-		return apierror.Wrap(apierror.InvalidArgument("resource_names is required"))
+	sources, match, window, err := s.tailSpec(req)
+	if err != nil {
+		return err
 	}
-	projects := map[parent]bool{}
-	for _, r := range req.GetResourceNames() {
-		p, err := s.admin.resolve("resource name", r)
-		if err != nil {
-			return apierror.Wrap(err)
-		}
-		projects[p] = true
+	return s.tail(stream, sources, match, window)
+}
+
+// tailSpec checks a tail's first request: what it reads, its filter and its
+// buffer window.
+func (s *Server) tailSpec(req *loggingpb.TailLogEntriesRequest) ([]source, pred, time.Duration, error) {
+	if len(req.GetResourceNames()) == 0 {
+		return nil, nil, 0, apierror.Wrap(apierror.InvalidArgument("resource_names is required"))
+	}
+	if len(req.GetResourceNames()) > 100 {
+		return nil, nil, 0, apierror.Wrap(apierror.InvalidArgument("resource_names: at most 100 resources, not %d", len(req.GetResourceNames())))
+	}
+	sources, err := s.sources(req.GetResourceNames())
+	if err != nil {
+		return nil, nil, 0, apierror.Wrap(err)
 	}
 	if len(req.GetFilter()) > MaxTailFilterLength {
-		return apierror.Wrap(apierror.InvalidArgument("filter is %d characters, over the %d-character limit",
+		return nil, nil, 0, apierror.Wrap(apierror.InvalidArgument("filter is %d characters, over the %d-character limit",
 			len(req.GetFilter()), MaxTailFilterLength))
 	}
 	match, err := compile(req.GetFilter())
 	if err != nil {
-		return apierror.Wrap(err)
+		return nil, nil, 0, apierror.Wrap(err)
 	}
 	window := DefaultTailBufferWindow
 	if bw := req.GetBufferWindow(); bw != nil {
 		if err := bw.CheckValid(); err != nil {
-			return apierror.Wrap(apierror.InvalidArgument("buffer_window: %v", err))
+			return nil, nil, 0, apierror.Wrap(apierror.InvalidArgument("buffer_window: %v", err))
 		}
 		window = bw.AsDuration()
 		if window < 0 || window > MaxTailBufferWindow {
-			return apierror.Wrap(apierror.InvalidArgument("buffer_window %s must be between 0 and 60s", window))
+			return nil, nil, 0, apierror.Wrap(apierror.InvalidArgument("buffer_window %s must be between 0 and 60s", window))
 		}
 	}
+	return sources, match, window, nil
+}
+
+// tail streams what sources hold and match passes, written from now on.
+func (s *Server) tail(stream loggingpb.LoggingServiceV2_TailLogEntriesServer, sources []source, match pred, window time.Duration) error {
 
 	ctx := stream.Context()
 	var mu sync.Mutex
 	var pending []*loggingpb.LogEntry
 	wake := make(chan struct{}, 1)
 	cancel := s.store.subscribe(func(e *loggingpb.LogEntry) {
-		if !projects[entryParent(e)] || !match(e) {
+		if !match(e) {
+			return
+		}
+		in := false
+		for _, src := range sources {
+			if in = s.store.inBucket(src.bucket, e) && src.holds(e, s.clock()); in {
+				break
+			}
+		}
+		if !in {
 			return
 		}
 		mu.Lock()

@@ -34,7 +34,8 @@ import (
 // CloudBurrow method on the Pub/Sub port, and not part of the Pub/Sub API.
 // Every idle subscription of every test sees the same clock, so the tests
 // that use it keep their total advance far below the 31-day default ttl.
-func advancePubSubClock(t *testing.T, h *Harness, d time.Duration) {
+// It returns the front's time after the advance; an advance of 0 reads it.
+func advancePubSubClock(t *testing.T, h *Harness, d time.Duration) time.Time {
 	t.Helper()
 	conn, err := grpc.NewClient(h.Endpoint(EnvPubSub), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -45,6 +46,7 @@ func advancePubSubClock(t *testing.T, h *Harness, d time.Duration) {
 	if err := conn.Invoke(h.Context(), pubsubfront.ClockMethod, durationpb.New(d), &now); err != nil {
 		t.Fatalf("advance the Pub/Sub clock by %s: %v", d, err)
 	}
+	return now.AsTime()
 }
 
 // listedSubscriptions is the project's subscriptions. Listing names no

@@ -13,10 +13,10 @@ package main
 //
 // What the pinned emulator does, measured against it and asserted by
 // TestConsolePubSubSchemas:
-//   - Protocol Buffer schemas are refused: ValidateSchema, CreateSchema and
-//     CommitSchema of type PROTOCOL_BUFFER answer UNIMPLEMENTED "Protocol
-//     buffer support not implemented in emulator". The forms therefore offer
-//     Avro only, and say why.
+//   - Protocol Buffer schemas are refused by the emulator, UNIMPLEMENTED
+//     "Protocol buffer support not implemented in emulator"; CloudBurrow's
+//     Pub/Sub front serves them itself (internal/pubsubfront,
+//     protobufschemas.go, #1406), so the create form offers both types.
 //   - A definition that is not Avro is refused INVALID_ARGUMENT "Could not
 //     parse schema definition", by ValidateSchema as by CreateSchema and
 //     CommitSchema; the console asks ValidateSchema first, so nothing is
@@ -58,14 +58,10 @@ const (
 	actDeleteSchemaRevision = "delete-revision"
 )
 
-// pubsubProtobufRefusal is the emulator's answer to a Protocol Buffer schema,
-// word for word, as TestConsolePubSubSchemas asserts it.
-const pubsubProtobufRefusal = "Protocol buffer support not implemented in emulator"
-
-// pubsubSchemaAvroOnly is why the forms take an Avro definition and offer no
-// type.
-const pubsubSchemaAvroOnly = "Avro only: this emulator refuses Protocol Buffer schemas as UNIMPLEMENTED (\"" +
-	pubsubProtobufRefusal + "\")."
+// schemaTypes are the types the create form offers: AVRO, which the
+// emulator serves, and PROTOCOL_BUFFER, which CloudBurrow's Pub/Sub front
+// serves (#1406).
+var schemaTypes = []string{"AVRO", "PROTOCOL_BUFFER"}
 
 // deletedSchema is the schema Pub/Sub reports for a topic whose schema has
 // been deleted.
@@ -160,10 +156,25 @@ func (pubsubSchemasProvider) CreateForm() (string, []console.Field) {
 		},
 		{
 			Name: "definition", Label: "Definition", Type: "textarea", Required: true,
-			Help: "An Avro schema, in JSON. " + pubsubSchemaAvroOnly +
-				" The definition is checked with ValidateSchema first, and one it refuses is not created.",
+			Help: "An Avro schema, in JSON, or a Protocol Buffer definition (proto2 or proto3, one top-level message, " +
+				"no imports). The definition is checked with ValidateSchema first, and one it refuses is not created.",
+		},
+		{
+			Name: "type", Label: "Type", Type: "select", Options: schemaTypes, Default: "AVRO",
+			Help: "Protocol Buffer schemas are served by CloudBurrow's Pub/Sub front, as the emulator refuses them.",
 		},
 	}
+}
+
+// schemaTypeOf is the type a form chose; none is AVRO.
+func schemaTypeOf(v string) (pubsubpb.Schema_Type, error) {
+	switch strings.TrimSpace(v) {
+	case "", "AVRO":
+		return pubsubpb.Schema_AVRO, nil
+	case "PROTOCOL_BUFFER":
+		return pubsubpb.Schema_PROTOCOL_BUFFER, nil
+	}
+	return 0, fmt.Errorf("schema type %q is neither AVRO nor PROTOCOL_BUFFER", v)
 }
 
 // validateSchema asks the API whether a definition is one it accepts. Its
@@ -191,13 +202,17 @@ func (p pubsubSchemasProvider) Create(ctx context.Context, project string, value
 	}
 	defer func() { _ = c.Close() }()
 
+	typ, err := schemaTypeOf(values["type"])
+	if err != nil {
+		return "", err
+	}
 	definition := values["definition"]
-	if err := validateSchema(ctx, c, project, pubsubpb.Schema_AVRO, definition); err != nil {
+	if err := validateSchema(ctx, c, project, typ, definition); err != nil {
 		return "", err
 	}
 	s, err := c.CreateSchema(ctx, &pubsubpb.CreateSchemaRequest{
 		Parent: "projects/" + project, SchemaId: id,
-		Schema: &pubsubpb.Schema{Type: pubsubpb.Schema_AVRO, Definition: definition},
+		Schema: &pubsubpb.Schema{Type: typ, Definition: definition},
 	})
 	if err != nil {
 		return "", err
@@ -356,7 +371,7 @@ func (p pubsubSchemasProvider) DetailActions(ctx context.Context, project string
 	return []console.Action{
 		{ID: actCommitSchema, Label: "Commit revision", Fields: []console.Field{{
 			Name: "definition", Label: "Definition", Type: "textarea", Required: true, Default: s.GetDefinition(),
-			Help: "The new revision's Avro definition, prefilled with the latest. It becomes the latest revision; " +
+			Help: "The new revision's definition, of the schema's type, prefilled with the latest. It becomes the latest revision; " +
 				"the others are kept. Checked with ValidateSchema first, and one it refuses is not committed.",
 		}}},
 		{ID: actTestMessage, Label: "Test message", Fields: []console.Field{
