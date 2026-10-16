@@ -96,7 +96,7 @@ func hasControlFlow(sql string) bool {
 		!strings.Contains(upper, "REPEAT") && !strings.Contains(upper, "FOR") && !strings.Contains(upper, "CASE") &&
 		!strings.Contains(upper, "EXCEPTION") && !strings.Contains(upper, "RAISE") && !strings.Contains(upper, "PROCEDURE") &&
 		!strings.Contains(upper, "CALL") && !strings.Contains(upper, "ALTER") && !strings.Contains(upper, "TRAN") &&
-		!strings.Contains(upper, "VIEW") {
+		!strings.Contains(upper, "VIEW") && !strings.Contains(upper, "OPTIONS") {
 		return false
 	}
 	toks, ok := lex(sql)
@@ -124,10 +124,17 @@ func hasControlFlow(sql string) bool {
 		}
 	}
 	temp := tokensHaveTemp(toks)
+	stmts := 0
+	for _, stmt := range splitStatements(toks) {
+		if len(stmt) > 0 && !(len(stmt) == 1 && stmt[0].punct(";")) {
+			stmts++
+		}
+	}
 	for _, stmt := range splitStatements(toks) {
 		if body, block, handler := stripControlFlow(stmt); block != "" || handler || len(body) > 0 && body[0].is("RAISE") ||
 			isProcedureStatement(body) || isAlterTable(body) || // #1217, procedures.go; #1227, altertable.go
-			!temp && isViewColumnList(sql, body) { // #1323, viewcolumns.go
+			!temp && isViewColumnList(sql, body) || // #1323, viewcolumns.go
+			!temp && stmts > 1 && hasDDLOptions(sql, body) { // #1390, ddloptions.go; a lone one is runQuery's
 			return true
 		}
 	}

@@ -23,7 +23,7 @@ func TestParseDDLOptions(t *testing.T) {
 		{sql: "CREATE VIEW ds.v OPTIONS(expiration_timestamp=TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)) AS SELECT 1", ok: true, exp: "TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)", view: true},
 		{sql: "CREATE TABLE ds.t LIKE ds.src OPTIONS(description='liked')", ok: true, desc: "liked"},
 		{sql: "ALTER VIEW IF EXISTS ds.v SET OPTIONS(friendly_name='n')", ok: true, friendly: "n", alter: true, view: true},
-		{sql: "CREATE TABLE ds.t OPTIONS(partition_expiration_days=1, description='d')", ok: true, desc: "d", msg: "partition_expiration_days"},
+		{sql: "CREATE TABLE ds.t OPTIONS(require_partition_filter=true, description='d')", ok: true, desc: "d", msg: "require_partition_filter"},
 		{sql: "CREATE TABLE ds.t OPTIONS(description=CONCAT('a','b'))", ok: true, msg: "string literal"},
 		{sql: "CREATE TABLE ds.t AS SELECT 1 AS x", ok: false},
 		{sql: "CREATE TABLE ds.t AS SELECT * FROM ML.PREDICT(MODEL m, TABLE t, STRUCT() AS OPTIONS)", ok: false},
@@ -73,5 +73,35 @@ func TestParseDDLOptions(t *testing.T) {
 	d, _, _ := parseDDLOptions("ALTER VIEW ds.v SET OPTIONS(description=NULL, labels=[])")
 	if !d.clearDescription || !d.hasLabels || len(d.labels) != 0 {
 		t.Errorf("ALTER clearing: got %+v", d)
+	}
+}
+
+// TestScriptWithDDLOptions (#1390): a script with a CREATE or ALTER VIEW
+// with OPTIONS is carried out a statement at a time; a lone one is not (it
+// is runQuery's, and would send itself again), nor one with a TEMP table.
+func TestScriptWithDDLOptions(t *testing.T) {
+	for sql, want := range map[string]bool{
+		"CREATE TABLE ds.t (x INT64) OPTIONS (description = 'd')":                                                false,
+		"CREATE TABLE ds.t (x INT64) OPTIONS (description = 'd');":                                               false,
+		"SELECT 1; CREATE TABLE ds.t (x INT64) OPTIONS (description = 'd')":                                      true,
+		"CREATE VIEW ds.v AS SELECT 1 AS a; ALTER VIEW ds.v SET OPTIONS (description = 'd')":                     true,
+		"SELECT 1; CREATE TABLE ds.t (x INT64)":                                                                  false,
+		"CREATE TEMP TABLE x AS SELECT 1 AS a; CREATE TABLE ds.t OPTIONS (description = 'd') AS SELECT * FROM x": false,
+	} {
+		if got := hasControlFlow(sql); got != want {
+			t.Errorf("hasControlFlow(%q) = %v, want %v", sql, got, want)
+		}
+	}
+}
+
+// TestTempScriptWithDDLOptions (#1390): a script with a TEMP table and a
+// table's OPTIONS is 501, as the emulator would drop them.
+func TestTempScriptWithDDLOptions(t *testing.T) {
+	v := checkDDL("CREATE TEMP TABLE x AS SELECT 1 AS a; CREATE TABLE ds.t OPTIONS (description = 'd') AS SELECT * FROM x")
+	if v.code != 501 || !strings.Contains(v.msg, "TEMP table") {
+		t.Errorf("checkDDL = %d %q, want 501", v.code, v.msg)
+	}
+	if v := checkDDL("CREATE TEMP TABLE x AS SELECT 1 AS a; CREATE TABLE ds.t PARTITION BY a AS SELECT * FROM x"); v.code != 0 {
+		t.Errorf("PARTITION BY alone: %d %q, want it left as it was", v.code, v.msg)
 	}
 }

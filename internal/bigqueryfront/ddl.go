@@ -208,6 +208,12 @@ func checkDDL(sql string) ddlVerdict {
 			v.funcs = append(v.funcs, fs)
 		}
 		var msg string
+		if unsupported == "" && v.statements > 1 && tokensHaveTemp(toks) && hasDDLOptions(sql, body) {
+			// #1390: the emulator drops the OPTIONS of a script it runs,
+			// and a script with a TEMP table is not run a statement at a
+			// time (hasControlFlow).
+			unsupported = "OPTIONS in a script with a TEMP table"
+		}
 		switch {
 		case isProcedureStatement(body):
 			// #1201: measured through the front, CREATE PROCEDURE in a
@@ -299,6 +305,11 @@ func checkDDL(sql string) ddlVerdict {
 			"in legacy SQL. CloudBurrow carries out ALTER TABLE itself in a GoogleSQL query (#1227), since the emulator " +
 			"behind it reports ADD COLUMN, DROP COLUMN, RENAME TO and SET OPTIONS as done and leaves the table unchanged " +
 			"(measured), but not in a dry run, so nothing was run."}
+	case unsupported == "OPTIONS in a script with a TEMP table":
+		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: a table's or view's OPTIONS " +
+			"in a multi-statement script with a TEMP table or function. The emulator behind " +
+			"CloudBurrow drops them from a script it runs (measured), and CloudBurrow sets them itself in a script it " +
+			"runs a statement at a time, but a TEMP table lasts only for the request that made it, so nothing was run (#1390)."}
 	case unsupported == "RAISE":
 		return ddlVerdict{code: 501, reason: "notImplemented", msg: "Not implemented here: RAISE. BigQuery ends the script " +
 			"with the error it raises, but the emulator behind CloudBurrow ignores RAISE and reports the script done " +

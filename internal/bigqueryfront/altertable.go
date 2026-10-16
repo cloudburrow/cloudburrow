@@ -106,7 +106,8 @@ func alterUnsupported(t []token) string {
 func alterNotImplemented(what string) string {
 	return "Not implemented here: ALTER TABLE " + what + ". BigQuery runs it, but the emulator behind CloudBurrow " +
 		"reports ALTER TABLE done and leaves the table unchanged (measured), and CloudBurrow carries out only ADD COLUMN, " +
-		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp), ALTER COLUMN SET OPTIONS (description), " +
+		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp, partition_expiration_days, kms_key_name), " +
+		"ALTER COLUMN SET OPTIONS (description), " +
 		"ALTER COLUMN DROP NOT NULL, ALTER COLUMN SET DATA TYPE, ALTER COLUMN SET DEFAULT and DROP DEFAULT, RENAME TO, RENAME COLUMN, " +
 		"DROP COLUMN and primary and foreign keys, " +
 		"so nothing of the statement was run."
@@ -174,7 +175,7 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 			}
 			for _, o := range opts {
 				switch o.name {
-				case "description", "friendly_name", "labels", "expiration_timestamp":
+				case "description", "friendly_name", "labels", "expiration_timestamp", "partition_expiration_days", "kms_key_name":
 				default:
 					return st, "SET OPTIONS (" + o.name + "), which changes how the table behaves", ""
 				}
@@ -582,6 +583,7 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 			Fields []map[string]any `json:"fields"`
 		} `json:"schema"`
 		TableConstraints *tableConstraints `json:"tableConstraints"`
+		TimePartitioning map[string]any    `json:"timePartitioning"`
 	}
 	if status != http.StatusOK || json.Unmarshal(got, &current) != nil {
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not read "+name, text)
@@ -726,6 +728,34 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 						}
 					}
 					patch["labels"] = labels
+				case "partition_expiration_days": // #1390
+					ms, ok := partitionExpirationMs(o.val)
+					switch {
+					case !ok:
+						s.notImpl = alterNotImplemented("SET OPTIONS (partition_expiration_days) set to other than a number literal")
+						return &scriptFlow{}
+					case current.TimePartitioning == nil:
+						return failWith(http.StatusBadRequest, "invalidQuery", partitionExpirationRefused, text)
+					}
+					tp := map[string]any{}
+					for k, v := range current.TimePartitioning {
+						tp[k] = v
+					}
+					delete(tp, "expirationMs")
+					if ms != "NULL" {
+						tp["expirationMs"] = ms
+					}
+					patch["timePartitioning"] = tp
+				case "kms_key_name": // #1390, stored
+					v, flow := s.stringOption(o, text)
+					if flow != nil {
+						return flow
+					}
+					if v == nil {
+						patch["encryptionConfiguration"] = nil
+					} else {
+						patch["encryptionConfiguration"] = map[string]any{"kmsKeyName": *v}
+					}
 				case "expiration_timestamp":
 					if len(o.val) == 1 && o.val[0].is("NULL") {
 						patch["expirationTime"] = nil
