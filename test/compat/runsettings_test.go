@@ -104,8 +104,9 @@ func TestRunServiceStoredSettingsAndSubPath(t *testing.T) {
 // through /sub and exits 0 only when the file is at /data/a/b, so the
 // execution succeeding is the proof. VPC access, the encryption key, the
 // execution environment and binary authorization read back as set. A
-// subPath that leaves the volume is InvalidArgument; Cloud Storage FUSE and
-// NFS volumes are still refused by name.
+// subPath that leaves the volume is InvalidArgument; a Cloud Storage FUSE
+// volume is still refused by name (NFS volumes are served since #1448:
+// runnfsenv_test.go).
 func TestRunJobSubPathAndStoredSettings(t *testing.T) {
 	h := New(t)
 	jc, _ := runJobClients(t, h)
@@ -156,7 +157,6 @@ func TestRunJobSubPathAndStoredSettings(t *testing.T) {
 	}
 	for field, v := range map[string]*runpb.Volume{
 		"volumes.gcs": {Name: "v", VolumeType: &runpb.Volume_Gcs{Gcs: &runpb.GCSVolumeSource{Bucket: "b"}}},
-		"volumes.nfs": {Name: "v", VolumeType: &runpb.Volume_Nfs{Nfs: &runpb.NFSVolumeSource{Server: "10.0.0.2", Path: "/"}}},
 	} {
 		refused := shellJob("true", 1, nil)
 		refused.Template.Template.Volumes = []*runpb.Volume{v}

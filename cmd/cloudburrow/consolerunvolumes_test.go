@@ -91,3 +91,74 @@ func TestConsoleShowsTheWorkloadsServiceAccount(t *testing.T) {
 		t.Error("the job's summary does not name the default compute account")
 	}
 }
+
+// The NFS volumes field (#1448) builds an NFS volume per mount path, a
+// trailing :ro making it read-only, and prefills back to the same lines;
+// a line that is not server:/export is refused.
+func TestRunNFSVolumeFieldRoundTrip(t *testing.T) {
+	lines := `{"/mnt/ro":"10.0.0.2:/exports:ro","/mnt/share":"nfs.example:/"}`
+	tmpl, err := runFormTemplate(map[string]string{"image": "ghcr.io/x/y:1", "nfsVolumes": lines})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := tmpl.GetVolumes()
+	if len(v) != 2 || v[0].GetNfs().GetServer() != "10.0.0.2" || v[0].GetNfs().GetPath() != "/exports" ||
+		!v[0].GetNfs().GetReadOnly() || v[1].GetNfs().GetServer() != "nfs.example" || v[1].GetNfs().GetReadOnly() {
+		t.Fatalf("volumes = %v", v)
+	}
+	if got := runNFSDefault(v, tmpl.GetContainers()[0].GetVolumeMounts()); got != lines {
+		t.Errorf("prefill = %s; want %s", got, lines)
+	}
+	for _, bad := range []string{`{"/mnt":"server"}`, `{"/mnt":":/x"}`, `{"/mnt":"s:relative"}`, `{"/":"s:/"}`} {
+		if _, err := runFormTemplate(map[string]string{"image": "ghcr.io/x/y:1", "nfsVolumes": bad}); err == nil {
+			t.Errorf("%s was accepted", bad)
+		}
+	}
+	job, err := runJobFormTemplate(map[string]string{"image": "busybox:1", "nfsVolumes": `{"/data":"s:/x"}`})
+	if err != nil || len(job.GetTemplate().GetVolumes()) != 1 {
+		t.Errorf("job form NFS volume = %v, %v", job, err)
+	}
+}
+
+// The Cloud Storage volumes field (#1474) is /mount/path=bucket[:ro][;option...].
+func TestRunGCSVolumeFieldRoundTrip(t *testing.T) {
+	lines := `{"/mnt/data":"data","/mnt/logs":"logs:ro;only-dir=app;implicit-dirs"}`
+	tmpl, err := runFormTemplate(map[string]string{"image": "ghcr.io/x/y:1", "gcsVolumes": lines})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := tmpl.GetVolumes()
+	if len(v) != 2 || v[0].GetGcs().GetBucket() != "data" || v[0].GetGcs().GetReadOnly() ||
+		v[1].GetGcs().GetBucket() != "logs" || !v[1].GetGcs().GetReadOnly() || len(v[1].GetGcs().GetMountOptions()) != 2 {
+		t.Fatalf("volumes = %v", v)
+	}
+	if got := runGCSDefault(v, tmpl.GetContainers()[0].GetVolumeMounts()); got != lines {
+		t.Errorf("prefill = %s; want %s", got, lines)
+	}
+	for _, bad := range []string{`{"/mnt":""}`, `{"/mnt":"gs://b"}`, `{"/":"b"}`, `{"rel":"b"}`} {
+		if _, err := runFormTemplate(map[string]string{"image": "ghcr.io/x/y:1", "gcsVolumes": bad}); err == nil {
+			t.Errorf("%s was accepted", bad)
+		}
+	}
+	job, err := runJobFormTemplate(map[string]string{"image": "busybox:1", "gcsVolumes": `{"/data":"b"}`})
+	if err != nil || len(job.GetTemplate().GetVolumes()) != 1 {
+		t.Errorf("job form Cloud Storage volume = %v, %v", job, err)
+	}
+}
+
+// Use HTTP/2 end-to-end (#1475) names the container port h2c.
+func TestRunHTTP2FieldNamesThePortH2C(t *testing.T) {
+	for port, want := range map[string]int32{"50051": 50051, "": 8080} {
+		tmpl, err := runFormTemplate(map[string]string{"image": "ghcr.io/x/y:1", "port": port, "useHttp2": "true"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p := tmpl.GetContainers()[0].GetPorts(); len(p) != 1 || p[0].GetName() != "h2c" || p[0].GetContainerPort() != want {
+			t.Errorf("port %q: ports = %v; want h2c %d", port, p, want)
+		}
+	}
+	tmpl, err := runFormTemplate(map[string]string{"image": "ghcr.io/x/y:1", "port": "8080"})
+	if err != nil || tmpl.GetContainers()[0].GetPorts()[0].GetName() != "" {
+		t.Errorf("without the option the port is named: %v, %v", tmpl, err)
+	}
+}

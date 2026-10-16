@@ -267,6 +267,9 @@ func (p *WorkerPoolsServer) CreateWorkerPool(ctx context.Context, req *runpb.Cre
 	if req.GetValidateOnly() {
 		return s.doneOperation(req.GetParent(), wp.Name, spec)
 	}
+	if err := s.ensureGCSFuse(ctx, projectOf(w.name), spec.GetTemplate().GetVolumes()); err != nil {
+		return nil, err
+	}
 	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "create", spec.GetTemplate().GetServiceAccount()); err != nil {
 		return nil, err
 	}
@@ -409,6 +412,9 @@ func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.Upd
 	}
 	if req.GetValidateOnly() {
 		return s.doneOperation(parent, name, spec)
+	}
+	if err := s.ensureGCSFuse(ctx, projectOf(w.name), spec.GetTemplate().GetVolumes()); err != nil {
+		return nil, err
 	}
 	if err := s.writeWorkload(ctx, w, cmManifest, depManifest, "replace", spec.GetTemplate().GetServiceAccount()); err != nil {
 		return nil, err

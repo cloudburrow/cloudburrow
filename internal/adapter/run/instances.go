@@ -130,6 +130,9 @@ func (s *Server) writeInstance(ctx context.Context, w workload, spec *runpb.Inst
 	if err != nil {
 		return err
 	}
+	if err := s.ensureGCSFuse(ctx, projectOf(w.name), spec.GetVolumes()); err != nil {
+		return err
+	}
 	if err := s.writeWorkload(ctx, w, cm, dep, verb, spec.GetServiceAccount()); err != nil {
 		return err
 	}

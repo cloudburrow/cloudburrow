@@ -22,9 +22,9 @@ tracks it; a closed issue is named only where it says what was built.
 |---|---|---|---|---|---|
 | Cloud Storage | 5 | 0 | 4 | 1 | 0 |
 | Pub/Sub | 2 | 0 | 0 | 1 | 1 |
-| Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 6 | 2 | 3 | 0 | 1 |
-| Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
+| Cloud Tasks | 0 | 0 | 0 | 0 | 0 |
+| Cloud Run | 3 | 2 | 0 | 0 | 1 |
+| Cloud Scheduler | 1 | 0 | 0 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 1 | 0 | 0 | 1 |
@@ -33,9 +33,9 @@ tracks it; a closed issue is named only where it says what was built.
 | BigQuery | 28 | 5 | 15 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
-| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **66** | **12** | **35** | **13** | **6** |
+| **Total** | **59** | **10** | **30** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -92,13 +92,11 @@ the service account named to its workload by the metadata server (#1388); two pr
 of one ID (#1400); `gcloud run deploy --source` and `gcloud builds submit` with Artifact Registry
 and Cloud Build (#1347), steps of any image (#1382), a Docker registry for built images (#1383),
 `secretEnv`, `script` and `allowFailure` (#1407), Cloud Build triggers and worker pools (#1422),
-and the default logs bucket (#1430).
+and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_RUN_TASK_ATTEMPT`
+(#1448); Cloud Storage FUSE volumes from the instance's storage (#1474); the `h2c` port name (#1475).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud Storage FUSE and NFS volumes on services and jobs are refused `UNIMPLEMENTED` naming the field (#1448) | no emulator support (Knative refuses a privileged container and CSI volumes) | M |
-| A service's container sees `K_SERVICE`, `K_CONFIGURATION` and `K_REVISION` as the scoped Knative names, not Cloud Run's service and revision IDs, which the API reports (#1448) | no emulator support (Knative reserves the three variables) | S |
-| `CancelOperation`: a deployment in flight cannot be recalled (#1448) | no emulator support | S |
 | Cloud Build: `options.dynamicSubstitutions`, `secretEnv` on a docker build, docker push or pack step, `ApproveBuild` and `approvalRequired`, and triggers with a repository or Pub/Sub source or a `filename` are refused; Artifact Registry: 27 methods `UNIMPLEMENTED` (rules, attachments, Maven, npm, Python, Apt and Yum artifacts, project and VPC-SC settings, package, version and file updates; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | not built yet | M |
 | v1 (Knative) API: a domain mapping never becomes Ready, as no DNS is served and no certificate issued; a job's own `spec.template.spec.delayExecution` is 501, and a run's `overrides.delayExecution` is not read back on the execution, as v2 has no field for either (#1450) | not built yet | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
@@ -175,6 +173,8 @@ over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1454) | no emulator support (one text-only model) | S |
 | `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served (#1454) | needs Cloud Run's `h2c` port, which is not honoured, so no gRPC server in a custom container can be reached | M |
 | `Explain` with integrated gradients, XRAI or examples (#1454); Sampled Shapley is served | they need the model's gradients or an Example index, which a custom container's predict route does not expose | L |
+| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served: Cloud Run serves an `h2c` port (#1475), but a model's `grpcPorts` are not deployed (#1454) | no emulator support (no gRPC model server) | M |
+| `Explain` (#1454) | no emulator support | L |
 
 ## BigQuery
 

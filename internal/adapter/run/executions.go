@@ -42,6 +42,9 @@ const (
 	// The batch controller's own pod label and annotation.
 	labelJobName       = "batch.kubernetes.io/job-name"
 	annCompletionIndex = "batch.kubernetes.io/job-completion-index"
+	// annIndexFailureCount is how many of an index's pods have failed,
+	// which Kubernetes writes on each new pod of the index (#1448).
+	annIndexFailureCount = "batch.kubernetes.io/job-index-failure-count"
 )
 
 // renderExecution renders the batch/v1 Job for one execution of a job.
@@ -87,12 +90,15 @@ metadata:
 		secs := int64(t.AsDuration().Seconds())
 		fmt.Fprintf(&b, "      activeDeadlineSeconds: %d\n", max(secs, 1))
 	}
-	// Cloud Run's task environment, where Kubernetes has a counterpart.
-	// CLOUD_RUN_TASK_ATTEMPT has none: no pod field counts its retries.
+	// Cloud Run's task environment. CLOUD_RUN_TASK_ATTEMPT (#1448) is how
+	// many times the task has been retried, 0 on its first attempt: the
+	// count of failures of its index that the Job controller writes on each
+	// pod of a Job with backoffLimitPerIndex, as this one always has.
 	injected := []injectedEnv{
 		{name: "CLOUD_RUN_JOB", value: jobID},
 		{name: "CLOUD_RUN_EXECUTION", value: execID},
 		{name: "CLOUD_RUN_TASK_INDEX", fieldPath: "metadata.annotations['" + annCompletionIndex + "']"},
+		{name: "CLOUD_RUN_TASK_ATTEMPT", fieldPath: "metadata.annotations['" + annIndexFailureCount + "']"},
 		{name: "CLOUD_RUN_TASK_COUNT", value: strconv.Itoa(int(taskCount))},
 	}
 	// Then CloudBurrow's endpoints and project (#576), as a revision gets.

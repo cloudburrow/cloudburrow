@@ -1939,6 +1939,12 @@ func (runProvider) CreateForm() (string, []console.Field) {
 			Section: "Container",
 		},
 		{
+			Name: "useHttp2", Label: "Use HTTP/2 end-to-end", Type: "checkbox", Default: "false",
+			Help: "Names the container port h2c, as gcloud's --use-http2 does (#1475): requests reach the container " +
+				"over HTTP/2 cleartext, as a gRPC server needs. Set the container port with it, or 8080 is used.",
+			Section: "Container",
+		},
+		{
 			Name: "command", Label: "Entrypoint command", Type: "text",
 			Help:    "Optional. Overrides the image's entrypoint. Space-separated.",
 			Section: "Container",
@@ -1955,7 +1961,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 		},
 		runSecretEnvField("Container"),
 		runVolumeFields("Container")[0], runVolumeFields("Container")[1], runVolumeFields("Container")[2],
-		runVolumeFields("Container")[3],
+		runVolumeFields("Container")[3], runVolumeFields("Container")[4],
 		runSettingsFields("Settings", true)[0], runSettingsFields("Settings", true)[1], runSettingsFields("Settings", true)[2],
 		runSettingsFields("Settings", true)[3], runSettingsFields("Settings", true)[4],
 		{
@@ -2101,6 +2107,12 @@ func runFormTemplate(values map[string]string) (*runpb.RevisionTemplate, error) 
 		return nil, err
 	} else if port > 0 {
 		container.Ports = []*runpb.ContainerPort{{ContainerPort: int32(port)}}
+	}
+	if values["useHttp2"] == "true" {
+		if len(container.Ports) == 0 {
+			container.Ports = []*runpb.ContainerPort{{ContainerPort: 8080}}
+		}
+		container.Ports[0].Name = "h2c"
 	}
 	limits := map[string]string{}
 	if v := strings.TrimSpace(values["cpu"]); v != "" {

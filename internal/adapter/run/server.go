@@ -116,6 +116,11 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	if err := s.ensureWorkloadMetadata(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()); err != nil {
 		return nil, err
 	}
+	if err := s.ensureGCSFuse(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetVolumes()); err != nil {
+		return nil, err
+	}
+	// Cloud Run's K_* names for the revision's pods (#1448, kenv.go).
+	manifest = kEnvPolicy(s.kn.namespace()) + kEnvConfigMap(name, kname, s.kn.namespace(), s.instance, "") + manifest
 	if err := s.kn.Apply(ctx, manifest); err != nil {
 		return nil, err
 	}
@@ -182,6 +187,11 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 	if err := s.ensureWorkloadMetadata(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetServiceAccount()); err != nil {
 		return nil, err
 	}
+	if err := s.ensureGCSFuse(ctx, projectOf(svc.GetName()), svc.GetTemplate().GetVolumes()); err != nil {
+		return nil, err
+	}
+	manifest = kEnvPolicy(s.kn.namespace()) +
+		kEnvConfigMap(svc.GetName(), kname, s.kn.namespace(), s.instance, existing.Status.LatestCreatedRevisionName) + manifest
 	if err := s.kn.Apply(ctx, manifest); err != nil {
 		return nil, err
 	}
@@ -360,6 +370,8 @@ func (s *Server) DeleteService(ctx context.Context, req *runpb.DeleteServiceRequ
 	if err := s.kn.Delete(ctx, existing.Metadata.Name); err != nil {
 		return nil, err
 	}
+	// Its K_* names (kenv.go); a failure leaves only an unread ConfigMap.
+	_ = s.kn.Kube.Delete(ctx, "configmap", kEnvConfigMapName(existing.Metadata.Name), true)
 	op := s.ops.Create(parent, req.GetName())
 	_ = s.ops.Succeed(op.Name, &runpb.Service{Name: req.GetName()})
 	return s.toProtoOperation(op.Name)

@@ -488,10 +488,12 @@
         "status": "Verified",
         "tests": [
           "test/compat/runcloudsql_test.go:126 TestRunJobCloudSQLVolume",
+          "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
+          "test/compat/runnfsenv_test.go:111 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
-          "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
+          "test/compat/runsettings_test.go:110 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
@@ -519,7 +521,7 @@
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
-          "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
+          "test/compat/runsettings_test.go:110 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
@@ -537,10 +539,12 @@
         "status": "Verified",
         "tests": [
           "test/compat/runcloudsql_test.go:126 TestRunJobCloudSQLVolume",
+          "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
+          "test/compat/runnfsenv_test.go:111 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
-          "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
+          "test/compat/runsettings_test.go:110 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
         ]
       },
@@ -615,7 +619,13 @@
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:75 TestRunServiceCloudSQLVolume",
           "test/compat/runcloudsqlv1_test.go:50 TestRunServiceCloudSQLMySQLVolume",
+          "test/compat/rungcsfuse_test.go:213 TestTerraformRunCloudStorageVolume",
+          "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
+          "test/compat/runh2c_test.go:28 TestRunH2CPortServesGRPC",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
+          "test/compat/runnfsenv_test.go:111 TestRunNFSVolumesAndCloudRunEnv",
+          "test/compat/runnfstools_test.go:108 TestConsoleRunNFSVolume",
+          "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
@@ -628,7 +638,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
+          "test/compat/rungcsfuse_test.go:213 TestTerraformRunCloudStorageVolume",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
+          "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
@@ -647,7 +659,13 @@
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:75 TestRunServiceCloudSQLVolume",
+          "test/compat/rungcsfuse_test.go:213 TestTerraformRunCloudStorageVolume",
+          "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
+          "test/compat/runh2c_test.go:28 TestRunH2CPortServesGRPC",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
+          "test/compat/runnfsenv_test.go:111 TestRunNFSVolumesAndCloudRunEnv",
+          "test/compat/runnfstools_test.go:108 TestConsoleRunNFSVolume",
+          "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
@@ -1640,6 +1658,9 @@
         "tests": [
           "test/compat/gclouddeploysource_test.go:53 TestGcloudRunDeploySource",
           "test/compat/runcloudsqlv1_test.go:103 TestGcloudRunDeployCloudSQL",
+          "test/compat/rungcsfuse_test.go:184 TestGcloudRunDeployCloudStorageVolume",
+          "test/compat/runh2c_test.go:89 TestGcloudRunDeployUseHTTP2",
+          "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:167 TestRunV1VolumesProbesAndServiceAccount",
           "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
@@ -1649,6 +1670,8 @@
         "method": "run.namespaces.services.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/rungcsfuse_test.go:184 TestGcloudRunDeployCloudStorageVolume",
+          "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
         ]
@@ -1659,6 +1682,9 @@
         "tests": [
           "test/compat/gclouddeploysource_test.go:53 TestGcloudRunDeploySource",
           "test/compat/runcloudsqlv1_test.go:103 TestGcloudRunDeployCloudSQL",
+          "test/compat/rungcsfuse_test.go:184 TestGcloudRunDeployCloudStorageVolume",
+          "test/compat/runh2c_test.go:89 TestGcloudRunDeployUseHTTP2",
+          "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:167 TestRunV1VolumesProbesAndServiceAccount",
           "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
@@ -1676,6 +1702,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/runcloudsqlv1_test.go:103 TestGcloudRunDeployCloudSQL",
+          "test/compat/rungcsfuse_test.go:184 TestGcloudRunDeployCloudStorageVolume",
+          "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage"
         ]
