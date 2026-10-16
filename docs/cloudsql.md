@@ -615,7 +615,7 @@ port, use a connector with a dial option, as above.
 making it executable. Pinned for linux/amd64, linux/arm64 and darwin/arm64, it is the release the
 Cloud Run sidecar image is. `TestCloudSQLAuthProxyBinary` reads, through it, the rows a parallel
 import restored (pgx on PostgreSQL, go-sql-driver/mysql on MySQL) and those of a clone to binary
-log coordinates. CI's emulators shard installs it and runs the test. IAM database authentication (`WithIAMAuthN`, an
+log coordinates. CI's sql shard installs it and runs the test. IAM database authentication (`WithIAMAuthN`, an
 `access_token` in `generateEphemeralCert`, users of type `CLOUD_IAM_USER` and the like) is 501: it
 signs a database user in as a Google identity, and CloudBurrow has no identities
 ([ADR-0004](adr/0004-local-access-and-no-authentication.md)). Connecting to the server directly,

@@ -10,7 +10,8 @@ CI runs it against the compat job's storage shard instance. Cloud KMS and Cloud 
 served there, so the tests named `TestKMS*` and `TestCloudRun*` run against the run shard's
 instance instead, in the same step of that shard (#700), and the tests named `TestBigQuery*`,
 `TestFirestore*` and `TestDatastore*` against the emulators shard's, whose instance alone serves
-those screens (#854). The step fails `ci-green` unless every
+those screens (#854), and the tests named `TestCloudSQL*` against the sql shard's, whose
+instance alone serves the Cloud SQL screens (#1472). The step fails `ci-green` unless every
 test selected for its shard passed; a skipped test counts as a failure.
 
 ---

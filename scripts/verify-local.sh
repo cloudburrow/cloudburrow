@@ -15,7 +15,7 @@
 #
 # Options:
 #   --shards A,B,...  the shards to run, in order; default every one:
-#                     storage,served,run,emulators,acceptance
+#                     storage,served,run,emulators,sql,acceptance
 #   --port-base N     the instances' port layout (default 41000)
 #   --out DIR         where the result and logs go (default ./verify-local)
 #   --no-build        use bin/cloudburrow as it is instead of `make build`
@@ -420,11 +420,12 @@ browser_suite() {  # <shard> <dir> <flags...>
   local chrome="" select pattern
   # As in CI: the KMS and Cloud Run screens' tests in the run shard, the
   # BigQuery, Firestore and Datastore screens' in the emulators shard, the
-  # rest in storage.
+  # Cloud SQL screens' in the sql shard, the rest in storage.
   case "$shard" in
     run) select=-run pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS" ;;
     emulators) select=-run pattern="$COMPAT_BROWSER_EMULATORS_SHARD_TESTS" ;;
-    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS" ;;
+    sql) select=-run pattern="$COMPAT_BROWSER_SQL_SHARD_TESTS" ;;
+    *) select=-skip pattern="$COMPAT_BROWSER_RUN_SHARD_TESTS|$COMPAT_BROWSER_EMULATORS_SHARD_TESTS|$COMPAT_BROWSER_SQL_SHARD_TESTS|$COMPAT_BROWSER_NEVER_TESTS" ;;
   esac
   for c in "${CLOUDBURROW_TEST_CHROME:-}" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
     "$(command -v google-chrome || true)" "$(command -v google-chrome-stable || true)" "$(command -v chromium || true)"; do
