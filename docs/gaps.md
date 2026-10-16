@@ -157,7 +157,7 @@ delayed destruction (#1278). IAM conditions are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `customer_managed_encryption` on a replica or the automatic policy (#1453) | no emulator support (needs KMS-backed CMEK) | M |
+| A Cloud Run `secretKeyRef` to a version under a customer-managed key is `UNIMPLEMENTED`: the mounted Kubernetes Secret holds ciphertext (#1453) | not built yet | S |
 | Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) (#1445) | needs live GCP | S |
 
 ## Resource Manager

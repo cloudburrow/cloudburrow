@@ -182,13 +182,35 @@ func parseFilterDuration(s string) (time.Duration, error) {
 // unsetSecretFields are documented filter fields of a Secret that this
 // service refuses to create (checkCreatable), so no secret ever has them.
 var unsetSecretFields = map[string]bool{
-	"replication.user_managed.replicas.customerManagedEncryption":                true,
-	"replication.user_managed.replicas.customerManagedEncryption.kmsKeyName":     true,
-	"replication.user_managed.replicas.customer_managed_encryption":              true,
-	"replication.user_managed.replicas.customer_managed_encryption.kms_key_name": true,
+	"version_aliases": true,
+}
+
+// cmekFilterFields are the documented filter fields of a secret's
+// customer-managed keys (#1453), in both casings, each mapped to whether it
+// names automatic replication's key.
+var cmekFilterFields = map[string]bool{
+	"replication.user_managed.replicas.customerManagedEncryption":                false,
+	"replication.user_managed.replicas.customerManagedEncryption.kmsKeyName":     false,
+	"replication.user_managed.replicas.customer_managed_encryption":              false,
+	"replication.user_managed.replicas.customer_managed_encryption.kms_key_name": false,
 	"replication.automatic.customerManagedEncryption":                            true,
 	"replication.automatic.customer_managed_encryption":                          true,
-	"version_aliases": true,
+	"replication.automatic.customerManagedEncryption.kmsKeyName":                 true,
+	"replication.automatic.customer_managed_encryption.kms_key_name":             true,
+}
+
+// cmekFilterValue is a secret's keys for a cmekFilterFields field.
+func cmekFilterValue(s Secret, automatic bool) filterValue {
+	if automatic != (s.Replication != "user-managed") {
+		return filterValue{kind: 's'}
+	}
+	var keys []string
+	for _, k := range s.KMSKeys {
+		if k != "" {
+			keys = append(keys, k)
+		}
+	}
+	return strValue(keys...)
 }
 
 // secretFieldKind is the value kind of a field, for validating a value
@@ -206,6 +228,9 @@ func secretFieldKind(field string) (byte, bool) {
 	case field == "rotation.rotation_period", field == "version_destroy_ttl":
 		return 'd', true
 	case unsetSecretFields[field]:
+		return 's', true
+	}
+	if _, ok := cmekFilterFields[field]; ok {
 		return 's', true
 	}
 	return 0, false
@@ -279,6 +304,9 @@ func secretField(r any, field string) (filterValue, bool) {
 		return filterValue{set: s.RotationPeriod > 0, d: s.RotationPeriod, kind: 'd'}, true
 	case field == "version_destroy_ttl":
 		return filterValue{set: s.VersionDestroyTTL > 0, d: s.VersionDestroyTTL, kind: 'd'}, true
+	}
+	if automatic, ok := cmekFilterFields[field]; ok {
+		return cmekFilterValue(s, automatic), true
 	}
 	return filterValue{}, unsetSecretFields[field]
 }

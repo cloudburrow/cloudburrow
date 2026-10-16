@@ -214,6 +214,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	secretsSvc.register(coord)
 	kmsSvc := newKMSService(cfg)
 	kmsSvc.register(coord)
+	if secretsSvc != nil && kmsSvc != nil {
+		// A secret's customer-managed keys (#1453) are this instance's Cloud KMS.
+		secretsSvc.kms = kmsSvc.API
+	}
 	schedulerSvc := newSchedulerService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
 	schedulerSvc.useTokens(creds)
 	schedulerSvc.register(coord)
