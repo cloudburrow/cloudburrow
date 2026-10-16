@@ -84,7 +84,8 @@ func TestBigQueryCSVNameMatchAfterSkippedRows(t *testing.T) {
 // TestBigQueryCSVDelimiterAndQuoteBytes (#1457): in ISO-8859-1 data any
 // one character is a fieldDelimiter or quote, the raw bytes split before
 // they are decoded; a quote of several characters is its first byte; a
-// delimiter outside ASCII in UTF-8 data stays 501.
+// delimiter is its first byte, in UTF-8 data the first of its UTF-8 form;
+// a quote outside ISO-8859-1 stays 501.
 // covers: bigquery.jobs.insert, bigquery.jobs.query
 func TestBigQueryCSVDelimiterAndQuoteBytes(t *testing.T) {
 	h := New(t)
@@ -106,6 +107,13 @@ func TestBigQueryCSVDelimiterAndQuoteBytes(t *testing.T) {
 			s.Encoding, s.FieldDelimiter, s.Quote = bigquery.ISO_8859_1, "þ", "«"
 		}, "[[1 caféþx] [2 é]]"},
 		{"two_char_quote", "1,'a,b'\n", func(s *bigquery.ReaderSource) { s.Quote = "'x" }, "[[1 a,b]]"},
+		// #1457, second part: a delimiter of several characters is its
+		// first byte; in UTF-8 data a delimiter outside ASCII splits on the
+		// first byte of its UTF-8 form, the rest of it part of the next
+		// value, read as U+FFFD; a quote is its ISO-8859-1 byte.
+		{"two_char_delim", "1|x\n2|y\n", func(s *bigquery.ReaderSource) { s.FieldDelimiter = "||" }, "[[1 x] [2 y]]"},
+		{"utf8_delim", "1þx\n", func(s *bigquery.ReaderSource) { s.FieldDelimiter = "þ" }, "[[1 \ufffdx]]"},
+		{"utf8_quote", "1,\xabx,y\xab\n", func(s *bigquery.ReaderSource) { s.Quote = "«" }, "[[1 x,y]]"},
 	} {
 		if err := load(c2.table, c2.data, c2.set); err != nil {
 			t.Errorf("%s: %v", c2.table, err)
@@ -115,8 +123,35 @@ func TestBigQueryCSVDelimiterAndQuoteBytes(t *testing.T) {
 			t.Errorf("%s: rows %s, want %s", c2.table, got, c2.want)
 		}
 	}
-	err := load("utf8_e", "1é\xc3\xa9x\n", func(s *bigquery.ReaderSource) { s.FieldDelimiter = "é" })
-	wantReason(t, "a delimiter outside ASCII in UTF-8 data", err, http.StatusNotImplemented, "notImplemented")
+	err := load("snowman_quote", "1,x\n", func(s *bigquery.ReaderSource) { s.Quote = "☃" })
+	wantReason(t, "a quote outside ISO-8859-1", err, http.StatusNotImplemented, "notImplemented")
+}
+
+// TestBigQueryCSVEmptyStringWithNullMarker (#1457): with a nullMarker, an
+// empty value loads into a STRING column as an empty string and the
+// marker as NULL ("For STRING and BYTE columns, BigQuery interprets the
+// empty string as an empty value", JobConfigurationLoad), through the
+// emulator's patch 0038; into an INTEGER column it is 400 invalid.
+// covers: bigquery.jobs.insert, bigquery.jobs.query
+func TestBigQueryCSVEmptyStringWithNullMarker(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	load := func(table, data string) error {
+		src := bigquery.NewReaderSource(strings.NewReader(data))
+		src.Schema = loadSchema
+		src.NullMarker = `\N`
+		return runLoad(ctx, ds.Table(table).LoaderFrom(src))
+	}
+	if err := load("empty", "1,\n2,\\N\n3,x\n"); err != nil {
+		t.Fatal(err)
+	}
+	q := "SELECT a, b IS NULL, LENGTH(b) FROM `" + ds.DatasetID + ".empty` ORDER BY a"
+	if got := fmt.Sprint(rows(t, ctx, c, q)); got != "[[1 false 0] [2 true <nil>] [3 false 1]]" {
+		t.Errorf("rows %s, want [[1 false 0] [2 true <nil>] [3 false 1]]", got)
+	}
+	wantReason(t, "an empty INTEGER", load("empty_int", ",x\n"), http.StatusBadRequest, "invalid")
 }
 
 // TestBigQueryParquetLoadNaNAndUnlistedTypes (#1457): a NaN in a Parquet

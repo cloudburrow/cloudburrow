@@ -45,6 +45,18 @@ func TestCSVDialect(t *testing.T) {
 		{"quote of two characters", `,"quote":"'x"`, "1,'a,b'\n", `[{"a":"1","b":"a,b"}]`},
 		{"ISO-8859-1 delimiter and quote", `,"encoding":"ISO-8859-1","fieldDelimiter":"þ","quote":"«"`,
 			"1\xfe\xabcaf\xe9\xfex\xab\n2\xfe\xe9\n", `[{"a":"1","b":"caféþx"},{"a":"2","b":"é"}]`},
+		// #1457, second part: a delimiter is its first byte, of several
+		// characters too; in UTF-8 data the first byte of a multibyte one,
+		// the rest of it part of the next value, each byte left that is
+		// not UTF-8 read as U+FFFD; a quote is its ISO-8859-1 byte.
+		{"delimiter of two characters", `,"fieldDelimiter":"||"`, "1|x\n", `[{"a":"1","b":"x"}]`},
+		{"UTF-8 delimiter outside ASCII", `,"fieldDelimiter":"þ"`, "1þx\n", `[{"a":"1","b":"�x"}]`},
+		{"UTF-8 data, raw delimiter byte", `,"fieldDelimiter":"þ"`, "1\xc3caf\xa9\n", `[{"a":"1","b":"caf�"}]`},
+		// An empty STRING under a nullMarker is sent as the mark the
+		// emulator's patch 0038 loads as an empty string, NULL as empty.
+		{"empty STRING with a null marker", `,"nullMarker":"\\N"`, "1,\n2,\\N\n",
+			`[{"a":"1","b":"` + emptyStringMark + `"},{"a":"2","b":""}]`},
+		{"UTF-8 data, quote outside ASCII", `,"quote":"«"`, "1,\xabx,y\xab\n", `[{"a":"1","b":"x,y"}]`},
 	} {
 		emu := &csvEmulator{}
 		w := upload(t, Wrap(emu), loadJob(c.extra), c.data)
@@ -63,7 +75,7 @@ func TestCSVDialect(t *testing.T) {
 		code              int
 		reason            string
 	}{
-		{"empty STRING with a null marker", `,"nullMarker":"\\N"`, "1,\n", 501, "notImplemented"},
+		{"the empty-string mark in the data", `,"nullMarker":"\\N"`, "1," + emptyStringMark + "\n", 501, "notImplemented"},
 		{"empty INTEGER with a null marker", `,"nullMarker":"\\N"`, ",x\n", 400, "invalid"},
 		{"quote not closed", `,"quote":"'"`, "1,'x\n", 400, "invalid"},
 		{"data after a closing quote", `,"quote":"'"`, "1,'x'y\n", 400, "invalid"},
@@ -84,7 +96,8 @@ func TestCSVDialect(t *testing.T) {
 
 	// A delimiter or quote the front does not read is 501 before the data
 	// is sent.
-	for _, extra := range []string{`,"fieldDelimiter":"||"`, `,"fieldDelimiter":"é"`, `,"quote":"☃"`, `,"quote":"«"`, `,"quote":"|","fieldDelimiter":"|"`} {
+	for _, extra := range []string{`,"quote":"☃"`, `,"quote":"|","fieldDelimiter":"|"`, `,"fieldDelimiter":"\n"`,
+		`,"fieldDelimiter":"☃","encoding":"ISO-8859-1"`, `,"fieldDelimiter":"||","encoding":"UTF-16LE"`, `,"quote":"«","encoding":"UTF-16LE"`} {
 		emu := &csvEmulator{}
 		if w := upload(t, Wrap(emu), loadJob(extra), "1,x\n"); w.Code != 501 || emu.loads != 0 {
 			t.Errorf("%s: %d %s, %d loads; want 501", extra, w.Code, w.Body, emu.loads)

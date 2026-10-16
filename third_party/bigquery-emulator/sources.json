@@ -35,7 +35,8 @@
         "patches/bigquery-emulator/0019-quote-struct-field-names.patch",
         "patches/bigquery-emulator/0020-round-decimal-columns.patch",
         "patches/bigquery-emulator/0021-round-nested-decimal-fields.patch",
-        "patches/bigquery-emulator/0022-list-job-configurations.patch"
+        "patches/bigquery-emulator/0022-list-job-configurations.patch",
+        "patches/bigquery-emulator/0038-csv-empty-string-mark.patch"
       ]
     },
     {
