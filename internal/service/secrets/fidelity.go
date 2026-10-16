@@ -23,13 +23,15 @@ func checkCreatable(sec *secretmanagerpb.Secret) error {
 		{"version_aliases", len(sec.GetVersionAliases()) > 0},
 		{"customer_managed_encryption", sec.GetCustomerManagedEncryption() != nil},
 		{"tags", len(sec.GetTags()) > 0},
-		{"replication.automatic.customer_managed_encryption", sec.GetReplication().GetAutomatic().GetCustomerManagedEncryption() != nil},
 	}
 	for _, u := range unsupported {
 		if u.set {
 			return apierror.Unimplemented("Secret.%s is not implemented by CloudBurrow's Secret Manager; "+
 				"the secret would be stored without it, so the request is refused", u.field)
 		}
+	}
+	if err := checkCMEKFields(sec.GetReplication()); err != nil {
+		return err
 	}
 	if um := sec.GetReplication().GetUserManaged(); um != nil {
 		if len(um.GetReplicas()) == 0 {
@@ -38,10 +40,6 @@ func checkCreatable(sec *secretmanagerpb.Secret) error {
 		for _, r := range um.GetReplicas() {
 			if r.GetLocation() == "" {
 				return apierror.InvalidArgument("replication.user_managed.replicas[].location is required")
-			}
-			if r.GetCustomerManagedEncryption() != nil {
-				return apierror.Unimplemented("Secret.replication.user_managed.replicas[].customer_managed_encryption " +
-					"is not implemented by CloudBurrow's Secret Manager")
 			}
 		}
 	}
@@ -74,6 +72,20 @@ func checkPayloadCRC32C(data []byte, crc *int64) error {
 	}
 	if got := payloadCRC32C(data); got != *crc {
 		return apierror.InvalidArgument("payload.data_crc32c is %d, but the payload's CRC32C is %d; the data was corrupted in transit", *crc, got)
+	}
+	return nil
+}
+
+// checkCMEKFields refuses a customer_managed_encryption with no
+// kms_key_name, a REQUIRED field (#1453).
+func checkCMEKFields(r *secretmanagerpb.Replication) error {
+	if c := r.GetAutomatic().GetCustomerManagedEncryption(); c != nil && c.GetKmsKeyName() == "" {
+		return apierror.InvalidArgument("replication.automatic.customer_managed_encryption.kms_key_name is required")
+	}
+	for _, rep := range r.GetUserManaged().GetReplicas() {
+		if c := rep.GetCustomerManagedEncryption(); c != nil && c.GetKmsKeyName() == "" {
+			return apierror.InvalidArgument("replication.user_managed.replicas[].customer_managed_encryption.kms_key_name is required")
+		}
 	}
 	return nil
 }

@@ -114,7 +114,7 @@ func (s *Server) Encrypt(_ context.Context, req *kmspb.EncryptRequest) (*kmspb.E
 		CiphertextCrc32C:        wrapperspb.Int64(crc32c(ct)),
 		VerifiedPlaintextCrc32C: ptOK,
 		VerifiedAdditionalAuthenticatedDataCrc32C: aadOK,
-		ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
+		ProtectionLevel: v.protectionLevel(),
 	}, nil
 }
 
@@ -179,6 +179,6 @@ func (s *Server) Decrypt(_ context.Context, req *kmspb.DecryptRequest) (*kmspb.D
 		Plaintext:       pt,
 		PlaintextCrc32C: wrapperspb.Int64(crc32c(pt)),
 		UsedPrimary:     int(number) == k.Primary,
-		ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
+		ProtectionLevel: v.protectionLevel(),
 	}, nil
 }

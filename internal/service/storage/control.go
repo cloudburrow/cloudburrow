@@ -97,8 +97,9 @@ func folderV2JSON(f folderRecord) map[string]any {
 }
 
 func operationV2JSON(op operationRecord) map[string]any {
-	return map[string]any{"name": operationName(op), "done": true,
-		"metadata": operationMetadata(op), "response": operationResponse(op)}
+	out := map[string]any{"name": operationName(op), "done": !op.Pending, "metadata": operationMetadata(op)}
+	addOperationResult(out, op)
+	return out
 }
 
 // controlPreconditions reads ifMetagenerationMatch and NotMatch, sent as a

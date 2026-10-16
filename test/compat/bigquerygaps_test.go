@@ -303,7 +303,8 @@ func TestBigQueryExceptionHandlersRaiseAndCreateOrReplace(t *testing.T) {
 // client retried until it gave up, and listed a load the front failed as
 // succeeded. BigQuery takes the first row as the header only when it holds
 // only strings and another row does not: a load it would read otherwise is
-// 501, and so is skipLeadingRows 2. A load through a resumable upload (the
+// loaded as BigQuery documents it since #1457: as data, the columns named
+// generically, and skipLeadingRows 2 looks for the header in row 2. A load through a resumable upload (the
 // Go client's, in 256 KiB chunks) loads every row and is checked as any
 // other: a header BigQuery refuses fails the job, which jobs.list reports
 // failed.
@@ -323,15 +324,34 @@ func TestBigQueryAutodetectHeaderAndResumableLoads(t *testing.T) {
 		defer cancel()
 		return l.Run(lctx)
 	}
-	for table, data := range map[string]string{"strings": "a,b\nc,d\n", "numbers": "1,2\n3,4\n"} {
-		_, err := load(table, data, nil)
-		wantReason(t, "an autodetect load of "+strings.ReplaceAll(data, "\n", " / "), err, http.StatusNotImplemented, "notImplemented")
-		if tableExists(t, ctx, ds.Table(table)) {
-			t.Errorf("the refused load left %s", table)
+	// #1457: a first row BigQuery would not take as a header is data, the
+	// columns named generically, and skipLeadingRows 2 looks for the header
+	// in row 2 (TestBigQueryCSVAutodetectHeaderRows has more).
+	for table, want := range map[string]string{"strings": "string_field_0 string_field_1 [[a b] [c d]]",
+		"numbers": "int64_field_0 int64_field_1 [[1 2] [3 4]]", "skip2": "a n [[b 1]]"} {
+		data := map[string]string{"strings": "a,b\nc,d\n", "numbers": "1,2\n3,4\n", "skip2": "x\na,n\nb,1\n"}[table]
+		job, err := load(table, data, func(s *bigquery.ReaderSource, _ *bigquery.Loader) {
+			if table == "skip2" {
+				s.SkipLeadingRows = 2
+			}
+		})
+		if err = waitJob(ctx, job, err); err != nil {
+			t.Errorf("an autodetect load of %s: %v", strings.ReplaceAll(data, "\n", " / "), err)
+			continue
+		}
+		md, err := ds.Table(table).Metadata(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := ""
+		for _, f := range md.Schema {
+			got += f.Name + " "
+		}
+		got += fmt.Sprint(rows(t, ctx, c, "SELECT * FROM `"+ds.DatasetID+"."+table+"` ORDER BY 1"))
+		if got != want {
+			t.Errorf("%s: %s, want %s", table, got, want)
 		}
 	}
-	_, err := load("skip2", "x\na,n\nb,1\n", func(s *bigquery.ReaderSource, _ *bigquery.Loader) { s.SkipLeadingRows = 2 })
-	wantReason(t, "skipLeadingRows 2", err, http.StatusNotImplemented, "notImplemented")
 
 	chunked := func(_ *bigquery.ReaderSource, l *bigquery.Loader) {
 		l.MediaOptions = []googleapi.MediaOption{googleapi.ChunkSize(googleapi.MinUploadChunkSize)}

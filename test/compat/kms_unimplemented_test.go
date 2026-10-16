@@ -107,8 +107,9 @@ func registryUnimplemented(t *testing.T, prefix string) []string {
 // CloudBurrow does not implement is refused with UNIMPLEMENTED naming the
 // field, through the official client (#396). Rotation schedules, once here,
 // are implemented (#816; TestKMSRotationSchedule), and so are the asymmetric,
-// MAC, raw and ML-KEM purposes (#1212); the algorithms Go's standard library
-// does not compute are not.
+// MAC, raw and ML-KEM purposes (#1212), and HSM protection (#1452); the
+// algorithms Go's standard library does not compute, and the external
+// protection levels, are not.
 func TestKMSOutOfScopeKeyOptionsAreUnimplemented(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -132,7 +133,6 @@ func TestKMSOutOfScopeKeyOptionsAreUnimplemented(t *testing.T) {
 			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_PQ_SIGN_ML_DSA_65}}, "algorithm"},
 		"X-Wing": {&kmspb.CryptoKey{Purpose: kmspb.CryptoKey_KEY_ENCAPSULATION,
 			VersionTemplate: &kmspb.CryptoKeyVersionTemplate{Algorithm: kmspb.CryptoKeyVersion_KEM_XWING}}, "algorithm"},
-		"HSM":                {&kmspb.CryptoKey{Purpose: sym, VersionTemplate: level(kmspb.ProtectionLevel_HSM)}, "protection_level"},
 		"EXTERNAL":           {&kmspb.CryptoKey{Purpose: sym, VersionTemplate: level(kmspb.ProtectionLevel_EXTERNAL)}, "protection_level"},
 		"EXTERNAL_VPC":       {&kmspb.CryptoKey{Purpose: sym, VersionTemplate: level(kmspb.ProtectionLevel_EXTERNAL_VPC)}, "protection_level"},
 		"import_only":        {&kmspb.CryptoKey{Purpose: sym, ImportOnly: true}, "import_only"},

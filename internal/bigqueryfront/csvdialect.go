@@ -130,10 +130,12 @@ import (
 //     character other than tab, newline and carriage return is 501: the
 //     reference does not say what BigQuery does with it. With it, the
 //     value is loaded as it is, as the emulator stores it.
-//   - With sourceColumnMatch NAME and skipLeadingRows 1, the first row of
-//     each file is read as the header, and each value goes to the column
-//     it names (case-insensitively); a header that does not name each
-//     column once is 501, as is NAME with another skipLeadingRows.
+//   - With sourceColumnMatch NAME, "Column names are read from the last
+//     skipped row based on Header rows to skip" (loading-data-cloud-
+//     storage-csv): row skipLeadingRows of each file is read as the header
+//     (#1457; before it, only skipLeadingRows 1), and each value goes to
+//     the column it names (case-insensitively); a header that does not
+//     name each column once is 501, as is NAME with no row skipped.
 //     POSITION is the default for a load with columns.
 //   - timeZone and the four formats are read as BigQuery reads them, and
 //     each value written in the form the emulator reads (#1325,
@@ -158,6 +160,9 @@ type csvDialect struct {
 	quotedNewlines bool
 	// latin1 is encoding ISO-8859-1.
 	latin1 bool
+	// latin1Only is a delimiter or quote byte outside ASCII, read only in
+	// ISO-8859-1 data (#1457, dialectOf).
+	latin1Only bool
 	// wide is encoding UTF-16BE, UTF-16LE, UTF-32BE or UTF-32LE (#1325).
 	wide string
 	// times are timeZone and the date and time formats (#1325,
@@ -201,31 +206,68 @@ func (d csvDialect) optionsSet() bool {
 }
 
 // dialectOf returns the dialect a load's options give, or why it is 501.
+//
+// Since #1457 a fieldDelimiter or quote outside ASCII is read as BigQuery
+// documents it for ISO-8859-1 data: fieldDelimiter "is interpreted as a
+// single byte. For files encoded in ISO-8859-1, any single character can
+// be used as a separator"; quote: "BigQuery converts the string to
+// ISO-8859-1 encoding, and then uses the first byte of the encoded string
+// to split the data in its raw, binary state" (JobConfigurationLoad), so a
+// quote of several characters is its first. For such data the front
+// splits the raw bytes, and then decodes each value ("BigQuery decodes the
+// data after the raw, binary data has been split using the values of the
+// quote and fieldDelimiter properties"). A byte outside ASCII in UTF-8
+// data is still 501 (latin1Only, checked in withOptions): the reference
+// has only "the first byte used for separating fields" of a multibyte
+// delimiter, the rest "part of the field", which leaves a value that is
+// not UTF-8, whose repair it does not document byte for byte, and the CSV
+// loading page says of an ISO-8859-1 character there that BigQuery "will
+// interpret it correctly". A delimiter of several characters, and a
+// character outside ISO-8859-1, are 501 too: the reference documents
+// neither.
 func dialectOf(fieldDelimiter string, quote *string, jagged bool, nullMarker *string) (csvDialect, string) {
 	d := csvDialect{delim: ',', quote: '"', jagged: jagged}
+	latin1Byte := func(s string) (byte, bool) {
+		r, n := utf8.DecodeRuneInString(s)
+		if r == utf8.RuneError && n <= 1 || r < 1 || r > 0xFF || r == '\n' || r == '\r' {
+			return 0, false
+		}
+		return byte(r), true
+	}
 	switch fd := fieldDelimiter; {
 	case fd == "":
 	case fd == `\t`:
 		d.delim = '\t'
-	case len(fd) == 1 && fd[0] >= 1 && fd[0] < 0x80 && fd[0] != '\n' && fd[0] != '\r':
-		d.delim = fd[0]
+	case utf8.RuneCountInString(fd) == 1:
+		b, ok := latin1Byte(fd)
+		if !ok {
+			return d, fmt.Sprintf("fieldDelimiter %q: CloudBurrow reads a delimiter of one ISO-8859-1 character (or "+
+				"\\t), and BigQuery's reference does not document another", fd)
+		}
+		d.delim = b
 	default:
-		return d, fmt.Sprintf("fieldDelimiter %q: CloudBurrow reads a delimiter of one ASCII character (or \\t), and "+
-			"the emulator behind it none but a comma", fd)
+		return d, fmt.Sprintf("fieldDelimiter %q: CloudBurrow reads a delimiter of one character (or \\t); BigQuery's "+
+			"reference says the separator \"is interpreted as a single byte\" and does not document one of several "+
+			"characters", fd)
 	}
 	if quote != nil {
 		switch q := *quote; {
 		case q == "":
 			d.quote = 0
-		case len(q) == 1 && q[0] >= 1 && q[0] < 0x80 && q[0] != '\n' && q[0] != '\r':
-			d.quote = q[0]
 		default:
-			return d, fmt.Sprintf("quote %q: CloudBurrow reads a quote of one ASCII character, or none, and the emulator "+
-				"behind it none but \"", q)
+			b, ok := latin1Byte(q)
+			if !ok {
+				return d, fmt.Sprintf("quote %q: BigQuery converts the quote to ISO-8859-1 and uses its first byte, "+
+					"and its first character has none CloudBurrow reads", q)
+			}
+			d.quote = b
 		}
 	}
+	if d.delim >= 0x80 || d.quote >= 0x80 {
+		d.latin1Only = true
+	}
 	if d.quote != 0 && d.quote == d.delim {
-		return d, fmt.Sprintf("quote %q is also the fieldDelimiter", string(d.quote))
+		return d, fmt.Sprintf("quote %q is also the fieldDelimiter", string(rune(d.quote)))
 	}
 	if nullMarker != nil && *nullMarker != "" {
 		d.nullMark, d.nullIsSet = *nullMarker, true
@@ -273,11 +315,20 @@ func (d csvDialect) withOptions(o csvOptions, nullMarkerSet bool, cols []field, 
 	case "", "UTF-8", "UTF8":
 	case "ISO-8859-1":
 		d.latin1 = true
+	}
+	switch strings.ToUpper(o.Encoding) {
+	case "", "UTF-8", "UTF8", "ISO-8859-1":
 	case "UTF-16BE", "UTF-16LE", "UTF-32BE", "UTF-32LE":
 		d.wide = strings.ToUpper(o.Encoding) // #1325, csvtimes.go
 	default:
 		return d, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid encoding %q: the supported values are UTF-8, "+
 			"ISO-8859-1, UTF-16BE, UTF-16LE, UTF-32BE and UTF-32LE.", o.Encoding)
+	}
+	if d.latin1Only && !d.latin1 {
+		return unimplemented(fmt.Sprintf("a fieldDelimiter or quote outside ASCII (byte 0x%02X) in data that is not "+
+			"ISO-8859-1. BigQuery documents only that of a multibyte delimiter \"the first byte\" splits the fields and "+
+			"\"the remaining bytes will be treated as a part of the field\", which leaves values that are not UTF-8, "+
+			"whose repair it does not document; set encoding ISO-8859-1 for Latin-1 data", max(d.delim, d.quote)))
 	}
 	if n, set := skipLeadingRows(o.MaxBadRecords); set {
 		if n < 0 {
@@ -298,9 +349,10 @@ func (d csvDialect) withOptions(o csvOptions, nullMarkerSet bool, cols []field, 
 	case "", "SOURCE_COLUMN_MATCH_UNSPECIFIED", "POSITION":
 	case "NAME":
 		if len(cols) > 0 {
-			if skip != 1 {
-				return unimplemented(fmt.Sprintf("sourceColumnMatch NAME and skipLeadingRows %d. CloudBurrow reads the "+
-					"header for NAME only as the one row skipLeadingRows 1 skips", skip))
+			if skip < 1 {
+				return unimplemented(fmt.Sprintf("sourceColumnMatch NAME and skipLeadingRows %d. BigQuery reads the "+
+					"column names \"from the last skipped row\" (loading-data-cloud-storage-csv), and with none skipped "+
+					"its documentation does not say where they are", skip))
 			}
 			d.byName = true
 		}
@@ -378,7 +430,11 @@ func (c *csvRecords) read() (rec []string, quoted []bool, empty bool, err error)
 	var f strings.Builder
 	inQuote, wasQuoted, afterQuote, seen := false, false, false, false
 	end := func() {
-		rec = append(rec, f.String())
+		v := f.String()
+		if c.d.latin1 {
+			v = latin1String(v) // split first, then decoded (#1457)
+		}
+		rec = append(rec, v)
 		quoted = append(quoted, wasQuoted)
 		f.Reset()
 		wasQuoted, afterQuote = false, false
@@ -481,9 +537,6 @@ type csvState struct {
 // null marker, an empty value that was in the data fails the load (see
 // above). A bad record is left out, up to d.maxBad of them over the load.
 func dialectRecords(cw *csv.Writer, data io.Reader, d csvDialect, cols []field, skip int64, st *csvState) error {
-	if d.latin1 {
-		data = &latin1Reader{r: bufio.NewReader(data)}
-	}
 	if d.wide != "" {
 		data = wideReader(data, d.wide) // #1325, csvtimes.go
 	}
@@ -644,39 +697,19 @@ func controlCharacters(rec []string, line int) error {
 	return nil
 }
 
-// latin1Reader decodes ISO-8859-1 to UTF-8: each byte is the code point
+// latin1String decodes ISO-8859-1 to UTF-8: each byte is the code point
 // of its value.
-type latin1Reader struct {
-	r       *bufio.Reader
-	pending []byte
-}
-
-func (l *latin1Reader) Read(p []byte) (int, error) {
-	n := 0
-	for n < len(p) {
-		if n > 0 && len(l.pending) == 0 && l.r.Buffered() == 0 {
-			break
-		}
-		if len(l.pending) > 0 {
-			c := copy(p[n:], l.pending)
-			l.pending, n = l.pending[c:], n+c
-			continue
-		}
-		b, err := l.r.ReadByte()
-		if err != nil {
-			if n > 0 {
-				return n, nil
+func latin1String(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			b := make([]rune, len(s))
+			for k := 0; k < len(s); k++ {
+				b[k] = rune(s[k])
 			}
-			return 0, err
+			return string(b)
 		}
-		if b < 0x80 {
-			p[n] = b
-			n++
-			continue
-		}
-		l.pending = utf8.AppendRune(nil, rune(b))
 	}
-	return n, nil
+	return s
 }
 
 // columnName names column i of cols, or its position.

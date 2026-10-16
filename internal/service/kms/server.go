@@ -9,8 +9,11 @@
 // Encrypt and Decrypt (crypto.go); the asymmetric, MAC, raw and ML-KEM
 // purposes (purposes.go, ops.go); key deletion (delete.go); and import jobs
 // (import.go). IAM policies on key rings and crypto keys are stored and never
-// enforced (iam.go, ADR-0006 as amended by #421). HSM and EKM protection,
-// trusted key wrapping and IAM on anything else are UNIMPLEMENTED. Automatic rotation (rotation_period, next_rotation_time) is
+// enforced (iam.go, ADR-0006 as amended by #421). HSM keys are served as
+// SOFTWARE ones are, without an HSM or an attestation (protection.go); EKM
+// connections and configuration are stored (ekm.go), and Autokey creates
+// keys on demand (autokey.go, #1452). EXTERNAL and EXTERNAL_VPC protection,
+// single-tenant HSMs, trusted key wrapping and IAM on anything else are UNIMPLEMENTED. Automatic rotation (rotation_period, next_rotation_time) is
 // served on the Server's clock (rotation.go, #816).
 package kms
 
@@ -73,6 +76,12 @@ type cryptoKey struct {
 	// written before other purposes existed read unchanged.
 	Purpose   string `json:"purpose,omitempty"`
 	Algorithm string `json:"algorithm,omitempty"`
+	// ProtectionLevel is the version template's, empty for SOFTWARE
+	// (#1452); new versions get it.
+	ProtectionLevel string `json:"protectionLevel,omitempty"`
+	// KAJPolicy is key_access_justifications_policy, stored and returned,
+	// never enforced (protection.go).
+	KAJPolicy *kajPolicy `json:"keyAccessJustificationsPolicy,omitempty"`
 }
 
 // Destroy scheduling (resources.proto destroy_scheduled_duration; the range
@@ -99,6 +108,8 @@ type keyVersion struct {
 	Material []byte `json:"material"`
 	// Algorithm is empty for GOOGLE_SYMMETRIC_ENCRYPTION (#1212).
 	Algorithm string `json:"algorithm,omitempty"`
+	// ProtectionLevel is empty for SOFTWARE (#1452).
+	ProtectionLevel string `json:"protectionLevel,omitempty"`
 	// ImportJob and Imported are set on an imported version (import.go).
 	ImportJob string    `json:"importJob,omitempty"`
 	Imported  time.Time `json:"importTime,omitempty"`
@@ -146,6 +157,8 @@ type Server struct {
 	clock sched.Clock
 	// rearm wakes Run when a destroy or restore changes the next due time.
 	rearm chan struct{}
+	// hierarchy resolves Autokey configs through folders (autokey.go).
+	hierarchy Hierarchy
 }
 
 // NewServer returns the API over db.
@@ -160,10 +173,16 @@ func NewServerWithClock(db store.Store, clock sched.Clock) *Server {
 func (s *Server) now() time.Time { return s.clock.Now() }
 
 // Register adds the service to a gRPC server, or to the JSON transcoder,
-// with the IAMPolicy mixin cloudkms.googleapis.com serves beside it
-// (cloudkms_v1.yaml:13), and the Locations mixin (#1291).
+// with the EKM, Autokey, AutokeyAdmin and HsmManagement services
+// cloudkms.googleapis.com also serves (#1452), the IAMPolicy mixin it serves
+// beside them (cloudkms_v1.yaml:13), and the Locations mixin (#1291). The
+// Operations mixin is registered apart (Operations).
 func (s *Server) Register(g grpc.ServiceRegistrar) {
 	kmspb.RegisterKeyManagementServiceServer(g, s)
+	kmspb.RegisterEkmServiceServer(g, s.Ekm())
+	kmspb.RegisterAutokeyServer(g, s.Autokey())
+	kmspb.RegisterAutokeyAdminServer(g, s.AutokeyAdmin())
+	kmspb.RegisterHsmManagementServer(g, HsmManagementServer{})
 	iampb.RegisterIAMPolicyServer(g, s.IAMPolicy())
 	locations.Register(g, s.Locations())
 }
@@ -350,7 +369,7 @@ func (s *Server) toVersion(v keyVersion) *kmspb.CryptoKeyVersion {
 	out := &kmspb.CryptoKeyVersion{
 		Name:            v.Name,
 		State:           v.state(),
-		ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
+		ProtectionLevel: v.protectionLevel(),
 		Algorithm:       v.algorithm(),
 		CreateTime:      timestamppb.New(v.Created),
 		GenerateTime:    timestamppb.New(v.Created),
@@ -383,9 +402,10 @@ func (s *Server) toKey(k cryptoKey) (*kmspb.CryptoKey, error) {
 		// UNVERIFIED.
 		DestroyScheduledDuration: durationpb.New(k.destroyScheduled()),
 		VersionTemplate: &kmspb.CryptoKeyVersionTemplate{
-			ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
+			ProtectionLevel: k.protectionLevel(),
 			Algorithm:       k.algorithm(),
 		},
+		KeyAccessJustificationsPolicy: k.KAJPolicy.proto(),
 	}
 	if k.RotationPeriod > 0 {
 		out.RotationSchedule = &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(k.RotationPeriod)}
@@ -419,13 +439,11 @@ func unsupportedKey(k *kmspb.CryptoKey) error {
 	if p := k.GetPurpose(); !purposes[p] {
 		return apierror.Unimplemented("crypto_key.purpose %s is not implemented", p)
 	}
-	if t := k.GetVersionTemplate(); t != nil {
-		if pl := t.GetProtectionLevel(); pl != kmspb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED && pl != kmspb.ProtectionLevel_SOFTWARE {
-			return apierror.Unimplemented("crypto_key.version_template.protection_level %s is not implemented: only SOFTWARE keys exist locally", pl)
-		}
+	if _, err := protectionLevelOf("crypto_key.version_template.protection_level", k.GetVersionTemplate().GetProtectionLevel()); err != nil {
+		return err
 	}
 	if k.GetCryptoKeyBackend() != "" {
-		return apierror.Unimplemented("crypto_key.crypto_key_backend is not implemented")
+		return apierror.Unimplemented("crypto_key.crypto_key_backend is not implemented: it names an EkmConnection for EXTERNAL_VPC keys or a single-tenant HSM instance, and neither protection level is served")
 	}
 	if k.GetImportOnly() {
 		return apierror.Unimplemented("crypto_key.import_only is not implemented")
@@ -476,6 +494,11 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	level, _ := protectionLevelOf("", in.GetVersionTemplate().GetProtectionLevel())
+	kaj, err := kajPolicyOf(in.GetKeyAccessJustificationsPolicy())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	period, err := rotationPeriodOf(in)
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -517,13 +540,14 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	}
 	k := cryptoKey{Name: name, Created: now, Labels: in.GetLabels(), Next: 1, DestroyScheduled: destroyAfter,
 		RotationPeriod: period, NextRotation: nextRotation,
-		Purpose: storedPurpose(in.GetPurpose()), Algorithm: storedAlgorithm(alg)}
+		Purpose: storedPurpose(in.GetPurpose()), Algorithm: storedAlgorithm(alg),
+		ProtectionLevel: storedLevel(level), KAJPolicy: kaj}
 	if !req.GetSkipInitialVersionCreation() {
 		mat, err := newMaterial(k)
 		if err != nil {
 			return nil, apierror.Wrap(err)
 		}
-		if err := s.put(dbKey(versionPrefix, versionName(name, 1)), keyVersion{Name: versionName(name, 1), Created: now, Material: mat, Algorithm: k.Algorithm}); err != nil {
+		if err := s.put(dbKey(versionPrefix, versionName(name, 1)), keyVersion{Name: versionName(name, 1), Created: now, Material: mat, Algorithm: k.Algorithm, ProtectionLevel: k.ProtectionLevel}); err != nil {
 			return nil, apierror.Wrap(err)
 		}
 		k.Next = 2
@@ -648,7 +672,7 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 		return nil, apierror.Wrap(err)
 	}
 	n := k.Next
-	v := keyVersion{Name: versionName(k.Name, n), Created: s.now().UTC(), Material: mat, State: initial.String(), Algorithm: k.Algorithm}
+	v := keyVersion{Name: versionName(k.Name, n), Created: s.now().UTC(), Material: mat, State: initial.String(), Algorithm: k.Algorithm, ProtectionLevel: k.ProtectionLevel}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -791,7 +815,7 @@ func (s *Server) UpdateCryptoKeyVersion(_ context.Context, req *kmspb.UpdateCryp
 		switch p {
 		case "state":
 		case "external_protection_level_options":
-			return nil, apierror.Wrap(apierror.Unimplemented("update_mask path %q is not implemented: EXTERNAL protection is not supported", p))
+			return nil, apierror.Wrap(apierror.Unimplemented(errExternal, "update_mask path", p))
 		default:
 			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask path %q is not a field that can be updated: only state is", p))
 		}
@@ -1113,7 +1137,9 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 	if len(paths) == 0 {
 		return nil, apierror.Wrap(apierror.InvalidArgument("update_mask is required"))
 	}
-	var setLabels, setPeriod, setNext, setTemplate bool
+	var setLabels, setPeriod, setNext, setTemplate, setLevel, setKAJ bool
+	var level kmspb.ProtectionLevel
+	var kaj *kajPolicy
 	var templateAlg algo
 	var period time.Duration
 	var nextRotation time.Time
@@ -1129,11 +1155,13 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 			if p != "version_template.protection_level" {
 				templateAlg, setTemplate = t.GetAlgorithm(), true
 			}
-			if pl := t.GetProtectionLevel(); p != "version_template.algorithm" && pl != kmspb.ProtectionLevel_SOFTWARE &&
-				pl != kmspb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED {
-				return nil, apierror.Wrap(apierror.Unimplemented("version_template.protection_level %s is not implemented: only SOFTWARE keys exist locally", pl))
+			if p != "version_template.algorithm" {
+				pl, err := protectionLevelOf("version_template.protection_level", t.GetProtectionLevel())
+				if err != nil {
+					return nil, apierror.Wrap(err)
+				}
+				level, setLevel = pl, true
 			}
-			// The only template accepted is the one every key already has.
 		case "rotation_period":
 			d, err := rotationPeriodOf(in)
 			if err != nil {
@@ -1147,7 +1175,11 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 			}
 			nextRotation, setNext = t, true
 		case "key_access_justifications_policy":
-			return nil, apierror.Wrap(apierror.Unimplemented("update_mask path %q is not implemented", p))
+			pol, err := kajPolicyOf(in.GetKeyAccessJustificationsPolicy())
+			if err != nil {
+				return nil, apierror.Wrap(err)
+			}
+			kaj, setKAJ = pol, true
 		case "purpose", "destroy_scheduled_duration", "import_only", "crypto_key_backend":
 			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask path %q names an immutable field", p))
 		case "name", "primary", "create_time":
@@ -1173,6 +1205,14 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 	}
 	if setNext {
 		k.NextRotation = nextRotation
+	}
+	// A key keeps the protection level it was created with: the template
+	// may name it again, not another (the code is UNVERIFIED).
+	if setLevel && level != k.protectionLevel() {
+		return nil, apierror.Wrap(apierror.InvalidArgument("version_template.protection_level cannot change from %s to %s", k.protectionLevel(), level))
+	}
+	if setKAJ {
+		k.KAJPolicy = kaj
 	}
 	if setTemplate {
 		// A template names an algorithm of the key's own purpose; new
@@ -1205,9 +1245,10 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 }
 
 // checkView accepts the defined views. FULL adds only attestation, which
-// exists for HSM versions (resources.proto CryptoKeyVersionView); every
-// version here is SOFTWARE, so both views return the same fields. Revisit
-// with the first HSM work (#406). Another value's code is UNVERIFIED.
+// exists for HSM versions (resources.proto CryptoKeyVersionView); an HSM
+// version here has no attestation to show, since no HSM made it
+// (protection.go, #1452), so both views return the same fields. Another
+// value's code is UNVERIFIED.
 func checkView(field string, v kmspb.CryptoKeyVersion_CryptoKeyVersionView) error {
 	switch v {
 	case kmspb.CryptoKeyVersion_CRYPTO_KEY_VERSION_VIEW_UNSPECIFIED, kmspb.CryptoKeyVersion_FULL:

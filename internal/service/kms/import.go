@@ -53,6 +53,9 @@ type importJob struct {
 	// Private is the RSA wrapping key, PKCS #8 DER, stored unencrypted like
 	// all key material here.
 	Private []byte `json:"private"`
+	// ProtectionLevel is empty for SOFTWARE; an HSM job is generated as a
+	// SOFTWARE one is, with no attestation (protection.go, #1452).
+	ProtectionLevel string `json:"protectionLevel,omitempty"`
 }
 
 type importSpec struct {
@@ -106,7 +109,7 @@ func (s *Server) toImportJob(j importJob) (*kmspb.ImportJob, error) {
 	out := &kmspb.ImportJob{
 		Name:            j.Name,
 		ImportMethod:    j.method(),
-		ProtectionLevel: kmspb.ProtectionLevel_SOFTWARE,
+		ProtectionLevel: j.protectionLevel(),
 		CreateTime:      timestamppb.New(j.Created),
 		GenerateTime:    timestamppb.New(j.Created),
 		ExpireTime:      timestamppb.New(j.Created.Add(importJobTTL)),
@@ -149,12 +152,12 @@ func (s *Server) CreateImportJob(_ context.Context, req *kmspb.CreateImportJobRe
 	if !ok {
 		return nil, apierror.Wrap(apierror.Unimplemented("import_job.import_method %s is not implemented", m))
 	}
-	switch pl := in.GetProtectionLevel(); pl {
-	case kmspb.ProtectionLevel_SOFTWARE:
-	case kmspb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED:
+	if in.GetProtectionLevel() == kmspb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED {
 		return nil, apierror.Wrap(apierror.InvalidArgument("import_job.protection_level is required"))
-	default:
-		return nil, apierror.Wrap(apierror.Unimplemented("import_job.protection_level %s is not implemented: only SOFTWARE keys exist locally", pl))
+	}
+	level, err := protectionLevelOf("import_job.protection_level", in.GetProtectionLevel())
+	if err != nil {
+		return nil, apierror.Wrap(err)
 	}
 	if in.GetCryptoKeyBackend() != "" {
 		return nil, apierror.Wrap(apierror.Unimplemented("import_job.crypto_key_backend is not implemented"))
@@ -180,7 +183,7 @@ func (s *Server) CreateImportJob(_ context.Context, req *kmspb.CreateImportJobRe
 	} else if found {
 		return nil, apierror.Wrap(apierror.AlreadyExists("ImportJob %s already exists", name))
 	}
-	j := importJob{Name: name, Method: m.String(), Created: s.now().UTC(), Private: der}
+	j := importJob{Name: name, Method: m.String(), Created: s.now().UTC(), Private: der, ProtectionLevel: storedLevel(level)}
 	if err := s.put(dbKey(importJobPrefix, name), j); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -412,6 +415,12 @@ func (s *Server) ImportCryptoKeyVersion(_ context.Context, req *kmspb.ImportCryp
 	if err := s.load(dbKey(importJobPrefix, req.GetImportJob()), &j, "ImportJob", req.GetImportJob()); err != nil {
 		return nil, err
 	}
+	// The job's protection level "must match the protection_level of the
+	// version_template on the CryptoKey you attempt to import into"
+	// (resources.proto ImportJob); the code is UNVERIFIED.
+	if j.protectionLevel() != k.protectionLevel() {
+		return nil, apierror.Wrap(apierror.InvalidArgument("ImportJob %s is %s, but CryptoKey %s is %s: the protection levels must match", j.Name, j.protectionLevel(), k.Name, k.protectionLevel()))
+	}
 	now := s.now().UTC()
 	if st := j.state(now); st != kmspb.ImportJob_ACTIVE {
 		return nil, apierror.Wrap(apierror.FailedPrecondition("ImportJob %s is %s: only an ACTIVE import job can be used", j.Name, st))
@@ -426,7 +435,7 @@ func (s *Server) ImportCryptoKeyVersion(_ context.Context, req *kmspb.ImportCryp
 	}
 	n := k.Next
 	v := keyVersion{Name: versionName(k.Name, n), Created: now, Material: mat, Algorithm: storedAlgorithm(a),
-		ImportJob: j.Name, Imported: now}
+		ImportJob: j.Name, Imported: now, ProtectionLevel: k.ProtectionLevel}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}

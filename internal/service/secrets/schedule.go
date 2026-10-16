@@ -192,7 +192,12 @@ func (s *Store) destroyNowQuiet(project, id string, v Version) (Version, error) 
 	v.State = StateDestroyed
 	v.ScheduledDestroy = time.Time{}
 	v.Destroyed = s.now().UTC()
-	v.Payload = nil
+	v.Payload, v.PayloadSize = nil, 0
+	// The wrapped data keys go with the payload; the key versions stay,
+	// as replication_status (#1453).
+	for i := range v.Replicas {
+		v.Replicas[i].WrappedKey = nil
+	}
 	v.Etag = s.etag()
 	return v, s.put(versionKey(project, id, v.Number), v)
 }

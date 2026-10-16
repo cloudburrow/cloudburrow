@@ -127,6 +127,11 @@ func (f *Front) serveREST(w http.ResponseWriter, r *http.Request, next http.Hand
 			}
 			var req pubsubpb.CreateSnapshotRequest
 			if restJSON.Unmarshal(body, &req) == nil {
+				if _, ok := f.detachedSub(req.GetSubscription()); ok {
+					// detachedcalls.go (#1446).
+					writeRESTError(w, errDetachedTopic("CreateSnapshot", req.GetSubscription()))
+					return
+				}
 				f.touch(req.GetSubscription())
 			}
 		}

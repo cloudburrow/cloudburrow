@@ -116,7 +116,10 @@ type Server struct {
 	// called (#1380).
 	transfers *transfers
 	// certs are the instances' client certificates (sslCerts, #1380).
-	certs    *sslCertStore
+	certs *sslCertStore
+	// secrets reads executeSql's passwordSecretVersion (#1462), nil
+	// unless SetSecretAccessor was called; emu guards it.
+	secrets  SecretAccessor
 	stopAuto chan struct{}
 	// advances are the retention clock's Advances (#1330), oldest first.
 	clockMu  sync.Mutex
@@ -278,13 +281,46 @@ func unimplemented(what, why string) error {
 
 const instanceWhy = "this server was started without instance writes (docs/cloudsql.md)"
 
+// The reasons the instance methods CloudBurrow cannot serve faithfully are
+// refused (#1462): each names what is missing.
+const (
+	externalPrimaryWhy = "an external primary (a source representation instance, for a database server outside Cloud SQL) is not served, " +
+		"so there is no external server to replicate from or to; read replicas of an instance are served (docs/cloudsql.md)"
+	sqlServerWhy = "it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
+	diskWhy      = "an instance's storage is its server's volume in the cluster, not a provisioned Compute Engine persistent disk, " +
+		"so it has no provisioned size (settings.dataDiskSizeGb) to shrink or reset"
+	BlueGreenWhy = "a blue-green deployment's switchover moves the blue instance's write endpoint (its IP address and DNS name) to the green instance, " +
+		"which needs Google-managed networking; CloudBurrow's instances are reached by connection name through the connector. " +
+		"Read replicas and promoteReplica are served (docs/cloudsql.md)"
+	ResolveWhy = "resolving a DNS name needs the instance's Cloud DNS records (the dnsNames of Private Service Connect and write endpoints), " +
+		"Google-managed networking that is not served; instances are reached by connection name through connectSettings"
+)
+
 // verbWhy is why an instance method other than restart is not served.
 func verbWhy(verb string) string {
 	switch verb {
-	case "demoteMaster", "demote", "switchover", "reencrypt":
-		return "external primaries, legacy failover replicas and switchover are not served; read replicas and high availability (availabilityType REGIONAL, instances.failover) are (docs/cloudsql.md)"
-	case "backups":
-		return "the project-level Backups API is not served; an instance's backups are its backupRuns"
+	case "demoteMaster", "demote", "startExternalSync", "verifyExternalSyncSettings":
+		return externalPrimaryWhy
+	case "switchover":
+		return "switchover swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster, " +
+			"which needs a second region, and CloudBurrow has one (" + Region + "); promote a read replica with promoteReplica, " +
+			"or fail over a REGIONAL instance with instances.failover (docs/cloudsql.md)"
+	case "reencrypt":
+		return "an instance's data is not encrypted with a customer-managed Cloud KMS key (diskEncryptionConfiguration is not applied to its server's volume), " +
+			"so there is no key version to re-encrypt it with"
+	case "acquireSsrsLease", "releaseSsrsLease":
+		return "SQL Server Reporting Services leases: " + sqlServerWhy
+	case "listEntraIdCertificates", "addEntraIdCertificate", "rotateEntraIdCertificate":
+		return "Microsoft Entra ID authentication: " + sqlServerWhy
+	case "listServerCertificates", "addServerCertificate", "rotateServerCertificate":
+		return "per-instance server certificates are for instances whose serverCaMode is GOOGLE_MANAGED_CAS_CA or CUSTOMER_MANAGED_CAS_CA, " +
+			"issued by Certificate Authority Service, which is not served; instances here are GOOGLE_MANAGED_INTERNAL_CA, " +
+			"whose server CA is rotated with addServerCa and rotateServerCa"
+	case "getDiskShrinkConfig", "performDiskShrink", "resetReplicaSize":
+		return diskWhy
+	case "rescheduleMaintenance":
+		return "CloudBurrow's servers have no Google-managed maintenance: no maintenance event is ever scheduled (scheduledMaintenance is never set), " +
+			"so there is none to reschedule"
 	}
 	return "beneath an instance only databases, users, backupRuns, connectSettings, restart, restoreBackup and clone are served; " +
 		"see docs/cloudsql.md for what is served"
@@ -302,6 +338,12 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		strings.TrimSuffix(p[1], ":pointInTimeRestore") != "" && r.Method == http.MethodPost {
 		out, err := s.pointInTimeRestore(r, base, strings.TrimSuffix(p[1], ":pointInTimeRestore"))
 		return "sql.instances.pointInTimeRestore", out, err
+	}
+	if len(p) == 4 && p[0] == "locations" && p[2] == "dns" && strings.HasSuffix(p[3], ":resolveConnectSettings") {
+		return "sql.connect.resolve", nil, unimplemented("connect.resolve", ResolveWhy)
+	}
+	if len(p) >= 5 && p[0] == "projects" && p[2] == "locations" && p[4] == "blueGreenDeployments" {
+		return "sql.blueGreenDeployments", nil, unimplemented("blueGreenDeployments", BlueGreenWhy)
 	}
 	if len(p) < 2 || p[0] != "projects" || p[1] == "" || strings.Contains(p[1], ":") || len(p) == 2 {
 		// flags and locations.
@@ -323,6 +365,8 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 			return "sql.operations.cancel", out, err
 		}
 		return "sql.operations", nil, Errorf(http.StatusNotFound, "%s is not a Cloud SQL Admin API path", r.URL.Path)
+	case "backups":
+		return s.projectBackups(r, base, project, rest[1:])
 	case "instances":
 	default:
 		return "", nil, unimplemented("projects/"+project+"/"+rest[0], "only instances, databases, users and operations are served")
@@ -403,7 +447,7 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 			out, err := s.patchInstance(r, base, project, name, true)
 			return "sql.instances.update", out, err
 		case http.MethodDelete:
-			out, err := s.deleteInstance(base, project, name)
+			out, err := s.deleteInstance(r, base, project, name)
 			return "sql.instances.delete", out, err
 		}
 		return "sql.instances", nil, Errorf(http.StatusNotFound, "method %s is not served on an instance", r.Method)
@@ -461,6 +505,21 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		}
 		out, err := s.connectSettings(r, project, e)
 		return "sql.connect.get", out, err
+	case "executeSql":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.executeSQL(r, project, e)
+			return "sql.instances.executeSql", out, err
+		}
+	case "truncateLog":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.truncateLog(r, base, project, e)
+			return "sql.instances.truncateLog", out, err
+		}
+	case "preCheckMajorVersionUpgrade":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.preCheckMajorVersionUpgrade(r, base, project, e)
+			return "sql.instances.preCheckMajorVersionUpgrade", out, err
+		}
 	case "restart":
 		if len(rest) == 3 && r.Method == http.MethodPost {
 			out, err := s.restartInstance(base, project, name)

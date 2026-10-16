@@ -148,6 +148,17 @@ type plan struct {
 	LogRetentionDays                                               int64
 	Rules                                                          []rule
 	Labels                                                         map[string]string
+	// Revision is the current revision's number: v0 at creation, one
+	// more per patch. Revisions are every revision's snapshot, oldest
+	// first.
+	Revision  int
+	Revisions []planRevision `json:",omitempty"`
+}
+
+// planRevision is one revision of a plan: the plan as it was.
+type planRevision struct {
+	ID, CreateTime string
+	Snapshot       map[string]any
 }
 
 type association struct {
@@ -163,11 +174,16 @@ type lastBackup struct {
 type dataSource struct {
 	Name, Project, Instance, Association, CreateTime, UpdateTime string
 	Info                                                         Instance
+	Labels                                                       map[string]string `json:",omitempty"`
 }
 
 type backup struct {
 	Name, DataSource, RunID, RuleID, Plan, CreateTime, ExpireTime, Description string
 	Labels                                                                     map[string]string
+	// Revision is the plan revision the backup was taken under, "" for v0.
+	// EnforcedEnd is enforcedRetentionEndTime when a patch set it apart
+	// from ExpireTime; UpdateTime is the last patch's.
+	Revision, EnforcedEnd, UpdateTime string `json:",omitempty"`
 }
 
 // NewServer serves at addr once started, backing up through sql. With a
@@ -331,6 +347,9 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 		path, verb = path[:i], path[i+1:]
 	}
 	p := strings.Split(strings.TrimSuffix(path, "/"), "/")
+	if len(p) == 5 && (p[0] == "folders" || p[0] == "organizations") && p[2] == "locations" && p[4] == "resourceBackupConfigs" && verb == "fetch" {
+		return "backupdr." + p[0] + ".locations.resourceBackupConfigs.fetch", nil, unimplemented(p[0]+".locations.resourceBackupConfigs.fetch", hierarchyWhy)
+	}
 	if len(p) < 2 || p[0] != "projects" || p[1] == "" {
 		return "", nil, notFound("%s is not a Backup and DR API v1 path", r.URL.Path)
 	}
@@ -345,10 +364,18 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 		return "backupdr.projects.locations.get", locationJSON(p[1], p[3]), nil
 	}
 	rest := p[4:]
+	if len(rest) == 0 && verb == "msComplianceMetadata" {
+		return "backupdr.projects.locations.managementServers.msComplianceMetadata", nil,
+			unimplemented("managementServers.msComplianceMetadata", managementServerWhy)
+	}
 	if len(rest) == 0 {
 		return "", nil, unimplemented("projects.locations."+verb, otherWhy)
 	}
+	if m, why := refused(rest, verb); why != "" {
+		return m, nil, unimplemented(strings.TrimPrefix(m, "backupdr.projects.locations."), why)
+	}
 	get, list, post, del := r.Method == http.MethodGet, r.Method == http.MethodGet, r.Method == http.MethodPost, r.Method == http.MethodDelete
+	patch := r.Method == http.MethodPatch
 	switch rest[0] {
 	case "operations":
 		switch {
@@ -357,11 +384,45 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 		case len(rest) == 2 && get && verb == "":
 			out, err := s.operation(loc + "/operations/" + rest[1])
 			return "backupdr.projects.locations.operations.get", out, err
+		case len(rest) == 2 && post && verb == "cancel":
+			out, err := s.cancelOperation(loc + "/operations/" + rest[1])
+			return "backupdr.projects.locations.operations.cancel", out, err
+		case len(rest) == 2 && del && verb == "":
+			out, err := s.deleteOperation(loc + "/operations/" + rest[1])
+			return "backupdr.projects.locations.operations.delete", out, err
+		}
+	case "dataSourceReferences":
+		switch {
+		case len(rest) == 1 && list && verb == "":
+			return "backupdr.projects.locations.dataSourceReferences.list", s.listReferences(loc), nil
+		case len(rest) == 1 && get && verb == "fetchForResourceType":
+			out, err := s.fetchReferences(r, loc)
+			return "backupdr.projects.locations.dataSourceReferences.fetchForResourceType", out, err
+		case len(rest) == 2 && get && verb == "":
+			out, err := s.getReference(loc + "/dataSourceReferences/" + rest[1])
+			return "backupdr.projects.locations.dataSourceReferences.get", out, err
 		}
 	case "backupVaults":
 		switch {
 		case len(rest) == 1 && list && verb == "":
 			return "backupdr.projects.locations.backupVaults.list", s.listVaults(loc), nil
+		case len(rest) == 1 && get && verb == "fetchUsable":
+			return "backupdr.projects.locations.backupVaults.fetchUsable", s.listVaults(loc), nil
+		case len(rest) == 2 && patch && verb == "":
+			out, err := s.patchVault(r, loc+"/backupVaults/"+rest[1])
+			return "backupdr.projects.locations.backupVaults.patch", out, err
+		case len(rest) == 2 && post && verb == "testIamPermissions":
+			out, err := s.testVaultPermissions(r, loc+"/backupVaults/"+rest[1])
+			return "backupdr.projects.locations.backupVaults.testIamPermissions", out, err
+		case len(rest) == 4 && rest[2] == "dataSources" && patch && verb == "":
+			out, err := s.patchDataSource(r, strings.Join(p, "/"))
+			return "backupdr.projects.locations.backupVaults.dataSources.patch", out, err
+		case len(rest) == 5 && rest[2] == "dataSources" && rest[4] == "backups" && get && verb == "fetchForResourceType":
+			out, err := s.fetchBackups(r, strings.Join(p[:len(p)-1], "/"))
+			return "backupdr.projects.locations.backupVaults.dataSources.backups.fetchForResourceType", out, err
+		case len(rest) == 6 && rest[2] == "dataSources" && rest[4] == "backups" && patch && verb == "":
+			out, err := s.patchBackup(r, strings.Join(p, "/"))
+			return "backupdr.projects.locations.backupVaults.dataSources.backups.patch", out, err
 		case len(rest) == 1 && post && verb == "":
 			out, err := s.createVault(r, loc)
 			return "backupdr.projects.locations.backupVaults.create", out, err
@@ -403,6 +464,15 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 		case len(rest) == 2 && del && verb == "":
 			out, err := s.deletePlan(loc + "/backupPlans/" + rest[1])
 			return "backupdr.projects.locations.backupPlans.delete", out, err
+		case len(rest) == 2 && patch && verb == "":
+			out, err := s.patchPlan(r, loc+"/backupPlans/"+rest[1])
+			return "backupdr.projects.locations.backupPlans.patch", out, err
+		case len(rest) == 3 && rest[2] == "revisions" && list && verb == "":
+			out, err := s.listRevisions(loc + "/backupPlans/" + rest[1])
+			return "backupdr.projects.locations.backupPlans.revisions.list", out, err
+		case len(rest) == 4 && rest[2] == "revisions" && get && verb == "":
+			out, err := s.getRevision(loc+"/backupPlans/"+rest[1], rest[3])
+			return "backupdr.projects.locations.backupPlans.revisions.get", out, err
 		}
 	case "backupPlanAssociations":
 		switch {
@@ -411,6 +481,12 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 		case len(rest) == 1 && post && verb == "":
 			out, err := s.createAssociation(r, loc)
 			return "backupdr.projects.locations.backupPlanAssociations.create", out, err
+		case len(rest) == 1 && get && verb == "fetchForResourceType":
+			out, err := s.fetchAssociations(r, loc)
+			return "backupdr.projects.locations.backupPlanAssociations.fetchForResourceType", out, err
+		case len(rest) == 2 && patch && verb == "":
+			out, err := s.patchAssociation(r, loc+"/backupPlanAssociations/"+rest[1])
+			return "backupdr.projects.locations.backupPlanAssociations.patch", out, err
 		case len(rest) == 2 && get && verb == "":
 			out, err := s.getAssociation(loc + "/backupPlanAssociations/" + rest[1])
 			return "backupdr.projects.locations.backupPlanAssociations.get", out, err
@@ -427,6 +503,35 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 		what += ":" + verb
 	}
 	return "backupdr." + rest[0], nil, unimplemented(r.Method+" "+what, otherWhy)
+}
+
+// refused is the method a path names and why it is refused, when it is
+// one CloudBurrow cannot serve faithfully; why is "" otherwise.
+func refused(rest []string, verb string) (string, string) {
+	const pre = "backupdr.projects.locations."
+	switch {
+	case rest[0] == "managementServers":
+		m := map[string]string{"getIamPolicy": "getIamPolicy", "setIamPolicy": "setIamPolicy", "testIamPermissions": "testIamPermissions"}[verb]
+		if m == "" {
+			return pre + "managementServers", managementServerWhy
+		}
+		return pre + "managementServers." + m, managementServerWhy
+	case len(rest) == 1 && rest[0] == "trial":
+		if verb == "" {
+			return pre + "getTrial", trialWhy
+		}
+		return pre + "trial." + verb, trialWhy
+	case len(rest) == 1 && rest[0] == "resourceBackupConfigs":
+		return pre + "resourceBackupConfigs." + map[bool]string{true: "fetch", false: "list"}[verb == "fetch"], inventoryWhy
+	case len(rest) == 1 && rest[0] == "serviceConfig" && verb == "initialize":
+		return pre + "serviceConfig.initialize", initializeWhy
+	case len(rest) == 4 && rest[0] == "backupVaults" && rest[2] == "dataSources":
+		switch verb {
+		case "initiateBackup", "finalizeBackup", "abandonBackup", "fetchAccessToken", "setInternalStatus", "remove":
+			return pre + "backupVaults.dataSources." + verb, applianceWhy
+		}
+	}
+	return "", ""
 }
 
 // otherWhy is why a method outside Cloud SQL's integration is refused.
@@ -592,7 +697,8 @@ func (s *Server) createVault(r *http.Request, loc string) (any, error) {
 		return nil, invalid("backupVault.backupMinimumEnforcedRetentionDuration %q is not a duration such as \"100000s\".", body.MinRetention)
 	}
 	if len(body.EncryptionConfig) > 0 && string(body.EncryptionConfig) != "null" && string(body.EncryptionConfig) != "{}" {
-		return nil, unimplemented("backupVault.encryptionConfig", "a vault's backups are not encrypted with a customer key in CloudBurrow")
+		return nil, unimplemented("backupVault.encryptionConfig", "a customer-managed encryption key needs Cloud KMS to wrap the vault's backups, "+
+			"and CloudBurrow's Backup and DR Service does not use Cloud KMS: a vault's backups are Cloud SQL backup runs, unencrypted at rest (docs/backupdr.md)")
 	}
 	switch body.AccessRestriction {
 	case "":

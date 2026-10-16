@@ -106,8 +106,47 @@ _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "or
 ```
 
 What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), legacy
-failover replicas (`failoverReplica`, `failoverTarget`), external-primary replicas, `MYSQL_5_7` and versions Cloud SQL no longer lists, the project-level Backups API, BAK and TDE imports and exports, and upgrading a read replica on its own. See
-[coverage/sqladmin.md](coverage/sqladmin.md) for every method.
+failover replicas (`failoverReplica`, `failoverTarget`), external-primary replicas, `MYSQL_5_7` and versions Cloud SQL no longer lists, BAK and TDE imports and exports, and upgrading a read replica on its own. See
+[coverage/sqladmin.md](coverage/sqladmin.md) for every method, and the next section for the
+methods #1462 refuses and why.
+
+### The Data API, upgrade pre-checks and the rest of the instance verbs (#1462)
+
+- **`instances.executeSql`** runs statements in the instance's own server, as the payload's
+  `user`, connecting with the password held by `passwordSecretVersion` in this instance's
+  Secret Manager (start CloudBurrow with `secretmanager` in `--services`; without it the call is
+  412 naming the service). As on Cloud SQL the instance needs `settings.dataApiAccess`
+  `ALLOW_DATA_API`; the servers `up` runs cannot have it, so create an instance for it. Each
+  statement gives one result: its columns, typed by the server, and its rows, a NULL as
+  `nullValue`; a statement that returns no rows gives its command tag as `message`. More rows
+  than `rowLimit` is 400 unless `partialResultMode` is `ALLOW_PARTIAL_RESULT`, which returns the
+  first `rowLimit` rows marked `partialResult`. A statement the database refuses ends the run,
+  and its error is the response's `status` (code 3, or 16 when the server refuses the user's
+  password); the results before it are returned. `autoIamAuthn` is 501 (ADR-0004). PostgreSQL
+  trusts local connections, so there the password is read but not checked, as for every
+  connection (section 4). `gcloud sql instances execute-sql --user --password-secret-version`
+  works.
+- **`instances.preCheckMajorVersionUpgrade`** checks the upgrade `instances.patch` would make
+  (section "Database versions and major version upgrades"): the operation's
+  `preCheckMajorVersionUpgradeContext.preCheckResponse` has an `ERROR` naming what would refuse
+  it, such as read replicas not yet upgraded, and nothing when the upgrade would go ahead. A
+  target that is not a newer version of the engine is 400. It does not run `pg_upgrade --check`.
+- **`instances.truncateLog`** truncates MySQL's `mysql.general_log` (`MYSQL_GENERAL_TABLE`) or
+  `mysql.slow_log` (`MYSQL_SLOW_TABLE`); on PostgreSQL it is 400, as on Cloud SQL.
+
+Refused with 501, each naming what is missing:
+
+| Methods | Why |
+|---|---|
+| `blueGreenDeployments.*` | the switchover moves the blue instance's write endpoint (IP address and DNS name) to the green one: Google-managed networking |
+| `connect.resolve` | needs the instance's Cloud DNS records (Private Service Connect and write endpoint DNS names) |
+| `listServerCertificates`, `addServerCertificate`, `rotateServerCertificate` | per-instance server certificates are for `GOOGLE_MANAGED_CAS_CA` and `CUSTOMER_MANAGED_CAS_CA` instances, issued by Certificate Authority Service; instances here are `GOOGLE_MANAGED_INTERNAL_CA`, rotated with `addServerCa` and `rotateServerCa` |
+| Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
+| `demote`, `demoteMaster`, `startExternalSync`, `verifyExternalSyncSettings` | need an external primary (a source representation instance) |
+| `instances.switchover` | swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster; CloudBurrow has one region |
+| `reencrypt` | the server's volume is not encrypted with a customer-managed Cloud KMS key |
+| `getDiskShrinkConfig`, `performDiskShrink`, `resetReplicaSize` | storage is the server's volume in the cluster, not a provisioned persistent disk |
+| `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
 
 ### Imports and exports (#1380)
 
@@ -357,11 +396,26 @@ flags, deletion protection, automated backups and their start time, sent as one
   section).
 - **Persistence follows the instance's mode**: in persistent mode the dumps and their records
   (`cloudsql-backups/backups.json`) survive `stop` and `up`; in ephemeral mode the next `up`
-  removes them. Deleting a created instance deletes its backups.
+  removes them. Deleting a created instance deletes its backups, except a `FINAL` one (below).
 
 The operation is `BACKUP_VOLUME`, `RESTORE_VOLUME` or `CLONE`, `RUNNING` until the dump or the
 load is done. The console's instance page has a **Backups** tab with **Create backup**,
 **Restore**, **Delete backup** and **Clone**.
+
+**The project-level Backups API (#1462).** `projects/{project}/backups/{id}` names the same
+backups: `CreateBackup` takes an `ON_DEMAND` one as `backupRuns.insert` does, `ListBackups`
+lists the project's (filter by `instance`, `type` and `state`, joined by `AND`), `GetBackup`,
+`UpdateBackup` and `DeleteBackup` read, change and delete one, and `restoreBackup` with `backup`
+restores one by its name. `ttlDays` or `expiryTime` expire a backup on the retention clock.
+`UpdateBackup` changes any backup's `description`, and the retention (`ttl_days`,
+`expiry_time`) of a `FINAL` backup only, as Cloud SQL documents. **Final backups**:
+`instances.delete` with `enableFinalBackup` dumps the instance before it is removed (when the
+dump fails the instance is kept), and the `FINAL` backup outlives the instance, with
+`instanceDeletionTime`, for `finalBackupTtlDays` (30 by default) or until
+`finalBackupExpiryTime`. `gcloud sql backups list` without `--instance`, and `describe` by name,
+use this API. The console's instance page offers **Delete with final backup**, **Edit project
+backup**, **Restore project backup** and **Delete project backup**, which reach a final backup
+whose instance is gone from any instance's page.
 
 ### Point-in-time recovery (#1330)
 

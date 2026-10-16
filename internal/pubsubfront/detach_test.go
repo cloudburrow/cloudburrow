@@ -73,8 +73,8 @@ func TestDetachSubscription(t *testing.T) {
 		t.Errorf("CreateSubscription of a detached name = %v, want ALREADY_EXISTS", err)
 	}
 	if _, err := fx.client.SubscriptionAdminClient.Seek(ctx, &pubsubpb.SeekRequest{Subscription: sub,
-		Target: &pubsubpb.SeekRequest_Time{Time: timestamppb.Now()}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("Seek of a detached subscription = %v, want UNIMPLEMENTED with the reason", err)
+		Target: &pubsubpb.SeekRequest_Time{Time: timestamppb.Now()}}); err != nil {
+		t.Errorf("Seek to a time of a detached subscription = %v, want success (#1446)", err)
 	}
 	if _, err := fx.client.TopicAdminClient.DetachSubscription(ctx, &pubsubpb.DetachSubscriptionRequest{Subscription: sub}); err != nil {
 		t.Errorf("a second DetachSubscription = %v, want success", err)
