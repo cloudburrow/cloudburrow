@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
-	"github.com/apache/arrow/go/v15/arrow/array"
-	"github.com/apache/arrow/go/v15/arrow/memory"
-	"github.com/apache/arrow/go/v15/parquet/file"
-	"github.com/apache/arrow/go/v15/parquet/pqarrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/linkedin/goavro/v2"
 )
 
@@ -278,8 +278,12 @@ func TestBigQueryParquetExtract(t *testing.T) {
 		tr.Release()
 		tbl.Release()
 		sort.Strings(rows)
+		// arrow-go v18's text: DATETIME and TIMESTAMP are written
+		// isAdjustedToUTC false (BigQuery's mapping, extractparquet.go),
+		// which v18 reads as no time zone, printed without a Z (v15 read
+		// them as UTC); the file is the same.
 		want2 := []string{
-			`1|true|x|YWI=|12.5|2020-01-02|2020-01-02 03:04:05.5Z|2020-01-02 03:04:05.123456Z|03:04:05.000000|{"a":7,"t":"q"}`,
+			`1|true|x|YWI=|12.5|2020-01-02|2020-01-02T03:04:05.5|2020-01-02T03:04:05.123456|03:04:05.000000|{"a":7,"t":"q"}`,
 			"2|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)|(null)",
 		}
 		if !reflect.DeepEqual(rows, want2) {

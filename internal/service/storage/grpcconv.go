@@ -287,6 +287,7 @@ type jsonBucket struct {
 	Billing               *struct{ RequesterPays bool }
 	Encryption            *struct{ DefaultKmsKeyName string }
 	Autoclass             *struct{ Enabled bool }
+	CustomPlacementConfig *struct{ DataLocations []string }
 	HierarchicalNamespace *struct{ Enabled bool }
 	ObjectRetention       *struct{ Mode string }
 	Lifecycle             *struct{ Rule []jsonRule }
@@ -340,6 +341,9 @@ func (b jsonBucket) proto() *pb.Bucket {
 	if a := b.Autoclass; a != nil {
 		out.Autoclass = &pb.Bucket_Autoclass{Enabled: a.Enabled}
 	}
+	if c := b.CustomPlacementConfig; c != nil {
+		out.CustomPlacementConfig = &pb.Bucket_CustomPlacementConfig{DataLocations: c.DataLocations}
+	}
 	if h := b.HierarchicalNamespace; h != nil {
 		out.HierarchicalNamespace = &pb.Bucket_HierarchicalNamespace{Enabled: h.Enabled}
 	}
@@ -385,14 +389,18 @@ var bucketMaskFields = map[string]string{
 	"soft_delete_policy": "softDeletePolicy", "iam_config": "iamConfiguration", "cors": "cors",
 	"website": "website", "logging": "logging", "billing": "billing", "encryption": "encryption",
 	"autoclass": "autoclass", "lifecycle": "lifecycle", "rpo": "rpo",
-	"acl": "acl", "default_object_acl": "defaultObjectAcl",
+	"acl": "acl", "default_object_acl": "defaultObjectAcl", "custom_placement_config": "customPlacementConfig",
 }
 
 // bucketToJSON is b as JSON API metadata: every field it sets, or, with
 // paths (an update_mask), those fields, null where b leaves one unset.
 func bucketToJSON(b *pb.Bucket, paths []string) (map[string]any, error) {
-	if b.GetCustomPlacementConfig() != nil || b.GetIpFilter() != nil {
-		return nil, grpcstatus.Error(codes.Unimplemented, "custom_placement_config and ip_filter are not implemented over gRPC")
+	if b.GetIpFilter() != nil {
+		// The JSON API refuses ipFilter too (buckets.go): a filter is only
+		// worth its name enforced, and enforcing it needs the caller's VPC
+		// network and the storage.buckets.exemptFromIpFilter permission,
+		// neither of which CloudBurrow models.
+		return nil, grpcstatus.Error(codes.Unimplemented, "ip_filter is not implemented: bucket IP filtering is not enforced by CloudBurrow, so it is refused rather than stored")
 	}
 	all := map[string]any{}
 	set := func(k string, v any, ok bool) {
@@ -462,6 +470,13 @@ func bucketToJSON(b *pb.Bucket, paths []string) (map[string]any, error) {
 	}
 	if a := b.GetAutoclass(); a != nil {
 		all["autoclass"] = map[string]any{"enabled": a.GetEnabled()}
+	}
+	if c := b.GetCustomPlacementConfig(); c != nil {
+		locs := c.GetDataLocations()
+		if locs == nil {
+			locs = []string{}
+		}
+		all["customPlacementConfig"] = map[string]any{"dataLocations": locs}
 	}
 	if h := b.GetHierarchicalNamespace(); h != nil && paths == nil {
 		all["hierarchicalNamespace"] = map[string]any{"enabled": h.GetEnabled()}

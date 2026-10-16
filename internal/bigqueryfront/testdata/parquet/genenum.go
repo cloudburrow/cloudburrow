@@ -1,7 +1,7 @@
 //go:build ignore
 
 // Writes enum.parquet with Apache Arrow's Parquet writer for Go (the
-// module's github.com/apache/arrow/go/v15), as pyarrow writes no ENUM
+// module's github.com/apache/arrow-go/v18), as pyarrow writes no ENUM
 // column. Run by hand from this directory, never in CI:
 //
 //	go run genenum.go
@@ -11,10 +11,10 @@ import (
 	"log"
 	"os"
 
-	"github.com/apache/arrow/go/v15/parquet"
-	"github.com/apache/arrow/go/v15/parquet/compress"
-	"github.com/apache/arrow/go/v15/parquet/file"
-	"github.com/apache/arrow/go/v15/parquet/schema"
+	"github.com/apache/arrow-go/v18/parquet"
+	"github.com/apache/arrow-go/v18/parquet/compress"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/schema"
 )
 
 func main() {

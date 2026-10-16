@@ -220,3 +220,48 @@ output "ca" {
 		t.Errorf("GetInstance after destroy = %v, want NOT_FOUND", err)
 	}
 }
+
+// covers: google.cloud.redis.v1.CloudRedis/CreateInstance, google.cloud.redis.v1.CloudRedis/GetInstance, google.cloud.redis.v1.CloudRedis/DeleteInstance
+//
+// TestTerraformRedisCustomerManagedKey (#1463): a google_redis_instance
+// with customer_managed_key, a Cloud KMS key the official KMS client made
+// in its region, applies with the official provider, reads back with the
+// key, the second plan is empty, and destroy removes it.
+func TestTerraformRedisCustomerManagedKey(t *testing.T) {
+	h := New(t)
+	c, _ := memorystoreAdminClient(t, h)
+	m := newTFModule(t)
+	ctx := h.Context()
+	key := memorystoreKey(t, h, m.project)
+	id := fmt.Sprintf("tf-cmek-%d", time.Now().UnixNano()%1e8)
+	name := "projects/" + m.project + "/locations/us-central1/instances/" + id
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(h.Context(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = op.Wait(h.Context())
+		}
+	})
+	m.write(fmt.Sprintf(`
+resource "google_redis_instance" "cmek" {
+  project              = %q
+  region               = "us-central1"
+  name                 = %q
+  tier                 = "BASIC"
+  memory_size_gb       = 1
+  customer_managed_key = %q
+}
+`, m.project, id, key))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil {
+		t.Fatalf("GetInstance after apply: %v", err)
+	}
+	if inst.GetCustomerManagedKey() != key || inst.GetState() != redispb.Instance_READY {
+		t.Fatalf("after apply, the instance reads back as %v", inst)
+	}
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetInstance after destroy = %v, want NOT_FOUND", err)
+	}
+}

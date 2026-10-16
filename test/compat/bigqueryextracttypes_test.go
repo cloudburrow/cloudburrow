@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
-	"github.com/apache/arrow/go/v15/arrow/memory"
-	"github.com/apache/arrow/go/v15/parquet/file"
-	"github.com/apache/arrow/go/v15/parquet/pqarrow"
+	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/linkedin/goavro/v2"
 )
 
@@ -198,7 +198,10 @@ func TestBigQueryExtractOfEveryType(t *testing.T) {
 		got = append(got, tbl.Schema().Field(i).Name+" "+tbl.Schema().Field(i).Type.String()+" "+tbl.Column(i).Data().Chunk(0).String())
 	}
 	want := []string{`i utf8 ["1-2 3 4:5:6.789"]`, `g utf8 ["POINT(1 2)"]`,
-		`r struct<start: timestamp[us, tz=UTC], end: timestamp[us, tz=UTC]> {[1577836800000000] [(null)]}`}
+		// The bounds are written isAdjustedToUTC false (extractparquet.go),
+		// which arrow-go v18 reads as no time zone (v15 read it as UTC);
+		// the file is the same.
+		`r struct<start: timestamp[us] nullable, end: timestamp[us] nullable> {[1577836800000000] [(null)]}`}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("PARQUET read back %q,\nwant %q", got, want)
 	}

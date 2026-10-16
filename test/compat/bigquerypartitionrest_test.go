@@ -34,7 +34,13 @@ import (
 func TestBigQueryStreamingBuffer(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
-	ctx := h.Context()
+	// Not h.Context(): its 60 seconds are the whole test's, and the test
+	// waits up to 60 seconds for the buffer to flush (below, its own
+	// bound) after a dozen calls, which under the full suite's load took
+	// the rest of those 60 seconds, so a query failed of the context, not
+	// of the buffer.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
 	ds := validationDataset(t, h, c)
 	p := func(table string) string { return "`" + ds.DatasetID + "." + table + "`" }
 	rows := func(sql string) []string {

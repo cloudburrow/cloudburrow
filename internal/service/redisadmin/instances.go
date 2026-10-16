@@ -53,6 +53,9 @@ type Spec struct {
 	// in-transit encryption (#1413): the server serves TLS only, on
 	// TLSPort, with a certificate of it (ServerTLS). "" for none.
 	TransitCA, TransitCAKey string
+	// TransitTrust, PEM, are every CA server_ca_certs lists: TransitCA
+	// and the ones a rotation replaced, which still are valid (#1463).
+	TransitTrust string
 }
 
 // Provisioner runs the server of an instance CreateInstance made.
@@ -123,6 +126,18 @@ type record struct {
 	// transit_encryption_mode SERVER_AUTHENTICATION (#1413).
 	TransitCA    string `json:"transitCa,omitempty"`
 	TransitCAKey string `json:"transitCaKey,omitempty"`
+	// PreviousCAs are the CAs a server CA rotation replaced, PEM, still
+	// listed in server_ca_certs until they expire (#1463).
+	PreviousCAs string `json:"previousCas,omitempty"`
+
+	// CMEK (#1463): CustomerManagedKey is customer_managed_key, WrappedKey
+	// the data key it wrapped, and Sealed the secrets above sealed with
+	// the data key, which then are not kept in the clear.
+	CustomerManagedKey string `json:"customerManagedKey,omitempty"`
+	WrappedKey         []byte `json:"wrappedKey,omitempty"`
+	Sealed             []byte `json:"sealed,omitempty"`
+	dek                []byte
+	suspended          bool
 
 	// Not kept: what the running server is now.
 	state   redispb.Instance_State
@@ -139,7 +154,7 @@ type record struct {
 func (r *record) spec() Spec {
 	return Spec{Server: r.Server, MaxMemory: maxMemory(r.MemorySizeGB, r.RedisConfigs),
 		Password: r.AuthString, Configs: serverConfigs(r.RedisConfigs), RDBSeconds: r.Persistence.seconds(), Version: r.version(),
-		TransitCA: r.TransitCA, TransitCAKey: r.TransitCAKey}
+		TransitCA: r.TransitCA, TransitCAKey: r.TransitCAKey, TransitTrust: r.caPEM()}
 }
 
 // binary is the prefix of the server's programs: valkey-server, ...
@@ -168,6 +183,9 @@ type instances struct {
 	// objs is this instance's Cloud Storage, for import and export; nil
 	// when it is not enabled.
 	objs Objects
+	// kms is Cloud KMS, for customer_managed_key; nil when it is not
+	// enabled (#1463).
+	kms KeyService
 	// aof is whether a server keeps an append-only file when it has no
 	// RDB persistence: the CloudBurrow instance's persistent mode.
 	aof bool
@@ -241,6 +259,21 @@ func (s *Server) Restore() error {
 			return fmt.Errorf("Memorystore instance %s: %w", k, err)
 		}
 		r.state, r.message = redispb.Instance_REPAIRING, "CloudBurrow is starting the instance's server again"
+		if r.CustomerManagedKey != "" {
+			// The key must unwrap the data key before the server runs.
+			dek, err := c.unwrap(c.bg, r.CustomerManagedKey, r.WrappedKey)
+			if err == nil {
+				err = r.unseal(dek)
+			}
+			if err != nil {
+				c.mu.Lock()
+				c.byID[r.Name] = r
+				r.suspended = true
+				r.state, r.message = redispb.Instance_STATE_UNSPECIFIED, "the instance is suspended: its customer-managed key "+r.CustomerManagedKey+" cannot be used: "+err.Error()
+				c.mu.Unlock()
+				continue
+			}
+		}
 		c.mu.Lock()
 		c.byID[r.Name] = r
 		c.mu.Unlock()
@@ -253,7 +286,11 @@ func (c *instances) save(r *record) error {
 	if c.db == nil {
 		return nil
 	}
-	b, err := json.Marshal(r)
+	k, err := r.kept()
+	if err != nil {
+		return err
+	}
+	b, err := json.Marshal(k)
 	if err != nil {
 		return err
 	}
@@ -402,6 +439,7 @@ func (c *instances) render(r *record) *redispb.Instance {
 		inst.TransitEncryptionMode = redispb.Instance_SERVER_AUTHENTICATION
 	}
 	r.renderHA(inst)
+	r.renderCMEK(inst)
 	if region == "" {
 		inst.LocationId = ""
 	}
@@ -498,6 +536,15 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 		}
 		r.TransitCA, r.TransitCAKey = cert, key
 	}
+	if key := in.GetCustomerManagedKey(); key != "" {
+		if err := checkKey(key, m[2]); err != nil {
+			return nil, err
+		}
+		r.CustomerManagedKey = key
+		if err := c.newDataKey(ctx, r); err != nil {
+			return nil, err
+		}
+	}
 	if in.GetAuthEnabled() {
 		pw, err := newAuthString()
 		if err != nil {
@@ -536,9 +583,6 @@ func checkCreate(in *redispb.Instance) error {
 	}
 	if err := checkVersion(in.GetRedisVersion()); err != nil {
 		return err
-	}
-	if in.GetCustomerManagedKey() != "" {
-		return apierror.Unimplemented("customer_managed_key is not supported")
 	}
 	return checkConfigs(in.GetRedisConfigs(), in.GetMemorySizeGb())
 }

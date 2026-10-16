@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/apache/arrow/go/v15/arrow"
+	"github.com/apache/arrow-go/v18/arrow"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
