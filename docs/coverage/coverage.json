@@ -403,14 +403,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject"
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/CreateInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
@@ -418,7 +418,7 @@
         "method": "google.cloud.run.v2.Instances/DeleteInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
@@ -426,7 +426,7 @@
         "method": "google.cloud.run.v2.Instances/GetInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
@@ -434,7 +434,7 @@
         "method": "google.cloud.run.v2.Instances/ListInstances",
         "status": "Verified",
         "tests": [
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
@@ -458,7 +458,7 @@
         "tests": [
           "test/compat/runcloudsql_test.go:126 TestRunJobCloudSQLVolume",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes",
@@ -470,7 +470,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -487,7 +487,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
@@ -498,7 +498,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject"
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject"
         ]
       },
       {
@@ -507,7 +507,7 @@
         "tests": [
           "test/compat/runcloudsql_test.go:126 TestRunJobCloudSQLVolume",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
@@ -564,7 +564,7 @@
         "tests": [
           "test/compat/consolerun_test.go:78 TestConsoleRunEditAndDeployNewRevision",
           "test/compat/run_test.go:149 TestRunRevisions",
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath"
         ]
       },
@@ -583,7 +583,7 @@
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:75 TestRunServiceCloudSQLVolume",
           "test/compat/runcloudsqlv1_test.go:50 TestRunServiceCloudSQLMySQLVolume",
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
@@ -596,7 +596,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/terraform_cicd_test.go:134 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
@@ -615,7 +615,7 @@
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:75 TestRunServiceCloudSQLVolume",
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
@@ -630,7 +630,7 @@
         "tests": [
           "test/compat/consolepredict_test.go:56 TestConsoleOnlinePredictionThroughTheConsoleAPI",
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject"
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject"
         ]
       },
       {
@@ -692,7 +692,7 @@
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
           "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
         ]
@@ -701,7 +701,7 @@
         "method": "google.cloud.run.v2.WorkerPools/DeleteWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
           "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
         ]
@@ -718,7 +718,7 @@
         "method": "google.cloud.run.v2.WorkerPools/GetWorkerPool",
         "status": "Verified",
         "tests": [
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
           "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits",
           "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
@@ -728,7 +728,7 @@
         "method": "google.cloud.run.v2.WorkerPools/ListWorkerPools",
         "status": "Verified",
         "tests": [
-          "test/compat/runnames_test.go:34 TestRunNamesPerProject",
+          "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
         ]
       },
@@ -7673,6 +7673,7 @@
         "tests": [
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlversions_test.go:104 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:265 TestCloudSQLCascadingAndCrossRegionReplicas"
@@ -7684,6 +7685,7 @@
         "tests": [
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlversions_test.go:104 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:265 TestCloudSQLCascadingAndCrossRegionReplicas"
@@ -7800,9 +7802,11 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups",
+          "test/compat/cloudsqlparallel_test.go:185 TestCloudSQLCloneToBinLogCoordinates",
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
-          "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery"
+          "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary"
         ]
       },
       {
@@ -7841,6 +7845,8 @@
         "method": "sql.instances.export",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlparallel_test.go:136 TestCloudSQLExportMasterData",
+          "test/compat/cloudsqlparallel_test.go:48 TestCloudSQLParallelExportAndImport",
           "test/compat/cloudsqltransfers_test.go:155 TestCloudSQLImportAndExport"
         ]
       },
@@ -7864,6 +7870,8 @@
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
+          "test/compat/cloudsqlpitrrestore_test.go:31 TestCloudSQLPointInTimeRestoreFromBackupDR",
+          "test/compat/cloudsqlpitrrestore_test.go:67 TestGcloudSQLPointInTimeRestoreRefused",
           "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
@@ -7880,6 +7888,8 @@
         "method": "sql.instances.import",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlparallel_test.go:48 TestCloudSQLParallelExportAndImport",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqltransfers_test.go:155 TestCloudSQLImportAndExport"
         ]
       },
@@ -7926,6 +7936,7 @@
         "tests": [
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlparallel_test.go:267 TestCloudSQLUpgradeWithReplicas",
           "test/compat/cloudsqlversions_test.go:172 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:375 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion"
@@ -7935,6 +7946,8 @@
         "method": "sql.instances.pointInTimeRestore",
         "status": "Unimplemented",
         "tests": [
+          "test/compat/cloudsqlpitrrestore_test.go:31 TestCloudSQLPointInTimeRestoreFromBackupDR",
+          "test/compat/cloudsqlpitrrestore_test.go:67 TestGcloudSQLPointInTimeRestoreRefused",
           "test/compat/sqladmin_test.go:101 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"

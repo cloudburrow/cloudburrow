@@ -5,10 +5,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
@@ -54,8 +56,20 @@ func (x sqlTransferer) ExportSQL(ctx context.Context, t sqladmin.DumpTarget, e s
 		return x.exec(t)(ctx, nil, w, args...)
 	}
 	m := x.mysql(t)
+	gtid := "--set-gtid-purged=OFF"
+	if e.MasterData == 1 {
+		// Cloud SQL sets --set-gtid-purged=ON with masterData 1; AUTO is ON
+		// on a server with GTIDs, as every Cloud SQL server has them, and
+		// writes no GTID_PURGED on one without, where ON would fail.
+		gtid = "--set-gtid-purged=AUTO"
+	}
 	args := []string{"--single-transaction", "--hex-blob", "--routines", "--triggers", "--events",
-		"--set-gtid-purged=OFF", "--no-tablespaces", "--default-character-set=utf8mb4"}
+		gtid, "--no-tablespaces", "--default-character-set=utf8mb4"}
+	if e.MasterData != 0 {
+		// MySQL 8.4's name for --master-data: the binary log coordinates
+		// as CHANGE REPLICATION SOURCE TO, commented out for 2.
+		args = append(args, fmt.Sprintf("--source-data=%d", e.MasterData))
+	}
 	if e.SchemaOnly {
 		args = append(args, "--no-data")
 	}
@@ -75,6 +89,97 @@ func (x sqlTransferer) ExportSQL(ctx context.Context, t sqladmin.DumpTarget, e s
 		args = append(append(args, "--databases"), names...)
 	}
 	return m.sh(ctx, nil, w, "mysqldump", args...)
+}
+
+var _ sqladmin.ParallelTransferer = sqlTransferer{}
+
+// shQuote quotes s for sh.
+func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// jsString is s as a JavaScript string literal, for MySQL Shell's --js.
+func jsString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+// ExportParallel is a parallel export (#1421), the directory Cloud SQL
+// writes, as a tar stream of its files: pg_dump -Fd -j for PostgreSQL,
+// MySQL Shell's util.dumpSchemas (or dumpTables) with threads for MySQL.
+// The directory is made in the server's container and removed after.
+func (x sqlTransferer) ExportParallel(ctx context.Context, t sqladmin.DumpTarget, e sqladmin.SQLExport, w io.Writer) error {
+	threads := strconv.Itoa(e.Threads)
+	if !t.MySQL {
+		dump := "pg_dump -U " + shQuote(x.pgUser(t, "")) + " -d " + shQuote(e.Databases[0]) + " -Fd -j " + threads + " -f \"$d/dump\""
+		if e.SchemaOnly {
+			dump += " --schema-only"
+		}
+		if e.Clean {
+			dump += " --clean"
+		}
+		if e.IfExists {
+			dump += " --if-exists"
+		}
+		for _, tb := range e.Tables {
+			dump += " " + shQuote("--table="+tb)
+		}
+		script := `set -e; d=$(mktemp -d); trap 'rm -rf "$d"' EXIT; ` + dump + ` >&2; tar -C "$d/dump" -cf - .`
+		return x.exec(t)(ctx, nil, w, "sh", "-c", script)
+	}
+	m := x.mysql(t)
+	dbs := e.Databases
+	if len(dbs) == 0 {
+		var err error
+		if dbs, err = m.databases(ctx); err != nil {
+			return err
+		}
+		if len(dbs) == 0 {
+			return fmt.Errorf("the instance has no database to export")
+		}
+	}
+	opts := fmt.Sprintf("{threads: %d, ddlOnly: %t, showProgress: false, consistent: true}", e.Threads, e.SchemaOnly)
+	var call string
+	if len(e.Tables) > 0 {
+		tbs, _ := json.Marshal(e.Tables)
+		call = "util.dumpTables(" + jsString(dbs[0]) + ", " + string(tbs) + ", D, " + opts + ")"
+	} else {
+		names, _ := json.Marshal(dbs)
+		call = "util.dumpSchemas(" + string(names) + ", D, " + opts + ")"
+	}
+	script := mysqlRootEnv + `set -e; d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+LC_ALL=C mysqlsh --no-wizard --js --uri root@127.0.0.1:3306 --password="$MYSQL_PWD" -e "var D = '$d/dump'; ` + strings.ReplaceAll(call, `"`, `\"`) + `" >&2
+tar -C "$d/dump" -cf - .`
+	return m.exec(ctx, nil, w, "sh", "-c", script)
+}
+
+// ImportParallel restores a parallel export's directory, read as a tar
+// stream: pg_restore -j for PostgreSQL, util.loadDump for MySQL, which
+// needs local_infile on while it loads.
+func (x sqlTransferer) ImportParallel(ctx context.Context, t sqladmin.DumpTarget, i sqladmin.SQLImport, r io.Reader) error {
+	threads := strconv.Itoa(i.Threads)
+	if !t.MySQL {
+		restore := "pg_restore -U " + shQuote(x.pgUser(t, i.User)) + " -d " + shQuote(i.Database) + " -j " + threads + " --no-owner --no-acl --exit-on-error"
+		if i.Clean {
+			restore += " --clean"
+		}
+		if i.IfExists {
+			restore += " --if-exists"
+		}
+		script := `set -e; d=$(mktemp -d); trap 'rm -rf "$d"' EXIT; tar -C "$d" -xf -; test -f "$d/toc.dat" || { echo "the folder holds no pg_dump directory (toc.dat)" >&2; exit 1; }; ` + restore + ` "$d"`
+		return x.exec(t)(ctx, r, io.Discard, "sh", "-c", script)
+	}
+	m := x.mysql(t)
+	opts := fmt.Sprintf("{threads: %d, showProgress: false, ignoreVersion: true, progressFile: '', loadUsers: false}", i.Threads)
+	if i.Database != "" {
+		opts = fmt.Sprintf("{threads: %d, showProgress: false, ignoreVersion: true, progressFile: '', loadUsers: false, schema: %s}", i.Threads, jsString(i.Database))
+	}
+	script := mysqlRootEnv + `set -e; d=$(mktemp -d)
+was=$(mysql $MYSQL_LOCAL -N -B -e 'SELECT @@GLOBAL.local_infile')
+trap 'rm -rf "$d"; mysql $MYSQL_LOCAL -e "SET GLOBAL local_infile = $was" || true' EXIT
+tar -C "$d" -xf -
+test -f "$d/@.json" || { echo "the folder holds no MySQL Shell dump (@.json)" >&2; exit 1; }
+mysql $MYSQL_LOCAL -e 'SET GLOBAL local_infile = 1'
+LC_ALL=C mysqlsh --no-wizard --js --uri root@127.0.0.1:3306 --password="$MYSQL_PWD" -e "util.loadDump('$d', ` + strings.ReplaceAll(opts, `"`, `\"`) + `)" >&2`
+	return m.exec(ctx, r, io.Discard, "sh", "-c", script)
 }
 
 func (x sqlTransferer) ImportSQL(ctx context.Context, t sqladmin.DumpTarget, database, user string, r io.Reader) error {
@@ -231,4 +336,48 @@ func (o sqlObjects) Create(ctx context.Context, bucket, object string, data []by
 		return sqladmin.Errorf(http.StatusNotFound, "the bucket %s does not exist in this instance's Cloud Storage", bucket)
 	}
 	return fmt.Errorf("write gs://%s/%s: HTTP %d %s", bucket, object, resp.StatusCode, strings.TrimSpace(string(b)))
+}
+
+// List names the bucket's objects under prefix, through the JSON API's
+// objects.list, every page.
+func (o sqlObjects) List(ctx context.Context, bucket, prefix string) ([]string, error) {
+	var names []string
+	token := ""
+	for {
+		u := o.f.base() + "/storage/v1/b/" + url.PathEscape(bucket) + "/o?fields=items(name),nextPageToken&prefix=" + url.QueryEscape(prefix)
+		if token != "" {
+			u += "&pageToken=" + url.QueryEscape(token)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := o.f.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("list gs://%s/%s: %v", bucket, prefix, err)
+		}
+		var page struct {
+			Items []struct {
+				Name string `json:"name"`
+			} `json:"items"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+		resp.Body.Close()
+		switch {
+		case resp.StatusCode == http.StatusNotFound:
+			return nil, sqladmin.Errorf(http.StatusNotFound, "the bucket %s does not exist in this instance's Cloud Storage", bucket)
+		case resp.StatusCode != http.StatusOK:
+			return nil, fmt.Errorf("list gs://%s/%s: HTTP %d %s", bucket, prefix, resp.StatusCode, strings.TrimSpace(string(b[:min(len(b), 512)])))
+		}
+		if err := json.Unmarshal(b, &page); err != nil {
+			return nil, fmt.Errorf("list gs://%s/%s: %v", bucket, prefix, err)
+		}
+		for _, it := range page.Items {
+			names = append(names, it.Name)
+		}
+		if token = page.NextPageToken; token == "" {
+			return names, nil
+		}
+	}
 }

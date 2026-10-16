@@ -105,8 +105,8 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource), legacy
-failover replicas (`failoverReplica`, `failoverTarget`), external-primary replicas, `MYSQL_5_7` and versions Cloud SQL no longer lists, the project-level Backups API, and parallel or BAK imports and exports. See
+What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource, #1433), legacy
+failover replicas (`failoverReplica`, `failoverTarget`), external-primary replicas, `MYSQL_5_7` and versions Cloud SQL no longer lists, the project-level Backups API, BAK and TDE imports and exports, and upgrading a read replica on its own. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
 ### Imports and exports (#1380)
@@ -132,8 +132,28 @@ The server's own tools do the work, in its pod: `pg_dump` and `psql`, or `mysqld
 export names exactly one database; a MySQL one without databases exports every application
 database. An import or export runs in the background, and `operations.cancel` stops it while
 it runs; a cancelled MySQL import can leave the rows it
-already loaded, as Google warns. Parallel imports and exports, BAK and TDE files and
-`masterData` answer 501. The console's instance page has Export and Import.
+already loaded, as Google warns. BAK and TDE files answer 501. The console's instance page
+has Export and Import, with the parallel and `masterData` options below.
+
+**Parallel imports and exports (#1421).** `sqlExportOptions.parallel` (with `threads`, 4 when
+none is given) writes the directory Cloud SQL documents under the `uri`, which names a folder
+and must be empty: `pg_dump -Fd -j <threads>` of the one database named for PostgreSQL
+(`toc.dat` and a file per table), MySQL Shell's `util.dumpSchemas` (or `util.dumpTables` with
+`tables`) for MySQL (`@.json`, `@.done.json`, per-table `.tsv.zst` chunks). The dump is made in
+the server's container and each of its files written as an object under the folder.
+`sqlImportOptions.parallel` reads every object under the folder back and restores it:
+`pg_restore -j <threads> --no-owner --no-acl`, with `postgresImportOptions.clean` and
+`ifExists` as `--clean` and `--if-exists`; `util.loadDump` for MySQL, with `local_infile` on
+while it loads and set back after. `threads` without `parallel`, and `clean`/`ifExists`
+outside a PostgreSQL parallel import, are 400. `gcloud sql export sql --parallel --threads`
+and `gcloud sql import sql --parallel` work.
+
+**`mysqlExportOptions.masterData` (#1421)** is `mysqldump --source-data` (MySQL 8.4's name for
+`--master-data`): 1 writes the binary log coordinates as a `CHANGE REPLICATION SOURCE TO`
+statement, with `--set-gtid-purged` on where the server has GTIDs (every Cloud SQL server
+does; `AUTO` writes none on one without), and 2 writes it as a comment. Any other value, with
+`parallel`, or on PostgreSQL, is 400; on a server without binary logging the export fails with
+mysqldump's words.
 
 ### Client certificates, tiers and flags (#1380)
 
@@ -269,9 +289,18 @@ the new version on a fresh volume, and the dump is loaded into it:
 
 If the new server cannot start or load the dump, the old version is started again from the same
 dump and the operation fails with the reason, so the instance keeps its data. A downgrade or a
-change of engine is 400. An instance with read replicas, or a replica, is 501: CloudBurrow
-upgrades a primary with none (delete the replicas, upgrade, and create them again). The
-console's instance page offers **Upgrade** with the versions the instance can go to, and the
+change of engine is 400.
+
+**An instance with read replicas (#1421)** is upgraded as Cloud SQL documents: without
+`includeReplicasForMajorVersionUpgrade` its replicas must be upgraded first, so a primary with
+a replica on the older version is 400 saying so; with it the primary is upgraded, and then
+every replica under it, level by level for cascading replicas, is rebuilt on the new version
+from its upgraded primary (Cloud SQL "recreates the replicas"), each `MAINTENANCE` meanwhile.
+A replica that fails is `FAILED` and the operation's error names it; the primary stays
+upgraded. **Upgrading a replica on its own is 501**: a replica here replicates its primary's
+server by the engine's own replication (streaming for PostgreSQL), which does not run across
+major versions; upgrade the primary with its replicas instead. The console's instance page
+offers **Upgrade** with the versions the instance can go to and **Include replicas**, and the
 Create instance form's version picker lists every served version.
 
 **The instances `up` runs stay as they are:** `postgres` and `mysql` cannot be patched,
@@ -309,7 +338,15 @@ flags, deletion protection, automated backups and their start time, sent as one
   `users.update` makes the backup fail with MySQL's words.
 - **`instances.clone`** creates a new instance with the source's settings, starts its server,
   and loads a dump of the source taken then; with `pointInTime` it recovers the source to that
-  time (next section). A clone to `binLogCoordinates` and a clone of some databases only are 501.
+  time (next section), and with `binLogCoordinates` (#1421) to a position in a MySQL source's
+  binary log: the newest base at or before the coordinates is loaded and the binary log
+  replayed up to the first transaction starting at or after `binLogPosition`, so every
+  transaction that started before it is in the clone. It needs `binaryLogEnabled`, as Cloud SQL
+  does; `binLogCoordinates` on PostgreSQL, with `pointInTime`, on an instance without binary
+  logging, or before its first base is 400. `databaseNames` is SQL Server's ("(SQL Server
+  only) Clone only the specified databases"), and is 400 on PostgreSQL and MySQL. `gcloud sql
+  instances clone --bin-log-file-name --bin-log-position` works, and the console's page of a
+  MySQL instance with binary logging has **Clone to binary log position**.
 - **`settings.backupConfiguration`** (`enabled`, `startTime`, `backupRetentionSettings`) is
   recorded and answered. **An automated backup is taken at `startTime` (UTC) only if
   CloudBurrow is running then**; a start time that passes while it is stopped is not made up
@@ -380,8 +417,14 @@ instance holding the source's databases as they were at that time, to the micros
   was written. The clock only moves forward, and starts again at the real time on `up`.
 - **What is not recovered to a time:** the servers `up` runs (`postgres`, `mysql`) keep no
   log, and a clone to a time of one is 400 saying so; a read replica takes no base.
-  `instances.pointInTimeRestore` is 501: it restores from a Backup and DR Service datasource
-  (`projects/…/backupVaults/…/dataSources/…`), which is not served.
+  `instances.pointInTimeRestore` (#1425) restores an instance managed by the Backup and DR
+  Service from its datasource (`projects/…/locations/…/backupVaults/…/dataSources/…`, gcloud's
+  `sql instances point-in-time-restore DATASOURCE TARGET POINT_IN_TIME`). The Backup and DR
+  Service (`backupdr.googleapis.com`) is not served (#1433), so no instance is managed by it
+  and no datasource exists: the call checks its request as Google does (the datasource's format,
+  `targetInstance`, `pointInTime`, `preferredSecondaryZone` not equal to `preferredZone`, each a
+  400 naming the field) and then answers 501 saying so, creating no target. The same instance
+  recovered to the same time is `instances.clone` with `cloneContext.pointInTime`.
 
 ### High availability (#1408)
 
@@ -541,8 +584,35 @@ An instance whose address is taken still starts, and the rest of the Admin API s
 holds it (each listener records its instance name and PID in the user's temporary directory
 while it serves) and the setting that moves it.
 
-Verified with `cloud.google.com/go/cloudsqlconn` on both servers, and with Google's Auth Proxy
-(`cloud-sql-proxy` 2.19.0) in a pod, below. IAM database authentication (`WithIAMAuthN`, an
+Verified with `cloud.google.com/go/cloudsqlconn` on both servers, with Google's Auth Proxy
+(`cloud-sql-proxy` 2.19.0) in a pod, below, and with the same release's binary on the host.
+
+**The Auth Proxy binary (#1421).** Google's `cloud-sql-proxy` runs against an instance unchanged,
+pointed at it by its own flags:
+
+```sh
+export CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$(make -s cloud-sql-proxy)   # pinned, SHA-256 checked
+$CLOUDBURROW_TEST_CLOUD_SQL_PROXY --sqladmin-api-endpoint "$CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL" --token local \
+  "$PROJECT:us-central1:postgres?port=6432" "$PROJECT:us-central1:mysql?port=6306"
+psql "host=127.0.0.1 port=6432 user=cloudburrow dbname=cloudburrow sslmode=disable"
+```
+
+`--sqladmin-api-endpoint` is the Admin API's URL, which `cloudburrow env` exports as
+`CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL`. Any `--token` will do, as tokens are not checked; pass one,
+so the proxy does not go looking for Google credentials. Leave
+`--auto-iam-authn` off: it is IAM database authentication, which is 501 (below). The proxy then
+calls `connectSettings` and `generateEphemeralCert` and dials the reported address at 3307. It
+has no flag for that port (its `--port` is the local listener's), so it reaches only the instance
+whose connector holds 3307. Against an instance started with `--cloudsql-connector` on another
+port, use a connector with a dial option, as above.
+
+`make cloud-sql-proxy` downloads the release from Google's bucket
+(`storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.19.0/`) to
+`bin/cloud-sql-proxy/`, and checks it against the SHA-256 Google's release page lists before
+making it executable. Pinned for linux/amd64, linux/arm64 and darwin/arm64, it is the release the
+Cloud Run sidecar image is. `TestCloudSQLAuthProxyBinary` reads, through it, the rows a parallel
+import restored (pgx on PostgreSQL, go-sql-driver/mysql on MySQL) and those of a clone to binary
+log coordinates. CI's emulators shard installs it and runs the test. IAM database authentication (`WithIAMAuthN`, an
 `access_token` in `generateEphemeralCert`, users of type `CLOUD_IAM_USER` and the like) is 501: it
 signs a database user in as a Google identity, and CloudBurrow has no identities
 ([ADR-0004](adr/0004-local-access-and-no-authentication.md)). Connecting to the server directly,

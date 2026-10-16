@@ -29,7 +29,7 @@ func TestServedVersionsAndUpgrades(t *testing.T) {
 	for v, want := range map[string]string{
 		"POSTGRES_13": "400", "MYSQL_8_4": "400", "POSTGRES_12": "501", "BOGUS": "400",
 	} {
-		err := s.checkUpgrade(c, v)
+		err := s.checkUpgrade(c, v, false)
 		if err == nil || !strings.Contains(errStatus(err), want) {
 			t.Errorf("upgrade to %s: %v, want %s", v, err, want)
 		}
