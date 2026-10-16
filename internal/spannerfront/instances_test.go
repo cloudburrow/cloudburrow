@@ -135,6 +135,9 @@ func TestUpdateInstanceOverREST(t *testing.T) {
 	if code != 200 || op["done"] != true {
 		t.Fatalf("patch = %d %v", code, op)
 	}
+	if code, got := do("GET", "/v1/"+op["name"].(string), ""); code != 200 || got["done"] != true {
+		t.Errorf("the operation = %d %v, want it done", code, got)
+	}
 	code, got := do("GET", "/v1/projects/p/instances/i", "")
 	if code != 200 || got["nodeCount"] != float64(3) || got["processingUnits"] != float64(3000) || got["displayName"] != "by rest" {
 		t.Fatalf("get = %d %v", code, got)

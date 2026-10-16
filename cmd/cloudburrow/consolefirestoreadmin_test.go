@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	admin "cloud.google.com/go/firestore/apiv1/admin"
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
@@ -80,7 +81,7 @@ func TestConsoleFirestoreDatabasesIndexesAndFields(t *testing.T) {
 	}
 
 	d, err := p.Detail(ctx, "p", []string{"orders"})
-	if err != nil || d.Unavailable != "" || len(d.Sections) != 2 {
+	if err != nil || d.Unavailable != "" || len(d.Sections) != 3 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
 	props := map[string]string{}
@@ -192,7 +193,7 @@ func TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides(t *testing.T) {
 		t.Errorf("the created index = %v", resp)
 	}
 	d, err := p.Detail(ctx, "p", []string{"(default)"})
-	if err != nil || len(d.Sections) != 2 || len(d.Sections[0].Listing.Items) != 1 {
+	if err != nil || len(d.Sections) != 3 || len(d.Sections[0].Listing.Items) != 1 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
 	row := d.Sections[0].Listing.Items[0]
@@ -277,5 +278,57 @@ func TestFirestoreIndexFieldsParse(t *testing.T) {
 		if _, err := parseIndexFields(bad); err == nil {
 			t.Errorf("parseIndexFields(%q) accepted it", bad)
 		}
+	}
+}
+
+// TestConsoleFirestoreBackupSchedules (#1461): Create backup schedule on a
+// database's page, the Backup schedules tab, Edit retention and Delete
+// backup schedule on a schedule's row, each read back through the official
+// Firestore Admin client.
+func TestConsoleFirestoreBackupSchedules(t *testing.T) {
+	p := firestoreAdminFront(t)
+	ctx := context.Background()
+	c, err := p.client(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	db := "projects/p/databases/(default)"
+	found := false
+	for _, a := range p.DetailActions(ctx, "p", []string{"(default)"}) {
+		found = found || a.ID == "createschedule"
+	}
+	if !found {
+		t.Fatal("a database's page offers no Create backup schedule")
+	}
+	if err := p.ActAt(ctx, "p", []string{"(default)"}, "createschedule", map[string]string{"recurrence": "weekly", "day": "SUNDAY", "retentionDays": "14"}); err != nil {
+		t.Fatalf("Create backup schedule: %v", err)
+	}
+	if err := p.ActAt(ctx, "p", []string{"(default)"}, "createschedule", map[string]string{"recurrence": "daily", "retentionDays": "8"}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a daily schedule keeping 8 days: %v, want the API's INVALID_ARGUMENT", err)
+	}
+	d, err := p.Detail(ctx, "p", []string{"(default)"})
+	if err != nil || len(d.Sections) != 3 || len(d.Sections[2].Listing.Items) != 1 {
+		t.Fatalf("Detail = %+v, %v", d, err)
+	}
+	row := d.Sections[2].Listing.Items[0]
+	if row.Fields["Recurrence"] != "Weekly, Sunday" || row.Fields["Retention"] != "336h0m0s" {
+		t.Errorf("the schedule row = %+v", row.Fields)
+	}
+	if err := p.ActAt(ctx, "p", row.ActsOn, "editschedule", map[string]string{"retentionDays": "21"}); err != nil {
+		t.Fatalf("Edit retention: %v", err)
+	}
+	s, err := c.GetBackupSchedule(ctx, &adminpb.GetBackupScheduleRequest{Name: db + "/backupSchedules/" + row.Name})
+	if err != nil || s.GetRetention().AsDuration() != 21*24*time.Hour {
+		t.Errorf("after Edit retention = %v, %v", s, err)
+	}
+	if acts := p.DetailActions(ctx, "p", row.ActsOn); len(acts) != 2 {
+		t.Errorf("a schedule's actions = %+v", acts)
+	}
+	if err := p.ActAt(ctx, "p", row.ActsOn, "deleteschedule", nil); err != nil {
+		t.Fatalf("Delete backup schedule: %v", err)
+	}
+	if _, err := c.GetBackupSchedule(ctx, &adminpb.GetBackupScheduleRequest{Name: db + "/backupSchedules/" + row.Name}); status.Code(err) != codes.NotFound {
+		t.Errorf("after Delete backup schedule: %v, want NotFound", err)
 	}
 }

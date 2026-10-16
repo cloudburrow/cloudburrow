@@ -52,15 +52,21 @@ var instanceNameRe = regexp.MustCompile(`^projects/[^/]+/instances/[^/]+$`)
 // Instances answers the instance calls Claims claims, over gRPC and REST.
 type Instances struct {
 	instancepb.UnimplementedInstanceAdminServer
+	longrunningpb.UnimplementedOperationsServer
 
-	emu  instancepb.InstanceAdminClient
-	grpc *grpc.Server
-	now  func() time.Time
+	emu    instancepb.InstanceAdminClient
+	emuOps longrunningpb.OperationsClient
+	grpc   *grpc.Server
+	now    func() time.Time
 
 	mu sync.Mutex
 	// changes are the fields an update set, per instance name: the
 	// instance carries the values, and paths the fields they are.
 	changes map[string]*change
+	// ops are the update operations, done, for GetOperation: gcloud
+	// polls one even when it is returned done. Their names, oldest first.
+	ops     map[string]*longrunningpb.Operation
+	opOrder []string
 }
 
 type change struct {
@@ -75,22 +81,47 @@ func New(emulator string) (*Instances, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewWithClient(instancepb.NewInstanceAdminClient(conn)), nil
-}
-
-// NewWithClient is New over an InstanceAdmin client of the emulator.
-func NewWithClient(emu instancepb.InstanceAdminClient) *Instances {
-	s := &Instances{emu: emu, now: func() time.Time { return time.Now().UTC() }, changes: map[string]*change{}}
+	s := &Instances{emu: instancepb.NewInstanceAdminClient(conn), emuOps: longrunningpb.NewOperationsClient(conn),
+		now: func() time.Time { return time.Now().UTC() }, changes: map[string]*change{}, ops: map[string]*longrunningpb.Operation{}}
 	s.grpc = grpc.NewServer()
 	instancepb.RegisterInstanceAdminServer(s.grpc, s)
-	return s
+	longrunningpb.RegisterOperationsServer(s.grpc, s)
+	return s, nil
+}
+
+const getOperation = "/google.longrunning.Operations/GetOperation"
+
+// GetOperation answers for the front's own operations, and passes any
+// other to the emulator.
+func (s *Instances) GetOperation(ctx context.Context, req *longrunningpb.GetOperationRequest) (*longrunningpb.Operation, error) {
+	s.mu.Lock()
+	op, ok := s.ops[req.GetName()]
+	s.mu.Unlock()
+	if ok {
+		return proto.Clone(op).(*longrunningpb.Operation), nil
+	}
+	return s.emuOps.GetOperation(ctx, req)
+}
+
+// ownOperation reports whether name is one of the front's operations.
+func (s *Instances) ownOperation(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.ops[name]
+	return ok
 }
 
 // Claims reports whether r is one of the instance calls the front answers.
 func (s *Instances) Claims(r *http.Request) bool {
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+		if r.URL.Path == getOperation {
+			return true
+		}
 		m, ok := strings.CutPrefix(r.URL.Path, instanceService)
 		return ok && claimed[m]
+	}
+	if r.Method == http.MethodGet && s.ownOperation(strings.TrimPrefix(r.URL.Path, "/v1/")) {
+		return true
 	}
 	_, ok := restCall(r)
 	return ok
@@ -254,8 +285,18 @@ func (s *Instances) UpdateInstance(ctx context.Context, req *instancepb.UpdateIn
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "operation response: %v", err)
 	}
-	return &longrunningpb.Operation{Name: in.GetName() + "/operations/" + opID(), Metadata: meta, Done: true,
-		Result: &longrunningpb.Operation_Response{Response: resp}}, nil
+	op := &longrunningpb.Operation{Name: in.GetName() + "/operations/" + opID(), Metadata: meta, Done: true,
+		Result: &longrunningpb.Operation_Response{Response: resp}}
+	s.mu.Lock()
+	s.ops[op.Name] = op
+	s.opOrder = append(s.opOrder, op.Name)
+	// Keep the last 1000, so a long-lived instance does not grow forever.
+	if len(s.opOrder) > 1000 {
+		delete(s.ops, s.opOrder[0])
+		s.opOrder = s.opOrder[1:]
+	}
+	s.mu.Unlock()
+	return proto.Clone(op).(*longrunningpb.Operation), nil
 }
 
 // unset reports whether in leaves the refused field p at its zero value,

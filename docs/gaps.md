@@ -246,10 +246,10 @@ Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405)
 
 | Gap | Why open | Size |
 |---|---|---|
-| Spanner: 32 RPCs refused (backups, backup schedules, IAM, instance configurations, instance and partition updates, `FetchCacheUpdate`; [spanner.md](coverage/spanner.md)) (#1461) | no emulator support | L |
+| Spanner: 31 RPCs refused, each naming why (backups, backup schedules, IAM, instance configurations, partition and database updates, `FetchCacheUpdate`; [spanner.md](coverage/spanner.md)); `UpdateInstance` is served by the call front since #1461 (#1461) | no emulator support: the emulator cannot snapshot a database and has one instance configuration | L |
 | Bigtable: 48 RPCs refused (authorized, logical and materialized views, memory layers, snapshots, backups, schema bundles, table IAM, `ExecuteQuery`, change streams, …; [bigtable.md](coverage/bigtable.md)) (#1461) | no emulator support | L |
-| Firestore: `ExecutePipeline`; Firestore Admin: backups, backup schedules, restore, clone, user credentials, `ExportDocuments`, `ImportDocuments`, `BulkDeleteDocuments` (20 methods; [firestoreadmin.md](coverage/firestoreadmin.md)) (#1461) | no emulator support | L |
-| Datastore GQL aggregation queries (`RunAggregationQuery` with `gql_query`) and `explain_options` are 501 (#1461) | no emulator support (the emulator serves neither) | S |
+| Firestore: `ExecutePipeline`; Firestore Admin: backups, restore, clone, user credentials, `ExportDocuments`, `ImportDocuments`, `BulkDeleteDocuments` (15 methods, each naming why; [firestoreadmin.md](coverage/firestoreadmin.md)); backup schedules are served since #1461 and take no backups (#1461) | no emulator support: it cannot snapshot or export a database, and is not Firestore with MongoDB compatibility | L |
+| Datastore `explain_options` are 501; GQL aggregation queries are served since #1461 (#1461) | no emulator support: the emulator plans no query | S |
 | Whether production reorders an array's excluded values after its indexed ones, as the emulator does (#941) | needs live GCP | S |
 
 ## Cloud SQL, Memorystore

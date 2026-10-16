@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
+	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	rpccode "google.golang.org/genproto/googleapis/rpc/code"
 	"google.golang.org/grpc/codes"
@@ -43,6 +45,9 @@ func restCall(r *http.Request) (string, bool) {
 
 func (s *Instances) serveREST(w http.ResponseWriter, r *http.Request) {
 	method, _ := restCall(r)
+	if name := strings.TrimPrefix(r.URL.Path, "/v1/"); r.Method == http.MethodGet && s.ownOperation(name) {
+		method = "GetOperation"
+	}
 	ctx, q := r.Context(), r.URL.Query()
 	reply := func(m proto.Message, err error) {
 		if err != nil {
@@ -58,6 +63,8 @@ func (s *Instances) serveREST(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(b)
 	}
 	switch method {
+	case "GetOperation":
+		reply(s.GetOperation(ctx, &longrunningpb.GetOperationRequest{Name: strings.TrimPrefix(r.URL.Path, "/v1/")}))
 	case "ListInstances":
 		n, _ := strconv.Atoi(q.Get("pageSize"))
 		reply(s.ListInstances(ctx, &instancepb.ListInstancesRequest{Parent: restInstances.FindStringSubmatch(r.URL.Path)[1],

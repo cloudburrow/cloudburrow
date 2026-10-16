@@ -14,6 +14,7 @@ import (
 	instance "cloud.google.com/go/spanner/admin/instance/apiv1"
 	instancepb "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	"google.golang.org/api/iterator"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -377,6 +378,11 @@ func spannerPartitionName(project, instanceID, partitionID string) string {
 func (p spannerProvider) spannerAdminAct(ctx context.Context, project string, path []string, action string,
 	values map[string]string) (handled bool, err error) {
 	switch action {
+	case "editinstance":
+		if len(path) != 1 {
+			return true, errors.New("Edit instance is an instance's action")
+		}
+		return true, p.spannerEditInstance(ctx, project, path[0], values)
 	case "updateddl":
 		if len(path) != 2 || isSpannerPartitionPath(path) {
 			return true, errors.New("Update schema is a database's action")
@@ -457,4 +463,49 @@ func (p spannerProvider) spannerAdminAct(ctx context.Context, project string, pa
 		})
 	}
 	return false, nil
+}
+
+// spannerEditInstanceAction is Edit instance (#1461), prefilled from the
+// instance: its display name and compute capacity, which the call front in
+// the Spanner pod updates (the emulator refuses UpdateInstance).
+func (p spannerProvider) spannerEditInstanceAction(ctx context.Context, project, instanceID string) (console.Action, bool) {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return console.Action{}, false
+	}
+	defer instAdmin.Close()
+	inst, err := instAdmin.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: fmt.Sprintf("projects/%s/instances/%s", project, instanceID)})
+	if err != nil {
+		return console.Action{}, false
+	}
+	return console.Action{ID: "editinstance", Label: "Edit instance", Fields: []console.Field{
+		{Name: "displayName", Label: "Display name", Type: "text", Required: true, Default: inst.GetDisplayName(), Pattern: `^.{4,30}$`,
+			Help: "4 to 30 characters."},
+		{Name: "processingUnits", Label: "Processing units", Type: "text", Required: true, Pattern: `^[0-9]+$`,
+			Default: strconv.Itoa(int(inst.GetProcessingUnits())),
+			Help:    "A multiple of 100 below 1000, and of 1000 (a node) from 1000. The emulator serves every instance the same."},
+	}}, true
+}
+
+func (p spannerProvider) spannerEditInstance(ctx context.Context, project, instanceID string, values map[string]string) error {
+	pu, err := strconv.ParseInt(strings.TrimSpace(values["processingUnits"]), 10, 32)
+	if err != nil {
+		return fmt.Errorf("processing units %q is not a whole number", values["processingUnits"])
+	}
+	instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return fmt.Errorf("cannot reach Spanner: %w", err)
+	}
+	defer instAdmin.Close()
+	op, err := instAdmin.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{
+		Instance: &instancepb.Instance{Name: fmt.Sprintf("projects/%s/instances/%s", project, instanceID),
+			DisplayName: strings.TrimSpace(values["displayName"]), ProcessingUnits: int32(pu)},
+		FieldMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name", "processing_units"}}})
+	if err != nil {
+		return err
+	}
+	_, err = op.Wait(ctx)
+	return err
 }
