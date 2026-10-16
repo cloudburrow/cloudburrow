@@ -37,17 +37,42 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/firestoreadmin"
 	"github.com/cloudburrow/cloudburrow/internal/frontready"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/queryfront"
 )
 
 // ErrUsage means the arguments were refused; the reason has been written.
 var ErrUsage = errors.New("usage")
 
 // Intercept answers some calls itself instead of the emulator: the
-// Firestore Admin API (internal/firestoreadmin, #1331), which the Firestore
-// emulator does not serve.
+// Firestore Admin API (internal/firestoreadmin, #1331), and the query RPCs
+// (internal/queryfront, #1405), which the emulators do not serve.
 type Intercept interface {
 	http.Handler
 	Claims(r *http.Request) bool
+}
+
+// Intercepts is several intercepts; the first that claims a call answers it.
+type Intercepts []Intercept
+
+// Claims reports whether any of the intercepts claims r.
+func (is Intercepts) Claims(r *http.Request) bool { return is.claimant(r) != nil }
+
+func (is Intercepts) claimant(r *http.Request) Intercept {
+	for _, i := range is {
+		if i.Claims(r) {
+			return i
+		}
+	}
+	return nil
+}
+
+// ServeHTTP answers r through the first intercept that claims it.
+func (is Intercepts) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if i := is.claimant(r); i != nil {
+		i.ServeHTTP(w, r)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 // Handler is the front for the emulator at upstream, recording into ring.
@@ -127,11 +152,18 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	restUpstream := fs.String("rest-upstream", "", "the emulator's second (REST) address, on the pod's loopback")
 	// The Firestore Admin API, served by the front itself (#1331).
 	firestoreAdmin := fs.Bool("firestore-admin", false, "serve the Firestore Admin API in front of the Firestore emulator")
+	// The query RPCs the emulator does not serve, answered by the front
+	// from calls it does (#1405).
+	queries := fs.String("queries", "", "answer the query RPCs the emulator does not serve: datastore (RunAggregationQuery) or firestore (PartitionQuery)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
 	if fs.NArg() > 0 || *listen == "" || *upstream == "" || (*restListen == "") != (*restUpstream == "") {
 		fmt.Fprintln(stderr, "call-front: --listen and --upstream are required, --rest-listen and --rest-upstream go together, and nothing else")
+		return ErrUsage
+	}
+	if *queries != "" && *queries != "datastore" && *queries != "firestore" {
+		fmt.Fprintln(stderr, "call-front: --queries is datastore or firestore")
 		return ErrUsage
 	}
 	logger := log.New(stdout, "", log.LstdFlags|log.LUTC)
@@ -142,9 +174,19 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	var servers []*http.Server
 	var listeners []net.Listener
-	var icpt Intercept
+	var icpts Intercepts
+	switch *queries {
+	case "datastore":
+		icpts = append(icpts, queryfront.NewDatastore(*upstream))
+	case "firestore":
+		icpts = append(icpts, queryfront.NewFirestore(*upstream))
+	}
 	if *firestoreAdmin {
-		icpt = firestoreadmin.New(*upstream)
+		icpts = append(icpts, firestoreadmin.New(*upstream))
+	}
+	var icpt Intercept
+	if len(icpts) > 0 {
+		icpt = icpts
 	}
 	for i, p := range pairs {
 		l, err := net.Listen("tcp", p[0])

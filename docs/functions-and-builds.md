@@ -13,10 +13,11 @@ is a Cloud Build `Build` (`GetBuild`, `ListBuilds`, its operation at
 `projects/*/locations/*/operations/{build id}`), and the repository is Artifact Registry
 metadata (`GetRepository`, `CreateRepository`, `ListRepositories`), both served on the Run port
 and reached through `gcloud-setup`'s `cloudbuild` and `artifactregistry` overrides. The build
-itself stays local: Docker for a Dockerfile, pack for a source without one. **No image is
-pushed**, and a repository is not a registry a docker client can push to or pull from: the
-image is loaded into the cluster as `dev.local/<image URI>`, and a service naming the image
-under the repository's URL, by tag or by the digest the build reports, runs it. The console
+itself stays local: Docker for a Dockerfile, pack for a source without one. Since #1383 the
+image is **pushed** to the repository, a Docker registry ([below](#artifact-registrys-docker-registry-1383)),
+and the digest the build reports is its manifest's; it is also loaded into the cluster as
+`dev.local/<image URI>`, the fast path, so a service naming the image under the repository's
+URL, by tag or by that digest, runs it without a pull. The console
 shows the repositories (Artifact Registry) and the builds (Cloud Run, Build history), each
 build's page with its steps' status and timing and its log.
 
@@ -30,9 +31,11 @@ the same local builder as SubmitBuild, not in the step's own container:
   host's Docker for the nodes' architecture and loads the image as `dev.local/<tag>`;
 - `gcr.io/cloud-builders/gcb-internal` with `docker build …` as its args, the step
   `gcloud builds submit --tag` sends, is the same docker build;
-- `docker push` of a tag an earlier step built succeeds without a registry: the image is
-  already in the cluster. Each of `images` gets a digest, and a service naming it by tag or
-  digest runs it. A push is never sent to a registry, so a build never reaches Google's;
+- `docker push` of a tag an earlier step built pushes it to its Artifact Registry repository
+  when this instance holds that repository (#1383), and is otherwise a success that only
+  leaves the image in the cluster. Each of `images` is pushed the same way and gets its
+  manifest's digest (a digest derived from the build's ID when nothing was pushed), and a
+  service naming it by tag or digest runs it;
 - `gcr.io/k8s-skaffold/pack` `build IMAGE` (`--builder gcr.io/buildpacks/builder…`, `--env`,
   `--path`) builds with pack, gated as the Functions tests are.
 
@@ -123,6 +126,45 @@ container); the build's `secrets`, `availableSecrets`, `artifacts`, `serviceAcco
 pools, machine types and other `options`; and sources other than `storageSource`. Triggers,
 worker pools and `ApproveBuild` are not served. The console's Build history takes the same
 filter in its filter box, and offers Retry on a finished build's page.
+
+## Artifact Registry's Docker registry (#1383)
+
+Each `DOCKER` repository is a Docker registry: the Docker Registry HTTP API v2 (the OCI
+distribution spec) at `/v2/` on the Run port, over a content-addressed store in the instance's
+state directory (`<state-dir>/<name>/artifactregistry/`), which survives a restart with the
+repositories. On Google the registry is `{region}-docker.pkg.dev/{project}/{repository}/{image}`;
+here a docker client reaches it as
+
+    {region}-docker.pkg.localhost:{run port}/{project}/{repository}/{image}
+
+`*.localhost` resolves to loopback without any DNS or `/etc/hosts` entry (RFC 6761), and docker
+and crane treat a loopback registry as insecure (plain HTTP) without configuration, as they do
+`localhost:5000`. The region in the name selects the repository's location; `127.0.0.1:{run
+port}` works too and finds the project's one repository of that ID. `cloudburrow gcloud-setup`
+prints the address. For example, with the `demo` instance's repository `images` in
+`us-central1`:
+
+    docker tag app us-central1-docker.pkg.localhost:9004/demo/images/app:v1
+    docker push us-central1-docker.pkg.localhost:9004/demo/images/app:v1
+    crane ls us-central1-docker.pkg.localhost:9004/demo/images/app
+
+No credential is asked for, so `gcloud auth configure-docker` is not needed. CloudBurrow never
+writes docker's configuration (`~/.docker/config.json`): if you have run `gcloud auth
+configure-docker us-central1-docker.pkg.dev`, that names the real host and is not consulted
+for the `.localhost` one. To push with the `-docker.pkg.dev` name itself you would have to map
+it to this machine yourself (an `/etc/hosts` entry, and docker's `insecure-registries`); nothing
+here does that for you, because it would also send your real pushes here.
+
+What is pushed is what the Artifact Registry API reads: packages, versions, tags, Docker images
+and files (`gcloud artifacts docker images list`, `gcloud artifacts docker tags add`), and the
+console's repository page lists images, versions, tags and files with Delete, Add tag and
+Remove tag. Cloud Build's `images` and `docker push` steps, and SubmitBuild, push to it. A Cloud
+Run service naming an image the registry holds, and that was not built here, pulls it: the
+revision names it by digest, and every kind node's containerd has a
+`/etc/containerd/certs.d/{region}-docker.pkg.dev/hosts.toml` (written at `up`, for every
+region) whose server and mirror are the Run port at the address pods reach this machine at, so
+a pull never falls back to Google. See the Docker Registry rows of
+[compatibility.md](compatibility.md) for what is served and refused.
 
 ## Functions Framework (#32)
 

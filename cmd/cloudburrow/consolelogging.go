@@ -401,10 +401,32 @@ type loggingSinksProvider struct{ loggingAdminScreen }
 func (loggingSinksProvider) ID() string    { return "logging-sinks" }
 func (loggingSinksProvider) Title() string { return "Log router sinks" }
 
-const sinkNote = "A sink is stored with its destination and filter and delivers nothing: no entry is routed to its bucket, dataset, topic or log bucket."
+const sinkNote = "A sink delivers each matching entry: to a log bucket and a Pub/Sub topic at once, to a BigQuery dataset streamed in, to a Cloud Storage bucket in hourly files, and to another project's _Default bucket and sinks. A destination that is missing is a sink error, in the project's logging.googleapis.com/sink_error log."
+
+// sinkDelivery is a sink's delivery status, for its row and its page.
+func (s loggingAdminScreen) sinkDelivery(name string) (state, lastErr string) {
+	if s.svc == nil || s.svc.api == nil {
+		return "-", ""
+	}
+	st := s.svc.api.SinkStatus(name)
+	if st == nil {
+		return "Nothing delivered yet", ""
+	}
+	state = fmt.Sprintf("%d delivered", st.Delivered)
+	if !st.LastDelivery.IsZero() {
+		state += ", last " + st.LastDelivery.UTC().Format(time.RFC3339)
+	}
+	if st.Pending > 0 {
+		state += fmt.Sprintf(", %d waiting for the hourly file", st.Pending)
+	}
+	if st.LastError != "" {
+		lastErr = st.LastErrorAt.UTC().Format(time.RFC3339) + " " + st.LastError
+	}
+	return state, lastErr
+}
 
 func (p loggingSinksProvider) List(ctx context.Context, project string) (console.Listing, error) {
-	out := console.Listing{Columns: []string{"Destination", "Filter", "State", "Updated"}, NameColumn: "Sink", Noun: "sinks", Note: sinkNote}
+	out := console.Listing{Columns: []string{"Destination", "Filter", "State", "Delivery", "Last error", "Updated"}, NameColumn: "Sink", Noun: "sinks", Note: sinkNote}
 	a, err := p.admin()
 	if err != nil {
 		return console.Listing{}, err
@@ -421,8 +443,11 @@ func (p loggingSinksProvider) List(ctx context.Context, project string) (console
 		return console.Listing{}, err
 	}
 	for _, s := range resp.GetSinks() {
-		out.Items = append(out.Items, console.Resource{Name: "projects/" + project + "/sinks/" + s.GetName(), Fields: map[string]string{
-			"Destination": s.GetDestination(), "Filter": orDash(s.GetFilter()), "State": enabledWord(s.GetDisabled()), "Updated": loggingTime(s.GetUpdateTime()),
+		name := "projects/" + project + "/sinks/" + s.GetName()
+		delivery, lastErr := p.sinkDelivery(name)
+		out.Items = append(out.Items, console.Resource{Name: name, Fields: map[string]string{
+			"Destination": s.GetDestination(), "Filter": orDash(s.GetFilter()), "State": enabledWord(s.GetDisabled()),
+			"Delivery": delivery, "Last error": orDash(lastErr), "Updated": loggingTime(s.GetUpdateTime()),
 		}})
 	}
 	out.Total = len(out.Items)
@@ -498,12 +523,16 @@ func (p loggingSinksProvider) Detail(ctx context.Context, project string, path [
 	if err != nil {
 		return console.Detail{Unavailable: consoleErr(err)}, nil
 	}
+	delivery, lastErr := p.sinkDelivery(path[0])
 	props := []console.Property{
 		{Label: "Resource name", Value: path[0]},
 		{Label: "Destination", Value: s.GetDestination()},
 		{Label: "Filter", Value: orDash(s.GetFilter())},
 		{Label: "Description", Value: orDash(s.GetDescription())},
 		{Label: "State", Value: enabledWord(s.GetDisabled())},
+		{Label: "Writer identity", Value: orDash(s.GetWriterIdentity())},
+		{Label: "Delivery", Value: delivery},
+		{Label: "Last error", Value: orDash(lastErr)},
 		{Label: "Created", Value: loggingTime(s.GetCreateTime())},
 		{Label: "Updated", Value: loggingTime(s.GetUpdateTime())},
 	}
@@ -511,7 +540,8 @@ func (p loggingSinksProvider) Detail(ctx context.Context, project string, path [
 		props = append(props, console.Property{Label: "Exclusion " + e.GetName(), Value: e.GetFilter()})
 	}
 	return console.Detail{
-		Summary: []console.Property{{Label: "Destination", Value: s.GetDestination()}, {Label: "State", Value: enabledWord(s.GetDisabled())}},
+		Summary: []console.Property{{Label: "Destination", Value: s.GetDestination()}, {Label: "State", Value: enabledWord(s.GetDisabled())},
+			{Label: "Delivery", Value: delivery}},
 		Sections: []console.Section{{ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
 			Groups: []console.PropertyGroup{{Heading: "Sink", Properties: props}}, Note: sinkNote}},
 		Edit: &console.EditForm{Label: "Edit sink", Fields: sinkFields(s), Note: "The name is the sink's identity and cannot change."},

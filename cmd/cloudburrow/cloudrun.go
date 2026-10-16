@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
+	"github.com/cloudburrow/cloudburrow/internal/registry"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -135,6 +138,14 @@ func (r *runService) Start(ctx context.Context) error {
 		adapter = adapter.WithCloudSQL(r.cloudSQL)
 	}
 	r.adapter.Store(adapter)
+	// Artifact Registry's Docker registry (#1383): content-addressed in
+	// the instance's state directory, so pushed images and the
+	// repositories that hold them survive a restart.
+	regStore, err := registry.Open(filepath.Join(r.cfg.InstanceDir(), "artifactregistry"))
+	if err != nil {
+		return fmt.Errorf("open the Artifact Registry store: %w", err)
+	}
+	runadapter.UseRegistry(regStore)
 
 	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))
 	r.server = grpctransport.New(addr)
@@ -200,8 +211,11 @@ func (r *runService) Start(ctx context.Context) error {
 	// build and a Cloud Run service, on the same port, with its source
 	// upload and download URLs.
 	functions := adapter.Functions(builds, func() string { return hostURL(r.server.Addr()) })
-	var jsonAPI http.Handler = functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
-		adapter.V1Handler(runadapter.NewRESTHandler(register))))
+	// The Docker Registry HTTP API v2 at /v2/ (#1383), before the JSON
+	// APIs: no Google API's path starts with v2/ on this port but Cloud
+	// Run's own, /v2/projects/..., which the registry passes on.
+	var jsonAPI http.Handler = runadapter.RegistryHandlerOr(functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
+		adapter.V1Handler(runadapter.NewRESTHandler(register)))))
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}

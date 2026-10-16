@@ -64,6 +64,11 @@ type loggingService struct {
 	// hierarchy is Resource Manager's registry, whose folders and
 	// organization are Logging parents (#1395); nil when it is not open.
 	hierarchy *resourcemanager.Registry
+	// pubsub and bigquery are the tunnels sinks deliver through (#1404),
+	// or nil.
+	pubsub, bigquery func() *netfwd.Forwarder
+	// stopDelivery ends the Cloud Storage sinks' hourly writes.
+	stopDelivery context.CancelFunc
 }
 
 // storageObjectWriter uploads an object to the instance's Cloud Storage
@@ -92,6 +97,10 @@ func (w storageObjectWriter) WriteObject(ctx context.Context, bucket, name, cont
 	_, msg, _, _ := apierror.DecodeJSON(io.LimitReader(resp.Body, 1<<16))
 	if msg == "" {
 		msg = resp.Status
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		// A sink reports a missing bucket as a sink error (#1404).
+		return fmt.Errorf("gs://%s/%s: %s: %w", bucket, name, msg, logging.ErrDestinationNotFound)
 	}
 	return fmt.Errorf("gs://%s/%s: %s", bucket, name, msg)
 }
@@ -288,6 +297,12 @@ func (s *loggingService) Start(ctx context.Context) error {
 		}
 		s.admin.UseStorage(storageObjectWriter{src: src, client: &http.Client{Timeout: 2 * time.Minute}})
 	}
+	// Sinks deliver to the instance's Cloud Storage, Pub/Sub and BigQuery
+	// (#1404).
+	s.api.UseDestinations(s.destinations())
+	dctx, cancel := context.WithCancel(context.Background())
+	s.stopDelivery = cancel
+	go s.api.RunDelivery(dctx)
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Logging))
 	s.server = grpctransport.New(addr)
 	s.server.Observe(s.calls)
@@ -301,6 +316,15 @@ func (s *loggingService) Start(ctx context.Context) error {
 	// server, transcoded, for REST clients and gcloud.
 	register := func(g grpc.ServiceRegistrar) { s.api.Register(g); s.admin.Register(g) }
 	var jsonAPI http.Handler = logging.NewRESTHandler(register)
+	// The Logging clock (#1404), a CloudBurrow extension on the API's port.
+	transcoded := jsonAPI
+	jsonAPI = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == logging.ClockPath {
+			s.api.ServeClock(w, r)
+			return
+		}
+		transcoded.ServeHTTP(w, r)
+	})
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
@@ -312,6 +336,9 @@ func (s *loggingService) Start(ctx context.Context) error {
 }
 
 func (s *loggingService) Stop(ctx context.Context) error {
+	if s.stopDelivery != nil {
+		s.stopDelivery()
+	}
 	var err error
 	if s.server != nil {
 		err = s.server.Stop(ctx)

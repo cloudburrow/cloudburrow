@@ -11,7 +11,7 @@ Do not edit these files by hand.
 | [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
 | [Cloud Run v2](run.md) | 41 | 41 | 0 | 0 | 0 | 0 | 0 | 4 |
-| [Artifact Registry](artifactregistry.md) | 50 | 5 | 0 | 45 | 0 | 0 | 0 | 0 |
+| [Artifact Registry](artifactregistry.md) | 50 | 20 | 0 | 30 | 0 | 0 | 0 | 0 |
 | [Cloud Build](cloudbuild.md) | 19 | 6 | 0 | 13 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 35 | 0 | 0 | 0 | 0 | 41 | 0 |
@@ -25,9 +25,9 @@ Do not edit these files by hand.
 | [Pub/Sub](pubsub.md) | 47 | 45 | 2 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 68 | 0 | 19 | 0 | 0 | 0 | 14 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 24 | 22 | 0 | 0 | 2 | 0 | 0 | 0 |
-| [Firestore](firestore.md) | 17 | 15 | 2 | 0 | 0 | 0 | 0 | 0 |
+| [Firestore](firestore.md) | 17 | 16 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Firestore Admin API](firestoreadmin.md) | 32 | 12 | 0 | 20 | 0 | 0 | 0 | 0 |
-| [Datastore](datastore.md) | 8 | 7 | 1 | 0 | 0 | 0 | 0 | 0 |
+| [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Bigtable](bigtable.md) | 84 | 36 | 48 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 33 | 32 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 46 | 1 | 0 | 0 | 0 | 0 | 0 |

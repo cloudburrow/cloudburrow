@@ -212,8 +212,32 @@ func runGcloudSetup(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stderr, "cloudburrow: wrote gcloud configuration %s (%s); your default configuration is unchanged\n",
 		gcloudConfigName(cfg), path)
+	if hint := dockerRegistryHint(cfg); hint != "" {
+		fmt.Fprintln(stderr, hint)
+	}
 	fmt.Fprintf(stdout, "export CLOUDSDK_ACTIVE_CONFIG_NAME=%s\n", gcloudConfigName(cfg))
 	return nil
+}
+
+// dockerRegistryHint tells a docker client where Artifact Registry's Docker
+// registry is (#1383): the Run port, under {region}-docker.pkg.localhost,
+// which resolves to loopback (RFC 6761) and so is an insecure registry
+// docker accepts without configuration. Nothing of docker's is written:
+// the registry asks for no credential, so `gcloud auth configure-docker`,
+// which edits ~/.docker/config.json, is not needed.
+func dockerRegistryHint(cfg config.Config) string {
+	if !serviceEnabled(cfg, config.ServiceRun) || cfg.Endpoints.Run == 0 {
+		return ""
+	}
+	port := strconv.Itoa(cfg.Endpoints.Run)
+	if ip := net.ParseIP(cfg.BindAddress); ip == nil || !ip.IsLoopback() {
+		return fmt.Sprintf("cloudburrow: Artifact Registry's Docker registry is at %s; push an image to a DOCKER repository "+
+			"as %s/PROJECT/REPOSITORY/IMAGE:TAG (your docker configuration is unchanged)", net.JoinHostPort(cfg.BindAddress, port),
+			net.JoinHostPort(cfg.BindAddress, port))
+	}
+	return fmt.Sprintf("cloudburrow: Artifact Registry's Docker registry is at REGION-docker.pkg.localhost:%s; push an image "+
+		"to a DOCKER repository as, e.g., us-central1-docker.pkg.localhost:%s/PROJECT/REPOSITORY/IMAGE:TAG "+
+		"(your docker configuration is unchanged)", port, port)
 }
 
 func runGcloudTeardown(args []string, stdout, stderr io.Writer) error {

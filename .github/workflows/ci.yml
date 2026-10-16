@@ -452,7 +452,7 @@ jobs:
     name: official SDK compatibility (${{ matrix.shard }})
     runs-on: ubuntu-latest
     # Well above its usual run; a wedged job fails here instead of at GitHub's 6-hour default (#715).
-    timeout-minutes: 60
+    timeout-minutes: 75
     # Same rule as integration: the suite that caught #268 only after it merged.
     needs: [changes, bigquery-emulator]
     if: github.event_name != 'pull_request' || needs.changes.outputs.heavy == 'true' || contains(github.event.pull_request.labels.*.name, 'run-integration')
@@ -667,7 +667,9 @@ jobs:
             echo "== acceptance: $(grep -c -- '^--- PASS' e2e.log) e2e and $(grep -c -- '^--- PASS' k8s.log) test/k8s tests passed"
           else
             set +e
-            go test -tags=compat -timeout 25m -v ./test/compat/... | tee compat.log
+            # 45m: the emulators shard passed 25m in main run 38910752877 (Cloud SQL
+            # versions and HA, sink delivery, BigQuery), timing out in TestGcloud*.
+            go test -tags=compat -timeout 45m -v ./test/compat/... | tee compat.log
             rc=$?
             set -e
             if [ "$rc" -ne 0 ]; then

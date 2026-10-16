@@ -217,6 +217,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if loggingSvc != nil {
 		// CopyLogEntries writes to the instance's Cloud Storage (#1394).
 		loggingSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		// Sinks deliver to Pub/Sub and BigQuery too (#1404).
+		loggingSvc.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
+		loggingSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
 		// A queue's sampled dispatch attempts go to the instance's Cloud
 		// Logging through its own WriteLogEntries (#1256), so exclusions
 		// apply to them as to any write.

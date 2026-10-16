@@ -48,6 +48,9 @@ var compatEnvExceptions = map[string]string{
 	// default alpine:3.20 is not to be pulled; a host choice, not an
 	// instance's.
 	"CLOUDBURROW_TEST_STEP_IMAGE": "host fixture: an image already on the machine",
+	// The registry test (#1383) deploys from the pushed image unless this
+	// is set, which skips only that slower Cloud Run step.
+	"CLOUDBURROW_TEST_SKIP_RUN_PULL": "opt-out switch: skips the Cloud Run pull of the registry test",
 	// An opt-in switch for a slow test no CI shard runs (#678).
 	"CLOUDBURROW_TEST_FUNCTIONS": "opt-in switch",
 	// The signed URL tests' key and account, for the builtin storage-server
@@ -313,6 +316,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"RUN_SQLADMIN":             "127.0.0.1:9020",
 		"TASKS_LOGGING":            "127.0.0.1:9009",
 		"BIGQUERY_RESOURCEMANAGER": "127.0.0.1:9007",
+		"LOGGING_RESOURCEMANAGER":  "127.0.0.1:9007",
 		"SPANNER":                  "127.0.0.1:9013",
 		"DATASTORE":                "127.0.0.1:9011",
 		"FIRESTORE":                "127.0.0.1:9010",
@@ -333,6 +337,9 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"GCLOUD":                   "/opt/gcloud/bin/gcloud",
 		"TOFU":                     "/opt/tofu",
 		"SPANNER_REST":             "http://127.0.0.1:9022",
+		"SINK_LOGGING":             "127.0.0.1:9009",
+		"SINK_STORAGE":             "http://127.0.0.1:50003",
+		"SINK_PUBSUB":              "127.0.0.1:50004",
 	}
 	list := compatEnvList(t)
 	if len(want) != len(list) {

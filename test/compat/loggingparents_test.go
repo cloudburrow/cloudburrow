@@ -20,12 +20,22 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
+// envLoggingResourceManager is Resource Manager under the served shard's
+// name, so the Logging folder and organization tests run there, with
+// Cloud Logging, and the Resource Manager suite stays in storage; on a
+// developer's instance RESOURCEMANAGER does.
+const envLoggingResourceManager = "CLOUDBURROW_TEST_LOGGING_RESOURCEMANAGER"
+
 // loggingParentsFixture is a folder under the organization holding a new
-// project, for the folder and organization Logging parents (#1395).
+// project, for the folder and organization Logging parents (#1395). It
+// skips without Cloud Logging, before it makes anything: the storage shard
+// serves Resource Manager but exports no LOGGING, and a gcloud session
+// there has no logging override (CI run 38910752877).
 func loggingParentsFixture(t *testing.T, h *Harness, prefix string) (folder, project string) {
 	t.Helper()
+	h.Endpoint(EnvLogging)
 	ctx := h.Context()
-	fc, _, pc := foldersClients(t, h)
+	fc, _, pc := foldersClientsAt(t, h, rmOptionsAt(runShardEndpoint(h, envLoggingResourceManager, EnvResourceManager)))
 	op, err := fc.CreateFolder(ctx, &rmpb.CreateFolderRequest{Folder: &rmpb.Folder{Parent: localOrg, DisplayName: folderLabel(h, prefix)}})
 	if err != nil {
 		t.Fatalf("CreateFolder: %v", err)

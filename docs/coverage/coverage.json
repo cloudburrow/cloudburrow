@@ -198,6 +198,7 @@
         "tests": [
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
@@ -210,6 +211,7 @@
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ],
@@ -227,6 +229,7 @@
         "tests": [
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion",
           "test/compat/terraform_tasks_secrets_test.go:113 TestTerraformSecretRotationAndTopics"
         ]
@@ -247,6 +250,7 @@
         "tests": [
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
+          "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
@@ -301,6 +305,7 @@
         "tests": [
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
+          "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
       },
@@ -580,6 +585,7 @@
         "method": "google.cloud.run.v2.Services/CreateService",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:75 TestRunServiceCloudSQLVolume",
           "test/compat/runcloudsqlv1_test.go:50 TestRunServiceCloudSQLMySQLVolume",
@@ -763,8 +769,8 @@
     "Key": "artifactregistry",
     "Title": "Artifact Registry",
     "counts": {
-      "Unimplemented": 45,
-      "Verified": 5
+      "Unimplemented": 30,
+      "Verified": 20
     },
     "rows": [
       {
@@ -781,7 +787,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild",
+          "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
         ]
       },
@@ -792,8 +798,11 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateTag",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteAttachment",
@@ -807,13 +816,16 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeletePackage",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRepository",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
         ]
       },
@@ -824,13 +836,17 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteTag",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ExportArtifact",
@@ -844,13 +860,18 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetDockerImage",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetFile",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetIamPolicy",
@@ -869,8 +890,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetPackage",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetProjectSettings",
@@ -886,7 +909,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetRepository",
         "status": "Verified",
         "tests": [
-          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild",
+          "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
         ]
       },
@@ -897,8 +920,11 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetTag",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetVPCSCConfig",
@@ -907,8 +933,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportAptArtifacts",
@@ -927,13 +955,18 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListDockerImages",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListFiles",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListMavenArtifacts",
@@ -947,8 +980,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListPackages",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListPythonPackages",
@@ -959,7 +994,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListRepositories",
         "status": "Verified",
         "tests": [
-          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
+          "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild"
         ]
       },
       {
@@ -969,13 +1004,17 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListTags",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListVersions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/SetIamPolicy",
@@ -1006,6 +1045,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateRepository",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
         ]
       },
@@ -1016,8 +1056,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateTag",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateVPCSCConfig",
@@ -1089,7 +1131,7 @@
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
           "test/compat/cloudbuildsteps_test.go:66 TestCloudBuildArbitraryStepsFilterAndRetry",
-          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
+          "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild"
         ]
       },
       {
@@ -1101,7 +1143,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetDefaultServiceAccount",
         "status": "Verified",
         "tests": [
-          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
+          "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild"
         ]
       },
       {
@@ -1121,7 +1163,7 @@
           "test/compat/cloudbuildsteps_test.go:220 TestGcloudBuildsStepsAndList",
           "test/compat/cloudbuildsteps_test.go:283 TestCloudBuildHostStepsOff",
           "test/compat/cloudbuildsteps_test.go:66 TestCloudBuildArbitraryStepsFilterAndRetry",
-          "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
+          "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild"
         ]
       },
       {
@@ -2452,7 +2494,8 @@
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
       {
@@ -2461,21 +2504,24 @@
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/GetFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
       {
@@ -2504,7 +2550,8 @@
         "method": "google.cloud.resourcemanager.v3.Folders/SetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
       {
@@ -2533,7 +2580,8 @@
         "method": "google.cloud.resourcemanager.v3.Organizations/GetIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
       {
@@ -2954,7 +3002,8 @@
         "method": "cloudresourcemanager.organizations.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
       {
@@ -2992,7 +3041,8 @@
         "method": "cloudresourcemanager.organizations.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM",
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
         ]
       },
       {
@@ -3246,7 +3296,7 @@
         "method": "google.logging.v2.ConfigServiceV2/CopyLogEntries",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingcopy_test.go:67 TestLoggingCopyLogEntries"
+          "test/compat/loggingcopy_test.go:90 TestLoggingCopyLogEntries"
         ]
       },
       {
@@ -3254,7 +3304,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
@@ -3270,8 +3320,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3287,9 +3339,12 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
+          "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
+          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3305,7 +3360,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
@@ -3314,8 +3369,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3331,9 +3388,11 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
+          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3349,8 +3408,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks",
+          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets"
         ]
       },
       {
@@ -3358,7 +3419,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3366,8 +3427,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3383,7 +3446,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/terraform_logging_parents_test.go:157 TestTerraformLoggingOrganizationAndFolderSettings"
         ]
       },
       {
@@ -3391,9 +3455,11 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
+          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3416,7 +3482,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3431,7 +3497,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3439,7 +3505,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3454,7 +3520,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
+          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks",
+          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets"
         ]
       },
       {
@@ -3476,7 +3544,9 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3484,7 +3554,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/terraform_logging_parents_test.go:157 TestTerraformLoggingOrganizationAndFolderSettings"
         ]
       },
       {
@@ -3492,9 +3563,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
+          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3511,7 +3583,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_test.go:106 TestConsoleDeleteLogIsSeenByTheOfficialClient",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3521,7 +3593,7 @@
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/runlogs_test.go:189 TestGcloudRunLogsRead",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
@@ -3532,7 +3604,7 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3554,9 +3626,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
+          "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
+          "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3564,7 +3637,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3572,7 +3645,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3580,7 +3653,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3595,7 +3668,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       }
     ]
@@ -3724,6 +3797,7 @@
           "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
           "test/compat/memorystoreupgrade_test.go:27 TestMemorystoreVersionsAndUpgrade",
+          "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
@@ -3734,6 +3808,7 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
+          "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
@@ -3769,6 +3844,7 @@
           "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
+          "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
@@ -3822,6 +3898,7 @@
           "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
           "test/compat/memorystoreops_test.go:34 TestMemorystoreLocationsOperationsMaintenance",
+          "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
@@ -5322,8 +5399,8 @@
     "Key": "firestore",
     "Title": "Firestore",
     "counts": {
-      "Refused": 2,
-      "Verified": 15
+      "Refused": 1,
+      "Verified": 16
     },
     "rows": [
       {
@@ -5339,7 +5416,7 @@
         "method": "google.firestore.v1.Firestore/BatchWrite",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:211 TestFirestoreBulkWriter"
+          "test/compat/firestoremethods_test.go:213 TestFirestoreBulkWriter"
         ]
       },
       {
@@ -5362,21 +5439,21 @@
         "method": "google.firestore.v1.Firestore/CreateDocument",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:57 TestFirestoreDocumentRPCs"
+          "test/compat/firestoremethods_test.go:59 TestFirestoreDocumentRPCs"
         ]
       },
       {
         "method": "google.firestore.v1.Firestore/DeleteDocument",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:57 TestFirestoreDocumentRPCs"
+          "test/compat/firestoremethods_test.go:59 TestFirestoreDocumentRPCs"
         ]
       },
       {
         "method": "google.firestore.v1.Firestore/ExecutePipeline",
         "status": "Refused",
         "tests": [
-          "test/compat/firestoremethods_test.go:337 TestFirestorePipelineIsRefused"
+          "test/compat/firestoremethods_test.go:397 TestFirestorePipelineIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -5384,7 +5461,7 @@
         "method": "google.firestore.v1.Firestore/GetDocument",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:57 TestFirestoreDocumentRPCs"
+          "test/compat/firestoremethods_test.go:59 TestFirestoreDocumentRPCs"
         ]
       },
       {
@@ -5406,22 +5483,21 @@
         "method": "google.firestore.v1.Firestore/Listen",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:245 TestFirestoreSnapshotListener"
+          "test/compat/firestoremethods_test.go:247 TestFirestoreSnapshotListener"
         ]
       },
       {
         "method": "google.firestore.v1.Firestore/PartitionQuery",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:316 TestFirestorePartitionQueryIsRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/firestoremethods_test.go:322 TestFirestorePartitionedQueries"
+        ]
       },
       {
         "method": "google.firestore.v1.Firestore/Rollback",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:180 TestFirestoreRollback"
+          "test/compat/firestoremethods_test.go:182 TestFirestoreRollback"
         ]
       },
       {
@@ -5429,7 +5505,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefirestorecount_test.go:32 TestConsoleFirestoreCountOnly",
-          "test/compat/firestoremethods_test.go:276 TestFirestoreCountAggregation"
+          "test/compat/firestoremethods_test.go:278 TestFirestoreCountAggregation"
         ]
       },
       {
@@ -5444,14 +5520,14 @@
         "method": "google.firestore.v1.Firestore/UpdateDocument",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:57 TestFirestoreDocumentRPCs"
+          "test/compat/firestoremethods_test.go:59 TestFirestoreDocumentRPCs"
         ]
       },
       {
         "method": "google.firestore.v1.Firestore/Write",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoremethods_test.go:126 TestFirestoreWriteStream"
+          "test/compat/firestoremethods_test.go:128 TestFirestoreWriteStream"
         ]
       }
     ]
@@ -5669,15 +5745,14 @@
     "Key": "datastore",
     "Title": "Datastore",
     "counts": {
-      "Refused": 1,
-      "Verified": 7
+      "Verified": 8
     },
     "rows": [
       {
         "method": "google.datastore.v1.Datastore/AllocateIds",
         "status": "Verified",
         "tests": [
-          "test/compat/datastoremethods_test.go:19 TestDatastoreAllocateAndReserveIDs"
+          "test/compat/datastoremethods_test.go:22 TestDatastoreAllocateAndReserveIDs"
         ]
       },
       {
@@ -5707,23 +5782,23 @@
         "method": "google.datastore.v1.Datastore/ReserveIds",
         "status": "Verified",
         "tests": [
-          "test/compat/datastoremethods_test.go:19 TestDatastoreAllocateAndReserveIDs"
+          "test/compat/datastoremethods_test.go:22 TestDatastoreAllocateAndReserveIDs"
         ]
       },
       {
         "method": "google.datastore.v1.Datastore/Rollback",
         "status": "Verified",
         "tests": [
-          "test/compat/datastoremethods_test.go:54 TestDatastoreRollback"
+          "test/compat/datastoremethods_test.go:57 TestDatastoreRollback"
         ]
       },
       {
         "method": "google.datastore.v1.Datastore/RunAggregationQuery",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/datastoremethods_test.go:84 TestDatastoreAggregationIsRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/consoledatastoreaggregate_test.go:25 TestConsoleDatastoreAggregate",
+          "test/compat/datastoremethods_test.go:92 TestDatastoreAggregation"
+        ]
       },
       {
         "method": "google.datastore.v1.Datastore/RunQuery",
@@ -7797,7 +7872,8 @@
           "test/compat/cloudsqlversions_test.go:104 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:265 TestCloudSQLCascadingAndCrossRegionReplicas",
           "test/compat/cloudsqlversions_test.go:375 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion"
+          "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion",
+          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica"
         ]
       },
       {
@@ -7851,7 +7927,8 @@
           "test/compat/cloudsqlversions_test.go:375 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion",
           "test/compat/sqladmin_test.go:423 TestGcloudSQL",
-          "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
+          "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers",
+          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica"
         ]
       },
       {
@@ -7878,7 +7955,9 @@
           "test/compat/cloudsqlversions_test.go:172 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:265 TestCloudSQLCascadingAndCrossRegionReplicas",
           "test/compat/cloudsqlversions_test.go:375 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion"
+          "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion",
+          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
+          "test/compat/terraform_batch4_test.go:404 TestTerraformSQLSourceRepresentationRefused"
         ]
       },
       {
@@ -7906,7 +7985,8 @@
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlversions_test.go:172 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:375 TestGcloudSQLDatabaseVersions",
-          "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion"
+          "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion",
+          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica"
         ]
       },
       {
@@ -8024,6 +8104,7 @@
           "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion",
           "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:423 TestGcloudSQL",
+          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
@@ -8083,21 +8164,24 @@
         "method": "sql.sslCerts.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqltransfers_test.go:272 TestSQLAdminSSLCerts"
+          "test/compat/cloudsqltransfers_test.go:272 TestSQLAdminSSLCerts",
+          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica"
         ]
       },
       {
         "method": "sql.sslCerts.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqltransfers_test.go:272 TestSQLAdminSSLCerts"
+          "test/compat/cloudsqltransfers_test.go:272 TestSQLAdminSSLCerts",
+          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica"
         ]
       },
       {
         "method": "sql.sslCerts.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqltransfers_test.go:272 TestSQLAdminSSLCerts"
+          "test/compat/cloudsqltransfers_test.go:272 TestSQLAdminSSLCerts",
+          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica"
         ]
       },
       {
@@ -8235,7 +8319,7 @@
         "method": "serviceusage.services.list",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingparents_test.go:268 TestServiceUsageFolderParentRefused",
+          "test/compat/loggingparents_test.go:278 TestServiceUsageFolderParentRefused",
           "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:217 TestGcloudServices",
           "test/compat/serviceusage_test.go:47 TestServiceUsageServices"
