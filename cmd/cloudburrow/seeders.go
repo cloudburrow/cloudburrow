@@ -387,18 +387,17 @@ func (p *pubsubSeeder) parse(spec json.RawMessage) (plan pubsubPlan, err error) 
 			return plan, fmt.Errorf("%s.name %q appears twice", where, s.Name)
 		}
 		seen[s.Name] = true
-		switch s.Type {
-		case "AVRO":
-		case "PROTOCOL_BUFFER":
-			return plan, fmt.Errorf("%s.type: the emulator refuses Protocol Buffer schemas as UNIMPLEMENTED "+
-				"(\"Protocol buffer support not implemented in emulator\"); use AVRO", where)
-		default:
-			return plan, fmt.Errorf("%s.type %q is not AVRO", where, s.Type)
+		// The emulator refuses Protocol Buffer schemas; CloudBurrow's
+		// Pub/Sub front, which the seed goes through, serves them (#1406,
+		// #1446).
+		typ, ok := map[string]pubsubpb.Schema_Type{"AVRO": pubsubpb.Schema_AVRO, "PROTOCOL_BUFFER": pubsubpb.Schema_PROTOCOL_BUFFER}[s.Type]
+		if !ok {
+			return plan, fmt.Errorf("%s.type %q is not AVRO or PROTOCOL_BUFFER", where, s.Type)
 		}
 		if strings.TrimSpace(s.Definition) == "" {
 			return plan, fmt.Errorf("%s.definition is required", where)
 		}
-		plan.schemas = append(plan.schemas, &pubsubpb.Schema{Name: s.Name, Type: pubsubpb.Schema_AVRO, Definition: s.Definition})
+		plan.schemas = append(plan.schemas, &pubsubpb.Schema{Name: s.Name, Type: typ, Definition: s.Definition})
 	}
 
 	seen = map[string]bool{}

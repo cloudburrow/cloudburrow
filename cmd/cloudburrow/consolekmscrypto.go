@@ -286,8 +286,7 @@ func kmsCreateImportJobAction() console.Action {
 		{Name: "importMethod", Label: "Import method", Type: "select", Default: kmsImportMethods[0], Options: kmsImportMethods,
 			Help: "How key material is wrapped for this job. The *_AES_256 methods wrap an ephemeral AES-256 key with RSA-OAEP and the key with " +
 				"AES-KWP, and carry any key; the others wrap the key with RSA-OAEP alone, so cannot carry an RSA key. The HPKE methods are not implemented."},
-		{Name: "protectionLevel", Label: "Protection level", Type: "select", Default: "SOFTWARE", Options: []string{"SOFTWARE"},
-			Help: "Only SOFTWARE keys exist locally; HSM and EXTERNAL are not implemented."},
+		kmsProtectionField("It must match the protection level of the key imported into."),
 	}}
 }
 

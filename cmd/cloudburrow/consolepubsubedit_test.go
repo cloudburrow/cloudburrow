@@ -93,8 +93,8 @@ func TestPubSubEditTopicThroughUpdateTopic(t *testing.T) {
 		t.Errorf("name field = %+v; want orders, immutable", f)
 	}
 	values := pubsubSubmitted(form)
-	if len(values) != 2 || values["messageRetention"] != "" || values["labels"] != `{"team":"a"}` {
-		t.Fatalf("a topic with no retention submits %v; want an empty retention and its labels", values)
+	if len(values) != 4 || values["messageRetention"] != "" || values["labels"] != `{"team":"a"}` || values["schema"] != "" {
+		t.Fatalf("a topic with no retention submits %v; want an empty retention, no schema and its labels", values)
 	}
 	if f, _ := fieldNamed(form, "messageRetention"); f.Required {
 		t.Error("the retention of a topic that has none is required")

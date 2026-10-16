@@ -18,8 +18,8 @@ import (
 // TestKMSLocations (#1291), with cloud.google.com/go/kms/apiv1's Locations
 // mixin over gRPC and REST: ListLocations pages through global, the
 // multi-regions and the regions, plus a location that holds a key ring;
-// GetLocation reads one back with a LocationMetadata saying no HSM and no
-// EKM; an unknown location is NOT_FOUND and a malformed name
+// GetLocation reads one back with a LocationMetadata saying HSM (#1452) and
+// no EKM; an unknown location is NOT_FOUND and a malformed name
 // INVALID_ARGUMENT.
 func TestKMSLocations(t *testing.T) {
 	h := New(t)
@@ -61,8 +61,8 @@ func TestKMSLocations(t *testing.T) {
 				t.Fatalf("GetLocation(global) = %v, %v", loc, err)
 			}
 			var md kmspb.LocationMetadata
-			if err := loc.GetMetadata().UnmarshalTo(&md); err != nil || md.GetHsmAvailable() || md.GetEkmAvailable() {
-				t.Errorf("GetLocation(global).metadata = %v (%v); want a LocationMetadata, no HSM, no EKM", loc.GetMetadata(), err)
+			if err := loc.GetMetadata().UnmarshalTo(&md); err != nil || !md.GetHsmAvailable() || md.GetEkmAvailable() {
+				t.Errorf("GetLocation(global).metadata = %v (%v); want a LocationMetadata, HSM, no EKM", loc.GetMetadata(), err)
 			}
 			if loc, err := c.GetLocation(ctx, &locationpb.GetLocationRequest{Name: parent}); err != nil || loc.GetName() != parent {
 				t.Errorf("GetLocation(compat-kms-lab) = %v, %v", loc, err)

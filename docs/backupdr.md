@@ -40,7 +40,10 @@ the regions CloudBurrow lists, and `-` lists every location's vaults, plans and 
 | `backupPlanAssociations` | `create`, `get`, `list`, `delete`, `triggerBackup` | `resource` is `projects/{project}/instances/{instance}` (with or without `//sqladmin.googleapis.com/`), `resourceType` `sqladmin.googleapis.com/Instance`; the instance must exist. An instance is protected by one association at a time. Creating it makes a data source in the plan's vault (or reuses the one an earlier association left there); `rulesConfigInfo` reports each rule's last backup. Deleting it stops protection; the data source and its backups stay. `triggerBackup` with a `ruleId` takes an on-demand backup, kept for the rule's retention or `customRetentionDays`. |
 | `backupVaults.dataSources` | `get`, `list` | The instance protected (`dataSourceGcpResource.cloudSqlInstanceDatasourceProperties`: name, version, tier, create time), `backupCount`, and `backupConfigInfo` (last backup state and consistency time, the plan and association). `configState` is ACTIVE while an association applies, PASSIVE after. |
 | `backupVaults.dataSources.backups` | `get`, `list`, `delete` | `state` CREATING, ACTIVE or ERROR from the Cloud SQL backup underneath, `backupType` SCHEDULED or ON_DEMAND, `consistencyTime` when it finished, `expireTime` from the retention, `cloudSqlInstanceBackupProperties` and `gcpBackupPlanInfo`. `-` as the data source lists a vault's every backup. |
-| `operations` | `get`, `list` | Every mutation returns a `google.longrunning.Operation` with `OperationMetadata`: done at once, with the resource as its response, except `triggerBackup`, whose operation runs until the backup is taken (or fails, with the error). Operations are kept in memory. |
+| Updates (#1462) | `backupVaults.patch`, `backupPlans.patch`, `backupPlanAssociations.patch`, `dataSources.patch`, `backups.patch` | `updateMask` is required (camelCase or snake_case); a field outside these is 400. A vault: description, labels, `backupMinimumEnforcedRetentionDuration`, `accessRestriction`, `effectiveTime`, with `validateOnly`. A plan: description, labels, `backupRules`, `logRetentionDays`, checked as on create. An association: `backupPlan` only, as Google documents; a plan in another vault gives the instance a data source there, and the old one goes PASSIVE. A data source: labels (`allowMissing` is refused, since data sources are made by associations). A backup: `expireTime`, `enforcedRetentionEndTime` (extended, never reduced; `expireTime` cannot come before it), labels, description. |
+| `backupPlans.revisions` | `get`, `list` | Each create and patch of a plan is a revision, `v0`, `v1`, …, newest first: the current one ACTIVE, the others INACTIVE, each with its `backupPlanSnapshot`. The plan reports `revisionId` and `revisionName`; associations and data sources name the current one, and each backup the one it was taken under. |
+| Views (#1462) | `backupVaults.fetchUsable`, `backupVaults.testIamPermissions`, `backupPlanAssociations.fetchForResourceType`, `backups.fetchForResourceType`, `dataSourceReferences.get`, `list`, `fetchForResourceType` | Over what the service holds; a resource type other than `sqladmin.googleapis.com/Instance` lists nothing. `testIamPermissions` returns every permission asked (IAM is not enforced). A data source reference is `{location}/dataSourceReferences/{data source id}`, the project-level view of the data source. |
+| `operations` | `get`, `list`, `cancel`, `delete` | `cancel` sets `requestedCancellation` on a running operation (a backup already being dumped still finishes); `delete` forgets the record. Every mutation returns a `google.longrunning.Operation` with `OperationMetadata`: done at once, with the resource as its response, except `triggerBackup`, whose operation runs until the backup is taken (or fails, with the error). Operations are kept in memory. |
 
 The records are kept in the instance directory (`backupdr.json`) for a persistent instance, and
 in memory for an ephemeral one.
@@ -94,11 +97,20 @@ Each answers 501 UNIMPLEMENTED with the reason:
   a Cloud SQL backup.
 - **`pointInTimeRestore` into another project** than the data source's instance's: call it with
   that project as the parent.
-- **`encryptionConfig`** on a vault: backups are not encrypted with a customer key.
-- **Everything else** in the API: management servers and backup appliances, `patch` methods,
-  plan revisions, `fetchUsable`, `fetchForResourceType`, data source references, resource backup
-  configs, trials, `dataSources.initiateBackup`/`finalizeBackup`/`abandonBackup`/`remove`, and
-  `operations.cancel`/`delete`.
+- **`encryptionConfig`** on a vault: it needs a Cloud KMS key; backups are not encrypted with a
+  customer key.
+- **Management servers** (`managementServers.*`): a management server is a Google-managed backup
+  and recovery appliance VM on Compute Engine, reached over VPC peering.
+- **The appliance protocol** (`dataSources.initiateBackup`, `finalizeBackup`, `abandonBackup`,
+  `fetchAccessToken`, `setInternalStatus`, `remove`): what an appliance's agents call.
+- **Trials** (`getTrial`, `trial.subscribe`, `trial.end`): billing-account state, and CloudBurrow
+  has no billing accounts.
+- **Resource backup configs** (`resourceBackupConfigs.list` and `fetch`, and the folder and
+  organization `fetch`): they inventory a project's (or every project's) resources through Cloud
+  Asset Inventory.
+- **`serviceConfig.initialize`**: it creates Google's default vault and plan, whose names, rules
+  and retention Google does not document; create them with `backupVaults.create` and
+  `backupPlans.create`.
 
 IAM is not enforced on any of it, as elsewhere (ADR-0004).
 

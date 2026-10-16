@@ -10,12 +10,13 @@ import (
 	reflectionpb "google.golang.org/grpc/reflection/grpc_reflection_v1"
 )
 
-// The Cloud KMS port serves KeyManagementService, the IAMPolicy mixin (#428)
-// and the Locations mixin (#1291), and nothing else of Google's: EKM, Autokey
-// and HSM management stay unregistered, so gRPC answers UNIMPLEMENTED for them (#397).
+// The Cloud KMS port serves KeyManagementService, EkmService, Autokey and
+// AutokeyAdmin (#1452), HsmManagement (every method UNIMPLEMENTED), the
+// IAMPolicy mixin (#428), the Locations mixin (#1291) and the Operations
+// mixin CreateKeyHandle's operations are read through (#1452).
 // Reflection is the transport's own, registered on every CloudBurrow gRPC
 // server.
-func TestTheKMSPortRegistersOnlyKeyManagementService(t *testing.T) {
+func TestTheKMSPortRegistersGooglesKMSServices(t *testing.T) {
 	svc := startedKMS(t, kmsConfig(t, "kms"), nil)
 	conn, err := grpc.NewClient(svc.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -38,7 +39,9 @@ func TestTheKMSPortRegistersOnlyKeyManagementService(t *testing.T) {
 		got = append(got, s.GetName())
 	}
 	slices.Sort(got)
-	want := []string{"google.cloud.kms.v1.KeyManagementService", "google.cloud.location.Locations", "google.iam.v1.IAMPolicy", "grpc.reflection.v1.ServerReflection", "grpc.reflection.v1alpha.ServerReflection"}
+	want := []string{"google.cloud.kms.v1.Autokey", "google.cloud.kms.v1.AutokeyAdmin", "google.cloud.kms.v1.EkmService", "google.cloud.kms.v1.HsmManagement",
+		"google.cloud.kms.v1.KeyManagementService", "google.cloud.location.Locations", "google.iam.v1.IAMPolicy", "google.longrunning.Operations",
+		"grpc.reflection.v1.ServerReflection", "grpc.reflection.v1alpha.ServerReflection"}
 	if !slices.Equal(got, want) {
 		t.Errorf("services on the KMS port = %v, want %v", got, want)
 	}

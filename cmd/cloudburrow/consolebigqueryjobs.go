@@ -131,9 +131,10 @@ func bigqueryLoadFields(withTable bool) []console.Field {
 		console.Field{Name: "skipLeadingRows", Label: "Header rows to skip", Type: "number", Section: "CSV options",
 			Help: "CSV only: rows at the top of each file that are not data. Empty is 0."},
 		console.Field{Name: "fieldDelimiter", Label: "Field delimiter", Type: "text", Default: ",", Section: "CSV options",
-			Help: "CSV only: one ASCII character, or \\t for a tab."},
+			Help: "CSV only: one ASCII character, or \\t for a tab; with encoding ISO-8859-1, any one character of it."},
 		console.Field{Name: "quote", Label: "Quote character", Type: "text", Default: `"`, Section: "CSV options",
-			Help: "CSV only: one ASCII character. Empty: values are not quoted."},
+			Help: "CSV only: one ASCII character (of several, the first); with encoding ISO-8859-1, any one " +
+				"character of it. Empty: values are not quoted."},
 		console.Field{Name: "nullMarker", Label: "Null marker", Type: "text", Section: "CSV options",
 			Help: "CSV only: the text that stands for NULL, such as \\N."},
 		console.Field{Name: "nullMarkers", Label: "Null markers", Type: "textarea", Section: "CSV options",
@@ -142,7 +143,7 @@ func bigqueryLoadFields(withTable bool) []console.Field {
 		console.Field{Name: "sourceColumnMatch", Label: "Source column match", Type: "select", Options: bigqueryColumnMatches,
 			Section: "CSV options",
 			Help: "CSV only: POSITION puts each value in the column at its place; NAME in the column its header " +
-				"names, with one header row to skip."},
+				"names, read from the last header row skipped."},
 		console.Field{Name: "timeZone", Label: "Time zone", Type: "text", Section: "CSV options",
 			Help: "CSV only: the zone of a TIMESTAMP value that names none, such as America/Los_Angeles or -08:00. " +
 				"Empty is UTC."},

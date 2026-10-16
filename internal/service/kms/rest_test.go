@@ -35,7 +35,11 @@ func TestRESTAnswersGoogleBindingsAndNothingElse(t *testing.T) {
 		{"POST", kr + "/importJobs/j:setIamPolicy", 501},
 		// Locations is served since #1291; TestLocationsOverREST lists them.
 		{"GET", "/v1/projects/demo-project/locations/no-such-region", 404},
-		{"GET", "/v1/projects/p/locations/global/operations/o", 501},
+		// GetOperation is served since #1452, for CreateKeyHandle.
+		{"GET", "/v1/projects/demo-project/locations/global/operations/o", 404},
+		// HsmManagement and VerifyConnectivity stay 501 (#1452).
+		{"GET", "/v1/projects/demo-project/locations/global/singleTenantHsmInstances", 501},
+		{"GET", "/v1/projects/demo-project/locations/global/ekmConnections/c:verifyConnectivity", 501},
 		{"DELETE", kr, 501},
 		{"POST", kr + "/cryptoKeys/k/cryptoKeyVersions/1:decrypt", 404}, // decrypt binds cryptoKeys/* only
 		{"POST", kr + ":getIamPolicy", 404},                             // getIamPolicy is GET only
@@ -76,7 +80,7 @@ func TestRoutesCoverEveryKMSService(t *testing.T) {
 	for _, r := range Routes() {
 		seen[strings.SplitN(r.RPC, "/", 2)[0]] = true
 	}
-	for _, svc := range []string{"KeyManagementService", "IAMPolicy", "Locations", "Operations"} {
+	for _, svc := range []string{"KeyManagementService", "EkmService", "Autokey", "AutokeyAdmin", "HsmManagement", "IAMPolicy", "Locations", "Operations"} {
 		if !seen[svc] {
 			t.Errorf("no routes for %s: %v", svc, seen)
 		}

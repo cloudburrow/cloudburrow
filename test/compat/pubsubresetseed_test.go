@@ -78,8 +78,8 @@ func TestPubSubResetDeletesSchemas(t *testing.T) {
 // schema and a topic whose schemaSettings name it. The official clients read
 // both back, a conforming message is published and a non-conforming one is
 // refused INVALID_ARGUMENT, a repeat is a 409 and ifNotExists makes it a
-// no-op. A Protocol Buffer schema is refused by name before anything is
-// seeded.
+// no-op. A Protocol Buffer schema is seeded too (#1446), with a topic bound
+// to it, and one whose definition the API refuses seeds nothing.
 // covers: google.pubsub.v1.SchemaService/GetSchema, google.pubsub.v1.Publisher/GetTopic, google.pubsub.v1.Publisher/Publish
 func TestPubSubSeedSchemaAndBoundTopic(t *testing.T) {
 	h := New(t)
@@ -98,14 +98,38 @@ func TestPubSubSeedSchemaAndBoundTopic(t *testing.T) {
 			skip, schema, strconv.Quote(resetSeedAvro), topic, schema)
 	}
 
-	proto := fmt.Sprintf(`{"components": {"pubsub": {"schemas": [{"name": "projects/%s/schemas/seed-proto",
-		"type": "PROTOCOL_BUFFER", "definition": "syntax = \"proto3\"; message M { int32 n = 1; }"}],
+	// A Protocol Buffer schema, served by CloudBurrow's Pub/Sub front, is
+	// seeded since #1446, with a topic bound to it; one whose definition
+	// the API refuses seeds nothing.
+	bad := fmt.Sprintf(`{"components": {"pubsub": {"schemas": [{"name": "projects/%s/schemas/seed-proto-bad",
+		"type": "PROTOCOL_BUFFER", "definition": "syntax = \"proto3\";"}],
 		"topics": [{"name": "projects/%s/topics/seed-untouched"}]}}}`, project, project)
-	if code, body := adminSeed(t, control, proto); code != http.StatusBadRequest {
-		t.Errorf("a Protocol Buffer schema seeded %d %s; want 400", code, body)
+	if code, body := adminSeed(t, control, bad); code != http.StatusBadRequest {
+		t.Errorf("a Protocol Buffer schema with no message seeded %d %s; want 400", code, body)
 	}
 	if _, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: "projects/" + project + "/topics/seed-untouched"}); status.Code(err) != codes.NotFound {
 		t.Errorf("a refused seed created its topic anyway: %v", err)
+	}
+	const protoDef = "syntax = \"proto3\";\nmessage M {\n  int32 n = 1;\n}\n"
+	protoSchema := "projects/" + project + "/schemas/seed-proto"
+	protoTopic := "projects/" + project + "/topics/seed-proto-typed"
+	proto := fmt.Sprintf(`{"components": {"pubsub": {"schemas": [{"name": %q, "type": "PROTOCOL_BUFFER", "definition": %s}],
+		"topics": [{"name": %q, "schemaSettings": {"schema": %q, "encoding": "JSON"}}]}}}`,
+		protoSchema, strconv.Quote(protoDef), protoTopic, protoSchema)
+	if code, body := adminSeed(t, control, proto); code != http.StatusOK {
+		t.Fatalf("seed of a Protocol Buffer schema: %d %s", code, body)
+	}
+	if s, err := sc.GetSchema(ctx, &pubsubpb.GetSchemaRequest{Name: protoSchema, View: pubsubpb.SchemaView_FULL}); err != nil ||
+		s.GetType() != pubsubpb.Schema_PROTOCOL_BUFFER || s.GetDefinition() != protoDef {
+		t.Errorf("the seeded Protocol Buffer schema reads %v, %v", s, err)
+	}
+	if got, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: protoTopic}); err != nil ||
+		got.GetSchemaSettings().GetSchema() != protoSchema {
+		t.Errorf("the topic seeded on it reads %v, %v", got, err)
+	}
+	if _, err := c.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: protoTopic,
+		Messages: []*pubsubpb.PubsubMessage{{Data: []byte(`{"n":"not a number"}`)}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("publishing a message the seeded Protocol Buffer schema refuses = %v; want INVALID_ARGUMENT", err)
 	}
 
 	if code, body := adminSeed(t, control, doc(false)); code != http.StatusOK {

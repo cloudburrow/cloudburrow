@@ -36,10 +36,10 @@ import (
 //     unsigned INT(64) above 9,223,372,036,854,775,807 is an error, as
 //     BigQuery documents ("an error will be returned if the unsigned value
 //     exceeds the maximum INTEGER value").
-//   - FLOAT and DOUBLE as FLOAT64, a FLOAT widened exactly. NaN is 501:
-//     the emulator's engine stores a NaN as NULL (measured: an INSERT of
-//     IEEE_DIVIDE(0, 0), and of CAST(x AS FLOAT64) of 'nan', read back
-//     NULL), and would lose it.
+//   - FLOAT and DOUBLE as FLOAT64, a FLOAT widened exactly. A NaN is
+//     written as IEEE_DIVIDE(0, 0): the pinned engine stored it as NULL,
+//     but the one CloudBurrow builds keeps it (googlesqlite patch 0004,
+//     #1066), so since #1457 it loads.
 //   - DATE from days since 1970-01-01; TIME(MILLIS) and TIME(MICROS) from
 //     the time since midnight; TIMESTAMP(MILLIS) and TIMESTAMP(MICROS) from
 //     the time since the Unix epoch; INT96 from its nanoseconds of the day
@@ -663,7 +663,7 @@ func timestampLiteral(col string, t time.Time) (string, error) {
 func floatLiteral(col string, f float64) (string, error) {
 	switch {
 	case math.IsNaN(f):
-		return "", valueNotHere("column %s has a NaN, which the emulator behind CloudBurrow stores as NULL (measured)", col)
+		return "IEEE_DIVIDE(0, 0)", nil // the engine keeps a NaN (googlesqlite 0004, #1066; #1457)
 	case math.IsInf(f, 1):
 		return "IEEE_DIVIDE(1, 0)", nil
 	case math.IsInf(f, -1):

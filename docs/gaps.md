@@ -20,22 +20,22 @@ tracks it; a closed issue is named only where it says what was built.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 7 | 0 | 6 | 1 | 0 |
-| Pub/Sub | 2 | 0 | 0 | 2 | 0 |
+| Cloud Storage | 5 | 0 | 4 | 1 | 0 |
+| Pub/Sub | 2 | 0 | 0 | 1 | 1 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 6 | 2 | 3 | 0 | 1 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
-| Secret Manager | 2 | 0 | 1 | 0 | 1 |
+| Secret Manager | 2 | 1 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 28 | 5 | 16 | 7 | 0 |
+| BigQuery | 28 | 5 | 15 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **68** | **11** | **39** | **13** | **5** |
+| **Total** | **66** | **12** | **35** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -50,10 +50,8 @@ and object IAM on the JSON API are excluded (below).
 |---|---|---|
 | gRPC `google.storage.v2`: `Bucket.ip_filter` stays `UNIMPLEMENTED` (and `ipFilter` 400 on the JSON API): enforcing it needs the caller's VPC network and the `storage.buckets.exemptFromIpFilter` permission, which are not modelled, and a filter stored without effect would look like a control that is not there. Appendable objects, `custom_placement_config` and `SetIamPolicy`'s `update_mask` are built (#1443) | no emulator support: enforcement needs what is not modelled | S |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) | no emulator support (no cache tier) | S |
-| `anywhereCaches.*`, `rapidCaches.*` (#1444) | no emulator support (no cache tier) | M |
-| `buckets.relocate`, `buckets.operations.advanceRelocateBucket` (#1444) | no emulator support (one location) | M |
-| `buckets.operations.cancel`: every operation is done when returned (#1444) | no emulator support | S |
-| Notifications: the server with no Pub/Sub refuses a configuration (501) (#1444) | no emulator support (needs Pub/Sub) | S |
+| `rapidCaches.*` (#1444; Anywhere Caches, as records with no cache tier, `buckets.relocate`, `advanceRelocateBucket` and `operations.cancel` are built) | no emulator support (no cache tier) | M |
+| Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444) | no emulator support (needs Pub/Sub) | S |
 | UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
 
 ## Pub/Sub
@@ -64,7 +62,7 @@ enforced (#1367).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Any call but Get, List, Delete, Pull and StreamingPull on a detached subscription, and an `UpdateTopic` of `schema_settings` bound to a Protocol Buffer schema, answer `UNIMPLEMENTED` with the reason; the seed file still refuses `PROTOCOL_BUFFER` schemas; the front's messages for a refused `.proto` definition or message are its own (#1446) | not documented by Google (no answer to copy; Google's messages not measured) | S |
+| The front's messages for a refused `.proto` definition or message, and for the calls Google documents no answer to on a detached subscription (`FAILED_PRECONDITION` for a snapshot of it or a seek to a snapshot, `INVALID_ARGUMENT` for an immutable field), are its own (#1445; built in #1446) | needs live GCP: Google's messages not measured | S |
 | UNVERIFIED error codes: subscription expiration, exactly-once and label refusals ([pubsub.md](coverage/pubsub.md); an invalid label's message is #982) (#1445) | not documented by Google | S |
 
 ## Cloud Tasks
@@ -128,7 +126,7 @@ on folder and organization buckets, as Google refuses them (#1435).
 
 | Gap | Why open | Size |
 |---|---|---|
-| A BigQuery sink's schema mismatch is not written to an `export_errors` table, `protoPayload` is not exported, and the sink error codes but `topic_not_found` are CloudBurrow's (#1451) | not documented by Google | S |
+| A BigQuery sink's `export_errors` column types and `schemaErrorDetail` text, the types of `httpRequest.latency` and other `Duration` and `Any` fields (left out), and the sink error codes but `topic_not_found` are CloudBurrow's (#1451; `export_errors` and `protoPayload` are built) | not documented by Google; needs a live sink | S |
 
 ## Cloud KMS
 
@@ -137,9 +135,9 @@ methods (#1212), and their console (#1219). Closed by the sweep: Locations (#129
 
 | Gap | Why open | Size |
 |---|---|---|
-| HSM, EXTERNAL and EXTERNAL_VPC protection levels, `crypto_key_backend`, `external_protection_level_options` (#1452) | no emulator support | L |
-| EKM, Autokey, AutokeyAdmin and HSM management services (#1452) | no emulator support | L |
-| `key_access_justifications_policy` on `UpdateCryptoKey` (#1452) | no emulator support | S |
+| EXTERNAL, EXTERNAL_VPC and HSM_SINGLE_TENANT protection levels, `crypto_key_backend`, `external_protection_level_options` (#1469; HSM is served since #1452, without an HSM or an attestation) | no emulator support | L |
+| HsmManagement, `EkmService/VerifyConnectivity`, and IAM on `ekmConfig` and `ekmConnections` (#1469; EkmService CRUD, Autokey and AutokeyAdmin are served since #1452) | no emulator support | L |
+| `key_access_justifications_policy` is stored and returned, not enforced (#1452): no call carries an access justification locally | no emulator support | S |
 | REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` (#1445) | not documented by Google | S |
 | UNVERIFIED error codes ([kms.md](coverage/kms.md)) (#1445) | not documented by Google | S |
 | Project-number parents are refused; whether Google accepts them, and whether an empty key ring can be deleted (#1445) | needs live GCP | S |
@@ -153,7 +151,7 @@ delayed destruction (#1278). IAM conditions are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `customer_managed_encryption` on a replica or the automatic policy (#1453) | no emulator support (needs KMS-backed CMEK) | M |
+| A Cloud Run `secretKeyRef` to a version under a customer-managed key is `UNIMPLEMENTED`: the mounted Kubernetes Secret holds ciphertext (#1453) | not built yet | S |
 | Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) (#1445) | needs live GCP | S |
 
 ## Resource Manager
@@ -219,8 +217,8 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | Project configurations: `default_time_zone` does not reach `DATE`, `DATETIME`, `TIME`, `STRING` or `EXTRACT` given a column or other expression whose type the text does not show, `DATE_TRUNC` and the like, or a `TIMESTAMP` literal with no offset; the job and queue timeouts are stored, not enforced; `default_kms_key_name` reaches `tables.insert` only; `ALTER PROJECT` / `ALTER ORGANIZATION` inside a block, `IF` or loop of a script is 501; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows (#1456) | not built yet | S |
 | `columnNameCharacterMap` `V1` / `V2` when a detected CSV or Parquet name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix, an empty or too long name, a Parquet name with a period) and names the same once replaced are 501: BigQuery documents only that "invalid column names will be normalized" (#1457) | not documented by Google | S |
 | Autodetect: a JSON column whose values mix types BigQuery does not document detecting, `skipLeadingRows` other than 1 into a new table, and a sample with a format or `timeZone` that BigQuery's detection is not documented for, are 501; CSV header detection where BigQuery and the emulator disagree (every column `STRING`, a name that reads as a number, boolean, date or timestamp) is 501 (#1457) | not documented by Google | S |
-| CSV: a multi-character or non-ASCII delimiter or quote, an empty `STRING` with a `nullMarker`, a `maxBadRecords` load the emulator fails, `sourceColumnMatch` `NAME` with `skipLeadingRows` other than 1; JSON: a null field outside the schema, a `maxBadRecords` load the emulator fails (#1457) | no emulator support | M |
-| Parquet loads with a NaN, and the other refused Parquet columns (#1457) | no emulator support | S |
+| CSV: a multi-character delimiter, a non-ASCII delimiter or quote in data that is not ISO-8859-1, an empty `STRING` with a `nullMarker`, a `maxBadRecords` load the emulator fails, `sourceColumnMatch` `NAME` with no row skipped (ISO-8859-1 delimiters and quotes, a quote's first byte, `skipLeadingRows` N and the header with `autodetect`, and `NAME` after skipped rows are built, #1457); JSON: a null field outside the schema, a `maxBadRecords` load the emulator fails (#1457) | no emulator support | M |
+| Parquet: the refused columns left (an INT96 with a part of a microsecond, a DECIMAL that would round, DECIMAL to STRING, a NULL element or a LIST of lists with list inference); a NaN loads and unlisted types are 400 since #1457 | not documented by Google | S |
 | A load of several Cloud Storage objects when the front was given no Cloud Storage (#1457) | no emulator support | S |
 | Partition decorators: `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination, a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, and through a partition a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order or a RECORD's fields changed, are 501, none documented by BigQuery (#1458) | not documented by Google | S |
 | A table made by `CREATE TABLE … AS SELECT`, a temporary table, or one made before the engine had the column keeps no stream time, so its streamed rows are held from DML only while in the 20-second streaming buffer; a query naming `_PARTITION_BUFFERED` or `_PARTITION_STREAMED` reads the engine's marks; a table restored from state saved before #1277 keeps no ingestion time (#1458) | no emulator support | S |
@@ -265,8 +263,8 @@ encryption (#1413), and customer-managed keys and server CA rotation (#1463). IA
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud SQL: legacy failover replicas and external-primary replicas; `MYSQL_5_7`, `POSTGRES_12` and other versions; upgrading a replica on its own; a PostgreSQL database's charset change; `BAK` and `TDE` files; 32 methods 501 (`Backups.*`, blue-green deployments, `connect.resolve`, server and Entra ID certificates, `demote`, `switchover`, `executeSql`, `reencrypt`, disk shrink, external sync and others; [sqladmin.md](coverage/sqladmin.md)) (#1462) | not built yet | L |
-| Backup and DR: workload types other than Cloud SQL instances, `encryptionConfig`, `patch`, plan revisions, data source references, resource backup configs, management servers and trials (39 methods 501; [backupdr.md](coverage/backupdr.md)) (#1462) | not built yet | L |
+| Cloud SQL: legacy failover replicas and external-primary replicas; `MYSQL_5_7`, `POSTGRES_12` and other versions; upgrading a replica on its own; a PostgreSQL database's charset change; `BAK` and `TDE` files; 24 methods 501, each naming what is missing (blue-green deployments and `connect.resolve`, server and Entra ID certificates, `demote` and external sync, `switchover`, `reencrypt`, disk shrink and others; project `Backups`, `executeSql`, `preCheckMajorVersionUpgrade`, `truncateLog` and final backups are built since #1462; [sqladmin.md](coverage/sqladmin.md)) (#1462) | not built yet | L |
+| Backup and DR: workload types other than Cloud SQL instances, `encryptionConfig`, resource backup configs, management servers and trials (23 methods 501, each naming what is missing; `patch`, plan revisions, data source references and `fetchUsable` are built since #1462; [backupdr.md](coverage/backupdr.md)) (#1462) | not built yet | L |
 | Memorystore for Redis: `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image (the Docker official `redis` image last built them in 2018, 2020 and 2022); with a customer-managed key, the RDB snapshots and AOF Valkey writes on a server's own volume are not encrypted with it, and are served only while the key can be used (#1463) | no emulator support: no maintained image; Valkey writes its own files | S |
 
 ## Functions, credentials, tooling

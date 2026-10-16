@@ -473,6 +473,10 @@ func (p storageProvider) ActAtResult(ctx context.Context, project string, path [
 	if action == "filteroperations" {
 		return p.filterOperations(ctx, path, values["filter"])
 	}
+	// Anywhere Caches, relocation and cancel (#1444).
+	if handled, res, err := p.actOnCaches(ctx, path, action, values); handled {
+		return res, err
+	}
 	// Bulk restore answers with its operation and counts (#1279).
 	if action == "bulkrestore" {
 		return p.bulkRestore(ctx, path, values)

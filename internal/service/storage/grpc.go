@@ -27,6 +27,8 @@ import (
 	"strings"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
+	"cloud.google.com/go/longrunning/autogen/longrunningpb"
+	"cloud.google.com/go/storage/control/apiv2/controlpb"
 	"google.golang.org/genproto/googleapis/type/expr"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -49,7 +51,10 @@ type grpcStorage struct {
 // newGRPCServer returns the gRPC server for s.
 func newGRPCServer(s *Server) *grpc.Server {
 	gs := grpc.NewServer(grpc.MaxRecvMsgSize(64 << 20))
-	pb.RegisterStorageServer(gs, &grpcStorage{s: s})
+	g := &grpcStorage{s: s}
+	pb.RegisterStorageServer(gs, g)
+	controlpb.RegisterStorageControlServer(gs, &grpcControl{g: g})
+	longrunningpb.RegisterOperationsServer(gs, &grpcOperations{g: g})
 	return gs
 }
 

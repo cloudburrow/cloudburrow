@@ -271,6 +271,7 @@ func (s *Server) Advance(d time.Duration) (time.Time, error) {
 	s.clockMu.Lock()
 	s.advances = append(s.advances, clockAdvance{time.Now(), d})
 	s.clockMu.Unlock()
+	s.sweepExpiredBackups()
 	s.sweepRetention()
 	return s.Clock(), nil
 }

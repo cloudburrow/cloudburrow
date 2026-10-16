@@ -2,6 +2,7 @@ package main
 
 import (
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
+	"cloud.google.com/go/kms/apiv1/kmspb"
 	"time"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
@@ -326,6 +327,12 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		t.Fatal(err)
 	}
 	if _, err := kp.ActAtResult(ctx, blankProject, []string{ring}, "createkey", map[string]string{"cryptoKeyId": "k1"}); err != nil {
+		t.Fatal(err)
+	}
+	// The sparsest EKM connection the API accepts: no service resolver
+	// (#1452).
+	if _, err := d.kms.API().Ekm().CreateEkmConnection(ctx, &kmspb.CreateEkmConnectionRequest{Parent: "projects/" + blankProject + "/locations/global",
+		EkmConnectionId: "blank-ekm", EkmConnection: &kmspb.EkmConnection{}}); err != nil {
 		t.Fatal(err)
 	}
 

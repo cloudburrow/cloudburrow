@@ -18,6 +18,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/k8s"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/kms"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
@@ -52,6 +53,9 @@ type secretsService struct {
 	// event notifications are published to (#1259); nil when Pub/Sub is not
 	// enabled, and then a secret with topics is refused.
 	pubsub func() *netfwd.Forwarder
+	// kms is the instance's Cloud KMS, which encrypts the versions of a
+	// secret with customer-managed keys (#1453); nil when KMS is not enabled.
+	kms func() *kms.Server
 }
 
 // Store returns the Secret Manager store, available after Start.
@@ -164,6 +168,14 @@ func (s *secretsService) Start(ctx context.Context) error {
 				return errors.New("Pub/Sub has not started on this instance")
 			}
 			return publishLocal(ctx, f, topic, data, attrs)
+		})
+	}
+	if s.kms != nil {
+		st.SetKeyService(func() secrets.KeyService {
+			if api := s.kms(); api != nil {
+				return api
+			}
+			return nil
 		})
 	}
 	s.store = st

@@ -274,6 +274,19 @@ func TestParquetLoadsTheFrontCarriesOut(t *testing.T) {
 	}
 }
 
+// TestParquetLoadNaN (#1457): a NaN in a file is written as
+// IEEE_DIVIDE(0, 0), which the engine CloudBurrow builds keeps.
+func TestParquetLoadNaN(t *testing.T) {
+	emu := &tablesEmulator{}
+	w := upload(t, Wrap(emu), parquetJobBody("t", ""), string(fixture(t, "nan.parquet")))
+	if w.Code != 200 || strings.Contains(w.Body.String(), "errorResult") {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if !strings.Contains(strings.Join(emu.statements(), "\n"), "IEEE_DIVIDE(0, 0)") {
+		t.Errorf("no NaN written: %v", emu.statements())
+	}
+}
+
 // TestParquetLoadValuesRefused (#1004, #1005): a value BigQuery refuses
 // fails the job, reason invalid; one the front does not load is 501; and
 // neither loads a row or makes a table.
@@ -284,7 +297,6 @@ func TestParquetLoadValuesRefused(t *testing.T) {
 		reason, msg       string
 	}{
 		{"unsigned INT64 above INT64's maximum", "uint64_big.parquet", "", 200, "invalid", "exceeds the maximum INTEGER value"},
-		{"NaN", "nan.parquet", "", 501, "notImplemented", "has a NaN"},
 		{"INT96 with nanoseconds", "int96_ns.parquet", "", 501, "notImplemented", "part of a microsecond"},
 		{"a NULL element with list inference", "list_null.parquet", `,"parquetOptions":{"enableListInference":true}`, 501,
 			"notImplemented", "a NULL element"},
