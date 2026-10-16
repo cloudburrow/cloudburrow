@@ -720,3 +720,53 @@ func copyEnv(m map[string]string) map[string]string {
 	}
 	return out
 }
+
+// SQLStandbyPrefix starts the name of the Deployment, Service and volume
+// of the second server of a Cloud SQL high-availability instance (#1408):
+// "sqlha-" and the instance's name fit the 63 characters a Service's name
+// may have, as "sqlinst-" and it do.
+const SQLStandbyPrefix = "sqlha-"
+
+// SQLStandbyApplicationName is the application_name a high-availability
+// standby streams as, which its primary's synchronous_standby_names names,
+// so a read replica of the primary is never the synchronous standby.
+const SQLStandbyApplicationName = "cloudsqlstandby"
+
+// CloudSQLStandbyBackend makes b, one of the two PostgreSQL servers of a
+// high-availability instance, a standby built at epoch (#1408). When its
+// volume's recorded epoch differs, the server's data directory is
+// replaced by a pg_basebackup of the primary, host (the instance's
+// Service, which selects the primary), and the server starts as a hot
+// standby streaming from it as SQLStandbyApplicationName. When the epoch
+// is the recorded one, the data is kept: a standby resumes streaming, and
+// a standby promoted since starts as the primary it is now.
+func CloudSQLStandbyBackend(b Backend, host string, epoch int) Backend {
+	b.Env = copyEnv(b.Env)
+	b.Env["CLOUDSQL_PRIMARY_HOST"] = host
+	b.Env["CLOUDSQL_STANDBY_EPOCH"] = fmt.Sprint(epoch)
+	args := b.Args
+	if len(args) == 0 {
+		args = []string{"postgres"}
+	}
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+	}
+	b.Command = []string{"sh", "-c", `set -e
+marker="$(dirname "$PGDATA")/cloudsql-standby-epoch"
+if [ "$(cat "$marker" 2>/dev/null)" != "$CLOUDSQL_STANDBY_EPOCH" ]; then
+  mkdir -p "$PGDATA" && rm -rf "$PGDATA" && mkdir -p "$PGDATA"
+  chown -R postgres:postgres "$(dirname "$PGDATA")" && chmod 700 "$PGDATA"
+  asuser=$(command -v su-exec || command -v gosu)
+  until "$asuser" postgres pg_basebackup -h "$CLOUDSQL_PRIMARY_HOST" -p ` + fmt.Sprint(CloudSQLPort) + ` -U ` + SQLReplicaUser +
+		` -D "$PGDATA" -R -X stream -c fast; do
+    echo "waiting for the primary $CLOUDSQL_PRIMARY_HOST"; rm -rf "$PGDATA" && mkdir -p "$PGDATA" && chown postgres:postgres "$PGDATA" && chmod 700 "$PGDATA"; sleep 2
+  done
+  echo "primary_conninfo = 'host=$CLOUDSQL_PRIMARY_HOST port=` + fmt.Sprint(CloudSQLPort) + ` user=` + SQLReplicaUser +
+		` application_name=` + SQLStandbyApplicationName + `'" >> "$PGDATA/postgresql.auto.conf"
+  echo "$CLOUDSQL_STANDBY_EPOCH" > "$marker"
+fi
+exec docker-entrypoint.sh ` + strings.Join(quoted, " ")}
+	b.Args = nil
+	return b
+}
