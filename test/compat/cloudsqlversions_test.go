@@ -28,7 +28,9 @@ func (e sqlEngine) open(t *testing.T, h *Harness, connName, user, password, db s
 	var register func(string, ...cloudsqlconn.Option) (func() error, error)
 	var dsn string
 	if e.mysql {
-		register = func(n string, o ...cloudsqlconn.Option) (func() error, error) { return cloudsqlmysql.RegisterDriver(n, o...) }
+		register = func(n string, o ...cloudsqlconn.Option) (func() error, error) {
+			return cloudsqlmysql.RegisterDriver(n, o...)
+		}
 		dsn = fmt.Sprintf("%s:%s@%s(%s)/%s", user, password, drv, connName, db)
 	} else {
 		register = func(n string, o ...cloudsqlconn.Option) (func() error, error) { return pgxv5.RegisterDriver(n, o...) }
@@ -362,4 +364,89 @@ func TestCloudSQLCascadingAndCrossRegionReplicas(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGcloudSQLDatabaseVersions (#1381): `gcloud sql instances create
+// --database-version=POSTGRES_15`, `patch --database-version=POSTGRES_16`
+// (a major version upgrade), and a cross-region replica with
+// `--master-instance-name` and `--region`, through the configuration
+// `cloudburrow gcloud-setup` writes, with egress to Google blocked.
+// covers: sql.instances.insert, sql.instances.get, sql.instances.patch, sql.instances.delete, sql.operations.get
+func TestGcloudSQLDatabaseVersions(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" {
+		t.Skip("needs --services cloudsql")
+	}
+	g := newGcloudSession(t, h)
+	name := fmt.Sprintf("gcloud-v-%d", time.Now().UnixNano()%1e6)
+	g.must("sql", "instances", "create", name, "--project", g.project, "--database-version=POSTGRES_15",
+		"--tier=db-custom-1-3840", "--region=us-central1", "--no-backup", "--quiet")
+	defer g.run(nil, "sql", "instances", "delete", name, "--project", g.project, "--quiet")
+	out := g.must("sql", "instances", "describe", name, "--project", g.project, "--format=value(databaseVersion,databaseInstalledVersion)")
+	if !strings.Contains(out, "POSTGRES_15") || !strings.Contains(out, "POSTGRES_15_19") {
+		t.Errorf("describe: %s", out)
+	}
+	g.must("sql", "instances", "patch", name, "--project", g.project, "--database-version=POSTGRES_16", "--quiet")
+	out = g.must("sql", "instances", "describe", name, "--project", g.project, "--format=value(databaseVersion,databaseInstalledVersion,state)")
+	if !strings.Contains(out, "POSTGRES_16_15") || !strings.Contains(out, "RUNNABLE") {
+		t.Errorf("describe after the upgrade: %s", out)
+	}
+	replica := name + "-r"
+	g.must("sql", "instances", "create", replica, "--project", g.project, "--master-instance-name="+name,
+		"--region=europe-west1", "--tier=db-custom-1-3840", "--quiet")
+	defer g.run(nil, "sql", "instances", "delete", replica, "--project", g.project, "--quiet")
+	out = g.must("sql", "instances", "describe", replica, "--project", g.project, "--format=value(region,connectionName,instanceType)")
+	if !strings.Contains(out, "europe-west1") || !strings.Contains(out, g.project+":europe-west1:"+replica) || !strings.Contains(out, "READ_REPLICA_INSTANCE") {
+		t.Errorf("describe the cross-region replica: %s", out)
+	}
+	g.must("sql", "instances", "delete", replica, "--project", g.project, "--quiet")
+}
+
+// TestTerraformSQLDatabaseVersion (#1381): a google_sql_database_instance
+// with database_version POSTGRES_14 applies through `cloudburrow
+// terraform` with the official hashicorp/google provider, its plan is
+// then empty, changing database_version to POSTGRES_15 upgrades it in
+// place (the instance is not replaced: its createTime stays), and destroy
+// removes it.
+// covers: sql.instances.insert, sql.instances.get, sql.instances.patch, sql.instances.delete, sql.operations.get
+func TestTerraformSQLDatabaseVersion(t *testing.T) {
+	h := New(t)
+	if os.Getenv(EnvCloudSQL) == "" {
+		t.Skip("needs --services cloudsql")
+	}
+	svc := sqlAdminService(t, h)
+	m := newTFModule(t)
+	name := fmt.Sprintf("tf-v-%d", time.Now().UnixNano()%1e6)
+	module := func(version string) string {
+		return fmt.Sprintf(`
+resource "google_sql_database_instance" "main" {
+  project             = %[1]q
+  name                = %[2]q
+  region              = "us-central1"
+  database_version    = %[3]q
+  deletion_protection = false
+  settings {
+    tier = "db-custom-1-3840"
+  }
+}
+`, m.project, name, version)
+	}
+	m.write(module("POSTGRES_14"))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	in, err := svc.Instances.Get(m.project, name).Do()
+	if err != nil || in.DatabaseInstalledVersion != "POSTGRES_14_24" {
+		t.Fatalf("after apply: %+v %v", in, err)
+	}
+	m.planClean()
+	m.write(module("POSTGRES_15"))
+	m.apply()
+	up, err := svc.Instances.Get(m.project, name).Do()
+	if err != nil || up.DatabaseVersion != "POSTGRES_15" || up.DatabaseInstalledVersion != "POSTGRES_15_19" || up.CreateTime != in.CreateTime {
+		t.Errorf("after the version change: %+v %v", up, err)
+	}
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	_, err = svc.Instances.Get(m.project, name).Do()
+	wantHTTP(t, "instances.get after destroy", err, 404)
 }

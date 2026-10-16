@@ -130,9 +130,10 @@ func (s *Server) upgrade(name string, from, to Spec, opID string) {
 	c := s.writes.byName[name]
 	if c != nil {
 		if err != nil {
-			// The old server's data is where it was: the instance keeps
-			// its version, as a failed Cloud SQL upgrade rolls back.
-			c.spec.DatabaseVersion = from.DatabaseVersion
+			// The provisioner started the old version again with its data
+			// (sqlProvisioner.Upgrade): the instance keeps its version and
+			// settings, as a failed Cloud SQL upgrade rolls back.
+			c.spec = from
 			c.engine = s.writes.prov.Engine(c.spec)
 			c.state, c.failure = "RUNNABLE", ""
 		} else {

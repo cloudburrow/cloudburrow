@@ -551,16 +551,12 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 			s.emu.Unlock()
 			return nil, Errorf(http.StatusConflict, "Operation failed because the instance is %s.", c.state)
 		}
-		if b.Settings != nil && len(b.raw) > 0 {
-			s.emu.Unlock()
-			return nil, Errorf(http.StatusBadRequest, "Invalid request: a major version upgrade changes databaseVersion alone; patch the settings in another call.")
-		}
 		from := c.spec
 		to := c.spec
+		// Settings sent with the new version apply to the new server.
+		b.apply(&to, replace)
 		to.DatabaseVersion = b.DatabaseVersion
 		to.SettingsVersion++
-		// Flags of the old version the new one does not take are dropped,
-		// as Cloud SQL's upgrade asks for them to be removed first.
 		c.spec = to
 		c.engine = s.writes.prov.Engine(to)
 		c.state = "MAINTENANCE"

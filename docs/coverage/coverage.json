@@ -7295,7 +7295,9 @@
         "tests": [
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
+          "test/compat/cloudsqlversions_test.go:102 TestCloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:263 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
       },
       {
@@ -7304,7 +7306,9 @@
         "tests": [
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
-          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
+          "test/compat/cloudsqlversions_test.go:102 TestCloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:263 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
       },
       {
@@ -7367,7 +7371,8 @@
         "method": "sql.flags.list",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqltransfers_test.go:349 TestSQLAdminTiersAndFlags"
+          "test/compat/cloudsqltransfers_test.go:349 TestSQLAdminTiersAndFlags",
+          "test/compat/cloudsqlversions_test.go:102 TestCloudSQLDatabaseVersions"
         ]
       },
       {
@@ -7432,7 +7437,11 @@
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
-          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
+          "test/compat/cloudsqlversions_test.go:102 TestCloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:263 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/cloudsqlversions_test.go:373 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:410 TestTerraformSQLDatabaseVersion"
         ]
       },
       {
@@ -7480,6 +7489,11 @@
           "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
+          "test/compat/cloudsqlversions_test.go:102 TestCloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:170 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:263 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/cloudsqlversions_test.go:373 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:410 TestTerraformSQLDatabaseVersion",
           "test/compat/sqladmin_test.go:423 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers"
         ]
@@ -7503,7 +7517,12 @@
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
-          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
+          "test/compat/cloudsqlversions_test.go:102 TestCloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:170 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:263 TestCloudSQLCascadingAndCrossRegionReplicas",
+          "test/compat/cloudsqlversions_test.go:373 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:410 TestTerraformSQLDatabaseVersion"
         ]
       },
       {
@@ -7528,7 +7547,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
-          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites"
+          "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlversions_test.go:170 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:373 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:410 TestTerraformSQLDatabaseVersion"
         ]
       },
       {
@@ -7549,7 +7571,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
-          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas"
+          "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
+          "test/compat/cloudsqlversions_test.go:263 TestCloudSQLCascadingAndCrossRegionReplicas"
         ]
       },
       {
@@ -7640,6 +7663,9 @@
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
+          "test/compat/cloudsqlversions_test.go:170 TestCloudSQLMajorVersionUpgrade",
+          "test/compat/cloudsqlversions_test.go:373 TestGcloudSQLDatabaseVersions",
+          "test/compat/cloudsqlversions_test.go:410 TestTerraformSQLDatabaseVersion",
           "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:423 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
@@ -7752,6 +7778,7 @@
         "method": "sql.users.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlversions_test.go:170 TestCloudSQLMajorVersionUpgrade",
           "test/compat/sqladmin_test.go:271 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:423 TestGcloudSQL",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
