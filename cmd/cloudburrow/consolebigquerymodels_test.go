@@ -90,3 +90,65 @@ func TestBigQueryModelsSectionAndPage(t *testing.T) {
 		t.Errorf("no models.delete: %v", calls)
 	}
 }
+
+// TestBigQueryModelPageResults: a KMEANS model's page shows its
+// centroids, a LOGISTIC_REG model's its confusion matrix, and a PCA
+// model's its components, from the ML functions the front answers (#1481).
+func TestBigQueryModelPageResults(t *testing.T) {
+	models := map[string]string{
+		"km": `"modelType":"KMEANS","trainingRuns":[{"evaluationMetrics":{"clusteringMetrics":{"daviesBouldinIndex":0.1,"meanSquaredDistance":1.5}}}]`,
+		"lg": `"modelType":"LOGISTIC_REGRESSION","trainingRuns":[{"evaluationMetrics":{"multiClassClassificationMetrics":{"aggregateClassificationMetrics":{"accuracy":0.9}}}}]`,
+		"pc": `"modelType":"PCA","trainingRuns":[{"evaluationMetrics":{"dimensionalityReductionMetrics":{"totalExplainedVarianceRatio":0.75}}}]`,
+	}
+	rows := func(fields, rows string) string {
+		return `{"jobReference":{"projectId":"p","jobId":"j"},"jobComplete":true,"schema":{"fields":[` + fields + `]},"rows":[` + rows + `]}`
+	}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		for id, m := range models {
+			if strings.HasSuffix(r.URL.Path, "/datasets/d/models/"+id) {
+				fmt.Fprint(w, `{"modelReference":{"projectId":"p","datasetId":"d","modelId":"`+id+`"},`+m+`}`)
+				return
+			}
+		}
+		q := string(b)
+		switch {
+		case strings.Contains(q, "ML.CENTROIDS"):
+			fmt.Fprint(w, rows(`{"name":"centroid_id","type":"INTEGER"},{"name":"feature","type":"STRING"},{"name":"numerical_value","type":"FLOAT"},`+
+				`{"name":"categorical_value","type":"RECORD","mode":"REPEATED","fields":[{"name":"category","type":"STRING"},{"name":"value","type":"FLOAT"}]}`,
+				`{"f":[{"v":"1"},{"v":"x"},{"v":"11.5"},{"v":[]}]},{"f":[{"v":"1"},{"v":"c"},{"v":null},{"v":[{"v":{"f":[{"v":"a"},{"v":"0.25"}]}}]}]}`))
+		case strings.Contains(q, "ML.CONFUSION_MATRIX"):
+			fmt.Fprint(w, rows(`{"name":"expected_label","type":"STRING"},{"name":"a","type":"INTEGER"},{"name":"b","type":"INTEGER"}`,
+				`{"f":[{"v":"a"},{"v":"7"},{"v":"1"}]},{"f":[{"v":"b"},{"v":"0"},{"v":"9"}]}`))
+		case strings.Contains(q, "ML.PRINCIPAL_COMPONENT_INFO"):
+			fmt.Fprint(w, rows(`{"name":"principal_component_id","type":"INTEGER"},{"name":"eigenvalue","type":"FLOAT"},`+
+				`{"name":"explained_variance_ratio","type":"FLOAT"},{"name":"cumulative_explained_variance_ratio","type":"FLOAT"}`,
+				`{"f":[{"v":"1"},{"v":"1.5"},{"v":"0.75"},{"v":"0.75"}]}`))
+		case strings.Contains(q, "ML.PRINCIPAL_COMPONENTS"):
+			fmt.Fprint(w, rows(`{"name":"principal_component_id","type":"INTEGER"},{"name":"feature","type":"STRING"},{"name":"numerical_value","type":"FLOAT"}`,
+				`{"f":[{"v":"1"},{"v":"x"},{"v":"0.6"}]}`))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":{"code":400,"message":"not supported"}}`)
+		}
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	for id, wants := range map[string][]string{
+		"km": {"Centroids", "Value:11.5", "a=0.25", "Davies-Bouldin index"},
+		"lg": {"Confusion matrix", "Predicted a:7", "Predicted b:9", "Accuracy"},
+		"pc": {"Components", "Eigenvalue:1.5", "x=0.6", "Total explained variance ratio"},
+	} {
+		d, err := p.Detail(context.Background(), "p", []string{"d", "models", id})
+		if err != nil || d.Unavailable != "" {
+			t.Fatalf("%s: %v %+v", id, err, d)
+		}
+		s := fmt.Sprintf("%+v", d.Sections)
+		for _, want := range wants {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s's page lacks %q: %s", id, want, s)
+			}
+		}
+	}
+}

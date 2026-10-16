@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
+	bq "google.golang.org/api/bigquery/v2"
 	"google.golang.org/api/iterator"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
@@ -171,6 +172,24 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 				f("Median absolute error", rm.MedianAbsoluteError)
 				f("R²", rm.RSquared)
 			}
+			agg := func(a *bq.AggregateClassificationMetrics) {
+				f("Precision", a.Precision)
+				f("Recall", a.Recall)
+				f("Accuracy", a.Accuracy)
+				f("F1", a.F1Score)
+				f("Log loss", a.LogLoss)
+				f("ROC AUC", a.RocAuc)
+			}
+			if mm := em.MultiClassClassificationMetrics; mm != nil && mm.AggregateClassificationMetrics != nil {
+				agg(mm.AggregateClassificationMetrics)
+			}
+			if cm := em.ClusteringMetrics; cm != nil {
+				f("Davies-Bouldin index", cm.DaviesBouldinIndex)
+				f("Mean squared distance", cm.MeanSquaredDistance)
+			}
+			if dm := em.DimensionalityReductionMetrics; dm != nil {
+				f("Total explained variance ratio", dm.TotalExplainedVarianceRatio)
+			}
 			if bm := em.BinaryClassificationMetrics; bm != nil && bm.AggregateClassificationMetrics != nil {
 				a := bm.AggregateClassificationMetrics
 				f("Precision", a.Precision)
@@ -206,12 +225,113 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 			{Label: "Type", Value: orDash(md.Type)},
 			{Label: "Features", Value: fmt.Sprint(len(cols))},
 		},
-		Sections: []console.Section{
-			{ID: "features", Label: "Features", Listing: feats},
-			{ID: "training", Label: "Training", Listing: iters},
-			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: groups},
-		},
+		Sections: append(append([]console.Section{{ID: "features", Label: "Features", Listing: feats}},
+			p.modelResultSections(ctx, c, md.Type, datasetID, modelID)...),
+			console.Section{ID: "training", Label: "Training", Listing: iters},
+			console.Section{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: groups}),
 	}, nil
+}
+
+// modelResultSections are a model's centroids (KMEANS, ML.CENTROIDS),
+// confusion matrix (LOGISTIC_REG, ML.CONFUSION_MATRIX) or principal
+// components (PCA, ML.PRINCIPAL_COMPONENT_INFO and
+// ML.PRINCIPAL_COMPONENTS), each where the model has them (#1481).
+func (p bigqueryProvider) modelResultSections(ctx context.Context, c *bigquery.Client, typ, datasetID, modelID string) []console.Section {
+	model := fmt.Sprintf("MODEL `%s.%s.%s`", p.project, datasetID, modelID)
+	read := func(sql string) (bigquery.Schema, [][]bigquery.Value) {
+		it, err := c.Query(sql).Read(ctx)
+		if err != nil {
+			return nil, nil
+		}
+		var rows [][]bigquery.Value
+		for {
+			var row []bigquery.Value
+			if err := it.Next(&row); err != nil {
+				break
+			}
+			rows = append(rows, row)
+		}
+		return it.Schema, rows
+	}
+	num := func(v bigquery.Value) string {
+		if f, ok := v.(float64); ok {
+			return strconv.FormatFloat(f, 'g', 8, 64)
+		}
+		if v == nil {
+			return "—"
+		}
+		return fmt.Sprint(v)
+	}
+	cats := func(v bigquery.Value) string {
+		var parts []string
+		arr, _ := v.([]bigquery.Value)
+		for _, e := range arr {
+			if st, ok := e.([]bigquery.Value); ok && len(st) == 2 {
+				cat := "NULL"
+				if st[0] != nil {
+					cat = fmt.Sprint(st[0])
+				}
+				parts = append(parts, cat+"="+num(st[1]))
+			}
+		}
+		return strings.Join(parts, ", ")
+	}
+	switch typ {
+	case "KMEANS":
+		_, rows := read("SELECT centroid_id, feature, numerical_value, categorical_value FROM ML.CENTROIDS(" + model + ") ORDER BY centroid_id, feature")
+		if len(rows) == 0 {
+			return nil
+		}
+		l := console.Listing{Columns: []string{"Feature", "Value"}, NameColumn: "Centroid", Noun: "centroid features"}
+		for _, r := range rows {
+			v := num(r[2])
+			if r[2] == nil {
+				v = orDash(cats(r[3]))
+			}
+			l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: map[string]string{"Feature": fmt.Sprint(r[1]), "Value": v}})
+		}
+		l.Total = len(l.Items)
+		return []console.Section{{ID: "centroids", Label: "Centroids", Listing: l}}
+	case "LOGISTIC_REGRESSION":
+		schema, rows := read("SELECT * FROM ML.CONFUSION_MATRIX(" + model + ") ORDER BY expected_label")
+		if len(rows) == 0 || len(schema) < 2 {
+			return nil
+		}
+		l := console.Listing{NameColumn: "Expected label", Noun: "labels"}
+		for _, fs := range schema[1:] {
+			l.Columns = append(l.Columns, "Predicted "+fs.Name)
+		}
+		for _, r := range rows {
+			fields := map[string]string{}
+			for i, fs := range schema[1:] {
+				fields["Predicted "+fs.Name] = fmt.Sprint(r[i+1])
+			}
+			l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: fields})
+		}
+		l.Total = len(l.Items)
+		return []console.Section{{ID: "confusion", Label: "Confusion matrix", Listing: l}}
+	case "PCA":
+		_, info := read("SELECT principal_component_id, eigenvalue, explained_variance_ratio, cumulative_explained_variance_ratio " +
+			"FROM ML.PRINCIPAL_COMPONENT_INFO(" + model + ") ORDER BY principal_component_id")
+		if len(info) == 0 {
+			return nil
+		}
+		_, comps := read("SELECT principal_component_id, feature, numerical_value FROM ML.PRINCIPAL_COMPONENTS(" + model + ") ORDER BY principal_component_id, feature")
+		load := map[string][]string{}
+		for _, r := range comps {
+			id := fmt.Sprint(r[0])
+			load[id] = append(load[id], fmt.Sprint(r[1])+"="+num(r[2]))
+		}
+		l := console.Listing{Columns: []string{"Eigenvalue", "Explained variance", "Cumulative", "Loadings"}, NameColumn: "Component", Noun: "components"}
+		for _, r := range info {
+			id := fmt.Sprint(r[0])
+			l.Items = append(l.Items, console.Resource{Name: id, Fields: map[string]string{"Eigenvalue": num(r[1]), "Explained variance": num(r[2]),
+				"Cumulative": num(r[3]), "Loadings": orDash(strings.Join(load[id], ", "))}})
+		}
+		l.Total = len(l.Items)
+		return []console.Section{{ID: "components", Label: "Components", Listing: l}}
+	}
+	return nil
 }
 
 func evalLoss(v float64) string {
