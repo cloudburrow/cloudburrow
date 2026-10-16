@@ -114,7 +114,7 @@ func (s *Server) ExportInstance(ctx context.Context, req *redispb.ExportInstance
 	c.mu.Lock()
 	r := c.byID[req.GetName()]
 	op, err := c.claim(r, "export")
-	addr, auth, server := r.addr, r.AuthString, r.Server
+	addr, auth, server := r.addr, r.AuthString, r.dataServer()
 	c.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -162,7 +162,7 @@ func (s *Server) ImportInstance(ctx context.Context, req *redispb.ImportInstance
 	if err == nil {
 		r.state = redispb.Instance_IMPORTING
 	}
-	addr, auth, server, bin := r.addr, r.AuthString, r.Server, r.binary()
+	addr, auth, server, bin := r.addr, r.AuthString, r.dataServer(), r.binary()
 	c.mu.Unlock()
 	if err != nil {
 		return nil, err
