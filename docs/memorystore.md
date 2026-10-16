@@ -150,8 +150,22 @@ the others in the region's zones in turn; `current_location_id` is the primary's
   `LIMITED_DATA_LOSS` (the default) aborts the operation FAILED_PRECONDITION when the greatest
   offset delta between the primary and a replica is 30 MB or more, or a replica is not
   replicating, as Memorystore documents; `FORCE_DATA_LOSS` does not check. The instance is
-  FAILING_OVER meanwhile. Nothing fails over on its own: a node whose pod restarts comes back
-  in the role it had.
+  FAILING_OVER meanwhile.
+- **Automatic failover** (#1412): when the primary fails, the instance fails over on its own, as
+  Memorystore's does, to the replica with the least replication lag (the greatest offset). The
+  primary is checked every second, INFO replication through its tunnel; once it has not answered
+  as a primary three checks in a row (its pod is gone or not Ready, or it came back as a replica)
+  the replica is promoted as `FailoverInstance` promotes one with `FORCE_DATA_LOSS`, since the
+  primary cannot be asked its offset. The instance is REPAIRING meanwhile and READY after; `host`
+  and `port` stay the same and drop their connections; `current_location_id` moves. Writes the
+  replicas had not received are lost, as Memorystore documents of its asynchronous replication.
+  No operation is recorded (Memorystore records none for an automated repair); `up.log` has a
+  line. Google documents no detection window, and says an instance is unavailable for 30 seconds
+  on average during one; here it is a few seconds. Every node starts as a replica of the
+  instance's Service, so a node whose pod restarts, the old primary among them, comes back as a
+  replica of the current primary and syncs from it: a restarted primary never comes back empty as
+  the primary, which would empty its replicas. A BASIC instance never fails over: its server
+  restarts, empty or from its persistence.
 
 ```sh
 gcloud redis instances create ha --region=us-central1 --tier=standard --size=5 \

@@ -221,7 +221,7 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	}
 	b := components.MemorystoreServerOf(components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
 		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: spec.Configs, RDBSeconds: spec.RDBSeconds,
-		Image: memorystoreImages[spec.Version]})
+		ReplicaOf: spec.ReplicaOf, Image: memorystoreImages[spec.Version]})
 	if err := p.installer.InstallBackends(ctx, []components.Backend{b}, memorystoreReadyTimeout); err != nil {
 		return "", err
 	}

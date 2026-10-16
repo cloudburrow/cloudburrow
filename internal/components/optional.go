@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 
@@ -486,6 +487,9 @@ type MemorystoreSettings struct {
 	// stops, in place of the append-only file. In persistent mode the
 	// snapshot is on the server's volume, so its data comes back with it.
 	RDBSeconds int
+	// ReplicaOf, host:port, starts the server as a replica of it
+	// (--replicaof): a Memorystore Standard tier node (#1412).
+	ReplicaOf string
 }
 
 // Redis images of Memorystore's older versions (#1386), each the last
@@ -536,6 +540,9 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 	}
 	if password != "" {
 		args = append(args, "--requirepass", password)
+	}
+	if h, p, err := net.SplitHostPort(o.ReplicaOf); err == nil {
+		args = append(args, "--replicaof", h, p)
 	}
 	switch {
 	case o.RDBSeconds > 0 && persistent:

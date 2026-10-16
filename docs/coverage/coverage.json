@@ -3790,6 +3790,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
@@ -3842,6 +3843,7 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",

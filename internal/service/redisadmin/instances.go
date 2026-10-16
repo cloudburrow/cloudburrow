@@ -45,6 +45,10 @@ type Spec struct {
 	// that many seconds have passed with a change, in place of the
 	// CloudBurrow instance's mode's own.
 	RDBSeconds int
+	// ReplicaOf, host:port, starts the server as a replica of it: a
+	// Standard tier node (#1412), which a failover or the automatic
+	// failover makes a primary.
+	ReplicaOf string
 }
 
 // Provisioner runs the server of an instance CreateInstance made.
@@ -176,6 +180,7 @@ func (s *Server) EnableCreate(ctx context.Context, p Provisioner, dial Dialer, d
 	}
 	s.created = &instances{prov: p, dial: dial, db: db, ops: operations, now: time.Now, bg: ctx,
 		byID: map[string]*record{}, busy: map[string]string{}, cancels: map[string]context.CancelFunc{}}
+	go s.created.watch(ctx, healthEvery)
 }
 
 // Operations is the operations store, nil before EnableCreate.

@@ -103,6 +103,18 @@ func (r *record) nodeSpec(n int) Spec {
 	return s
 }
 
+// haNodeSpec is nodeSpec, starting as a replica of the instance's
+// Service (#1412): a node whose pod restarts, the primary's among them,
+// comes back as a replica, which refuses its own replicas a sync until it
+// is linked to a primary, so a primary that restarts empty never empties
+// its replicas; it follows whichever node the Service selects.
+func (r *record) haNodeSpec(rs ReplicaSet, n int) Spec {
+	s := r.nodeSpec(n)
+	host, port := rs.ClusterAddr(r.Server)
+	s.ReplicaOf = net.JoinHostPort(host, strconv.Itoa(port))
+	return s
+}
+
 // servers are every server of r.
 func (r *record) servers() []string {
 	if !r.ha() {
@@ -279,7 +291,7 @@ func (c *instances) startHA(ctx context.Context, from record) error {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			addr, err := c.prov.Provision(ctx, from.nodeSpec(n))
+			addr, err := c.prov.Provision(ctx, from.haNodeSpec(rs, n))
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil && first == nil {
@@ -589,7 +601,7 @@ func (c *instances) scale(ctx context.Context, name string) error {
 		}
 	}
 	for i := have; i < want; i, next = i+1, next+1 {
-		addr, err := c.prov.Provision(ctx, from.nodeSpec(next))
+		addr, err := c.prov.Provision(ctx, from.haNodeSpec(rs, next))
 		if err != nil {
 			return fmt.Errorf("node-%d: %w", next, err)
 		}
