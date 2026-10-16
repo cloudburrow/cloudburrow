@@ -1,6 +1,7 @@
 package main
 
 import (
+	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"time"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
@@ -386,6 +387,20 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 		CreateBuild(ctx, &cbpb.CreateBuildRequest{ProjectId: blankProject, Build: &cbpb.Build{
 			Steps: []*cbpb.BuildStep{{Name: "gcr.io/cloud-builders/docker", Args: []string{"push", "example.invalid/never"}}}}}); err != nil {
 		t.Fatal(err)
+	}
+	// A Cloud Functions function (#1377), the sparsest CreateFunction
+	// takes, whose build fails.
+	fnSrv := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
+	if _, err := fnSrv.Functions(fnSrv.Builds(stubSource{}, failingBuilder{}), func() string { return "" }).CreateFunction(ctx, &functionspb.CreateFunctionRequest{
+		Parent: "projects/" + blankProject + "/locations/us-central1", FunctionId: "blank-fn", Function: &functionspb.Function{
+			BuildConfig: &functionspb.BuildConfig{Runtime: "nodejs22",
+				Source: &functionspb.Source{Source: &functionspb.Source_StorageSource{StorageSource: &functionspb.StorageSource{Bucket: "b", Object: "o"}}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if fns := runadapter.Functions(blankProject); len(fns) == 1 && fns[0].GetState() == functionspb.Function_FAILED {
+			break
+		}
 	}
 
 	// Cloud Run and the cluster screens read through kubectl, so a kubectl

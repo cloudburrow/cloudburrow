@@ -264,7 +264,7 @@ eval "$(cloudburrow gcloud-teardown)"  # unset CLOUDSDK_ACTIVE_CONFIG_NAME
 gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It sets
 `core/project`, turns on `auth/disable_credentials` and names the ADC fixture. It writes
 `api_endpoint_overrides` **only** for the services whose gcloud use is Verified below.
-Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `artifactregistry`, `cloudbuild`, `cloudresourcemanager`, `serviceusage`, `sql` and `redis`
+Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `cloudresourcemanager`, `serviceusage`, `sql` and `redis`
 (written whatever `--services` selects, since Resource Manager and Service Usage are always served; `sql` with either Cloud SQL service; `redis`, the Memorystore admin API, with `memorystore`). `run` (#1293) is
 `http://run.localhost:<port>/` on a loopback bind: gcloud run calls `{region}-{host}` for a
 command given `--region`, and `us-central1-run.localhost` is still loopback. `cloudresourcemanager`
@@ -277,7 +277,8 @@ domain-mappings list`, `describe` and `delete` are verified (#1349); `domain-map
 refuses every domain as not verified, since no domain is verified without Search Console.
 `artifactregistry` and `cloudbuild` (#1347) are the Run port too, which serves the Artifact
 Registry repository calls and the Cloud Build builds and operations `gcloud run deploy --source`
-and `gcloud builds submit` make.
+and `gcloud builds submit` make. `cloudfunctions` (#1377) is the Run port as well, which serves
+Cloud Functions v2 for `gcloud functions … --gen2`.
 `gcloud tasks` covers queues (#590) and, since tasks are transcoded (#591), tasks;
 `gcloud tasks run` is RunTask, which is not implemented, so it answers 501 (which gcloud retries)
 rather than reaching Google. `gcloud scheduler` needs `--location`: without it gcloud looks for an

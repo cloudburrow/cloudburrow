@@ -1,7 +1,7 @@
 # Functions and source builds
 
-Two optional capabilities, both reusing Google-published components. Neither implies any
-Cloud Functions API parity, and the functions are not addressable as Cloud resources. The
+Two optional capabilities, both reusing Google-published components, and the Cloud Functions
+v2 API built on them (#1377, [below](#the-cloud-functions-v2-api-1377)). The other
 Google API that builds through them is Cloud Run's `Builds.SubmitBuild` (#1268), which builds
 a source archive from the instance's Cloud Storage with Docker or this pack path; see the
 Cloud Run section of [compatibility.md](compatibility.md).
@@ -126,12 +126,59 @@ any image is pulled, with `build failed: no runtime detected` naming the files l
 `build failed: exit status 1 (runtime nodejs, detected from package.json)`, followed by the
 tail of pack's log. `SubmitBuild`'s `buildpack_build.runtime` stays `UNIMPLEMENTED`.
 
-**Not supported, and not implied by a working handler:**
+**Not supported:** **Eventarc trigger management.** Nothing creates or routes triggers, and a
+function's `eventTrigger` is refused (below). Delivery is whatever you point at the function — a
+Pub/Sub push subscription, for instance, which sends Pub/Sub's push body rather than a CloudEvent.
 
-- **The Cloud Functions management API.** There is no `projects.locations.functions` surface.
-  Deploy the built image as a Cloud Run service instead.
-- **Eventarc trigger management.** Nothing creates or routes triggers. Delivery is whatever
-  you point at the function — a Pub/Sub push subscription, for instance.
+## The Cloud Functions v2 API (#1377)
+
+`google.cloud.functions.v2.FunctionService` is served on the Run port, over gRPC and as JSON at
+Google's v2 paths, and reached by `gcloud functions … --gen2` through `gcloud-setup`'s
+`cloudfunctions` override, by Terraform's `google_cloudfunctions2_function` through
+`cloudfunctions2_custom_endpoint`, and by the console's Cloud Functions page. It needs
+`--services run,storage`: the source is kept in Cloud Storage.
+
+A function is what Google's 2nd gen makes of it, a build and a Cloud Run service:
+
+1. **Source.** `GenerateUploadUrl` returns a URL on the Run port that takes the zip with an
+   unauthenticated `PUT`, as Google's signed URL does, and writes it to
+   `gs://gcf-v2-uploads-{project number}-{region}/{uuid}.zip` in the instance's Cloud Storage
+   (the bucket is made on the first upload; Google's is named
+   `gcf-v2-uploads-{project number}.{region}.cloudfunctions.appspot.com`). Any other
+   `build_config.source.storage_source` in the instance's Cloud Storage works too.
+   `GenerateDownloadUrl` returns a URL on the Run port that reads the source back.
+2. **Build.** `CreateFunction` stores the function `DEPLOYING` and returns its operation
+   (`OperationMetadata` with the `BUILD` and `SERVICE` stages and `build_name`). The build is
+   SubmitBuild's buildpacks build, so it is a Cloud Build build in the build history:
+   `GOOGLE_RUNTIME` is `build_config.runtime` (one `ListRuntimes` names), the function target
+   `entry_point`, plus `build_config.environment_variables`. The image is named
+   `{region}-docker.pkg.dev/{project}/gcf-artifacts/{function}:version_…`, as Google names it,
+   and loaded into the cluster, not pushed. Builds are gated as the Functions tests are: Google's
+   builder makes linux/amd64 images only.
+3. **Service.** The function's Cloud Run service has the function's ID, runs the image with
+   `service_config`'s memory (Functions' `256M` is `256Mi`), CPU, timeout, environment,
+   max/min instances and concurrency, and its service account is stored on it (the revision runs
+   as the host). `service_config.service`, `uri`, `revision` and the function's `url` report it,
+   and the function is `ACTIVE`. A failed build or rollout fails the operation and leaves the
+   function `FAILED` with a state message, as on Google.
+
+`UpdateFunction` with a mask redeploys what the mask touches: `build_config.*` rebuilds and rolls
+out, `service_config.*` and `labels` roll out a new revision of the same image, and
+`description` changes nothing that runs. With no mask the function is replaced and rebuilt.
+`DeleteFunction` deletes the service; the image stays in the cluster, as Google leaves it in
+`gcf-artifacts`. `getIamPolicy`, `setIamPolicy` and `testIamPermissions` on a function are stored
+and never enforced (ADR-0006). `locations.list` names the regions; any well-formed region is
+accepted in a name. Functions are kept in memory, and are gone when the instance restarts.
+
+**Refused, with the reason** (`UNIMPLEMENTED`): `eventTrigger` (a 2nd-gen trigger is an Eventarc
+trigger, which delivers a CloudEvent to the service; no Eventarc is served); GEN_1 functions and
+uploads; `repo_source` and `git_uri`; worker pools, `docker_repository` and a build service
+account; VPC connectors, secret environment variables and volumes, KMS keys and binary
+authorization; `ListFunctions` `filter`, `order_by` and `page_token`; `GetFunction` `revision`.
+An unknown runtime is `INVALID_ARGUMENT`. The tests are `TestFunctionsAPI` (ungated: everything but
+a build that succeeds), and `TestFunctionsAPIBuildsAndServes`, `TestGcloudFunctions`'s deploy and
+`TestTerraformCloudFunctions2Function`'s apply, gated by `CLOUDBURROW_TEST_FUNCTIONS` and amd64
+nodes, which have **not yet run**.
 
 ## Google Buildpacks (#33)
 
