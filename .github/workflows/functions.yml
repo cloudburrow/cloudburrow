@@ -3,8 +3,8 @@
 # TestTerraformCloudFunctions2Function (#1377) and TestGcloudFunctionsEventTriggers
 # (#1414) (#678; TestFunctionsSubmitBuildBuildpacks since #1268;
 # TestFunctionsEventTriggerBuilds since #1414; TestFunctionsV1BuildsAndServes,
-# with the ungated TestFunctionsV1API and the gated half of TestGcloudFunctionsV1,
-# since #1428;
+# with the ungated TestFunctionsV1API and the gated halves of TestGcloudFunctionsV1,
+# TestConsoleFunctionsV1 and TestTerraformCloudFunctionsFunction, since #1428;
 # TestFunctionsNodejsBuiltWithBuildpacks and TestFunctionsPythonBuiltWithBuildpacks
 # since #1303; the Java, Ruby, PHP and .NET ones since #1319), on demand:
 # TestFunctionsFrameworkBuiltWithBuildpacks builds testdata/function with the
@@ -151,9 +151,9 @@ jobs:
 
           # The Functions tests, gcloud's and Terraform's deploys of the
           # same fixture (#1377), its event triggers through the client
-          # and gcloud (#1414), and its 1st-gen deploys through the v1 API
-          # and gcloud --no-gen2 (#1428).
-          TESTS='TestFunctions|^TestGcloudFunctions$|^TestGcloudFunctionsEventTriggers$|^TestGcloudFunctionsV1$|^TestTerraformCloudFunctions2Function$'
+          # and gcloud (#1414), and its 1st-gen deploys through the v1 API,
+          # gcloud --no-gen2, the console and Terraform (#1428).
+          TESTS='TestFunctions|^TestGcloudFunctions$|^TestGcloudFunctionsEventTriggers$|^TestGcloudFunctionsV1$|^TestTerraformCloudFunctions2Function$|^TestConsoleFunctionsV1$|^TestTerraformCloudFunctionsFunction$'
           set -o pipefail
           rc=0
           CLOUDBURROW_TEST_FUNCTIONS=1 go test -tags compat -count=1 -timeout 145m -run "$TESTS" -v ./test/compat/ | tee functions.log || rc=1

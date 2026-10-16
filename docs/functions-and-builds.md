@@ -363,9 +363,16 @@ secrets, CMEK, build worker pools, `dockerRepository` and Container Registry, a 
 account, the legacy `object.change` and non-Pub/Sub, non-Storage event sources, call of an event
 function (publish to its topic or write to its bucket instead), and past versions. A 1st-gen
 function is updated through v1 only, and a 2nd-gen one through v2. `TestFunctionsV1API` and
-`TestGcloudFunctionsV1`'s ungated half run on any instance with `--services run,storage,pubsub`;
-`TestFunctionsV1BuildsAndServes` and `TestGcloudFunctionsV1`'s deploy and call are gated like the
-other Functions tests and have **not yet run**.
+the ungated halves of `TestGcloudFunctionsV1`, `TestConsoleFunctionsV1` and
+`TestTerraformCloudFunctionsFunction` run on any instance with `--services run,storage,pubsub`;
+`TestFunctionsV1BuildsAndServes` and those three tests' deploys from `testdata/function` are gated
+like the other Functions tests and have **not yet run**.
+
+The console's Create function offers the Environment as Google's does: 1st gen creates through
+the v1 API with an HTTP trigger, a Pub/Sub topic or a Cloud Storage event, the function's page
+shows the v1 `CloudFunction`, and Test function calls a 1st-gen HTTP function through `call`.
+Terraform's `google_cloudfunctions_function` reaches the same API through
+`cloud_functions_custom_endpoint`, which `cloudburrow terraform` sets.
 
 ## Google Buildpacks (#33)
 

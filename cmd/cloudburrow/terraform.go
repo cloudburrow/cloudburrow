@@ -63,8 +63,9 @@ var terraformEndpoints = []terraformEndpoint{
 	// TestTerraformCloudFunctions2Function, gated as the Functions tests are.
 	{config.ServiceRun, "cloudfunctions2_custom_endpoint", "GOOGLE_CLOUDFUNCTIONS2_CUSTOM_ENDPOINT", "/v2/", true},
 	// Cloud Functions v1 (#1428), on the same port over the same machinery:
-	// google_cloudfunctions_function reaches this instance, never Google; no
-	// Terraform test covers it yet.
+	// google_cloudfunctions_function reaches this instance, never Google:
+	// TestTerraformCloudFunctionsFunction applies an HTTP and an event
+	// function, gated as the Functions tests are.
 	{config.ServiceRun, "cloud_functions_custom_endpoint", "GOOGLE_CLOUD_FUNCTIONS_CUSTOM_ENDPOINT", "/v1/", true},
 	// Cloud KMS (#425): a key ring, a key and a version apply, plan clean,
 	// update their labels and destroy in TestTerraformKMS, over the JSON API

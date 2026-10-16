@@ -160,10 +160,10 @@ func TestConsoleFunctionsCreateGenerations(t *testing.T) {
 	}{
 		{"gen1-http", map[string]string{"environment": "1st gen", "trigger": "HTTP"}, "HTTP",
 			map[string]string{"Trigger": "HTTP", "URL": "https://us-central1-console-gen.cloudfunctions.net/gen1-http"}},
-		{"gen1-topic", map[string]string{"environment": "1st gen", "trigger": "Cloud Pub/Sub", "topic": "orders"}, "google.cloud.pubsub.topic.v1.messagePublished",
+		{"gen1-topic", map[string]string{"environment": "1st gen", "trigger": "Cloud Pub/Sub", "topic": "orders"}, "google.pubsub.topic.publish",
 			map[string]string{"Trigger": "google.pubsub.topic.publish", "Trigger resource": "projects/console-gen/topics/orders", "Retry on failure": "No"}},
 		{"gen1-bucket", map[string]string{"environment": "1st gen", "trigger": "Cloud Storage", "bucket": "gs://uploads", "storageEvent": "google.storage.object.delete"},
-			"google.cloud.storage.object.v1.deleted",
+			"google.storage.object.delete",
 			map[string]string{"Trigger": "google.storage.object.delete", "Trigger resource": "projects/_/buckets/uploads"}},
 	} {
 		values := map[string]string{"name": cs.id}

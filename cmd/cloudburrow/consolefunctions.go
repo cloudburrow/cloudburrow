@@ -41,6 +41,8 @@ const (
 	functionTriggerHTTP    = "HTTP"
 	functionTriggerPubSub  = "Cloud Pub/Sub"
 	functionTriggerStorage = "Cloud Storage"
+
+	functionPubSubEvent = "google.cloud.pubsub.topic.v1.messagePublished"
 )
 
 // functionStorageEvents are the Cloud Storage events Create function
@@ -139,12 +141,24 @@ func functionGeneration(fn *functionspb.Function) string {
 	return functionGen2
 }
 
-// functionTrigger is a function's trigger: HTTP, or its event type.
+// functionTrigger is a function's trigger: HTTP, or its event type, in a
+// 1st-gen function's legacy terms for one made through the v1 API.
 func functionTrigger(fn *functionspb.Function) string {
-	if t := fn.GetEventTrigger().GetEventType(); t != "" {
-		return t
+	t := fn.GetEventTrigger().GetEventType()
+	if t == "" {
+		return functionTriggerHTTP
 	}
-	return "HTTP"
+	if fn.GetEnvironment() == functionspb.Environment_GEN_1 {
+		if t == functionPubSubEvent {
+			return "google.pubsub.topic.publish"
+		}
+		for _, e := range functionStorageEvents {
+			if e.v2 == t {
+				return e.v1
+			}
+		}
+	}
+	return t
 }
 
 // functionStatus is a function's state as the console's list words it.
@@ -467,7 +481,7 @@ func functionTriggerOf(project string, values map[string]string) (functionTrigge
 func (t functionTriggerSpec) v2() *functionspb.EventTrigger {
 	switch t.kind {
 	case functionTriggerPubSub:
-		return &functionspb.EventTrigger{EventType: "google.cloud.pubsub.topic.v1.messagePublished", PubsubTopic: t.topic,
+		return &functionspb.EventTrigger{EventType: functionPubSubEvent, PubsubTopic: t.topic,
 			RetryPolicy: functionspb.EventTrigger_RETRY_POLICY_DO_NOT_RETRY}
 	case functionTriggerStorage:
 		typ := ""
