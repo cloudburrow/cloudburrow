@@ -209,8 +209,8 @@ Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`),
 | `DROP SCHEMA` where the script's other statements see the dataset | no emulator support | M |
 | `CREATE SCHEMA` options other than the supported strings, and `DEFAULT COLLATE` | no emulator support | M |
 | `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that does | no emulator support | S |
-| CSV: a multi-character or non-ASCII delimiter or quote, an empty `STRING` with a `nullMarker`, a `maxBadRecords` load the emulator fails | no emulator support | M |
-| Parquet loads with a NaN, and the other refused Parquet columns | no emulator support | S |
+| CSV: a multi-character delimiter, a non-ASCII delimiter or quote in data that is not ISO-8859-1, an empty `STRING` with a `nullMarker`, a `maxBadRecords` load the emulator fails (ISO-8859-1 delimiters and quotes, a quote's first byte, `skipLeadingRows` N and the header with `autodetect`, `NAME` after skipped rows: built, #1457) | no emulator support | M |
+| Parquet: the refused columns left (an INT96 with a part of a microsecond, a DECIMAL that would round, DECIMAL to STRING, a NULL element or a LIST of lists with list inference); a NaN loads and unlisted types are 400 since #1457 | not documented by Google | S |
 | Storage Read API: `SplitReadStream`, and `ReadRows` of a stream made before the front last started | no emulator support | S |
 | A load of several Cloud Storage objects when the front was given no Cloud Storage | no emulator support | S |
 | Script variable named as an alias, a column or a table; `WRITE_TRUNCATE_DATA` of a result of another type | not documented by Google | S |
