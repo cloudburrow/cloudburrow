@@ -31,7 +31,7 @@ func role(ctx context.Context, t *testing.T, rc *redis.Client) string {
 	return ""
 }
 
-// eventually polls f for up to a minute.
+// eventuallyTrue polls f for up to a minute.
 func eventually(t *testing.T, what string, f func() bool) {
 	t.Helper()
 	for end := time.Now().Add(time.Minute); ; {
