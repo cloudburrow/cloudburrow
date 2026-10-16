@@ -73,6 +73,10 @@ func TestCloudSQLPointInTimeRestoreFromBackupDR(t *testing.T) {
 // covers: sql.instances.pointInTimeRestore, sql.instances.get
 func TestGcloudSQLPointInTimeRestoreRefused(t *testing.T) {
 	h := New(t)
+	// The Admin API first: gcloud's sql override is vouched only where it is
+	// served, and elsewhere gcloud would reach for sqladmin.googleapis.com
+	// (main run 38946612957, served shard).
+	svc := sqlAdminService(t, h)
 	g := newGcloudSession(t, h)
 	target := fmt.Sprintf("gcloud-pitr-dr-%d", time.Now().UnixNano()%1e6)
 	out, err := g.run(nil, "sql", "instances", "point-in-time-restore", pitrDatasource(g.project), target,
@@ -80,6 +84,6 @@ func TestGcloudSQLPointInTimeRestoreRefused(t *testing.T) {
 	if err == nil || !strings.Contains(out, "Backup and DR") {
 		t.Errorf("gcloud sql instances point-in-time-restore: %v\n%s\nwant a failure naming the Backup and DR Service", err, out)
 	}
-	_, err = sqlAdminService(t, h).Instances.Get(g.project, target).Do()
+	_, err = svc.Instances.Get(g.project, target).Do()
 	wantHTTP(t, "instances.get of the refused restore's target", err, http.StatusNotFound)
 }
