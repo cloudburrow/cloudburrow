@@ -364,6 +364,8 @@ func (s *Server) DeleteService(ctx context.Context, req *runpb.DeleteServiceRequ
 	if err := s.kn.Delete(ctx, existing.Metadata.Name); err != nil {
 		return nil, err
 	}
+	// Its K_* names (kenv.go); a failure leaves only an unread ConfigMap.
+	_ = s.kn.Kube.Delete(ctx, "configmap", kEnvConfigMapName(existing.Metadata.Name), true)
 	op := s.ops.Create(parent, req.GetName())
 	_ = s.ops.Succeed(op.Name, &runpb.Service{Name: req.GetName()})
 	return s.toProtoOperation(op.Name)

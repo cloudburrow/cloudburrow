@@ -138,10 +138,13 @@ metadata:
     cloudburrow.dev/instance: %q
     %s: "true"
 data:
-`, dnsLabel("run-k-env-"+kname), namespace, instance, labelKEnv)
+`, kEnvConfigMapName(kname), namespace, instance, labelKEnv)
 	for _, k := range keys {
 		fmt.Fprintf(&b, "  %s: %q\n", k, data[k])
 	}
 	b.WriteString("---\n")
 	return b.String()
 }
+
+// kEnvConfigMapName names the ConfigMap of a Knative Service's K_* names.
+func kEnvConfigMapName(kname string) string { return dnsLabel("run-k-env-" + kname) }
