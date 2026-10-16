@@ -146,19 +146,25 @@ func (m *mysqlArchiver) sh(ctx context.Context, stdin io.Reader, stdout io.Write
 	for i, a := range args {
 		quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
 	}
-	script := `export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; ` + mysqlAwaitSocket + `; exec ` + tool + " -uroot " + strings.Join(quoted, " ")
+	script := mysqlRootEnv + `exec ` + tool + " $MYSQL_LOCAL " + strings.Join(quoted, " ")
 	return m.exec(ctx, stdin, stdout, "sh", "-c", script)
 }
 
-// mysqlAwaitSocket waits, inside the server's container, until mysqld
-// answers on its unix socket. The pod's readiness probe is a TCP check
-// that can pass before the socket the local clients use is there, and on
-// CI's slower runners a backup or a replica's setup right after the server
-// starts (or restarts) found no socket (ERROR 2002). mysqladmin ping
+// mysqlRootEnv starts every script run in a MySQL server's container: the
+// clients sign in as root over TCP to 127.0.0.1:3306 ($MYSQL_LOCAL), not over
+// the unix socket, and wait until the server answers there. On CI's runners
+// the server's classic socket, /var/run/mysqld/mysqld.sock, was missing
+// while the server served TCP (only mysqlx.sock was there), so a backup or a
+// replica's setup failed with ERROR 2002; TCP is what the pod's readiness
+// probe checks. The flags are explicit because not every client reads
+// MYSQL_HOST (mysqladmin pinged over the socket with it set). The image's
+// root is root@'%', which a TCP sign-in from 127.0.0.1 is. mysqladmin ping
 // succeeds once the server runs, even when it refuses the login.
-const mysqlAwaitSocket = `i=0; until mysqladmin -uroot --connect-timeout=2 ping >/dev/null 2>&1; do ` +
+const mysqlRootEnv = `export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"; MYSQL_LOCAL="-uroot -h127.0.0.1 -P3306 --protocol=TCP"; ` +
+	`i=0; until mysqladmin $MYSQL_LOCAL --connect-timeout=2 ping >/dev/null 2>&1; do ` +
 	`i=$((i+1)); if [ "$i" -ge 120 ]; then ` +
-	`echo "mysqld did not answer on its socket in 120s: $(ls -la /var/run/mysqld 2>&1)" >&2; exit 1; fi; sleep 1; done`
+	`echo "mysqld did not answer on 127.0.0.1:3306 in 120s" >&2; exit 1; fi; sleep 1; done
+`
 
 func (m *mysqlArchiver) query(ctx context.Context, stmt string) (string, error) {
 	var out bytes.Buffer

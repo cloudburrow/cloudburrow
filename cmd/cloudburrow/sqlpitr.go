@@ -70,8 +70,7 @@ func (d *sqlDumper) sh(ctx context.Context, t sqladmin.DumpTarget, stdin io.Read
 }
 
 const mysqlPITRPrelude = `set -e
-export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"
-R=` + mysqlPITRDir + `
+` + mysqlRootEnv + `R=` + mysqlPITRDir + `
 `
 
 const pgPITRPrelude = `set -e
@@ -83,11 +82,11 @@ func (d *sqlDumper) PITRBase(ctx context.Context, t sqladmin.DumpTarget) error {
 	defer pitrLock(d.deployment(t))()
 	if t.MySQL {
 		return d.sh(ctx, t, nil, io.Discard, mysqlPITRPrelude+`mkdir -p "$R/base"
-dbs=$(mysql -uroot -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
+dbs=$(mysql $MYSQL_LOCAL -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
 if [ -n "$dbs" ]; then
-  mysqldump -uroot --single-transaction --source-data=2 --set-gtid-purged=OFF --routines --triggers --events --no-tablespaces --databases $dbs > "$R/base/.tmp"
+  mysqldump $MYSQL_LOCAL --single-transaction --source-data=2 --set-gtid-purged=OFF --routines --triggers --events --no-tablespaces --databases $dbs > "$R/base/.tmp"
 else
-  mysql -uroot -N -B -e 'SHOW BINARY LOG STATUS' | awk '{printf "-- CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='"'"'%s'"'"', SOURCE_LOG_POS=%s;\n", $1, $2}' > "$R/base/.tmp"
+  mysql $MYSQL_LOCAL -N -B -e 'SHOW BINARY LOG STATUS' | awk '{printf "-- CHANGE REPLICATION SOURCE TO SOURCE_LOG_FILE='"'"'%s'"'"', SOURCE_LOG_POS=%s;\n", $1, $2}' > "$R/base/.tmp"
 fi
 grep -q 'SOURCE_LOG_FILE=' "$R/base/.tmp"
 mv "$R/base/.tmp" "$R/base/$(( $(date -u +%s) + 1 )).sql"`)
@@ -254,23 +253,22 @@ const mysqlPITRUser = "cloudsqlpitr"
 // rotation, so every transaction up to now is in a closed file. It prints
 // the base's binary log file and position, then each binary log's name.
 const mysqlRecoverySource = mysqlPITRPrelude + `base="$R/base/$1.sql"
-mysql -uroot -e "CREATE USER IF NOT EXISTS '` + mysqlPITRUser + `'@'%' IDENTIFIED BY '$2'; ALTER USER '` + mysqlPITRUser + `'@'%' IDENTIFIED BY '$2'; GRANT REPLICATION SLAVE ON *.* TO '` + mysqlPITRUser + `'@'%'; FLUSH BINARY LOGS"
+mysql $MYSQL_LOCAL -e "CREATE USER IF NOT EXISTS '` + mysqlPITRUser + `'@'%' IDENTIFIED BY '$2'; ALTER USER '` + mysqlPITRUser + `'@'%' IDENTIFIED BY '$2'; GRANT REPLICATION SLAVE ON *.* TO '` + mysqlPITRUser + `'@'%'; FLUSH BINARY LOGS"
 sed -n "s/.*SOURCE_LOG_FILE='\([^']*\)', SOURCE_LOG_POS=\([0-9]*\).*/\1 \2/p" "$base" | head -1
-dirname "$(mysql -uroot -N -B -e 'SELECT @@log_bin_basename')"
-mysql -uroot -N -B -e 'SHOW BINARY LOGS' | awk '{print $1}'`
+dirname "$(mysql $MYSQL_LOCAL -N -B -e 'SELECT @@log_bin_basename')"
+mysql $MYSQL_LOCAL -N -B -e 'SHOW BINARY LOGS' | awk '{print $1}'`
 
 // mysqlRecoveryReplay replicates the source's binary log into the clone
 // from the base's position to the stop position, with MySQL's own
 // applier, and waits for it to stop there.
 const mysqlRecoveryReplay = `set -e
-export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"
-q() { mysql -uroot -N -B -e "$1"; }
+` + mysqlRootEnv + `q() { mysql $MYSQL_LOCAL -N -B -e "$1"; }
 q "SET GLOBAL server_id = $8"
 q "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$1', SOURCE_PORT = $2, SOURCE_USER = '` + mysqlPITRUser + `', SOURCE_PASSWORD = '$3', SOURCE_LOG_FILE = '$4', SOURCE_LOG_POS = $5, SOURCE_SSL = 1, SOURCE_AUTO_POSITION = 0"
 q "START REPLICA UNTIL SOURCE_LOG_FILE = '$6', SOURCE_LOG_POS = $7"
 i=0
 while :; do
-  st=$(mysql -uroot -e 'SHOW REPLICA STATUS\G')
+  st=$(mysql $MYSQL_LOCAL -e 'SHOW REPLICA STATUS\G')
   sql=$(echo "$st" | sed -n 's/^ *Replica_SQL_Running: //p')
   err=$(echo "$st" | sed -n 's/^ *Last_Error: //p')
   ioerr=$(echo "$st" | sed -n 's/^ *Last_IO_Error: //p')
@@ -291,7 +289,7 @@ func (d *sqlDumper) mysqlCopyAt(ctx context.Context, src, dst sqladmin.DumpTarge
 	}
 	password := randomHex(12)
 	defer func() {
-		_ = d.sh(context.Background(), src, nil, io.Discard, mysqlPITRPrelude+`mysql -uroot -e "DROP USER IF EXISTS '`+mysqlPITRUser+`'@'%'"`)
+		_ = d.sh(context.Background(), src, nil, io.Discard, mysqlPITRPrelude+`mysql $MYSQL_LOCAL -e "DROP USER IF EXISTS '`+mysqlPITRUser+`'@'%'"`)
 	}()
 	var info bytes.Buffer
 	if err := d.sh(ctx, src, nil, &info, mysqlRecoverySource, strconv.FormatInt(id, 10), password); err != nil {
@@ -320,7 +318,7 @@ func (d *sqlDumper) mysqlCopyAt(ctx context.Context, src, dst sqladmin.DumpTarge
 	if err != nil {
 		return err
 	}
-	err = d.sh(ctx, dst, in, io.Discard, `export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"; exec mysql -uroot`)
+	err = d.sh(ctx, dst, in, io.Discard, mysqlRootEnv+`exec mysql $MYSQL_LOCAL`)
 	_ = in.Close()
 	if err != nil {
 		return fmt.Errorf("load the base into %s: %w", dst.Instance, err)

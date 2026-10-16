@@ -140,18 +140,16 @@ func (p *sqlProvisioner) backend(spec sqladmin.Spec) components.Backend {
 // the primary's GTIDs as purged, and starts GTID replication from it, once:
 // a replica that has a source already is left as it is.
 const mysqlReplicaSetup = `set -e
-export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:-}"
-` + mysqlAwaitSocket + `
-if [ -n "$(mysql -uroot -N -e 'SHOW REPLICA STATUS')" ]; then exit 0; fi
+` + mysqlRootEnv + `if [ -n "$(mysql $MYSQL_LOCAL -N -e 'SHOW REPLICA STATUS')" ]; then exit 0; fi
 src() { MYSQL_PWD="$CLOUDSQL_REPLICATION_PASSWORD" "$@" -h "$CLOUDSQL_PRIMARY_HOST" -u ` + components.SQLReplicaUser + `; }
 dbs=$(src mysql -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','information_schema','performance_schema')")
-mysql -uroot -e 'RESET BINARY LOGS AND GTIDS'
+mysql $MYSQL_LOCAL -e 'RESET BINARY LOGS AND GTIDS'
 if [ -n "$dbs" ]; then
-  src mysqldump --single-transaction --set-gtid-purged=ON --routines --triggers --events --databases $dbs | mysql -uroot
+  src mysqldump --single-transaction --set-gtid-purged=ON --routines --triggers --events --databases $dbs | mysql $MYSQL_LOCAL
 else
-  mysql -uroot -e "SET GLOBAL gtid_purged = '$(src mysql -N -e 'SELECT @@GLOBAL.gtid_executed')'"
+  mysql $MYSQL_LOCAL -e "SET GLOBAL gtid_purged = '$(src mysql -N -e 'SELECT @@GLOBAL.gtid_executed')'"
 fi
-mysql -uroot -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRIMARY_HOST', SOURCE_PORT = 3306, SOURCE_USER = '` +
+mysql $MYSQL_LOCAL -e "CHANGE REPLICATION SOURCE TO SOURCE_HOST = '$CLOUDSQL_PRIMARY_HOST', SOURCE_PORT = 3306, SOURCE_USER = '` +
 	components.SQLReplicaUser + `', SOURCE_PASSWORD = '$CLOUDSQL_REPLICATION_PASSWORD', SOURCE_AUTO_POSITION = 1, SOURCE_SSL = 1; START REPLICA; SET PERSIST super_read_only = ON"
 `
 
