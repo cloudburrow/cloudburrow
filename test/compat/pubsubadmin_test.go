@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // The Pub/Sub admin surface the earlier suites left Unknown (#693), and the
@@ -122,23 +123,61 @@ func TestPubSubTopicAndSnapshotListings(t *testing.T) {
 	}
 }
 
-// TestPubSubUpdateSnapshotIsRefused records that the emulator does not
-// serve UpdateSnapshot.
-// covers: google.pubsub.v1.Subscriber/UpdateSnapshot (unimplemented)
-func TestPubSubUpdateSnapshotIsRefused(t *testing.T) {
+// TestPubSubUpdateSnapshot (#1406): the emulator refuses UpdateSnapshot
+// ("Method google.pubsub.v1.Subscriber/UpdateSnapshot is unimplemented");
+// CloudBurrow's front applies its labels and an earlier expire_time, which
+// GetSnapshot and ListSnapshots then read back, and refuses a mask naming
+// anything else, as Google does.
+// covers: google.pubsub.v1.Subscriber/UpdateSnapshot, google.pubsub.v1.Subscriber/GetSnapshot
+func TestPubSubUpdateSnapshot(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)
+	ctx := h.Context()
 
 	tn := topic(t, h, c, "update-snapshot-topic")
 	sn := subscription(t, h, c, "update-snapshot-subscription", tn)
 	snap := snapshot(t, h, c, "update-snapshot", sn)
 
-	_, err := c.SubscriptionAdminClient.UpdateSnapshot(h.Context(), &pubsubpb.UpdateSnapshotRequest{
-		Snapshot:   &pubsubpb.Snapshot{Name: snap, Labels: map[string]string{"k": "v"}},
-		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"labels"}},
+	cur, err := c.SubscriptionAdminClient.GetSnapshot(ctx, &pubsubpb.GetSnapshotRequest{Snapshot: snap})
+	if err != nil {
+		t.Fatalf("GetSnapshot: %v", err)
+	}
+	expire := time.Now().Add(time.Hour).Truncate(time.Second)
+	paths := []string{"labels", "expire_time"}
+	if cur.GetExpireTime() == nil || !expire.Before(cur.GetExpireTime().AsTime()) {
+		paths = []string{"labels"}
+	}
+	got, err := c.SubscriptionAdminClient.UpdateSnapshot(ctx, &pubsubpb.UpdateSnapshotRequest{
+		Snapshot:   &pubsubpb.Snapshot{Name: snap, Labels: map[string]string{"k": "v"}, ExpireTime: timestamppb.New(expire)},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: paths},
 	})
-	wantRefused(t, "UpdateSnapshot", err, codes.Unimplemented,
-		"Method google.pubsub.v1.Subscriber/UpdateSnapshot is unimplemented")
+	if err != nil {
+		t.Fatalf("UpdateSnapshot: %v", err)
+	}
+	if got.GetLabels()["k"] != "v" {
+		t.Errorf("UpdateSnapshot answered labels %v, want k=v", got.GetLabels())
+	}
+	read, err := c.SubscriptionAdminClient.GetSnapshot(ctx, &pubsubpb.GetSnapshotRequest{Snapshot: snap})
+	if err != nil || read.GetLabels()["k"] != "v" {
+		t.Errorf("GetSnapshot after UpdateSnapshot = %v, %v; want label k=v", read, err)
+	}
+	if len(paths) == 2 && !read.GetExpireTime().AsTime().Equal(expire) {
+		t.Errorf("GetSnapshot expire_time = %v, want %v", read.GetExpireTime().AsTime(), expire)
+	}
+	var labelled bool
+	for _, s := range drain(t, "ListSnapshots", c.SubscriptionAdminClient.ListSnapshots(ctx,
+		&pubsubpb.ListSnapshotsRequest{Project: "projects/" + h.Project()}).Next) {
+		labelled = labelled || (s.GetName() == snap && s.GetLabels()["k"] == "v")
+	}
+	if !labelled {
+		t.Errorf("ListSnapshots does not name %s with its updated labels", snap)
+	}
+	if _, err := c.SubscriptionAdminClient.UpdateSnapshot(ctx, &pubsubpb.UpdateSnapshotRequest{
+		Snapshot:   &pubsubpb.Snapshot{Name: snap, Topic: tn},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"topic"}},
+	}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("UpdateSnapshot(topic) = %v, want INVALID_ARGUMENT", err)
+	}
 }
 
 // TestPubSubModifyPushConfig turns a pull subscription into a push one and
@@ -182,19 +221,73 @@ func TestPubSubModifyPushConfig(t *testing.T) {
 	}
 }
 
-// TestPubSubDetachSubscriptionIsRefused records that the emulator does not
-// serve DetachSubscription.
-// covers: google.pubsub.v1.Publisher/DetachSubscription (unimplemented)
-func TestPubSubDetachSubscriptionIsRefused(t *testing.T) {
+// TestPubSubDetachSubscription (#1406): the emulator refuses
+// DetachSubscription ("Method google.pubsub.v1.Publisher/DetachSubscription
+// is unimplemented"); CloudBurrow's front carries it out as Google documents
+// it. The subscription reads back detached, on "_deleted-topic_", and is
+// still listed; its topic no longer lists it; a pull fails
+// FAILED_PRECONDITION; a message published afterwards reaches a sibling
+// subscription and not it; and it can be deleted.
+// covers: google.pubsub.v1.Publisher/DetachSubscription
+func TestPubSubDetachSubscription(t *testing.T) {
 	h := New(t)
 	c := pubsubClient(t, h)
+	ctx := h.Context()
 
 	tn := topic(t, h, c, "detach-topic")
 	sn := subscription(t, h, c, "detach-subscription", tn)
+	sibling := subscription(t, h, c, "detach-sibling", tn)
 
-	_, err := c.TopicAdminClient.DetachSubscription(h.Context(), &pubsubpb.DetachSubscriptionRequest{Subscription: sn})
-	wantRefused(t, "DetachSubscription", err, codes.Unimplemented,
-		"Method google.pubsub.v1.Publisher/DetachSubscription is unimplemented")
+	if _, err := c.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: tn,
+		Messages: []*pubsubpb.PubsubMessage{{Data: []byte("before")}}}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if _, err := c.TopicAdminClient.DetachSubscription(ctx, &pubsubpb.DetachSubscriptionRequest{Subscription: sn}); err != nil {
+		t.Fatalf("DetachSubscription: %v", err)
+	}
+	got, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sn})
+	if err != nil || !got.GetDetached() || got.GetTopic() != "_deleted-topic_" {
+		t.Fatalf("GetSubscription after detach = %v, %v; want detached on _deleted-topic_", got, err)
+	}
+	if got := drain(t, "ListTopicSubscriptions", c.TopicAdminClient.ListTopicSubscriptions(ctx,
+		&pubsubpb.ListTopicSubscriptionsRequest{Topic: tn}).Next); contains(got, sn) || !contains(got, sibling) {
+		t.Errorf("ListTopicSubscriptions = %v; want %s without %s", got, sibling, sn)
+	}
+	var names []string
+	for _, s := range drain(t, "ListSubscriptions", c.SubscriptionAdminClient.ListSubscriptions(ctx,
+		&pubsubpb.ListSubscriptionsRequest{Project: "projects/" + h.Project()}).Next) {
+		names = append(names, s.GetName())
+	}
+	if !contains(names, sn) {
+		t.Errorf("ListSubscriptions = %v; want the detached %s still listed", names, sn)
+	}
+	if _, err := c.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: tn,
+		Messages: []*pubsubpb.PubsubMessage{{Data: []byte("after")}}}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	_, err = c.SubscriptionAdminClient.Pull(ctx, &pubsubpb.PullRequest{Subscription: sn, MaxMessages: 10})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("Pull from the detached subscription = %v, want FAILED_PRECONDITION", err)
+	}
+	seen := map[string]bool{}
+	for i := 0; i < 20 && !seen["after"]; i++ {
+		resp, err := c.SubscriptionAdminClient.Pull(ctx, &pubsubpb.PullRequest{Subscription: sibling, MaxMessages: 10})
+		if err != nil {
+			t.Fatalf("Pull from the sibling: %v", err)
+		}
+		for _, m := range resp.GetReceivedMessages() {
+			seen[string(m.GetMessage().GetData())] = true
+		}
+	}
+	if !seen["after"] {
+		t.Errorf("the sibling subscription never received the message published after the detach: %v", seen)
+	}
+	if err := c.SubscriptionAdminClient.DeleteSubscription(ctx, &pubsubpb.DeleteSubscriptionRequest{Subscription: sn}); err != nil {
+		t.Fatalf("DeleteSubscription of the detached subscription: %v", err)
+	}
+	if _, err := c.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sn}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetSubscription after delete = %v, want NOT_FOUND", err)
+	}
 }
 
 func schemaClient(t *testing.T, h *Harness) *vkit.SchemaClient {

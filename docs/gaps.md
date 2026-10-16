@@ -58,8 +58,7 @@ Already tracked: #982 (Google's message for an invalid label is not measured).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `DetachSubscription`, `UpdateSnapshot` are refused `UNIMPLEMENTED` by Google's emulator | no emulator support | M |
-| Protocol Buffer schemas: `ValidateSchema` of `PROTOCOL_BUFFER` is `UNIMPLEMENTED` | no emulator support | M |
+| `DetachSubscription`, `UpdateSnapshot` and Protocol Buffer schemas, which Google's emulator refuses `UNIMPLEMENTED`, are served by CloudBurrow's Pub/Sub front (#1406). Left: an `UpdateTopic` of `schema_settings` bound to a Protocol Buffer schema, and any call but Get, List, Delete, Pull and StreamingPull on a detached subscription, answer `UNIMPLEMENTED` with the reason; the seed file still refuses `PROTOCOL_BUFFER` schemas | front-served, not by the emulator; Google's exact messages for a refused `.proto` definition or message are not measured | S |
 | 4 UNVERIFIED error codes: subscription expiration, exactly-once and label refusals ([pubsub.md](coverage/pubsub.md)) | not documented by Google | S |
 
 ## Cloud Tasks
