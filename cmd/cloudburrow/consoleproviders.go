@@ -1541,8 +1541,14 @@ func (storageProvider) CreateForm() (string, []console.Field) {
 		},
 		{Name: "labels", Label: "Labels", Type: "map", Help: "Optional. One key=value per line."},
 		{Name: "storageClass", Label: "Default storage class", Type: "select", Section: class, Default: "STANDARD",
-			Options: []string{"STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE"},
-			Help:    "The class a new object gets when it names none. Classes are recorded, not priced: nothing is billed here."},
+			Options: []string{"STANDARD", "NEARLINE", "COLDLINE", "ARCHIVE", "RAPID"},
+			Help: "The class a new object gets when it names none. Classes are recorded, not priced: nothing is billed here. " +
+				"RAPID (Rapid storage) needs a zone below, and holds appendable objects."},
+		// A zone makes a zonal bucket (#1443): its location is the zone's
+		// region and customPlacementConfig names the zone.
+		{Name: "zone", Label: "Zone (Rapid storage)", Type: "text", Section: class, Pattern: `^([a-z]+-[a-z]+[0-9]+-[a-z])?$`,
+			Help: "Optional. A zone such as us-central1-a places the bucket in that zone, as Rapid storage needs. " +
+				"It can be set only when the bucket is created."},
 		// Hierarchical namespace (#1203) needs uniform bucket-level access
 		// and excludes versioning, so checking it turns the one on and the
 		// other off, and holds them there.
@@ -1598,6 +1604,12 @@ func bucketCreateRequest(name string, values map[string]string) ([]byte, string,
 	}
 	if v := strings.TrimSpace(values["storageClass"]); v != "" {
 		b["storageClass"] = v
+	}
+	if z := strings.TrimSpace(values["zone"]); z != "" {
+		if i := strings.LastIndex(z, "-"); i > 0 {
+			b["location"] = z[:i]
+		}
+		b["customPlacementConfig"] = map[string]any{"dataLocations": []string{z}}
 	}
 	if v, ok := values["uniformAccess"]; ok {
 		b["iamConfiguration"] = map[string]any{"uniformBucketLevelAccess": map[string]any{"enabled": v == "true"}}
@@ -3569,6 +3581,7 @@ func bucketConfigSection(b bucketMeta) console.Section {
 			{Heading: "Location and class", Properties: []console.Property{
 				{Label: "Location", Value: b.Location},
 				{Label: "Location type", Value: b.LocationType},
+				{Label: "Placement", Value: b.placement()},
 				{Label: "Storage class", Value: b.StorageClass},
 			}},
 			{Heading: "Protection", Properties: protection},
