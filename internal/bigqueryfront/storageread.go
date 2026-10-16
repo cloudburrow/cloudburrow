@@ -28,7 +28,8 @@ import (
 // emulator's is the pod's own). CreateReadSession is sent to the emulator,
 // which reads the session's table and schema by project, dataset and
 // table; ReadRows the front answers itself (storagerows.go), from a query
-// of the table's whole name; every other call (SplitReadStream, and the
+// of the table's whole name; SplitReadStream the front answers too
+// (storagereadstate.go, #1460); every other call (the
 // Storage Write API, which writes by the whole name: the emulator's
 // AddTableData, read in its source) is passed through as raw frames.
 //
@@ -67,9 +68,11 @@ import (
 // code that panics. The session's schema is the emulator's (Arrow framed as
 // BigQuery's, arrowframes.go, with a DATETIME's type BigQuery's,
 // storagerows.go; Avro with valid names, avrorows.go), and the rows are
-// written in it. A stream the front did not see made (a session
-// made before the front last started) is UNIMPLEMENTED, as the front
-// cannot tell its table or schema. CreateReadSession without a session, a
+// written in it. The front keeps the streams it sees made in its state
+// directory, so a session made before it last started reads on
+// (storagereadstate.go, #1460); a stream it never saw made, or whose
+// session has expired, is NOT_FOUND (UNIMPLEMENTED with no state
+// directory, as the front cannot tell its table or schema). CreateReadSession without a session, a
 // table name or a data format of ARROW or AVRO is INVALID_ARGUMENT before
 // the emulator sees it: its handler reads req.ReadSession.Table without
 // looking for the session, which would panic too. So is a table the REST
@@ -103,6 +106,10 @@ type storageRead struct {
 	mu      sync.Mutex
 	streams map[string]*readStream
 	order   []string
+	// statePath is where the streams are kept (storagereadstate.go), ""
+	// in memory alone; logf logs a failure to keep one.
+	statePath string
+	logf      func(string, ...any)
 }
 
 // readTable is the table a read stream reads.
@@ -118,6 +125,12 @@ type readStream struct {
 	// avroSchema its Avro schema, as the client was given it.
 	arrowSchema []byte
 	avroSchema  string
+	// expires is the session's expire_time, zero when it gave none.
+	expires time.Time
+	// split is whether SplitReadStream made the stream, of rows [from,
+	// to) of a read of the table (storagereadstate.go).
+	split    bool
+	from, to int64
 }
 
 // ServeStorageRead serves the Storage Read front on l until ctx ends:
@@ -149,6 +162,9 @@ func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest
 	defer s.upstream.Close()
 	if wo != nil {
 		s.policies = wo.policies
+		if wo.stateDir != "" {
+			s.keepStreams(readStreamsStateFile(wo.stateDir), wo.logf) // storagereadstate.go, #1460
+		}
 	}
 	if front != nil {
 		s.write = newStorageWrite(front)
@@ -211,6 +227,8 @@ func (s *storageRead) handle(_ any, ss grpc.ServerStream) error {
 	switch method {
 	case createReadSession:
 		return s.createSession(ss, open)
+	case splitReadStream:
+		return s.splitStream(ctx, ss) // storagereadstate.go
 	case readRows:
 		var in rawFrame
 		if err := ss.RecvMsg(&in); err != nil {
@@ -317,6 +335,9 @@ func (s *storageRead) createSession(ss grpc.ServerStream, open func() (grpc.Clie
 			return fr
 		}
 		rs := &readStream{table: t, restriction: restriction}
+		if e := sess.GetExpireTime(); e != nil {
+			rs.expires = e.AsTime()
+		}
 		if a := sess.GetArrowSchema(); a != nil {
 			a.SerializedSchema = bigQueryArrowSchema(arrowSchemaMessage(a.SerializedSchema)) // arrowframes.go, storagerows.go
 			rs.arrowSchema = a.SerializedSchema
@@ -357,10 +378,14 @@ func (s *storageRead) streamOf(name string) (*readStream, error) {
 	s.mu.Lock()
 	st, ok := s.streams[name]
 	s.mu.Unlock()
-	if !ok {
+	if !ok && s.statePath == "" {
 		return nil, status.Errorf(codes.Unimplemented, "Not implemented here: ReadRows of the stream %q, which "+
-			"CloudBurrow did not see made, so it cannot tell which table it reads or its schema (the session was made "+
-			"before the BigQuery front last started). Nothing was read. Create the read session again.", name)
+			"CloudBurrow did not see made, so it cannot tell which table it reads or its schema (the front keeps no "+
+			"state directory, so a session made before it last started is not kept). Nothing was read. Create the read session again.", name)
+	}
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "Not found: the read stream %q, which CloudBurrow did not see made "+
+			"or whose session has expired. Create the read session again.", name) // wording UNVERIFIED
 	}
 	return st, nil
 }
@@ -371,6 +396,11 @@ func (s *storageRead) remember(stream string, st *readStream) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.rememberLocked(stream, st)
+	s.saveLocked(stream, st)
+}
+
+func (s *storageRead) rememberLocked(stream string, st *readStream) {
 	if _, ok := s.streams[stream]; !ok {
 		s.order = append(s.order, stream)
 	}

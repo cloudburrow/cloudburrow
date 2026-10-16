@@ -235,7 +235,6 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | A failed script after a statement that wrote: the emulator does not roll back (#1459) | no emulator support | L |
 | A snapshot or clone `FOR SYSTEM_TIME AS OF` a past time (a query reads one since #1460); `FOR SYSTEM_TIME AS OF` a past time before an ALTER TABLE rebuild or CREATE OR REPLACE TABLE, of an ingestion-time partitioned table, or with a partition decorator (#1460) | not built yet | M |
 | `datasets.undelete`: the emulator keeps nothing of a deleted dataset (#1460) | no emulator support | M |
-| Storage Read API: `SplitReadStream`, and `ReadRows` of a stream made before the front last started (#1460) | no emulator support | S |
 | BQML: `CREATE MODEL` is refused by the engine ("Statement not supported: CreateModelStatement"), so no model can be made, used or extracted (#1465) | no emulator support | L |
 | Script variable named as an alias, a column or a table; `WRITE_TRUNCATE_DATA` of a result of another type (#1445) | not documented by Google | S |
 | BigQuery's wording of every front refusal (UNVERIFIED throughout the BigQuery rows) (#1445) | not documented by Google | S |

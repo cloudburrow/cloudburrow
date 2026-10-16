@@ -7590,6 +7590,7 @@
           "test/compat/bigqueryscriptflow2_test.go:22 TestBigQueryScriptControlFlowMore",
           "test/compat/bigqueryscriptflow_test.go:59 TestBigQueryScriptControlFlow",
           "test/compat/bigquerysilent_test.go:502 TestBigQueryExecuteImmediateInTurn",
+          "test/compat/bigquerystoragesplit_test.go:31 TestBigQueryStorageReadSplitAndRestart",
           "test/compat/bigquerystoragewriteinterval_test.go:183 TestBigQueryStorageWriteIntervals",
           "test/compat/bigquerystreamdml_test.go:54 TestBigQueryDMLOfRecentlyStreamedRows",
           "test/compat/bigquerytimetravel_test.go:31 TestBigQueryTimeTravelHistory",
