@@ -9,8 +9,7 @@
 //
 // What cannot be faithful is refused with 501 and says why: creating,
 // patching, restarting or deleting an instance (that would mean starting or
-// stopping a server), IAM database authentication, backups, replicas,
-// imports and exports, and SSL certificates. The connector path
+// stopping a server) and IAM database authentication. The connector path
 // (connectSettings, generateEphemeralCert and the TLS listener on 3307) is
 // in connector.go (#1330).
 package sqladmin
@@ -109,7 +108,12 @@ type Server struct {
 	emu    sync.RWMutex
 	writes *instances
 	// backups are the backup runs, nil unless EnableBackups was called.
-	backups  *backupStore
+	backups *backupStore
+	// transfers are imports and exports, nil unless EnableTransfers was
+	// called (#1380).
+	transfers *transfers
+	// certs are the instances' client certificates (sslCerts, #1380).
+	certs    *sslCertStore
 	stopAuto chan struct{}
 	// advances are the retention clock's Advances (#1330), oldest first.
 	clockMu  sync.Mutex
@@ -281,16 +285,21 @@ func verbWhy(verb string) string {
 	case "pointInTimeRestore":
 		return "it restores from a Backup and DR Service datasource, which CloudBurrow does not serve; " +
 			"recover to a point in time with instances.clone and cloneContext.pointInTime (docs/cloudsql.md)"
-	case "import", "export":
-		return "imports and exports go through Cloud Storage buckets, which this API does not reach"
 	case "backups":
 		return "the project-level Backups API is not served; an instance's backups are its backupRuns"
 	}
 	return "beneath an instance only databases, users, backupRuns, connectSettings, restart, restoreBackup and clone are served; " +
-		"replicas, SSL certificates and imports are not (docs/cloudsql.md)"
+		"see docs/cloudsql.md for what is served"
 }
 
 func (s *Server) route(r *http.Request, base string, p []string) (string, any, error) {
+	if len(p) == 1 && p[0] == "flags" && r.Method == http.MethodGet {
+		out, err := listFlags(r.URL.Query().Get("databaseVersion"))
+		return "sql.flags.list", out, err
+	}
+	if len(p) == 3 && p[0] == "projects" && p[2] == "tiers" && r.Method == http.MethodGet {
+		return "sql.tiers.list", listTiers(), nil
+	}
 	if len(p) < 2 || p[0] != "projects" || p[1] == "" || strings.Contains(p[1], ":") || len(p) == 2 {
 		// flags, locations, and projects/{project}:pointInTimeRestore.
 		return "", nil, unimplemented(r.URL.Path, "only instances, databases, users and operations are served")
@@ -306,8 +315,11 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		case len(rest) == 2 && r.Method == http.MethodGet:
 			op, err := s.operation(project, rest[1])
 			return "sql.operations.get", op, err
+		case len(rest) == 3 && rest[2] == "cancel" && r.Method == http.MethodPost:
+			out, err := s.cancelOperation(project, rest[1])
+			return "sql.operations.cancel", out, err
 		}
-		return "sql.operations", nil, unimplemented("this operations method", "operations finish before they are returned, so there is nothing to cancel")
+		return "sql.operations", nil, Errorf(http.StatusNotFound, "%s is not a Cloud SQL Admin API path", r.URL.Path)
 	case "instances":
 	default:
 		return "", nil, unimplemented("projects/"+project+"/"+rest[0], "only instances, databases, users and operations are served")
@@ -397,6 +409,46 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		return s.users(r, base, project, e, rest[3:])
 	case "backupRuns":
 		return s.backupRuns(r, base, project, e, rest[3:])
+	case "sslCerts":
+		return s.sslCerts(r, base, project, e, rest[3:])
+	case "listServerCas":
+		if len(rest) == 3 && r.Method == http.MethodGet {
+			out, err := s.listServerCas(project, e)
+			return "sql.instances.listServerCas", out, err
+		}
+	case "addServerCa":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.addServerCa(base, project, e)
+			return "sql.instances.addServerCa", out, err
+		}
+	case "rotateServerCa":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.rotateServerCa(r, base, project, e)
+			return "sql.instances.rotateServerCa", out, err
+		}
+	case "createEphemeral":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.generateEphemeralCert(r, project, e)
+			if m, ok := out.(map[string]any); ok && err == nil {
+				out = m["ephemeralCert"]
+			}
+			return "sql.sslCerts.createEphemeral", out, err
+		}
+	case "resetSslConfig":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.resetSslConfig(base, project, e)
+			return "sql.instances.resetSslConfig", out, err
+		}
+	case "export":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.exportInstance(r, base, project, e)
+			return "sql.instances.export", out, err
+		}
+	case "import":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.importInstance(r, base, project, e)
+			return "sql.instances.import", out, err
+		}
 	case "connectSettings":
 		if len(rest) != 3 || r.Method != http.MethodGet {
 			return "sql.connect.get", nil, Errorf(http.StatusNotFound, "%s is not a Cloud SQL Admin API path", r.URL.Path)

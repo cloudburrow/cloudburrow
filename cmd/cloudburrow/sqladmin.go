@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"strconv"
+	"time"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/components"
@@ -55,8 +57,15 @@ func newSQLAdminServer(cfg config.Config, fwds []*netfwd.Forwarder, creds compon
 	// Backups (#1330): dumps kept on the host, with their records when the
 	// instance is persistent. A store that cannot be made leaves backupRuns
 	// answering 501 and the rest serving.
-	if err := srv.EnableBackups(newSQLDumper(cfg), sqlBackupsDir(cfg), cfg.Mode == config.ModePersistent); err != nil && logw != nil {
+	dumper := newSQLDumper(cfg)
+	if err := srv.EnableBackups(dumper, sqlBackupsDir(cfg), cfg.Mode == config.ModePersistent); err != nil && logw != nil {
 		fmt.Fprintf(logw, "cloudburrow: Cloud SQL backups are off: %v\n", err)
+	}
+	// Imports and exports (#1380) go to and from the instance's own Cloud
+	// Storage; without it they answer 501.
+	if serviceEnabled(cfg, config.ServiceStorage) {
+		srv.EnableTransfers(sqlTransferer{d: dumper},
+			sqlObjects{f: storageSourceFetcher{cfg: cfg, client: &http.Client{Timeout: 10 * time.Minute}}})
 	}
 	return srv
 }
