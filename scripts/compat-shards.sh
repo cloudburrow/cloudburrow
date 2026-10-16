@@ -46,6 +46,10 @@ COMPAT_SHARDS="storage served run emulators acceptance"
 COMPAT_BROWSER_SHARDS="storage run emulators"
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|CloudSQL|Bigtable|Spanner)'
+# Browser tests no shard runs: the Studio's local models (#1396) need a
+# -tags onnx build started with -local-ai-embeddings, which no shard builds;
+# they run locally, as the compat suite's local AI tests do (ci.yml never=).
+COMPAT_BROWSER_NEVER_TESTS='^TestStudioManagesLocalModelsAndTestsEmbeddings$'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services

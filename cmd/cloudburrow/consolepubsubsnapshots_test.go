@@ -253,9 +253,9 @@ func TestASubscriptionPageCreatesSnapshotsAndSeeks(t *testing.T) {
 	}
 
 	acts := actionsByID(detail(sub))
-	if len(acts) != 3 || acts[actCreateSnapshot].Label != "Create snapshot" || acts[actSeekTime].Label != "Seek to time" ||
-		acts[actAdvanceClock].Label != "Advance clock (CloudBurrow extension)" {
-		t.Fatalf("a subscription whose topic has no snapshot offers %+v; want Create snapshot, Seek to time and Advance clock", acts)
+	if len(acts) != 4 || acts[actCreateSnapshot].Label != "Create snapshot" || acts[actSeekTime].Label != "Seek to time" ||
+		acts[actAdvanceClock].Label != "Advance clock (CloudBurrow extension)" || !acts[actDetachSubscription].Destructive {
+		t.Fatalf("a subscription whose topic has no snapshot offers %+v; want Create snapshot, Detach from topic, Seek to time and Advance clock", acts)
 	}
 	create := acts[actCreateSnapshot]
 	if len(create.Fields) != 1 || create.Fields[0].Name != "name" || !strings.Contains(create.Fields[0].Help, pubsubSnapshotLabelsDropped) {
@@ -407,8 +407,8 @@ func TestTheSnapshotsScreenListsOpensAndDeletes(t *testing.T) {
 
 	var d console.Detail
 	getJSON200(t, srv.URL+"/api/detail/pubsub-snapshots?project="+project+"&name="+url.QueryEscape(snap), &d)
-	if d.Edit != nil {
-		t.Error("a snapshot page offers an edit, which the emulator's UpdateSnapshot refuses")
+	if d.Edit == nil || len(d.Edit.Fields) != 2 || d.Edit.Fields[0].Name != "labels" || d.Edit.Fields[1].Name != "expireTime" {
+		t.Errorf("a snapshot page's edit = %+v; want Edit snapshot of its labels and expiry, which the front applies (#1406)", d.Edit)
 	}
 	props := map[string]string{}
 	for _, p := range d.Summary {
@@ -417,19 +417,14 @@ func TestTheSnapshotsScreenListsOpensAndDeletes(t *testing.T) {
 	if props["Snapshot"] != snap || props["Topic"] != topic {
 		t.Errorf("snapshot summary = %v", props)
 	}
-	var subsListed, editReason bool
+	var subsListed bool
 	for _, sec := range d.Sections {
 		for _, it := range sec.Listing.Items {
 			subsListed = subsListed || (it.Name == sub && strings.Contains(it.Link, "/pubsub/subscriptions/"))
 		}
-		for _, g := range sec.Groups {
-			for _, p := range g.Properties {
-				editReason = editReason || (p.Label == "Edit" && strings.Contains(p.Value, pubsubSnapshotEditRefusal))
-			}
-		}
 	}
-	if !subsListed || !editReason {
-		t.Errorf("the snapshot page does not list %s linked, or say why edit is not offered: %+v", sub, d.Sections)
+	if !subsListed {
+		t.Errorf("the snapshot page does not list %s linked: %+v", sub, d.Sections)
 	}
 
 	// The topic page's Snapshots section, from ListTopicSnapshots.

@@ -234,3 +234,10 @@ func (p *fakeProv) startedNames() []string {
 	}
 	return out
 }
+
+func (p *fakeProv) Failover(_ context.Context, _, to Spec) error {
+	p.mu.Lock()
+	p.started[to.Name] = to
+	p.mu.Unlock()
+	return nil
+}

@@ -2,7 +2,8 @@ package pubsubfront
 
 // The front's own state, kept in a file (#898). What the front knows and the
 // emulator does not (the expiration policies and labels updates set, the
-// IAM policies (iam.go, #1367), the clock's offset, when each subscription
+// IAM policies (iam.go, #1367), the detached subscriptions and snapshot
+// updates (#1406), the clock's offset, when each subscription
 // was last active, and the projects calls have named) would otherwise live only in the front's memory, so a
 // restart of the front's container alone, with the emulator still running
 // and holding every subscription, would give the subscriptions and topics
@@ -56,6 +57,17 @@ type savedState struct {
 	// IAMPolicies are the stored IAM policies (iam.go, #1367), by topic,
 	// subscription, snapshot or schema name.
 	IAMPolicies map[string]iampolicy.Stored `json:"iamPolicies,omitempty"`
+	// Detached are the detached subscriptions (detach.go, #1406), as
+	// protojson, by name.
+	Detached map[string]json.RawMessage `json:"detached,omitempty"`
+	// Snapshots are what UpdateSnapshot set (snapshots.go, #1406), by
+	// snapshot name.
+	Snapshots map[string]keptSnapshot `json:"snapshots,omitempty"`
+	// ProtoSchemas are the PROTOCOL_BUFFER schemas the front keeps
+	// (protobufschemas.go, #1406): each one's revisions, oldest first, as
+	// protojson, by name; TopicSchemas the topics bound to them.
+	ProtoSchemas map[string][]string        `json:"protoSchemas,omitempty"`
+	TopicSchemas map[string]json.RawMessage `json:"topicSchemas,omitempty"`
 }
 
 // KeepState restores the front's state from path, when the file exists, and
@@ -97,6 +109,37 @@ func (f *Front) restore(b []byte) error {
 		}
 		policies[name] = p
 	}
+	detached := make(map[string]*pubsubpb.Subscription, len(s.Detached))
+	for name, raw := range s.Detached {
+		d := &pubsubpb.Subscription{}
+		if err := protojson.Unmarshal(raw, d); err != nil {
+			return fmt.Errorf("the detached subscription %s: %w", name, err)
+		}
+		detached[name] = d
+	}
+	schemas := make(map[string]*protoSchema, len(s.ProtoSchemas))
+	for name, revs := range s.ProtoSchemas {
+		ps := &protoSchema{}
+		for _, raw := range revs {
+			r := &pubsubpb.Schema{}
+			if err := protojson.Unmarshal([]byte(raw), r); err != nil {
+				return fmt.Errorf("the schema %s: %w", name, err)
+			}
+			ps.revisions = append(ps.revisions, r)
+		}
+		if len(ps.revisions) == 0 {
+			return fmt.Errorf("the schema %s has no revision", name)
+		}
+		schemas[name] = ps
+	}
+	topicSchemas := make(map[string]*pubsubpb.SchemaSettings, len(s.TopicSchemas))
+	for name, raw := range s.TopicSchemas {
+		ss := &pubsubpb.SchemaSettings{}
+		if err := protojson.Unmarshal(raw, ss); err != nil {
+			return fmt.Errorf("the schema settings of %s: %w", name, err)
+		}
+		topicSchemas[name] = ss
+	}
 	if s.ClockOffsetNanos < 0 {
 		return fmt.Errorf("a negative clock offset, %d", s.ClockOffsetNanos)
 	}
@@ -117,6 +160,18 @@ func (f *Front) restore(b []byte) error {
 	}
 	for name, p := range s.IAMPolicies {
 		f.iam[name] = p
+	}
+	for name, d := range detached {
+		f.detached[name] = d
+	}
+	for name, k := range s.Snapshots {
+		f.snapshots[name] = k
+	}
+	for name, ps := range schemas {
+		f.protoSchemas[name] = ps
+	}
+	for name, ss := range topicSchemas {
+		f.topicSchemas[name] = ss
 	}
 	return nil
 }
@@ -188,6 +243,34 @@ func (f *Front) save() error {
 	}
 	for name, p := range f.iam {
 		s.IAMPolicies[name] = p
+	}
+	if len(f.detached) > 0 {
+		s.Detached = make(map[string]json.RawMessage, len(f.detached))
+	}
+	for name, d := range f.detached {
+		if s.Detached[name], err = protojson.Marshal(d); err != nil {
+			f.mu.Unlock()
+			return fmt.Errorf("encode the detached subscription %s: %w", name, err)
+		}
+	}
+	if len(f.snapshots) > 0 {
+		s.Snapshots = make(map[string]keptSnapshot, len(f.snapshots))
+	}
+	for name, k := range f.snapshots {
+		s.Snapshots[name] = k
+	}
+	if s.ProtoSchemas, err = keptSchemasJSON(f.protoSchemas); err != nil {
+		f.mu.Unlock()
+		return fmt.Errorf("encode the schemas: %w", err)
+	}
+	if len(f.topicSchemas) > 0 {
+		s.TopicSchemas = make(map[string]json.RawMessage, len(f.topicSchemas))
+	}
+	for name, ss := range f.topicSchemas {
+		if s.TopicSchemas[name], err = protojson.Marshal(ss); err != nil {
+			f.mu.Unlock()
+			return fmt.Errorf("encode the schema settings of %s: %w", name, err)
+		}
 	}
 	f.mu.Unlock()
 	sort.Strings(s.Projects)

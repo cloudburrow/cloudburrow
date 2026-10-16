@@ -195,6 +195,10 @@ type BuildsServer struct {
 	// hostSteps lets CreateBuild run arbitrary steps, from the host's
 	// loopback only (#1382, cloudbuildgate.go).
 	hostSteps bool
+	// secretManager and kms read a CreateBuild build's availableSecrets
+	// and secrets (#1407); nil refuses a build that names one.
+	secretManager SecretAccessor
+	kms           KMSDecrypter
 }
 
 // Builds returns the Builds service. fetch or builder nil leaves SubmitBuild

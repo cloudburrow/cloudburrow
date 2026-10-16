@@ -127,7 +127,7 @@ func TestRESTWire(t *testing.T) {
 			`"orderBy":"timestamp desc","pageSize":10}`, 200, `"msg":"boom"`},
 		{"GET", "/v2/projects/demo-project/logs", "", 200, "projects/demo-project/logs/g"},
 		{"POST", "/v2/entries:write", `{"entries":[],"noSuchField":1}`, 400, "INVALID_ARGUMENT"},
-		{"POST", "/v2/entries:tail", `{"resourceNames":["projects/demo-project"]}`, 501, "UNIMPLEMENTED"},
+		{"POST", "/v2/entries:tail", `{"resourceNames":[]}`, 400, "INVALID_ARGUMENT"},
 		{"GET", "/v2/monitoredResourceDescriptors", "", 200, `"type":"global"`},
 		{"GET", "/v2/projects/demo-project/sinks", "", 501, "UNIMPLEMENTED"},
 		{"GET", "/v2/projects/demo-project/metrics", "", 501, "UNIMPLEMENTED"},

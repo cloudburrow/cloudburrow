@@ -190,22 +190,7 @@ func (s *loggingService) toConsole(rec *console.Recorder) {
 	if s == nil || rec == nil {
 		return
 	}
-	s.store.Observe(func(e *loggingpb.LogEntry) {
-		// A folder's, organization's or billing account's entry (#1395) has
-		// no project; its Resource is its log name, which names the parent.
-		project := ""
-		if rest, ok := strings.CutPrefix(e.GetLogName(), "projects/"); ok {
-			project, _, _ = strings.Cut(rest, "/")
-		}
-		rec.Log(console.Entry{
-			Timestamp: e.GetTimestamp().AsTime(),
-			Severity:  consoleSeverity(e.GetSeverity().String()),
-			Source:    "logging/" + e.GetLogName()[strings.LastIndex(e.GetLogName(), "/")+1:],
-			Project:   project,
-			Resource:  e.GetLogName(),
-			Message:   entryMessage(e),
-		})
-	})
+	s.store.Observe(func(e *loggingpb.LogEntry) { rec.Log(consoleEntry(e)) })
 }
 
 // consoleLogDeleter is the Logs Explorer's Delete log (#799): DeleteLog on the

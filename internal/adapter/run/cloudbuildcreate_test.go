@@ -138,11 +138,13 @@ func TestCreateBuildRefusals(t *testing.T) {
 		"no steps":       {&cbpb.Build{Source: cbSource()}, codes.InvalidArgument},
 		"arbitrary step": {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "ubuntu", Args: []string{"echo", "hi"}}}}, codes.FailedPrecondition},
 		"docker run":     {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"run", "x"}}}}, codes.FailedPrecondition},
-		"secrets":        {&cbpb.Build{Source: cbSource(), AvailableSecrets: &cbpb.Secrets{}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.Unimplemented},
-		"repo source":    {&cbpb.Build{Source: &cbpb.Source{Source: &cbpb.Source_RepoSource{RepoSource: &cbpb.RepoSource{}}}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.Unimplemented},
-		"bad waitFor":    {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "docker", WaitFor: []string{"later"}, Args: []string{"push", "x"}}}}, codes.InvalidArgument},
-		"escaping dir":   {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "docker", Dir: "../x", Args: []string{"build", "-t", "x", "."}}}}, codes.Unimplemented},
-		"bad subst key":  {&cbpb.Build{Source: cbSource(), Substitutions: map[string]string{"FOO": "x"}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.InvalidArgument},
+		// Secrets without the instance's Secret Manager wired (#1407).
+		"secrets": {&cbpb.Build{Source: cbSource(), AvailableSecrets: &cbpb.Secrets{SecretManager: []*cbpb.SecretManagerSecret{
+			{VersionName: "projects/p/secrets/s/versions/1", Env: "S"}}}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.FailedPrecondition},
+		"repo source":   {&cbpb.Build{Source: &cbpb.Source{Source: &cbpb.Source_RepoSource{RepoSource: &cbpb.RepoSource{}}}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.Unimplemented},
+		"bad waitFor":   {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "docker", WaitFor: []string{"later"}, Args: []string{"push", "x"}}}}, codes.InvalidArgument},
+		"escaping dir":  {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "docker", Dir: "../x", Args: []string{"build", "-t", "x", "."}}}}, codes.Unimplemented},
+		"bad subst key": {&cbpb.Build{Source: cbSource(), Substitutions: map[string]string{"FOO": "x"}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.InvalidArgument},
 	} {
 		_, err := cb.CreateBuild(context.Background(), &cbpb.CreateBuildRequest{ProjectId: "p", Build: tc.b})
 		if status.Code(err) != tc.code {

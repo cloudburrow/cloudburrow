@@ -7316,7 +7316,11 @@ async function renderLogs(view) {
   // hides the logs it exists to show.
   // Or a folder or the organization (#1395), as Google's Logs Explorer
   // refines its scope to one: that parent's own Cloud Logging entries.
-  let scope = ["project", "parent"].includes(params.get("scope")) ? params.get("scope") : "all";
+  // Or through a Cloud Logging log view (#1410): a bucket and one of its
+  // views, of a project, folder, organization or billing account, read with
+  // ListLogEntries and tailed with TailLogEntries, so the view's filter and
+  // the bucket's retention apply.
+  let scope = ["project", "parent", "view"].includes(params.get("scope")) ? params.get("scope") : "all";
   // Followed from a failed operation in Activity. The server has always
   // supported the filter; the client simply never read it, so the one path
   // built to explain a failure landed on the unfiltered stream of the whole
@@ -7327,8 +7331,61 @@ async function renderLogs(view) {
     el("option", { value: "all", text: "All sources" }),
     el("option", { value: "project", text: project ? `Project ${project}` : "This project",
                    disabled: project ? null : "disabled" }),
-    el("option", { value: "parent", text: "A folder or organization" }));
+    el("option", { value: "parent", text: "A folder or organization" }),
+    el("option", { value: "view", text: "Through a log view" }));
   scopeSelect.value = scope;
+
+  // The view scope's pickers: whose buckets, which bucket, which view.
+  const initialView = params.get("view") || "";
+  const viewParentInput = el("input", { class: "filter", type: "search", id: "log-view-parent",
+    placeholder: "projects/…, folders/…, organizations/… or billingAccounts/…",
+    "aria-label": "Parent whose log buckets to read" });
+  viewParentInput.value = initialView.includes("/locations/")
+    ? initialView.slice(0, initialView.indexOf("/locations/"))
+    : (params.get("viewParent") || (project ? `projects/${project}` : ""));
+  const bucketSelect = el("select", { id: "log-bucket", "aria-label": "Log bucket" });
+  const viewSelect = el("select", { id: "log-view", "aria-label": "Log view" });
+  const viewNote = el("p", { class: "unavailable", id: "log-view-note" });
+  const viewControls = el("span", { class: "log-view-controls" }, viewParentInput, bucketSelect, viewSelect);
+  let viewBuckets = [];
+  const showViewControls = () => {
+    viewControls.hidden = scope !== "view";
+    viewNote.hidden = scope !== "view";
+  };
+  const drawViewNote = (error) => {
+    if (error) return setChildren(viewNote, el("span", { text: error }));
+    const b = viewBuckets.find((x) => x.name === bucketSelect.value);
+    const v = b && (b.views || []).find((x) => x.name === viewSelect.value);
+    if (!b) return setChildren(viewNote, el("span", { text: "No log bucket under this parent." }));
+    setChildren(viewNote, el("span", { text:
+      `Bucket ${b.name} keeps entries ${b.retentionDays} days; older entries are not returned. ` +
+      (v ? (v.filter ? `View filter: ${v.filter}` : "This view has no filter: every entry of the bucket.") : "") }));
+  };
+  const fillViews = (want) => {
+    const b = viewBuckets.find((x) => x.name === bucketSelect.value);
+    const views = b ? (b.views || []) : [];
+    setChildren(viewSelect, ...views.map((v) =>
+      el("option", { value: v.name, text: v.name.slice(v.name.lastIndexOf("/") + 1) })));
+    if (want && views.some((v) => v.name === want)) viewSelect.value = want;
+    drawViewNote();
+  };
+  const loadBuckets = async (want) => {
+    const parent = viewParentInput.value.trim();
+    viewBuckets = [];
+    setChildren(bucketSelect);
+    setChildren(viewSelect);
+    if (!parent) return drawViewNote("Name a parent: projects/…, folders/…, organizations/… or billingAccounts/….");
+    try {
+      viewBuckets = (await api(`/api/logs/buckets?${new URLSearchParams({ parent })}`)).buckets || [];
+    } catch (err) {
+      return drawViewNote(err.message);
+    }
+    setChildren(bucketSelect, ...viewBuckets.map((b) =>
+      el("option", { value: b.name, text: `${b.name.split("/")[3]}/${b.name.slice(b.name.lastIndexOf("/") + 1)}` })));
+    const wantBucket = want && want.includes("/views/") ? want.slice(0, want.indexOf("/views/")) : "";
+    if (wantBucket && viewBuckets.some((b) => b.name === wantBucket)) bucketSelect.value = wantBucket;
+    fillViews(want || (bucketSelect.value ? `${bucketSelect.value}/views/_AllLogs` : ""));
+  };
   const parentInput = el("input", { class: "filter", type: "search", id: "log-parent",
     placeholder: "folders/123 or organizations/…", "aria-label": "Folder or organization to scope to" });
   parentInput.value = params.get("parent") || "";
@@ -7436,6 +7493,7 @@ async function renderLogs(view) {
     const query = new URLSearchParams();
     if (scope === "project" && project) query.set("project", project);
     if (scope === "parent" && parentInput.value.trim()) query.set("parent", parentInput.value.trim());
+    if (scope === "view" && viewSelect.value) query.set("view", viewSelect.value);
     if (operation) query.set("operation", operation);
     if (severity.value) query.set("severity", severity.value);
     if (source.value) query.set("source", source.value);
@@ -7536,14 +7594,23 @@ async function renderLogs(view) {
     else url.searchParams.set("scope", next);
     if (next === "parent" && parentInput.value.trim()) url.searchParams.set("parent", parentInput.value.trim());
     else url.searchParams.delete("parent");
+    if (next === "view" && viewSelect.value) url.searchParams.set("view", viewSelect.value);
+    else url.searchParams.delete("view");
     history.replaceState({}, "", url);
     parentInput.hidden = next !== "parent";
+    showViewControls();
     connect();
     announce(next === "project" ? `Scoped to project ${project}`
       : next === "parent" ? `Scoped to ${parentInput.value.trim() || "a folder or organization"}` : "Showing all sources");
   };
-  scopeSelect.addEventListener("change", () => setScope(scopeSelect.value));
+  scopeSelect.addEventListener("change", async () => {
+    if (scopeSelect.value === "view" && !viewBuckets.length) await loadBuckets("");
+    setScope(scopeSelect.value);
+  });
   parentInput.addEventListener("change", () => setScope("parent"));
+  viewParentInput.addEventListener("change", async () => { await loadBuckets(""); setScope("view"); });
+  bucketSelect.addEventListener("change", () => { fillViews(`${bucketSelect.value}/views/_AllLogs`); setScope("view"); });
+  viewSelect.addEventListener("change", () => { drawViewNote(); setScope("view"); });
 
   // A `logging/<log>` entry of the toolbar's project is one Cloud Logging
   // holds, and its log can be deleted through DeleteLog. Nothing else can:
@@ -7669,6 +7736,10 @@ async function renderLogs(view) {
 
     const query = filterQuery();
     query.set("limit", "200");
+    if (scope === "view" && !viewSelect.value) {
+      setStatus("choose a log view", "warn");
+      return;
+    }
 
     setStatus(attempt ? `reconnecting (attempt ${attempt})` : "connecting…", "warn");
     drawTimeline();
@@ -7684,6 +7755,15 @@ async function renderLogs(view) {
       heard();
     });
     stream.addEventListener("keepalive", heard);
+    // A read the Logging API refused (a view filter it does not evaluate, a
+    // parent that does not exist): its own message, and no reconnect.
+    stream.addEventListener("failure", (e) => {
+      let msg = "the log view could not be read";
+      try { msg = JSON.parse(e.data).error || msg; } catch { /* shown as is */ }
+      stream.close();
+      setStatus("refused", "error");
+      drawViewNote(msg);
+    });
     stream.addEventListener("log", (e) => {
       heard();
       let entry;
@@ -7725,12 +7805,15 @@ async function renderLogs(view) {
           text: "Delete log is on the Cloud Logging entries (source logging/…) of the selected project. " +
                 "Pod logs and CloudBurrow's own request log are not held by the Logging API, so they cannot be deleted here." })
       : null,
-    el("div", { class: "actions" }, scopeSelect, parentInput, severity, source, resource, contains,
+    el("div", { class: "actions" }, scopeSelect, parentInput, viewControls, severity, source, resource, contains,
        pauseButton, reconnectButton, status),
+    viewNote,
     chips,
     timeline,
     el("div", { class: "table-wrap" }, table));
 
+  showViewControls();
+  if (scope === "view") await loadBuckets(initialView);
   connect();
   announce(operation ? `Logs Explorer opened, scoped to operation ${operation}`
                      : "Logs Explorer opened");

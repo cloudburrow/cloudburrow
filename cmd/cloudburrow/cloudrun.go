@@ -45,12 +45,19 @@ type runService struct {
 	// Secret Manager is not enabled, and the adapter then refuses a
 	// reference rather than dropping it.
 	secrets runadapter.SecretResolver
+	// buildSecretManager and buildKMS read a Cloud Build build's
+	// availableSecrets and secrets (#1407); nil when not enabled.
+	buildSecretManager runadapter.SecretAccessor
+	buildKMS           runadapter.KMSDecrypter
 	// env is what every revision and job task is given (#576), resolved
 	// per request: the adapter starts before the CLI-hosted services are
 	// published to the cluster, so their addresses are not known at Start.
 	env runadapter.Environment
 	// cloudSQL serves Cloud SQL volumes (#1346); nil refuses them.
 	cloudSQL runadapter.CloudSQL
+	// events serves functions' event triggers (#1414); nil without
+	// Pub/Sub, which refuses them.
+	events *eventsConfig
 	// adapter is the started adapter, which the metadata server asks for a
 	// workload's account (#1388); nil before Start.
 	adapter atomic.Pointer[runadapter.Server]
@@ -177,6 +184,7 @@ func (r *runService) Start(ctx context.Context) error {
 	}
 	// Arbitrary steps run only with --cloudbuild-host-steps, from loopback (#1382).
 	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg)).AllowHostSteps(r.cfg.CloudBuildHostSteps)
+	builds = builds.WithBuildSecrets(r.buildSecretManager, r.buildKMS)
 	register := func(g grpc.ServiceRegistrar) {
 		adapter.Register(g)
 		adapter.Revisions().Register(g)
@@ -211,6 +219,18 @@ func (r *runService) Start(ctx context.Context) error {
 	// build and a Cloud Run service, on the same port, with its source
 	// upload and download URLs.
 	functions := adapter.Functions(builds, func() string { return hostURL(r.server.Addr()) })
+	if r.events != nil {
+		ingress := ""
+		if r.cfg.Endpoints.Ingress != 0 {
+			host := r.cfg.BindAddress
+			if host == "" || host == "0.0.0.0" || host == "::" {
+				host = "127.0.0.1"
+			}
+			ingress = net.JoinHostPort(host, strconv.Itoa(r.cfg.Endpoints.Ingress))
+		}
+		functions.WithEvents(runadapter.Events{Transport: r.events.transport, Tokens: r.events.tokens,
+			PushBase: r.events.pushBase, Ingress: ingress})
+	}
 	// The Docker Registry HTTP API v2 at /v2/ (#1383), before the JSON
 	// APIs: no Google API's path starts with v2/ on this port but Cloud
 	// Run's own, /v2/projects/..., which the registry passes on.
