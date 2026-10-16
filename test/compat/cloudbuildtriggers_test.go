@@ -74,7 +74,7 @@ func TestCloudBuildTriggersAndWorkerPools(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}
-	ctx, cancel := context.WithTimeout(h.Context(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	t.Cleanup(cancel)
 	cb := cloudBuildClient(ctx, t, h)
 	parent := runParent(h)
@@ -294,7 +294,7 @@ func TestGcloudBuildsTriggersAndWorkerPools(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}
-	ctx, cancel := context.WithTimeout(h.Context(), 6*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	t.Cleanup(cancel)
 	g := newGcloudSession(t, h)
 	cb := cloudBuildClient(ctx, t, h)
