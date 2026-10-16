@@ -153,13 +153,21 @@ func TestCreateOrReplaceExistingTable(t *testing.T) {
 		}
 		log := strings.Join(emu.log, "\n")
 		scratch := strings.SplitN(strings.SplitN(log, resultsDataset+"._cloudburrow_replace_", 2)[1], "`", 2)[0]
+		// The table's change history is saved, to be carried into the new
+		// one (#1466): this emulator has none of the new table to carry it to.
+		history := strings.SplitN(strings.SplitN(log, "QUERY CREATE TABLE `"+resultsDataset+"._cloudburrow_replace_", 2)[1], "`", 2)[0]
 		want := strings.Join([]string{
 			"GET " + tablesBase + "t", // is it a snapshot (#1002)
 			"QUERY SELECT * FROM (\nSELECT * FROM ds.t WHERE a > 1\n) LIMIT 0",
 			"GET " + tablesBase + "t",
 			"QUERY CREATE OR REPLACE TABLE `" + resultsDataset + "._cloudburrow_replace_" + scratch + "` AS SELECT * FROM ds.t WHERE a > 1",
+			"GET " + tablesBase + "t",
+			"QUERY CREATE TABLE `" + resultsDataset + "._cloudburrow_replace_" + history + "` AS SELECT * FROM (SELECT *, " + carriedColumns +
+				" FROM `p.ds.t" + changeTableSuffix + "`)",
 			"DELETE " + tablesBase + "t",
 			"QUERY CREATE OR REPLACE TABLE ds.t AS SELECT * FROM `" + resultsDataset + "._cloudburrow_replace_" + scratch + "`",
+			"GET " + tablesBase + "t",
+			"QUERY DROP TABLE IF EXISTS `" + resultsDataset + "._cloudburrow_replace_" + history + "`",
 			"DELETE " + base + "/datasets/" + resultsDataset + "/tables/_cloudburrow_replace_" + scratch,
 		}, "\n")
 		if log != want {

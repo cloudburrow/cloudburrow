@@ -29,9 +29,11 @@ import (
 //
 // Where the change table cannot answer, the read stays 501, each with its
 // reason:
-//   - a table whose change table started after T: an ALTER TABLE that
-//     rebuilds the table (ADD COLUMN, for one), or CREATE OR REPLACE
-//     TABLE, starts it over (#1466), so the rows before are not there;
+//   - a table whose change table started after T (a table made before
+//     googlesqlite patch 0036); an ALTER TABLE that rebuilds the table and
+//     CREATE OR REPLACE TABLE carry the history on (#1466,
+//     changehistorycarry.go), the rows a rebuild copied marked CARRY and
+//     the old ones ended by an END, which this read takes as a delete;
 //   - a change table made before patch 0041, which has no row identities;
 //   - an ingestion-time partitioned table: the change table keeps no
 //     _PARTITIONTIME;
@@ -116,6 +118,6 @@ func (f front) historySubquery(r *http.Request, dataset, table string, m partiti
 	text := fmt.Sprintf("(SELECT %s FROM (SELECT %s, _CHANGE_TYPE AS _cloudburrow_change, "+
 		"ROW_NUMBER() OVER (PARTITION BY googlesqlite_change_rowid ORDER BY rowid DESC) AS _cloudburrow_last "+
 		"FROM %s WHERE _CHANGE_TYPE != 'START' AND googlesqlite_change_micros <= %d AND (%s) IS NOT NULL) "+
-		"WHERE _cloudburrow_last = 1 AND _cloudburrow_change != 'DELETE')", list, list, changes, past, expr)
+		"WHERE _cloudburrow_last = 1 AND _cloudburrow_change NOT IN ('DELETE', '"+changeEnd+"'))", list, list, changes, past, expr)
 	return text, 0, ""
 }
