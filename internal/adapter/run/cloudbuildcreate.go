@@ -753,10 +753,9 @@ type buildRun struct {
 	log          bytes.Buffer
 	built        map[string]string // tag -> local image, under mu
 	// secretDefs are the build's secrets (#1407), read at build time into
-	// secrets, whose values mask hides in the log; under mu.
+	// secrets, under mu. The log does not mask them, as Google's does not.
 	secretDefs map[string]buildSecret
 	secrets    map[string]string
-	mask       *strings.Replacer
 }
 
 // mergeNames is a then b, without repeats.
@@ -789,7 +788,7 @@ func (w *stepWriter) Write(p []byte) (int, error) {
 			break
 		}
 		w.r.log.WriteString(w.prefix)
-		w.r.log.WriteString(w.r.masked(string(w.pending[:i+1])))
+		w.r.log.Write(w.pending[:i+1])
 		w.pending = w.pending[i+1:]
 	}
 	return len(p), nil
@@ -803,7 +802,7 @@ func (w *stepWriter) flush() {
 
 func (r *buildRun) logf(format string, a ...any) {
 	r.mu.Lock()
-	r.log.WriteString(r.masked(fmt.Sprintf(format, a...)))
+	fmt.Fprintf(&r.log, format, a...)
 	r.mu.Unlock()
 }
 

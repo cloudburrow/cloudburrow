@@ -32,7 +32,7 @@ func (fakeKMS) Decrypt(_ context.Context, key string, ct []byte) ([]byte, error)
 }
 
 // echoBuilder is a stepBuilder whose steps print their secrets, so the
-// test sees the log mask them.
+// test sees the log show them as written, as Google's does.
 type echoBuilder struct{ stepBuilder }
 
 func (b *echoBuilder) OpenWorkspace(ctx context.Context, id string, archive io.Reader) (BuildWorkspace, error) {
@@ -53,7 +53,7 @@ func (b *echoBuilder) RunStep(ctx context.Context, spec StepSpec) error {
 
 // TestCreateBuildSecretsScriptAndAllowFailure (#1407): availableSecrets
 // are read at build time and given to the steps whose secretEnv names
-// them, masked in the log; a script step runs its file by its #! line or
+// them, and the log shows what a step prints of them, unmasked as on Google; a script step runs its file by its #! line or
 // /bin/sh; allowFailure and allowExitCodes leave the build SUCCESS with the
 // step FAILURE and its exit code.
 func TestCreateBuildSecretsScriptAndAllowFailure(t *testing.T) {
@@ -110,13 +110,14 @@ func TestCreateBuildSecretsScriptAndAllowFailure(t *testing.T) {
 		t.Errorf("#! script step, automap off = %+v", sp)
 	}
 	log, _ := BuildLog(res.GetName())
-	if strings.Contains(log, "s3cr3t-value") || strings.Contains(log, "dec(ct)") || !strings.Contains(log, "TOKEN="+secretMask) {
-		t.Errorf("the log does not mask the secrets:\n%s", log)
+	// Cloud Build does not mask secrets: the log holds what the step printed.
+	if !strings.Contains(log, "TOKEN=s3cr3t-value\n") || !strings.Contains(log, "INLINE=dec(ct)\n") || strings.Contains(log, "********") {
+		t.Errorf("the log does not show the step's output as written:\n%s", log)
 	}
 	logs.mu.Lock()
 	for name, data := range logs.logs {
-		if strings.Contains(data, "s3cr3t-value") {
-			t.Errorf("the log object %s holds the secret", name)
+		if !strings.Contains(data, "TOKEN=s3cr3t-value") {
+			t.Errorf("the log object %s lacks the step's output", name)
 		}
 	}
 	logs.mu.Unlock()
@@ -168,15 +169,5 @@ func TestCreateBuildSecretsScriptAndAllowFailure(t *testing.T) {
 		Steps: []*cbpb.BuildStep{{Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", "x", "."}, SecretEnv: []string{"T"}}}}})
 	if status.Code(err) != codes.Unimplemented {
 		t.Errorf("secretEnv on a docker build step = %v; want UNIMPLEMENTED", err)
-	}
-}
-
-func TestSecretLines(t *testing.T) {
-	got := secretLines("line1\nline2\n")
-	if strings.Join(got, "|") != "line1\nline2|line1|line2" {
-		t.Errorf("secretLines = %q", got)
-	}
-	if secretLines("\n") != nil {
-		t.Errorf("an empty secret masks something")
 	}
 }

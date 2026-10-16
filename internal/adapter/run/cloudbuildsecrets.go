@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"strings"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -16,7 +15,9 @@ import (
 // entries and the legacy secrets field decrypted with this instance's Cloud
 // KMS, at build time. A step's secretEnv, and options.secretEnv for every
 // arbitrary step, names which of them the step gets as environment
-// variables. Each value is masked in the build log CloudBurrow writes.
+// variables. As on Google, Cloud Build does not mask a secret's value in
+// the build log: a step that prints one shows it (the user's decision,
+// 2026-10-16).
 
 // SecretAccessor reads a Secret Manager secret version's payload, by its
 // resource name. The CLI wires this instance's Secret Manager.
@@ -37,9 +38,6 @@ func (b *BuildsServer) WithBuildSecrets(sm SecretAccessor, kms KMSDecrypter) *Bu
 	b.secretManager, b.kms = sm, kms
 	return b
 }
-
-// secretMask replaces a secret's value in the build log.
-const secretMask = "********"
 
 var (
 	secretVersionRE = regexp.MustCompile(`^projects/[^/]+/(locations/[^/]+/)?secrets/[^/]+/versions/[^/]+$`)
@@ -155,7 +153,6 @@ func (r *buildRun) resolveSecrets(ctx context.Context) error {
 	}
 	sort.Strings(names)
 	values := map[string]string{}
-	var masks []string
 	for _, n := range names {
 		s := r.secretDefs[n]
 		var v []byte
@@ -172,45 +169,9 @@ func (r *buildRun) resolveSecrets(ctx context.Context) error {
 			}
 		}
 		values[n] = string(v)
-		masks = append(masks, secretLines(string(v))...)
-	}
-	// Longest first, so a secret that contains another is masked whole.
-	sort.Slice(masks, func(i, j int) bool { return len(masks[i]) > len(masks[j]) })
-	pairs := make([]string, 0, 2*len(masks))
-	for _, m := range masks {
-		pairs = append(pairs, m, secretMask)
 	}
 	r.mu.Lock()
 	r.secrets = values
-	if len(pairs) > 0 {
-		r.mask = strings.NewReplacer(pairs...)
-	}
 	r.mu.Unlock()
 	return nil
-}
-
-// secretLines is what of a secret value the log masks: the value, and each
-// of its lines, since the log is written a line at a time.
-func secretLines(v string) []string {
-	v = strings.TrimRight(v, "\r\n")
-	if v == "" {
-		return nil
-	}
-	out := []string{v}
-	if strings.Contains(v, "\n") {
-		for _, l := range strings.Split(v, "\n") {
-			if l = strings.TrimRight(l, "\r"); l != "" {
-				out = append(out, l)
-			}
-		}
-	}
-	return out
-}
-
-// masked is s with every secret value masked; r.mu is held.
-func (r *buildRun) masked(s string) string {
-	if r.mask == nil {
-		return s
-	}
-	return r.mask.Replace(s)
 }

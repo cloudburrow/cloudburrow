@@ -74,8 +74,10 @@ func buildLogText(ctx context.Context, t *testing.T, h *Harness, bucket, prefix,
 // --cloudbuild-host-steps:
 //   - availableSecrets.secretManager reads a version from the instance's
 //     Secret Manager at build time, and a step whose secretEnv names it gets
-//     it as a variable: the step prints its SHA-256, which the log carries,
-//     and the value itself, which the log masks; availableSecrets.inline
+//     it as a variable: the step prints its SHA-256 and the value itself,
+//     and the log carries both as the step wrote them, since Cloud Build
+//     does not mask secrets (the test compares hashes, so it prints no
+//     raw secret); availableSecrets.inline
 //     decrypts a ciphertext with the instance's Cloud KMS (when it runs);
 //   - a script step runs through /bin/sh, and one with a #! line through
 //     that interpreter; automapSubstitutions gives it the substitutions;
@@ -160,7 +162,8 @@ func TestCloudBuildSecretsScriptAndAllowFailure(t *testing.T) {
 		t.Errorf("GetBuild = %v, %v", got, err)
 	}
 	logText := buildLogText(ctx, t, h, bucket, "logs/", b.GetId())
-	want := []string{`Step #0 - "secret": ` + hex.EncodeToString(sum[:]), `Step #0 - "secret": raw:********`,
+	checkRawSecretLine(t, logText, `Step #0 - "secret": raw:`, value)
+	want := []string{`Step #0 - "secret": ` + hex.EncodeToString(sum[:]),
 		`Step #1 - "sh": script runs in /workspace`, `Step #2 - "shebang": shebang /builder/script`, "DONE"}
 	if avail.Inline != nil {
 		isum := sha256.Sum256([]byte("inline-" + value))
@@ -168,11 +171,8 @@ func TestCloudBuildSecretsScriptAndAllowFailure(t *testing.T) {
 	}
 	for _, w := range want {
 		if !strings.Contains(logText, w) {
-			t.Errorf("the log lacks %q:\n%s", w, logText)
+			t.Errorf("the log lacks %q:\n%s", w, redactSecret(logText, value))
 		}
-	}
-	if strings.Contains(logText, value) {
-		t.Errorf("the log holds the secret's value:\n%s", logText)
 	}
 
 	if _, err := cb.CreateBuild(ctx, &cbpb.CreateBuildRequest{ProjectId: h.Project(), Build: &cbpb.Build{
@@ -183,6 +183,29 @@ func TestCloudBuildSecretsScriptAndAllowFailure(t *testing.T) {
 		Steps: []*cbpb.BuildStep{{Name: img, Args: []string{"true"}, SecretEnv: []string{"UNDEFINED"}}}}}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("an undefined secretEnv = %v; want INVALID_ARGUMENT", err)
 	}
+}
+
+// checkRawSecretLine checks that the log holds the line a step wrote as
+// prefix followed by the secret's value, unmasked, as Google's Cloud Build
+// log does. It compares SHA-256 hashes, so a failure prints no secret.
+func checkRawSecretLine(t *testing.T, logText, prefix, value string) {
+	t.Helper()
+	want := sha256.Sum256([]byte(value))
+	for _, l := range strings.Split(logText, "\n") {
+		if rest, ok := strings.CutPrefix(l, prefix); ok {
+			if got := sha256.Sum256([]byte(rest)); got != want {
+				t.Errorf("the log's %q line is not the value the step printed: its SHA-256 is %x, want %x", prefix, got, want)
+			}
+			return
+		}
+	}
+	t.Errorf("the log has no %q line:\n%s", prefix, redactSecret(logText, value))
+}
+
+// redactSecret is a log with a secret's value replaced, for a test's
+// failure message.
+func redactSecret(logText, value string) string {
+	return strings.ReplaceAll(logText, value, "<the secret's value>")
 }
 
 // runShardEndpointIfSet is runShardEndpoint's address, or "" when neither
@@ -201,7 +224,8 @@ func runShardEndpointIfSet(h *Harness, own, shared string) string {
 // secretEnv names it, a script step and an allowFailure step, through the
 // configuration `cloudburrow gcloud-setup` writes, egress blocked. The
 // build is SUCCESS, the allowFailure step FAILURE, and its log shows the
-// secret's hash and the script's output, the value masked. The
+// secret's hash, the value the step echoed (unmasked, as on Google) and the
+// script's output. The
 // build names a logsBucket: the default one, *.cloudbuild-logs.
 // googleusercontent.com, is a name the instance's Cloud Storage refuses.
 func TestGcloudBuildsSecretsAndScript(t *testing.T) {
@@ -251,12 +275,10 @@ func TestGcloudBuildsSecretsAndScript(t *testing.T) {
 	// `gcloud builds log` reads storage.googleapis.com itself, with no
 	// endpoint override, so the log is read with the official client.
 	logText := buildLogText(ctx, t, h, g.project+"_cloudbuild", "logs/", id)
-	for _, w := range []string{"Step #0: " + hex.EncodeToString(sum[:]), "Step #0: raw:********", "Step #1: script sees gcloud"} {
+	checkRawSecretLine(t, logText, "Step #0: raw:", value)
+	for _, w := range []string{"Step #0: " + hex.EncodeToString(sum[:]), "Step #1: script sees gcloud"} {
 		if !strings.Contains(logText, w) {
-			t.Errorf("the log lacks %q:\n%s", w, logText)
+			t.Errorf("the log lacks %q:\n%s", w, redactSecret(logText, value))
 		}
-	}
-	if strings.Contains(logText, value) {
-		t.Errorf("the log holds the secret's value:\n%s", logText)
 	}
 }

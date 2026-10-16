@@ -127,9 +127,10 @@ to rerun. Deploy again to rebuild it.
   `versionName` or `kmsKeyName` is `INVALID_ARGUMENT`; a secret the build names on an instance
   without Secret Manager (or Cloud KMS) is `FAILED_PRECONDITION`, naming the service to enable;
   one that cannot be read fails the build before its steps run, naming the version.
-- Google's documentation does not say that Cloud Build masks secrets in build logs. CloudBurrow
-  masks them: every secret's value, and each line of a multi-line one, is written `********` in
-  the log it writes (the logs bucket's `log-{id}.txt` and the console). A step's secrets are
+- Cloud Build does not mask secrets in build logs: Google's documentation says nothing of it, so
+  a step that prints a secret shows it in the log, on Google and here (the logs bucket's
+  `log-{id}.txt` and the console's log view). Matching Google here is the user's decision
+  (2026-10-16); keep secrets out of a step's output. A step's secrets are
   passed to `docker` through its environment as `-e NAME`, so no value is on a command line; they
   are in the step container's environment while it runs, as on Google's worker.
 - A step's `script` is written to `/builder/script`, executable, and run by its `#!` line's
