@@ -4509,13 +4509,15 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudstorage_test.go:163 TestGcloudStorageParallelCompositeUpload",
-          "test/compat/storage_test.go:267 TestStorageCompose"
+          "test/compat/storage_test.go:267 TestStorageCompose",
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts"
         ]
       },
       {
         "method": "storage.objects.copy",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagejsonapi_test.go:152 TestStorageObjectsCopy"
         ]
       },
@@ -4560,6 +4562,7 @@
         "tests": [
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
@@ -4579,6 +4582,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:136 TestStorageListWithPrefix",
+          "test/compat/storagecontexts_test.go:223 TestGcloudStorageObjectContexts",
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:170 TestStorageVersioningPersistentMode",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
@@ -4606,6 +4611,8 @@
           "test/compat/gcloudstorage_test.go:238 TestGcloudStorageClearLabels",
           "test/compat/remaining_test.go:163 TestObjectMetadataUpdate",
           "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
+          "test/compat/storagecontexts_test.go:223 TestGcloudStorageObjectContexts",
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -4625,6 +4632,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/remaining_test.go:70 TestObjectCopyAndRewrite",
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
       },
@@ -4756,6 +4764,7 @@
         "method": "google.storage.v2.Storage/ComposeObject",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
           "test/compat/storagegrpccompose_test.go:20 TestStorageGRPCComposeDeletesSources",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
@@ -4802,6 +4811,7 @@
         "method": "google.storage.v2.Storage/GetObject",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
@@ -4818,6 +4828,7 @@
         "method": "google.storage.v2.Storage/ListObjects",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
         ]
       },
@@ -4859,6 +4870,7 @@
         "method": "google.storage.v2.Storage/RewriteObject",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
@@ -4896,6 +4908,7 @@
         "method": "google.storage.v2.Storage/UpdateObject",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
         ]
@@ -4904,6 +4917,7 @@
         "method": "google.storage.v2.Storage/WriteObject",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
       }

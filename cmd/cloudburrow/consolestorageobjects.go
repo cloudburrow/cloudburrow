@@ -64,12 +64,25 @@ type objectJSON struct {
 	StorageClass       string            `json:"storageClass"`
 	Updated            string            `json:"updated"`
 	Metadata           map[string]string `json:"metadata"`
+	Contexts           *struct {
+		Custom map[string]struct {
+			Value string `json:"value"`
+		} `json:"custom"`
+	} `json:"contexts"`
 }
 
 func (o objectJSON) meta() objectMeta {
+	var contexts map[string]string
+	if o.Contexts != nil {
+		contexts = map[string]string{}
+		for k, v := range o.Contexts.Custom {
+			contexts[k] = v.Value
+		}
+	}
 	return objectMeta{
 		Name: o.Name, ContentType: o.ContentType, CacheControl: o.CacheControl,
 		ContentDisposition: o.ContentDisposition, StorageClass: o.StorageClass, Metadata: o.Metadata,
+		Contexts: contexts,
 	}
 }
 
@@ -77,14 +90,27 @@ func (o objectJSON) meta() objectMeta {
 // row or from the object itself.
 type objectMeta struct {
 	Name, ContentType, CacheControl, ContentDisposition, StorageClass string
-	Metadata                                                          map[string]string
+	Metadata, Contexts                                                map[string]string
 }
 
 func attrsMeta(a *storage.ObjectAttrs) objectMeta {
 	return objectMeta{
 		Name: a.Name, ContentType: a.ContentType, CacheControl: a.CacheControl,
 		ContentDisposition: a.ContentDisposition, StorageClass: a.StorageClass, Metadata: a.Metadata,
+		Contexts: contextValues(a.Contexts),
 	}
+}
+
+// contextValues are an object's contexts.custom as key=value (#1345).
+func contextValues(c *storage.ObjectContexts) map[string]string {
+	if c == nil || len(c.Custom) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(c.Custom))
+	for k, v := range c.Custom {
+		out[k] = v.Value
+	}
+	return out
 }
 
 // bucketNamePattern is the Create form's bucket name rule.
@@ -144,6 +170,8 @@ func objectMetadataFields(o objectMeta) []console.Field {
 			Help: "Optional, such as attachment; filename=report.pdf."},
 		{Name: "metadata", Label: "Custom metadata", Type: "map", Default: console.FormatMap(o.Metadata),
 			Help: "One key=value per line. A key removed here is removed from the object."},
+		{Name: "contexts", Label: "Object contexts", Type: "map", Default: console.FormatMap(o.Contexts),
+			Help: "One key=value per line; keys and values of 1 to 256 characters, starting with a letter or digit. A key removed here is removed from the object."},
 	}
 }
 
@@ -355,9 +383,16 @@ func (p storageProvider) editObjectMetadata(ctx context.Context, bucket, name st
 		return fmt.Errorf("custom metadata: %w", err)
 	}
 	objURL := p.objectURL(bucket, name)
+	wantContexts, err := console.ParseMap(values["contexts"])
+	if err != nil {
+		return fmt.Errorf("object contexts: %w", err)
+	}
 	var cur struct {
 		Metageneration string            `json:"metageneration"`
 		Metadata       map[string]string `json:"metadata"`
+		Contexts       struct {
+			Custom map[string]any `json:"custom"`
+		} `json:"contexts"`
 	}
 	if err := getJSON(ctx, objURL, &cur); err != nil {
 		return fmt.Errorf("cannot read %s/%s: %w", bucket, name, err)
@@ -386,6 +421,17 @@ func (p storageProvider) editObjectMetadata(ctx context.Context, bucket, name st
 	}
 	if len(meta) > 0 {
 		body["metadata"] = meta
+	}
+	// Object contexts the same way: a key the form drops is sent as null.
+	custom := map[string]any{}
+	for k := range cur.Contexts.Custom {
+		custom[k] = nil
+	}
+	for k, v := range wantContexts {
+		custom[k] = map[string]any{"value": v}
+	}
+	if len(custom) > 0 {
+		body["contexts"] = map[string]any{"custom": custom}
 	}
 	// Against the metageneration just read, so an edit made meanwhile by
 	// something else is refused rather than overwritten.
@@ -487,6 +533,16 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 	if len(custom) == 0 {
 		custom = []console.Property{{Label: "Keys", Value: "None"}}
 	}
+	contexts := make([]console.Property, 0)
+	if a.Contexts != nil {
+		for k, v := range a.Contexts.Custom {
+			contexts = append(contexts, console.Property{Label: k, Value: v.Value + " (updated " + stamp(v.UpdateTime) + ")"})
+		}
+	}
+	sort.Slice(contexts, func(i, j int) bool { return contexts[i].Label < contexts[j].Label })
+	if len(contexts) == 0 {
+		contexts = []console.Property{{Label: "Keys", Value: "None"}}
+	}
 	components := ""
 	if a.ComponentCount > 0 {
 		components = strconv.FormatInt(a.ComponentCount, 10)
@@ -516,6 +572,7 @@ func (p storageProvider) objectDetail(ctx context.Context, path []string) (conso
 			"CRC32C", base64.StdEncoding.EncodeToString(crc[:]),
 		)},
 		{Heading: "Custom metadata", Properties: custom},
+		{Heading: "Object contexts", Properties: contexts},
 		{Heading: "Protection", Properties: props(
 			"Event-based hold", onOff(a.EventBasedHold),
 			"Temporary hold", onOff(a.TemporaryHold),

@@ -204,11 +204,20 @@ func TestStorageObjectActionsThroughTheAPI(t *testing.T) {
 	// Edit metadata: replaces the custom keys and the three headers.
 	before, _ := c.Bucket("ops").Object("a.txt").Attrs(ctx)
 	meta := map[string]string{"contentType": "application/json", "cacheControl": "no-cache",
-		"contentDisposition": "attachment", "metadata": `{"n":"1"}`}
+		"contentDisposition": "attachment", "metadata": `{"n":"1"}`, "contexts": `{"team":"red","tier":"gold"}`}
 	if err := p.ActAt(ctx, "p", path, "editmetadata", meta); err != nil {
 		t.Fatalf("edit metadata: %v", err)
 	}
+	// Object contexts (#1345): a key the form drops is removed.
+	meta["contexts"] = `{"team":"blue"}`
+	if err := p.ActAt(ctx, "p", path, "editmetadata", meta); err != nil {
+		t.Fatalf("edit contexts: %v", err)
+	}
 	after, _ := c.Bucket("ops").Object("a.txt").Attrs(ctx)
+	if got := contextValues(after.Contexts); len(got) != 1 || got["team"] != "blue" {
+		t.Errorf("after the contexts edit Attrs reads contexts %v; want team=blue", got)
+	}
+	before.Metageneration++ // the second edit
 	if after.ContentType != "application/json" || after.CacheControl != "no-cache" || after.ContentDisposition != "attachment" ||
 		len(after.Metadata) != 1 || after.Metadata["n"] != "1" {
 		t.Errorf("after the edit Attrs reads %+v", after)
