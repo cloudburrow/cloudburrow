@@ -37,7 +37,8 @@ func advanceBigQueryClock(t *testing.T, h *Harness, d time.Duration) {
 // last 30 minutes. All other rows in the table remain modifiable". On a
 // table that is not partitioned, which has no streaming buffer mark, a
 // streamed row is refused for 30 minutes, the table's other rows are not,
-// and after 30 minutes (the front's clock advanced) the row is modifiable.
+// and after 30 minutes (the front's clock advanced) the row is modifiable;
+// so is a row streamed to a table a CREATE TABLE statement made.
 // Measured first: DML changed a streamed row of such a table at once.
 //
 // covers: bigquery.tabledata.insertAll, bigquery.jobs.insert, bigquery.jobs.query
@@ -86,7 +87,33 @@ func TestBigQueryDMLOfRecentlyStreamedRows(t *testing.T) {
 	if err := exec("UPDATE " + p + " SET n = 10 WHERE n = 1"); err != nil {
 		t.Errorf("UPDATE 31 minutes after the stream: %v", err)
 	}
-	if got := queryRows(t, ctx, c, "", "", "SELECT n FROM "+p+" ORDER BY n"); strings.Join(got, ",") != "2,5,10" {
-		t.Errorf("rows %v, want 2, 5, 10", got)
+	if got := queryRows(t, ctx, c, "", "", "SELECT n FROM "+p+" ORDER BY n"); strings.Join(got, ",") != "10,2,5" {
+		// queryRows sorts the rows as strings.
+		t.Errorf("rows %v, want 10, 2, 5", got)
+	}
+
+	// A table made by a CREATE TABLE statement holds its streamed rows
+	// too, and leaves the stream time out of its schema.
+	if err := exec("CREATE TABLE `" + ds.DatasetID + ".sdddl` (n INT64)"); err != nil {
+		t.Fatal(err)
+	}
+	ddl := ds.Table("sdddl")
+	if err := ddl.Inserter().Put(ctx, []*row{{N: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	q := "`" + ds.DatasetID + ".sdddl`"
+	if err := exec("DELETE FROM " + q + " WHERE n = 1"); err == nil || !strings.Contains(err.Error(), "streaming buffer") {
+		t.Errorf("DELETE of a row streamed to a CREATE TABLE table: %v, want the streaming buffer's error", err)
+	}
+	if md, err := ddl.Metadata(ctx); err != nil || len(md.Schema) != 1 || md.Schema[0].Name != "n" {
+		t.Errorf("CREATE TABLE table's schema: %v (%v), want n alone", md, err)
+	}
+	if got := queryRows(t, ctx, c, "", "", "SELECT column_name FROM `"+ds.DatasetID+
+		"`.INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'sdddl'"); strings.Join(got, ",") != "n" {
+		t.Errorf("INFORMATION_SCHEMA.COLUMNS %v, want n alone", got)
+	}
+	advanceBigQueryClock(t, h, 31*time.Minute)
+	if err := exec("DELETE FROM " + q + " WHERE n = 1"); err != nil {
+		t.Errorf("DELETE 31 minutes after the stream: %v", err)
 	}
 }

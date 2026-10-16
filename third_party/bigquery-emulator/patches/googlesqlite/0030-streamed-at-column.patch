@@ -9,9 +9,13 @@ That needs each streamed row's time, on any table, partitioned or not.
 
 The patch makes a table column named _PARTITION_STREAMED a pseudo-column,
 as patch 0028 makes _PARTITIONTIME one: SELECT * leaves it out, an INSERT
-may give it and a query names it. bigquery-emulator patch 0018 gives every
+may give it and a query names it, and INFORMATION_SCHEMA.COLUMNS leaves it
+out. bigquery-emulator patch 0018 gives every
 table made by tables.insert the column, TIMESTAMP, and CloudBurrow's front
-sets it to the time of a streamed row. BigQuery reserves the column-name
+sets it to the time of a streamed row; a table made by a CREATE TABLE
+statement with a column list (not a temporary one, nor IF NOT EXISTS,
+which may name a table made without it) gets the column too,
+so the front holds a row streamed to it as well. BigQuery reserves the column-name
 prefix _PARTITION, so no column of a table can be named so.
 streamed_at_column_test.go fails without the patch and passes with it.
 
@@ -41,9 +45,73 @@ Authors.
  // streamingBufferColumn is the pseudo-column a table partitioned by a
  // column or an integer range gets: TRUE on a row in the table's
  // streaming buffer, NULL on any other (CloudBurrow patch,
+--- a/internal/spec.go
++++ b/internal/spec.go
+@@ -757,16 +757,40 @@
+ 
+ func newTableSpecWithQuery(ctx context.Context, namePath *NamePath, query string, stmt *googlesql.ResolvedCreateTableStmt) *TableSpec {
+ 	now := time.Now()
++	isTemp := resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp
++	// CREATE TABLE IF NOT EXISTS may name a table that exists without the
++	// column (made by CREATE TABLE ... AS SELECT), which SQLite then
++	// leaves as it is: the catalog must not have it either.
++	ifNotExists := m1(stmt.CreateMode()) == googlesql.ResolvedCreateStatementEnums_CreateModeCreateIfNotExists
+ 	return &TableSpec{
+-		IsTemp:     resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
++		IsTemp:     isTemp,
+ 		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
+-		Columns:    newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
++		Columns:    withStreamedAtColumn(newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())), isTemp || ifNotExists),
+ 		PrimaryKey: newPrimaryKey(m1(stmt.PrimaryKey())),
+ 		CreateMode: m1(stmt.CreateMode()),
+ 		Options:    newTableOptionsFromResolved(m1(stmt.OptionList())),
+ 		UpdatedAt:  now,
+ 		CreatedAt:  now,
++	}
++}
++
++// withStreamedAtColumn gives a table made by a CREATE TABLE statement with
++// a column list the pseudo-column of the time a row was streamed, as
++// bigquery-emulator patch 0018 gives one made by tables.insert, unless
++// its columns have it already (that patch's own CREATE TABLE), or skip:
++// a temporary table, which tabledata.insertAll cannot stream to, or a
++// CREATE TABLE IF NOT EXISTS (above) (CloudBurrow patch,
++// cloudburrow/cloudburrow#1370).
++func withStreamedAtColumn(columns []*ColumnSpec, skip bool) []*ColumnSpec {
++	if skip {
++		return columns
+ 	}
++	for _, c := range columns {
++		if strings.EqualFold(c.Name, streamedAtColumn) {
++			return columns
++		}
++	}
++	return append(columns, &ColumnSpec{Name: streamedAtColumn, Type: &Type{Kind: int(googlesql.TypeKindTypeTimestamp)}})
+ }
+ 
+ // normaliseStringLiteralQuotes rewrites a double-quoted STRING
+--- a/internal/info_schema.go
++++ b/internal/info_schema.go
+@@ -226,7 +226,15 @@
+ 			continue
+ 		}
+ 		tableName := t.NamePath[len(t.NamePath)-1]
+-		for i, col := range t.Columns {
++		i := -1
++		for _, col := range t.Columns {
++			if strings.EqualFold(col.Name, streamedAtColumn) {
++				// CloudBurrow patch (cloudburrow/cloudburrow#1370):
++				// the time a row was streamed is CloudBurrow's, not a
++				// column of BigQuery's.
++				continue
++			}
++			i++
+ 			isNullable := "YES"
+ 			if col.IsNotNull {
+ 				isNullable = "NO"
 --- /dev/null
 +++ b/streamed_at_column_test.go
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,61 @@
 +package googlesqlite_test
 +
 +import (
@@ -87,5 +155,21 @@ Authors.
 +	var id int64
 +	if err := db.QueryRowContext(ctx, `SELECT id FROM plain WHERE _PARTITION_STREAMED >= TIMESTAMP '2025-12-31 23:30:00+00'`).Scan(&id); err != nil || id != 2 {
 +		t.Errorf("streamed row: id %d (%v), want 2", id, err)
++	}
++	// A CREATE TABLE without the column gets it too, and SELECT * still
++	// leaves it out.
++	exec("CREATE TABLE ddl (id INT64)")
++	exec(`INSERT INTO ddl (id, _PARTITION_STREAMED) VALUES (3, TIMESTAMP '2026-01-01 00:00:00+00')`)
++	rows, err = db.QueryContext(ctx, `SELECT * FROM ddl`)
++	if err != nil {
++		t.Fatal(err)
++	}
++	cols, _ = rows.Columns()
++	rows.Close()
++	if strings.Join(cols, ",") != "id" {
++		t.Errorf("CREATE TABLE: SELECT * columns = %v, want [id]", cols)
++	}
++	if err := db.QueryRowContext(ctx, `SELECT id FROM ddl WHERE _PARTITION_STREAMED IS NOT NULL`).Scan(&id); err != nil || id != 3 {
++		t.Errorf("CREATE TABLE streamed row: id %d (%v), want 3", id, err)
 +	}
 +}
