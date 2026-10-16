@@ -59,6 +59,13 @@ type BackupRun struct {
 	// does not show it and deleting the instance does not delete it, as a
 	// Backup and DR backup outlives its instance in its vault.
 	BackupDR bool `json:"backupdr,omitempty"`
+	// ExpiryTime is when the backup is deleted (the Backups API's
+	// expiryTime, or ttlDays from when it was set), on the retention clock.
+	ExpiryTime string `json:"expiryTime,omitempty"`
+	TTLDays    int64  `json:"ttlDays,omitempty"`
+	// InstanceDeletionTime is set on a FINAL backup when its instance is
+	// deleted: a final backup outlives its instance.
+	InstanceDeletionTime string `json:"instanceDeletionTime,omitempty"`
 }
 
 type backupStore struct {
@@ -416,8 +423,13 @@ func (s *Server) removeInstanceBackups(project, instance string) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, r := range b.sortedLocked(project, instance) {
 		if r.BackupDR {
+			continue
+		}
+		if r.Type == "FINAL" {
+			r.InstanceDeletionTime = now
 			continue
 		}
 		delete(b.runs, r.ID)
@@ -459,11 +471,18 @@ func (s *Server) restoreBackup(r *http.Request, base, project string, e Engine) 
 	if err := decode(r, &body); err != nil {
 		return nil, err
 	}
-	if body.Backup != "" {
-		return nil, unimplemented("restoring a backup by its Backups resource name", "the project-level Backups API is not served; restore a backup run by restoreBackupContext.backupRunId")
-	}
 	var cp BackupRun
-	if body.BackupdrBackup != "" {
+	if body.Backup != "" {
+		// A project-level backup (#1462), by its Backups resource name.
+		if body.Ctx != nil || body.BackupdrBackup != "" {
+			return nil, Errorf(http.StatusBadRequest, "Invalid request: give one of restoreBackupContext, backup and backupdrBackup.")
+		}
+		run, err := s.backupByName(body.Backup)
+		if err != nil {
+			return nil, err
+		}
+		cp = run
+	} else if body.BackupdrBackup != "" {
 		// A Backup and DR backup (#1433): the vault's backup names the
 		// backup run the Backup and DR Service took.
 		if body.Ctx != nil {
@@ -680,6 +699,7 @@ func (s *Server) automate(stop <-chan struct{}) {
 			return
 		case now := <-t.C:
 			s.automatedTick(now.UTC())
+			s.sweepExpiredBackups()
 			s.sweepRetention()
 		}
 	}

@@ -61,8 +61,8 @@ func TestConsoleKMSImportJobsAndImportVersion(t *testing.T) {
 		}
 	}
 	if err := p.ActAt(ctx, "demo-proj", []string{ring}, "createimportjob",
-		map[string]string{"importJobId": "hsm", "importMethod": kmsImportMethods[0], "protectionLevel": "HSM"}); err == nil {
-		t.Error("Create import job at HSM was accepted")
+		map[string]string{"importJobId": "external", "importMethod": kmsImportMethods[0], "protectionLevel": "EXTERNAL"}); err == nil {
+		t.Error("Create import job at EXTERNAL was accepted")
 	}
 	aesJob := ring + "/importJobs/rsa-oaep-3072-sha256-aes-256"
 	got, err := c.GetImportJob(ctx, &kmspb.GetImportJobRequest{Name: aesJob})

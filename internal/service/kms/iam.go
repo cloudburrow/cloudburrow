@@ -33,8 +33,8 @@ type iamResource struct {
 
 // iamTarget routes resource. Google serves IAM on key rings, crypto keys,
 // import jobs, ekmConfig and ekmConnections (cloudkms_v1.yaml:75-105);
-// CloudBurrow serves none of the last three, so IAM on them is UNIMPLEMENTED,
-// never an empty policy. Anything else, a CryptoKeyVersion included, has no
+// IAM on the last three is UNIMPLEMENTED, never an empty policy: their
+// records (import.go, ekm.go) keep no policy yet. Anything else, a CryptoKeyVersion included, has no
 // IAM on Google and is INVALID_ARGUMENT (UNVERIFIED).
 func iamTarget(resource string) (iamResource, error) {
 	if resource == "" {
@@ -55,9 +55,9 @@ func iamTarget(resource string) (iamResource, error) {
 	case len(parts) == 8 && parts[6] == "importJobs":
 		return iamResource{}, apierror.Unimplemented("IAM on import jobs is not implemented: CloudBurrow serves no import jobs")
 	case len(parts) == 5 && parts[4] == "ekmConfig":
-		return iamResource{}, apierror.Unimplemented("IAM on ekmConfig is not implemented: CloudBurrow serves no EKM configuration")
+		return iamResource{}, apierror.Unimplemented("IAM on ekmConfig is not implemented: an EkmConfig keeps no IAM policy locally")
 	case len(parts) == 6 && parts[4] == "ekmConnections":
-		return iamResource{}, apierror.Unimplemented("IAM on ekmConnections is not implemented: CloudBurrow serves no EKM connections")
+		return iamResource{}, apierror.Unimplemented("IAM on ekmConnections is not implemented: an EkmConnection keeps no IAM policy locally")
 	}
 	return iamResource{}, apierror.InvalidArgument("resource %q is not a key ring or crypto key name", resource)
 }

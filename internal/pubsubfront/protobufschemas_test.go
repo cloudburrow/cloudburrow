@@ -154,11 +154,49 @@ func TestProtobufSchemaTopic(t *testing.T) {
 		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "Message failed schema validation") {
 			t.Errorf("Publish(non-conforming %s) = %v, want INVALID_ARGUMENT", enc, err)
 		}
-		if _, err := fx.client.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
-			Topic:      &pubsubpb.Topic{Name: topic},
-			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"schema_settings"}}}); status.Code(err) != codes.Unimplemented {
-			t.Errorf("UpdateTopic(schema_settings) = %v, want UNIMPLEMENTED", err)
-		}
+	}
+	// An UpdateTopic of schema_settings (#1446): onto a kept schema's
+	// revision range, then cleared, then bound again.
+	topic := parent + "/topics/t-json"
+	rev, err := sc.GetSchema(ctx, &pubsubpb.GetSchemaRequest{Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd, err := fx.client.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
+		Topic: &pubsubpb.Topic{Name: topic, SchemaSettings: &pubsubpb.SchemaSettings{Schema: name,
+			Encoding: pubsubpb.Encoding_BINARY, FirstRevisionId: rev.GetRevisionId()}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"schema_settings"}}})
+	if err != nil || upd.GetSchemaSettings().GetEncoding() != pubsubpb.Encoding_BINARY ||
+		upd.GetSchemaSettings().GetFirstRevisionId() != rev.GetRevisionId() {
+		t.Fatalf("UpdateTopic(schema_settings to BINARY) = %v, %v", upd, err)
+	}
+	if _, err := fx.client.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: topic,
+		Messages: []*pubsubpb.PubsubMessage{{Data: []byte(`{"name":"x"}`)}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("Publish(JSON to a topic now BINARY) = %v, want INVALID_ARGUMENT", err)
+	}
+	if _, err := fx.client.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
+		Topic: &pubsubpb.Topic{Name: topic, SchemaSettings: &pubsubpb.SchemaSettings{Schema: name,
+			Encoding: pubsubpb.Encoding_JSON, LastRevisionId: "nope"}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"schema_settings"}}}); status.Code(err) != codes.NotFound {
+		t.Errorf("UpdateTopic(schema_settings to an absent revision) = %v, want NOT_FOUND", err)
+	}
+	cleared, err := fx.client.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
+		Topic: &pubsubpb.Topic{Name: topic}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"schema_settings"}}})
+	if err != nil || cleared.GetSchemaSettings() != nil {
+		t.Fatalf("UpdateTopic(clear schema_settings) = %v, %v", cleared, err)
+	}
+	if _, err := fx.client.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: topic,
+		Messages: []*pubsubpb.PubsubMessage{{Data: []byte("anything")}}}); err != nil {
+		t.Errorf("Publish to a topic with no schema: %v", err)
+	}
+	if _, err := fx.client.TopicAdminClient.UpdateTopic(ctx, &pubsubpb.UpdateTopicRequest{
+		Topic:      &pubsubpb.Topic{Name: topic, SchemaSettings: &pubsubpb.SchemaSettings{Schema: name, Encoding: pubsubpb.Encoding_JSON}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"schema_settings"}}}); err != nil {
+		t.Fatalf("UpdateTopic(bind again): %v", err)
+	}
+	if got, err := fx.client.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: topic}); err != nil ||
+		got.GetSchemaSettings().GetSchema() != name || got.GetSchemaSettings().GetEncoding() != pubsubpb.Encoding_JSON {
+		t.Errorf("GetTopic after binding again = %v, %v", got, err)
 	}
 	// The state file keeps the schema and the bindings.
 	path := filepath.Join(t.TempDir(), "state.json")

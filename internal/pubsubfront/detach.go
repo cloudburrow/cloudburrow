@@ -29,10 +29,16 @@ package pubsubfront
 //   - CreateSubscription of the name fails ALREADY_EXISTS, as the name is
 //     still taken;
 //   - a detach of it again succeeds and changes nothing;
-//   - every other call on it (an update, a seek, an acknowledgement, a
-//     snapshot) is refused UNIMPLEMENTED with the reason: the front keeps a
-//     detached subscription's configuration, not a subscription the emulator
-//     could act on, and Google documents no answer for them to copy.
+//   - the other calls are answered from what Google documents of a
+//     detached subscription, that it is still a subscription, that it
+//     "don't retain any backlog" and that it can't be reattached
+//     (detachedcalls.go, #1446): UpdateSubscription and ModifyPushConfig
+//     change the kept configuration; Acknowledge and ModifyAckDeadline
+//     succeed and change nothing, as there is no outstanding message (with
+//     exactly-once delivery each ack ID is reported invalid, as Google
+//     reports an ack ID it no longer holds); a Seek to a time succeeds and
+//     changes nothing, a Seek to a snapshot and CreateSnapshot fail
+//     FAILED_PRECONDITION, as both need the subscription's topic.
 // A detached subscription never expires in the front: it has no activity to
 // measure. With a state file (state.go) it survives a restart of the front.
 
@@ -61,11 +67,10 @@ func errDetachedPull(name string) error {
 		"pulls from a detached subscription return FAILED_PRECONDITION", name)
 }
 
-// errDetachedOther is the refusal of any other call on a detached
-// subscription.
-func errDetachedOther(method, name string) error {
-	return apierror.Unimplemented("%s on the detached subscription %s is not implemented: CloudBurrow keeps a "+
-		"detached subscription's configuration, not a subscription the Pub/Sub emulator can act on", method, name)
+// errDetachedTopic is the refusal of a call that needs the subscription's
+// topic, which a detached subscription no longer has.
+func errDetachedTopic(method, name string) error {
+	return apierror.FailedPrecondition("%s needs the subscription's topic, and the subscription %s is detached from it", method, name)
 }
 
 // detachedSub is the kept configuration of a detached subscription, a copy,
@@ -185,7 +190,8 @@ func (f *Front) detachedCall(method string, fr frame) (resp proto.Message, handl
 	case "CreateSubscription":
 		return nil, true, apierror.AlreadyExists("Subscription already exists: %s", name)
 	}
-	return nil, true, errDetachedOther(m, name)
+	resp, err = f.detachedOther(m, fr, s)
+	return resp, true, err
 }
 
 // handleDetach serves Publisher/DetachSubscription over gRPC.
@@ -267,11 +273,25 @@ func (f *Front) serveRESTDetached(w http.ResponseWriter, r *http.Request, name, 
 	case verb == "pull":
 		writeRESTError(w, errDetachedPull(name))
 	default:
-		what := verb
-		if what == "" {
-			what = r.Method
+		body, err := readBody(r)
+		if err != nil {
+			writeRESTError(w, err)
+			return true
 		}
-		writeRESTError(w, errDetachedOther(what, name))
+		req, err := restDetachedRequest(r, name, verb, body)
+		if err == nil && req == nil {
+			err = apierror.NotFound("%s %s is not a Pub/Sub method", r.Method, r.URL.Path)
+		}
+		if err != nil {
+			writeRESTError(w, err)
+			return true
+		}
+		resp, err := f.onDetached(r.Context(), req, s)
+		if err != nil {
+			writeRESTError(w, err)
+			return true
+		}
+		writeProtoJSON(w, resp)
 	}
 	return true
 }

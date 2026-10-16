@@ -3399,6 +3399,10 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 			if ops := p.operationsSection(ctx, bucket); hns || len(ops.Listing.Items) > 0 || ops.Listing.Unavailable != "" {
 				sections = append(sections, ops)
 			}
+			// Its Anywhere Caches, and the cache, relocation and cancel
+			// actions (#1444).
+			sections = append(sections, p.cachesSection(ctx, bucket))
+			actions = append(actions, cacheActions()...)
 		}
 		// Its notifications, and Create notification (#791).
 		notifications, create := p.notificationsSection(ctx, project, bucket)
@@ -3678,6 +3682,7 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		ID: "configuration", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{
 			{Heading: "Replication", Properties: replicationProperties(secret)},
+			{Heading: "Encryption", Properties: secretEncryptionProperties(secret)},
 			{Heading: "Expiration", Properties: []console.Property{{Label: "Expire time", Value: secretExpiry(secret)}}},
 			{Heading: "Notifications", Properties: []console.Property{{Label: "Pub/Sub topics", Value: secretTopicsText(secret)}}},
 		},
@@ -3685,7 +3690,8 @@ func (p secretsProvider) Detail(_ context.Context, project string, path []string
 		// covers labels and annotations and says so rather than offering a
 		// field the API would refuse.
 		Note: "Labels, annotations, the expiry, the notification topics, the rotation and the destruction delay can be " +
-			"edited. Replication is fixed when the secret is created.",
+			"edited. Replication is fixed when the secret is created, except for its customer-managed encryption keys " +
+			"(Change encryption keys).",
 	}
 	config.Groups = append(config.Groups, secretScheduleProperties(secret)...)
 	if len(secret.Labels) > 0 {
@@ -3757,7 +3763,7 @@ func (p secretsProvider) versionDetail(project, id, version string) (console.Det
 	// question that distinguishes an empty write from a missing one.
 	size := "—"
 	if v.State != secrets.StateDestroyed {
-		size = fmt.Sprintf("%d bytes", len(v.Payload))
+		size = fmt.Sprintf("%d bytes", v.Size())
 	}
 
 	return console.Detail{
@@ -3779,6 +3785,10 @@ func (p secretsProvider) versionDetail(project, id, version string) (console.Det
 				},
 			}},
 			Note: versionNote(v.State),
+		}, {
+			ID: "encryption", Label: "Encryption", Kind: console.KindProperties,
+			Groups: []console.PropertyGroup{{Heading: "Replication status", Properties: versionEncryptionProperties(v)}},
+			Note:   "A version is encrypted with its secret's keys when it is added; changing the keys later does not re-encrypt it.",
 		}},
 	}, nil
 }
@@ -3816,6 +3826,10 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 	}
 	switch len(path) {
 	case 1:
+		sec, err := st.GetSecret(project, lastSegment(path[0]))
+		if err != nil {
+			return nil
+		}
 		return []console.Action{{
 			ID: "addversion", Label: "Add version",
 			Fields: []console.Field{{
@@ -3823,7 +3837,7 @@ func (p secretsProvider) DetailActions(_ context.Context, project string, path [
 				Help: "Stored as UTF-8 bytes. This becomes the new enabled version; " +
 					"earlier versions keep the state they have.",
 			}},
-		}, secretAdvanceClockAction()}
+		}, secretAdvanceClockAction(), secretKeysAction(sec)}
 	case 2:
 		// What is offered depends on the version's current state. Enabling an
 		// enabled version and destroying a destroyed one are both buttons that
@@ -3884,6 +3898,8 @@ func (p secretsProvider) ActAt(_ context.Context, project string, path []string,
 	case "destroy":
 		_, err := st.DestroyVersion(project, id, path[1])
 		return err
+	case actSecretKeys:
+		return setSecretKeys(st, project, id, values)
 	case actSecretAdvanceClock:
 		d, err := parseAdvance(values["duration"])
 		if err != nil {
@@ -4084,6 +4100,7 @@ func (p secretsProvider) CreateForm() (string, []console.Field) {
 		{Name: "locations", Label: "Locations", Type: "text", Section: "Replication policy",
 			Pattern: `^[a-z0-9\-]+(\s*,\s*[a-z0-9\-]+)*$`,
 			Help:    "User-managed only: the replica locations, comma-separated, for example us-east1, europe-west1."},
+		secretKMSKeysField(),
 	}
 }
 
@@ -4168,8 +4185,12 @@ func (p secretsProvider) Create(_ context.Context, project string, values map[st
 		return "", err
 	}
 	id := strings.TrimSpace(values["secretId"])
-	sec, err := st.CreateSecretScheduled(project, id, labels, annotations, expire,
-		secretTopicsValue(values["topics"]), sch, kind, locations...)
+	keys, err := secretKMSKeysValue(values["kmsKeys"], kind, locations)
+	if err != nil {
+		return "", err
+	}
+	sec, err := st.CreateSecretEncrypted(project, id, labels, annotations, expire,
+		secretTopicsValue(values["topics"]), sch, keys, kind, locations...)
 	if err != nil {
 		return "", err
 	}

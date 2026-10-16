@@ -214,6 +214,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	secretsSvc.register(coord)
 	kmsSvc := newKMSService(cfg)
 	kmsSvc.register(coord)
+	if secretsSvc != nil && kmsSvc != nil {
+		// A secret's customer-managed keys (#1453) are this instance's Cloud KMS.
+		secretsSvc.kms = kmsSvc.API
+	}
 	schedulerSvc := newSchedulerService(cfg, func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") })
 	schedulerSvc.useTokens(creds)
 	schedulerSvc.register(coord)
@@ -445,6 +449,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	coord.Register(rmSrv)
 	// Its folders and organization are Logging parents (#1395).
 	loggingSvc.useHierarchy(projects)
+	// And Autokey resolves folder configs through them (#1452).
+	kmsSvc.useHierarchy(projects)
 
 	// The Service Usage API (#1352), which APIs each project has enabled,
 	// kept in the registry's store so it persists as the projects do.
@@ -456,6 +462,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
+		// executeSql reads a user's password from Secret Manager (#1462).
+		if secretsSvc != nil {
+			sqlAdminSrv.SetSecretAccessor(buildSecretAccessor{svc: secretsSvc})
+		}
 		coord.Register(sqlAdminSrv)
 	}
 	// The Backup and DR Service (#1433), over the Admin API's backups.

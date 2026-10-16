@@ -70,7 +70,8 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)
 }
 
-// WriteError renders an error in the Google JSON envelope.
+// WriteError renders an error as Google's JSON mapping of google.rpc.Status,
+// {"error": {"code", "message", "status", "details"}} (apierror.WriteJSON).
 func WriteError(w http.ResponseWriter, err error) {
 	apierror.WriteJSON(w, err)
 }

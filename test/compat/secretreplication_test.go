@@ -5,7 +5,6 @@ package compat
 import (
 	"context"
 	"net/http"
-	"strings"
 	"testing"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
@@ -122,23 +121,7 @@ func TestSecretManagerUserManagedReplicasRoundTrip(t *testing.T) {
 		t.Errorf("after refused updates the secret has replication %v and labels %v", got.GetReplication(), got.GetLabels())
 	}
 
-	// Customer-managed encryption is not implemented: a policy carrying it
-	// is refused naming the field, not stored without it.
-	cmek := &secretmanagerpb.CustomerManagedEncryption{KmsKeyName: "projects/" + h.Project() + "/locations/us-east1/keyRings/r/cryptoKeys/k"}
-	for field, repl := range map[string]*secretmanagerpb.Replication{
-		"replication.automatic.customer_managed_encryption": {Replication: &secretmanagerpb.Replication_Automatic_{
-			Automatic: &secretmanagerpb.Replication_Automatic{CustomerManagedEncryption: cmek}}},
-		"replication.user_managed.replicas[].customer_managed_encryption": {Replication: &secretmanagerpb.Replication_UserManaged_{
-			UserManaged: &secretmanagerpb.Replication_UserManaged{Replicas: []*secretmanagerpb.Replication_UserManaged_Replica{
-				{Location: "us-east1", CustomerManagedEncryption: cmek}}}}},
-	} {
-		_, err := c.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: "cmek-refused",
-			Secret: &secretmanagerpb.Secret{Replication: repl}})
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), field) {
-			_ = c.DeleteSecret(context.Background(), &secretmanagerpb.DeleteSecretRequest{Name: secretsParent(h) + "/secrets/cmek-refused"})
-			t.Errorf("CreateSecret with %s = %v; want Unimplemented naming it", field, err)
-		}
-	}
+	// Customer-managed encryption is TestSecretManagerCMEK's (#1453).
 
 	updated, err := c.UpdateSecret(ctx, &secretmanagerpb.UpdateSecretRequest{
 		Secret:     &secretmanagerpb.Secret{Name: name, Replication: want, Labels: map[string]string{"team": "blue"}},

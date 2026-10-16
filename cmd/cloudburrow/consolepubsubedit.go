@@ -183,15 +183,59 @@ func topicEditForm(t *pubsubpb.Topic) *console.EditForm {
 			{Name: "name", Label: "Topic ID", Type: "text", Default: lastSegment(t.GetName()), Immutable: true,
 				Help: "A topic's name cannot be changed."},
 			retention,
+			{Name: "schema", Label: "Schema", Type: "text", Default: t.GetSchemaSettings().GetSchema(),
+				Help: "A schema ID of this project, or projects/{project}/schemas/{schema}, AVRO or PROTOCOL_BUFFER " +
+					"(#1446). A message published to the topic that does not conform to it is refused. Empty: no schema."},
+			{Name: "schemaEncoding", Label: "Message encoding", Type: "select", Options: []string{"JSON", "BINARY"},
+				Default: topicEncoding(t),
+				Help:    "How a message's data encodes the schema, with a schema only."},
 			labelsField(t.GetLabels(), ""),
 		},
-		Note: "Saved through UpdateTopic. The schema, the message storage policy and the KMS key cannot be " +
+		Note: "Saved through UpdateTopic. The message storage policy and the KMS key cannot be " +
 			"changed on this emulator: its UpdateTopic refuses each as \"not a known Topic field\".",
 	}
 }
 
+// topicEncoding is a topic's message encoding, JSON when it has none.
+func topicEncoding(t *pubsubpb.Topic) string {
+	if t.GetSchemaSettings().GetEncoding() == pubsubpb.Encoding_BINARY {
+		return "BINARY"
+	}
+	return "JSON"
+}
+
+// changedSchemaSettings is the binding the form asks for, and whether it
+// differs from the topic's; nil is no schema. A schema and encoding left as
+// they are keep the binding's revision range.
+func changedSchemaSettings(project string, values map[string]string, cur *pubsubpb.Topic) (*pubsubpb.SchemaSettings, bool, error) {
+	raw, sent := values["schema"]
+	if !sent {
+		return nil, false, nil
+	}
+	schema := strings.TrimSpace(raw)
+	if schema != "" && !strings.HasPrefix(schema, "projects/") && schema != "_deleted-schema_" {
+		schema = "projects/" + project + "/schemas/" + schema
+	}
+	enc := pubsubpb.Encoding_JSON
+	switch strings.TrimSpace(values["schemaEncoding"]) {
+	case "", "JSON":
+	case "BINARY":
+		enc = pubsubpb.Encoding_BINARY
+	default:
+		return nil, false, fmt.Errorf("message encoding: %q is neither JSON nor BINARY", values["schemaEncoding"])
+	}
+	old := cur.GetSchemaSettings()
+	if schema == "" {
+		return nil, old != nil, nil
+	}
+	if old != nil && old.GetSchema() == schema && (old.GetEncoding() == enc || values["schemaEncoding"] == "") {
+		return nil, false, nil
+	}
+	return &pubsubpb.SchemaSettings{Schema: schema, Encoding: enc}, true, nil
+}
+
 // Edit implements console.Editor for a topic: UpdateTopic with a mask naming
-// the retention when it changed. A subscription row of the topic page, at
+// the retention, the labels and the schema settings (#1446) that changed. A subscription row of the topic page, at
 // [topic, subscription], is edited on the subscription's own page.
 func (p pubsubProvider) Edit(ctx context.Context, project string, path []string, values map[string]string) error {
 	if len(path) != 1 {
@@ -234,6 +278,14 @@ func (p pubsubProvider) Edit(ctx context.Context, project string, path []string,
 	if labelsChanged {
 		upd.Labels = labels
 		paths = append(paths, "labels")
+	}
+	ss, schemaChanged, err := changedSchemaSettings(project, values, cur)
+	if err != nil {
+		return err
+	}
+	if schemaChanged {
+		upd.SchemaSettings = ss
+		paths = append(paths, "schema_settings")
 	}
 	if len(paths) == 0 {
 		return nil

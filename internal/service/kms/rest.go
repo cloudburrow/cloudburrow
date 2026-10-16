@@ -81,5 +81,6 @@ func Routes() []Route { return transcoder().Routes() }
 func NewRESTHandler(s *Server) http.Handler {
 	t := transcoder()
 	s.Register(t)
+	s.Operations().Register(t)
 	return t
 }

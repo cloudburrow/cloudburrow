@@ -22,7 +22,8 @@ package logging
 //     underscore, then _YYYYMMDD of its UTC timestamp, or, with
 //     bigquery_options.use_partitioned_tables, one table partitioned by day
 //     on its timestamp column. The table's schema is made from the first
-//     entry and grows by the fields later entries add (bigquery.go).
+//     entry and grows by the fields later entries add; an entry that does
+//     not fit it goes to the dataset's export_errors table (bigquery.go).
 //   - logging.googleapis.com/projects/P: the entry goes to P's _Default
 //     bucket, unless one of P's exclusions matches it, and through P's own
 //     sinks, once: a project destination of P's is not followed again.
@@ -107,8 +108,11 @@ type SinkStatus struct {
 	Delivered    int64
 	LastDelivery time.Time
 	Pending      int // entries batched for Cloud Storage, not yet written
-	LastError    string
-	LastErrorAt  time.Time
+	// ErrorRows are the entries a BigQuery sink wrote to its dataset's
+	// export_errors table (#1451).
+	ErrorRows   int64
+	LastError   string
+	LastErrorAt time.Time
 }
 
 // delivery is one entry a sink sends to a destination other than a log
@@ -339,10 +343,15 @@ func (s *Server) deliverNow(ctx context.Context, ds []delivery) {
 				continue
 			}
 			s.d.bqMu.Lock()
-			n, err := streamToBigQuery(ctx, dest.BigQuery, parts[2], parts[4], g.partitioned, g.entries)
+			n, rejected, err := streamToBigQuery(ctx, dest.BigQuery, g.sink, parts[2], parts[4], g.partitioned, g.entries)
 			s.d.bqMu.Unlock()
 			if n > 0 {
 				s.delivered(g.sink, n)
+			}
+			if rejected > 0 {
+				s.d.mu.Lock()
+				s.d.statusOf(g.sink).ErrorRows += int64(rejected)
+				s.d.mu.Unlock()
 			}
 			if err != nil {
 				s.sinkError(g, errorCode(err, "dataset_not_found"), err.Error())

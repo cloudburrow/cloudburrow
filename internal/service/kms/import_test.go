@@ -122,8 +122,28 @@ func TestImportJobAndImportCryptoKeyVersion(t *testing.T) {
 		t.Errorf("an expired job = %v", err)
 	}
 	if _, err := c.CreateImportJob(ctx, &kmspb.CreateImportJobRequest{Parent: ring.GetName(), ImportJobId: "hsm",
-		ImportJob: &kmspb.ImportJob{ImportMethod: kmspb.ImportJob_RSA_OAEP_3072_SHA256, ProtectionLevel: kmspb.ProtectionLevel_HSM}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("an HSM job = %v", err)
+		ImportJob: &kmspb.ImportJob{ImportMethod: kmspb.ImportJob_RSA_OAEP_3072_SHA256, ProtectionLevel: kmspb.ProtectionLevel_EXTERNAL}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("an EXTERNAL job = %v", err)
+	}
+	// An HSM job is served (#1452), and imports only into an HSM key.
+	hsmJob, err := c.CreateImportJob(ctx, &kmspb.CreateImportJobRequest{Parent: ring.GetName(), ImportJobId: "hsm",
+		ImportJob: &kmspb.ImportJob{ImportMethod: kmspb.ImportJob_RSA_OAEP_3072_SHA1_AES_256, ProtectionLevel: kmspb.ProtectionLevel_HSM}})
+	if err != nil || hsmJob.GetProtectionLevel() != kmspb.ProtectionLevel_HSM || hsmJob.GetAttestation() != nil {
+		t.Fatalf("an HSM job = %v, %v", hsmJob, err)
+	}
+	hsmKey, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "hsm-import", SkipInitialVersionCreation: true,
+		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, VersionTemplate: &kmspb.CryptoKeyVersionTemplate{ProtectionLevel: kmspb.ProtectionLevel_HSM}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ImportCryptoKeyVersion(ctx, &kmspb.ImportCryptoKeyVersionRequest{Parent: sym.GetName(), ImportJob: hsmJob.GetName(),
+		Algorithm: kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION, WrappedKey: wrapForImport(t, hsmJob.GetPublicKey().GetPem(), false, material)}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("an HSM job into a SOFTWARE key = %v", err)
+	}
+	hv, err := c.ImportCryptoKeyVersion(ctx, &kmspb.ImportCryptoKeyVersionRequest{Parent: hsmKey.GetName(), ImportJob: hsmJob.GetName(),
+		Algorithm: kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION, WrappedKey: wrapForImport(t, hsmJob.GetPublicKey().GetPem(), false, material)})
+	if err != nil || hv.GetProtectionLevel() != kmspb.ProtectionLevel_HSM {
+		t.Errorf("an HSM job into an HSM key = %v, %v", hv, err)
 	}
 }
 

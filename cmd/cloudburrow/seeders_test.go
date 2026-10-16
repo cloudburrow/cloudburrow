@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cloudburrow/cloudburrow/internal/pubsubfront"
 	"github.com/cloudburrow/cloudburrow/internal/service/secrets"
 	"github.com/cloudburrow/cloudburrow/internal/service/storage"
 	"github.com/cloudburrow/cloudburrow/internal/service/tasks"
@@ -279,6 +281,62 @@ func TestPubSubSeedCreatesSchemasAndBindsTopics(t *testing.T) {
 	}
 }
 
+// A Protocol Buffer schema is seeded through CloudBurrow's Pub/Sub front,
+// which serves them as the emulator does not (#1446), and a topic is bound
+// to it.
+func TestPubSubSeedProtocolBufferSchema(t *testing.T) {
+	fake := pstest.NewServer()
+	defer func() { _ = fake.Close() }()
+	front, err := pubsubfront.New(fake.Addr, func(string, ...any) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = front.Close() }()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = front.Serve(ctx, l, time.Hour) }()
+	p := &pubsubSeeder{tunnel: forwarderAt(t, l.Addr().String())}
+	const def = "syntax = \"proto3\";\nmessage Order { string id = 1; }\n"
+	doc := json.RawMessage(`{"schemas": [{"name": "projects/seed-proj/schemas/order", "type": "PROTOCOL_BUFFER", "definition": ` + strconv.Quote(def) + `}],
+		"topics": [{"name": "projects/seed-proj/topics/orders", "schemaSettings": {"schema": "projects/seed-proj/schemas/order", "encoding": "JSON"}}]}`)
+	if err := p.Validate(doc); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Seed(ctx, doc); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	sc, err := pubsubSchemas(ctx, p.tunnel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sc.Close() }()
+	s, err := sc.GetSchema(ctx, &pubsubpb.GetSchemaRequest{Name: "projects/seed-proj/schemas/order", View: pubsubpb.SchemaView_FULL})
+	if err != nil || s.GetType() != pubsubpb.Schema_PROTOCOL_BUFFER || s.GetDefinition() != def {
+		t.Errorf("the schema seeded as %v (%v)", s, err)
+	}
+	c, err := pubsubAdmin(ctx, p.tunnel, "seed-proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	topic, err := c.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: "projects/seed-proj/topics/orders"})
+	if err != nil || topic.GetSchemaSettings().GetSchema() != "projects/seed-proj/schemas/order" {
+		t.Errorf("the topic seeded as %v (%v)", topic, err)
+	}
+	if _, err := c.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: "projects/seed-proj/topics/orders",
+		Messages: []*pubsubpb.PubsubMessage{{Data: []byte(`{"nope":1}`)}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("Publish(non-conforming) = %v, want INVALID_ARGUMENT", err)
+	}
+	bad := json.RawMessage(`{"schemas": [{"name": "projects/seed-proj/schemas/bad", "type": "PROTOCOL_BUFFER", "definition": "syntax = \"proto3\";"}]}`)
+	if err := p.Seed(ctx, bad); status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "schemas[0].definition") {
+		t.Errorf("Seed(a definition with no message) = %v, want INVALID_ARGUMENT naming schemas[0].definition", err)
+	}
+}
+
 // A definition the API refuses seeds nothing, and the refusal is the API's
 // own message, naming the schema's place in the document.
 func TestPubSubSeedValidatesSchemasFirst(t *testing.T) {
@@ -311,7 +369,6 @@ func TestPubSubSeedRefusesWhatTheEmulatorDoesNotHonour(t *testing.T) {
 		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "schemaSettings": {"schema": "projects/seed-proj/schemas/s-one"}}]}`:                                                                                  "schemaSettings.encoding",
 		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "schemaSettings": {"schema": "s", "encoding": "JSON"}}]}`:                                                                                             "schemaSettings.schema",
 		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "schemaSettings": {"schema": "projects/seed-proj/schemas/s-one", "encoding": "JSON", "firstRevisionId": "a"}}]}`:                                      "firstRevisionId",
-		`{"schemas": [{"name": "projects/seed-proj/schemas/s-one", "type": "PROTOCOL_BUFFER", "definition": "syntax = \"proto3\";"}]}`:                                                                                 "Protocol Buffer",
 		`{"schemas": [{"name": "projects/seed-proj/schemas/s-one", "type": "AVRO"}]}`:                                                                                                                                  "schemas[0].definition",
 		`{"schemas": [{"name": "s-one", "type": "AVRO", "definition": "{}"}]}`:                                                                                                                                         "schemas[0].name",
 		`{"topics": [{"name": "projects/seed-proj/topics/t-one", "kmsKeyName": "k"}]}`:                                                                                                                                 "kmsKeyName",
