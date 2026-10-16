@@ -279,7 +279,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		})
 	}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if (front{next: next, buffers: buffers, dropped: dropped}).serveUndelete(w, r) { // dropped.go, #1460
+		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,
+			functions: functions, records: records, settings: settings}).serveUndelete(w, r) { // dropped.go, #1460
 			return
 		}
 		if serveUnserved(w, r) { // unserved.go, #1200
@@ -412,7 +413,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
 			buffers: buffers, tables: tables, linked: linked, settings: settings, icebergs: icebergs, storageHost: storageHost,
-			dropped: dropped}
+			dropped: dropped, iam: iam}
 		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
 			if r.Method == http.MethodPost {
 				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))

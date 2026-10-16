@@ -229,8 +229,8 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | `DROP SCHEMA` where the script's other statements see the dataset; `CREATE SCHEMA` options other than the supported strings, and `DEFAULT COLLATE` (#1459) | no emulator support | M |
 | `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that changes data; a dry run of a script with a `TEMP` table or function, beyond what the emulator's own dry run checks (#1459) | not built yet | S |
 | A failed script after a statement that wrote: the emulator does not roll back (#1459) | no emulator support | L |
-| `FOR SYSTEM_TIME AS OF` a past time before an ALTER TABLE rebuild or CREATE OR REPLACE TABLE, of an ingestion-time partitioned table, or with a partition decorator, in a query, a snapshot or clone, or a copy of `table@time` (#1483) | not built yet | M |
-| What #1460 leaves of undelete: `UNDROP SCHEMA` in a script, a copy of `table@0` or a range decorator, a restored table's change history (it starts at the restore), and a dataset's routines and models, materialized views, snapshots, a table's front-kept settings, IAM and row access policies, none of which a deletion keeps (#1483) | not built yet | M |
+| `FOR SYSTEM_TIME AS OF` a past time of an ingestion-time partitioned table, or with a partition decorator, in a query, a snapshot or clone, or a copy of `table@time` (#1483) | not built yet | M |
+| What #1483 leaves of undelete: a dataset's routines and models and an external table are not kept by a deletion; `UNDROP SCHEMA` in a script with control flow, or whose other statements name the dataset, and in a dry run of a script (#1483) | not built yet | M |
 | BQML: `CREATE MODEL` is refused by the engine ("Statement not supported: CreateModelStatement"), so no model can be made, used or extracted (#1465) | no emulator support | L |
 | Script variable named as an alias, a column or a table; `WRITE_TRUNCATE_DATA` of a result of another type (#1445) | not documented by Google | S |
 | BigQuery's wording of every front refusal (UNVERIFIED throughout the BigQuery rows) (#1445) | not documented by Google | S |
