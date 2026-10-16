@@ -131,7 +131,7 @@ neither list.
 | `CLOUDBURROW_TEST_SIGNING_KEY`, `CLOUDBURROW_TEST_SIGNING_EMAIL` | the signed URL tests, against a builtin `storage-server` started with `--signing-cert` |
 | `CLOUDBURROW_TEST_FUNCTIONS` | `TestFunctionsFrameworkBuiltWithBuildpacks`, `TestFunctionsRebuildReusesLayers` and `TestFunctionsBuildBrokenModulePathFails`, which run only when it is `1` |
 | `CLOUDBURROW_TEST_STEP_IMAGE` | the Cloud Build arbitrary-step tests (#1382): the shell image their steps run, instead of `alpine:3.20`, for one already on the host |
-| `CLOUDBURROW_TEST_CLOUD_SQL_PROXY` | `TestCloudSQLAuthProxyBinary` (#1421): Google's `cloud-sql-proxy` binary, pinned by SHA-256, as `make -s cloud-sql-proxy` downloads it and prints its path; CI's emulators shard sets it |
+| `CLOUDBURROW_TEST_CLOUD_SQL_PROXY` | `TestCloudSQLAuthProxyBinary` (#1421): Google's `cloud-sql-proxy` binary, pinned by SHA-256, as `make -s cloud-sql-proxy` downloads it and prints its path; CI's sql shard sets it |
 | `CLOUDBURROW_TEST_SKIP_RUN_PULL` | `TestArtifactRegistryDockerRegistry` (#1383): when set, skips deploying a Cloud Run service from the pushed image, the slower part of the test |
 | `CLOUDBURROW_TEST_NAMESPACE` | the Spanner restart and in-cluster tests; defaults to `cloudburrow`, the namespace every instance uses |
 

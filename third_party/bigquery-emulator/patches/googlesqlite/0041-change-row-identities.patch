@@ -1,0 +1,304 @@
+CloudBurrow patch 41 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1460). Applies after patch 0036.
+
+The gap: BigQuery's FOR SYSTEM_TIME AS OF reads a table as it was at a
+time in its time travel window
+(https://cloud.google.com/bigquery/docs/time-travel). Patch 0036's change
+table records each row inserted, deleted and updated with the time of
+its transaction, but a reader cannot tell which change is of which row,
+nor the order of one transaction's changes, nor from when the change
+table holds the whole history (an ALTER TABLE that rebuilds the table,
+and CREATE OR REPLACE TABLE, start it over).
+
+The patch gives every change table three pseudo-columns, which SELECT *
+leaves out: googlesqlite_change_micros (the change time in microseconds),
+googlesqlite_change_rowid (the changed row's rowid in the table) and
+rowid (the change table's own rowid, the order of the changes); and
+records, as the change table is made, a row of _CHANGE_TYPE 'START' at
+the time it was made. The table as it was at a time is then, of each
+rowid, the last change at or before that time, when it is not a DELETE.
+CloudBurrow's front reads FOR SYSTEM_TIME AS OF so, and leaves the START
+row out of APPENDS and CHANGES. change_history_rows_test.go fails
+without the patch and passes with it; change_history_test.go (patch
+0036) leaves the START row out of its reads.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/change_history_test.go
++++ b/change_history_test.go
+@@ -16,7 +16,8 @@
+ // (a DELETE of the old row, _CHANGE_IS_FOR_UPDATE, and an UPDATE of the
+ // new), with the time of the change, one time per statement; MERGE and
+ // TRUNCATE TABLE are recorded; a wildcard and INFORMATION_SCHEMA leave
+-// the change table out; DROP TABLE drops it.
++// the change table out; DROP TABLE drops it. (Its START row, patch 0041,
++// is left out of the reads.)
+ func TestChangeHistory(t *testing.T) {
+ 	db, err := sql.Open("googlesqlite", ":memory:")
+ 	if err != nil {
+@@ -53,7 +54,7 @@
+ 		}
+ 		return strings.Join(out, "; ")
+ 	}
+-	const read = "SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.Produce$changes` ORDER BY _CHANGE_TIMESTAMP, _CHANGE_TYPE DESC, product"
++	const read = "SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.Produce$changes` WHERE _CHANGE_TYPE != 'START' ORDER BY _CHANGE_TIMESTAMP, _CHANGE_TYPE DESC, product"
+ 	exec("CREATE TABLE `p.d.Produce` (product STRING, inventory INT64)")
+ 	exec("INSERT INTO `p.d.Produce` VALUES ('bananas', 20), ('carrots', 30)")
+ 	exec("DELETE `p.d.Produce` WHERE product = 'bananas'")
+@@ -67,14 +68,14 @@
+ 		t.Errorf("one INSERT statement's change times: %d (%v), want 1", n, err)
+ 	}
+ 	var ts string
+-	if err := db.QueryRowContext(ctx, "SELECT FORMAT_TIMESTAMP('%F', _CHANGE_TIMESTAMP) FROM `p.d.Produce$changes` LIMIT 1").Scan(&ts); err != nil || len(ts) != 10 {
++	if err := db.QueryRowContext(ctx, "SELECT FORMAT_TIMESTAMP('%F', _CHANGE_TIMESTAMP) FROM `p.d.Produce$changes` WHERE _CHANGE_TYPE != 'START' LIMIT 1").Scan(&ts); err != nil || len(ts) != 10 {
+ 		t.Errorf("_CHANGE_TIMESTAMP %q (%v)", ts, err)
+ 	}
+ 
+ 	exec("CREATE TABLE `p.d.src` (product STRING, inventory INT64)")
+ 	exec("INSERT INTO `p.d.src` VALUES ('carrots', 1), ('grapes', 2)")
+ 	exec("MERGE `p.d.Produce` T USING `p.d.src` S ON T.product = S.product WHEN MATCHED THEN UPDATE SET inventory = S.inventory WHEN NOT MATCHED THEN INSERT (product, inventory) VALUES (S.product, S.inventory)")
+-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `p.d.Produce$changes`").Scan(&n); err != nil || n != 8 {
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `p.d.Produce$changes` WHERE _CHANGE_TYPE != 'START'").Scan(&n); err != nil || n != 8 {
+ 		t.Errorf("after MERGE: %d changes (%v), want 8", n, err)
+ 	}
+ 	exec("TRUNCATE TABLE `p.d.Produce`")
+@@ -101,12 +102,12 @@
+ 		t.Fatal(err)
+ 	}
+ 	exec("UPDATE `p.d.tx` SET inventory = 3 WHERE TRUE")
+-	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.tx$changes` ORDER BY _CHANGE_TIMESTAMP, _CHANGE_TYPE DESC"); got != "kiwis 2 INSERT false; kiwis 3 UPDATE false; kiwis 2 DELETE true" {
++	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.tx$changes` WHERE _CHANGE_TYPE != 'START' ORDER BY _CHANGE_TIMESTAMP, _CHANGE_TYPE DESC"); got != "kiwis 2 INSERT false; kiwis 3 UPDATE false; kiwis 2 DELETE true" {
+ 		t.Errorf("insert and update in one transaction, then an update: %s", got)
+ 	}
+ 
+ 	exec("CREATE TABLE `p.d.ctas` AS SELECT 'apples' AS product, 10 AS inventory")
+-	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.ctas$changes`"); got != "apples 10 INSERT false" {
++	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.ctas$changes` WHERE _CHANGE_TYPE != 'START'"); got != "apples 10 INSERT false" {
+ 		t.Errorf("CREATE TABLE AS SELECT: %s", got)
+ 	}
+ 	exec("CREATE TABLE `proj.ds.wild_1` (product STRING)")
+@@ -134,7 +135,7 @@
+ 	}
+ 	// CREATE TABLE IF NOT EXISTS of a table that is there keeps its history.
+ 	exec("CREATE TABLE IF NOT EXISTS `p.d.ctas` (product STRING, inventory INT64)")
+-	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.ctas$changes`"); got != "apples 10 INSERT false" {
++	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.ctas$changes` WHERE _CHANGE_TYPE != 'START'"); got != "apples 10 INSERT false" {
+ 		t.Errorf("after CREATE TABLE IF NOT EXISTS: %s", got)
+ 	}
+ 	// A table taken out of the catalog by a DROP TABLE rolled back, and
+@@ -152,7 +153,7 @@
+ 	}
+ 	exec("CREATE TABLE IF NOT EXISTS `p.d.ctas` (product STRING, inventory INT64)")
+ 	exec("INSERT INTO `p.d.ctas` VALUES ('pears', 3)")
+-	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.ctas$changes` ORDER BY _CHANGE_TIMESTAMP"); got != "apples 10 INSERT false; pears 3 INSERT false" {
++	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.ctas$changes` WHERE _CHANGE_TYPE != 'START' ORDER BY _CHANGE_TIMESTAMP"); got != "apples 10 INSERT false; pears 3 INSERT false" {
+ 		t.Errorf("after a rolled-back DROP TABLE and CREATE TABLE IF NOT EXISTS: %s", got)
+ 	}
+ 	exec("DROP TABLE `p.d.ctas`")
+--- /dev/null
++++ b/change_history_rows_test.go
+@@ -0,0 +1,98 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"strings"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestChangeHistoryRows is CloudBurrow's regression test of its patch 0041
++// (cloudburrow/cloudburrow#1460): a change table has its changes' times,
++// changed rows' rowids and order as pseudo-columns, which SELECT * leaves
++// out, and a START row of when it was made; the table as it was after
++// each statement is the last change of each row, when not a DELETE.
++func TestChangeHistoryRows(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	exec := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	micros := func() int64 {
++		t.Helper()
++		var n int64
++		if err := db.QueryRowContext(ctx, "SELECT MAX(googlesqlite_change_micros) FROM `p.d.t$changes`").Scan(&n); err != nil {
++			t.Fatal(err)
++		}
++		return n
++	}
++	asOf := func(at int64) string {
++		t.Helper()
++		q := fmt.Sprintf("SELECT id, v FROM (SELECT id, v, _CHANGE_TYPE AS k, ROW_NUMBER() OVER (PARTITION BY googlesqlite_change_rowid ORDER BY rowid DESC) AS n "+
++			"FROM `p.d.t$changes` WHERE _CHANGE_TYPE != 'START' AND googlesqlite_change_micros <= %d) WHERE n = 1 AND k != 'DELETE' ORDER BY id", at)
++		rows, err := db.QueryContext(ctx, q)
++		if err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		defer rows.Close()
++		var out []string
++		for rows.Next() {
++			var id int64
++			var v string
++			if err := rows.Scan(&id, &v); err != nil {
++				t.Fatal(err)
++			}
++			out = append(out, fmt.Sprintf("%d=%s", id, v))
++		}
++		if err := rows.Err(); err != nil {
++			t.Fatal(err)
++		}
++		return strings.Join(out, " ")
++	}
++	exec("CREATE TABLE `p.d.t` (id INT64, v STRING)")
++	var start int64
++	if err := db.QueryRowContext(ctx, "SELECT googlesqlite_change_micros FROM `p.d.t$changes` WHERE _CHANGE_TYPE = 'START'").Scan(&start); err != nil {
++		t.Fatalf("START row: %v", err)
++	}
++	exec("INSERT INTO `p.d.t` VALUES (1, 'a'), (2, 'b')")
++	t1 := micros()
++	exec("UPDATE `p.d.t` SET v = 'c' WHERE id = 1")
++	t2 := micros()
++	exec("DELETE `p.d.t` WHERE id = 2")
++	t3 := micros()
++	exec("INSERT INTO `p.d.t` VALUES (3, 'd')") // may take the deleted row's rowid
++	t4 := micros()
++	for _, c := range []struct {
++		at   int64
++		want string
++	}{{start, ""}, {t1, "1=a 2=b"}, {t2, "1=c 2=b"}, {t3, "1=c"}, {t4, "1=c 3=d"}} {
++		if got := asOf(c.at); got != c.want {
++			t.Errorf("as of %d: %q, want %q", c.at, got, c.want)
++		}
++	}
++	// SELECT * leaves the pseudo-columns out.
++	rows, err := db.QueryContext(ctx, "SELECT * FROM `p.d.t$changes`")
++	if err != nil {
++		t.Fatal(err)
++	}
++	cols, _ := rows.Columns()
++	rows.Close()
++	if got := strings.Join(cols, ","); got != "id,v,_CHANGE_TYPE,_CHANGE_TIMESTAMP,_CHANGE_IS_FOR_UPDATE" {
++		t.Errorf("SELECT * columns: %s", got)
++	}
++	// No other table has them.
++	if _, err := db.QueryContext(ctx, "SELECT googlesqlite_change_rowid FROM `p.d.t`"); err == nil {
++		t.Error("a table has the change row pseudo-columns")
++	}
++}
+--- /dev/null
++++ b/internal/change_history_rows.go
+@@ -0,0 +1,53 @@
++package internal
++
++import (
++	"fmt"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// Change table row identities (CloudBurrow patch,
++// cloudburrow/cloudburrow#1460).
++//
++// BigQuery's FOR SYSTEM_TIME AS OF reads a table as it was at a time in
++// its time travel window (https://cloud.google.com/bigquery/docs/time-travel).
++// A table's change table (change_history.go) records each row inserted,
++// deleted and updated with its time, so the table as it was at a time is,
++// of each of its rows, the last change recorded at or before that time,
++// when that change is not a DELETE. That needs the changed row's rowid,
++// which the change table keeps (changeRowidColumn), and the order of the
++// changes of one transaction, the change table's own rowid: this patch
++// names both, and the change time in microseconds (changeMicrosColumn),
++// as pseudo-columns of a change table, which SELECT * leaves out.
++//
++// A change table records nothing before it was made: a table rebuilt by
++// an ALTER TABLE, or made again by CREATE OR REPLACE TABLE, starts it
++// over. createChangeTable records the time it was made as a row of
++// _CHANGE_TYPE 'START', so that a reader knows from when the change
++// table holds the whole history.
++
++// changeOrderColumn is the pseudo-column of a change table's own rowid:
++// SQLite reads a column named rowid, which no change table has, as the
++// rowid.
++const changeOrderColumn = "rowid"
++
++// changeStartType is the _CHANGE_TYPE of the row that records when a
++// change table was made.
++const changeStartType = "START"
++
++// changeRowColumns returns the pseudo-columns a table named name has: the
++// row identities of a change table, none of any other table.
++func changeRowColumns(name string) []string {
++	if !isChangeTableName(name) {
++		return nil
++	}
++	return []string{changeMicrosColumn, changeRowidColumn, changeOrderColumn}
++}
++
++// changeStartRow is the statement that records, in the change table
++// named change, the time it was made.
++func changeStartRow(change string) string {
++	return fmt.Sprintf("INSERT INTO `%s` (`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`_CHANGE_IS_FOR_UPDATE`,`%s`) "+
++		"VALUES (%s, googlesqlite_change_timestamp(), %s, googlesqlite_change_micros())",
++		change, changeMicrosColumn, encodedLiteral(value.StringValue(changeStartType)), encodedLiteral(value.BoolValue(false)))
++}
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -2465,6 +2465,15 @@
+ 		// are pseudo-columns, which SELECT * leaves out.
+ 		columns = append(columns, m1(googlesql.NewSimpleColumn(storageName, column.Name, typ, isIngestionPseudoColumn(column.Name), true)))
+ 		colIndex[column.Name] = int32(i)
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1460): a change table's
++	// row identities, as pseudo-columns (change_history_rows.go).
++	for _, name := range changeRowColumns(storageName) {
++		typ, err := (&Type{Kind: int(googlesql.TypeKindTypeInt64)}).ToGoogleSQLType()
++		if err != nil {
++			return nil, err
++		}
++		columns = append(columns, m1(googlesql.NewSimpleColumn(storageName, name, typ, true, true)))
+ 	}
+ 	tbl := newSimpleTableWithColumns(storageName, columns)
+ 	if tbl == nil {
+@@ -2520,6 +2529,15 @@
+ 		)))
+ 		colIndex[column.Name] = int32(i)
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1460): a change table's
++	// row identities, as pseudo-columns (change_history_rows.go).
++	for _, name := range changeRowColumns(tableName) {
++		typ, err := (&Type{Kind: int(googlesql.TypeKindTypeInt64)}).ToGoogleSQLType()
++		if err != nil {
++			return nil, err
++		}
++		columns = append(columns, m1(googlesql.NewSimpleColumn(tableName, name, typ, true, true)))
++	}
+ 	tbl := newSimpleTableWithColumns(tableName, columns)
+ 	if tbl != nil && len(spec.PrimaryKey) > 0 {
+ 		// Propagate PRIMARY KEY column ordinals so the analyzer can
+--- a/internal/change_history.go
++++ b/internal/change_history.go
+@@ -200,6 +200,9 @@
+ 	if n > 0 {
+ 		stmts = append(stmts, trigger("fold", "UPDATE", inserted, fold))
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1460): when the history
++	// starts (change_history_rows.go).
++	stmts = append(stmts, changeStartRow(change))
+ 	stmts = append(stmts, fmt.Sprintf("%s SELECT %s%s, googlesqlite_change_timestamp(), %s, googlesqlite_change_micros(), rowid FROM `%s`",
+ 		target, all, ins, no, base))
+ 	for _, s := range stmts {

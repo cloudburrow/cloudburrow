@@ -135,7 +135,7 @@ func TestBigQueryPartitionDecorators(t *testing.T) {
 // time reads the table as it is; a time before the table was made, or
 // before the dataset's time travel window, fails as BigQuery documents it
 // ("Invalid snapshot time ... Cannot read before ..."); any other past time
-// is 501, the emulator keeps no history. Measured first: every form was
+// reads the table's history (#1460, TestBigQueryTimeTravelHistory). Measured first: every form was
 // 400 "FOR SYSTEM_TIME AS OF is not supported".
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
@@ -164,8 +164,9 @@ func TestBigQueryTimeTravelReads(t *testing.T) {
 			http.StatusBadRequest, "Invalid snapshot time")
 		wantAPIError(t, "out of window", bqRun(ctx, c, "SELECT n FROM "+p+
 			" FOR SYSTEM_TIME AS OF TIMESTAMP '2001-01-01'", insert), http.StatusBadRequest, "Cannot read before")
-		wantAPIError(t, "in window", bqRun(ctx, c, "SELECT n FROM "+p+
-			" FOR SYSTEM_TIME AS OF TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 MICROSECOND)", insert),
-			http.StatusNotImplemented, "keeps no history")
+		if err := bqRun(ctx, c, "SELECT n FROM "+p+
+			" FOR SYSTEM_TIME AS OF TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 MICROSECOND)", insert); err != nil {
+			t.Errorf("in window: %v", err) // the table's history, bigquerytimetravel_test.go
+		}
 	}
 }

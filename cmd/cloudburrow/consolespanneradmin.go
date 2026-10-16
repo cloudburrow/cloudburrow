@@ -14,6 +14,7 @@ import (
 	instance "cloud.google.com/go/spanner/admin/instance/apiv1"
 	instancepb "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	"google.golang.org/api/iterator"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
@@ -377,6 +378,16 @@ func spannerPartitionName(project, instanceID, partitionID string) string {
 func (p spannerProvider) spannerAdminAct(ctx context.Context, project string, path []string, action string,
 	values map[string]string) (handled bool, err error) {
 	switch action {
+	case "dropprotection":
+		if len(path) != 2 || isSpannerPartitionPath(path) {
+			return true, errors.New("Drop protection is a database's action")
+		}
+		return true, p.spannerSetDropProtection(ctx, project, path[0], path[1], values["enabled"] == "true")
+	case "editinstance":
+		if len(path) != 1 {
+			return true, errors.New("Edit instance is an instance's action")
+		}
+		return true, p.spannerEditInstance(ctx, project, path[0], values)
 	case "updateddl":
 		if len(path) != 2 || isSpannerPartitionPath(path) {
 			return true, errors.New("Update schema is a database's action")
@@ -457,4 +468,86 @@ func (p spannerProvider) spannerAdminAct(ctx context.Context, project string, pa
 		})
 	}
 	return false, nil
+}
+
+// spannerEditInstanceAction is Edit instance (#1461), prefilled from the
+// instance: its display name and compute capacity, which the call front in
+// the Spanner pod updates (the emulator refuses UpdateInstance).
+func (p spannerProvider) spannerEditInstanceAction(ctx context.Context, project, instanceID string) (console.Action, bool) {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return console.Action{}, false
+	}
+	defer instAdmin.Close()
+	inst, err := instAdmin.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: fmt.Sprintf("projects/%s/instances/%s", project, instanceID)})
+	if err != nil {
+		return console.Action{}, false
+	}
+	return console.Action{ID: "editinstance", Label: "Edit instance", Fields: []console.Field{
+		{Name: "displayName", Label: "Display name", Type: "text", Required: true, Default: inst.GetDisplayName(), Pattern: `^.{4,30}$`,
+			Help: "4 to 30 characters."},
+		{Name: "processingUnits", Label: "Processing units", Type: "text", Required: true, Pattern: `^[0-9]+$`,
+			Default: strconv.Itoa(int(inst.GetProcessingUnits())),
+			Help:    "A multiple of 100 below 1000, and of 1000 (a node) from 1000. The emulator serves every instance the same."},
+	}}, true
+}
+
+func (p spannerProvider) spannerEditInstance(ctx context.Context, project, instanceID string, values map[string]string) error {
+	pu, err := strconv.ParseInt(strings.TrimSpace(values["processingUnits"]), 10, 32)
+	if err != nil {
+		return fmt.Errorf("processing units %q is not a whole number", values["processingUnits"])
+	}
+	instAdmin, err := instance.NewInstanceAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return fmt.Errorf("cannot reach Spanner: %w", err)
+	}
+	defer instAdmin.Close()
+	op, err := instAdmin.UpdateInstance(ctx, &instancepb.UpdateInstanceRequest{
+		Instance: &instancepb.Instance{Name: fmt.Sprintf("projects/%s/instances/%s", project, instanceID),
+			DisplayName: strings.TrimSpace(values["displayName"]), ProcessingUnits: int32(pu)},
+		FieldMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name", "processing_units"}}})
+	if err != nil {
+		return err
+	}
+	_, err = op.Wait(ctx)
+	return err
+}
+
+// spannerDropProtectionAction is Drop protection on a database's page
+// (#1461), prefilled from the database: UpdateDatabase's
+// enable_drop_protection, which the call front answers and enforces.
+func (p spannerProvider) spannerDropProtectionAction(ctx context.Context, project, instanceID, dbID string) (console.Action, bool) {
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
+	dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return console.Action{}, false
+	}
+	defer dbAdmin.Close()
+	db, err := dbAdmin.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, dbID)})
+	if err != nil {
+		return console.Action{}, false
+	}
+	return console.Action{ID: "dropprotection", Label: "Drop protection", Fields: []console.Field{
+		{Name: "enabled", Label: "Protect the database from being dropped", Type: "checkbox", Default: strconv.FormatBool(db.GetEnableDropProtection()),
+			Help: "While it is on, Drop database, and Delete instance of its instance, are refused."},
+	}}, true
+}
+
+func (p spannerProvider) spannerSetDropProtection(ctx context.Context, project, instanceID, dbID string, on bool) error {
+	dbAdmin, err := database.NewDatabaseAdminClient(ctx, localOpts(p.endpoint)...)
+	if err != nil {
+		return fmt.Errorf("cannot reach Spanner: %w", err)
+	}
+	defer dbAdmin.Close()
+	op, err := dbAdmin.UpdateDatabase(ctx, &databasepb.UpdateDatabaseRequest{
+		Database:   &databasepb.Database{Name: fmt.Sprintf("projects/%s/instances/%s/databases/%s", project, instanceID, dbID), EnableDropProtection: on},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"enable_drop_protection"}}})
+	if err != nil {
+		return err
+	}
+	_, err = op.Wait(ctx)
+	return err
 }

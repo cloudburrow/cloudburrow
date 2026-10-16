@@ -23,19 +23,19 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Storage | 5 | 0 | 4 | 1 | 0 |
 | Pub/Sub | 2 | 0 | 0 | 1 | 1 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 6 | 2 | 3 | 0 | 1 |
+| Cloud Run | 3 | 2 | 0 | 0 | 1 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 1 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
-| Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 28 | 5 | 15 | 8 | 0 |
+| Vertex AI | 5 | 0 | 5 | 0 | 0 |
+| BigQuery | 27 | 6 | 13 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **66** | **12** | **35** | **13** | **6** |
+| **Total** | **64** | **13** | **32** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -74,7 +74,7 @@ field (#1255), `stackdriver_logging_config`, with each sampled dispatch written 
 
 | Gap | Why open | Size |
 |---|---|---|
-| App Engine targets and `app_engine_routing_override` (#1447) | no emulator support (no App Engine) | L |
+| Delivery to an App Engine target (#1447) | no emulator support (no App Engine): tasks and `app_engine_routing_override` are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
 
 ## Cloud Run
 
@@ -92,13 +92,11 @@ the service account named to its workload by the metadata server (#1388); two pr
 of one ID (#1400); `gcloud run deploy --source` and `gcloud builds submit` with Artifact Registry
 and Cloud Build (#1347), steps of any image (#1382), a Docker registry for built images (#1383),
 `secretEnv`, `script` and `allowFailure` (#1407), Cloud Build triggers and worker pools (#1422),
-and the default logs bucket (#1430).
+and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_RUN_TASK_ATTEMPT`
+(#1448); Cloud Storage FUSE volumes from the instance's storage (#1474); the `h2c` port name (#1475).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud Storage FUSE and NFS volumes on services and jobs are refused `UNIMPLEMENTED` naming the field (#1448) | no emulator support (Knative refuses a privileged container and CSI volumes) | M |
-| A service's container sees `K_SERVICE`, `K_CONFIGURATION` and `K_REVISION` as the scoped Knative names, not Cloud Run's service and revision IDs, which the API reports (#1448) | no emulator support (Knative reserves the three variables) | S |
-| `CancelOperation`: a deployment in flight cannot be recalled (#1448) | no emulator support | S |
 | Cloud Build: `options.dynamicSubstitutions`, `secretEnv` on a docker build, docker push or pack step, `ApproveBuild` and `approvalRequired`, and triggers with a repository or Pub/Sub source or a `filename` are refused; Artifact Registry: 27 methods `UNIMPLEMENTED` (rules, attachments, Maven, npm, Python, Apt and Yum artifacts, project and VPC-SC settings, package, version and file updates; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | not built yet | M |
 | v1 (Knative) API: a domain mapping never becomes Ready, as no DNS is served and no certificate issued; a job's own `spec.template.spec.delayExecution` is 501, and a run's `overrides.delayExecution` is not read back on the execution, as v2 has no field for either (#1450) | not built yet | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
@@ -109,7 +107,7 @@ Closed by the sweep: Locations (#1237).
 
 | Gap | Why open | Size |
 |---|---|---|
-| App Engine targets (#1447) | no emulator support (no App Engine) | L |
+| Delivery to an App Engine target (#1447) | no emulator support (no App Engine): jobs are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
 | `ResumeJob` on an enabled job and the default `retry_config` are inferred from the Terraform provider (#1445) | needs live GCP | S |
 
 ## Cloud Logging
@@ -173,7 +171,9 @@ over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`
 | Gap | Why open | Size |
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1454) | no emulator support (one text-only model) | S |
-| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served (#1454) | no emulator support (no gRPC model server) | M |
+| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served (#1454, #1477) | no emulator support: a model's container is deployed with its HTTP ports only; its `grpcPorts` are not deployed (#1477) | M |
+| `Explain` with integrated gradients, XRAI or examples (#1454); Sampled Shapley is served | no emulator support: they need the model's gradients or an Example index, which a custom container's predict route does not expose | L |
+| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served: Cloud Run serves an `h2c` port (#1475), but a model's `grpcPorts` are not deployed (#1454) | no emulator support (no gRPC model server) | M |
 | `Explain` (#1454) | no emulator support | L |
 
 ## BigQuery
@@ -221,8 +221,8 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | Parquet: the refused columns left (an INT96 with a part of a microsecond, a DECIMAL that would round, DECIMAL to STRING, a NULL element or a LIST of lists with list inference); a NaN loads and unlisted types are 400 since #1457 | not documented by Google | S |
 | A load of several Cloud Storage objects when the front was given no Cloud Storage (#1457) | no emulator support | S |
 | Partition decorators: `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination, a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, and through a partition a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order or a RECORD's fields changed, are 501, none documented by BigQuery (#1458) | not documented by Google | S |
-| A table made by `CREATE TABLE … AS SELECT`, a temporary table, or one made before the engine had the column keeps no stream time, so its streamed rows are held from DML only while in the 20-second streaming buffer; a query naming `_PARTITION_BUFFERED` or `_PARTITION_STREAMED` reads the engine's marks; a table restored from state saved before #1277 keeps no ingestion time (#1458) | no emulator support | S |
-| `PARTITIONS` has no byte counts or `last_modified_time`; region `TABLE_STORAGE` has no byte columns, `total_partitions` or `storage_last_modified_time`; `COLUMNS` has no `async_generation_status`; `OBJECT_PRIVILEGES` and `SCHEMATA_LINKS` dataset-qualified are 501 (#1458) | no emulator support (no faithful byte counts or write times) | M |
+| A table made by `CREATE TABLE … AS SELECT`, a temporary table, or one made before the engine had the column keeps no stream time, so its streamed rows are held from DML only while in the 20-second streaming buffer; a table restored from state saved before #1277 keeps no ingestion time (#1458) | no emulator support | S |
+| `PARTITIONS` has no byte counts or `last_modified_time`; region `TABLE_STORAGE` has no byte columns or `storage_last_modified_time` (#1458) | no emulator support (no faithful byte counts or write times) | M |
 | Region-qualified `INFORMATION_SCHEMA.JOBS` has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (#1458) | not documented by Google (their STRUCTs) | S |
 | A script the emulator runs whole (no control flow, no query before its last statement) makes no child jobs; a script's last DML statement has no child of its own, and a `SELECT` child names no destination table (#1459) | no emulator support | M |
 | `MERGE` from a subquery inside a multi-statement script; DML with a `FROM` of several items (#1459) | no emulator support | M |
@@ -231,9 +231,8 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | `DROP SCHEMA` where the script's other statements see the dataset; `CREATE SCHEMA` options other than the supported strings, and `DEFAULT COLLATE` (#1459) | no emulator support | M |
 | `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that changes data; a runtime error or an `ASSERT` in a script with a `TEMP` table or function (#1459) | no emulator support | S |
 | A failed script after a statement that wrote: the emulator does not roll back (#1459) | no emulator support | L |
-| `FOR SYSTEM_TIME AS OF` a past time inside the time travel window, and a snapshot or clone at one, are 501: the emulator keeps no history (#1460) | no emulator support | L |
-| `datasets.undelete`: the emulator keeps nothing of a deleted dataset (#1460) | no emulator support | M |
-| Storage Read API: `SplitReadStream`, and `ReadRows` of a stream made before the front last started (#1460) | no emulator support | S |
+| A snapshot or clone `FOR SYSTEM_TIME AS OF` a past time (a query reads one since #1460); `FOR SYSTEM_TIME AS OF` a past time before an ALTER TABLE rebuild or CREATE OR REPLACE TABLE, of an ingestion-time partitioned table, or with a partition decorator (#1460) | not built yet | M |
+| `datasets.undelete`, `UNDROP SCHEMA`, and restoring a dropped table by a copy of `table@time`: the emulator drops a table's rows and change history with it, and a dataset's tables (#1460) | no emulator support | M |
 | BQML: `CREATE MODEL` is refused by the engine ("Statement not supported: CreateModelStatement"), so no model can be made, used or extracted (#1465) | no emulator support | L |
 | Script variable named as an alias, a column or a table; `WRITE_TRUNCATE_DATA` of a result of another type (#1445) | not documented by Google | S |
 | BigQuery's wording of every front refusal (UNVERIFIED throughout the BigQuery rows) (#1445) | not documented by Google | S |
@@ -244,10 +243,10 @@ Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405)
 
 | Gap | Why open | Size |
 |---|---|---|
-| Spanner: 32 RPCs refused (backups, backup schedules, IAM, instance configurations, instance and partition updates, `FetchCacheUpdate`; [spanner.md](coverage/spanner.md)) (#1461) | no emulator support | L |
+| Spanner: 30 RPCs refused, each naming why (backups, backup schedules, IAM, instance configurations, partition updates, `FetchCacheUpdate`; [spanner.md](coverage/spanner.md)); `UpdateInstance` and `UpdateDatabase` (drop protection) are served by the call front since #1461 (#1461) | no emulator support: the emulator cannot snapshot a database and has one instance configuration | L |
 | Bigtable: 48 RPCs refused (authorized, logical and materialized views, memory layers, snapshots, backups, schema bundles, table IAM, `ExecuteQuery`, change streams, …; [bigtable.md](coverage/bigtable.md)) (#1461) | no emulator support | L |
-| Firestore: `ExecutePipeline`; Firestore Admin: backups, backup schedules, restore, clone, user credentials, `ExportDocuments`, `ImportDocuments`, `BulkDeleteDocuments` (20 methods; [firestoreadmin.md](coverage/firestoreadmin.md)) (#1461) | no emulator support | L |
-| Datastore GQL aggregation queries (`RunAggregationQuery` with `gql_query`) and `explain_options` are 501 (#1461) | no emulator support (the emulator serves neither) | S |
+| Firestore: `ExecutePipeline`; Firestore Admin: backups, restore, clone, user credentials, `ExportDocuments`, `ImportDocuments`, `BulkDeleteDocuments` (15 methods, each naming why; [firestoreadmin.md](coverage/firestoreadmin.md)); backup schedules are served since #1461 and take no backups (#1461) | no emulator support: it cannot snapshot or export a database, and is not Firestore with MongoDB compatibility | L |
+| Datastore `explain_options` are 501; GQL aggregation queries are served since #1461 (#1461) | no emulator support: the emulator plans no query | S |
 | Whether production reorders an array's excluded values after its indexed ones, as the emulator does (#941) | needs live GCP | S |
 
 ## Cloud SQL, Memorystore

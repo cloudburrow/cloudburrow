@@ -424,6 +424,7 @@ func TestJobRunsAsABatchJob(t *testing.T) {
 		"secretKeyRef:\n                  name: k8s-secret\n                  key: 2",
 		`cpu: "1"`, `memory: "256Mi"`,
 		"- name: CLOUD_RUN_TASK_INDEX\n              valueFrom:\n                fieldRef:\n                  fieldPath: \"metadata.annotations['batch.kubernetes.io/job-completion-index']\"",
+		"- name: CLOUD_RUN_TASK_ATTEMPT\n              valueFrom:\n                fieldRef:\n                  fieldPath: \"metadata.annotations['batch.kubernetes.io/job-index-failure-count']\"",
 		"- name: CLOUD_RUN_TASK_COUNT\n              value: \"3\"",
 		"cloudburrow.dev/owned: \"true\"", "cloudburrow.dev/run-job: nightly",
 	} {
@@ -598,9 +599,6 @@ func TestJobRefusesWhatItDoesNotMap(t *testing.T) {
 	js, _, _, f := jobsServer(fakeSecrets{})
 	ctx := context.Background()
 	cases := map[string]func(*runpb.Job){
-		"template.template.volumes.nfs": func(j *runpb.Job) {
-			j.Template.Template.Volumes = []*runpb.Volume{{Name: "v", VolumeType: &runpb.Volume_Nfs{Nfs: &runpb.NFSVolumeSource{Server: "s"}}}}
-		},
 		"template.template.nodeSelector": func(j *runpb.Job) { j.Template.Template.NodeSelector = &runpb.NodeSelector{Accelerator: "l4"} },
 		"container.dependsOn":            func(j *runpb.Job) { j.Template.Template.Containers[0].DependsOn = []string{"x"} },
 		"container.ports": func(j *runpb.Job) {

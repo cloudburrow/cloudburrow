@@ -851,6 +851,13 @@ var parityRows = []parityRow{
 		Methods:  []string{"FirestoreAdmin/ListIndexes", "FirestoreAdmin/ListFields"},
 		Provider: "firestore-databases", Offers: "A database's Indexes tab (every composite index in every collection group, with its fields, query scope and state) and Field overrides tab (each field with index settings or a TTL policy of its own), each saying that the emulator needs no index and deletes no expired document (#1331)",
 		Tests: []string{"TestConsoleFirestoreDatabasesIndexesAndFields", "TestFirestoreAdminIndexes", "TestFirestoreAdminFields"}},
+	{Resource: "Firestore backup schedules", Service: "firestoreadmin",
+		Methods:  []string{"FirestoreAdmin/CreateBackupSchedule", "FirestoreAdmin/ListBackupSchedules", "FirestoreAdmin/UpdateBackupSchedule", "FirestoreAdmin/DeleteBackupSchedule"},
+		Provider: "firestore-databases", Offers: "A database's Backup schedules tab (each schedule's recurrence, retention and creation time, saying the schedules take no backups); Create backup schedule on a database's page (daily or weekly on a day, retention in days), and Edit retention and Delete backup schedule on a schedule's row (#1461)",
+		Tests: []string{"TestConsoleFirestoreBackupSchedules", "TestFirestoreAdminBackupSchedules"}},
+	{Resource: "Firestore single backup schedule reads", Service: "firestoreadmin",
+		Methods:  []string{"FirestoreAdmin/GetBackupSchedule"},
+		Excluded: "the one-resource form of the Backup schedules tab, which lists every schedule with all that GetBackupSchedule returns"},
 	{Resource: "Firestore single index and field reads", Service: "firestoreadmin",
 		Methods:  []string{"FirestoreAdmin/GetIndex", "FirestoreAdmin/GetField"},
 		Excluded: "the one-resource forms of the Indexes and Field overrides tabs, which list every index and override with all that GetIndex and GetField return"},
@@ -939,6 +946,14 @@ var parityRows = []parityRow{
 			"Spanner/ExecuteStreamingSql", "Spanner/StreamingRead"},
 		Provider: "spanner", Offers: "Instances, databases, tables, columns and indexes, DDL, read-only query editor, Create database, Drop database, Delete instance",
 		Tests: []string{"TestConsoleSpannerCreateAndDropDatabase"}},
+	{Resource: "Spanner database drop protection", Service: "spanner",
+		Methods:  []string{"DatabaseAdmin/UpdateDatabase"},
+		Provider: "spanner", Offers: "Drop protection on a database's page, prefilled from it: UpdateDatabase's enable_drop_protection, which the call front in the Spanner pod applies and enforces on Drop database and Delete instance (#1461)",
+		Tests: []string{"TestConsoleSpannerEditInstance", "TestSpannerDatabaseDropProtection"}},
+	{Resource: "Spanner instance updates", Service: "spanner",
+		Methods:  []string{"InstanceAdmin/UpdateInstance"},
+		Provider: "spanner", Offers: "Edit instance on an instance's page, prefilled from it: display name and processing units, which the call front in the Spanner pod applies (the emulator refuses UpdateInstance) (#1461)",
+		Tests: []string{"TestConsoleSpannerEditInstance", "TestSpannerUpdateInstance"}},
 	{Resource: "Spanner sessions and transactions", Service: "spanner",
 		Methods: []string{"Spanner/CreateSession", "Spanner/BeginTransaction", "Spanner/BatchCreateSessions", "Spanner/GetSession",
 			"Spanner/ListSessions", "Spanner/DeleteSession", "Spanner/Rollback"}, Excluded: transactionReason},
@@ -998,7 +1013,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleBigQueryEditTableViewsAndInsertOptions", "TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms"}},
 	{Resource: "BigQuery queries", Service: "bigquery",
 		Methods:  []string{"bigquery.jobs.query", "bigquery.jobs.getQueryResults"},
-		Provider: "bigquery", Offers: "The query editor on every dataset and table page, run with jobs.query: read-only by default, one SELECT or WITH … SELECT, at most 200 rows (#698); an opt-in, confirmed Read-write mode for DDL (a view's column list too, also in a script and with a column's description, #1240, #1323) and scripts with DECLARE (#994), and a DML statement of its own (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE) answered with the rows it changed (#1024); DML inside a script (#1028) and UPDATE … FROM (#1027) refused with the reason; in the editor a SELECT reads one partition by its decorator (`t$20240101`), the pseudo-columns _PARTITIONTIME and _PARTITIONDATE where BigQuery has them, and FOR SYSTEM_TIME AS OF, as the front answers them (#1273, #1276, #1277); the project and organization configurations, which have no settings page: ALTER PROJECT and ALTER ORGANIZATION SET OPTIONS, alone or in a script, in the Read-write mode, and `region-REGION`.INFORMATION_SCHEMA.PROJECT_OPTIONS, ORGANIZATION_OPTIONS and EFFECTIVE_PROJECT_OPTIONS read in the read-only editor (#1417)",
+		Provider: "bigquery", Offers: "The query editor on every dataset and table page, run with jobs.query: read-only by default, one SELECT or WITH … SELECT, at most 200 rows (#698); an opt-in, confirmed Read-write mode for DDL (a view's column list too, also in a script and with a column's description, #1240, #1323) and scripts with DECLARE (#994), and a DML statement of its own (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE) answered with the rows it changed (#1024); DML inside a script (#1028) and UPDATE … FROM (#1027) refused with the reason; in the editor a SELECT reads one partition by its decorator (`t$20240101`), the pseudo-columns _PARTITIONTIME and _PARTITIONDATE where BigQuery has them, and FOR SYSTEM_TIME AS OF, as the front answers them (#1273, #1276, #1277); the project and organization configurations, which have no settings page: ALTER PROJECT and ALTER ORGANIZATION SET OPTIONS, alone or in a script, in the Read-write mode, and `region-REGION`.INFORMATION_SCHEMA.PROJECT_OPTIONS, ORGANIZATION_OPTIONS and EFFECTIVE_PROJECT_OPTIONS read in the read-only editor (#1417); a dataset's and a region's INFORMATION_SCHEMA views read there as the front answers them, COLUMNS with async_generation_status and region TABLE_STORAGE with total_partitions, a dataset-qualified OBJECT_PRIVILEGES or SCHEMATA_LINKS and a query naming the engine's _PARTITION_BUFFERED or _PARTITION_STREAMED refused with the reason (#1458)",
 		Tests: []string{"TestConsoleBigQueryDatasetsSchemaAndQuery", "TestTheBigQueryEditorRunsOnlyOneSelect", "TestTheBigQueryEditorsCarryProjectConfigurations",
 			"TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts", "TestConsoleBigQueryReadWriteEditorRunsDML",
 			"TestTheBigQueryReadWriteEditorScreensStatements", "TestBigQueryDMLAnswerSaysWhatChanged",
@@ -1095,8 +1110,9 @@ var parityRows = []parityRow{
 			"TestConsoleLocalModelsUnloadDeleteDownloadLoad", "TestStudioManagesLocalModelsAndTestsEmbeddings"}},
 	{Resource: "Vertex AI custom prediction (serving contract)",
 		Screen: "/ai/predict", Offers: "Online prediction: the Cloud Run services configured with the contract's AIP_* variables, " +
-			"JSON instances and parameters, Predict, the container's status and body verbatim; Vertex's Endpoint, " +
-			"PredictionService and batch prediction named as not served (#869)",
+			"JSON instances and parameters, Predict, the container's status and body verbatim, and Explain with " +
+			"its Sampled Shapley spec (#1454); Vertex's Endpoint, the explanation methods that need gradients or an " +
+			"Example index, and batch prediction named as not served (#869)",
 		Tests: []string{"TestConsoleOnlinePredictionThroughTheConsoleAPI", "TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser",
 			"TestPredictRelaysThroughTheIngressAndShowsTheAnswerVerbatim", "TestPredictRefusesWhatItCannotSend"}},
 	// PredictionService over gRPC (#1193) is a protocol for the requests
@@ -1110,6 +1126,15 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleOnlinePredictionThroughTheConsoleAPI", "TestPredictionClientReachesACustomEndpoint",
 			"TestGRPCPredictEmbedsLikeTheJSONRoute", "TestEmbeddingsScreenSendsBothMethods", "TestRawPredictOnTheEmbeddingModel",
 			"TestGRPCRawPredictOnTheEmbeddingModel", "TestRawPredictREST"}},
+	{Resource: "Vertex AI PredictionService: Explain", Service: "vertexai",
+		Methods: []string{"PredictionService/Explain"},
+		Screen:  "/ai/predict", Offers: "Online prediction: Explain sends the instances and parameters with " +
+			"explanation_spec_override (Sampled Shapley path count, each feature's input_baselines) to the endpoint's " +
+			":explain, and shows the attributions per feature, the baseline and instance outputs, and the API's " +
+			"body or refusal verbatim; integrated gradients, XRAI and example-based explanations are named as not " +
+			"served (#1454)",
+		Tests: []string{"TestConsoleExplainMatchesThePredictionClient", "TestPredictionClientReachesACustomEndpoint",
+			"TestExplainSendsTheSpecOverrideAndShowsAttributionsPerFeature", "TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser"}},
 	{Resource: "Vertex AI PredictionService: EmbedContent", Service: "vertexai",
 		Methods: []string{"PredictionService/EmbedContent"},
 		Screen:  "/ai/embeddings", Offers: "Embeddings: Method EmbedContent sends each text as the :embedContent " +

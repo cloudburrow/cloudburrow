@@ -62,7 +62,8 @@ type ksvc struct {
 						ValueFrom *struct{} `json:"valueFrom"`
 					} `json:"env"`
 					Ports []struct {
-						ContainerPort int `json:"containerPort"`
+						ContainerPort int    `json:"containerPort"`
+						Name          string `json:"name"`
 					} `json:"ports"`
 				} `json:"containers"`
 			} `json:"spec"`

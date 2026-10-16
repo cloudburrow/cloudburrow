@@ -241,6 +241,9 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 		if d := c.Query.DestinationTable; d != nil && f.refuseSnapshotWrite(w, r, d.DatasetID, d.TableID, "a query job's destinationTable") { // #1002
 			return
 		}
+		if f.refusePseudoColumns(w, r, c.Query.queryOptions, true) { // #1458, pseudocolumns.go
+			return
+		}
 		qf := &queryFailures{}        // #1109, queryfailures.go
 		refused := &emulatorRefusal{} // #1397, failedjobs.go
 		raw, _ := readBody(r)
@@ -352,6 +355,9 @@ func (f front) query(w http.ResponseWriter, r *http.Request) {
 	raw, ok := decode(r, &body)
 	if !ok {
 		f.next.ServeHTTP(w, r)
+		return
+	}
+	if f.refusePseudoColumns(w, r, body, false) { // #1458, pseudocolumns.go
 		return
 	}
 	qf := &queryFailures{} // #1109, queryfailures.go

@@ -185,6 +185,19 @@ type jsonDetail struct {
 // API answers in its own envelope instead: WriteStorageJSON.
 func WriteJSON(w http.ResponseWriter, err error) {
 	e := From(err)
+	write(w, e.HTTPStatus(), statusBody(e))
+}
+
+// MarshalJSON is the body WriteJSON writes, for a caller that cannot send it
+// as a response: a server-sent event stream that fails after its first event
+// has already committed a 200, and so sends the error as a final event
+// (Vertex AI's streamGenerateContent and streamRawPredict do).
+func MarshalJSON(err error) []byte {
+	b, _ := json.Marshal(statusBody(From(err)))
+	return b
+}
+
+func statusBody(e *Error) statusError {
 	var body statusError
 	body.Error.Code = e.HTTPStatus()
 	body.Error.Message = e.Message
@@ -196,7 +209,7 @@ func WriteJSON(w http.ResponseWriter, err error) {
 			body.Error.Details = append(body.Error.Details, b)
 		}
 	}
-	write(w, e.HTTPStatus(), body)
+	return body
 }
 
 // WriteStorageJSON renders the error in the Cloud Storage JSON API envelope,

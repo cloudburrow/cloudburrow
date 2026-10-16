@@ -14,8 +14,8 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// TestCloudSQLReadWriteEditorsThroughThePage (#995), in the emulators shard,
-// whose instance serves both Cloud SQL engines. On each engine's cloudburrow
+// TestCloudSQLReadWriteEditorsThroughThePage (#995), in the sql shard
+// (#1472), whose instance serves both Cloud SQL engines. On each engine's cloudburrow
 // database page, the Query tab starts Read-only, and a CREATE TABLE there is
 // the database's own refusal: PostgreSQL's read-only transaction, MySQL's
 // command-denied error for the read-only account. Switched to Read-write,

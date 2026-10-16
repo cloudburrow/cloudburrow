@@ -46,6 +46,10 @@ func offlinePlan(ctx context.Context, cfg config.Config, r prefetch.Runner) pref
 	if serviceEnabled(cfg, config.ServiceRun) && sqlAdminEnabled(cfg) {
 		plan.Images[runadapter.CloudSQLProxyImage] = append(plan.Images[runadapter.CloudSQLProxyImage], "cloud-sql-proxy")
 	}
+	// gcsfuse, which mounts a Cloud Storage volume's bucket (#1474).
+	if serviceEnabled(cfg, config.ServiceRun) && serviceEnabled(cfg, config.ServiceStorage) {
+		plan.Images[runadapter.GCSFuseImage] = append(plan.Images[runadapter.GCSFuseImage], "gcsfuse")
+	}
 	plan.Arch = daemonArch(ctx, r)
 	if needsStorageImage(cfg) {
 		plan.Storage = true

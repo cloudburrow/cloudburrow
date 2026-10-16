@@ -212,6 +212,9 @@ var gcloudOverrides = []struct {
 	{"backupdr", []string{"BACKUPDR"}},
 	// Bigtable's admin REST API, on the Bigtable front's port (#1440).
 	{"bigtableadmin", []string{"BIGTABLE"}},
+	// Spanner's admin REST API and the Firestore Admin API (#1461).
+	{"spanner", []string{"SPANNER_REST"}},
+	{"firestore", []string{"FIRESTORE"}},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`

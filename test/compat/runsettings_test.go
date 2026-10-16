@@ -104,8 +104,9 @@ func TestRunServiceStoredSettingsAndSubPath(t *testing.T) {
 // through /sub and exits 0 only when the file is at /data/a/b, so the
 // execution succeeding is the proof. VPC access, the encryption key, the
 // execution environment and binary authorization read back as set. A
-// subPath that leaves the volume is InvalidArgument; Cloud Storage FUSE and
-// NFS volumes are still refused by name.
+// subPath that leaves the volume is InvalidArgument; a Cloud Storage FUSE
+// volume is still refused by name (NFS volumes are served since #1448:
+// runnfsenv_test.go).
 func TestRunJobSubPathAndStoredSettings(t *testing.T) {
 	h := New(t)
 	jc, _ := runJobClients(t, h)
@@ -154,17 +155,8 @@ func TestRunJobSubPathAndStoredSettings(t *testing.T) {
 	if _, err := jc.CreateJob(ctx, &runpb.CreateJobRequest{Parent: runParent(h), JobId: "compat-job-badsub", Job: bad}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("subPath ../up = %v; want InvalidArgument", err)
 	}
-	for field, v := range map[string]*runpb.Volume{
-		"volumes.gcs": {Name: "v", VolumeType: &runpb.Volume_Gcs{Gcs: &runpb.GCSVolumeSource{Bucket: "b"}}},
-		"volumes.nfs": {Name: "v", VolumeType: &runpb.Volume_Nfs{Nfs: &runpb.NFSVolumeSource{Server: "10.0.0.2", Path: "/"}}},
-	} {
-		refused := shellJob("true", 1, nil)
-		refused.Template.Template.Volumes = []*runpb.Volume{v}
-		_, err := jc.CreateJob(ctx, &runpb.CreateJobRequest{Parent: runParent(h), JobId: "compat-job-refused", Job: refused})
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), field) {
-			t.Errorf("%s = %v; want Unimplemented naming it", field, err)
-		}
-	}
+	// Cloud Storage (#1474) and NFS (#1448) volumes are served since; their
+	// tests are TestRunCloudStorageFUSEVolumes and TestRunNFSVolumesAndCloudRunEnv.
 }
 
 // TestConsoleRunStoredSettings (#1346), in the run shard: a service deployed

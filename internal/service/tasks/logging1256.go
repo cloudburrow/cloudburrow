@@ -143,6 +143,12 @@ func AttemptLogEntry(q Queue, task Task, statusCode int, err error, started time
 		}
 		attempt["targetAddress"] = method + " " + task.HTTPRequest.URL
 	}
+	targetType := "HTTP"
+	if task.AppEngineHTTPRequest != nil {
+		targetType = "APP_ENGINE"
+		attempt["targetType"] = targetType
+		attempt["targetAddress"] = appEngineTargetAddress(task, q)
+	}
 	if !retry.IsZero() {
 		attempt["retryTime"] = retry.UTC().Format(time.RFC3339Nano)
 	}
@@ -158,7 +164,7 @@ func AttemptLogEntry(q Queue, task Task, statusCode int, err error, started time
 	return &loggingpb.LogEntry{
 		LogName: "projects/" + project + "/logs/" + url.PathEscape(TaskOperationsLog),
 		Resource: &monitoredres.MonitoredResource{Type: "cloud_tasks_queue", Labels: map[string]string{
-			"project_id": project, "location": location, "queue_id": queue, "target_type": "HTTP",
+			"project_id": project, "location": location, "queue_id": queue, "target_type": targetType,
 		}},
 		Timestamp: timestamppb.New(started),
 		Severity:  severity,

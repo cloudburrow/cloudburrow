@@ -436,7 +436,7 @@ jobs:
         run: |
           for c in $(kind get clusters 2>/dev/null); do kind delete cluster --name "$c" || true; done
 
-  # The compatibility suite runs as four shards and an acceptance shard,
+  # The compatibility suite runs as five shards and an acceptance shard,
   # each an instance with only its services and only their CLOUDBURROW_TEST_*
   # variables exported (#565). What each shard starts and runs is in
   # scripts/compat-shards.sh, sourced here and by scripts/verify-local.sh,
@@ -459,7 +459,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [storage, served, run, emulators, acceptance]
+        shard: [storage, served, run, emulators, sql, acceptance]
     env:
       SHARD: ${{ matrix.shard }}
       # Every make build here uses the emulator binaries the
@@ -479,12 +479,12 @@ jobs:
       # The Google Cloud CLI the gcloud, gsutil and bq tests run (#694, #696),
       # pinned rather than whatever the runner image carries, in the shards
       # that export a service those tests use: bq's is BigQuery, in the
-      # emulators shard. The versioned release archive,
+      # emulators shard, and gcloud sql's, in the sql shard. The versioned release archive,
       # checked against its pinned SHA-256 before it is unpacked, and never
       # given credentials. 88 MB and a few seconds to unpack, so it is not
       # cached: restoring the unpacked 460 MB would take longer.
       - name: Install the Google Cloud CLI
-        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators'
+        if: matrix.shard == 'storage' || matrix.shard == 'served' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'sql'
         run: |
           curl --retry 5 --retry-all-errors -fsSLo "$RUNNER_TEMP/gcloud.tar.gz" https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-586.0.0-linux-x86_64.tar.gz
           echo "6c774c76793eedd501150b59da653610fbe3eaac169e822965b722de75a2f001  $RUNNER_TEMP/gcloud.tar.gz" | sha256sum -c -
@@ -500,12 +500,12 @@ jobs:
           "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" version
 
       # Google's Cloud SQL Auth Proxy binary for TestCloudSQLAuthProxyBinary
-      # (#1421), in the shard that runs the Cloud SQL suite: `make
+      # (#1421), in the shard that runs the Cloud SQL suite, sql (#1472): `make
       # cloud-sql-proxy` downloads the pinned release and checks it against
       # its SHA-256 before making it executable. The connector listens at
       # the default 3307 there, the one port the proxy dials.
       - name: Install the Cloud SQL Auth Proxy
-        if: matrix.shard == 'emulators'
+        if: matrix.shard == 'sql'
         run: |
           echo "CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$(make -s cloud-sql-proxy)" >> "$GITHUB_ENV"
 
@@ -678,8 +678,8 @@ jobs:
           else
             set +e
             # 60m: the emulators shard passed 25m in main run 38910752877 and 45m
-            # in 38946612957 (about 490 tests; Cloud SQL and Backup and DR take the
-            # most). Splitting the shard is #1472.
+            # in 38946612957 (about 490 tests; Cloud SQL and Backup and DR took the
+            # most), before they moved to the sql shard (#1472).
             go test -tags=compat -timeout 60m -v ./test/compat/... | tee compat.log
             rc=$?
             set -e
@@ -710,10 +710,10 @@ jobs:
 
           # The flags naming this instance, one per line, for the console
           # browser step below, which brings it up again (#594): in the
-          # storage shard, and in the run and emulators shards for the
-          # screens only their instances serve (#700, #854).
+          # storage shard, and in the run, emulators and sql shards for the
+          # screens only their instances serve (#700, #854, #1472).
           case "$SHARD" in
-            storage|run|emulators) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
+            storage|run|emulators|sql) printf '%s\n' "${CB[@]}" > "$RUNNER_TEMP/cb-args" ;;
           esac
           if [ "$SHARD" = storage ]; then
             # The official Python clients against the same instance (#287),
@@ -828,14 +828,15 @@ jobs:
       # stopped the instance, so it is brought up again here with the same
       # flags. Most of the suite runs in the storage shard; the Cloud KMS and
       # Cloud Run screens are served only by the run shard's instance, so the
-      # tests named TestKMS* and TestCloudRun* run there instead (#700), and
-      # the BigQuery, Firestore, Datastore, Cloud SQL and Bigtable screens only
-      # by the emulators shard's, so TestBigQuery*, TestFirestore*,
-      # TestDatastore*, TestCloudSQL* and TestBigtable* run there (#854, #868,
-      # #995, #1198). Every test selected for the shard must pass: go test
+      # tests named TestKMS* and TestCloudRun* run there instead (#700); the
+      # BigQuery, Firestore, Datastore, Spanner and Bigtable screens only by
+      # the emulators shard's, so TestBigQuery*, TestFirestore*,
+      # TestDatastore*, TestSpanner* and TestBigtable* run there (#854,
+      # #1198); and the Cloud SQL screens only by the sql shard's, so
+      # TestCloudSQL* run there (#868, #995, #1472). Every test selected for the shard must pass: go test
       # exits 0 on a skip, and each skips without its variables or its screen.
       - name: Console in a headless browser
-        if: matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators'
+        if: matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'sql'
         run: |
           set -o pipefail
           # ubuntu-latest ships Google Chrome: it is in the runner image's
@@ -875,18 +876,20 @@ jobs:
           BROWSER_ENV=$(scripts/compat-env.sh --strict --only "$BROWSER_VARS" --cli "$PWD/bin/cloudburrow" -- "${CB[@]}")
           eval "$BROWSER_ENV"
 
-          # The run and emulators shards' tests, and the rest for the
+          # The run, emulators and sql shards' tests, and the rest for the
           # storage shard, from the file scripts/verify-local.sh reads too
           # (#705).
           # shellcheck source=scripts/compat-shards.sh
           . scripts/compat-shards.sh
           RUN_SHARD_TESTS=$COMPAT_BROWSER_RUN_SHARD_TESTS
           EMULATORS_SHARD_TESTS=$COMPAT_BROWSER_EMULATORS_SHARD_TESTS
+          SQL_SHARD_TESTS=$COMPAT_BROWSER_SQL_SHARD_TESTS
           NEVER_TESTS=$COMPAT_BROWSER_NEVER_TESTS
           case "$SHARD" in
             run) SELECT=(-run "$RUN_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$RUN_SHARD_TESTS") ;;
             emulators) SELECT=(-run "$EMULATORS_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$EMULATORS_SHARD_TESTS") ;;
-            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS") ;;
+            sql) SELECT=(-run "$SQL_SHARD_TESTS" -skip "$NEVER_TESTS"); PICK=(grep -E "$SQL_SHARD_TESTS") ;;
+            *) SELECT=(-skip "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$SQL_SHARD_TESTS|$NEVER_TESTS"); PICK=(grep -vE "$RUN_SHARD_TESTS|$EMULATORS_SHARD_TESTS|$SQL_SHARD_TESTS") ;;
           esac
           rc=0
           go test -tags=browser -count=1 -timeout 10m -v "${SELECT[@]}" ./test/browser/ | tee browser.log || rc=1
@@ -899,7 +902,7 @@ jobs:
           echo "== browser ($SHARD): $(grep -c -- '^--- PASS' browser.log) console tests passed in $("$CHROME" --version)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators')
+        if: failure() && (matrix.shard == 'storage' || matrix.shard == 'run' || matrix.shard == 'emulators' || matrix.shard == 'sql')
         with:
           name: browser-screenshots-${{ matrix.shard }}
           path: |
@@ -949,7 +952,7 @@ jobs:
 
   # Every compat test ran in some shard. A test whose service is in no shard
   # would skip everywhere and never be missed: the shards are gated by
-  # variables, and a variable nobody exports is silent. This reads the three
+  # variables, and a variable nobody exports is silent. This reads the
   # shards' logs and fails on any test that passed or failed in none of them.
   compat-coverage:
     name: every compat test ran in a shard
@@ -970,7 +973,7 @@ jobs:
         run: |
           go test -tags=compat -list '.*' ./test/compat/ | grep '^Test' | sort > all.txt
           missing=
-          for shard in storage served run emulators; do
+          for shard in storage served run emulators sql; do
             d=logs/compat-log-$shard
             [ -d "$d" ] || { echo "no logs from the $shard shard"; missing=1; continue; }
             # Top-level results only; a subtest's line is indented.

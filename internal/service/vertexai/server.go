@@ -291,16 +291,14 @@ func (s *Server) writeStream(w http.ResponseWriter, r *http.Request, model strin
 	// sent as a final event so the client sees a failure rather than a stream
 	// that merely stopped.
 	if err := generationError(r.Context(), errFn); err != nil {
-		e := apierror.From(err)
-		b, _ := json.Marshal(map[string]any{
-			"error": map[string]any{"code": e.HTTPStatus(), "status": e.Code.String(), "message": e.Message},
-		})
 		if !wrote {
 			// Nothing written yet, so a real status code is still possible.
 			apierror.WriteJSON(w, err)
 			return
 		}
-		fmt.Fprintf(w, "data: %s\n\n", b)
+		// The event carries the body WriteJSON would have sent: Google's
+		// status mapping, with the canonical code's name in status.
+		fmt.Fprintf(w, "data: %s\n\n", apierror.MarshalJSON(err))
 		flusher.Flush()
 	}
 }

@@ -167,8 +167,20 @@ func TestV1RoundTripAndRefusals(t *testing.T) {
 		t.Errorf("v1 read back = %+v", again)
 	}
 
+	// A Cloud Storage FUSE csi volume is v2's gcs volume (#1474).
 	in = toV1Service(v2, k)
-	in.Spec.Template.Spec.Volumes = []*runv1.Volume{{Name: "v", Csi: &runv1.CSIVolumeSource{Driver: "gcsfuse.run.googleapis.com"}}}
+	in.Spec.Template.Spec.Volumes = []*runv1.Volume{{Name: "v", Csi: &runv1.CSIVolumeSource{Driver: "gcsfuse.run.googleapis.com",
+		ReadOnly: true, VolumeAttributes: map[string]string{"bucketName": "b", "mountOptions": "implicit-dirs,uid=1000"}}}}
+	in.Spec.Template.Spec.Containers[0].VolumeMounts = nil
+	got, err = fromV1Service(in, v2.GetName())
+	if g := got.GetTemplate().GetVolumes()[0].GetGcs(); err != nil || g.GetBucket() != "b" || !g.GetReadOnly() || len(g.GetMountOptions()) != 2 {
+		t.Errorf("v1 csi gcsfuse volume = %v, %v", got.GetTemplate().GetVolumes(), err)
+	} else if c := toV1Template(got).Spec.Volumes[0].Csi; c == nil || c.VolumeAttributes["mountOptions"] != "implicit-dirs,uid=1000" {
+		t.Errorf("v1 csi read back = %+v", c)
+	}
+
+	in = toV1Service(v2, k)
+	in.Spec.Template.Spec.Volumes = []*runv1.Volume{{Name: "v", Csi: &runv1.CSIVolumeSource{Driver: "example.com/other"}}}
 	in.Spec.Template.Spec.Containers[0].ReadinessProbe = &runv1.Probe{}
 	_, err = fromV1Service(in, v2.GetName())
 	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "volumes") || !strings.Contains(err.Error(), "readinessProbe") {

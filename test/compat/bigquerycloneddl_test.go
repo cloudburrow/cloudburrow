@@ -190,8 +190,8 @@ func TestBigQueryCloneAndSnapshotDDL(t *testing.T) {
 // CREATE TABLE ... CLONE ... OPTIONS(friendly_name) a clone with it. FOR
 // SYSTEM_TIME AS OF a time before the table's time travel window fails
 // invalidQuery, as https://cloud.google.com/bigquery/docs/time-travel
-// documents; a time in the past within it is 501 (the emulator keeps no
-// history), and so is an option CloudBurrow does not set; neither makes a
+// documents; a time in the past within it is 501 (a query reads a past
+// time, #1460, but a snapshot or clone does not copy one yet), and so is an option CloudBurrow does not set; neither makes a
 // table.
 func TestBigQueryCloneDDLOptionsAndSystemTime(t *testing.T) {
 	h := New(t)

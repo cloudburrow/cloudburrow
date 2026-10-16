@@ -3,17 +3,21 @@
 package compat
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	admin "cloud.google.com/go/firestore/apiv1/admin"
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	"google.golang.org/genproto/googleapis/type/dayofweek"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -268,10 +272,15 @@ func TestFirestoreAdminFields(t *testing.T) {
 	}
 }
 
-// TestFirestoreAdminRefusals: the managed export and import, bulk delete
-// and backups answer UNIMPLEMENTED, each saying why.
+// TestFirestoreAdminRefusals: the managed export and import, bulk delete,
+// backups, restores, clones and user credentials answer UNIMPLEMENTED, each
+// saying why (#1461): the emulator has no managed export, cannot snapshot a
+// database, and is not Firestore with MongoDB compatibility.
 //
 // covers: google.firestore.admin.v1.FirestoreAdmin/ExportDocuments (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ImportDocuments (unimplemented), google.firestore.admin.v1.FirestoreAdmin/BulkDeleteDocuments (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ListBackups (unimplemented)
+// covers: google.firestore.admin.v1.FirestoreAdmin/GetBackup (unimplemented), google.firestore.admin.v1.FirestoreAdmin/DeleteBackup (unimplemented), google.firestore.admin.v1.FirestoreAdmin/RestoreDatabase (unimplemented), google.firestore.admin.v1.FirestoreAdmin/CloneDatabase (unimplemented)
+// covers: google.firestore.admin.v1.FirestoreAdmin/CreateUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/GetUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ListUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/EnableUserCreds (unimplemented)
+// covers: google.firestore.admin.v1.FirestoreAdmin/DisableUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ResetUserPassword (unimplemented), google.firestore.admin.v1.FirestoreAdmin/DeleteUserCreds (unimplemented)
 func TestFirestoreAdminRefusals(t *testing.T) {
 	h := New(t)
 	c := firestoreAdmin(t, h)
@@ -294,9 +303,126 @@ func TestFirestoreAdminRefusals(t *testing.T) {
 			_, err := c.ListBackups(ctx, &adminpb.ListBackupsRequest{Parent: "projects/" + h.Project() + "/locations/-"})
 			return err
 		}(),
+		"GetBackup": func() error {
+			_, err := c.GetBackup(ctx, &adminpb.GetBackupRequest{Name: "projects/" + h.Project() + "/locations/nam5/backups/b1"})
+			return err
+		}(),
+		"DeleteBackup": func() error {
+			return c.DeleteBackup(ctx, &adminpb.DeleteBackupRequest{Name: "projects/" + h.Project() + "/locations/nam5/backups/b1"})
+		}(),
+		"RestoreDatabase": func() error {
+			_, err := c.RestoreDatabase(ctx, &adminpb.RestoreDatabaseRequest{Parent: "projects/" + h.Project(), DatabaseId: "restored",
+				Backup: "projects/" + h.Project() + "/locations/nam5/backups/b1"})
+			return err
+		}(),
+		"CloneDatabase": func() error {
+			_, err := c.CloneDatabase(ctx, &adminpb.CloneDatabaseRequest{Parent: "projects/" + h.Project(), DatabaseId: "cloned",
+				PitrSnapshot: &adminpb.PitrSnapshot{Database: db}})
+			return err
+		}(),
+		"CreateUserCreds": func() error {
+			_, err := c.CreateUserCreds(ctx, &adminpb.CreateUserCredsRequest{Parent: db, UserCredsId: "u1", UserCreds: &adminpb.UserCreds{}})
+			return err
+		}(),
+		"GetUserCreds": func() error {
+			_, err := c.GetUserCreds(ctx, &adminpb.GetUserCredsRequest{Name: db + "/userCreds/u1"})
+			return err
+		}(),
+		"ListUserCreds": func() error {
+			_, err := c.ListUserCreds(ctx, &adminpb.ListUserCredsRequest{Parent: db})
+			return err
+		}(),
+		"EnableUserCreds": func() error {
+			_, err := c.EnableUserCreds(ctx, &adminpb.EnableUserCredsRequest{Name: db + "/userCreds/u1"})
+			return err
+		}(),
+		"DisableUserCreds": func() error {
+			_, err := c.DisableUserCreds(ctx, &adminpb.DisableUserCredsRequest{Name: db + "/userCreds/u1"})
+			return err
+		}(),
+		"ResetUserPassword": func() error {
+			_, err := c.ResetUserPassword(ctx, &adminpb.ResetUserPasswordRequest{Name: db + "/userCreds/u1"})
+			return err
+		}(),
+		"DeleteUserCreds": func() error {
+			return c.DeleteUserCreds(ctx, &adminpb.DeleteUserCredsRequest{Name: db + "/userCreds/u1"})
+		}(),
 	} {
 		if status.Code(err) != codes.Unimplemented || len(status.Convert(err).Message()) < 20 {
 			t.Errorf("%s: %v, want UNIMPLEMENTED with a reason", what, err)
+		}
+	}
+}
+
+// TestFirestoreAdminBackupSchedules (#1461): a daily and a weekly backup
+// schedule are created on `(default)` through the official Firestore Admin
+// client, listed and got, a second daily one is refused ALREADY_EXISTS, a
+// retention beyond Google's 7-day cap for a daily schedule is
+// INVALID_ARGUMENT, the daily one's retention is updated and its recurrence
+// cannot be, and both are deleted. They take no backups: backups stay
+// refused (TestFirestoreAdminRefusals).
+//
+// covers: google.firestore.admin.v1.FirestoreAdmin/CreateBackupSchedule, google.firestore.admin.v1.FirestoreAdmin/GetBackupSchedule, google.firestore.admin.v1.FirestoreAdmin/ListBackupSchedules, google.firestore.admin.v1.FirestoreAdmin/UpdateBackupSchedule, google.firestore.admin.v1.FirestoreAdmin/DeleteBackupSchedule
+func TestFirestoreAdminBackupSchedules(t *testing.T) {
+	h := New(t)
+	c := firestoreAdmin(t, h)
+	ctx := h.Context()
+	db := "projects/" + h.Project() + "/databases/(default)"
+	day := 24 * time.Hour
+	dailyRec := &adminpb.BackupSchedule_DailyRecurrence{DailyRecurrence: &adminpb.DailyRecurrence{}}
+	// A schedule a previous run left behind would make the daily one a second.
+	if l, err := c.ListBackupSchedules(ctx, &adminpb.ListBackupSchedulesRequest{Parent: db}); err == nil {
+		for _, s := range l.BackupSchedules {
+			_ = c.DeleteBackupSchedule(ctx, &adminpb.DeleteBackupScheduleRequest{Name: s.Name})
+		}
+	}
+	d, err := c.CreateBackupSchedule(ctx, &adminpb.CreateBackupScheduleRequest{Parent: db,
+		BackupSchedule: &adminpb.BackupSchedule{Retention: durationpb.New(7 * day), Recurrence: dailyRec}})
+	if err != nil || !strings.HasPrefix(d.GetName(), db+"/backupSchedules/") || d.GetCreateTime() == nil {
+		t.Fatalf("CreateBackupSchedule (daily) = %v, %v", d, err)
+	}
+	t.Cleanup(func() {
+		_ = c.DeleteBackupSchedule(h.Context(), &adminpb.DeleteBackupScheduleRequest{Name: d.GetName()})
+	})
+	w, err := c.CreateBackupSchedule(ctx, &adminpb.CreateBackupScheduleRequest{Parent: db,
+		BackupSchedule: &adminpb.BackupSchedule{Retention: durationpb.New(14 * 7 * day),
+			Recurrence: &adminpb.BackupSchedule_WeeklyRecurrence{WeeklyRecurrence: &adminpb.WeeklyRecurrence{Day: dayofweek.DayOfWeek_SATURDAY}}}})
+	if err != nil {
+		t.Fatalf("CreateBackupSchedule (weekly): %v", err)
+	}
+	if _, err := c.CreateBackupSchedule(ctx, &adminpb.CreateBackupScheduleRequest{Parent: db,
+		BackupSchedule: &adminpb.BackupSchedule{Retention: durationpb.New(day), Recurrence: dailyRec}}); status.Code(err) != codes.AlreadyExists {
+		t.Errorf("a second daily schedule: %v, want AlreadyExists", err)
+	}
+	if _, err := c.CreateBackupSchedule(ctx, &adminpb.CreateBackupScheduleRequest{Parent: db,
+		BackupSchedule: &adminpb.BackupSchedule{Retention: durationpb.New(8 * day), Recurrence: dailyRec}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("8 days of daily retention: %v, want InvalidArgument", err)
+	}
+	l, err := c.ListBackupSchedules(ctx, &adminpb.ListBackupSchedulesRequest{Parent: db})
+	if err != nil || len(l.GetBackupSchedules()) != 2 {
+		t.Fatalf("ListBackupSchedules = %v, %v", l, err)
+	}
+	g, err := c.GetBackupSchedule(ctx, &adminpb.GetBackupScheduleRequest{Name: w.GetName()})
+	if err != nil || g.GetWeeklyRecurrence().GetDay() != dayofweek.DayOfWeek_SATURDAY || g.GetRetention().AsDuration() != 14*7*day {
+		t.Errorf("GetBackupSchedule (weekly) = %v, %v", g, err)
+	}
+	u, err := c.UpdateBackupSchedule(ctx, &adminpb.UpdateBackupScheduleRequest{
+		BackupSchedule: &adminpb.BackupSchedule{Name: d.GetName(), Retention: durationpb.New(2 * day)},
+		UpdateMask:     &fieldmaskpb.FieldMask{Paths: []string{"retention"}}})
+	if err != nil || u.GetRetention().AsDuration() != 2*day || u.GetDailyRecurrence() == nil {
+		t.Errorf("UpdateBackupSchedule = %v, %v", u, err)
+	}
+	if _, err := c.UpdateBackupSchedule(ctx, &adminpb.UpdateBackupScheduleRequest{
+		BackupSchedule: &adminpb.BackupSchedule{Name: w.GetName(), Recurrence: dailyRec},
+		UpdateMask:     &fieldmaskpb.FieldMask{Paths: []string{"daily_recurrence"}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("changing the recurrence: %v, want InvalidArgument", err)
+	}
+	for _, n := range []string{d.GetName(), w.GetName()} {
+		if err := c.DeleteBackupSchedule(ctx, &adminpb.DeleteBackupScheduleRequest{Name: n}); err != nil {
+			t.Fatalf("DeleteBackupSchedule %s: %v", n, err)
+		}
+		if _, err := c.GetBackupSchedule(ctx, &adminpb.GetBackupScheduleRequest{Name: n}); status.Code(err) != codes.NotFound {
+			t.Errorf("GetBackupSchedule after delete: %v, want NotFound", err)
 		}
 	}
 }

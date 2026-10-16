@@ -335,7 +335,8 @@ func bigtableBackend(project string) Backend {
 func spannerBackend() Backend {
 	front := callFront(SpannerPort, SpannerEmulatorPort)
 	front.Args = append(front.Args, "--rest-listen", fmt.Sprintf("0.0.0.0:%d", SpannerRESTPort),
-		"--rest-upstream", fmt.Sprintf("127.0.0.1:%d", SpannerEmulatorRESTPort))
+		"--rest-upstream", fmt.Sprintf("127.0.0.1:%d", SpannerEmulatorRESTPort),
+		"--spanner-instances")
 	front.Extra = []FrontPort{{Port: SpannerRESTPort, Upstream: SpannerEmulatorRESTPort}}
 	return Backend{
 		Name:  "spanner",

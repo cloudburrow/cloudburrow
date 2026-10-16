@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,8 @@ type adminDeps struct {
 	kms       *kmsService
 	scheduler *schedulerService
 	logging   *loggingService
+	// run is Cloud Run, for its unused volume objects' reset (#1476).
+	run *runService
 	// mysql is Cloud SQL for MySQL's credentials, for its resetter.
 	mysql      components.MySQLCredentials
 	forwarders []*netfwd.Forwarder
@@ -91,6 +94,10 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.secrets != nil {
 		api.RegisterResetter(&secretsResetter{svc: d.secrets})
 		api.RegisterSeeder(&secretsSeeder{svc: d.secrets})
+	}
+	if d.run != nil {
+		// The volume objects no Cloud Run workload uses (#1476).
+		api.RegisterResetter(&runVolumesResetter{svc: d.run})
 	}
 	if d.registry != nil {
 		// Project, folder and organization IAM policies (#1368), stored as
@@ -199,8 +206,48 @@ func (t *tasksSeeder) Name() string { return "tasks" }
 
 type tasksSeedSpec struct {
 	IfNotExists bool `json:"ifNotExists"`
-	// Queues are full resource names.
-	Queues []string `json:"queues"`
+	// Queues are full resource names, or queue objects (queueSeed).
+	Queues []queueSeed `json:"queues"`
+}
+
+// queueSeed is one seeded queue: its full resource name as a string, or an
+// object in the REST API's field names with the queue's
+// appEngineRoutingOverride (#1447), which CreateQueue takes. Its host is
+// output only, computed from the routing, so it is not taken.
+type queueSeed struct {
+	Name                     string                `json:"name"`
+	AppEngineRoutingOverride *appEngineRoutingSeed `json:"appEngineRoutingOverride,omitempty"`
+}
+
+// appEngineRoutingSeed is an AppEngineRouting without its output-only host,
+// for a queue's override and a Scheduler job's App Engine target.
+type appEngineRoutingSeed struct {
+	Service  string `json:"service,omitempty"`
+	Version  string `json:"version,omitempty"`
+	Instance string `json:"instance,omitempty"`
+}
+
+func (q *queueSeed) UnmarshalJSON(b []byte) error {
+	if t := bytes.TrimSpace(b); len(t) > 0 && t[0] == '"' {
+		return json.Unmarshal(b, &q.Name)
+	}
+	type plain queueSeed
+	var v plain
+	if err := strictDecode(b, &v); err != nil {
+		return err
+	}
+	*q = queueSeed(v)
+	return nil
+}
+
+// routing is the queue's override as the store holds it, nil when unset or
+// empty, as CreateQueue stores an empty override.
+func (q queueSeed) routing() *tasks.AppEngineRouting {
+	r := q.AppEngineRoutingOverride
+	if r == nil || (r.Service == "" && r.Version == "" && r.Instance == "") {
+		return nil
+	}
+	return &tasks.AppEngineRouting{Service: r.Service, Version: r.Version, Instance: r.Instance}
 }
 
 func (t *tasksSeeder) Validate(spec json.RawMessage) error {
@@ -209,7 +256,8 @@ func (t *tasksSeeder) Validate(spec json.RawMessage) error {
 		return err
 	}
 	seen := map[string]bool{}
-	for i, name := range s.Queues {
+	for i, q := range s.Queues {
+		name := q.Name
 		// The store's own parser, so validation cannot disagree with creation.
 		if n, err := resource.Parse(name); err != nil || n.Collection != "queues" {
 			return fmt.Errorf("queues[%d] %q is not projects/{project}/locations/{location}/queues/{queue}", i, name)
@@ -231,8 +279,9 @@ func (t *tasksSeeder) Seed(_ context.Context, spec json.RawMessage) error {
 	if st == nil {
 		return fmt.Errorf("Cloud Tasks is not running")
 	}
-	for _, name := range s.Queues {
-		_, err := st.CreateQueue(tasks.Queue{Name: name})
+	for _, q := range s.Queues {
+		name := q.Name
+		_, err := st.CreateQueue(tasks.Queue{Name: name, AppEngineRouting: q.routing()})
 		if status.Code(err) == codes.AlreadyExists {
 			if s.IfNotExists {
 				continue

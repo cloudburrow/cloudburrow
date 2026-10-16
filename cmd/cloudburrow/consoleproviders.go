@@ -405,6 +405,38 @@ func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
 		}
 	}
 
+	if ae := t.AppEngineHTTPRequest; ae != nil {
+		var override *tasks.AppEngineRouting
+		if q, err := st.GetQueue(t.Queue); err == nil {
+			override = q.AppEngineRouting
+		}
+		routing := tasks.AppEngineRouting{}
+		switch {
+		case override != nil:
+			routing = *override
+		case ae.Routing != nil:
+			routing = *ae.Routing
+		}
+		request := []console.Property{
+			{Label: "Method", Value: orDash(ae.Method)},
+			{Label: "Relative URI", Value: ae.RelativeURI},
+			{Label: "Host", Value: tasks.AppEngineHost(strings.Split(t.Name, "/")[1], routing)},
+			{Label: "Body size", Value: fmt.Sprintf("%d bytes", len(ae.Body))},
+		}
+		for _, pair := range sortedPairs(redactHeaders(ae.Headers)) {
+			request = append(request, console.Property{Label: "Header " + pair.Label, Value: pair.Value})
+		}
+		if a := t.LastAttempt; a != nil && a.Message != "" {
+			request = append(request, console.Property{Label: "Last attempt", Value: a.Message})
+		}
+		sections = append(sections, console.Section{
+			ID: "request", Label: "Request", Kind: console.KindProperties,
+			Groups: []console.PropertyGroup{{Heading: "App Engine HTTP request", Properties: request}},
+			Note: "This instance has no App Engine: every attempt fails with NOT_FOUND (HTTP 404) " +
+				"and is retried by the queue's retry config, as a request to an app that does not exist is.",
+		})
+	}
+
 	return console.Detail{
 		Summary: []console.Property{
 			{Label: "Scheduled", Value: t.ScheduleTime.Format(time.RFC3339)},
@@ -1907,6 +1939,12 @@ func (runProvider) CreateForm() (string, []console.Field) {
 			Section: "Container",
 		},
 		{
+			Name: "useHttp2", Label: "Use HTTP/2 end-to-end", Type: "checkbox", Default: "false",
+			Help: "Names the container port h2c, as gcloud's --use-http2 does (#1475): requests reach the container " +
+				"over HTTP/2 cleartext, as a gRPC server needs. Set the container port with it, or 8080 is used.",
+			Section: "Container",
+		},
+		{
 			Name: "command", Label: "Entrypoint command", Type: "text",
 			Help:    "Optional. Overrides the image's entrypoint. Space-separated.",
 			Section: "Container",
@@ -1923,7 +1961,7 @@ func (runProvider) CreateForm() (string, []console.Field) {
 		},
 		runSecretEnvField("Container"),
 		runVolumeFields("Container")[0], runVolumeFields("Container")[1], runVolumeFields("Container")[2],
-		runVolumeFields("Container")[3],
+		runVolumeFields("Container")[3], runVolumeFields("Container")[4],
 		runSettingsFields("Settings", true)[0], runSettingsFields("Settings", true)[1], runSettingsFields("Settings", true)[2],
 		runSettingsFields("Settings", true)[3], runSettingsFields("Settings", true)[4],
 		{
@@ -2069,6 +2107,12 @@ func runFormTemplate(values map[string]string) (*runpb.RevisionTemplate, error) 
 		return nil, err
 	} else if port > 0 {
 		container.Ports = []*runpb.ContainerPort{{ContainerPort: int32(port)}}
+	}
+	if values["useHttp2"] == "true" {
+		if len(container.Ports) == 0 {
+			container.Ports = []*runpb.ContainerPort{{ContainerPort: 8080}}
+		}
+		container.Ports[0].Name = "h2c"
 	}
 	limits := map[string]string{}
 	if v := strings.TrimSpace(values["cpu"]); v != "" {

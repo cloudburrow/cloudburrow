@@ -92,8 +92,16 @@ func fromV1Volumes(in []*runv1.Volume, gap func(bool, string)) []*runpb.Volume {
 			o.VolumeType = &runpb.Volume_EmptyDir{EmptyDir: e}
 		case v.Nfs != nil:
 			o.VolumeType = &runpb.Volume_Nfs{Nfs: &runpb.NFSVolumeSource{Server: v.Nfs.Server, Path: v.Nfs.Path, ReadOnly: v.Nfs.ReadOnly}}
+		case v.Csi != nil && v.Csi.Driver == gcsFuseDriver:
+			// Cloud Storage FUSE (#1474): v1's csi volume of Cloud Run's
+			// gcsfuse driver, whose mountOptions are comma-separated.
+			g := &runpb.GCSVolumeSource{Bucket: v.Csi.VolumeAttributes["bucketName"], ReadOnly: v.Csi.ReadOnly}
+			if o := v.Csi.VolumeAttributes["mountOptions"]; o != "" {
+				g.MountOptions = strings.Split(o, ",")
+			}
+			o.VolumeType = &runpb.Volume_Gcs{Gcs: g}
 		default:
-			// configMap and csi (Cloud Storage FUSE) have no local source.
+			// configMap, and csi of any other driver, have no local source.
 			gap(true, "spec.template.spec.volumes["+v.Name+"]")
 			continue
 		}
@@ -155,6 +163,16 @@ func toV1Volumes(in []*runpb.Volume) []*runv1.Volume {
 			o.EmptyDir = &runv1.EmptyDirVolumeSource{SizeLimit: v.GetEmptyDir().GetSizeLimit()}
 			if v.GetEmptyDir().GetMedium() == runpb.EmptyDirVolumeSource_MEMORY {
 				o.EmptyDir.Medium = "Memory"
+			}
+		case v.GetNfs() != nil:
+			n := v.GetNfs()
+			o.Nfs = &runv1.NFSVolumeSource{Server: n.GetServer(), Path: n.GetPath(), ReadOnly: n.GetReadOnly()}
+		case v.GetGcs() != nil:
+			g := v.GetGcs()
+			o.Csi = &runv1.CSIVolumeSource{Driver: gcsFuseDriver, ReadOnly: g.GetReadOnly(),
+				VolumeAttributes: map[string]string{"bucketName": g.GetBucket()}}
+			if len(g.GetMountOptions()) > 0 {
+				o.Csi.VolumeAttributes["mountOptions"] = strings.Join(g.GetMountOptions(), ",")
 			}
 		}
 		out = append(out, o)

@@ -16,9 +16,7 @@ import (
 	schedulerpb "cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 )
 
 // EnvScheduler is the Cloud Scheduler endpoint.
@@ -40,8 +38,8 @@ func schedulerClient(t *testing.T, h *Harness) *scheduler.CloudSchedulerClient {
 // TestSchedulerHTTPAndPubSubJobs (#302), with cloud.google.com/go/scheduler/
 // apiv1 against the CI instance: an every-minute HTTP job that RunJob
 // delivers at once to an httptest server; a Pub/Sub job whose message a
-// subscription receives; pause and resume; and an App Engine target refused
-// as UNIMPLEMENTED. OIDC and OAuth tokens are TestSchedulerJobTokens (#1243).
+// subscription receives; and pause and resume. App Engine targets are
+// TestSchedulerAppEngineTarget (#1447). OIDC and OAuth tokens are TestSchedulerJobTokens (#1243).
 func TestSchedulerHTTPAndPubSubJobs(t *testing.T) {
 	h := New(t)
 	c := schedulerClient(t, h)
@@ -121,10 +119,4 @@ func TestSchedulerHTTPAndPubSubJobs(t *testing.T) {
 		t.Errorf("the Pub/Sub job's message = %v, want data tick and attribute from=scheduler", msg)
 	}
 
-	// Refused, not accepted and ignored.
-	if _, err := c.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: parent, Job: &schedulerpb.Job{
-		Name: parent + "/jobs/app-engine", Schedule: "* * * * *",
-		Target: &schedulerpb.Job_AppEngineHttpTarget{AppEngineHttpTarget: &schedulerpb.AppEngineHttpTarget{RelativeUri: "/"}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("App Engine target = %v, want Unimplemented", err)
-	}
 }

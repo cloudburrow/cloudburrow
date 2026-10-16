@@ -21,16 +21,16 @@ Do not edit these files by hand.
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 26 | 12 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Vertex AI PredictionService](vertexai.md) | 14 | 10 | 0 | 4 | 0 | 0 | 0 | 0 |
+| [Vertex AI PredictionService](vertexai.md) | 14 | 11 | 0 | 3 | 0 | 0 | 0 | 0 |
 | [Memorystore for Redis](memorystore.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 2 |
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 78 | 0 | 9 | 0 | 0 | 0 | 22 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 24 | 22 | 0 | 0 | 2 | 0 | 0 | 0 |
 | [Firestore](firestore.md) | 17 | 16 | 1 | 0 | 0 | 0 | 0 | 0 |
-| [Firestore Admin API](firestoreadmin.md) | 32 | 12 | 0 | 20 | 0 | 0 | 0 | 0 |
+| [Firestore Admin API](firestoreadmin.md) | 32 | 17 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Bigtable](bigtable.md) | 84 | 36 | 48 | 0 | 0 | 0 | 0 | 0 |
-| [Spanner](spanner.md) | 65 | 33 | 32 | 0 | 0 | 0 | 0 | 0 |
+| [Spanner](spanner.md) | 65 | 35 | 30 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 46 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 56 | 0 | 24 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 7 | 0 | 3 | 0 | 0 | 0 | 0 |

@@ -258,3 +258,77 @@ func TestConsoleSpannerSchemaConfigurationsAndPartitions(t *testing.T) {
 		t.Errorf("GetInstancePartition after the console's delete = %v, want NOT_FOUND", err)
 	}
 }
+
+// TestConsoleSpannerEditInstance (#1461): Edit instance on an instance's
+// page, prefilled from it, changes its display name and processing units
+// through the official admin client's UpdateInstance, which the call front
+// in the Spanner pod answers; GetInstance reads the change back, and a
+// capacity Google refuses is refused with the API's message. Drop
+// protection on a database's page sets and clears enable_drop_protection
+// through UpdateDatabase, which GetDatabase reads back.
+//
+// covers: google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstance, google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabase
+func TestConsoleSpannerEditInstance(t *testing.T) {
+	h := New(t)
+	spAddr := h.Endpoint(EnvSpanner)
+	addr := consoleAddr(t, h)
+	ctx := h.Context()
+	project := h.Project()
+	const instanceID = "console-edit"
+	instName := fmt.Sprintf("projects/%s/instances/%s", project, instanceID)
+	spannerDatabase(t, ctx, spAddr, project, instanceID, "editdb", "CREATE TABLE T (Id INT64 NOT NULL) PRIMARY KEY (Id)")
+	instAdmin, err := instance.NewInstanceAdminClient(ctx, spannerOpts(spAddr)...)
+	if err != nil {
+		t.Fatalf("NewInstanceAdminClient: %v", err)
+	}
+	defer instAdmin.Close()
+	t.Cleanup(func() {
+		_ = instAdmin.DeleteInstance(context.Background(), &instancepb.DeleteInstanceRequest{Name: instName})
+	})
+	var p spannerConsolePage
+	consoleJSON(t, addr, http.MethodGet, "/api/detail/spanner?"+url.Values{"project": {project}, "name": {instanceID}}.Encode(), "", &p)
+	offered := false
+	for _, a := range p.Actions {
+		offered = offered || a.ID == "editinstance"
+	}
+	if !offered {
+		t.Fatalf("the instance's page offers no Edit instance: %+v", p.Actions)
+	}
+	act := func(values map[string]string) (int, string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"Path": []string{instanceID}, "Action": "editinstance", "Values": values})
+		return consoleDo(t, addr, http.MethodPost, "/api/actions/spanner?project="+project, string(body))
+	}
+	if code, out := act(map[string]string{"displayName": "edited in console", "processingUnits": "300"}); code != http.StatusOK {
+		t.Fatalf("Edit instance = %d %s", code, out)
+	}
+	in, err := instAdmin.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: instName})
+	if err != nil || in.GetDisplayName() != "edited in console" || in.GetProcessingUnits() != 300 {
+		t.Errorf("after Edit instance = %v, %v", in, err)
+	}
+	if code, out := act(map[string]string{"displayName": "edited in console", "processingUnits": "1500"}); code == http.StatusOK || !strings.Contains(out, "processing_units") {
+		t.Errorf("1500 processing units = %d %s, want the API's refusal", code, out)
+	}
+
+	// Drop protection on the database's page.
+	dbName := instName + "/databases/editdb"
+	protect := func(on string) (int, string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"Path": []string{instanceID, "editdb"}, "Action": "dropprotection", "Values": map[string]string{"enabled": on}})
+		return consoleDo(t, addr, http.MethodPost, "/api/actions/spanner?project="+project, string(body))
+	}
+	if code, out := protect("true"); code != http.StatusOK {
+		t.Fatalf("Drop protection on = %d %s", code, out)
+	}
+	dbAdmin, err := database.NewDatabaseAdminClient(ctx, spannerOpts(spAddr)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dbAdmin.Close()
+	if db, err := dbAdmin.GetDatabase(ctx, &databasepb.GetDatabaseRequest{Name: dbName}); err != nil || !db.GetEnableDropProtection() {
+		t.Errorf("after Drop protection on = %v, %v", db, err)
+	}
+	if code, out := protect("false"); code != http.StatusOK {
+		t.Fatalf("Drop protection off = %d %s", code, out)
+	}
+}

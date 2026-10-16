@@ -143,9 +143,14 @@ func fromProto(p *schedulerpb.Job) (Job, error) {
 		}
 		j.PubSub = &PubSubTarget{Topic: topic, Data: t.PubsubTarget.GetData(), Attributes: t.PubsubTarget.GetAttributes()}
 	case *schedulerpb.Job_AppEngineHttpTarget:
-		return Job{}, apierror.Unimplemented("app_engine_http_target is not implemented: there is no App Engine locally")
+		// Stored; every attempt fails, as no app serves it (#1447).
+		a, err := appEngineFromProto(t.AppEngineHttpTarget)
+		if err != nil {
+			return Job{}, err
+		}
+		j.AppEngine = a
 	default:
-		return Job{}, apierror.InvalidArgument("a job needs a target: http_target or pubsub_target")
+		return Job{}, apierror.InvalidArgument("a job needs a target: http_target, pubsub_target or app_engine_http_target")
 	}
 	j.RetryUnset = p.GetRetryConfig() == nil
 	if rc := p.GetRetryConfig(); rc != nil {
@@ -218,6 +223,8 @@ func toProto(j Job) *schedulerpb.Job {
 	case j.PubSub != nil:
 		out.Target = &schedulerpb.Job_PubsubTarget{PubsubTarget: &schedulerpb.PubsubTarget{
 			TopicName: j.PubSub.Topic, Data: j.PubSub.Data, Attributes: j.PubSub.Attributes}}
+	case j.AppEngine != nil:
+		out.Target = &schedulerpb.Job_AppEngineHttpTarget{AppEngineHttpTarget: appEngineToProto(j.AppEngine, j.Name)}
 	}
 	return out
 }

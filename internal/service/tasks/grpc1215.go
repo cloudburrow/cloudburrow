@@ -55,7 +55,7 @@ func (g *GRPCServer) RunTask(_ context.Context, req *taskspb.RunTaskRequest) (*t
 	if err != nil {
 		return nil, err
 	}
-	return toProtoTask(t), nil
+	return g.protoTask(t), nil
 }
 
 // BatchCreateTasks creates up to 100 tasks in one queue.

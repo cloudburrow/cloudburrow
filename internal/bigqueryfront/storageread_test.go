@@ -530,9 +530,14 @@ func TestStorageReadRefusesWhatWouldCrashTheEmulator(t *testing.T) {
 		t.Errorf("ReadRows of a table gone: %v, want NOT_FOUND", err)
 	}
 
+	// SplitReadStream the front answers (storagereadstate.go, #1460).
 	_, err = c.SplitReadStream(ctx, &storagepb.SplitReadStreamRequest{Name: "x"})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "SplitReadStream not implemented") {
-		t.Errorf("SplitReadStream: %v, want the emulator's own answer", err)
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("SplitReadStream without a fraction: %v, want INVALID_ARGUMENT", err)
+	}
+	_, err = c.SplitReadStream(ctx, &storagepb.SplitReadStreamRequest{Name: "x", Fraction: 0.5})
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "did not see made") {
+		t.Errorf("SplitReadStream of a stream the front did not see made, without a state directory: %v, want UNIMPLEMENTED", err)
 	}
 	if emu.reads != 0 {
 		t.Errorf("the emulator's ReadRows was called %d times", emu.reads)

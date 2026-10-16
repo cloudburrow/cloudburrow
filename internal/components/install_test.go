@@ -85,6 +85,10 @@ func TestKnativeInstallSetsTheRevisionProgressDeadline(t *testing.T) {
 	if got := r.find("configmap/config-deployment"); !strings.Contains(got, want) {
 		t.Errorf("config-deployment patch = %q, want it to contain %q", got, want)
 	}
+	// NFS volumes are claims a revision mounts and writes (#1448).
+	if got := r.find("configmap/config-features"); !strings.Contains(got, KnativeFeatures) {
+		t.Errorf("config-features patch = %q, want it to contain %q", got, KnativeFeatures)
+	}
 }
 
 // A cluster installed before the deadline existed gets it on the next up:

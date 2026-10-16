@@ -45,8 +45,9 @@ import (
 // first: a time before the table's time travel window (its creation, or
 // the dataset's maxTimeTravelHours, 168 by default, before now) fails as
 // BigQuery documents it (https://cloud.google.com/bigquery/docs/time-travel),
-// a time at the engine's now reads the table as it is, and any other is
-// 501.
+// a time at the engine's now reads the table as it is, a time in the
+// future is 501, and a past time in the window reads the table's history
+// (timetravel.go, #1460).
 
 // tableRead is one read of a table in a FROM clause of a query.
 type tableRead struct {
@@ -233,13 +234,22 @@ func (f front) partitionReads(w http.ResponseWriter, r *http.Request, q queryOpt
 			if !ok {
 				return false // not found: the engine's own error
 			}
-			code, msg := f.systemTime(r, q, tr.dataset, ref, m, expr)
+			past, code, msg := f.systemTime(r, q, tr.dataset, ref, m, expr)
+			if code == 0 && past != 0 {
+				var text string
+				if text, code, msg = f.historyRead(r, tr, m, ref, past, expr); code == 0 {
+					edits = append(edits, edit{tr.stmt[tr.at].pos, tr.stmt[tr.next-1].end, text})
+				}
+			}
 			if code != 0 {
 				reason := reasonOf(code, "invalidQuery")
 				writeError(w, code, reason, msg)
 				return true
 			}
 			edits = append(edits, edit{tr.stmt[k].pos, tr.stmt[end-1].end, ""})
+			if past != 0 {
+				continue // historyRead refuses a decorator
+			}
 		}
 		// table$partition (#1273).
 		if tr.decorator == "" {
@@ -326,18 +336,20 @@ func systemTimeEnd(stmt []token, i int) int {
 // systemTime checks a read of the table ref (of dataset, with m) AS OF
 // expr: 0 when it reads the table as it is, else the status and message
 // it fails with (above).
-func (f front) systemTime(r *http.Request, q queryOptions, dataset, ref string, m partitionMeta, expr string) (int, string) {
-	notBuilt := "Not implemented here: FOR SYSTEM_TIME AS OF a time before now. The emulator behind CloudBurrow keeps no " +
-		"history of a table's rows, so it can read a table only as it is now (docs/compatibility.md). Nothing was run."
+//
+// past is not 0 when the time is a past one inside the window: the time,
+// in microseconds since the epoch, to read the table's history at
+// (timetravel.go).
+func (f front) systemTime(r *http.Request, q queryOptions, dataset, ref string, m partitionMeta, expr string) (past int64, code int, msg string) {
 	legacy := false
 	body, err := json.Marshal(queryOptions{Query: "SELECT UNIX_MICROS(" + expr + "), UNIX_MICROS(CURRENT_TIMESTAMP())",
 		UseLegacySQL: &legacy, DefaultDataset: q.DefaultDataset, ParameterMode: q.ParameterMode, QueryParameters: q.QueryParameters})
 	if err != nil {
-		return http.StatusInternalServerError, err.Error()
+		return 0, http.StatusInternalServerError, err.Error()
 	}
 	status, got := f.send(r, http.MethodPost, "/queries", body)
 	if status != http.StatusOK {
-		return http.StatusBadRequest, errorMessage(got, status)
+		return 0, http.StatusBadRequest, errorMessage(got, status)
 	}
 	var res struct {
 		Rows []struct {
@@ -347,15 +359,15 @@ func (f front) systemTime(r *http.Request, q queryOptions, dataset, ref string, 
 		} `json:"rows"`
 	}
 	if json.Unmarshal(got, &res) != nil || len(res.Rows) != 1 || len(res.Rows[0].F) != 2 || res.Rows[0].F[1].V == nil {
-		return http.StatusInternalServerError, "cloudburrow: could not read the time of FOR SYSTEM_TIME AS OF"
+		return 0, http.StatusInternalServerError, "cloudburrow: could not read the time of FOR SYSTEM_TIME AS OF"
 	}
 	if res.Rows[0].F[0].V == nil {
-		return http.StatusBadRequest, "FOR SYSTEM_TIME AS OF expression must not be NULL" // UNVERIFIED wording
+		return 0, http.StatusBadRequest, "FOR SYSTEM_TIME AS OF expression must not be NULL" // UNVERIFIED wording
 	}
 	ts, err1 := strconv.ParseInt(*res.Rows[0].F[0].V, 10, 64)
 	now, err2 := strconv.ParseInt(*res.Rows[0].F[1].V, 10, 64)
 	if err1 != nil || err2 != nil {
-		return http.StatusInternalServerError, "cloudburrow: could not read the time of FOR SYSTEM_TIME AS OF"
+		return 0, http.StatusInternalServerError, "cloudburrow: could not read the time of FOR SYSTEM_TIME AS OF"
 	}
 	hours := int64(168)
 	if st, got := f.get(r, "/datasets/"+url.PathEscape(dataset)); st == http.StatusOK {
@@ -381,15 +393,15 @@ func (f front) systemTime(r *http.Request, q queryOptions, dataset, ref string, 
 	switch {
 	case tsMs < earliest:
 		// As https://cloud.google.com/bigquery/docs/time-travel documents it.
-		return http.StatusBadRequest, fmt.Sprintf("Invalid snapshot time %d for table %s@%d. Cannot read before %d",
+		return 0, http.StatusBadRequest, fmt.Sprintf("Invalid snapshot time %d for table %s@%d. Cannot read before %d",
 			tsMs, ref, tsMs, earliest)
 	case current:
-		return 0, ""
+		return 0, 0, ""
 	case ts > now:
-		return http.StatusNotImplemented, "Not implemented here: FOR SYSTEM_TIME AS OF a time in the future. " +
+		return 0, http.StatusNotImplemented, "Not implemented here: FOR SYSTEM_TIME AS OF a time in the future. " +
 			"CloudBurrow does not know how BigQuery answers it (docs/compatibility.md). Nothing was run."
 	}
-	return http.StatusNotImplemented, notBuilt
+	return ts, 0, ""
 }
 
 // partitionFilter returns the condition the rows of partition dec of a

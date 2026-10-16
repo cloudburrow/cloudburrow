@@ -19,7 +19,8 @@ import (
 // dataset's access list grants and a row per member of the table's IAM
 // policy, and refuses a query that does not filter on object_name;
 // SCHEMATA_LINKS has BigQuery's columns and no rows. Measured first: the
-// front refused both 501.
+// front refused both 501. A dataset-qualified OBJECT_PRIVILEGES is 400, as
+// BigQuery documents the view region-qualified only (#1458).
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.datasets.update, bigquery.tables.setIamPolicy
 func TestBigQueryObjectPrivilegesAndSchemataLinks(t *testing.T) {
@@ -113,6 +114,9 @@ func TestBigQueryObjectPrivilegesAndSchemataLinks(t *testing.T) {
 	}
 	_, err = read(cols+view, false)
 	wantCode(t, "OBJECT_PRIVILEGES with no object_name filter", err, http.StatusBadRequest, "object_name")
+	// BigQuery documents both views region-qualified only (#1458).
+	_, err = read(cols+"`"+project+"."+ds.DatasetID+".INFORMATION_SCHEMA.OBJECT_PRIVILEGES` WHERE object_name = 'priv'", false)
+	wantCode(t, "dataset-qualified OBJECT_PRIVILEGES", err, http.StatusBadRequest, "must include a region qualifier")
 
 	got, err := read("SELECT catalog_name, schema_name, linked_schema_catalog_number, linked_schema_catalog_name, linked_schema_name, "+
 		"linked_schema_creation_time, linked_schema_org_display_name, shared_asset_id, link_type FROM `region-us`.INFORMATION_SCHEMA.SCHEMATA_LINKS", false)

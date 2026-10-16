@@ -146,6 +146,21 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 			sent.HTTPRequest = &hr
 		}
 	}
+	if task.AppEngineHTTPRequest != nil {
+		// No App Engine here: the attempt fails (#1447).
+		if task.FirstAttempt.IsZero() {
+			task.FirstAttempt = d.clock.Now()
+		}
+		task.DispatchCount++
+		started := d.clock.Now()
+		err := d.attemptAppEngine(&task, started)
+		d.logAttempt(ctx, task, AppEngineAttemptStatus, nil, started)
+		if span != nil {
+			span.SetAttributes(attribute.Int("http.response.status_code", AppEngineAttemptStatus))
+			span.SetStatus(otelcodes.Error, err.Error())
+		}
+		return err
+	}
 	req, err := d.buildRequest(ctx, sent)
 	if err != nil {
 		return err
@@ -165,6 +180,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 	resp, err := d.client.Do(req)
 	if err != nil {
 		// No response at all: record the attempt and ask for a retry.
+		task.LastAttempt = &Attempt{Scheduled: task.ScheduleTime, Dispatched: started}
 		_ = d.store.UpdateTask(task)
 		d.report(task, 0, err)
 		d.logAttempt(ctx, task, 0, err, started)
@@ -175,6 +191,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 
 	task.ResponseCount++
 	task.LastResponseCode = resp.StatusCode
+	task.LastAttempt = &Attempt{Scheduled: task.ScheduleTime, Dispatched: started, Responded: d.clock.Now(),
+		Code: int32(attemptStatus(resp.StatusCode, nil))}
+	if code := attemptStatus(resp.StatusCode, nil); code != 0 {
+		task.LastAttempt.Message = resp.Status
+	}
 	if span != nil {
 		span.SetAttributes(attribute.Int("http.response.status_code", resp.StatusCode))
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {

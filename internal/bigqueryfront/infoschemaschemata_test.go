@@ -32,7 +32,8 @@ func TestDatasetOptions(t *testing.T) {
 			t.Errorf("%s is not registered as a dataset and region view", v)
 		}
 	}
-	if !unbuiltInfoSchema["SCHEMATA_LINKS"] || !unbuiltInfoSchema["OBJECT_PRIVILEGES"] {
-		t.Error("SCHEMATA_LINKS and OBJECT_PRIVILEGES should stay 501")
+	if unbuiltInfoSchema["SCHEMATA_LINKS"] || unbuiltInfoSchema["OBJECT_PRIVILEGES"] ||
+		!regionOnlyInfoSchema["SCHEMATA_LINKS"] || !regionOnlyInfoSchema["OBJECT_PRIVILEGES"] {
+		t.Error("SCHEMATA_LINKS and OBJECT_PRIVILEGES should be region-only (#1458)")
 	}
 }
