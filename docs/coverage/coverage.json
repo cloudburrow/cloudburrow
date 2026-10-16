@@ -3246,6 +3246,7 @@
         "method": "google.logging.v2.ConfigServiceV2/CopyLogEntries",
         "status": "Verified",
         "tests": [
+          "test/compat/consoleloggingviews_test.go:177 TestConsoleLoggingCopyFromParents",
           "test/compat/loggingcopy_test.go:69 TestLoggingCopyLogEntries"
         ]
       },
@@ -3443,6 +3444,7 @@
         "method": "google.logging.v2.ConfigServiceV2/ListViews",
         "status": "Verified",
         "tests": [
+          "test/compat/consoleloggingviews_test.go:58 TestConsoleLogsExplorerThroughView",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
@@ -3523,6 +3525,7 @@
         "method": "google.logging.v2.LoggingServiceV2/ListLogEntries",
         "status": "Verified",
         "tests": [
+          "test/compat/consoleloggingviews_test.go:58 TestConsoleLogsExplorerThroughView",
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
@@ -3552,6 +3555,7 @@
         "method": "google.logging.v2.LoggingServiceV2/TailLogEntries",
         "status": "Verified",
         "tests": [
+          "test/compat/consoleloggingviews_test.go:58 TestConsoleLogsExplorerThroughView",
           "test/compat/logging1215_test.go:40 TestLoggingTailLogEntries",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention"
         ]
