@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,6 +56,9 @@ type icebergTable struct {
 	Created  string `json:"created"`
 	// Print is the hash of the rows and schema last written.
 	Print string `json:"print,omitempty"`
+	// Failed is the hash of the rows and schema whose files could not be
+	// written, already answered as the request's error (syncAll).
+	Failed string `json:"failed,omitempty"`
 }
 
 // icebergTables are the tables for Apache Iceberg, by streamKey.
@@ -158,7 +162,10 @@ func icebergColumns(fields []field) ([]bqiceberg.Column, string) {
 			c.Precision = p
 			c.Scale, _ = strconv.Atoi(string(fl.Scale))
 		}
-		if _, ok := bqiceberg.IcebergType(c); !ok || strings.EqualFold(fl.Mode, "REPEATED") {
+		if strings.EqualFold(fl.Mode, "REPEATED") {
+			return nil, fl.Name + " (ARRAY<" + fl.Type + ">)"
+		}
+		if _, ok := bqiceberg.IcebergType(c); !ok {
 			return nil, fl.Name + " (" + fl.Type + ")"
 		}
 		cols[i] = c
@@ -221,10 +228,15 @@ func icebergValue(c bqiceberg.Column, v any) (any, error) {
 }
 
 // syncAll writes the files of every table for Apache Iceberg whose rows
-// changed since they were last written. r is the request just served.
-func (t *icebergTables) syncAll(r *http.Request, mk func(base string) front) {
+// changed since they were last written. r is the request just served. It
+// returns the first table whose files could not be written, for the first
+// time of its rows then, as the HTTP status and BigQuery error to answer
+// instead of the request's own answer (Wrap), or 0: in BigQuery the
+// table's data is only in its files, so a write whose files fail is no
+// success (#1427).
+func (t *icebergTables) syncAll(r *http.Request, mk func(base string) front) (int, rowError) {
 	if !t.any() {
-		return
+		return 0, rowError{}
 	}
 	t.mu.Lock()
 	keys := make([]string, 0, len(t.m))
@@ -232,19 +244,74 @@ func (t *icebergTables) syncAll(r *http.Request, mk func(base string) front) {
 		keys = append(keys, k)
 	}
 	t.mu.Unlock()
+	sort.Strings(keys)
+	status, why := 0, rowError{}
 	for _, k := range keys {
-		_, _ = t.sync(r, mk, k)
+		it, msg, fresh := t.syncFresh(r, mk, k)
+		if msg == "" || !fresh || status != 0 || strings.HasPrefix(msg, "the table no longer exists") {
+			continue
+		}
+		status, why = icebergWriteError(it, msg)
 	}
+	return status, why
+}
+
+// icebergWriteError is the answer to a request after which its table's
+// files could not be written (msg, sync's).
+func icebergWriteError(it icebergTable, msg string) (int, rowError) {
+	status, reason := http.StatusBadRequest, "invalid"
+	switch {
+	case strings.HasPrefix(msg, "the column "):
+		status, reason = http.StatusNotImplemented, "notImplemented"
+	case strings.Contains(msg, "Cloud Storage answered 404"):
+		status, reason = http.StatusNotFound, "notFound"
+	case strings.Contains(msg, "Cloud Storage answered 403"):
+		status, reason = http.StatusForbidden, "accessDenied"
+	}
+	return status, rowError{Reason: reason, Message: "The BigQuery table for Apache Iceberg " + it.Dataset + "." + it.Table +
+		": its files could not be written to " + it.Location + ": " + msg + ". The engine keeps the change; the files are " +
+		"written again at the table's next change and at EXPORT TABLE METADATA."}
 }
 
 // sync writes key's files if its rows changed; it returns the table, and
 // why it could not be written, or "".
 func (t *icebergTables) sync(r *http.Request, mk func(base string) front, key string) (icebergTable, string) {
+	it, msg, _ := t.syncFresh(r, mk, key)
+	return it, msg
+}
+
+// syncFresh is sync; fresh when msg is the first failure to write the
+// table's rows then (Failed), so that a bucket that stays unwritable fails
+// the request that changed the rows, not every request after it.
+func (t *icebergTables) syncFresh(r *http.Request, mk func(base string) front, key string) (icebergTable, string, bool) {
+	it, print, msg := t.write(r, mk, key)
+	if msg == "" || print == "" {
+		// Before its rows were read (a column of a type not written, a
+		// read that failed): answered at EXPORT TABLE METADATA alone.
+		return it, msg, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cur, ok := t.m[key]
+	if !ok || cur.Created != it.Created {
+		return it, msg, true
+	}
+	fresh := cur.Failed != print
+	cur.Failed = print
+	t.m[key] = cur
+	t.save()
+	return it, msg, fresh
+}
+
+// write writes key's files if its rows changed; it returns the table, the
+// hash of its rows ("" before they were read), and why its files could not
+// be written, or "".
+func (t *icebergTables) write(r *http.Request, mk func(base string) front, key string) (icebergTable, string, string) {
 	t.mu.Lock()
 	it, ok := t.m[key]
 	t.mu.Unlock()
 	if !ok {
-		return it, "not a BigQuery table for Apache Iceberg"
+		return it, "", "not a BigQuery table for Apache Iceberg"
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Minute)
 	defer cancel()
@@ -264,25 +331,25 @@ func (t *icebergTables) sync(r *http.Request, mk func(base string) front, key st
 		delete(t.m, key)
 		t.save()
 		t.mu.Unlock()
-		return it, "the table no longer exists"
+		return it, "", "the table no longer exists"
 	}
 	if status != http.StatusOK {
-		return it, errorMessage(got, status)
+		return it, "", errorMessage(got, status)
 	}
 	cols, bad := icebergColumns(meta.Schema.Fields)
 	if bad != "" {
-		return it, "the column " + bad + ", of a type CloudBurrow does not write to Apache Iceberg"
+		return it, "", "the column " + bad + ", of a type CloudBurrow does not write to Apache Iceberg"
 	}
 	rows, status, got := f.tableRows(r, it.Dataset, it.Table)
 	if status != http.StatusOK {
-		return it, errorMessage(got, status)
+		return it, "", errorMessage(got, status)
 	}
 	h := sha256.New()
 	_ = json.NewEncoder(h).Encode(meta.Schema.Fields)
 	_ = json.NewEncoder(h).Encode(rows)
 	print := hex.EncodeToString(h.Sum(nil))
 	if print == it.Print {
-		return it, ""
+		return it, print, ""
 	}
 	conv := make([][]any, len(rows))
 	for i, row := range rows {
@@ -294,28 +361,28 @@ func (t *icebergTables) sync(r *http.Request, mk func(base string) front, key st
 			}
 			x, err := icebergValue(c, v)
 			if err != nil {
-				return it, fmt.Sprintf("row %d, column %s: %v", i+1, c.Name, err)
+				return it, print, fmt.Sprintf("row %d, column %s: %v", i+1, c.Name, err)
 			}
 			conv[i][j] = x
 		}
 	}
 	data, err := t.store.Write(ctx, it.Location, cols, conv)
 	if err != nil {
-		return it, err.Error()
+		return it, print, err.Error()
 	}
 	for _, uri := range data {
 		if msg := t.uploadFile(ctx, f, uri, "application/octet-stream"); msg != "" {
-			return it, msg
+			return it, print, msg
 		}
 	}
 	t.mu.Lock()
 	if cur, ok := t.m[key]; ok && cur.Created == it.Created {
-		cur.Print = print
+		cur.Print, cur.Failed = print, ""
 		t.m[key] = cur
 		t.save()
 	}
 	t.mu.Unlock()
-	return it, ""
+	return it, print, ""
 }
 
 func (t *icebergTables) uploadFile(ctx context.Context, f front, uri, contentType string) string {
@@ -410,6 +477,11 @@ func (f front) serveExportMetadata(w http.ResponseWriter, r *http.Request, q que
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return
 	}
+	// statementType: the REST reference's JobStatistics2.statementType
+	// (checked 2026-10-16) names no value for EXPORT TABLE METADATA, nor
+	// do the EXPORT TABLE METADATA and INFORMATION_SCHEMA.JOBS pages; the
+	// front answers EXPORT_DATA, the documented value of the nearest
+	// statement, as BigQuery's own is UNVERIFIED (docs/compatibility.md).
 	f.forward(w, r, jobText{query: q.Query, ddl: &ownDDL{target: tableRef{ProjectID: project, DatasetID: ds, TableID: table},
 		statementType: "EXPORT_DATA"}})
 }
@@ -440,9 +512,7 @@ func (f front) insertIcebergTable(w http.ResponseWriter, r *http.Request, datase
 	}
 	if body.Schema != nil {
 		if _, bad := icebergColumns(body.Schema.Fields); bad != "" {
-			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: the column "+bad+
-				" of a BigQuery table for Apache Iceberg: CloudBurrow writes INT64, FLOAT64, BOOL, STRING, BYTES, NUMERIC, "+
-				"DATE, DATETIME, TIME and TIMESTAMP columns to Apache Iceberg. Nothing was made.")
+			writeError(w, http.StatusNotImplemented, "notImplemented", icebergColumnRefused(bad))
 			return
 		}
 	}
@@ -491,4 +561,106 @@ func (d ddlOptions) checkIceberg() string {
 	b, _ := json.Marshal(conf)
 	_, _, msg := icebergConfig(b)
 	return msg
+}
+
+// icebergColumnRefused is the 501 of bad, icebergColumns's, at the table's
+// making.
+func icebergColumnRefused(bad string) string {
+	return "Not implemented here: the column " + bad + " of a BigQuery table for Apache Iceberg: CloudBurrow writes " +
+		"INT64, FLOAT64, BOOL, STRING, BYTES, NUMERIC, DATE, DATETIME, TIME and TIMESTAMP columns to Apache Iceberg. " +
+		"Nothing was made."
+}
+
+// iceberg is whether d makes a BigQuery table for Apache Iceberg: its
+// OPTIONS give a file_format or table_format.
+func (d ddlOptions) iceberg() bool {
+	if d.alter || d.view {
+		return false
+	}
+	for _, o := range d.more {
+		if part, ok := o.value.(map[string]any); ok && o.key == "biglakeConfiguration" {
+			if _, ok := part["tableFormat"]; ok {
+				return true
+			}
+			if _, ok := part["fileFormat"]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// icebergColumnsOf is the CREATE TABLE form's check of tables.insert's
+// (insertIcebergTable): of d, a table for Apache Iceberg, the 501 of its
+// first column of a type CloudBurrow does not write, from the statement's
+// column list, else from the schema of its AS query (run with LIMIT 0);
+// or "", nothing having been made.
+func (f front) icebergColumnsOf(r *http.Request, q queryOptions, d ddlOptions) string {
+	var fields []field
+	if len(d.columns) > 0 {
+		cols := d.columns
+		for i := 0; i < len(cols); {
+			end := skipTo(cols, i, ",")
+			if end > len(cols) {
+				end = len(cols)
+			}
+			c := cols[i:end]
+			i = end + 1
+			if len(c) < 2 || !isName(c[0]) {
+				continue
+			}
+			ft, _, what := fieldType(c, 1)
+			if what != "" {
+				continue // the engine answers the statement as written
+			}
+			ft["name"] = c[0].text
+			var fl field
+			if b, err := json.Marshal(ft); err == nil && json.Unmarshal(b, &fl) == nil {
+				fields = append(fields, fl)
+			}
+		}
+	} else if query := ctasQuery(q.Query); query != "" {
+		legacy := false
+		req, err := json.Marshal(queryOptions{Query: "SELECT * FROM (" + query + "\n) LIMIT 0", UseLegacySQL: &legacy,
+			DefaultDataset: q.DefaultDataset, ParameterMode: q.ParameterMode, QueryParameters: q.QueryParameters})
+		if err != nil {
+			return ""
+		}
+		status, got := f.send(r, http.MethodPost, "/queries", req)
+		var res struct {
+			Schema struct {
+				Fields []field `json:"fields"`
+			} `json:"schema"`
+		}
+		if status != http.StatusOK || json.Unmarshal(got, &res) != nil {
+			return "" // the statement fails as it does
+		}
+		fields = res.Schema.Fields
+	}
+	if _, bad := icebergColumns(fields); bad != "" {
+		return icebergColumnRefused(bad)
+	}
+	return ""
+}
+
+// ctasQuery is the query of sql, a CREATE TABLE ... AS query (its first AS
+// outside parentheses), or "".
+func ctasQuery(sql string) string {
+	t, lexed := lex(sql)
+	if !lexed {
+		return ""
+	}
+	if n := len(t); n > 0 && t[n-1].punct(";") {
+		t = t[:n-1]
+	}
+	for j := 0; j < len(t); j++ {
+		if t[j].punct("(") || t[j].punct("[") {
+			j = skipTo(t, j+1, ")", "]")
+			continue
+		}
+		if t[j].is("AS") && j+1 < len(t) {
+			return sql[t[j].end:t[len(t)-1].end]
+		}
+	}
+	return ""
 }

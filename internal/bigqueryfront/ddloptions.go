@@ -419,6 +419,12 @@ func (f front) ddlWithOptions(w http.ResponseWriter, r *http.Request, q queryOpt
 		f.runQuery(w, r, q, insert)
 		return
 	}
+	if d.iceberg() { // #1427, iceberg.go
+		if msg := f.icebergColumnsOf(r, q, d); msg != "" {
+			writeError(w, http.StatusNotImplemented, "notImplemented", msg)
+			return
+		}
+	}
 	expiration, set, status, body := f.expirationMillis(r, q, d.expiration)
 	if status != http.StatusOK {
 		writeError(w, http.StatusBadRequest, "invalidQuery", "expiration_timestamp: "+errorMessage(body, status))

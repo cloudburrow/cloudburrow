@@ -452,16 +452,27 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The files of the tables for Apache Iceberg whose rows the
+		// request changed are written before it is answered; a failure is
+		// its answer (#1427, iceberg.go).
+		if icebergs.any() && (r.Method != http.MethodGet || strings.Contains(r.URL.Path, "/jobs/") || strings.Contains(r.URL.Path, "/queries/")) {
+			rec := newRecorder()
+			if !serveJobLocations(rec, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
+				inner.ServeHTTP(rec, r)
+			}
+			status, why := icebergs.syncAll(r, func(base string) front {
+				return front{next: next, base: base, ids: ids, storageHost: storageHost, icebergs: icebergs}
+			})
+			if status != 0 && (rec.status == 0 || rec.status/100 == 2) {
+				writeError(w, status, why.Reason, why.Message)
+				return
+			}
+			rec.copyTo(w)
+			return
+		}
 		// Every job the front answers has a location (#1371, location.go).
 		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
 			inner.ServeHTTP(w, r)
-		}
-		// The files of the tables for Apache Iceberg whose rows the
-		// request changed (#1427, iceberg.go).
-		if icebergs.any() && (r.Method != http.MethodGet || strings.Contains(r.URL.Path, "/jobs/") || strings.Contains(r.URL.Path, "/queries/")) {
-			icebergs.syncAll(r, func(base string) front {
-				return front{next: next, base: base, ids: ids, storageHost: storageHost, icebergs: icebergs}
-			})
 		}
 	})
 }
