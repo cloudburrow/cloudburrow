@@ -229,6 +229,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if secretsSvc != nil {
 		runSvc.useSecrets(lazySecretResolver{svc: secretsSvc})
 	}
+	// A Cloud Build build's secrets (#1407).
+	runSvc.useBuildSecrets(secretsSvc, kmsSvc)
 
 	// Admin routes must be mounted before the control server starts: it builds
 	// its mux at Start, so anything added afterwards is never routed.
