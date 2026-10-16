@@ -308,9 +308,9 @@ func TestGRPCGenerateContentMatchesTheJSONRoute(t *testing.T) {
 
 func TestGRPCOtherMethodsAreUnimplemented(t *testing.T) {
 	c, _ := startMixed(t, endpointServer(t, func(n int) int { return n }))
-	_, err := c.Explain(context.Background(), &aiplatformpb.ExplainRequest{Endpoint: endpointName})
+	_, err := c.DirectRawPredict(context.Background(), &aiplatformpb.DirectRawPredictRequest{Endpoint: endpointName, MethodName: "/m.S/Predict"})
 	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("Explain: %v, want UNIMPLEMENTED", err)
+		t.Errorf("DirectRawPredict: %v, want UNIMPLEMENTED", err)
 	}
 	// On an endpoint rather than a publisher model, streaming is refused.
 	st, err := c.StreamGenerateContent(context.Background(), &aiplatformpb.GenerateContentRequest{Model: endpointName})

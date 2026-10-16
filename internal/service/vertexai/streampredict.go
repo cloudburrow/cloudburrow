@@ -481,7 +481,8 @@ func (p *predictionService) StreamRawPredict(req *aiplatformpb.StreamRawPredictR
 // gRPC model server methods: nothing here is one.
 func noModelServer(method, name string) error {
 	return apierror.Unimplemented("%s calls method_name %q on a gRPC model server, and none is served here: "+
-		"the local models answer Predict, RawPredict and their streaming forms, and custom prediction containers speak HTTP; "+
+		"the local models answer Predict, RawPredict and their streaming forms, and a custom endpoint is a Cloud Run service, "+
+		"whose container is reached over HTTP/1.1 at its predict route (a port named h2c is not honoured, so no gRPC server in it can be called); "+
 		"see docs/compatibility.md", method, name)
 }
 

@@ -46,7 +46,7 @@ func predictionClientAt(t *testing.T, h *Harness, envVar string) *aiplatform.Pre
 	return c
 }
 
-// covers: google.cloud.aiplatform.v1.PredictionService/Predict, google.cloud.aiplatform.v1.PredictionService/RawPredict
+// covers: google.cloud.aiplatform.v1.PredictionService/Predict, google.cloud.aiplatform.v1.PredictionService/RawPredict, google.cloud.aiplatform.v1.PredictionService/Explain
 //
 // TestPredictionClientReachesACustomEndpoint (#1193): a custom prediction
 // container deployed through the official Cloud Run SDK, on non-default
@@ -55,7 +55,8 @@ func predictionClientAt(t *testing.T, h *Harness, envVar string) *aiplatform.Pre
 // one prediction per instance and the container's deployedModelId; the
 // container's refusal of a bad instance is INVALID_ARGUMENT in its own words;
 // an endpoint that is not deployed is NOT_FOUND; RawPredict relays the body;
-// and a method CloudBurrow does not implement is UNIMPLEMENTED.
+// Explain answers Sampled Shapley attributions (#1454); and a method
+// CloudBurrow does not implement is UNIMPLEMENTED.
 func TestPredictionClientReachesACustomEndpoint(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvPrediction)
@@ -128,9 +129,42 @@ func TestPredictionClientReachesACustomEndpoint(t *testing.T) {
 		t.Errorf("RawPredict = %s", raw.GetData())
 	}
 
+	// Explain (#1454): Sampled Shapley over the container's predictions, the
+	// spec from explanation_spec_override. The doubler's one feature takes
+	// all of 2*3 from its baseline of 0.
 	_, err = pc.Explain(ctx, &aiplatformpb.ExplainRequest{Endpoint: endpoint, Instances: inst(1)})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("Explain with no explanation spec: %v, want FAILED_PRECONDITION", err)
+	}
+	ex, err := pc.Explain(ctx, &aiplatformpb.ExplainRequest{Endpoint: endpoint, Instances: inst(3),
+		ExplanationSpecOverride: &aiplatformpb.ExplanationSpecOverride{
+			Parameters: &aiplatformpb.ExplanationParameters{Method: &aiplatformpb.ExplanationParameters_SampledShapleyAttribution{
+				SampledShapleyAttribution: &aiplatformpb.SampledShapleyAttribution{PathCount: 5}}},
+			Metadata: &aiplatformpb.ExplanationMetadataOverride{Inputs: map[string]*aiplatformpb.ExplanationMetadataOverride_InputMetadataOverride{"x": {}}},
+		}})
+	if err != nil {
+		t.Fatalf("Explain: %v", err)
+	}
+	if len(ex.GetExplanations()) != 1 || len(ex.GetExplanations()[0].GetAttributions()) != 1 || ex.GetDeployedModelId() != "doubler-v1" ||
+		len(ex.GetPredictions()) != 1 || ex.GetPredictions()[0].GetNumberValue() != 6 {
+		t.Fatalf("Explain = %v", ex)
+	}
+	a := ex.GetExplanations()[0].GetAttributions()[0]
+	if a.GetBaselineOutputValue() != 0 || a.GetInstanceOutputValue() != 6 ||
+		math.Abs(a.GetFeatureAttributions().GetStructValue().GetFields()["x"].GetNumberValue()-6) > 1e-9 {
+		t.Errorf("attribution = %v, want x: 6 from 0 to 6", a)
+	}
+	_, err = pc.Explain(ctx, &aiplatformpb.ExplainRequest{Endpoint: endpoint, Instances: inst(1),
+		ExplanationSpecOverride: &aiplatformpb.ExplanationSpecOverride{Parameters: &aiplatformpb.ExplanationParameters{
+			Method: &aiplatformpb.ExplanationParameters_IntegratedGradientsAttribution{
+				IntegratedGradientsAttribution: &aiplatformpb.IntegratedGradientsAttribution{StepCount: 50}}}}})
 	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("Explain: %v, want UNIMPLEMENTED", err)
+		t.Errorf("Explain with integrated gradients: %v, want UNIMPLEMENTED", err)
+	}
+
+	_, err = pc.DirectRawPredict(ctx, &aiplatformpb.DirectRawPredictRequest{Endpoint: endpoint, MethodName: "/m.S/Predict"})
+	if status.Code(err) != codes.Unimplemented {
+		t.Errorf("DirectRawPredict: %v, want UNIMPLEMENTED", err)
 	}
 }
 
