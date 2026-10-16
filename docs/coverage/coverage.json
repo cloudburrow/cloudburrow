@@ -854,7 +854,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRule",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata",
+          "test/compat/terraform_batch7_test.go:37 TestTerraformArtifactRegistryRuleAndCleanupPolicies"
         ]
       },
       {
@@ -898,7 +899,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRule",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata",
+          "test/compat/terraform_batch7_test.go:37 TestTerraformArtifactRegistryRuleAndCleanupPolicies"
         ]
       },
       {
@@ -994,7 +996,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetRule",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata",
+          "test/compat/terraform_batch7_test.go:37 TestTerraformArtifactRegistryRuleAndCleanupPolicies"
         ]
       },
       {
@@ -1143,6 +1146,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/terraform_batch7_test.go:37 TestTerraformArtifactRegistryRuleAndCleanupPolicies",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
@@ -1150,7 +1154,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateRule",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata",
+          "test/compat/terraform_batch7_test.go:37 TestTerraformArtifactRegistryRuleAndCleanupPolicies"
         ]
       },
       {
@@ -1566,21 +1571,24 @@
         "method": "run.namespaces.domainmappings.create",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1global_test.go:193 TestRunV1DomainMappings"
+          "test/compat/runv1global_test.go:193 TestRunV1DomainMappings",
+          "test/compat/terraform_batch7_test.go:149 TestTerraformCloudRunDomainMapping"
         ]
       },
       {
         "method": "run.namespaces.domainmappings.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1global_test.go:193 TestRunV1DomainMappings"
+          "test/compat/runv1global_test.go:193 TestRunV1DomainMappings",
+          "test/compat/terraform_batch7_test.go:149 TestTerraformCloudRunDomainMapping"
         ]
       },
       {
         "method": "run.namespaces.domainmappings.get",
         "status": "Verified",
         "tests": [
-          "test/compat/runv1global_test.go:193 TestRunV1DomainMappings"
+          "test/compat/runv1global_test.go:193 TestRunV1DomainMappings",
+          "test/compat/terraform_batch7_test.go:149 TestTerraformCloudRunDomainMapping"
         ]
       },
       {
@@ -8855,7 +8863,8 @@
           "test/compat/cloudsqlversions_test.go:405 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:442 TestTerraformSQLDatabaseVersion",
           "test/compat/consolecloudsqldataapi_test.go:27 TestConsoleCloudSQLDataAPIAndProjectBackups",
-          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica"
+          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
+          "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade"
         ]
       },
       {
@@ -8930,7 +8939,8 @@
           "test/compat/cloudsqlversions_test.go:442 TestTerraformSQLDatabaseVersion",
           "test/compat/sqladmin_test.go:431 TestGcloudSQL",
           "test/compat/sqladmin_test.go:51 TestSQLAdminInstancesDescribeTheRunningServers",
-          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica"
+          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
+          "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade"
         ]
       },
       {
@@ -8971,7 +8981,8 @@
           "test/compat/cloudsqlversions_test.go:405 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:442 TestTerraformSQLDatabaseVersion",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
-          "test/compat/terraform_batch4_test.go:404 TestTerraformSQLSourceRepresentationRefused"
+          "test/compat/terraform_batch4_test.go:404 TestTerraformSQLSourceRepresentationRefused",
+          "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade"
         ]
       },
       {
@@ -9007,7 +9018,8 @@
           "test/compat/cloudsqlversions_test.go:202 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:405 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:442 TestTerraformSQLDatabaseVersion",
-          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica"
+          "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
+          "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade"
         ]
       },
       {
@@ -9155,6 +9167,7 @@
           "test/compat/sqladmin_test.go:279 TestSQLAdminDatabasesAndUsersAreTheServers",
           "test/compat/sqladmin_test.go:431 TestGcloudSQL",
           "test/compat/terraform_batch4_test.go:38 TestTerraformSQLSSLCertAndReplica",
+          "test/compat/terraform_batch7_test.go:229 TestTerraformSQLPostgres12Upgrade",
           "test/compat/terraform_sql_test.go:21 TestTerraformSQLDatabaseAndUser"
         ]
       },
