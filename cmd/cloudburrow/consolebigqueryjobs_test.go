@@ -491,3 +491,57 @@ func TestBigQueryCopyTableSendsTheOperation(t *testing.T) {
 		t.Errorf("a refused copy was sent: %v", sent)
 	}
 }
+
+// TestBigQuerySnapshotCloneAndRestoreSendTheirOperation (#1002): Snapshot,
+// Clone and Restore are each one copy job with their operationType;
+// Snapshot's expiration is then patched onto the snapshot, and a bad one is
+// refused before anything is sent.
+func TestBigQuerySnapshotCloneAndRestoreSendTheirOperation(t *testing.T) {
+	var sent []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/jobs"):
+			sent = append(sent, "job "+string(b))
+			_, _ = io.WriteString(w, `{"jobReference":{"projectId":"p","jobId":"c1","location":"US"},"status":{"state":"DONE"}}`)
+		case r.Method == http.MethodPatch:
+			sent = append(sent, "patch "+r.URL.Path+" "+string(b))
+			_, _ = io.WriteString(w, `{"tableReference":{"projectId":"p","datasetId":"d2","tableId":"t2"}}`)
+		default:
+			_, _ = io.WriteString(w, `{"jobReference":{"projectId":"p","jobId":"c1","location":"US"},"status":{"state":"DONE"}}`)
+		}
+	}))
+	defer api.Close()
+	p := bigqueryProvider{endpoint: strings.TrimPrefix(api.URL, "http://"), project: "p"}
+	ctx := context.Background()
+	for action, op := range map[string]string{actSnapshotTable: "SNAPSHOT", actCloneTable: "CLONE", actRestoreTable: "RESTORE"} {
+		sent = nil
+		if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, action,
+			map[string]string{"datasetId": "d2", "tableId": "t2"}); err != nil {
+			t.Fatal(err)
+		}
+		if len(sent) != 1 || !strings.Contains(sent[0], `"operationType":"`+op+`"`) {
+			t.Errorf("%s sent %v", action, sent)
+		}
+	}
+	sent = nil
+	if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, actSnapshotTable,
+		map[string]string{"datasetId": "d2", "tableId": "t2", "expirationHours": "24"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 2 || !strings.HasPrefix(sent[1], "patch ") || !strings.Contains(sent[1], "/tables/t2") ||
+		!strings.Contains(sent[1], `"expirationTime"`) {
+		t.Errorf("Snapshot with an expiration sent %v", sent)
+	}
+	sent = nil
+	for _, hours := range []string{"0", "-1", "soon"} {
+		if _, err := p.ActAtResult(ctx, "p", []string{"d", "t"}, actSnapshotTable,
+			map[string]string{"datasetId": "d2", "tableId": "t2", "expirationHours": hours}); err == nil {
+			t.Errorf("an expiration of %q was taken", hours)
+		}
+	}
+	if len(sent) != 0 {
+		t.Errorf("a refused Snapshot was sent: %v", sent)
+	}
+}

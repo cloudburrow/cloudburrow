@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 )
@@ -152,4 +153,61 @@ func quoteAll(ss []string) []string {
 		out[i] = "'" + s + "'"
 	}
 	return out
+}
+
+// TestConsoleBigQuerySnapshotCloneAndRestoreActions (#1002), through the
+// console API, each outcome read back with the official client: Snapshot on
+// a table's page makes a read-only SNAPSHOT that expires in the hours the
+// form names, Clone a writable clone, and Restore, offered on the
+// snapshot's page instead of Insert rows and Load, a standard table with
+// the snapshot's rows.
+func TestConsoleBigQuerySnapshotCloneAndRestoreActions(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	addr := consoleAddr(t, h)
+	ctx := h.Context()
+	ds := validationDataset(t, h, c)
+	d := ds.DatasetID
+	schema := bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType}, {Name: "name", Type: bigquery.StringFieldType}}
+	if err := ds.Table("a").Create(ctx, &bigquery.TableMetadata{Schema: schema}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bqRun(ctx, c, "INSERT INTO "+d+".a VALUES (1, 'n1'), (2, 'n2')", false); err != nil {
+		t.Fatal(err)
+	}
+	act := func(src, action string, values map[string]string) {
+		t.Helper()
+		_, fields, _ := consoleJobResult(t, addr, project, []string{d, src}, action, values)
+		if fields["State"] != "Succeeded" {
+			t.Errorf("%s of %s answered %v", action, src, fields)
+		}
+	}
+	act("a", "snapshottable", map[string]string{"datasetId": d, "tableId": "sn", "expirationHours": "24"})
+	md, err := ds.Table("sn").Metadata(ctx)
+	if err != nil || md.Type != bigquery.Snapshot || md.SnapshotDefinition == nil {
+		t.Fatalf("the snapshot: %+v, %v", md, err)
+	}
+	if want := time.Now().Add(24 * time.Hour); md.ExpirationTime.Before(want.Add(-5*time.Minute)) || md.ExpirationTime.After(want.Add(5*time.Minute)) {
+		t.Errorf("the snapshot expires %v, want about %v", md.ExpirationTime, want)
+	}
+	act("a", "clonetable", map[string]string{"datasetId": d, "tableId": "cl"})
+	if md, err := ds.Table("cl").Metadata(ctx); err != nil || md.Type != bigquery.RegularTable || md.CloneDefinition == nil {
+		t.Errorf("the clone: %+v, %v", md, err)
+	}
+	act("sn", "restoretable", map[string]string{"datasetId": d, "tableId": "re", "writeDisposition": "WRITE_EMPTY"})
+	if md, err := ds.Table("re").Metadata(ctx); err != nil || md.Type != bigquery.RegularTable || md.SnapshotDefinition != nil {
+		t.Errorf("the restored table: %+v, %v", md, err)
+	}
+	for _, table := range []string{"cl", "sn", "re"} {
+		if got := strings.Join(readRowsSorted(t, ctx, ds.Table(table)), " "); got != `[1,"n1"] [2,"n2"]` {
+			t.Errorf("%s holds %s", table, got)
+		}
+	}
+	if code, out := consoleAct(t, addr, "bigquery", project, []string{d, "a"}, "snapshottable", map[string]string{
+		"datasetId": d, "tableId": "bad", "expirationHours": "-1"}); code == http.StatusOK {
+		t.Errorf("Snapshot with a negative expiration = %d: %s, want a refusal", code, out)
+	}
+	if tableExists(t, ctx, ds.Table("bad")) {
+		t.Error("a refused Snapshot made a table")
+	}
 }

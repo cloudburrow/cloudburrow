@@ -411,11 +411,11 @@ func TestCreateTableLikeCopyCloneAreNotImplemented(t *testing.T) {
 	}
 	emu := &fakeEmulator{}
 	for _, path := range []string{base + "/queries", base + "/jobs"} {
-		// A lone CLONE is carried out since #1002 (cloneddl.go); with FOR
-		// SYSTEM_TIME AS OF it is still 501.
-		body := `{"query":"CREATE TABLE ds.c CLONE ds.t FOR SYSTEM_TIME AS OF CURRENT_TIMESTAMP()"}`
+		// A lone CLONE is carried out since #1002 (cloneddl.go), with FOR
+		// SYSTEM_TIME AS OF and OPTIONS too; with OR REPLACE it is still 501.
+		body := `{"query":"CREATE OR REPLACE TABLE ds.c CLONE ds.t"}`
 		if strings.HasSuffix(path, "/jobs") {
-			body = `{"configuration":{"query":{"query":"CREATE TABLE ds.c CLONE ds.t FOR SYSTEM_TIME AS OF CURRENT_TIMESTAMP()"}}}`
+			body = `{"configuration":{"query":{"query":"CREATE OR REPLACE TABLE ds.c CLONE ds.t"}}}`
 		}
 		if code, got := do(t, Wrap(emu), "POST", path, body); code != 501 {
 			t.Errorf("%s: %d %v, want 501", path, code, got)

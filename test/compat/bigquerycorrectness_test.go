@@ -281,7 +281,8 @@ func TestBigQueryCreateIfNotExistsOfAnExistingOne(t *testing.T) {
 // CreateSnapshotTableStatement". A lone LIKE or COPY is carried out since
 // #1239 (TestBigQueryCreateTableLikeAndCopy), and a lone CLONE or CREATE
 // SNAPSHOT TABLE since #1002 (TestBigQueryCloneAndSnapshotDDL): OR REPLACE
-// and FOR SYSTEM_TIME AS OF of them stay 501.
+// and FOR SYSTEM_TIME AS OF a time other than now (here, in the future;
+// TestBigQueryCloneDDLOptionsAndSystemTime) of them stay 501.
 func TestBigQueryCreateTableLikeCopyCloneNotImplemented(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -296,7 +297,7 @@ func TestBigQueryCreateTableLikeCopyCloneNotImplemented(t *testing.T) {
 			"like":  "SELECT 1; CREATE TABLE " + path("like") + " LIKE " + path("src"),
 			"copy":  "SELECT 1; CREATE TABLE " + path("copy") + " COPY " + path("src"),
 			"clone": "CREATE OR REPLACE TABLE " + path("clone") + " CLONE " + path("src"),
-			"snap":  "CREATE SNAPSHOT TABLE " + path("snap") + " CLONE " + path("src") + " FOR SYSTEM_TIME AS OF CURRENT_TIMESTAMP()",
+			"snap":  "CREATE SNAPSHOT TABLE " + path("snap") + " CLONE " + path("src") + " FOR SYSTEM_TIME AS OF TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)",
 		} {
 			err := bqRun(ctx, c, sql, insert)
 			wantReason(t, sql, err, http.StatusNotImplemented, "notImplemented")

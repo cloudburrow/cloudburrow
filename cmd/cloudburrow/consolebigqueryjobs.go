@@ -525,6 +525,75 @@ func (p bigqueryProvider) copyJob(ctx context.Context, project, datasetID, table
 	return p.finishedJob(ctx, project, job)
 }
 
+// Snapshot and Clone on a table's page, and Restore on a table snapshot's,
+// as Google's console offers them (#1002): each a copy job with that
+// operationType (Copy table's, copyJob), into a destination that does not
+// exist, or (Restore) with a write preference. Snapshot's expiration is set
+// on the snapshot, after the job, with tables.patch (the official client's
+// Copier has no destinationExpirationTime).
+const (
+	actSnapshotTable = "snapshottable"
+	actCloneTable    = "clonetable"
+	actRestoreTable  = "restoretable"
+)
+
+// bigquerySnapshotFields are Snapshot's, Clone's and Restore's inputs.
+func bigquerySnapshotFields(action string) []console.Field {
+	fields := []console.Field{
+		{Name: "datasetId", Label: "Destination dataset", Type: "text", Required: true, Pattern: bigqueryDatasetIDPattern,
+			Help: "A dataset of this project that exists."},
+		{Name: "tableId", Label: "Destination table", Type: "text", Required: true, Pattern: bigqueryTableIDPattern,
+			Help: "A table that does not exist."},
+	}
+	switch action {
+	case actSnapshotTable:
+		fields = append(fields, console.Field{Name: "expirationHours", Label: "Expiration (hours)", Type: "number",
+			Help: "Optional: the snapshot expires this many hours from now. CloudBurrow keeps the expiration time and does not delete the snapshot when it passes."})
+	case actRestoreTable:
+		fields[1].Help = "WRITE_TRUNCATE below replaces a table that exists."
+		fields = append(fields, console.Field{Name: "writeDisposition", Label: "If the destination exists", Type: "select",
+			Options: bigqueryCopyWrites, Help: "WRITE_EMPTY refuses a destination that has rows."})
+	}
+	return fields
+}
+
+// snapshotCloneRestore carries out Snapshot, Clone or Restore of
+// datasetID.tableID (above).
+func (p bigqueryProvider) snapshotCloneRestore(ctx context.Context, project, datasetID, tableID, action string, values map[string]string) (*console.Listing, error) {
+	copyValues := map[string]string{"datasetId": values["datasetId"], "tableId": values["tableId"],
+		"writeDisposition": values["writeDisposition"]}
+	var hours int64
+	switch action {
+	case actSnapshotTable:
+		copyValues["operationType"] = "SNAPSHOT"
+		if raw := strings.TrimSpace(values["expirationHours"]); raw != "" {
+			n, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || n <= 0 {
+				return nil, fmt.Errorf("the expiration is a whole number of hours above 0, not %q", raw)
+			}
+			hours = n
+		}
+	case actCloneTable:
+		copyValues["operationType"] = "CLONE"
+	default:
+		copyValues["operationType"] = "RESTORE"
+	}
+	out, err := p.copyJob(ctx, project, datasetID, tableID, copyValues)
+	if err != nil || hours == 0 {
+		return out, err
+	}
+	c, err := p.client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	tbl := c.Dataset(strings.TrimSpace(values["datasetId"])).Table(strings.TrimSpace(values["tableId"]))
+	if _, err := tbl.Update(ctx, bigquery.TableMetadataToUpdate{ExpirationTime: time.Now().Add(time.Duration(hours) * time.Hour)}, ""); err != nil {
+		return nil, fmt.Errorf("the snapshot was made, but its expiration was not set: %w", bigqueryRefusal(err))
+	}
+	return out, nil
+}
+
 // finishedJob waits for a job and says how it ended: the API's error if it
 // failed, else one row naming it, with what it did.
 func (p bigqueryProvider) finishedJob(ctx context.Context, project string, job *bigquery.Job) (*console.Listing, error) {
@@ -601,6 +670,8 @@ func (p bigqueryProvider) ActAtResult(ctx context.Context, project string, path 
 		return p.exportJob(ctx, project, path[0], path[1], values)
 	case action == actCopyTable && len(path) == 2:
 		return p.copyJob(ctx, project, path[0], path[1], values)
+	case (action == actSnapshotTable || action == actCloneTable || action == actRestoreTable) && len(path) == 2:
+		return p.snapshotCloneRestore(ctx, project, path[0], path[1], action, values)
 	case action == actLoadFile:
 		// Its file is not in a JSON action: the form sends both to the
 		// upload route, which calls ActAtFile.
