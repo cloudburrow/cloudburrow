@@ -364,9 +364,9 @@ func (c arrowCol) value(arr arrow.Array, i int) (any, error) {
 	case *array.LargeBinary:
 		return base64.StdEncoding.EncodeToString(a.Value(i)), nil
 	case *array.String:
-		return a.Value(i), nil
+		return c.text(a.Value(i))
 	case *array.LargeString:
-		return a.Value(i), nil
+		return c.text(a.Value(i))
 	case *array.Int8:
 		return strconv.FormatInt(int64(a.Value(i)), 10), nil
 	case *array.Int16:
@@ -420,15 +420,35 @@ func (c arrowCol) value(arr arrow.Array, i int) (any, error) {
 		scale := a.DataType().(*arrow.Decimal256Type).Scale
 		return decimalText(a.Value(i).BigInt(), scale), nil
 	case *array.MonthInterval:
-		return intervalText(int64(a.Value(i)), 0, 0), nil
+		return checkedIntervalText(int64(a.Value(i)), 0, 0)
 	case *array.DayTimeInterval:
 		v := a.Value(i)
-		return intervalText(0, int64(v.Days), int64(v.Milliseconds)*1_000_000), nil
+		return checkedIntervalText(0, int64(v.Days), int64(v.Milliseconds)*1_000_000)
 	case *array.MonthDayNanoInterval:
 		v := a.Value(i)
-		return intervalText(int64(v.Months), int64(v.Days), v.Nanoseconds), nil
+		return checkedIntervalText(int64(v.Months), int64(v.Days), v.Nanoseconds)
 	}
 	return nil, fmt.Errorf("no conversion of %s to %s", arr.DataType(), c.typ)
+}
+
+// text is a Utf8 value written to the column. An INTERVAL's is read as
+// the proto path reads a string (#1424), and one that is not an interval,
+// or is out of range, fails its row (#1437); it was passed to the engine
+// unchecked.
+func (c arrowCol) text(s string) (any, error) {
+	if c.typ == "INTERVAL" {
+		return writeIntervalText(s)
+	}
+	return s, nil
+}
+
+// checkedIntervalText is an Arrow interval's canonical text, or an error
+// when a part is out of INTERVAL's range (#1437).
+func checkedIntervalText(months, days, nanos int64) (any, error) {
+	if err := (interval{months: months, days: days, micros: nanos / 1000}).check(); err != nil {
+		return nil, err
+	}
+	return intervalText(months, days, nanos), nil
 }
 
 func floatValue(f float64, bits int) any {

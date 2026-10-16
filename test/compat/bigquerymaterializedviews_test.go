@@ -321,9 +321,9 @@ func TestBigQueryMaterializedViews(t *testing.T) {
 			t.Errorf("no child job of statementType %s: %v", want, types)
 		}
 	}
-	err = bqRun(ctx, c, "CREATE TEMP TABLE x AS SELECT 1 AS a; DROP MATERIALIZED VIEW "+path("smv"), false)
-	wantReason(t, "a materialized view in a script with a TEMP table", err, http.StatusNotImplemented, "notImplemented")
-	run("DROP MATERIALIZED VIEW "+path("smv")+"; DROP TABLE "+path("sbase"), false)
+	// #1434: with a TEMP table too (TestBigQueryMaterializedViewsInTempScripts).
+	run("CREATE TEMP TABLE x AS SELECT 1 AS a; DROP MATERIALIZED VIEW "+path("smv")+"; SELECT * FROM x", false)
+	run("DROP TABLE "+path("sbase"), false)
 	if tableExists(t, ctx, ds.Table("smv")) {
 		t.Error("the script's DROP MATERIALIZED VIEW left smv")
 	}

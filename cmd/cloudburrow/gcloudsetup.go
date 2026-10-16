@@ -109,6 +109,10 @@ var gcloudVerified = []struct {
 	// TestGcloudBackupDR drives vaults, plans, associations, data sources
 	// and backups.
 	{config.ServiceBackupDR, "backupdr", "/", false, false},
+	// Bigtable's admin REST API (#1440), on the Bigtable port beside gRPC;
+	// gcloud bigtable appends v2/. TestGcloudBigtableAppProfiles creates,
+	// lists, updates and deletes app profiles.
+	{config.ServiceBigtable, "bigtableadmin", "/", false, false},
 }
 
 // gcloudFamilies is the gcloud-setup help's list of what it writes, from
@@ -157,7 +161,8 @@ func gcloudConfiguration(cfg config.Config, adcPath string) string {
 		config.ServiceScheduler: cfg.Endpoints.Scheduler, config.ServiceLogging: cfg.Endpoints.Logging,
 		resourceManagerService: cfg.Endpoints.ResourceManager, config.ServiceRun: cfg.Endpoints.Run,
 		sqlAdminEndpoint: cfg.Endpoints.SQLAdmin, memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
-		serviceUsageService: cfg.Endpoints.ServiceUsage, config.ServiceBackupDR: cfg.Endpoints.BackupDR}
+		serviceUsageService: cfg.Endpoints.ServiceUsage, config.ServiceBackupDR: cfg.Endpoints.BackupDR,
+		config.ServiceBigtable: cfg.Endpoints.Bigtable}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n# Instance %q.\n", gcloudMarker, cfg.Name)
 	// should_prompt_to_enable_api is off because gcloud would otherwise ask
@@ -194,7 +199,10 @@ func runGcloudSetup(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if info, ok := running(cfg); ok {
-		cfg = withLivePorts(cfg, info.Endpoints)
+		// The services the instance serves, as `env` and `terraform` take
+		// them (#652): `--name x` alone would otherwise give the default
+		// services, and an opt-in one such as Bigtable no override (#1440).
+		cfg = withLivePorts(servedConfig(cfg, info, true), info.Endpoints)
 	}
 	creds, err := metadata.LoadOrCreate(cfg.InstanceDir(), cfg.DefaultProject(), tokenURI(cfg))
 	if err != nil {

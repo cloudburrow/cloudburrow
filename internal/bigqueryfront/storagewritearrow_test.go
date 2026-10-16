@@ -265,3 +265,57 @@ func TestStorageWriteArrowRefusesSchemas(t *testing.T) {
 		t.Errorf("rows written: %v", got)
 	}
 }
+
+// TestStorageWriteArrowIntervalStrings (#1437): an INTERVAL column written
+// as Utf8 is read as the proto path reads a string (#1424), stored
+// canonical, and a value that is not an interval, or is out of range, fails
+// its row with row_errors; it was passed to the engine unchecked. An Arrow
+// interval out of range fails its row too.
+func TestStorageWriteArrowIntervalStrings(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c, tables := storageWriteFront(t, ctx)
+	tables.schemas["ds.iv"] = `[{"name":"iv","type":"INTERVAL"}]`
+	record := func(vals ...string) (schema, batch []byte) {
+		b := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema([]arrow.Field{{Name: "iv", Type: arrow.BinaryTypes.String}}, nil))
+		defer b.Release()
+		for _, v := range vals {
+			b.Field(0).(*array.StringBuilder).Append(v)
+		}
+		return arrowIPC(t, b.NewRecord())
+	}
+	def := "projects/p-1/datasets/ds/tables/iv/streams/_default"
+	schema, batch := record("1-2 3 4:5:6.5", "INTERVAL 5 DAY", "INTERVAL '1-2' YEAR TO MONTH", " -0-1 0 -0:0:1 ")
+	if resp, err := openAppend(t, ctx, c).send(arrowReq(def, schema, batch, nil)); respCode(resp, err) != codes.OK {
+		t.Fatalf("append: %v, %v", resp, err)
+	}
+	tables.mu.Lock()
+	got, _ := json.Marshal(tables.rows["ds.iv"])
+	tables.mu.Unlock()
+	if want := `[{"iv":"1-2 3 4:5:6.5"},{"iv":"0-0 5 0:0:0"},{"iv":"1-2 0 0:0:0"},{"iv":"-0-1 0 -0:0:1"}]`; string(got) != want {
+		t.Errorf("rows:\n got %s\nwant %s", got, want)
+	}
+
+	for name, bad := range map[string]string{"not an interval": "five days", "out of range": "10001-0 0 0:0:0"} {
+		schema, batch := record("0-0 1 0:0:0", bad)
+		resp, err := openAppend(t, ctx, c).send(arrowReq(def, schema, batch, nil))
+		if respCode(resp, err) != codes.InvalidArgument || len(resp.GetRowErrors()) != 1 || resp.GetRowErrors()[0].GetIndex() != 1 {
+			t.Errorf("%s: %v, %v; want row 1's error", name, resp, err)
+		}
+	}
+	tables.mu.Lock()
+	n := len(tables.rows["ds.iv"])
+	tables.mu.Unlock()
+	if n != 4 {
+		t.Errorf("rows after the refused appends: %d, want 4", n)
+	}
+
+	b := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema([]arrow.Field{{Name: "iv", Type: arrow.FixedWidthTypes.MonthDayNanoInterval}}, nil))
+	b.Field(0).(*array.MonthDayNanoIntervalBuilder).Append(arrow.MonthDayNanoInterval{Days: 3_660_001})
+	schema, batch = arrowIPC(t, b.NewRecord())
+	b.Release()
+	resp, err := openAppend(t, ctx, c).send(arrowReq(def, schema, batch, nil))
+	if respCode(resp, err) != codes.InvalidArgument || len(resp.GetRowErrors()) != 1 {
+		t.Errorf("an Arrow interval of 3,660,001 days: %v, %v; want a row error", resp, err)
+	}
+}

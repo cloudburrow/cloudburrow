@@ -1152,8 +1152,17 @@ func (s *scriptRun) child(project, id, text string) scriptChild {
 	if s.expr > 0 && !s.intoQuery {
 		kind = "EXPRESSION"
 	}
+	sql := s.sql
+	if sess := sessionOf(s.r); sess != nil { // #1434, tempsession.go: the script's own names
+		text, sql = sess.restore(text), sess.orig
+		if s.f.texts != nil && id != "" {
+			t, _ := s.f.texts.get(project, id)
+			t.merge(jobText{query: text})
+			s.f.texts.add(project, id, t)
+		}
+	}
 	c := scriptChild{project: project, id: id, kind: kind, text: text}
-	c.line, c.col, c.endLine, c.endCol = childAt(s.sql, text)
+	c.line, c.col, c.endLine, c.endCol = childAt(sql, text)
 	if f, ok := s.frames[text]; ok && kind == "STATEMENT" && c.line == 0 {
 		c.text, c.line, c.col, c.endLine, c.endCol = f.text, f.line, f.col, f.endLine, f.endCol
 	}

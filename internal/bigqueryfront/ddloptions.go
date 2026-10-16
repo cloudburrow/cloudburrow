@@ -44,8 +44,9 @@ import (
 // In a multi-statement script with no TEMP table or function, each such
 // statement is set so too (#1390, hasDDLOptions). Not carried out: options
 // in a script with a TEMP table or function, which the emulator still
-// drops, and a column's OPTIONS in a column definition, but for a NUMERIC
-// or BIGNUMERIC column's rounding_mode (#1401, decimalddl.go).
+// drops. A column's OPTIONS in a column definition, description and a
+// NUMERIC or BIGNUMERIC column's rounding_mode, are set too (#1401, #1438,
+// decimalddl.go), and any other column option is 501.
 
 // ddlOptions is a lone DDL statement's table OPTIONS.
 type ddlOptions struct {
@@ -82,10 +83,13 @@ type ddlOptions struct {
 	// decimals are the column list's parameterized NUMERIC and
 	// BIGNUMERIC columns and rounding modes (#1401, decimalddl.go).
 	decimals []decimalColumn
-	// sent is the statement as the engine is sent it, a STRUCT field's
-	// OPTIONS (rounding_mode) cut, or "" for the statement as it is
-	// (#1409, decimalddl.go).
+	// sent is the statement as the engine is sent it, the column
+	// OPTIONS cut, or "" for the statement as it is (#1409, #1438,
+	// decimalddl.go).
 	sent string
+	// columnUnsupported names a column option the front does not set
+	// (#1438), or "".
+	columnUnsupported string
 }
 
 // optionsKey marks a request whose options the front is already setting,
@@ -161,7 +165,7 @@ func parseDDLOptionsOf(sql string, mv bool) (d ddlOptions, msg string, ok bool) 
 	if !d.alter && !d.view && i < end && t[i].punct("(") {
 		d.columns = t[i+1 : skipTo(t, i+1, ")")]
 		var invalid string
-		if d.decimals, invalid = readDecimalColumns(d.columns); invalid != "" { // #1401
+		if d.decimals, invalid, d.columnUnsupported = readDecimalColumns(sql, d.columns); invalid != "" { // #1401, #1438
 			d.invalid = invalid
 		}
 		d.sent = withoutFieldRounding(sql, d.columns) // #1409
@@ -232,6 +236,9 @@ func parseDDLOptionsOf(sql string, mv bool) (d ddlOptions, msg string, ok bool) 
 	}
 	if clus >= 0 {
 		d.cluster = clause(clus)
+	}
+	if d.columnUnsupported != "" { // #1438
+		return d, d.columnUnsupported + ", which CloudBurrow does not set", true
 	}
 	if opt < 0 && (part >= 0 || clus >= 0 || len(d.decimals) > 0 || d.invalid != "") {
 		return d, "", true
@@ -440,6 +447,10 @@ func (f front) ddlWithOptions(w http.ResponseWriter, r *http.Request, q queryOpt
 		return
 	}
 	d.spec = spec
+	if msg := f.evalColumnDescriptions(r, q, d.decimals); msg != "" { // #1438, decimalddl.go
+		writeError(w, http.StatusBadRequest, "invalidQuery", msg)
+		return
+	}
 	if d.partitionMs != "" && d.partitionMs != "NULL" && spec.time == nil {
 		writeError(w, http.StatusBadRequest, "invalidQuery", partitionExpirationRefused)
 		return

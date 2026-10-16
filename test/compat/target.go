@@ -210,6 +210,8 @@ var gcloudOverrides = []struct {
 	{"sql", []string{"SQLADMIN"}},
 	{"redis", []string{"MEMORYSTORE_ADMIN"}},
 	{"backupdr", []string{"BACKUPDR"}},
+	// Bigtable's admin REST API, on the Bigtable front's port (#1440).
+	{"bigtableadmin", []string{"BIGTABLE"}},
 }
 
 // gcloudRestrictConfig checks a configuration `cloudburrow gcloud-setup`
