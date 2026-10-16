@@ -255,6 +255,10 @@ func entryMessage(e *loggingpb.LogEntry) string {
 	return ""
 }
 
+// linkedDatasetsCheck is how often Logging checks that BigQuery still has
+// each link's dataset (#1435).
+const linkedDatasetsCheck = 5 * time.Second
+
 func (s *loggingService) Start(ctx context.Context) error {
 	var db store.Store = store.NewMemory()
 	if s.cfg.Mode == config.ModePersistent {
@@ -286,12 +290,18 @@ func (s *loggingService) Start(ctx context.Context) error {
 	// (#1404).
 	s.api.UseDestinations(s.destinations())
 	// Links make Log Analytics datasets in the instance's BigQuery (#1423).
-	if serviceEnabled(s.cfg, config.ServiceBigQuery) && s.bigquery != nil {
+	linked := serviceEnabled(s.cfg, config.ServiceBigQuery) && s.bigquery != nil
+	if linked {
 		s.admin.UseLinkedDatasets(linkedTables{tunnel: s.bigquery})
 	}
 	dctx, cancel := context.WithCancel(context.Background())
 	s.stopDelivery = cancel
 	go s.api.RunDelivery(dctx)
+	if linked {
+		// Each link's dataset BigQuery lost, after an emulator restart or
+		// with a new emulator, is made again and filled (#1435).
+		go s.admin.KeepLinkedDatasets(dctx, linkedDatasetsCheck)
+	}
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.Logging))
 	s.server = grpctransport.New(addr)
 	s.server.Observe(s.calls)

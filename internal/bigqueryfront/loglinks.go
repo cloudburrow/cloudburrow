@@ -3,9 +3,14 @@ package bigqueryfront
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -31,8 +36,9 @@ import (
 //
 // Google does not document the error; the front answers 403 accessDenied
 // (a failed job for a query job), UNVERIFIED. Reads are the emulator's.
-// LinkedEntriesTable, which the view reads, is left out of tables.list, as
-// a linked dataset lists only its views.
+// LinkedEntriesTable, which the views read, is left out of tables.list, as
+// a linked dataset lists only its views (one per log view of the bucket,
+// #1435).
 
 const (
 	// linkedLabel is logging.LinkedDatasetLabel.
@@ -46,12 +52,64 @@ const (
 // linkedDatasets are the linked datasets the Logging server made through
 // this front, by project and dataset. The front learns of one from the
 // Logging server's own datasets.insert, which carries linkedWriterHeader,
-// and forgets it at the server's datasets.delete or an emulator restart; a
-// write to another dataset costs no read. A front that restarts while the
-// emulator keeps running forgets them (its writes are then let in).
+// and forgets it at the server's datasets.delete or an emulator restart
+// (when the Logging server makes it again); a write to another dataset
+// costs no read. With a state directory they are kept in it
+// (linkedDatasetsStateFile, #1435), so a front that restarts while the
+// emulator keeps running still refuses writes to them.
 type linkedDatasets struct {
-	mu sync.Mutex
-	m  map[string]bool
+	mu   sync.Mutex
+	m    map[string]bool
+	path string
+	logf func(string, ...any)
+}
+
+func linkedDatasetsStateFile(dir string) string { return filepath.Join(dir, "linkeddatasets.json") }
+
+// keep restores the linked datasets from path and from then on keeps them
+// there.
+func (l *linkedDatasets) keep(path string, logf func(string, ...any)) {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	var saved []string
+	b, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		logf("bigquery front: read %s: %v; starting without the linked datasets it kept", path, err)
+	case json.Unmarshal(b, &saved) != nil:
+		logf("bigquery front: %s is unreadable; starting without the linked datasets it kept", path)
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.m = map[string]bool{}
+	for _, k := range saved {
+		l.m[k] = true
+	}
+	l.path, l.logf = path, logf
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		logf("bigquery front: %v", err)
+	}
+	l.saveLocked()
+}
+
+func (l *linkedDatasets) saveLocked() {
+	if l.path == "" {
+		return
+	}
+	keys := make([]string, 0, len(l.m))
+	for k := range l.m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	b, err := json.Marshal(keys)
+	if err == nil {
+		err = writeFileAtomic(l.path, b)
+	}
+	if err != nil {
+		l.logf("bigquery front: keeping the linked datasets in %s: %v", l.path, err)
+	}
 }
 
 func (l *linkedDatasets) set(project, dataset string, on bool) {
@@ -68,6 +126,7 @@ func (l *linkedDatasets) set(project, dataset string, on bool) {
 	} else {
 		delete(l.m, project+"."+dataset)
 	}
+	l.saveLocked()
 }
 
 func (l *linkedDatasets) has(project, dataset string) bool {
@@ -83,6 +142,7 @@ func (l *linkedDatasets) reset() {
 	if l != nil {
 		l.mu.Lock()
 		l.m = nil
+		l.saveLocked()
 		l.mu.Unlock()
 	}
 }

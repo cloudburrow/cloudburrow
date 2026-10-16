@@ -87,6 +87,8 @@ type Admin struct {
 	// linked makes and fills links' BigQuery datasets (analytics.go,
 	// #1423), or is nil.
 	linked LinkedDatasets
+	// linkSync is what keeps links' datasets in step (analytics.go, #1435).
+	linkSync linkSync
 	// done are the done operations doneOp answered, by name, and their
 	// order (links.go).
 	done      map[string]*longrunningpb.Operation
