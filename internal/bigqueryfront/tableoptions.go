@@ -37,10 +37,11 @@ import (
 //     (partitionFilterRefusal); the check is that the column is named in a
 //     WHERE of the statement that reads it, not that the filter can prune.
 //   - max_staleness: a query reads the table as it is, never older data.
-//   - default_rounding_mode: kept, not applied: the engine rounds a
-//     NUMERIC or BIGNUMERIC value written with more digits than its scale
-//     half away from zero whatever the mode, so a ROUND_HALF_EVEN table
-//     rounds 2.5 as BigQuery's ROUND_HALF_AWAY_FROM_ZERO does.
+//   - default_rounding_mode: kept, not applied: the engine does not round
+//     a value written to a parameterized NUMERIC or BIGNUMERIC column to
+//     its scale at all (measured 2026-10-16: 2.5 and 3.5 inserted into a
+//     NUMERIC(2,0) column of a ROUND_HALF_EVEN table read back 2.5 and
+//     3.5, where BigQuery stores 2 and 4), so neither mode can be applied.
 //   - enable_change_history: CHANGES and APPENDS are not served (501).
 //   - privacy_policy: a query of the table is refused 501, since the
 //     front does not enforce the policy, and reading the table as if it
