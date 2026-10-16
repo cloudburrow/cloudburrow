@@ -128,8 +128,8 @@ func TestBigQueryCreateViewWithAColumnList(t *testing.T) {
 // = '...'), alone and in a script, reads back as that column's description
 // in tables.get, the other columns none. A name listed twice in a script
 // is 400 invalidQuery before anything runs (the script's earlier CREATE
-// TABLE makes nothing). Still 501: a column option other than description
-// (a script with a TEMP table is TestBigQueryViewColumnListInATempScriptAndADryRun,
+// TABLE makes nothing). A column option other than description is 400
+// invalidQuery since #1416, as BigQuery takes description alone (a script with a TEMP table is TestBigQueryViewColumnListInATempScriptAndADryRun,
 // #1335). Measured first: the emulator refused a column list
 // in a script (400 "CREATE VIEW with explicit column list is not
 // supported", through the front 501), and kept no column description from
@@ -209,8 +209,9 @@ func TestBigQueryViewColumnListInAScriptAndColumnOptions(t *testing.T) {
 				t.Errorf("the refused script made %s", table)
 			}
 		}
+		// #1416: BigQuery takes description alone for a view's column.
 		sql = "CREATE VIEW " + path("opts") + " (c OPTIONS(rounding_mode = 'ROUND_HALF_EVEN'), d) AS SELECT a, b FROM " + path("base")
-		wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusNotImplemented, "notImplemented")
+		wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusBadRequest, "invalidQuery")
 	}
 }
 
@@ -222,8 +223,8 @@ func TestBigQueryViewColumnListInAScriptAndColumnOptions(t *testing.T) {
 // written, the rows by the listed names, and the script's last statement
 // reads the view. So too when the view's query reads a table the script
 // makes before it, which cannot be run beforehand. A name listed twice is
-// 400 invalidQuery and a column option other than description 501, nothing
-// run. A dry run of a lone one (Query.DryRun, jobs.insert, and jobs.query
+// 400 invalidQuery and so (#1416) is a column option other than
+// description, nothing run. A dry run of a lone one (Query.DryRun, jobs.insert, and jobs.query
 // through the generated client) answers statementType CREATE_VIEW,
 // totalBytesProcessed 0 and no schema, and makes nothing; a list of
 // another length than the query's is 400 invalidQuery, a dataset that
@@ -301,7 +302,7 @@ func TestBigQueryViewColumnListInATempScriptAndADryRun(t *testing.T) {
 		sql = "CREATE TEMP TABLE tt AS SELECT 1 AS k; CREATE VIEW " + path("dup") + " (c, C) AS SELECT a, b FROM " + path("base")
 		wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusBadRequest, "invalidQuery")
 		sql = "CREATE TEMP TABLE tt AS SELECT 1 AS k; CREATE VIEW " + path("opts") + " (c OPTIONS(rounding_mode = 'ROUND_HALF_EVEN'), d) AS SELECT a, b FROM " + path("base")
-		wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusNotImplemented, "notImplemented")
+		wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusBadRequest, "invalidQuery") // #1416
 		for _, table := range []string{"dup", "opts"} {
 			if tableExists(t, ctx, ds.Table(table)) {
 				t.Errorf("the refused script made %s", table)

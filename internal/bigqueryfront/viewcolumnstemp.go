@@ -37,8 +37,11 @@ import (
 // emulator's own dry run of a CREATE VIEW answered statementType SELECT
 // (measured). A dry run of CREATE VIEW, without OR REPLACE or IF NOT
 // EXISTS, of a view that exists is 501: what BigQuery's dry run answers
-// for it is not known here. A script with a column list in a dry run stays
-// 501 (checkDDL).
+// for it is not known here. A script with a column list in a dry run
+// (#1416) is put in the text it amounts to as above, each query's columns
+// read with a dry run of it alone (loneDry), and that text is given to
+// the emulator's dry run, as a script without a list is: it is answered
+// as that script would be, and nothing is made.
 
 // scriptViewList is a CREATE VIEW with a column list in a script, at
 // sql[pos:end].
@@ -50,13 +53,18 @@ type scriptViewList struct {
 // tempScriptViewLists returns the CREATE VIEW statements with a column
 // list of sql, a script of several statements with a TEMP table or
 // function, or false for any other query.
-func tempScriptViewLists(sql string) ([]scriptViewList, bool) {
+func tempScriptViewLists(sql string) ([]scriptViewList, bool) { return scriptViewLists(sql, true) }
+
+// scriptViewLists returns the CREATE VIEW statements with a column list of
+// sql, a script of several statements (with a TEMP table or function, when
+// temp), or false for any other query.
+func scriptViewLists(sql string, temp bool) ([]scriptViewList, bool) {
 	upper := strings.ToUpper(sql)
-	if !strings.Contains(upper, "VIEW") || !strings.Contains(upper, "TEMP") || !strings.Contains(sql, ";") {
+	if !strings.Contains(upper, "VIEW") || temp && !strings.Contains(upper, "TEMP") || !strings.Contains(sql, ";") {
 		return nil, false
 	}
 	toks, ok := lex(sql)
-	if !ok || !tokensHaveTemp(toks) {
+	if !ok || temp && !tokensHaveTemp(toks) {
 		return nil, false
 	}
 	stmts := 0
@@ -97,6 +105,7 @@ func (f front) tempScriptViews(w http.ResponseWriter, r *http.Request, q queryOp
 	}
 	var after []made
 	text := q.Query
+	dry := dryRun(r, insert) // #1416: the script's dry run, of the text it amounts to
 	// From the last, so that the positions of the earlier stand.
 	sort.Slice(views, func(i, j int) bool { return views[i].pos > views[j].pos })
 	for _, sv := range views {
@@ -105,8 +114,16 @@ func (f front) tempScriptViews(w http.ResponseWriter, r *http.Request, q queryOp
 			writeError(w, http.StatusNotImplemented, "notImplemented", v.badOptionMessage())
 			return
 		}
+		if code, msg := f.resolveDescriptions(r, q, &v); code != 0 { // #1416
+			writeError(w, code, "invalidQuery", msg)
+			return
+		}
 		var sel string
-		if fields, status, _ := f.lone(r, q, v.query); status == http.StatusOK {
+		lone := f.lone
+		if dry {
+			lone = f.loneDry
+		}
+		if fields, status, _ := lone(r, q, v.query); status == http.StatusOK {
 			var msg string
 			if sel, msg = v.aliasedQuery(fields); msg != "" {
 				writeError(w, http.StatusBadRequest, "invalidQuery", msg)
@@ -122,7 +139,7 @@ func (f front) tempScriptViews(w http.ResponseWriter, r *http.Request, q queryOp
 			}
 			sel = v.untypedQuery()
 		}
-		if ds, table, ok := tableOf(q, v.path); ok {
+		if ds, table, ok := tableOf(q, v.path); ok && !dry {
 			existed := false
 			if v.ifNotExists {
 				status, _ := f.get(r, tablePath(ds, table))
@@ -229,7 +246,12 @@ func (f front) loneDry(r *http.Request, q queryOptions, sel string) (fields []fi
 // dryViewAnswer is the emulator's answer b to the dry run of a view's
 // query, as BigQuery's to the dry run of the CREATE VIEW (above): a job
 // (jobs.insert) or a jobs.query response.
-func dryViewAnswer(b []byte) []byte {
+func dryViewAnswer(b []byte) []byte { return dryDDLAnswer(b, "CREATE_VIEW") }
+
+// dryDDLAnswer is the emulator's answer b to a dry run, as BigQuery's to
+// the dry run of a DDL statement of statementType: no data read, no
+// schema or rows (#1416).
+func dryDDLAnswer(b []byte, statementType string) []byte {
 	var resp map[string]any
 	if json.Unmarshal(b, &resp) != nil {
 		return b
@@ -241,7 +263,7 @@ func dryViewAnswer(b []byte) []byte {
 			qs = map[string]any{}
 			st["query"] = qs
 		}
-		qs["statementType"] = "CREATE_VIEW"
+		qs["statementType"] = statementType
 		qs["totalBytesProcessed"] = "0"
 		delete(qs, "schema")
 	} else {
