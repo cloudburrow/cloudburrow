@@ -305,6 +305,7 @@ func (p bigqueryProvider) tableDetail(ctx context.Context, datasetID, tableID st
 	if md.ViewQuery != "" {
 		props = append(props, console.Property{Label: "View query", Value: md.ViewQuery})
 	}
+	props = append(props, materializedViewProps(md)...) // #1390, consolebigquerymv.go
 	if len(md.Labels) > 0 {
 		props = append(props, console.Property{Label: "Labels", Value: formatLabels(md.Labels)})
 	}

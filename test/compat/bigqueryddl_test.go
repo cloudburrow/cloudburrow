@@ -65,7 +65,7 @@ func tableExists(t *testing.T, ctx context.Context, tbl *bigquery.Table) bool {
 // ADD COLUMN are 400, as BigQuery refuses them (#1389),, through jobs.query and jobs.insert
 // alike, since the emulator would report it done and leave the table as it
 // was; the table's schema is unchanged and it is not renamed. A table
-// option the front does not set (max_staleness) is 501 too (#1251).
+// option the front does not set (enable_fine_grained_mutations) is 501 too (#1251).
 func TestBigQueryAlterTableNamesAndNotImplemented(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -78,14 +78,14 @@ func TestBigQueryAlterTableNamesAndNotImplemented(t *testing.T) {
 	ref := "`" + ds.DatasetID + ".altered`"
 	for _, insert := range []bool{false, true} {
 		for sql, code := range map[string]int{
-			"ALTER TABLE " + ref + " ADD COLUMN `b!` STRING":                        http.StatusBadRequest,
-			"ALTER TABLE " + ref + " ADD COLUMN s STRUCT<`q?` INT64>":               http.StatusBadRequest,
-			"ALTER TABLE " + ref + " RENAME TO `t!`":                                http.StatusBadRequest,
-			"ALTER TABLE " + ref + " RENAME COLUMN a TO `c!`":                       http.StatusBadRequest,
-			"ALTER TABLE " + ref + " ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":     http.StatusNotImplemented,
-			"ALTER TABLE " + ref + " ALTER COLUMN a.x SET DEFAULT 1":                http.StatusBadRequest, // #1389
-			"ALTER TABLE " + ref + " ADD COLUMN b STRING, RENAME COLUMN a TO c":     http.StatusBadRequest, // #1389
-			"ALTER TABLE " + ref + " SET OPTIONS (max_staleness = INTERVAL 1 HOUR)": http.StatusNotImplemented,
+			"ALTER TABLE " + ref + " ADD COLUMN `b!` STRING":                             http.StatusBadRequest,
+			"ALTER TABLE " + ref + " ADD COLUMN s STRUCT<`q?` INT64>":                    http.StatusBadRequest,
+			"ALTER TABLE " + ref + " RENAME TO `t!`":                                     http.StatusBadRequest,
+			"ALTER TABLE " + ref + " RENAME COLUMN a TO `c!`":                            http.StatusBadRequest,
+			"ALTER TABLE " + ref + " ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":          http.StatusNotImplemented,
+			"ALTER TABLE " + ref + " ALTER COLUMN a.x SET DEFAULT 1":                     http.StatusBadRequest, // #1389
+			"ALTER TABLE " + ref + " ADD COLUMN b STRING, RENAME COLUMN a TO c":          http.StatusBadRequest, // #1389
+			"ALTER TABLE " + ref + " SET OPTIONS (enable_fine_grained_mutations = TRUE)": http.StatusNotImplemented,
 		} {
 			err := bqRun(ctx, c, sql, insert)
 			wantHTTPStatus(t, sql, err, code)

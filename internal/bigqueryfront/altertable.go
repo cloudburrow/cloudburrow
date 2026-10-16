@@ -106,7 +106,8 @@ func alterUnsupported(t []token) string {
 func alterNotImplemented(what string) string {
 	return "Not implemented here: ALTER TABLE " + what + ". BigQuery runs it, but the emulator behind CloudBurrow " +
 		"reports ALTER TABLE done and leaves the table unchanged (measured), and CloudBurrow carries out only ADD COLUMN, " +
-		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp, partition_expiration_days, kms_key_name), " +
+		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp, partition_expiration_days, kms_key_name, " +
+		"max_staleness, default_rounding_mode, tags, require_partition_filter, enable_change_history, storage_uri, privacy_policy), " +
 		"ALTER COLUMN SET OPTIONS (description), " +
 		"ALTER COLUMN DROP NOT NULL, ALTER COLUMN SET DATA TYPE, ALTER COLUMN SET DEFAULT and DROP DEFAULT, RENAME TO, RENAME COLUMN, " +
 		"DROP COLUMN and primary and foreign keys, " +
@@ -177,6 +178,9 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 				switch o.name {
 				case "description", "friendly_name", "labels", "expiration_timestamp", "partition_expiration_days", "kms_key_name":
 				default:
+					if moreOptionNames[o.name] { // #1390, tableoptions.go
+						continue
+					}
 					return st, "SET OPTIONS (" + o.name + "), which changes how the table behaves", ""
 				}
 			}
@@ -584,6 +588,7 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 		} `json:"schema"`
 		TableConstraints *tableConstraints `json:"tableConstraints"`
 		TimePartitioning map[string]any    `json:"timePartitioning"`
+		CreationTime     string            `json:"creationTime"`
 	}
 	if status != http.StatusOK || json.Unmarshal(got, &current) != nil {
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not read "+name, text)
@@ -598,6 +603,7 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 	fields := current.Schema.Fields
 	schemaChanged := false
 	patch := map[string]any{}
+	var clears []string // #1390, tableoptions.go
 	find := func(column string) map[string]any {
 		for _, f := range fields {
 			if n, _ := f["name"].(string); strings.EqualFold(n, column) {
@@ -756,6 +762,36 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 					} else {
 						patch["encryptionConfiguration"] = map[string]any{"kmsKeyName": *v}
 					}
+				case "max_staleness", "default_rounding_mode", "tags", "require_partition_filter", "enable_change_history",
+					"storage_uri", "privacy_policy": // #1390, tableoptions.go
+					m, msg := readMoreOption(o.name, o.val, text)
+					if msg != "" {
+						return failWith(http.StatusBadRequest, "invalidQuery", msg, text)
+					}
+					if m.eval != "" {
+						v, flow := s.optionValue(m.eval, text)
+						if flow != nil {
+							return flow
+						}
+						m.value = nil
+						if v != nil {
+							m.value = *v
+						}
+					}
+					if m.setting {
+						s.f.tables.set(streamKey(project, ds, table), current.CreationTime, m)
+						continue
+					}
+					if m.name == "require_partition_filter" && m.value == true {
+						s.f.tables.watchTable(streamKey(project, ds, table))
+					}
+					if m.value == nil || m.value == false {
+						// tables.patch drops a null or false (the emulator's
+						// Table omits them): removed after it.
+						clears = append(clears, m.key)
+						continue
+					}
+					patch[m.key] = m.value
 				case "expiration_timestamp":
 					if len(o.val) == 1 && o.val[0].is("NULL") {
 						patch["expirationTime"] = nil
@@ -784,10 +820,35 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 			patch["tableConstraints"] = cons
 		}
 	}
+	if len(clears) > 0 {
+		if flow := s.clearTableFields(ds, table, clears, text); flow != nil {
+			return flow
+		}
+	}
 	if len(patch) == 0 {
 		return nil
 	}
 	return s.patchTable(ds, table, patch, text)
+}
+
+// clearTableFields removes keys from dataset.table's resource, with a
+// tables.update of the rest (#1390).
+func (s *scriptRun) clearTableFields(dataset, table string, keys []string, text string) *scriptFlow {
+	st, got := s.f.get(s.r, tablePath(dataset, table))
+	var meta map[string]json.RawMessage
+	if st != http.StatusOK || json.Unmarshal(got, &meta) != nil {
+		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not read the table: "+
+			errorMessage(got, st), text)
+	}
+	for _, k := range keys {
+		delete(meta, k)
+	}
+	body, _ := json.Marshal(meta)
+	if st, got := s.f.send(s.r, http.MethodPut, tablePath(dataset, table), body); st != http.StatusOK {
+		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not clear the options: "+
+			errorMessage(got, st), text)
+	}
+	return nil
 }
 
 // exprText is the text of the tokens val, a part of text.

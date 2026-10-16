@@ -107,7 +107,7 @@ func rows(t *testing.T, ctx context.Context, c *bigquery.Client, sql string) [][
 // leaving it unreadable. A view with names BigQuery takes is made and
 // read, and CREATE OR REPLACE VIEW replaces an existing one. CREATE
 // MATERIALIZED VIEW, which the emulator does not support (400 "not
-// supported", measured), is 501. (A view's column list, which the emulator
+// supported", measured), is carried out by the front (#1390). (A view's column list, which the emulator
 // does not support either, is carried out: #1240, #1323, #1335.)
 func TestBigQueryViewNamesAndColumns(t *testing.T) {
 	h := New(t)
@@ -129,8 +129,10 @@ func TestBigQueryViewNamesAndColumns(t *testing.T) {
 				t.Errorf("the refused %s made %s", sql, view)
 			}
 		}
-		sql := "CREATE MATERIALIZED VIEW " + path("mv") + " AS SELECT a FROM " + path("base")
-		wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusNotImplemented, "notImplemented")
+		sql := "CREATE OR REPLACE MATERIALIZED VIEW " + path("mv") + " AS SELECT a FROM " + path("base")
+		if err := bqRun(ctx, c, sql, insert); err != nil { // #1390
+			t.Errorf("%s: %v", sql, err)
+		}
 	}
 	err := ds.Table("tv").Create(ctx, &bigquery.TableMetadata{ViewQuery: "SELECT a AS `w!` FROM " + path("base")})
 	wantReason(t, "tables.insert of a view with a column w!", err, http.StatusBadRequest, "invalid")

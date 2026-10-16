@@ -314,6 +314,10 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 			failed(http.StatusBadRequest, "invalidQuery", "expiration_timestamp: "+errorMessage(body, status))
 			return
 		}
+		if code, msg := f.evalMore(r, q, st.options); code != 0 { // #1390, max_staleness
+			failed(code, "invalidQuery", msg)
+			return
+		}
 	}
 	start := time.Now().UTC().Format(time.RFC3339Nano)
 	base := map[string]string{"projectId": project, "datasetId": src.DatasetID, "tableId": src.TableID}

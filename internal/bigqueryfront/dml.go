@@ -165,6 +165,15 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.alterProjectOptions(w, r, q, insert) { // #1375, projectoptions.go
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && r.Context().Value(optionsKey{}) == nil {
+		if st, ok := parseMVStatement(q.Query); ok { // #1390, materializedviews.go
+			f.serveMV(w, r, q, insert, st)
+			return
+		}
+	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.checkReads(w, r, q, insert) { // #1390, tableoptions.go
+		return
+	}
 	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
 		if refs := informationSchemaJobs(q.Query); len(refs) > 0 { // #1275, infoschemajobs.go
 			f.withInformationSchemaJobs(w, r, q, refs, insert)
@@ -180,6 +189,10 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && r.Context().Value(optionsKey{}) == nil && !dryRun(r, insert) {
 		if d, msg, ok := parseDDLOptions(q.Query); ok { // #1251, ddloptions.go
+			if d.invalid != "" && msg == "" { // #1390
+				f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: d.invalid})
+				return
+			}
 			if msg != "" {
 				writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+msg+", so nothing was run.")
 				return

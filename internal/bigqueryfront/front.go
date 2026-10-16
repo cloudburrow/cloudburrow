@@ -219,7 +219,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	iam := &iamPolicies{}                           // iam.go, #1231
 	buffers := &streamBuffers{stamp: o.streamTimes} // streamingbuffer.go, #1273, #1370
 	settings := &projectOptions{}                   // projectoptions.go, #1375
+	tables := &tableSettings{}                      // tableoptions.go, #1390
 	if o.stateDir != "" {
+		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
 		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)         // iam.go, #1231
 		settings.keep(projectOptionsStateFile(o.stateDir), o.logf) // projectoptions.go, #1375
@@ -247,6 +249,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			iam.reset()
 			buffers.reset()
 			settings.reset()
+			tables.reset()
 		})
 	}
 	// listJobs serves jobs.list, r a GET of a project's jobs: here, and
@@ -335,7 +338,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
-				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings}
+				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, tables: tables}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -391,7 +394,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
-			buffers: buffers}
+			buffers: buffers, tables: tables}
 		switch {
 		case m[4] != "" && strings.Contains(table, "$") && strings.Index(table, "$") > 0 && (m[5] == "" || m[5] == "data"):
 			f.servePartition(w, r, dataset, table, m[5]) // #1273, partitionreads.go
@@ -416,6 +419,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.insertAll(w, r, dataset, table)
 		case r.Method == http.MethodGet && m[5] == "data":
 			f.listTableData(w, r, dataset, table) // #1015
+		case r.Method == http.MethodDelete && m[4] != "" && m[5] == "" && f.tables.watched(streamKey(projectOf(f.base), dataset, table)):
+			f.deleteWatched(w, r, dataset, table) // #1390, materializedviews.go
 		default:
 			next.ServeHTTP(w, r)
 		}
@@ -430,6 +435,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 
 type front struct {
 	next http.Handler
+	// tables are the table settings the front keeps, and the tables whose
+	// reads it checks (tableoptions.go, #1390), or nil.
+	tables *tableSettings
 	// base is the path up to and including the project, as the client sent
 	// it: reads the front makes go to the same prefix.
 	base string
@@ -670,6 +678,17 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 			writeError(w, http.StatusBadRequest, "invalid", msg)
 			return
 		}
+	}
+	if !update && body.MaterializedView != nil && body.View == nil { // #1390, materializedviews.go
+		f.insertMV(w, r, dataset, raw)
+		return
+	}
+	if bytes.Contains(raw, []byte(`"requirePartitionFilter"`)) { // #1390, tableoptions.go
+		key := table
+		if body.TableReference != nil && key == "" {
+			key = body.TableReference.TableID
+		}
+		f.tables.watchTable(streamKey(projectOf(f.base), dataset, key))
 	}
 	if !update && body.View == nil && body.MaterializedView == nil && body.Schema != nil &&
 		f.createTableFloat64(w, r, dataset, raw, body.Schema.Fields) {

@@ -110,6 +110,7 @@ func (f front) tablesOf(r *http.Request, dataset string, m *datasetMeta) ([]info
 				return nil, http.StatusInternalServerError, "cloudburrow: could not read a table: " + errorMessage(got, st)
 			}
 			md["tableId"] = tb.TableReference.TableID
+			f.tables.annotate(project, dataset, md)                              // #1390, tableoptions.go
 			if v, _ := md["view"].(map[string]any); v != nil && f.views != nil { // the client's text (views.go, #1014)
 				if t, ok := f.views.get(viewKey(project, dataset, tb.TableReference.TableID)); ok && t.engine == v["query"] {
 					v["query"] = t.client
@@ -470,6 +471,8 @@ func tableOptions(t infoTable) [][3]string {
 	if b, _ := t["requirePartitionFilter"].(bool); b || tp["requirePartitionFilter"] == true {
 		add("require_partition_filter", "BOOL", "true")
 	}
+	moreTableOptions(t, add) // #1390, tableoptions.go
+	sort.SliceStable(out, func(i, j int) bool { return out[i][0] < out[j][0] })
 	return out
 }
 
@@ -495,6 +498,9 @@ func tableDDL(project, dataset string, t infoTable) string {
 	}
 	if v, _ := t["view"].(map[string]any); v != nil {
 		return "CREATE VIEW " + name + options + "\nAS " + str(v, "query") + ";"
+	}
+	if v, _ := t["materializedView"].(map[string]any); v != nil { // #1390
+		return "CREATE MATERIALIZED VIEW " + name + options + "\nAS " + str(v, "query") + ";"
 	}
 	schema, _ := t["schema"].(map[string]any)
 	var cols []string

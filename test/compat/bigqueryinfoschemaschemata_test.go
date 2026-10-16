@@ -12,7 +12,8 @@ import (
 // TestBigQueryInformationSchemaSchemataOptions (#1351): a dataset's
 // options read back through INFORMATION_SCHEMA.SCHEMATA_OPTIONS, dataset-
 // and region-qualified, with BigQuery's documented columns, and
-// MATERIALIZED_VIEWS is empty (the engine makes no materialized view).
+// MATERIALIZED_VIEWS is empty for a dataset with no materialized view
+// (TestBigQueryMaterializedViews lists one, #1390).
 // Measured first: each was 400 "Table not found", refused 501 by the front.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert

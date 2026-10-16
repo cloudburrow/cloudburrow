@@ -154,7 +154,7 @@ func TestBigQueryDDLOptionsInAScript(t *testing.T) {
 			t.Errorf("insert %v: view %q %q", insert, vm.Name, vm.Description)
 		}
 	}
-	err := bqRun(ctx, c, "SELECT 1; CREATE TABLE `"+ds.DatasetID+".script_bad` (x INT64) OPTIONS (max_staleness = INTERVAL 1 HOUR)", false)
+	err := bqRun(ctx, c, "SELECT 1; CREATE TABLE `"+ds.DatasetID+".script_bad` (x INT64) OPTIONS (enable_fine_grained_mutations = TRUE)", false)
 	wantHTTPStatus(t, "an option CloudBurrow does not set, in a script", err, http.StatusNotImplemented)
 	if tableExists(t, ctx, ds.Table("script_bad")) {
 		t.Error("script_bad was made")
