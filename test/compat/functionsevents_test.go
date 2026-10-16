@@ -6,20 +6,27 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
+	"cloud.google.com/go/logging/logadmin"
 	"cloud.google.com/go/pubsub/v2"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -346,5 +353,333 @@ func TestFunctionsEventTriggers(t *testing.T) {
 	}
 	if _, err := pc.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: ntopic}); err == nil {
 		t.Errorf("the storage trigger's topic %s outlived its function", ntopic)
+	}
+}
+
+// functionLogLine polls the official logadmin client for a line of the
+// function's Cloud Run service, written to Cloud Logging as Cloud Run
+// writes its container output (#1298), that contains want.
+func functionLogLine(ctx context.Context, t *testing.T, ac *logadmin.Client, service, want string) string {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Minute)
+	var seen []string
+	for time.Now().Before(deadline) && ctx.Err() == nil {
+		seen = seen[:0]
+		it := ac.Entries(ctx, logadmin.Filter(`resource.type = "cloud_run_revision"`))
+		for {
+			e, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				t.Fatalf("Entries: %v", err)
+			}
+			if e.Resource.GetLabels()["service_name"] != service {
+				continue
+			}
+			line := fmt.Sprint(e.Payload)
+			if strings.Contains(line, want) {
+				return line
+			}
+			seen = append(seen, line)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	t.Fatalf("no log line of %s contains %q; it wrote %q", service, want, seen)
+	return ""
+}
+
+// functionsLogClient is the official logadmin client on the instance's
+// Cloud Logging, which the run shard serves.
+func functionsLogClient(ctx context.Context, t *testing.T, h *Harness) *logadmin.Client {
+	t.Helper()
+	logAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_LOGGING", EnvLogging)
+	ac, err := logadmin.NewClient(ctx, "projects/"+h.Project(), option.WithEndpoint(logAddr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ac.Close() })
+	return ac
+}
+
+// TestFunctionsEventTriggerBuilds (#1414), gated as the Functions tests are:
+// testdata/function, zipped and PUT to an upload URL, is built by Google's
+// builder with entry point Event, the Functions Framework CloudEvent
+// function, twice: once with a Pub/Sub trigger and once with a Cloud Storage
+// finalized trigger. A publish and an upload each reach the built function,
+// which decodes the CloudEvent and prints its type, subject and data; the
+// printed line, read back through Cloud Logging, names the event.
+func TestFunctionsEventTriggerBuilds(t *testing.T) {
+	h := New(t)
+	storageAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
+	pubsubAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
+	ctx, cancel := context.WithTimeout(h.Context(), 45*time.Minute)
+	t.Cleanup(cancel)
+	requireAmd64Functions(ctx, t)
+	ac := functionsLogClient(ctx, t, h)
+	t.Setenv("PUBSUB_EMULATOR_HOST", pubsubAddr)
+	pc, err := pubsub.NewClient(ctx, h.Project())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+	sc, err := storage.NewClient(ctx, option.WithoutAuthentication(), option.WithEndpoint(storageAddr+"/storage/v1/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	fc := functionsClient(t, h)
+	parent := runParent(h)
+	src := zipFunction(t, filepath.Join(moduleRoot(t), "testdata", "function"))
+
+	build := func(id string, trigger *functionspb.EventTrigger) *functionspb.Function {
+		t.Helper()
+		up, err := fc.GenerateUploadUrl(ctx, &functionspb.GenerateUploadUrlRequest{Parent: parent})
+		if err != nil {
+			t.Fatalf("GenerateUploadUrl: %v", err)
+		}
+		putSource(ctx, t, up.GetUploadUrl(), src)
+		name := parent + "/functions/" + id
+		op, err := fc.CreateFunction(ctx, &functionspb.CreateFunctionRequest{Parent: parent, FunctionId: id, Function: &functionspb.Function{
+			BuildConfig: &functionspb.BuildConfig{Runtime: "go123", EntryPoint: "Event",
+				Source: &functionspb.Source{Source: &functionspb.Source_StorageSource{StorageSource: up.GetStorageSource()}}},
+			ServiceConfig: &functionspb.ServiceConfig{AvailableMemory: "256M", MinInstanceCount: 1},
+			EventTrigger:  trigger}})
+		if err != nil {
+			t.Fatalf("CreateFunction %s: %v", id, err)
+		}
+		t.Cleanup(func() {
+			dctx, dcancel := context.WithTimeout(context.Background(), time.Minute)
+			defer dcancel()
+			if op, err := fc.DeleteFunction(dctx, &functionspb.DeleteFunctionRequest{Name: name}); err == nil {
+				_ = op.Wait(dctx)
+			}
+		})
+		fn, err := op.Wait(ctx)
+		if err != nil {
+			t.Fatalf("CreateFunction.Wait %s: %v", id, err)
+		}
+		if fn.GetState() != functionspb.Function_ACTIVE || fn.GetBuildConfig().GetBuild() == "" ||
+			!strings.Contains(fn.GetEventTrigger().GetTrigger(), "/triggers/"+id+"-") {
+			t.Fatalf("the built function = %v; want it ACTIVE with its build and its trigger named", fn)
+		}
+		return fn
+	}
+
+	// Pub/Sub.
+	tn := topic(t, h, pc, "fn-built-events")
+	build("evfn-built-pubsub", &functionspb.EventTrigger{EventType: "google.cloud.pubsub.topic.v1.messagePublished", PubsubTopic: tn})
+	res, err := pc.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: tn, Messages: []*pubsubpb.PubsubMessage{
+		{Data: []byte("hello built function")}}})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	msgID := res.GetMessageIds()[0]
+	line := functionLogLine(ctx, t, ac, "evfn-built-pubsub", "messageId:"+msgID)
+	if !strings.Contains(line, "received CloudEvent type=google.cloud.pubsub.topic.v1.messagePublished") ||
+		!strings.Contains(line, base64.StdEncoding.EncodeToString([]byte("hello built function"))) {
+		t.Errorf("the function printed %q; want the messagePublished event with the message's data", line)
+	}
+
+	// Cloud Storage.
+	bh := bucket(t, h, sc)
+	build("evfn-built-storage", &functionspb.EventTrigger{EventType: "google.cloud.storage.object.v1.finalized",
+		EventFilters: []*functionspb.EventFilter{{Attribute: "bucket", Value: bh.BucketName()}}})
+	w := bh.Object("built/event.txt").NewWriter(ctx)
+	_, _ = w.Write([]byte("abc"))
+	if err := w.Close(); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	line = functionLogLine(ctx, t, ac, "evfn-built-storage", "subject=objects/built/event.txt")
+	if !strings.Contains(line, "received CloudEvent type=google.cloud.storage.object.v1.finalized") ||
+		!strings.Contains(line, "bucket:"+bh.BucketName()) {
+		t.Errorf("the function printed %q; want the finalized event with the object's bucket", line)
+	}
+}
+
+// covers: google.cloud.functions.v2.FunctionService/CreateFunction, google.cloud.functions.v2.FunctionService/UpdateFunction, google.cloud.functions.v2.FunctionService/GetFunction, google.cloud.functions.v2.FunctionService/DeleteFunction
+//
+// TestGcloudFunctionsEventTriggers (#1414): the pinned gcloud, through
+// gcloud-setup's overrides alone, egress to Google blocked. Ungated:
+// `functions deploy --gen2 --trigger-topic=T --retry
+// --trigger-service-account=SA` and `--trigger-event-filters=type=
+// google.cloud.storage.object.v1.finalized --trigger-event-filters=bucket=B`
+// of a gs:// source that is not a zip, which fails with this instance's
+// build error; `describe` shows the eventTrigger gcloud sent; a redeploy
+// with --no-retry, an update whose mask mixes snake_case and lowerCamelCase
+// paths, changes its retry policy; and `delete` removes them. Gated as the Functions tests are: the same deploys of
+// testdata/function's Event entry point become ACTIVE, `describe` names
+// their trigger, and a publish and an upload reach them, printed by the
+// function and read back through Cloud Logging.
+func TestGcloudFunctionsEventTriggers(t *testing.T) {
+	h := New(t)
+	storageAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
+	pubsubAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
+	g := newGcloudSession(t, h)
+	ctx, cancel := context.WithTimeout(h.Context(), 45*time.Minute)
+	t.Cleanup(cancel)
+	t.Setenv("PUBSUB_EMULATOR_HOST", pubsubAddr)
+	pc, err := pubsub.NewClient(ctx, g.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+	sc, err := storage.NewClient(ctx, option.WithoutAuthentication(), option.WithEndpoint(storageAddr+"/storage/v1/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	fc := functionsClient(t, h)
+	parent := "projects/" + g.project + "/locations/us-central1"
+
+	// gcloud names the topic in its own project.
+	topicID := "gcloud-fn-events"
+	tn := "projects/" + g.project + "/topics/" + topicID
+	if _, err := pc.TopicAdminClient.CreateTopic(ctx, &pubsubpb.Topic{Name: tn}); err != nil {
+		t.Fatalf("CreateTopic: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = pc.TopicAdminClient.DeleteTopic(context.Background(), &pubsubpb.DeleteTopicRequest{Topic: tn})
+	})
+	bh := bucket(t, h, sc)
+	w := bh.Object("src/not-a-zip.zip").NewWriter(ctx)
+	_, _ = w.Write([]byte("not a zip"))
+	if err := w.Close(); err != nil {
+		t.Fatalf("upload the source: %v", err)
+	}
+	sa := "events@" + g.project + ".iam.gserviceaccount.com"
+	topicFlags := []string{"--trigger-topic=" + topicID, "--retry", "--trigger-service-account=" + sa}
+	storageFlags := []string{"--trigger-event-filters=type=google.cloud.storage.object.v1.finalized",
+		"--trigger-event-filters=bucket=" + bh.BucketName()}
+	deploy := func(id, source, entry string, trigger []string) (string, error) {
+		args := append([]string{"functions", "deploy", id, "--gen2", "--region=us-central1", "--runtime=go123",
+			"--entry-point=" + entry, "--source=" + source, "--memory=256Mi"}, trigger...)
+		out, err := g.run(nil, args...)
+		t.Logf("gcloud %s:\n%s", strings.Join(args, " "), out)
+		return out, err
+	}
+	type eventTrigger struct {
+		EventType    string `json:"eventType"`
+		PubsubTopic  string `json:"pubsubTopic"`
+		EventFilters []struct {
+			Attribute, Value, Operator string
+		} `json:"eventFilters"`
+		RetryPolicy         string `json:"retryPolicy"`
+		ServiceAccountEmail string `json:"serviceAccountEmail"`
+		TriggerRegion       string `json:"triggerRegion"`
+		Trigger             string `json:"trigger"`
+	}
+	describe := func(id string) (string, string, eventTrigger) {
+		t.Helper()
+		var d struct {
+			State        string       `json:"state"`
+			URL          string       `json:"url"`
+			EventTrigger eventTrigger `json:"eventTrigger"`
+		}
+		// stdout alone: describe of a FAILED function warns of its
+		// conditions on stderr.
+		cmd := exec.Command(g.bin, "functions", "describe", id, "--gen2", "--region=us-central1", "--format=json")
+		cmd.Env = g.env
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("gcloud functions describe %s: %v\n%s", id, err, stderr.String())
+		}
+		if err := json.Unmarshal(out, &d); err != nil {
+			t.Fatalf("gcloud functions describe %s: %v\n%s", id, err, out)
+		}
+		return d.State, d.URL, d.EventTrigger
+	}
+	checkTopic := func(et eventTrigger) {
+		t.Helper()
+		if et.EventType != "google.cloud.pubsub.topic.v1.messagePublished" || et.PubsubTopic != tn ||
+			et.RetryPolicy != "RETRY_POLICY_RETRY" || et.ServiceAccountEmail != sa || et.TriggerRegion != "us-central1" {
+			t.Errorf("--trigger-topic's eventTrigger = %+v; want messagePublished on %s, retried, as %s, in us-central1", et, tn, sa)
+		}
+	}
+	checkStorage := func(et eventTrigger) {
+		t.Helper()
+		if et.EventType != "google.cloud.storage.object.v1.finalized" || len(et.EventFilters) != 1 ||
+			et.EventFilters[0].Attribute != "bucket" || et.EventFilters[0].Value != bh.BucketName() ||
+			et.RetryPolicy != "RETRY_POLICY_DO_NOT_RETRY" || et.PubsubTopic != "" {
+			t.Errorf("--trigger-event-filters' eventTrigger = %+v; want finalized on bucket %s, not retried", et, bh.BucketName())
+		}
+	}
+
+	bad := "gs://" + bh.BucketName() + "/src/not-a-zip.zip"
+	for _, c := range []struct {
+		id      string
+		trigger []string
+		check   func(eventTrigger)
+	}{{"gcloud-ev-topic-bad", topicFlags, checkTopic}, {"gcloud-ev-storage-bad", storageFlags, checkStorage}} {
+		t.Cleanup(func() { _, _ = g.run(nil, "functions", "delete", c.id, "--gen2", "--region=us-central1", "--quiet") })
+		out, err := deploy(c.id, bad, "Event", c.trigger)
+		if err == nil || !strings.Contains(out, "Build failed") {
+			t.Errorf("gcloud functions deploy %s of a source that is not a zip = %v; want this instance's build error:\n%s", c.id, err, out)
+		}
+		state, _, et := describe(c.id)
+		if state != "FAILED" {
+			t.Errorf("%s is %s; want FAILED", c.id, state)
+		}
+		c.check(et)
+		if c.id == "gcloud-ev-topic-bad" {
+			// A redeploy is an UpdateFunction whose updateMask mixes
+			// snake_case paths with eventTrigger.retryPolicy.
+			out, err := deploy(c.id, bad, "Event", []string{"--trigger-topic=" + topicID, "--no-retry", "--trigger-service-account=" + sa})
+			if err == nil || !strings.Contains(out, "Build failed") {
+				t.Errorf("gcloud functions deploy %s --no-retry, a redeploy = %v; want this instance's build error:\n%s", c.id, err, out)
+			}
+			if _, _, et := describe(c.id); et.RetryPolicy != "RETRY_POLICY_DO_NOT_RETRY" || et.PubsubTopic != tn {
+				t.Errorf("after the redeploy with --no-retry, eventTrigger = %+v; want DO_NOT_RETRY on %s", et, tn)
+			}
+		}
+		g.must("functions", "delete", c.id, "--gen2", "--region=us-central1", "--quiet")
+		if _, err := fc.GetFunction(ctx, &functionspb.GetFunctionRequest{Name: parent + "/functions/" + c.id}); status.Code(err) != codes.NotFound {
+			t.Errorf("GetFunction after gcloud functions delete = %v; want NOT_FOUND", err)
+		}
+	}
+
+	requireAmd64Functions(ctx, t)
+	ac := functionsLogClient(ctx, t, h)
+	src := filepath.Join(moduleRoot(t), "testdata", "function")
+	for _, id := range []string{"gcloud-ev-topic", "gcloud-ev-storage"} {
+		t.Cleanup(func() { _, _ = g.run(nil, "functions", "delete", id, "--gen2", "--region=us-central1", "--quiet") })
+	}
+	if _, err := deploy("gcloud-ev-topic", src, "Event", topicFlags); err != nil {
+		t.Fatalf("gcloud functions deploy --gen2 --trigger-topic: %v", err)
+	}
+	state, _, et := describe("gcloud-ev-topic")
+	checkTopic(et)
+	if state != "ACTIVE" || !strings.Contains(et.Trigger, "/triggers/gcloud-ev-topic-") {
+		t.Errorf("gcloud-ev-topic is %s with trigger %q; want ACTIVE and its trigger named", state, et.Trigger)
+	}
+	res, err := pc.TopicAdminClient.Publish(ctx, &pubsubpb.PublishRequest{Topic: tn, Messages: []*pubsubpb.PubsubMessage{{Data: []byte("from gcloud")}}})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if line := functionLogLine(ctx, t, ac, "gcloud-ev-topic", "messageId:"+res.GetMessageIds()[0]); !strings.Contains(line, "type=google.cloud.pubsub.topic.v1.messagePublished") {
+		t.Errorf("gcloud-ev-topic printed %q; want the messagePublished event", line)
+	}
+
+	if _, err := deploy("gcloud-ev-storage", src, "Event", storageFlags); err != nil {
+		t.Fatalf("gcloud functions deploy --gen2 --trigger-event-filters: %v", err)
+	}
+	state, _, et = describe("gcloud-ev-storage")
+	checkStorage(et)
+	if state != "ACTIVE" || !strings.Contains(et.Trigger, "/triggers/gcloud-ev-storage-") {
+		t.Errorf("gcloud-ev-storage is %s with trigger %q; want ACTIVE and its trigger named", state, et.Trigger)
+	}
+	w = bh.Object("gcloud/event.txt").NewWriter(ctx)
+	_, _ = w.Write([]byte("abc"))
+	if err := w.Close(); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if line := functionLogLine(ctx, t, ac, "gcloud-ev-storage", "subject=objects/gcloud/event.txt"); !strings.Contains(line, "type=google.cloud.storage.object.v1.finalized") {
+		t.Errorf("gcloud-ev-storage printed %q; want the finalized event", line)
+	}
+	for _, id := range []string{"gcloud-ev-topic", "gcloud-ev-storage"} {
+		g.must("functions", "delete", id, "--gen2", "--region=us-central1", "--quiet")
 	}
 }

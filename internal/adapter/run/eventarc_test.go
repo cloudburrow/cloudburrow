@@ -205,3 +205,24 @@ func TestStorageTriggerDeliversAndTearsDown(t *testing.T) {
 		t.Errorf("teardown = %q", tr.calls)
 	}
 }
+
+// A redeploy with gcloud's --no-retry masks eventTrigger.retryPolicy, which
+// the REST layer hands on as event_trigger.retry_policy: it changes only the
+// retry policy (#1414).
+func TestUpdateMaskEventTriggerSubpath(t *testing.T) {
+	fn := &functionspb.Function{EventTrigger: &functionspb.EventTrigger{EventType: pubsubPublished,
+		PubsubTopic: "projects/p/topics/t", RetryPolicy: functionspb.EventTrigger_RETRY_POLICY_RETRY}}
+	in := &functionspb.Function{EventTrigger: &functionspb.EventTrigger{RetryPolicy: functionspb.EventTrigger_RETRY_POLICY_DO_NOT_RETRY}}
+	for _, p := range []string{"event_trigger.retry_policy", "eventTrigger.retryPolicy"} {
+		fn.EventTrigger.RetryPolicy = functionspb.EventTrigger_RETRY_POLICY_RETRY
+		if err := applyFunctionPath(fn, in, p); err != nil {
+			t.Fatalf("applyFunctionPath(%s): %v", p, err)
+		}
+		if et := fn.GetEventTrigger(); et.GetRetryPolicy() != functionspb.EventTrigger_RETRY_POLICY_DO_NOT_RETRY || et.GetPubsubTopic() != "projects/p/topics/t" {
+			t.Errorf("after %s, event_trigger = %v; want DO_NOT_RETRY on the same topic", p, et)
+		}
+	}
+	if err := applyFunctionPath(fn, in, "event_trigger.no_such_field"); err == nil {
+		t.Error("an unknown event_trigger field was accepted")
+	}
+}

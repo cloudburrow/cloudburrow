@@ -1170,7 +1170,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:205 TestFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
         ]
       },
       {
@@ -1178,7 +1179,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:205 TestFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
         ]
       },
       {
@@ -1200,7 +1202,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:205 TestFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
         ]
       },
       {
@@ -1222,7 +1225,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsevents_test.go:205 TestFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
+          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
         ]
       }
     ]

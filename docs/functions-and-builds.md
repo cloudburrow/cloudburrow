@@ -249,9 +249,11 @@ uploads; `repo_source` and `git_uri`; worker pools, `docker_repository` and a bu
 account; VPC connectors, secret environment variables and volumes, KMS keys and binary
 authorization; `ListFunctions` `filter`, `order_by` and `page_token`; `GetFunction` `revision`.
 An unknown runtime is `INVALID_ARGUMENT`. The tests are `TestFunctionsAPI` (ungated: everything but
-a build that succeeds), and `TestFunctionsAPIBuildsAndServes`, `TestGcloudFunctions`'s deploy and
-`TestTerraformCloudFunctions2Function`'s apply, gated by `CLOUDBURROW_TEST_FUNCTIONS` and amd64
-nodes, which have **not yet run**.
+a build that succeeds), `TestFunctionsEventTriggers` and `TestGcloudFunctionsEventTriggers`'
+ungated half (event triggers, #1414), and `TestFunctionsAPIBuildsAndServes`,
+`TestFunctionsEventTriggerBuilds`, `TestGcloudFunctions`'s and `TestGcloudFunctionsEventTriggers`'
+deploys and `TestTerraformCloudFunctions2Function`'s apply, gated by `CLOUDBURROW_TEST_FUNCTIONS`
+and amd64 nodes, which have **not yet run**.
 
 ## Google Buildpacks (#33)
 

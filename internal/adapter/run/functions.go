@@ -674,6 +674,12 @@ func applyFunctionPath(fn, in *functionspb.Function, p string) error {
 			fn.ServiceConfig = &functionspb.ServiceConfig{}
 		}
 		dst, src = fn.ServiceConfig, in.GetServiceConfig()
+	case "event_trigger", "eventTrigger":
+		// gcloud's --retry and --no-retry send eventTrigger.retryPolicy.
+		if fn.EventTrigger == nil {
+			fn.EventTrigger = &functionspb.EventTrigger{}
+		}
+		dst, src = fn.EventTrigger, in.GetEventTrigger()
 	default:
 		return apierror.InvalidArgument("update_mask path %q is not a Function field", p)
 	}
@@ -1026,8 +1032,11 @@ var functionsMixins = []*annotations.HttpRule{
 }
 
 // FunctionsTranscoder is the Cloud Functions v2 JSON API's configuration.
+// Its update masks may be snake_case: a redeploy with `gcloud functions
+// deploy --gen2` sends updateMask=build_config.source,event_trigger,
+// eventTrigger.retryPolicy, both spellings in one mask (#1414).
 func FunctionsTranscoder() *rest.Transcoder {
-	return &rest.Transcoder{Packages: []string{"google.cloud.functions.v2"}, Mixins: functionsMixins}
+	return &rest.Transcoder{Packages: []string{"google.cloud.functions.v2"}, Mixins: functionsMixins, SnakeCaseMasks: true}
 }
 
 // FunctionsHandler serves the Cloud Functions v2 JSON API, and the source
