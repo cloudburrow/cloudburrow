@@ -346,7 +346,7 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 			case key == "JOBS":
 				sub, status, msg = f.jobsRows(r, pushedJobsFilter(q.Query, refs, time.Now()))
 			case projectViews[key] != nil: // #1375, projectoptions.go
-				sub = projectViews[key](f)
+				sub = projectViews[key](f, location)
 			case hierarchyJobsViews[key]: // #1392, infoschemahierarchy.go
 				sub, status, msg = f.hierarchyJobsRows(r, key, pushedJobsFilter(q.Query, refs, time.Now()))
 			case key == "TABLE_STORAGE":

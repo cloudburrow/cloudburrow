@@ -401,12 +401,13 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
-			buffers: buffers, tables: tables}
+			buffers: buffers, tables: tables, settings: settings}
 		switch {
 		case m[4] != "" && strings.Contains(table, "$") && strings.Index(table, "$") > 0 && (m[5] == "" || m[5] == "data"):
 			f.servePartition(w, r, dataset, table, m[5]) // #1273, partitionreads.go
 		case r.Method == http.MethodPost && m[3] == "":
 			datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base))) // #1371, location.go; #1375
+			datasetInsertDefaults(r, settings, projectOf(f.base))                 // #1417, projectdefaults.go
 			f.insertDataset(w, r)
 		case r.Method == http.MethodGet && m[3] == "":
 			f.listDatasets(w, r) // #1371, location.go
@@ -656,6 +657,9 @@ func (f front) insertTable(w http.ResponseWriter, r *http.Request, dataset, tabl
 		return
 	}
 	raw = legacyTableTypes(r, raw, body.Schema) // #1034, typenames.go
+	if !update && body.View == nil && body.MaterializedView == nil {
+		raw = f.defaultTableKey(r, dataset, raw) // #1417, projectdefaults.go
+	}
 	if !update {
 		id := ""
 		if body.TableReference != nil {

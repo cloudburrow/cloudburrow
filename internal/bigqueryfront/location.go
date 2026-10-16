@@ -361,8 +361,10 @@ func serveJobLocations(w http.ResponseWriter, r *http.Request, next http.Handler
 // qualified, that dataset's row, as the engine did; region-qualified, the
 // rows of the project's datasets in that region (inRegion,
 // projectoptions.go), but the front's own results dataset (results.go).
-// In a script too (#1375), read as the script starts: a dataset the
-// script itself makes is not yet there, and fails 404.
+// In a script too (#1375): one that makes, alters or drops a dataset
+// before it reads SCHEMATA is run a statement at a time (runScript,
+// #1417), so SCHEMATA is read in its turn and shows a dataset the script
+// made; any other script reads it as the script starts.
 //
 // ddl is the CREATE SCHEMA statement in the documented example's form:
 //
@@ -376,7 +378,9 @@ func serveJobLocations(w http.ResponseWriter, r *http.Request, next http.Handler
 // default_partition_expiration_days, default_table_expiration_days,
 // description, friendly_name, labels and location (lower case), each as
 // that example writes them (labels as CREATE SCHEMA's
-// [("key", "value")], UNVERIFIED); DEFAULT COLLATE is left out of it.
+// [("key", "value")], UNVERIFIED); with a defaultCollation, CREATE
+// SCHEMA's DEFAULT COLLATE 'und:ci' clause before OPTIONS (#1417; where
+// BigQuery breaks the line is UNVERIFIED).
 // sync_status is NULL, as BigQuery gives it for a dataset with no replica,
 // and an instance keeps none. default_collation_name is the dataset's
 // defaultCollation, or NULL.
@@ -468,5 +472,39 @@ func schemaDDL(project, dataset string, ds map[string]any) string {
 	if loc := str(ds, "location"); loc != "" {
 		opts = append(opts, "location="+quote(strings.ToLower(loc)))
 	}
-	return "CREATE SCHEMA `" + project + "." + dataset + "`\nOPTIONS(\n  " + strings.Join(opts, ",\n  ") + "\n);"
+	collate := ""
+	if c := str(ds, "defaultCollation"); c != "" { // #1417, CREATE SCHEMA's clause, before OPTIONS
+		collate = "\nDEFAULT COLLATE '" + strings.ReplaceAll(c, "'", `\'`) + "'"
+	}
+	return "CREATE SCHEMA `" + project + "." + dataset + "`" + collate + "\nOPTIONS(\n  " + strings.Join(opts, ",\n  ") + "\n);"
+}
+
+// schemataInTurn reports whether sql is a script that makes, alters or
+// drops a dataset and then reads INFORMATION_SCHEMA.SCHEMATA or
+// SCHEMATA_OPTIONS, with no TEMP table or function, which runScript cannot
+// keep between its requests (#1417).
+func schemataInTurn(sql string) bool {
+	upper := strings.ToUpper(sql)
+	if !strings.Contains(upper, "SCHEMATA") || !strings.Contains(upper, "SCHEMA") {
+		return false
+	}
+	toks, ok := lex(sql)
+	if !ok || tokensHaveTemp(toks) || len(splitStatements(trimSemicolons(toks))) < 2 {
+		return false
+	}
+	changed := false
+	for i, t := range toks {
+		switch {
+		case (t.is("CREATE") || t.is("ALTER") || t.is("DROP")) && i+1 < len(toks) && toks[i+1].is("SCHEMA"):
+			changed = true
+		case t.is("CREATE") && i+3 < len(toks) && toks[i+1].is("OR") && toks[i+2].is("REPLACE") && toks[i+3].is("SCHEMA"):
+			changed = true
+		case changed && (t.is("SCHEMATA") || t.is("SCHEMATA_OPTIONS")):
+			return true
+		case changed && t.kind == tokQuoted && (strings.HasSuffix(strings.ToUpper(t.text), "INFORMATION_SCHEMA.SCHEMATA") ||
+			strings.HasSuffix(strings.ToUpper(t.text), "INFORMATION_SCHEMA.SCHEMATA_OPTIONS")):
+			return true
+		}
+	}
+	return false
 }
