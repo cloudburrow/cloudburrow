@@ -93,10 +93,11 @@ func TestSQLAdminInstancesDescribeTheRunningServers(t *testing.T) {
 // pointInTimeRestore (a Backup and DR datasource; a clone to a point in
 // time of the server `up` runs, which keeps no log, is a 400),
 // failover, replicas, IAM database authentication (an access token in
-// generateEphemeralCert), and tiers and flags answer 501;
+// generateEphemeralCert) answer 501 (tiers and flags are served since
+// #1380, TestSQLAdminTiersAndFlags);
 // the instances `up` runs refuse a patch, restart or delete with the
 // reason (instance writes act on created instances, TestCloudSQLInstanceWrites).
-// covers: sql.instances.pointInTimeRestore (unimplemented), sql.instances.failover (unimplemented), sql.tiers.list (unimplemented), sql.flags.list (unimplemented)
+// covers: sql.instances.pointInTimeRestore (unimplemented), sql.instances.failover (unimplemented)
 func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	h := New(t)
 	svc := sqlAdminService(t, h)
@@ -126,10 +127,6 @@ func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	wantHTTP(t, "instances.insert of a failover replica", err, 501)
 	_, err = svc.Connect.GenerateEphemeralCert(p, inst, &sqladmin.GenerateEphemeralCertRequest{PublicKey: "x", AccessToken: "iam"}).Do()
 	wantHTTP(t, "connect.generateEphemeralCert with an access token (IAM database authentication)", err, 501)
-	_, err = svc.Tiers.List(p).Do()
-	wantHTTP(t, "tiers.list", err, 501)
-	_, err = svc.Flags.List().Do()
-	wantHTTP(t, "flags.list", err, 501)
 }
 
 // sqlAdminEngine is one server under test: the instance name and how to

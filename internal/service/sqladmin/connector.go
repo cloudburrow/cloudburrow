@@ -218,6 +218,7 @@ func (c *connector) removeInstance(instance string) {
 	delete(c.cas, instance)
 	c.camu.Unlock()
 	_ = os.Remove(caPath(c.dir, instance))
+	_ = os.Remove((&sslCertStore{dir: c.dir}).path(instance))
 	c.mu.Lock()
 	for name := range c.certs {
 		if _, in, ok := parseDNSName(name); ok && in == instance {
@@ -273,6 +274,7 @@ func (s *Server) EnableConnector(addr, dir string) error {
 		c.cas[e.Instance()] = ca
 	}
 	s.conn = c
+	s.certs = &sslCertStore{dir: dir}
 	return nil
 }
 
