@@ -288,6 +288,11 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 		}
 		token = list.NextPageToken
 	}
+	if filter == nil { // nothing pushed down: the table of rows (jobstable.go, #1378)
+		if sub := f.tableJobsRows(r, project, jobs); sub != "" {
+			return sub, 0, ""
+		}
+	}
 	jobs = filter.apply(project, jobs)
 	rows := make([][]string, len(jobs))
 	for i, job := range jobs {

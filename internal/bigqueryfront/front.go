@@ -219,6 +219,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	iam := &iamPolicies{}                           // iam.go, #1231
 	buffers := &streamBuffers{stamp: o.streamTimes} // streamingbuffer.go, #1273, #1370
 	settings := &projectOptions{}                   // projectoptions.go, #1375
+	jobRows := &jobsTable{}                         // jobstable.go, #1378
 	if o.stateDir != "" {
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
 		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)         // iam.go, #1231
@@ -247,6 +248,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			iam.reset()
 			buffers.reset()
 			settings.reset()
+			jobRows.reset()
 		})
 	}
 	// listJobs serves jobs.list, r a GET of a project's jobs: here, and
@@ -335,7 +337,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
-				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings}
+				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -346,6 +348,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if j := jobRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet {
 			project := projectOf("/" + j[2])
 			if j[3] == "jobs" && own.serveJobAction(w, r, project, j[4], "") {
+				return
+			}
+			if j[3] == "queries" && own.failedJobResults(w, project, j[4]) { // #1397, failedjobs.go
 				return
 			}
 			serve := func(w http.ResponseWriter) {
@@ -474,6 +479,9 @@ type front struct {
 	// settings are the projects' options, default_location
 	// (projectoptions.go, #1375), or nil.
 	settings *projectOptions
+	// jobsTable is the table of INFORMATION_SCHEMA.JOBS rows
+	// (jobstable.go, #1378), or nil.
+	jobsTable *jobsTable
 }
 
 // Option is an option of Wrap.

@@ -444,7 +444,8 @@ func (f front) upload(ctx context.Context, uri, contentType string, data []byte)
 	return nil
 }
 
-// frontJobs are the jobs the front carried out itself (writeExtract), by
+// frontJobs are the jobs the front carried out itself (writeExtract), and
+// the failed queries the emulator made no job of (failedjobs.go, #1397), by
 // project and job ID, which it answers jobs.get, jobs.list, jobs.cancel
 // and jobs.delete of. The most recent maxFrontJobs are kept.
 type frontJobs struct {
@@ -453,7 +454,7 @@ type frontJobs struct {
 	order []string
 }
 
-const maxFrontJobs = 1000
+const maxFrontJobs = maxJobRecords
 
 func (j *frontJobs) add(project, id string, job map[string]any) {
 	key := project + "/" + id
