@@ -30,12 +30,12 @@ tracks it; a closed issue is named only where it says what was built.
 | Secret Manager | 2 | 1 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 2 | 0 | 2 | 0 | 0 |
-| BigQuery | 27 | 7 | 12 | 8 | 0 |
+| BigQuery | 29 | 10 | 11 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **58** | **10** | **29** | **13** | **6** |
+| **Total** | **60** | **13** | **28** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -178,7 +178,7 @@ over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`
 
 Already tracked: #1427 (Iceberg files for `storage_uri`), and the rows below.
 
-Closed: `CHANGES` and `APPENDS` (#1418), a table's `privacy_policy` aggregation threshold and join
+Closed: `CHANGES` and `APPENDS` (#1418), change history across table rebuilds and `CREATE OR REPLACE TABLE`, and the transaction, change data capture and one-day refusals (#1466), a table's `privacy_policy` aggregation threshold and join
 restriction (#1426), materialized view statements in a script with a TEMP table or function
 (#1434), `INTERVAL` arithmetic and the Write API's Arrow path (#1437), `CREATE TABLE` column
 `OPTIONS` (#1438), copy jobs, snapshots and clones (#1002), extracting every column type (#957),
@@ -213,6 +213,9 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | What #1426, #1455 and #1482 leave of `privacy_policy`: a read of an aggregation threshold or join restriction table or view in a subquery, CTE, another view, a script or a non-INNER join is 501; of differential privacy (#1455, #1482 built: `HAVING`, subqueries, CTEs, scripts, `PUBLIC_GROUPS`), `COUNT(DISTINCT)` and `max_rows_contributed` (documented by neither BigQuery nor GoogleSQL) and a DP aggregate inside an expression are 501 | not built yet | L |
 | What #1418 leaves of change history: an ALTER TABLE that rebuilds the table and CREATE OR REPLACE TABLE start the history over; CHANGES in a multi-statement transaction and on a change-data-capture table are not refused; every table's rows are recorded twice, whatever its options (#1466) | not built yet | M |
 | Project configurations: `default_time_zone` does not reach `DATE`, `DATETIME`, `TIME`, `STRING` or `EXTRACT` given a column or other expression whose type the text does not show, nor `DATE_TRUNC` and the like (the front has no types to tell a `TIMESTAMP` from a `DATETIME`, and the engine's zone is UTC alone); `default_kms_key_name` reaches `tables.insert` and a lone `CREATE TABLE`, not a table a script or a query, load or copy job makes; `ALTER PROJECT` / `ALTER ORGANIZATION` inside a block, `IF` or loop of a script is carried out in its turn (#1459), and 501 only in a dry run; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows, which Google does not document (#1456) | not built yet | S |
+| What #1426 leaves of `privacy_policy`: differential privacy (`SELECT WITH DIFFERENTIAL_PRIVACY`, a `differential_privacy_policy`) is 501, no noise mechanism or epsilon/delta budget (#1455); a read of a policy table or view in a subquery, CTE, another view, a script or a non-INNER join is 501 | not built yet | L |
+| What #1466 leaves of change history: `CHANGES` of a table that had a multi-statement transaction committed to it within the range is not refused; changes are kept seven days whatever the dataset's time travel window (only the window's are read) | not built yet | S |
+| Project configurations: `default_time_zone` does not reach `DATE`, `DATETIME`, `TIME`, `STRING` or `EXTRACT` given a column or other expression whose type the text does not show, `DATE_TRUNC` and the like, or a `TIMESTAMP` literal with no offset; the job and queue timeouts are stored, not enforced; `default_kms_key_name` reaches `tables.insert` only; `ALTER PROJECT` / `ALTER ORGANIZATION` inside a block, `IF` or loop of a script is 501; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows (#1456) | not built yet | S |
 | `columnNameCharacterMap` `V1` / `V2` when a detected CSV or Parquet name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix, an empty or too long name, a Parquet name with a period) and names the same once replaced are 501: BigQuery documents only that "invalid column names will be normalized" (#1457) | not documented by Google | S |
 | Autodetect: a JSON column whose values mix types BigQuery does not document detecting, `skipLeadingRows` other than 1 into a new table, and a sample with a format or `timeZone` that BigQuery's detection is not documented for, are 501; CSV header detection where BigQuery and the emulator disagree (every column `STRING`, a name that reads as a number, boolean, date or timestamp) is 501 (#1457) | not documented by Google | S |
 | CSV: a multi-character delimiter, a non-ASCII delimiter or quote in data that is not ISO-8859-1, an empty `STRING` with a `nullMarker`, a `maxBadRecords` load the emulator fails, `sourceColumnMatch` `NAME` with no row skipped (ISO-8859-1 delimiters and quotes, a quote's first byte, `skipLeadingRows` N and the header with `autodetect`, and `NAME` after skipped rows are built, #1457); JSON: a null field outside the schema, a `maxBadRecords` load the emulator fails (#1457) | no emulator support | M |
@@ -229,7 +232,7 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | `DROP SCHEMA` where the script's other statements see the dataset; `CREATE SCHEMA` options other than the supported strings, and `DEFAULT COLLATE` (#1459) | no emulator support | M |
 | `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that changes data; a dry run of a script with a `TEMP` table or function, beyond what the emulator's own dry run checks (#1459) | not built yet | S |
 | A failed script after a statement that wrote: the emulator does not roll back (#1459) | no emulator support | L |
-| A snapshot or clone `FOR SYSTEM_TIME AS OF` a past time (a query reads one since #1460); `FOR SYSTEM_TIME AS OF` a past time before an ALTER TABLE rebuild or CREATE OR REPLACE TABLE, of an ingestion-time partitioned table, or with a partition decorator (#1460) | not built yet | M |
+| A snapshot or clone `FOR SYSTEM_TIME AS OF` a past time (a query reads one since #1460); `FOR SYSTEM_TIME AS OF` a past time of an ingestion-time partitioned table, or with a partition decorator (#1460) | not built yet | M |
 | `datasets.undelete`, `UNDROP SCHEMA`, and restoring a dropped table by a copy of `table@time`: the emulator drops a table's rows and change history with it, and a dataset's tables (#1460) | no emulator support | M |
 | BQML: `LINEAR_REG`, binary and multiclass `LOGISTIC_REG`, `KMEANS` and `PCA` are trained by the front, with `TRANSFORM`, ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO and models.* (#1465, #1481); every other model type, remote models, ML preprocessing functions in TRANSFORM and the other ML functions are 501 with the reason | training Google does not document, or Google's infrastructure | L |
 | Script variable named as an alias, a column or a table; `WRITE_TRUNCATE_DATA` of a result of another type (#1445) | not documented by Google | S |

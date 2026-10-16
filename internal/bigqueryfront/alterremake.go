@@ -241,6 +241,12 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 		strings.Join(from, ", ")+" FROM "+quotePath([]string{ds, table})); msg != "" {
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not copy the rows of "+name+": "+msg, text)
 	}
+	// The table's change history goes on after it is made again (#1466,
+	// changehistorycarry.go).
+	saved, hasHistory := f.saveHistory(r, ds, table)
+	if hasHistory {
+		defer f.dropSavedHistory(r, saved)
+	}
 	if status, got := f.send(r, http.MethodDelete, tablePath(ds, table), nil); status != http.StatusOK && status != http.StatusNoContent {
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not make "+name+" again: "+
 			errorMessage(got, status), text)
@@ -257,6 +263,16 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 		quotePath([]string{scratch.DatasetID, scratch.TableID})); msg != "" {
 		keep = true
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: "+msg+held, text)
+	}
+	if hasHistory {
+		carried := make([]carriedColumn, len(cols))
+		for i := range cols {
+			n, _ := cols[i].field["name"].(string)
+			carried[i] = carriedColumn{name: n, expr: from[i]}
+		}
+		if msg := f.carryHistory(r, quotePath([]string{saved.DatasetID, saved.TableID}), ds, table, carried, false); msg != "" {
+			return failWith(http.StatusInternalServerError, "internalError", historyKept(name, msg), text)
+		}
 	}
 	return nil
 }
@@ -289,6 +305,21 @@ func (s *scriptRun) renameTable(src tableRef, to string, raw []any, meta map[str
 		" FROM "+quotePath([]string{src.DatasetID, src.TableID})); msg != "" {
 		f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
 		return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not copy the rows: "+msg, text)
+	}
+	// The table's change history goes with it (#1466, changehistorycarry.go).
+	var carried []carriedColumn
+	for _, fl := range raw {
+		if m, ok := fl.(map[string]any); ok {
+			n, _ := m["name"].(string)
+			carried = append(carried, carriedColumn{name: n, expr: quoteName(n)})
+		}
+	}
+	if f.hasHistory(r, src.DatasetID, src.TableID) {
+		if msg := f.carryHistory(r, f.historySource(src.DatasetID, src.TableID), dest.DatasetID, dest.TableID, carried, false); msg != "" {
+			f.send(r, http.MethodDelete, tablePath(dest.DatasetID, dest.TableID), nil)
+			return failWith(http.StatusInternalServerError, "internalError", "cloudburrow: could not carry the change history of "+
+				src.TableID+" to "+to+": "+msg, text)
+		}
 	}
 	// "recreates the table in the destination dataset with the creation
 	// timestamp of the original table"; "Existing table ACLs and row

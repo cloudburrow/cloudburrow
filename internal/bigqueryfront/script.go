@@ -682,8 +682,47 @@ func (f front) replace(w http.ResponseWriter, r *http.Request, q queryOptions, c
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return
 	}
+	// The table's change history goes on (#1466, changehistorycarry.go).
+	var saved tableRef
+	var oldFields []any
+	hasHistory := false
+	if !c.view {
+		if st, got := f.get(r, tablePath(dataset, table)); st == http.StatusOK {
+			oldFields = schemaFieldsOf(got)
+			if saved, hasHistory = f.saveHistory(r, dataset, table); hasHistory {
+				defer f.dropSavedHistory(r, saved)
+			}
+		}
+	}
 	f.send(r, http.MethodDelete, tablePath(dataset, table), nil)
-	f.forward(w, r, jobText{query: q.Query})
+	if !hasHistory {
+		f.forward(w, r, jobText{query: q.Query})
+		return
+	}
+	rec := newRecorder()
+	f.forward(rec, r, jobText{query: q.Query})
+	if (rec.status == 0 || rec.status == http.StatusOK) && !jobFailed(rec) {
+		if st, got := f.get(r, tablePath(dataset, table)); st == http.StatusOK {
+			if msg := f.carryHistory(r, quotePath([]string{saved.DatasetID, saved.TableID}), dataset, table,
+				replacedColumns(oldFields, schemaFieldsOf(got)), true); msg != "" {
+				writeError(w, http.StatusInternalServerError, "internalError", historyKept(tableName(projectOf(f.base),
+					tableRef{DatasetID: dataset, TableID: table}), msg))
+				return
+			}
+		}
+	}
+	rec.copyTo(w)
+}
+
+// schemaFieldsOf returns the schema fields of a tables.get answer.
+func schemaFieldsOf(got []byte) []any {
+	var meta map[string]any
+	if json.Unmarshal(got, &meta) != nil {
+		return nil
+	}
+	schema, _ := meta["schema"].(map[string]any)
+	fields, _ := schema["fields"].([]any)
+	return fields
 }
 
 // setQueryText replaces the query text in r's body: jobs.query's query, or

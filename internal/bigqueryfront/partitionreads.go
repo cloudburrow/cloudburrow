@@ -387,6 +387,14 @@ func (f front) systemTime(r *http.Request, q queryOptions, dataset, ref string, 
 	tsMs, nowMs := ts/1000, now/1000
 	earliest := nowMs - hours*int64(time.Hour/time.Millisecond)
 	c, err := strconv.ParseInt(m.Created, 10, 64) // milliseconds (#1310)
+	// The table's history starts when it was made, by the engine's clock,
+	// which follows the front's (#1466; the emulator keeps creationTime by
+	// the system's), and a table made again by CREATE OR REPLACE TABLE
+	// keeps the start of the one it replaced: "the data that is replaced
+	// or removed can be recovered through the time travel window".
+	if start, ok := f.historyStart(r, dataset, ref[strings.LastIndex(ref, ".")+1:]); ok {
+		c, err = start/1000, nil
+	}
 	if err == nil && c > earliest {
 		earliest = c
 	}
