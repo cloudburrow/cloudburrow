@@ -769,9 +769,8 @@
     "Key": "artifactregistry",
     "Title": "Artifact Registry",
     "counts": {
-      "Implemented": 1,
       "Unimplemented": 27,
-      "Verified": 22
+      "Verified": 23
     },
     "rows": [
       {
@@ -878,6 +877,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/consoleartifactregistrypermissions_test.go:22 TestConsolePermissionsOnARepository",
           "test/compat/terraform_batch5_test.go:362 TestTerraformArtifactRegistryRepositoryIAM"
         ]
       },
@@ -1023,13 +1023,16 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/SetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/consoleartifactregistrypermissions_test.go:22 TestConsolePermissionsOnARepository",
           "test/compat/terraform_batch5_test.go:362 TestTerraformArtifactRegistryRepositoryIAM"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/TestIamPermissions",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/consoleartifactregistrypermissions_test.go:22 TestConsolePermissionsOnARepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateFile",
