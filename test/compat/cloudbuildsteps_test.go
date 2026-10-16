@@ -149,8 +149,8 @@ func TestCloudBuildArbitraryStepsFilterAndRetry(t *testing.T) {
 		t.Errorf("the failed build = %v, %v", failed, err)
 	}
 	if _, err := cb.CreateBuild(ctx, &cbpb.CreateBuildRequest{ProjectId: h.Project(), Build: &cbpb.Build{
-		Steps: []*cbpb.BuildStep{{Name: img, SecretEnv: []string{"TOKEN"}}}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("secretEnv = %v; want UNIMPLEMENTED", err)
+		Steps: []*cbpb.BuildStep{{Name: img, SecretEnv: []string{"TOKEN"}}}}}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("a secretEnv no availableSecrets defines = %v; want INVALID_ARGUMENT (#1407)", err)
 	}
 
 	// ListBuilds' filter and paging.

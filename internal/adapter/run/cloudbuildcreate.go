@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"path"
 	"regexp"
 	"sort"
@@ -68,8 +69,19 @@ type StepSpec struct {
 	// /workspace itself.
 	Dir     string
 	Volumes []StepVolume
+	// Script is the step's script (#1407): the runner writes it, mode
+	// 0755, to ScriptPath in the container before it starts, and
+	// Entrypoint and Args run it.
+	Script string
+	// Secrets are the step's secretEnv variables, name to value (#1407).
+	// The runner must pass them without putting a value on a command line
+	// or in a log.
+	Secrets map[string]string
 	Log     io.Writer
 }
+
+// ScriptPath is where a step's script is written in its container.
+const ScriptPath = "/builder/script"
 
 // StepVolume is a named volume a step mounts at Path; steps naming the same
 // volume share it for the build.
@@ -115,6 +127,31 @@ type plannedStep struct {
 	env        map[string]string // pack --env
 	timeout    time.Duration
 	step       StepSpec // stepContainer
+	// allowFailure and allowExitCodes (#1407): a failure they allow is
+	// the step's FAILURE, not the build's.
+	allowFailure   bool
+	allowExitCodes []int32
+	// secretEnv names the secrets the step gets (stepContainer).
+	secretEnv []string
+}
+
+// allows reports whether the step's failure err leaves the build going:
+// allowExitCodes, when set, takes precedence over allowFailure, and allows
+// only an exit with one of its codes.
+func (p plannedStep) allows(err error) bool {
+	if len(p.allowExitCodes) > 0 {
+		var exit *StepExitError
+		if !errors.As(err, &exit) {
+			return false
+		}
+		for _, c := range p.allowExitCodes {
+			if int(c) == exit.Code {
+				return true
+			}
+		}
+		return false
+	}
+	return p.allowFailure
 }
 
 // runningBuilds holds the cancel function of each build CreateBuild started.
@@ -164,14 +201,25 @@ func planStep(i int, st *cbpb.BuildStep, subs map[string]string) (plannedStep, e
 	refuse := func(format string, a ...any) (plannedStep, error) {
 		return plannedStep{}, apierror.Unimplemented("step %d (%s): "+format, append([]any{i, st.GetName()}, a...)...)
 	}
-	switch {
-	case len(st.GetSecretEnv()) > 0:
-		return refuse("secretEnv is not supported: secrets come from Secret Manager, which Cloud Build reads on Google")
-	case st.GetScript() != "":
-		return refuse("script is not supported; give the step an entrypoint and args")
-	case st.GetAllowFailure() || len(st.GetAllowExitCodes()) > 0:
-		return refuse("allowFailure and allowExitCodes are not supported")
+	if st.GetScript() != "" && (len(st.GetArgs()) > 0 || st.GetEntrypoint() != "") {
+		return plannedStep{}, apierror.InvalidArgument("invalid build: step %d: script cannot be used with args or entrypoint", i)
 	}
+	for _, c := range st.GetAllowExitCodes() {
+		if c < 0 || c > 255 {
+			return plannedStep{}, apierror.InvalidArgument("invalid build: step %d: allowExitCodes value %d is not between 0 and 255", i, c)
+		}
+	}
+	p, err := planStepKind(i, st, subs, refuse)
+	if err != nil {
+		return p, err
+	}
+	p.allowFailure, p.allowExitCodes = st.GetAllowFailure(), st.GetAllowExitCodes()
+	return p, nil
+}
+
+// planStepKind plans the step as a local docker build, docker push or pack
+// step, or an arbitrary container.
+func planStepKind(i int, st *cbpb.BuildStep, subs map[string]string, refuse func(string, ...any) (plannedStep, error)) (plannedStep, error) {
 	args := make([]string, len(st.GetArgs()))
 	for j, a := range st.GetArgs() {
 		args[j] = substitute(a, subs)
@@ -195,7 +243,7 @@ func planStep(i int, st *cbpb.BuildStep, subs map[string]string) (plannedStep, e
 		// image running docker, args[0] the command.
 		name, args = "gcr.io/cloud-builders/docker", args[1:]
 	}
-	local := (dockerBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "docker") && len(args) > 0 &&
+	local := st.GetScript() == "" && (dockerBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "docker") && len(args) > 0 &&
 		(args[0] == "build" || args[0] == "push")) || (packBuilders[name] && (st.GetEntrypoint() == "" || st.GetEntrypoint() == "pack"))
 	if local {
 		// The local builder runs these steps itself, not in the step's
@@ -205,6 +253,9 @@ func planStep(i int, st *cbpb.BuildStep, subs map[string]string) (plannedStep, e
 			return refuse("volumes are not supported on a docker build, docker push or pack step: the local builder runs it, not the step's container")
 		case len(st.GetEnv()) > 0 && !packBuilders[name]:
 			return refuse("env is not supported on a docker build or push step: the local builder runs it, not the step's container")
+		case len(st.GetSecretEnv()) > 0:
+			return refuse("secretEnv is not supported on a docker build, docker push or pack step: the local builder runs it, " +
+				"not the step's container; run docker in a step with entrypoint bash, as Cloud Build's examples do")
 		}
 	}
 	switch {
@@ -381,8 +432,19 @@ func planContainer(i int, st *cbpb.BuildStep, name string, args []string, dir st
 		seen[p], seen["name:"+v.GetName()] = true, true
 		vols = append(vols, StepVolume{Name: v.GetName(), Path: p})
 	}
-	p := plannedStep{kind: stepContainer, step: StepSpec{Index: i, Image: name,
+	p := plannedStep{kind: stepContainer, secretEnv: st.GetSecretEnv(), step: StepSpec{Index: i, Image: name,
 		Entrypoint: substitute(st.GetEntrypoint(), subs), Args: args, Env: env, Dir: dir, Volumes: vols}}
+	if sc := st.GetScript(); sc != "" {
+		// Written to a file and run: by its #! line's interpreter, else
+		// by /bin/sh, as Cloud Build does. Substitutions are not applied
+		// to a script; automapSubstitutions gives them as variables.
+		p.step.Script = sc
+		if strings.HasPrefix(sc, "#!") {
+			p.step.Entrypoint, p.step.Args = ScriptPath, nil
+		} else {
+			p.step.Entrypoint, p.step.Args = "/bin/sh", []string{ScriptPath}
+		}
+	}
 	if t := st.GetTimeout(); t != nil {
 		p.timeout = t.AsDuration()
 	}
@@ -397,8 +459,6 @@ func unsupportedCreate(b *cbpb.Build) error {
 			fields = append(fields, f)
 		}
 	}
-	add(len(b.GetSecrets()) > 0, "secrets")
-	add(b.GetAvailableSecrets() != nil, "availableSecrets")
 	add(b.GetArtifacts() != nil, "artifacts")
 	add(b.GetServiceAccount() != "", "serviceAccount")
 	add(b.GetGitConfig() != nil, "gitConfig")
@@ -407,8 +467,6 @@ func unsupportedCreate(b *cbpb.Build) error {
 		add(o.GetMachineType() != cbpb.BuildOptions_UNSPECIFIED, "options.machineType")
 		add(o.GetDiskSizeGb() != 0, "options.diskSizeGb")
 		add(o.GetWorkerPool() != "" || o.GetPool() != nil, "options.pool")
-		add(len(o.GetEnv()) > 0, "options.env")
-		add(len(o.GetSecretEnv()) > 0, "options.secretEnv")
 		add(len(o.GetVolumes()) > 0, "options.volumes")
 		add(o.GetDynamicSubstitutions(), "options.dynamicSubstitutions")
 		add(o.GetDefaultLogsBucketBehavior() != cbpb.BuildOptions_DEFAULT_LOGS_BUCKET_BEHAVIOR_UNSPECIFIED, "options.defaultLogsBucketBehavior")
@@ -416,8 +474,8 @@ func unsupportedCreate(b *cbpb.Build) error {
 	if len(fields) == 0 {
 		return nil
 	}
-	return apierror.Unimplemented("Build field %s is not supported: it needs Google Cloud Build's own workers or "+
-		"Secret Manager; builds run locally with Docker or pack", strings.Join(fields, ", "))
+	return apierror.Unimplemented("Build field %s is not supported: it needs Google Cloud Build's own workers; "+
+		"builds run locally with Docker or pack", strings.Join(fields, ", "))
 }
 
 // CreateBuild starts a build and returns its operation at once, as Cloud
@@ -527,6 +585,15 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	for k, v := range in.GetSubstitutions() {
 		subs[k] = v
 	}
+	for _, e := range in.GetOptions().GetEnv() {
+		if k, _, ok := strings.Cut(substitute(e, subs), "="); !ok || k == "" {
+			return nil, apierror.InvalidArgument("invalid build: options.env %q is not KEY=VALUE", e)
+		}
+	}
+	secretDefs, err := c.planSecrets(in, subs)
+	if err != nil {
+		return nil, err
+	}
 	plan := make([]plannedStep, len(in.GetSteps()))
 	deps := make([][]int, len(in.GetSteps()))
 	ids := map[string]int{}
@@ -564,16 +631,30 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 				firstContainer = i
 			}
 			containers = true
-			if st.GetAutomapSubstitutions() || in.GetOptions().GetAutomapSubstitutions() {
+			// The step's own automapSubstitutions, true or false, wins
+			// over the build's.
+			automap := in.GetOptions().GetAutomapSubstitutions()
+			if st.AutomapSubstitutions != nil {
+				automap = st.GetAutomapSubstitutions()
+			}
+			// Docker's last -e wins: the substitutions, then options.env,
+			// then the step's env, which Cloud Build lets override both.
+			var env []string
+			if automap {
 				keys := make([]string, 0, len(subs))
 				for k := range subs {
 					keys = append(keys, k)
 				}
 				sort.Strings(keys)
 				for _, k := range keys {
-					p.step.Env = append(p.step.Env, k+"="+subs[k])
+					env = append(env, k+"="+subs[k])
 				}
 			}
+			for _, e := range in.GetOptions().GetEnv() {
+				env = append(env, substitute(e, subs))
+			}
+			p.step.Env = append(env, p.step.Env...)
+			p.secretEnv = mergeNames(in.GetOptions().GetSecretEnv(), p.secretEnv)
 		}
 		plan[i] = p
 	}
@@ -620,8 +701,9 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	writeLogs := logging != cbpb.BuildOptions_NONE && logging != cbpb.BuildOptions_CLOUD_LOGGING_ONLY
 	createBucket := false
 	if writeLogs && b.LogsBucket == "" {
-		// Cloud Build's default logs bucket, which Google owns; here it is
-		// made in the instance's Cloud Storage on the first log.
+		// Cloud Build's default logs bucket, which Google owns; here the
+		// instance's Cloud Storage makes it on the first log, read-only to
+		// users (#1430, internal/service/storage/cloudbuildlogs.go).
 		b.LogsBucket, createBucket = "gs://"+number+".cloudbuild-logs.googleusercontent.com", true
 	}
 	if !writeLogs {
@@ -652,7 +734,7 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	runningBuilds.cancel[b.Name] = cancel
 	runningBuilds.mu.Unlock()
 	r := &buildRun{c: c, name: b.Name, op: op.Name, project: project, plan: plan, deps: deps, src: src.GetStorageSource(),
-		runner: runner, logsBucket: b.LogsBucket, createBucket: createBucket}
+		runner: runner, logsBucket: b.LogsBucket, createBucket: createBucket, secretDefs: secretDefs}
 	go r.run(bctx, cancel)
 	return s.toProtoOperation(op.Name)
 }
@@ -672,6 +754,23 @@ type buildRun struct {
 	mu           sync.Mutex
 	log          bytes.Buffer
 	built        map[string]string // tag -> local image, under mu
+	// secretDefs are the build's secrets (#1407), read at build time into
+	// secrets, under mu. The log does not mask them, as Google's does not.
+	secretDefs map[string]buildSecret
+	secrets    map[string]string
+}
+
+// mergeNames is a then b, without repeats.
+func mergeNames(a, b []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, n := range append(append([]string(nil), a...), b...) {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // stepWriter prefixes each line a step writes, as Cloud Build's log does.
@@ -713,7 +812,10 @@ func (r *buildRun) logf(format string, a ...any) {
 var buildLogs = struct {
 	mu   sync.Mutex
 	logs map[string]string
-}{logs: map[string]string{}}
+	// errs is why a build's log could not last be written to its logs
+	// bucket (#1430).
+	errs map[string]string
+}{logs: map[string]string{}, errs: map[string]string{}}
 
 // BuildLog is a build's log so far, by its name, and whether it has one.
 func BuildLog(name string) (string, bool) {
@@ -732,16 +834,41 @@ func (r *buildRun) flushLog(ctx context.Context) {
 	buildLogs.mu.Lock()
 	buildLogs.logs[r.name] = string(data)
 	buildLogs.mu.Unlock()
-	w, ok := r.c.builds.fetch.(ObjectWriter)
-	if r.logsBucket == "" || !ok {
+	if r.logsBucket == "" {
 		return
 	}
 	bucket, prefix, _ := strings.Cut(strings.TrimPrefix(r.logsBucket, "gs://"), "/")
 	id := r.name[strings.LastIndex(r.name, "/")+1:]
 	object := path.Join(prefix, "log-"+id+".txt")
-	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	_ = w.Put(wctx, r.project, bucket, object, data, r.createBucket)
+	var err error
+	if w, ok := r.c.builds.fetch.(ObjectWriter); ok {
+		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		err = w.Put(wctx, r.project, bucket, object, data, r.createBucket)
+		cancel()
+	} else {
+		err = errors.New("this instance does not run Cloud Storage: start it with storage in --services")
+	}
+	buildLogs.mu.Lock()
+	if err != nil {
+		// Google documents no field a log-write failure is reported in, so
+		// it goes to the instance log, once per build, and the console's
+		// build page shows it.
+		if _, seen := buildLogs.errs[r.name]; !seen {
+			slog.Warn("Cloud Build could not write the build log", "build", r.name, "log", "gs://"+bucket+"/"+object, "err", err)
+		}
+		buildLogs.errs[r.name] = err.Error()
+	} else {
+		delete(buildLogs.errs, r.name)
+	}
+	buildLogs.mu.Unlock()
+}
+
+// BuildLogError is why a build's log could not last be written to its logs
+// bucket, or "".
+func BuildLogError(name string) string {
+	buildLogs.mu.Lock()
+	defer buildLogs.mu.Unlock()
+	return buildLogs.errs[name]
 }
 
 func (r *buildRun) update(f func(*cbpb.Build)) *cbpb.Build {
@@ -842,6 +969,14 @@ func (r *buildRun) run(ctx context.Context, cancel context.CancelFunc) {
 		r.ws = ws
 		defer ws.Close()
 	}
+	if err := r.resolveSecrets(ctx); err != nil {
+		if st, done := ctxStatus(); done {
+			failed(st, -1, "build "+strings.ToLower(st.String()))
+			return
+		}
+		failed(cbpb.Build_FAILURE, -1, err.Error())
+		return
+	}
 	r.logf("BUILD\n")
 	r.flushLog(ctx)
 
@@ -895,6 +1030,22 @@ func (r *buildRun) run(ctx context.Context, cancel context.CancelFunc) {
 			stepTimedOut := p.timeout > 0 && errors.Is(sctx.Err(), context.DeadlineExceeded) && stepsCtx.Err() == nil
 			scancel()
 			r.logf("Finished %s\n", label)
+			if err != nil && stepsCtx.Err() == nil && !stepTimedOut && p.allows(err) {
+				// allowFailure or allowExitCodes: the step is FAILURE
+				// with its exit code, and the build goes on.
+				_, _ = w.Write([]byte(err.Error() + "\n"))
+				stepEnd := time.Now()
+				ok[i] = true
+				r.update(func(b *cbpb.Build) {
+					b.Steps[i].Status, b.Steps[i].Timing.EndTime = cbpb.Build_FAILURE, timestamppb.New(stepEnd)
+					var exit *StepExitError
+					if errors.As(err, &exit) {
+						b.Steps[i].ExitCode = int32(exit.Code)
+					}
+				})
+				r.flushLog(ctx)
+				return
+			}
 			if err != nil {
 				defer stopSteps()
 				if st, isDone := ctxStatus(); isDone {
@@ -998,6 +1149,14 @@ func (r *buildRun) runStep(ctx context.Context, p plannedStep, w *stepWriter) er
 	case stepContainer:
 		spec := p.step
 		spec.Log = w
+		if len(p.secretEnv) > 0 {
+			r.mu.Lock()
+			spec.Secrets = make(map[string]string, len(p.secretEnv))
+			for _, n := range p.secretEnv {
+				spec.Secrets[n] = r.secrets[n]
+			}
+			r.mu.Unlock()
+		}
 		return r.ws.RunStep(ctx, spec)
 	case stepDockerPush:
 		r.mu.Lock()

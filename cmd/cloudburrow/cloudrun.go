@@ -45,6 +45,10 @@ type runService struct {
 	// Secret Manager is not enabled, and the adapter then refuses a
 	// reference rather than dropping it.
 	secrets runadapter.SecretResolver
+	// buildSecretManager and buildKMS read a Cloud Build build's
+	// availableSecrets and secrets (#1407); nil when not enabled.
+	buildSecretManager runadapter.SecretAccessor
+	buildKMS           runadapter.KMSDecrypter
 	// env is what every revision and job task is given (#576), resolved
 	// per request: the adapter starts before the CLI-hosted services are
 	// published to the cluster, so their addresses are not known at Start.
@@ -177,6 +181,7 @@ func (r *runService) Start(ctx context.Context) error {
 	}
 	// Arbitrary steps run only with --cloudbuild-host-steps, from loopback (#1382).
 	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg)).AllowHostSteps(r.cfg.CloudBuildHostSteps)
+	builds = builds.WithBuildSecrets(r.buildSecretManager, r.buildKMS)
 	register := func(g grpc.ServiceRegistrar) {
 		adapter.Register(g)
 		adapter.Revisions().Register(g)
