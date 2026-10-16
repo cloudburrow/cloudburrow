@@ -358,3 +358,21 @@ func TestFaultListSaysWhatARuleMayName(t *testing.T) {
 		}
 	}
 }
+
+// A Pub/Sub rule is refused because Pub/Sub is served in the cluster, behind
+// the front in the emulator's pod (#1266), not because CloudBurrow never sees
+// its requests: it records every one from that front.
+func TestFaultRuleForPubSubNamesWhyItIsRefused(t *testing.T) {
+	for _, svc := range []string{"pubsub", "bigtable", "spanner", "firestore", "datastore"} {
+		r := FaultRule{Service: svc, Code: "UNAVAILABLE"}
+		err := r.validate(map[string]bool{"kms": true})
+		if err == nil || !strings.Contains(err.Error(), "served in the cluster") ||
+			strings.Contains(err.Error(), "never sees") || strings.Contains(err.Error(), "port-forward") {
+			t.Errorf("a %s rule = %v, want refused because it is served in the cluster", svc, err)
+		}
+	}
+	r := FaultRule{Service: "spanner", Code: "UNAVAILABLE"}
+	if err := r.validate(map[string]bool{"spanner": true}); err != nil {
+		t.Errorf("a spanner rule once spanner is interposed = %v", err)
+	}
+}

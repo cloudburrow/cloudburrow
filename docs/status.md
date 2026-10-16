@@ -147,9 +147,10 @@ and a rough size, is in [gaps.md](gaps.md).
   reach the host's loopback ports. Health, readiness and metrics stay open.
 - **`/admin/events` and `/metrics` record only the services CloudBurrow observes** — Cloud Tasks,
   Secret Manager, the Cloud Run adapter, Cloud KMS, Cloud Scheduler, Cloud Logging, Resource Manager
-  and the builtin Cloud Storage server. Pub/Sub and the opt-in emulators are reached over a raw
-  port-forward to an upstream process, so their calls are not observed, and `/metrics` reports them
-  as `cloudburrow_service_measured 0` (#600).
+  and the builtin Cloud Storage server, and Pub/Sub, Bigtable, Spanner, Firestore and Datastore,
+  whose calls the CLI scrapes from the front in each emulator's pod (#1266, #1267, #1288). BigQuery,
+  Cloud SQL and Memorystore have no call observer, and `/metrics` reports them as
+  `cloudburrow_service_measured 0` (#600).
 - **The request log, tracing and fault injection cover the same in-process gRPC services** —
   Cloud Tasks, Secret Manager, the Cloud Run adapter, Cloud KMS, Cloud Scheduler, Cloud Logging and
   Resource Manager (#600): `cloudburrow logs --service <name>` shows their request lines, each call

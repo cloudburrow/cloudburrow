@@ -100,6 +100,12 @@ func avroExportSchema(typ string, logical bool) (any, string) {
 		// A WKT string with sqlType GEOGRAPHY, by analogy with JSON: the
 		// export section does not name GEOGRAPHY (UNVERIFIED against BigQuery).
 		return map[string]any{"type": "string", "sqlType": "GEOGRAPHY"}, "string"
+	case "INTERVAL":
+		// The Avro export details do not list INTERVAL: a string of its
+		// canonical text, "[sign]Y-M [sign]D [sign]H:M:S[.F]" (data types
+		// reference), with sqlType INTERVAL as JSON and GEOGRAPHY have
+		// (UNVERIFIED against BigQuery).
+		return map[string]any{"type": "string", "sqlType": "INTERVAL"}, "string"
 	case "NUMERIC":
 		// (A parameterized one's are its own: avroFields.) The precision
 		// and scale of an unparameterized NUMERIC and

@@ -11,8 +11,10 @@ import (
 // Optional emulator components.
 //
 // Each wraps a Google-published emulator rather than reimplementing a database
-// (ADR-0005). All four are in-memory by design, which is why none is given a
-// volume: provisioning one would imply durability they do not have.
+// (ADR-0005). Firestore, Bigtable and Spanner are in-memory by design, which is
+// why none of them is given a volume: provisioning one would imply durability
+// they do not have. Datastore's emulator stores to disk, so in persistent mode
+// it is given one (#307).
 const (
 	// SpannerImage is Google's Spanner emulator, pinned by digest. Unlike the
 	// others it ships as its own image rather than inside the Cloud SDK.

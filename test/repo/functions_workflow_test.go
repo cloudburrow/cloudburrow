@@ -99,8 +99,8 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 		t.Error("functions.yml does not check pack's tarball against a pinned SHA-256")
 	}
 
-	// The selection names exactly the ten gated tests, so a renamed one
-	// cannot drop out unnoticed.
+	// The selection names exactly the eleven gated tests and the ungated
+	// TestFunctionsAPI (#1377), so a renamed one cannot drop out unnoticed.
 	files, err := filepath.Glob(filepath.Join("..", "compat", "*_test.go"))
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +121,8 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 	}
 	for _, want := range []string{"TestFunctionsFrameworkBuiltWithBuildpacks", "TestFunctionsRebuildReusesLayers", "TestFunctionsBuildBrokenModulePathFails", "TestFunctionsSubmitBuildBuildpacks",
 		"TestFunctionsNodejsBuiltWithBuildpacks", "TestFunctionsPythonBuiltWithBuildpacks",
-		"TestFunctionsJavaBuiltWithBuildpacks", "TestFunctionsRubyBuiltWithBuildpacks", "TestFunctionsPHPBuiltWithBuildpacks", "TestFunctionsDotnetBuiltWithBuildpacks"} {
+		"TestFunctionsJavaBuiltWithBuildpacks", "TestFunctionsRubyBuiltWithBuildpacks", "TestFunctionsPHPBuiltWithBuildpacks", "TestFunctionsDotnetBuiltWithBuildpacks",
+		"TestFunctionsAPIBuildsAndServes", "TestFunctionsAPI"} {
 		found := false
 		for _, g := range got {
 			found = found || g == want
@@ -130,8 +131,8 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 			t.Errorf("-run TestFunctions does not select %s; it selects %q", want, got)
 		}
 	}
-	if len(got) != 10 {
-		t.Errorf("-run TestFunctions selects %q; want the ten gated Functions tests", got)
+	if len(got) != 12 {
+		t.Errorf("-run TestFunctions selects %q; want the eleven gated Functions tests and TestFunctionsAPI", got)
 	}
 }
 

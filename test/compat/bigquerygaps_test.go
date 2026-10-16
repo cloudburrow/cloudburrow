@@ -106,10 +106,9 @@ func rows(t *testing.T, ctx context.Context, c *bigquery.Client, sql string) [][
 // `x!`, and failed a CREATE OR REPLACE VIEW of an existing view, 400,
 // leaving it unreadable. A view with names BigQuery takes is made and
 // read, and CREATE OR REPLACE VIEW replaces an existing one. CREATE
-// MATERIALIZED VIEW and a view's column list in a multi-statement script
-// with a TEMP table (a lone one is carried out, #1240, and one in another
-// script, #1323), which the emulator does not support (400 "not
-// supported", measured), are 501.
+// MATERIALIZED VIEW, which the emulator does not support (400 "not
+// supported", measured), is 501. (A view's column list, which the emulator
+// does not support either, is carried out: #1240, #1323, #1335.)
 func TestBigQueryViewNamesAndColumns(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -130,12 +129,8 @@ func TestBigQueryViewNamesAndColumns(t *testing.T) {
 				t.Errorf("the refused %s made %s", sql, view)
 			}
 		}
-		for _, sql := range []string{
-			"CREATE TEMP TABLE tt AS SELECT 1 AS a; CREATE VIEW " + path("listed") + " (c, d) AS SELECT a, b FROM " + path("base"),
-			"CREATE MATERIALIZED VIEW " + path("mv") + " AS SELECT a FROM " + path("base"),
-		} {
-			wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusNotImplemented, "notImplemented")
-		}
+		sql := "CREATE MATERIALIZED VIEW " + path("mv") + " AS SELECT a FROM " + path("base")
+		wantReason(t, sql, bqRun(ctx, c, sql, insert), http.StatusNotImplemented, "notImplemented")
 	}
 	err := ds.Table("tv").Create(ctx, &bigquery.TableMetadata{ViewQuery: "SELECT a AS `w!` FROM " + path("base")})
 	wantReason(t, "tables.insert of a view with a column w!", err, http.StatusBadRequest, "invalid")

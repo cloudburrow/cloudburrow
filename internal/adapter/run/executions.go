@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -114,6 +115,26 @@ metadata:
 	return b.String(), nil
 }
 
+// executionLogURI is an execution's log_uri, or with index >= 0 its task's:
+// Google's form, the Cloud Logging console's Logs Explorer with the filter
+// that selects the execution's container output (#1379), which the run log
+// feeder writes under the same resource and labels (#1298). It is not the
+// CloudBurrow console's Logs Explorer, which takes no Cloud Logging filter;
+// gcloud logging read with the filter reads the same entries locally.
+func executionLogURI(execName string, index int) string {
+	n, err := resource.Parse(execName)
+	if err != nil || n.ParentID == "" {
+		return ""
+	}
+	filter := fmt.Sprintf("resource.type=\"cloud_run_job\"\nresource.labels.job_name=\"%s\"\nresource.labels.location=\"%s\"\n"+
+		"labels.\"run.googleapis.com/execution_name\"=\"%s\"", n.ParentID, n.Location, n.ID)
+	if index >= 0 {
+		filter += fmt.Sprintf("\nlabels.\"run.googleapis.com/task_index\"=\"%d\"", index)
+	}
+	return "https://console.cloud.google.com/logs/viewer?project=" + url.QueryEscape(n.Project) +
+		"&advancedFilter=" + url.QueryEscape(filter)
+}
+
 // executionState is what an execution's batch Job says about it.
 type executionState struct {
 	terminal   bool
@@ -221,6 +242,7 @@ func fromBatchJob(j kjob, podMessage string) *runpb.Execution {
 		RunningCount:       j.Status.Active,
 		SucceededCount:     j.Status.Succeeded,
 	}
+	e.LogUri = executionLogURI(e.Name, -1)
 	readJSONAnnotation(ann, annExecLabels, &e.Labels)
 	readJSONAnnotation(ann, annExecAnnotations, &e.Annotations)
 	if raw := ann[annTaskTemplate]; raw != "" {

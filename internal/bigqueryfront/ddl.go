@@ -234,7 +234,8 @@ func checkDDL(sql string) ddlVerdict {
 					// A lone one is carried out before this (#1240,
 					// viewcolumns.go), and one in a script with no TEMP
 					// table or function by the front's run of the script
-					// (#1323).
+					// (#1323), and with one in the script's text (#1335,
+					// viewcolumnstemp.go).
 					unsupported = "CREATE VIEW with a column list in a multi-statement script"
 				case kind == "TABLE" || kind == "VIEW":
 					c.text, c.pos = sql[body[0].pos:body[len(body)-1].end], body[0].pos
@@ -312,8 +313,8 @@ func checkDDL(sql string) ddlVerdict {
 		switch unsupported {
 		case "CREATE VIEW with a column list in a multi-statement script":
 			hint = "A query that is one CREATE VIEW with a column list is carried out (#1240), and so is one in a script " +
-				"with no TEMP table or function, which CloudBurrow runs a statement at a time (#1323), but not one with " +
-				"a TEMP table, which lasts only for the request that made it, nor a dry run, which runs nothing."
+				"with no TEMP table or function, which CloudBurrow runs a statement at a time (#1323), or with one (#1335), " +
+				"and a dry run of a lone one, but not a script in a dry run, nor one given by EXECUTE IMMEDIATE."
 		case "CREATE TABLE LIKE":
 			hint = "CREATE TABLE ... AS SELECT * FROM the source LIMIT 0 makes a table with its columns (not its options)."
 		case "CREATE TABLE COPY", "CREATE TABLE CLONE", "CREATE SNAPSHOT TABLE", "DROP SNAPSHOT TABLE":

@@ -11,12 +11,13 @@ Do not edit these files by hand.
 | [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
 | [Cloud Run v2](run.md) | 41 | 41 | 0 | 0 | 0 | 0 | 0 | 4 |
-| [Artifact Registry](artifactregistry.md) | 50 | 3 | 0 | 47 | 0 | 0 | 0 | 0 |
+| [Artifact Registry](artifactregistry.md) | 50 | 5 | 0 | 45 | 0 | 0 | 0 | 0 |
 | [Cloud Build](cloudbuild.md) | 19 | 5 | 0 | 14 | 0 | 0 | 0 | 0 |
-| [Cloud Run v1 (Knative API)](runv1.md) | 76 | 27 | 0 | 0 | 0 | 0 | 49 | 0 |
+| [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Cloud Run v1 (Knative API)](runv1.md) | 76 | 35 | 0 | 0 | 0 | 0 | 41 | 0 |
 | [Cloud KMS](kms.md) | 40 | 38 | 0 | 2 | 0 | 0 | 0 | 82 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 46 | 0 | 6 | 0 | 0 | 0 | 0 |
-| [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 25 | 0 | 0 | 0 | 0 | 13 | 0 |
+| [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 26 | 12 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 42 | 0 | 1 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 14 | 10 | 0 | 4 | 0 | 0 | 0 | 0 |

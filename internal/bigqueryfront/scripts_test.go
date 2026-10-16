@@ -557,7 +557,9 @@ func TestExtractJobs(t *testing.T) {
 		{"JSON with SNAPPY", `"t"},"destinationUris":["gs://b/out.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON","compression":"SNAPPY"`, 400, "", nil},
 		{"AVRO of a RANGE", `"rng"},"destinationUris":["gs://b/out.avro"],"destinationFormat":"AVRO"`, 400, "", nil}, // "RANGE types aren't supported in Avro export"
 		{"PARQUET of a RECORD", `"nested"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET"`, 200, "out", nil},
-		{"JSON of a DATE", `"t"},"destinationUris":["gs://b/out.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`, 501, "", nil},
+		{"JSON of a DATE", `"t"},"destinationUris":["gs://b/out.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`, 200, "out.json", nil},
+		{"JSON of a RECORD", `"nested"},"destinationUris":["gs://b/out.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`, 200, "out.json", nil},
+		{"PARQUET of a RANGE", `"rng"},"destinationUris":["gs://b/out"],"destinationFormat":"PARQUET"`, 200, "out", nil},
 		{"DEFLATE", `"t"},"destinationUris":["gs://b/out.csv"],"compression":"DEFLATE"`, 400, "", nil},
 		{"a delimiter of two", `"t"},"destinationUris":["gs://b/out.csv"],"fieldDelimiter":"||"`, 501, "", nil},
 		{"two URIs", `"t"},"destinationUris":["gs://b/a-*.csv","gs://b/b-*.csv"]`, 200, "a-000000000000.csv", nil}, // and b-000000000000.csv
@@ -566,7 +568,7 @@ func TestExtractJobs(t *testing.T) {
 		{"two wildcards", `"t"},"destinationUris":["gs://b/a-*-*.csv"]`, 400, "", nil},
 		{"a view", `"v"},"destinationUris":["gs://b/out.csv"]`, 400, "", nil},
 		{"nested", `"nested"},"destinationUris":["gs://b/out.csv"]`, 400, "", nil},
-		{"a TIMESTAMP", `"ts"},"destinationUris":["gs://b/out.csv"]`, 501, "", nil},
+		{"a TIMESTAMP", `"ts"},"destinationUris":["gs://b/out.csv"]`, 200, "out.csv", nil},
 		{"no such bucket", `"t"},"destinationUris":["gs://nope/out.csv"]`, 404, "", nil},
 		{"no such table", `"nope"},"destinationUris":["gs://b/out.csv"]`, 200, "", []string{`"tableId":"nope"`}},
 	} {
@@ -708,9 +710,9 @@ func TestExtractsTheFrontWrites(t *testing.T) {
 			t.Errorf("the emulator was sent %v", emu.log)
 		}
 	}
-	// A NULL in JSON is not written; the job's ID is still free.
-	if code, _ := do(t, h, "POST", base+"/jobs", job("j6", "n", `"destinationUris":["gs://b/n.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`)); code != 501 || uploads["n.json"] != "" {
-		t.Errorf("a NULL in JSON: %d", code)
+	// A NULL in JSON is left out.
+	if code, _ := do(t, h, "POST", base+"/jobs", job("j6", "n", `"destinationUris":["gs://b/n.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`)); code != 200 || uploads["n.json"] != "application/json\n{\"a\":\"1\"}\n" {
+		t.Errorf("a NULL in JSON: %d %q", code, uploads["n.json"])
 	}
 	if code, _ := do(t, h, "POST", base+"/jobs", job("j1", "t", `"destinationUris":["gs://b/again.json"],"destinationFormat":"NEWLINE_DELIMITED_JSON"`)); code != 409 {
 		t.Errorf("a job ID in use: %d", code)
@@ -724,7 +726,7 @@ func TestExtractsTheFrontWrites(t *testing.T) {
 		}
 		ids = append(ids, job["jobReference"].(map[string]any)["jobId"].(string))
 	}
-	if fmt.Sprint(ids) != "[j5 j4 j3 j2 j1]" { // newest first (#972)
+	if fmt.Sprint(ids) != "[j6 j5 j4 j3 j2 j1]" { // newest first (#972)
 		t.Errorf("jobs.list: %v", ids)
 	}
 	if code, got := do(t, h, "POST", base+"/jobs/j1/cancel", ""); code != 200 || got["job"] == nil {

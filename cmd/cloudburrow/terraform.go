@@ -48,6 +48,20 @@ var terraformEndpoints = []terraformEndpoint{
 	// and destroy in TestTerraformAppliesAndDestroysThroughTheWrapper.
 	{config.ServiceSecrets, "secret_manager_custom_endpoint", "GOOGLE_SECRET_MANAGER_CUSTOM_ENDPOINT", "/v1/", true},
 	{config.ServiceRun, "cloud_run_v2_custom_endpoint", "GOOGLE_CLOUD_RUN_V2_CUSTOM_ENDPOINT", "/v2/", true},
+	// Artifact Registry and Cloud Build v1 (#1304) are served on the Run
+	// port beside Cloud Run (#1347, SourceDeployHandler).
+	// google_artifact_registry_repository applies, plans clean, updates in
+	// place and destroys in TestTerraformArtifactRegistryRepository. Cloud
+	// Build serves builds, not triggers or worker pools: with the endpoint
+	// set, google_cloudbuild_trigger and _worker_pool are answered 501 by
+	// this instance, never sent to Google (TestTerraformCloudBuildTriggerRefused).
+	{config.ServiceRun, "artifact_registry_custom_endpoint", "GOOGLE_ARTIFACT_REGISTRY_CUSTOM_ENDPOINT", "/v1/", true},
+	{config.ServiceRun, "cloud_build_custom_endpoint", "GOOGLE_CLOUD_BUILD_CUSTOM_ENDPOINT", "/v1/", true},
+	// Cloud Functions v2 (#1377), on the Run port: a function is a
+	// buildpacks build and a Cloud Run service. google_cloudfunctions2_function
+	// applies, plans clean, updates in place and destroys in
+	// TestTerraformCloudFunctions2Function, gated as the Functions tests are.
+	{config.ServiceRun, "cloudfunctions2_custom_endpoint", "GOOGLE_CLOUDFUNCTIONS2_CUSTOM_ENDPOINT", "/v2/", true},
 	// Cloud KMS (#425): a key ring, a key and a version apply, plan clean,
 	// update their labels and destroy in TestTerraformKMS, over the JSON API
 	// (#422-#424). The provider's discovery client strips the version from
@@ -213,8 +227,10 @@ type unpointedPrefix struct{ prefix, why string }
 // Google for this instance, whatever is enabled, so the wrapper refuses to
 // run a module that declares one rather than warn and let it through.
 //
-// Firestore, Spanner and Bigtable when the instance does not serve them
-// (Spanner's REST port among it), since nothing then points them here.
+// Firestore, Spanner and Bigtable, and Artifact Registry and Cloud Build,
+// when the instance does not serve them (Spanner's REST port among it),
+// since nothing then points them here; Cloud Functions and Cloud Build v2
+// always.
 func unpointedResources(cfg config.Config) []unpointedPrefix {
 	var out []unpointedPrefix
 	set, _ := terraformSettings(cfg)
@@ -232,6 +248,23 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	if bigtableHost(cfg) == "" {
 		out = append(out, unpointedPrefix{"google_bigtable_", "this instance does not serve Bigtable"})
 	}
+	run := false
+	for _, e := range set {
+		run = run || e.service == config.ServiceRun
+	}
+	if !run {
+		out = append(out,
+			unpointedPrefix{"google_artifact_registry_", "this instance does not serve Artifact Registry (it is on the Run port)"},
+			unpointedPrefix{"google_cloudbuild_", "this instance does not serve Cloud Build (it is on the Run port)"},
+			unpointedPrefix{"google_cloudfunctions2_", "this instance does not serve Cloud Functions (it is on the Run port)"})
+	}
+	// Whatever is enabled: no instance serves the Cloud Functions v1 API
+	// or Cloud Build v2's repository connections, so the provider has no
+	// local endpoint for them (#1304). Cloud Functions v2 is served on the
+	// Run port (#1377).
+	out = append(out,
+		unpointedPrefix{"google_cloudfunctions_", "CloudBurrow serves Cloud Functions v2 only: use google_cloudfunctions2_function"},
+		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"})
 	return out
 }
 

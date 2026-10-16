@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -33,8 +34,11 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 			if strings.Contains(body, "googleapis.com") || strings.Contains(body, "google.com") {
 				t.Fatalf("%v: a Google endpoint in\n%s", services, body)
 			}
-			set := 0
+			set, rows := 0, 0
 			for _, e := range terraformEndpoints {
+				if slices.Contains(services, e.service) {
+					rows++ // Run has three: Cloud Run v2, Artifact Registry and Cloud Build (#1304)
+				}
 				in := strings.Contains(body, e.attr)
 				if in && !e.verified {
 					t.Errorf("%v: unverified %s was set", services, e.attr)
@@ -45,7 +49,7 @@ func TestTheTerraformProviderNeverPointsAtGoogle(t *testing.T) {
 			}
 			// The Resource Manager rows are always set: the project registry
 			// always runs, whichever services are enabled: v1, Cloud Billing, v3 and tags, and so does Service Usage.
-			if set+len(skipped) != len(services)+5 {
+			if set+len(skipped) != rows+5 {
 				t.Errorf("%v: %d set and %d named as skipped, want every enabled service accounted for", services, set, len(skipped))
 			}
 			if override != strings.Contains(body, "credentials  = null") {

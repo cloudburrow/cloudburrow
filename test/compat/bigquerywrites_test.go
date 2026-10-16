@@ -255,17 +255,19 @@ func TestBigQueryBytesParameters(t *testing.T) {
 		r0[14] != "ff0061" {
 		t.Errorf("the fields of a STRUCT parameter: %#v", r0)
 	}
-	// The whole STRUCT (no TIMESTAMP in it: a TIMESTAMP inside a RECORD
-	// reads back as the engine's text, #1101).
+	// The whole STRUCT, a TIMESTAMP in it: it used to read back as the
+	// engine's text, which the Go client failed to parse, until the front
+	// gave every nested TIMESTAMP in the form the client asks for (#1101).
 	type whole struct {
-		X []byte
-		S string
-		I inner
-		A []inner
+		X  []byte
+		S  string
+		I  inner
+		A  []inner
+		TS time.Time
 	}
-	got = read(query("SELECT @p", p(whole{X: raw, S: "s", I: inner{Z: []byte{0x00}, N: 1}, A: []inner{{Z: raw, N: 2}}})))
+	got = read(query("SELECT @p", p(whole{X: raw, S: "s", I: inner{Z: []byte{0x00}, N: 1}, A: []inner{{Z: raw, N: 2}}, TS: ts})))
 	if len(got) != 1 || fmt.Sprintf("%v", got[0][0]) != fmt.Sprintf("%v", []bigquery.Value{raw, "s", []bigquery.Value{[]byte{0x00}, int64(1)},
-		[]bigquery.Value{[]bigquery.Value{raw, int64(2)}}}) {
+		[]bigquery.Value{[]bigquery.Value{raw, int64(2)}}, ts}) {
 		t.Errorf("SELECT @p of a STRUCT: %#v", got)
 	}
 	// An ARRAY of STRUCTs, a positional STRUCT and a NULL one.

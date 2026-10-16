@@ -18,7 +18,8 @@ import (
 // the two versions store one job and refuse the same configuration. The
 // path is /apis/run.googleapis.com/v1/namespaces/{project}/jobs[/{name}],
 // and the region is the {region}- host's or the cloud.googleapis.com/location
-// label, as for services. replaceJob, run, executions and tasks stay 501.
+// label, as for services. replaceJob and run, and executions and tasks
+// (#1379), are in v1executions.go.
 
 // v1JobParent is a jobs request's v2 parent; every call needs a region.
 func v1JobParent(sc v1Scope, label string) (string, error) {
@@ -275,11 +276,7 @@ func toV1Job(j *runpb.Job) *runv1.Job {
 	}
 	et := j.GetTemplate()
 	tt := et.GetTemplate()
-	ts := &runv1.TaskSpec{Containers: toV1Containers(tt.GetContainers(), tt.GetVolumes()), Volumes: toV1Volumes(tt.GetVolumes()),
-		ServiceAccountName: tt.GetServiceAccount(), TimeoutSeconds: tt.GetTimeout().GetSeconds()}
-	if r, ok := tt.GetRetries().(*runpb.TaskTemplate_MaxRetries); ok {
-		ts.MaxRetries = int64(r.MaxRetries)
-	}
+	ts := toV1TaskSpec(tt)
 	out := &runv1.Job{ApiVersion: "run.googleapis.com/v1", Kind: "Job", Metadata: meta,
 		Spec: &runv1.JobSpec{Template: &runv1.ExecutionTemplateSpec{
 			Metadata: &runv1.ObjectMeta{Labels: et.GetLabels(), Annotations: toV1CloudSQL(cloneAnn(et.GetAnnotations()), tt.GetVolumes())},
@@ -297,6 +294,16 @@ func toV1Job(j *runpb.Job) *runv1.Job {
 		}
 	}
 	return out
+}
+
+// toV1TaskSpec renders a v2 task template as v1's task spec.
+func toV1TaskSpec(tt *runpb.TaskTemplate) *runv1.TaskSpec {
+	ts := &runv1.TaskSpec{Containers: toV1Containers(tt.GetContainers(), tt.GetVolumes()), Volumes: toV1Volumes(tt.GetVolumes()),
+		ServiceAccountName: tt.GetServiceAccount(), TimeoutSeconds: tt.GetTimeout().GetSeconds()}
+	if r, ok := tt.GetRetries().(*runpb.TaskTemplate_MaxRetries); ok {
+		ts.MaxRetries = int64(r.MaxRetries)
+	}
+	return ts
 }
 
 // v1Condition renders a v2 condition as v1's, of the given type.

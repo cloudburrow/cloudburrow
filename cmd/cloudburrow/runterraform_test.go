@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -50,5 +52,45 @@ func TestRequestEventsNameTheProjectUnderAnyVersion(t *testing.T) {
 	slices.Sort(got)
 	if strings.Join(got, ",") != "p1,p2" {
 		t.Errorf("projects = %q; want p1 and p2", got)
+	}
+}
+
+// TestTerraformSetsArtifactRegistryAndCloudBuild (#1304): with Cloud Run
+// served, Artifact Registry and Cloud Build are pointed at the Run port;
+// without it their resources are refused, as are Cloud Functions v2's
+// (#1377), and Cloud Functions v1 and Cloud Build v2, which no instance
+// serves, are refused whatever is enabled.
+func TestTerraformSetsArtifactRegistryAndCloudBuild(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []config.Service{config.ServiceRun}
+	body, _ := terraformProvider(cfg, false)
+	for _, want := range []string{
+		`artifact_registry_custom_endpoint = "http://127.0.0.1:9004/v1/"`,
+		`cloud_build_custom_endpoint = "http://127.0.0.1:9004/v1/"`,
+		`cloudfunctions2_custom_endpoint = "http://127.0.0.1:9004/v2/"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%s is not set:\n%s", want, body)
+		}
+	}
+	dir := t.TempDir()
+	module := `resource "google_artifact_registry_repository" "r" {}
+resource "google_cloudbuild_trigger" "t" {}
+resource "google_cloudfunctions2_function" "f" {}
+resource "google_cloudfunctions_function" "g" {}
+resource "google_cloudbuildv2_connection" "c" {}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := unpointed(dir, unpointedResources(cfg))
+	if len(got) != 2 || !strings.HasPrefix(got[0], "google_cloudfunctions_function ") ||
+		!strings.HasPrefix(got[1], "google_cloudbuildv2_connection ") {
+		t.Errorf("with Cloud Run: unpointed = %q, want the v1 function and the v2 connection", got)
+	}
+	noRun := config.Default()
+	noRun.Services = []config.Service{config.ServiceStorage}
+	if got := unpointed(dir, unpointedResources(noRun)); len(got) != 5 {
+		t.Errorf("without Cloud Run: unpointed = %q, want all five", got)
 	}
 }

@@ -119,6 +119,38 @@ func TestBigQueryToJSONStringOfStoredRows(t *testing.T) {
 	}
 }
 
+// TestBigQueryJSONBuildersOfStoredRows (#1127): JSON_OBJECT, JSON_ARRAY,
+// JSON_SET, JSON_ARRAY_APPEND and JSON_ARRAY_INSERT encode a value read
+// from a table as TO_JSON_STRING does. Measured first on the emulator: a
+// BOOL was written 1 and a DATE, DATETIME, TIME or TIMESTAMP unquoted; fixed
+// in the engine CloudBurrow builds (googlesqlite 0014).
+// covers: bigquery.jobs.query
+func TestBigQueryJSONBuildersOfStoredRows(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	ds, _ := twoDatasets(t, h, c)
+	ctx := h.Context()
+	tbl := ds.DatasetID + ".jb"
+	if err := bqRun(ctx, c, "CREATE TABLE "+tbl+" (b BOOL, d DATE, dt DATETIME, tm TIME, ts TIMESTAMP)", false); err != nil {
+		t.Fatalf("CREATE TABLE: %v", err)
+	}
+	if err := bqRun(ctx, c, "INSERT "+tbl+` VALUES (TRUE, DATE '2017-03-06', DATETIME '2017-03-06 12:34:56',
+		TIME '12:34:56', TIMESTAMP '2017-03-06 12:34:56+00')`, true); err != nil {
+		t.Fatalf("INSERT: %v", err)
+	}
+	for q, want := range map[string]string{
+		"SELECT TO_JSON_STRING(JSON_OBJECT('b', b, 'd', d, 'dt', dt, 'tm', tm, 'ts', ts)) FROM " + tbl: `{"b":true,"d":"2017-03-06","dt":"2017-03-06T12:34:56","tm":"12:34:56","ts":"2017-03-06T12:34:56Z"}`,
+		"SELECT TO_JSON_STRING(JSON_ARRAY(b, d, dt, tm, ts)) FROM " + tbl:                              `[true,"2017-03-06","2017-03-06T12:34:56","12:34:56","2017-03-06T12:34:56Z"]`,
+		"SELECT TO_JSON_STRING(JSON_SET(JSON '{}', '$.b', b, '$.d', d, '$.ts', ts)) FROM " + tbl:       `{"b":true,"d":"2017-03-06","ts":"2017-03-06T12:34:56Z"}`,
+		"SELECT TO_JSON_STRING(JSON_ARRAY_APPEND(JSON '[]', '$', b, '$', d, '$', ts)) FROM " + tbl:     `[true,"2017-03-06","2017-03-06T12:34:56Z"]`,
+		"SELECT TO_JSON_STRING(JSON_ARRAY_INSERT(JSON '[0]', '$[0]', b, '$[0]', tm)) FROM " + tbl:      `["12:34:56",true,0]`,
+	} {
+		if got := queryRows(t, ctx, c, project, "", q); len(got) != 1 || got[0] != want {
+			t.Errorf("%s: %q, want %s", q, got, want)
+		}
+	}
+}
+
 // canonicalJSON is s with its object keys sorted and its numbers as written.
 func canonicalJSON(t *testing.T, s string) string {
 	t.Helper()

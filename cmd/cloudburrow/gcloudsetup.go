@@ -93,6 +93,10 @@ var gcloudVerified = []struct {
 	// TestGcloudRunDeploySource and TestGcloudBuildsSubmit drive them.
 	{config.ServiceRun, "artifactregistry", "/", false, false},
 	{config.ServiceRun, "cloudbuild", "/", false, false},
+	// Cloud Functions v2 (#1377), on the Run port; gcloud functions appends
+	// v2/. TestGcloudFunctions drives deploy --gen2, describe, list and
+	// delete, gated as the Functions tests are.
+	{config.ServiceRun, "cloudfunctions", "/", false, false},
 	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.

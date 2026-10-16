@@ -106,7 +106,7 @@ func TestV1ServesKnativeShapedReads(t *testing.T) {
 		t.Errorf("getIamPolicy of a missing service = %d; want 404", code)
 	}
 	for _, path := range []string{
-		"/apis/run.googleapis.com/v1/namespaces/demo-project/executions",
+		"/apis/run.googleapis.com/v1/namespaces/demo-project/instances",
 	} {
 		if code, _ := call(t, srv, http.MethodGet, path, ""); code != 501 {
 			t.Errorf("GET %s = %d; want 501", path, code)

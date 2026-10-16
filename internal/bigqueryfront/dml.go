@@ -162,6 +162,9 @@ func (d dmlCounts) patch(obj map[string]any) {
 // 501, a query with CREATE VIEW through keepViewTexts (#1014), anything
 // else through serveQuery.
 func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) {
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.alterProjectOptions(w, r, q, insert) { // #1375, projectoptions.go
+		return
+	}
 	if q.UseLegacySQL == nil || !*q.UseLegacySQL {
 		if refs := informationSchemaJobs(q.Query); len(refs) > 0 { // #1275, infoschemajobs.go
 			f.withInformationSchemaJobs(w, r, q, refs, insert)
@@ -230,6 +233,12 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if !txnRequest(r) && (hasControlFlow(q.Query) || runsInTurn(q.Query)) { // #1201, scriptflow.go; a transaction's probe is the emulator's (transactions.go); #1037, execimmediate.go
 		f.runScript(w, r, q, insert)
 		return
+	}
+	if !txnRequest(r) {
+		if views, ok := tempScriptViewLists(q.Query); ok { // #1335, viewcolumnstemp.go
+			f.tempScriptViews(w, r, q, views, insert)
+			return
+		}
 	}
 	if !txnRequest(r) && rowCountInOneRequest(q.Query) { // #1037, execimmediate.go
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: @@row_count in a script with a "+
@@ -855,8 +864,19 @@ func mergeFromSubquery(sql string) string {
 // #1273, streamingbuffer.go). The rows a statement would change are
 // counted among the buffered rows alone; an INSERT changes none.
 func (f front) bufferedChange(r *http.Request, q queryOptions, d dmlStmt, ds, table string) string {
-	win, ok := f.buffers.window(projectOf(f.base), ds, table)
-	if !ok || d.kind == "INSERT" {
+	if d.kind == "INSERT" {
+		return ""
+	}
+	// The rows in the streaming buffer, and those streamed in the last 30
+	// minutes (#1370, streamingbuffer.go).
+	var conds []string
+	if win, ok := f.buffers.window(projectOf(f.base), ds, table); ok {
+		conds = append(conds, win.cond())
+	}
+	if c := f.buffers.streamedRecently(projectOf(f.base), ds, table); c != "" {
+		conds = append(conds, c)
+	}
+	if len(conds) == 0 {
 		return ""
 	}
 	alias := strings.TrimSpace(strings.TrimPrefix(d.targetText, d.pathText))
@@ -866,7 +886,7 @@ func (f front) bufferedChange(r *http.Request, q queryOptions, d dmlStmt, ds, ta
 	if alias == "" && len(d.target) > 0 {
 		alias = quoteName(d.target[len(d.target)-1])
 	}
-	buffered := "(SELECT * FROM " + d.pathText + " WHERE " + win.cond() + ") AS " + alias
+	buffered := "(SELECT * FROM " + d.pathText + " WHERE " + strings.Join(conds, " OR ") + ") AS " + alias
 	var n int64
 	switch d.kind {
 	case "TRUNCATE_TABLE", "DELETE", "UPDATE":

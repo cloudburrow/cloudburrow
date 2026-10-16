@@ -177,8 +177,12 @@ func (r *runService) Start(ctx context.Context) error {
 	// servers, transcoded, for REST clients and Terraform's provider.
 	// The v1 (Knative-shaped) API gcloud run calls (#1293), on the same
 	// port and over the same adapter.
-	var jsonAPI http.Handler = runadapter.SourceDeployHandler(sourceDeploy,
-		adapter.V1Handler(runadapter.NewRESTHandler(register)))
+	// Cloud Functions v2 (#1377): a function is a SubmitBuild buildpacks
+	// build and a Cloud Run service, on the same port, with its source
+	// upload and download URLs.
+	functions := adapter.Functions(builds, func() string { return hostURL(r.server.Addr()) })
+	var jsonAPI http.Handler = functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
+		adapter.V1Handler(runadapter.NewRESTHandler(register))))
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}
@@ -187,6 +191,7 @@ func (r *runService) Start(ctx context.Context) error {
 		register(g)
 		adapter.ArtifactRegistry().Register(g)
 		builds.CloudBuild().Register(g)
+		functions.Register(g)
 	}); err != nil {
 		return err
 	}

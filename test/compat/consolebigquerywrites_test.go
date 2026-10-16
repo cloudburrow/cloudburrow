@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	"google.golang.org/api/iterator"
@@ -284,7 +285,7 @@ func TestConsoleBigQueryEditTableViewsAndInsertOptions(t *testing.T) {
 	if got := strings.Join(consoleWriteDetail(t, addr, "bigquery", project, ds.DatasetID, "names").actionIDs(), ","); got != "edittable,deletetable" {
 		t.Errorf("a view's page offers %s", got)
 	}
-	if got := strings.Join(consoleWriteDetail(t, addr, "bigquery", project, ds.DatasetID, "people").actionIDs(), ","); got != "insertrows,edittable,load,loadfile,export,copytable,createrowpolicy,droprowpolicies,deletetable" {
+	if got := strings.Join(consoleWriteDetail(t, addr, "bigquery", project, ds.DatasetID, "people").actionIDs(), ","); got != "insertrows,edittable,load,loadfile,export,copytable,snapshottable,clonetable,createrowpolicy,droprowpolicies,deletetable" {
 		t.Errorf("a table's page offers %s", got)
 	}
 
@@ -404,6 +405,9 @@ func TestConsoleBigQueryReadWriteEditorRunsDML(t *testing.T) {
 	addr := consoleAddr(t, h)
 	ctx := h.Context()
 	ds, orders := seedOrders(t, h, c)
+	// seedOrders streams its rows, and DML refuses rows streamed in the
+	// last 30 minutes, as BigQuery does (#1370).
+	advanceBigQueryClock(t, h, 31*time.Minute)
 	q := "?project=" + url.QueryEscape(project)
 
 	var page struct {

@@ -417,7 +417,9 @@ export BIGTABLE_EMULATOR_HOST=127.0.0.1:...
 export SPANNER_EMULATOR_HOST=127.0.0.1:...
 ```
 
-**All four are in-memory.** Nothing they hold survives a restart, whatever `--mode` says.
+**Firestore, Bigtable and Spanner are in-memory**: nothing they hold survives a restart, whatever
+`--mode` says. **Datastore keeps its data in persistent mode**, on a volume; in ephemeral mode it
+starts empty too. See [compatibility.md](compatibility.md#optional-services).
 
 Bigtable, like the others, starts from its pinned image with no network access (#611).
 

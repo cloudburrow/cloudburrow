@@ -135,7 +135,18 @@ func TestBigQueryInformationSchemaJobs(t *testing.T) {
 			t.Errorf("insert=%v: JOBS_BY_USER gave %v, %v", insert, rows, err)
 		}
 		var e *googleapi.Error
-		_, _, err = read("SELECT * FROM `region-eu`.INFORMATION_SCHEMA.JOBS", insert)
+		// A query that names US: one naming no location runs in the
+		// region it reads (#1375).
+		eu := c.Query("SELECT * FROM `region-eu`.INFORMATION_SCHEMA.JOBS")
+		eu.Location = "US"
+		if insert {
+			var job *bigquery.Job
+			if job, err = eu.Run(ctx); err == nil {
+				_, err = job.Read(ctx)
+			}
+		} else {
+			_, err = eu.Read(ctx)
+		}
 		if !errors.As(err, &e) || e.Code != http.StatusNotFound || !strings.Contains(e.Message, "region-eu") {
 			t.Errorf("insert=%v: another region gave %v, want 404", insert, err)
 		}

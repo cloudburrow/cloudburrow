@@ -1,4 +1,4 @@
-# The ten gated Functions tests (#678; TestFunctionsSubmitBuildBuildpacks since #1268;
+# The eleven gated Functions tests, with the ungated TestFunctionsAPI (#1377) (#678; TestFunctionsSubmitBuildBuildpacks since #1268;
 # TestFunctionsNodejsBuiltWithBuildpacks and TestFunctionsPythonBuiltWithBuildpacks
 # since #1303; the Java, Ruby, PHP and .NET ones since #1319), on demand:
 # TestFunctionsFrameworkBuiltWithBuildpacks builds testdata/function with the

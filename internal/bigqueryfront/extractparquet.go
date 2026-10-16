@@ -112,22 +112,145 @@ func parquetFieldLeaf(fl field) (parquetLeaf, bool) {
 }
 
 // parquetUnwritten returns the first column of fields, by its path below
-// prefix, and its type, that the front does not write to Parquet (above),
-// GEOGRAPHY among them unless nativeGeo; "" when it writes them all.
-func parquetUnwritten(fields []field, nativeGeo bool, prefix string) (string, string) {
+// prefix, and its type, that the front does not write to Parquet (above,
+// and parquetFields); "" when it writes them all.
+func parquetUnwritten(fields []field, prefix string) (string, string) {
 	for _, fl := range fields {
 		typ := strings.ToUpper(fl.Type)
-		if typ == "RECORD" || typ == "STRUCT" {
-			if loc, t := parquetUnwritten(fl.Fields, nativeGeo, prefix+fl.Name+"."); loc != "" {
+		switch typ {
+		case "RECORD", "STRUCT":
+			if loc, t := parquetUnwritten(fl.Fields, prefix+fl.Name+"."); loc != "" {
 				return loc, t
 			}
 			continue
+		case "INTERVAL":
+			continue
+		case "RANGE":
+			if _, ok := parquetExportType(rangeElement(fl)); !ok {
+				return prefix + fl.Name, typ
+			}
+			continue
 		}
-		if _, ok := parquetExportType(typ); !ok || typ == "GEOGRAPHY" && !nativeGeo {
+		if _, ok := parquetExportType(typ); !ok {
 			return prefix + fl.Name, typ
 		}
 	}
 	return "", ""
+}
+
+// parquetFields is the schema the front writes fields in, and each row's
+// values for it (#957):
+//
+//   - GEOGRAPHY without nativeGeographyExportEnabled is a STRING of WKT:
+//     "When you export spatial data from BigQuery, GEOGRAPHY column values
+//     are always formatted as WKT strings" (gis-data). The export page
+//     says GeoParquet metadata is added, but GeoParquet 1.x holds WKB, not
+//     WKT, and its version and CRS are not given: none is written
+//     (UNVERIFIED against BigQuery).
+//   - INTERVAL, which the Parquet table does not list, is a STRING of its
+//     canonical text "[sign]Y-M [sign]D [sign]H:M:S[.F]" (UNVERIFIED).
+//   - RANGE, which the table does not list, is a group of two fields of
+//     its element type, start and end, a NULL for an UNBOUNDED bound: the
+//     form BigQuery's Storage Read API gives a RANGE in Arrow (a struct of
+//     start and end), UNVERIFIED for Parquet.
+func parquetFields(fields []field, nativeGeo bool) []field {
+	out := make([]field, len(fields))
+	for i, fl := range fields {
+		switch strings.ToUpper(fl.Type) {
+		case "GEOGRAPHY":
+			if !nativeGeo {
+				fl.Type = "STRING"
+			}
+		case "INTERVAL":
+			fl.Type = "STRING"
+		case "RANGE":
+			elem := rangeElement(fl)
+			fl.Type, fl.RangeElementType = "RECORD", nil
+			fl.Fields = []field{{Name: "start", Type: elem, Mode: "NULLABLE"}, {Name: "end", Type: elem, Mode: "NULLABLE"}}
+		case "RECORD", "STRUCT":
+			fl.Fields = parquetFields(fl.Fields, nativeGeo)
+		}
+		out[i] = fl
+	}
+	return out
+}
+
+// parquetRow is a row's values, as tabledata.list gives them, for
+// parquetFields: each RANGE "[start, end)" as a RECORD value of its bounds.
+func parquetRow(fields []field, row []any) ([]any, error) {
+	out := make([]any, len(row))
+	for j, v := range row {
+		if j >= len(fields) || v == nil {
+			out[j] = v
+			continue
+		}
+		fl := fields[j]
+		one := func(v any) (any, error) { return parquetOne(fl, v) }
+		if strings.EqualFold(fl.Mode, "REPEATED") {
+			items, _ := v.([]any)
+			vals := make([]any, len(items))
+			for i, it := range items {
+				x, err := one(cellValue(it))
+				if err != nil {
+					return nil, err
+				}
+				vals[i] = map[string]any{"v": x}
+			}
+			out[j] = vals
+			continue
+		}
+		x, err := one(v)
+		if err != nil {
+			return nil, err
+		}
+		out[j] = x
+	}
+	return out, nil
+}
+
+func parquetOne(fl field, v any) (any, error) {
+	if v == nil {
+		return nil, nil
+	}
+	switch strings.ToUpper(fl.Type) {
+	case "RANGE":
+		s, _ := v.(string)
+		if len(s) < 2 || s[0] != '[' || s[len(s)-1] != ')' {
+			return nil, fmt.Errorf("column %s: unreadable RANGE %q", fl.Name, s)
+		}
+		parts := strings.Split(s[1:len(s)-1], ", ")
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("column %s: unreadable RANGE %q", fl.Name, s)
+		}
+		cells := make([]any, 2)
+		for i, p := range parts {
+			var b any = p
+			if p == "UNBOUNDED" || p == "NULL" {
+				b = nil
+			}
+			cells[i] = map[string]any{"v": b}
+		}
+		return map[string]any{"f": cells}, nil
+	case "RECORD", "STRUCT":
+		cells, err := recordCells(v) // storagerows.go
+		if err != nil {
+			return nil, err
+		}
+		vals := make([]any, len(cells))
+		for i, c := range cells {
+			vals[i] = cellValue(c)
+		}
+		conv, err := parquetRow(fl.Fields, vals)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]any, len(conv))
+		for i, c := range conv {
+			out[i] = map[string]any{"v": c}
+		}
+		return map[string]any{"f": out}, nil
+	}
+	return v, nil
 }
 
 // parquetColumn is one leaf column of the file: its type, and its values
@@ -370,6 +493,16 @@ func twosComplementBytes(n *big.Int, size int) []byte {
 // Parquet file of one row group (above). It returns why a row cannot be
 // written, or "".
 func encodeParquetExtract(x writtenExtract, rows [][]any) ([]byte, string) {
+	conv := make([][]any, len(rows))
+	for i, row := range rows {
+		r, err := parquetRow(x.fields, row)
+		if err != nil {
+			return nil, fmt.Sprintf("row %d, %v", i+1, err)
+		}
+		conv[i] = r
+	}
+	rows = conv
+	x.fields = parquetFields(x.fields, x.parquetNativeGeography)
 	var cols []*parquetColumn
 	kids, nodes, err := parquetNodes(x.fields, 0, &cols)
 	if err != nil {

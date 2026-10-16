@@ -68,6 +68,7 @@ import (
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
+	_ "cloud.google.com/go/functions/apiv2/functionspb"
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
@@ -109,6 +110,10 @@ var areas = []area{
 	// repository calls and the builds SubmitBuild runs.
 	{Key: "artifactregistry", Title: "Artifact Registry", Own: true, Services: []string{"google.devtools.artifactregistry.v1.ArtifactRegistry"}},
 	{Key: "cloudbuild", Title: "Cloud Build", Own: true, Services: []string{"google.devtools.cloudbuild.v1.CloudBuild"}},
+	// Cloud Functions v2 (#1377), on the Run port: a function is a
+	// SubmitBuild buildpacks build and a Cloud Run service. Its IAM and
+	// Locations mixins are KMS's keys, which are global.
+	{Key: "functions", Title: "Cloud Functions v2", Own: true, Services: []string{"google.cloud.functions.v2.FunctionService"}},
 	// The v1 (Knative-shaped) API gcloud run calls (#1293): no proto, so
 	// its methods are the official generated client's, and a method is
 	// Verified only by an annotated official-client test.

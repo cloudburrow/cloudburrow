@@ -27,8 +27,8 @@ import (
 // task's ID is "{execution}-task{index}". Everything a task reports is read
 // from those pods and the Job; nothing is stored.
 //
-// log_uri is not set: there is no Cloud Logging console to link to. The
-// console's task page shows the pod's log instead.
+// log_uri is Google's Logs Explorer link for the task's entries
+// (executionLogURI); the console's task page shows the pod's log.
 
 // taskID is the ID of an execution's task with an index.
 func taskID(execID string, index int) string { return fmt.Sprintf("%s-task%d", execID, index) }
@@ -148,6 +148,7 @@ func fromPods(j kjob, exec *runpb.Execution, index int, attempts []kpod) *runpb.
 		Execution:          exec.GetName(),
 		Index:              int32(index),
 		Etag:               j.Metadata.ResourceVersion,
+		LogUri:             executionLogURI(exec.GetName(), index),
 	}
 	if tt := exec.GetTemplate(); tt != nil {
 		t.Containers = tt.GetContainers()
