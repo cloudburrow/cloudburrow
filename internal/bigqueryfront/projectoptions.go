@@ -56,7 +56,9 @@ import (
 // In a script of several statements, an ALTER PROJECT or ALTER
 // ORGANIZATION at the script's top level is carried out as the script
 // starts, and the emulator runs a statement that does nothing in its
-// place; one inside a block, IF or loop is 501.
+// place; one inside a block, IF or loop is carried out in its turn, as a
+// statement of its own, by the front's run of the script (#1459), as are
+// the script's others then; in a dry run it is 501.
 //
 // `region-REGION`.INFORMATION_SCHEMA.PROJECT_OPTIONS has a row per option
 // set on the project ("that differs from the default value"): the global
@@ -301,6 +303,28 @@ func (p *projectOptions) defaultLocation(project string) string {
 	return defaultLocation
 }
 
+// nestedAlterProject reports whether sql, a script, has an ALTER PROJECT
+// or ALTER ORGANIZATION inside a block, IF or loop, and no statement
+// parseAlterProject refuses at its top level.
+func nestedAlterProject(sql string) bool {
+	toks, ok := lex(sql)
+	if !ok {
+		return false
+	}
+	top := map[int]bool{}
+	for _, st := range splitStatements(trimSemicolons(toks)) {
+		if len(st) >= 2 && st[0].is("ALTER") && (st[1].is("PROJECT") || st[1].is("ORGANIZATION")) {
+			top[st[0].pos] = true
+		}
+	}
+	for i := 0; i+1 < len(toks); i++ {
+		if toks[i].is("ALTER") && (toks[i+1].is("PROJECT") || toks[i+1].is("ORGANIZATION")) && !top[toks[i].pos] {
+			return hasControlFlow(sql)
+		}
+	}
+	return false
+}
+
 // alterOptions is a parsed ALTER PROJECT or ALTER ORGANIZATION ... SET
 // OPTIONS statement.
 type alterOptions struct {
@@ -535,6 +559,12 @@ func (f front) alterProjectOptions(w http.ResponseWriter, r *http.Request, q que
 	if bad {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
 		return true
+	}
+	if msg != "" && nestedAlterProject(q.Query) && !dryRun(r, insert) && !txnRequest(r) && f.settings != nil {
+		// #1459: one inside a block, IF or loop is carried out in its
+		// turn by the front's run of the script (scriptflow.go), each a
+		// lone statement and child job of its own.
+		return false
 	}
 	if msg != "" {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+msg+". Nothing was run.")

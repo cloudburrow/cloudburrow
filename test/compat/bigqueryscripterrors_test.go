@@ -16,7 +16,8 @@ import (
 // script, as BigQuery fails it at that statement, keeping what the
 // statements before it did. Measured first against the pinned emulator:
 // `INSERT ...; SELECT 1/0; INSERT ...` answered done and kept both rows.
-// A script with a TEMP table and such a query is 501, nothing run.
+// A script with a TEMP table and such a query was 501, nothing run,
+// until #1459.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
 func TestBigQueryScriptRuntimeErrorBeforeLast(t *testing.T) {
@@ -55,12 +56,15 @@ func TestBigQueryScriptRuntimeErrorBeforeLast(t *testing.T) {
 		t.Errorf("a script of two queries: %v", err)
 	}
 	before := count()
-	err := bqRun(ctx, c, "CREATE TEMP TABLE tt AS SELECT 1 AS a; SELECT * FROM tt; INSERT INTO "+d+".t VALUES (7)", false)
-	if err == nil || !strings.Contains(err.Error(), "Not implemented here") {
-		t.Errorf("a TEMP table and a query before the last statement: %v, want 501", err)
+	// #1459: with a TEMP table too, the script run as its session's text
+	// (tempsession.go): the query's error fails it, the INSERT before it
+	// kept.
+	err := bqRun(ctx, c, "CREATE TEMP TABLE tt AS SELECT 0 AS a; INSERT INTO "+d+".t VALUES (7); SELECT 1/a FROM tt; INSERT INTO "+d+".t VALUES (8)", false)
+	if err == nil || !strings.Contains(err.Error(), "zero divided") {
+		t.Errorf("a TEMP table and a failing query before the last statement: %v, want the zero divided error", err)
 	}
-	if got := count(); got != before {
-		t.Errorf("%d rows after the refused script, want %d", got, before)
+	if got := count(); got != before+1 {
+		t.Errorf("%d rows after the failed script, want %d", got, before+1)
 	}
 }
 

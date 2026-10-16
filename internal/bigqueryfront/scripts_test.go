@@ -362,18 +362,19 @@ func TestFailedScriptThatWroteIs501(t *testing.T) {
 }
 
 // TestReplacingATempTableIs501 (#936): the emulator fails a script that
-// replaces or drops a TEMP table it created, so such a script is 501 and
-// nothing is run; CREATE OR REPLACE TEMP TABLE of a new name, and a DROP
-// of another table, are sent on.
+// replaces or drops a TEMP table it created, so since #1459 such a script
+// is run as its session's text (tempsession.go), a statement at a time;
+// CREATE OR REPLACE TEMP TABLE of a new name, and a DROP of another table,
+// are sent on.
 func TestReplacingATempTableIs501(t *testing.T) {
 	for _, c := range []struct {
 		sql  string
 		want int
 	}{
-		{"CREATE TEMP TABLE t AS SELECT 1 AS a; CREATE OR REPLACE TEMP TABLE t AS SELECT 2 AS a; SELECT * FROM t", 501},
-		{"CREATE TEMP TABLE t AS SELECT 1 AS a; DROP TABLE t; CREATE TEMP TABLE t AS SELECT 3 AS a", 501},
-		{"CREATE TEMPORARY TABLE t (a INT64); DROP TABLE IF EXISTS T", 501},
-		{"CREATE TEMP TABLE t (a INT64); CREATE OR REPLACE TEMPORARY TABLE _SESSION.t (b INT64)", 501},
+		{"CREATE TEMP TABLE t AS SELECT 1 AS a; CREATE OR REPLACE TEMP TABLE t AS SELECT 2 AS a; SELECT * FROM t", 200},
+		{"CREATE TEMP TABLE t AS SELECT 1 AS a; DROP TABLE t; CREATE TEMP TABLE t AS SELECT 3 AS a", 200},
+		{"CREATE TEMPORARY TABLE t (a INT64); DROP TABLE IF EXISTS T", 200},
+		{"CREATE TEMP TABLE t (a INT64); CREATE OR REPLACE TEMPORARY TABLE _SESSION.t (b INT64)", 200},
 		{"CREATE OR REPLACE TEMP TABLE t2 AS SELECT 1 AS a; SELECT * FROM t2", 200},
 		{"CREATE TEMP TABLE t AS SELECT 1 AS a; DROP TABLE ds.t", 200},
 		{"DROP TABLE t; CREATE TEMP TABLE t AS SELECT 1 AS a", 200},
@@ -382,6 +383,14 @@ func TestReplacingATempTableIs501(t *testing.T) {
 		code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", c.sql))
 		if code != c.want || (code == 501) != (len(emu.log) == 0) {
 			t.Errorf("%s: %d %v, want %d; sent %v", c.sql, code, got, c.want, emu.log)
+		}
+		for _, q := range emu.log {
+			if strings.Count(c.sql, "TEMP") < 2 && !strings.Contains(c.sql, "DROP TABLE IF EXISTS T") {
+				continue // only what the emulator failed whole is run a statement at a time
+			}
+			if strings.Contains(q, "TEMP") && strings.Contains(q, ";") {
+				t.Errorf("%s: sent whole with its TEMP table: %s", c.sql, q)
+			}
 		}
 	}
 }
@@ -1027,8 +1036,15 @@ func TestEarlierQuery(t *testing.T) {
 			t.Errorf("sent %q after the failing statement", q)
 		}
 	}
-	code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE TEMP TABLE x AS SELECT 1 AS a; SELECT * FROM x; SELECT 2"))
-	if code != 501 || errorReason(got) != "notImplemented" {
-		t.Errorf("a TEMP table: %d %v, want 501", code, got)
+	// #1459: with a TEMP table too, as its session's text (tempsession.go).
+	sent = nil
+	code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE TEMP TABLE x AS SELECT 1 AS a; SELECT 1/0 FROM x; SELECT 2"))
+	if code != 400 {
+		t.Errorf("a TEMP table: %d %v, want 400", code, got)
+	}
+	for _, q := range sent {
+		if strings.Contains(q, "SELECT 2") {
+			t.Errorf("a TEMP table: sent %q after the failing statement", q)
+		}
 	}
 }
