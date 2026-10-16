@@ -55,7 +55,7 @@ func functionsV1Client(t *testing.T, h *Harness) *fv1client.CloudFunctionsClient
 // through v1 are refused; delete removes it.
 func TestFunctionsV1API(t *testing.T) {
 	h := New(t)
-	ctx, cancel := context.WithTimeout(h.Context(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
 	parent := runParent(h)
 	c := functionsV1Client(t, h)
@@ -248,7 +248,7 @@ func TestFunctionsV1API(t *testing.T) {
 // removes it.
 func TestFunctionsV1BuildsAndServes(t *testing.T) {
 	h := New(t)
-	ctx, cancel := context.WithTimeout(h.Context(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	t.Cleanup(cancel)
 	requireAmd64Functions(ctx, t)
 	parent := runParent(h)
@@ -322,7 +322,7 @@ func TestGcloudFunctionsV1(t *testing.T) {
 	storageAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	pubsubAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
 	g := newGcloudSession(t, h)
-	ctx, cancel := context.WithTimeout(h.Context(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	t.Cleanup(cancel)
 	t.Setenv("PUBSUB_EMULATOR_HOST", pubsubAddr)
 	pc, err := pubsub.NewClient(ctx, g.project)
