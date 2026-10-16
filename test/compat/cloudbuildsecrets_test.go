@@ -27,21 +27,22 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// buildSecret makes a Secret Manager secret holding value, through the
-// official client, and returns its id.
-func buildSecret(ctx context.Context, t *testing.T, h *Harness, value string) string {
+// buildSecret makes a Secret Manager secret in project holding value,
+// through the official client, and returns its id.
+func buildSecret(ctx context.Context, t *testing.T, h *Harness, project, value string) string {
 	t.Helper()
 	sm := secretsClient(t, h)
+	parent := "projects/" + project
 	id := "cb-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	if _, err := sm.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: secretsParent(h), SecretId: id,
+	if _, err := sm.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: parent, SecretId: id,
 		Secret: &secretmanagerpb.Secret{Replication: &secretmanagerpb.Replication{
 			Replication: &secretmanagerpb.Replication_Automatic_{Automatic: &secretmanagerpb.Replication_Automatic{}}}}}); err != nil {
 		t.Fatalf("CreateSecret: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = sm.DeleteSecret(context.Background(), &secretmanagerpb.DeleteSecretRequest{Name: secretsParent(h) + "/secrets/" + id})
+		_ = sm.DeleteSecret(context.Background(), &secretmanagerpb.DeleteSecretRequest{Name: parent + "/secrets/" + id})
 	})
-	if _, err := sm.AddSecretVersion(ctx, &secretmanagerpb.AddSecretVersionRequest{Parent: secretsParent(h) + "/secrets/" + id,
+	if _, err := sm.AddSecretVersion(ctx, &secretmanagerpb.AddSecretVersionRequest{Parent: parent + "/secrets/" + id,
 		Payload: &secretmanagerpb.SecretPayload{Data: []byte(value)}}); err != nil {
 		t.Fatalf("AddSecretVersion: %v", err)
 	}
@@ -90,7 +91,7 @@ func TestCloudBuildSecretsScriptAndAllowFailure(t *testing.T) {
 	t.Cleanup(cancel)
 	cb := cloudBuildClient(ctx, t, h)
 	value := "s3cr3t-" + uuid.NewString()[:8]
-	secret := buildSecret(ctx, t, h, value)
+	secret := buildSecret(ctx, t, h, h.Project(), value)
 	sum := sha256.Sum256([]byte(value))
 	bucket := uploadSource(ctx, t, h, "unused.tar.gz", sourceArchive(t, map[string][]byte{"x": []byte("x")}))
 	img := stepImage()
@@ -199,8 +200,10 @@ func runShardEndpointIfSet(h *Harness, own, shared string) string {
 // of a cloudbuild.yaml with availableSecrets.secretManager, a step whose
 // secretEnv names it, a script step and an allowFailure step, through the
 // configuration `cloudburrow gcloud-setup` writes, egress blocked. The
-// build is SUCCESS, the allowFailure step FAILURE, and `gcloud builds log`
-// shows the secret's hash and the script's output, the value masked.
+// build is SUCCESS, the allowFailure step FAILURE, and its log shows the
+// secret's hash and the script's output, the value masked. The
+// build names a logsBucket: the default one, *.cloudbuild-logs.
+// googleusercontent.com, is a name the instance's Cloud Storage refuses.
 func TestGcloudBuildsSecretsAndScript(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvRun)
@@ -212,7 +215,7 @@ func TestGcloudBuildsSecretsAndScript(t *testing.T) {
 	t.Cleanup(cancel)
 	g := newGcloudSession(t, h)
 	value := "g-s3cr3t-" + uuid.NewString()[:8]
-	secret := buildSecret(ctx, t, h, value)
+	secret := buildSecret(ctx, t, h, g.project, value)
 	sum := sha256.Sum256([]byte(value))
 	src := t.TempDir()
 	config := "steps:\n" +
@@ -221,6 +224,7 @@ func TestGcloudBuildsSecretsAndScript(t *testing.T) {
 		"- name: " + stepImage() + "\n  script: |\n    #!/bin/sh\n    echo \"script sees $_WHO\"\n  automapSubstitutions: true\n" +
 		"- name: " + stepImage() + "\n  script: exit 4\n  allowFailure: true\n" +
 		"substitutions:\n  _WHO: gcloud\n" +
+		"logsBucket: gs://" + g.project + "_cloudbuild/logs\n" +
 		"availableSecrets:\n  secretManager:\n  - versionName: projects/$PROJECT_ID/secrets/" + secret + "/versions/latest\n    env: TOKEN\n"
 	if err := os.WriteFile(filepath.Join(src, "cloudbuild.yaml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
@@ -244,8 +248,9 @@ func TestGcloudBuildsSecretsAndScript(t *testing.T) {
 	if f := strings.Fields(desc); len(f) != 5 || f[0] != "SUCCESS" || f[1] != "SUCCESS" || f[2] != "SUCCESS" || f[3] != "FAILURE" || f[4] != "4" {
 		t.Fatalf("the build = %q; want SUCCESS with step 2 FAILURE, exit code 4", desc)
 	}
-	bucket := strings.TrimSpace(g.must("builds", "describe", id, "--format=value(logsBucket)"))
-	logText := buildLogText(ctx, t, h, strings.TrimPrefix(bucket, "gs://"), "", id)
+	// `gcloud builds log` reads storage.googleapis.com itself, with no
+	// endpoint override, so the log is read with the official client.
+	logText := buildLogText(ctx, t, h, g.project+"_cloudbuild", "logs/", id)
 	for _, w := range []string{"Step #0: " + hex.EncodeToString(sum[:]), "Step #0: raw:********", "Step #1: script sees gcloud"} {
 		if !strings.Contains(logText, w) {
 			t.Errorf("the log lacks %q:\n%s", w, logText)
