@@ -57,7 +57,7 @@ func (s *Server) v1ListJobs(w http.ResponseWriter, r *http.Request) {
 	var names []string
 	for _, j := range resp.GetJobs() {
 		v := toV1Job(j)
-		if selected(v.Metadata.Labels, sel) {
+		if selected(v.Metadata, sel) {
 			byName[j.GetName()] = v
 			names = append(names, j.GetName())
 		}
@@ -188,6 +188,11 @@ func fromV1Job(in *runv1.Job) (*runpb.Job, error) {
 	if ts.TimeoutSeconds > 0 {
 		tt.Timeout = durationpb.New(time.Duration(ts.TimeoutSeconds) * time.Second)
 	}
+	// The job's own delayExecution (gcloud beta run jobs create
+	// --delay-execution) would have to be stored and read back on the job,
+	// and v2's Job has no field for it; a run's overrides.delayExecution is
+	// served (#1420).
+	gap(es.DelayExecution, "spec.template.spec.delayExecution")
 	job := &runpb.Job{Template: &runpb.ExecutionTemplate{Parallelism: int32(es.Parallelism), TaskCount: int32(es.TaskCount), Template: tt}}
 	if m := in.Metadata; m != nil {
 		labels := map[string]string{}
