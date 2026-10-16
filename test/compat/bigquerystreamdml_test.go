@@ -15,8 +15,10 @@ import (
 
 // advanceBigQueryClock moves the BigQuery front's clock forward by d, a
 // CloudBurrow extension (POST /cloudburrow/bigquery/v2/clock:advance,
-// #1370), so a test passes BigQuery's 30 minutes at once.
-func advanceBigQueryClock(t *testing.T, h *Harness, d time.Duration) {
+// #1370), so a test passes BigQuery's 30 minutes at once. It returns the
+// front's clock after the move; a d of 0 only reads it. The clock is the
+// instance's, which earlier tests may have moved.
+func advanceBigQueryClock(t *testing.T, h *Harness, d time.Duration) time.Time {
 	t.Helper()
 	body, _ := json.Marshal(map[string]float64{"seconds": d.Seconds()})
 	resp, err := http.Post(strings.TrimSuffix(h.Endpoint(EnvBigQuery), "/")+"/cloudburrow/bigquery/v2/clock:advance",
@@ -24,10 +26,17 @@ func advanceBigQueryClock(t *testing.T, h *Harness, d time.Duration) {
 	if err != nil {
 		t.Fatalf("clock:advance: %v", err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("clock:advance: %s", resp.Status)
 	}
+	var got struct {
+		Time time.Time `json:"time"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || got.Time.IsZero() {
+		t.Fatalf("clock:advance: %v, %+v", err, got)
+	}
+	return got.Time.UTC()
 }
 
 // TestBigQueryDMLOfRecentlyStreamedRows (#1370): BigQuery documents that

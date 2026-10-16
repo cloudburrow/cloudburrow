@@ -22,8 +22,11 @@ import (
 // by queries at once, tables.get answers streamingBuffer and leaves them
 // out of numRows, a copy leaves them out, and DML that would change one
 // fails ("rows that were recently written ... can't be modified"), while
-// the table's other rows stay modifiable. After the flush (20 seconds) the
-// rows are in their partitions. The engine's mark of a buffered row is in
+// the table's other rows stay modifiable. After the flush (20 seconds
+// after each table's first buffered row) the rows are in their partitions.
+// The test reads "now" from the instance's BigQuery clock, which earlier
+// tests of the shard may have moved (#1370), as the front partitions and
+// flushes by it. The engine's mark of a buffered row is in
 // neither the schema nor SELECT *. Measured first: a streamed row was in its
 // partition at once, counted and copied, and DML changed it.
 //
@@ -41,7 +44,7 @@ func TestBigQueryColumnStreamingBuffer(t *testing.T) {
 		return got
 	}
 	exec := func(sql string) error { return bqRun(ctx, c, sql, true) }
-	now := time.Now().UTC()
+	now := advanceBigQueryClock(t, h, 0)
 	today := now.Format("2006-01-02")
 	type row struct {
 		N int64  `bigquery:"n"`
@@ -158,15 +161,28 @@ func TestBigQueryColumnStreamingBuffer(t *testing.T) {
 		t.Errorf("cbrange$__UNPARTITIONED__: %v, want [5]", got)
 	}
 
-	// The buffer flushes.
-	var got []string
+	// The buffer flushes. Each table's window is its own, flushing 20
+	// seconds after its first buffered row, and cbmonth and cbrange were
+	// streamed after cbday, so wait for every table's (CI run 38859319021
+	// read cbmonth and cbrange the moment cbday's had flushed).
+	buffered := func() map[string][]string {
+		t.Helper()
+		left := map[string][]string{}
+		for _, tbl := range []string{"cbday", "cbmonth", "cbrange"} {
+			if got := rows("SELECT CAST(n AS STRING) FROM " + p(tbl+"$__UNPARTITIONED__")); len(got) != 0 {
+				left[tbl] = got
+			}
+		}
+		return left
+	}
+	var left map[string][]string
 	for deadline := time.Now().Add(60 * time.Second); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
-		if got = read("__UNPARTITIONED__"); len(got) == 0 {
+		if left = buffered(); len(left) == 0 {
 			break
 		}
 	}
-	if len(got) != 0 {
-		t.Fatalf("cbday$__UNPARTITIONED__ after the flush: %v, want none", got)
+	if len(left) != 0 {
+		t.Fatalf("$__UNPARTITIONED__ after the flush: %v, want none", left)
 	}
 	if got := read("20200101"); !reflect.DeepEqual(got, []string{"2"}) {
 		t.Errorf("cbday$20200101 after the flush: %v, want [2]", got)
