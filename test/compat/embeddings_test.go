@@ -71,7 +71,7 @@ func norm(v []float32) float64 {
 func TestEmbeddingGemmaThroughTheOfficialSDK(t *testing.T) {
 	h := New(t)
 	cl := genaiClientAt(t, h, EnvEmbeddings)
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	const text = "The quick brown fox jumps over the lazy dog."

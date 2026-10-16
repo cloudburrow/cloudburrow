@@ -4,10 +4,13 @@ package compat
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"cloud.google.com/go/datastore"
+	"cloud.google.com/go/datastore/apiv1/datastorepb"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // The Datastore RPCs TestDatastoreEntityCRUD does not reach (#1197).
@@ -77,15 +80,83 @@ func TestDatastoreRollback(t *testing.T) {
 	}
 }
 
-// TestDatastoreAggregationIsRefused records that the emulator does not
-// serve RunAggregationQuery, which a count through the client sends.
+// TestDatastoreAggregation counts, sums and averages through the client's
+// aggregation query. The emulator does not serve RunAggregationQuery; the
+// call front answers it from the emulator's RunQuery (#1405): integers sum
+// as an integer and a double makes the sum a double, a string is skipped,
+// an empty set sums to 0 and averages to NULL, an unnamed aggregation is
+// property_1, the nested query's limit applies, and an aggregation inside a
+// transaction reads the transaction's snapshot.
 //
-// covers: google.datastore.v1.Datastore/RunAggregationQuery (unimplemented)
-func TestDatastoreAggregationIsRefused(t *testing.T) {
+// covers: google.datastore.v1.Datastore/RunAggregationQuery
+func TestDatastoreAggregation(t *testing.T) {
 	h := New(t)
 	c := datastoreClient(t, h, h.Project())
-	aq := datastore.NewQuery("Counted").NewAggregationQuery().WithCount("n")
-	_, err := c.RunAggregationQuery(h.Context(), aq)
-	wantRefused(t, "RunAggregationQuery", err, codes.Unimplemented,
-		"Method google.datastore.v1.Datastore/RunAggregationQuery is unimplemented")
+	ctx := h.Context()
+	type row struct {
+		I int64
+		V float64
+		W string
+	}
+	parent := datastore.NameKey("AggParent", "p", nil)
+	var keys []*datastore.Key
+	var rows []row
+	for i := int64(0); i < 8; i++ {
+		keys = append(keys, datastore.IDKey("Agg", i+1, parent))
+		rows = append(rows, row{I: i, V: 1.5, W: "str"})
+	}
+	if _, err := c.PutMulti(ctx, keys, rows); err != nil {
+		t.Fatalf("PutMulti: %v", err)
+	}
+	q := datastore.NewQuery("Agg").Ancestor(parent)
+	asInt := func(v any) any {
+		if pv, ok := v.(*datastorepb.Value); ok {
+			switch x := pv.GetValueType().(type) {
+			case *datastorepb.Value_IntegerValue:
+				return x.IntegerValue
+			case *datastorepb.Value_DoubleValue:
+				return x.DoubleValue
+			case *datastorepb.Value_NullValue:
+				return nil
+			}
+		}
+		return v
+	}
+	check := func(name string, aq *datastore.AggregationQuery, want map[string]any) {
+		t.Helper()
+		res, err := c.RunAggregationQuery(ctx, aq)
+		if err != nil {
+			t.Fatalf("%s: RunAggregationQuery: %v", name, err)
+		}
+		for k, w := range want {
+			if got := asInt(res[k]); fmt.Sprint(got) != fmt.Sprint(w) {
+				t.Errorf("%s: %s = %v (%T), want %v", name, k, got, got, w)
+			}
+		}
+	}
+	check("count", q.Filter("I >=", 3).NewAggregationQuery().WithCount("count"), map[string]any{"count": int64(5)})
+	check("sum and avg", q.NewAggregationQuery().WithSum("I", "i_sum").WithAvg("I", "avg").WithSum("V", "v_sum"),
+		map[string]any{"i_sum": int64(28), "avg": 3.5, "v_sum": 12.0})
+	check("limit", q.Limit(2).NewAggregationQuery().WithSum("I", "sum").WithAvg("I", "avg"),
+		map[string]any{"sum": int64(1), "avg": 0.5})
+	check("non-numeric", q.NewAggregationQuery().WithSum("W", "sum").WithAvg("W", "avg"),
+		map[string]any{"sum": int64(0), "avg": nil})
+	check("default alias", q.NewAggregationQuery().WithSum("I", ""), map[string]any{"property_1": int64(28)})
+
+	if _, err := c.RunAggregationQuery(ctx, q.NewAggregationQuery().WithSum("__key__", "")); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("SUM(__key__) = %v, want InvalidArgument", err)
+	}
+
+	tx, err := c.NewTransaction(ctx)
+	if err != nil {
+		t.Fatalf("NewTransaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := c.RunAggregationQuery(ctx, q.Transaction(tx).NewAggregationQuery().WithCount("n"))
+	if err != nil {
+		t.Fatalf("aggregation in a transaction: %v", err)
+	}
+	if n := asInt(res["n"]); fmt.Sprint(n) != "8" {
+		t.Errorf("count in a transaction = %v, want 8", n)
+	}
 }

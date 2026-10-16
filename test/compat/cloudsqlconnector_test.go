@@ -61,7 +61,7 @@ func TestCloudSQLConnectorDialsBothServers(t *testing.T) {
 		t.Skip("needs --services cloudsql or cloudsql-mysql")
 	}
 	project := h.Project()
-	ctx, cancel := context.WithTimeout(h.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	// connect.get through the generated client: the CA and address the

@@ -191,6 +191,17 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// Each Cloud Run workload is told its own service account (#1388).
 		metaSrv.WithAccounts(runSvc.metadataAccount)
 		runSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		// Functions' event triggers (#1414) deliver through Pub/Sub.
+		if serviceEnabled(cfg, config.ServicePubSub) {
+			runSvc.events = &eventsConfig{
+				transport: eventTransport{
+					pubsub:  func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") },
+					storage: func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+					client:  &http.Client{Timeout: time.Minute},
+				},
+				tokens: creds,
+			}
+		}
 	}
 	runSvc.register(coord)
 
@@ -217,6 +228,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if loggingSvc != nil {
 		// CopyLogEntries writes to the instance's Cloud Storage (#1394).
 		loggingSvc.storage = func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") }
+		// Sinks deliver to Pub/Sub and BigQuery too (#1404).
+		loggingSvc.pubsub = func() *netfwd.Forwarder { return forwarderFor(forwarders, "pubsub") }
+		loggingSvc.bigquery = func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }
 		// A queue's sampled dispatch attempts go to the instance's Cloud
 		// Logging through its own WriteLogEntries (#1256), so exclusions
 		// apply to them as to any write.
@@ -229,6 +243,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if secretsSvc != nil {
 		runSvc.useSecrets(lazySecretResolver{svc: secretsSvc})
 	}
+	// A Cloud Build build's secrets (#1407).
+	runSvc.useBuildSecrets(secretsSvc, kmsSvc)
 
 	// Admin routes must be mounted before the control server starts: it builds
 	// its mux at Start, so anything added afterwards is never routed.
@@ -517,6 +533,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if d := loggingSvc.logDeleter(faults); d != nil {
 			consoleSrv.SetLogDeleter(d)
 		}
+		// And the Explorer reads through a log view (#1410).
+		if v := loggingSvc.logViewReader(faults); v != nil {
+			consoleSrv.SetLogViewReader(v)
+		}
 	}
 
 	if localAISrv != nil {
@@ -603,6 +623,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	runSvc.useEnvironment(func() map[string]string {
 		return podEnvMap(podAddresses(forwarders, hostComp))
 	})
+	if runSvc != nil && runSvc.events != nil {
+		// The Pub/Sub emulator pushes a trigger's events to the Run port
+		// at its cloudburrow-host name.
+		runSvc.events.pushBase = func() string {
+			if a := hostComp.InCluster("run"); a != "" {
+				return "http://" + a
+			}
+			return ""
+		}
+	}
 	// Cloud SQL volumes (#1346): the Auth Proxy beside a revision asks the
 	// Admin API, through cloudburrow-host, and is told to dial the
 	// connector at that Service's cluster IP, port 3307, which forwards to

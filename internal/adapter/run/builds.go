@@ -141,6 +141,8 @@ func builtImagesOf(containers []*runpb.Container) map[string]string {
 	for _, c := range containers {
 		if l, ok := localBuilds.resolve(c.GetImage()); ok {
 			out[l] = c.GetImage()
+		} else if r, ok := RegistryImage(c.GetImage()); ok && r != c.GetImage() {
+			out[r] = c.GetImage() // pulled by digest from the registry (#1383)
 		}
 	}
 	return out
@@ -151,6 +153,12 @@ func builtImagesOf(containers []*runpb.Container) map[string]string {
 func containerImage(ref string) string {
 	if l, ok := localBuilds.resolve(ref); ok {
 		return l
+	}
+	// An image this instance's registry holds (#1383) is pulled from it
+	// by digest: the nodes reach the registry through their containerd
+	// mirror, and Knative resolves no tag of a by-digest reference.
+	if r, ok := RegistryImage(ref); ok {
+		return r
 	}
 	// An untagged Artifact Registry image is :latest, as Cloud Run reads
 	// it: `gcloud run deploy --source` validates the service (dryRun)
@@ -187,6 +195,10 @@ type BuildsServer struct {
 	// hostSteps lets CreateBuild run arbitrary steps, from the host's
 	// loopback only (#1382, cloudbuildgate.go).
 	hostSteps bool
+	// secretManager and kms read a CreateBuild build's availableSecrets
+	// and secrets (#1407); nil refuses a build that names one.
+	secretManager SecretAccessor
+	kms           KMSDecrypter
 }
 
 // Builds returns the Builds service. fetch or builder nil leaves SubmitBuild
@@ -292,7 +304,18 @@ func (b *BuildsServer) SubmitBuild(ctx context.Context, req *runpb.SubmitBuildRe
 			cb.Status, cb.StartTime, cb.Steps[0].Status = cbpb.Build_WORKING, timestamppb.Now(), cbpb.Build_WORKING
 		})
 		_ = b.s.ops.SetMetadata(op.Name, &cbpb.BuildOperationMetadata{Build: started})
-		if err := b.builder.Build(bctx, spec); err != nil {
+		// The image is pushed to its repository when this instance holds
+		// it (#1383), and its digest is then the manifest's.
+		digest := buildDigest(build.GetId())
+		err := b.builder.Build(bctx, spec)
+		if err == nil {
+			if d, pushed, perr := pushBuilt(bctx, b.builder, spec.LocalImage, tagged(uri)); perr != nil {
+				err = perr
+			} else if pushed {
+				digest = d
+			}
+		}
+		if err != nil {
 			failed := updateCloudBuild(build.GetName(), func(cb *cbpb.Build) {
 				cb.Status, cb.FinishTime, cb.Steps[0].Status = cbpb.Build_FAILURE, timestamppb.Now(), cbpb.Build_FAILURE
 				cb.StatusDetail = err.Error()
@@ -303,7 +326,6 @@ func (b *BuildsServer) SubmitBuild(ctx context.Context, req *runpb.SubmitBuildRe
 			return
 		}
 		localBuilds.record(uri, spec.LocalImage)
-		digest := buildDigest(build.GetId())
 		localBuilds.record(untagged(uri)+"@"+digest, spec.LocalImage)
 		done := updateCloudBuild(build.GetName(), func(cb *cbpb.Build) {
 			cb.Status, cb.FinishTime, cb.Steps[0].Status = cbpb.Build_SUCCESS, timestamppb.Now(), cbpb.Build_SUCCESS

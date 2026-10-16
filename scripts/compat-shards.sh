@@ -23,7 +23,8 @@
 #              serves, for TestOneProjectNumberEverywhere, which compares
 #              its project number with Cloud Storage's service agent;
 #   served:    the remaining CloudBurrow-served APIs (kms, logging) and the
-#              KMS restart probe;
+#              KMS restart probe, with Resource Manager as
+#              LOGGING_RESOURCEMANAGER for the Logging folder tests;
 #   run:       Cloud Run with its Knative install and the prediction
 #              fixtures, whose startup-failure test is minutes on its own;
 #              secretmanager too, for the two tests that read a secret from
@@ -45,6 +46,10 @@ COMPAT_SHARDS="storage served run emulators acceptance"
 COMPAT_BROWSER_SHARDS="storage run emulators"
 COMPAT_BROWSER_RUN_SHARD_TESTS='^Test(KMS|CloudRun|LoggingAdmin)'
 COMPAT_BROWSER_EMULATORS_SHARD_TESTS='^Test(BigQuery|Firestore|Datastore|CloudSQL|Bigtable|Spanner)'
+# Browser tests no shard runs: the Studio's local models (#1396) need a
+# -tags onnx build started with -local-ai-embeddings, which no shard builds;
+# they run locally, as the compat suite's local AI tests do (ci.yml never=).
+COMPAT_BROWSER_NEVER_TESTS='^TestStudioManagesLocalModelsAndTestsEmbeddings$'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services
@@ -99,8 +104,11 @@ compat_shard() {
     served)
       SERVICES=kms,logging
       # Cloud KMS (#309) and Cloud Logging (#304). Resource Manager's tests
-      # run in the storage shard.
-      TEST_VARS+=,KMS,LOGGING
+      # run in the storage shard; the Logging folder and organization tests
+      # (#1395) make their folder with it, which every instance serves, as
+      # LOGGING_RESOURCEMANAGER, so they run here and nowhere else (CI run
+      # 38910752877: in storage gcloud had no logging override).
+      TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER
       # Cloud KMS (#418): a key with ENABLED, DISABLED and
       # DESTROY_SCHEDULED versions and a ciphertext.
       SETUP_TESTS="TestKMSRestartSetup"
@@ -143,7 +151,11 @@ compat_shard() {
       # pubsub for TestEmulatorsBehindAFrontRefuseOtherPods (#1114), which
       # dials both emulators from a pod; PUBSUB is not exported, so the
       # Pub/Sub tests stay in the storage shard.
-      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql,storage,pubsub
+      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql,storage,pubsub,logging
+      # logging for the sinks that deliver to Cloud Storage, Pub/Sub and
+      # BigQuery (#1404), as SINK_LOGGING, SINK_STORAGE and SINK_PUBSUB, so
+      # those suites stay in their shards; the copies to a Cloud Storage
+      # bucket (#1394) run here under the same names.
       # Spanner with its REST API for Terraform (#1331), Datastore (#307),
       # Firestore and Bigtable (#346), Memorystore
       # (#296), Cloud SQL for MySQL with its generated password (#297),
@@ -154,7 +166,10 @@ compat_shard() {
       # test finds its endpoint with `cloudburrow env`; STORAGE is not
       # exported, so the Cloud Storage tests stay in the storage shard.
       # The Cloud SQL Admin API over both Cloud SQL servers (#1301).
-      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT
+      # Resource Manager as BIGQUERY_RESOURCEMANAGER (#1392): only
+      # BigQuery's JOBS_BY_FOLDER test reads it, to move the project into a
+      # folder, so the Resource Manager tests stay in storage.
+      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       # A created Memorystore instance follows the mode too (#1302), with RDB

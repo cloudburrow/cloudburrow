@@ -55,7 +55,7 @@ usage() { sed -n '/^# Usage:/,/^# Requires/p' "$0" | sed 's/^# \{0,1\}//' >&2; }
 ALL=(
   CREDENTIALS KUBECONFIG CLUSTER CONTROL METADATA CONSOLE ADMIN_TOKEN CLI CLI_ARGS
   STORAGE CORS_ORIGIN PUBSUB TASKS SECRETS SCHEDULER RUN KMS LOGGING RESOURCEMANAGER SERVICEUSAGE
-  RUN_STORAGE RUN_PUBSUB RUN_KMS RUN_SCHEDULER RUN_LOGGING RUN_BIGQUERY RUN_SQLADMIN TASKS_LOGGING
+  RUN_STORAGE RUN_PUBSUB RUN_KMS RUN_SCHEDULER RUN_LOGGING RUN_BIGQUERY RUN_SQLADMIN TASKS_LOGGING BIGQUERY_RESOURCEMANAGER LOGGING_RESOURCEMANAGER SINK_LOGGING SINK_STORAGE SINK_PUBSUB
   SPANNER SPANNER_REST DATASTORE FIRESTORE BIGTABLE MEMORYSTORE MEMORYSTORE_ADMIN MEMORYSTORE_PROJECT MYSQL MYSQL_PASSWORD CLOUDSQL SQLADMIN CLOUDSQL_CONNECTOR
   BIGQUERY BIGQUERY_STORAGE BIGQUERY_PROJECT
   LOCALAI PREDICTION GCLOUD TOFU
@@ -264,18 +264,22 @@ value() {
     # cloudburrow command, such as `cloudburrow terraform`.
     CLI) VALUE=$cli ;;
     CLI_ARGS) cli_args; warn_relative_state_dir ;;
-    STORAGE|RUN_STORAGE) from_env '.STORAGE_EMULATOR_HOST // empty' ;;
+    STORAGE|RUN_STORAGE|SINK_STORAGE) from_env '.STORAGE_EMULATOR_HOST // empty' ;;
     # An origin the storage server answers beyond loopback ones (#677).
     CORS_ORIGIN) cors_origin ;;
-    PUBSUB|RUN_PUBSUB) from_env '.PUBSUB_EMULATOR_HOST // empty' ;;
+    PUBSUB|RUN_PUBSUB|SINK_PUBSUB) from_env '.PUBSUB_EMULATOR_HOST // empty' ;;
     # Cloud Tasks, Secret Manager and Cloud Run have no emulator variable.
     TASKS) from_runtime '.endpoints.tasks // empty' ;;
     SECRETS) from_runtime '.endpoints.secretmanager // empty' ;;
     RUN) from_runtime '.endpoints.run // empty' ;;
     SCHEDULER|RUN_SCHEDULER) from_env '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' ;;
     KMS|RUN_KMS) from_env '.CLOUDBURROW_KMS_ENDPOINT // empty' ;;
-    LOGGING|RUN_LOGGING|TASKS_LOGGING) from_env '.CLOUDBURROW_LOGGING_ENDPOINT // empty' ;;
-    RESOURCEMANAGER) from_env '.CLOUDBURROW_RESOURCEMANAGER_ENDPOINT // empty' ;;
+    LOGGING|RUN_LOGGING|TASKS_LOGGING|SINK_LOGGING) from_env '.CLOUDBURROW_LOGGING_ENDPOINT // empty' ;;
+    # BIGQUERY_RESOURCEMANAGER: the same, for BigQuery's JOBS_BY_FOLDER test
+    # in the emulators shard, and LOGGING_RESOURCEMANAGER, for the Logging
+    # folder and organization tests in served, so the Resource Manager suite
+    # stays in storage.
+    RESOURCEMANAGER|BIGQUERY_RESOURCEMANAGER|LOGGING_RESOURCEMANAGER) from_env '.CLOUDBURROW_RESOURCEMANAGER_ENDPOINT // empty' ;;
     # Service Usage (#1352), always served beside Resource Manager.
     SERVICEUSAGE) from_env '.CLOUDBURROW_SERVICEUSAGE_ENDPOINT // empty' ;;
     SPANNER) from_env '.SPANNER_EMULATOR_HOST // empty' ;;

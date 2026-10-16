@@ -595,7 +595,9 @@ func (s *Server) bucketsList(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if !ok || b.Project != project {
+			// Cloud Build's default logs bucket is Google's, in no user's
+			// project (cloudbuildlogs.go).
+			if !ok || b.Project != project || IsCloudBuildLogsBucket(name) {
 				continue
 			}
 			if len(items) == max {

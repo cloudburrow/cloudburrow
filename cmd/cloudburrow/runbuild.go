@@ -24,6 +24,11 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/buildpacks"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/images"
+	"github.com/cloudburrow/cloudburrow/internal/service/storage"
+
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/tarball"
 )
 
 // storageSourceFetcher reads SubmitBuild's source archive from this
@@ -77,11 +82,17 @@ func (f storageSourceFetcher) Fetch(ctx context.Context, bucket, object string, 
 }
 
 // Put writes a Cloud Build log to this instance's Cloud Storage (#1347).
-// With create, a missing bucket is made first in project: the build's
-// default logs bucket, which Google owns and here is the instance's.
+// With create, a missing bucket is made first in project. The build's
+// default logs bucket, {number}.cloudbuild-logs.googleusercontent.com,
+// which Google owns, is written through the server's Cloud Build path
+// (#1430): no user may create that name or write to it.
 func (f storageSourceFetcher) Put(ctx context.Context, project, bucket, object string, data []byte, create bool) error {
 	put := func() (int, string, error) {
 		u := f.base() + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=media&name=" + url.QueryEscape(object)
+		if storage.IsCloudBuildLogsBucket(bucket) {
+			u = f.base() + storage.CloudBuildLogsPath + "?" +
+				url.Values{"project": {project}, "bucket": {bucket}, "name": {object}}.Encode()
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
 		if err != nil {
 			return 0, "", err
@@ -385,4 +396,31 @@ func hostURL(hostPort string) string {
 		host = "127.0.0.1"
 	}
 	return "http://" + net.JoinHostPort(host, port)
+}
+
+// Save reads a locally built image back from Docker, for the push of it
+// into this instance's Artifact Registry (#1383): `docker save` to a file
+// in the instance's directory, read as an image. cleanup removes the file.
+func (b *localImageBuilder) Save(ctx context.Context, local string) (v1.Image, func(), error) {
+	f, err := os.CreateTemp(b.cfg.InstanceDir(), "push-*.tar")
+	if err != nil {
+		return nil, nil, err
+	}
+	f.Close()
+	cleanup := func() { _ = os.Remove(f.Name()) }
+	if out, err := exec.CommandContext(ctx, "docker", "save", "-o", f.Name(), local).CombinedOutput(); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("docker save %s: %v\n%s", local, err, tailLines(string(out), 10))
+	}
+	tag, err := name.NewTag(local)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	img, err := tarball.ImageFromPath(f.Name(), &tag)
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("read the saved image %s: %w", local, err)
+	}
+	return img, cleanup, nil
 }

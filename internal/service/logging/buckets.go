@@ -15,10 +15,11 @@ package logging
 // created, updated (description, retention_days, locked, restricted_fields,
 // index_configs, analytics_enabled), deleted (kept in DELETE_REQUESTED, as
 // Google keeps it for 7 days, and purged when that has passed) and undeleted.
-// A locked bucket refuses retention changes, unlocking and deletion. Buckets
-// hold no entries here: every entry is stored once, as _Default's, so a
-// bucket's retention and a view's filter change nothing that is read. They are
-// configuration, kept in the Admin's store (durable in persistent mode).
+// A locked bucket refuses retention changes, unlocking and deletion. A
+// bucket holds its parent's own entries (_Default) and what sinks route to it
+// (#1395); a read applies its retention_days and the view's filter (#1410,
+// server.go's sources). Buckets and views are configuration, kept in the
+// Admin's store (durable in persistent mode).
 //
 // The Async variants, links and settings are in links.go (#1292); a bucket's
 // cmek_settings stays UNIMPLEMENTED. Where

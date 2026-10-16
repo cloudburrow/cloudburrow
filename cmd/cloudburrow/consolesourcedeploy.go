@@ -29,7 +29,7 @@ func (artifactRegistryProvider) Title() string { return "Artifact Registry repos
 
 func (p artifactRegistryProvider) List(_ context.Context, project string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Format", "Location", "URL", "Description", "Age"},
-		NameColumn: "Repository", Noun: "repositories"}
+		NameColumn: "Repository", Noun: "repositories", RowsOpenable: true}
 	if project == "" {
 		project = p.defaultProject
 	}
@@ -284,6 +284,7 @@ func (p runBuildsProvider) Detail(_ context.Context, project string, path []stri
 	}
 	add("Images", strings.Join(b.GetImages(), ", "))
 	add("Logs bucket", b.GetLogsBucket())
+	add("Log write error", runadapter.BuildLogError(b.GetName()))
 	add("Status detail", b.GetStatusDetail())
 	if b.GetStartTime() != nil && b.GetFinishTime() != nil {
 		add("Duration", b.GetFinishTime().AsTime().Sub(b.GetStartTime().AsTime()).Round(time.Millisecond).String())

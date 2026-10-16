@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	run "cloud.google.com/go/run/apiv2"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
@@ -33,7 +35,10 @@ import (
 // serving.
 func TestRunNamesPerProject(t *testing.T) {
 	h := New(t)
-	ctx := h.Context()
+	// Two services and two worker pools become Ready one after another, past
+	// the harness's 60s on a CI runner (main run 38919188966).
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 	opts := runClientOptions(h)
 	pc, err := run.NewWorkerPoolsClient(ctx, opts...)
 	if err != nil {

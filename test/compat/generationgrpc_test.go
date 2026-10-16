@@ -28,7 +28,7 @@ import (
 func TestStreamGenerateContentThroughThePredictionClient(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvLocalAI)
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	name := "projects/" + h.Project() + "/locations/us-central1/publishers/google/models/" + localModel
 	user := func(text string) []*aiplatformpb.Content {

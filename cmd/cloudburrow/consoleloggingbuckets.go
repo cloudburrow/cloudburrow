@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -22,7 +23,8 @@ type loggingBucketsProvider struct{ loggingAdminScreen }
 func (loggingBucketsProvider) ID() string    { return "logging-buckets" }
 func (loggingBucketsProvider) Title() string { return "Log storage" }
 
-const bucketNote = "Buckets are stored configuration: every entry is kept once, as _Default's, so a bucket's retention and a view's filter change nothing that is read."
+const bucketNote = "Reading through a view applies its filter and the bucket's retention: entries older than the retention are not returned (#1410). " +
+	"Open a view to read it in the Logs Explorer."
 
 const bucketDeleteRequested = "Delete requested"
 
@@ -40,31 +42,22 @@ func lockedWord(locked bool) string {
 	return "Not locked"
 }
 
-// bucketOfProject checks a bucket name against the screen's project.
-func bucketOfProject(project, name string) error {
-	if project == "" {
-		return errors.New("choose a project first")
-	}
-	if !strings.HasPrefix(name, "projects/"+project+"/locations/") || !strings.Contains(name, "/buckets/") {
-		return fmt.Errorf("%s is not one of project %s's buckets", name, project)
-	}
-	return nil
-}
-
 func (p loggingBucketsProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Location", "Retention", "Lock", "State", "Description"}, NameColumn: "Bucket", Noun: "buckets", Note: bucketNote}
 	a, err := p.admin()
 	if err != nil {
 		return console.Listing{}, err
 	}
-	if project == "" {
-		out.Prompt = "Cloud Logging lists buckets per project. Choose one in the toolbar."
+	out.Scope = p.bucketScope(ctx, project) // #1411
+	parent, err := bucketParent(ctx, project)
+	if err != nil {
+		out.Prompt = "Cloud Logging lists buckets per project, folder, organization or billing account. Choose a project in the toolbar, or a parent in the picker."
 		return out, nil
 	}
-	if err := p.fault(ctx, loggingpb.ConfigServiceV2_ListBuckets_FullMethodName, projectResource(project)); err != nil {
+	if err := p.fault(ctx, loggingpb.ConfigServiceV2_ListBuckets_FullMethodName, parent); err != nil {
 		return console.Listing{}, err
 	}
-	resp, err := a.ConfigServer().ListBuckets(ctx, &loggingpb.ListBucketsRequest{Parent: "projects/" + project + "/locations/-", PageSize: 1000})
+	resp, err := a.ConfigServer().ListBuckets(ctx, &loggingpb.ListBucketsRequest{Parent: parent + "/locations/-", PageSize: 1000})
 	if err != nil {
 		return console.Listing{}, err
 	}
@@ -106,14 +99,15 @@ func (p loggingBucketsProvider) Create(ctx context.Context, project string, valu
 	if err != nil {
 		return "", err
 	}
-	if project == "" {
-		return "", errors.New("choose a project before creating a bucket")
+	scope, err := bucketParent(ctx, project)
+	if err != nil {
+		return "", err
 	}
 	days, err := parseRetention(values["retention"])
 	if err != nil {
 		return "", err
 	}
-	parent := "projects/" + project + "/locations/" + strings.TrimSpace(values["location"])
+	parent := scope + "/locations/" + strings.TrimSpace(values["location"])
 	if err := p.fault(ctx, loggingpb.ConfigServiceV2_CreateBucket_FullMethodName, parent); err != nil {
 		return "", err
 	}
@@ -130,7 +124,7 @@ func (p loggingBucketsProvider) get(ctx context.Context, project, name string) (
 	if err != nil {
 		return nil, err
 	}
-	if err := bucketOfProject(project, name); err != nil {
+	if err := bucketOfParent(ctx, project, name); err != nil {
 		return nil, err
 	}
 	if err := p.fault(ctx, loggingpb.ConfigServiceV2_GetBucket_FullMethodName, name); err != nil {
@@ -143,8 +137,8 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
 	}
-	if project == "" {
-		return console.Detail{Prompt: "Choose a project in the toolbar."}, nil
+	if _, err := bucketParent(ctx, project); err != nil {
+		return console.Detail{Prompt: "Choose a project in the toolbar, or a parent on the Log storage screen."}, nil
 	}
 	b, err := p.get(ctx, project, path[0])
 	if err != nil {
@@ -161,7 +155,8 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 		for _, v := range resp.GetViews() {
 			id := v.GetName()[strings.LastIndex(v.GetName(), "/")+1:]
 			row := console.Resource{Name: id, Fields: map[string]string{
-				"Filter": orDash(v.GetFilter()), "Description": orDash(v.GetDescription())}}
+				"Filter": orDash(v.GetFilter()), "Description": orDash(v.GetDescription())},
+				Link: viewExplorerHref(project, v.GetName())} // #1410
 			if viewChangeable(b, id) {
 				row.Actions = viewRowActions(v) // #1283
 			}
@@ -237,7 +232,7 @@ func (p loggingBucketsProvider) Delete(ctx context.Context, project, name string
 	if err != nil {
 		return err
 	}
-	if err := bucketOfProject(project, name); err != nil {
+	if err := bucketOfParent(ctx, project, name); err != nil {
 		return err
 	}
 	if err := p.fault(ctx, loggingpb.ConfigServiceV2_DeleteBucket_FullMethodName, name); err != nil {
@@ -263,7 +258,7 @@ func (p loggingBucketsProvider) Act(ctx context.Context, project, name, action s
 	if err != nil {
 		return err
 	}
-	if err := bucketOfProject(project, name); err != nil {
+	if err := bucketOfParent(ctx, project, name); err != nil {
 		return err
 	}
 	if err := p.fault(ctx, loggingpb.ConfigServiceV2_UndeleteBucket_FullMethodName, name); err != nil {
@@ -271,6 +266,15 @@ func (p loggingBucketsProvider) Act(ctx context.Context, project, name, action s
 	}
 	_, err = a.ConfigServer().UndeleteBucket(ctx, &loggingpb.UndeleteBucketRequest{Name: name})
 	return err
+}
+
+// viewExplorerHref is the Logs Explorer reading through a view (#1410).
+func viewExplorerHref(project, view string) string {
+	q := url.Values{"scope": {"view"}, "view": {view}}
+	if project != "" {
+		q.Set("project", project)
+	}
+	return "/logs?" + q.Encode()
 }
 
 // links is a bucket's links (#1292), from ListLinks.

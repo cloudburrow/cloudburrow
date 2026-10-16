@@ -24,7 +24,7 @@ func TestConsoleEmbeddingsPlaygroundMatchesTheOfficialSDK(t *testing.T) {
 	h := New(t)
 	cl := genaiClientAt(t, h, EnvEmbeddings)
 	addr := consoleAddr(t, h)
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	const text = "The quick brown fox jumps over the lazy dog."
@@ -100,7 +100,7 @@ func TestConsoleLocalModelsUnloadDeleteDownloadLoad(t *testing.T) {
 	h := New(t)
 	cl := genaiClientAt(t, h, EnvEmbeddings)
 	addr := consoleAddr(t, h)
-	ctx, cancel := context.WithTimeout(h.Context(), 20*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	act := func(action, body string) (int, string) {
 		return consoleDo(t, addr, http.MethodPost, "/api/ai/local-models/"+embeddingModel+"/"+action, body)
@@ -180,7 +180,7 @@ func TestConsoleLocalModelsLoadEmbedUnload(t *testing.T) {
 	cl := genaiClientAt(t, h, EnvEmbeddings)
 	addr := consoleAddr(t, h)
 	control := h.Endpoint(EnvControl)
-	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	act := func(action string) (int, string) {
 		return consoleDo(t, addr, http.MethodPost, "/api/ai/local-models/"+embeddingModel+"/"+action, "{}")

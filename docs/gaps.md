@@ -21,21 +21,21 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
 | Cloud Storage | 7 | 1 | 5 | 1 | 0 |
-| Pub/Sub | 3 | 0 | 2 | 1 | 0 |
+| Pub/Sub | 1 | 0 | 0 | 1 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 19 | 12 | 5 | 0 | 2 |
+| Cloud Run | 21 | 14 | 5 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
-| Cloud Logging | 0 | 0 | 0 | 0 | 0 |
+| Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
 | BigQuery | 45 | 21 | 16 | 8 | 0 |
-| Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
+| Spanner, Bigtable, Firestore, Datastore | 2 | 0 | 2 | 0 | 0 |
 | Cloud SQL, Memorystore | 9 | 9 | 0 | 0 | 0 |
-| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **103** | **45** | **41** | **12** | **5** |
+| **Total** | **101** | **46** | **37** | **13** | **5** |
 
 ## Cloud Storage
 
@@ -58,8 +58,7 @@ Already tracked: #982 (Google's message for an invalid label is not measured).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `DetachSubscription`, `UpdateSnapshot` are refused `UNIMPLEMENTED` by Google's emulator | no emulator support | M |
-| Protocol Buffer schemas: `ValidateSchema` of `PROTOCOL_BUFFER` is `UNIMPLEMENTED` | no emulator support | M |
+| `DetachSubscription`, `UpdateSnapshot` and Protocol Buffer schemas, which Google's emulator refuses `UNIMPLEMENTED`, are served by CloudBurrow's Pub/Sub front (#1406). Left: an `UpdateTopic` of `schema_settings` bound to a Protocol Buffer schema, and any call but Get, List, Delete, Pull and StreamingPull on a detached subscription, answer `UNIMPLEMENTED` with the reason; the seed file still refuses `PROTOCOL_BUFFER` schemas | front-served, not by the emulator; Google's exact messages for a refused `.proto` definition or message are not measured | S |
 | 4 UNVERIFIED error codes: subscription expiration, exactly-once and label refusals ([pubsub.md](coverage/pubsub.md)) | not documented by Google | S |
 
 ## Cloud Tasks
@@ -82,6 +81,8 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 |---|---|---|
 | Refused service and job fields (#1346): Cloud Storage FUSE volumes (Knative refuses a privileged container and CSI volumes) and NFS volumes; the service account is stored but tokens name the instance's account (secret and in-memory volumes, the service account and v1 probes mapped in #1297; `subPath` mapped, Cloud SQL volumes served by the Cloud SQL Auth Proxy sidecar, and VPC access, encryption keys, binary authorization, execution environment and session affinity stored and returned without effect, in #1346, with v1's `run.googleapis.com/cloudsql-instances` annotation as the same volume) | no emulator support (Knative refuses FUSE and NFS volumes) | M |
 | `gcloud run deploy --source` and `gcloud builds submit` are served since #1347 (Artifact Registry repositories, Cloud Build `builds.create`, `CancelBuild` and operations on the Run port, verified with gcloud on Dockerfile sources and a two-step cloudbuild.yaml); since #1382 steps of any image run as containers on the host's Docker (socket, `cloudbuild` network, shared `/workspace`), and `ListBuilds` `filter` and paging and `RetryBuild` are served; left: a step's `secretEnv`, `script` and `allowFailure`, and no image is pushed to a registry a docker client can reach | not built yet | S |
+| `gcloud run deploy --source` and `gcloud builds submit` are served since #1347 (Artifact Registry repositories, Cloud Build `builds.create`, `CancelBuild` and operations on the Run port, verified with gcloud on Dockerfile sources and a two-step cloudbuild.yaml); left: arbitrary step containers (only docker build, docker push and pack steps run) (a build's images are pushed to the instance's Artifact Registry since #1383) | not built yet | M |
+| `gcloud run deploy --source` and `gcloud builds submit` are served since #1347 (Artifact Registry repositories, Cloud Build `builds.create`, `CancelBuild` and operations on the Run port, verified with gcloud on Dockerfile sources and a two-step cloudbuild.yaml); since #1382 steps of any image run as containers on the host's Docker (socket, `cloudbuild` network, shared `/workspace`), and `ListBuilds` `filter` and paging and `RetryBuild` are served; since #1407 a step's `secretEnv` (Secret Manager and KMS `availableSecrets`; not masked in the log, as on Google), `script`, `allowFailure` and `allowExitCodes`; since #1430 a build without `logsBucket` writes its log to the default `{number}.cloudbuild-logs.googleusercontent.com` bucket, read-only to users; left: `options.dynamicSubstitutions`, and no image is pushed to a registry a docker client can reach | not built yet | S |
 | A worker pool's `update_mask` and instance splits across revisions are refused (served since #1300 and #1299; operations wait for the instances and an instance has a URL since #1348) | not built yet | M |
 | Refused service and job fields: VPC access, Cloud SQL, Cloud Storage FUSE and NFS volumes, `subPath`, encryption keys, binary authorization, execution environment, session affinity (the service account named to its workload by the metadata server in #1388; secret and in-memory volumes, the service account and v1 probes mapped in #1297) (#1346) | not built yet | L |
 | `gcloud run deploy --source` is not served: it creates an Artifact Registry repository and polls Cloud Build's operations, neither served; `Builds.SubmitBuild` itself is (#1268), with its Cloud Build-only fields `UNIMPLEMENTED` (#1347) | not built yet | M |
@@ -112,9 +113,13 @@ Closed by this sweep: Locations (#1237).
 
 ## Cloud Logging
 
-Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394).
+Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394); the Terraform folder, organization and billing-account resources (#1403).
+Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394). Closed: sink delivery to Cloud Storage, Pub/Sub, BigQuery and another project, and `writer_identity` (#1404).
+Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394). Closed: sink delivery to Cloud Storage, Pub/Sub, BigQuery and another project, and `writer_identity` (#1404). Closed: `CopyLogEntries` from folder, organization and billing-account buckets, with their Operations JSON bindings (#1411); in the console, Log storage's Parent picker reaches those buckets, a billing account once Logging holds an entry or configuration for it or when named as `?parent=billingAccounts/ID` (Cloud Billing is not served, so nothing else lists one). Closed: log view filters and bucket retention applied on read, and TailLogEntries on views and over JSON (#1410); in the console, the Logs Explorer reads and tails through a chosen bucket and view.
 
-No gap is left open here.
+| Gap | Why open | Size |
+|---|---|---|
+| A BigQuery sink's schema mismatch is not written to an `export_errors` table, `protoPayload` is not exported, and the sink error codes but `topic_not_found` are CloudBurrow's (#1404) | not documented by Google | S |
 
 ## Cloud KMS
 
@@ -219,8 +224,7 @@ Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`),
 |---|---|---|
 | Spanner: 32 RPCs refused (backups, backup schedules, IAM, instance configurations, instance and partition updates, `FetchCacheUpdate`; [spanner.md](coverage/spanner.md)) | no emulator support | L |
 | Bigtable: 34 RPCs refused (authorized views, snapshots, backups, IAM, `ExecuteQuery`, …; [bigtable.md](coverage/bigtable.md)) | no emulator support | L |
-| Firestore `PartitionQuery` (`GetPartitionedQueries`) | no emulator support | M |
-| Datastore `RunAggregationQuery` (count, sum, avg) | no emulator support | M |
+| Datastore GQL aggregation queries (`RunAggregationQuery` with `gql_query`) and `explain_options` | the emulator serves neither `RunAggregationQuery` nor query plans; the call front answers structured COUNT, SUM and AVG and Firestore `PartitionQuery` from its `RunQuery` (#1405), and refuses these 501 | S |
 
 ## Cloud SQL, Memorystore
 
@@ -244,9 +248,8 @@ Closed: Functions in Node.js, Python, Java, Ruby, PHP and .NET, with a dated run
 
 | Gap | Why open | Size |
 |---|---|---|
-| Terraform resources beyond the verified set (#1304): `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool), and the Functions, Artifact Registry and Cloud Build resources, whose endpoints the wrapper does not set | not built yet (partly verified: Pub/Sub schemas and IAM (#1367), project IAM (#1368), secret versions, Storage ACLs, ACL lists and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access, dataset IAM and row access policies, partitioned and clustered tables and query jobs, `*_iam_member`, `*_iam_binding` and `*_iam_policy` on buckets, secrets, key rings, keys and queues, Firestore documents, databases, indexes and fields, Bigtable instances and tables, Spanner instances and databases, Logging bucket configs and linked datasets, `google_project_service`) | L |
 | A dated run of the Node.js, Python, Java, Ruby, PHP and .NET Functions tests (#1319) | fixtures and gated tests for all six exist; none has run, since the builder's amd64 images cannot run on arm64 nodes | S |
-| Terraform resources beyond the verified set (#1304): `google_pubsub_*_iam_*` (Pub/Sub serves no IAM methods, #1367), `google_project_iam_*` (ADR-0006 keeps project IAM UNIMPLEMENTED; a decision is needed, #1368), `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool), `google_cloudfunctions2_function` (served since #1377; the full apply is gated on amd64 nodes and not yet run) and v1 functions (refused by the wrapper: the v1 API is not served), and `google_cloudbuild_trigger` and `_worker_pool` (refused 501: Cloud Build serves builds only) | partly verified (Artifact Registry repositories, Cloud Run services with a Cloud SQL volume, Pub/Sub schemas, secret versions, Storage ACLs, ACL lists and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access, dataset IAM and row access policies, partitioned and clustered tables and query jobs, `*_iam_member`, `*_iam_binding` and `*_iam_policy` on buckets, secrets, key rings, keys and queues, Firestore documents, databases, indexes and fields, Bigtable instances and tables, Spanner instances and databases, Logging bucket configs and linked datasets, `google_project_service`) | L |
+| Terraform resources beyond the verified set (#1304): `google_pubsub_*_iam_*` (Pub/Sub serves no IAM methods, #1367), `google_project_iam_*` (ADR-0006 keeps project IAM UNIMPLEMENTED; a decision is needed, #1368), `google_firestore_backup_schedule` (backups are not served), Spanner instance updates (the emulator does not update instances, #1331), a worker pool's `scaling_mode` (#1354: refused, as Google publishes no such field for a worker pool), `google_cloudfunctions2_function` (served since #1377; the full apply is gated on amd64 nodes and not yet run) and v1 functions (refused by the wrapper: the v1 API is not served), `google_cloudbuild_trigger` and `_worker_pool` (refused 501: Cloud Build serves builds only), the Logging folder and organization resources (refused: Logging serves project parents only, #1403), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), and `google_secret_manager_regional_secret`, `google_bigquery_data_transfer_config` and `google_cloud_run_domain_mapping` (their endpoints are not set: not served, or never Ready) | partly verified (Cloud SQL client certificates and read replicas, a Memorystore maintenance policy, folder and organization IAM, secret versions' deletion policy, Artifact Registry repositories, Cloud Run services with a Cloud SQL volume, Pub/Sub schemas, secret versions, Storage ACLs, ACL lists and managed folders, Scheduler HTTP targets, Cloud Tasks queue HTTP targets, Secret Manager rotation and topics, Cloud Run volumes, service accounts and worker pools, KMS key purposes and import jobs, BigQuery dataset access, dataset IAM and row access policies, partitioned and clustered tables and query jobs, `*_iam_member`, `*_iam_binding` and `*_iam_policy` on buckets, secrets, key rings, keys and queues, Firestore documents, databases, indexes and fields, Bigtable instances and tables, Spanner instances and databases, Logging bucket configs and linked datasets, `google_project_service`) | L |
 | Functions in languages other than Go (#1303) | not built yet | L |
 
 ## Console

@@ -43,7 +43,7 @@ func TestEmulatorsBehindAFrontRefuseOtherPods(t *testing.T) {
 	if ns == "" {
 		ns = "cloudburrow"
 	}
-	ctx, cancel := context.WithTimeout(h.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	kc := func(args ...string) (string, error) {
 		out, err := exec.CommandContext(ctx, "kubectl", append([]string{"--kubeconfig", kubeconfig, "-n", ns}, args...)...).CombinedOutput()

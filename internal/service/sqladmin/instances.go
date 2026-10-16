@@ -290,7 +290,11 @@ type instanceBody struct {
 	FailoverReplica      *json.RawMessage `json:"failoverReplica"`
 	// IncludeReplicas is includeReplicasForMajorVersionUpgrade (#1421).
 	IncludeReplicas bool `json:"includeReplicasForMajorVersionUpgrade"`
-	Settings        *struct {
+	// OnPremisesConfiguration and instanceType ON_PREMISES_INSTANCE make a
+	// source representation instance: a record of a server outside Cloud
+	// SQL (#1304), Terraform's google_sql_source_representation_instance.
+	OnPremisesConfiguration *json.RawMessage `json:"onPremisesConfiguration"`
+	Settings                *struct {
 		Tier                      string             `json:"tier"`
 		UserLabels                *map[string]string `json:"userLabels"`
 		DatabaseFlags             *[]Flag            `json:"databaseFlags"`
@@ -309,6 +313,10 @@ type instanceBody struct {
 func (b instanceBody) unsupported() error {
 	if b.FailoverReplica != nil {
 		return unimplemented("failover replicas", legacyFailoverWhy)
+	}
+	if b.InstanceType == "ON_PREMISES_INSTANCE" || b.OnPremisesConfiguration != nil {
+		return unimplemented("source representation instances (instanceType ON_PREMISES_INSTANCE)",
+			"an instance's server is one CloudBurrow runs; a server outside it is not represented or replicated from")
 	}
 	if b.Settings != nil {
 		if a := b.Settings.AvailabilityType; a != "" && a != "ZONAL" && a != "REGIONAL" {
