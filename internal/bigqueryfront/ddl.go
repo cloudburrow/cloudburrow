@@ -344,8 +344,9 @@ func checkDDL(sql string) ddlVerdict {
 		case "CREATE MATERIALIZED VIEW in a script with a TEMP table or function",
 			"ALTER MATERIALIZED VIEW in a script with a TEMP table or function",
 			"DROP MATERIALIZED VIEW in a script with a TEMP table or function":
-			hint = "CloudBurrow carries out a materialized view's statements alone, and in a script with no TEMP table or " +
-				"function, which it runs a statement at a time (#1415); a TEMP table lasts only for the request that made it."
+			hint = "CloudBurrow carries out a materialized view's statements alone, and in a script, which it runs a " +
+				"statement at a time (#1415), a TEMP table kept for the script (#1434), but not in a dry run of a script " +
+				"with a TEMP table or function."
 		case "CREATE TABLE LIKE":
 			hint = "CREATE TABLE ... AS SELECT * FROM the source LIMIT 0 makes a table with its columns (not its options)."
 		case "CREATE TABLE COPY", "CREATE TABLE CLONE", "CREATE SNAPSHOT TABLE", "DROP SNAPSHOT TABLE":

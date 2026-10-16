@@ -413,7 +413,16 @@ var ddlFieldTypes = map[string]string{
 
 // fieldType reads the column type at t[i] as a TableFieldSchema (no name),
 // and returns the index after it; what names a type it does not read.
-func fieldType(t []token, i int) (map[string]any, int, string) {
+func fieldType(t []token, i int) (map[string]any, int, string) { return fieldTypeOf(t, i, false) }
+
+// descExprKey holds, in a field fieldTypeOf reads with exprs, the [pos,
+// end] of a STRUCT field's description that is a constant expression, for
+// the front to evaluate (#1438, decimalddl.go); it is never sent.
+const descExprKey = "\x00descriptionExpr"
+
+// fieldTypeOf is fieldType; with exprs, a STRUCT field's description may
+// be a constant expression (descExprKey).
+func fieldTypeOf(t []token, i int, exprs bool) (map[string]any, int, string) {
 	if i >= len(t) || t[i].kind != tokWord {
 		return nil, i, "a column with no type"
 	}
@@ -427,7 +436,7 @@ func fieldType(t []token, i int) (map[string]any, int, string) {
 		if i >= len(t) || !t[i].punct("<") {
 			return nil, i, "ARRAY without its element type"
 		}
-		elem, next, what := fieldType(t, i+1)
+		elem, next, what := fieldTypeOf(t, i+1, exprs)
 		if what != "" {
 			return nil, i, what
 		}
@@ -450,7 +459,7 @@ func fieldType(t []token, i int) (map[string]any, int, string) {
 				return nil, i, "a STRUCT field with no name"
 			}
 			name := t[i].text
-			f, next, what := fieldType(t, i+1)
+			f, next, what := fieldTypeOf(t, i+1, exprs)
 			if what != "" {
 				return nil, i, what
 			}
@@ -472,6 +481,9 @@ func fieldType(t []token, i int) (map[string]any, int, string) {
 					switch {
 					case o.name == "rounding_mode" && ok: // #1409, checked by roundingModeRefused
 						f["roundingMode"] = s
+					case o.name == "description" && len(o.val) == 1 && o.val[0].is("NULL"):
+					case exprs && o.name == "description" && !ok && len(o.val) > 0: // #1438
+						f[descExprKey] = [2]int{o.val[0].pos, o.val[len(o.val)-1].end}
 					case o.name != "description" || !ok:
 						return nil, i, "a STRUCT field's option " + o.name + " other than a description or rounding_mode literal"
 					default:
