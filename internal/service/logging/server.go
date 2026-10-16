@@ -378,6 +378,7 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 		s.store.mu.Unlock()
 		s.store.append(out, routes)
 		s.deliver(deliveries)
+		s.linkWrites(out, routes) // #1423, analytics.go
 	}
 	if first != nil {
 		st, err := status.New(first.Code, fmt.Sprintf("%s (%d of %d entries not written)", first.Message, len(failed), len(req.GetEntries()))).

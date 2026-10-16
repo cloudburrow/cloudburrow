@@ -221,6 +221,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	settings := &projectOptions{}                   // projectoptions.go, #1375
 	jobRows := &jobsTable{}                         // jobstable.go, #1378
 	tables := &tableSettings{}                      // tableoptions.go, #1390
+	linked := &linkedDatasets{}                     // loglinks.go, #1423
 	if o.stateDir != "" {
 		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
 		buffers.keep(streamBuffersStateFile(o.stateDir), o.logf)   // streamingbuffer.go, #1273
@@ -252,6 +253,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			settings.reset()
 			jobRows.reset()
 			tables.reset()
+			linked.reset()
 		})
 	}
 	// listJobs serves jobs.list, r a GET of a project's jobs: here, and
@@ -332,7 +334,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if j := jobsRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && strings.HasPrefix(r.URL.EscapedPath(), "/upload/") &&
 			r.URL.Query().Get("uploadType") == "resumable" && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, uploads: uploads, texts: texts, storage: storage, storageHost: storageHost,
-				configs: configs, jobs: own, records: records, functions: functions, buffers: buffers}
+				configs: configs, jobs: own, records: records, functions: functions, buffers: buffers, linked: linked}
 			f.resumable(w, r)
 			return
 		}
@@ -341,7 +343,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows,
-				resourceManager: o.resourceManager, tables: tables}
+				resourceManager: o.resourceManager, tables: tables, linked: linked}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -400,7 +402,20 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
-			buffers: buffers, tables: tables}
+			buffers: buffers, tables: tables, linked: linked}
+		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
+			if r.Method == http.MethodPost {
+				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
+				f.insertDataset(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		}) {
+			return
+		}
+		if what := linkedRequestWhat(r.Method, m[4], m[5]); m[3] != "" && what != "" && f.refuseLinkedWrite(w, r, dataset, what) { // #1423, loglinks.go
+			return
+		}
 		switch {
 		case m[4] != "" && strings.Contains(table, "$") && strings.Index(table, "$") > 0 && (m[5] == "" || m[5] == "data"):
 			f.servePartition(w, r, dataset, table, m[5]) // #1273, partitionreads.go
@@ -495,6 +510,9 @@ type front struct {
 	// JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION read the project's ancestry
 	// from (infoschemahierarchy.go, #1392), or "".
 	resourceManager string
+	// linked are the Log Analytics linked datasets, read-only to clients
+	// (loglinks.go, #1423), or nil.
+	linked *linkedDatasets
 }
 
 // Option is an option of Wrap.

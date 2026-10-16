@@ -4033,7 +4033,10 @@ function queryPane(route, segments, spec, onDone) {
   // The draft survives a navigation away and back, because losing a
   // half-written query to a misclick is the fastest way to stop using a
   // query pane. Per viewer and per resource; never sent anywhere.
-  editor.value = readStored(draftKey, "");
+  // A page that links here with ?query= (Log Analytics, #1423) opens the
+  // editor on that statement instead of the draft.
+  const linked = new URLSearchParams(location.search).get("query");
+  editor.value = linked !== null ? linked : readStored(draftKey, "");
   editor.addEventListener("input", () => writeStored(draftKey, editor.value));
 
   const results = el("div", { class: "query-results" });

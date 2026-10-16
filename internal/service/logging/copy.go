@@ -332,6 +332,11 @@ func (s operationsServer) find(name string) (*copyOp, error) {
 }
 
 func (s operationsServer) GetOperation(_ context.Context, req *longrunningpb.GetOperationRequest) (*longrunningpb.Operation, error) {
+	// A bucket's or link's operation, answered done (links.go), is read
+	// back as it was answered, as gcloud polls it (#1423).
+	if op := s.a.doneOperation(req.GetName()); op != nil {
+		return op, nil
+	}
 	c := &s.a.copies
 	c.mu.Lock()
 	defer c.mu.Unlock()
