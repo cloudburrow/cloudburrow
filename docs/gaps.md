@@ -40,7 +40,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 ## Cloud Storage
 
 Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `objects.bulkRestore`
-(#1279), `buckets.operations.list` filters (#1280), `channels.stop` and `objects.watchAll` (#1281), channel delivery on an `up` instance (#1290), and the XML API's bucket `PUT`, service `GET` and form `POST` (#1258), and the gRPC `google.storage.v2` API itself (#1321).
+(#1279), `buckets.operations.list` filters (#1280), `channels.stop` and `objects.watchAll` (#1281), watchAll's listing parameters (#1393), channel delivery on an `up` instance (#1290), and the XML API's bucket `PUT`, service `GET` and form `POST` (#1258), and the gRPC `google.storage.v2` API itself (#1321).
 
 | Gap | Why open | Size |
 |---|---|---|

@@ -589,7 +589,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleStorageNotifications", "TestStorageNotificationsThroughTheForm", "TestStorageNotificationsThroughTheAPI", "TestStorageNotificationsWithoutPubSub"}},
 	{Resource: "Cloud Storage object change notification channels", Service: "storage",
 		Methods:  []string{"storage.channels.stop"},
-		Provider: "storage", Offers: "Channels tab on a bucket's page listing its active objects.watchAll channels (channel ID, address, expiry, messages, created); Stop on each row, through channels.stop (#1281)",
+		Provider: "storage", Offers: "Channels tab on a bucket's page listing its active objects.watchAll channels (channel ID, address, the objects.list selection it watches (#1393), expiry, messages, created); Stop on each row, through channels.stop (#1281)",
 		Tests: []string{"TestConsoleStorageChannels"}},
 	{Resource: "Cloud Storage ACLs", Service: "storage",
 		Methods: []string{"storage.bucketAccessControls.list", "storage.bucketAccessControls.update", "storage.bucketAccessControls.delete",
