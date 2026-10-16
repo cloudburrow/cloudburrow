@@ -260,6 +260,16 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.refuseSnapshotQuery(w, r, q, insert) { // #1002, snapshots.go
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && dryRun(r, insert) {
+		if stmt, ok := loneAlterTable(q.Query); ok { // #1416, altertabledry.go
+			f.dryRunAlter(w, r, q, stmt, insert)
+			return
+		}
+		if views, ok := scriptViewLists(q.Query, false); ok { // #1416, viewcolumnstemp.go
+			f.tempScriptViews(w, r, q, views, insert)
+			return
+		}
+	}
 	if q.UseLegacySQL != nil && *q.UseLegacySQL || dryRun(r, insert) {
 		f.serveQuery(w, r, q, insert)
 		return

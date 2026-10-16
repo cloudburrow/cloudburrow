@@ -59,10 +59,10 @@ func tableExists(t *testing.T, ctx context.Context, tbl *bigquery.Table) bool {
 
 // TestBigQueryAlterTableNamesAndNotImplemented (#901): ALTER TABLE's new
 // names are held to the rules, 400 invalidQuery: an ADD COLUMN named a!,
-// a STRUCT field named q?, a RENAME TO t!, a RENAME COLUMN to c!. An ALTER
-// TABLE BigQuery would run but the front does not carry out (SET DATA TYPE
-// to an ARRAY) is 501; a subfield's SET DEFAULT and RENAME COLUMN with
-// ADD COLUMN are 400, as BigQuery refuses them (#1389),, through jobs.query and jobs.insert
+// a STRUCT field named q?, a RENAME TO t!, a RENAME COLUMN to c!. A
+// subfield's SET DEFAULT and RENAME COLUMN with ADD COLUMN are 400, as
+// BigQuery refuses them (#1389), and so (#1416) is SET DATA TYPE of an
+// INT64 to an ARRAY, a change of mode, through jobs.query and jobs.insert
 // alike, since the emulator would report it done and leave the table as it
 // was; the table's schema is unchanged and it is not renamed. A table
 // option the front does not set (enable_fine_grained_mutations) is 501 too (#1251).
@@ -82,7 +82,7 @@ func TestBigQueryAlterTableNamesAndNotImplemented(t *testing.T) {
 			"ALTER TABLE " + ref + " ADD COLUMN s STRUCT<`q?` INT64>":                    http.StatusBadRequest,
 			"ALTER TABLE " + ref + " RENAME TO `t!`":                                     http.StatusBadRequest,
 			"ALTER TABLE " + ref + " RENAME COLUMN a TO `c!`":                            http.StatusBadRequest,
-			"ALTER TABLE " + ref + " ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":          http.StatusNotImplemented,
+			"ALTER TABLE " + ref + " ALTER COLUMN a SET DATA TYPE ARRAY<INT64>":          http.StatusBadRequest, // #1416
 			"ALTER TABLE " + ref + " ALTER COLUMN a.x SET DEFAULT 1":                     http.StatusBadRequest, // #1389
 			"ALTER TABLE " + ref + " ADD COLUMN b STRING, RENAME COLUMN a TO c":          http.StatusBadRequest, // #1389
 			"ALTER TABLE " + ref + " SET OPTIONS (enable_fine_grained_mutations = TRUE)": http.StatusNotImplemented,

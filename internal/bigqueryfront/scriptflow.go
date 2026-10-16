@@ -132,7 +132,8 @@ func hasControlFlow(sql string) bool {
 	}
 	for _, stmt := range splitStatements(toks) {
 		if body, block, handler := stripControlFlow(stmt); block != "" || handler || len(body) > 0 && body[0].is("RAISE") ||
-			isProcedureStatement(body) || isAlterTable(body) || // #1217, procedures.go; #1227, altertable.go
+			isProcedureStatement(body) || // #1217, procedures.go
+			!temp && isAlterTable(body) || // #1227, altertable.go; with a TEMP table 501 (checkDDL, #1416)
 			!temp && isViewColumnList(sql, body) || // #1323, viewcolumns.go
 			!temp && stmts > 1 && hasDDLOptions(sql, body) || // #1390, ddloptions.go; a lone one is runQuery's
 			!temp && stmts > 1 && isMVBody(sql, body) { // #1415, materializedviews.go
@@ -584,6 +585,9 @@ type scriptRun struct {
 	rowCount  string
 	frames    map[string]scriptChild
 	intoQuery bool
+	// dry: the run is a dry run's, which checks an ALTER TABLE and
+	// changes nothing (altertabledry.go, #1416).
+	dry bool
 }
 
 // runScript carries out a script with control flow (above), and records

@@ -39,12 +39,23 @@ func TestViewColumnList(t *testing.T) {
 		*v.descriptions[0] != "x" || v.descriptions[1] != nil || v.withoutList() != "CREATE VIEW ds.v  AS SELECT 1, 2" {
 		t.Errorf("a column's OPTIONS: %+v %v", v, ok)
 	}
+	// #1416: another option is refused, as BigQuery refuses it; a
+	// description that is a constant expression is evaluated, one with a
+	// subquery or a function BigQuery bars refused.
+	if v, ok := parseViewColumnList("CREATE VIEW ds.v (c OPTIONS(rounding_mode='x')) AS SELECT 1"); !ok || v.badOption != "" ||
+		!strings.Contains(v.checkNames(), "rounding_mode is not supported") {
+		t.Errorf("rounding_mode: %+v %v", v, ok)
+	}
+	if v, ok := parseViewColumnList("CREATE VIEW ds.v (c OPTIONS(description=CONCAT('a', 'b')), d OPTIONS(description=NULL)) AS SELECT 1, 2"); !ok ||
+		v.badOption != "" || v.checkNames() != "" || v.descExprs[0] != "CONCAT('a', 'b')" || v.descExprs[1] != "" || v.descriptions[1] != nil {
+		t.Errorf("a constant description: %+v %v", v, ok)
+	}
 	for _, sql := range []string{
-		"CREATE VIEW ds.v (c OPTIONS(rounding_mode='x')) AS SELECT 1",
-		"CREATE VIEW ds.v (c OPTIONS(description=CONCAT('a', 'b'))) AS SELECT 1",
+		"CREATE VIEW ds.v (c OPTIONS(description=(SELECT 'a'))) AS SELECT 1",
+		"CREATE VIEW ds.v (c OPTIONS(description=REPEAT('a', 2))) AS SELECT 1",
 	} {
-		if v, ok := parseViewColumnList(sql); !ok || v.badOption == "" {
-			t.Errorf("%s: %+v %v, want an option not set", sql, v, ok)
+		if v, ok := parseViewColumnList(sql); !ok || !strings.Contains(v.checkNames(), "constant expression") {
+			t.Errorf("%s: %+v %v, want refused", sql, v, ok)
 		}
 	}
 	for _, sql := range []string{

@@ -65,10 +65,14 @@ type viewColumnList struct {
 	ifNotExists          bool
 	orReplace            bool
 	// descriptions are the listed columns' OPTIONS(description = ...), by
-	// position (nil for none); badOption names a column option the front
-	// does not set.
+	// position (nil for none), and descExprs the text of one that is not
+	// a string literal, a constant expression evaluated before the view
+	// is made (resolveDescriptions, #1416); badOption names OPTIONS the
+	// front cannot read, and refused why BigQuery refuses an option.
 	descriptions []*string
+	descExprs    []string
 	badOption    string
+	refused      string
 }
 
 // isViewColumnList reports whether body, one statement of a script, is a
@@ -84,6 +88,14 @@ func isViewColumnList(sql string, body []token) bool {
 // checkNames is why BigQuery refuses the listed names before running the
 // statement, or "".
 func (v viewColumnList) checkNames() string {
+	if v.refused != "" {
+		return v.refused
+	}
+	for _, e := range v.descExprs {
+		if msg := constantOptionRefused(e); msg != "" {
+			return msg
+		}
+	}
 	seen := map[string]bool{}
 	for _, c := range v.columns {
 		if msg := checkColumnName(c); msg != "" {
@@ -156,6 +168,7 @@ func parseViewColumnList(sql string) (viewColumnList, bool) {
 		}
 		v.columns = append(v.columns, t[i].text)
 		v.descriptions = append(v.descriptions, nil)
+		v.descExprs = append(v.descExprs, "")
 		i++
 		if i < end && t[i].is("OPTIONS") {
 			close := -1
@@ -172,12 +185,24 @@ func parseViewColumnList(sql string) (viewColumnList, bool) {
 			for _, o := range opts {
 				s, lit := stringLiteral(singleToken(o.val))
 				switch {
-				case o.name != "description" && v.badOption == "":
-					v.badOption = "the option " + o.name
-				case o.name == "description" && !lit && v.badOption == "":
-					v.badOption = "a description that is not a string literal"
-				case o.name == "description" && lit:
+				case o.name != "description":
+					// "Column options for a view have the same syntax and
+					// requirements as for a table, but with a different
+					// list of NAME and VALUE fields": description alone
+					// (#1416; the wording is CloudBurrow's, UNVERIFIED).
+					if v.refused == "" {
+						v.refused = "The column option " + o.name + " is not supported for a column of a view: " +
+							"description is the one column option of a view."
+					}
+				case lit:
 					v.descriptions[len(v.descriptions)-1] = &s
+				case len(o.val) == 1 && o.val[0].is("NULL"):
+				case len(o.val) == 0:
+					if v.badOption == "" {
+						v.badOption = "OPTIONS as written"
+					}
+				default:
+					v.descExprs[len(v.descExprs)-1] = sql[o.val[0].pos:o.val[len(o.val)-1].end]
 				}
 			}
 			i = close + 1
@@ -247,17 +272,90 @@ func (v viewColumnList) aliasedQuery(fields []field) (string, string) {
 		v.query + "\n))", ""
 }
 
-// badOptionMessage is the 501 for a column option the front does not set.
+// badOptionMessage is the 501 for a column's OPTIONS the front cannot read.
 func (v viewColumnList) badOptionMessage() string {
 	return "Not implemented here: " + v.badOption + " on a column in the column list of CREATE VIEW. CloudBurrow " +
-		"sets a listed column's OPTIONS(description = 'literal'), the one column option BigQuery takes for a view, " +
+		"sets a listed column's OPTIONS(description = ...), the one column option BigQuery takes for a view, " +
 		"and nothing else, so nothing was run."
+}
+
+// constantFunctions are the scalar functions an option's constant
+// expression "cannot contain" (data-definition-language, column_set_options_list).
+var constantFunctions = map[string]bool{"ARRAY_TO_STRING": true, "REPLACE": true, "REGEXP_REPLACE": true, "RAND": true,
+	"FORMAT": true, "LPAD": true, "RPAD": true, "REPEAT": true, "SESSION_USER": true, "GENERATE_ARRAY": true,
+	"GENERATE_DATE_ARRAY": true}
+
+// constantOptionRefused is why BigQuery refuses expr as an option's value,
+// "a constant expression containing only literals, query parameters, and
+// scalar functions" with no table, subquery or statement and none of
+// constantFunctions, or "" (#1416). The engine refuses the rest (a column
+// or a table it cannot resolve) when it evaluates it. The wording is
+// CloudBurrow's, UNVERIFIED.
+func constantOptionRefused(expr string) string {
+	t, ok := lex(expr)
+	if !ok {
+		return ""
+	}
+	for i, tok := range t {
+		switch {
+		case tok.kind != tokWord:
+		case tok.is("SELECT") || tok.is("FROM") || tok.is("WITH"):
+			return "An option's value must be a constant expression, without a subquery or a table: " + expr
+		case constantFunctions[strings.ToUpper(tok.text)] && i+1 < len(t) && t[i+1].punct("("):
+			return "An option's value must be a constant expression, which cannot call " + strings.ToUpper(tok.text) + ": " + expr
+		}
+	}
+	return ""
+}
+
+// resolveDescriptions evaluates v's descriptions that are constant
+// expressions (descExprs) with q's query parameters, each the STRING it
+// is (NULL for none), and returns the status and message of a refusal, or
+// 0 (#1416).
+func (f front) resolveDescriptions(r *http.Request, q queryOptions, v *viewColumnList) (int, string) {
+	for i, e := range v.descExprs {
+		if e == "" {
+			continue
+		}
+		if msg := constantOptionRefused(e); msg != "" {
+			return http.StatusBadRequest, msg
+		}
+		legacy := false
+		opts := queryOptions{Query: "SELECT CAST((" + e + ") AS STRING)", UseLegacySQL: &legacy, DefaultDataset: q.DefaultDataset}
+		if strings.ContainsAny(e, "@?") {
+			// The engine refuses parameters a query does not use
+			// (measured: "expected 0 arguments, got 1").
+			opts.ParameterMode, opts.QueryParameters = q.ParameterMode, q.QueryParameters
+		}
+		req, err := json.Marshal(opts)
+		if err != nil {
+			return http.StatusInternalServerError, err.Error()
+		}
+		status, got := f.send(r, http.MethodPost, "/queries", req)
+		var res struct {
+			Rows []struct {
+				F []struct {
+					V *string `json:"v"`
+				} `json:"f"`
+			} `json:"rows"`
+		}
+		if status != http.StatusOK || json.Unmarshal(got, &res) != nil || len(res.Rows) != 1 || len(res.Rows[0].F) != 1 {
+			return http.StatusBadRequest, "Could not evaluate the description of column " + v.columns[i] + ": " +
+				errorMessage(got, status)
+		}
+		v.descriptions[i] = res.Rows[0].F[0].V
+	}
+	return 0, ""
 }
 
 // createViewWithColumns carries out v, the lone statement of q (above).
 func (f front) createViewWithColumns(w http.ResponseWriter, r *http.Request, q queryOptions, v viewColumnList, insert bool) {
 	if v.badOption != "" {
 		writeError(w, http.StatusNotImplemented, "notImplemented", v.badOptionMessage())
+		return
+	}
+	if code, msg := f.resolveDescriptions(r, q, &v); code != 0 { // #1416
+		writeError(w, code, "invalidQuery", msg)
 		return
 	}
 	if dryRun(r, insert) { // #1335

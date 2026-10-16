@@ -33,8 +33,9 @@ import (
 //     "Setting the value replaces the existing value of that option for the
 //     table, if there was one. Setting the value to NULL clears the table's
 //     value for that option"; labels are replaced as a whole;
-//   - ALTER COLUMN [IF EXISTS] name SET OPTIONS (description = ...) and
-//     ALTER COLUMN [IF EXISTS] name DROP NOT NULL.
+//   - ALTER COLUMN [IF EXISTS] name SET OPTIONS (description = ...,
+//     rounding_mode = ..., #1416) and ALTER COLUMN [IF EXISTS] name DROP
+//     NOT NULL.
 //
 // An option's value is a literal, or (description, friendly_name,
 // expiration_timestamp) an expression the emulator evaluates, so
@@ -62,7 +63,9 @@ import (
 //
 // A script with an ALTER TABLE is carried out by the front's script
 // interpreter (hasControlFlow, scriptflow.go), each ALTER TABLE in its
-// turn (scriptRun.alterTable); a dry run of one stays 501 (checkDDL).
+// turn (scriptRun.alterTable); a dry run of a lone one is checked and
+// changes nothing (#1416, altertabledry.go), and of a script with one
+// stays 501 (checkDDL).
 
 // alterStmt is an ALTER TABLE statement as alterTable reads it.
 type alterStmt struct {
@@ -110,7 +113,7 @@ func alterNotImplemented(what string) string {
 		"reports ALTER TABLE done and leaves the table unchanged (measured), and CloudBurrow carries out only ADD COLUMN, " +
 		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp, partition_expiration_days, kms_key_name, " +
 		"max_staleness, default_rounding_mode, tags, require_partition_filter, enable_change_history, storage_uri, privacy_policy), " +
-		"ALTER COLUMN SET OPTIONS (description), " +
+		"ALTER COLUMN SET OPTIONS (description, rounding_mode), " +
 		"ALTER COLUMN DROP NOT NULL, ALTER COLUMN SET DATA TYPE, ALTER COLUMN SET DEFAULT and DROP DEFAULT, RENAME TO, RENAME COLUMN, " +
 		"DROP COLUMN and primary and foreign keys, " +
 		"so nothing of the statement was run."
@@ -220,7 +223,7 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 					return st, "", "Syntax error: SET OPTIONS without its list"
 				}
 				for _, o := range opts {
-					if o.name != "description" {
+					if o.name != "description" && o.name != "rounding_mode" { // rounding_mode: #1416
 						return st, "ALTER COLUMN SET OPTIONS (" + o.name + ")", ""
 					}
 				}
@@ -234,8 +237,6 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 					return st, "ALTER COLUMN SET DATA TYPE " + what, ""
 				case next != len(rest):
 					return st, "", fmt.Sprintf("Syntax error: unexpected %q after SET DATA TYPE", rest[next].text)
-				case f["mode"] == "REPEATED":
-					return st, "ALTER COLUMN SET DATA TYPE to an ARRAY", ""
 				}
 				act.kind, act.field = "set type", f
 			case len(rest) == 2 && rest[0].is("DROP") && rest[1].is("DEFAULT"):
@@ -578,7 +579,7 @@ func (s *scriptRun) alterTable(toks []token) *scriptFlow {
 		if flow := s.alterRun(sub, ds, table, text); flow != nil {
 			return flow
 		}
-		if g[0].kind == "rename table" {
+		if g[0].kind == "rename table" && !s.dry {
 			table = g[0].newName
 		}
 	}
@@ -711,10 +712,24 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 				if flow != nil {
 					return flow
 				}
+				key := "description"
+				if o.name == "rounding_mode" {
+					// "the rounding mode that's used for values written
+					// to a NUMERIC or BIGNUMERIC type column"; NULL
+					// clears it (#1416). The tables.patch path makes the
+					// engine's rounding again (decimalddl.go).
+					key = "roundingMode"
+					if v != nil {
+						probe := map[string]any{"name": str(f, "name"), "type": str(f, "type"), "roundingMode": *v}
+						if msg := roundingModeRefused(probe); msg != "" {
+							return failWith(http.StatusBadRequest, "invalidQuery", msg, text)
+						}
+					}
+				}
 				if v == nil || *v == "" {
-					delete(f, "description")
+					delete(f, key)
 				} else {
-					f["description"] = *v
+					f[key] = *v
 				}
 				schemaChanged = true
 			}
@@ -796,10 +811,12 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 						}
 					}
 					if m.setting {
-						s.f.tables.set(streamKey(project, ds, table), current.CreationTime, m)
+						if !s.dry {
+							s.f.tables.set(streamKey(project, ds, table), current.CreationTime, m)
+						}
 						continue
 					}
-					if m.name == "require_partition_filter" && m.value == true {
+					if m.name == "require_partition_filter" && m.value == true && !s.dry {
 						s.f.tables.watchTable(streamKey(project, ds, table))
 					}
 					if m.value == nil || m.value == false {
@@ -826,6 +843,9 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 				}
 			}
 		}
+	}
+	if s.dry { // #1416, altertabledry.go
+		return nil
 	}
 	if schemaChanged {
 		patch["schema"] = map[string]any{"fields": fields}
