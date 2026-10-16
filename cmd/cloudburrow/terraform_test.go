@@ -258,6 +258,9 @@ resource "google_storage_bucket" "b" {}
 	if !strings.Contains(body, `spanner_custom_endpoint = "http://127.0.0.1:9022/v1/"`) {
 		t.Errorf("provider lacks Spanner's REST endpoint:\n%s", body)
 	}
+	if !strings.Contains(body, `bigtable_custom_endpoint = "http://127.0.0.1:9012/v2/"`) {
+		t.Errorf("provider lacks Bigtable's admin REST endpoint:\n%s", body)
+	}
 	for _, c := range []struct {
 		args []string
 		want string

@@ -105,6 +105,13 @@ var terraformEndpoints = []terraformEndpoint{
 	// emulator's REST API, Spanner's second port (Endpoints.SpannerREST),
 	// which the call front in its pod serves.
 	{config.ServiceSpanner, "spanner_custom_endpoint", "GOOGLE_SPANNER_CUSTOM_ENDPOINT", "/v1/", true},
+	// Bigtable's admin REST API (#1440), on the Bigtable port beside gRPC
+	// (internal/bigtablefront/rest.go): google_bigtable_app_profile and
+	// google_bigtable_instance_iam_member, _binding and _policy apply, plan
+	// clean, update and destroy in TestTerraformBigtableAppProfileAndIAM.
+	// The provider's instance, table and GC policy resources use the gRPC
+	// clients, which BIGTABLE_EMULATOR_HOST points here (bigtableHost).
+	{config.ServiceBigtable, "bigtable_custom_endpoint", "GOOGLE_BIGTABLE_CUSTOM_ENDPOINT", "/v2/", true},
 	// Memorystore for Redis (#1302): a google_redis_instance applies, is
 	// reached with its AUTH string, plans clean, updates its size and labels
 	// in place and destroys in TestTerraformRedisInstance, over the admin
@@ -174,6 +181,8 @@ func terraformSettings(cfg config.Config) ([]terraformURL, []config.Service) {
 		// The REST port: the provider's Spanner resources use REST, the
 		// client libraries the gRPC one.
 		config.ServiceSpanner: cfg.Endpoints.SpannerREST,
+		// The front serves the admin REST API on the gRPC port.
+		config.ServiceBigtable: cfg.Endpoints.Bigtable,
 		// The admin API's port, not the RESP one.
 		memorystoreAdminEndpoint: cfg.Endpoints.MemorystoreAdmin,
 	}

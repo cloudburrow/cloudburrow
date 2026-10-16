@@ -8,7 +8,7 @@
 // (authorized views, snapshots), and forwards every other call to the
 // emulator unchanged, each message passed through undecoded.
 //
-// It serves gRPC and, on the same port, the readiness path the emulator's
+// It serves gRPC and, on the same port, the admin REST API (rest.go) and the readiness path the emulator's
 // container is probed through (internal/frontready), since the emulator
 // listens on the pod's loopback alone (#1114).
 package bigtablefront
@@ -289,12 +289,17 @@ func (rawCodec) Name() string { return "proto" }
 // Calls returns the calls numbered after seq, oldest first.
 func (f *Front) Calls(after uint64) []calllog.Call { return f.calls.After(after) }
 
-// httpHandler answers calllog.Path, and nothing else, on the connections
-// that are not gRPC.
+// httpHandler answers calllog.Path and the admin REST API (rest.go, #1440),
+// and nothing else, on the connections that are not gRPC.
 func (f *Front) httpHandler() http.Handler {
+	api := f.restHandler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == calllog.Path && r.Method == http.MethodGet {
 			f.calls.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, restPrefix) {
+			api.ServeHTTP(w, r)
 			return
 		}
 		http.NotFound(w, r)

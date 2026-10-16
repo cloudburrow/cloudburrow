@@ -32,6 +32,8 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		"memorystore":       "memorystore.cloudburrow.svc.cluster.local:6379",
 		"memorystore-admin": "cloudburrow-host.cloudburrow.svc.cluster.local:9021",
 		"serviceusage":      "cloudburrow-host.cloudburrow.svc.cluster.local:9023",
+		// The Bigtable front, which serves the admin REST API (#1440).
+		"bigtable": "bigtable.cloudburrow.svc.cluster.local:8086",
 	}
 	env := terminalEnv(addrs)
 	for name, want := range map[string]string{
@@ -41,6 +43,7 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER": "http://cloudburrow-host.cloudburrow.svc.cluster.local:9008/",
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_RUN":                  "http://cloudburrow-host.cloudburrow.svc.cluster.local:9010/",
 		"CLOUDSDK_API_ENDPOINT_OVERRIDES_REDIS":                "http://cloudburrow-host.cloudburrow.svc.cluster.local:9021/",
+		"CLOUDSDK_API_ENDPOINT_OVERRIDES_BIGTABLEADMIN":        "http://bigtable.cloudburrow.svc.cluster.local:8086/",
 		"CLOUDSDK_AUTH_DISABLE_CREDENTIALS":                    "true",
 		"STORAGE_EMULATOR_HOST":                                "http://storage.cloudburrow.svc.cluster.local:4443",
 		"PUBSUB_EMULATOR_HOST":                                 "pubsub.cloudburrow.svc.cluster.local:8085",
