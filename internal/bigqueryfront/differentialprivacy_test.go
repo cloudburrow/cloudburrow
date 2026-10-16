@@ -49,14 +49,21 @@ GROUP BY item ORDER BY item`)
 		t.Fatalf("inner\n%s\nwant\n%s", inner, want)
 	}
 	for sql, wantMsg := range map[string]string{
-		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) item FROM t GROUP BY item":                            "must use a differentially private aggregate",
-		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) MAX(x) FROM t":                                        "Aggregate function MAX is not supported",
-		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=-1, delta=.1, privacy_unit_column=id) COUNT(*) FROM t":                                     "epsilon option",
-		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) PERCENTILE_CONT(x, 0.5) FROM t":                       "requires contribution_bounds_per_row",
-		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) SUM(x, contribution_bounds_per_row => (0, 1)) FROM t": "takes contribution_bounds_per_group",
-		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) SUM(AVG(x)) FROM t":                                   "multi-level aggregation",
-		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) * FROM t":                                             "cannot select *",
-		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) COUNT(*) FROM t HAVING 1=1":                           "HAVING",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) item FROM t GROUP BY item":                                                                                                   "must use a differentially private aggregate",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) MAX(x) FROM t":                                                                                                               "Aggregate function MAX is not supported",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=-1, delta=.1, privacy_unit_column=id) COUNT(*) FROM t":                                                                                                            "epsilon option",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) PERCENTILE_CONT(x, 0.5) FROM t":                                                                                              "requires contribution_bounds_per_row",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) SUM(x, contribution_bounds_per_row => (0, 1)) FROM t":                                                                        "takes contribution_bounds_per_group",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) SUM(AVG(x)) FROM t":                                                                                                          "multi-level aggregation",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) * FROM t":                                                                                                                    "cannot select *",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) COUNT(*) FROM t QUALIFY 1=1":                                                                                                 "QUALIFY",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) COUNT(*) FROM t GROUP BY g HAVING MAX(x) > 1":                                                                                "Aggregate function MAX",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, privacy_unit_column=id) COUNT(DISTINCT x) FROM t":                                                                                                    "COUNT(DISTINCT",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, max_rows_contributed=1, privacy_unit_column=id) COUNT(*) FROM t":                                                                                     "max_rows_contributed",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, group_selection_strategy=SOME, privacy_unit_column=id) COUNT(*) FROM t":                                                                              "LAPLACE_THRESHOLD or PUBLIC_GROUPS",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, group_selection_strategy=PUBLIC_GROUPS, privacy_unit_column=id) g, COUNT(*) FROM t GROUP BY g":                                                       "public group join",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, group_selection_strategy=PUBLIC_GROUPS, privacy_unit_column=id) g, COUNT(*) FROM t JOIN (SELECT DISTINCT g FROM p) USING (g) GROUP BY g":             "public group join",
+		"SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.1, group_selection_strategy=PUBLIC_GROUPS, privacy_unit_column=id) g, h, COUNT(*) FROM t RIGHT JOIN (SELECT DISTINCT g FROM p) USING (g) GROUP BY g, h": "none for h",
 	} {
 		toks, _ := lex(sql)
 		_, msg, _ := parseDPQuery(sql, toks)
@@ -220,4 +227,66 @@ func TestParseDPPolicyAndBudget(t *testing.T) {
 	if !strings.Contains(string(b), "20") {
 		t.Fatalf("spent %s", b)
 	}
+}
+
+func TestDPHaving(t *testing.T) {
+	q := mustDPQuery(t, `SELECT WITH DIFFERENTIAL_PRIVACY
+    OPTIONS(epsilon=1e20, delta=.01, max_groups_contributed=2, privacy_unit_column=id)
+    item, COUNT(*, contribution_bounds_per_group => (0, 100)) AS n
+FROM professors GROUP BY item HAVING count(*, contribution_bounds_per_group => (0, 100)) > 1 AND item != 'x'
+  AND SUM(quantity, contribution_bounds_per_group => (0, 100)) > 50 ORDER BY n`)
+	if q.group != "item" || q.tail != "ORDER BY n" || len(q.items) != 3 || !q.items[2].hidden || q.items[2].agg.fn != "SUM" {
+		t.Fatalf("%q %q %+v", q.group, q.tail, q.items)
+	}
+	inner := q.innerSQL("id")
+	if !strings.Contains(inner, "SUM(quantity) AS `__dp_a2`") || !strings.HasSuffix(inner, "GROUP BY item, id") {
+		t.Fatalf("inner %s", inner)
+	}
+	rows := [][]any{{"pen", "2", "39", "101"}, {"pen", "1", "16", "123"}, {"pencil", "1", "24", "101"},
+		{"pencil", "2", "48", "123"}, {"pencil", "1", "72", "150"}, {"scissors", "1", "8", "130"}}
+	out, msg := q.compute(rows)
+	if msg != "" || len(out) != 3 {
+		t.Fatal(msg, out)
+	}
+	schema := []field{{Name: "item", Type: "STRING"}, {Name: "__dp_a1", Type: "INTEGER"}, {Name: "__dp_a2", Type: "INTEGER"}, {Name: "__dp_unit", Type: "INTEGER"}}
+	q.items[2].agg.sumInt = true
+	sql, msg := q.resultSQL(schema, out)
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	for _, want := range []string{"SELECT `__dp_c0` AS `item`, `__dp_c1` AS `n` FROM UNNEST(",
+		" WHERE `__dp_c1` > 1 AND `__dp_c0` != 'x'\n  AND `__dp_c2` > 50 ORDER BY n"} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("result\n%s\nwant %s", sql, want)
+		}
+	}
+}
+
+func TestDPPublicGroups(t *testing.T) {
+	q := mustDPQuery(t, `SELECT WITH DIFFERENTIAL_PRIVACY
+    OPTIONS(epsilon=1e20, delta=.01, max_groups_contributed=1, group_selection_strategy=PUBLIC_GROUPS, privacy_unit_column=id)
+    item, COUNT(*, contribution_bounds_per_group => (0, 10)) AS n
+FROM professors RIGHT OUTER JOIN (SELECT DISTINCT item FROM UNNEST(['pen', 'pencil', 'book']) AS item) USING (item)
+GROUP BY item`)
+	if !q.opts.public {
+		t.Fatal("PUBLIC_GROUPS not read")
+	}
+	// One unit in pen: kept with no thresholding; book has no unit (the
+	// outer join's NULL) and is kept too.
+	out, msg := q.compute([][]any{{"pen", "3", "101"}, {"book", "1", nil}})
+	if msg != "" || len(out) != 2 {
+		t.Fatal(msg, out)
+	}
+	got := map[string]int64{}
+	for _, r := range out {
+		got[r[0].(string)] = r[1].(int64)
+	}
+	if got["pen"] != 3 || got["book"] != 0 {
+		t.Fatalf("%v, want pen 3, book 0", got)
+	}
+	// LEFT JOIN with the public side first, joined ON.
+	mustDPQuery(t, `SELECT WITH DIFFERENTIAL_PRIVACY
+    OPTIONS(epsilon=1, delta=.01, group_selection_strategy=PUBLIC_GROUPS, privacy_unit_column=id)
+    p.item, COUNT(*) FROM (SELECT DISTINCT item FROM pub) AS p LEFT JOIN professors ON p.item = professors.item
+GROUP BY p.item`)
 }

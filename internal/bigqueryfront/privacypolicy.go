@@ -43,9 +43,10 @@ import (
 //   - Differential privacy (differential_privacy_policy, SELECT WITH
 //     DIFFERENTIAL_PRIVACY): carried out with the noise, the contribution
 //     bounding, the group thresholding and the epsilon and delta budget
-//     (#1455, differentialprivacy.go). A statement that reads a table with
-//     a differential_privacy_policy must be a lone SELECT WITH
-//     DIFFERENTIAL_PRIVACY.
+//     (#1455, differentialprivacy.go): a query, a parenthesized subquery or
+//     CTE's query, or a script's statement in its turn (#1482). A table
+//     with a differential_privacy_policy must be read in such a query's
+//     FROM clause.
 //
 // What the front cannot check is refused 501, never run as if the table
 // had no policy: a read of the table in a subquery, CTE or another view's
@@ -245,11 +246,32 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 		}
 		return ""
 	}
+	if f.dpScript(w, r, q, insert, stmts) { // #1482, differentialprivacy.go
+		return true
+	}
+	// A SELECT WITH DIFFERENTIAL_PRIVACY in parentheses, a subquery or a
+	// CTE's (#1482): its noisy rows, a query of literals, take its place.
+	var spans [][2]int
+	var spanReads [][]privacyRead
 	for _, s := range stmts {
+		depth := privacyDepths(s)
 		for i := 0; i+2 < len(s); i++ {
 			if i > 0 && s[i].is("SELECT") && s[i+1].is("WITH") && s[i+2].is("DIFFERENTIAL_PRIVACY") {
-				return refuse("Not implemented here: SELECT WITH DIFFERENTIAL_PRIVACY other than as a lone query's " +
-					"top-level SELECT. Nothing was run.")
+				end := -1
+				if s[i-1].punct("(") && clause(s) == "" && (len(spans) == 0 || i >= spans[len(spans)-1][1]) {
+					for j := i + 3; j < len(s); j++ {
+						if depth[j] < depth[i] {
+							end = j
+							break
+						}
+					}
+				}
+				if end < 0 {
+					return refuse("Not implemented here: SELECT WITH DIFFERENTIAL_PRIVACY other than as a query, a " +
+						"parenthesized subquery or a CTE's query, or in another differentially private query. Nothing was run.")
+				}
+				spans, spanReads = append(spans, [2]int{i, end}), append(spanReads, nil)
+				continue
 			}
 			if i > 0 && s[i].is("SELECT") && s[i+1].is("WITH") && s[i+2].is("AGGREGATION_THRESHOLD") {
 				return refuse("Not implemented here: SELECT WITH AGGREGATION_THRESHOLD other than as a lone query's " +
@@ -270,6 +292,13 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 		}
 		if p.tr.next < len(s) && s[p.tr.next].is("FOR") {
 			return fail("Time travel is disabled on " + p.name + ", which has a privacy policy.")
+		}
+		if k := dpSpanOf(spans, p); k >= 0 && p.pol.dp {
+			if p.pol.hasJoin {
+				return refuse(privacyRefusal("a join restriction in a differentially private subquery", p.name))
+			}
+			spanReads[k] = append(spanReads[k], p)
+			continue
 		}
 		if privacyDepths(s)[p.tr.at] != 0 || len(s) > 0 && s[0].is("WITH") {
 			return refuse(privacyRefusal("a read in a subquery or CTE", p.name))
@@ -296,6 +325,32 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 			}
 			atReads = append(atReads, p)
 		}
+	}
+	if len(spans) > 0 {
+		s := stmts[0]
+		finals := make([]string, len(spans))
+		for k, sp := range spans {
+			if len(spanReads[k]) > 1 {
+				return refuse("Not implemented here: a SELECT WITH DIFFERENTIAL_PRIVACY of more than one table or view " +
+					"with a differential_privacy_policy. Nothing was run.")
+			}
+			var at *privacyRead
+			if len(spanReads[k]) == 1 {
+				at = &spanReads[k][0]
+			}
+			final, fl := f.dpResult(r, q, s[sp[0]:sp[1]], at)
+			if fl != nil {
+				f.dpFail(w, r, q, insert, at, fl)
+				return true
+			}
+			finals[k] = final
+		}
+		text := q.Query
+		for k := len(spans) - 1; k >= 0; k-- {
+			text = text[:s[spans[k][0]].pos] + finals[k] + text[s[spans[k][1]-1].end:]
+		}
+		f.runRewritten(w, r, q, insert, text)
+		return true
 	}
 	for _, s := range stmts {
 		if clause(s) != "DIFFERENTIAL_PRIVACY" {

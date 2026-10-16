@@ -197,9 +197,7 @@ func TestBigQueryPrivacyPolicyDifferentialPrivacy(t *testing.T) {
 		_, err := dpQueryRows(t, c, h, sql, false)
 		wantReason(t, what, err, http.StatusBadRequest, "invalidQuery")
 	}
-	_, err = dpQueryRows(t, c, h, "SELECT * FROM (SELECT WITH DIFFERENTIAL_PRIVACY OPTIONS(epsilon=1, delta=.01, "+
-		"privacy_unit_column=id) COUNT(*) AS n FROM `"+d+".professors`)", false)
-	wantReason(t, "a SELECT WITH DIFFERENTIAL_PRIVACY in a subquery", err, http.StatusNotImplemented, "notImplemented")
+	// A SELECT WITH DIFFERENTIAL_PRIVACY in a subquery: TestBigQueryDifferentialPrivacyMore (#1482).
 }
 
 // TestBigQueryDifferentialPrivacyPolicyBudget (#1455): a view's

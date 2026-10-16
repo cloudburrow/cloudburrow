@@ -75,6 +75,9 @@ type dpOptions struct {
 	groupsSet, groupsNo bool  // set; set to NULL (no limit)
 	unitText            string
 	unitName            string
+	// public: group_selection_strategy = PUBLIC_GROUPS, the groups those
+	// of a public group join, kept without thresholding (#1482).
+	public bool
 }
 
 // dpAgg is one DP aggregate function of the select list.
@@ -94,6 +97,17 @@ type dpItem struct {
 	agg   *dpAgg
 	text  string
 	alias string // the aggregate's alias, "" when it has none
+	// key is an aggregate call's tokens, to find it again in HAVING;
+	// hidden an aggregate only HAVING calls, not in the select list.
+	key    string
+	hidden bool
+}
+
+// dpPart is a piece of a HAVING condition: text as it is, or a reference
+// to an item (an aggregate call, or a select list name), item >= 0.
+type dpPart struct {
+	text string
+	item int
 }
 
 // dpQuery is a SELECT WITH DIFFERENTIAL_PRIVACY.
@@ -103,6 +117,9 @@ type dpQuery struct {
 	from  string // FROM … [WHERE …]
 	group string // the GROUP BY list, "" when none
 	tail  string // ORDER BY … / LIMIT …, applied to the noisy rows
+	// having is the HAVING condition, applied to the noisy rows (#1482);
+	// nil when none.
+	having []dpPart
 }
 
 var dpFunctions = map[string]bool{"COUNT": true, "SUM": true, "AVG": true, "PERCENTILE_CONT": true}
@@ -170,8 +187,18 @@ func parseDPQuery(sql string, s []token) (q dpQuery, msg string, unsupported boo
 					return bad("The privacy_unit_column option of DIFFERENTIAL_PRIVACY must be a column name")
 				}
 				q.opts.unitText, q.opts.unitName = text, parts[len(parts)-1]
-			case "max_rows_contributed", "group_selection_strategy":
-				return no("the option " + name)
+			case "group_selection_strategy":
+				switch strings.ToUpper(text) {
+				case "LAPLACE_THRESHOLD":
+				case "PUBLIC_GROUPS":
+					q.opts.public = true
+				default:
+					return bad("The group_selection_strategy option of DIFFERENTIAL_PRIVACY must be LAPLACE_THRESHOLD or PUBLIC_GROUPS")
+				}
+			case "max_rows_contributed":
+				// Neither BigQuery's reference nor GoogleSQL's documents
+				// it (#1482).
+				return no("the option max_rows_contributed, which BigQuery's reference does not document")
 			default:
 				return bad("Unknown DIFFERENTIAL_PRIVACY option: " + s[j-2].text)
 			}
@@ -192,7 +219,7 @@ func parseDPQuery(sql string, s []token) (q dpQuery, msg string, unsupported boo
 	if s[bodyAt].is("DISTINCT") || s[bodyAt].is("ALL") || s[bodyAt].is("AS") {
 		return no("SELECT " + strings.ToUpper(s[bodyAt].text))
 	}
-	from, where, group, end := -1, -1, -1, len(s)
+	from, where, group, having, end := -1, -1, -1, -1, len(s)
 	for j := bodyAt; j < len(s); j++ {
 		if depth[j] != 0 {
 			continue
@@ -204,8 +231,10 @@ func parseDPQuery(sql string, s []token) (q dpQuery, msg string, unsupported boo
 		case from < 0:
 		case t.is("WHERE") && where < 0:
 			where = j
-		case t.is("GROUP") && group < 0:
+		case t.is("GROUP") && group < 0 && having < 0:
 			group = j
+		case t.is("HAVING") && having < 0 && end == len(s):
+			having = j
 		case t.is("HAVING") || t.is("QUALIFY") || t.is("WINDOW") || t.is("UNION") || t.is("INTERSECT") || t.is("EXCEPT"):
 			return no(strings.ToUpper(t.text))
 		case (t.is("ORDER") || t.is("LIMIT")) && end == len(s):
@@ -215,17 +244,23 @@ func parseDPQuery(sql string, s []token) (q dpQuery, msg string, unsupported boo
 	if from < 0 {
 		return bad("SELECT WITH DIFFERENTIAL_PRIVACY must read a table in its FROM clause")
 	}
-	fromEnd := end
+	fromEnd, groupEnd := end, end
+	if having >= 0 {
+		fromEnd, groupEnd = having, having
+		if having+1 >= end {
+			return bad("Syntax error: expected a condition after HAVING")
+		}
+	}
 	if group >= 0 {
 		fromEnd = group
-		if group+1 >= end || !s[group+1].is("BY") || group+2 >= end {
+		if group+1 >= groupEnd || !s[group+1].is("BY") || group+2 >= groupEnd {
 			return bad("Syntax error: expected BY after GROUP")
 		}
 		g := s[group+2]
 		if g.is("ROLLUP") || g.is("CUBE") || g.is("GROUPING") || g.is("ALL") {
 			return no("GROUP BY " + strings.ToUpper(g.text))
 		}
-		q.group = sql[g.pos:s[end-1].end]
+		q.group = sql[g.pos:s[groupEnd-1].end]
 	}
 	q.from = sql[s[from].pos:s[fromEnd-1].end]
 	if end < len(s) {
@@ -262,7 +297,125 @@ func parseDPQuery(sql string, s []token) (q dpQuery, msg string, unsupported boo
 	if aggs == 0 {
 		return bad("SELECT WITH DIFFERENTIAL_PRIVACY must use a differentially private aggregate function: AVG, COUNT, PERCENTILE_CONT or SUM")
 	}
+	if having >= 0 {
+		if m, unsup := q.parseHaving(sql, s[having+1:end], depth[having+1:end]); m != "" {
+			if unsup {
+				return no(m)
+			}
+			return bad(m)
+		}
+	}
+	if q.opts.public {
+		if m := dpPublicGroups(s[from:fromEnd], depth[from:fromEnd], q.group); m != "" {
+			return bad(m)
+		}
+	}
 	return q, "", false
+}
+
+// dpKey is a call's tokens, as HAVING finds the select list's aggregate
+// again: words in upper case, the rest as written.
+func dpKey(t []token) string {
+	var b strings.Builder
+	for _, tk := range t {
+		if tk.kind == tokWord {
+			b.WriteString(strings.ToUpper(tk.text))
+		} else {
+			b.WriteString(tk.text)
+		}
+		b.WriteByte(' ')
+	}
+	return b.String()
+}
+
+// parseHaving reads HAVING's condition, t (depths d): applied to the noisy
+// rows, as a HAVING applies to the groups' aggregates (query-syntax#having_clause).
+// A DP aggregate call that is one of the select list's is that column; another
+// is a hidden aggregate of the query, which takes its share of the epsilon as
+// any other (query-syntax#dp_epsilon); a name of the select list (an alias, a
+// grouping column) is that column.
+func (q *dpQuery) parseHaving(sql string, t []token, d []int) (msg string, unsupported bool) {
+	names := map[string]int{}
+	for i, it := range q.items {
+		n := it.alias
+		if it.agg == nil {
+			n = ""
+			if !strings.ContainsAny(it.text, " ()") {
+				n = it.text
+				if k := strings.LastIndex(n, "."); k >= 0 {
+					n = n[k+1:]
+				}
+				n = strings.Trim(n, "`")
+			}
+		}
+		if n != "" {
+			if _, dup := names[strings.ToLower(n)]; !dup {
+				names[strings.ToLower(n)] = i
+			}
+		}
+	}
+	last := t[0].pos
+	add := func(upTo int, item int) {
+		if upTo > last {
+			q.having = append(q.having, dpPart{text: sql[last:upTo], item: -1})
+		}
+		if item >= 0 {
+			q.having = append(q.having, dpPart{item: item})
+		}
+	}
+	for k := 0; k < len(t); k++ {
+		tk := t[k]
+		if tk.kind != tokWord && tk.kind != tokQuoted || k > 0 && t[k-1].punct(".") || k+1 < len(t) && t[k+1].punct(".") {
+			continue
+		}
+		if tk.kind == tokWord && k+1 < len(t) && t[k+1].punct("(") {
+			n := strings.ToUpper(tk.text)
+			if !dpFunctions[n] {
+				if otherAggregates[n] || aggregationThresholdFunctions[n] || strings.HasPrefix(n, "ANON_") {
+					return "Aggregate function " + n + " is not supported in SELECT WITH DIFFERENTIAL_PRIVACY; use AVG, COUNT, PERCENTILE_CONT or SUM", false
+				}
+				continue
+			}
+			closeAt := -1
+			for j := k + 2; j < len(t); j++ {
+				if d[j] == d[k] && t[j].punct(")") {
+					closeAt = j
+					break
+				}
+			}
+			if closeAt < 0 {
+				return "Syntax error: expected ) after " + n + " in HAVING", false
+			}
+			call := t[k : closeAt+1]
+			key := dpKey(call)
+			at := -1
+			for i, it := range q.items {
+				if it.agg != nil && it.key == key {
+					at = i
+					break
+				}
+			}
+			if at < 0 {
+				it, m, unsup := dpParseItem(sql, call, d[k:closeAt+1])
+				if m != "" {
+					return m, unsup
+				}
+				it.hidden = true
+				q.items = append(q.items, it)
+				at = len(q.items) - 1
+			}
+			add(tk.pos, at)
+			last = call[len(call)-1].end
+			k = closeAt
+			continue
+		}
+		if i, ok := names[strings.ToLower(tk.text)]; ok {
+			add(tk.pos, i)
+			last = tk.end
+		}
+	}
+	add(t[len(t)-1].end, -1)
+	return "", false
 }
 
 // dpParseItem reads one item of the select list, t, whose depths are d.
@@ -318,6 +471,7 @@ func dpParseItem(sql string, t []token, d []int) (it dpItem, msg string, unsuppo
 	if closeAt < 0 {
 		return it, "Syntax error: expected ) after " + name, false
 	}
+	it.key = dpKey(t[:closeAt+1])
 	rest := t[closeAt+1:]
 	switch {
 	case len(rest) == 0:
@@ -373,7 +527,9 @@ func dpParseItem(sql string, t []token, d []int) (it dpItem, msg string, unsuppo
 		if len(positional[0]) == 1 && positional[0][0].punct("*") {
 			g.star = true
 		} else if positional[0][0].is("DISTINCT") {
-			return it, "COUNT(DISTINCT …)", true
+			// Neither BigQuery's reference nor GoogleSQL's documents it
+			// (aggregate-dp-functions#dp_count; #1482).
+			return it, "COUNT(DISTINCT …), which BigQuery's reference does not document for differential privacy", true
 		} else {
 			g.arg = text(positional[0])
 		}
@@ -400,6 +556,93 @@ func dpParseItem(sql string, t []token, d []int) (it dpItem, msg string, unsuppo
 	}
 	it.agg = g
 	return it, "", false
+}
+
+// dpPublicGroups checks the public group join of a query with
+// group_selection_strategy = PUBLIC_GROUPS, whose FROM clause is t (depths
+// d) and GROUP BY list group: as GoogleSQL's reference has it
+// (query-syntax#dp_group_selection_strategy), a LEFT OUTER JOIN or RIGHT
+// OUTER JOIN whose public side is a SELECT DISTINCT subquery, joined on each
+// grouping item. msg is why it is refused.
+func dpPublicGroups(t []token, d []int, group string) string {
+	const need = "group_selection_strategy = PUBLIC_GROUPS requires a public group join for every grouping item: " +
+		"a LEFT OUTER JOIN or RIGHT OUTER JOIN of the private table with a SELECT DISTINCT subquery of the public groups, " +
+		"joined on each grouping item"
+	if strings.TrimSpace(group) == "" {
+		return need
+	}
+	distinct := func(open int) bool { return open+2 < len(t) && t[open+1].is("SELECT") && t[open+2].is("DISTINCT") }
+	name := func(tk token) bool { return tk.kind == tokWord || tk.kind == tokQuoted }
+	joined := map[string]bool{}
+	for k := range t {
+		if d[k] != 0 || !t[k].is("LEFT") && !t[k].is("RIGHT") {
+			continue
+		}
+		j := k + 1
+		if j < len(t) && t[j].is("OUTER") {
+			j++
+		}
+		if j >= len(t) || !t[j].is("JOIN") {
+			continue
+		}
+		j++
+		public := false
+		if t[k].is("RIGHT") {
+			public = j < len(t) && t[j].punct("(") && distinct(j)
+		} else {
+			b := k - 1
+			if b >= 0 && name(t[b]) {
+				b-- // an alias
+				if b >= 0 && t[b].is("AS") {
+					b--
+				}
+			}
+			if b >= 0 && t[b].punct(")") {
+				for o := b - 1; o >= 0; o-- {
+					if d[o] == d[b] && t[o].punct("(") {
+						public = distinct(o)
+						break
+					}
+				}
+			}
+		}
+		if !public {
+			continue
+		}
+		for j < len(t) && !(d[j] == 0 && (t[j].is("USING") || t[j].is("ON"))) {
+			j++
+		}
+		if j >= len(t) {
+			continue
+		}
+		if t[j].is("USING") {
+			for m := j + 1; m < len(t) && !(d[m] == 0 && t[m].punct(")")); m++ {
+				if name(t[m]) {
+					joined[strings.ToLower(t[m].text)] = true
+				}
+			}
+			continue
+		}
+		for m := j + 1; m < len(t); m++ {
+			if d[m] == 0 && (t[m].punct(",") || t[m].is("JOIN") || t[m].is("LEFT") || t[m].is("RIGHT") ||
+				t[m].is("INNER") || t[m].is("FULL") || t[m].is("CROSS") || t[m].is("WHERE")) {
+				break
+			}
+			if name(t[m]) && !(m+1 < len(t) && t[m+1].punct(".")) {
+				joined[strings.ToLower(t[m].text)] = true
+			}
+		}
+	}
+	for _, g := range strings.Split(group, ",") {
+		g = strings.TrimSpace(g)
+		if k := strings.LastIndex(g, "."); k >= 0 {
+			g = g[k+1:]
+		}
+		if !joined[strings.ToLower(strings.Trim(g, "`"))] {
+			return need + "; there is none for " + strings.TrimSpace(g)
+		}
+	}
+	return ""
 }
 
 // dpBounds reads "(lo, hi)".
@@ -553,25 +796,148 @@ func (s *dpBudgetStore) charge(key string, p dpPolicy, eps, delta float64) bool 
 	return true
 }
 
+// dpMemoKey holds a *dpMemo: a script's (#1482), set when the front runs a
+// script with SELECT WITH DIFFERENTIAL_PRIVACY a statement at a time.
+type dpMemoKey struct{}
+
+// dpReplayKey marks the script's last query run once more as the client's
+// request (scriptflow.go): its noisy rows are the ones its child job had,
+// not new noise of another charge of the budget.
+type dpReplayKey struct{}
+
+// dpMemo is each statement's last noisy query, by its text.
+type dpMemo struct {
+	mu   sync.Mutex
+	last map[string]string
+}
+
+// dpScript carries out q, a script of statements stmts with SELECT WITH
+// DIFFERENTIAL_PRIVACY, a statement at a time (scriptflow.go), each in its
+// turn, so it reads what the statements before it made (#1482); ok false
+// when q is not such a script.
+func (f front) dpScript(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, stmts [][]token) bool {
+	if len(stmts) < 2 {
+		return false
+	}
+	has := false
+	for _, s := range stmts {
+		for i := 0; i+2 < len(s) && !has; i++ {
+			has = s[i].is("SELECT") && s[i+1].is("WITH") && s[i+2].is("DIFFERENTIAL_PRIVACY")
+		}
+	}
+	if !has {
+		return false
+	}
+	if r.Context().Value(dpMemoKey{}) != nil || txnRequest(r) {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: SELECT WITH DIFFERENTIAL_PRIVACY "+
+			"in a script CloudBurrow cannot run a statement at a time. Nothing was run.")
+		return true
+	}
+	f.runScript(w, r.WithContext(context.WithValue(r.Context(), dpMemoKey{}, &dpMemo{})), q, insert)
+	return true
+}
+
+// dpSpanOf is the span of spans (a SELECT WITH DIFFERENTIAL_PRIVACY's tokens)
+// whose FROM clause reads p, or -1.
+func dpSpanOf(spans [][2]int, p privacyRead) int {
+	if len(spans) == 0 {
+		return -1
+	}
+	depth := privacyDepths(p.tr.stmt)
+	for k, sp := range spans {
+		if p.tr.at > sp[0] && p.tr.at < sp[1] && depth[p.tr.at] == depth[sp[0]] {
+			return k
+		}
+	}
+	return -1
+}
+
+// dpFailure is why a differentially private query is not answered: its
+// status (400, 501 or 500) and message.
+type dpFailure struct {
+	status int
+	msg    string
+}
+
 // enforceDifferentialPrivacy carries out s, the one statement of q, a
 // SELECT WITH DIFFERENTIAL_PRIVACY; at is its read of a table or view with
 // a differential_privacy_policy, or nil.
 func (f front) enforceDifferentialPrivacy(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, s []token, at *privacyRead) {
-	dataset := "_cloudburrow"
-	if at != nil {
-		dataset = at.tr.dataset
+	final, fl := f.dpResult(r, q, s, at)
+	if fl != nil {
+		f.dpFail(w, r, q, insert, at, fl)
+		return
 	}
-	fail := func(msg string) {
-		f.failBeforeRun(w, r, q, insert, dataset, http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
+	f.runRewritten(w, r, q, insert, final)
+}
+
+// dpFail answers fl.
+func (f front) dpFail(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, at *privacyRead, fl *dpFailure) {
+	switch fl.status {
+	case http.StatusBadRequest:
+		dataset := "_cloudburrow"
+		if at != nil {
+			dataset = at.tr.dataset
+		}
+		f.failBeforeRun(w, r, q, insert, dataset, http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: fl.msg})
+	case http.StatusNotImplemented:
+		writeError(w, fl.status, "notImplemented", fl.msg)
+	default:
+		writeError(w, fl.status, "internalError", fl.msg)
 	}
+}
+
+// runRewritten answers q with final, a query of the front's, in its place:
+// the job keeps the client's text.
+func (f front) runRewritten(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, final string) {
+	r = r.WithContext(context.WithValue(r.Context(), privacyCheckedKey{}, true))
+	if !setQueryText(r, insert, final) {
+		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
+		return
+	}
+	client := jobText{query: q.Query}
+	q.Query = final
+	rec := newRecorder()
+	f.runQuery(rec, r, q, insert)
+	f.clientText(w, rec, client)
+}
+
+// dpResult carries out s, a SELECT WITH DIFFERENTIAL_PRIVACY of q's text (a
+// lone query's, or a subquery's), and returns final, a query of its noisy
+// rows; at is its read of a table or view with a differential_privacy_policy,
+// or nil.
+func (f front) dpResult(r *http.Request, q queryOptions, s []token, at *privacyRead) (final string, fl *dpFailure) {
+	text := q.Query[s[0].pos:s[len(s)-1].end]
+	memo, _ := r.Context().Value(dpMemoKey{}).(*dpMemo)
+	if memo != nil && r.Context().Value(dpReplayKey{}) != nil {
+		memo.mu.Lock()
+		got, ok := memo.last[text]
+		memo.mu.Unlock()
+		if ok {
+			return got, nil
+		}
+	}
+	final, fl = f.dpCompute(r, q, s, at)
+	if fl == nil && memo != nil {
+		memo.mu.Lock()
+		if memo.last == nil {
+			memo.last = map[string]string{}
+		}
+		memo.last[text] = final
+		memo.mu.Unlock()
+	}
+	return final, fl
+}
+
+// dpCompute is dpResult's work: the noise, the budget's charge.
+func (f front) dpCompute(r *http.Request, q queryOptions, s []token, at *privacyRead) (string, *dpFailure) {
+	failed := func(msg string) (string, *dpFailure) { return "", &dpFailure{http.StatusBadRequest, msg} }
 	dq, msg, unsupported := parseDPQuery(q.Query, s)
 	if unsupported {
-		writeError(w, http.StatusNotImplemented, "notImplemented", msg)
-		return
+		return "", &dpFailure{http.StatusNotImplemented, msg}
 	}
 	if msg != "" {
-		fail(msg)
-		return
+		return failed(msg)
 	}
 	o := &dq.opts
 	unitRef := o.unitText
@@ -580,9 +946,8 @@ func (f front) enforceDifferentialPrivacy(w http.ResponseWriter, r *http.Request
 	if at != nil {
 		pol = at.pol.dpPolicy
 		if o.unitName != "" && !strings.EqualFold(o.unitName, pol.unit) {
-			fail(fmt.Sprintf("The privacy_unit_column of the query (%s) must match the privacy_unit_column of %s (%s)",
+			return failed(fmt.Sprintf("The privacy_unit_column of the query (%s) must match the privacy_unit_column of %s (%s)",
 				o.unitText, at.name, pol.unit))
-			return
 		}
 		if unitRef == "" {
 			unitRef = quotePath([]string{pol.unit})
@@ -590,25 +955,22 @@ func (f front) enforceDifferentialPrivacy(w http.ResponseWriter, r *http.Request
 		if !o.hasEps {
 			o.eps, o.hasEps = pol.maxEps, true
 		} else if o.eps > pol.maxEps {
-			fail("Epsilon is too high: " + strconv.FormatFloat(o.eps, 'g', -1, 64) + ", policy for table " + at.name +
+			return failed("Epsilon is too high: " + strconv.FormatFloat(o.eps, 'g', -1, 64) + ", policy for table " + at.name +
 				" allows max " + strconv.FormatFloat(pol.maxEps, 'g', -1, 64))
-			return
 		}
 		if !o.hasDelta {
 			o.delta, o.hasDelta = pol.deltaPerQuery, true
 		} else if o.delta != pol.deltaPerQuery {
-			fail("Delta must be the delta_per_query of the policy for table " + at.name + ": " +
+			return failed("Delta must be the delta_per_query of the policy for table " + at.name + ": " +
 				strconv.FormatFloat(pol.deltaPerQuery, 'g', -1, 64) + ", not " + strconv.FormatFloat(o.delta, 'g', -1, 64))
-			return
 		}
 		if pol.maxGroups > 0 {
 			switch {
 			case !o.groupsSet:
 				o.maxGroups = pol.maxGroups
 			case o.groupsNo || o.maxGroups > pol.maxGroups:
-				fail(fmt.Sprintf("max_groups_contributed of the query must be at most %d, the max_groups_contributed of "+
+				return failed(fmt.Sprintf("max_groups_contributed of the query must be at most %d, the max_groups_contributed of "+
 					"the policy for table %s", pol.maxGroups, at.name))
-				return
 			}
 		}
 		project := projectOf(f.base)
@@ -622,24 +984,20 @@ func (f front) enforceDifferentialPrivacy(w http.ResponseWriter, r *http.Request
 		got := b.spent[budgetKey]
 		b.mu.Unlock()
 		if pol.hasEpsBudget && got[0]+o.eps > pol.epsBudget*(1+1e-12) || pol.hasDeltaBg && got[1]+o.delta > pol.deltaBudget*(1+1e-12) {
-			fail("Privacy budget is not sufficient for table '" + at.name + "' in this query.")
-			return
+			return failed("Privacy budget is not sufficient for table '" + at.name + "' in this query.")
 		}
 	}
 	switch {
 	case !o.hasEps:
-		fail("The epsilon option of DIFFERENTIAL_PRIVACY must be set")
-		return
+		return failed("The epsilon option of DIFFERENTIAL_PRIVACY must be set")
 	case !o.hasDelta:
-		fail("The delta option of DIFFERENTIAL_PRIVACY must be set")
-		return
+		return failed("The delta option of DIFFERENTIAL_PRIVACY must be set")
 	case unitRef == "":
-		fail("A differentially private query must include one and only one privacy unit column: " +
+		return failed("A differentially private query must include one and only one privacy unit column: " +
 			"set privacy_unit_column in the DIFFERENTIAL_PRIVACY OPTIONS")
-		return
-	case o.delta == 0:
-		fail("The delta option of DIFFERENTIAL_PRIVACY must be greater than 0 to select groups")
-		return
+	case o.delta == 0 && !o.public:
+		// Public groups are not selected, so need no delta.
+		return failed("The delta option of DIFFERENTIAL_PRIVACY must be greater than 0 to select groups")
 	}
 	if !o.groupsSet && o.maxGroups == 0 {
 		o.maxGroups = 1 // "The default value is 1."
@@ -648,16 +1006,13 @@ func (f front) enforceDifferentialPrivacy(w http.ResponseWriter, r *http.Request
 	inner := dq.innerSQL(unitRef)
 	schema, rows, code, emsg := f.dpRows(r, q, inner)
 	if code != 0 {
-		if code == http.StatusNotImplemented {
-			writeError(w, code, "notImplemented", emsg)
-			return
+		if code != http.StatusNotImplemented {
+			code = http.StatusBadRequest
 		}
-		fail(emsg)
-		return
+		return "", &dpFailure{code, emsg}
 	}
 	if len(schema) != len(dq.items)+1 {
-		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: the differentially private query's columns could not be read")
-		return
+		return "", &dpFailure{http.StatusInternalServerError, "cloudburrow: the differentially private query's columns could not be read"}
 	}
 	for i, it := range dq.items {
 		if it.agg != nil && it.agg.fn == "SUM" {
@@ -668,29 +1023,17 @@ func (f front) enforceDifferentialPrivacy(w http.ResponseWriter, r *http.Request
 	// 2. The noise.
 	out, emsg := dq.compute(rows)
 	if emsg != "" {
-		fail(emsg)
-		return
+		return failed(emsg)
 	}
 	if budgetKey != "" && !f.dpBudgets().charge(budgetKey, pol, o.eps, o.delta) {
-		fail("Privacy budget is not sufficient for table '" + at.name + "' in this query.")
-		return
+		return failed("Privacy budget is not sufficient for table '" + at.name + "' in this query.")
 	}
 	// 3. The answer.
 	final, emsg := dq.resultSQL(schema, out)
 	if emsg != "" {
-		writeError(w, http.StatusNotImplemented, "notImplemented", emsg)
-		return
+		return "", &dpFailure{http.StatusNotImplemented, emsg}
 	}
-	r = r.WithContext(context.WithValue(r.Context(), privacyCheckedKey{}, true))
-	if !setQueryText(r, insert, final) {
-		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
-		return
-	}
-	client := jobText{query: q.Query}
-	q.Query = final
-	rec := newRecorder()
-	f.runQuery(rec, r, q, insert)
-	f.clientText(w, rec, client)
+	return final, nil
 }
 
 // innerSQL is the query of each privacy unit's contribution to each group:
@@ -848,11 +1191,9 @@ func (dq dpQuery) compute(rows [][]any) ([]dpOut, string) {
 	groups := map[string]*dpGroup{}
 	unitGroups := map[string][]string{}
 	for _, row := range rows {
-		if len(row) != n+1 || row[n] == nil {
+		if len(row) != n+1 || row[n] == nil && !dq.opts.public {
 			continue // a NULL privacy unit contributes nothing
 		}
-		ub, _ := json.Marshal(row[n])
-		unit := string(ub)
 		var key []any
 		for i, it := range dq.items {
 			if it.agg == nil {
@@ -865,6 +1206,13 @@ func (dq dpQuery) compute(rows [][]any) ([]dpOut, string) {
 			g = &dpGroup{cells: row[:n], units: map[string][]float64{}, order: len(groups)}
 			groups[string(kb)] = g
 		}
+		if row[n] == nil {
+			// A public group of no privacy unit (PUBLIC_GROUPS: the outer
+			// join's row): the group is kept, with nothing of it.
+			continue
+		}
+		ub, _ := json.Marshal(row[n])
+		unit := string(ub)
 		vals := make([]float64, n)
 		for i, it := range dq.items {
 			vals[i] = math.NaN()
@@ -910,7 +1258,13 @@ func (dq dpQuery) compute(rows [][]any) ([]dpOut, string) {
 	if l0 <= 0 {
 		l0 = most // NULL: no limit, the sensitivity what the data has
 	}
-	eps := dq.opts.eps / float64(nAgg+1)
+	// The group selection is one more aggregate (query-syntax#dp_epsilon),
+	// none with public groups, which are not selected.
+	shares := nAgg + 1
+	if dq.opts.public {
+		shares = nAgg
+	}
+	eps := dq.opts.eps / float64(shares)
 	// Implicit bounds, found with half of each aggregate's epsilon.
 	bounds := make([][2]float64, n)
 	aggEps := make([]float64, n)
@@ -945,26 +1299,16 @@ func (dq dpQuery) compute(rows [][]any) ([]dpOut, string) {
 	}
 	ordered := make([]*dpGroup, 0, len(groups))
 	for _, g := range groups {
-		if len(g.units) > 0 {
+		if len(g.units) > 0 || dq.opts.public {
 			ordered = append(ordered, g)
 		}
 	}
 	sort.Slice(ordered, func(a, b int) bool { return ordered[a].order < ordered[b].order })
 	var out []dpOut
 	for _, g := range ordered {
-		// Group selection: a noisy count of the group's units, thresholded.
-		c, err := dpagg.NewCount(&dpagg.CountOptions{Epsilon: eps, MaxPartitionsContributed: l0, Noise: noise.Laplace()})
-		if err != nil {
-			return nil, "Invalid differential privacy parameters: " + err.Error()
-		}
-		if err := c.IncrementBy(int64(len(g.units))); err != nil {
-			return nil, err.Error()
-		}
-		kept, err := c.ThresholdedResult(dq.opts.delta)
-		if err != nil {
-			return nil, "Invalid differential privacy parameters: " + err.Error()
-		}
-		if kept == nil {
+		if keep, msg := dq.selected(g, eps, l0); msg != "" {
+			return nil, msg
+		} else if !keep {
 			continue
 		}
 		row := make(dpOut, len(dq.items))
@@ -982,6 +1326,27 @@ func (dq dpQuery) compute(rows [][]any) ([]dpOut, string) {
 		out = append(out, row)
 	}
 	return out, ""
+}
+
+// selected reports whether group g is kept: a noisy count of its units,
+// Laplace noise with epsilon eps, thresholded with the query's delta (the
+// library's Count.ThresholdedResult); with PUBLIC_GROUPS every group is.
+func (dq dpQuery) selected(g *dpGroup, eps float64, l0 int64) (bool, string) {
+	if dq.opts.public {
+		return true, ""
+	}
+	c, err := dpagg.NewCount(&dpagg.CountOptions{Epsilon: eps, MaxPartitionsContributed: l0, Noise: noise.Laplace()})
+	if err != nil {
+		return false, "Invalid differential privacy parameters: " + err.Error()
+	}
+	if err := c.IncrementBy(int64(len(g.units))); err != nil {
+		return false, err.Error()
+	}
+	kept, err := c.ThresholdedResult(dq.opts.delta)
+	if err != nil {
+		return false, "Invalid differential privacy parameters: " + err.Error()
+	}
+	return kept != nil, ""
 }
 
 // dpAggregate is aggregate a's noisy value over g's units, the i-th
@@ -1140,11 +1505,21 @@ func dpApproxBounds(vals []float64, l0 int64, eps float64) (lo, hi float64, ok b
 
 // resultSQL is a query whose rows are out, with the columns the client's
 // query has: a grouping column's name and type from schema (innerSQL's),
-// an aggregate's its alias (else f<n>_) and its type.
+// an aggregate's its alias (else f<n>_) and its type. The rows' columns are
+// __dp_c<i>, item i, so HAVING (on them) and ORDER BY (on the names) apply
+// to the noisy values; a hidden aggregate is not selected.
 func (dq dpQuery) resultSQL(schema []field, out []dpOut) (string, string) {
 	var cols, types []string
 	anon := 0
 	for i, it := range dq.items {
+		if it.hidden {
+			typ := "FLOAT64"
+			if it.agg.fn == "COUNT" || it.agg.sumInt {
+				typ = "INT64"
+			}
+			cols, types = append(cols, ""), append(types, typ)
+			continue
+		}
 		if it.agg == nil {
 			if i >= len(schema) {
 				return "", "cloudburrow: the differentially private query's columns could not be read"
@@ -1175,9 +1550,13 @@ func (dq dpQuery) resultSQL(schema []field, out []dpOut) (string, string) {
 		}
 		cols, types = append(cols, name), append(types, typ)
 	}
-	var st []string
+	var st, sel []string
 	for i := range cols {
-		st = append(st, quotePath([]string{cols[i]})+" "+types[i])
+		c := fmt.Sprintf("`__dp_c%d`", i)
+		st = append(st, c+" "+types[i])
+		if !dq.items[i].hidden {
+			sel = append(sel, c+" AS "+quotePath([]string{cols[i]}))
+		}
 	}
 	structType := "STRUCT<" + strings.Join(st, ", ") + ">"
 	var lits []string
@@ -1212,7 +1591,18 @@ func (dq dpQuery) resultSQL(schema []field, out []dpOut) (string, string) {
 		}
 		lits = append(lits, "STRUCT("+strings.Join(vs, ", ")+")")
 	}
-	sql := "SELECT * FROM UNNEST(ARRAY<" + structType + ">[" + strings.Join(lits, ", ") + "])"
+	sql := "SELECT " + strings.Join(sel, ", ") + " FROM UNNEST(ARRAY<" + structType + ">[" + strings.Join(lits, ", ") + "])"
+	if len(dq.having) > 0 {
+		var b strings.Builder
+		for _, p := range dq.having {
+			if p.item >= 0 {
+				fmt.Fprintf(&b, "`__dp_c%d`", p.item)
+				continue
+			}
+			b.WriteString(p.text)
+		}
+		sql += " WHERE " + b.String()
+	}
 	if dq.tail != "" {
 		sql += " " + dq.tail
 	}
