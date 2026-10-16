@@ -189,7 +189,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
-          "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
+          "test/compat/secretcmek_test.go:243 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
@@ -199,7 +199,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
+          "test/compat/secretcmek_test.go:243 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
@@ -212,7 +212,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
-          "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
+          "test/compat/secretcmek_test.go:243 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
@@ -367,7 +367,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
-          "test/compat/secretcmek_test.go:203 TestGcloudSecretsCMEK",
+          "test/compat/secretcmek_test.go:200 TestGcloudSecretsCMEK",
           "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
           "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
@@ -7675,7 +7675,7 @@
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
           "test/compat/bigqueryparquetcharmap_test.go:64 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
-          "test/compat/bigquerypartitionrest_test.go:142 TestBigQueryPartitionDestinationsRest",
+          "test/compat/bigquerypartitionrest_test.go:145 TestBigQueryPartitionDestinationsRest",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
           "test/compat/bigqueryscriptchildren_test.go:27 TestBigQueryScriptChildJobs",
           "test/compat/bigqueryscriptfailedchildren_test.go:27 TestBigQueryScriptFailedChildJobs",
@@ -7776,7 +7776,7 @@
           "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
           "test/compat/bigquerypartitionreads_test.go:33 TestBigQueryPartitionPseudoColumns",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
-          "test/compat/bigquerypartitionrest_test.go:142 TestBigQueryPartitionDestinationsRest",
+          "test/compat/bigquerypartitionrest_test.go:145 TestBigQueryPartitionDestinationsRest",
           "test/compat/bigquerypartitionrest_test.go:34 TestBigQueryStreamingBuffer",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
           "test/compat/bigqueryprivacypolicy_test.go:189 TestBigQueryPrivacyPolicyJoinRestriction",
@@ -8180,7 +8180,7 @@
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
-          "test/compat/bigquerypartitionrest_test.go:142 TestBigQueryPartitionDestinationsRest",
+          "test/compat/bigquerypartitionrest_test.go:145 TestBigQueryPartitionDestinationsRest",
           "test/compat/bigquerypartitionrest_test.go:34 TestBigQueryStreamingBuffer",
           "test/compat/bigquerypartitionwrites_test.go:263 TestConsoleBigQueryPartitions",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
