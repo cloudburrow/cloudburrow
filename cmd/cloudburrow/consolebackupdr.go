@@ -20,7 +20,8 @@ import (
 // their rules) that store into it and the associations applying them, and
 // a data source's page with its backups. Create vault, Create backup plan,
 // Associate an instance and Trigger backup go through the Backup and DR
-// Service; Restore a backup (instances.restoreBackup with backupdrBackup)
+// Service, as do (#1462) Edit vault, Edit backup plan (a new revision, listed
+// in Plan revisions), Move association and Edit backup; Restore a backup (instances.restoreBackup with backupdrBackup)
 // and Point-in-time restore (instances.pointInTimeRestore with the data
 // source) go through the Cloud SQL Admin API. Both are called in process
 // through their own HTTP handlers, so the page shows what gcloud and
@@ -235,9 +236,26 @@ func (p backupDRProvider) Detail(ctx context.Context, project string, path []str
 	}
 	assocs.Total = len(assocs.Items)
 
+	revs := console.Listing{Columns: []string{"Backup plan", "Revision", "Created", "Rules"}, NameColumn: "Revision", Noun: "revisions"}
+	for _, pl := range plans.Items {
+		out, err := p.get(ctx, loc+"/backupPlans/"+pl.Name+"/revisions")
+		if err != nil {
+			revs.Unavailable = err.Error()
+			break
+		}
+		for _, r := range bdrItems(out, "backupPlanRevisions") {
+			snap, _ := r["backupPlanSnapshot"].(map[string]any)
+			revs.Items = append(revs.Items, console.Resource{Name: pl.Name + "/" + str(r, "revisionId"), Status: str(r, "state"),
+				Fields: map[string]string{"Backup plan": pl.Name, "Revision": str(r, "revisionId"), "Created": str(r, "createTime"),
+					"Rules": rulesText(snap)}})
+		}
+	}
+	revs.Total = len(revs.Items)
+
 	d.Sections = []console.Section{
 		{ID: "datasources", Label: "Data sources", Listing: ds},
 		{ID: "plans", Label: "Backup plans", Listing: plans},
+		{ID: "revisions", Label: "Plan revisions", Listing: revs},
 		{ID: "associations", Label: "Associations", Listing: assocs},
 	}
 	return d, nil
@@ -288,9 +306,10 @@ func (p backupDRProvider) DetailActions(ctx context.Context, project string, pat
 	}
 	loc := vault[:strings.Index(vault, "/backupVaults/")]
 	if len(path) == 2 {
-		var backups []string
+		var backups, all []string
 		if out, err := p.get(ctx, vault+"/dataSources/"+path[1]+"/backups"); err == nil {
 			for _, b := range bdrItems(out, "backups") {
+				all = append(all, lastSegment(str(b, "name")))
 				if str(b, "state") == "ACTIVE" {
 					backups = append(backups, lastSegment(str(b, "name")))
 				}
@@ -308,11 +327,20 @@ func (p backupDRProvider) DetailActions(ctx context.Context, project string, pat
 			Fields: []console.Field{{Name: "target", Label: "New instance ID", Type: "text", Required: true},
 				{Name: "time", Label: "Point in time", Type: "text", Required: true,
 					Help: "An RFC 3339 time inside the instance's recovery window, such as 2026-10-16T12:00:00Z."}}})
+		if len(all) > 0 {
+			acts = append(acts, console.Action{ID: "editbackup", Label: "Edit backup", Fields: []console.Field{
+				{Name: "backup", Label: "Backup", Type: "select", Required: true, Options: all},
+				{Name: "expire", Label: "Expires", Type: "text",
+					Help: "An RFC 3339 time, such as 2026-12-31T00:00:00Z; empty keeps it. It cannot be before the enforced retention ends."},
+				{Name: "enforced", Label: "Enforced retention ends", Type: "text",
+					Help: "An RFC 3339 time; empty keeps it. Enforced retention can be extended, not reduced."}}})
+		}
 		return acts
 	}
-	var plans, assocs, rules []string
+	var plans, allPlans, assocs, rules []string
 	if out, err := p.get(ctx, loc+"/backupPlans"); err == nil {
 		for _, x := range bdrItems(out, "backupPlans") {
+			allPlans = append(allPlans, lastSegment(str(x, "name")))
 			if str(x, "backupVault") == vault {
 				plans = append(plans, lastSegment(str(x, "name")))
 				for _, r := range bdrItems(x, "backupRules") {
@@ -345,14 +373,117 @@ func (p backupDRProvider) DetailActions(ctx context.Context, project string, pat
 			{Name: "plan", Label: "Backup plan", Type: "select", Required: true, Options: plans},
 			{Name: "instance", Label: "Cloud SQL instance", Type: "text", Required: true}}})
 	}
+	if len(plans) > 0 {
+		acts = append(acts, console.Action{ID: "editplan", Label: "Edit backup plan", Fields: []console.Field{
+			{Name: "plan", Label: "Backup plan", Type: "select", Required: true, Options: plans,
+				Help: "Each edit makes a new revision of the plan, listed in Plan revisions."},
+			{Name: "rule", Label: "Rule", Type: "select", Required: true, Options: rules},
+			{Name: "recurrence", Label: "Recurrence", Type: "select", Options: []string{"", "HOURLY", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"},
+				Help: "Empty keeps the rule's."},
+			{Name: "retention", Label: "Retention (days)", Type: "number", Help: "Empty keeps the rule's."},
+			{Name: "description", Label: "Description", Type: "text", Help: "Empty keeps the plan's."}}})
+	}
+	if len(assocs) > 0 {
+		acts = append(acts, console.Action{ID: "moveassoc", Label: "Move association", Fields: []console.Field{
+			{Name: "association", Label: "Association", Type: "select", Required: true, Options: assocs},
+			{Name: "plan", Label: "New backup plan", Type: "select", Required: true, Options: allPlans,
+				Help: "A plan storing into another vault gives the instance a data source there."}}})
+	}
 	if len(assocs) > 0 && len(rules) > 0 {
 		acts = append(acts, console.Action{ID: "trigger", Label: "Trigger backup", Fields: []console.Field{
 			{Name: "association", Label: "Association", Type: "select", Required: true, Options: assocs},
 			{Name: "rule", Label: "Rule", Type: "select", Required: true, Options: rules}}})
 	}
+	if v, err := p.get(ctx, vault); err == nil {
+		acts = append(acts, console.Action{ID: "editvault", Label: "Edit vault", Fields: []console.Field{
+			{Name: "description", Label: "Description", Type: "text", Default: str(v, "description")},
+			{Name: "labels", Label: "Labels", Type: "text", Default: bdrLabelsText(v["labels"]), Help: "key=value pairs, comma-separated."},
+			{Name: "retention", Label: "Minimum enforced retention", Type: "text", Required: true,
+				Default: str(v, "backupMinimumEnforcedRetentionDuration"), Help: "A duration in seconds, such as 86400s (one day)."}}})
+	}
 	acts = append(acts, console.Action{ID: "delete", Label: "Delete", Destructive: true, Leaves: true,
 		Confirm: "The vault is deleted. A vault holding data sources or used by a plan cannot be."})
 	return acts
+}
+
+// bdrLabelsText is labels as k=v pairs, sorted; bdrParseLabels reads them back.
+func bdrLabelsText(v any) string {
+	m, _ := v.(map[string]any)
+	var out []string
+	for k, x := range m {
+		out = append(out, k+"="+fmt.Sprint(x))
+	}
+	sort.Strings(out)
+	return strings.Join(out, ",")
+}
+
+func bdrParseLabels(s string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, kv := range strings.Split(s, ",") {
+		if kv = strings.TrimSpace(kv); kv == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || strings.TrimSpace(k) == "" {
+			return nil, fmt.Errorf("label %q is not key=value", kv)
+		}
+		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	return out, nil
+}
+
+// editPlan changes one rule's recurrence or retention, and the plan's
+// description, through backupPlans.patch.
+func (p backupDRProvider) editPlan(ctx context.Context, loc string, v map[string]string) error {
+	name := loc + "/backupPlans/" + v["plan"]
+	plan, err := p.get(ctx, name)
+	if err != nil {
+		return err
+	}
+	var mask []string
+	body := map[string]any{}
+	if v["recurrence"] != "" || v["retention"] != "" {
+		rules := bdrItems(plan, "backupRules")
+		found := false
+		for _, r := range rules {
+			if str(r, "ruleId") != v["rule"] {
+				continue
+			}
+			found = true
+			if v["retention"] != "" {
+				var n int
+				if _, e := fmt.Sscan(v["retention"], &n); e != nil || n <= 0 {
+					return fmt.Errorf("retention %q is not a number of days", v["retention"])
+				}
+				r["backupRetentionDays"] = n
+			}
+			if v["recurrence"] != "" {
+				sch, _ := r["standardSchedule"].(map[string]any)
+				if sch == nil {
+					sch = map[string]any{"timeZone": "UTC"}
+				}
+				sch["recurrenceType"] = v["recurrence"]
+				if v["recurrence"] == "HOURLY" && sch["hourlyFrequency"] == nil {
+					sch["hourlyFrequency"] = 6
+				}
+				r["standardSchedule"] = sch
+			}
+		}
+		if !found {
+			return fmt.Errorf("backup plan %s has no rule %q", v["plan"], v["rule"])
+		}
+		body["backupRules"] = rules
+		mask = append(mask, "backupRules")
+	}
+	if v["description"] != "" {
+		body["description"] = v["description"]
+		mask = append(mask, "description")
+	}
+	if len(mask) == 0 {
+		return errors.New("nothing to change: set a recurrence, a retention or a description")
+	}
+	_, err = p.call(ctx, p.bdr, http.MethodPatch, "/v1/"+name+"?updateMask="+strings.Join(mask, ","), body)
+	return err
 }
 
 func compactStrings(s []string) []string {
@@ -397,6 +528,35 @@ func (p backupDRProvider) ActAt(ctx context.Context, project string, path []stri
 		_, err = p.call(ctx, p.bdr, http.MethodPost, "/v1/"+loc+"/backupPlanAssociations?backupPlanAssociationId="+url.QueryEscape(v["id"]),
 			map[string]any{"backupPlan": loc + "/backupPlans/" + v["plan"], "resourceType": "sqladmin.googleapis.com/Instance",
 				"resource": "projects/" + project + "/instances/" + v["instance"]})
+	case "editvault":
+		labels, e := bdrParseLabels(v["labels"])
+		if e != nil {
+			return e
+		}
+		_, err = p.call(ctx, p.bdr, http.MethodPatch, "/v1/"+vault+"?updateMask=description,labels,backupMinimumEnforcedRetentionDuration",
+			map[string]any{"description": v["description"], "labels": labels, "backupMinimumEnforcedRetentionDuration": v["retention"]})
+	case "editplan":
+		err = p.editPlan(ctx, loc, v)
+	case "moveassoc":
+		_, err = p.call(ctx, p.bdr, http.MethodPatch, "/v1/"+loc+"/backupPlanAssociations/"+v["association"]+"?updateMask=backupPlan",
+			map[string]any{"backupPlan": loc + "/backupPlans/" + v["plan"]})
+	case "editbackup":
+		if len(path) != 2 {
+			return errors.New("edit backup is offered on a data source's page")
+		}
+		var mask []string
+		body := map[string]any{}
+		if v["expire"] != "" {
+			body["expireTime"], mask = v["expire"], append(mask, "expireTime")
+		}
+		if v["enforced"] != "" {
+			body["enforcedRetentionEndTime"], mask = v["enforced"], append(mask, "enforcedRetentionEndTime")
+		}
+		if len(mask) == 0 {
+			return errors.New("nothing to change: set an expiry or an enforced retention end")
+		}
+		_, err = p.call(ctx, p.bdr, http.MethodPatch, "/v1/"+vault+"/dataSources/"+path[1]+"/backups/"+v["backup"]+
+			"?updateMask="+strings.Join(mask, ","), body)
 	case "trigger":
 		_, err = p.call(ctx, p.bdr, http.MethodPost, "/v1/"+loc+"/backupPlanAssociations/"+v["association"]+":triggerBackup",
 			map[string]any{"ruleId": v["rule"]})
