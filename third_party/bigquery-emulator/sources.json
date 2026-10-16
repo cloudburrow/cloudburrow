@@ -30,7 +30,8 @@
         "patches/bigquery-emulator/0014-column-defaults.patch",
         "patches/bigquery-emulator/0015-ingestion-partition-time.patch",
         "patches/bigquery-emulator/0016-streaming-buffer-mark.patch",
-        "patches/bigquery-emulator/0018-streamed-at-column.patch"
+        "patches/bigquery-emulator/0018-streamed-at-column.patch",
+        "patches/bigquery-emulator/0019-quote-struct-field-names.patch"
       ]
     },
     {

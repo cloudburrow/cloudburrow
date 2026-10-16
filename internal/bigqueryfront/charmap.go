@@ -26,8 +26,17 @@ import (
 // A name still refused once its characters are replaced (a V1 name that
 // starts with a digit, an empty or reserved name, one too long), and names
 // that are the same once replaced, are not renamed: BigQuery's rule for
-// them is not documented, so the load stays 501 (autodetectLoad). Only a
-// CSV load is renamed; another format stays 501.
+// them is not documented, so the load stays 501 (autodetectLoad).
+//
+// A Parquet load (#1373) is renamed as the front reads the file's schema
+// (pqOptions.name, parquetshape.go): each name, at every depth, the same
+// way but for its periods, which BigQuery keeps ("except periods in
+// Parquet file column names"); the front then carries out the load itself
+// (parquetload.go), as the emulator reads the file by the schema's names,
+// each value going to the column of its renamed field. The cases the CSV
+// path leaves 501 are 501 here too: a name still refused once replaced (a
+// period kept is one, as no rule takes it), and names the same once
+// replaced.
 
 // classicColumnRune is a character V1's rule takes.
 var classicColumnRune = regexp.MustCompile(`^[A-Za-z0-9_]$`)
@@ -208,11 +217,11 @@ func charMapFormat(charMap, format string) string {
 // are refused under the load's columnNameCharacterMap, with the status:
 // under STRICT (or none) a name the column rules refuse is 400, as
 // BigQuery documents ("Load jobs with unsupported characters in column
-// names fail with an error message"); under V1 or V2 BigQuery replaces
-// the unsupported characters with underscores, "except periods in
-// Parquet file column names", which the front does not do for a Parquet
-// file (the emulator reads the file by its own names), so such a load is
-// 501 (#1336).
+// names fail with an error message") (#1336); under V1 or V2, file holds
+// the names once their unsupported characters are replaced with
+// underscores, "except periods in Parquet file column names" (#1373,
+// pqOptions.name), and one still refused is 501, as BigQuery does not
+// document how it names it.
 func parquetCharMapNames(file []field, charMap string) (int, string) {
 	m := strings.ToUpper(charMap)
 	check := checkColumnName
@@ -224,9 +233,9 @@ func parquetCharMapNames(file []field, charMap string) (int, string) {
 		return 0, ""
 	}
 	if m == "V1" || m == "V2" {
-		return http.StatusNotImplemented, "under columnNameCharacterMap " + m + ", which would rename a column of the file: " +
-			bad + " BigQuery replaces its unsupported characters (but periods) with underscores; CloudBurrow does not " +
-			"rename a Parquet file's columns"
+		return http.StatusNotImplemented, "under columnNameCharacterMap " + m + " of a file whose column is still refused " +
+			"once its unsupported characters (but periods) are replaced with underscores: " + bad + " BigQuery's " +
+			"documentation does not say how it names such a column (\"Invalid column names will be normalized\")"
 	}
 	return http.StatusBadRequest, bad + " The name is the Parquet file's; columnNameCharacterMap STRICT, the default, " +
 		"refuses it rather than renaming it."

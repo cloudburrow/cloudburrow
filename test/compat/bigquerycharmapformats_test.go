@@ -23,9 +23,9 @@ import (
 // rules refuse ("!") is 400 under STRICT, the default ("Load jobs with
 // unsupported characters in column names fail with an error message");
 // under V1 or V2, where BigQuery replaces the unsupported characters with
-// underscores ("except periods in Parquet file column names"), which
-// CloudBurrow does not do for a Parquet file, it is 501. A name the rules
-// take loads under either. Measured first: a JSON load under V2 loaded, and
+// underscores ("except periods in Parquet file column names"), it loads
+// as "_" (#1373, TestBigQueryParquetColumnNameCharacterMap). A name the
+// rules take loads under any. Measured first: a JSON load under V2 loaded, and
 // a Parquet column "!" was 501 under STRICT too.
 //
 // covers: bigquery.jobs.insert, bigquery.tables.get
@@ -78,15 +78,15 @@ func TestBigQueryColumnNameCharacterMapFormats(t *testing.T) {
 		return strings.ReplaceAll(string(parquet), "\x18\x01b", "\x18\x01"+name)
 	}
 	for _, tc := range []struct {
-		table, column string
-		charMap       bigquery.ColumnNameCharacterMap
-		want          int
+		table, column, loaded string
+		charMap               bigquery.ColumnNameCharacterMap
+		want                  int
 	}{
-		{"pq_bang_strict", "!", "", http.StatusBadRequest},
-		{"pq_bang_v1", "!", bigquery.V1ColumnNameCharacterMap, http.StatusNotImplemented},
-		{"pq_bang_v2", "!", bigquery.V2ColumnNameCharacterMap, http.StatusNotImplemented},
-		{"pq_b_v1", "b", bigquery.V1ColumnNameCharacterMap, 0},
-		{"pq_b_strict", "b", bigquery.StrictColumnNameCharacterMap, 0},
+		{"pq_bang_strict", "!", "", "", http.StatusBadRequest},
+		{"pq_bang_v1", "!", "_", bigquery.V1ColumnNameCharacterMap, 0},
+		{"pq_bang_v2", "!", "_", bigquery.V2ColumnNameCharacterMap, 0},
+		{"pq_b_v1", "b", "b", bigquery.V1ColumnNameCharacterMap, 0},
+		{"pq_b_strict", "b", "b", bigquery.StrictColumnNameCharacterMap, 0},
 	} {
 		err := run(tc.table, parquetUpload(named(tc.column), nil), tc.charMap)
 		if tc.want != 0 {
@@ -101,8 +101,8 @@ func TestBigQueryColumnNameCharacterMapFormats(t *testing.T) {
 			continue
 		}
 		md, err := ds.Table(tc.table).Metadata(ctx)
-		if err != nil || len(md.Schema) != 2 || md.Schema[1].Name != tc.column {
-			t.Errorf("%s: schema %v (%v), want a and %s", tc.table, md, err, tc.column)
+		if err != nil || len(md.Schema) != 2 || md.Schema[1].Name != tc.loaded {
+			t.Errorf("%s: schema %v (%v), want a and %s", tc.table, md, err, tc.loaded)
 		}
 	}
 }
