@@ -453,7 +453,7 @@ func (x *ExecutionsServer) ListExecutions(ctx context.Context, req *runpb.ListEx
 	if _, err := x.s.loadJob(ctx, req.GetParent(), id); err != nil {
 		return nil, err
 	}
-	all, err := x.s.jobExecutions(ctx, id)
+	all, err := x.s.jobExecutions(ctx, req.GetParent())
 	if err != nil {
 		return nil, err
 	}

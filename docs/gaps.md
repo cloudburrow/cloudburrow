@@ -94,6 +94,7 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 | `Instances.*` is not served (#1299) | not built yet | L |
 | `WorkerPools.*` is not served (#1300) | not built yet | L |
 | A v1 (Knative) domain mapping never becomes Ready, as no DNS is served; v1 `overrides.delayExecution` and set-based `labelSelector`s (`gcloud run jobs executions tasks list --succeeded`) are 501 (projects.locations.list, IAM, jobs create/get/list/delete and domain mappings since #1349; `replaceJob`, `run`, executions and tasks since #1379) | not built yet | S |
+| Two projects or regions cannot each have a service of one ID: a Knative Service is named by the service ID alone (its URL and its revisions' names), so the second create is `UNIMPLEMENTED` (#1400); worker pools, jobs and instances are scoped since #1399 | not built yet | L |
 | `CancelOperation`: a deployment in flight cannot be recalled | no emulator support | S |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION` | needs live GCP | S |
 | `CancelExecution`'s result | needs live GCP | S |

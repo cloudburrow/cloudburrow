@@ -83,7 +83,11 @@ func (s *Server) CreateService(ctx context.Context, req *runpb.CreateServiceRequ
 	name := fmt.Sprintf("%s/services/%s", req.GetParent(), id)
 	svc.Name = name
 
-	if _, err := s.kn.Get(ctx, id); err == nil {
+	if k, err := s.kn.Get(ctx, id); err == nil {
+		if other := k.Metadata.Annotations[annRunName]; other != "" && other != name {
+			return nil, apierror.Unimplemented("service ID %q is in use by %s: a Knative Service is named by its ID alone, "+
+				"so two projects or regions cannot each have a service of one ID locally (#1400)", id, other)
+		}
 		return nil, apierror.AlreadyExists("service %s already exists", name)
 	}
 
@@ -133,7 +137,7 @@ func (s *Server) UpdateService(ctx context.Context, req *runpb.UpdateServiceRequ
 		return nil, err
 	}
 	parent := strings.TrimSuffix(svc.GetName(), "/services/"+id)
-	existing, err := s.kn.Get(ctx, id)
+	existing, err := s.service(ctx, svc.GetName(), id)
 	if err != nil {
 		if !req.GetAllowMissing() {
 			return nil, apierror.NotFound("service %s not found", svc.GetName())
@@ -258,12 +262,27 @@ func (s *Server) GetService(ctx context.Context, req *runpb.GetServiceRequest) (
 	if err != nil {
 		return nil, err
 	}
-	k, err := s.kn.Get(ctx, id)
+	k, err := s.service(ctx, req.GetName(), id)
 	if err != nil {
-		return nil, apierror.NotFound("service %s not found", req.GetName())
+		return nil, err
 	}
 	parent := strings.TrimSuffix(req.GetName(), "/services/"+id)
 	return FromKnative(k, parent), nil
+}
+
+// service reads the Knative Service behind a Cloud Run service name, and
+// only if it is that name's: Knative Services are named by ID alone
+// (#1400), so another project's or region's service of the same ID is
+// NOT_FOUND here, not returned under the wrong name.
+func (s *Server) service(ctx context.Context, name, id string) (ksvc, error) {
+	k, err := s.kn.Get(ctx, id)
+	if err != nil {
+		return ksvc{}, apierror.NotFound("service %s not found", name)
+	}
+	if n := k.Metadata.Annotations[annRunName]; n != "" && n != name {
+		return ksvc{}, apierror.NotFound("service %s not found", name)
+	}
+	return k, nil
 }
 
 // ListServices lists services under a parent.
@@ -279,6 +298,11 @@ func (s *Server) ListServices(ctx context.Context, req *runpb.ListServicesReques
 	names := make([]string, 0, len(items))
 	for _, k := range items {
 		svc := FromKnative(k, req.GetParent())
+		// Only the parent's: every project's services are in the one
+		// namespace (#1399).
+		if !strings.HasPrefix(svc.GetName(), req.GetParent()+"/services/") {
+			continue
+		}
 		byName[svc.GetName()] = svc
 		names = append(names, svc.GetName())
 	}
@@ -299,16 +323,14 @@ func (s *Server) DeleteService(ctx context.Context, req *runpb.DeleteServiceRequ
 	if err != nil {
 		return nil, err
 	}
-	// validate_only and etag need the service as it is (#581); a plain
-	// delete does not, and keeps its old behaviour for a missing one.
-	if req.GetValidateOnly() || req.GetEtag() != "" {
-		existing, err := s.kn.Get(ctx, id)
-		if err != nil {
-			return nil, apierror.NotFound("service %s not found", req.GetName())
-		}
-		if err := checkEtag(req.GetEtag(), existing); err != nil {
-			return nil, err
-		}
+	// The service as it is: for validate_only and etag (#581), and so a
+	// delete never removes another project's service of the same ID (#1399).
+	existing, err := s.service(ctx, req.GetName(), id)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkEtag(req.GetEtag(), existing); err != nil {
+		return nil, err
 	}
 	parent := strings.TrimSuffix(req.GetName(), "/services/"+id)
 	if req.GetValidateOnly() {

@@ -402,13 +402,15 @@
         "method": "google.cloud.run.v2.Executions/ListExecutions",
         "status": "Verified",
         "tests": [
-          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject"
         ]
       },
       {
         "method": "google.cloud.run.v2.Instances/CreateInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
@@ -416,6 +418,7 @@
         "method": "google.cloud.run.v2.Instances/DeleteInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
@@ -423,6 +426,7 @@
         "method": "google.cloud.run.v2.Instances/GetInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
@@ -430,6 +434,7 @@
         "method": "google.cloud.run.v2.Instances/ListInstances",
         "status": "Verified",
         "tests": [
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:225 TestRunInstanceLifecycle"
         ]
       },
@@ -453,6 +458,7 @@
         "tests": [
           "test/compat/runcloudsql_test.go:126 TestRunJobCloudSQLVolume",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes",
@@ -464,6 +470,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -480,6 +487,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
@@ -489,7 +497,8 @@
         "method": "google.cloud.run.v2.Jobs/ListJobs",
         "status": "Verified",
         "tests": [
-          "test/compat/runjobs_test.go:73 TestRunJobLifecycle"
+          "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject"
         ]
       },
       {
@@ -498,6 +507,7 @@
         "tests": [
           "test/compat/runcloudsql_test.go:126 TestRunJobCloudSQLVolume",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:109 TestRunJobSubPathAndStoredSettings",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
@@ -572,6 +582,7 @@
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:75 TestRunServiceCloudSQLVolume",
           "test/compat/runcloudsqlv1_test.go:50 TestRunServiceCloudSQLMySQLVolume",
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
@@ -583,6 +594,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -600,6 +612,7 @@
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runcloudsql_test.go:75 TestRunServiceCloudSQLVolume",
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
@@ -612,7 +625,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepredict_test.go:56 TestConsoleOnlinePredictionThroughTheConsoleAPI",
-          "test/compat/run_test.go:58 TestRunServiceLifecycle"
+          "test/compat/run_test.go:58 TestRunServiceLifecycle",
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject"
         ]
       },
       {
@@ -673,6 +687,7 @@
         "method": "google.cloud.run.v2.WorkerPools/CreateWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
           "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
         ]
@@ -681,6 +696,7 @@
         "method": "google.cloud.run.v2.WorkerPools/DeleteWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
           "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
         ]
@@ -697,6 +713,7 @@
         "method": "google.cloud.run.v2.WorkerPools/GetWorkerPool",
         "status": "Verified",
         "tests": [
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
           "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits",
           "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
@@ -706,6 +723,7 @@
         "method": "google.cloud.run.v2.WorkerPools/ListWorkerPools",
         "status": "Verified",
         "tests": [
+          "test/compat/runnames_test.go:31 TestRunNamesPerProject",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle"
         ]
       },

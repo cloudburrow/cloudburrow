@@ -216,6 +216,9 @@ func (r *RevisionsServer) GetRevision(ctx context.Context, req *runpb.GetRevisio
 	if err != nil {
 		return nil, err
 	}
+	if _, err := r.s.service(ctx, serviceName, service); err != nil {
+		return nil, apierror.NotFound("revision %s not found", req.GetName())
+	}
 	kr, err := r.s.kn.Revision(ctx, service, revision)
 	if err != nil {
 		return nil, apierror.NotFound("revision %s not found", req.GetName())
@@ -233,8 +236,8 @@ func (r *RevisionsServer) ListRevisions(ctx context.Context, req *runpb.ListRevi
 	}
 	// The service first: listing the revisions of a service that does not
 	// exist is NOT_FOUND, not an empty page.
-	if _, err := r.s.kn.Get(ctx, service); err != nil {
-		return nil, apierror.NotFound("service %s not found", req.GetParent())
+	if _, err := r.s.service(ctx, req.GetParent(), service); err != nil {
+		return nil, err
 	}
 	items, err := r.s.kn.Revisions(ctx, service)
 	if err != nil {
@@ -275,9 +278,9 @@ func (r *RevisionsServer) DeleteRevision(ctx context.Context, req *runpb.DeleteR
 	if err != nil {
 		return nil, err
 	}
-	k, err := r.s.kn.Get(ctx, service)
+	k, err := r.s.service(ctx, serviceName, service)
 	if err != nil {
-		return nil, apierror.NotFound("service %s not found", serviceName)
+		return nil, err
 	}
 	if k.Metadata.Labels[k8s.OwnedLabel] != k8s.OwnedValue {
 		return nil, apierror.FailedPrecondition(

@@ -172,20 +172,26 @@ func jobSpec(job *runpb.Job, generation int64, updated time.Time) *runpb.Job {
 
 // jobConfigMap renders the ConfigMap that holds a job. resourceVersion,
 // when set, makes a replace fail rather than overwrite a newer write.
-func jobConfigMap(spec *runpb.Job, id, namespace, instance, resourceVersion string) (string, error) {
+//
+// cmName is the ConfigMap's name: jobCMName's for a new job, and the one it
+// was found under for an update, which for a job an older version created
+// is the unscoped run-job-<id> (#1399).
+func jobConfigMap(spec *runpb.Job, cmName, id, namespace, instance, resourceVersion string) (string, error) {
 	raw, err := protojson.Marshal(spec)
 	if err != nil {
 		return "", apierror.Internal(err, "encode job %s", spec.GetName())
+	}
+	labels := map[string]string{labelOwned: "true", labelInstance: instance, labelKind: kindRunJob, labelRunJob: id}
+	if cmName != jobCMPrefix+id {
+		labels[labelScope] = nameScope(parentOf(spec.GetName()))
 	}
 	cm := map[string]any{
 		"apiVersion": "v1",
 		"kind":       "ConfigMap",
 		"metadata": map[string]any{
-			"name":      jobCMPrefix + id,
-			"namespace": namespace,
-			"labels": map[string]string{
-				labelOwned: "true", labelInstance: instance, labelKind: kindRunJob, labelRunJob: id,
-			},
+			"name":        cmName,
+			"namespace":   namespace,
+			"labels":      labels,
 			"annotations": map[string]string{annRunName: spec.GetName()},
 		},
 		"data": map[string]string{jobDataKey: string(raw)},
@@ -260,11 +266,30 @@ func (s *Server) Jobs() *JobsServer { return &JobsServer{s: s} }
 // Register adds the Jobs service to a gRPC server or a JSON transcoder.
 func (j *JobsServer) Register(g grpc.ServiceRegistrar) { runpb.RegisterJobsServer(g, j) }
 
+// jobCMName is the name of a new job's ConfigMap: scoped by its project
+// and location (scope.go), so two projects' jobs of one ID are two.
+func jobCMName(name, id string) string {
+	return jobCMPrefix + nameScope(parentOf(name)) + "-" + id
+}
+
 // loadJob reads a job's ConfigMap and checks it is the one named: owned by
-// the adapter, and under the same project and location.
+// the adapter, and under the same project and location. A job an older
+// version created under the unscoped run-job-<id> is found too (#1399).
 func (s *Server) loadJob(ctx context.Context, name, id string) (kconfigMap, error) {
+	cm, err := s.jobAt(ctx, jobCMName(name, id), name)
+	if err == nil || apierror.From(err).Code != codes.NotFound {
+		return cm, err
+	}
+	legacy, lerr := s.jobAt(ctx, jobCMPrefix+id, name)
+	if lerr != nil || legacy.Metadata.Labels[labelScope] != "" {
+		return kconfigMap{}, err
+	}
+	return legacy, nil
+}
+
+func (s *Server) jobAt(ctx context.Context, cmName, name string) (kconfigMap, error) {
 	var cm kconfigMap
-	if err := s.kn.getObject(ctx, &cm, resConfigMap, jobCMPrefix+id, "job "+name); err != nil {
+	if err := s.kn.getObject(ctx, &cm, resConfigMap, cmName, "job "+name); err != nil {
 		return kconfigMap{}, err
 	}
 	if cm.Metadata.Labels[labelOwned] != "true" || cm.Metadata.Labels[labelKind] != kindRunJob ||
@@ -274,13 +299,25 @@ func (s *Server) loadJob(ctx context.Context, name, id string) (kconfigMap, erro
 	return cm, nil
 }
 
-// jobExecutions lists a job's executions, or with id "" every job's.
-func (s *Server) jobExecutions(ctx context.Context, id string) ([]kjob, error) {
+// jobExecutions lists a job's executions by its full name, so another
+// project's job of the same ID is not counted (#1399); with name "" it
+// lists every job's.
+func (s *Server) jobExecutions(ctx context.Context, name string) ([]kjob, error) {
 	sel := labelOwned + "=true," + labelRunJob
-	if id != "" {
-		sel += "=" + id
+	if name == "" {
+		return listObjects[kjob](ctx, s.kn, resBatchJob, sel)
 	}
-	return listObjects[kjob](ctx, s.kn, resBatchJob, sel)
+	all, err := listObjects[kjob](ctx, s.kn, resBatchJob, sel+"="+name[strings.LastIndex(name, "/")+1:])
+	if err != nil {
+		return nil, err
+	}
+	var out []kjob
+	for _, j := range all {
+		if j.Metadata.Annotations[annRunJob] == name {
+			out = append(out, j)
+		}
+	}
+	return out, nil
 }
 
 // checkResourceEtag refuses a stale etag, as checkEtag does for a service.
@@ -338,7 +375,13 @@ func (j *JobsServer) CreateJob(ctx context.Context, req *runpb.CreateJobRequest)
 		return nil, err
 	}
 	var existing kconfigMap
-	if err := s.kn.getObject(ctx, &existing, resConfigMap, jobCMPrefix+id, "job "+job.Name); err == nil {
+	if err := s.kn.getObject(ctx, &existing, resConfigMap, jobCMName(job.Name, id), "job "+job.Name); err == nil {
+		return nil, apierror.AlreadyExists("job %s already exists", job.Name)
+	} else if apierror.From(err).Code != codes.NotFound {
+		return nil, err
+	}
+	// One an older version created under the unscoped name.
+	if _, err := s.loadJob(ctx, job.Name, id); err == nil {
 		return nil, apierror.AlreadyExists("job %s already exists", job.Name)
 	} else if apierror.From(err).Code != codes.NotFound {
 		return nil, err
@@ -346,7 +389,7 @@ func (j *JobsServer) CreateJob(ctx context.Context, req *runpb.CreateJobRequest)
 	if req.GetValidateOnly() {
 		return s.doneOperation(req.GetParent(), job.Name, spec)
 	}
-	manifest, err := jobConfigMap(spec, id, s.kn.namespace(), s.instance, "")
+	manifest, err := jobConfigMap(spec, jobCMName(job.Name, id), id, s.kn.namespace(), s.instance, "")
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +417,7 @@ func (j *JobsServer) GetJob(ctx context.Context, req *runpb.GetJobRequest) (*run
 	if err != nil {
 		return nil, err
 	}
-	execs, err := j.s.jobExecutions(ctx, id)
+	execs, err := j.s.jobExecutions(ctx, req.GetName())
 	if err != nil {
 		return nil, err
 	}
@@ -396,7 +439,7 @@ func (j *JobsServer) ListJobs(ctx context.Context, req *runpb.ListJobsRequest) (
 	}
 	byJob := map[string][]kjob{}
 	for _, e := range execs {
-		byJob[e.Metadata.Labels[labelRunJob]] = append(byJob[e.Metadata.Labels[labelRunJob]], e)
+		byJob[e.Metadata.Annotations[annRunJob]] = append(byJob[e.Metadata.Annotations[annRunJob]], e)
 	}
 	byName := map[string]*runpb.Job{}
 	names := []string{}
@@ -406,7 +449,7 @@ func (j *JobsServer) ListJobs(ctx context.Context, req *runpb.ListJobsRequest) (
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		job, err := fromConfigMap(cm, byJob[cm.Metadata.Labels[labelRunJob]])
+		job, err := fromConfigMap(cm, byJob[name])
 		if err != nil {
 			return nil, err
 		}
@@ -457,7 +500,7 @@ func (j *JobsServer) UpdateJob(ctx context.Context, req *runpb.UpdateJobRequest)
 	if req.GetValidateOnly() {
 		return s.doneOperation(parent, name, spec)
 	}
-	manifest, err := jobConfigMap(spec, id, s.kn.namespace(), s.instance, cm.Metadata.ResourceVersion)
+	manifest, err := jobConfigMap(spec, cm.Metadata.Name, id, s.kn.namespace(), s.instance, cm.Metadata.ResourceVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -468,7 +511,7 @@ func (j *JobsServer) UpdateJob(ctx context.Context, req *runpb.UpdateJobRequest)
 	if err != nil {
 		return nil, apierror.Internal(err, "read back job %s", name)
 	}
-	execs, err := s.jobExecutions(ctx, id)
+	execs, err := s.jobExecutions(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -493,7 +536,7 @@ func (j *JobsServer) DeleteJob(ctx context.Context, req *runpb.DeleteJobRequest)
 	if err := checkResourceEtag(req.GetEtag(), cm.Metadata.ResourceVersion, "job"); err != nil {
 		return nil, err
 	}
-	execs, err := s.jobExecutions(ctx, id)
+	execs, err := s.jobExecutions(ctx, req.GetName())
 	if err != nil {
 		return nil, err
 	}
@@ -504,10 +547,14 @@ func (j *JobsServer) DeleteJob(ctx context.Context, req *runpb.DeleteJobRequest)
 	if req.GetValidateOnly() {
 		return s.doneOperation(parent, req.GetName(), job)
 	}
-	if err := s.kn.deleteSelected(ctx, resBatchJob, labelOwned+"=true,"+labelRunJob+"="+id); err != nil {
-		return nil, err
+	// Its own executions, by name: another project's job of the same ID
+	// has executions with the same run-job label (#1399).
+	for _, e := range execs {
+		if err := s.kn.deleteObject(ctx, resBatchJob, e.Metadata.Name); err != nil {
+			return nil, err
+		}
 	}
-	if err := s.kn.deleteObject(ctx, resConfigMap, jobCMPrefix+id); err != nil {
+	if err := s.kn.deleteObject(ctx, resConfigMap, cm.Metadata.Name); err != nil {
 		return nil, err
 	}
 	return s.doneOperation(parent, req.GetName(), job)

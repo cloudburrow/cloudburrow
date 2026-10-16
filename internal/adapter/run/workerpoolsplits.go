@@ -265,7 +265,11 @@ func (s *Server) splitDeployments(ctx context.Context, w workload) ([]kdeploymen
 	if w.kind != kindWorkerPool {
 		return nil, nil
 	}
-	return listObjects[kdeployment](ctx, s.kn, resDeployment, labelSplitOf+"="+w.kind+"-"+w.id)
+	sel := labelSplitOf + "=" + w.kind + "-" + w.id + ",!" + labelScope
+	if w.scope != "" {
+		sel = labelSplitOf + "=" + w.kind + "-" + w.id + "," + labelScope + "=" + w.scope
+	}
+	return listObjects[kdeployment](ctx, s.kn, resDeployment, sel)
 }
 
 // servingRevisions is the set of a pool's revisions with instances: the

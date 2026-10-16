@@ -17,8 +17,10 @@ import (
 // A standalone instance's route (#1348): a ClusterIP Service selecting its
 // pod, and a Knative networking Ingress (KIngress) the gateway (Kourier)
 // serves, as Knative routes a service's revision. The host is
-// <id>.instance.<namespace>.<domain>: an extra label, so it cannot collide
-// with a service's <name>.<namespace>.<domain>.
+// <id>-<scope>.instance.<namespace>.<domain> (<id>.instance... for one an
+// older version created): an extra label, so it cannot collide with a
+// service's <name>.<namespace>.<domain>, and the scope (scope.go), so two
+// projects' instances of one ID are two hosts.
 
 const (
 	resService  = "services"
@@ -32,7 +34,12 @@ const (
 
 // instanceHost is the host an instance is reached at.
 func (s *Server) instanceHost(w workload) string {
-	return w.id + ".instance." + s.kn.namespace() + "." + components.DefaultDomain
+	label := w.id
+	if w.scope != "" {
+		// Two projects' instances of one ID have two hosts (#1399).
+		label = dnsLabel(w.id + "-" + w.scope)
+	}
+	return label + ".instance." + s.kn.namespace() + "." + components.DefaultDomain
 }
 
 // servingContainers returns the containers as they run: the ingress
@@ -79,8 +86,7 @@ func servingContainers(cs []*runpb.Container) ([]*runpb.Container, int32) {
 // instanceRoute renders the Service and KIngress of an instance.
 func (s *Server) instanceRoute(w workload, port int32) string {
 	ns := s.kn.namespace()
-	labels := fmt.Sprintf("    %s: \"true\"\n    %s: %q\n    %s: %s\n", labelOwned, labelInstance, s.instance,
-		labelWorkload, w.kind+"-"+w.id)
+	labels := fmt.Sprintf("    %s: \"true\"\n    %s: %q\n%s", labelOwned, labelInstance, s.instance, w.labelLines("    "))
 	return fmt.Sprintf(`apiVersion: v1
 kind: Service
 metadata:
@@ -92,11 +98,10 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    %[6]s: %[7]s
-  ports:
+%[6]s  ports:
     - name: http
       port: 80
-      targetPort: %[8]d
+      targetPort: %[7]d
 ---
 apiVersion: networking.internal.knative.dev/v1alpha1
 kind: Ingress
@@ -106,11 +111,11 @@ metadata:
   labels:
 %[3]s  annotations:
     %[4]s: %[5]q
-    networking.knative.dev/ingress.class: %[9]s
+    networking.knative.dev/ingress.class: %[8]s
 spec:
   httpOption: Enabled
   rules:
-    - hosts: [%[10]q]
+    - hosts: [%[9]q]
       visibility: ExternalIP
       http:
         paths:
@@ -119,7 +124,7 @@ spec:
                 serviceNamespace: %[2]s
                 servicePort: 80
                 percent: 100
-`, w.objectName(), ns, labels, annRunName, w.name, labelWorkload, w.kind+"-"+w.id, port, kourierClass, s.instanceHost(w))
+`, w.objectName(), ns, labels, annRunName, w.name, w.labelLines("    "), port, kourierClass, s.instanceHost(w))
 }
 
 // applyInstanceRoute writes an instance's route. An instance with no
