@@ -388,6 +388,15 @@ func (f front) systemTime(r *http.Request, q queryOptions, dataset, ref string, 
 	earliest := nowMs - hours*int64(time.Hour/time.Millisecond)
 	c, err := strconv.ParseInt(m.Created, 10, 64) // milliseconds (#1310)
 	if err == nil && c > earliest {
+		// A table made again by CREATE OR REPLACE TABLE is read from
+		// before it, within the window, as far as its history goes
+		// (#1466, googlesqlite patch 0044): "the data that is replaced or
+		// removed can be recovered through the time travel window".
+		if tsMs < c && tsMs >= earliest {
+			if start, ok := f.historyStart(r, dataset, ref[strings.LastIndex(ref, ".")+1:]); ok && start/1000 <= tsMs {
+				c = earliest
+			}
+		}
 		earliest = c
 	}
 	switch {

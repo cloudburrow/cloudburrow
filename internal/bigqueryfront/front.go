@@ -280,7 +280,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if serveUnserved(w, r) { // unserved.go, #1200
 			return
 		}
-		if buffers.serveClock(w, r) { // streamingbuffer.go, #1370
+		if buffers.serveClock(w, r, next) { // streamingbuffer.go, #1370
 			return
 		}
 		buffers.flushDue(next, r)      // streamingbuffer.go, #1273

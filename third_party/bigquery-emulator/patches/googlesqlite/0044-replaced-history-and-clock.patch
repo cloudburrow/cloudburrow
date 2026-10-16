@@ -1,0 +1,447 @@
+CloudBurrow patch 44 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1466). Applies after patch 0041.
+
+The gaps: BigQuery keeps the contents a CREATE OR REPLACE TABLE
+replaces, "the data that is replaced or removed can be recovered through
+the time travel window" (https://cloud.google.com/bigquery/docs/time-travel),
+but patch 0036 started the table's change table over, so FOR SYSTEM_TIME
+AS OF a time before the replace, APPENDS and CHANGES had nothing to read.
+And the engine's clock (CURRENT_TIMESTAMP() and the change times) is the
+system's, while CloudBurrow's front advances its own clock in tests: a
+time travel window or a CHANGES range measured by one clock and read by
+the other.
+
+The patch keeps the change table of the table a CREATE OR REPLACE TABLE
+replaces and carries it into the new one: its changes, with the values
+of each column the new table has of the same name and type, its START
+row in place of the new one, and a DELETE, at the time of the replace,
+of each row the replaced table still had (as a WRITE_TRUNCATE records the
+rows it replaces), the old rows' rowids moved below every rowid. And it
+gives the engine a clock offset, googlesqlite.SetClockOffset, which
+CURRENT_TIMESTAMP(), CURRENT_DATE(), CURRENT_DATETIME(), CURRENT_TIME()
+and the change times read; bigquery-emulator patch 0034 serves it to the
+front. change_history_replace_test.go fails without the patch and passes
+with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/change_history_replace_test.go
+@@ -0,0 +1,114 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// TestChangeHistoryReplace is CloudBurrow's regression test of its patch
++// 0044 (cloudburrow/cloudburrow#1466): CREATE OR REPLACE TABLE keeps the
++// history of the table it replaces, its rows as they were before the
++// replace, and records the rows it replaced as deleted; and the engine's
++// clock (CURRENT_TIMESTAMP() and the change times) reads the offset
++// SetClockOffset sets.
++func TestChangeHistoryReplace(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	exec := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	micros := func() int64 {
++		t.Helper()
++		var n int64
++		if err := db.QueryRowContext(ctx, "SELECT MAX(googlesqlite_change_micros) FROM `p.d.t$changes`").Scan(&n); err != nil {
++			t.Fatal(err)
++		}
++		return n
++	}
++	strs := func(q string) string {
++		t.Helper()
++		rows, err := db.QueryContext(ctx, q)
++		if err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		defer rows.Close()
++		var out []string
++		for rows.Next() {
++			var a, b sql.NullString
++			if err := rows.Scan(&a, &b); err != nil {
++				t.Fatal(err)
++			}
++			out = append(out, a.String+"="+b.String)
++		}
++		return strings.Join(out, " ")
++	}
++	asOf := func(at int64) string {
++		t.Helper()
++		return strs(fmt.Sprintf("SELECT CAST(id AS STRING), v FROM (SELECT id, v, _CHANGE_TYPE AS k, ROW_NUMBER() OVER (PARTITION BY googlesqlite_change_rowid ORDER BY rowid DESC) AS n "+
++			"FROM `p.d.t$changes` WHERE _CHANGE_TYPE != 'START' AND googlesqlite_change_micros <= %d) WHERE n = 1 AND k != 'DELETE' ORDER BY id", at))
++	}
++	exec("CREATE TABLE `p.d.t` (id INT64, v STRING, gone INT64)")
++	var start int64
++	if err := db.QueryRowContext(ctx, "SELECT googlesqlite_change_micros FROM `p.d.t$changes` WHERE _CHANGE_TYPE = 'START'").Scan(&start); err != nil {
++		t.Fatal(err)
++	}
++	exec("INSERT INTO `p.d.t` VALUES (1, 'a', 10), (2, 'b', 20)")
++	exec("UPDATE `p.d.t` SET v = 'c' WHERE id = 1")
++	before := micros()
++	time.Sleep(2 * time.Millisecond)
++	exec("CREATE OR REPLACE TABLE `p.d.t` AS SELECT 3 AS id, 'd' AS v")
++	after := micros()
++	if got := asOf(before); got != "1=c 2=b" {
++		t.Errorf("as of before the replace: %q, want %q", got, "1=c 2=b")
++	}
++	if got := asOf(after); got != "3=d" {
++		t.Errorf("as of after the replace: %q, want %q", got, "3=d")
++	}
++	var n int64
++	var first int64
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*), MIN(googlesqlite_change_micros) FROM `p.d.t$changes` WHERE _CHANGE_TYPE = 'START'").Scan(&n, &first); err != nil || n != 1 || first != start {
++		t.Errorf("START rows: %d at %d (%v), want 1 at %d", n, first, err, start)
++	}
++	if got := strs(fmt.Sprintf("SELECT CAST(id AS STRING), v FROM `p.d.t$changes` WHERE _CHANGE_TYPE = 'DELETE' AND googlesqlite_change_micros = %d ORDER BY id", after)); got != "1=c 2=b" {
++		t.Errorf("the replace's deletes: %q", got)
++	}
++	if got := strs("SELECT _CHANGE_TYPE, CAST(COUNT(*) AS STRING) FROM `p.d.t$changes` GROUP BY 1 ORDER BY 1"); got != "DELETE=3 INSERT=3 START=1 UPDATE=1" {
++		t.Errorf("changes by type: %q", got)
++	}
++	// A second replace keeps the whole history still.
++	exec("CREATE OR REPLACE TABLE `p.d.t` (id INT64, v STRING)")
++	if got := asOf(before); got != "1=c 2=b" {
++		t.Errorf("as of before the first replace, after two: %q", got)
++	}
++	if got := asOf(micros()); got != "" {
++		t.Errorf("after the second replace: %q", got)
++	}
++
++	googlesqlite.SetClockOffset(48 * time.Hour)
++	defer googlesqlite.SetClockOffset(0)
++	var ahead float64
++	if err := db.QueryRowContext(ctx, "SELECT TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), TIMESTAMP_MICROS("+fmt.Sprint(time.Now().UnixMicro())+"), SECOND)").Scan(&ahead); err != nil {
++		t.Fatal(err)
++	}
++	if ahead < 48*3600-60 || ahead > 48*3600+60 {
++		t.Errorf("CURRENT_TIMESTAMP() is %v s ahead, want 48 h", ahead)
++	}
++	exec("INSERT INTO `p.d.t` VALUES (9, 'z')")
++	if d := time.Duration(micros()-time.Now().UnixMicro()) * time.Microsecond; d < 47*time.Hour {
++		t.Errorf("a change's time is %v ahead, want 48 h", d)
++	}
++}
+--- /dev/null
++++ b/clock.go
+@@ -0,0 +1,17 @@
++package googlesqlite
++
++import (
++	"time"
++
++	"github.com/goccy/googlesqlite/internal/clock"
++)
++
++// SetClockOffset sets how far the engine's clock (CURRENT_TIMESTAMP(),
++// CURRENT_DATE(), CURRENT_DATETIME(), CURRENT_TIME() and the times of a
++// table's change history) reads ahead of the system's (CloudBurrow patch,
++// cloudburrow/cloudburrow#1466): CloudBurrow's front advances its own
++// clock in tests, and the engine's follows.
++func SetClockOffset(d time.Duration) { clock.SetOffset(d) }
++
++// ClockOffset is the offset SetClockOffset set.
++func ClockOffset() time.Duration { return clock.Offset() }
+--- /dev/null
++++ b/internal/clock/clock.go
+@@ -0,0 +1,22 @@
++// Package clock is the engine's clock (CloudBurrow patch,
++// cloudburrow/cloudburrow#1466): the time now, moved forward by the
++// offset CloudBurrow's front sets when its own clock is advanced, so that
++// CURRENT_TIMESTAMP() and the change history's times (change_history.go)
++// read the front's clock.
++package clock
++
++import (
++	"sync/atomic"
++	"time"
++)
++
++var offset atomic.Int64
++
++// SetOffset sets how far the clock reads ahead of the system's.
++func SetOffset(d time.Duration) { offset.Store(int64(d)) }
++
++// Offset is how far the clock reads ahead of the system's.
++func Offset() time.Duration { return time.Duration(offset.Load()) }
++
++// Now is the time now by the clock.
++func Now() time.Time { return time.Now().Add(Offset()) }
+--- /dev/null
++++ b/internal/change_history_replace.go
+@@ -0,0 +1,122 @@
++package internal
++
++import (
++	"context"
++	"fmt"
++	"strings"
++
++	googlesql "github.com/goccy/go-googlesql"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// The history of a replaced table (CloudBurrow patch,
++// cloudburrow/cloudburrow#1466).
++//
++// BigQuery keeps the contents a CREATE OR REPLACE TABLE replaces: "the
++// data that is replaced or removed can be recovered through the time
++// travel window" (https://cloud.google.com/bigquery/docs/time-travel).
++// Patch 0036 started the change table over, so FOR SYSTEM_TIME AS OF a
++// time before the replace, APPENDS and CHANGES had nothing to read. Now
++// the change table of the table replaced is kept (keepReplacedHistory)
++// and carried into the new one (carryReplacedHistory): its changes, with
++// the values of each column the new table has of the same name and type
++// (a column it does not have is left out: CHANGES and APPENDS read "the
++// table's current schema"), its START row in place of the new one, and a
++// DELETE, at the time of the replace, of each row the replaced table
++// still had, as a WRITE_TRUNCATE records the rows it replaces. The rowids
++// of the replaced table's rows are moved below every rowid (shift), so
++// that no row of the new table is taken for one of the old.
++
++// replacedHistory is the change table of a table CREATE OR REPLACE TABLE
++// replaces, renamed to table.
++type replacedHistory struct {
++	table   string
++	columns []*ColumnSpec // the change table's columns but its own three
++}
++
++// replacedSuffix ends the name of a replaced table's change table while
++// the new one is made.
++const replacedSuffix = "$replaced"
++
++// keepReplacedHistory renames the change table of the table spec, a
++// CREATE OR REPLACE TABLE, replaces (change), and returns it; nil when
++// spec replaces none.
++func keepReplacedHistory(ctx context.Context, conn *Conn, catalog *Catalog, spec *TableSpec, change string) (*replacedHistory, error) {
++	if spec.CreateMode != googlesql.ResolvedCreateStatementEnums_CreateModeCreateOrReplace {
++		return nil, nil
++	}
++	old, ok := catalog.tableMap[change]
++	if !ok {
++		return nil, nil
++	}
++	var one int
++	if err := conn.QueryRowContext(ctx, "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", change).Scan(&one); err != nil {
++		return nil, nil
++	}
++	rep := &replacedHistory{table: change + replacedSuffix}
++	for _, c := range old.Columns {
++		if !strings.HasPrefix(c.Name, "_CHANGE_") {
++			rep.columns = append(rep.columns, c)
++		}
++	}
++	for _, s := range []string{
++		fmt.Sprintf("DROP TABLE IF EXISTS `%s`", rep.table),
++		fmt.Sprintf("DROP INDEX IF EXISTS `%s$time`", change),
++		fmt.Sprintf("DROP INDEX IF EXISTS `%s$row`", change),
++		fmt.Sprintf("ALTER TABLE `%s` RENAME TO `%s`", change, rep.table),
++	} {
++		if _, err := conn.ExecContext(ctx, s); err != nil {
++			return nil, fmt.Errorf("history of the table %s replaces: %w", spec.TableName(), err)
++		}
++	}
++	return rep, nil
++}
++
++// carryReplacedHistory carries rep into cs, the new change table, just
++// made (above), and drops rep.
++func carryReplacedHistory(ctx context.Context, conn *Conn, cs *TableSpec, rep *replacedHistory) error {
++	change := cs.TableName()
++	var common []string
++	for _, c := range cs.Columns {
++		if strings.HasPrefix(c.Name, "_CHANGE_") {
++			continue
++		}
++		for _, o := range rep.columns {
++			if o.Name == c.Name && o.SQLiteSchema() == c.SQLiteSchema() {
++				common = append(common, "`"+c.Name+"`")
++				break
++			}
++		}
++	}
++	list := strings.Join(common, ",")
++	if len(common) > 0 {
++		list += ","
++	}
++	var shift int64
++	if err := conn.QueryRowContext(ctx, fmt.Sprintf("SELECT 2 * (COALESCE(MAX(ABS(`%s`)), 0) + 1) FROM `%s`", changeRowidColumn, rep.table)).Scan(&shift); err != nil {
++		return err
++	}
++	start, del, no := encodedLiteral(value.StringValue(changeStartType)), encodedLiteral(value.StringValue("DELETE")),
++		encodedLiteral(value.BoolValue(false))
++	target := fmt.Sprintf("INSERT INTO `%s` (%s`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`_CHANGE_IS_FOR_UPDATE`,`%s`,`%s`)",
++		change, list, changeMicrosColumn, changeRowidColumn)
++	for _, s := range []string{
++		// The history starts when the replaced table's did.
++		fmt.Sprintf("DELETE FROM `%s` WHERE `_CHANGE_TYPE` = %s AND EXISTS (SELECT 1 FROM `%s` WHERE `_CHANGE_TYPE` = %s)",
++			change, start, rep.table, start),
++		fmt.Sprintf("%s SELECT %s`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`_CHANGE_IS_FOR_UPDATE`,`%s`,`%s` - %d FROM `%s` ORDER BY rowid",
++			target, list, changeMicrosColumn, changeRowidColumn, shift, rep.table),
++		// The rows the replaced table still had are deleted by the replace.
++		fmt.Sprintf("%s SELECT %s%s, googlesqlite_change_timestamp(), %s, googlesqlite_change_micros(), `%s` - %d FROM "+
++			"(SELECT *, ROW_NUMBER() OVER (PARTITION BY `%s` ORDER BY rowid DESC) AS googlesqlite_last FROM `%s` WHERE `_CHANGE_TYPE` != %s) "+
++			"WHERE googlesqlite_last = 1 AND `_CHANGE_TYPE` != %s ORDER BY `%s`",
++			target, list, del, no, changeRowidColumn, shift, changeRowidColumn, rep.table, start, del, changeRowidColumn),
++		fmt.Sprintf("DROP TABLE `%s`", rep.table),
++	} {
++		if _, err := conn.ExecContext(ctx, s); err != nil {
++			return err
++		}
++	}
++	return nil
++}
+--- a/internal/change_history.go
++++ b/internal/change_history.go
+@@ -10,6 +10,7 @@
+ 	googlesql "github.com/goccy/go-googlesql"
+ 	"github.com/ncruces/go-sqlite3"
+ 
++	"github.com/goccy/googlesqlite/internal/clock"
+ 	"github.com/goccy/googlesqlite/internal/sqlitex"
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+@@ -132,6 +133,13 @@
+ 			return catalog.AddNewTableSpec(ctx, conn, cs)
+ 		}
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1466): CREATE OR REPLACE
++	// TABLE keeps the history of the table it replaces
++	// (change_history_replace.go).
++	replaced, err := keepReplacedHistory(ctx, conn, catalog, spec, change)
++	if err != nil {
++		return err
++	}
+ 	n := len(cs.Columns) - 3
+ 	cols := make([]string, n)
+ 	defs := make([]string, 0, len(cs.Columns)+1)
+@@ -210,6 +218,11 @@
+ 			return fmt.Errorf("change history of %s: %w", base, err)
+ 		}
+ 	}
++	if replaced != nil {
++		if err := carryReplacedHistory(ctx, conn, cs, replaced); err != nil {
++			return fmt.Errorf("change history of %s: %w", base, err)
++		}
++	}
+ 	if _, exists := catalog.tableMap[change]; exists {
+ 		if err := catalog.DeleteTableSpec(ctx, conn, change); err != nil {
+ 			return err
+@@ -244,7 +257,7 @@
+ 		mu.Lock()
+ 		defer mu.Unlock()
+ 		if at.IsZero() {
+-			at = time.Now().UTC().Truncate(time.Microsecond)
++			at = clock.Now().UTC().Truncate(time.Microsecond) // CloudBurrow patch (#1466): the front's clock
+ 		}
+ 		return at
+ 	}
+--- a/internal/functions/timestamp/current_timestamp.go
++++ b/internal/functions/timestamp/current_timestamp.go
+@@ -2,8 +2,8 @@
+ 
+ import (
+ 	"fmt"
+-	"time"
+ 
++	"github.com/goccy/googlesqlite/internal/clock"
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+ 
+@@ -12,7 +12,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return CURRENT_TIMESTAMP_WITH_TIME(time.Now().In(loc))
++	return CURRENT_TIMESTAMP_WITH_TIME(clock.Now().In(loc))
+ }
+ 
+ func BindCurrentTimestamp(args ...value.Value) (value.Value, error) {
+--- a/internal/functions/date/current_date.go
++++ b/internal/functions/date/current_date.go
+@@ -2,8 +2,8 @@
+ 
+ import (
+ 	"fmt"
+-	"time"
+ 
++	"github.com/goccy/googlesqlite/internal/clock"
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+ 
+@@ -12,7 +12,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return CURRENT_DATE_WITH_TIME(time.Now().In(loc))
++	return CURRENT_DATE_WITH_TIME(clock.Now().In(loc))
+ }
+ 
+ func BindCurrentDate(args ...value.Value) (value.Value, error) {
+--- a/internal/functions/datetime/current_datetime.go
++++ b/internal/functions/datetime/current_datetime.go
+@@ -2,8 +2,8 @@
+ 
+ import (
+ 	"fmt"
+-	"time"
+ 
++	"github.com/goccy/googlesqlite/internal/clock"
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+ 
+@@ -12,7 +12,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return CURRENT_DATETIME_WITH_TIME(time.Now().In(loc))
++	return CURRENT_DATETIME_WITH_TIME(clock.Now().In(loc))
+ }
+ 
+ func BindCurrentDatetime(args ...value.Value) (value.Value, error) {
+--- a/internal/functions/time/current_time.go
++++ b/internal/functions/time/current_time.go
+@@ -2,8 +2,8 @@
+ 
+ import (
+ 	"fmt"
+-	"time"
+ 
++	"github.com/goccy/googlesqlite/internal/clock"
+ 	"github.com/goccy/googlesqlite/internal/value"
+ )
+ 
+@@ -12,7 +12,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	return CURRENT_TIME_WITH_TIME(time.Now().In(loc))
++	return CURRENT_TIME_WITH_TIME(clock.Now().In(loc))
+ }
+ 
+ func BindCurrentTime(args ...value.Value) (value.Value, error) {

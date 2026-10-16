@@ -44,9 +44,21 @@ import (
 // table, the window's rows, and runs the query so; the job keeps the
 // statement the client sent. Its costs: every write to every table is
 // written twice (CHANGES needs no history of a table without the option,
-// but APPENDS reads any table's, and the option can be set later), a
-// DELETE or TRUNCATE copies the deleted rows, and the copies are kept
-// for seven days whatever the dataset's time travel window.
+// but APPENDS and time travel read any table's, and the option can be set
+// later), a DELETE or TRUNCATE copies the deleted rows, and the copies
+// are kept for seven days whatever the dataset's time travel window.
+// Measured (#1466, the engine alone, 50,000 rows inserted, 10,000 updated
+// and 10,000 deleted): the same insert time (the analysis dominates), an
+// UPDATE and a DELETE about three times as long, and a database about
+// five times as large. It stays: recording only once a table has the
+// option, or is read with APPENDS, would leave APPENDS and time travel
+// without the rows before.
+//
+// #1466 also refuses either function inside a multi-statement
+// transaction ("You can't call the APPENDS [CHANGES] function within a
+// multi-statement transaction") and CHANGES of a table with change data
+// capture, and keeps the history across the table's rebuilds
+// (changehistorycarry.go), whose CARRY and END rows the reads leave out.
 //
 // The ten-minute lag some older documentation gave CHANGES's end is not
 // in the documentation read (2026-10-16), which takes NULL as the
@@ -151,11 +163,27 @@ func (f front) changeReads(w http.ResponseWriter, r *http.Request, q queryOption
 		if st != http.StatusOK || json.Unmarshal(got, &meta) != nil {
 			return fail(c.dataset, http.StatusNotFound, "notFound", "Not found: Table "+ref)
 		}
-		if typ := str(meta, "type"); typ != "" && typ != "TABLE" {
+		typ := str(meta, "type")
+		if meta["snapshotDefinition"] != nil {
+			typ = "SNAPSHOT" // the emulator's type of one is TABLE (snapshots.go, #1466)
+		}
+		if typ != "" && typ != "TABLE" {
 			return fail(c.dataset, http.StatusBadRequest, "invalidQuery", fmt.Sprintf(
 				"%s can only be used with a regular table; %s is a %s", c.name, ref, strings.ReplaceAll(typ, "_", " ")))
 		}
 		created, _ := strconv.ParseInt(str(meta, "creationTime"), 10, 64) // milliseconds
+		if inTransaction(q.Query, c.pos) {
+			// "You can't call the APPENDS [CHANGES] function within a
+			// multi-statement transaction" (#1466).
+			return fail(c.dataset, http.StatusBadRequest, "invalidQuery", fmt.Sprintf(
+				"%s cannot be called within a multi-statement transaction", c.name))
+		}
+		if c.name == "CHANGES" && changeDataCapture(meta) {
+			// "You can't use the CHANGES function with a table that has
+			// change data capture enabled" (#1466).
+			return fail(c.dataset, http.StatusBadRequest, "invalidQuery", fmt.Sprintf(
+				"CHANGES cannot be used with the table %s, which has change data capture enabled (a primary key and max_staleness)", ref))
+		}
 		if c.name == "CHANGES" {
 			s := f.tables.get(streamKey(project, c.dataset, c.table), str(meta, "creationTime"))
 			if s.ChangeHistory == nil || *s.ChangeHistory != "true" {
@@ -170,7 +198,7 @@ func (f front) changeReads(w http.ResponseWriter, r *http.Request, q queryOption
 		cols := "*"
 		// The engine's START row marks when the change table was made
 		// (googlesqlite patch 0041, timetravel.go).
-		filter := fmt.Sprintf("_CHANGE_TIMESTAMP >= TIMESTAMP_MICROS(%d) AND _CHANGE_TIMESTAMP < TIMESTAMP_MICROS(%d) AND _CHANGE_TYPE != 'START'", start, stop)
+		filter := fmt.Sprintf("_CHANGE_TIMESTAMP >= TIMESTAMP_MICROS(%d) AND _CHANGE_TIMESTAMP < TIMESTAMP_MICROS(%d) AND _CHANGE_TYPE NOT IN ('START', '%s', '%s')", start, stop, changeCarry, changeEnd)
 		if c.name == "APPENDS" {
 			cols = "* EXCEPT (_CHANGE_IS_FOR_UPDATE)"
 			filter += " AND _CHANGE_TYPE = 'INSERT'"
@@ -249,6 +277,11 @@ func (f front) changeWindow(r *http.Request, q queryOptions, c changeFunc, ref s
 	}
 	earliest := now - hours*int64(time.Hour/time.Microsecond)
 	createdMicros := created * 1000
+	// A table made again by CREATE OR REPLACE TABLE keeps the history of
+	// the one it replaced (#1466): NULL reads from the start of it.
+	if start, ok := f.historyStart(r, c.dataset, c.table); ok && start < createdMicros {
+		createdMicros = start
+	}
 	start, hasStart := at(res.Rows[0].F[0].V)
 	stop, hasStop := at(res.Rows[0].F[1].V)
 	switch {
@@ -261,20 +294,67 @@ func (f front) changeWindow(r *http.Request, q queryOptions, c changeFunc, ref s
 	case hasStop && stop > now:
 		return 0, 0, http.StatusBadRequest, fmt.Sprintf("Invalid end_timestamp of %s: %s is in the future", c.name, micros(stop))
 	}
+	// "The maximum allowed time range between the start_timestamp and
+	// end_timestamp arguments you specify is one day" (#1466): the
+	// arguments as given, and the range they read from the table's
+	// creation (below).
+	if c.name == "CHANGES" && hasStart && hasStop && stop-start > day {
+		return 0, 0, http.StatusBadRequest, fmt.Sprintf("Invalid time range of CHANGES on %s: from %s to %s is more than one day, "+
+			"the longest range allowed", ref, micros(start), micros(stop))
+	}
 	if !hasStart || start < createdMicros {
 		start = createdMicros
 	}
 	if !hasStop {
 		stop = now
 	}
-	if c.name == "CHANGES" && stop-start > int64(24*time.Hour/time.Microsecond) {
+	if c.name == "CHANGES" && stop-start > day {
 		return 0, 0, http.StatusBadRequest, fmt.Sprintf("Invalid time range of CHANGES on %s: from %s to %s is more than one day, "+
 			"the longest range allowed", ref, micros(start), micros(stop))
 	}
 	return start, stop, 0, ""
 }
 
+// day is one day in microseconds.
+const day = int64(24 * time.Hour / time.Microsecond)
+
 // micros is t, microseconds since the epoch, as a UTC timestamp.
 func micros(t int64) string {
 	return time.UnixMicro(t).UTC().Format("2006-01-02 15:04:05.999999 UTC")
+}
+
+// inTransaction reports whether the byte offset pos of sql is inside a
+// multi-statement transaction: after a BEGIN TRANSACTION and before the
+// COMMIT or ROLLBACK that ends it.
+func inTransaction(sql string, pos int) bool {
+	toks, ok := lex(sql)
+	if !ok {
+		return false
+	}
+	in := false
+	for i, t := range toks {
+		if t.pos >= pos {
+			break
+		}
+		start := i == 0 || toks[i-1].punct(";")
+		switch {
+		case start && isBeginTransaction(toks[i:]):
+			in = true
+		case start && (t.is("COMMIT") || t.is("ROLLBACK")):
+			in = false
+		}
+	}
+	return in
+}
+
+// changeDataCapture reports whether the table of the tables.get answer
+// meta has change data capture enabled: BigQuery's CDC needs a primary
+// key and max_staleness (https://cloud.google.com/bigquery/docs/change-data-capture).
+// CloudBurrow serves no _CHANGE_TYPE upserts, so a table so configured is
+// taken for one.
+func changeDataCapture(meta map[string]any) bool {
+	tc, _ := meta["tableConstraints"].(map[string]any)
+	pk, _ := tc["primaryKey"].(map[string]any)
+	cols, _ := pk["columns"].([]any)
+	return len(cols) > 0 && str(meta, "maxStaleness") != ""
 }
