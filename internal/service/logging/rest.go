@@ -3,6 +3,7 @@ package logging
 import (
 	"net/http"
 
+	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/grpc"
 
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
@@ -17,12 +18,13 @@ import (
 // Admin does not implement (the Async bucket calls, links, settings) answer 501
 // UNIMPLEMENTED, as TailLogEntries does: the transcoder serves unary calls,
 // and the tail, a bidirectional stream, is served over gRPC only (#1215). A path Google does not bind answers 404.
-// logging_v2.yaml's Locations and Operations mixins are not bound.
+// Of logging_v2.yaml's mixins, Operations' project bindings are (#1394), for
+// CopyLogEntries' operations; Locations is not bound.
 
 // Transcoder returns the Cloud Logging JSON API's configuration, with nothing
 // registered: register the same server with it as with gRPC.
 func Transcoder() *rest.Transcoder {
-	return &rest.Transcoder{Packages: []string{"google.logging.v2"}}
+	return &rest.Transcoder{Packages: []string{"google.logging.v2"}, Mixins: operationsMixins}
 }
 
 // Routes returns every bound route.
@@ -35,4 +37,14 @@ func NewRESTHandler(register func(grpc.ServiceRegistrar)) http.Handler {
 	t := Transcoder()
 	register(t)
 	return t
+}
+
+// operationsMixins are logging_v2.yaml's Operations bindings for projects.
+var operationsMixins = []*annotations.HttpRule{
+	{Selector: "google.longrunning.Operations.GetOperation",
+		Pattern: &annotations.HttpRule_Get{Get: "/v2/{name=projects/*/locations/*/operations/*}"}},
+	{Selector: "google.longrunning.Operations.ListOperations",
+		Pattern: &annotations.HttpRule_Get{Get: "/v2/{name=projects/*/locations/*}/operations"}},
+	{Selector: "google.longrunning.Operations.CancelOperation",
+		Pattern: &annotations.HttpRule_Post{Post: "/v2/{name=projects/*/locations/*/operations/*}:cancel"}, Body: "*"},
 }

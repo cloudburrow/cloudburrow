@@ -311,7 +311,7 @@
   "google.iam.v1.IAMPolicy/GetIamPolicy": "implemented",
   "google.iam.v1.IAMPolicy/SetIamPolicy": "implemented",
   "google.iam.v1.IAMPolicy/TestIamPermissions": "implemented",
-  "google.logging.v2.ConfigServiceV2/CopyLogEntries": "unimplemented",
+  "google.logging.v2.ConfigServiceV2/CopyLogEntries": "implemented",
   "google.logging.v2.ConfigServiceV2/CreateBucket": "implemented",
   "google.logging.v2.ConfigServiceV2/CreateBucketAsync": "implemented",
   "google.logging.v2.ConfigServiceV2/CreateExclusion": "implemented",

@@ -3198,14 +3198,15 @@
     "Key": "logging",
     "Title": "Cloud Logging",
     "counts": {
-      "Unimplemented": 1,
-      "Verified": 42
+      "Verified": 43
     },
     "rows": [
       {
         "method": "google.logging.v2.ConfigServiceV2/CopyLogEntries",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/loggingcopy_test.go:67 TestLoggingCopyLogEntries"
+        ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/CreateBucket",
@@ -4519,7 +4520,7 @@
         "method": "storage.channels.stop",
         "status": "Verified",
         "tests": [
-          "test/compat/storagechannels_test.go:38 TestStorageObjectChangeChannels"
+          "test/compat/storagechannels_test.go:40 TestStorageObjectChangeChannels"
         ]
       },
       {
@@ -4891,6 +4892,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:136 TestStorageListWithPrefix",
+          "test/compat/storagechannels_test.go:148 TestStorageObjectChangeChannelSelection",
           "test/compat/storagecontexts_test.go:223 TestGcloudStorageObjectContexts",
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
