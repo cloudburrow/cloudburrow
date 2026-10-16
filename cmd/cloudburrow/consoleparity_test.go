@@ -456,7 +456,7 @@ var parityRows = []parityRow{
 	{Resource: "Cloud Logging sinks", Service: "logging",
 		Methods: []string{"ConfigServiceV2/CreateSink", "ConfigServiceV2/DeleteSink", "ConfigServiceV2/GetSink",
 			"ConfigServiceV2/ListSinks", "ConfigServiceV2/UpdateSink"},
-		Provider: "logging-sinks", Offers: "Log router sinks list and detail, Create sink (destination, filter, description, disabled), Edit sink, Delete; says a sink delivers nothing (#1226)",
+		Provider: "logging-sinks", Offers: "Log router sinks list and detail, Create sink (destination, filter, description, disabled), Edit sink, Delete (#1226); each sink's writer identity and delivery status: entries delivered, the last delivery, entries waiting for the hourly Cloud Storage file, the last error (#1404)",
 		Tests: []string{"TestConsoleLoggingSinksAndExclusions", "TestLoggingSinks"}},
 	{Resource: "Cloud Logging exclusions", Service: "logging",
 		Methods: []string{"ConfigServiceV2/CreateExclusion", "ConfigServiceV2/DeleteExclusion", "ConfigServiceV2/GetExclusion",
