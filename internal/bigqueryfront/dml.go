@@ -274,6 +274,12 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		f.serveQuery(w, r, q, insert)
 		return
 	}
+	if !txnRequest(r) && sessionOf(r) == nil {
+		if s, ok := tempSessionScript(q.Query); ok { // #1434, tempsession.go
+			f.runTempSession(w, r, q, insert, s)
+			return
+		}
+	}
 	if !txnRequest(r) && (hasControlFlow(q.Query) || runsInTurn(q.Query)) { // #1201, scriptflow.go; a transaction's probe is the emulator's (transactions.go); #1037, execimmediate.go
 		f.runScript(w, r, q, insert)
 		return

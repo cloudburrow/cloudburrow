@@ -8,6 +8,7 @@ import (
 	"time"
 
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 
@@ -84,5 +85,60 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 	}
 	if err := p.ActAt(ctx, "", []string{"images"}, "delete", nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestConsoleArtifactRegistryPermissions (#1439): a repository's page has a
+// Permissions tab over its stored policy (#1304), read back through the
+// ArtifactRegistry API's GetIamPolicy; an image's page has none.
+func TestConsoleArtifactRegistryPermissions(t *testing.T) {
+	ctx := context.Background()
+	st, err := registry.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runadapter.UseRegistry(st)
+	t.Cleanup(func() { runadapter.UseRegistry(nil) })
+	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
+	ar := s.ArtifactRegistry()
+	const name = "projects/console-ar-iam/locations/us-central1/repositories/perm"
+	if _, err := ar.CreateRepository(ctx, &arpb.CreateRepositoryRequest{
+		Parent: "projects/console-ar-iam/locations/us-central1", RepositoryId: "perm",
+		Repository: &arpb.Repository{Format: arpb.Repository_DOCKER}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { runadapter.RemoveRepository(name) })
+	p := artifactRegistryProvider{defaultProject: "console-ar-iam"}
+	var lastStale error
+	c := permissionsCase{service: "artifact-registry", project: "console-ar-iam", path: []string{"perm"},
+		readBack: func(t *testing.T) *iampb.Policy {
+			pol, err := ar.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return pol
+		},
+		write: func(t *testing.T, add *iampb.Binding) {
+			pol, _ := ar.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: name})
+			stale := pol.GetEtag()
+			pol.Bindings = append(pol.Bindings, add)
+			if _, err := ar.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: name, Policy: pol}); err != nil {
+				t.Fatal(err)
+			}
+			pol.Etag = stale
+			_, lastStale = ar.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: name, Policy: pol})
+		},
+		refusal: func() string { return grpcRefusal(lastStale) },
+	}
+	exercisePermissions(t, p, c)
+
+	if held, err := p.TestPermissions(ctx, "", []string{"perm"}, []string{"artifactregistry.repositories.get"}); err != nil || len(held) != 1 {
+		t.Errorf("TestPermissions = %v, %v", held, err)
+	}
+	if p.PolicyOn(ctx, []string{"perm", "web"}) != nil {
+		t.Error("an image's page has a Permissions tab; only a repository has a policy")
+	}
+	if _, err := p.GetPolicy(ctx, "", []string{"missing"}); err == nil {
+		t.Error("a missing repository's policy was read")
 	}
 }
