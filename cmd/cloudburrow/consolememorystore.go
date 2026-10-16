@@ -49,7 +49,7 @@ func (memorystoreProvider) ID() string    { return "memorystore" }
 func (memorystoreProvider) Title() string { return "Memorystore" }
 
 const memorystoreNote = "The instance memorystore is the Valkey server --services memorystore runs; it cannot be edited or deleted. " +
-	"Each instance created here is a Valkey server of its own, BASIC tier, REDIS_7_2, without in-transit encryption."
+	"Each instance created here is a server of its own, BASIC tier (REDIS_6_X Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey), without in-transit encryption."
 
 // List implements console.Provider: the project's instances.
 func (p memorystoreProvider) List(ctx context.Context, project string) (console.Listing, error) {
@@ -153,6 +153,8 @@ func (memorystoreProvider) CreateForm() (string, []console.Field) {
 			Help: "CloudBurrow does not place instances geographically."},
 		{Name: "memorySizeGb", Label: "Capacity (GB)", Type: "number", Required: true, Default: "1", Pattern: `^[0-9]{1,3}$`,
 			Help: "1 to 300: the server's maxmemory."},
+		{Name: "redisVersion", Label: "Version", Type: "select", Default: redisadmin.DefaultRedisVersion, Options: redisadmin.Versions,
+			Help: "REDIS_6_X is Redis 6.2, REDIS_7_0 Redis 7.0, REDIS_7_2 Valkey 8.1."},
 		{Name: "authEnabled", Label: "Enable AUTH", Type: "checkbox",
 			Help: "Clients must AUTH with the instance's AUTH string, which GetInstanceAuthString returns."},
 		{Name: "labels", Label: "Labels", Type: "map", Help: "Optional. One key=value per line."},
@@ -184,7 +186,7 @@ func (p memorystoreProvider) Create(ctx context.Context, project string, values 
 	op, err := p.api().CreateInstance(ctx, &redispb.CreateInstanceRequest{
 		Parent: "projects/" + project + "/locations/" + region, InstanceId: strings.TrimSpace(values["id"]),
 		Instance: &redispb.Instance{Tier: redispb.Instance_BASIC, MemorySizeGb: int32(size), DisplayName: values["displayName"],
-			AuthEnabled: values["authEnabled"] == "true", Labels: labels, RedisConfigs: configs}})
+			AuthEnabled: values["authEnabled"] == "true", Labels: labels, RedisConfigs: configs, RedisVersion: values["redisVersion"]}})
 	if err != nil {
 		return "", err
 	}
@@ -357,14 +359,29 @@ func (p memorystoreProvider) DetailActions(ctx context.Context, project string, 
 	if err != nil || memorystoreID(name) == redisadmin.InstanceID {
 		return nil
 	}
-	return []console.Action{
+	var upgrade []console.Action
+	if inst, err := p.api().GetInstance(ctx, &redispb.GetInstanceRequest{Name: name}); err == nil {
+		var later []string
+		seen := false
+		for _, v := range redisadmin.Versions {
+			if seen {
+				later = append(later, v)
+			}
+			seen = seen || v == inst.GetRedisVersion()
+		}
+		if len(later) > 0 {
+			upgrade = []console.Action{{ID: "upgrade", Label: "Upgrade", Confirm: "The instance's server is started again on the new version, with its data; an instance cannot be downgraded.",
+				Fields: []console.Field{{Name: "redisVersion", Label: "Version", Type: "select", Required: true, Options: later, Default: later[0]}}}}
+		}
+	}
+	return append(upgrade, []console.Action{
 		{ID: "export", Label: "Export", Fields: []console.Field{{Name: "uri", Label: "Destination", Type: "text", Required: true,
 			Pattern: "^gs://[^/]+/.+$", Help: "gs://bucket/object: the RDB file ExportInstance writes, in this instance's Cloud Storage."}}},
 		{ID: "import", Label: "Import", Destructive: true,
 			Confirm: "Every key of the instance is replaced by the RDB file's (ImportInstance overwrites the data).",
 			Fields: []console.Field{{Name: "uri", Label: "Source", Type: "text", Required: true,
 				Pattern: "^gs://[^/]+/.+$", Help: "gs://bucket/object: an RDB file in this instance's Cloud Storage."}}},
-	}
+	}...)
 }
 
 // ActAt implements console.PathActor: ExportInstance or ImportInstance,
@@ -387,6 +404,12 @@ func (p memorystoreProvider) ActAt(ctx context.Context, project string, path []s
 	case "import":
 		op, err := p.api().ImportInstance(ctx, &redispb.ImportInstanceRequest{Name: name,
 			InputConfig: &redispb.InputConfig{Source: &redispb.InputConfig_GcsSource{GcsSource: &redispb.GcsSource{Uri: uri}}}})
+		if err != nil {
+			return err
+		}
+		opName = op.GetName()
+	case "upgrade":
+		op, err := p.api().UpgradeInstance(ctx, &redispb.UpgradeInstanceRequest{Name: name, RedisVersion: values["redisVersion"]})
 		if err != nil {
 			return err
 		}

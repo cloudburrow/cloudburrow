@@ -39,6 +39,8 @@ type Spec struct {
 	// Configs are further server settings, by Valkey's own names
 	// (maxmemory-policy, notify-keyspace-events, ...).
 	Configs map[string]string
+	// Version is the redis_version the server runs (#1386): its image.
+	Version string
 	// RDBSeconds, above 0, is RDB persistence (#1384): a snapshot once
 	// that many seconds have passed with a change, in place of the
 	// CloudBurrow instance's mode's own.
@@ -92,6 +94,8 @@ type record struct {
 	Created      time.Time         `json:"created"`
 	Server       string            `json:"server"`
 
+	// Version is redis_version; "" is DefaultRedisVersion (#1386).
+	Version string `json:"version,omitempty"`
 	// Maintenance is maintenance_policy, as protojson; "" for none (#1386).
 	Maintenance string `json:"maintenance,omitempty"`
 	// Persistence is persistence_config, as last set; nil when never set.
@@ -105,11 +109,16 @@ type record struct {
 
 func (r *record) spec() Spec {
 	return Spec{Server: r.Server, MaxMemory: maxMemory(r.MemorySizeGB, r.RedisConfigs),
-		Password: r.AuthString, Configs: serverConfigs(r.RedisConfigs), RDBSeconds: r.Persistence.seconds()}
+		Password: r.AuthString, Configs: serverConfigs(r.RedisConfigs), RDBSeconds: r.Persistence.seconds(), Version: r.version()}
 }
 
 // binary is the prefix of the server's programs: valkey-server, ...
-func (r *record) binary() string { return "valkey" }
+func (r *record) binary() string {
+	if r.version() == DefaultRedisVersion {
+		return "valkey"
+	}
+	return "redis"
+}
 
 // instances are the instances CreateInstance made.
 type instances struct {
@@ -324,7 +333,7 @@ func (c *instances) render(r *record) *redispb.Instance {
 		Labels:                copyMap(r.Labels),
 		LocationId:            r.LocationID,
 		CurrentLocationId:     r.LocationID,
-		RedisVersion:          DefaultRedisVersion,
+		RedisVersion:          r.version(),
 		Host:                  host,
 		Port:                  port,
 		CreateTime:            timestamppb.New(r.Created),
@@ -406,7 +415,7 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 	}
 	r := &record{Name: name, DisplayName: in.GetDisplayName(), Labels: copyMap(in.GetLabels()), LocationID: loc,
 		MemorySizeGB: in.GetMemorySizeGb(), RedisConfigs: copyMap(in.GetRedisConfigs()), Created: c.now(),
-		Server: ServerName(name), state: redispb.Instance_CREATING}
+		Server: ServerName(name), state: redispb.Instance_CREATING, Version: in.GetRedisVersion()}
 	if mp := in.GetMaintenancePolicy(); mp != nil {
 		kept, err := maintenancePolicy(mp, c.now(), c.now())
 		if err != nil {
@@ -458,8 +467,8 @@ func checkCreate(in *redispb.Instance) error {
 	if in.GetMemorySizeGb() < 1 || in.GetMemorySizeGb() > 300 {
 		return apierror.InvalidArgument("memory_size_gb must be between 1 and 300 for a BASIC instance, not %d", in.GetMemorySizeGb())
 	}
-	if v := in.GetRedisVersion(); v != "" && v != DefaultRedisVersion {
-		return apierror.Unimplemented("redis_version %s is not supported: CloudBurrow's server is Valkey, which is %s", v, DefaultRedisVersion)
+	if err := checkVersion(in.GetRedisVersion()); err != nil {
+		return err
 	}
 	if in.GetTransitEncryptionMode() == redispb.Instance_SERVER_AUTHENTICATION {
 		return apierror.Unimplemented("transit_encryption_mode SERVER_AUTHENTICATION is not supported: the server speaks plain TCP")

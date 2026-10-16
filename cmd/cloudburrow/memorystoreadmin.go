@@ -220,7 +220,8 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 		return "", ctx.Err()
 	}
 	b := components.MemorystoreServerOf(components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
-		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: spec.Configs, RDBSeconds: spec.RDBSeconds})
+		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: spec.Configs, RDBSeconds: spec.RDBSeconds,
+		Image: memorystoreImages[spec.Version]})
 	if err := p.installer.InstallBackends(ctx, []components.Backend{b}, memorystoreReadyTimeout); err != nil {
 		return "", err
 	}
@@ -295,6 +296,13 @@ func (o memorystoreObjects) Write(ctx context.Context, bucket, object string, da
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return apierror.FailedPrecondition("write gs://%s/%s: HTTP %d %s", bucket, object, resp.StatusCode, strings.TrimSpace(string(b)))
 	}
+}
+
+// memorystoreImages are the server images of redis_version (#1386); the
+// Valkey image, REDIS_7_2, is the default.
+var memorystoreImages = map[string]string{
+	"REDIS_6_X": components.MemorystoreRedis62Image,
+	"REDIS_7_0": components.MemorystoreRedis70Image,
 }
 
 // Remove closes the server's tunnel and deletes its Deployment, Service

@@ -248,7 +248,7 @@ func TestCreateRefusals(t *testing.T) {
 		{"no tier", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: &redispb.Instance{MemorySizeGb: 1}}, codes.InvalidArgument},
 		{"no size", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.MemorySizeGb = 0 })}, codes.InvalidArgument},
 		{"standard", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.Tier = redispb.Instance_STANDARD_HA })}, codes.Unimplemented},
-		{"version", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.RedisVersion = "REDIS_6_X" })}, codes.Unimplemented},
+		{"version", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) { i.RedisVersion = "REDIS_5_0" })}, codes.Unimplemented},
 		{"persistence period", &redispb.CreateInstanceRequest{Parent: parent, InstanceId: "a", Instance: basic(func(i *redispb.Instance) {
 			i.PersistenceConfig = &redispb.PersistenceConfig{PersistenceMode: redispb.PersistenceConfig_RDB, RdbSnapshotPeriod: 99}
 		})}, codes.InvalidArgument},

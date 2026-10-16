@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -237,5 +238,51 @@ func TestConsoleMemorystoreImportExport(t *testing.T) {
 	if err != nil || got.GetPersistenceConfig().GetPersistenceMode() != redispb.PersistenceConfig_RDB ||
 		got.GetPersistenceConfig().GetRdbSnapshotPeriod() != redispb.PersistenceConfig_ONE_HOUR {
 		t.Errorf("after Edit's Persistence, GetInstance = %v, %v", got.GetPersistenceConfig(), err)
+	}
+}
+
+// TestConsoleMemorystoreUpgrade (#1386): Create instance's Version makes a
+// REDIS_7_0 instance, whose page offers Upgrade to the later versions
+// only; Upgrade to REDIS_7_2 runs UpgradeInstance and waits for it, and
+// the instance keeps its keys.
+func TestConsoleMemorystoreUpgrade(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c, project := memorystoreAdminClient(t, h)
+	ctx := h.Context()
+	id := fmt.Sprintf("console-up-%d", time.Now().UnixNano()%1e8)
+	name := "projects/" + project + "/locations/us-central1/instances/" + id
+	t.Cleanup(func() {
+		if op, err := c.DeleteInstance(context.Background(), &redispb.DeleteInstanceRequest{Name: name}); err == nil {
+			_ = op.Wait(context.Background())
+		}
+	})
+	q := "?project=" + url.QueryEscape(project)
+	body, _ := json.Marshal(map[string]string{"id": id, "region": "us-central1", "memorySizeGb": "1", "redisVersion": "REDIS_7_0"})
+	if code, out := consoleDo(t, addr, http.MethodPost, "/api/resources/memorystore"+q, string(body)); code != http.StatusOK {
+		t.Fatalf("console create = %d: %s", code, out)
+	}
+	inst, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil || inst.GetRedisVersion() != "REDIS_7_0" {
+		t.Fatalf("created from the console: %v, %v", inst, err)
+	}
+	rc := redisAt(inst, "")
+	rc.Set(ctx, "k", "v", 0)
+	rc.Close()
+	code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/memorystore"+q+"&name="+id, "")
+	if code != http.StatusOK || !strings.Contains(out, `"id":"upgrade"`) || strings.Contains(out, `"REDIS_6_X"`) {
+		t.Fatalf("instance page = %d: %s; want Upgrade to later versions only", code, out)
+	}
+	if code, out := consoleAct(t, addr, "memorystore", project, []string{id}, "upgrade", map[string]string{"redisVersion": "REDIS_7_2"}); code != http.StatusOK {
+		t.Fatalf("console Upgrade = %d: %s", code, out)
+	}
+	inst, err = c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: name})
+	if err != nil || inst.GetRedisVersion() != "REDIS_7_2" {
+		t.Fatalf("after Upgrade: %v, %v", inst, err)
+	}
+	rc = redisAt(inst, "")
+	defer rc.Close()
+	if v, err := rc.Get(ctx, "k").Result(); err != nil || v != "v" {
+		t.Errorf("after Upgrade GET k = %q, %v", v, err)
 	}
 }

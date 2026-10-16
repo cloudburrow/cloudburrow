@@ -60,7 +60,7 @@
   "google.cloud.redis.v1.CloudRedis/ListInstances": "implemented",
   "google.cloud.redis.v1.CloudRedis/RescheduleMaintenance": "implemented",
   "google.cloud.redis.v1.CloudRedis/UpdateInstance": "implemented",
-  "google.cloud.redis.v1.CloudRedis/UpgradeInstance": "unimplemented",
+  "google.cloud.redis.v1.CloudRedis/UpgradeInstance": "implemented",
   "google.cloud.resourcemanager.v3.Folders/CreateFolder": "implemented",
   "google.cloud.resourcemanager.v3.Folders/DeleteFolder": "implemented",
   "google.cloud.resourcemanager.v3.Folders/GetFolder": "implemented",
