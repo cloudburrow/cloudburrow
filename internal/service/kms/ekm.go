@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
 // The EKM service (google.cloud.kms.v1.EkmService, #1452) is CRUD over
@@ -23,6 +24,8 @@ import (
 // UNIMPLEMENTED (protection.go), so a stored connection protects nothing.
 // VerifyConnectivity is UNIMPLEMENTED: it would reach the EKM over the Cloud
 // EKM protocol through Service Directory, and neither is served locally.
+// IAM policies on a connection and on a location's EkmConfig are stored on
+// their records and never enforced (iam.go, #1469).
 // Server certificates are parsed as Google documents (Certificate.parsed and
 // the fields only present when it is true). The codes for refused requests
 // are UNVERIFIED.
@@ -43,6 +46,8 @@ type ekmConnection struct {
 	Resolvers   []ekmResolver `json:"serviceResolvers,omitempty"`
 	Mode        string        `json:"keyManagementMode,omitempty"`
 	CryptoSpace string        `json:"cryptoSpacePath,omitempty"`
+	// IAMPolicy is stored, never enforced (#1469), as a key ring's is.
+	IAMPolicy *iampolicy.Stored `json:"iamPolicy,omitempty"`
 }
 
 type ekmResolver struct {
@@ -55,10 +60,15 @@ type ekmResolver struct {
 type ekmConfig struct {
 	Name    string `json:"name"`
 	Default string `json:"defaultEkmConnection,omitempty"`
+	// IAMPolicy is stored, never enforced (#1469).
+	IAMPolicy *iampolicy.Stored `json:"iamPolicy,omitempty"`
 }
 
-// etag is a digest of what is stored, so any change makes a new one.
+// etag is a digest of what is stored, so any change makes a new one. The
+// IAM policy is left out: it has its own etag, and setting it changes
+// nothing UpdateEkmConnection compares against (#1469).
 func (c ekmConnection) etag() string {
+	c.IAMPolicy = nil
 	b, _ := json.Marshal(c)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
@@ -379,7 +389,13 @@ func (e *EkmServer) UpdateEkmConfig(_ context.Context, req *kmspb.UpdateEkmConfi
 			return nil, apierror.Wrap(apierror.InvalidArgument("ekm_config.default_ekm_connection %s does not exist", def))
 		}
 	}
-	c := ekmConfig{Name: in.GetName(), Default: def}
+	// The record is read again under the lock, so the IAM policy stored on
+	// it (#1469) is kept.
+	c := ekmConfig{Name: in.GetName()}
+	if _, err := s.get(dbKey(ekmConfigPrefix, c.Name), &c); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	c.Name, c.Default = in.GetName(), def
 	if err := s.put(dbKey(ekmConfigPrefix, c.Name), c); err != nil {
 		return nil, apierror.Wrap(err)
 	}

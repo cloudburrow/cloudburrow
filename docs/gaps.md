@@ -135,8 +135,8 @@ methods (#1212), and their console (#1219). Closed by the sweep: Locations (#129
 
 | Gap | Why open | Size |
 |---|---|---|
-| EXTERNAL, EXTERNAL_VPC and HSM_SINGLE_TENANT protection levels, `crypto_key_backend`, `external_protection_level_options` (#1469; HSM is served since #1452, without an HSM or an attestation) | no emulator support | L |
-| HsmManagement, `EkmService/VerifyConnectivity`, and IAM on `ekmConfig` and `ekmConnections` (#1469; EkmService CRUD, Autokey and AutokeyAdmin are served since #1452) | no emulator support | L |
+| EXTERNAL, EXTERNAL_VPC and HSM_SINGLE_TENANT protection levels, `crypto_key_backend`, `external_protection_level_options` (#1469; HSM is served since #1452, without an HSM or an attestation; no open-source key manager speaks Google's Cloud EKM protocol, and Google publishes none, checked 2026-10-16) | no emulator support | L |
+| HsmManagement and `EkmService/VerifyConnectivity` (#1469; EkmService CRUD, Autokey and AutokeyAdmin are served since #1452, and IAM on `ekmConfig` and `ekmConnections`, stored and not enforced, since #1469) | no emulator support | L |
 | `key_access_justifications_policy` is stored and returned, not enforced (#1452): no call carries an access justification locally | no emulator support | S |
 | REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` (#1445) | not documented by Google | S |
 | UNVERIFIED error codes ([kms.md](coverage/kms.md)) (#1445) | not documented by Google | S |

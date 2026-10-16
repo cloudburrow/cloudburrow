@@ -1930,6 +1930,7 @@
         "method": "google.cloud.kms.v1.EkmService/CreateEkmConnection",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_hsm_ekm_autokey_test.go:152 TestKMSEkmConnectionsAreStored"
         ]
       },
@@ -1944,6 +1945,7 @@
         "method": "google.cloud.kms.v1.EkmService/GetEkmConnection",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_hsm_ekm_autokey_test.go:152 TestKMSEkmConnectionsAreStored"
         ]
       },
@@ -1958,6 +1960,7 @@
         "method": "google.cloud.kms.v1.EkmService/UpdateEkmConfig",
         "status": "Verified",
         "tests": [
+          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_hsm_ekm_autokey_test.go:152 TestKMSEkmConnectionsAreStored"
         ]
       },
@@ -2793,6 +2796,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
+          "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnAnEkmConnection",
+          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
         ],
@@ -2801,6 +2806,11 @@
             "code": "NOT_FOUND",
             "case": "a key ring that does not exist",
             "test": "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
+          },
+          {
+            "code": "NOT_FOUND",
+            "case": "an EkmConnection that does not exist",
+            "test": "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced"
           },
           {
             "code": "UNIMPLEMENTED",
@@ -2814,10 +2824,17 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
+          "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnAnEkmConnection",
+          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
         ],
         "unverified": [
+          {
+            "code": "ABORTED",
+            "case": "a stale etag on an EkmConnection or ekmConfig",
+            "test": "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced"
+          },
           {
             "code": "ABORTED",
             "case": "a stale etag",
@@ -2830,6 +2847,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:251 TestConsolePermissionsOnAKeyRingAndKey",
+          "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnAnEkmConnection",
+          "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced"
         ]
       }
@@ -5040,7 +5059,7 @@
         "method": "storage.buckets.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnABucket",
+          "test/compat/consolepermissions_test.go:319 TestConsolePermissionsOnABucket",
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -5179,7 +5198,7 @@
         "method": "storage.buckets.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnABucket",
+          "test/compat/consolepermissions_test.go:319 TestConsolePermissionsOnABucket",
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
           "test/compat/storageiam_test.go:59 TestStorageBucketIAMStaleEtag",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM",
@@ -5202,7 +5221,7 @@
         "method": "storage.buckets.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnABucket",
+          "test/compat/consolepermissions_test.go:319 TestConsolePermissionsOnABucket",
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip"
         ]
       },
@@ -5367,7 +5386,7 @@
         "method": "storage.managedFolders.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:340 TestConsolePermissionsOnAManagedFolder",
+          "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
           "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
@@ -5401,7 +5420,7 @@
         "method": "storage.managedFolders.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:340 TestConsolePermissionsOnAManagedFolder",
+          "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
           "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
@@ -5418,7 +5437,7 @@
         "method": "storage.managedFolders.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/consolepermissions_test.go:340 TestConsolePermissionsOnAManagedFolder",
+          "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
           "test/compat/storagemanagedfolders_test.go:142 TestStorageManagedFolderIAM"
         ]
       },

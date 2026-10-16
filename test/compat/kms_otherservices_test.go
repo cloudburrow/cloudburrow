@@ -20,10 +20,10 @@ import (
 // (kms_hsm_ekm_autokey_test.go), and the Locations mixin since #1291. What
 // stays UNIMPLEMENTED, through each official client: every HsmManagement
 // method, since a single-tenant HSM instance is hardware administered by
-// quorum-approved proposals; and IAM on import jobs, ekmConfig and
-// ekmConnections, whose records keep no policy, never an empty policy. The
-// IAMPolicy mixin stores policies on key rings and crypto keys (#428,
-// TestKMSIamPolicyIsStoredNotEnforced).
+// quorum-approved proposals; and IAM on import jobs, whose records keep no
+// policy, never an empty policy. The IAMPolicy mixin stores policies on key
+// rings and crypto keys (#428, TestKMSIamPolicyIsStoredNotEnforced), and on
+// ekmConfig and EKM connections (#1469, TestKMSEkmIamPolicyIsStoredNotEnforced).
 //
 // covers: google.cloud.kms.v1.HsmManagement/ListSingleTenantHsmInstances (unimplemented), google.cloud.kms.v1.HsmManagement/GetSingleTenantHsmInstance (unimplemented), google.cloud.kms.v1.HsmManagement/CreateSingleTenantHsmInstance (unimplemented)
 // covers: google.cloud.kms.v1.HsmManagement/CreateSingleTenantHsmInstanceProposal (unimplemented), google.cloud.kms.v1.HsmManagement/ApproveSingleTenantHsmInstanceProposal (unimplemented), google.cloud.kms.v1.HsmManagement/ExecuteSingleTenantHsmInstanceProposal (unimplemented)
@@ -44,7 +44,7 @@ func TestKMSOtherServicesAreUnimplemented(t *testing.T) {
 	defer hsm.Close()
 
 	calls := map[string]func(context.Context) error{}
-	for _, res := range []string{ring.GetName() + "/importJobs/j", loc + "/ekmConfig", loc + "/ekmConnections/c"} {
+	for _, res := range []string{ring.GetName() + "/importJobs/j"} {
 		calls["GetIamPolicy on "+res] = func(ctx context.Context) error {
 			_, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res})
 			return err

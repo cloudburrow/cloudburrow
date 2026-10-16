@@ -6,9 +6,12 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"cloud.google.com/go/iam/apiv1/iampb"
+	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
@@ -105,5 +108,86 @@ func TestGcloudKMSHSMEkmAndAutokey(t *testing.T) {
 	ak, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: kmsKey})
 	if err != nil || ak.GetVersionTemplate().GetProtectionLevel() != kmspb.ProtectionLevel_HSM {
 		t.Errorf("the Autokey key = %v, %v", ak, err)
+	}
+}
+
+// TestGcloudKMSEkmIamPolicy (#1469): gcloud kms ekm-connections and
+// ekm-config add-iam-policy-binding, get-iam-policy and
+// remove-iam-policy-binding, configured by `cloudburrow gcloud-setup`
+// alone, read and write the policies stored on an EKM connection and on its
+// location's EkmConfig; the official client reads what each wrote. The
+// policies are stored, never enforced.
+func TestGcloudKMSEkmIamPolicy(t *testing.T) {
+	h := New(t)
+	run, project := gcloudKMS(t, h)
+	ctx := h.Context()
+	gc := func(args ...string) string {
+		t.Helper()
+		out, err := run(args...)
+		if err != nil {
+			t.Fatalf("gcloud %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return out
+	}
+	certFile := filepath.Join(t.TempDir(), "ekm.pem")
+	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ekmCertificate(t)}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The gcloud project is shared by every run: the location is this
+	// test's alone, and the connection ID this run's.
+	const location = "europe-west2"
+	ekmID := "gc-ekm-iam-" + h.Project()
+	gc("kms", "ekm-connections", "create", ekmID, "--location", location,
+		"--service-directory-service", "projects/"+project+"/locations/"+location+"/namespaces/ekm/services/replica",
+		"--hostname", "ekm.example.com", "--server-certificates-files", certFile)
+	conn := "projects/" + project + "/locations/" + location + "/ekmConnections/" + ekmID
+	member := "user:" + h.Project() + "@example.com"
+	ekm, err := kms.NewEkmClient(ctx, kmsOptions(h, "grpc")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ekm.Close()
+	members := func(res string) []string {
+		t.Helper()
+		p, err := ekm.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res})
+		if err != nil {
+			t.Fatalf("GetIamPolicy(%s) = %v", res, err)
+		}
+		var out []string
+		for _, b := range p.GetBindings() {
+			if b.GetRole() == "roles/cloudkms.viewer" {
+				out = append(out, b.GetMembers()...)
+			}
+		}
+		return out
+	}
+	for _, c := range []struct {
+		res  string
+		args []string // the command group and its resource arguments
+	}{
+		{conn, []string{"ekm-connections", "%s", ekmID, "--location", location}},
+		{"projects/" + project + "/locations/" + location + "/ekmConfig", []string{"ekm-config", "%s", "--location", location}},
+	} {
+		cmd := func(verb string, extra ...string) []string {
+			args := []string{"kms"}
+			for _, a := range c.args {
+				if a == "%s" {
+					a = verb
+				}
+				args = append(args, a)
+			}
+			return append(args, extra...)
+		}
+		gc(cmd("add-iam-policy-binding", "--member", member, "--role", "roles/cloudkms.viewer")...)
+		if got := members(c.res); !slices.Contains(got, member) {
+			t.Errorf("%s after add-iam-policy-binding: roles/cloudkms.viewer = %v, want %s", c.res, got, member)
+		}
+		if out := gc(cmd("get-iam-policy", "--format", "value(bindings.members)")...); !strings.Contains(out, member) {
+			t.Errorf("%s get-iam-policy = %q, want %s", c.args[0], out, member)
+		}
+		gc(cmd("remove-iam-policy-binding", "--member", member, "--role", "roles/cloudkms.viewer")...)
+		if got := members(c.res); slices.Contains(got, member) {
+			t.Errorf("%s after remove-iam-policy-binding: roles/cloudkms.viewer = %v, want %s gone", c.res, got, member)
+		}
 	}
 }
