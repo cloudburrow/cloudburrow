@@ -28,6 +28,7 @@ var compatSections = map[string]string{
 	"artifactregistry": "## Cloud Run — `google.cloud.run.v2`",
 	"cloudbuild":       "## Cloud Run — `google.cloud.run.v2`",
 	"functions":        "## Functions and source builds",
+	"functionsv1":      "## Functions and source builds",
 	"scheduler":        "## Cloud Scheduler — `google.cloud.scheduler.v1`",
 	"logging":          "## Cloud Logging — `google.logging.v2`",
 	"kms":              "## Cloud KMS — `google.cloud.kms.v1`",

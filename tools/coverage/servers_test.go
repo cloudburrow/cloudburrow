@@ -83,8 +83,11 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.Builds(nil, nil).Register(srv)
 	runSrv.ArtifactRegistry().Register(srv)
 	runSrv.CloudBuild().Register(srv)
-	// FunctionService alone: its IAM and Locations mixins are KMS's above.
-	functionspb.RegisterFunctionServiceServer(srv, runSrv.Functions(runSrv.Builds(nil, nil), func() string { return "" }))
+	// FunctionService alone: its IAM and Locations mixins are KMS's above;
+	// and Cloud Functions v1 (#1428) over the same functions.
+	fns := runSrv.Functions(runSrv.Builds(nil, nil), func() string { return "" })
+	functionspb.RegisterFunctionServiceServer(srv, fns)
+	fns.V1().Register(srv)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
