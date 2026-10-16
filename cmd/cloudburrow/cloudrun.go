@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"log/slog"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -255,7 +256,37 @@ func (r *runService) Start(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	// The gcsfuse pods, PersistentVolumes and claims no workload uses,
+	// counted from the cluster: whatever was deleted while the instance was
+	// down, or before they were collected at all (#1476).
+	go func() {
+		cctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if _, err := adapter.CollectVolumes(cctx); err != nil {
+			slog.Warn("Cloud Run could not remove unused volume objects", "err", err)
+		}
+	}()
 	return r.server.Start(ctx)
+}
+
+// runVolumesResetter is Cloud Run's part of a reset (#1476): every gcsfuse
+// pod, PersistentVolume and claim that no service, job, worker pool or
+// instance uses. Cloud Run's workloads themselves are not reset. The
+// objects are shared across projects by bucket or export, so a project's
+// reset removes the same unused ones a full reset does.
+type runVolumesResetter struct{ svc *runService }
+
+func (r *runVolumesResetter) Name() string { return "run" }
+
+func (r *runVolumesResetter) Reset(ctx context.Context) error { return r.ResetProject(ctx, "") }
+
+func (r *runVolumesResetter) ResetProject(ctx context.Context, _ string) error {
+	a := r.svc.adapter.Load()
+	if a == nil {
+		return nil
+	}
+	_, err := a.CollectVolumes(ctx)
+	return err
 }
 
 func (r *runService) Stop(ctx context.Context) error {

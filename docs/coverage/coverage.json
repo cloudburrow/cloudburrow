@@ -491,9 +491,10 @@
           "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
-          "test/compat/runnfsenv_test.go:111 TestRunNFSVolumesAndCloudRunEnv",
+          "test/compat/runnfsenv_test.go:114 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:110 TestRunJobSubPathAndStoredSettings",
+          "test/compat/runvolumegc_test.go:125 TestRunCloudStorageVolumeObjectsGoWithTheirLastWorkload",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
@@ -504,6 +505,7 @@
         "tests": [
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
+          "test/compat/runvolumegc_test.go:125 TestRunCloudStorageVolumeObjectsGoWithTheirLastWorkload",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -542,9 +544,10 @@
           "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runjobs_test.go:73 TestRunJobLifecycle",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
-          "test/compat/runnfsenv_test.go:111 TestRunNFSVolumesAndCloudRunEnv",
+          "test/compat/runnfsenv_test.go:114 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:110 TestRunJobSubPathAndStoredSettings",
+          "test/compat/runvolumegc_test.go:125 TestRunCloudStorageVolumeObjectsGoWithTheirLastWorkload",
           "test/compat/runvolumes_test.go:56 TestRunJobMountsSecretAndMemoryVolumes"
         ]
       },
@@ -623,11 +626,13 @@
           "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runh2c_test.go:28 TestRunH2CPortServesGRPC",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
-          "test/compat/runnfsenv_test.go:111 TestRunNFSVolumesAndCloudRunEnv",
+          "test/compat/runnfsenv_test.go:114 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runnfstools_test.go:108 TestConsoleRunNFSVolume",
           "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
+          "test/compat/runvolumegc_test.go:125 TestRunCloudStorageVolumeObjectsGoWithTheirLastWorkload",
+          "test/compat/runvolumegc_test.go:203 TestRunNFSVolumeObjectsGoWithTheirLastService",
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
@@ -641,6 +646,8 @@
           "test/compat/rungcsfuse_test.go:213 TestTerraformRunCloudStorageVolume",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
+          "test/compat/runvolumegc_test.go:125 TestRunCloudStorageVolumeObjectsGoWithTheirLastWorkload",
+          "test/compat/runvolumegc_test.go:203 TestRunNFSVolumeObjectsGoWithTheirLastService",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
@@ -663,7 +670,7 @@
           "test/compat/rungcsfuse_test.go:49 TestRunCloudStorageFUSEVolumes",
           "test/compat/runh2c_test.go:28 TestRunH2CPortServesGRPC",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
-          "test/compat/runnfsenv_test.go:111 TestRunNFSVolumesAndCloudRunEnv",
+          "test/compat/runnfsenv_test.go:114 TestRunNFSVolumesAndCloudRunEnv",
           "test/compat/runnfstools_test.go:108 TestConsoleRunNFSVolume",
           "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",

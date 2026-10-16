@@ -63,6 +63,9 @@ spec:
       ports:
         - containerPort: 2049
 `, nfsNamespace, nfsServerImage)
+	// An earlier test's server namespace, still terminating, would refuse
+	// the pod.
+	_ = exec.Command("kubectl", "--kubeconfig", kubeconfig, "wait", "--for=delete", "namespace/"+nfsNamespace, "--timeout=180s").Run()
 	apply := exec.Command("kubectl", "--kubeconfig", kubeconfig, "apply", "-f", "-")
 	apply.Stdin = strings.NewReader(manifest)
 	if raw, err := apply.CombinedOutput(); err != nil {

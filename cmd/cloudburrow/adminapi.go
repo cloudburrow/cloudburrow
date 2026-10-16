@@ -33,6 +33,8 @@ type adminDeps struct {
 	kms       *kmsService
 	scheduler *schedulerService
 	logging   *loggingService
+	// run is Cloud Run, for its unused volume objects' reset (#1476).
+	run *runService
 	// mysql is Cloud SQL for MySQL's credentials, for its resetter.
 	mysql      components.MySQLCredentials
 	forwarders []*netfwd.Forwarder
@@ -92,6 +94,10 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.secrets != nil {
 		api.RegisterResetter(&secretsResetter{svc: d.secrets})
 		api.RegisterSeeder(&secretsSeeder{svc: d.secrets})
+	}
+	if d.run != nil {
+		// The volume objects no Cloud Run workload uses (#1476).
+		api.RegisterResetter(&runVolumesResetter{svc: d.run})
 	}
 	if d.registry != nil {
 		// Project, folder and organization IAM policies (#1368), stored as

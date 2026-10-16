@@ -507,6 +507,8 @@ func (j *JobsServer) UpdateJob(ctx context.Context, req *runpb.UpdateJobRequest)
 	if err := s.kn.writeObject(ctx, "replace", manifest, "job "+name); err != nil {
 		return nil, err
 	}
+	// A volume the update dropped goes once nothing uses it (#1476).
+	s.collectVolumes(ctx)
 	updated, err := s.loadJob(ctx, name, id)
 	if err != nil {
 		return nil, apierror.Internal(err, "read back job %s", name)
@@ -557,6 +559,8 @@ func (j *JobsServer) DeleteJob(ctx context.Context, req *runpb.DeleteJobRequest)
 	if err := s.kn.deleteObject(ctx, resConfigMap, cm.Metadata.Name); err != nil {
 		return nil, err
 	}
+	// Its volumes' mount pods, once no other workload uses them (#1476).
+	s.collectVolumes(ctx)
 	return s.doneOperation(parent, req.GetName(), job)
 }
 
@@ -589,6 +593,8 @@ func (j *JobsServer) RunJob(ctx context.Context, req *runpb.RunJobRequest) (*lon
 		if err := s.ensureWorkloadMetadata(ctx, projectOf(spec.GetName()), tmpl.GetServiceAccount()); err != nil {
 			return nil, err
 		}
+		release := s.holdVolumes(tmpl.GetVolumes())
+		defer release()
 		if err := s.ensureGCSFuse(ctx, projectOf(spec.GetName()), tmpl.GetVolumes()); err != nil {
 			return nil, err
 		}
