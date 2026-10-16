@@ -186,6 +186,88 @@ var areas = []area{
 	// official generated client's.
 	{Key: "serviceusage", Title: "Service Usage API (v1)", Own: true,
 		Methods: serviceusageMethods()},
+	// The Backup and DR Service (#1433): CloudBurrow's own, JSON only, for
+	// Cloud SQL. Its methods are the official generated client's
+	// (google.golang.org/api/backupdr/v1).
+	{Key: "backupdr", Title: "Backup and DR Service API (v1)", Own: true, Methods: backupdrMethods()},
+}
+
+// backupdrStatuses is every method of the backupdr v1 discovery document,
+// true for the ones internal/service/backupdr serves. backups.restore is
+// false: its targets are Compute Engine instances and disks, and it
+// answers 501 (a Cloud SQL backup is restored by Cloud SQL).
+var backupdrStatuses = map[string]bool{
+	"backupdr.folders.locations.resourceBackupConfigs.fetch":                            false,
+	"backupdr.organizations.locations.resourceBackupConfigs.fetch":                      false,
+	"backupdr.projects.locations.backupPlanAssociations.create":                         true,
+	"backupdr.projects.locations.backupPlanAssociations.delete":                         true,
+	"backupdr.projects.locations.backupPlanAssociations.fetchForResourceType":           false,
+	"backupdr.projects.locations.backupPlanAssociations.get":                            true,
+	"backupdr.projects.locations.backupPlanAssociations.list":                           true,
+	"backupdr.projects.locations.backupPlanAssociations.patch":                          false,
+	"backupdr.projects.locations.backupPlanAssociations.triggerBackup":                  true,
+	"backupdr.projects.locations.backupPlans.create":                                    true,
+	"backupdr.projects.locations.backupPlans.delete":                                    true,
+	"backupdr.projects.locations.backupPlans.get":                                       true,
+	"backupdr.projects.locations.backupPlans.list":                                      true,
+	"backupdr.projects.locations.backupPlans.patch":                                     false,
+	"backupdr.projects.locations.backupPlans.revisions.get":                             false,
+	"backupdr.projects.locations.backupPlans.revisions.list":                            false,
+	"backupdr.projects.locations.backupVaults.create":                                   true,
+	"backupdr.projects.locations.backupVaults.dataSources.abandonBackup":                false,
+	"backupdr.projects.locations.backupVaults.dataSources.backups.delete":               true,
+	"backupdr.projects.locations.backupVaults.dataSources.backups.fetchForResourceType": false,
+	"backupdr.projects.locations.backupVaults.dataSources.backups.get":                  true,
+	"backupdr.projects.locations.backupVaults.dataSources.backups.list":                 true,
+	"backupdr.projects.locations.backupVaults.dataSources.backups.patch":                false,
+	"backupdr.projects.locations.backupVaults.dataSources.backups.restore":              false,
+	"backupdr.projects.locations.backupVaults.dataSources.fetchAccessToken":             false,
+	"backupdr.projects.locations.backupVaults.dataSources.finalizeBackup":               false,
+	"backupdr.projects.locations.backupVaults.dataSources.get":                          true,
+	"backupdr.projects.locations.backupVaults.dataSources.initiateBackup":               false,
+	"backupdr.projects.locations.backupVaults.dataSources.list":                         true,
+	"backupdr.projects.locations.backupVaults.dataSources.patch":                        false,
+	"backupdr.projects.locations.backupVaults.dataSources.remove":                       false,
+	"backupdr.projects.locations.backupVaults.dataSources.setInternalStatus":            false,
+	"backupdr.projects.locations.backupVaults.delete":                                   true,
+	"backupdr.projects.locations.backupVaults.fetchUsable":                              false,
+	"backupdr.projects.locations.backupVaults.get":                                      true,
+	"backupdr.projects.locations.backupVaults.list":                                     true,
+	"backupdr.projects.locations.backupVaults.patch":                                    false,
+	"backupdr.projects.locations.backupVaults.testIamPermissions":                       false,
+	"backupdr.projects.locations.dataSourceReferences.fetchForResourceType":             false,
+	"backupdr.projects.locations.dataSourceReferences.get":                              false,
+	"backupdr.projects.locations.dataSourceReferences.list":                             false,
+	"backupdr.projects.locations.get":                                                   true,
+	"backupdr.projects.locations.getTrial":                                              false,
+	"backupdr.projects.locations.list":                                                  true,
+	"backupdr.projects.locations.managementServers.create":                              false,
+	"backupdr.projects.locations.managementServers.delete":                              false,
+	"backupdr.projects.locations.managementServers.get":                                 false,
+	"backupdr.projects.locations.managementServers.getIamPolicy":                        false,
+	"backupdr.projects.locations.managementServers.list":                                false,
+	"backupdr.projects.locations.managementServers.msComplianceMetadata":                false,
+	"backupdr.projects.locations.managementServers.setIamPolicy":                        false,
+	"backupdr.projects.locations.managementServers.testIamPermissions":                  false,
+	"backupdr.projects.locations.operations.cancel":                                     false,
+	"backupdr.projects.locations.operations.delete":                                     false,
+	"backupdr.projects.locations.operations.get":                                        true,
+	"backupdr.projects.locations.operations.list":                                       true,
+	"backupdr.projects.locations.resourceBackupConfigs.fetch":                           false,
+	"backupdr.projects.locations.resourceBackupConfigs.list":                            false,
+	"backupdr.projects.locations.serviceConfig.initialize":                              false,
+	"backupdr.projects.locations.trial.end":                                             false,
+	"backupdr.projects.locations.trial.subscribe":                                       false,
+}
+
+// backupdrMethods is backupdrStatuses' methods, sorted.
+func backupdrMethods() []string {
+	var out []string
+	for id := range backupdrStatuses {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // pubsubIAMMethods are Pub/Sub's IAM methods, as discovery IDs:
@@ -551,7 +633,7 @@ func loadRegistry(root string) (map[string]string, error) {
 		}
 	}
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
-	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses()} {
+	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), backupdrStatuses} {
 		for id, isBuilt := range statuses {
 			if isBuilt {
 				r[id] = regImplemented

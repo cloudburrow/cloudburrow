@@ -69,6 +69,31 @@ type parityRow struct {
 }
 
 var parityRows = []parityRow{
+	// Backup and DR (#1433).
+	{Resource: "Cloud SQL point-in-time restore from a Backup and DR data source", Service: "sqladmin",
+		Methods:  []string{"sql.instances.pointInTimeRestore"},
+		Provider: "backupdr", Offers: "Point-in-time restore on a Backup and DR data source's page: a new instance recovered to a time (#1433)",
+		Tests: []string{"TestConsoleBackupDRVaultPlanAssociationRestore"}},
+	{Resource: "Backup and DR vaults, plans and associations", Service: "backupdr",
+		Methods: []string{"backupdr.projects.locations.backupVaults.create", "backupdr.projects.locations.backupVaults.get",
+			"backupdr.projects.locations.backupVaults.list", "backupdr.projects.locations.backupVaults.delete",
+			"backupdr.projects.locations.backupPlans.create", "backupdr.projects.locations.backupPlans.list",
+			"backupdr.projects.locations.backupPlanAssociations.create", "backupdr.projects.locations.backupPlanAssociations.list",
+			"backupdr.projects.locations.backupPlanAssociations.triggerBackup"},
+		Provider: "backupdr", Offers: "Backup and DR page (#1433): backup vaults with Create backup vault and Delete; a vault's page with its data sources, the backup plans storing into it (rules shown) and their associations, Create backup plan, Associate an instance and Trigger backup",
+		Tests: []string{"TestConsoleBackupDRVaultPlanAssociationRestore"}},
+	{Resource: "Backup and DR data sources and backups", Service: "backupdr",
+		Methods: []string{"backupdr.projects.locations.backupVaults.dataSources.get", "backupdr.projects.locations.backupVaults.dataSources.list",
+			"backupdr.projects.locations.backupVaults.dataSources.backups.list"},
+		Provider: "backupdr", Offers: "a data source's page with its backups (type, consistency time, expiry), Restore a backup (instances.restoreBackup with backupdrBackup) and Point-in-time restore (instances.pointInTimeRestore)",
+		Tests: []string{"TestConsoleBackupDRVaultPlanAssociationRestore"}},
+	{Resource: "Backup and DR reads, deletes and operations", Service: "backupdr",
+		Methods: []string{"backupdr.projects.locations.backupPlans.get", "backupdr.projects.locations.backupPlans.delete",
+			"backupdr.projects.locations.backupPlanAssociations.get", "backupdr.projects.locations.backupPlanAssociations.delete",
+			"backupdr.projects.locations.backupVaults.dataSources.backups.get", "backupdr.projects.locations.backupVaults.dataSources.backups.delete",
+			"backupdr.projects.locations.operations.get", "backupdr.projects.locations.operations.list",
+			"backupdr.projects.locations.list", "backupdr.projects.locations.get"},
+		Excluded: "single-resource reads the vault and data source pages already show in their lists, deletes of plans, associations and backups that gcloud and Terraform make, and the poll of an operation the page does not wait on"},
 	// Cloud Tasks
 	{Resource: "Cloud Tasks queues", Service: "tasks",
 		Methods:  []string{"CloudTasks/CreateQueue", "CloudTasks/DeleteQueue", "CloudTasks/GetQueue", "CloudTasks/ListQueues", "CloudTasks/PauseQueue", "CloudTasks/ResumeQueue", "CloudTasks/PurgeQueue"},

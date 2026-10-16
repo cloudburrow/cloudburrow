@@ -65,6 +65,9 @@ type consoleDeps struct {
 	serviceUsage *serviceusage.Server
 	// backupdr is the Backup and DR Service (#1433), nil unless enabled.
 	backupdr *backupdr.Server
+	// sqlAdmin is the Cloud SQL Admin API, which restores Backup and DR
+	// backups; nil unless a Cloud SQL service is enabled.
+	sqlAdmin *sqladmin.Server
 }
 
 // runAddrOf is the adapter's live address, or nothing when there is no
@@ -210,6 +213,14 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// APIs & Services (#1352): always served, as projects are.
 	if d.serviceUsage != nil {
 		providers = append(providers, serviceUsageProvider{api: d.serviceUsage})
+	}
+	// Backup and DR (#1433), in process, restoring through Cloud SQL.
+	if enabled[config.ServiceBackupDR] && d.backupdr != nil {
+		p := backupDRProvider{bdr: d.backupdr}
+		if d.sqlAdmin != nil {
+			p.sql = d.sqlAdmin
+		}
+		providers = append(providers, p)
 	}
 	// Cloud Logging's admin screens, beside the Logs Explorer (#1226).
 	if enabled[config.ServiceLogging] && d.logging != nil {

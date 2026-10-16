@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -23,13 +24,18 @@ func pitrDatasource(project string) string {
 // TestCloudSQLPointInTimeRestoreFromBackupDR (#1425): through the official
 // Go client, instances.pointInTimeRestore checks its request as Google does
 // (a datasource that is not a Backup and DR datasource, a missing
-// targetInstance or pointInTime, are 400s naming the field), and a well-formed
-// one is a 501 naming the Backup and DR Service, which CloudBurrow does not
-// serve, so no instance is managed by it (#1433); no target instance is
-// created. Point-in-time recovery is instances.clone (TestCloudSQLPointInTimeRecovery).
-// covers: sql.instances.pointInTimeRestore (unimplemented), sql.instances.get
+// targetInstance or pointInTime, are 400s naming the field). A well-formed
+// one names a datasource no backup plan association made: without the
+// Backup and DR Service it is a 501 naming --services backupdr, with it a
+// 404 (#1433); no target instance is created. A restore from a real
+// datasource is TestBackupDRCloudSQLRestore.
+// covers: sql.instances.pointInTimeRestore, sql.instances.get
 func TestCloudSQLPointInTimeRestoreFromBackupDR(t *testing.T) {
 	h := New(t)
+	unknown, unknownWant := http.StatusNotImplemented, "--services backupdr"
+	if os.Getenv(EnvBackupDR) != "" {
+		unknown, unknownWant = http.StatusNotFound, "does not exist"
+	}
 	svc := sqlAdminService(t, h)
 	p := h.Project()
 	target := fmt.Sprintf("pitr-dr-%d", time.Now().UnixNano()%1e6)
@@ -47,7 +53,7 @@ func TestCloudSQLPointInTimeRestoreFromBackupDR(t *testing.T) {
 		{"no pointInTime", sqladmin.PointInTimeRestoreContext{Datasource: pitrDatasource(p), TargetInstance: target},
 			http.StatusBadRequest, "pointInTime is required"},
 		{"a datasource", sqladmin.PointInTimeRestoreContext{Datasource: pitrDatasource(p), TargetInstance: target, PointInTime: at,
-			PreferredZone: "us-central1-a"}, http.StatusNotImplemented, "backupdr.googleapis.com"},
+			PreferredZone: "us-central1-a"}, unknown, unknownWant},
 	} {
 		_, err := svc.Instances.PointInTimeRestore("projects/"+p, &c.ctx).Do()
 		var ge *googleapi.Error
@@ -62,16 +68,17 @@ func TestCloudSQLPointInTimeRestoreFromBackupDR(t *testing.T) {
 // TestGcloudSQLPointInTimeRestoreRefused (#1425): `gcloud sql instances
 // point-in-time-restore DATASOURCE TARGET POINT_IN_TIME` reaches the server,
 // through the configuration `cloudburrow gcloud-setup` writes with egress to
-// Google blocked, and fails with the 501's reason; no target is created.
-// covers: sql.instances.pointInTimeRestore (unimplemented), sql.instances.get
+// Google blocked, and fails naming the Backup and DR datasource that does not
+// exist (or the service that is not served); no target is created.
+// covers: sql.instances.pointInTimeRestore, sql.instances.get
 func TestGcloudSQLPointInTimeRestoreRefused(t *testing.T) {
 	h := New(t)
 	g := newGcloudSession(t, h)
 	target := fmt.Sprintf("gcloud-pitr-dr-%d", time.Now().UnixNano()%1e6)
 	out, err := g.run(nil, "sql", "instances", "point-in-time-restore", pitrDatasource(g.project), target,
 		time.Now().UTC().Add(-time.Minute).Format(time.RFC3339), "--project", g.project, "--quiet")
-	if err == nil || !strings.Contains(out, "backupdr.googleapis.com") {
-		t.Errorf("gcloud sql instances point-in-time-restore: %v\n%s\nwant a failure naming backupdr.googleapis.com", err, out)
+	if err == nil || !strings.Contains(out, "Backup and DR") {
+		t.Errorf("gcloud sql instances point-in-time-restore: %v\n%s\nwant a failure naming the Backup and DR Service", err, out)
 	}
 	_, err = sqlAdminService(t, h).Instances.Get(g.project, target).Do()
 	wantHTTP(t, "instances.get of the refused restore's target", err, http.StatusNotFound)

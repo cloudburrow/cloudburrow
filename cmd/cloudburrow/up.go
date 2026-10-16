@@ -506,6 +506,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		mysql:        mysqlCreds,
 		serviceUsage: serviceUsageSrv,
 		backupdr:     backupDRSrv,
+		sqlAdmin:     sqlAdminSrv,
 	})
 	if consoleSrv != nil {
 		// The Request Log reads the same recorder /admin/events does.

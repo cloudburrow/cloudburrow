@@ -266,16 +266,35 @@ func (s *Server) fail(w http.ResponseWriter, method string, err error) {
 	}})
 }
 
-var idRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
+var idRE = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 func checkID(field, id string) error {
 	if id == "" {
 		return invalid("%s is required.", field)
 	}
 	if !idRE.MatchString(id) {
-		return invalid("%s %q must be 2 to 63 lowercase letters, digits and hyphens, start with a letter and not end with a hyphen.", field, id)
+		return invalid("%s %q must be 1 to 63 lowercase letters, digits and hyphens, start with a letter and not end with a hyphen.", field, id)
 	}
 	return nil
+}
+
+// param is a query parameter, by its JSON name or its proto field name
+// (backupPlanId or backup_plan_id): gRPC transcoding accepts both, and the
+// Terraform provider sends the second.
+func param(r *http.Request, name string) string {
+	q := r.URL.Query()
+	if v := q.Get(name); v != "" {
+		return v
+	}
+	var b strings.Builder
+	for _, c := range name {
+		if c >= 'A' && c <= 'Z' {
+			b.WriteByte('_')
+			c += 'a' - 'A'
+		}
+		b.WriteRune(c)
+	}
+	return q.Get(b.String())
 }
 
 func decode(r *http.Request, v any) error {
@@ -359,7 +378,7 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 			out, err := s.getDataSource(strings.Join(p, "/"))
 			return "backupdr.projects.locations.backupVaults.dataSources.get", out, err
 		case len(rest) == 5 && rest[2] == "dataSources" && rest[4] == "backups" && list && verb == "":
-			out, err := s.listBackups(strings.Join(p, "/"))
+			out, err := s.listBackups(strings.Join(p[:len(p)-1], "/"))
 			return "backupdr.projects.locations.backupVaults.dataSources.backups.list", out, err
 		case len(rest) == 6 && rest[2] == "dataSources" && rest[4] == "backups" && get && verb == "":
 			out, err := s.getBackup(strings.Join(p, "/"))
@@ -537,7 +556,7 @@ func (s *Server) vaultJSON(v *vault) map[string]any {
 			deletable = false
 		}
 	}
-	out := map[string]any{"name": v.Name, "createTime": v.CreateTime, "updateTime": v.UpdateTime, "effectiveTime": v.CreateTime,
+	out := map[string]any{"name": v.Name, "createTime": v.CreateTime, "updateTime": v.UpdateTime,
 		"state": "ACTIVE", "uid": v.UID, "deletable": deletable, "backupCount": strconv.Itoa(count),
 		"backupMinimumEnforcedRetentionDuration": v.MinRetention, "etag": strconv.Quote(v.UpdateTime),
 		"serviceAccount":    "service-backupdr@cloudburrow.iam.gserviceaccount.com",
@@ -552,7 +571,7 @@ func (s *Server) vaultJSON(v *vault) map[string]any {
 }
 
 func (s *Server) createVault(r *http.Request, loc string) (any, error) {
-	id := r.URL.Query().Get("backupVaultId")
+	id := param(r, "backupVaultId")
 	if err := checkID("backupVaultId", id); err != nil {
 		return nil, err
 	}
@@ -623,29 +642,44 @@ func (s *Server) listVaults(loc string) any {
 	return map[string]any{"backupVaults": out}
 }
 
-// under is whether name is loc's (or every location's, for "-") child of kind.
-func under(name, loc, kind string) bool {
-	if strings.HasSuffix(loc, "/locations/-") {
-		proj := strings.TrimSuffix(loc, "/locations/-")
-		return strings.HasPrefix(name, proj+"/locations/") && strings.Contains(name, kind) && strings.Count(name, "/") == 5
+// under is whether name is a direct child of kind ("/backupVaults/") under
+// parent, whose segments may be "-" for every one.
+func under(name, parent, kind string) bool {
+	pre, id, ok := strings.Cut(name, kind)
+	return ok && id != "" && !strings.Contains(id, "/") && match(parent, pre)
+}
+
+// match is whether name has pattern's segments, "-" matching any.
+func match(pattern, name string) bool {
+	p, n := strings.Split(pattern, "/"), strings.Split(name, "/")
+	if len(p) != len(n) {
+		return false
 	}
-	return strings.HasPrefix(name, loc+kind) && strings.Count(name, "/") == 5
+	for i := range p {
+		if p[i] != n[i] && p[i] != "-" {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) deleteVault(r *http.Request, name string) (any, error) {
-	force := r.URL.Query().Get("force") == "true"
+	force := param(r, "force") == "true"
+	// ignoreInactiveDatasources lets a vault go with the data sources no
+	// association protects any more, and their backups.
+	inactive := param(r, "ignoreInactiveDatasources") == "true"
 	loc := name[:strings.Index(name, "/backupVaults/")]
 	s.mu.Lock()
 	v := s.st.Vaults[name]
 	if v == nil {
 		s.mu.Unlock()
-		if r.URL.Query().Get("allowMissing") == "true" {
+		if param(r, "allowMissing") == "true" {
 			return s.opDone(loc, "delete", name, nil, "", nil), nil
 		}
 		return nil, notFound("Backup vault %s does not exist.", name)
 	}
 	for _, p := range s.st.Plans {
-		if p.Vault == name {
+		if p.Vault == name && param(r, "ignoreBackupPlanReferences") != "true" {
 			s.mu.Unlock()
 			return nil, precondition("Backup vault %s is used by backup plan %s; delete the plan first.", name, p.Name)
 		}
@@ -655,7 +689,7 @@ func (s *Server) deleteVault(r *http.Request, name string) (any, error) {
 		if !strings.HasPrefix(n, name+"/") {
 			continue
 		}
-		if !force {
+		if !force && !(inactive && s.st.Associations[d.Association] == nil) {
 			s.mu.Unlock()
 			return nil, precondition("Backup vault %s holds data source %s; delete its backups, or pass force=true.", name, d.Name)
 		}

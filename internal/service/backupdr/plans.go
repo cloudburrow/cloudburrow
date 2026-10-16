@@ -13,7 +13,8 @@ import (
 // refused.
 func workloadWhy(typ string) string {
 	return "CloudBurrow's Backup and DR Service protects Cloud SQL instances (" + CloudSQLResourceType + "); " + typ +
-		" needs a server of that workload type, which CloudBurrow does not run (docs/backupdr.md)"
+		" is another workload type (Compute Engine instances and disks, AlloyDB, Filestore), whose servers CloudBurrow " +
+		"does not run (docs/backupdr.md)"
 }
 
 var recurrences = map[string]bool{"HOURLY": true, "DAILY": true, "WEEKLY": true, "MONTHLY": true, "YEARLY": true}
@@ -40,7 +41,7 @@ func (s *Server) planJSON(p *plan) map[string]any {
 }
 
 func (s *Server) createPlan(r *http.Request, loc string) (any, error) {
-	id := r.URL.Query().Get("backupPlanId")
+	id := param(r, "backupPlanId")
 	if err := checkID("backupPlanId", id); err != nil {
 		return nil, err
 	}
@@ -50,7 +51,7 @@ func (s *Server) createPlan(r *http.Request, loc string) (any, error) {
 		Vault            string            `json:"backupVault"`
 		ResourceType     string            `json:"resourceType"`
 		Rules            []rule            `json:"backupRules"`
-		LogRetentionDays json.Number       `json:"logRetentionDays"`
+		LogRetentionDays json.RawMessage   `json:"logRetentionDays"`
 	}
 	if err := decode(r, &body); err != nil {
 		return nil, err
@@ -82,8 +83,8 @@ func (s *Server) createPlan(r *http.Request, loc string) (any, error) {
 		}
 	}
 	var logDays int64
-	if body.LogRetentionDays != "" {
-		n, err := body.LogRetentionDays.Int64()
+	if raw := strings.Trim(string(body.LogRetentionDays), `"`); raw != "" && raw != "null" {
+		n, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || n < 0 {
 			return nil, invalid("backupPlan.logRetentionDays %q is not a number of days.", body.LogRetentionDays)
 		}
@@ -234,7 +235,7 @@ func (d *dataSource) info() Instance {
 }
 
 func (s *Server) createAssociation(r *http.Request, loc string) (any, error) {
-	id := r.URL.Query().Get("backupPlanAssociationId")
+	id := param(r, "backupPlanAssociationId")
 	if err := checkID("backupPlanAssociationId", id); err != nil {
 		return nil, err
 	}
@@ -398,12 +399,12 @@ func (s *Server) dataSourceJSON(d *dataSource) map[string]any {
 func (s *Server) listDataSources(vaultName string) (any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.st.Vaults[vaultName] == nil {
+	if s.st.Vaults[vaultName] == nil && !strings.Contains(vaultName+"/", "/-/") {
 		return nil, notFound("Backup vault %s does not exist.", vaultName)
 	}
 	out := []any{}
 	for _, n := range sortedKeys(s.st.DataSources) {
-		if strings.HasPrefix(n, vaultName+"/dataSources/") {
+		if under(n, vaultName, "/dataSources/") {
 			out = append(out, s.dataSourceJSON(s.st.DataSources[n]))
 		}
 	}
@@ -467,13 +468,13 @@ func (s *Server) backupJSON(b *backup) map[string]any {
 func (s *Server) listBackups(dsName string) (any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.st.DataSources[dsName] == nil && !strings.HasSuffix(dsName, "/dataSources/-") {
+	if s.st.DataSources[dsName] == nil && !strings.Contains(dsName+"/", "/-/") {
 		return nil, notFound("Data source %s does not exist.", dsName)
 	}
 	out := []any{}
 	for _, n := range sortedKeys(s.st.Backups) {
 		b := s.st.Backups[n]
-		if b.DataSource == dsName || (strings.HasSuffix(dsName, "/-") && strings.HasPrefix(n, strings.TrimSuffix(dsName, "-"))) {
+		if match(dsName, b.DataSource) {
 			out = append(out, s.backupJSON(b))
 		}
 	}
@@ -549,7 +550,17 @@ func (s *Server) triggerBackup(r *http.Request, name string) (any, error) {
 		return nil, err
 	}
 	if body.RuleID == "" {
-		return nil, invalid("ruleId is required.")
+		// Without a rule, the plan's first rule, with the custom retention.
+		s.mu.Lock()
+		if a := s.st.Associations[name]; a != nil {
+			if p := s.st.Plans[a.Plan]; p != nil && len(p.Rules) > 0 {
+				body.RuleID = p.Rules[0].RuleID
+			}
+		}
+		s.mu.Unlock()
+		if body.RuleID == "" {
+			return nil, invalid("ruleId is required.")
+		}
 	}
 	_, op, err := s.backup(name, body.RuleID, true, body.CustomRetentionDays, body.Labels)
 	return op, err

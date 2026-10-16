@@ -90,14 +90,15 @@ func TestSQLAdminInstancesDescribeTheRunningServers(t *testing.T) {
 }
 
 // TestSQLAdminRefusesWhatItCannotDoFaithfully (#1301, #1330):
-// pointInTimeRestore (a Backup and DR datasource, #1425; a clone to a point
-// in time of the server `up` runs, which keeps no log, is a 400),
+// pointInTimeRestore of a datasource no association made (501 without the
+// Backup and DR Service, 404 with it, #1433; a clone to a point in time of
+// the server `up` runs, which keeps no log, is a 400),
 // legacy failover replicas, IAM database authentication (an access token in
 // generateEphemeralCert) answer 501 (tiers and flags are served since
 // #1380, TestSQLAdminTiersAndFlags);
 // the instances `up` runs refuse a patch, restart or delete with the
 // reason (instance writes act on created instances, TestCloudSQLInstanceWrites).
-// covers: sql.instances.pointInTimeRestore (unimplemented)
+// covers: sql.instances.pointInTimeRestore
 func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	h := New(t)
 	svc := sqlAdminService(t, h)
@@ -118,7 +119,11 @@ func TestSQLAdminRefusesWhatItCannotDoFaithfully(t *testing.T) {
 	wantHTTP(t, "instances.clone to a point in time", err, http.StatusBadRequest)
 	_, err = svc.Instances.PointInTimeRestore("projects/"+p, &sqladmin.PointInTimeRestoreContext{
 		Datasource: pitrDatasource(p), TargetInstance: "pitr", PointInTime: "2026-01-01T00:00:00Z"}).Do()
-	wantHTTP(t, "instances.pointInTimeRestore", err, 501)
+	pitrCode := http.StatusNotImplemented
+	if os.Getenv(EnvBackupDR) != "" {
+		pitrCode = http.StatusNotFound
+	}
+	wantHTTP(t, "instances.pointInTimeRestore of an unknown datasource", err, pitrCode)
 	_, err = svc.Instances.Failover(p, inst, &sqladmin.InstancesFailoverRequest{}).Do()
 	// The instances `up` runs are ZONAL, and refuse a failover as they
 	// refuse a patch (#1408).

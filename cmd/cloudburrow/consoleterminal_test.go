@@ -32,6 +32,7 @@ func TestTerminalEnvIsGcloudSetupAtInClusterAddresses(t *testing.T) {
 		"memorystore":       "memorystore.cloudburrow.svc.cluster.local:6379",
 		"memorystore-admin": "cloudburrow-host.cloudburrow.svc.cluster.local:9021",
 		"serviceusage":      "cloudburrow-host.cloudburrow.svc.cluster.local:9023",
+		"backupdr":          "cloudburrow-host.cloudburrow.svc.cluster.local:9024",
 	}
 	env := terminalEnv(addrs)
 	for name, want := range map[string]string{
