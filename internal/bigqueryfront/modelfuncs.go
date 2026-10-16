@@ -354,30 +354,14 @@ func dotSQL(w []float64, enc []string) string {
 }
 
 // mlInput is the FROM of a call's input, the model's TRANSFORM applied
-// (modeltransform.go), how to name a model column in it, and the helper
-// columns to leave out of the output. The TRANSFORM's items are columns
-// of their own (_cbml_t<n>), not a STRUCT: the engine loses a FLOAT64
-// STRUCT field's type, so that dividing it divides integers (measured).
+// (modeltransform.go) as the STRUCT _cbml_t, how to name a model column in
+// it, and the helper columns to leave out of the output.
 func (md bqModel) mlInput(input string) (from string, ref func(string) string, helpers []string) {
 	if len(md.Transform) == 0 {
 		return "(" + input + ") AS _cbml_in", sqlIdent, nil
 	}
-	cols := map[string]string{}
-	var sel []string
-	for k, it := range md.predictTransform() {
-		expr, name := transformItemName(it)
-		h := fmt.Sprintf("_cbml_t%d", k)
-		cols[strings.ToLower(name)] = h
-		sel = append(sel, "("+expr+") AS "+h)
-		helpers = append(helpers, h)
-	}
-	return "(SELECT *, " + strings.Join(sel, ", ") + " FROM (" + input + ")) AS _cbml_in",
-		func(n string) string {
-			if h, ok := cols[strings.ToLower(n)]; ok {
-				return h
-			}
-			return sqlIdent(n)
-		}, helpers
+	return "(SELECT *, STRUCT(" + strings.Join(md.predictTransform(), ", ") + ") AS _cbml_t FROM (" + input + ")) AS _cbml_in",
+		func(n string) string { return "_cbml_t." + sqlIdent(n) }, []string{"_cbml_t"}
 }
 
 func except(cols []string) string {

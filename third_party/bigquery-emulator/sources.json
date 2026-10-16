@@ -79,7 +79,8 @@
         "patches/googlesqlite/0032-round-decimal-nested.patch",
         "patches/googlesqlite/0035-interval-arithmetic.patch",
         "patches/googlesqlite/0036-change-history.patch",
-        "patches/googlesqlite/0041-change-row-identities.patch"
+        "patches/googlesqlite/0041-change-row-identities.patch",
+        "patches/googlesqlite/0049-struct-float-type.patch"
       ]
     },
     {
