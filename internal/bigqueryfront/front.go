@@ -211,7 +211,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	if policies == nil {
 		policies = &rowPolicies{}
 	}
-	iam := &iamPolicies{} // iam.go, #1231
+	iam := &iamPolicies{}   // iam.go, #1231
+	jobRows := &jobsTable{} // jobstable.go, #1378
 	if o.stateDir != "" {
 		iam.keep(iamPoliciesStateFile(o.stateDir), o.logf)      // iam.go, #1231
 		policies.keep(rowPoliciesStateFile(o.stateDir), o.logf) // rowpolicies.go, #1218
@@ -236,6 +237,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			ids.reset()
 			policies.reset()
 			iam.reset()
+			jobRows.reset()
 		})
 	}
 	// listJobs serves jobs.list, r a GET of a project's jobs: here, and
@@ -320,7 +322,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			// Reads go to the REST path, never the upload one.
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
-				listJobs: listJobs, iam: iam}
+				listJobs: listJobs, iam: iam, jobsTable: jobRows}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -446,6 +448,9 @@ type front struct {
 	// iam are the tables' and routines' IAM policies (iam.go, #1231),
 	// which OBJECT_PRIVILEGES reads (#1355), or nil.
 	iam *iamPolicies
+	// jobsTable is the table of INFORMATION_SCHEMA.JOBS rows
+	// (jobstable.go, #1378), or nil.
+	jobsTable *jobsTable
 }
 
 // Option is an option of Wrap.

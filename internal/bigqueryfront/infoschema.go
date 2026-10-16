@@ -101,6 +101,9 @@ func (f front) tablesOf(r *http.Request, dataset string, m *datasetMeta) ([]info
 			return nil, http.StatusInternalServerError, "cloudburrow: could not list the dataset's tables: " + errorMessage(got, st)
 		}
 		for _, tb := range list.Tables {
+			if dataset == resultsDataset && tb.TableReference.TableID == jobsTableName {
+				continue // the front's table of JOBS rows (jobstable.go, #1378)
+			}
 			st, got := f.get(r, tablePath(dataset, tb.TableReference.TableID))
 			if st == http.StatusNotFound {
 				continue // deleted meanwhile
@@ -143,6 +146,11 @@ func rowsSubquery(columns string, rows [][]string) string {
 	for i, r := range rows {
 		lits[i] = "(" + strings.Join(r, ", ") + ")"
 	}
+	return literalRows(columns, lits)
+}
+
+// literalRows is rowsSubquery of rows already written as STRUCT literals.
+func literalRows(columns string, lits []string) string {
 	var parts []string
 	for len(lits) > rowsPerArray {
 		parts = append(parts, "SELECT * FROM UNNEST(ARRAY<"+columns+">["+strings.Join(lits[:rowsPerArray], ", ")+"])")
