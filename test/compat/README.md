@@ -92,7 +92,8 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_RUN_KMS`, `CLOUDBURROW_TEST_RUN_SCHEDULER`, `CLOUDBURROW_TEST_RUN_LOGGING` | as `KMS`, `SCHEDULER` and `LOGGING` | the Cloud Run revision tests; see below |
 | `CLOUDBURROW_TEST_TASKS_LOGGING` | as `LOGGING` | the Cloud Tasks dispatch log (#1256), in the storage shard, so the Logging tests stay in served |
 | `CLOUDBURROW_TEST_BIGQUERY_RESOURCEMANAGER` | as `RESOURCEMANAGER` | BigQuery's `JOBS_BY_FOLDER` and `JOBS_BY_ORGANIZATION` (#1392), in the emulators shard, so the Resource Manager tests stay in storage |
-| `CLOUDBURROW_TEST_SINK_LOGGING`, `CLOUDBURROW_TEST_SINK_STORAGE`, `CLOUDBURROW_TEST_SINK_PUBSUB` | as `LOGGING`, `STORAGE` and `PUBSUB` | the Cloud Logging sinks that deliver to Cloud Storage, Pub/Sub and BigQuery (#1404), in the emulators shard beside BigQuery |
+| `CLOUDBURROW_TEST_LOGGING_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the Cloud Logging folder and organization tests, which make a folder (#1395), in the served shard, so the Resource Manager tests stay in storage |
+| `CLOUDBURROW_TEST_SINK_LOGGING`, `CLOUDBURROW_TEST_SINK_STORAGE`, `CLOUDBURROW_TEST_SINK_PUBSUB` | as `LOGGING`, `STORAGE` and `PUBSUB` | the Cloud Logging sinks that deliver to Cloud Storage, Pub/Sub and BigQuery (#1404), in the emulators shard beside BigQuery, and `gcloud logging copy` and `CopyLogEntries` to a bucket (#1394) |
 | `CLOUDBURROW_TEST_RUN_BIGQUERY` | as `BIGQUERY` | the Cloud Run revision refused by the BigQuery front (#874); see below |
 | `CLOUDBURROW_TEST_RUN_SQLADMIN` | as `SQLADMIN` | the Cloud Run services and job with a Cloud SQL volume (#1346), without the Cloud SQL suite |
 | `CLOUDBURROW_TEST_SPANNER` | `SPANNER_EMULATOR_HOST` | Spanner |
