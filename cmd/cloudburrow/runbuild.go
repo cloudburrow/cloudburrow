@@ -24,6 +24,10 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/buildpacks"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/images"
+
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/tarball"
 )
 
 // storageSourceFetcher reads SubmitBuild's source archive from this
@@ -385,4 +389,31 @@ func hostURL(hostPort string) string {
 		host = "127.0.0.1"
 	}
 	return "http://" + net.JoinHostPort(host, port)
+}
+
+// Save reads a locally built image back from Docker, for the push of it
+// into this instance's Artifact Registry (#1383): `docker save` to a file
+// in the instance's directory, read as an image. cleanup removes the file.
+func (b *localImageBuilder) Save(ctx context.Context, local string) (v1.Image, func(), error) {
+	f, err := os.CreateTemp(b.cfg.InstanceDir(), "push-*.tar")
+	if err != nil {
+		return nil, nil, err
+	}
+	f.Close()
+	cleanup := func() { _ = os.Remove(f.Name()) }
+	if out, err := exec.CommandContext(ctx, "docker", "save", "-o", f.Name(), local).CombinedOutput(); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("docker save %s: %v\n%s", local, err, tailLines(string(out), 10))
+	}
+	tag, err := name.NewTag(local)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	img, err := tarball.ImageFromPath(f.Name(), &tag)
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("read the saved image %s: %w", local, err)
+	}
+	return img, cleanup, nil
 }
