@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -362,5 +363,125 @@ func TestStorageRelocate(t *testing.T) {
 	}
 	if attrs, err := s.Buckets.Get(d).Do(); err != nil || attrs.CustomPlacementConfig == nil || strings.Join(attrs.CustomPlacementConfig.DataLocations, ",") != "US-EAST1,US-WEST1" {
 		t.Errorf("dual-region after relocation = %+v, %v", attrs, err)
+	}
+}
+
+// TestGcloudStorageAnywhereCachesRelocate: gcloud storage buckets
+// anywhere-caches create, describe, list, update, disable and resume, and
+// gcloud storage buckets relocate (a dry run, a relocation, --finalize) with
+// gcloud storage operations cancel, all through the egress-guarded session.
+//
+// covers: storage.anywhereCaches.insert, storage.anywhereCaches.get, storage.anywhereCaches.list, storage.anywhereCaches.update
+// covers: storage.anywhereCaches.disable, storage.anywhereCaches.resume
+// covers: storage.buckets.relocate, storage.buckets.operations.advanceRelocateBucket, storage.buckets.operations.cancel
+func TestGcloudStorageAnywhereCachesRelocate(t *testing.T) {
+	h := New(t)
+	g := newGcloudSession(t, h)
+	s := storageJSON(t, h)
+	b := locatedBucket(t, h, "-gac", "US-CENTRAL1")
+	url := "gs://" + b
+
+	g.must("storage", "buckets", "anywhere-caches", "create", url, "us-central1-a", "--ttl=2d")
+	waitCache := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			c, err := s.AnywhereCaches.Get(b, "us-central1-a").Do()
+			if err == nil && c.State == want && !c.PendingUpdate {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("cache = %+v, %v; want %s", c, err, want)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	waitCache("running")
+	if out := g.must("storage", "buckets", "anywhere-caches", "describe", b+"/us-central1-a", "--format=json"); !strings.Contains(out, `"172800s"`) || !strings.Contains(out, "running") {
+		t.Errorf("describe = %s", out)
+	}
+	if out := g.must("storage", "buckets", "anywhere-caches", "list", url, "--format=value(zone)"); !strings.Contains(out, "us-central1-a") {
+		t.Errorf("list = %s", out)
+	}
+	g.must("storage", "buckets", "anywhere-caches", "update", b+"/us-central1-a", "--ttl=1d")
+	waitCache("running")
+	if c, _ := s.AnywhereCaches.Get(b, "us-central1-a").Do(); c == nil || c.Ttl != "86400s" {
+		t.Errorf("after update = %+v", c)
+	}
+	g.must("storage", "buckets", "anywhere-caches", "disable", b+"/us-central1-a")
+	waitCache("disabled")
+	g.must("storage", "buckets", "anywhere-caches", "resume", b+"/us-central1-a")
+	waitCache("running")
+
+	g.must("storage", "buckets", "relocate", url, "--location=us-east1", "--dry-run")
+	if attrs, _ := s.Buckets.Get(b).Do(); attrs == nil || attrs.Location != "US-CENTRAL1" {
+		t.Errorf("bucket after a dry run = %+v", attrs)
+	}
+	g.must("storage", "buckets", "relocate", url, "--location=us-east1")
+	ops, err := s.Operations.List(b).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var name string
+	for _, op := range ops.Operations {
+		if !op.Done && strings.Contains(string(op.Metadata), "RelocateBucketMetadata") {
+			name = op.Name
+		}
+	}
+	if name == "" {
+		t.Fatalf("no running relocation in %+v", ops)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		op, err := s.Operations.Get(b, lastSegment(name)).Do()
+		if err == nil && opMetadata(t, op)["finalizationState"] == "READY" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("relocation never READY: %+v, %v", op, err)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	g.must("storage", "buckets", "relocate", "--finalize", "--operation="+name, "--ttl=2h")
+	if op := waitOp(t, s, b, lastSegment(name)); !op.Done || op.Error != nil {
+		t.Errorf("finalized relocation = %+v", op)
+	}
+	if attrs, _ := s.Buckets.Get(b).Do(); attrs == nil || attrs.Location != "US-EAST1" {
+		t.Errorf("bucket after relocation = %+v", attrs)
+	}
+
+	op, err := s.Buckets.Relocate(b, &storagev1.RelocateBucketRequest{DestinationLocation: "US-WEST1"}).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.must("storage", "operations", "cancel", op.Name)
+	if op, err := s.Operations.Get(b, lastSegment(op.Name)).Do(); err != nil || opMetadata(t, op)["relocationState"] != "CANCELLED" {
+		t.Errorf("cancelled by gcloud = %+v, %v", op, err)
+	}
+}
+
+// TestStorageNotificationsWithoutPubSub: on an instance serving no Pub/Sub,
+// a notification configuration has no topic to name or deliver to, so
+// notifications.insert is refused 501 naming the reason, never accepted and
+// dropped; list still answers (empty), and get and delete of a missing
+// configuration are 404. Skipped when the instance serves Pub/Sub.
+//
+// covers: storage.notifications.list
+func TestStorageNotificationsWithoutPubSub(t *testing.T) {
+	if strings.TrimSpace(os.Getenv(EnvPubSub)) != "" {
+		t.Skip("the instance serves Pub/Sub; TestNotificationConfigsCRUDThroughTheSDK covers notifications with it")
+	}
+	h := New(t)
+	s := storageJSON(t, h)
+	b := locatedBucket(t, h, "-nps", "US")
+	_, err := s.Notifications.Insert(b, &storagev1.Notification{Topic: "//pubsub.googleapis.com/projects/" + h.Project() + "/topics/t", PayloadFormat: "JSON_API_V1"}).Do()
+	if httpCode(err) != http.StatusNotImplemented || !strings.Contains(err.Error(), "Pub/Sub") {
+		t.Errorf("insert without Pub/Sub = %v; want 501 naming Pub/Sub", err)
+	}
+	if l, err := s.Notifications.List(b).Do(); err != nil || len(l.Items) != 0 {
+		t.Errorf("list = %+v, %v; want none", l, err)
+	}
+	if _, err := s.Notifications.Get(b, "1").Do(); httpCode(err) != http.StatusNotFound {
+		t.Errorf("get = %v; want 404", err)
 	}
 }
