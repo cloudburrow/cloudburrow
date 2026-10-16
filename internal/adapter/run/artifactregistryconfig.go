@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	arpb "cloud.google.com/go/artifactregistry/apiv1/artifactregistrypb"
@@ -324,10 +325,16 @@ func (a *ArtifactRegistryServer) BatchDeleteVersions(ctx context.Context, req *a
 	meta := &arpb.BatchDeleteVersionsMetadata{}
 	if !req.GetValidateOnly() {
 		for _, n := range req.GetNames() {
-			if _, err := a.DeleteVersion(ctx, &arpb.DeleteVersionRequest{Name: n, Force: true}); err != nil {
+			if err := deleteVersionNow(n); err != nil {
 				meta.FailedVersions = append(meta.FailedVersions, n)
 			}
 		}
+	}
+	if a.s == nil {
+		if len(meta.FailedVersions) > 0 {
+			return nil, apierror.Internal(nil, "could not delete %s", strings.Join(meta.FailedVersions, ", "))
+		}
+		return nil, nil // the console's call (ConfigServer)
 	}
 	loc := repoName[:strings.Index(repoName, "/repositories/")]
 	op := a.s.ops.Create(loc, repoName)
@@ -514,6 +521,9 @@ func (a *ArtifactRegistryServer) CreateAttachment(ctx context.Context, req *arpb
 	arConfig.attachments[at.Name] = at
 	saveARConfigLocked()
 	arConfig.mu.Unlock()
+	if a.s == nil {
+		return nil, nil // the console's call (ConfigServer): stored, no operation
+	}
 	loc := req.GetParent()[:strings.Index(req.GetParent(), "/repositories/")]
 	op := a.s.ops.Create(loc, at.Name)
 	_ = a.s.ops.SetMetadata(op.Name, &arpb.OperationMetadata{})
@@ -593,6 +603,9 @@ func (a *ArtifactRegistryServer) DeleteAttachment(_ context.Context, req *arpb.D
 	delete(arConfig.attachments, req.GetName())
 	saveARConfigLocked()
 	arConfig.mu.Unlock()
+	if a.s == nil {
+		return nil, nil // the console's call (ConfigServer)
+	}
 	repoName, _, _ := splitChild(req.GetName(), "attachments")
 	return a.doneEmpty(repoName, req.GetName())
 }
@@ -747,11 +760,34 @@ func (a *ArtifactRegistryServer) ImportYumArtifacts(context.Context, *arpb.Impor
 	return nil, apierror.Unimplemented(noFormat, "YUM")
 }
 
-// ConfigServer serves, for the console, the methods above that complete
-// at once with no operation: rules, project settings, VPC-SC config, and
-// UpdatePackage, UpdateVersion and UpdateFile. Calling one that returns
-// an operation on it panics.
+// ConfigServer serves the methods above for the console: those returning
+// an operation (CreateAttachment, DeleteAttachment, BatchDeleteVersions,
+// ExportArtifact) do their work and return no operation on it.
+// LastExport is the files the latest ExportArtifact wrote.
 func ConfigServer() *ArtifactRegistryServer { return &ArtifactRegistryServer{} }
+
+var lastExport atomic.Pointer[arpb.ExportArtifactMetadata]
+
+// LastExport is the metadata of the latest ExportArtifact, for the console.
+func LastExport() *arpb.ExportArtifactMetadata { return lastExport.Load() }
+
+// deleteVersionNow deletes a version and its tags, as DeleteVersion with
+// force does, with no operation.
+func deleteVersionNow(name string) error {
+	_, repoName, image, digest, err := parseVersionName(name)
+	if err != nil {
+		return err
+	}
+	st, err := contentStore(repoName)
+	if err != nil {
+		return err
+	}
+	if err := st.DeleteManifest(repoOf(repoName), image, digest); err != nil {
+		return storeErr(err)
+	}
+	forgetUnder(name)
+	return nil
+}
 
 // exportWriter writes ExportArtifact's files to the instance's Cloud
 // Storage; nil when Cloud Storage is not served.
@@ -806,6 +842,7 @@ func (a *ArtifactRegistryServer) ExportArtifact(ctx context.Context, req *arpb.E
 	st := RegistryStore()
 	project := strings.Split(req.GetRepository(), "/")[1]
 	meta := &arpb.ExportArtifactMetadata{}
+	defer func() { lastExport.Store(meta) }()
 	for _, f := range repoFiles(st, req.GetRepository()) {
 		if f.GetOwner() != version {
 			continue
@@ -828,6 +865,9 @@ func (a *ArtifactRegistryServer) ExportArtifact(ctx context.Context, req *arpb.E
 		}
 		meta.ExportedFiles = append(meta.ExportedFiles, &arpb.ExportArtifactMetadata_ExportedFile{Name: f.GetName(), Hashes: f.GetHashes(),
 			Destination: &arpb.ExportArtifactMetadata_ExportedFile_GcsObjectPath{GcsObjectPath: bucket + "/" + object}})
+	}
+	if a.s == nil {
+		return nil, nil // the console's call (ConfigServer)
 	}
 	loc := req.GetRepository()[:strings.Index(req.GetRepository(), "/repositories/")]
 	op := a.s.ops.Create(loc, req.GetRepository())

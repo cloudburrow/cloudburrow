@@ -769,19 +769,23 @@
     "Key": "artifactregistry",
     "Title": "Artifact Registry",
     "counts": {
-      "Unimplemented": 27,
-      "Verified": 23
+      "Unimplemented": 8,
+      "Verified": 42
     },
     "rows": [
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/BatchDeleteVersions",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateAttachment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRepository",
@@ -793,8 +797,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateTag",
@@ -806,13 +812,17 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteAttachment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteFile",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeletePackage",
@@ -831,8 +841,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteTag",
@@ -845,18 +857,23 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteVersion",
         "status": "Verified",
         "tests": [
-          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
+          "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
+          "test/compat/artifactregistryconfig_test.go:266 TestGcloudArtifactsVPCSCAndVersions"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ExportArtifact",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetAttachment",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetDockerImage",
@@ -900,8 +917,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetProjectSettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetPythonPackage",
@@ -918,8 +937,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetTag",
@@ -931,8 +952,11 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetVPCSCConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:266 TestGcloudArtifactsVPCSCAndVersions",
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetVersion",
@@ -953,8 +977,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListAttachments",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListDockerImages",
@@ -1002,8 +1028,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListRules",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListTags",
@@ -1036,18 +1064,24 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateFile",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdatePackage",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateProjectSettings",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateRepository",
@@ -1059,8 +1093,10 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateRule",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateTag",
@@ -1071,13 +1107,19 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateVPCSCConfig",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:266 TestGcloudArtifactsVPCSCAndVersions",
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateVersion",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistryconfig_test.go:266 TestGcloudArtifactsVPCSCAndVersions",
+          "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
+        ]
       }
     ]
   },
@@ -1085,19 +1127,22 @@
     "Key": "cloudbuild",
     "Title": "Cloud Build",
     "counts": {
-      "Unimplemented": 1,
-      "Verified": 18
+      "Verified": 19
     },
     "rows": [
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ApproveBuild",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
+          "test/compat/cloudbuildapproval_test.go:246 TestGcloudBuildsApproveAndReject"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CancelBuild",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild"
         ]
       },
@@ -1105,6 +1150,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateBuild",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildapproval_test.go:56 TestCloudBuildDynamicSubstitutionsAndSecretBuildArg",
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
           "test/compat/cloudbuilddefaultlogs_test.go:131 TestGcloudBuildsSubmitDefaultLogsBucket",
@@ -1120,6 +1166,8 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateBuildTrigger",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildapproval_test.go:246 TestGcloudBuildsApproveAndReject",
+          "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1136,6 +1184,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/DeleteBuildTrigger",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1152,6 +1201,8 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetBuild",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
+          "test/compat/cloudbuildapproval_test.go:56 TestCloudBuildDynamicSubstitutionsAndSecretBuildArg",
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
           "test/compat/cloudbuilddefaultlogs_test.go:131 TestGcloudBuildsSubmitDefaultLogsBucket",
@@ -1165,6 +1216,8 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetBuildTrigger",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
+          "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]
@@ -1226,6 +1279,9 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/RunBuildTrigger",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildapproval_test.go:126 TestCloudBuildApproveBuild",
+          "test/compat/cloudbuildapproval_test.go:246 TestGcloudBuildsApproveAndReject",
+          "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
         ]
       },
@@ -1233,6 +1289,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateBuildTrigger",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildapproval_test.go:308 TestTerraformCloudBuildTriggerApproval",
           "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
           "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
         ]

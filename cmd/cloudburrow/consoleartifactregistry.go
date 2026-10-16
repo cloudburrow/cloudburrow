@@ -124,11 +124,15 @@ func (p artifactRegistryProvider) repositoryDetail(st *registry.Store, r *arpb.R
 	if c, err := cs.GetVPCSCConfig(ctx, &arpb.GetVPCSCConfigRequest{Name: "projects/" + repo.Project + "/locations/" + repo.Location + "/vpcscConfig"}); err == nil {
 		vpcsc = c.GetVpcscPolicy().String()
 	}
+	settings := "-"
+	if ps, err := cs.GetProjectSettings(ctx, &arpb.GetProjectSettingsRequest{Name: "projects/" + repo.Project + "/projectSettings"}); err == nil {
+		settings = fmt.Sprintf("%s, pull percent %d", ps.GetLegacyRedirectionState(), ps.GetPullPercent())
+	}
 	return console.Detail{
 		Summary: []console.Property{{Label: "Format", Value: r.GetFormat().String()}, {Label: "Location", Value: repo.Location},
 			{Label: "URL", Value: r.GetRegistryUri()}, {Label: "Push to", Value: registryPushHint(repo)},
 			{Label: "Description", Value: orDash(r.GetDescription())}, {Label: "Cleanup policies", Value: cleanup},
-			{Label: "VPC-SC policy (location)", Value: vpcsc}},
+			{Label: "VPC-SC policy (location)", Value: vpcsc}, {Label: "Project settings", Value: settings}},
 		Sections: []console.Section{{ID: "images", Label: "Images", Listing: images}, {ID: "rules", Label: "Rules", Listing: rules},
 			{ID: "attachments", Label: "Attachments", Listing: attachments}},
 	}
@@ -174,10 +178,15 @@ func (p artifactRegistryProvider) versionDetail(st *registry.Store, repo registr
 	if err != nil {
 		return console.Detail{}, fmt.Errorf("version %s of %s not found", digest, image)
 	}
-	files := console.Listing{Columns: []string{"Kind", "Media type", "Size"}, NameColumn: "Digest", Noun: "files"}
+	files := console.Listing{Columns: []string{"Kind", "Media type", "Size", "Annotations"}, NameColumn: "Digest", Noun: "files"}
+	repoName := "projects/" + repo.Project + "/locations/" + repo.Location + "/repositories/" + repo.Repository
 	add := func(kind string, d registry.Descriptor) {
+		ann := "-"
+		if f, err := runadapter.ConfigServer().GetFile(context.Background(), &arpb.GetFileRequest{Name: repoName + "/files/" + d.Digest}); err == nil {
+			ann = formatAnnotations(f.GetAnnotations())
+		}
 		files.Items = append(files.Items, console.Resource{Name: d.Digest, Fields: map[string]string{
-			"Kind": kind, "Media type": orDash(d.MediaType), "Size": humanBytes(d.Size)}})
+			"Kind": kind, "Media type": orDash(d.MediaType), "Size": humanBytes(d.Size), "Annotations": ann}})
 	}
 	if m.Doc != nil {
 		if m.Doc.Config != nil {
@@ -221,6 +230,11 @@ func (p artifactRegistryProvider) DetailActions(_ context.Context, project strin
 				{Name: "condition", Label: "Condition", Type: "text", Help: "optional: a CEL expression, as CreateRule takes"}}},
 			{ID: "delete-rule", Label: "Delete rule", Destructive: true, Fields: []console.Field{
 				{Name: "id", Label: "Rule ID", Type: "text", Required: true}}},
+			{ID: "delete-attachment", Label: "Delete attachment", Destructive: true, Fields: []console.Field{
+				{Name: "id", Label: "Attachment ID", Type: "text", Required: true, Help: "its files stay"}}},
+			{ID: "pull-percent", Label: "Set project pull percent", Fields: []console.Field{
+				{Name: "percent", Label: "Pull percent", Type: "number", Default: "0",
+					Help: "UpdateProjectSettings' pull_percent; gcr.io redirection stays off, as nothing here serves gcr.io"}}},
 			{ID: "vpcsc", Label: "Set VPC-SC policy", Fields: []console.Field{
 				{Name: "policy", Label: "Policy", Type: "select", Options: []string{"DENY", "ALLOW"}, Default: "DENY",
 					Help: "the location's policy for remote repositories' upstream fetches, as UpdateVPCSCConfig sets it"}}},
@@ -230,12 +244,23 @@ func (p artifactRegistryProvider) DetailActions(_ context.Context, project strin
 		return []console.Action{
 			{ID: "display-name", Label: "Set display name", Fields: []console.Field{
 				{Name: "name", Label: "Display name", Type: "text", Help: "empty restores the image's name"}}},
+			{ID: "delete-untagged", Label: "Delete untagged versions", Destructive: true,
+				Confirm: "Every version with no tag is deleted at once, as BatchDeleteVersions does."},
 			{ID: "delete", Label: "Delete image", Destructive: true, Leaves: true,
 				Confirm: "Every version and tag of the image is deleted, as DeletePackage does."}}
 	case 3:
 		return []console.Action{
 			{ID: "annotate", Label: "Set annotations", Fields: []console.Field{{Name: "annotations", Label: "Annotations", Type: "text",
 				Help: "key=value pairs, comma separated, replacing the version's annotations; empty clears them"}}},
+			{ID: "annotate-file", Label: "Set file annotations", Fields: []console.Field{
+				{Name: "file", Label: "File digest", Type: "text", Required: true, Help: "one of the Files below, sha256:..."},
+				{Name: "annotations", Label: "Annotations", Type: "text", Help: "key=value pairs, comma separated; empty clears them"}}},
+			{ID: "attach", Label: "Add attachment", Fields: []console.Field{
+				{Name: "id", Label: "Attachment ID", Type: "text", Required: true},
+				{Name: "type", Label: "Type", Type: "text", Required: true, Default: "application/vnd.spdx+json"},
+				{Name: "file", Label: "File digest", Type: "text", Required: true, Help: "a file of this repository, sha256:..."}}},
+			{ID: "export", Label: "Export to Cloud Storage", Fields: []console.Field{
+				{Name: "path", Label: "Destination", Type: "text", Required: true, Help: "bucket or bucket/dir in this instance's Cloud Storage"}}},
 			{ID: "add-tag", Label: "Add tag", Fields: []console.Field{{Name: "tag", Label: "Tag", Type: "text", Required: true,
 				Help: "a new tag, or an existing one to move to this version"}}},
 			{ID: "remove-tag", Label: "Remove tag", Fields: []console.Field{{Name: "tag", Label: "Tag", Type: "text", Required: true,
@@ -273,6 +298,51 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 	case len(path) == 1 && action == "delete-rule":
 		_, err := cs.DeleteRule(ctx, &arpb.DeleteRuleRequest{Name: repoName + "/rules/" + strings.TrimSpace(values["id"])})
 		return err
+	case len(path) == 1 && action == "delete-attachment":
+		_, err := cs.DeleteAttachment(ctx, &arpb.DeleteAttachmentRequest{Name: repoName + "/attachments/" + strings.TrimSpace(values["id"])})
+		return err
+	case len(path) == 1 && action == "pull-percent":
+		n, err := strconv.Atoi(strings.TrimSpace(values["percent"]))
+		if err != nil {
+			return fmt.Errorf("pull percent %q is not a number", values["percent"])
+		}
+		_, err = cs.UpdateProjectSettings(ctx, &arpb.UpdateProjectSettingsRequest{ProjectSettings: &arpb.ProjectSettings{
+			Name: "projects/" + repo.Project + "/projectSettings", PullPercent: int32(n)}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"pull_percent"}}})
+		return err
+	case len(path) == 2 && action == "delete-untagged":
+		ms, err := st.Manifests(repo, path[1])
+		if err != nil {
+			return err
+		}
+		var names []string
+		for _, m := range ms {
+			if len(m.Tags) == 0 {
+				names = append(names, packageName(repo, path[1])+"/versions/"+m.Digest)
+			}
+		}
+		if len(names) == 0 {
+			return fmt.Errorf("every version of %s is tagged", path[1])
+		}
+		_, err = cs.BatchDeleteVersions(ctx, &arpb.BatchDeleteVersionsRequest{Parent: packageName(repo, path[1]), Names: names})
+		return err
+	case len(path) == 3 && action == "annotate-file":
+		a, err := parseAnnotations(values["annotations"])
+		if err != nil {
+			return err
+		}
+		_, err = cs.UpdateFile(ctx, &arpb.UpdateFileRequest{File: &arpb.File{Name: repoName + "/files/" + strings.TrimSpace(values["file"]), Annotations: a},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"annotations"}}})
+		return err
+	case len(path) == 3 && action == "attach":
+		_, err := cs.CreateAttachment(ctx, &arpb.CreateAttachmentRequest{Parent: repoName, AttachmentId: strings.TrimSpace(values["id"]),
+			Attachment: &arpb.Attachment{Target: packageName(repo, path[1]) + "/versions/" + path[2], Type: strings.TrimSpace(values["type"]),
+				Files: []string{repoName + "/files/" + strings.TrimSpace(values["file"])}}})
+		return err
+	case len(path) == 3 && action == "export":
+		_, err := cs.ExportArtifact(ctx, &arpb.ExportArtifactRequest{Repository: repoName,
+			SourceArtifact: &arpb.ExportArtifactRequest_SourceVersion{SourceVersion: packageName(repo, path[1]) + "/versions/" + path[2]},
+			Destination:    &arpb.ExportArtifactRequest_GcsPath{GcsPath: strings.TrimSpace(values["path"])}})
+		return err
 	case len(path) == 1 && action == "vpcsc":
 		_, err := cs.UpdateVPCSCConfig(ctx, &arpb.UpdateVPCSCConfigRequest{VpcscConfig: &arpb.VPCSCConfig{
 			Name:        "projects/" + repo.Project + "/locations/" + repo.Location + "/vpcscConfig",
@@ -283,18 +353,11 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 			DisplayName: strings.TrimSpace(values["name"])}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name"}}})
 		return err
 	case len(path) == 3 && action == "annotate":
-		a := map[string]string{}
-		for _, kv := range strings.Split(values["annotations"], ",") {
-			if kv = strings.TrimSpace(kv); kv == "" {
-				continue
-			}
-			k, v, ok := strings.Cut(kv, "=")
-			if !ok {
-				return fmt.Errorf("annotation %q must be key=value", kv)
-			}
-			a[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		a, err := parseAnnotations(values["annotations"])
+		if err != nil {
+			return err
 		}
-		_, err := cs.UpdateVersion(ctx, &arpb.UpdateVersionRequest{Version: &arpb.Version{Name: packageName(repo, path[1]) + "/versions/" + path[2],
+		_, err = cs.UpdateVersion(ctx, &arpb.UpdateVersionRequest{Version: &arpb.Version{Name: packageName(repo, path[1]) + "/versions/" + path[2],
 			Annotations: a}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"annotations"}}})
 		return err
 	case len(path) == 2 && action == "delete":
@@ -325,6 +388,22 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 func packageName(repo registry.Repo, image string) string {
 	return "projects/" + repo.Project + "/locations/" + repo.Location + "/repositories/" + repo.Repository +
 		"/packages/" + registry.EscapePackage(image)
+}
+
+// parseAnnotations reads comma-separated key=value pairs.
+func parseAnnotations(s string) (map[string]string, error) {
+	a := map[string]string{}
+	for _, kv := range strings.Split(s, ",") {
+		if kv = strings.TrimSpace(kv); kv == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			return nil, fmt.Errorf("annotation %q must be key=value", kv)
+		}
+		a[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	return a, nil
 }
 
 // formatAnnotations is key=value pairs, sorted, or a dash.
