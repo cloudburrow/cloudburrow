@@ -80,6 +80,23 @@ type runBuildsProvider struct {
 	// runAddr is the Run port, where Cloud Build is served; the console's
 	// Run build and Cancel go through the official client there.
 	runAddr func() string
+	// hostSteps is --cloudbuild-host-steps (#1382): whether CreateBuild runs
+	// steps other than docker build, docker push and pack. The history says
+	// which, and why.
+	hostSteps bool
+}
+
+// buildStepsNote is what the build history says about arbitrary steps
+// (#1382, ADR-0004).
+func buildStepsNote(on bool) string {
+	if on {
+		return "Build steps other than docker build, docker push and pack are on (--cloudbuild-host-steps): each runs as a " +
+			"container on the host's Docker with the host's Docker socket mounted, so they run only for builds submitted " +
+			"from this machine's loopback, never from a pod."
+	}
+	return "Build steps other than docker build, docker push and pack are off: each would run as a container on the " +
+		"host's Docker with the host's Docker socket mounted, which gives it control of the host, so a build with one is " +
+		"refused. Start the instance with --cloudbuild-host-steps to run them, for builds submitted from this machine's loopback only."
 }
 
 // withClient dials Cloud Build on the Run port as an SDK would.
@@ -213,7 +230,7 @@ const buildsFilterHelp = `ListBuilds' filter, as "Filtering build results" docum
 // (#1382), evaluated by the same code as the API.
 func (p runBuildsProvider) ListFiltered(_ context.Context, project, filter string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Location", "Image", "Digest", "Source", "Age"},
-		NameColumn: "Build", Noun: "builds", AlwaysStatus: true,
+		NameColumn: "Build", Noun: "builds", AlwaysStatus: true, Note: buildStepsNote(p.hostSteps),
 		ServerFilter: &console.ServerFilter{Value: filter, Placeholder: `status="FAILURE" OR status="TIMEOUT"`, Help: buildsFilterHelp}}
 	if project == "" {
 		project = p.defaultProject

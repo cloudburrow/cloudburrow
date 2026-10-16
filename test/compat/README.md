@@ -125,6 +125,7 @@ neither list.
 | `CLOUDBURROW_TEST_STORAGE_VERSIONING_PROBE` | `TestStorageVersioningPersistentMode`, against the builtin `storage-server` |
 | `CLOUDBURROW_TEST_SIGNING_KEY`, `CLOUDBURROW_TEST_SIGNING_EMAIL` | the signed URL tests, against a builtin `storage-server` started with `--signing-cert` |
 | `CLOUDBURROW_TEST_FUNCTIONS` | `TestFunctionsFrameworkBuiltWithBuildpacks`, `TestFunctionsRebuildReusesLayers` and `TestFunctionsBuildBrokenModulePathFails`, which run only when it is `1` |
+| `CLOUDBURROW_TEST_STEP_IMAGE` | the Cloud Build arbitrary-step tests (#1382): the shell image their steps run, instead of `alpine:3.20`, for one already on the host |
 | `CLOUDBURROW_TEST_NAMESPACE` | the Spanner restart and in-cluster tests; defaults to `cloudburrow`, the namespace every instance uses |
 
 The restart probes are driven by ci.yml's compat job, which runs each setup, stops the

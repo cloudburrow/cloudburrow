@@ -178,3 +178,18 @@ func TestConsoleRunBuildAndCancel(t *testing.T) {
 		t.Errorf("a source without gs:// was accepted")
 	}
 }
+
+// TestConsoleBuildHistorySaysWhetherStepsAreOn (#1382): the build history
+// says arbitrary steps are off, naming the flag and the Docker socket, or
+// on and loopback only.
+func TestConsoleBuildHistorySaysWhetherStepsAreOn(t *testing.T) {
+	off, err := runBuildsProvider{}.List(context.Background(), "console-steps")
+	if err != nil || !strings.Contains(off.Note, "are off") || !strings.Contains(off.Note, "--cloudbuild-host-steps") ||
+		!strings.Contains(off.Note, "Docker socket") {
+		t.Errorf("the note without the flag = %q, %v", off.Note, err)
+	}
+	on, err := runBuildsProvider{hostSteps: true}.List(context.Background(), "console-steps")
+	if err != nil || !strings.Contains(on.Note, "are on") || !strings.Contains(on.Note, "loopback") {
+		t.Errorf("the note with the flag = %q, %v", on.Note, err)
+	}
+}

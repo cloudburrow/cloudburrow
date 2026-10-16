@@ -1030,8 +1030,9 @@
         "tests": [
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
-          "test/compat/cloudbuildsteps_test.go:201 TestGcloudBuildsStepsAndList",
-          "test/compat/cloudbuildsteps_test.go:49 TestCloudBuildArbitraryStepsFilterAndRetry"
+          "test/compat/cloudbuildsteps_test.go:220 TestGcloudBuildsStepsAndList",
+          "test/compat/cloudbuildsteps_test.go:283 TestCloudBuildHostStepsOff",
+          "test/compat/cloudbuildsteps_test.go:66 TestCloudBuildArbitraryStepsFilterAndRetry"
         ]
       },
       {
@@ -1060,7 +1061,7 @@
         "tests": [
           "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
-          "test/compat/cloudbuildsteps_test.go:49 TestCloudBuildArbitraryStepsFilterAndRetry",
+          "test/compat/cloudbuildsteps_test.go:66 TestCloudBuildArbitraryStepsFilterAndRetry",
           "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
         ]
       },
@@ -1090,8 +1091,9 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuilds",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildsteps_test.go:201 TestGcloudBuildsStepsAndList",
-          "test/compat/cloudbuildsteps_test.go:49 TestCloudBuildArbitraryStepsFilterAndRetry",
+          "test/compat/cloudbuildsteps_test.go:220 TestGcloudBuildsStepsAndList",
+          "test/compat/cloudbuildsteps_test.go:283 TestCloudBuildHostStepsOff",
+          "test/compat/cloudbuildsteps_test.go:66 TestCloudBuildArbitraryStepsFilterAndRetry",
           "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
         ]
       },
@@ -1109,7 +1111,7 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/RetryBuild",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildsteps_test.go:49 TestCloudBuildArbitraryStepsFilterAndRetry"
+          "test/compat/cloudbuildsteps_test.go:66 TestCloudBuildArbitraryStepsFilterAndRetry"
         ]
       },
       {

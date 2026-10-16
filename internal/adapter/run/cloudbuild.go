@@ -257,7 +257,9 @@ func SourceDeployHandler(register func(grpc.ServiceRegistrar), next http.Handler
 	register(t)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isSourceDeployPath(r.URL.Path) {
-			t.ServeHTTP(w, r)
+			// The caller's Host and address go with the request: CreateBuild
+			// runs arbitrary steps only from the host's loopback (#1382).
+			t.ServeHTTP(w, withCaller(r))
 			return
 		}
 		next.ServeHTTP(w, r)

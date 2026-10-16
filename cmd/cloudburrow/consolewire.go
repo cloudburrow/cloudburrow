@@ -176,7 +176,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 			runAddr:        runAddrOf(d.run),
 			defaultProject: d.cfg.DefaultProject(),
 			readyTimeout:   time.Duration(d.cfg.ReadyTimeout),
-		}, runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run)},
+		}, runBuildsProvider{defaultProject: d.cfg.DefaultProject(), runAddr: runAddrOf(d.run), hostSteps: d.cfg.CloudBuildHostSteps},
 			// Artifact Registry's repositories are served on the Run port (#1347).
 			artifactRegistryProvider{defaultProject: d.cfg.DefaultProject()},
 			// Cloud Functions v2 is served on the Run port too (#1377).

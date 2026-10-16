@@ -530,7 +530,7 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	plan := make([]plannedStep, len(in.GetSteps()))
 	deps := make([][]int, len(in.GetSteps()))
 	ids := map[string]int{}
-	containers := false
+	containers, firstContainer := false, 0
 	for i, st := range in.GetSteps() {
 		switch w := st.GetWaitFor(); {
 		case len(w) == 0:
@@ -560,6 +560,9 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 			return nil, err
 		}
 		if p.kind == stepContainer {
+			if !containers {
+				firstContainer = i
+			}
 			containers = true
 			if st.GetAutomapSubstitutions() || in.GetOptions().GetAutomapSubstitutions() {
 				keys := make([]string, 0, len(subs))
@@ -576,6 +579,11 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	}
 	var runner StepRunner
 	if containers {
+		// Refused before anything runs (#1382): the step gets the host's
+		// Docker socket.
+		if err := c.hostStepsRefusal(ctx, firstContainer, plan[firstContainer].step.Image); err != nil {
+			return nil, err
+		}
 		var ok bool
 		if runner, ok = c.builds.builder.(StepRunner); !ok {
 			return nil, apierror.Unimplemented("this instance's builder runs only docker build, docker push and pack steps; " +

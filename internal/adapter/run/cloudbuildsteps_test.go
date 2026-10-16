@@ -98,8 +98,8 @@ func TestCreateBuildArbitrarySteps(t *testing.T) {
 	s := NewServer(&Knative{}, "t", time.Minute)
 	b := &stepBuilder{fakeBuilder: fakeBuilder{got: make(chan BuildSpec, 2)}}
 	f := fakeFetcher{objects: map[string]string{"b/src.tgz": "archive"}}
-	cb := s.Builds(f, b).CloudBuild()
-	op, err := cb.CreateBuild(context.Background(), &cbpb.CreateBuildRequest{Parent: "projects/proj-1/locations/us-central1",
+	cb := s.Builds(f, b).AllowHostSteps(true).CloudBuild()
+	op, err := cb.CreateBuild(fromLoopback(), &cbpb.CreateBuildRequest{Parent: "projects/proj-1/locations/us-central1",
 		Build: &cbpb.Build{Source: cbSource(), Substitutions: map[string]string{"_V": "1"},
 			Options: &cbpb.BuildOptions{AutomapSubstitutions: true},
 			Steps: []*cbpb.BuildStep{
@@ -145,7 +145,7 @@ func TestCreateBuildArbitrarySteps(t *testing.T) {
 	b.mu.Unlock()
 	// A step that exits non-zero fails the build with its exit code; the
 	// step waiting for it never starts.
-	op, err = cb.CreateBuild(context.Background(), &cbpb.CreateBuildRequest{ProjectId: "proj-1", Build: &cbpb.Build{
+	op, err = cb.CreateBuild(fromLoopback(), &cbpb.CreateBuildRequest{ProjectId: "proj-1", Build: &cbpb.Build{
 		Steps: []*cbpb.BuildStep{{Name: "alpine", Args: []string{"fail", "now"}}, {Name: "alpine", Args: []string{"echo", "never"}}}}})
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +164,7 @@ func TestCreateBuildArbitrarySteps(t *testing.T) {
 		"bad env":       {Name: "alpine", Env: []string{"NOEQUALS"}},
 		"docker volume": {Name: "docker", Args: []string{"push", "x"}, Volumes: []*cbpb.Volume{{Name: "v", Path: "/v"}}},
 	} {
-		_, err := cb.CreateBuild(context.Background(), &cbpb.CreateBuildRequest{ProjectId: "p", Build: &cbpb.Build{Steps: []*cbpb.BuildStep{st}}})
+		_, err := cb.CreateBuild(fromLoopback(), &cbpb.CreateBuildRequest{ProjectId: "p", Build: &cbpb.Build{Steps: []*cbpb.BuildStep{st}}})
 		if c := status.Code(err); c != codes.InvalidArgument && c != codes.Unimplemented {
 			t.Errorf("%s: %v; want a refusal", name, err)
 		}
@@ -176,14 +176,14 @@ func TestCreateBuildArbitrarySteps(t *testing.T) {
 func TestRetryBuild(t *testing.T) {
 	s := NewServer(&Knative{}, "t", time.Minute)
 	b := &stepBuilder{fakeBuilder: fakeBuilder{got: make(chan BuildSpec, 2)}}
-	cb := s.Builds(fakeFetcher{}, b).CloudBuild()
-	op, err := cb.CreateBuild(context.Background(), &cbpb.CreateBuildRequest{Parent: "projects/proj-r/locations/europe-west1",
+	cb := s.Builds(fakeFetcher{}, b).AllowHostSteps(true).CloudBuild()
+	op, err := cb.CreateBuild(fromLoopback(), &cbpb.CreateBuildRequest{Parent: "projects/proj-r/locations/europe-west1",
 		Build: &cbpb.Build{Tags: []string{"t1"}, Steps: []*cbpb.BuildStep{{Name: "alpine", Args: []string{"echo", "$BUILD_ID"}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	first, _ := buildResult(t, s, op.GetName())
-	rop, err := cb.RetryBuild(context.Background(), &cbpb.RetryBuildRequest{Name: first.GetName()})
+	rop, err := cb.RetryBuild(fromLoopback(), &cbpb.RetryBuildRequest{Name: first.GetName()})
 	if err != nil {
 		t.Fatalf("RetryBuild: %v", err)
 	}
@@ -195,16 +195,16 @@ func TestRetryBuild(t *testing.T) {
 		second.GetTags()[0] != "t1" || second.GetSteps()[0].GetArgs()[1] != second.GetId() {
 		t.Errorf("retried build = %v, %v", second, err)
 	}
-	gop, err := cb.RetryBuild(context.Background(), &cbpb.RetryBuildRequest{ProjectId: "proj-r", Id: first.GetId()})
+	gop, err := cb.RetryBuild(fromLoopback(), &cbpb.RetryBuildRequest{ProjectId: "proj-r", Id: first.GetId()})
 	if err != nil || !strings.HasPrefix(gop.GetName(), "operations/build/proj-r/") {
 		t.Errorf("global RetryBuild = %v, %v", gop, err)
 	}
 	waitOp(t, s, gop.GetName())
 	sub := newCloudBuild("projects/proj-r/locations/europe-west1", "gcr.io/p/x", BuildDocker, "b", "o")
-	if _, err := cb.RetryBuild(context.Background(), &cbpb.RetryBuildRequest{Name: sub.GetName()}); status.Code(err) != codes.FailedPrecondition {
+	if _, err := cb.RetryBuild(fromLoopback(), &cbpb.RetryBuildRequest{Name: sub.GetName()}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("RetryBuild of a SubmitBuild build = %v; want FAILED_PRECONDITION", err)
 	}
-	if _, err := cb.RetryBuild(context.Background(), &cbpb.RetryBuildRequest{ProjectId: "proj-r", Id: "missing"}); status.Code(err) != codes.NotFound {
+	if _, err := cb.RetryBuild(fromLoopback(), &cbpb.RetryBuildRequest{ProjectId: "proj-r", Id: "missing"}); status.Code(err) != codes.NotFound {
 		t.Errorf("RetryBuild of a missing build = %v", err)
 	}
 }

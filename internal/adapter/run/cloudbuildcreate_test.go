@@ -133,9 +133,11 @@ func TestCreateBuildRefusals(t *testing.T) {
 		b    *cbpb.Build
 		code codes.Code
 	}{
+		// An arbitrary step, docker run among them, is off without
+		// --cloudbuild-host-steps (#1382).
 		"no steps":       {&cbpb.Build{Source: cbSource()}, codes.InvalidArgument},
-		"arbitrary step": {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "ubuntu", Args: []string{"echo", "hi"}}}}, codes.Unimplemented},
-		"docker run":     {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"run", "x"}}}}, codes.Unimplemented},
+		"arbitrary step": {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "ubuntu", Args: []string{"echo", "hi"}}}}, codes.FailedPrecondition},
+		"docker run":     {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"run", "x"}}}}, codes.FailedPrecondition},
 		"secrets":        {&cbpb.Build{Source: cbSource(), AvailableSecrets: &cbpb.Secrets{}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.Unimplemented},
 		"repo source":    {&cbpb.Build{Source: &cbpb.Source{Source: &cbpb.Source_RepoSource{RepoSource: &cbpb.RepoSource{}}}, Steps: []*cbpb.BuildStep{{Name: "docker", Args: []string{"push", "x"}}}}, codes.Unimplemented},
 		"bad waitFor":    {&cbpb.Build{Source: cbSource(), Steps: []*cbpb.BuildStep{{Name: "docker", WaitFor: []string{"later"}, Args: []string{"push", "x"}}}}, codes.InvalidArgument},

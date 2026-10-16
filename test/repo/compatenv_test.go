@@ -44,6 +44,10 @@ var compatEnvExceptions = map[string]string{
 	"CLOUDBURROW_TEST_SECRETS_EXPECT":           "restart probe expectation (present or absent)",
 	"CLOUDBURROW_TEST_TASKS_EXPECT":             "restart probe expectation (present or absent)",
 	"CLOUDBURROW_TEST_SCHEDULER_EXPECT":         "restart probe expectation (present or absent)",
+	// The image the Cloud Build arbitrary-step tests run (#1382), when the
+	// default alpine:3.20 is not to be pulled; a host choice, not an
+	// instance's.
+	"CLOUDBURROW_TEST_STEP_IMAGE": "host fixture: an image already on the machine",
 	// An opt-in switch for a slow test no CI shard runs (#678).
 	"CLOUDBURROW_TEST_FUNCTIONS": "opt-in switch",
 	// The signed URL tests' key and account, for the builtin storage-server

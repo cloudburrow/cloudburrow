@@ -30,7 +30,24 @@ func stepImage() string {
 	return "alpine:3.20"
 }
 
+// hostStepsFlag is the `up` flag without which arbitrary steps are refused
+// (#1382).
+const hostStepsFlag = "--cloudbuild-host-steps"
+
+// skipWithoutHostSteps skips a test of arbitrary steps on an instance
+// started without --cloudbuild-host-steps, whose CreateBuild refuses them
+// FAILED_PRECONDITION naming the flag. The run shard sets it.
+func skipWithoutHostSteps(t *testing.T, err error) {
+	t.Helper()
+	if status.Code(err) == codes.FailedPrecondition && strings.Contains(err.Error(), hostStepsFlag) {
+		t.Skip("the instance runs arbitrary build steps only with " + hostStepsFlag + " (#1382, ADR-0004); start it with the flag")
+	}
+}
+
 // covers: google.devtools.cloudbuild.v1.CloudBuild/CreateBuild, google.devtools.cloudbuild.v1.CloudBuild/ListBuilds, google.devtools.cloudbuild.v1.CloudBuild/RetryBuild, google.devtools.cloudbuild.v1.CloudBuild/GetBuild
+//
+// It runs on an instance started with --cloudbuild-host-steps, and skips
+// on one without, where TestCloudBuildHostStepsOff runs instead.
 //
 // TestCloudBuildArbitraryStepsFilterAndRetry (#1382), with the official
 // Cloud Build client over gRPC on the Run port:
@@ -80,6 +97,7 @@ func TestCloudBuildArbitraryStepsFilterAndRetry(t *testing.T) {
 			{Id: "image", Name: "gcr.io/cloud-builders/docker", WaitFor: []string{"read"}, Args: []string{"build", "-t", image, "."}},
 		},
 		Images: []string{image}}})
+	skipWithoutHostSteps(t, err)
 	if err != nil {
 		t.Fatalf("CreateBuild: %v", err)
 	}
@@ -197,7 +215,8 @@ func TestCloudBuildArbitraryStepsFilterAndRetry(t *testing.T) {
 // a cloudbuild.yaml whose first step is a shell image, not docker, writing
 // a file a docker build step then copies in, through the configuration
 // `cloudburrow gcloud-setup` writes, egress blocked; then `gcloud builds
-// list --filter` by the build's tag and status.
+// list --filter` by the build's tag and status. It needs
+// --cloudbuild-host-steps, as TestCloudBuildArbitraryStepsFilterAndRetry.
 func TestGcloudBuildsStepsAndList(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvRun)
@@ -226,6 +245,9 @@ func TestGcloudBuildsStepsAndList(t *testing.T) {
 	out, err := g.run(nil, "builds", "submit", src, "--config="+filepath.Join(src, "cloudbuild.yaml"),
 		"--substitutions=_TAG=v1", "--async", "--format=value(id)")
 	t.Logf("gcloud builds submit --config:\n%s", out)
+	if err != nil && strings.Contains(out, hostStepsFlag) {
+		t.Skip("the instance runs arbitrary build steps only with " + hostStepsFlag + " (#1382, ADR-0004); start it with the flag")
+	}
 	if err != nil {
 		t.Fatalf("gcloud builds submit: %v", err)
 	}
@@ -246,5 +268,63 @@ func TestGcloudBuildsStepsAndList(t *testing.T) {
 	}
 	if none := g.must("builds", "list", "--filter=tags="+tag+" AND status=FAILURE", "--format=value(id)"); strings.TrimSpace(none) != "" {
 		t.Errorf("gcloud builds list --filter status=FAILURE = %q, want none", none)
+	}
+}
+
+// covers: google.devtools.cloudbuild.v1.CloudBuild/CreateBuild, google.devtools.cloudbuild.v1.CloudBuild/ListBuilds
+//
+// TestCloudBuildHostStepsOff (#1382, ADR-0004), with the official Cloud
+// Build client on an instance started without --cloudbuild-host-steps: a
+// build with a step that is not a docker build, push or pack step is
+// refused FAILED_PRECONDITION before anything runs, naming the flag and
+// the host's Docker socket, and leaves no build behind; a build of only a
+// docker build step still runs to SUCCESS. It skips on an instance with the
+// flag, where the steps tests above run.
+func TestCloudBuildHostStepsOff(t *testing.T) {
+	h := New(t)
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker is required: builds run with the host's Docker")
+	}
+	ctx, cancel := context.WithTimeout(h.Context(), 5*time.Minute)
+	t.Cleanup(cancel)
+	parent := runParent(h)
+	cb := cloudBuildClient(ctx, t, h)
+	bucket := uploadSource(ctx, t, h, "off.tar.gz", sourceArchive(t, map[string][]byte{
+		"Dockerfile": []byte("FROM scratch\nCOPY hello.txt /hello.txt\n"),
+		"hello.txt":  []byte("hello\n"),
+	}))
+	src := &cbpb.Source{Source: &cbpb.Source_StorageSource{StorageSource: &cbpb.StorageSource{Bucket: bucket, Object: "off.tar.gz"}}}
+	tag := "o" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
+	image := "us-central1-docker.pkg.dev/" + h.Project() + "/cb-repo/off:v1"
+
+	op, err := cb.CreateBuild(ctx, &cbpb.CreateBuildRequest{Parent: parent, ProjectId: h.Project(), Build: &cbpb.Build{
+		Source: src, Tags: []string{tag},
+		Steps: []*cbpb.BuildStep{
+			{Name: stepImage(), Entrypoint: "sh", Args: []string{"-c", "echo should-not-run"}},
+			{Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", image, "."}},
+		}}})
+	if err == nil {
+		_, _ = op.Wait(ctx)
+		t.Skip("the instance runs with " + hostStepsFlag + "; TestCloudBuildArbitraryStepsFilterAndRetry covers it")
+	}
+	if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), hostStepsFlag) ||
+		!strings.Contains(err.Error(), "Docker socket") || !strings.Contains(err.Error(), "build step 0") {
+		t.Fatalf("CreateBuild with an arbitrary step = %v; want FAILED_PRECONDITION naming %s and the Docker socket", err, hostStepsFlag)
+	}
+	it := cb.ListBuilds(ctx, &cbpb.ListBuildsRequest{ProjectId: h.Project(), Filter: `tags="` + tag + `"`})
+	if x, err := it.Next(); err != iterator.Done {
+		t.Errorf("the refused build was recorded: %v, %v", x, err)
+	}
+
+	dop, err := cb.CreateBuild(ctx, &cbpb.CreateBuildRequest{Parent: parent, ProjectId: h.Project(), Build: &cbpb.Build{
+		Source: src, Tags: []string{tag},
+		Steps:  []*cbpb.BuildStep{{Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", image, "."}}},
+		Images: []string{image}}})
+	if err != nil {
+		t.Fatalf("CreateBuild of a docker build alone: %v", err)
+	}
+	b, err := dop.Wait(ctx)
+	if err != nil || b.GetStatus() != cbpb.Build_SUCCESS || len(b.GetResults().GetImages()) != 1 {
+		t.Fatalf("the docker build = %v, %v", b, err)
 	}
 }

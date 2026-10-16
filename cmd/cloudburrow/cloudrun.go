@@ -146,7 +146,8 @@ func (r *runService) Start(ctx context.Context) error {
 		}
 		fetch = sf
 	}
-	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg))
+	// Arbitrary steps run only with --cloudbuild-host-steps, from loopback (#1382).
+	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg)).AllowHostSteps(r.cfg.CloudBuildHostSteps)
 	register := func(g grpc.ServiceRegistrar) {
 		adapter.Register(g)
 		adapter.Revisions().Register(g)

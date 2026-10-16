@@ -61,13 +61,29 @@ host's own architecture: Google's workers are linux/amd64. The step's container 
 host's network as any container does, so a step that calls a Google API, such as a
 `gcr.io/cloud-builders/gcloud` step, calls Google, not this instance.
 
-**Security.** A step gets the host's Docker socket, as on Google, where the socket belongs to a
-throwaway VM. Here it belongs to the developer's machine: a step can start any container,
-including a privileged one. CreateBuild is reachable only where ADR-0004 allows the service APIs
-to be reached: loopback, and the instance's own pods through `cloudburrow-host`. A workload
-deployed to the instance can therefore run a build with the socket, and that is the same trust
-CloudBurrow already places in what you deploy. Do not run builds from sources you would not run
-on the host.
+**Security: off by default, loopback only (ADR-0004, decided 2026-10-16).** A step gets the
+host's Docker socket, as on Google, where the socket belongs to a throwaway VM. Here it belongs
+to the developer's machine: a step can start any container, including a privileged one, with any
+of the host's files mounted. So these steps run only when `up` is given
+`--cloudbuild-host-steps` (`CLOUDBURROW_CLOUDBUILD_HOST_STEPS=true`, or `"cloudbuildHostSteps":
+true` in a config file you name; a discovered `./cloudburrow.json` cannot set it). Without it, a
+build with any step other than docker build, docker push or pack is refused before anything
+runs, `FAILED_PRECONDITION`:
+
+```
+build step 0 (alpine) is not a docker build, docker push or pack step, and this instance runs
+such steps only when started with --cloudbuild-host-steps: each one runs as a container on the
+host's Docker with the host's Docker socket mounted, which gives it control of the host (ADR-0004)
+```
+
+Docker build, push and pack builds, `gcloud builds submit --tag`, source deploys and functions
+are unaffected. With the flag on, such a build still runs only when it was submitted from this
+machine's loopback: from a loopback address, to `127.0.0.1`, `[::1]` or `localhost`, as the SDK,
+gcloud (through `gcloud-setup`), Terraform and the console's Retry do. A pod's `CreateBuild` or
+`RetryBuild` through `cloudburrow-host` (or `host.docker.internal`, the kind gateway or a cluster
+IP), and another machine's under `--allow-remote`, is refused `FAILED_PRECONDITION` with the
+reason. The console's build history says whether the steps are on, and why. Do not run builds
+from sources you would not run on the host.
 
 Built-in (`$PROJECT_ID`, `$PROJECT_NUMBER`, `$BUILD_ID`, `$LOCATION`) and user (`$_NAME`)
 substitutions apply to a step's `name`, `args`, `env`, `dir` and `entrypoint`, and to `images`.
