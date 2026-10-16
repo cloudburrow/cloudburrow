@@ -98,6 +98,7 @@ func testGcloudSetup(t *testing.T, gdir, stateDir string) string {
 		// Artifact Registry and Cloud Build on the Run port (#1347).
 		"artifactregistry": "http://127.0.0.1:9004/",
 		"cloudbuild":       "http://127.0.0.1:9004/",
+		"cloudfunctions":   "http://127.0.0.1:9004/",
 	}
 	if got := sections["api_endpoint_overrides"]; !reflect.DeepEqual(got, wantOverrides) {
 		t.Errorf("api_endpoint_overrides = %v, want %v:\n%s", got, wantOverrides, conf)

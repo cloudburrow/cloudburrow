@@ -2,6 +2,7 @@ package main
 
 import (
 	adminpb "cloud.google.com/go/firestore/apiv1/admin/adminpb"
+	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"context"
 	"fmt"
 	"net"
@@ -82,6 +83,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.Builds(nil, nil).Register(srv)
 	runSrv.ArtifactRegistry().Register(srv)
 	runSrv.CloudBuild().Register(srv)
+	// FunctionService alone: its IAM and Locations mixins are KMS's above.
+	functionspb.RegisterFunctionServiceServer(srv, runSrv.Functions(runSrv.Builds(nil, nil), func() string { return "" }))
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

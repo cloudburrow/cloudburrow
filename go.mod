@@ -64,6 +64,7 @@ require (
 )
 
 require (
+	cloud.google.com/go/functions v1.26.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 )

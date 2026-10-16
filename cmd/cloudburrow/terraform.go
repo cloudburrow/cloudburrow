@@ -57,6 +57,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// this instance, never sent to Google (TestTerraformCloudBuildTriggerRefused).
 	{config.ServiceRun, "artifact_registry_custom_endpoint", "GOOGLE_ARTIFACT_REGISTRY_CUSTOM_ENDPOINT", "/v1/", true},
 	{config.ServiceRun, "cloud_build_custom_endpoint", "GOOGLE_CLOUD_BUILD_CUSTOM_ENDPOINT", "/v1/", true},
+	// Cloud Functions v2 (#1377), on the Run port: a function is a
+	// buildpacks build and a Cloud Run service. google_cloudfunctions2_function
+	// applies, plans clean, updates in place and destroys in
+	// TestTerraformCloudFunctions2Function, gated as the Functions tests are.
+	{config.ServiceRun, "cloudfunctions2_custom_endpoint", "GOOGLE_CLOUDFUNCTIONS2_CUSTOM_ENDPOINT", "/v2/", true},
 	// Cloud KMS (#425): a key ring, a key and a version apply, plan clean,
 	// update their labels and destroy in TestTerraformKMS, over the JSON API
 	// (#422-#424). The provider's discovery client strips the version from
@@ -250,15 +255,15 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	if !run {
 		out = append(out,
 			unpointedPrefix{"google_artifact_registry_", "this instance does not serve Artifact Registry (it is on the Run port)"},
-			unpointedPrefix{"google_cloudbuild_", "this instance does not serve Cloud Build (it is on the Run port)"})
+			unpointedPrefix{"google_cloudbuild_", "this instance does not serve Cloud Build (it is on the Run port)"},
+			unpointedPrefix{"google_cloudfunctions2_", "this instance does not serve Cloud Functions (it is on the Run port)"})
 	}
-	// Whatever is enabled: no instance serves the Cloud Functions API (v1
-	// or v2) or Cloud Build v2's repository connections, so the provider
-	// has no local endpoint for them (#1304). A function is a Cloud Run
-	// service built from source here (`gcloud run deploy --source`).
+	// Whatever is enabled: no instance serves the Cloud Functions v1 API
+	// or Cloud Build v2's repository connections, so the provider has no
+	// local endpoint for them (#1304). Cloud Functions v2 is served on the
+	// Run port (#1377).
 	out = append(out,
-		unpointedPrefix{"google_cloudfunctions_", "CloudBurrow does not serve the Cloud Functions v1 API, #1377"},
-		unpointedPrefix{"google_cloudfunctions2_", "CloudBurrow does not serve the Cloud Functions v2 API, #1377"},
+		unpointedPrefix{"google_cloudfunctions_", "CloudBurrow serves Cloud Functions v2 only: use google_cloudfunctions2_function"},
 		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"})
 	return out
 }
