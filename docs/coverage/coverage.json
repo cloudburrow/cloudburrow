@@ -2291,99 +2291,101 @@
     "Key": "resourcemanager",
     "Title": "Resource Manager v3 (Projects, Folders, Organizations, Tags)",
     "counts": {
-      "Unimplemented": 6,
-      "Verified": 46
+      "Unimplemented": 15,
+      "Verified": 37
     },
     "rows": [
       {
         "method": "google.cloud.resourcemanager.v3.Folders/CreateFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:226 TestTerraformGoogleFolder",
-          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders",
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:257 TestTerraformGoogleFolder"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/DeleteFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:226 TestTerraformGoogleFolder",
-          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders",
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:257 TestTerraformGoogleFolder"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/GetFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/GetIamPolicy",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
-        ]
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/ListFolders",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/MoveFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:226 TestTerraformGoogleFolder",
-          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:257 TestTerraformGoogleFolder"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/SearchFolders",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/SetIamPolicy",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
-        ]
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/TestIamPermissions",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
-        ]
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/UndeleteFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/UpdateFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:226 TestTerraformGoogleFolder",
-          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:257 TestTerraformGoogleFolder"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Organizations/GetIamPolicy",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
-        ]
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Organizations/GetOrganization",
@@ -2401,100 +2403,100 @@
       },
       {
         "method": "google.cloud.resourcemanager.v3.Organizations/SetIamPolicy",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
-        ]
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Organizations/TestIamPermissions",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
-        ]
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/CreateProject",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/DeleteProject",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/GetIamPolicy",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:207 TestGcloudProjectIAM",
-          "test/compat/resourcemanageriam_test.go:253 TestTerraformProjectIAM",
-          "test/compat/resourcemanageriam_test.go:279 TestConsoleProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM"
-        ]
+          "test/compat/resourcemanager_test.go:206 TestResourceManagerV3RefusesIAM"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/GetProject",
         "status": "Verified",
         "tests": [
           "test/compat/projectnumber_test.go:34 TestOneProjectNumberEverywhere",
-          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/ListProjects",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:209 TestResourceManagerV3ListProjects",
-          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
+          "test/compat/resourcemanager_test.go:242 TestResourceManagerV3ListProjects",
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/MoveProject",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/SearchProjects",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/SetIamPolicy",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:279 TestConsoleProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM"
-        ]
+          "test/compat/resourcemanager_test.go:206 TestResourceManagerV3RefusesIAM"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/TestIamPermissions",
-        "status": "Verified",
+        "status": "Unimplemented",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:279 TestConsoleProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM"
-        ]
+          "test/compat/resourcemanager_test.go:206 TestResourceManagerV3RefusesIAM"
+        ],
+        "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/UndeleteProject",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/UpdateProject",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:57 TestResourceManagerV3Projects"
         ]
       },
       {
@@ -2688,8 +2690,9 @@
     "Key": "resourcemanagerv1",
     "Title": "Resource Manager v1 REST (projects, org policies; liens on v1 and v3)",
     "counts": {
-      "Unknown": 13,
-      "Verified": 25
+      "Refused": 1,
+      "Unknown": 18,
+      "Verified": 19
     },
     "rows": [
       {
@@ -2756,7 +2759,7 @@
         "method": "cloudresourcemanager.organizations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:301 TestGcloudFoldersAndOrganizations"
+          "test/compat/resourcemanagerfolders_test.go:332 TestGcloudFoldersAndOrganizations"
         ]
       },
       {
@@ -2765,10 +2768,7 @@
       },
       {
         "method": "cloudresourcemanager.organizations.getIamPolicy",
-        "status": "Verified",
-        "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "cloudresourcemanager.organizations.getOrgPolicy",
@@ -2786,15 +2786,12 @@
         "method": "cloudresourcemanager.organizations.search",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:301 TestGcloudFoldersAndOrganizations"
+          "test/compat/resourcemanagerfolders_test.go:332 TestGcloudFoldersAndOrganizations"
         ]
       },
       {
         "method": "cloudresourcemanager.organizations.setIamPolicy",
-        "status": "Verified",
-        "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "cloudresourcemanager.organizations.setOrgPolicy",
@@ -2802,10 +2799,7 @@
       },
       {
         "method": "cloudresourcemanager.organizations.testIamPermissions",
-        "status": "Verified",
-        "tests": [
-          "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "cloudresourcemanager.projects.clearOrgPolicy",
@@ -2818,7 +2812,6 @@
         "method": "cloudresourcemanager.projects.create",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
         ]
       },
@@ -2826,7 +2819,6 @@
         "method": "cloudresourcemanager.projects.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
         ]
       },
@@ -2834,7 +2826,6 @@
         "method": "cloudresourcemanager.projects.get",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:253 TestTerraformProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
         ]
       },
@@ -2842,8 +2833,8 @@
         "method": "cloudresourcemanager.projects.getAncestry",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:301 TestGcloudFoldersAndOrganizations",
-          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:122 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:332 TestGcloudFoldersAndOrganizations"
         ]
       },
       {
@@ -2855,12 +2846,11 @@
       },
       {
         "method": "cloudresourcemanager.projects.getIamPolicy",
-        "status": "Verified",
+        "status": "Refused",
         "tests": [
-          "test/compat/resourcemanageriam_test.go:207 TestGcloudProjectIAM",
-          "test/compat/resourcemanageriam_test.go:253 TestTerraformProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM"
-        ]
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+        ],
+        "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "cloudresourcemanager.projects.getOrgPolicy",
@@ -2892,12 +2882,7 @@
       },
       {
         "method": "cloudresourcemanager.projects.setIamPolicy",
-        "status": "Verified",
-        "tests": [
-          "test/compat/resourcemanageriam_test.go:207 TestGcloudProjectIAM",
-          "test/compat/resourcemanageriam_test.go:253 TestTerraformProjectIAM",
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "cloudresourcemanager.projects.setOrgPolicy",
@@ -2908,10 +2893,7 @@
       },
       {
         "method": "cloudresourcemanager.projects.testIamPermissions",
-        "status": "Verified",
-        "tests": [
-          "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM"
-        ]
+        "status": "Unknown"
       },
       {
         "method": "cloudresourcemanager.projects.undelete",
@@ -4527,13 +4509,15 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudstorage_test.go:163 TestGcloudStorageParallelCompositeUpload",
-          "test/compat/storage_test.go:267 TestStorageCompose"
+          "test/compat/storage_test.go:267 TestStorageCompose",
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts"
         ]
       },
       {
         "method": "storage.objects.copy",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagejsonapi_test.go:152 TestStorageObjectsCopy"
         ]
       },
@@ -4554,6 +4538,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
+          "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -4577,6 +4562,8 @@
         "tests": [
           "test/compat/storage_test.go:92 TestStorageObjectRoundTrip",
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
+          "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
           "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
           "test/compat/storagexmlpost_test.go:120 TestStorageXMLFormPostPolicyV4",
@@ -4595,6 +4582,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:136 TestStorageListWithPrefix",
+          "test/compat/storagecontexts_test.go:223 TestGcloudStorageObjectContexts",
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:170 TestStorageVersioningPersistentMode",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
@@ -4622,6 +4611,8 @@
           "test/compat/gcloudstorage_test.go:238 TestGcloudStorageClearLabels",
           "test/compat/remaining_test.go:163 TestObjectMetadataUpdate",
           "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
+          "test/compat/storagecontexts_test.go:223 TestGcloudStorageObjectContexts",
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storageretention_test.go:140 TestStorageHoldsBlockDelete",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
@@ -4640,7 +4631,9 @@
         "method": "storage.objects.rewrite",
         "status": "Verified",
         "tests": [
-          "test/compat/remaining_test.go:70 TestObjectCopyAndRewrite"
+          "test/compat/remaining_test.go:70 TestObjectCopyAndRewrite",
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
+          "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
       },
       {
@@ -4743,8 +4736,8 @@
     "Key": "storagegrpc",
     "Title": "Cloud Storage (gRPC API v2)",
     "counts": {
-      "Implemented": 3,
-      "Verified": 21
+      "Implemented": 2,
+      "Verified": 22
     },
     "rows": [
       {
@@ -4771,8 +4764,10 @@
         "method": "google.storage.v2.Storage/ComposeObject",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
-          "test/compat/storagegrpccompose_test.go:20 TestStorageGRPCComposeDeletesSources"
+          "test/compat/storagegrpccompose_test.go:20 TestStorageGRPCComposeDeletesSources",
+          "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
       },
       {
@@ -4816,8 +4811,10 @@
         "method": "google.storage.v2.Storage/GetObject",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
-          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
+          "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
+          "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
       },
       {
@@ -4831,6 +4828,7 @@
         "method": "google.storage.v2.Storage/ListObjects",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
         ]
       },
@@ -4857,7 +4855,8 @@
         "method": "google.storage.v2.Storage/ReadObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
       },
       {
@@ -4871,7 +4870,9 @@
         "method": "google.storage.v2.Storage/RewriteObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
+          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
       },
       {
@@ -4907,14 +4908,18 @@
         "method": "google.storage.v2.Storage/UpdateObject",
         "status": "Verified",
         "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
         ]
       },
       {
         "method": "google.storage.v2.Storage/WriteObject",
-        "status": "Implemented",
-        "note": "no official-SDK test proves it yet"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
+          "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
+        ]
       }
     ]
   },
@@ -6614,7 +6619,6 @@
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
-          "test/compat/bqcopysnapshot_test.go:24 TestBqCopySnapshotCloneAndRestore",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:200 TestConsoleBigQueryJobPageShowsDMLRows",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
@@ -6638,7 +6642,6 @@
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
-          "test/compat/bigquerycloneddl_test.go:196 TestBigQueryCloneDDLOptionsAndSystemTime",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
@@ -6674,7 +6677,6 @@
           "test/compat/bigqueryviewcolumns_test.go:138 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
-          "test/compat/bqcopysnapshot_test.go:24 TestBqCopySnapshotCloneAndRestore",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
@@ -6696,7 +6698,6 @@
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
-          "test/compat/bigquerycloneddl_test.go:196 TestBigQueryCloneDDLOptionsAndSystemTime",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
@@ -6949,7 +6950,6 @@
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
           "test/compat/bigqueryaltertypes_test.go:31 TestBigQueryAlterTableSetDataTypeAndKeys",
           "test/compat/bigquerycharmap_test.go:30 TestBigQueryColumnNameCharacterMap",
-          "test/compat/bigquerycloneddl_test.go:196 TestBigQueryCloneDDLOptionsAndSystemTime",
           "test/compat/bigquerycloneddl_test.go:28 TestBigQueryCloneAndSnapshotDDL",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
@@ -6966,7 +6966,6 @@
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/bigqueryviewcolumns_test.go:138 TestBigQueryViewColumnListInAScriptAndColumnOptions",
           "test/compat/bigqueryviewcolumns_test.go:27 TestBigQueryCreateViewWithAColumnList",
-          "test/compat/bqcopysnapshot_test.go:24 TestBqCopySnapshotCloneAndRestore",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"

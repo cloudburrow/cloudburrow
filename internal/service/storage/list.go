@@ -68,12 +68,18 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 		glob = re
 	}
 
+	filter, err := parseContextFilter(q.Get("filter"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
 	var items []any
 	var prefixes []string
 	seen := map[string]bool{}
 	var last listToken
 	next := ""
-	err := s.meta.View(func(tx Tx) error {
+	err = s.meta.View(func(tx Tx) error {
 		b, ok, err := s.getBucket(tx, bucket)
 		if err != nil {
 			return err
@@ -112,6 +118,16 @@ func (s *Server) objectsList(w http.ResponseWriter, r *http.Request) {
 					for len(vs) > 0 && vs[0].Generation <= tok.Gen {
 						vs = vs[1:]
 					}
+				}
+				// The filter applies to objects; prefixes are exempt.
+				if filter != nil {
+					kept := vs[:0:0]
+					for _, v := range vs {
+						if filter.match(v) {
+							kept = append(kept, v)
+						}
+					}
+					vs = kept
 				}
 				emitItem = len(vs) > 0
 			}

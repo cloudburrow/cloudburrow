@@ -63,6 +63,8 @@ type objectRecord struct {
 	// KeySHA256 is the SHA-256 of the customer-supplied key the object is
 	// encrypted with (csek.go); nil means none.
 	KeySHA256 []byte `json:"keySha256,omitempty"`
+	// Contexts are the object's contexts.custom (contexts.go).
+	Contexts map[string]objectContext `json:"contexts,omitempty"`
 }
 
 func objectKey(bucket, name string) string { return objectPrefix + bucket + "/" + name }
@@ -152,6 +154,9 @@ func (s *Server) objectJSONWith(r *http.Request, o objectRecord, b bucketRecord)
 	}
 	if len(o.Metadata) > 0 {
 		out["metadata"] = o.Metadata
+	}
+	if len(o.Contexts) > 0 {
+		out["contexts"] = contextsJSON(o)
 	}
 	if !o.CustomTime.IsZero() {
 		out["customTime"] = o.CustomTime.UTC().Format(time.RFC3339Nano)
@@ -268,6 +273,9 @@ type uploadMeta struct {
 	// KeySHA256 is the request's customer-supplied key (csek.go), which
 	// persists with a resumable session; it is never read from the body.
 	KeySHA256 []byte `json:"keySha256,omitempty"`
+	// Contexts is the metadata's contexts (contexts.go), kept raw so it
+	// persists with a resumable session.
+	Contexts json.RawMessage `json:"contexts,omitempty"`
 	// protection is the body's holds and retention, for applyProtection.
 	protection map[string]any
 }
@@ -286,7 +294,7 @@ var uploadFields = map[string]string{
 	"acl":          "kept", "owner": "output",
 	"temporaryHold": "kept", "eventBasedHold": "kept", "retention": "kept", "retentionExpirationTime": "output",
 	"customTime": "kept", "kmsKeyName": "customer-managed keys are not implemented",
-	"customerEncryption": "output", "contexts": "object contexts are not implemented",
+	"customerEncryption": "output", "contexts": "kept",
 }
 
 func parseUploadMeta(raw []byte) (uploadMeta, error) {
@@ -312,6 +320,11 @@ func parseUploadMeta(raw []byte) (uploadMeta, error) {
 		return m, badRequest("Invalid argument: %v", err)
 	}
 	m.KeySHA256 = nil
+	if v, ok := generic["contexts"]; ok {
+		if err := checkContextsBody(v); err != nil {
+			return m, err
+		}
+	}
 	m.protection = map[string]any{}
 	for _, k := range []string{"temporaryHold", "eventBasedHold", "retention"} {
 		if v, ok := generic[k]; ok {
@@ -518,6 +531,13 @@ func (s *Server) finalizeObject(bucket string, meta uploadMeta, blob Blob, pre o
 			return objectRecord{}, badRequest("Invalid argument: customTime %q is not RFC 3339", meta.CustomTime)
 		}
 		o.CustomTime = t
+	}
+	if len(meta.Contexts) > 0 {
+		var v any
+		if err := json.Unmarshal(meta.Contexts, &v); err != nil {
+			return objectRecord{}, badRequest("Invalid argument: contexts: %v", err)
+		}
+		applyContexts(&o, v, true, now)
 	}
 	if err := applyProtection(&o, objectRecord{}, meta.protection, false, false, now); err != nil {
 		return objectRecord{}, err

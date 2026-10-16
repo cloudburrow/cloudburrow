@@ -44,7 +44,7 @@ Already tracked: none open. ACLs and object IAM are excluded (below). Closed: `o
 
 | Gap | Why open | Size |
 |---|---|---|
-| gRPC `google.storage.v2` (#1321): served on the JSON API's port; `UNIMPLEMENTED` over gRPC are appendable objects (zonal buckets only, which are not modelled; the store has no unfinalized object) and `ListObjects.filter` (object contexts, which neither API stores) (customer-supplied encryption keys, on both APIs, the `acl` fields, managed-folder IAM and `ComposeObject.delete_source_objects` are carried out since #1345) (#1345) | not built yet | M |
+| gRPC `google.storage.v2` (#1321): served on the JSON API's port; `UNIMPLEMENTED` over gRPC are appendable objects (zonal buckets only, which are not modelled; the store has no unfinalized object) (customer-supplied encryption keys, on both APIs, the `acl` fields, managed-folder IAM, `ComposeObject.delete_source_objects`, object contexts and `ListObjects.filter`, on both APIs, are carried out since #1345) (#1345) | not built yet | M |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` | no emulator support (no cache tier) | M |
 | `buckets.relocate`, `buckets.operations.advanceRelocateBucket` | no emulator support (one location) | M |

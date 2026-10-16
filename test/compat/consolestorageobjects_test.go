@@ -190,13 +190,15 @@ func TestConsoleStorageObjectOperations(t *testing.T) {
 	}
 	values["contentType"], values["cacheControl"] = "application/json", "public, max-age=60"
 	values["contentDisposition"], values["metadata"] = "attachment; filename=a.json", `{"stage":"edited"}`
+	values["contexts"] = `{"team":"blue"}`
 	if code, body := act(objPage(b, "docs/a.txt"), "editmetadata", values); code != http.StatusOK {
 		t.Fatalf("console Edit metadata = %d: %s", code, body)
 	}
 	_, edited := read(src, "docs/a.txt")
 	if edited.ContentType != "application/json" || edited.CacheControl != "public, max-age=60" ||
 		edited.ContentDisposition != "attachment; filename=a.json" ||
-		len(edited.Metadata) != 1 || edited.Metadata["stage"] != "edited" {
+		len(edited.Metadata) != 1 || edited.Metadata["stage"] != "edited" ||
+		edited.Contexts == nil || len(edited.Contexts.Custom) != 1 || edited.Contexts.Custom["team"].Value != "blue" {
 		t.Errorf("after the console's edit Attrs reads %+v", edited)
 	}
 	if edited.Generation != orig.Generation || edited.Metageneration != orig.Metageneration+1 {

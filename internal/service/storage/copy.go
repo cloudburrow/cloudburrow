@@ -31,10 +31,15 @@ func applyDestination(o *objectRecord, body map[string]any) error {
 	if err := checkObjectBody(body); err != nil {
 		return err
 	}
-	if err := applyObjectBody(o, body, false); err != nil {
+	// Body contexts override every source context (dropContextGroups).
+	if _, ok := body["contexts"]; ok {
+		o.Contexts = nil
+	}
+	now := time.Now()
+	if err := applyObjectBody(o, body, false, now); err != nil {
 		return err
 	}
-	return applyProtection(o, objectRecord{}, body, false, false, time.Now())
+	return applyProtection(o, objectRecord{}, body, false, false, now)
 }
 
 // commitNew makes o a new live generation at its bucket and name, under dst
@@ -106,7 +111,7 @@ func (s *Server) sourceObject(q url.Values, bucket, name string) (o objectRecord
 }
 
 func refuseCopyParams(q url.Values) error {
-	for _, p := range []string{"destinationPredefinedAcl", "destinationKmsKeyName", "kmsKeyName", "dropContextGroups"} {
+	for _, p := range []string{"destinationPredefinedAcl", "destinationKmsKeyName", "kmsKeyName"} {
 		if q.Get(p) != "" {
 			return badRequest("%s is not supported by CloudBurrow; it is refused rather than ignored", p)
 		}
@@ -146,9 +151,17 @@ func (s *Server) objectsCopy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	drop, err := dropCustomContexts(q)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	o := src
 	fresh(&o)
 	o.Bucket, o.Name, o.StorageClass, o.KeySHA256 = dstB, dstO, "", dstKey
+	if drop {
+		o.Contexts = nil
+	}
 	if len(body) > 0 {
 		// A copy with a body takes its metadata from the body.
 		o.ContentType, o.ContentEncoding, o.ContentDisposition, o.ContentLanguage, o.CacheControl, o.Metadata = "", "", "", "", "", nil
@@ -181,7 +194,9 @@ type rewriteState struct {
 	// destination bucket's default.
 	StorageClass string `json:"storageClass,omitempty"`
 	// DstKeySHA256 is the destination's customer-supplied key (csek.go).
-	DstKeySHA256 []byte    `json:"dstKeySha256,omitempty"`
+	DstKeySHA256 []byte `json:"dstKeySha256,omitempty"`
+	// DropContexts is dropContextGroups=custom (contexts.go).
+	DropContexts bool      `json:"dropContexts,omitempty"`
 	Done         int64     `json:"done"`
 	Created      time.Time `json:"created"`
 	Used         bool      `json:"used"`
@@ -261,8 +276,13 @@ func (s *Server) objectsRewrite(w http.ResponseWriter, r *http.Request) {
 			writeError(w, err)
 			return
 		}
+		drop, err := dropCustomContexts(q)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
 		st = rewriteState{Token: newUploadID(), Source: src, DstBucket: dstB, DstName: dstO, Body: body, StorageClass: class,
-			DstKeySHA256: dstKey, Created: s.now()}
+			DstKeySHA256: dstKey, DropContexts: drop, Created: s.now()}
 	}
 	step := st.Source.Size - st.Done
 	if per > 0 && step > per {
@@ -288,6 +308,9 @@ func (s *Server) objectsRewrite(w http.ResponseWriter, r *http.Request) {
 	o := st.Source
 	fresh(&o)
 	o.Bucket, o.Name, o.StorageClass, o.KeySHA256 = st.DstBucket, st.DstName, st.StorageClass, st.DstKeySHA256
+	if st.DropContexts {
+		o.Contexts = nil
+	}
 	if len(st.Body) > 0 {
 		o.ContentType, o.ContentEncoding, o.ContentDisposition, o.ContentLanguage, o.CacheControl, o.Metadata = "", "", "", "", "", nil
 		if err := applyDestination(&o, st.Body); err != nil {
@@ -350,8 +373,9 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 		writeError(w, badRequest("kmsKeyName is not supported by CloudBurrow; it is refused rather than ignored"))
 		return
 	}
-	if len(req.DropContextGroups) > 0 {
-		writeError(w, badRequest("dropContextGroups is not supported by CloudBurrow; it is refused rather than ignored"))
+	dropContexts, err := dropCustomContexts(q, req.DropContextGroups...)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 	if n := len(req.SourceObjects); n < 1 || n > maxComponents {
@@ -431,6 +455,9 @@ func (s *Server) objectsCompose(w http.ResponseWriter, r *http.Request) {
 	// the components' combined, which is the CRC32C of the joined bytes.
 	o := objectRecord{Bucket: bucket, Name: name, Blob: blob.ID, Size: blob.Size, CRC32C: blob.CRC32C,
 		ComponentCount: components, StorageClass: sources[0].StorageClass, KeySHA256: key}
+	if !dropContexts {
+		o.Contexts = mergeContexts(sources)
+	}
 	if err := validObjectName(name); err != nil {
 		writeError(w, err)
 		return
