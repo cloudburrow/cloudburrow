@@ -51,6 +51,8 @@ func schedulerEditBlocked(j scheduler.Job) string {
 		return "Edit is not offered: this job's body is not UTF-8 text, which the form cannot hold. Use the API."
 	case j.PubSub != nil && !utf8.Valid(j.PubSub.Data):
 		return "Edit is not offered: this job's message data is not UTF-8 text, which the form cannot hold. Use the API."
+	case j.AppEngine != nil:
+		return "Edit is not offered for an App Engine job: change it with UpdateJob, or delete it and create it again."
 	case j.HTTP == nil && j.PubSub == nil:
 		return "Edit is not offered: this job has no HTTP or Pub/Sub target."
 	}
@@ -145,8 +147,7 @@ func schedulerEditForm(j scheduler.Job) *console.EditForm {
 		Label:  "Edit job",
 		Fields: fields,
 		Note: "Saved through UpdateJob; the next run follows the new schedule. The name, region and target type " +
-			"cannot be changed, and the state changes with Pause and Resume. App Engine targets are not " +
-			"implemented on this instance, so they are not offered.",
+			"cannot be changed, and the state changes with Pause and Resume.",
 	}
 }
 

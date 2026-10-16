@@ -253,9 +253,9 @@ func TestRefusalsAndCRUD(t *testing.T) {
 		t.Errorf("OIDC job without an account = %v, want InvalidArgument", err)
 	}
 	ae := &schedulerpb.Job{Name: parent + "/jobs/ae", Schedule: "* * * * *",
-		Target: &schedulerpb.Job_AppEngineHttpTarget{AppEngineHttpTarget: &schedulerpb.AppEngineHttpTarget{RelativeUri: "/"}}}
-	if _, err := c.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: parent, Job: ae}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("App Engine job = %v, want Unimplemented", err)
+		Target: &schedulerpb.Job_AppEngineHttpTarget{AppEngineHttpTarget: &schedulerpb.AppEngineHttpTarget{RelativeUri: "no-slash"}}}
+	if _, err := c.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: parent, Job: ae}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("App Engine job with a relative_uri lacking / = %v, want InvalidArgument", err)
 	}
 	bad := httpJob("bad-cron", "http://127.0.0.1:1/")
 	bad.Schedule = "every tuesday"

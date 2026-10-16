@@ -3,6 +3,7 @@ package scheduler
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -186,6 +187,9 @@ func (r *Runner) deliver(ctx context.Context, j Job, scheduled time.Time) {
 		grpcCode, msg := codes.OK, ""
 		if err != nil {
 			grpcCode, msg = codes.Unknown, err.Error()
+			if errors.As(err, new(errNoAppEngine)) {
+				grpcCode = codes.NotFound
+			}
 		}
 		_, _ = r.store.Update(j.Name, func(cur *Job) error {
 			cur.LastAttemptTime, cur.LastCode, cur.LastMessage = now, int32(grpcCode), msg
@@ -250,6 +254,8 @@ func (r *Runner) attempt(ctx context.Context, j Job, scheduled time.Time, attemp
 			return resp.StatusCode, fmt.Errorf("%s returned HTTP %d", j.HTTP.URI, resp.StatusCode)
 		}
 		return resp.StatusCode, nil
+	case j.AppEngine != nil:
+		return attemptAppEngine(j)
 	default:
 		return 0, fmt.Errorf("job %s has no target", j.Name)
 	}

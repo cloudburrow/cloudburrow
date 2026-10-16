@@ -176,26 +176,6 @@ func TestGRPCTaskLifecycle(t *testing.T) {
 	}
 }
 
-// App Engine targets are out of scope. Reporting that is better than accepting
-// a task that would never be dispatched.
-func TestGRPCAppEngineTargetIsUnimplemented(t *testing.T) {
-	t.Parallel()
-	c := serve(t)
-	cc := ctx(t)
-	if _, err := c.CreateQueue(cc, &taskspb.CreateQueueRequest{Parent: loc, Queue: &taskspb.Queue{Name: queueA}}); err != nil {
-		t.Fatal(err)
-	}
-	_, err := c.CreateTask(cc, &taskspb.CreateTaskRequest{
-		Parent: queueA,
-		Task: &taskspb.Task{MessageType: &taskspb.Task_AppEngineHttpRequest{
-			AppEngineHttpRequest: &taskspb.AppEngineHttpRequest{RelativeUri: "/work"},
-		}},
-	})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("App Engine target = %v, want Unimplemented", status.Code(err))
-	}
-}
-
 func TestGRPCPauseResume(t *testing.T) {
 	t.Parallel()
 	c := serve(t)

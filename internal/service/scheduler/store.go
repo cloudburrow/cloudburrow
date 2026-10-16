@@ -4,8 +4,8 @@
 // Google publishes no Cloud Scheduler emulator, so this is built, as Cloud
 // Tasks was (#24): jobs with cron schedules in any IANA time zone, delivered
 // to HTTP targets or published to the local Pub/Sub emulator, with retries on
-// the same schedule Cloud Tasks computes. App Engine targets and OIDC/OAuth
-// tokens are refused as UNIMPLEMENTED rather than accepted and ignored.
+// the same schedule Cloud Tasks computes. App Engine targets are stored and
+// their attempts fail, since no App Engine runs locally (appengine1447.go).
 package scheduler
 
 import (
@@ -85,7 +85,9 @@ type Job struct {
 	State       State         `json:"state"`
 	HTTP        *HTTPTarget   `json:"http,omitempty"`
 	PubSub      *PubSubTarget `json:"pubsub,omitempty"`
-	Retry       RetryConfig   `json:"retry"`
+	// AppEngine is an App Engine job's target (#1447, appengine1447.go).
+	AppEngine *AppEngineTarget `json:"appEngine,omitempty"`
+	Retry     RetryConfig      `json:"retry"`
 	// RetryUnset is true for a job given no retry_config: it retries by the
 	// defaults, and its responses carry no retry_config, as the Terraform
 	// provider expects of Google (#591). False, the zero value, for records

@@ -250,12 +250,23 @@ const tasksHTTPMethods = "POST, GET, HEAD, PUT, DELETE, PATCH or OPTIONS"
 // tasksCreateTaskFields is Create task on a queue's page. A function so the
 // pattern check in consolepatterns_test.go reads the fields shipped.
 //
-// An HTTP target only: App Engine targets are refused by this instance's
-// CreateTask, so they are not offered. An OIDC or OAuth token is (#1243).
+// An HTTP target, with an OIDC or OAuth token (#1243), or an App Engine
+// target (#1447), which is stored and whose every attempt fails: there is
+// no App Engine on an instance.
 func tasksCreateTaskFields() []console.Field {
 	return append([]console.Field{
-		{Name: "url", Label: "URL", Type: "url", Required: true,
-			Help: "The full URL the task is sent to, http or https."},
+		{Name: "target", Label: "Target", Type: "select", Required: true, Default: "HTTP",
+			Options: []string{"HTTP", "App Engine"},
+			Help: "HTTP sends the task to the URL. App Engine stores an appEngineHttpRequest; " +
+				"this instance has no App Engine, so each attempt fails with NOT_FOUND (HTTP 404) and is retried."},
+		{Name: "url", Label: "URL", Type: "url",
+			Help: "HTTP target: the full URL the task is sent to, http or https."},
+		{Name: "relativeUri", Label: "Relative URI", Type: "text", Pattern: `^/.*$`,
+			Help: "App Engine target: the path and query, beginning with /; empty is /."},
+		{Name: "appEngineService", Label: "App Engine service", Type: "text",
+			Help: "App Engine target: optional; empty is the default service."},
+		{Name: "appEngineVersion", Label: "App Engine version", Type: "text",
+			Help: "App Engine target: optional; empty is the default version."},
 		{Name: "httpMethod", Label: "HTTP method", Type: "text", Required: true, Default: "POST",
 			Pattern: `^(POST|GET|HEAD|PUT|DELETE|PATCH|OPTIONS)$`,
 			Help:    "One of " + tasksHTTPMethods + ", in capitals."},
@@ -291,6 +302,39 @@ func (p tasksProvider) createTask(ctx context.Context, project, queue string, va
 	if err != nil {
 		return err
 	}
+	var task *cloudtaskspb.Task
+	if values["target"] == "App Engine" {
+		task = &cloudtaskspb.Task{MessageType: &cloudtaskspb.Task_AppEngineHttpRequest{AppEngineHttpRequest: &cloudtaskspb.AppEngineHttpRequest{
+			HttpMethod: cloudtaskspb.HttpMethod(method), RelativeUri: strings.TrimSpace(values["relativeUri"]),
+			Headers: headers, Body: []byte(values["body"]),
+			AppEngineRouting: &cloudtaskspb.AppEngineRouting{
+				Service: strings.TrimSpace(values["appEngineService"]), Version: strings.TrimSpace(values["appEngineVersion"])},
+		}}}
+		if auth.kind != "" {
+			return errors.New("an App Engine task carries no OIDC or OAuth token")
+		}
+	} else {
+		if strings.TrimSpace(values["url"]) == "" {
+			return errors.New("an HTTP task needs a URL")
+		}
+		task = &cloudtaskspb.Task{MessageType: &cloudtaskspb.Task_HttpRequest{HttpRequest: tasksFormHTTPRequest(values, method, headers, auth)}}
+	}
+	if id := strings.TrimSpace(values["taskId"]); id != "" {
+		task.Name = queue + "/tasks/" + id
+	}
+	if at := strings.TrimSpace(values["scheduleTime"]); at != "" {
+		when, err := time.Parse(time.RFC3339, at)
+		if err != nil {
+			return fmt.Errorf("schedule time %q is not an RFC 3339 time such as 2026-09-27T15:04:05Z", at)
+		}
+		task.ScheduleTime = timestamppb.New(when)
+	}
+	_, err = api.CreateTask(ctx, &cloudtaskspb.CreateTaskRequest{Parent: queue, Task: task})
+	return err
+}
+
+// tasksFormHTTPRequest is the form's HTTP target.
+func tasksFormHTTPRequest(values map[string]string, method int32, headers map[string]string, auth authToken) *cloudtaskspb.HttpRequest {
 	hr := &cloudtaskspb.HttpRequest{
 		Url:        strings.TrimSpace(values["url"]),
 		HttpMethod: cloudtaskspb.HttpMethod(method),
@@ -305,19 +349,7 @@ func (p tasksProvider) createTask(ctx context.Context, project, queue string, va
 		hr.AuthorizationHeader = &cloudtaskspb.HttpRequest_OauthToken{OauthToken: &cloudtaskspb.OAuthToken{
 			ServiceAccountEmail: auth.email, Scope: auth.scope}}
 	}
-	task := &cloudtaskspb.Task{MessageType: &cloudtaskspb.Task_HttpRequest{HttpRequest: hr}}
-	if id := strings.TrimSpace(values["taskId"]); id != "" {
-		task.Name = queue + "/tasks/" + id
-	}
-	if at := strings.TrimSpace(values["scheduleTime"]); at != "" {
-		when, err := time.Parse(time.RFC3339, at)
-		if err != nil {
-			return fmt.Errorf("schedule time %q is not an RFC 3339 time such as 2026-09-27T15:04:05Z", at)
-		}
-		task.ScheduleTime = timestamppb.New(when)
-	}
-	_, err = api.CreateTask(ctx, &cloudtaskspb.CreateTaskRequest{Parent: queue, Task: task})
-	return err
+	return hr
 }
 
 // tasksInProject refuses a queue outside the project on screen: a request
