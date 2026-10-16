@@ -3212,6 +3212,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
@@ -3227,6 +3228,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
@@ -3243,6 +3245,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
@@ -3259,6 +3263,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
@@ -3267,6 +3272,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
@@ -3283,6 +3289,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
@@ -3299,6 +3307,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
@@ -3306,7 +3315,8 @@
         "method": "google.logging.v2.ConfigServiceV2/GetCmekSettings",
         "status": "Verified",
         "tests": [
-          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3314,6 +3324,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
@@ -3329,7 +3340,8 @@
         "method": "google.logging.v2.ConfigServiceV2/GetSettings",
         "status": "Verified",
         "tests": [
-          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3337,6 +3349,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
@@ -3359,7 +3373,8 @@
         "method": "google.logging.v2.ConfigServiceV2/ListExclusions",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:256 TestLoggingExclusions"
+          "test/compat/logging1226_test.go:256 TestLoggingExclusions",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3373,14 +3388,16 @@
         "method": "google.logging.v2.ConfigServiceV2/ListSinks",
         "status": "Verified",
         "tests": [
-          "test/compat/logging1226_test.go:184 TestLoggingSinks"
+          "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
         "method": "google.logging.v2.ConfigServiceV2/ListViews",
         "status": "Verified",
         "tests": [
-          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews"
+          "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3424,7 +3441,8 @@
         "method": "google.logging.v2.ConfigServiceV2/UpdateSettings",
         "status": "Verified",
         "tests": [
-          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
+          "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3432,6 +3450,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
+          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
           "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
         ]
       },
@@ -3448,7 +3468,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
-          "test/compat/logging_test.go:106 TestConsoleDeleteLogIsSeenByTheOfficialClient"
+          "test/compat/logging_test.go:106 TestConsoleDeleteLogIsSeenByTheOfficialClient",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3458,6 +3479,7 @@
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
           "test/compat/runlogs_test.go:189 TestGcloudRunLogsRead",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig"
         ]
@@ -3467,7 +3489,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
-          "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
+          "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3490,7 +3513,8 @@
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
-          "test/compat/logging_test.go:34 TestLoggingWriteAndRead"
+          "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -8070,6 +8094,7 @@
         "method": "serviceusage.services.list",
         "status": "Verified",
         "tests": [
+          "test/compat/loggingparents_test.go:268 TestServiceUsageFolderParentRefused",
           "test/compat/serviceusage_test.go:146 TestTerraformProjectService",
           "test/compat/serviceusage_test.go:217 TestGcloudServices",
           "test/compat/serviceusage_test.go:47 TestServiceUsageServices"

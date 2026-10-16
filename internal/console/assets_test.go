@@ -2365,7 +2365,11 @@ func TestTheLogsScreenDoesNotHideUnattributedEntries(t *testing.T) {
 		`id: "log-scope"`,
 		`text: "All sources"`,
 		`const setScope = (next)`,
-		`url.searchParams.set("scope", "project")`,
+		// The scope (project, or a folder or organization since #1395)
+		// travels in the URL.
+		`url.searchParams.set("scope", next)`,
+		`el("option", { value: "parent", text: "A folder or organization" })`,
+		`query.set("parent", parentInput.value.trim())`,
 	} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("the log scope control is missing %q", want)

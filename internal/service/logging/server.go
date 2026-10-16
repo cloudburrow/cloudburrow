@@ -4,10 +4,10 @@
 // Google publishes no Logging emulator. This keeps entries in a bounded
 // in-memory store: WriteLogEntries, ListLogEntries with a documented filter
 // subset (see filter.go), ListLogs, DeleteLog, TailLogEntries (tail.go) and
-// ListMonitoredResourceDescriptors (descriptors.go). Log-based metrics, and
-// project sinks and exclusions, are stored by Admin (admin.go, #1226); buckets,
-// views, links and settings answer UNIMPLEMENTED. Entries do not survive a
-// restart, in any mode.
+// ListMonitoredResourceDescriptors (descriptors.go). Log-based metrics, sinks,
+// exclusions, buckets, views, links and settings are stored by Admin
+// (admin.go, buckets.go, links.go). Entries may belong to any of the four
+// parents (parent.go, #1395). Entries do not survive a restart, in any mode.
 package logging
 
 import (

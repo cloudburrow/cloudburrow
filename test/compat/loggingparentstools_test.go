@@ -4,6 +4,8 @@ package compat
 
 import (
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +21,7 @@ import (
 // create --folder --include-children` and `--organization`, describe, list
 // and delete them, and `gcloud logging read --folder` reads the folder's own
 // entries, written with the official Client, through the harness (egress
-// blocked).
+// blocked); the console's Logs Explorer scoped to the folder shows them.
 func TestGcloudLoggingFolderAndOrganizationSinks(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -54,6 +56,23 @@ func TestGcloudLoggingFolderAndOrganizationSinks(t *testing.T) {
 	}
 	if got := g.must("logging", "read", "--folder="+folderID, "--format=value(textPayload)"); strings.TrimSpace(got) != "folder-"+suffix {
 		t.Errorf("logging read --folder = %q; want the folder's entry", got)
+	}
+
+	// The console's Logs Explorer scoped to the folder shows it, and scoped
+	// to the organization does not: it is the folder's own entry.
+	for parent, want := range map[string]bool{folder: true, localOrg: false} {
+		q := url.Values{"parent": {parent}}
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			code, body := consoleDo(t, consoleAddr(t, h), http.MethodGet, "/api/logs?"+q.Encode(), "")
+			if code == http.StatusOK && strings.Contains(body, "folder-"+suffix) == want {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the Logs Explorer scoped to %s: %d %s; want the folder's entry shown %v", parent, code, body, want)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
 	}
 }
 

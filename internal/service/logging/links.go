@@ -11,7 +11,7 @@ package logging
 //     (analytics_enabled), and names the BigQuery dataset Google would make
 //     for it. No dataset is made: the link is configuration. CreateLink and
 //     DeleteLink answer done Operations with a LinkMetadata.
-//   - Settings and CmekSettings are read and written per project. A KMS key
+//   - Settings and CmekSettings are read and written per parent (#1395). A KMS key
 //     is refused UNIMPLEMENTED, as a bucket's cmek_settings is: entries are
 //     not encrypted with a customer key here. The service account IDs are
 //     made up from the project ID (UNVERIFIED: Google's use the project

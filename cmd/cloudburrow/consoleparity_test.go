@@ -404,8 +404,8 @@ var parityRows = []parityRow{
 	// Cloud Logging
 	{Resource: "Cloud Logging entries", Service: "logging",
 		Methods: []string{"LoggingServiceV2/ListLogEntries", "LoggingServiceV2/ListLogs"},
-		Screen:  "/logs", Offers: "Logs Explorer: entries under source `logging/<log>`, filters in the URL, live stream",
-		Tests: []string{"TestLoggingWriteAndRead", "TestFiltersNarrowTheView"}},
+		Screen:  "/logs", Offers: "Logs Explorer: entries under source `logging/<log>`, filters in the URL, live stream; scoped to a folder or organization, its own entries (#1395)",
+		Tests: []string{"TestLoggingWriteAndRead", "TestFiltersNarrowTheView", "TestGcloudLoggingFolderAndOrganizationSinks", "TestParentScopeShowsThatParentsOwnEntries"}},
 	{Resource: "Cloud Logging tail", Service: "logging",
 		Methods: []string{"LoggingServiceV2/TailLogEntries"},
 		Screen:  "/logs", Offers: "Logs Explorer's live stream, which shows each entry as it is written, with Pause / Resume (#1215)",

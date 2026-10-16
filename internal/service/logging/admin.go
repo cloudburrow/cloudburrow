@@ -10,7 +10,8 @@ package logging
 //     time series: Cloud Monitoring is not emulated, so nothing reads one.
 //     CountMatching counts the entries its filter matches over a window, for
 //     the console.
-//   - A sink stores its destination and filter and delivers nothing.
+//   - A sink stores its destination and filter. Only a log-bucket destination
+//     is delivered to (server.go routeOf, #1395); nothing else is.
 //   - An enabled exclusion is applied as Google applies a project exclusion to
 //     the _Default sink: a matching entry written after it is not stored, so it
 //     is never listed. Only the _Default bucket is modelled, so that is every
@@ -20,10 +21,9 @@ package logging
 // filter the store could not evaluate is INVALID_ARGUMENT naming the term,
 // rather than stored and silently never matching.
 //
-// Buckets and views are in buckets.go (#1264). Every other ConfigServiceV2
-// method (the Async bucket calls, links, settings, CMEK)
-// stays UNIMPLEMENTED, as does a sink or exclusion of an organization, folder
-// or billing account.
+// Buckets and views are in buckets.go (#1264); the Async bucket calls, links
+// and settings in links.go (#1292). Folder, organization and billing-account
+// parents are in parent.go (#1395).
 
 import (
 	"context"

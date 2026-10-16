@@ -411,3 +411,17 @@ func TestHistogramBucketsBySeverityOverTheSpanItIsGiven(t *testing.T) {
 		t.Fatalf("histogram(nil) = %v, want an empty slice", got)
 	}
 }
+
+// A folder or organization scope (#1395) shows that parent's own Cloud
+// Logging entries, and not its children's or another parent's.
+func TestParentScopeShowsThatParentsOwnEntries(t *testing.T) {
+	t.Parallel()
+	r := recorder(t)
+	r.Log(Entry{Source: "logging/audit", Resource: "folders/10/logs/audit", Message: "folder"})
+	r.Log(Entry{Source: "logging/audit", Resource: "folders/101/logs/audit", Message: "other folder"})
+	r.Log(Entry{Source: "logging/app", Project: "p1", Resource: "projects/p1/logs/app", Message: "project"})
+	got := r.Entries(Filter{Parent: "folders/10"})
+	if len(got) != 1 || got[0].Message != "folder" {
+		t.Errorf("Parent folders/10 = %v; want its one entry", got)
+	}
+}
