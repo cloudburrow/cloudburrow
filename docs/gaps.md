@@ -126,7 +126,7 @@ on folder and organization buckets, as Google refuses them (#1435).
 
 | Gap | Why open | Size |
 |---|---|---|
-| A BigQuery sink's schema mismatch is not written to an `export_errors` table, `protoPayload` is not exported, and the sink error codes but `topic_not_found` are CloudBurrow's (#1451) | not documented by Google | S |
+| A BigQuery sink's `export_errors` column types and `schemaErrorDetail` text, the types of `httpRequest.latency` and other `Duration` and `Any` fields (left out), and the sink error codes but `topic_not_found` are CloudBurrow's (#1451; `export_errors` and `protoPayload` are built) | not documented by Google; needs a live sink | S |
 
 ## Cloud KMS
 

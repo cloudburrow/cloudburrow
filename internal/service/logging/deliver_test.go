@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +11,13 @@ import (
 
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 	mrpb "google.golang.org/genproto/googleapis/api/monitoredres"
+	"google.golang.org/genproto/googleapis/appengine/legacy"
+	applogging "google.golang.org/genproto/googleapis/appengine/logging/v1"
+	auditpb "google.golang.org/genproto/googleapis/cloud/audit"
+	bqlogging "google.golang.org/genproto/googleapis/cloud/bigquery/logging/v1"
+	ltype "google.golang.org/genproto/googleapis/logging/type"
+	"google.golang.org/genproto/googleapis/rpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -170,8 +178,84 @@ func TestSinkDelivery(t *testing.T) {
 	if len(f.rows["app_20261016"]) != 2 {
 		t.Fatal("a mismatched row was written")
 	}
-	if st := s.SinkStatus("projects/proj-one/sinks/bq"); st == nil || !strings.HasPrefix(st.LastError, "schema_mismatch") {
+	// It is in the error table instead (#1451).
+	er := f.rows["export_errors_20261016"]
+	if len(er) != 1 || er[0]["sink"] != "projects/proj-one/sinks/bq" || er[0]["logName"] != "projects/proj-one/logs/app" ||
+		!strings.Contains(er[0]["logEntry"].(string), `"three"`) || er[0]["resourceType"] != "global" ||
+		er[0]["schemaErrorDetail"] != "Provided Schema does not match Table proj-one:ds.app_20261016. Field jsonPayload.n has changed type from FLOAT to STRING." {
+		t.Fatalf("export_errors rows %v", er)
+	}
+	if st := s.SinkStatus("projects/proj-one/sinks/bq"); st == nil || !strings.HasPrefix(st.LastError, "schema_mismatch") || st.ErrorRows != 1 {
 		t.Fatalf("bq status %+v", st)
+	}
+}
+
+func TestProtoPayloadRow(t *testing.T) {
+	req, _ := structpb.NewStruct(map[string]any{"name": "x"})
+	sd, err := anypb.New(&bqlogging.AuditData{Request: &bqlogging.AuditData_TableInsertRequest{TableInsertRequest: &bqlogging.TableInsertRequest{
+		Resource: &bqlogging.Table{TableName: &bqlogging.TableName{ProjectId: "p", DatasetId: "d", TableId: "t"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := anypb.New(&auditpb.AuditLog{MethodName: "google.cloud.bigquery.v2.TableService.InsertTable", ResourceName: "projects/p/datasets/d/tables/t",
+		AuthenticationInfo: &auditpb.AuthenticationInfo{PrincipalEmail: "a@example.com"}, Status: &status.Status{Code: 7},
+		Request: req, ServiceData: sd, NumResponseItems: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := entryRow(&loggingpb.LogEntry{LogName: "projects/p/logs/cloudaudit.googleapis.com%2Factivity", Payload: &loggingpb.LogEntry_ProtoPayload{ProtoPayload: a},
+		Timestamp: timestamppb.Now(), HttpRequest: &ltype.HttpRequest{CacheHit: true, CacheFillBytes: 9}})
+	p, ok := r.values["protopayload_auditlog"].(map[string]any)
+	if !ok {
+		t.Fatalf("row %v", r.values)
+	}
+	if p["methodName"] != "google.cloud.bigquery.v2.TableService.InsertTable" || p["authenticationInfo"].(map[string]any)["principalEmail"] != "a@example.com" ||
+		p["status"].(map[string]any)["code"] != int64(7) || p["requestJson"] != `{"name":"x"}` || p["numResponseItems"] != int64(3) ||
+		p["servicedata_v1_bigquery"].(map[string]any)["tableInsertRequest"].(map[string]any)["resource"].(map[string]any)["tableName"].(map[string]any)["tableId"] != "t" {
+		t.Fatalf("protopayload_auditlog %v", p)
+	}
+	h := r.values["httpRequest"].(map[string]any)
+	if h["cacheHit"] != true || h["cacheFillBytes"] != int64(9) {
+		t.Fatalf("httpRequest %v", h)
+	}
+	// Another type: its fields lowercased; an App Engine request log: protoPayload.
+	rl, _ := anypb.New(&applogging.RequestLog{AppId: "app", Status: 200})
+	r = entryRow(&loggingpb.LogEntry{Payload: &loggingpb.LogEntry_ProtoPayload{ProtoPayload: rl}, Timestamp: timestamppb.Now()})
+	if p, _ := r.values["protoPayload"].(map[string]any); p["appid"] != "app" || p["status"] != int64(200) {
+		t.Fatalf("RequestLog row %v", r.values)
+	}
+	ld, _ := anypb.New(&legacy.AuditData{EventMessage: "e"})
+	r = entryRow(&loggingpb.LogEntry{Payload: &loggingpb.LogEntry_ProtoPayload{ProtoPayload: ld}, Timestamp: timestamppb.Now()})
+	if p, _ := r.values["protopayload_legacy_appengine"].(map[string]any); p["eventmessage"] != "e" {
+		t.Fatalf("legacy AuditData row %v", r.values)
+	}
+	// An unknown type is left out.
+	r = entryRow(&loggingpb.LogEntry{Payload: &loggingpb.LogEntry_ProtoPayload{ProtoPayload: &anypb.Any{TypeUrl: "type.googleapis.com/x.Unknown"}}, Timestamp: timestamppb.Now()})
+	for k := range r.values {
+		if strings.HasPrefix(strings.ToLower(k), "protopayload") {
+			t.Fatalf("unknown type exported as %s", k)
+		}
+	}
+}
+
+func TestColumnLimit(t *testing.T) {
+	f := newFakeDest()
+	fields := map[string]any{}
+	for i := 0; i <= maxColumns; i++ {
+		fields[fmt.Sprintf("f%d", i)] = "v"
+	}
+	wide, _ := structpb.NewStruct(fields)
+	ts := timestamppb.New(time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC))
+	es := []*loggingpb.LogEntry{
+		{LogName: "projects/p/logs/w", Payload: &loggingpb.LogEntry_TextPayload{TextPayload: "ok"}, Timestamp: ts, InsertId: "1"},
+		{LogName: "projects/p/logs/w", Payload: &loggingpb.LogEntry_JsonPayload{JsonPayload: wide}, Timestamp: ts, InsertId: "2"},
+	}
+	n, rejected, err := streamToBigQuery(context.Background(), f, "projects/p/sinks/s", "p", "ds", true, es)
+	if n != 0 || rejected != 2 || !errors.Is(err, errSchemaMismatch) {
+		t.Fatalf("wrote %d, rejected %d, %v", n, rejected, err)
+	}
+	if len(f.rows["w"]) != 0 || len(f.rows["export_errors"]) != 2 {
+		t.Fatalf("rows %d, errors %d", len(f.rows["w"]), len(f.rows["export_errors"]))
 	}
 }
 
