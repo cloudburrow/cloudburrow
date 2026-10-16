@@ -115,6 +115,9 @@ func (s *Server) tail(stream loggingpb.LoggingServiceV2_TailLogEntriesServer, so
 		}
 	})
 	defer cancel()
+	// Subscribed: the stream may open now, and every entry written from here
+	// on is tailed (the JSON stream writes its "[" here, tailjson.go).
+	_ = stream.SendHeader(nil)
 
 	// Later requests carry nothing the tail uses; reading them notices a
 	// stream the client has broken.
