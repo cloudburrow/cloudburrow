@@ -220,8 +220,12 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 		return "", nil, errorf(http.StatusNotFound, "NOT_FOUND", "%s is not a Service Usage API v1 path", r.URL.Path)
 	}
 	if p[0] != "projects" {
+		// Google's v1 reference documents only projects/{project} as a
+		// consumer (Service.parent, ListServicesRequest.parent); the route
+		// takes {parent=*/*}, but what it answers for a folder or an
+		// organization is undocumented, so it is not guessed (#1395).
 		return "", nil, errorf(http.StatusNotImplemented, "UNIMPLEMENTED",
-			"CloudBurrow serves Service Usage for projects only; %s has no enabled services of its own here", p[0]+"/"+p[1])
+			"Service Usage v1 documents only projects/{project} as a parent; %s is not one, and CloudBurrow does not guess what Google answers for it", p[0]+"/"+p[1])
 	}
 	project, err := s.project(p[1])
 	if err != nil {

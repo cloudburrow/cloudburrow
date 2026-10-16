@@ -139,7 +139,9 @@ func TestLoggingLinksSettingsAndAsyncBuckets(t *testing.T) {
 		CmekSettings: &loggingpb.CmekSettings{KmsKeyName: "projects/p/locations/global/keyRings/r/cryptoKeys/k"}}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("UpdateCmekSettings with a key = %v; want UNIMPLEMENTED", err)
 	}
-	if _, err := c.GetSettings(ctx, &loggingpb.GetSettingsRequest{Name: "organizations/1/settings"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("GetSettings of an organization = %v; want UNIMPLEMENTED", err)
+	// Since #1395 the local organization's settings are served
+	// (TestLoggingFolderOrganizationAndBillingParents); another is NOT_FOUND.
+	if _, err := c.GetSettings(ctx, &loggingpb.GetSettingsRequest{Name: "organizations/1/settings"}); status.Code(err) != codes.NotFound {
+		t.Errorf("GetSettings of an organization that does not exist = %v; want NOT_FOUND", err)
 	}
 }

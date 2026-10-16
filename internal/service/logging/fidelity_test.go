@@ -127,7 +127,7 @@ func TestEntryAndRequestLimits(t *testing.T) {
 		t.Errorf("stored %q, want only soon: entries older than retention are accepted but not stored", got)
 	}
 
-	for _, name := range []string{"projects/" + project + "/logs/a/b", "projects/" + project + "/logs/a%20b", "organizations/1/logs/a"} {
+	for _, name := range []string{"projects/" + project + "/logs/a/b", "projects/" + project + "/logs/a%20b", "unknown/1/logs/a", "folders/x/logs/a"} {
 		_, err := s.WriteLogEntries(context.Background(), &loggingpb.WriteLogEntriesRequest{
 			LogName: name, Resource: global, Entries: []*loggingpb.LogEntry{textEntry("x")}})
 		if status.Code(err) != codes.InvalidArgument {

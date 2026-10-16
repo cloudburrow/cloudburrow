@@ -38,8 +38,8 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
-// doneOp is a finished Operation under projects/{p}/locations/{l}.
-func (a *Admin) doneOp(project, location string, metadata, response proto.Message) (*longrunningpb.Operation, error) {
+// doneOp is a finished Operation under {parent}/locations/{l}.
+func (a *Admin) doneOp(project parent, location string, metadata, response proto.Message) (*longrunningpb.Operation, error) {
 	md, err := anypb.New(metadata)
 	if err != nil {
 		return nil, apierror.Wrap(apierror.Internal(err, "operation metadata"))
@@ -50,7 +50,7 @@ func (a *Admin) doneOp(project, location string, metadata, response proto.Messag
 	}
 	a.ops++
 	return &longrunningpb.Operation{
-		Name:     fmt.Sprintf("projects/%s/locations/%s/operations/op-%d-%d", project, location, a.now().UnixNano(), a.ops),
+		Name:     fmt.Sprintf("%s/locations/%s/operations/op-%d-%d", project, location, a.now().UnixNano(), a.ops),
 		Metadata: md, Done: true, Result: &longrunningpb.Operation_Response{Response: resp},
 	}, nil
 }
@@ -61,7 +61,7 @@ func (s configServer) bucketOp(b *loggingpb.LogBucket, md *loggingpb.BucketMetad
 	md.StartTime, md.EndTime, md.State = now, now, loggingpb.OperationState_OPERATION_STATE_SUCCEEDED
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
-	return s.a.doneOp(ref.project, ref.location, md, b)
+	return s.a.doneOp(ref.parent, ref.location, md, b)
 }
 
 // CreateBucketAsync is CreateBucket, answered as a done Operation.
@@ -92,20 +92,20 @@ type linkRef struct {
 func (l linkRef) name() string { return l.bucket.name() + "/links/" + l.link }
 
 func (l linkRef) key() string {
-	return linkPrefix(l.bucket.project) + hex.EncodeToString([]byte(l.bucket.location+"/"+l.bucket.bucket+"/"+l.link))
+	return linkPrefix(l.bucket.parent) + hex.EncodeToString([]byte(l.bucket.location+"/"+l.bucket.bucket+"/"+l.link))
 }
 
-func linkPrefix(project string) string { return "logging/links/" + project + "/" }
+func linkPrefix(p parent) string { return "logging/links/" + p.seg() + "/" }
 
 func parseLink(field, name string) (linkRef, error) {
 	p, err := splitName(field, name, "buckets", "links")
 	if err != nil {
 		return linkRef{}, err
 	}
-	if p[1] == "-" {
+	if p.location == "-" {
 		return linkRef{}, apierror.InvalidArgument("%s %q: name a location, not -", field, name)
 	}
-	return linkRef{bucketRef{p[0], p[1], p[2]}, p[3]}, nil
+	return linkRef{bucketRef{p.parent, p.location, p.ids[0]}, p.ids[1]}, nil
 }
 
 func (a *Admin) getLink(ref linkRef) (*loggingpb.Link, error) {
@@ -125,13 +125,13 @@ func (a *Admin) getLink(ref linkRef) (*loggingpb.Link, error) {
 
 // links lists the links of one bucket, in name order.
 func (a *Admin) links(bucket bucketRef) ([]*loggingpb.Link, error) {
-	keys, err := a.db.List(linkPrefix(bucket.project))
+	keys, err := a.db.List(linkPrefix(bucket.parent))
 	if err != nil {
 		return nil, apierror.Internal(err, "listing links")
 	}
 	var out []*loggingpb.Link
 	for _, k := range keys {
-		raw, err := hex.DecodeString(strings.TrimPrefix(k, linkPrefix(bucket.project)))
+		raw, err := hex.DecodeString(strings.TrimPrefix(k, linkPrefix(bucket.parent)))
 		if err != nil {
 			continue
 		}
@@ -150,7 +150,7 @@ func (a *Admin) links(bucket bucketRef) ([]*loggingpb.Link, error) {
 func linkOp(a *Admin, ref linkRef, md *loggingpb.LinkMetadata, response proto.Message) (*longrunningpb.Operation, error) {
 	now := timestamppb.New(a.now())
 	md.StartTime, md.EndTime, md.State = now, now, loggingpb.OperationState_OPERATION_STATE_SUCCEEDED
-	return a.doneOp(ref.bucket.project, ref.bucket.location, md, response)
+	return a.doneOp(ref.bucket.parent, ref.bucket.location, md, response)
 }
 
 // CreateLink links a bucket with Log Analytics on to a BigQuery dataset
@@ -159,6 +159,12 @@ func (s configServer) CreateLink(_ context.Context, req *loggingpb.CreateLinkReq
 	bucket, err := parseBucket("parent", req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if !bucket.parent.isProject() {
+		// The dataset a link makes is in a project; which one Google uses for
+		// a folder's, organization's or billing account's bucket is not
+		// something this has measured.
+		return nil, apierror.Wrap(apierror.Unimplemented("parent %q: links are supported on project buckets only", req.GetParent()))
 	}
 	id := req.GetLinkId()
 	if err := checkID("link", id, configIDRe); err != nil {
@@ -188,7 +194,7 @@ func (s configServer) CreateLink(_ context.Context, req *loggingpb.CreateLinkReq
 		Name: ref.name(), Description: in.GetDescription(), CreateTime: timestamppb.New(s.a.now()),
 		LifecycleState: loggingpb.LifecycleState_ACTIVE,
 		BigqueryDataset: &loggingpb.BigQueryDataset{
-			DatasetId: "bigquery.googleapis.com/projects/" + bucket.project + "/datasets/" + strings.ReplaceAll(id, "-", "_"),
+			DatasetId: "bigquery.googleapis.com/projects/" + bucket.parent.id + "/datasets/" + strings.ReplaceAll(id, "-", "_"),
 		},
 	}
 	raw, err := protojson.Marshal(l)
@@ -264,24 +270,37 @@ func (s configServer) GetLink(_ context.Context, req *loggingpb.GetLinkRequest) 
 
 // --- settings ------------------------------------------------------------
 
-// parseSettings takes projects/{p}/{suffix}, or projects/{p} as the JSON
-// binding {name=*/*}/settings carries it.
-func parseSettings(field, name, suffix string) (string, error) {
-	for _, p := range []string{"organizations/", "folders/", "billingAccounts/"} {
-		if strings.HasPrefix(name, p) {
-			return "", apierror.Unimplemented("%s %q: only projects/{project}/%s is supported", field, name, suffix)
-		}
+// parseSettings takes {parent}/{suffix}, or {parent} as the JSON binding
+// {name=*/*}/settings carries it, for any of the four parents.
+func (a *Admin) parseSettings(field, name, suffix string) (parent, error) {
+	p, rest, err := cutParent(field, name)
+	if err != nil {
+		return parent{}, err
 	}
-	return parseProjectParent(field, strings.TrimSuffix(name, "/"+suffix))
+	if rest != "" && rest != suffix {
+		return parent{}, apierror.InvalidArgument("%s %q is not {parent}/%s", field, name, suffix)
+	}
+	return p, a.check(p)
 }
 
-func settingsKey(project string) string { return "logging/settings/" + project }
+func settingsKey(p parent) string { return "logging/settings/" + p.seg() }
 
-func serviceAccount(project string) string {
-	return "service-" + project + "@gcp-sa-logging.iam.gserviceaccount.com"
+// serviceAccount is made up from the parent's ID (UNVERIFIED: Google's names
+// a number).
+func serviceAccount(p parent) string {
+	id := strings.ToLower(p.id)
+	switch p.coll {
+	case collFolders:
+		id = "fld-" + id
+	case collOrgs:
+		id = "org-" + id
+	case collBilling:
+		id = "bac-" + id
+	}
+	return "service-" + id + "@gcp-sa-logging.iam.gserviceaccount.com"
 }
 
-func (a *Admin) settings(project string) (*loggingpb.Settings, error) {
+func (a *Admin) settings(project parent) (*loggingpb.Settings, error) {
 	st := &loggingpb.Settings{}
 	raw, err := a.db.Get(settingsKey(project))
 	switch {
@@ -293,7 +312,7 @@ func (a *Admin) settings(project string) (*loggingpb.Settings, error) {
 			return nil, apierror.Internal(err, "decoding the settings")
 		}
 	}
-	st.Name = "projects/" + project + "/settings"
+	st.Name = project.String() + "/settings"
 	st.KmsServiceAccountId = serviceAccount(project)
 	return st, nil
 }
@@ -301,7 +320,7 @@ func (a *Admin) settings(project string) (*loggingpb.Settings, error) {
 // GetSettings reads the project's settings; a project never changed has the
 // defaults: no storage location, the default sink on.
 func (s configServer) GetSettings(_ context.Context, req *loggingpb.GetSettingsRequest) (*loggingpb.Settings, error) {
-	project, err := parseSettings("name", req.GetName(), "settings")
+	project, err := s.a.parseSettings("name", req.GetName(), "settings")
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -318,9 +337,14 @@ func (s configServer) GetSettings(_ context.Context, req *loggingpb.GetSettingsR
 // empty): storage_location and disable_default_sink; a kms_key_name is
 // refused.
 func (s configServer) UpdateSettings(_ context.Context, req *loggingpb.UpdateSettingsRequest) (*loggingpb.Settings, error) {
-	project, err := parseSettings("name", req.GetName(), "settings")
+	project, err := s.a.parseSettings("name", req.GetName(), "settings")
 	if err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if project.coll == collFolders || project.coll == collBilling {
+		// logging_config.proto: settings "can currently only be configured
+		// for Google Cloud organizations"; they are read for all four.
+		return nil, apierror.Wrap(apierror.FailedPrecondition("%s: Log Router settings can only be configured for organizations (and, here, projects); they are read for folders and billing accounts", req.GetName()))
 	}
 	in := req.GetSettings()
 	if in == nil {
@@ -366,16 +390,16 @@ func (s configServer) UpdateSettings(_ context.Context, req *loggingpb.UpdateSet
 // GetCmekSettings answers the project's CMEK settings: no key, and the
 // service account a key would be granted to.
 func (s configServer) GetCmekSettings(_ context.Context, req *loggingpb.GetCmekSettingsRequest) (*loggingpb.CmekSettings, error) {
-	project, err := parseSettings("name", req.GetName(), "cmekSettings")
+	project, err := s.a.parseSettings("name", req.GetName(), "cmekSettings")
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	return &loggingpb.CmekSettings{Name: "projects/" + project + "/cmekSettings", ServiceAccountId: serviceAccount(project)}, nil
+	return &loggingpb.CmekSettings{Name: project.String() + "/cmekSettings", ServiceAccountId: serviceAccount(project)}, nil
 }
 
 // UpdateCmekSettings accepts only clearing the key, which is never set.
 func (s configServer) UpdateCmekSettings(ctx context.Context, req *loggingpb.UpdateCmekSettingsRequest) (*loggingpb.CmekSettings, error) {
-	if _, err := parseSettings("name", req.GetName(), "cmekSettings"); err != nil {
+	if _, err := s.a.parseSettings("name", req.GetName(), "cmekSettings"); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	if req.GetCmekSettings().GetKmsKeyName() != "" {

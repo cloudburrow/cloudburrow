@@ -72,8 +72,8 @@ func TestMetricValidation(t *testing.T) {
 		t.Errorf("GetLogMetric escaped = %v, %v", got, err)
 	}
 	_, err = ms.CreateLogMetric(ctx, &loggingpb.CreateLogMetricRequest{Parent: "organizations/1", Metric: &loggingpb.LogMetric{Name: "x", Filter: "severity=INFO"}})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("an organization parent: %v, want UNIMPLEMENTED", err)
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("an organization parent: %v, want INVALID_ARGUMENT: metrics have project parents only", err)
 	}
 }
 

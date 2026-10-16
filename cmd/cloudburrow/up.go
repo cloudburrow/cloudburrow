@@ -411,6 +411,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	rmSrv.Interpose(grpctransport.LogInterceptor(logger, "resourcemanager"))
 	rmSrv.Interpose(faults.Interceptor("resourcemanager"))
 	coord.Register(rmSrv)
+	// Its folders and organization are Logging parents (#1395).
+	loggingSvc.useHierarchy(projects)
 
 	// The Service Usage API (#1352), which APIs each project has enabled,
 	// kept in the registry's store so it persists as the projects do.

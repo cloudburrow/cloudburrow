@@ -85,7 +85,7 @@ func TestTailLogEntriesRefusals(t *testing.T) {
 	defer c.Close()
 	for _, req := range []*loggingpb.TailLogEntriesRequest{
 		{},
-		{ResourceNames: []string{"organizations/1"}},
+		{ResourceNames: []string{"unknown/1"}},
 		{ResourceNames: []string{"projects/" + project}, Filter: `jsonPayload.x = "y"`},
 		{ResourceNames: []string{"projects/" + project}, BufferWindow: durationpb.New(61 * time.Second)},
 	} {

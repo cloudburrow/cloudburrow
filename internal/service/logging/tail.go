@@ -10,7 +10,6 @@ import (
 	"cloud.google.com/go/logging/apiv2/loggingpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
-	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // TailLogEntries limits, from the TailLogEntriesRequest reference.
@@ -25,9 +24,8 @@ const (
 
 // TailLogEntries streams entries as they are written (#1215).
 //
-// The first request on the stream sets resource_names (projects/{project}
-// only: organizations, folders, billing accounts and views are
-// INVALID_ARGUMENT, as on ListLogEntries), filter (the same subset as
+// The first request on the stream sets resource_names (parents, whose own
+// entries are sent, #1395: a bucket view is INVALID_ARGUMENT here), filter (the same subset as
 // ListLogEntries, filter.go) and buffer_window. Only entries written after
 // the stream opened are sent: a tail is not a read of history. Matching
 // entries are held for buffer_window and sent as one response ordered by
@@ -48,9 +46,9 @@ func (s *Server) TailLogEntries(stream loggingpb.LoggingServiceV2_TailLogEntries
 	if len(req.GetResourceNames()) == 0 {
 		return apierror.Wrap(apierror.InvalidArgument("resource_names is required"))
 	}
-	projects := map[string]bool{}
+	projects := map[parent]bool{}
 	for _, r := range req.GetResourceNames() {
-		p, err := parseProjectParent("resource name", r)
+		p, err := s.admin.resolve("resource name", r)
 		if err != nil {
 			return apierror.Wrap(err)
 		}
@@ -80,8 +78,7 @@ func (s *Server) TailLogEntries(stream loggingpb.LoggingServiceV2_TailLogEntries
 	var pending []*loggingpb.LogEntry
 	wake := make(chan struct{}, 1)
 	cancel := s.store.subscribe(func(e *loggingpb.LogEntry) {
-		p, _, err := resource.ParseLogName(e.GetLogName())
-		if err != nil || !projects[p] || !match(e) {
+		if !projects[entryParent(e)] || !match(e) {
 			return
 		}
 		mu.Lock()
