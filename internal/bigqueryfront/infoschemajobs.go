@@ -29,7 +29,7 @@ import (
 //
 // The instance's jobs are in one location, US (the emulator gives jobs and
 // datasets none; BigQuery's default). A region other than the query's
-// location (US when the request names none) is refused 404 "Not found"
+// location (the region read when the request names none, #1375) is refused 404 "Not found"
 // (wording UNVERIFIED), as BigQuery refuses a view of another region than
 // the job's. JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION are 501: an instance
 // has neither.
