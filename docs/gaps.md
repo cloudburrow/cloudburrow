@@ -20,7 +20,7 @@ tracks it; a closed issue is named only where it says what was built.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 6 | 0 | 5 | 1 | 0 |
+| Cloud Storage | 7 | 0 | 6 | 1 | 0 |
 | Pub/Sub | 2 | 0 | 0 | 2 | 0 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 6 | 2 | 3 | 0 | 1 |
@@ -32,10 +32,10 @@ tracks it; a closed issue is named only where it says what was built.
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
 | BigQuery | 28 | 5 | 16 | 7 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
-| Cloud SQL, Memorystore | 12 | 12 | 0 | 0 | 0 |
-| Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
+| Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
+| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **74** | **19** | **37** | **13** | **5** |
+| **Total** | **68** | **11** | **39** | **13** | **5** |
 
 ## Cloud Storage
 
@@ -48,7 +48,7 @@ and object IAM on the JSON API are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| gRPC `google.storage.v2`: `Bucket.ip_filter` stays `UNIMPLEMENTED` (and `ipFilter` 400 on the JSON API): enforcing it needs the caller's VPC network and the `storage.buckets.exemptFromIpFilter` permission, which are not modelled. Appendable objects, `custom_placement_config` and `SetIamPolicy`'s `update_mask` are built (#1443) | refused by design: enforcement needs what is not modelled | S |
+| gRPC `google.storage.v2`: `Bucket.ip_filter` stays `UNIMPLEMENTED` (and `ipFilter` 400 on the JSON API): enforcing it needs the caller's VPC network and the `storage.buckets.exemptFromIpFilter` permission, which are not modelled, and a filter stored without effect would look like a control that is not there. Appendable objects, `custom_placement_config` and `SetIamPolicy`'s `update_mask` are built (#1443) | no emulator support: enforcement needs what is not modelled | S |
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) | no emulator support (no cache tier) | S |
 | `anywhereCaches.*`, `rapidCaches.*` (#1444) | no emulator support (no cache tier) | M |
 | `buckets.relocate`, `buckets.operations.advanceRelocateBucket` (#1444) | no emulator support (one location) | M |
@@ -261,23 +261,14 @@ and exports, client certificates and server CA rotation, `tiers.list`, `flags.li
 replicas (#1381), high availability (#1408), Google's Auth Proxy binary (#1421),
 `pointInTimeRestore` and Backup and DR backups through the Backup and DR Service (#1425, #1433);
 the Memorystore admin API over Valkey (#1302), exports, imports and RDB persistence (#1384),
-STANDARD_HA and failover (#1385), versions, upgrades and maintenance (#1386), and in-transit
-encryption (#1413). IAM database authentication is excluded (below).
+STANDARD_HA and failover (#1385), versions, upgrades and maintenance (#1386), in-transit
+encryption (#1413), and customer-managed keys and server CA rotation (#1463). IAM database authentication is excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
 | Cloud SQL: legacy failover replicas and external-primary replicas; `MYSQL_5_7`, `POSTGRES_12` and other versions; upgrading a replica on its own; a PostgreSQL database's charset change; `BAK` and `TDE` files; 32 methods 501 (`Backups.*`, blue-green deployments, `connect.resolve`, server and Entra ID certificates, `demote`, `switchover`, `executeSql`, `reencrypt`, disk shrink, external sync and others; [sqladmin.md](coverage/sqladmin.md)) (#1462) | not built yet | L |
 | Backup and DR: workload types other than Cloud SQL instances, `encryptionConfig`, `patch`, plan revisions, data source references, resource backup configs, management servers and trials (39 methods 501; [backupdr.md](coverage/backupdr.md)) (#1462) | not built yet | L |
-| Memorystore for Redis: customer-managed keys are 501; `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image; no server CA rotation for in-transit encryption (#1463) | not built yet | M |
-| The Cloud SQL Admin API beyond instance reads and writes (a server per created instance, POSTGRES_17 and MYSQL_8_4), databases, users, operations (#1301), the connector path (`connectSettings`, `generateEphemeralCert` and TLS on 3307, served for the Go connector), backups, restores and clones over real dumps, read replicas (streaming and GTID replication, promote, stop and start), and point-in-time recovery of created instances (archived WAL, the binary log; clone to a time, getLatestRecoveryTime; `transactionLogRetentionDays` and retained backups applied, with a retention clock), all #1330, and `pointInTimeRestore` and Backup and DR backups through the Backup and DR Service (#1425, #1433): IAM database authentication (no identities, ADR-0004), legacy failover replicas (high availability, `REGIONAL` and `instances.failover`, is served since #1408), cascading and cross-region replicas, and other database versions (the pinned Auth Proxy binary is tested since #1421) | not built yet | L |
-| The Memorystore admin API (`redis.googleapis.com`) (#1302) | not built yet | L |
-| The Cloud SQL Admin API beyond instance reads and writes (a server per created instance, POSTGRES_17 and MYSQL_8_4), databases, users, operations (#1301), the connector path (`connectSettings`, `generateEphemeralCert` and TLS on 3307, served for the Go connector), backups, restores and clones over real dumps, read replicas (streaming and GTID replication, promote, stop and start), and point-in-time recovery of created instances (archived WAL, the binary log; clone to a time, getLatestRecoveryTime; `transactionLogRetentionDays` and retained backups applied, with a retention clock), all #1330, and imports and exports (SQL and CSV, to and from the instance's Cloud Storage), client certificates and server CA rotation (`sslCerts`, `resetSslConfig`, `addServerCa`, `rotateServerCa`, `listServerCas`), `tiers.list`, `flags.list` and `operations.cancel` (#1380), and `pointInTimeRestore` and Backup and DR backups through the Backup and DR Service (#1425, #1433): parallel imports and exports, BAK/TDE files, IAM database authentication (no identities, ADR-0004), legacy failover replicas (high availability, `REGIONAL` and `instances.failover`, is served since #1408), and a major version upgrade of an instance with replicas (#1330, #1381; the pinned Auth Proxy binary is tested since #1421) | not built yet | L |
-| The rest of the Memorystore admin API: `ListInstances`, `GetInstance` and `GetInstanceAuthString` are served over the one Valkey server (#1302); creating, updating, upgrading, deleting, importing, exporting and failing over an instance are UNIMPLEMENTED, and the gcloud and Terraform endpoint overrides are not exported until a test drives them | not built yet | M |
-| Memorystore for Redis beyond one BASIC Valkey server per instance (#1302): STANDARD_HA (replicas, failover, read replicas), Redis versions other than `REDIS_7_2`, in-transit encryption, RDB persistence and customer-managed keys are UNIMPLEMENTED | not built yet | L |
-| The rest of the Memorystore admin API: `UpgradeInstance`, `ImportInstance`, `ExportInstance`, `FailoverInstance` and `RescheduleMaintenance` are UNIMPLEMENTED; creating, updating and deleting instances, their operations, `gcloud redis` and `google_redis_instance` are served since #1302 | not built yet | M |
-| Memorystore for Redis beyond one BASIC Valkey server per instance (#1302): STANDARD_HA (replicas, failover, read replicas), Redis versions other than `REDIS_6_X`, `REDIS_7_0` and `REDIS_7_2` (#1386), in-transit encryption and customer-managed keys are UNIMPLEMENTED | not built yet | L |
-| Memorystore for Redis beyond BASIC and STANDARD_HA servers (#1302, #1385, #1413, #1463): customer-managed keys and server CA rotation are served since #1463, except that the RDB snapshots and AOF on a server's own volume are not encrypted with the key (Valkey writes them; they are served only while the key can be used); `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image (the Docker official `redis` image last built them in 2018, 2020 and 2022) | not built yet | S |
-| The Cloud SQL Admin API beyond instance reads, databases, users and operations (served since #1301): creating or changing instances, IAM database authentication, backups, replicas, the Auth Proxy and connector path (`connectSettings`, `generateEphemeralCert`) (#1330) | not built yet | L |
+| Memorystore for Redis: `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image (the Docker official `redis` image last built them in 2018, 2020 and 2022); with a customer-managed key, the RDB snapshots and AOF Valkey writes on a server's own volume are not encrypted with it, and are served only while the key can be used (#1463) | no emulator support: no maintained image; Valkey writes its own files | S |
 
 ## Functions, credentials, tooling
 
