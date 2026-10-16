@@ -465,10 +465,16 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// with no model: the official aiplatform client reaches them through it.
 	localAISrv = withPredictionEndpoints(cfg, localAISrv, runSvc, ingressAddr)
 
+	// One manager of the local AI models for the console's Local models
+	// page and /admin/local-models (#1396), so a download started on one is
+	// the download the other reports.
+	localModels := localModelsFor(cfg, localAISrv)
+	adminAPI.SetLocalModels(localModels)
+
 	// The console reads through the objects above rather than owning any of
 	// them, so it cannot answer from a store of its own.
 	consoleSrv := buildConsole(consoleDeps{
-		cfg: cfg, coord: coord, cluster: clusterComp, localAI: localAISrv,
+		cfg: cfg, coord: coord, cluster: clusterComp, localAI: localAISrv, localModels: localModels,
 		projects: projects,
 		tasks:    tasksSvc, secrets: secretsSvc, forwarders: forwarders,
 		kms: kmsSvc, scheduler: schedulerSvc, run: runSvc, logging: loggingSvc,

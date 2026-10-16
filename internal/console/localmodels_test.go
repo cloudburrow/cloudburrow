@@ -91,3 +91,34 @@ func TestLocalModelsPageIsOffOnlyWhenNotConfigured(t *testing.T) {
 		t.Fatalf("download without a manager: %d", resp.StatusCode)
 	}
 }
+
+// TestStudioReachesModelManagementAndTheEmbeddingView (#1396): the Studio
+// shows each local model's state from the Local models API and links to the
+// page that downloads, loads, unloads and deletes them and to the Embeddings
+// test view; the Embeddings view shows the token count and truncated flag
+// as each API method returns them.
+func TestStudioReachesModelManagementAndTheEmbeddingView(t *testing.T) {
+	js := consoleAsset(t, "console.js")
+	studio := js[strings.Index(js, "async function renderPlayground("):]
+	studio = studio[:strings.Index(studio, "\n}\n")]
+	if !strings.Contains(studio, "await playgroundModelsCard()") {
+		t.Error("the Studio does not draw the local models card")
+	}
+	card := js[strings.Index(js, "async function playgroundModelsCard("):]
+	card = card[:strings.Index(card, "\n}\n")]
+	for _, want := range []string{`api("/api/ai/local-models")`, `href: "/ai/local-models"`,
+		`href: "/ai/embeddings"`, "LOCAL_MODEL_STATES[m.state]", `m.state === "downloading"`, "m.loaded"} {
+		if !strings.Contains(card, want) {
+			t.Errorf("the Studio's local models card lacks %s", want)
+		}
+	}
+	emb := js[strings.Index(js, "async function renderEmbeddings("):]
+	emb = emb[:strings.Index(emb, "\n}\n")]
+	for _, want := range []string{"data.usageMetadata?.promptTokenCount", "data.truncated === true",
+		"statistics?.token_count", "statistics?.truncated === true", `text: "Truncated"`,
+		"embeddingCosine(a, b)", "v.slice(0, 6)"} {
+		if !strings.Contains(emb, want) {
+			t.Errorf("the Embeddings view lacks %s", want)
+		}
+	}
+}

@@ -18,13 +18,32 @@
 > - Use: `POST /v1/projects/{p}/locations/{l}/publishers/google/models/embeddinggemma-300m-onnx-community:predict`
 >   or `:embedContent` (#1244), PredictionService `Predict` or `EmbedContent` over gRPC, or the
 >   console's Vertex AI → Embeddings, which shows each whole vector, its dimension and norm,
->   and the pairwise cosine similarity (#1305).
+>   its first values, the token count and `truncated` flag as the API returns them
+>   (`usageMetadata.promptTokenCount` and `truncated` from `:embedContent`,
+>   `statistics.token_count` and `statistics.truncated` from `:predict`, #1396), and the
+>   pairwise cosine similarity (#1305).
 > - Manage: the console's Vertex AI → Local models (#1306) lists every catalogued model with
 >   its download state and size. **Download** is offered only for a pinned, ungated model —
 >   today this one — after you confirm its exact size, and fetches the same pinned files
 >   `-local-ai-embeddings` does, each verified by SHA-256; **Load** and **Unload** change what
 >   the running endpoint serves (the embedding runtime only; a generation model is the
 >   container `-local-ai-model` starts, which has no unload); **Delete** removes the local copy.
+>   The Studio (Vertex AI → Studio) lists each pinned or served model's state — not
+>   downloaded, downloading with its progress, downloaded, loaded — and links to Local models
+>   and Embeddings (#1396).
+> - Script it: the same operations are on the control port's admin API, behind the
+>   instance's admin token like every `/admin` route (#1396), and drive the same manager the
+>   console does, so a download started on one is the one the other reports:
+>   `GET /admin/local-models` lists the states, and
+>   `POST /admin/local-models/{id}/{download|cancel|load|unload|delete}` runs one; a download
+>   needs `{"confirmBytes": N}`, the model's exact pinned size, and verifies every file.
+>
+>   ```sh
+>   TOKEN=$(cat <state-dir>/<name>/admin-token)
+>   curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9000/admin/local-models
+>   curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+>     http://127.0.0.1:9000/admin/local-models/embeddinggemma-300m-onnx-community/unload
+>   ```
 > - Measured against the real model on 2026-10-15 and 2026-10-16: see the Local AI section of
 >   [compatibility.md](compatibility.md#local-ai).
 >

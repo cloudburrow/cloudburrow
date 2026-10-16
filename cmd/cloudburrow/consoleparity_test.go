@@ -966,6 +966,15 @@ var parityRows = []parityRow{
 		Commands: []string{"env", "gcloud-setup", "terraform", "version", "diagnose"},
 		Screen:   "/connect", Offers: "Connect: what `env` exports in each of its formats with Copy, client snippets, the gcloud-setup, gcloud-teardown and terraform commands to copy; About, as `version` prints it; Download bundle, the `diagnose` bundle (#802)",
 		Tests: []string{"TestConsoleConnectIsTheInstancesEnv", "TestConnectVariablesAreEnvJSON", "TestAboutIsTheBuildsVersion", "TestConsoleDiagnoseBundleHoldsNoCredentials", "TestConnectPageShowsTheEnvironmentAndDownloadsTheBundle"}},
+	{Resource: "Local AI models",
+		Routes: []string{"GET /admin/local-models", "POST /admin/local-models/{id}/{action}"},
+		Screen: "/ai/local-models", Offers: "Local models: each catalogued model's state (not pinned, not downloaded, " +
+			"downloading with progress, downloaded, loaded), Download (a pinned, ungated model, its exact size confirmed, " +
+			"each file checked against its pinned SHA-256), Cancel, Load, Unload and Delete (#1306), through the same " +
+			"manager the admin routes drive; the Studio lists each model's state and links to it and to Embeddings (#1396)",
+		Tests: []string{"TestAdminLocalModelsNeedTheTokenAndRunEachAction", "TestLocalModelsPageRoutesEachActionAndNeedsTheConfirmedSize",
+			"TestStudioReachesModelManagementAndTheEmbeddingView", "TestConsoleLocalModelsLoadEmbedUnload",
+			"TestConsoleLocalModelsUnloadDeleteDownloadLoad", "TestStudioManagesLocalModelsAndTestsEmbeddings"}},
 	{Resource: "Vertex AI custom prediction (serving contract)",
 		Screen: "/ai/predict", Offers: "Online prediction: the Cloud Run services configured with the contract's AIP_* variables, " +
 			"JSON instances and parameters, Predict, the container's status and body verbatim; Vertex's Endpoint, " +
@@ -989,8 +998,10 @@ var parityRows = []parityRow{
 			"an EmbedContent on the publisher model runs, with its task type and output dimensionality, and shows " +
 			"the API's answer or refusal verbatim (#1244); the playground names the model (any ID is sent as typed, " +
 			"and the API's 404 for text-embedding-005 or textembedding-gecko shown), and shows each whole vector " +
-			"with its dimension and norm, a copy of it, the pairwise cosine similarity and the request sent (#1305)",
+			"with its dimension and norm, a copy of it, the pairwise cosine similarity and the request sent (#1305), " +
+			"and the token count and truncated flag as the API returns them (#1396)",
 		Tests: []string{"TestEmbeddingsScreenSendsBothMethods", "TestEmbeddingsScreenSendsTheNamedModel", "TestEmbedContentThroughThePredictionClient",
+			"TestStudioManagesLocalModelsAndTestsEmbeddings",
 			"TestGRPCEmbedContent", "TestEmbedContentREST"}},
 	{Resource: "Vertex AI PredictionService: GenerateContent", Service: "vertexai",
 		Methods: []string{"PredictionService/GenerateContent"},
