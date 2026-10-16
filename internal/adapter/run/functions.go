@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	fv1 "cloud.google.com/go/functions/apiv1/functionspb"
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -53,6 +54,18 @@ type FunctionsServer struct {
 	base func() string
 	// events serves event triggers; nil refuses them.
 	events *Events
+	// ingress and tokens are how a v1 call reaches a function (#1428):
+	// the cluster's ingress address, "" when none is published, and the
+	// ID token minter, nil without one.
+	ingress string
+	tokens  IDTokenMinter
+}
+
+// WithIngress lets the v1 API's call reach a function through the
+// cluster's ingress, with an ID token from tokens when it is not nil.
+func (f *FunctionsServer) WithIngress(ingress string, tokens IDTokenMinter) *FunctionsServer {
+	f.ingress, f.tokens = ingress, tokens
+	return f
 }
 
 // Functions returns the Cloud Functions v2 service, which builds through
@@ -66,6 +79,7 @@ func (s *Server) Functions(builds *BuildsServer, base func() string) *FunctionsS
 // mixin to a gRPC server or the JSON transcoder.
 func (f *FunctionsServer) Register(g grpc.ServiceRegistrar) {
 	functionspb.RegisterFunctionServiceServer(g, f)
+	f.V1().Register(g)
 	iampb.RegisterIAMPolicyServer(g, functionsIAM{f})
 	locations.Register(g, functionsLocations{})
 }
@@ -75,6 +89,10 @@ type storedFunction struct {
 	policy *iampolicy.Stored
 	// trigger is what the function's event trigger made, nil without one.
 	trigger *liveTrigger
+	// v1 is a 1st-gen function's CloudFunction as the v1 API was given it
+	// (#1428), nil for a 2nd-gen one; version is its v1 versionId.
+	v1      *fv1.CloudFunction
+	version int64
 }
 
 // functions is process-wide, like repositories.
@@ -149,8 +167,19 @@ func (f *FunctionsServer) ListFunctions(_ context.Context, req *functionspb.List
 	if err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
-	if req.GetPageToken() != "" || req.GetFilter() != "" || req.GetOrderBy() != "" {
-		return nil, apierror.Unimplemented("ListFunctions page_token, filter and order_by are not supported")
+	if req.GetPageToken() != "" || req.GetOrderBy() != "" {
+		return nil, apierror.Unimplemented("ListFunctions page_token and order_by are not supported")
+	}
+	// gcloud functions list sends environment="GEN_2", and lists 1st gen
+	// through the v1 API (#1428).
+	env := functionspb.Environment_ENVIRONMENT_UNSPECIFIED
+	if f := req.GetFilter(); f != "" {
+		k, v, ok := strings.Cut(f, "=")
+		e, known := functionspb.Environment_value[strings.Trim(strings.TrimSpace(v), `"`)]
+		if !ok || strings.TrimSpace(k) != "environment" || !known {
+			return nil, apierror.Unimplemented("ListFunctions filter %q is not supported: only environment=\"GEN_1\" or \"GEN_2\" is", f)
+		}
+		env = functionspb.Environment(e)
 	}
 	prefix := req.GetParent() + "/functions/"
 	if location == "-" {
@@ -158,7 +187,7 @@ func (f *FunctionsServer) ListFunctions(_ context.Context, req *functionspb.List
 	}
 	out := &functionspb.ListFunctionsResponse{}
 	for _, fn := range Functions(project) {
-		if strings.HasPrefix(fn.GetName(), prefix) {
+		if strings.HasPrefix(fn.GetName(), prefix) && (env == functionspb.Environment_ENVIRONMENT_UNSPECIFIED || fn.GetEnvironment() == env) {
 			out.Functions = append(out.Functions, fn)
 		}
 	}
@@ -506,7 +535,10 @@ func (f *FunctionsServer) deploy(ctx context.Context, opName, name string, build
 		return
 	}
 	sf.fn.State, sf.fn.StateMessages, sf.fn.UpdateTime = functionspb.Function_ACTIVE, nil, timestamppb.Now()
-	done := cloneFunction(sf.fn)
+	var done proto.Message = cloneFunction(sf.fn)
+	if sf.v1 != nil {
+		done = f.finishV1(opName, sf)
+	}
 	functions.mu.Unlock()
 	f.setStage(opName, func(md *functionspb.OperationMetadata) { md.EndTime = timestamppb.Now() })
 	_ = f.s.ops.Succeed(opName, done)
@@ -587,6 +619,10 @@ func (f *FunctionsServer) UpdateFunction(ctx context.Context, req *functionspb.U
 	if sf.fn.State == functionspb.Function_DEPLOYING {
 		functions.mu.Unlock()
 		return nil, apierror.FailedPrecondition("An operation on function %s is already in progress", in.GetName())
+	}
+	if sf.v1 != nil {
+		functions.mu.Unlock()
+		return nil, apierror.FailedPrecondition("Function %s is a 1st gen function: update it through the Cloud Functions v1 API", in.GetName())
 	}
 	fn := cloneFunction(sf.fn)
 	build, serve, trig := false, false, false
@@ -706,27 +742,45 @@ func applyFunctionPath(fn, in *functionspb.Function, p string) error {
 	return nil
 }
 
-// DeleteFunction deletes the function's service and the function. The
-// built image stays in the cluster, as Google leaves it in gcf-artifacts.
+// DeleteFunction deletes the function's service and the function, 1st gen
+// or 2nd, as Google's v2 API deletes either. The built image stays in the
+// cluster, as Google leaves it in gcf-artifacts.
 func (f *FunctionsServer) DeleteFunction(ctx context.Context, req *functionspb.DeleteFunctionRequest) (*longrunningpb.Operation, error) {
 	parent, _, err := parseFunctionName(req.GetName())
 	if err != nil {
 		return nil, err
 	}
 	functions.mu.Lock()
-	sf, ok := functions.fns[req.GetName()]
+	_, ok := functions.fns[req.GetName()]
+	functions.mu.Unlock()
+	if !ok {
+		return nil, functionNotFound(req.GetName())
+	}
+	op := f.newOperation(parent, req.GetName(), "delete", functionspb.OperationType_DELETE_FUNCTION, nil)
+	if err := f.deleteFunction(ctx, op, req.GetName()); err != nil {
+		return nil, err
+	}
+	return f.s.toProtoOperation(op)
+}
+
+// deleteFunction tears down a function's trigger and service, removes it
+// and finishes op; a function mid-deploy is refused.
+func (f *FunctionsServer) deleteFunction(ctx context.Context, op, name string) error {
+	functions.mu.Lock()
+	sf, ok := functions.fns[name]
 	if !ok {
 		functions.mu.Unlock()
-		return nil, functionNotFound(req.GetName())
+		_ = f.s.ops.Delete(op)
+		return functionNotFound(name)
 	}
 	if sf.fn.State == functionspb.Function_DEPLOYING {
 		functions.mu.Unlock()
-		return nil, apierror.FailedPrecondition("An operation on function %s is already in progress", req.GetName())
+		_ = f.s.ops.Delete(op)
+		return apierror.FailedPrecondition("An operation on function %s is already in progress", name)
 	}
 	sf.fn.State = functionspb.Function_DELETING
 	svc := sf.fn.GetServiceConfig().GetService()
 	functions.mu.Unlock()
-	op := f.newOperation(parent, req.GetName(), "delete", functionspb.OperationType_DELETE_FUNCTION, nil)
 	f.teardown(ctx, sf.trigger)
 	if svc != "" {
 		if _, err := f.s.DeleteService(ctx, &runpb.DeleteServiceRequest{Name: svc}); err != nil && apierror.From(err).Code != codes.NotFound {
@@ -734,15 +788,15 @@ func (f *FunctionsServer) DeleteFunction(ctx context.Context, req *functionspb.D
 			sf.fn.State = functionspb.Function_FAILED
 			functions.mu.Unlock()
 			_ = f.s.ops.Fail(op, err)
-			return f.s.toProtoOperation(op)
+			return nil
 		}
 	}
 	functions.mu.Lock()
-	delete(functions.fns, req.GetName())
+	delete(functions.fns, name)
 	functions.mu.Unlock()
 	f.setStage(op, func(md *functionspb.OperationMetadata) { md.EndTime = timestamppb.Now() })
 	_ = f.s.ops.Succeed(op, &emptypb.Empty{})
-	return f.s.toProtoOperation(op)
+	return nil
 }
 
 // uploadPrefix and downloadPrefix are the Run port's paths for a
@@ -782,9 +836,6 @@ func (f *FunctionsServer) GenerateUploadUrl(_ context.Context, req *functionspb.
 	}
 	if req.GetKmsKeyName() != "" {
 		return nil, apierror.Unimplemented("kms_key_name is not supported")
-	}
-	if req.GetEnvironment() == functionspb.Environment_GEN_1 {
-		return nil, apierror.Unimplemented("GEN_1 uploads are not supported: only 2nd-gen functions are served")
 	}
 	bucket, object := uploadBucket(project, location), uuid.NewString()+".zip"
 	return &functionspb.GenerateUploadUrlResponse{
@@ -924,14 +975,36 @@ func (f *FunctionsServer) ListRuntimes(_ context.Context, req *functionspb.ListR
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
 	}
-	if req.GetFilter() != "" {
-		return nil, apierror.Unimplemented("ListRuntimes filter is not supported")
+	envs := []functionspb.Environment{functionspb.Environment_GEN_2, functionspb.Environment_GEN_1}
+	name := ""
+	if f := req.GetFilter(); f != "" {
+		// gcloud functions deploy --no-gen2 sends name=go123 AND
+		// environment=GEN_1: terms of name and environment, ANDed.
+		for _, term := range strings.Split(f, " AND ") {
+			k, v, ok := strings.Cut(term, "=")
+			k, v = strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"`)
+			e, known := functionspb.Environment_value[v]
+			switch {
+			case ok && k == "environment" && known:
+				envs = []functionspb.Environment{functionspb.Environment(e)}
+			case ok && k == "name" && v != "":
+				name = v
+			default:
+				return nil, apierror.Unimplemented("ListRuntimes filter %q is not supported: only name= and environment= terms joined by AND are", f)
+			}
+		}
 	}
 	out := &functionspb.ListRuntimesResponse{}
 	for _, r := range Runtimes {
-		out.Runtimes = append(out.Runtimes, &functionspb.ListRuntimesResponse_Runtime{
-			Name: r.Name, DisplayName: r.Display, Stage: functionspb.ListRuntimesResponse_GA,
-			Environment: functionspb.Environment_GEN_2})
+		if name != "" && r.Name != name {
+			continue
+		}
+		// Each runtime builds a 1st-gen function too (#1428), through the
+		// same builder.
+		for _, env := range envs {
+			out.Runtimes = append(out.Runtimes, &functionspb.ListRuntimesResponse_Runtime{
+				Name: r.Name, DisplayName: r.Display, Stage: functionspb.ListRuntimesResponse_GA, Environment: env})
+		}
 	}
 	return out, nil
 }
@@ -1043,10 +1116,21 @@ func FunctionsTranscoder() *rest.Transcoder {
 // upload and download URLs, on the Run port beside next.
 func (f *FunctionsServer) FunctionsHandler(next http.Handler) http.Handler {
 	t := FunctionsTranscoder()
-	f.Register(t)
+	functionspb.RegisterFunctionServiceServer(t, f)
+	iampb.RegisterIAMPolicyServer(t, functionsIAM{f})
+	locations.Register(t, functionsLocations{})
+	// The v1 API (#1428), on its own transcoder: its operations are
+	// /v1/operations, over the adapter's store.
+	t1 := FunctionsV1Transcoder()
+	f.V1().Register(t1)
+	NewOperationsServer(f.s).Register(t1)
 	return f.SourceHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isFunctionsPath(r.URL.Path) {
 			t.ServeHTTP(w, r)
+			return
+		}
+		if isFunctionsV1Path(r.URL.Path) {
+			t1.ServeHTTP(w, r)
 			return
 		}
 		next.ServeHTTP(w, r)

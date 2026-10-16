@@ -62,6 +62,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// applies, plans clean, updates in place and destroys in
 	// TestTerraformCloudFunctions2Function, gated as the Functions tests are.
 	{config.ServiceRun, "cloudfunctions2_custom_endpoint", "GOOGLE_CLOUDFUNCTIONS2_CUSTOM_ENDPOINT", "/v2/", true},
+	// Cloud Functions v1 (#1428), on the same port over the same machinery:
+	// google_cloudfunctions_function reaches this instance, never Google; no
+	// Terraform test covers it yet.
+	{config.ServiceRun, "cloud_functions_custom_endpoint", "GOOGLE_CLOUD_FUNCTIONS_CUSTOM_ENDPOINT", "/v1/", true},
 	// Cloud KMS (#425): a key ring, a key and a version apply, plan clean,
 	// update their labels and destroy in TestTerraformKMS, over the JSON API
 	// (#422-#424). The provider's discovery client strips the version from
@@ -256,14 +260,13 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 		out = append(out,
 			unpointedPrefix{"google_artifact_registry_", "this instance does not serve Artifact Registry (it is on the Run port)"},
 			unpointedPrefix{"google_cloudbuild_", "this instance does not serve Cloud Build (it is on the Run port)"},
-			unpointedPrefix{"google_cloudfunctions2_", "this instance does not serve Cloud Functions (it is on the Run port)"})
+			unpointedPrefix{"google_cloudfunctions2_", "this instance does not serve Cloud Functions (it is on the Run port)"},
+			unpointedPrefix{"google_cloudfunctions_", "this instance does not serve Cloud Functions (it is on the Run port)"})
 	}
-	// Whatever is enabled: no instance serves the Cloud Functions v1 API
-	// or Cloud Build v2's repository connections, so the provider has no
-	// local endpoint for them (#1304). Cloud Functions v2 is served on the
-	// Run port (#1377).
+	// Whatever is enabled: no instance serves Cloud Build v2's repository
+	// connections, so the provider has no local endpoint for them (#1304).
+	// Cloud Functions v2 (#1377) and v1 (#1428) are served on the Run port.
 	out = append(out,
-		unpointedPrefix{"google_cloudfunctions_", "CloudBurrow serves Cloud Functions v2 only: use google_cloudfunctions2_function"},
 		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"})
 	return out
 }

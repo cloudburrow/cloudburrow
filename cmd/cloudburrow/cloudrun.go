@@ -203,15 +203,22 @@ func (r *runService) Start(ctx context.Context) error {
 	// build and a Cloud Run service, on the same port, with its source
 	// upload and download URLs.
 	functions := adapter.Functions(builds, func() string { return hostURL(r.server.Addr()) })
-	if r.events != nil {
-		ingress := ""
-		if r.cfg.Endpoints.Ingress != 0 {
-			host := r.cfg.BindAddress
-			if host == "" || host == "0.0.0.0" || host == "::" {
-				host = "127.0.0.1"
-			}
-			ingress = net.JoinHostPort(host, strconv.Itoa(r.cfg.Endpoints.Ingress))
+	ingress := ""
+	if r.cfg.Endpoints.Ingress != 0 {
+		host := r.cfg.BindAddress
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
 		}
+		ingress = net.JoinHostPort(host, strconv.Itoa(r.cfg.Endpoints.Ingress))
+	}
+	// Cloud Functions v1's call (#1428) reaches a function through the
+	// ingress, as a delivery does.
+	var tokens runadapter.IDTokenMinter
+	if r.events != nil {
+		tokens = r.events.tokens
+	}
+	functions.WithIngress(ingress, tokens)
+	if r.events != nil {
 		functions.WithEvents(runadapter.Events{Transport: r.events.transport, Tokens: r.events.tokens,
 			PushBase: r.events.pushBase, Ingress: ingress})
 	}
