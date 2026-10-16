@@ -170,14 +170,22 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 		writeError(w, status, "notFound", msg)
 		return false
 	}
+	file := make([]field, len(cols))
+	for i, c := range cols {
+		file[i] = c.field
+	}
+	// A name the load's columnNameCharacterMap refuses, before a flexible
+	// one, which is not built (#1336, charmap.go).
+	switch status, msg := parquetCharMapNames(file, l.ColumnNameCharacterMap); status {
+	case http.StatusBadRequest:
+		return invalid(msg)
+	case http.StatusNotImplemented:
+		return notImplemented(msg)
+	}
 	for _, c := range cols {
 		if c.notHere != "" {
 			return notImplemented("of a file whose column " + c.notHere)
 		}
-	}
-	file := make([]field, len(cols))
-	for i, c := range cols {
-		file[i] = c.field
 	}
 	if l.Schema != nil && !givenFits(l.Schema.Fields, file) {
 		return notImplemented("whose job gives a schema that is not the file's (" + describeFields(l.Schema.Fields) +

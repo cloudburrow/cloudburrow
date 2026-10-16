@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -180,4 +181,53 @@ func (f front) failLoadedRename(w http.ResponseWriter, rec *recorder, job jobBod
 	}
 	failJob(resp, e)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// charMapFormat is why a load's columnNameCharacterMap, charMap, is refused
+// for its sourceFormat, or "" (#1336). BigQuery documents the map as the
+// "Character map supported for column names in CSV/Parquet loads", and
+// "Using this option with unsupporting load formats will result in an
+// error" (JobConfigurationLoad); the LOAD DATA statement's
+// column_name_character_map "Applies to CSV and Parquet data". The
+// option is any value given but COLUMN_NAME_CHARACTER_MAP_UNSPECIFIED.
+// The error's wording is CloudBurrow's (UNVERIFIED).
+func charMapFormat(charMap, format string) string {
+	m := strings.ToUpper(charMap)
+	if m == "" || m == "COLUMN_NAME_CHARACTER_MAP_UNSPECIFIED" {
+		return ""
+	}
+	f := strings.ToUpper(format)
+	if f == "" || f == "CSV" || f == "PARQUET" {
+		return ""
+	}
+	return fmt.Sprintf("columnNameCharacterMap %s is not supported for sourceFormat %s: the column name character map "+
+		"applies to CSV and Parquet loads only.", charMap, format)
+}
+
+// parquetCharMapNames is why the column names of a Parquet file, file,
+// are refused under the load's columnNameCharacterMap, with the status:
+// under STRICT (or none) a name the column rules refuse is 400, as
+// BigQuery documents ("Load jobs with unsupported characters in column
+// names fail with an error message"); under V1 or V2 BigQuery replaces
+// the unsupported characters with underscores, "except periods in
+// Parquet file column names", which the front does not do for a Parquet
+// file (the emulator reads the file by its own names), so such a load is
+// 501 (#1336).
+func parquetCharMapNames(file []field, charMap string) (int, string) {
+	m := strings.ToUpper(charMap)
+	check := checkColumnName
+	if m == "V1" {
+		check = checkClassicColumnName
+	}
+	bad := checkNames(file, "", nil, check)
+	if bad == "" {
+		return 0, ""
+	}
+	if m == "V1" || m == "V2" {
+		return http.StatusNotImplemented, "under columnNameCharacterMap " + m + ", which would rename a column of the file: " +
+			bad + " BigQuery replaces its unsupported characters (but periods) with underscores; CloudBurrow does not " +
+			"rename a Parquet file's columns"
+	}
+	return http.StatusBadRequest, bad + " The name is the Parquet file's; columnNameCharacterMap STRICT, the default, " +
+		"refuses it rather than renaming it."
 }

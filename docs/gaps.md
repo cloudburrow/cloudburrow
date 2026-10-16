@@ -30,7 +30,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 1 | 1 | 0 | 0 | 0 |
 | Vertex AI | 3 | 0 | 3 | 0 | 0 |
-| BigQuery | 38 | 17 | 17 | 4 | 0 |
+| BigQuery | 39 | 17 | 17 | 5 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 4 | 0 | 0 |
 | Cloud SQL, Memorystore | 6 | 6 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
@@ -159,7 +159,8 @@ Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`),
 | `NEWLINE_DELIMITED_JSON` load with `autodetect` into a new table is 501 (the emulator crashes on it) (#1324) | not built yet | M |
 | CSV loads: `timeZone`, `dateFormat`, `datetimeFormat`, `timeFormat`, `timestampFormat`, and an `encoding` other than UTF-8 or ISO-8859-1 (#1325) | not built yet | M |
 | `ALTER TABLE` `ALTER COLUMN SET DEFAULT` / `DROP DEFAULT` are 501: the engine applies a column default only from the `CREATE TABLE` that made its table, never from the table's `defaultValueExpression` (measured, #1340); and so are `RENAME TO` with another action, a nested field, `RENAME TO` another dataset, a table with row access policies, `RENAME COLUMN` of a partitioning or clustering column, `RENAME COLUMN` or `DROP COLUMN` of a table with keys, and `RENAME COLUMN`, `DROP COLUMN` or `SET DATA TYPE` with an action that is not one of them (`ADD COLUMN`, `SET OPTIONS` and `ALTER COLUMN` are carried out since #1227, `RENAME TO`, `RENAME COLUMN` and `DROP COLUMN` since #1322, `SET DATA TYPE` and primary and foreign keys since #1334) (#1340) | not built yet | M |
-| `columnNameCharacterMap` `V1` / `V2` when a detected name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix), names the same once replaced, and a load that is not CSV, are 501 (renaming by replacing characters is built since #1326) (#1336) | not built yet | S |
+| `columnNameCharacterMap` `V1` / `V2` when a detected CSV name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix, an empty or too long name) and names the same once replaced are 501: BigQuery documents only that "invalid column names will be normalized", not how a name replacing characters cannot fix is (renaming by replacing characters is built since #1326; the map refused for a format other than CSV and Parquet, and a Parquet name refused under `STRICT`, since #1336) | not documented by Google | S |
+| `columnNameCharacterMap` `V1` / `V2` renaming of a Parquet file's columns (documented: unsupported characters but periods replaced with underscores) is 501 (#1373) | not built yet | S |
 | CSV loads: a C-style (`%m/%d/%Y`) date or time format, and `timeZone` or a format with `autodetect` and no schema (SQL-style formats, `timeZone` and the UTF-16 and UTF-32 encodings are built, #1325) (#1338) | not built yet | S |
 | Storage Write API `arrow_rows` (#1327) | not built yet | M |
 | Partition decorators: through a partition, a schema change BigQuery does not document (a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order, a RECORD's fields changed), `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination and a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, none documented by BigQuery, are 501 (the rest of #1273 is built: the streaming buffer of column- and range-partitioned tables, DML refused on buffered rows, a REQUIRED column left out with `ALLOW_FIELD_RELAXATION`, #1273; and since #1370 DML refuses a row streamed in the last 30 minutes, on any table) | not documented by Google | S |
