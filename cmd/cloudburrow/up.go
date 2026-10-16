@@ -238,6 +238,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		scheduler: schedulerSvc,
 		logging:   loggingSvc,
 		projects:  func() []string { return registered() },
+		registry:  func() *resourcemanager.Registry { return projectRegistry },
 		projectStore: func() store.Store {
 			if projectRegistry == nil {
 				return nil

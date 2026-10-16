@@ -11,8 +11,9 @@
 // what a local instance needs — the identifier, a display name, lifecycle
 // state and creation time — and refuses everything it does not implement
 // rather than accepting it silently. One fixed organization and the folders
-// under it are kept too (#1294, hierarchy.go); liens, IAM policies and
-// billing are out of scope and say so.
+// under it are kept too (#1294, hierarchy.go); liens are kept (tags.go), and
+// IAM policies stored, never enforced (iam.go); billing is out of scope and
+// says so.
 package resourcemanager
 
 import (
@@ -155,6 +156,9 @@ func (r *Registry) register(p Project) (Project, error) {
 		p.CreateTime = r.now().UTC().Format(time.RFC3339)
 	}
 	p.DeleteTime = ""
+	// A project made under a purged one's ID starts with no policy, as on
+	// Google (#1368).
+	r.dropIAM(p.Name)
 
 	b, err := json.Marshal(p)
 	if err != nil {
@@ -229,6 +233,7 @@ func (r *Registry) load(id string) (Project, error) {
 	if p.State == StateDeleteRequested {
 		if t, err := time.Parse(time.RFC3339, p.DeleteTime); err == nil && !r.now().Before(t.Add(RetentionPeriod)) {
 			_ = r.st.Delete(key(id))
+			r.dropIAM("projects/" + id)
 			return Project{}, apierror.NotFound("project %q not found", id)
 		}
 	}
@@ -369,5 +374,5 @@ func (r *Registry) Move(id, parent string) (Project, error) {
 func ErrNotImplemented(what string) error {
 	return apierror.Unimplemented(
 		"%s is not implemented: this is a local project registry, not Resource Manager. "+
-			"IAM policies and billing are out of scope", what)
+			"billing is out of scope", what)
 }

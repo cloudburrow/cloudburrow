@@ -21,7 +21,31 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 )
+
+// projectIAMResetter clears the IAM policies Resource Manager stores on
+// projects, folders and the organization (#1368, ADR-0006). The registry
+// itself is not reset: projects are what the other services' state is
+// scoped by.
+type projectIAMResetter struct {
+	registry func() *resourcemanager.Registry
+}
+
+func (r *projectIAMResetter) Name() string { return "resourcemanager" }
+
+func (r *projectIAMResetter) Reset(context.Context) error {
+	return r.ResetProject(context.Background(), "")
+}
+
+// ResetProject clears one project's policy, or every policy for "".
+func (r *projectIAMResetter) ResetProject(_ context.Context, project string) error {
+	reg := r.registry()
+	if reg == nil {
+		return nil
+	}
+	return reg.ResetIAM(project)
+}
 
 // Resetters for the services /admin/reset did not reach.
 //
