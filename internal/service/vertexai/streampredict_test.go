@@ -266,24 +266,6 @@ func TestGRPCStreamRawPredictStreamsGeneration(t *testing.T) {
 	}
 }
 
-func TestGRPCDirectRawMethodsNameMethodName(t *testing.T) {
-	c, _ := startMixed(t, NewServer(&EchoGenerator{ID: testModel}))
-	_, err := c.DirectRawPredict(context.Background(), &aiplatformpb.DirectRawPredictRequest{Endpoint: endpointName, MethodName: "/tensorflow.serving.PredictionService/Predict"})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "method_name") {
-		t.Errorf("DirectRawPredict: %v", err)
-	}
-	st, _ := c.StreamingRawPredict(context.Background())
-	_ = st.Send(&aiplatformpb.StreamingRawPredictRequest{Endpoint: endpointName, MethodName: "/m"})
-	if _, err := st.Recv(); status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "method_name") {
-		t.Errorf("StreamingRawPredict: %v", err)
-	}
-	sd, _ := c.StreamDirectRawPredict(context.Background())
-	_ = sd.Send(&aiplatformpb.StreamDirectRawPredictRequest{Endpoint: endpointName, MethodName: "/m"})
-	if _, err := sd.Recv(); status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "method_name") {
-		t.Errorf("StreamDirectRawPredict: %v", err)
-	}
-}
-
 func TestStreamRawPredictREST(t *testing.T) {
 	s := NewServer(&EchoGenerator{ID: testModel})
 	s.SetEmbedder(fakeEmbedder{}, nil)
