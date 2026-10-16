@@ -499,6 +499,16 @@ jobs:
           echo "$RUNNER_TEMP/google-cloud-sdk/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/google-cloud-sdk/bin/gcloud" version
 
+      # Google's Cloud SQL Auth Proxy binary for TestCloudSQLAuthProxyBinary
+      # (#1421), in the shard that runs the Cloud SQL suite: `make
+      # cloud-sql-proxy` downloads the pinned release and checks it against
+      # its SHA-256 before making it executable. The connector listens at
+      # the default 3307 there, the one port the proxy dials.
+      - name: Install the Cloud SQL Auth Proxy
+        if: matrix.shard == 'emulators'
+        run: |
+          echo "CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$(make -s cloud-sql-proxy)" >> "$GITHUB_ENV"
+
       - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
         with:
           install_only: true

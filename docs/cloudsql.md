@@ -578,8 +578,35 @@ An instance whose address is taken still starts, and the rest of the Admin API s
 holds it (each listener records its instance name and PID in the user's temporary directory
 while it serves) and the setting that moves it.
 
-Verified with `cloud.google.com/go/cloudsqlconn` on both servers, and with Google's Auth Proxy
-(`cloud-sql-proxy` 2.19.0) in a pod, below. IAM database authentication (`WithIAMAuthN`, an
+Verified with `cloud.google.com/go/cloudsqlconn` on both servers, with Google's Auth Proxy
+(`cloud-sql-proxy` 2.19.0) in a pod, below, and with the same release's binary on the host.
+
+**The Auth Proxy binary (#1421).** Google's `cloud-sql-proxy` runs against an instance unchanged,
+pointed at it by its own flags:
+
+```sh
+export CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$(make -s cloud-sql-proxy)   # pinned, SHA-256 checked
+$CLOUDBURROW_TEST_CLOUD_SQL_PROXY --sqladmin-api-endpoint "$CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL" --token local \
+  "$PROJECT:us-central1:postgres?port=6432" "$PROJECT:us-central1:mysql?port=6306"
+psql "host=127.0.0.1 port=6432 user=cloudburrow dbname=cloudburrow sslmode=disable"
+```
+
+`--sqladmin-api-endpoint` is the Admin API's URL, which `cloudburrow env` exports as
+`CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL`. Any `--token` will do, as tokens are not checked; pass one,
+so the proxy does not go looking for Google credentials. Leave
+`--auto-iam-authn` off: it is IAM database authentication, which is 501 (below). The proxy then
+calls `connectSettings` and `generateEphemeralCert` and dials the reported address at 3307. It
+has no flag for that port (its `--port` is the local listener's), so it reaches only the instance
+whose connector holds 3307. Against an instance started with `--cloudsql-connector` on another
+port, use a connector with a dial option, as above.
+
+`make cloud-sql-proxy` downloads the release from Google's bucket
+(`storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.19.0/`) to
+`bin/cloud-sql-proxy/`, and checks it against the SHA-256 Google's release page lists before
+making it executable. Pinned for linux/amd64, linux/arm64 and darwin/arm64, it is the release the
+Cloud Run sidecar image is. `TestCloudSQLAuthProxyBinary` reads, through it, the rows a parallel
+import restored (pgx on PostgreSQL, go-sql-driver/mysql on MySQL) and those of a clone to binary
+log coordinates. CI's emulators shard installs it and runs the test. IAM database authentication (`WithIAMAuthN`, an
 `access_token` in `generateEphemeralCert`, users of type `CLOUD_IAM_USER` and the like) is 501: it
 signs a database user in as a Google identity, and CloudBurrow has no identities
 ([ADR-0004](adr/0004-local-access-and-no-authentication.md)). Connecting to the server directly,

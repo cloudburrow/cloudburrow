@@ -48,6 +48,10 @@ var compatEnvExceptions = map[string]string{
 	// default alpine:3.20 is not to be pulled; a host choice, not an
 	// instance's.
 	"CLOUDBURROW_TEST_STEP_IMAGE": "host fixture: an image already on the machine",
+	// Google's Cloud SQL Auth Proxy binary (#1421), which `make
+	// cloud-sql-proxy` downloads and checks; a host tool, as gcloud is, but
+	// no instance has it.
+	"CLOUDBURROW_TEST_CLOUD_SQL_PROXY": "host fixture: the pinned binary make cloud-sql-proxy downloads",
 	// An opt-in switch for a slow test no CI shard runs (#678).
 	"CLOUDBURROW_TEST_FUNCTIONS": "opt-in switch",
 	// The signed URL tests' key and account, for the builtin storage-server

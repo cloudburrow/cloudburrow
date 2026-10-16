@@ -7652,6 +7652,7 @@
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlversions_test.go:104 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:265 TestCloudSQLCascadingAndCrossRegionReplicas"
@@ -7664,6 +7665,7 @@
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlversions_test.go:104 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:265 TestCloudSQLCascadingAndCrossRegionReplicas"
@@ -7783,7 +7785,8 @@
           "test/compat/cloudsqlparallel_test.go:185 TestCloudSQLCloneToBinLogCoordinates",
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
-          "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery"
+          "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary"
         ]
       },
       {
@@ -7869,6 +7872,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlparallel_test.go:48 TestCloudSQLParallelExportAndImport",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqltransfers_test.go:155 TestCloudSQLImportAndExport"
         ]
       },
