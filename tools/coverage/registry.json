@@ -272,7 +272,7 @@
   "google.devtools.cloudbuild.v1.CloudBuild/ListBuilds": "implemented",
   "google.devtools.cloudbuild.v1.CloudBuild/ListWorkerPools": "unimplemented",
   "google.devtools.cloudbuild.v1.CloudBuild/ReceiveTriggerWebhook": "unimplemented",
-  "google.devtools.cloudbuild.v1.CloudBuild/RetryBuild": "unimplemented",
+  "google.devtools.cloudbuild.v1.CloudBuild/RetryBuild": "implemented",
   "google.devtools.cloudbuild.v1.CloudBuild/RunBuildTrigger": "unimplemented",
   "google.devtools.cloudbuild.v1.CloudBuild/UpdateBuildTrigger": "unimplemented",
   "google.devtools.cloudbuild.v1.CloudBuild/UpdateWorkerPool": "unimplemented",

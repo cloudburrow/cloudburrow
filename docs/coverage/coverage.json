@@ -1008,8 +1008,8 @@
     "Key": "cloudbuild",
     "Title": "Cloud Build",
     "counts": {
-      "Unimplemented": 14,
-      "Verified": 5
+      "Unimplemented": 13,
+      "Verified": 6
     },
     "rows": [
       {
@@ -1028,8 +1028,10 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateBuild",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildcreate_test.go:181 TestGcloudBuildsSubmit",
-          "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild"
+          "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
+          "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
+          "test/compat/cloudbuildsteps_test.go:201 TestGcloudBuildsStepsAndList",
+          "test/compat/cloudbuildsteps_test.go:49 TestCloudBuildArbitraryStepsFilterAndRetry"
         ]
       },
       {
@@ -1056,8 +1058,9 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetBuild",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudbuildcreate_test.go:181 TestGcloudBuildsSubmit",
+          "test/compat/cloudbuildcreate_test.go:182 TestGcloudBuildsSubmit",
           "test/compat/cloudbuildcreate_test.go:45 TestCloudBuildCreateBuild",
+          "test/compat/cloudbuildsteps_test.go:49 TestCloudBuildArbitraryStepsFilterAndRetry",
           "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
         ]
       },
@@ -1087,6 +1090,8 @@
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuilds",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudbuildsteps_test.go:201 TestGcloudBuildsStepsAndList",
+          "test/compat/cloudbuildsteps_test.go:49 TestCloudBuildArbitraryStepsFilterAndRetry",
           "test/compat/gclouddeploysource_test.go:87 TestSourceDeployArtifactRegistryAndCloudBuild"
         ]
       },
@@ -1102,8 +1107,10 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/RetryBuild",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildsteps_test.go:49 TestCloudBuildArbitraryStepsFilterAndRetry"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/RunBuildTrigger",
