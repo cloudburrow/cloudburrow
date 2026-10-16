@@ -2372,7 +2372,77 @@ func (p datastoreProvider) QueryForm(path []string) (string, []console.Field) {
 		{Name: "limit", Label: "Limit", Type: "text", Default: "50",
 			Pattern: `^[0-9]{1,4}$`,
 			Help:    fmt.Sprintf("At most %d.", detailLimit)},
+		{Name: "aggregate", Label: "Aggregate", Type: "select", Options: datastoreAggregateOptions,
+			Help: "Answer with an aggregation over the matching entities, computed by " +
+				"Datastore (RunAggregationQuery), instead of listing them: COUNT, or SUM or " +
+				"AVG of the aggregated property, over every matching entity: Limit does not apply."},
+		{Name: "aggregateProperty", Label: "Aggregated property", Type: "text",
+			Help: "The property SUM and AVG add up; values that are not numbers are skipped."},
 	}
+}
+
+// datastoreAggregateOptions are the query builder's aggregations; "none"
+// lists the entities.
+var datastoreAggregateOptions = []string{"none", "COUNT", "SUM", "AVG"}
+
+// datastoreAggregate answers the query builder's Aggregate: one
+// RunAggregationQuery over the query (#1405).
+func datastoreAggregate(ctx context.Context, c datastorepb.DatastoreClient, project, ns string, q *datastorepb.Query, op, prop string) (console.Listing, error) {
+	agg := &datastorepb.AggregationQuery_Aggregation{Alias: strings.ToLower(op)}
+	ref := &datastorepb.PropertyReference{Name: prop}
+	switch op {
+	case "COUNT":
+		agg.Operator = &datastorepb.AggregationQuery_Aggregation_Count_{Count: &datastorepb.AggregationQuery_Aggregation_Count{}}
+	case "SUM", "AVG":
+		if prop == "" {
+			return console.Listing{}, fmt.Errorf("%s needs an aggregated property", op)
+		}
+		if op == "SUM" {
+			agg.Operator = &datastorepb.AggregationQuery_Aggregation_Sum_{Sum: &datastorepb.AggregationQuery_Aggregation_Sum{Property: ref}}
+		} else {
+			agg.Operator = &datastorepb.AggregationQuery_Aggregation_Avg_{Avg: &datastorepb.AggregationQuery_Aggregation_Avg{Property: ref}}
+		}
+	default:
+		return console.Listing{}, fmt.Errorf("unknown aggregation %q", op)
+	}
+	resp, err := c.RunAggregationQuery(ctx, &datastorepb.RunAggregationQueryRequest{
+		ProjectId:   project,
+		PartitionId: &datastorepb.PartitionId{ProjectId: project, NamespaceId: ns},
+		QueryType: &datastorepb.RunAggregationQueryRequest_AggregationQuery{AggregationQuery: &datastorepb.AggregationQuery{
+			QueryType:    &datastorepb.AggregationQuery_NestedQuery{NestedQuery: q},
+			Aggregations: []*datastorepb.AggregationQuery_Aggregation{agg},
+		}},
+	})
+	if err != nil {
+		return console.Listing{}, err
+	}
+	var v *datastorepb.Value
+	for _, r := range resp.GetBatch().GetAggregationResults() {
+		v = r.GetAggregateProperties()[agg.Alias]
+	}
+	if v == nil {
+		return console.Listing{}, fmt.Errorf("Datastore answered the aggregation with no %s", agg.Alias)
+	}
+	var value string
+	switch x := v.GetValueType().(type) {
+	case *datastorepb.Value_IntegerValue:
+		value = strconv.FormatInt(x.IntegerValue, 10)
+	case *datastorepb.Value_DoubleValue:
+		value = strconv.FormatFloat(x.DoubleValue, 'g', -1, 64)
+	case *datastorepb.Value_NullValue:
+		value = "null"
+	default:
+		value = fmt.Sprint(v)
+	}
+	name := op + "(*)"
+	if op != "COUNT" {
+		name = op + "(" + prop + ")"
+	}
+	return console.Listing{
+		Columns: []string{"Value"}, NameColumn: "Aggregation", Noun: "aggregations",
+		Items: []console.Resource{{Name: name, Fields: map[string]string{"Value": value}}},
+		Total: 1,
+	}, nil
 }
 
 func (p datastoreProvider) Build(ctx context.Context, project string, path []string, values map[string]string) (console.Listing, error) {
@@ -2424,6 +2494,11 @@ func (p datastoreProvider) Build(ctx context.Context, project string, path []str
 			return console.Listing{}, err
 		}
 		q.Order = []*datastorepb.PropertyOrder{o}
+	}
+	if op := values["aggregate"]; op != "" && op != "none" {
+		// Over every matching entity, as Firestore's Count only is: the
+		// Limit is the listing's page size.
+		return datastoreAggregate(ctx, c, project, scope.ns, q, op, strings.TrimSpace(values["aggregateProperty"]))
 	}
 
 	res, err := runEntityQuery(ctx, c, project, scope.ns, q, queryLimit(values["limit"]), nil)

@@ -218,8 +218,7 @@ Already tracked: #1201 (scripting blocks), #1037 (`EXECUTE IMMEDIATE ... INTO`),
 |---|---|---|
 | Spanner: 32 RPCs refused (backups, backup schedules, IAM, instance configurations, instance and partition updates, `FetchCacheUpdate`; [spanner.md](coverage/spanner.md)) | no emulator support | L |
 | Bigtable: 34 RPCs refused (authorized views, snapshots, backups, IAM, `ExecuteQuery`, …; [bigtable.md](coverage/bigtable.md)) | no emulator support | L |
-| Firestore `PartitionQuery` (`GetPartitionedQueries`) | no emulator support | M |
-| Datastore `RunAggregationQuery` (count, sum, avg) | no emulator support | M |
+| Datastore GQL aggregation queries (`RunAggregationQuery` with `gql_query`) and `explain_options` | the emulator serves neither `RunAggregationQuery` nor query plans; the call front answers structured COUNT, SUM and AVG and Firestore `PartitionQuery` from its `RunQuery` (#1405), and refuses these 501 | S |
 
 ## Cloud SQL, Memorystore
 
