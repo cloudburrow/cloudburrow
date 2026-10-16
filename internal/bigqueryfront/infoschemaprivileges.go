@@ -15,7 +15,8 @@ import (
 // (https://cloud.google.com/bigquery/docs/information-schema-object-privileges,
 // -datasets-schemata-links). Measured first: the front refused both 501.
 // Both are project views, region-qualified; a dataset-qualified reference
-// stays 501, as BigQuery documents no such form.
+// is refused 400 invalidQuery, as BigQuery documents that a query of
+// either "must include a region qualifier" (regionOnlyInfoSchema, #1458).
 //
 // OBJECT_PRIVILEGES has a row per role binding set on the object itself,
 // none inherited: for a dataset (object_schema NULL, object_type SCHEMA)
@@ -50,7 +51,7 @@ func init() {
 	infoSchemaBuilders["SCHEMATA_LINKS"] = emptyRows(schemataLinksColumns)
 	regionViews["OBJECT_PRIVILEGES"], regionColumns["OBJECT_PRIVILEGES"] = true, objectPrivilegesColumns
 	regionViews["SCHEMATA_LINKS"], regionColumns["SCHEMATA_LINKS"] = true, schemataLinksColumns
-	// unbuiltInfoSchema keeps both: a dataset-qualified reference is 501.
+	// regionOnlyInfoSchema refuses a dataset-qualified reference (#1458).
 }
 
 // unqualifiedSchemataLinks returns sql's references to
@@ -58,7 +59,8 @@ func init() {
 // (#1392), which BigQuery reads in the US region: each is answered as
 // `region-us`.INFORMATION_SCHEMA.SCHEMATA_LINKS (withInformationSchemaJobs).
 // A three-part name is the project's when its first part is project, the
-// request's: another is a dataset's, which stays 501.
+// request's: another is a dataset's, refused 400 (regionOnlyInfoSchema),
+// or another project's, 501.
 func unqualifiedSchemataLinks(sql, project string) []jobsRef {
 	t, ok := lex(sql)
 	if !ok {

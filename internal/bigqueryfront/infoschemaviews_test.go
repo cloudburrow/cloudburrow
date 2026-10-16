@@ -63,7 +63,8 @@ func TestInformationSchemaRows(t *testing.T) {
 	check("TABLES", tablesColumns, tablesRows("p", "ds", table), 1)
 	cols := columnsRows("p", "ds", table)
 	check("COLUMNS", columnsColumns, cols, 3)
-	if cols[2][6] != "'ARRAY<STRUCT<x INT64>>'" || cols[1][6] != "'STRING(10)'" || cols[0][5] != "'NO'" || cols[0][13] != "'YES'" || cols[1][14] != "1" {
+	if cols[2][6] != "'ARRAY<STRUCT<x INT64>>'" || cols[1][6] != "'STRING(10)'" || cols[0][5] != "'NO'" || cols[0][14] != "'YES'" || cols[1][15] != "1" ||
+		cols[0][10] != asyncGenerationNone {
 		t.Errorf("COLUMNS: %v", cols)
 	}
 	check("COLUMN_FIELD_PATHS", fieldPathsColumns, fieldPathsRows("p", "ds", table), 4)

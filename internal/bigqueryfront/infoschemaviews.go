@@ -38,6 +38,9 @@ type viewsRef struct {
 	// alias is whether a name or AS follows it, so the subquery needs
 	// none of its own.
 	alias bool
+	// project is whether the reference names a project before the
+	// dataset (project.dataset.INFORMATION_SCHEMA.<view>).
+	project bool
 }
 
 // informationSchemaViews returns sql's references to
@@ -64,11 +67,12 @@ func informationSchemaViews(sql string) []viewsRef {
 			continue
 		}
 		view := strings.ToUpper(parts[n-1])
-		if _, ok := infoSchemaBuilders[view]; !ok && !unbuiltInfoSchema[view] || script && engineInfoSchema[view] {
+		if _, ok := infoSchemaBuilders[view]; !ok && !unbuiltInfoSchema[view] && !regionOnlyInfoSchema[view] ||
+			script && engineInfoSchema[view] {
 			i = next - 1
 			continue
 		}
-		ref := viewsRef{pos: t[i].pos, end: t[next-1].end, dataset: parts[n-3], view: view}
+		ref := viewsRef{pos: t[i].pos, end: t[next-1].end, dataset: parts[n-3], view: view, project: n == 4}
 		if next < len(t) && (t[next].is("AS") || t[next].kind == tokQuoted ||
 			t[next].kind == tokWord && !reservedWords[strings.ToUpper(t[next].text)]) {
 			ref.alias = true
@@ -164,6 +168,23 @@ func (f front) withInformationSchemaViews(w http.ResponseWriter, r *http.Request
 	subs := map[string]string{}
 	meta := &datasetMeta{}
 	for _, ref := range refs {
+		if regionOnlyInfoSchema[ref.view] {
+			// x.INFORMATION_SCHEMA.SCHEMATA_LINKS is project x's (US region)
+			// when x is not a dataset of the project: another project's,
+			// which an instance does not answer (unqualifiedSchemataLinks
+			// answers the project's own).
+			if ref.view == "SCHEMATA_LINKS" && !ref.project {
+				if st, _ := f.get(r, "/datasets/"+url.PathEscape(ref.dataset)); st == http.StatusNotFound {
+					writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: INFORMATION_SCHEMA.SCHEMATA_LINKS "+
+						"of project "+ref.dataset+", which is not this instance's project, so nothing was run.")
+					return
+				}
+			}
+			f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery",
+				Message: "Queries against INFORMATION_SCHEMA." + ref.view + " must include a region qualifier, for example " +
+					"`region-us`.INFORMATION_SCHEMA." + ref.view})
+			return
+		}
 		if unbuiltInfoSchema[ref.view] {
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: INFORMATION_SCHEMA."+ref.view+
 				" is not built (docs/compatibility.md), so nothing was run.")

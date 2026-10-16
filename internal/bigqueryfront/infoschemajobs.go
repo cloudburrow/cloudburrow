@@ -465,13 +465,42 @@ func (f front) regionRows(r *http.Request, meta *datasetMeta, view, columns stri
 // storageColumns are region-qualified TABLE_STORAGE's columns
 // (https://cloud.google.com/bigquery/docs/information-schema-table-storage)
 // but those the emulator keeps no faithful count of, left out: every
-// *_bytes column, total_partitions and storage_last_modified_time (it
-// keeps no time of a table's last write apart from its metadata's).
-// project_number is NULL: an instance has none.
+// *_bytes column (the engine's tables.get answers numBytes 0, measured,
+// loadstats.go) and storage_last_modified_time (it keeps no time of a
+// table's last write apart from its metadata's). project_number is NULL:
+// an instance has none. total_partitions, "the number of partitions
+// present in the table" (0 for a table not partitioned), counts the
+// partitions PARTITIONS has a row for (#1458): those holding rows, with
+// __NULL__ and __UNPARTITIONED__ (whether BigQuery counts those two, and
+// a streaming buffer's rows, is UNVERIFIED).
 const storageColumns = "STRUCT<project_id STRING, project_number INT64, table_catalog STRING, table_schema STRING, " +
-	"table_name STRING, creation_time TIMESTAMP, total_rows INT64, deleted BOOL, table_type STRING, " +
+	"table_name STRING, creation_time TIMESTAMP, total_rows INT64, total_partitions INT64, deleted BOOL, table_type STRING, " +
 	"managed_table_type STRING, last_metadata_index_refresh_time TIMESTAMP, table_deletion_reason STRING, " +
 	"table_deletion_time TIMESTAMP>"
+
+// totalPartitions is TABLE_STORAGE's total_partitions of table t (above):
+// the distinct partition IDs of its rows, as PARTITIONS reads them
+// (partitionIDExpr), or 0 for a table not partitioned.
+func (f front) totalPartitions(r *http.Request, project, dataset string, t infoTable) (int64, int, string) {
+	raw, err := json.Marshal(t)
+	var pm partitionMeta
+	if err != nil || json.Unmarshal(raw, &pm) != nil {
+		return 0, http.StatusInternalServerError, "cloudburrow: could not read a table's partitioning"
+	}
+	name := str(t, "tableId")
+	id, ok := partitionIDExpr(pm)
+	if !ok {
+		return 0, http.StatusInternalServerError, "cloudburrow: could not read the range partitioning of " + name
+	}
+	if id == "" {
+		return 0, 0, ""
+	}
+	n, msg := f.scalar(r, "SELECT COUNT(DISTINCT "+id+") FROM `"+project+"."+dataset+"."+name+"`")
+	if msg != "" {
+		return 0, http.StatusInternalServerError, "cloudburrow: could not count the partitions of " + name + ": " + msg
+	}
+	return n, 0, ""
+}
 
 // storageRows are a dataset's TABLE_STORAGE rows: its tables, snapshots
 // and clones (no view), none deleted (the instance keeps none).
@@ -493,8 +522,12 @@ func (f front) storageRows(r *http.Request, dataset string, m *datasetMeta) (str
 		} else if t["cloneDefinition"] != nil {
 			tt = "CLONE"
 		}
+		parts, st, msg := f.totalPartitions(r, project, dataset, t)
+		if st != 0 {
+			return "", st, msg
+		}
 		rows = append(rows, []string{sqlString(project), "NULL", sqlString(project), sqlString(dataset), sqlString(str(t, "tableId")),
-			millisTimestamp(t["creationTime"]), int64Or(t["numRows"]), "FALSE", sqlString(tt), managed, "NULL", "NULL", "NULL"})
+			millisTimestamp(t["creationTime"]), int64Or(t["numRows"]), strconv.FormatInt(parts, 10), "FALSE", sqlString(tt), managed, "NULL", "NULL", "NULL"})
 	}
 	return rowsSubquery(storageColumns, rows), 0, ""
 }
