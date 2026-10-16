@@ -30,15 +30,31 @@ import (
 //     allowNonIncrementalDefinition), with the statement's OPTIONS
 //     (ddloptions.go) and PARTITION BY and CLUSTER BY (partitionddl.go).
 //
-// A query of it reads the backing table, so its results are those of the
-// last refresh. A refresh deletes the backing table's rows and inserts its
-// query's again, and sets lastRefreshTime: CALL
-// BQ.REFRESH_MATERIALIZED_VIEW, and, when enableRefresh, the first query
-// that reads it refreshIntervalMs (30 minutes by default) or more after
-// the last refresh, by the front's clock, which the admin's clock:advance
-// moves (streamingbuffer.go). BigQuery's automatic refresh is best-effort
-// within five minutes of a change to a base table, at most every
-// refresh_interval_minutes; the front does not watch the base tables.
+// A query of it reads the backing table. BigQuery's query of a
+// materialized view returns current data, its cached results combined
+// with the base tables' changes, unless max_staleness lets it return the
+// last refresh's (#1415). So at each query of one, and each tables.get of
+// it (syncMV), the front compares the backing table with its query's
+// results now (mvCurrent): when a base table changed since the last
+// refresh, it refreshes it if enableRefresh and refreshIntervalMs (30
+// minutes by default) has passed since the last refresh, by the front's
+// clock, which the admin's clock:advance moves (streamingbuffer.go);
+// otherwise a query brings the backing table up to date without a
+// refresh, lastRefreshTime kept and the table marked changed (MVChanged)
+// so the next due refresh happens, unless the last refresh is within
+// maxStaleness, when it reads the last refresh's results. A refresh
+// deletes the backing table's rows and inserts its query's again, and sets
+// lastRefreshTime: CALL BQ.REFRESH_MATERIALIZED_VIEW, and the automatic
+// one above. BigQuery's automatic refresh is best-effort within five
+// minutes of a change; the front's happens at the first read or get once
+// due. A backing table brought up to date while there was no max_staleness
+// stays so should an ALTER then set one.
+//
+// In a multi-statement script with no TEMP table or function (#1415), a
+// CREATE, ALTER or DROP MATERIALIZED VIEW, and CALL
+// BQ.REFRESH_MATERIALIZED_VIEW, are run in their turn as lone ones, each a
+// child job (scriptflow.go); with a TEMP table, which lasts only for its
+// request, they are 501 (checkDDL).
 //
 // ALTER MATERIALIZED VIEW SET OPTIONS sets enable_refresh,
 // refresh_interval_minutes, max_staleness and the table options; DROP
@@ -58,8 +74,7 @@ import (
 //
 // Not built: smart tuning (BigQuery's rewriting of a query of a base
 // table to read a materialized view instead), an optimization whose
-// results are the same; and the automatic refresh on a change to a base
-// table (above). tables.delete of a materialized view leaves its backing
+// results are the same. tables.delete of a materialized view leaves its backing
 // table in the hidden dataset.
 
 // mvOptions are a materialized view's own options.
@@ -336,6 +351,17 @@ func parseMVStatement(sql string) (st mvStatement, ok bool) {
 	return st, false
 }
 
+// isMVBody reports whether body, a statement of the script sql, is a
+// CREATE, ALTER or DROP MATERIALIZED VIEW, which a script's run carries
+// out in its turn through runQuery (#1415).
+func isMVBody(sql string, body []token) bool {
+	if len(body) < 3 || !body[0].is("CREATE") && !body[0].is("ALTER") && !body[0].is("DROP") {
+		return false
+	}
+	st, ok := parseMVStatement(sql[body[0].pos:body[len(body)-1].end])
+	return ok && st.kind != "refresh"
+}
+
 // parseDDLOptionsMV is parseDDLOptions of text, a CREATE TABLE written for
 // a CREATE MATERIALIZED VIEW, its options read as a materialized view's.
 func parseDDLOptionsMV(text string) (ddlOptions, string, bool) {
@@ -595,24 +621,117 @@ func (f front) refreshMV(r *http.Request, dataset, table string) (int, string) {
 	if st, got := f.send(r, http.MethodPut, tablePath(dataset, table), body); st != http.StatusOK {
 		return http.StatusInternalServerError, errorMessage(got, st)
 	}
+	var created string
+	_ = json.Unmarshal(meta["creationTime"], &created)
+	f.tables.setMVChanged(streamKey(projectOf(f.base), dataset, table), created, false)
 	return 0, ""
 }
 
-// refreshDue refreshes dataset.table, a materialized view whose resource
-// is meta, when its refresh interval has passed (above).
-func (f front) refreshDue(r *http.Request, dataset, table string, meta map[string]any) {
+// syncMV brings dataset.table, a materialized view whose resource is
+// meta, to what BigQuery would give (#1415, above): when its base tables
+// changed since its last refresh, it is refreshed if enableRefresh and
+// its refresh interval has passed; otherwise, for a read, its backing
+// table is brought up to date, as BigQuery's read of the base tables
+// would, unless its last refresh is within maxStaleness.
+func (f front) syncMV(r *http.Request, dataset, table string, meta map[string]any, read bool) {
 	def, _ := meta["materializedView"].(map[string]any)
-	if def == nil || def["enableRefresh"] != true {
+	if def == nil || str(def, "query") == "" {
 		return
 	}
+	key := streamKey(projectOf(f.base), dataset, table)
+	created := str(meta, "creationTime")
+	same, ok := f.mvCurrent(r, dataset, table, str(def, "query"))
+	if !ok {
+		return
+	}
+	pending := f.tables.get(key, created).MVChanged
+	if same && !pending {
+		return
+	}
+	now := f.buffers.clock().UnixMilli()
 	last, _ := strconv.ParseInt(str(def, "lastRefreshTime"), 10, 64)
 	every, err := strconv.ParseInt(str(def, "refreshIntervalMs"), 10, 64)
 	if err != nil || every <= 0 {
 		every = mvDefaultRefreshMs
 	}
-	if f.buffers.clock().UnixMilli()-last >= every {
+	if def["enableRefresh"] == true && now-last >= every {
 		f.refreshMV(r, dataset, table)
+		return
 	}
+	if !read {
+		return
+	}
+	if ms, ok := intervalMillis(str(meta, "maxStaleness")); ok && now-last <= ms {
+		return // within max_staleness: the last refresh's results
+	}
+	if !same {
+		backing := quotePath([]string{resultsDataset, mvBacking(dataset, table)})
+		if code, _ := f.mvQuery(r, dataset, "DELETE FROM "+backing+" WHERE TRUE"); code != 0 {
+			return
+		}
+		if code, _ := f.mvQuery(r, dataset, "INSERT INTO "+backing+" "+str(def, "query")); code != 0 {
+			return
+		}
+	}
+	f.tables.setMVChanged(key, created, true)
+}
+
+// mvCurrent reports whether dataset.table's backing table holds query's
+// results now: the same rows, by their count and two sums of their
+// fingerprints (ok false when that could not be found).
+func (f front) mvCurrent(r *http.Request, dataset, table, query string) (same, ok bool) {
+	print := func(from string) string {
+		return "TO_JSON_STRING((SELECT AS STRUCT COUNT(*) AS n, BIT_XOR(fp) AS x, SUM(MOD(fp, 1000000007)) AS s FROM " +
+			"(SELECT FARM_FINGERPRINT(TO_JSON_STRING(t)) AS fp FROM (" + from + ") AS t)))"
+	}
+	backing := "SELECT * FROM `" + projectOf(f.base) + "`." + quotePath([]string{resultsDataset, mvBacking(dataset, table)})
+	def, _ := json.Marshal(map[string]string{"projectId": projectOf(f.base), "datasetId": dataset})
+	v, msg := f.evalString(r, queryOptions{DefaultDataset: def}, "CAST("+print(query)+" = "+print(backing)+" AS STRING)")
+	if msg != "" || v == nil {
+		return false, false
+	}
+	return *v == "true", true
+}
+
+// intervalMillis is s, an INTERVAL in BigQuery's canonical form "Y-M D
+// H:M:S[.F]" (a month taken as 30 days), in milliseconds.
+func intervalMillis(s string) (int64, bool) {
+	f := strings.Fields(s)
+	if len(f) != 3 {
+		return 0, false
+	}
+	ym := strings.SplitN(f[0], "-", 2)
+	if strings.HasPrefix(f[0], "-") {
+		return 0, false
+	}
+	hms := strings.Split(f[2], ":")
+	if len(ym) != 2 || len(hms) != 3 {
+		return 0, false
+	}
+	y, e1 := strconv.ParseInt(ym[0], 10, 64)
+	mo, e2 := strconv.ParseInt(ym[1], 10, 64)
+	d, e3 := strconv.ParseInt(f[1], 10, 64)
+	h, e4 := strconv.ParseInt(hms[0], 10, 64)
+	mi, e5 := strconv.ParseInt(hms[1], 10, 64)
+	sec, e6 := strconv.ParseFloat(hms[2], 64)
+	for _, e := range []error{e1, e2, e3, e4, e5, e6} {
+		if e != nil {
+			return 0, false
+		}
+	}
+	days := (y*12+mo)*30 + d
+	return ((days*24+h)*60+mi)*60000 + int64(math.Round(sec*1000)), true
+}
+
+// syncGot is syncMV of dataset.table, when it is a materialized view, for
+// a tables.get of it: its lastRefreshTime as of an automatic refresh due.
+func (f front) syncGot(r *http.Request, dataset, table string) {
+	st, got := f.get(r, tablePath(dataset, table))
+	var meta map[string]any
+	if st != http.StatusOK || json.Unmarshal(got, &meta) != nil || str(meta, "type") != "MATERIALIZED_VIEW" {
+		return
+	}
+	f.syncMV(r, dataset, table, meta, false)
 }
 
 // insertMV serves tables.insert of body, a table with a materializedView.

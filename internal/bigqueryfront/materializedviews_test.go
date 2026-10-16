@@ -81,3 +81,31 @@ func TestPartitionFilterRefusal(t *testing.T) {
 		t.Errorf("without the option: %q", msg)
 	}
 }
+
+// TestMVScriptsAndStaleness (#1415): a materialized view's statements in a
+// script are run in turn, and max_staleness is read as milliseconds.
+func TestMVScriptsAndStaleness(t *testing.T) {
+	for sql, want := range map[string]bool{
+		"CREATE TABLE ds.t (x INT64); CREATE MATERIALIZED VIEW ds.mv AS SELECT x FROM ds.t": true,
+		"SELECT 1; ALTER MATERIALIZED VIEW ds.mv SET OPTIONS (enable_refresh = FALSE)":      true,
+		"SELECT 1; DROP MATERIALIZED VIEW ds.mv":                                            true,
+		"CREATE TEMP TABLE x AS SELECT 1 AS a; DROP MATERIALIZED VIEW ds.mv":                false,
+		"CREATE MATERIALIZED VIEW ds.mv AS SELECT x FROM ds.t":                              false,
+	} {
+		if got := hasControlFlow(sql); got != want {
+			t.Errorf("hasControlFlow(%q) = %v, want %v", sql, got, want)
+		}
+	}
+	v := checkDDL("CREATE TEMP TABLE x AS SELECT 1 AS a; CREATE MATERIALIZED VIEW ds.mv AS SELECT a FROM ds.t")
+	if v.code != 501 || !strings.Contains(v.msg, "TEMP table") {
+		t.Errorf("TEMP script: %+v", v)
+	}
+	for s, want := range map[string]int64{"0-0 0 4:0:0": 4 * 3600000, "0-0 1 0:30:0.5": 86400000 + 1800500, "0-1 0 0:0:0": 30 * 86400000} {
+		if got, ok := intervalMillis(s); !ok || got != want {
+			t.Errorf("intervalMillis(%q) = %d %v, want %d", s, got, ok, want)
+		}
+	}
+	if _, ok := intervalMillis("4 hours"); ok {
+		t.Error("intervalMillis read 4 hours")
+	}
+}

@@ -176,6 +176,10 @@ type tableSetting struct {
 	Created       string  `json:"created,omitempty"`
 	ChangeHistory *string `json:"changeHistory,omitempty"`
 	PrivacyPolicy *string `json:"privacyPolicy,omitempty"`
+	// MVChanged marks a materialized view whose base tables changed
+	// since its last refresh, its backing table already brought up to
+	// date by a read (materializedviews.go, #1415).
+	MVChanged bool `json:"mvChanged,omitempty"`
 }
 
 // tableSettings are the settings of every table, by project, dataset and
@@ -278,6 +282,28 @@ func (s *tableSettings) set(key, created string, o moreOption) {
 			s.watchLocked(key)
 		}
 	}
+	s.m[key] = t
+	s.saveLocked()
+}
+
+// setMVChanged sets MVChanged of the table made at created.
+func (s *tableSettings) setMVChanged(key, created string, changed bool) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.m == nil {
+		s.m = map[string]tableSetting{}
+	}
+	t := s.m[key]
+	if t.Created != created {
+		t = tableSetting{Created: created}
+	}
+	if t.MVChanged == changed {
+		return
+	}
+	t.MVChanged = changed
 	s.m[key] = t
 	s.saveLocked()
 }
@@ -434,7 +460,7 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 			continue
 		}
 		if !seen[key] && str(meta, "type") == "MATERIALIZED_VIEW" {
-			f.refreshDue(r, tr.dataset, tr.table, meta)
+			f.syncMV(r, tr.dataset, tr.table, meta, true)
 		}
 		seen[key] = true
 		name := project + "." + tr.dataset + "." + tr.table
