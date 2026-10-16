@@ -38,18 +38,21 @@ import (
 //   - default_time_zone: the zone of the time functions a query calls
 //     without one (timezone.go), for jobs in that region.
 //   - default_kms_key_name: the encryptionConfiguration of a table made
-//     with tables.insert, in a dataset of that region with no
-//     defaultEncryptionConfiguration and given none itself.
+//     with tables.insert or a lone CREATE TABLE (#1456), in a dataset of
+//     that region with no defaultEncryptionConfiguration and given none
+//     itself (projectdefaults.go).
+//   - default_query_job_timeout_ms: the timeout of a query job that gives
+//     no jobTimeoutMs (#1456, jobtimeout.go).
 //   - default_max_time_travel_hours and default_storage_billing_model:
 //     those of a dataset made with datasets.insert in that region, given
 //     none itself ("applies to new datasets only").
 //   - default_sql_dialect_option 'only_google_sql': a legacy SQL query in
 //     that region fails 400.
 //
-// Stored, and read back, but with no effect: the job and queue timeouts
-// (default_query_job_timeout_ms, default_interactive_query_queue_timeout_ms,
-// default_batch_query_queue_timeout_ms; the front enforces no jobTimeoutMs,
-// and an instance queues no job), and the rest of the documented options,
+// Stored, and read back, but with nothing to bound: the queue timeouts
+// (default_interactive_query_queue_timeout_ms,
+// default_batch_query_queue_timeout_ms; an instance queues no job). With
+// no effect: the rest of the documented options,
 // which name reservations, connections, data policies or billing an
 // instance has none of.
 //
