@@ -115,7 +115,9 @@ resource "google_cloudbuild_trigger" "t" {
 	if err == nil {
 		t.Fatalf("a Cloud Build trigger applied:\n%s", lastLines(out, 20))
 	}
-	if !strings.Contains(out, "501") || !strings.Contains(out, "127.0.0.1") {
+	// The transcoder's own refusal: Google would answer a create, and
+	// egress to it is blocked, so this 501 can only be the instance's.
+	if !strings.Contains(out, "Error 501: method CreateBuildTrigger not implemented") {
 		t.Errorf("the trigger was not refused 501 by this instance:\n%s", lastLines(out, 30))
 	}
 }
@@ -156,7 +158,10 @@ resource "google_cloud_run_v2_service" "s" {
     containers {
       image   = %[6]q
       command = ["sh", "-c"]
-      args    = [%[7]q]
+      args = [<<-EOT
+%[7]s
+EOT
+      ]
       env {
         name  = "CONN"
         value = %[3]q
@@ -172,7 +177,9 @@ resource "google_cloud_run_v2_service" "s" {
     }
   }
 }
-`, h.Project(), id, conn, label, value, postgresImage, cloudSQLServeScript)
+`, h.Project(), id, conn, label, value, postgresImage,
+			// HCL interpolates ${ and %{ in a heredoc; $${ and %%{ are literal.
+			strings.NewReplacer("${", "$${", "%{", "%%{").Replace(cloudSQLServeScript))
 	}
 	check := func(when, label, value string) *runpb.Service {
 		t.Helper()

@@ -257,8 +257,8 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	// has no local endpoint for them (#1304). A function is a Cloud Run
 	// service built from source here (`gcloud run deploy --source`).
 	out = append(out,
-		unpointedPrefix{"google_cloudfunctions_", "CloudBurrow does not serve the Cloud Functions v1 API"},
-		unpointedPrefix{"google_cloudfunctions2_", "CloudBurrow does not serve the Cloud Functions v2 API"},
+		unpointedPrefix{"google_cloudfunctions_", "CloudBurrow does not serve the Cloud Functions v1 API, #1377"},
+		unpointedPrefix{"google_cloudfunctions2_", "CloudBurrow does not serve the Cloud Functions v2 API, #1377"},
 		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"})
 	return out
 }
