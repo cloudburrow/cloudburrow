@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -15,7 +14,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
-	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
@@ -96,9 +94,19 @@ func TestBigQueryParquetExtractOfNativeGeography(t *testing.T) {
 		}
 		return err
 	}
-	var ge *googleapi.Error
-	if err := extract(c); !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented {
-		t.Fatalf("a PARQUET extract of GEOGRAPHY with GeoParquet metadata: %v, want 501", err)
+	// Without the flag (#957): a WKT STRING, as "GEOGRAPHY column values
+	// are always formatted as WKT strings" (gis-data).
+	if err := extract(c); err != nil {
+		t.Fatalf("a PARQUET extract of GEOGRAPHY without nativeGeographyExportEnabled: %v", err)
+	}
+	if r, err := bucket.Object("geo.parquet").NewReader(ctx); err != nil {
+		t.Fatal(err)
+	} else {
+		b, _ := io.ReadAll(r)
+		r.Close()
+		if !bytes.Contains(b, []byte("POINT(1 2)")) {
+			t.Errorf("the PARQUET extract without the flag does not hold the WKT POINT(1 2)")
+		}
 	}
 	if err := extract(nc); err != nil {
 		t.Fatalf("a PARQUET extract of GEOGRAPHY with nativeGeographyExportEnabled: %v", err)

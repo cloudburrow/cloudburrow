@@ -38,10 +38,14 @@ type writtenExtract struct {
 	gzip                   bool
 	delimiter              rune
 	header                 bool
-	// uris are the URIs written, each wildcard replaced (shardURI): the
-	// rows are shared out between them (shareRows).
+	// uris are the job's URIs, a wildcard's "*" kept: the rows are shared
+	// out between them (shareRows), and a wildcard URI's share between its
+	// files (extractFiles).
 	uris   []string
 	fields []field
+	// size is the table's logical size in bytes (numBytes), 0 when not
+	// known.
+	size int64
 }
 
 // writeExtract carries out an extract job the front writes itself (#957):
@@ -66,14 +70,9 @@ type writtenExtract struct {
 //     the file holds the header row and nothing else, where the emulator
 //     wrote an empty object.
 //
-//   - NEWLINE_DELIMITED_JSON, of STRING and INT64 columns: one object per
-//     row, its members in the schema's order; "INT64 (integer) data types
-//     are encoded as JSON strings to preserve 64-bit precision", and "the
-//     symbols <, >, and & are converted by using the unicode notation"
-//     (\u003c, \u003e, \u0026). The documentation does not say how a NULL
-//     is written: a row with one is 501, and nothing is written. Nor does
-//     it say how the other types are, or whether there are spaces between
-//     members: the other types are 501, and members are written with none.
+//   - NEWLINE_DELIMITED_JSON: one object per row (jsonExtractRow,
+//     extracttext.go), and CSV and JSON values in each type's text
+//     (extractText).
 //
 //   - AVRO, of the columns avroExportSchema gives a type (extractavro.go:
 //     TIMESTAMP, DATE, TIME, NUMERIC and BIGNUMERIC as the documentation's
@@ -110,13 +109,12 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 		writeRaw(w, status, got)
 		return
 	}
-	// Each URI's share of the rows is encoded before anything is
-	// uploaded, so a share that cannot be written writes nothing.
-	shares := shareRows(rows, len(x.uris))
-	files := make([][]byte, len(shares))
+	// Each file is encoded before anything is uploaded, so a share that
+	// cannot be written writes nothing.
+	files := extractFiles(x, rows)
 	var msg string
-	for k, share := range shares {
-		if files[k], msg = encodeExtract(x, share); msg != "" {
+	for k := range files {
+		if files[k].data, msg = encodeExtract(x, files[k].rows); msg != "" {
 			break
 		}
 	}
@@ -131,28 +129,76 @@ func (f front) writeExtract(w http.ResponseWriter, r *http.Request, e *extractCo
 		return
 	}
 	if msg != "" {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job to "+
-			"NEWLINE_DELIMITED_JSON of a row with a NULL value ("+msg+"). BigQuery's documentation does not say how it "+
-			"writes a NULL to JSON, so CloudBurrow does not write it. Nothing was written.")
+		format := "CSV"
+		if x.json {
+			format = "NEWLINE_DELIMITED_JSON"
+		}
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: an extract job to "+format+
+			" that CloudBurrow could not write as BigQuery documents it ("+msg+"). Nothing was written.")
 		return
 	}
 	var failure *rowError
 	counts := make([]string, len(x.uris))
-	for k, uri := range x.uris {
-		counts[k] = "1"
-		contentType := http.DetectContentType(files[k])
+	perURI := make([]int, len(x.uris))
+	for _, fl := range files {
+		perURI[fl.uri]++
+		contentType := http.DetectContentType(fl.data)
 		if x.avro || x.parquet {
 			contentType = "application/octet-stream"
 		}
 		if x.json && !x.gzip {
 			contentType = "application/json"
 		}
-		if err := f.upload(r.Context(), uri, contentType, files[k]); err != nil {
-			failure = &rowError{Reason: "backendError", Message: fmt.Sprintf("could not write %s: %v", uri, err)}
+		if err := f.upload(r.Context(), fl.name, contentType, fl.data); err != nil {
+			failure = &rowError{Reason: "backendError", Message: fmt.Sprintf("could not write %s: %v", fl.name, err)}
 			break
 		}
 	}
+	for k, n := range perURI {
+		counts[k] = strconv.Itoa(n)
+	}
 	f.finishOwnJob(w, r, j, "EXTRACT", "extract", map[string]any{"destinationUriFileCounts": counts}, failure)
+}
+
+// extractFile is one file an extract writes: its object's URI, the index
+// of the job's URI it is a file of, and its rows and bytes.
+type extractFile struct {
+	name string
+	uri  int
+	rows [][]any
+	data []byte
+}
+
+// extractFiles shares rows out between x's URIs (shareRows), and a
+// wildcard URI's share between as many files as keep each at most
+// extractFileLimit bytes of the table's logical size ("BigQuery can export
+// up to 1 GB of logical data size to a single file"), the share's size
+// taken in proportion to its rows. Each file of a wildcard URI is named by
+// the "*" replaced with its number: "BigQuery replaces the asterisk with a
+// 12-digit number, starting with 000000000000"; a URI's files number from
+// 0 each (exporting-data). A wildcard URI with no rows gets one empty file
+// (destinationUriFileCounts 1, as BigQuery writes a file with the header).
+// How many files BigQuery writes, and which rows each holds, is UNVERIFIED:
+// "The number of files generated by an extract job can vary".
+func extractFiles(x writtenExtract, rows [][]any) []extractFile {
+	var out []extractFile
+	for k, share := range shareRows(rows, len(x.uris)) {
+		uri := x.uris[k]
+		if !strings.Contains(uri, "*") {
+			out = append(out, extractFile{name: uri, uri: k, rows: share})
+			continue
+		}
+		n := 1
+		if x.size > 0 && len(rows) > 0 {
+			bytes := x.size * int64(len(share)) / int64(len(rows))
+			n = int((bytes + extractFileLimit - 1) / extractFileLimit)
+			n = max(1, min(n, len(share)))
+		}
+		for i, part := range shareRows(share, n) {
+			out = append(out, extractFile{name: strings.Replace(uri, "*", fmt.Sprintf("%012d", i), 1), uri: k, rows: part})
+		}
+	}
+	return out
 }
 
 // shareRows shares rows out between n URIs, in order: the first URI gets
@@ -332,24 +378,11 @@ func encodeExtract(x writtenExtract, rows [][]any) ([]byte, string) {
 	}
 	if x.json {
 		for i, row := range rows {
-			var line bytes.Buffer
-			line.WriteByte('{')
-			for j, fl := range x.fields {
-				if j >= len(row) || row[j] == nil {
-					return nil, fmt.Sprintf("row %d, column %s", i+1, fl.Name)
-				}
-				s, _ := row[j].(string)
-				if j > 0 {
-					line.WriteByte(',')
-				}
-				name, _ := json.Marshal(fl.Name)
-				val, _ := json.Marshal(s)
-				line.Write(name)
-				line.WriteByte(':')
-				line.Write(val)
+			line, err := jsonExtractRow(x.fields, row)
+			if err != nil {
+				return nil, fmt.Sprintf("row %d, %v", i+1, err)
 			}
-			line.WriteString("}\n")
-			_, _ = out.Write(line.Bytes())
+			_, _ = out.Write(line)
 		}
 	} else {
 		cw := csv.NewWriter(out)
@@ -361,12 +394,18 @@ func encodeExtract(x writtenExtract, rows [][]any) ([]byte, string) {
 			}
 			_ = cw.Write(names)
 		}
-		for _, row := range rows {
+		for i, row := range rows {
 			rec := make([]string, len(x.fields))
-			for j := range x.fields {
-				if j < len(row) {
-					rec[j], _ = row[j].(string)
+			for j, fl := range x.fields {
+				if j >= len(row) || row[j] == nil {
+					continue // a NULL is an empty field
 				}
+				s, _ := row[j].(string)
+				t, err := extractText(fl, s) // extracttext.go
+				if err != nil {
+					return nil, fmt.Sprintf("row %d, column %s: %v", i+1, fl.Name, err)
+				}
+				rec[j] = t
 			}
 			_ = cw.Write(rec)
 		}

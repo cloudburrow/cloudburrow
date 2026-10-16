@@ -403,8 +403,17 @@ func TestBigQueryExtractToCloudStorage(t *testing.T) {
 	// is refused 400 (#957, TestBigQueryExtractCompressionsEachFormatAllows).
 	_, err = extract("src", func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.Compression = bigquery.Deflate }, uri("out.csv"))
 	wantReason(t, "a DEFLATE extract to out.csv", err, 400, "invalid")
-	_, err = extract("ts", nil, uri("ts.csv"))
-	wantReason(t, "a CSV extract of a TIMESTAMP", err, 501, "notImplemented")
+	// A TIMESTAMP is written "… UTC" by the front (#957,
+	// TestBigQueryExtractOfEveryType).
+	if _, err := extract("ts", nil, uri("ts.csv")); err != nil {
+		t.Errorf("a CSV extract of a TIMESTAMP: %v", err)
+	} else if r, err := bucket.Object("ts.csv").NewReader(ctx); err == nil {
+		b, _ := io.ReadAll(r)
+		r.Close()
+		if string(b) != "ts_col\n2020-01-02 03:04:05 UTC\n" {
+			t.Errorf("ts.csv = %q", b)
+		}
+	}
 	// (Several URIs share the rows out: TestBigQueryExtractToSeveralURIs.)
 
 	var names []string
@@ -419,7 +428,7 @@ func TestBigQueryExtractToCloudStorage(t *testing.T) {
 		}
 		names = append(names, o.Name)
 	}
-	if wantNames := []string{"empty.csv", "nohdr.csv", "out-000000000000.csv", "plain.csv"}; !reflect.DeepEqual(names, wantNames) {
+	if wantNames := []string{"empty.csv", "nohdr.csv", "out-000000000000.csv", "plain.csv", "ts.csv"}; !reflect.DeepEqual(names, wantNames) {
 		t.Errorf("the bucket holds %v, want %v", names, wantNames)
 	}
 }
