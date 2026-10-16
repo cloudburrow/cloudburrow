@@ -2,7 +2,6 @@ package rest
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +13,6 @@ import (
 	"sync"
 
 	"google.golang.org/genproto/googleapis/api/annotations"
-	rpccode "google.golang.org/genproto/googleapis/rpc/code"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -45,7 +43,7 @@ import (
 // fields they name; body "*" is the whole request, body "<field>" that field;
 // every other leaf field is a query parameter, named by its JSON or proto
 // field path. The query policy is in query.go. Errors are the AIP-193
-// envelope, {"error": {"code", "message", "status"}}.
+// envelope, {"error": {"code", "message", "status", "details"}}.
 //
 // Fields are read on first use, so set them before serving.
 type Transcoder struct {
@@ -420,16 +418,6 @@ func (t *Transcoder) decodeBody(r *http.Request, m proto.Message) error {
 	return nil
 }
 
-// writeStatusError writes the AIP-193 error envelope, with status set to the
-// canonical code name, which the Cloud Storage-style WriteError omits.
-func writeStatusError(w http.ResponseWriter, err error) {
-	e := apierror.From(err)
-	body := map[string]any{"error": map[string]any{
-		"code":    e.HTTPStatus(),
-		"message": e.Message,
-		"status":  rpccode.Code(e.Code).String(),
-	}}
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.WriteHeader(e.HTTPStatus())
-	_ = json.NewEncoder(w).Encode(body)
-}
+// writeStatusError writes the AIP-193 error envelope: code, message, status
+// set to the canonical code name, and the status's details.
+func writeStatusError(w http.ResponseWriter, err error) { apierror.WriteJSON(w, err) }
