@@ -405,6 +405,38 @@ func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
 		}
 	}
 
+	if ae := t.AppEngineHTTPRequest; ae != nil {
+		var override *tasks.AppEngineRouting
+		if q, err := st.GetQueue(t.Queue); err == nil {
+			override = q.AppEngineRouting
+		}
+		routing := tasks.AppEngineRouting{}
+		switch {
+		case override != nil:
+			routing = *override
+		case ae.Routing != nil:
+			routing = *ae.Routing
+		}
+		request := []console.Property{
+			{Label: "Method", Value: orDash(ae.Method)},
+			{Label: "Relative URI", Value: ae.RelativeURI},
+			{Label: "Host", Value: tasks.AppEngineHost(strings.Split(t.Name, "/")[1], routing)},
+			{Label: "Body size", Value: fmt.Sprintf("%d bytes", len(ae.Body))},
+		}
+		for _, pair := range sortedPairs(redactHeaders(ae.Headers)) {
+			request = append(request, console.Property{Label: "Header " + pair.Label, Value: pair.Value})
+		}
+		if a := t.LastAttempt; a != nil && a.Message != "" {
+			request = append(request, console.Property{Label: "Last attempt", Value: a.Message})
+		}
+		sections = append(sections, console.Section{
+			ID: "request", Label: "Request", Kind: console.KindProperties,
+			Groups: []console.PropertyGroup{{Heading: "App Engine HTTP request", Properties: request}},
+			Note: "This instance has no App Engine: every attempt fails with NOT_FOUND (HTTP 404) " +
+				"and is retried by the queue's retry config, as a request to an app that does not exist is.",
+		})
+	}
+
 	return console.Detail{
 		Summary: []console.Property{
 			{Label: "Scheduled", Value: t.ScheduleTime.Format(time.RFC3339)},

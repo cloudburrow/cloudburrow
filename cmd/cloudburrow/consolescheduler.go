@@ -85,6 +85,8 @@ func schedulerTargetType(j scheduler.Job) string {
 		return "HTTP"
 	case j.PubSub != nil:
 		return "Pub/Sub"
+	case j.AppEngine != nil:
+		return "App Engine"
 	}
 	return "—"
 }
@@ -193,6 +195,18 @@ func (p schedulerProvider) Detail(_ context.Context, project string, path []stri
 		}
 		for _, pair := range sortedPairs(j.PubSub.Attributes) {
 			target = append(target, console.Property{Label: "Attribute " + pair.Label, Value: pair.Value})
+		}
+	case j.AppEngine != nil:
+		target = []console.Property{
+			{Label: "Type", Value: "App Engine"},
+			{Label: "Method", Value: j.AppEngine.Method},
+			{Label: "Relative URI", Value: j.AppEngine.RelativeURI},
+			{Label: "Host", Value: scheduler.AppEngineHost(strings.Split(j.Name, "/")[1], j.AppEngine.Routing)},
+			{Label: "Body size", Value: fmt.Sprintf("%d bytes", len(j.AppEngine.Body))},
+			{Label: "Delivery", Value: "This instance has no App Engine: every attempt fails with NOT_FOUND (HTTP 404)."},
+		}
+		for _, pair := range sortedPairs(redactHeaders(j.AppEngine.Headers)) {
+			target = append(target, console.Property{Label: "Header " + pair.Label, Value: pair.Value})
 		}
 	}
 	targetSection := console.Section{
@@ -314,9 +328,9 @@ func (p schedulerProvider) Delete(ctx context.Context, project, name string) err
 	return err
 }
 
-// CreateForm is the Create job form. It offers the two targets that work
-// locally; the help names the ones the API refuses, so the refusal is on the
-// form before it is in an error.
+// CreateForm is the Create job form: an HTTP, Pub/Sub or App Engine target.
+// An App Engine job is stored and its attempts fail, as the help says: there
+// is no App Engine on an instance (#1447).
 func (schedulerProvider) CreateForm() (string, []console.Field) {
 	return "Create job", append([]console.Field{
 		{Name: "name", Label: "Name", Type: "text", Required: true,
@@ -335,8 +349,14 @@ func (schedulerProvider) CreateForm() (string, []console.Field) {
 		{Name: "topic", Label: "Pub/Sub topic", Type: "text", Section: "Target",
 			Help: "For a Pub/Sub target: projects/{project}/topics/{topic}, published to the local emulator."},
 		{Name: "body", Label: "Body or message", Type: "textarea", Section: "Target",
-			Help: "The HTTP body, or the Pub/Sub message data (required for a Pub/Sub target). " +
-				"App Engine targets are not implemented locally and are not offered."},
+			Help: "The HTTP or App Engine body, or the Pub/Sub message data (required for a Pub/Sub target)."},
+		{Name: "appEngineRelativeUri", Label: "App Engine relative URI", Type: "text", Section: "Target", Pattern: `^/.*$`,
+			Help: "For an App Engine target: the path, beginning with /, sent with POST. This instance has no App Engine, " +
+				"so each attempt fails with NOT_FOUND (HTTP 404). Give one of the URL, the topic or this."},
+		{Name: "appEngineService", Label: "App Engine service", Type: "text", Section: "Target",
+			Help: "For an App Engine target: optional; empty is the default service."},
+		{Name: "appEngineVersion", Label: "App Engine version", Type: "text", Section: "Target",
+			Help: "For an App Engine target: optional; empty is the default version."},
 	}, authTokenFields("Target")...)
 }
 
@@ -362,16 +382,29 @@ func (p schedulerProvider) Create(ctx context.Context, project string, values ma
 		TimeZone:    strings.TrimSpace(values["timeZone"]),
 	}
 	uri, topic := strings.TrimSpace(values["uri"]), strings.TrimSpace(values["topic"])
+	aeURI := strings.TrimSpace(values["appEngineRelativeUri"])
 	auth, err := parseAuthToken(values)
 	if err != nil {
 		return "", err
 	}
 	if auth.kind != "" && uri == "" {
-		return "", fmt.Errorf("an auth header is for an HTTP target; a Pub/Sub target takes none")
+		return "", fmt.Errorf("an auth header is for an HTTP target; a Pub/Sub or App Engine target takes none")
+	}
+	given := 0
+	for _, v := range []string{uri, topic, aeURI} {
+		if v != "" {
+			given++
+		}
 	}
 	switch {
-	case uri != "" && topic != "":
-		return "", fmt.Errorf("give either an HTTP URL or a Pub/Sub topic, not both")
+	case given > 1:
+		return "", fmt.Errorf("give one of an HTTP URL, a Pub/Sub topic or an App Engine relative URI, not several")
+	case aeURI != "":
+		job.Target = &schedulerpb.Job_AppEngineHttpTarget{AppEngineHttpTarget: &schedulerpb.AppEngineHttpTarget{
+			HttpMethod: schedulerpb.HttpMethod_POST, RelativeUri: aeURI, Body: []byte(values["body"]),
+			AppEngineRouting: &schedulerpb.AppEngineRouting{
+				Service: strings.TrimSpace(values["appEngineService"]), Version: strings.TrimSpace(values["appEngineVersion"])},
+		}}
 	case uri != "":
 		h := &schedulerpb.HttpTarget{Uri: uri, HttpMethod: schedulerpb.HttpMethod_POST, Body: []byte(values["body"])}
 		switch auth.kind {
@@ -388,7 +421,7 @@ func (p schedulerProvider) Create(ctx context.Context, project string, values ma
 			TopicName: topic, Data: []byte(values["body"]),
 		}}
 	default:
-		return "", fmt.Errorf("a job needs a target: an HTTP URL or a Pub/Sub topic")
+		return "", fmt.Errorf("a job needs a target: an HTTP URL, a Pub/Sub topic or an App Engine relative URI")
 	}
 	created, err := api.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: parent, Job: job})
 	if err != nil {

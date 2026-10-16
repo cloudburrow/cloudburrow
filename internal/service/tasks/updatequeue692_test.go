@@ -146,8 +146,6 @@ func TestUpdateQueueRefusesPathsItCannotApply(t *testing.T) {
 			[]string{"stackdriver_logging_config"}, codes.InvalidArgument, "stackdriver_logging_config"},
 		{&taskspb.Queue{StackdriverLoggingConfig: &taskspb.StackdriverLoggingConfig{SamplingRatio: 2}},
 			nil, codes.InvalidArgument, "stackdriver_logging_config"},
-		{&taskspb.Queue{AppEngineRoutingOverride: &taskspb.AppEngineRouting{Service: "s"}},
-			[]string{"app_engine_routing_override"}, codes.Unimplemented, "app_engine_routing_override"},
 		{&taskspb.Queue{RetryConfig: &taskspb.RetryConfig{MaxAttempts: 1, MaxRetryDuration: durationpb.New(-time.Second)}},
 			[]string{"retry_config"}, codes.InvalidArgument, "max_retry_duration"},
 	} {

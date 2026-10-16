@@ -102,6 +102,9 @@ type Queue struct {
 	// HTTPTarget is the queue's http_target as proto JSON, nil when unset
 	// (#1282, httptarget1282.go).
 	HTTPTarget []byte `json:"httpTarget,omitempty"`
+	// AppEngineRouting is the queue's app_engine_routing_override, nil when
+	// unset (#1447, appengine1447.go).
+	AppEngineRouting *AppEngineRouting `json:"appEngineRouting,omitempty"`
 }
 
 // HTTPRequest is a task's HTTP target.
@@ -140,11 +143,14 @@ type TokenMinter interface {
 
 // Task is a queued unit of work.
 type Task struct {
-	Name         string       `json:"name"`
-	Queue        string       `json:"queue"`
-	HTTPRequest  *HTTPRequest `json:"httpRequest,omitempty"`
-	ScheduleTime time.Time    `json:"scheduleTime"`
-	Created      time.Time    `json:"created"`
+	Name        string       `json:"name"`
+	Queue       string       `json:"queue"`
+	HTTPRequest *HTTPRequest `json:"httpRequest,omitempty"`
+	// AppEngineHTTPRequest is set instead of HTTPRequest for an App Engine
+	// task (#1447), whose every attempt fails (appengine1447.go).
+	AppEngineHTTPRequest *AppEngineHTTPRequest `json:"appEngineHttpRequest,omitempty"`
+	ScheduleTime         time.Time             `json:"scheduleTime"`
+	Created              time.Time             `json:"created"`
 	// DispatchCount counts attempts already made.
 	DispatchCount int `json:"dispatchCount"`
 	// ResponseCount counts attempts that produced a response, successful or not.
@@ -154,6 +160,8 @@ type Task struct {
 	// FirstAttempt is when the task was first dispatched, zero before; the
 	// queue's MaxRetryDuration is measured from it (#578).
 	FirstAttempt time.Time `json:"firstAttempt,omitempty"`
+	// LastAttempt is the task's last attempt, nil before the first.
+	LastAttempt *Attempt `json:"lastAttempt,omitempty"`
 	// DispatchDeadline is the per-attempt deadline the task was created
 	// with, zero when unset; each attempt runs under it, or under Google's
 	// default of 10 minutes (#579).
@@ -428,7 +436,7 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 	if !taskIDRE.MatchString(n.ID) {
 		return Task{}, apierror.InvalidArgument("task ID %q must be letters, digits, hyphens and underscores, at most 500 characters", n.ID)
 	}
-	if t.HTTPRequest == nil {
+	if t.HTTPRequest == nil && t.AppEngineHTTPRequest == nil {
 		return Task{}, apierror.InvalidArgument("task requires an httpRequest with a url")
 	}
 
@@ -445,7 +453,7 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 	}
 	// A queue whose http_target names a host makes the URL of a task that
 	// has none (#1282).
-	if t.HTTPRequest.URL == "" && !targetsHost(q) {
+	if t.HTTPRequest != nil && t.HTTPRequest.URL == "" && !targetsHost(q) {
 		return Task{}, apierror.InvalidArgument("task requires an httpRequest with a url")
 	}
 	if _, err := s.db.Get(taskKey(t.Name)); err == nil {
@@ -460,7 +468,7 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 		_ = s.db.Delete(tombstoneKey(t.Name))
 	}
 
-	if t.HTTPRequest.Method == "" {
+	if t.HTTPRequest != nil && t.HTTPRequest.Method == "" {
 		t.HTTPRequest.Method = "POST"
 	}
 	now := time.Now().UTC()

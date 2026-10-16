@@ -82,7 +82,8 @@ func toProtoQueue(q Queue) *taskspb.Queue {
 			}
 			return &taskspb.StackdriverLoggingConfig{SamplingRatio: q.Logging.SamplingRatio}
 		}(),
-		HttpTarget: queueHTTPTarget(q),
+		HttpTarget:               queueHTTPTarget(q),
+		AppEngineRoutingOverride: routingToProto(q.AppEngineRouting, projectOf(q.Name)),
 	}
 }
 
@@ -90,9 +91,6 @@ func toProtoQueue(q Queue) *taskspb.Queue {
 // CreateQueue and, field by field as its mask names them, UpdateQueue.
 func checkQueue(p *taskspb.Queue) error {
 	if err := checkLogging(p); err != nil {
-		return err
-	}
-	if err := checkAppEngineRouting(p); err != nil {
 		return err
 	}
 	if err := checkHTTPTarget(p); err != nil {
@@ -183,6 +181,7 @@ func fromProtoQueue(p *taskspb.Queue) Queue {
 		q.Logging = &LoggingConfig{SamplingRatio: c.GetSamplingRatio()}
 	}
 	q.HTTPTarget = httpTargetJSON(p.GetHttpTarget())
+	q.AppEngineRouting = routingFromProto(p.GetAppEngineRoutingOverride())
 	if rc := p.GetRetryConfig(); rc != nil {
 		q.RetryConfig = RetryConfig{
 			MaxAttempts:      int(rc.GetMaxAttempts()),
@@ -195,7 +194,10 @@ func fromProtoQueue(p *taskspb.Queue) Queue {
 	return q
 }
 
-func toProtoTask(t Task) *taskspb.Task {
+// toProtoTaskIn is a task as the API returns it, for a queue whose
+// app_engine_routing_override is override, which sets the host an App
+// Engine task reports.
+func toProtoTaskIn(t Task, override *AppEngineRouting) *taskspb.Task {
 	pt := &taskspb.Task{
 		Name:          t.Name,
 		ScheduleTime:  timestamppb.New(t.ScheduleTime),
@@ -227,6 +229,11 @@ func toProtoTask(t Task) *taskspb.Task {
 		}
 		pt.MessageType = &taskspb.Task_HttpRequest{HttpRequest: hr}
 	}
+	if t.AppEngineHTTPRequest != nil {
+		pt.MessageType = &taskspb.Task_AppEngineHttpRequest{
+			AppEngineHttpRequest: appEngineToProto(t.AppEngineHTTPRequest, t.Name, override)}
+	}
+	attemptsToProto(t, pt)
 	return pt
 }
 
@@ -235,14 +242,29 @@ func fromProtoTask(p *taskspb.Task, parent string) (Task, error) {
 	if p.GetScheduleTime() != nil {
 		t.ScheduleTime = p.GetScheduleTime().AsTime()
 	}
+	if dd := p.GetDispatchDeadline(); dd != nil {
+		d := dd.AsDuration()
+		if d < 15*time.Second || d > 24*time.Hour+15*time.Second {
+			return Task{}, apierror.InvalidArgument("dispatch_deadline %s must be between 15s and 24h0m15s", d)
+		}
+		t.DispatchDeadline = d
+	}
 	hr := p.GetHttpRequest()
 	if hr == nil {
-		// App Engine targets are out of scope. Saying so is better than
-		// accepting a task that would never be dispatched.
-		if p.GetAppEngineHttpRequest() != nil {
-			return Task{}, apierror.Unimplemented("appEngineHttpRequest is not supported; use httpRequest")
+		// An App Engine task is stored, and its attempts fail, as no app
+		// serves it here (#1447, appengine1447.go).
+		if ae := p.GetAppEngineHttpRequest(); ae != nil {
+			a, err := appEngineFromProto(ae)
+			if err != nil {
+				return Task{}, err
+			}
+			t.AppEngineHTTPRequest = a
+			return t, nil
 		}
-		return Task{}, apierror.InvalidArgument("task requires an httpRequest")
+		return Task{}, apierror.InvalidArgument("task requires an httpRequest or an appEngineHttpRequest")
+	}
+	if t.DispatchDeadline > 30*time.Minute {
+		return Task{}, apierror.InvalidArgument("dispatch_deadline %s must be between 15s and 30m for an HTTP task", t.DispatchDeadline)
 	}
 	oidc, oauth, err := authorizationFromProto(hr)
 	if err != nil {
@@ -253,13 +275,6 @@ func fromProtoTask(p *taskspb.Task, parent string) (Task, error) {
 		if len(hr.GetBody()) > 0 {
 			return Task{}, apierror.InvalidArgument("httpRequest.body must be empty for an %s task", hr.GetHttpMethod())
 		}
-	}
-	if dd := p.GetDispatchDeadline(); dd != nil {
-		d := dd.AsDuration()
-		if d < 15*time.Second || d > 30*time.Minute {
-			return Task{}, apierror.InvalidArgument("dispatch_deadline %s must be between 15s and 30m", d)
-		}
-		t.DispatchDeadline = d
 	}
 	t.HTTPRequest = &HTTPRequest{
 		URL:        hr.GetUrl(),
@@ -375,7 +390,9 @@ func (g *GRPCServer) UpdateQueue(_ context.Context, req *taskspb.UpdateQueueRequ
 				set = func(q *Queue) { q.HTTPTarget = target }
 			}
 		case "app_engine_routing_override":
-			err = checkAppEngineRouting(in)
+			// The whole message; its host is output only and ignored.
+			routing := routingFromProto(in.GetAppEngineRoutingOverride())
+			set = func(q *Queue) { q.AppEngineRouting = routing }
 		case "name":
 			err = apierror.InvalidArgument("update_mask path %q cannot be updated: a queue's name cannot be changed", p)
 		case "state":
@@ -539,7 +556,7 @@ func (g *GRPCServer) CreateTask(ctx context.Context, req *taskspb.CreateTaskRequ
 	if err != nil {
 		return nil, err
 	}
-	return toProtoTask(created), nil
+	return g.protoTask(created), nil
 }
 
 func (g *GRPCServer) GetTask(_ context.Context, req *taskspb.GetTaskRequest) (*taskspb.Task, error) {
@@ -547,7 +564,7 @@ func (g *GRPCServer) GetTask(_ context.Context, req *taskspb.GetTaskRequest) (*t
 	if err != nil {
 		return nil, err
 	}
-	return toProtoTask(t), nil
+	return g.protoTask(t), nil
 }
 
 func (g *GRPCServer) ListTasks(_ context.Context, req *taskspb.ListTasksRequest) (*taskspb.ListTasksResponse, error) {
@@ -567,7 +584,7 @@ func (g *GRPCServer) ListTasks(_ context.Context, req *taskspb.ListTasksRequest)
 	}
 	resp := &taskspb.ListTasksResponse{NextPageToken: next}
 	for _, n := range page {
-		resp.Tasks = append(resp.Tasks, toProtoTask(byName[n]))
+		resp.Tasks = append(resp.Tasks, g.protoTask(byName[n]))
 	}
 	return resp, nil
 }

@@ -51,6 +51,7 @@ var tasksEditPaths = []string{
 	"retry_config.max_retry_duration",
 	"stackdriver_logging_config",
 	"http_target",
+	"app_engine_routing_override",
 }
 
 // tasksDurationHelp is the help every duration field carries.
@@ -85,11 +86,28 @@ func tasksQueueConfigGroups(q tasks.Queue) []console.PropertyGroup {
 			{Label: "Sampling ratio", Value: tasksSamplingText(q)},
 		}},
 		tasksHTTPTargetGroup(q),
+		tasksAppEngineRoutingGroup(q),
 		{Heading: "Queue", Properties: []console.Property{
 			{Label: "Resource name", Value: q.Name},
 			{Label: "State", Value: string(q.State)},
 		}},
 	}
+}
+
+// tasksAppEngineRoutingGroup is the queue's app_engine_routing_override
+// (#1447), with the host its App Engine tasks are sent to.
+func tasksAppEngineRoutingGroup(q tasks.Queue) console.PropertyGroup {
+	r := q.AppEngineRouting
+	if r == nil {
+		return console.PropertyGroup{Heading: "App Engine routing override", Properties: []console.Property{
+			{Label: "Override", Value: "None: each App Engine task's own routing applies"}}}
+	}
+	return console.PropertyGroup{Heading: "App Engine routing override", Properties: []console.Property{
+		{Label: "Service", Value: orDash(r.Service)},
+		{Label: "Version", Value: orDash(r.Version)},
+		{Label: "Instance", Value: orDash(r.Instance)},
+		{Label: "Host", Value: tasks.AppEngineHost(strings.Split(q.Name, "/")[1], *r)},
+	}}
 }
 
 // tasksSamplingText is a queue's stackdriver_logging_config as its page
@@ -114,9 +132,9 @@ func tasksSamplingDefault(q tasks.Queue) string {
 // Only what UpdateQueue applies here: the rate and concurrency limits and the
 // five retry parameters, and the logging sampling ratio (#1256). Max burst
 // size is shown and not sent, because the API derives it from the rate and
-// refuses it as output only. The queue's HTTP target (#1282) is on it; App
-// Engine routing is refused as UNIMPLEMENTED by this instance's API, so it
-// is not on the form at all.
+// refuses it as output only. The queue's HTTP target (#1282) and its App
+// Engine routing override (#1447) are on it; emptying the override's three
+// fields clears it.
 func tasksQueueEditForm(q tasks.Queue) *console.EditForm {
 	r, l := q.RetryConfig, q.RateLimits
 	retryFor := ""
@@ -124,7 +142,12 @@ func tasksQueueEditForm(q tasks.Queue) *console.EditForm {
 		retryFor = r.MaxRetryDuration.String()
 	}
 	const rates, retries, logs, target = "Rate limits", "Retry parameters", "Logging", "HTTP target"
+	const appEngine = "App Engine routing override"
 	tv := tasksHTTPTargetValues(q)
+	var ae tasks.AppEngineRouting
+	if q.AppEngineRouting != nil {
+		ae = *q.AppEngineRouting
+	}
 	return &console.EditForm{
 		Label: "Edit queue",
 		Fields: []console.Field{
@@ -167,15 +190,23 @@ func tasksQueueEditForm(q tasks.Queue) *console.EditForm {
 			{Name: "targetOidcAccount", Label: "OIDC token service account", Type: "text", Section: target,
 				Default: tv.oidc,
 				Help:    "Optional. Every dispatch carries an ID token for this account, replacing the task's own token."},
+			{Name: "appEngineService", Label: "Service", Type: "text", Section: appEngine, Default: ae.Service,
+				Help: "Optional. The App Engine service every App Engine task of the queue is sent to, over the task's own " +
+					"routing (app_engine_routing_override). Empty service, version and instance clear the override."},
+			{Name: "appEngineVersion", Label: "Version", Type: "text", Section: appEngine, Default: ae.Version,
+				Help: "Optional. The App Engine version; empty is the default version."},
+			{Name: "appEngineInstance", Label: "Instance", Type: "text", Section: appEngine, Default: ae.Instance,
+				Help: "Optional. The App Engine instance; empty is any available instance."},
 			{Name: "samplingRatio", Label: "Sampling ratio", Type: "text", Section: logs,
 				Default: tasksSamplingDefault(q), Pattern: `^(0(\.[0-9]+)?|1(\.0+)?)$`,
 				Help: "Optional. The fraction of dispatch attempts written to Cloud Logging, from 0.0 to 1.0, " +
 					"in the log cloudtasks.googleapis.com/task_operations_log. Empty or 0 logs none."},
 		},
 		Note: "Saved through UpdateQueue, and applied to tasks already in the queue. The queue's " +
-			"name and region cannot be changed, and its state changes with Pause and Resume. App Engine " +
-			"routing is not implemented on this instance, so it is not offered. Sampled attempts are " +
-			"written to Cloud Logging only when the instance serves it.",
+			"name and region cannot be changed, and its state changes with Pause and Resume. This instance " +
+			"has no App Engine: the routing override is stored and sets each App Engine task's host, and every " +
+			"App Engine attempt fails with NOT_FOUND (HTTP 404). Sampled attempts are written to Cloud Logging " +
+			"only when the instance serves it.",
 	}
 }
 
@@ -237,10 +268,25 @@ func (p tasksProvider) Edit(ctx context.Context, project string, path []string, 
 			},
 			StackdriverLoggingConfig: logging,
 			HttpTarget:               target,
+			AppEngineRoutingOverride: tasksRoutingFromForm(values),
 		},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: tasksEditPaths},
 	})
 	return err
+}
+
+// tasksRoutingFromForm is the queue's app_engine_routing_override from Edit
+// queue, nil when its three fields are empty, which clears it.
+func tasksRoutingFromForm(values map[string]string) *cloudtaskspb.AppEngineRouting {
+	r := &cloudtaskspb.AppEngineRouting{
+		Service:  strings.TrimSpace(values["appEngineService"]),
+		Version:  strings.TrimSpace(values["appEngineVersion"]),
+		Instance: strings.TrimSpace(values["appEngineInstance"]),
+	}
+	if r.Service == "" && r.Version == "" && r.Instance == "" {
+		return nil
+	}
+	return r
 }
 
 // tasksHTTPMethods are the methods Create task offers: HttpMethod's values,
@@ -250,12 +296,23 @@ const tasksHTTPMethods = "POST, GET, HEAD, PUT, DELETE, PATCH or OPTIONS"
 // tasksCreateTaskFields is Create task on a queue's page. A function so the
 // pattern check in consolepatterns_test.go reads the fields shipped.
 //
-// An HTTP target only: App Engine targets are refused by this instance's
-// CreateTask, so they are not offered. An OIDC or OAuth token is (#1243).
+// An HTTP target, with an OIDC or OAuth token (#1243), or an App Engine
+// target (#1447), which is stored and whose every attempt fails: there is
+// no App Engine on an instance.
 func tasksCreateTaskFields() []console.Field {
 	return append([]console.Field{
-		{Name: "url", Label: "URL", Type: "url", Required: true,
-			Help: "The full URL the task is sent to, http or https."},
+		{Name: "target", Label: "Target", Type: "select", Required: true, Default: "HTTP",
+			Options: []string{"HTTP", "App Engine"},
+			Help: "HTTP sends the task to the URL. App Engine stores an appEngineHttpRequest; " +
+				"this instance has no App Engine, so each attempt fails with NOT_FOUND (HTTP 404) and is retried."},
+		{Name: "url", Label: "URL", Type: "url",
+			Help: "HTTP target: the full URL the task is sent to, http or https."},
+		{Name: "relativeUri", Label: "Relative URI", Type: "text", Pattern: `^/.*$`,
+			Help: "App Engine target: the path and query, beginning with /; empty is /."},
+		{Name: "appEngineService", Label: "App Engine service", Type: "text",
+			Help: "App Engine target: optional; empty is the default service."},
+		{Name: "appEngineVersion", Label: "App Engine version", Type: "text",
+			Help: "App Engine target: optional; empty is the default version."},
 		{Name: "httpMethod", Label: "HTTP method", Type: "text", Required: true, Default: "POST",
 			Pattern: `^(POST|GET|HEAD|PUT|DELETE|PATCH|OPTIONS)$`,
 			Help:    "One of " + tasksHTTPMethods + ", in capitals."},
@@ -291,6 +348,39 @@ func (p tasksProvider) createTask(ctx context.Context, project, queue string, va
 	if err != nil {
 		return err
 	}
+	var task *cloudtaskspb.Task
+	if values["target"] == "App Engine" {
+		task = &cloudtaskspb.Task{MessageType: &cloudtaskspb.Task_AppEngineHttpRequest{AppEngineHttpRequest: &cloudtaskspb.AppEngineHttpRequest{
+			HttpMethod: cloudtaskspb.HttpMethod(method), RelativeUri: strings.TrimSpace(values["relativeUri"]),
+			Headers: headers, Body: []byte(values["body"]),
+			AppEngineRouting: &cloudtaskspb.AppEngineRouting{
+				Service: strings.TrimSpace(values["appEngineService"]), Version: strings.TrimSpace(values["appEngineVersion"])},
+		}}}
+		if auth.kind != "" {
+			return errors.New("an App Engine task carries no OIDC or OAuth token")
+		}
+	} else {
+		if strings.TrimSpace(values["url"]) == "" {
+			return errors.New("an HTTP task needs a URL")
+		}
+		task = &cloudtaskspb.Task{MessageType: &cloudtaskspb.Task_HttpRequest{HttpRequest: tasksFormHTTPRequest(values, method, headers, auth)}}
+	}
+	if id := strings.TrimSpace(values["taskId"]); id != "" {
+		task.Name = queue + "/tasks/" + id
+	}
+	if at := strings.TrimSpace(values["scheduleTime"]); at != "" {
+		when, err := time.Parse(time.RFC3339, at)
+		if err != nil {
+			return fmt.Errorf("schedule time %q is not an RFC 3339 time such as 2026-09-27T15:04:05Z", at)
+		}
+		task.ScheduleTime = timestamppb.New(when)
+	}
+	_, err = api.CreateTask(ctx, &cloudtaskspb.CreateTaskRequest{Parent: queue, Task: task})
+	return err
+}
+
+// tasksFormHTTPRequest is the form's HTTP target.
+func tasksFormHTTPRequest(values map[string]string, method int32, headers map[string]string, auth authToken) *cloudtaskspb.HttpRequest {
 	hr := &cloudtaskspb.HttpRequest{
 		Url:        strings.TrimSpace(values["url"]),
 		HttpMethod: cloudtaskspb.HttpMethod(method),
@@ -305,19 +395,7 @@ func (p tasksProvider) createTask(ctx context.Context, project, queue string, va
 		hr.AuthorizationHeader = &cloudtaskspb.HttpRequest_OauthToken{OauthToken: &cloudtaskspb.OAuthToken{
 			ServiceAccountEmail: auth.email, Scope: auth.scope}}
 	}
-	task := &cloudtaskspb.Task{MessageType: &cloudtaskspb.Task_HttpRequest{HttpRequest: hr}}
-	if id := strings.TrimSpace(values["taskId"]); id != "" {
-		task.Name = queue + "/tasks/" + id
-	}
-	if at := strings.TrimSpace(values["scheduleTime"]); at != "" {
-		when, err := time.Parse(time.RFC3339, at)
-		if err != nil {
-			return fmt.Errorf("schedule time %q is not an RFC 3339 time such as 2026-09-27T15:04:05Z", at)
-		}
-		task.ScheduleTime = timestamppb.New(when)
-	}
-	_, err = api.CreateTask(ctx, &cloudtaskspb.CreateTaskRequest{Parent: queue, Task: task})
-	return err
+	return hr
 }
 
 // tasksInProject refuses a queue outside the project on screen: a request
