@@ -38,10 +38,10 @@ import (
 //     WHERE of the statement that reads it, not that the filter can prune.
 //   - max_staleness: a query reads the table as it is, never older data.
 //   - default_rounding_mode: kept; the engine rounds a value written to a
-//     parameterized NUMERIC or BIGNUMERIC column of a tables.insert table
-//     to its scale by the column's roundingMode, else this, else
-//     ROUND_HALF_AWAY_FROM_ZERO (engine patches googlesqlite 0031 and
-//     bigquery-emulator 0020, #1401); a CREATE TABLE table does not round.
+//     parameterized NUMERIC or BIGNUMERIC column to its scale by the
+//     column's roundingMode, else this, else ROUND_HALF_AWAY_FROM_ZERO
+//     (engine patches googlesqlite 0031 and bigquery-emulator 0020, #1401;
+//     a CREATE TABLE's columns, decimalddl.go).
 //   - enable_change_history: CHANGES and APPENDS are not served (501).
 //   - privacy_policy: a query of the table is refused 501, since the
 //     front does not enforce the policy, and reading the table as if it

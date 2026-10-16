@@ -26,9 +26,11 @@ import (
 // ROUND_HALF_AWAY_FROM_ZERO and 2 and 4 under ROUND_HALF_EVEN, by each
 // write path: DML INSERT, UPDATE and MERGE, tabledata.insertAll, a load,
 // the Storage Write API and a query's destination table; 99.5 (100 once
-// rounded) is refused by each.
+// rounded) is refused by each, insertAll's as an invalid row. A table made
+// by CREATE TABLE keeps its columns' NUMERIC(P) and rounding_mode and its
+// default_rounding_mode, and rounds by them; tables.get reads them back.
 //
-// covers: bigquery.tables.insert, bigquery.tables.patch, bigquery.jobs.query, bigquery.jobs.insert, bigquery.tabledata.insertAll, bigquery.tabledata.list
+// covers: bigquery.tables.insert, bigquery.tables.patch, bigquery.tables.get, bigquery.jobs.query, bigquery.jobs.insert, bigquery.tabledata.insertAll, bigquery.tabledata.list
 func TestBigQueryNumericRounding(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
@@ -99,8 +101,37 @@ func TestBigQueryNumericRounding(t *testing.T) {
 		}
 	})
 
+	t.Run("defaultRoundingMode", func(t *testing.T) {
+		// The table's mode rounds a, and e keeps its own, by DML and a load.
+		_, name := table(bigquery.RoundHalfEven)
+		if err := bqRun(ctx, c, "INSERT INTO "+name+" (id, a, e) VALUES (1, 2.5, 2.5)", false); err != nil {
+			t.Fatal(err)
+		}
+		tbl, name2 := table(bigquery.RoundHalfEven)
+		src := bigquery.NewReaderSource(strings.NewReader(`{"id": 2, "a": "3.5", "e": "3.5"}` + "\n"))
+		src.SourceFormat = bigquery.JSON
+		job, err := tbl.LoaderFrom(src).Run(ctx)
+		if err == nil {
+			var st *bigquery.JobStatus
+			if st, err = job.Wait(ctx); err == nil {
+				err = st.Err()
+			}
+		}
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		check("DML INSERT, table ROUND_HALF_EVEN", name, "1|2|2")
+		check("load, table ROUND_HALF_EVEN", name2, "2|4|4")
+		md, err := tbl.Metadata(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if md.Schema[2].RoundingMode != bigquery.RoundHalfEven || md.Schema[1].Precision != 2 {
+			t.Errorf("schema read back: a %+v, e %+v", md.Schema[1], md.Schema[2])
+		}
+	})
+
 	t.Run("DDL", func(t *testing.T) {
-		t.Skip("#1401 follow-up: a table made by CREATE TABLE keeps no precision in the engine's table resource, so it does not round (measured)")
 		// The table's defaultRoundingMode, set by DDL and changed by
 		// ALTER TABLE SET OPTIONS.
 		name := ds.DatasetID + ".ddl"
@@ -115,10 +146,17 @@ func TestBigQueryNumericRounding(t *testing.T) {
 			}
 		}
 		check("DDL", name, "1|2|3", "2|3|3")
+		refused("DDL table", bqRun(ctx, c, "INSERT INTO "+name+" (id, a) VALUES (3, 99.5)", false))
+		md, err := ds.Table("ddl").Metadata(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a, e := md.Schema[1], md.Schema[2]; a.Precision != 2 || e.Precision != 2 || e.RoundingMode != bigquery.RoundHalfAwayFromZero {
+			t.Errorf("DDL table's schema: a %+v, e %+v", a, e)
+		}
 	})
 
 	t.Run("insertAll", func(t *testing.T) {
-		t.Skip("#1401 follow-up: insertAll loses the column's roundingMode, and its OUT_OF_RANGE is a 500 the client retries (measured)")
 		for _, mode := range []bigquery.RoundingMode{"", bigquery.RoundHalfEven} {
 			tbl, name := table(mode)
 			if err := tbl.Inserter().Put(ctx, []*bigquery.ValuesSaver{
@@ -175,7 +213,6 @@ func TestBigQueryNumericRounding(t *testing.T) {
 	})
 
 	t.Run("Storage Write API", func(t *testing.T) {
-		t.Skip("#1401 follow-up: the Storage Write API rounds and refuses, but loses the column's roundingMode, as insertAll does (measured)")
 		tbl, name := table("")
 		m, dp := writerSchema(t, h, tbl)
 		mw := managedWriter(t, h, project)
