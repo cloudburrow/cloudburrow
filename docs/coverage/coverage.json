@@ -188,6 +188,8 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
+          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/terraform_more_test.go:109 TestTerraformSecretVersion"
         ]
@@ -196,6 +198,8 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
+          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
@@ -206,8 +210,10 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/CreateSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/secretcmek_test.go:246 TestTerraformSecretCMEK",
+          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
-          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
+          "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
@@ -284,8 +290,9 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecret",
         "status": "Verified",
         "tests": [
+          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
-          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
+          "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",
@@ -303,6 +310,7 @@
         "method": "google.cloud.secretmanager.v1.SecretManagerService/GetSecretVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/terraform_batch4_test.go:215 TestTerraformSecretVersionDeletionPolicy",
@@ -322,7 +330,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/secretexpiryfilter_test.go:96 TestSecretManagerListFilters",
-          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
+          "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:49 TestSecretLifecycle"
         ]
       },
@@ -356,8 +364,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudsecrets_test.go:19 TestGcloudSecrets",
+          "test/compat/secretcmek_test.go:203 TestGcloudSecretsCMEK",
+          "test/compat/secretcmek_test.go:73 TestSecretManagerCMEK",
           "test/compat/secretexpiryfilter_test.go:32 TestSecretManagerExpiry",
-          "test/compat/secretreplication_test.go:54 TestSecretManagerUserManagedReplicasRoundTrip",
+          "test/compat/secretreplication_test.go:53 TestSecretManagerUserManagedReplicasRoundTrip",
           "test/compat/secrets_test.go:360 TestSecretUpdateAppliesOnlyTheMask",
           "test/compat/secretschedule_test.go:53 TestSecretManagerRotationAndDelayedDestroy",
           "test/compat/secrettopics_test.go:32 TestSecretManagerTopicNotifications",

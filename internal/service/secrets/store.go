@@ -69,6 +69,10 @@ type Secret struct {
 	// order given. An automatic secret has none. Replication is immutable
 	// after create, so nothing but CreateSecret writes this.
 	ReplicaLocations []string `json:"replicaLocations,omitempty"`
+	// KMSKeys are the customer-managed encryption keys (#1453): one entry
+	// under automatic replication, one per replica under user-managed, ""
+	// where a replica has none. nil when no replica has a key.
+	KMSKeys []string `json:"kmsKeys,omitempty"`
 	// NextVersion is the number the next AddSecretVersion will use. It never
 	// decreases, so a destroyed version's number is never reused — reuse
 	// would let a stale reference resolve to different bytes.
@@ -115,8 +119,17 @@ type Version struct {
 	ScheduledDestroy time.Time `json:"scheduledDestroyTime,omitempty"`
 	// Payload is the stored bytes. It is cleared on destroy rather than
 	// marked, so a destroyed version cannot leak what it held.
-	Payload []byte `json:"payload,omitempty"`
-	Etag    string `json:"etag"`
+	//
+	// When a replica has a customer-managed key (#1453), it is the payload
+	// sealed under a data key that Replicas hold encrypted, and PayloadSize
+	// is the plaintext's length.
+	Payload     []byte `json:"payload,omitempty"`
+	PayloadSize int    `json:"payloadSize,omitempty"`
+	Etag        string `json:"etag"`
+	// Replicas are the version's replication_status: one entry under
+	// automatic replication, one per replica under user-managed, with the
+	// key version that encrypted each. Versions added before #1453 have none.
+	Replicas []ReplicaStatus `json:"replicas,omitempty"`
 	// ClientChecksum records that the client sent a CRC32C with the payload
 	// and it matched; Secret Manager reports it as
 	// client_specified_payload_checksum, and gcloud treats a version added
@@ -141,6 +154,8 @@ type Store struct {
 	// offset is how far Advance has moved the store's clock past its base
 	// clock, in nanoseconds (#1278).
 	offset atomic.Int64
+	// keys is Cloud KMS, for customer-managed encryption (#1453).
+	keys func() KeyService
 }
 
 // NewStore returns a store backed by db.
@@ -346,6 +361,13 @@ func (s *Store) CreateSecretWithTopics(project, id string, labels, annotations m
 // CreateSecretScheduled is CreateSecretWithTopics with a rotation schedule
 // and a version_destroy_ttl (#1278).
 func (s *Store) CreateSecretScheduled(project, id string, labels, annotations map[string]string, expire time.Time, topics []string, sch Schedule, replication string, locations ...string) (Secret, error) {
+	return s.CreateSecretEncrypted(project, id, labels, annotations, expire, topics, sch, nil, replication, locations...)
+}
+
+// CreateSecretEncrypted is CreateSecretScheduled with customer-managed
+// encryption keys (#1453): keys[i] is replica i's, "" for none, and an
+// automatic policy takes one. nil is none.
+func (s *Store) CreateSecretEncrypted(project, id string, labels, annotations map[string]string, expire time.Time, topics []string, sch Schedule, keys []string, replication string, locations ...string) (Secret, error) {
 	if err := sch.check(s.now(), true, true); err != nil {
 		return Secret{}, err
 	}
@@ -384,9 +406,22 @@ func (s *Store) CreateSecretScheduled(project, id string, labels, annotations ma
 		return Secret{}, apierror.InvalidArgument("replication %q must be automatic or user-managed", replication)
 	}
 
+	if keys != nil {
+		want := 1
+		if replication == "user-managed" {
+			want = len(locations)
+		}
+		if len(keys) != want {
+			return Secret{}, apierror.InvalidArgument("the replication policy has %d replicas; %d keys were given", want, len(keys))
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.checkKMSKeys(replication, locations, keys); err != nil {
+		return Secret{}, err
+	}
 	if err := s.validateTopics(topics); err != nil {
 		return Secret{}, err
 	}
@@ -407,6 +442,7 @@ func (s *Store) CreateSecretScheduled(project, id string, labels, annotations ma
 		Annotations:      annotations,
 		Replication:      replication,
 		ReplicaLocations: locations,
+		KMSKeys:          normalKeys(keys),
 		NextVersion:      1,
 		Etag:             s.etag(),
 	}
@@ -696,21 +732,24 @@ func (s *Store) addVersion(project, id string, payload []byte, clientChecksum bo
 		return Version{}, err
 	}
 	number := sec.NextVersion
-	sec.NextVersion++
-	sec.Etag = s.etag()
-	if err := s.put(secretKey(project, id), sec); err != nil {
-		return Version{}, err
-	}
-
 	v := Version{
 		Name:    VersionName(project, id, number),
 		Number:  number,
 		State:   StateEnabled,
 		Created: s.now().UTC(),
-		Payload: append([]byte(nil), payload...),
 		Etag:    s.etag(),
 
 		ClientChecksum: clientChecksum,
+	}
+	// Encrypted before anything is stored: a key that cannot encrypt
+	// fails the add and uses no version number.
+	if err := s.sealVersion(sec, &v, payload); err != nil {
+		return Version{}, err
+	}
+	sec.NextVersion++
+	sec.Etag = s.etag()
+	if err := s.put(secretKey(project, id), sec); err != nil {
+		return Version{}, err
 	}
 	if err := s.put(versionKey(project, id, number), v); err != nil {
 		return Version{}, err
@@ -804,7 +843,7 @@ func (s *Store) AccessVersion(project, id, version string) (Version, error) {
 		return Version{}, apierror.FailedPrecondition(
 			"secret version %s is %s and cannot be accessed", v.Name, v.State)
 	}
-	return v, nil
+	return s.openVersion(v)
 }
 
 // ListVersions returns a secret's versions, newest first.
@@ -1042,6 +1081,13 @@ func (s *Store) ResolveSecretRef(project, secret, version string) (secretName, d
 	if !v.Accessible() {
 		return "", "", apierror.FailedPrecondition(
 			"secret version %s is %s and cannot be mounted", v.Name, v.State)
+	}
+	// The Kubernetes Secret holds what is stored, which for a version
+	// under a customer-managed key is ciphertext (#1453).
+	if v.encrypted() {
+		return "", "", apierror.Unimplemented("secret version %s is encrypted with a customer-managed key, and "+
+			"CloudBurrow mounts a version from the stored bytes, which are ciphertext; "+
+			"read it with AccessSecretVersion instead", v.Name)
 	}
 	return KubernetesSecretName(project, id), VersionKey(number), nil
 }

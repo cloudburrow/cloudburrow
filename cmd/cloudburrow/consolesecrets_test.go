@@ -97,8 +97,8 @@ func TestVersionActionsFollowTheVersionsState(t *testing.T) {
 		t.Fatalf("destroyed version offers %v, want nothing", got)
 	}
 	// The secret itself offers a new version, at every point, and Advance
-	// clock, the CloudBurrow extension (#1278).
-	if got := strings.Join(ids("api-key"), ","); got != "addversion,advance-clock" {
+	// clock, the CloudBurrow extension (#1278), and Change encryption keys (#1453).
+	if got := strings.Join(ids("api-key"), ","); got != "addversion,advance-clock,kmskeys" {
 		t.Fatalf("secret offers %q", got)
 	}
 }

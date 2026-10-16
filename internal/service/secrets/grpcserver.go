@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"google.golang.org/protobuf/proto"
+	"slices"
 	"strings"
 	"time"
 
@@ -106,35 +107,70 @@ func toProtoVersion(v Version) *secretmanagerpb.SecretVersion {
 	if !v.ScheduledDestroy.IsZero() {
 		out.ScheduledDestroyTime = timestamppb.New(v.ScheduledDestroy)
 	}
+	out.ReplicationStatus = toProtoReplicationStatus(v)
 	return out
+}
+
+// toProtoReplicationStatus is a version's replication_status (#1453): its
+// replicas, with the key version that encrypted each. nil for a version
+// added before it was recorded.
+func toProtoReplicationStatus(v Version) *secretmanagerpb.ReplicationStatus {
+	if len(v.Replicas) == 0 {
+		return nil
+	}
+	cmek := func(r ReplicaStatus) *secretmanagerpb.CustomerManagedEncryptionStatus {
+		if r.KeyVersion == "" {
+			return nil
+		}
+		return &secretmanagerpb.CustomerManagedEncryptionStatus{KmsKeyVersionName: r.KeyVersion}
+	}
+	if len(v.Replicas) == 1 && v.Replicas[0].Location == "" {
+		return &secretmanagerpb.ReplicationStatus{ReplicationStatus: &secretmanagerpb.ReplicationStatus_Automatic{
+			Automatic: &secretmanagerpb.ReplicationStatus_AutomaticStatus{CustomerManagedEncryption: cmek(v.Replicas[0])}}}
+	}
+	um := &secretmanagerpb.ReplicationStatus_UserManagedStatus{}
+	for _, r := range v.Replicas {
+		um.Replicas = append(um.Replicas, &secretmanagerpb.ReplicationStatus_UserManagedStatus_ReplicaStatus{
+			Location: r.Location, CustomerManagedEncryption: cmek(r)})
+	}
+	return &secretmanagerpb.ReplicationStatus{ReplicationStatus: &secretmanagerpb.ReplicationStatus_UserManaged{UserManaged: um}}
 }
 
 // toProtoReplication is a secret's replication policy as it was created:
 // automatic, or user-managed with its replica locations in the order given.
 func toProtoReplication(s Secret) *secretmanagerpb.Replication {
+	cmek := func(i int) *secretmanagerpb.CustomerManagedEncryption {
+		if i >= len(s.KMSKeys) || s.KMSKeys[i] == "" {
+			return nil
+		}
+		return &secretmanagerpb.CustomerManagedEncryption{KmsKeyName: s.KMSKeys[i]}
+	}
 	if s.Replication == "user-managed" {
 		um := &secretmanagerpb.Replication_UserManaged{}
-		for _, l := range s.ReplicaLocations {
-			um.Replicas = append(um.Replicas, &secretmanagerpb.Replication_UserManaged_Replica{Location: l})
+		for i, l := range s.ReplicaLocations {
+			um.Replicas = append(um.Replicas, &secretmanagerpb.Replication_UserManaged_Replica{Location: l, CustomerManagedEncryption: cmek(i)})
 		}
 		return &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_UserManaged_{UserManaged: um}}
 	}
 	return &secretmanagerpb.Replication{Replication: &secretmanagerpb.Replication_Automatic_{
-		Automatic: &secretmanagerpb.Replication_Automatic{}}}
+		Automatic: &secretmanagerpb.Replication_Automatic{CustomerManagedEncryption: cmek(0)}}}
 }
 
 // replicationOf is a request's replication policy as the store keeps it:
-// the kind, and a user-managed policy's replica locations.
-func replicationOf(r *secretmanagerpb.Replication) (string, []string) {
+// the kind, a user-managed policy's replica locations, and the
+// customer-managed key of each replica ("" for none; one entry under
+// automatic), nil when there is none.
+func replicationOf(r *secretmanagerpb.Replication) (string, []string, []string) {
 	um := r.GetUserManaged()
 	if um == nil {
-		return "automatic", nil
+		return "automatic", nil, normalKeys([]string{r.GetAutomatic().GetCustomerManagedEncryption().GetKmsKeyName()})
 	}
-	var locations []string
+	var locations, keys []string
 	for _, rep := range um.GetReplicas() {
 		locations = append(locations, rep.GetLocation())
+		keys = append(keys, rep.GetCustomerManagedEncryption().GetKmsKeyName())
 	}
-	return "user-managed", locations
+	return "user-managed", locations, normalKeys(keys)
 }
 
 // parseParent validates a projects/{project} parent.
@@ -172,9 +208,9 @@ func (g *GRPCServer) CreateSecret(_ context.Context, req *secretmanagerpb.Create
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	kind, locations := replicationOf(sec.GetReplication())
-	created, err := g.store.CreateSecretScheduled(project, req.GetSecretId(),
-		sec.GetLabels(), sec.GetAnnotations(), expire, topicNames(sec), sch, kind, locations...)
+	kind, locations, keys := replicationOf(sec.GetReplication())
+	created, err := g.store.CreateSecretEncrypted(project, req.GetSecretId(),
+		sec.GetLabels(), sec.GetAnnotations(), expire, topicNames(sec), sch, keys, kind, locations...)
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -242,8 +278,9 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 	if err := g.secretEtag(project, id, sec.GetEtag()); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	var newKeys []string
 	if checkReplication {
-		if err := g.replicationUnchanged(project, id, sec.GetReplication()); err != nil {
+		if newKeys, err = g.replicationUnchanged(project, id, sec.GetReplication()); err != nil {
 			return nil, apierror.Wrap(err)
 		}
 	}
@@ -267,6 +304,12 @@ func (g *GRPCServer) UpdateSecret(_ context.Context, req *secretmanagerpb.Update
 	})
 	if err != nil {
 		return nil, apierror.Wrap(err)
+	}
+	if newKeys != nil {
+		// The keys are the one part of replication that can change (#1453).
+		if updated, err = g.store.SetReplicationKeys(project, id, newKeys); err != nil {
+			return nil, apierror.Wrap(err)
+		}
 	}
 	return toProtoSecret(updated), nil
 }
@@ -310,16 +353,33 @@ func topicNames(sec *secretmanagerpb.Secret) []string {
 // immutable field in an update is ignored when it matches and refused with
 // INVALID_ARGUMENT when it would change; documented, not measured against
 // Google.
-func (g *GRPCServer) replicationUnchanged(project, id string, requested *secretmanagerpb.Replication) error {
+//
+// The customer-managed keys are the exception docs.cloud.google.com/secret-manager/docs/cmek
+// documents (#1453): `gcloud secrets replication update --set-kms-key` and
+// `--remove-cmek` change them with the rest of the policy unchanged. The
+// keys to set are returned (one empty entry per replica to remove them),
+// nil when they do not change.
+func (g *GRPCServer) replicationUnchanged(project, id string, requested *secretmanagerpb.Replication) ([]string, error) {
 	current, err := g.store.GetSecret(project, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if !proto.Equal(requested, toProtoReplication(current)) {
-		return apierror.InvalidArgument("replication is immutable: the replication policy of %s cannot be "+
-			"changed after the secret is created; create a new secret with the policy instead", current.Name)
+	if err := checkCMEKFields(requested); err != nil {
+		return nil, err
 	}
-	return nil
+	kind, locations, keys := replicationOf(requested)
+	if requested.GetReplication() == nil || kind != current.Replication || !slices.Equal(locations, current.ReplicaLocations) {
+		return nil, apierror.InvalidArgument("replication is immutable: the replication policy of %s cannot be "+
+			"changed after the secret is created, except for its customer-managed encryption keys; "+
+			"create a new secret with the policy instead", current.Name)
+	}
+	if slices.Equal(keys, current.KMSKeys) {
+		return nil, nil
+	}
+	if keys == nil {
+		keys = make([]string, max(1, len(locations)))
+	}
+	return keys, nil
 }
 
 func (g *GRPCServer) DeleteSecret(_ context.Context, req *secretmanagerpb.DeleteSecretRequest) (*emptypb.Empty, error) {
