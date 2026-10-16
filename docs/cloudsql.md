@@ -106,7 +106,7 @@ _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "or
 ```
 
 What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` (a Backup and DR datasource), legacy
-failover replicas (`failoverReplica`, `failoverTarget`), external-primary replicas, `MYSQL_5_7` and versions Cloud SQL no longer lists, the project-level Backups API, and parallel or BAK imports and exports. See
+failover replicas (`failoverReplica`, `failoverTarget`), external-primary replicas, `MYSQL_5_7` and versions Cloud SQL no longer lists, the project-level Backups API, BAK and TDE imports and exports, and upgrading a read replica on its own. See
 [coverage/sqladmin.md](coverage/sqladmin.md) for every method.
 
 ### Imports and exports (#1380)
@@ -132,8 +132,28 @@ The server's own tools do the work, in its pod: `pg_dump` and `psql`, or `mysqld
 export names exactly one database; a MySQL one without databases exports every application
 database. An import or export runs in the background, and `operations.cancel` stops it while
 it runs; a cancelled MySQL import can leave the rows it
-already loaded, as Google warns. Parallel imports and exports, BAK and TDE files and
-`masterData` answer 501. The console's instance page has Export and Import.
+already loaded, as Google warns. BAK and TDE files answer 501. The console's instance page
+has Export and Import, with the parallel and `masterData` options below.
+
+**Parallel imports and exports (#1421).** `sqlExportOptions.parallel` (with `threads`, 4 when
+none is given) writes the directory Cloud SQL documents under the `uri`, which names a folder
+and must be empty: `pg_dump -Fd -j <threads>` of the one database named for PostgreSQL
+(`toc.dat` and a file per table), MySQL Shell's `util.dumpSchemas` (or `util.dumpTables` with
+`tables`) for MySQL (`@.json`, `@.done.json`, per-table `.tsv.zst` chunks). The dump is made in
+the server's container and each of its files written as an object under the folder.
+`sqlImportOptions.parallel` reads every object under the folder back and restores it:
+`pg_restore -j <threads> --no-owner --no-acl`, with `postgresImportOptions.clean` and
+`ifExists` as `--clean` and `--if-exists`; `util.loadDump` for MySQL, with `local_infile` on
+while it loads and set back after. `threads` without `parallel`, and `clean`/`ifExists`
+outside a PostgreSQL parallel import, are 400. `gcloud sql export sql --parallel --threads`
+and `gcloud sql import sql --parallel` work.
+
+**`mysqlExportOptions.masterData` (#1421)** is `mysqldump --source-data` (MySQL 8.4's name for
+`--master-data`): 1 writes the binary log coordinates as a `CHANGE REPLICATION SOURCE TO`
+statement, with `--set-gtid-purged` on where the server has GTIDs (every Cloud SQL server
+does; `AUTO` writes none on one without), and 2 writes it as a comment. Any other value, with
+`parallel`, or on PostgreSQL, is 400; on a server without binary logging the export fails with
+mysqldump's words.
 
 ### Client certificates, tiers and flags (#1380)
 
@@ -269,9 +289,18 @@ the new version on a fresh volume, and the dump is loaded into it:
 
 If the new server cannot start or load the dump, the old version is started again from the same
 dump and the operation fails with the reason, so the instance keeps its data. A downgrade or a
-change of engine is 400. An instance with read replicas, or a replica, is 501: CloudBurrow
-upgrades a primary with none (delete the replicas, upgrade, and create them again). The
-console's instance page offers **Upgrade** with the versions the instance can go to, and the
+change of engine is 400.
+
+**An instance with read replicas (#1421)** is upgraded as Cloud SQL documents: without
+`includeReplicasForMajorVersionUpgrade` its replicas must be upgraded first, so a primary with
+a replica on the older version is 400 saying so; with it the primary is upgraded, and then
+every replica under it, level by level for cascading replicas, is rebuilt on the new version
+from its upgraded primary (Cloud SQL "recreates the replicas"), each `MAINTENANCE` meanwhile.
+A replica that fails is `FAILED` and the operation's error names it; the primary stays
+upgraded. **Upgrading a replica on its own is 501**: a replica here replicates its primary's
+server by the engine's own replication (streaming for PostgreSQL), which does not run across
+major versions; upgrade the primary with its replicas instead. The console's instance page
+offers **Upgrade** with the versions the instance can go to and **Include replicas**, and the
 Create instance form's version picker lists every served version.
 
 **The instances `up` runs stay as they are:** `postgres` and `mysql` cannot be patched,
@@ -309,7 +338,15 @@ flags, deletion protection, automated backups and their start time, sent as one
   `users.update` makes the backup fail with MySQL's words.
 - **`instances.clone`** creates a new instance with the source's settings, starts its server,
   and loads a dump of the source taken then; with `pointInTime` it recovers the source to that
-  time (next section). A clone to `binLogCoordinates` and a clone of some databases only are 501.
+  time (next section), and with `binLogCoordinates` (#1421) to a position in a MySQL source's
+  binary log: the newest base at or before the coordinates is loaded and the binary log
+  replayed up to the first transaction starting at or after `binLogPosition`, so every
+  transaction that started before it is in the clone. It needs `binaryLogEnabled`, as Cloud SQL
+  does; `binLogCoordinates` on PostgreSQL, with `pointInTime`, on an instance without binary
+  logging, or before its first base is 400. `databaseNames` is SQL Server's ("(SQL Server
+  only) Clone only the specified databases"), and is 400 on PostgreSQL and MySQL. `gcloud sql
+  instances clone --bin-log-file-name --bin-log-position` works, and the console's page of a
+  MySQL instance with binary logging has **Clone to binary log position**.
 - **`settings.backupConfiguration`** (`enabled`, `startTime`, `backupRetentionSettings`) is
   recorded and answered. **An automated backup is taken at `startTime` (UTC) only if
   CloudBurrow is running then**; a start time that passes while it is stopped is not made up

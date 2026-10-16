@@ -8,6 +8,7 @@ package sqladmin
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -92,7 +93,7 @@ type Upgrader interface {
 // checkUpgrade is whether c can be upgraded to version, as Cloud SQL
 // allows: to a newer major version of the same engine, on an instance
 // with no read replicas that is not one.
-func (s *Server) checkUpgrade(c *created, version string) error {
+func (s *Server) checkUpgrade(c *created, version string, includeReplicas bool) error {
 	cur := c.spec.DatabaseVersion
 	if !SupportedVersions[version] {
 		if strings.HasPrefix(version, "POSTGRES_") || strings.HasPrefix(version, "MYSQL_") {
@@ -110,22 +111,141 @@ func (s *Server) checkUpgrade(c *created, version string) error {
 		return unimplemented("changing databaseVersion", "this instance's provisioner cannot replace a server")
 	}
 	if c.spec.MasterInstanceName != "" {
-		return unimplemented("upgrading a read replica's major version",
-			"CloudBurrow upgrades a primary with no replicas; delete the replica, upgrade the primary, and create the replica again")
+		return unimplemented("upgrading a read replica's major version on its own",
+			"a replica here replicates its primary's server by the engine's own replication, which does not run across major versions; "+
+				"upgrade the primary with includeReplicasForMajorVersionUpgrade, which upgrades its replicas after it, as Cloud SQL does")
 	}
-	if rs := s.replicaNamesLocked(c.spec.Project, c.spec.Name); len(rs) > 0 {
-		return unimplemented("upgrading the major version of an instance with read replicas",
-			"CloudBurrow upgrades a primary with no replicas; delete its replicas ("+strings.Join(rs, ", ")+") first")
+	if rs := s.replicaNamesLocked(c.spec.Project, c.spec.Name); len(rs) > 0 && !includeReplicas {
+		// Cloud SQL: "If you don't include replicas in the upgrade, then you
+		// must upgrade the read replicas before you upgrade the primary
+		// instance."
+		var behind []string
+		for _, r := range rs {
+			if rc := s.writes.byName[r]; rc != nil && versionIndex(rc.spec.DatabaseVersion) < versionIndex(version) {
+				behind = append(behind, r)
+			}
+		}
+		if len(behind) > 0 {
+			return Errorf(http.StatusBadRequest, "Invalid request: the read replicas of %s (%s) must be upgraded before the primary instance; "+
+				"or upgrade the primary with includeReplicasForMajorVersionUpgrade set, which upgrades all its replicas after it.",
+				c.spec.Name, strings.Join(behind, ", "))
+		}
 	}
 	return nil
 }
 
+// replicaTreeLocked is every replica under name, each after its primary:
+// its replicas, then theirs. Called with emu held.
+func (s *Server) replicaTreeLocked(project, name string) []string {
+	var out []string
+	queue := []string{name}
+	for len(queue) > 0 {
+		rs := s.replicaNamesLocked(project, queue[0])
+		queue = append(queue[1:], rs...)
+		out = append(out, rs...)
+	}
+	return out
+}
+
+// upgradeReplicas is the second half of an upgrade with
+// includeReplicasForMajorVersionUpgrade (#1421): as Cloud SQL "recreates
+// the replicas", each replica under the upgraded primary, level by level,
+// is rebuilt on the new version from its primary. A replica that fails is
+// FAILED; the primary stays upgraded and available.
+func (s *Server) upgradeReplicas(project, primary, version string) error {
+	s.emu.Lock()
+	names := s.replicaTreeLocked(project, primary)
+	for _, n := range names {
+		s.writes.byName[n].state = "MAINTENANCE"
+	}
+	s.emu.Unlock()
+	var failed []string
+	for _, n := range names {
+		if err := s.upgradeReplica(n, version); err != nil {
+			failed = append(failed, n+": "+err.Error())
+		}
+	}
+	if len(failed) > 0 {
+		return Errorf(http.StatusInternalServerError, "%s was upgraded to %s, and its replicas failed to: %s.", primary, version, strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+func (s *Server) upgradeReplica(name, version string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*startTimeout)
+	defer cancel()
+	s.emu.Lock()
+	c := s.writes.byName[name]
+	pc := s.writes.byName[c.spec.MasterInstanceName]
+	if pc == nil || pc.state != "RUNNABLE" {
+		s.emu.Unlock()
+		err := fmt.Errorf("its primary %s is not RUNNABLE", c.spec.MasterInstanceName)
+		s.failReplica(c, err)
+		return err
+	}
+	pe := pc.engine
+	cascading := pc.spec.MasterInstanceName != ""
+	spec := c.spec
+	spec.DatabaseVersion = version
+	spec.SettingsVersion++
+	spec.ReplicationPassword = newReplicationPassword()
+	spec.ReplicationStopped = false
+	c.spec = spec
+	c.engine = s.writes.prov.Engine(spec)
+	_ = s.saveLocked()
+	s.emu.Unlock()
+	var err error
+	if cascading {
+		if cs, ok := pe.(cascader); ok {
+			err = cs.PrepareCascadingSource(ctx, spec.ReplicationPassword)
+		} else {
+			err = fmt.Errorf("%s cannot be a cascading replication source", c.spec.MasterInstanceName)
+		}
+	} else if r, ok := pe.(replicator); ok {
+		err = r.PrepareReplicationSource(ctx, spec.ReplicationPassword)
+	} else {
+		err = fmt.Errorf("%s cannot be a replication source", c.spec.MasterInstanceName)
+	}
+	if err == nil {
+		err = s.writes.prov.Remove(ctx, name)
+	}
+	if err == nil {
+		err = s.writes.prov.Start(ctx, spec)
+	}
+	if err != nil {
+		s.failReplica(c, err)
+		return err
+	}
+	s.emu.Lock()
+	if s.writes.byName[name] == c {
+		c.state, c.failure = "RUNNABLE", ""
+		_ = s.saveLocked()
+	}
+	s.emu.Unlock()
+	return nil
+}
+
+func (s *Server) failReplica(c *created, err error) {
+	s.emu.Lock()
+	defer s.emu.Unlock()
+	if s.writes.byName[c.spec.Name] == c {
+		c.state, c.failure = "FAILED", err.Error()
+		_ = s.saveLocked()
+	}
+}
+
 // upgrade runs a major version upgrade of name to spec's version, as the
 // operation opID.
-func (s *Server) upgrade(name string, from, to Spec, opID string) {
+func (s *Server) upgrade(name string, from, to Spec, opID string, includeReplicas bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*startTimeout)
 	defer cancel()
 	err := s.writes.prov.(Upgrader).Upgrade(ctx, from, to)
+	defer func() {
+		if err == nil && includeReplicas {
+			err = s.upgradeReplicas(to.Project, name, to.DatabaseVersion)
+		}
+		s.finish(opID, err)
+	}()
 	s.emu.Lock()
 	c := s.writes.byName[name]
 	if c != nil {
@@ -142,5 +262,4 @@ func (s *Server) upgrade(name string, from, to Spec, opID string) {
 		_ = s.saveLocked()
 	}
 	s.emu.Unlock()
-	s.finish(opID, err)
 }

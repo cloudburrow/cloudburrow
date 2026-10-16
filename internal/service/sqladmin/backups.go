@@ -514,8 +514,18 @@ func (s *Server) cloneInstance(r *http.Request, base, project string, e Engine) 
 	if body.Ctx == nil || body.Ctx.Destination == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: cloneContext.destinationInstanceName is required.")
 	}
-	if len(body.Ctx.BinLog) > 0 {
-		return nil, unimplemented("cloning to binary log coordinates", "a clone is recovered to cloneContext.pointInTime (docs/cloudsql.md)")
+	if len(body.Ctx.DatabaseNames) > 0 {
+		// The API's own words: "(SQL Server only) Clone only the specified
+		// databases from the source instance."
+		return nil, Errorf(http.StatusBadRequest, "Invalid request: cloneContext.databaseNames is supported only for SQL Server "+
+			"instances; a %s clone copies every database of the source.", e.DatabaseVersion())
+	}
+	var coords *binLogCoordinates
+	if len(body.Ctx.BinLog) > 0 && string(body.Ctx.BinLog) != "null" {
+		var err error
+		if coords, err = s.checkBinLogCoordinates(e, body.Ctx.BinLog, body.Ctx.PointInTime != ""); err != nil {
+			return nil, err
+		}
 	}
 	var at time.Time
 	if body.Ctx.PointInTime != "" {
@@ -523,9 +533,6 @@ func (s *Server) cloneInstance(r *http.Request, base, project string, e Engine) 
 		if at, err = s.checkPointInTime(e, body.Ctx.PointInTime); err != nil {
 			return nil, err
 		}
-	}
-	if len(body.Ctx.DatabaseNames) > 0 {
-		return nil, unimplemented("cloning some databases only", "a clone copies every database of the source")
 	}
 	dest := body.Ctx.Destination
 	if !instanceNameRE.MatchString(dest) || len(dest) > maxInstanceName {
@@ -580,7 +587,9 @@ func (s *Server) cloneInstance(r *http.Request, base, project string, e Engine) 
 		s.setState(dest, "PENDING_CREATE")
 		dst := DumpTarget{Instance: dest, MySQL: spec.MySQL(), Created: true}
 		var err error
-		if at.IsZero() {
+		if coords != nil {
+			err = s.copyToCoordinates(src, dst, *coords)
+		} else if at.IsZero() {
 			err = s.copyData(src, dst)
 		} else {
 			err = s.copyAt(src, dst, at)

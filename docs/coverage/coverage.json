@@ -7780,6 +7780,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups",
+          "test/compat/cloudsqlparallel_test.go:185 TestCloudSQLCloneToBinLogCoordinates",
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery"
@@ -7824,6 +7825,8 @@
         "method": "sql.instances.export",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlparallel_test.go:136 TestCloudSQLExportMasterData",
+          "test/compat/cloudsqlparallel_test.go:48 TestCloudSQLParallelExportAndImport",
           "test/compat/cloudsqltransfers_test.go:155 TestCloudSQLImportAndExport"
         ]
       },
@@ -7865,6 +7868,7 @@
         "method": "sql.instances.import",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlparallel_test.go:48 TestCloudSQLParallelExportAndImport",
           "test/compat/cloudsqltransfers_test.go:155 TestCloudSQLImportAndExport"
         ]
       },
@@ -7917,6 +7921,7 @@
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlparallel_test.go:267 TestCloudSQLUpgradeWithReplicas",
           "test/compat/cloudsqlversions_test.go:172 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:375 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion"
