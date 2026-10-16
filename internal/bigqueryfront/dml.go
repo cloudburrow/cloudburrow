@@ -211,6 +211,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 			return
 		}
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && refuseUndrop(w, q) { // #1460, unserved.go
+		return
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && f.changeReads(w, r, q, insert) { // #1418, changehistory.go
 		return
 	}
