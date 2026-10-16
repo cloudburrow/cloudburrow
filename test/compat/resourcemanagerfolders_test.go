@@ -51,12 +51,12 @@ func foldersClients(t *testing.T, h *Harness) (*resourcemanager.FoldersClient, *
 	return fc, oc, pc
 }
 
-// covers: google.cloud.resourcemanager.v3.Organizations/GetOrganization, google.cloud.resourcemanager.v3.Organizations/SearchOrganizations, google.cloud.resourcemanager.v3.Organizations/GetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Organizations/SetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Organizations/TestIamPermissions (unimplemented), google.cloud.resourcemanager.v3.Folders/GetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Folders/SetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Folders/TestIamPermissions (unimplemented)
+// covers: google.cloud.resourcemanager.v3.Organizations/GetOrganization, google.cloud.resourcemanager.v3.Organizations/SearchOrganizations
 //
 // TestResourceManagerV3Organizations (#1294): the one local organization
 // through cloud.google.com/go/resourcemanager/apiv3 OrganizationsClient: get
-// it, find it by domain, another organization is NOT_FOUND, and its IAM and
-// a folder's are UNIMPLEMENTED citing ADR-0006, as a project's is.
+// it, find it by domain, and another organization is NOT_FOUND. Its IAM and
+// a folder's are stored since #1368 (TestResourceManagerFolderAndOrgIAM).
 func TestResourceManagerV3Organizations(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -74,38 +74,6 @@ func TestResourceManagerV3Organizations(t *testing.T) {
 	}
 	if _, err := oc.GetOrganization(ctx, &rmpb.GetOrganizationRequest{Name: "organizations/1"}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetOrganization(organizations/1) = %v; want NotFound", err)
-	}
-	fc, _, _ := foldersClients(t, h)
-	perms := []string{"resourcemanager.folders.get"}
-	for what, err := range map[string]error{
-		"organization GetIamPolicy": func() error {
-			_, err := oc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: localOrg})
-			return err
-		}(),
-		"organization SetIamPolicy": func() error {
-			_, err := oc.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: localOrg, Policy: &iampb.Policy{}})
-			return err
-		}(),
-		"organization TestIamPermissions": func() error {
-			_, err := oc.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: localOrg, Permissions: perms})
-			return err
-		}(),
-		"folder GetIamPolicy": func() error {
-			_, err := fc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "folders/1"})
-			return err
-		}(),
-		"folder SetIamPolicy": func() error {
-			_, err := fc.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: "folders/1", Policy: &iampb.Policy{}})
-			return err
-		}(),
-		"folder TestIamPermissions": func() error {
-			_, err := fc.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: "folders/1", Permissions: perms})
-			return err
-		}(),
-	} {
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "ADR-0006") {
-			t.Errorf("%s = %v; want UNIMPLEMENTED citing ADR-0006", what, err)
-		}
 	}
 }
 
@@ -241,8 +209,9 @@ func TestResourceManagerV3Folders(t *testing.T) {
 	if f, err := udop.Wait(ctx); err != nil || f.GetState() != rmpb.Folder_ACTIVE {
 		t.Errorf("UndeleteFolder result = %v, %v", f, err)
 	}
-	if _, err := fc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: child.GetName()}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("folder GetIamPolicy = %v; want Unimplemented", err)
+	// Its IAM policy is stored since #1368, and a new folder has none.
+	if p, err := fc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: child.GetName()}); err != nil || len(p.GetBindings()) != 0 {
+		t.Errorf("folder GetIamPolicy = %v, %v; want an empty policy", p, err)
 	}
 }
 

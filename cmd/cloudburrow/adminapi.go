@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/version"
 	"net/http"
@@ -40,6 +41,9 @@ type adminDeps struct {
 	// projectStore is the registry's store, for state snapshots; read at
 	// snapshot time for the same reason.
 	projectStore func() store.Store
+	// registry is the project registry, for its IAM policies' reset (#1368);
+	// read at reset time for the same reason.
+	registry func() *resourcemanager.Registry
 }
 
 // mountAdmin attaches the admin API to the control server.
@@ -87,6 +91,12 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.secrets != nil {
 		api.RegisterResetter(&secretsResetter{svc: d.secrets})
 		api.RegisterSeeder(&secretsSeeder{svc: d.secrets})
+	}
+	if d.registry != nil {
+		// Project, folder and organization IAM policies (#1368), stored as
+		// every other service's are, so a reset clears them as it clears
+		// those; the projects themselves are a registry and stay.
+		api.RegisterResetter(&projectIAMResetter{registry: d.registry})
 	}
 
 	// State snapshots (#289): the services whose state is theirs to keep,

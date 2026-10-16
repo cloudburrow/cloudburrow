@@ -132,7 +132,9 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 			"Tags (Tags screen; bound and inherited ones under Tags here) and " +
 			"liens: a lien restricting resourcemanager.projects.delete makes " +
 			"deleting this project fail, as on Google. Tags are stored, not enforced.\n\n" +
-			"Absent: IAM policies and billing. Each returns UNIMPLEMENTED " +
+			"IAM policies (IAM & Admin > IAM): stored and never enforced, and " +
+			"inherited by nothing (ADR-0006, #1368).\n\n" +
+			"Absent: billing, which returns UNIMPLEMENTED " +
 			"rather than a plausible answer.\n\n" +
 			"Deleting this project marks it DELETE_REQUESTED for 30 days, as Google " +
 			"does, and Undelete project restores it until then. It changes the " +

@@ -37,7 +37,7 @@ func v1ID(h *Harness, prefix string) string {
 	return strings.TrimRight(id, "-")
 }
 
-// covers: cloudresourcemanager.projects.create, cloudresourcemanager.projects.get, cloudresourcemanager.projects.list, cloudresourcemanager.projects.update, cloudresourcemanager.projects.delete, cloudresourcemanager.projects.undelete, cloudresourcemanager.projects.getIamPolicy (unimplemented)
+// covers: cloudresourcemanager.projects.create, cloudresourcemanager.projects.get, cloudresourcemanager.projects.list, cloudresourcemanager.projects.update, cloudresourcemanager.projects.delete, cloudresourcemanager.projects.undelete
 //
 // TestResourceManagerV1Projects.
 //
@@ -106,9 +106,6 @@ func TestResourceManagerV1Projects(t *testing.T) {
 	}
 	if _, err := c.Projects.Update(v1ID(h, "v1-none-"), &crmv1.Project{Name: "x"}).Context(ctx).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotFound {
 		t.Errorf("v1 projects.update of an unknown project = %v, want 404", err)
-	}
-	if _, err := c.Projects.GetIamPolicy(id, &crmv1.GetIamPolicyRequest{}).Context(ctx).Do(); !errors.As(err, &ge) || ge.Code != http.StatusNotImplemented {
-		t.Errorf("v1 getIamPolicy = %v, want 501 UNIMPLEMENTED", err)
 	}
 
 	if _, err := c.Projects.Delete(id).Context(ctx).Do(); err != nil {

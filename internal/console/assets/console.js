@@ -146,6 +146,10 @@ const ROUTES = [
 
   { path: "/secrets", service: "secrets", title: "Secret Manager", section: "Security and identity" },
   { path: "/kms/keyrings", service: "kms", title: "Cloud KMS", section: "Security and identity" },
+  // IAM & Admin > IAM (#1368): the selected project's IAM policy, stored and
+  // never enforced (ADR-0006); Grant access and Remove principal on its
+  // Permissions tab.
+  { path: "/iam-admin/iam", service: "iam", title: "IAM", section: "IAM & Admin" },
 
   { path: "/monitoring", service: null, screen: "monitoring", title: "Monitoring", section: "Operations" },
   { path: "/logs",     service: null, screen: "logs",     title: "Logs Explorer", section: "Operations" },
@@ -256,6 +260,8 @@ const ICONS = {
   playground:'<rect x="3" y="4" width="18" height="14" rx="3"/><path d="M8 10.5h.01M12 10.5h.01M16 10.5h.01"/><path d="M8 14h6"/>',
   // Resource Manager: a folder of projects.
   projects:  '<path d="M3 7h6l2 2h10v10H3z"/><path d="M3 7V5h6l2 2"/>',
+  // IAM: a person beside a key.
+  iam:       '<circle cx="8" cy="8" r="3"/><path d="M3 19a5 5 0 0 1 10 0"/><circle cx="17" cy="13" r="2"/><path d="M17 15v5M17 18h2"/>',
   // Firestore: stacked documents.
   firestore: '<path d="M8 3h9l3 3v11H8z"/><path d="M5 7v14h11"/><path d="M11 9h6M11 13h6"/>',
   // Datastore: an entity table.
@@ -299,6 +305,8 @@ const CATEGORY_ICONS = {
   "Operations": '<path d="M3 12h4l3-7 4 14 3-7h4"/>',
   // Two arrows chasing each other: build, then deploy, then build again.
   "CI/CD": '<path d="M4 12a8 8 0 0 1 13.7-5.6L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15"/><path d="M4 20v-5h5"/>',
+  // A person: who may do what.
+  "IAM & Admin": '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   // A wrench.
   "Management tools": '<path d="M14.5 6.5a4 4 0 0 0 5 5L21 13l-2 2-1.5-1.5a4 4 0 0 1-5-5L5 16v3h3l7.5-7.5"/>',
 };

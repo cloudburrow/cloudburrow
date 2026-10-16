@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"cloud.google.com/go/iam/apiv1/iampb"
 	resourcemanager "cloud.google.com/go/resourcemanager/apiv3"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"google.golang.org/api/iterator"
@@ -195,38 +194,6 @@ func consoleProjectState(t *testing.T, addr, project, id string) string {
 		}
 	}
 	return ""
-}
-
-// covers: google.cloud.resourcemanager.v3.Projects/GetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Projects/SetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.Projects/TestIamPermissions (unimplemented)
-//
-// TestResourceManagerV3RefusesIAM (#1216): a project's IAM methods stay
-// UNIMPLEMENTED under ADR-0006, which stores policies only on the resources
-// it names, and each says why. MoveProject, once refused here, is served
-// since #1294 (TestResourceManagerV3Folders).
-func TestResourceManagerV3RefusesIAM(t *testing.T) {
-	h := New(t)
-	ctx := h.Context()
-	c, err := resourcemanager.NewProjectsClient(ctx, rmOptions(h)...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	name := "projects/" + h.Project()
-	for what, err := range map[string]error{
-		"GetIamPolicy": func() error { _, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: name}); return err }(),
-		"SetIamPolicy": func() error {
-			_, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: name, Policy: &iampb.Policy{}})
-			return err
-		}(),
-		"TestIamPermissions": func() error {
-			_, err := c.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: name, Permissions: []string{"resourcemanager.projects.get"}})
-			return err
-		}(),
-	} {
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "ADR-0006") {
-			t.Errorf("%s = %v, want UNIMPLEMENTED citing ADR-0006", what, err)
-		}
-	}
 }
 
 // covers: google.cloud.resourcemanager.v3.Projects/ListProjects

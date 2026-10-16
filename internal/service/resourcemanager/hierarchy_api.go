@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
@@ -27,11 +26,6 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
-
-// hierarchyIAMRefusal is why folder and organization IAM stays
-// UNIMPLEMENTED: the reason project IAM is (ADR-0006).
-const hierarchyIAMRefusal = ": folder and organization IAM policies (ADR-0006 stores policies only on the resources it names, " +
-	"and bindings inherited down the hierarchy do not exist here)"
 
 // v3Ops keeps the operations the v3 methods return, so operations.get finds
 // them. Bounded, as v1Ops is.
@@ -304,18 +298,6 @@ func (s *FoldersServer) UndeleteFolder(_ context.Context, req *rmpb.UndeleteFold
 	return doneOperation("udf", f.ID(), folderProto(f))
 }
 
-func (s *FoldersServer) GetIamPolicy(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("GetIamPolicy" + hierarchyIAMRefusal))
-}
-
-func (s *FoldersServer) SetIamPolicy(context.Context, *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("SetIamPolicy" + hierarchyIAMRefusal))
-}
-
-func (s *FoldersServer) TestIamPermissions(context.Context, *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("TestIamPermissions" + hierarchyIAMRefusal))
-}
-
 // CheckParentExists is CheckParent for a listing: the parent must exist,
 // and may be pending deletion.
 func (r *Registry) CheckParentExists(parent string) error {
@@ -335,7 +317,12 @@ func (r *Registry) CheckParentExists(parent string) error {
 // OrganizationsServer serves google.cloud.resourcemanager.v3.Organizations.
 type OrganizationsServer struct {
 	rmpb.UnimplementedOrganizationsServer
+	reg *Registry // where its IAM policy is kept (iam.go)
 }
+
+// NewOrganizationsServer returns the Organizations service, whose IAM policy
+// is kept in reg.
+func NewOrganizationsServer(reg *Registry) OrganizationsServer { return OrganizationsServer{reg: reg} }
 
 func checkOrg(name string) error {
 	if name == OrganizationName {
@@ -389,18 +376,6 @@ func (OrganizationsServer) SearchOrganizations(_ context.Context, req *rmpb.Sear
 		out.Organizations = []*rmpb.Organization{OrganizationProto()}
 	}
 	return out, nil
-}
-
-func (OrganizationsServer) GetIamPolicy(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("GetIamPolicy" + hierarchyIAMRefusal))
-}
-
-func (OrganizationsServer) SetIamPolicy(context.Context, *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("SetIamPolicy" + hierarchyIAMRefusal))
-}
-
-func (OrganizationsServer) TestIamPermissions(context.Context, *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("TestIamPermissions" + hierarchyIAMRefusal))
 }
 
 // --- v3 REST -----------------------------------------------------------
@@ -504,9 +479,9 @@ func (s *FoldersServer) restRoutes(r *rest.Router, orgs OrganizationsServer, v1o
 		case "undelete":
 			op, err = s.UndeleteFolder(req.Context(), &rmpb.UndeleteFolderRequest{Name: name})
 		case "getIamPolicy", "setIamPolicy", "testIamPermissions":
-			return ErrNotImplemented(verb + hierarchyIAMRefusal)
+			return serveIAM(w, req, s, name, verb)
 		default:
-			return apierror.InvalidArgument("POST to a folder requires a custom method: move or undelete")
+			return apierror.InvalidArgument("POST to a folder requires a custom method: move, undelete or an IAM method")
 		}
 		if err != nil {
 			return err
@@ -536,10 +511,9 @@ func (s *FoldersServer) restRoutes(r *rest.Router, orgs OrganizationsServer, v1o
 		if err != nil {
 			return err
 		}
-		_, verb, _ := strings.Cut(raw, ":")
-		switch verb {
-		case "getIamPolicy", "setIamPolicy", "testIamPermissions":
-			return ErrNotImplemented(verb + hierarchyIAMRefusal)
+		id, verb, _ := strings.Cut(raw, ":")
+		if isIAMVerb(verb) {
+			return serveIAM(w, req, orgs, "organizations/"+id, verb)
 		}
 		return apierror.InvalidArgument("POST to an organization requires a custom method")
 	})
@@ -704,9 +678,9 @@ func (s *FoldersServer) v2Routes(r *rest.Router, ops *v1Ops) {
 			}
 			return rest.WriteJSON(w, http.StatusOK, v2Folder(f))
 		case "getIamPolicy", "setIamPolicy", "testIamPermissions":
-			return ErrNotImplemented(verb + hierarchyIAMRefusal)
+			return serveIAM(w, req, s, "folders/"+strings.TrimPrefix(id, "folders/"), verb)
 		}
-		return apierror.InvalidArgument("POST to a folder requires a custom method: move or undelete")
+		return apierror.InvalidArgument("POST to a folder requires a custom method: move, undelete or an IAM method")
 	})
 }
 
@@ -718,7 +692,7 @@ func v1Organization() *crmv1.Organization {
 		LifecycleState: "ACTIVE", CreationTime: OrganizationCreateTime}
 }
 
-func (s *ProjectsServer) v1OrgRoutes(r *rest.Router) {
+func (s *ProjectsServer) v1OrgRoutes(r *rest.Router, orgs OrganizationsServer) {
 	r.Handle("GET /v1/organizations/{org}", func(w http.ResponseWriter, req *http.Request) error {
 		id, err := rest.PathValue(req, "org")
 		if err != nil {
@@ -753,8 +727,11 @@ func (s *ProjectsServer) v1OrgRoutes(r *rest.Router) {
 		if err != nil {
 			return err
 		}
-		_, verb, _ := strings.Cut(raw, ":")
-		return ErrNotImplemented("organizations." + verb + hierarchyIAMRefusal)
+		id, verb, _ := strings.Cut(raw, ":")
+		if isIAMVerb(verb) {
+			return serveIAM(w, req, orgs, "organizations/"+id, verb)
+		}
+		return ErrNotImplemented("organizations." + verb)
 	})
 }
 
