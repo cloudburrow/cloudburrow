@@ -155,16 +155,8 @@ func TestRunJobSubPathAndStoredSettings(t *testing.T) {
 	if _, err := jc.CreateJob(ctx, &runpb.CreateJobRequest{Parent: runParent(h), JobId: "compat-job-badsub", Job: bad}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("subPath ../up = %v; want InvalidArgument", err)
 	}
-	for field, v := range map[string]*runpb.Volume{
-		"volumes.gcs": {Name: "v", VolumeType: &runpb.Volume_Gcs{Gcs: &runpb.GCSVolumeSource{Bucket: "b"}}},
-	} {
-		refused := shellJob("true", 1, nil)
-		refused.Template.Template.Volumes = []*runpb.Volume{v}
-		_, err := jc.CreateJob(ctx, &runpb.CreateJobRequest{Parent: runParent(h), JobId: "compat-job-refused", Job: refused})
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), field) {
-			t.Errorf("%s = %v; want Unimplemented naming it", field, err)
-		}
-	}
+	// Cloud Storage (#1474) and NFS (#1448) volumes are served since; their
+	// tests are TestRunCloudStorageFUSEVolumes and TestRunNFSVolumesAndCloudRunEnv.
 }
 
 // TestConsoleRunStoredSettings (#1346), in the run shard: a service deployed
