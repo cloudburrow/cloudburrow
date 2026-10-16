@@ -86,6 +86,14 @@ func TestConditionsAndAuditConfigsAreUnimplemented(t *testing.T) {
 	if _, err := set(t, nil, &iampb.Policy{Version: 3, Bindings: []*iampb.Binding{{Role: "roles/viewer", Members: []string{"user:a@example.com"}}}}); err != nil {
 		t.Errorf("version 3 without a condition: %v", err)
 	}
+	// gcloud kms ekm-config sends this mask (#1469).
+	if _, err := Set(nil, &iampb.SetIamPolicyRequest{Policy: &iampb.Policy{Version: 3},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"bindings", "etag", "version"}}}); err != nil {
+		t.Errorf("an update_mask naming version: %v", err)
+	}
+	if _, err := Set(nil, &iampb.SetIamPolicyRequest{Policy: &iampb.Policy{}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"owner"}}}); code(err) != codes.InvalidArgument {
+		t.Errorf("an update_mask naming no Policy field: %v, want INVALID_ARGUMENT", err)
+	}
 	if _, err := set(t, nil, &iampb.Policy{Version: 2}); code(err) != codes.InvalidArgument {
 		t.Errorf("version 2: %v, want INVALID_ARGUMENT", err)
 	}

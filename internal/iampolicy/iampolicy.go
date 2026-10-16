@@ -80,7 +80,10 @@ func Get(current *Stored, opts *iampb.GetPolicyOptions) (*iampb.Policy, error) {
 func Set(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
 	for _, path := range req.GetUpdateMask().GetPaths() {
 		switch path {
-		case "bindings", "etag":
+		// version is a Policy field too: gcloud kms ekm-config
+		// set-iam-policy and add-iam-policy-binding send
+		// "bindings,etag,version" (#1469).
+		case "bindings", "etag", "version":
 		case "audit_configs", "auditConfigs":
 			return Stored{}, apierror.Unimplemented("update_mask %q: audit configs are not supported", path)
 		default:

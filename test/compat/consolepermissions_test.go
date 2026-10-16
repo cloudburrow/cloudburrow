@@ -279,6 +279,38 @@ func TestConsolePermissionsOnAKeyRingAndKey(t *testing.T) {
 	})
 }
 
+// TestConsolePermissionsOnAnEkmConnection (#1469): the Permissions tab on an
+// EKM connection's page reads and writes the policy the official client's
+// IAM handle reads, on the KMS port's IAMPolicy mixin.
+//
+// covers: google.iam.v1.IAMPolicy/GetIamPolicy, google.iam.v1.IAMPolicy/SetIamPolicy, google.iam.v1.IAMPolicy/TestIamPermissions
+func TestConsolePermissionsOnAnEkmConnection(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	ctx := h.Context()
+	c, err := kms.NewKeyManagementClient(ctx, option.WithEndpoint(h.Endpoint(EnvKMS)), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	ec, err := newEkmClient(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ec.Close() })
+	// Connections cannot be deleted; the project is the test's own.
+	conn, err := ec.CreateEkmConnection(ctx, &kmspb.CreateEkmConnectionRequest{Parent: "projects/" + h.Project() + "/locations/us-east4",
+		EkmConnectionId: "console-perms", EkmConnection: &kmspb.EkmConnection{ServiceResolvers: []*kmspb.EkmConnection_ServiceResolver{{
+			ServiceDirectoryService: "projects/" + h.Project() + "/locations/us-east4/namespaces/ekm/services/replica",
+			Hostname:                "ekm.example.com", ServerCertificates: []*kmspb.Certificate{{RawDer: ekmCertificate(t)}}}}}})
+	if err != nil {
+		t.Fatalf("CreateEkmConnection: %v", err)
+	}
+	consolePermissionsRoundTrip(t, h, addr, "kms-ekm", []string{conn.GetName()}, handleOf(c.ResourceIAM(conn.GetName())),
+		"roles/cloudkms.ekmConnectionsAdmin", "cloudkms.ekmConnections.use")
+}
+
 // TestConsolePermissionsOnABucket, in the storage shard: through the JSON
 // API's storage.buckets.getIamPolicy and setIamPolicy, whose stale etag is
 // refused 412.

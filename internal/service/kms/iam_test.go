@@ -11,6 +11,7 @@ import (
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
@@ -140,10 +141,11 @@ func TestIamRouting(t *testing.T) {
 	}
 	_, iam, _, _ = iamFixture(t, store.NewMemory())
 	for res, want := range map[string]codes.Code{
-		"":                        codes.InvalidArgument,
-		ring + "/importJobs/j":    codes.Unimplemented,
-		loc + "/ekmConfig":        codes.Unimplemented,
-		loc + "/ekmConnections/c": codes.Unimplemented,
+		"":                                         codes.InvalidArgument,
+		ring + "/importJobs/j":                     codes.Unimplemented,
+		loc + "/ekmConnections/absent":             codes.NotFound,
+		loc + "/ekmConnections/bad.id":             codes.InvalidArgument,
+		"projects/p/locations/global/ekmConfig":    codes.InvalidArgument,
 		ring + "/cryptoKeys/k/cryptoKeyVersions/1": codes.InvalidArgument,
 		"projects/p/locations/global/keyRings/r":   codes.InvalidArgument, // project "p" is malformed
 		loc + "/keyRings/absent":                   codes.NotFound,
@@ -155,5 +157,64 @@ func TestIamRouting(t *testing.T) {
 	r, err := iam.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: loc + "/keyRings/absent", Permissions: []string{"cloudkms.keyRings.get"}})
 	if err != nil || len(r.GetPermissions()) != 0 {
 		t.Errorf("TestIamPermissions on a missing ring = %v, %v; want an empty set", r, err)
+	}
+}
+
+// IAM on a location's ekmConfig and on an EkmConnection is stored on their
+// records and read back (#1469). The ekmConfig singleton has an empty
+// policy before one is set; setting a policy changes neither record's
+// fields, the connection's own etag included, and UpdateEkmConfig keeps it.
+func TestIamOnEkmResources(t *testing.T) {
+	srv := NewServer(store.NewMemory())
+	iam, ekm := &iamServer{s: srv}, srv.Ekm()
+	ctx := context.Background()
+	conn, err := ekm.CreateEkmConnection(ctx, &kmspb.CreateEkmConnectionRequest{Parent: loc, EkmConnectionId: "c",
+		EkmConnection: &kmspb.EkmConnection{ServiceResolvers: []*kmspb.EkmConnection_ServiceResolver{{
+			ServiceDirectoryService: "projects/demo-project/locations/us-central1/namespaces/ns/services/ekm",
+			Hostname:                "ekm.example", ServerCertificates: []*kmspb.Certificate{{RawDer: selfSigned(t)}}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := loc + "/ekmConfig"
+	for _, res := range []string{cfg, conn.GetName()} {
+		cur, err := iam.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res})
+		if err != nil || len(cur.GetBindings()) != 0 || len(cur.GetEtag()) == 0 {
+			t.Fatalf("GetIamPolicy(%s) = %v, %v; want the empty policy with an etag", res, cur, err)
+		}
+		p := binding("user:ekm@example.com")
+		p.Etag = cur.GetEtag()
+		if _, err := iam.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: p}); err != nil {
+			t.Fatalf("SetIamPolicy(%s) = %v", res, err)
+		}
+		if _, err := iam.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: p}); status.Code(err) != codes.Aborted {
+			t.Errorf("SetIamPolicy(%s) with a stale etag = %v, want ABORTED", res, err)
+		}
+		got, err := iam.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res})
+		if err != nil || len(got.GetBindings()) != 1 || got.GetBindings()[0].GetMembers()[0] != "user:ekm@example.com" {
+			t.Errorf("GetIamPolicy(%s) after a set = %v, %v", res, got, err)
+		}
+		perms, err := iam.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: res, Permissions: []string{"cloudkms.ekmConnections.use"}})
+		if err != nil || len(perms.GetPermissions()) != 1 {
+			t.Errorf("TestIamPermissions(%s) = %v, %v", res, perms, err)
+		}
+	}
+	again, err := ekm.GetEkmConnection(ctx, &kmspb.GetEkmConnectionRequest{Name: conn.GetName()})
+	if err != nil || again.GetEtag() != conn.GetEtag() {
+		t.Errorf("the connection's etag after SetIamPolicy = %q, %v; want %q unchanged", again.GetEtag(), err, conn.GetEtag())
+	}
+	if _, err := ekm.UpdateEkmConfig(ctx, &kmspb.UpdateEkmConfigRequest{EkmConfig: &kmspb.EkmConfig{Name: cfg, DefaultEkmConnection: conn.GetName()},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"default_ekm_connection"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := iam.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: cfg}); err != nil || len(got.GetBindings()) != 1 {
+		t.Errorf("the ekmConfig policy after UpdateEkmConfig = %v, %v; want it kept", got, err)
+	}
+	if c, err := ekm.GetEkmConfig(ctx, &kmspb.GetEkmConfigRequest{Name: cfg}); err != nil || c.GetDefaultEkmConnection() != conn.GetName() {
+		t.Errorf("GetEkmConfig = %v, %v", c, err)
+	}
+	// An absent connection: an empty permission set, as for a ring.
+	perms, err := iam.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: loc + "/ekmConnections/absent", Permissions: []string{"p"}})
+	if err != nil || len(perms.GetPermissions()) != 0 {
+		t.Errorf("TestIamPermissions on an absent connection = %v, %v", perms, err)
 	}
 }

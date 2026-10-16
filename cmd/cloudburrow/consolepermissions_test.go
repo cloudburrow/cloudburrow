@@ -357,6 +357,46 @@ func TestKMSPermissionsOnARingAndAKey(t *testing.T) {
 	}
 }
 
+// The Permissions tab on an EKM connection's page (#1469) reads and writes
+// the policy the connection stores, through the KMS port's IAMPolicy mixin
+// the official client's IAM handle reaches.
+func TestKMSPermissionsOnAnEkmConnection(t *testing.T) {
+	ctx := context.Background()
+	kp, client := kmsEditFixture(t)
+	p := kmsEkmProvider{svc: kp.svc}
+	name, err := p.Create(ctx, "iam-proj", map[string]string{"ekmConnectionId": "c", "location": "us-east1",
+		"serviceDirectoryService": "projects/iam-proj/locations/us-east1/namespaces/n/services/s",
+		"hostname":                "ekm.test", "certificate": consoleEkmPEM(t), "keyManagementMode": "MANUAL"})
+	if err != nil {
+		t.Fatalf("Create EKM connection: %v", err)
+	}
+	h := client.ResourceIAM(name)
+	var lastStale error
+	exercisePermissions(t, p, permissionsCase{service: "kms-ekm", project: "iam-proj", path: []string{name},
+		readBack: func(t *testing.T) *iampb.Policy {
+			pol, err := h.Policy(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return pol.InternalProto
+		},
+		write: func(t *testing.T, add *iampb.Binding) {
+			pol, _ := h.Policy(ctx)
+			stale := pol.InternalProto.GetEtag()
+			pol.InternalProto.Bindings = append(pol.InternalProto.Bindings, add)
+			if err := h.SetPolicy(ctx, pol); err != nil {
+				t.Fatal(err)
+			}
+			pol.InternalProto.Etag = stale
+			lastStale = h.SetPolicy(ctx, pol)
+		},
+		refusal: func() string { return grpcRefusal(lastStale) },
+	})
+	if _, err := p.GetPolicy(ctx, "other-proj", []string{name}); err == nil {
+		t.Error("another project's EKM connection policy was read")
+	}
+}
+
 func TestStoragePermissionsThroughBucketIAM(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
