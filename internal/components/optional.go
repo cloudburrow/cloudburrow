@@ -214,10 +214,20 @@ func firestoreBackend(project string) Backend {
 
 // firestoreFront is the call front, serving the Firestore Admin API itself
 // (internal/firestoreadmin, #1331): the emulator serves the documents API
-// alone.
+// alone; and PartitionQuery, which it does not serve (internal/queryfront,
+// #1405).
 func firestoreFront() *Front {
 	f := callFront(FirestorePort, FirestoreEmulatorPort)
-	f.Args = append(f.Args, "--firestore-admin")
+	f.Args = append(f.Args, "--firestore-admin", "--queries", "firestore")
+	return f
+}
+
+// datastoreFront is the call front, answering RunAggregationQuery, which
+// the emulator does not serve, from its RunQuery (internal/queryfront,
+// #1405).
+func datastoreFront() *Front {
+	f := callFront(DatastorePort, DatastoreEmulatorPort)
+	f.Args = append(f.Args, "--queries", "datastore")
 	return f
 }
 
@@ -258,7 +268,7 @@ const DatastoreLockFile = "/data/datastore.lock"
 // measured).
 func datastoreBackend(project string, persistent bool) Backend {
 	b := Backend{Name: "datastore", Image: PubSubImage, Port: DatastorePort,
-		Front: callFront(DatastorePort, DatastoreEmulatorPort)}
+		Front: datastoreFront()}
 	if !persistent {
 		b.Command = []string{"gcloud", "beta", "emulators", "datastore", "start",
 			"--project=" + project,

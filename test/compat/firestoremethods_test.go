@@ -3,12 +3,14 @@
 package compat
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
 	"cloud.google.com/go/firestore"
 	fsapi "cloud.google.com/go/firestore/apiv1"
 	"cloud.google.com/go/firestore/apiv1/firestorepb"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -309,24 +311,82 @@ func valueOf(v any) any {
 	return v
 }
 
-// TestFirestorePartitionQueryIsRefused records that the emulator does not
-// serve PartitionQuery, which GetPartitionedQueries calls.
+// TestFirestorePartitionedQueries splits a collection group into
+// partitions with the client's GetPartitionedQueries, and reads every
+// document exactly once across them. The emulator does not serve
+// PartitionQuery; the call front answers it from the emulator's RunQuery
+// (#1405), with cursors at document references that split the group
+// evenly. A paged PartitionQuery returns the same cursors.
 //
-// covers: google.firestore.v1.Firestore/PartitionQuery (unimplemented)
-func TestFirestorePartitionQueryIsRefused(t *testing.T) {
+// covers: google.firestore.v1.Firestore/PartitionQuery
+func TestFirestorePartitionedQueries(t *testing.T) {
 	h := New(t)
-	c := firestoreGAPIC(t, h)
-	it := c.PartitionQuery(h.Context(), &firestorepb.PartitionQueryRequest{
+	c := firestoreClient(t, h)
+	ctx := h.Context()
+	want := map[string]bool{}
+	for _, parent := range []string{"a", "b", "c"} {
+		for i := 0; i < 7; i++ {
+			ref := c.Collection("owners").Doc(parent).Collection("parted").Doc(fmt.Sprintf("d%02d", i))
+			if _, err := ref.Set(ctx, map[string]any{"i": i}); err != nil {
+				t.Fatalf("Set %s: %v", ref.Path, err)
+			}
+			want[ref.Path] = true
+		}
+	}
+	queries, err := c.CollectionGroup("parted").GetPartitionedQueries(ctx, 4)
+	if err != nil {
+		t.Fatalf("GetPartitionedQueries: %v", err)
+	}
+	if len(queries) < 2 {
+		t.Fatalf("GetPartitionedQueries(4) = %d partitions, want the group split", len(queries))
+	}
+	seen := map[string]int{}
+	for i, q := range queries {
+		docs, err := q.Documents(ctx).GetAll()
+		if err != nil {
+			t.Fatalf("partition %d: %v", i, err)
+		}
+		if len(docs) == 0 {
+			t.Errorf("partition %d is empty", i)
+		}
+		for _, d := range docs {
+			seen[d.Ref.Path]++
+		}
+	}
+	for p := range want {
+		if seen[p] != 1 {
+			t.Errorf("%s read %d times across partitions, want once", p, seen[p])
+		}
+	}
+	if len(seen) != len(want) {
+		t.Errorf("read %d documents, want %d", len(seen), len(want))
+	}
+
+	// Paged by the generated client: one cursor a page, the same cursors.
+	g := firestoreGAPIC(t, h)
+	it := g.PartitionQuery(ctx, &firestorepb.PartitionQueryRequest{
 		Parent:         firestoreDocs(h),
 		PartitionCount: 3,
+		PageSize:       1,
 		QueryType: &firestorepb.PartitionQueryRequest_StructuredQuery{StructuredQuery: &firestorepb.StructuredQuery{
 			From:    []*firestorepb.StructuredQuery_CollectionSelector{{CollectionId: "parted", AllDescendants: true}},
 			OrderBy: []*firestorepb.StructuredQuery_Order{{Field: &firestorepb.StructuredQuery_FieldReference{FieldPath: "__name__"}, Direction: firestorepb.StructuredQuery_ASCENDING}},
 		}},
 	})
-	_, err := it.Next()
-	wantRefused(t, "PartitionQuery", err, codes.Unimplemented,
-		"Method google.firestore.v1.Firestore/PartitionQuery is unimplemented")
+	var cursors []string
+	for {
+		cur, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("PartitionQuery: %v", err)
+		}
+		cursors = append(cursors, cur.GetValues()[0].GetReferenceValue())
+	}
+	if len(cursors) != 3 {
+		t.Errorf("PartitionQuery(3) paged one a page = %v, want 3 cursors", cursors)
+	}
 }
 
 // TestFirestorePipelineIsRefused records that the emulator refuses
