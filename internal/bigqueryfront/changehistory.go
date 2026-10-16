@@ -168,7 +168,9 @@ func (f front) changeReads(w http.ResponseWriter, r *http.Request, q queryOption
 			return fail(c.dataset, code, reasonOf(code, "invalidQuery"), msg)
 		}
 		cols := "*"
-		filter := fmt.Sprintf("_CHANGE_TIMESTAMP >= TIMESTAMP_MICROS(%d) AND _CHANGE_TIMESTAMP < TIMESTAMP_MICROS(%d)", start, stop)
+		// The engine's START row marks when the change table was made
+		// (googlesqlite patch 0041, timetravel.go).
+		filter := fmt.Sprintf("_CHANGE_TIMESTAMP >= TIMESTAMP_MICROS(%d) AND _CHANGE_TIMESTAMP < TIMESTAMP_MICROS(%d) AND _CHANGE_TYPE != 'START'", start, stop)
 		if c.name == "APPENDS" {
 			cols = "* EXCEPT (_CHANGE_IS_FOR_UPDATE)"
 			filter += " AND _CHANGE_TYPE = 'INSERT'"

@@ -233,7 +233,7 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | `DROP SCHEMA` where the script's other statements see the dataset; `CREATE SCHEMA` options other than the supported strings, and `DEFAULT COLLATE` (#1459) | no emulator support | M |
 | `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that changes data; a runtime error or an `ASSERT` in a script with a `TEMP` table or function (#1459) | no emulator support | S |
 | A failed script after a statement that wrote: the emulator does not roll back (#1459) | no emulator support | L |
-| `FOR SYSTEM_TIME AS OF` a past time inside the time travel window, and a snapshot or clone at one, are 501: the emulator keeps no history (#1460) | no emulator support | L |
+| A snapshot or clone `FOR SYSTEM_TIME AS OF` a past time (a query reads one since #1460); `FOR SYSTEM_TIME AS OF` a past time before an ALTER TABLE rebuild or CREATE OR REPLACE TABLE, of an ingestion-time partitioned table, or with a partition decorator (#1460) | not built yet | M |
 | `datasets.undelete`: the emulator keeps nothing of a deleted dataset (#1460) | no emulator support | M |
 | Storage Read API: `SplitReadStream`, and `ReadRows` of a stream made before the front last started (#1460) | no emulator support | S |
 | BQML: `CREATE MODEL` is refused by the engine ("Statement not supported: CreateModelStatement"), so no model can be made, used or extracted (#1465) | no emulator support | L |
