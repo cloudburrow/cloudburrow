@@ -157,6 +157,9 @@ type Server struct {
 	now   func() time.Time
 	// admin holds the project exclusions WriteLogEntries applies (#1226).
 	admin *Admin
+	// d delivers to sink destinations other than log buckets (deliver.go,
+	// #1404).
+	d deliverer
 }
 
 // UseAdmin makes the project exclusions admin stores apply to writes: an
@@ -308,10 +311,11 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 	if n := proto.Size(req); n > MaxRequestBytes {
 		return nil, apierror.Wrap(apierror.InvalidArgument("the request is %d bytes, over the %d-byte (10 MB) limit", n, MaxRequestBytes))
 	}
-	now := s.now()
+	now := s.clock()
 	exclusions := map[parent]pred{}
 	sinks := map[parent][]sinkRoute{}
 	routes := map[*loggingpb.LogEntry]*route{}
+	var deliveries []delivery
 	out := make([]*loggingpb.LogEntry, 0, len(req.GetEntries()))
 	failed := map[int32]*spb.Status{}
 	var first *apierror.Error
@@ -332,7 +336,9 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 			continue
 		}
 		hidden := s.excluded(e, exclusions)
-		buckets := s.routeOf(e, sinks)
+		rt := s.routeOf(e, sinks, exclusions)
+		buckets := rt.buckets
+		deliveries = append(deliveries, rt.out...)
 		if hidden && len(buckets) == 0 {
 			continue
 		}
@@ -354,6 +360,7 @@ func (s *Server) WriteLogEntries(_ context.Context, req *loggingpb.WriteLogEntri
 		}
 		s.store.mu.Unlock()
 		s.store.append(out, routes)
+		s.deliver(deliveries)
 	}
 	if first != nil {
 		st, err := status.New(first.Code, fmt.Sprintf("%s (%d of %d entries not written)", first.Message, len(failed), len(req.GetEntries()))).
@@ -584,6 +591,8 @@ func (s *Server) sources(names []string) (sources, error) {
 		}
 		if rest == "" {
 			out.parents[p] = true
+			// What another project's sinks routed to this one (#1404).
+			out.buckets = append(out.buckets, bucketRef{parent: p, location: "global", bucket: bucketDefault}.name())
 			continue
 		}
 		ref, view, err := parseView("resource name", r)
@@ -609,19 +618,40 @@ func (s *Server) sources(names []string) (sources, error) {
 	return out, nil
 }
 
-// sinkRoute is one sink that can send an entry to a log bucket.
+// sinkRoute is one sink and where it sends what it matches.
 type sinkRoute struct {
 	match, excluded pred
-	bucket          string
+	sink            string // the sink's resource name
+	parent          parent
+	// dest is the sink's destination without logging.googleapis.com/ for a
+	// log bucket or a project, else as stored.
+	dest        string
+	partitioned bool
 }
 
-// routeOf is the log buckets the sinks of the entry's own parent, and the
-// include_children sinks of the folders and organization above it, send it
-// to. Only a destination that is a log bucket is delivered to; Cloud
-// Storage, BigQuery, Pub/Sub and project destinations receive nothing.
-func (s *Server) routeOf(e *loggingpb.LogEntry, cache map[parent][]sinkRoute) []string {
+func (r sinkRoute) isBucket() bool {
+	return strings.Contains(r.dest, "/buckets/") && !strings.Contains(r.dest, ".googleapis.com/")
+}
+func (r sinkRoute) project() string { p, _ := strings.CutPrefix(r.dest, "projects/"); return p }
+func (r sinkRoute) isProject() bool {
+	return strings.HasPrefix(r.dest, "projects/") && !strings.Contains(r.project(), "/")
+}
+
+// routing is where one entry goes: log buckets, and other destinations.
+type routing struct {
+	buckets []string
+	out     []delivery
+}
+
+// routeOf is where the sinks of the entry's own parent, and the
+// include_children sinks of the folders and organization above it, send
+// it: log buckets, which store it, and the other destinations deliver.go
+// delivers to. A project destination's own _Default bucket and sinks take
+// it, once (rerouted).
+func (s *Server) routeOf(e *loggingpb.LogEntry, cache map[parent][]sinkRoute, exclusions map[parent]pred) routing {
+	var out routing
 	if s.admin == nil {
-		return nil
+		return out
 	}
 	own := entryParent(e)
 	var routes []sinkRoute
@@ -637,14 +667,49 @@ func (s *Server) routeOf(e *loggingpb.LogEntry, cache map[parent][]sinkRoute) []
 		}
 		routes = append(routes, rs...)
 	}
-	var out []string
 	seen := map[string]bool{}
+	s.follow(e, routes, cache, exclusions, &out, seen, true)
+	return out
+}
+
+func (s *Server) follow(e *loggingpb.LogEntry, routes []sinkRoute, cache map[parent][]sinkRoute, exclusions map[parent]pred,
+	out *routing, seen map[string]bool, reroute bool) {
 	for _, r := range routes {
-		if seen[r.bucket] || !r.match(e) || (r.excluded != nil && r.excluded(e)) {
+		if !r.match(e) || (r.excluded != nil && r.excluded(e)) {
 			continue
 		}
-		seen[r.bucket] = true
-		out = append(out, r.bucket)
+		switch {
+		case r.isBucket():
+			if !seen[r.dest] {
+				seen[r.dest] = true
+				out.buckets = append(out.buckets, r.dest)
+			}
+		case r.isProject():
+			if !reroute {
+				continue // routed to a project once already
+			}
+			dp := projectParent(r.project())
+			if seen["project|"+dp.id] {
+				continue
+			}
+			seen["project|"+dp.id] = true
+			ex, ok := exclusions[dp]
+			if !ok {
+				ex = s.admin.excluder(dp)
+				exclusions[dp] = ex
+			}
+			if def := (bucketRef{parent: dp, location: "global", bucket: bucketDefault}).name(); (ex == nil || !ex(e)) && !seen[def] && dp != entryParent(e) {
+				seen[def] = true
+				out.buckets = append(out.buckets, def)
+			}
+			rs, ok := cache[dp]
+			if !ok {
+				rs = s.admin.sinkRoutes(dp, false)
+				cache[dp] = rs
+			}
+			s.follow(e, rs, cache, exclusions, out, seen, false)
+		default:
+			out.out = append(out.out, delivery{sink: r.sink, parent: r.parent, dest: r.dest, partitioned: r.partitioned, e: e})
+		}
 	}
-	return out
 }

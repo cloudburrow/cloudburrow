@@ -20,11 +20,10 @@ import (
 // logging_custom_endpoint to the JSON API on the logging port (#591). Each is
 // read back through the official Go SDK's MetricsClient and ConfigClient,
 // the second plan is empty, an in-place update of each lands, and after
-// destroy each is NOT_FOUND. Nothing is delivered to the sink's destination,
-// the exclusion drops entries only from what the instance stores, and the
-// sink's writer_identity stays empty although unique_writer_identity is set
-// (#1226: Google's names the project number, which the instance does not
-// hold); the provider plans clean with it empty.
+// destroy each is NOT_FOUND. The exclusion drops entries only from what the
+// instance stores. The sink's writer_identity is the project's Logging
+// service agent (#1404); TestTerraformLoggingSinkDestinations grants it and
+// sees entries delivered.
 // covers: google.logging.v2.MetricsServiceV2/CreateLogMetric, google.logging.v2.MetricsServiceV2/GetLogMetric, google.logging.v2.MetricsServiceV2/UpdateLogMetric, google.logging.v2.MetricsServiceV2/DeleteLogMetric, google.logging.v2.ConfigServiceV2/CreateSink, google.logging.v2.ConfigServiceV2/GetSink, google.logging.v2.ConfigServiceV2/UpdateSink, google.logging.v2.ConfigServiceV2/DeleteSink, google.logging.v2.ConfigServiceV2/CreateExclusion, google.logging.v2.ConfigServiceV2/GetExclusion, google.logging.v2.ConfigServiceV2/UpdateExclusion, google.logging.v2.ConfigServiceV2/DeleteExclusion
 func TestTerraformLogging(t *testing.T) {
 	h := New(t)

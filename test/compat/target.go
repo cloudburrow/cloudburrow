@@ -189,13 +189,15 @@ var gcloudOverrides = []struct {
 }{
 	// RUN_STORAGE too, for the same reason as RUN_LOGGING: `gcloud run
 	// deploy --source` uploads its source in the run shard (#1347).
-	{"storage", []string{"STORAGE", "RUN_STORAGE"}},
-	{"pubsub", []string{"PUBSUB"}},
+	// And the SINK_ names, which the emulators shard exports for the
+	// Logging sinks' tests beside BigQuery (#1404).
+	{"storage", []string{"STORAGE", "RUN_STORAGE", "SINK_STORAGE"}},
+	{"pubsub", []string{"PUBSUB", "SINK_PUBSUB"}},
 	{"cloudkms", []string{"KMS"}},
 	{"secretmanager", []string{"SECRETS"}},
 	{"cloudtasks", []string{"TASKS"}},
 	{"cloudscheduler", []string{"SCHEDULER"}},
-	{"logging", []string{"LOGGING", "RUN_LOGGING"}},
+	{"logging", []string{"LOGGING", "RUN_LOGGING", "SINK_LOGGING"}},
 	{"cloudresourcemanager", []string{"RESOURCEMANAGER"}},
 	{"serviceusage", []string{"SERVICEUSAGE"}},
 	{"run", []string{"RUN"}},

@@ -2450,8 +2450,8 @@
         "method": "google.cloud.resourcemanager.v3.Folders/CreateFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:226 TestTerraformGoogleFolder",
+          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders",
           "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
         ]
       },
@@ -2459,8 +2459,8 @@
         "method": "google.cloud.resourcemanager.v3.Folders/DeleteFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerfolders_test.go:226 TestTerraformGoogleFolder",
+          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders",
           "test/compat/resourcemanageriam_test.go:139 TestResourceManagerFolderAndOrgIAM"
         ]
       },
@@ -2468,7 +2468,7 @@
         "method": "google.cloud.resourcemanager.v3.Folders/GetFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
         ]
       },
       {
@@ -2482,22 +2482,22 @@
         "method": "google.cloud.resourcemanager.v3.Folders/ListFolders",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/MoveFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:226 TestTerraformGoogleFolder",
+          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/SearchFolders",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
         ]
       },
       {
@@ -2518,15 +2518,15 @@
         "method": "google.cloud.resourcemanager.v3.Folders/UndeleteFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Folders/UpdateFolder",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:226 TestTerraformGoogleFolder",
+          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
         ]
       },
       {
@@ -2540,14 +2540,14 @@
         "method": "google.cloud.resourcemanager.v3.Organizations/GetOrganization",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:68 TestResourceManagerV3Organizations"
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Organizations/SearchOrganizations",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:68 TestResourceManagerV3Organizations"
+          "test/compat/resourcemanagerfolders_test.go:60 TestResourceManagerV3Organizations"
         ]
       },
       {
@@ -2568,14 +2568,14 @@
         "method": "google.cloud.resourcemanager.v3.Projects/CreateProject",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:62 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/DeleteProject",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:62 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
         ]
       },
       {
@@ -2593,15 +2593,15 @@
         "status": "Verified",
         "tests": [
           "test/compat/projectnumber_test.go:34 TestOneProjectNumberEverywhere",
-          "test/compat/resourcemanager_test.go:62 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/ListProjects",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:215 TestResourceManagerV3ListProjects",
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanager_test.go:209 TestResourceManagerV3ListProjects",
+          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
         ]
       },
       {
@@ -2609,14 +2609,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigqueryjobsbyfolder_test.go:29 TestBigQueryJobsByFolderAndOrganization",
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/SearchProjects",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:62 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
         ]
       },
       {
@@ -2639,14 +2639,14 @@
         "method": "google.cloud.resourcemanager.v3.Projects/UndeleteProject",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:62 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
         ]
       },
       {
         "method": "google.cloud.resourcemanager.v3.Projects/UpdateProject",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanager_test.go:62 TestResourceManagerV3Projects"
+          "test/compat/resourcemanager_test.go:56 TestResourceManagerV3Projects"
         ]
       },
       {
@@ -2939,7 +2939,7 @@
         "method": "cloudresourcemanager.organizations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:309 TestGcloudFoldersAndOrganizations"
+          "test/compat/resourcemanagerfolders_test.go:301 TestGcloudFoldersAndOrganizations"
         ]
       },
       {
@@ -2985,7 +2985,7 @@
         "method": "cloudresourcemanager.organizations.search",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:309 TestGcloudFoldersAndOrganizations"
+          "test/compat/resourcemanagerfolders_test.go:301 TestGcloudFoldersAndOrganizations"
         ]
       },
       {
@@ -3045,8 +3045,8 @@
         "method": "cloudresourcemanager.projects.getAncestry",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:309 TestGcloudFoldersAndOrganizations",
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:301 TestGcloudFoldersAndOrganizations",
+          "test/compat/resourcemanagerfolders_test.go:90 TestResourceManagerV3Folders"
         ]
       },
       {
@@ -3271,9 +3271,7 @@
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
-          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3289,10 +3287,11 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
+          "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3318,9 +3317,7 @@
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
-          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3336,10 +3333,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3356,9 +3353,7 @@
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
-          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets"
+          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -3375,9 +3370,7 @@
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
-          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3393,8 +3386,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_parents_test.go:157 TestTerraformLoggingOrganizationAndFolderSettings"
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3402,10 +3394,10 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
+          "test/compat/logging1404tools_test.go:103 TestTerraformLoggingSinkDestinations",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3466,9 +3458,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
-          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets"
+          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -3490,9 +3480,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:256 TestLoggingExclusions",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
-          "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3500,8 +3488,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
-          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_parents_test.go:157 TestTerraformLoggingOrganizationAndFolderSettings"
+          "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
       {
@@ -3510,9 +3497,8 @@
         "tests": [
           "test/compat/logging1226_test.go:184 TestLoggingSinks",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/loggingparentstools_test.go:87 TestTerraformLoggingFolderAndOrganizationSinks",
-          "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/loggingparentstools_test.go:86 TestTerraformLoggingFolderAndOrganizationSinks",
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3572,6 +3558,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
+          "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
           "test/compat/loggingparents_test.go:102 TestLoggingFolderOrganizationAndBillingParents"
@@ -3582,7 +3569,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3590,7 +3577,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3598,7 +3585,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       },
       {
@@ -3613,7 +3600,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/logging1226_test.go:50 TestLoggingLogBasedMetrics",
-          "test/compat/terraform_logging_test.go:29 TestTerraformLogging"
+          "test/compat/terraform_logging_test.go:28 TestTerraformLogging"
         ]
       }
     ]

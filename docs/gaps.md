@@ -25,7 +25,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 19 | 12 | 5 | 0 | 2 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
-| Cloud Logging | 0 | 0 | 0 | 0 | 0 |
+| Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 0 | 1 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
@@ -35,7 +35,7 @@ is the to-do view of it. Gaps filed by the sweep carry their issue number.
 | Cloud SQL, Memorystore | 9 | 9 | 0 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **103** | **45** | **41** | **12** | **5** |
+| **Total** | **104** | **45** | **41** | **13** | **5** |
 
 ## Cloud Storage
 
@@ -113,8 +113,11 @@ Closed by this sweep: Locations (#1237).
 ## Cloud Logging
 
 Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394); the Terraform folder, organization and billing-account resources (#1403).
+Closed: `TailLogEntries`, `ListMonitoredResourceDescriptors` (#1215), and log-based metrics, `MetricsServiceV2` (#1226). Closed by this sweep: the Async bucket calls, links and settings of `ConfigServiceV2` (#1292), and `CopyLogEntries` (#1394). Closed: sink delivery to Cloud Storage, Pub/Sub, BigQuery and another project, and `writer_identity` (#1404).
 
-No gap is left open here.
+| Gap | Why open | Size |
+|---|---|---|
+| A BigQuery sink's schema mismatch is not written to an `export_errors` table, `protoPayload` is not exported, and the sink error codes but `topic_not_found` are CloudBurrow's (#1404) | not documented by Google | S |
 
 ## Cloud KMS
 

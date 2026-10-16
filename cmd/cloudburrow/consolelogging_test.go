@@ -142,7 +142,7 @@ func TestConsoleLoggingSinksAndExclusions(t *testing.T) {
 	}
 	var sd console.Detail
 	getJSON200(t, srv.URL+"/api/detail/logging-sinks?project="+project+"&name="+url.QueryEscape("projects/proj-1/sinks/to-gcs"), &sd)
-	if sd.Edit == nil || !strings.Contains(loggingDetailText(sd), "delivers nothing") {
+	if sd.Edit == nil || !strings.Contains(loggingDetailText(sd), "Nothing delivered yet") || !strings.Contains(loggingDetailText(sd), "serviceAccount:service-proj-1@") {
 		t.Errorf("the sink page = %+v", sd)
 	}
 	if code, out := consoleDelete(t, srv, "logging-sinks", project, "projects/proj-1/sinks/to-gcs"); code != http.StatusOK {

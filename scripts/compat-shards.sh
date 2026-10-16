@@ -143,7 +143,10 @@ compat_shard() {
       # pubsub for TestEmulatorsBehindAFrontRefuseOtherPods (#1114), which
       # dials both emulators from a pod; PUBSUB is not exported, so the
       # Pub/Sub tests stay in the storage shard.
-      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql,storage,pubsub
+      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,cloudsql,cloudsql-mysql,storage,pubsub,logging
+      # logging for the sinks that deliver to Cloud Storage, Pub/Sub and
+      # BigQuery (#1404), as SINK_LOGGING, SINK_STORAGE and SINK_PUBSUB, so
+      # those suites stay in their shards.
       # Spanner with its REST API for Terraform (#1331), Datastore (#307),
       # Firestore and Bigtable (#346), Memorystore
       # (#296), Cloud SQL for MySQL with its generated password (#297),
@@ -157,7 +160,7 @@ compat_shard() {
       # Resource Manager as BIGQUERY_RESOURCEMANAGER (#1392): only
       # BigQuery's JOBS_BY_FOLDER test reads it, to move the project into a
       # folder, so the Resource Manager tests stay in storage.
-      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER
+      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       # A created Memorystore instance follows the mode too (#1302), with RDB
