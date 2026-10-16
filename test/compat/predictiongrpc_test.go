@@ -58,8 +58,8 @@ func predictionClientAt(t *testing.T, h *Harness, envVar string) *aiplatform.Pre
 // one prediction per instance and the container's deployedModelId; the
 // container's refusal of a bad instance is INVALID_ARGUMENT in its own words;
 // an endpoint that is not deployed is NOT_FOUND; RawPredict relays the body;
-// Explain answers Sampled Shapley attributions (#1454); and a method
-// CloudBurrow does not implement is UNIMPLEMENTED.
+// Explain answers Sampled Shapley attributions (#1454); and DirectRawPredict
+// on a model with no grpcPorts is FAILED_PRECONDITION (#1477).
 func TestPredictionClientReachesACustomEndpoint(t *testing.T) {
 	h := New(t)
 	pc := predictionClientAt(t, h, EnvPrediction)
@@ -165,9 +165,11 @@ func TestPredictionClientReachesACustomEndpoint(t *testing.T) {
 		t.Errorf("Explain with integrated gradients: %v, want UNIMPLEMENTED", err)
 	}
 
+	// The doubler's model declares no grpcPorts (#1477): DirectRawPredict
+	// has no gRPC server to call.
 	_, err = pc.DirectRawPredict(ctx, &aiplatformpb.DirectRawPredictRequest{Endpoint: endpoint, MethodName: "/m.S/Predict"})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("DirectRawPredict: %v, want UNIMPLEMENTED", err)
+	if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), "grpcPorts") {
+		t.Errorf("DirectRawPredict: %v, want FAILED_PRECONDITION naming grpcPorts", err)
 	}
 }
 

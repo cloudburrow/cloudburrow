@@ -434,3 +434,56 @@ var (
 	_ console.Driller   = kmsAutokeyProvider{}
 	_ console.PathActor = kmsAutokeyProvider{}
 )
+
+// The Permissions tab on an EKM connection's page (#1469): the policy the
+// connection stores, read and written through the KMS port's IAMPolicy
+// mixin, the methods an SDK's EkmClient reaches. It is stored, never
+// enforced (ADR-0006). A location's EkmConfig has a policy too, which has no
+// page here: gcloud kms ekm-config get-iam-policy and its siblings reach it
+// from the console's terminal.
+
+func (kmsEkmProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
+	if len(path) != 1 {
+		return nil
+	}
+	return &console.PolicyTarget{Link: compatibilityDoc + "cloud-kms--googlecloudkmsv1",
+		RoleHelp: roleHelp("Cloud KMS", "roles/cloudkms.ekmConnectionsAdmin")}
+}
+
+func (p kmsEkmProvider) ekmIAM(project string, path []string) (iamServer, string, error) {
+	api := p.svc.API()
+	if api == nil {
+		return nil, "", errors.New(kmsNotStarted)
+	}
+	if len(path) != 1 {
+		return nil, "", fmt.Errorf("no IAM policy at %s", strings.Join(path, "/"))
+	}
+	if err := kmsOwned(project, path[0]); err != nil {
+		return nil, "", err
+	}
+	return api.IAMPolicy(), path[0], nil
+}
+
+func (p kmsEkmProvider) GetPolicy(ctx context.Context, project string, path []string) (console.Policy, error) {
+	api, name, err := p.ekmIAM(project, path)
+	if err != nil {
+		return console.Policy{}, err
+	}
+	return getProtoPolicy(ctx, api, name)
+}
+
+func (p kmsEkmProvider) SetPolicy(ctx context.Context, project string, path []string, pol console.Policy) error {
+	api, name, err := p.ekmIAM(project, path)
+	if err != nil {
+		return err
+	}
+	return setProtoPolicy(ctx, api, name, pol)
+}
+
+func (p kmsEkmProvider) TestPermissions(ctx context.Context, project string, path []string, perms []string) ([]string, error) {
+	api, name, err := p.ekmIAM(project, path)
+	if err != nil {
+		return nil, err
+	}
+	return testProtoPermissions(ctx, api, name, perms)
+}

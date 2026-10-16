@@ -284,8 +284,10 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 // The reasons the instance methods CloudBurrow cannot serve faithfully are
 // refused (#1462): each names what is missing.
 const (
-	externalPrimaryWhy = "an external primary (a source representation instance, for a database server outside Cloud SQL) is not served, " +
-		"so there is no external server to replicate from or to; read replicas of an instance are served (docs/cloudsql.md)"
+	externalPrimaryWhy = "an external primary is a source representation instance (instanceType ON_PREMISES_INSTANCE) for a database server " +
+		"outside Cloud SQL, with its onPremisesConfiguration (hostPort, replication user, CA and dump file); CloudBurrow keeps no such " +
+		"instance and builds no replica server from an outside source's dump and binary log or WAL, so there is no external server " +
+		"to replicate from, demote to, or sync with; read replicas of an instance are served (docs/cloudsql.md)"
 	sqlServerWhy = "it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
 	diskWhy      = "an instance's storage is its server's volume in the cluster, not a provisioned Compute Engine persistent disk, " +
 		"so it has no provisioned size (settings.dataDiskSizeGb) to shrink or reset"

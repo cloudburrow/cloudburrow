@@ -180,6 +180,34 @@ func (f *fakeKube) Run(_ context.Context, stdin string, args ...string) (string,
 		delete(f.cms, args[2])
 		delete(f.jobs, args[2])
 		return "", nil
+	case args[0] == "patch" && args[1] == resConfigMap:
+		// A merge patch of annotations: a null value removes one.
+		cm, ok := f.cms[args[2]]
+		if !ok {
+			return "", errors.New("NotFound")
+		}
+		var p struct {
+			Metadata struct {
+				Annotations map[string]*string `json:"annotations"`
+			} `json:"metadata"`
+		}
+		if err := json.Unmarshal([]byte(args[len(args)-1]), &p); err != nil {
+			return "", err
+		}
+		md := cm["metadata"].(map[string]any)
+		ann, _ := md["annotations"].(map[string]any)
+		if ann == nil {
+			ann = map[string]any{}
+		}
+		for k, v := range p.Metadata.Annotations {
+			if v == nil {
+				delete(ann, k)
+			} else {
+				ann[k] = *v
+			}
+		}
+		md["annotations"], md["resourceVersion"] = ann, f.nextRV()
+		return "", nil
 	case args[0] == "patch":
 		j, ok := f.jobs[args[2]]
 		if !ok {

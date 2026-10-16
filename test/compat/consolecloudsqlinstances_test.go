@@ -360,7 +360,8 @@ func TestConsoleCloudSQLPointInTimeRestore(t *testing.T) {
 
 // TestConsoleCloudSQLVersionsAndUpgrade (#1381): the Create instance
 // form's version picker lists every served version of the engines this
-// instance runs; an instance created from it as POSTGRES_15 in
+// instance runs, PostgreSQL 9.6 to 12 among them (#1462), and a
+// POSTGRES_12 instance is created from it; an instance created from it as POSTGRES_15 in
 // europe-west1 is read by the official client (sqladmin/v1) with that
 // version and region, its page offers Upgrade with the newer versions, and
 // Upgrade to POSTGRES_16 is read back as the new version, the server
@@ -402,12 +403,33 @@ func TestConsoleCloudSQLVersionsAndUpgrade(t *testing.T) {
 			}
 		}
 	}
-	want := []string{"POSTGRES_13", "POSTGRES_14", "POSTGRES_15", "POSTGRES_16", "POSTGRES_17", "POSTGRES_18"}
+	want := []string{"POSTGRES_9_6", "POSTGRES_10", "POSTGRES_11", "POSTGRES_12", "POSTGRES_13", "POSTGRES_14", "POSTGRES_15", "POSTGRES_16", "POSTGRES_17", "POSTGRES_18"}
 	if os.Getenv(EnvMySQL) != "" {
 		want = append(want, "MYSQL_8_0", "MYSQL_8_4")
 	}
 	if strings.Join(picker, ",") != strings.Join(want, ",") {
 		t.Errorf("the version picker lists %v, want %v", picker, want)
+	}
+	// PostgreSQL 12, served since #1462, is created from the picker too.
+	old := fmt.Sprintf("console-pg12-%d", time.Now().UnixNano()%1e6)
+	if code, out := consoleCreate(t, addr, "cloudsql-instances", project, map[string]string{
+		"name": old, "databaseVersion": "POSTGRES_12", "tier": "db-custom-1-3840"}); code != http.StatusOK {
+		t.Fatalf("console create of POSTGRES_12 = %d: %s", code, out)
+	}
+	t.Cleanup(func() {
+		if op, err := svc.Instances.Delete(project, old).Do(); err == nil {
+			waitSQLOp(t, svc, project, op)
+		}
+	})
+	for i := 0; ; i++ {
+		in, err := svc.Instances.Get(project, old).Do()
+		if err == nil && in.State == "RUNNABLE" && in.DatabaseInstalledVersion == "POSTGRES_12_22" {
+			break
+		}
+		if i == 240 {
+			t.Fatalf("the POSTGRES_12 instance: %+v %v", in, err)
+		}
+		time.Sleep(time.Second)
 	}
 	name := fmt.Sprintf("console-v-%d", time.Now().UnixNano()%1e6)
 	code, out := consoleCreate(t, addr, "cloudsql-instances", project, map[string]string{

@@ -427,7 +427,7 @@ func (p *WorkerPoolsServer) UpdateWorkerPool(ctx context.Context, req *runpb.Upd
 		return nil, err
 	}
 	// A volume the update dropped goes once nothing uses it (#1476).
-	go s.collectVolumes(ctx)
+	s.collectVolumesAfter(ctx)
 	return s.workloadOperation(ctx, parent, w, s.workerPoolReady(w))
 }
 

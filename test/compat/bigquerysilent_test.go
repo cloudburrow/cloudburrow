@@ -406,28 +406,37 @@ func TestBigQueryExecuteImmediate(t *testing.T) {
 		// of a statement that is not a query (#1037), also where the front
 		// runs the script in its turn (in IF); numbers of variables and
 		// columns that differ are an error now
-		// (TestBigQueryExecuteImmediateErrors). Computed SQL, a USING expression or a
-		// hidden variable in a script with a TEMP table, which cannot be
-		// run a statement at a time (TestBigQueryExecuteImmediateInTurn
-		// reads the rest back).
+		// (TestBigQueryExecuteImmediateErrors).
 		for _, sql := range []string{
 			// A name that must be quoted: the emulator does not SET one
 			// (measured), nor does the front's own run of a script read one.
 			"DECLARE `select` INT64; EXECUTE IMMEDIATE 'SELECT 5' INTO `select`",
 			"DECLARE x INT64; EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".into_" + suffix + " (x INT64)' INTO x",
 			"DECLARE x INT64; IF TRUE THEN EXECUTE IMMEDIATE 'CREATE TABLE " + d + ".into_" + suffix + " (x INT64)' INTO x; END IF",
-			"CREATE TEMP TABLE not_made (x INT64); EXECUTE IMMEDIATE (SELECT FORMAT('SELECT %d', COUNT(*)) FROM not_made); " +
-				"CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64)",
-			"CREATE TEMP TABLE tmp (x INT64); EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a; CREATE TABLE " + d + ".not_made_" + suffix + " (x INT64)",
 		} {
 			err := runIn(ctx, c, project, "", sql, insert)
 			if code, reason := apiError(err); code != http.StatusNotImplemented || reason != "notImplemented" {
 				t.Errorf("%s (query job %v): %v, want 501 notImplemented", sql, insert, err)
 			}
 		}
-		for _, name := range []string{"not_made_", "into_"} {
+		for _, name := range []string{"into_"} {
 			if _, err := ds.Table(name + suffix).Metadata(ctx); err == nil {
 				t.Errorf("a script refused 501 made its table %s (query job %v)", name, insert)
+			}
+		}
+		// #1459: computed SQL and a USING expression in a script with a
+		// TEMP table are carried out in their turn, the script run as its
+		// session's text (tempsession.go).
+		for i, sql := range []string{
+			"CREATE TEMP TABLE made (x INT64); EXECUTE IMMEDIATE (SELECT FORMAT('SELECT %d', COUNT(*)) FROM made); " +
+				"CREATE TABLE " + d + ".temp_made_" + suffix + " (x INT64)",
+			"CREATE TEMP TABLE tmp (x INT64); EXECUTE IMMEDIATE 'SELECT @a' USING 1 + 1 AS a; CREATE TABLE " + d + ".temp_using_" + suffix + " (x INT64)",
+		} {
+			if err := runIn(ctx, c, project, "", sql, insert); err != nil {
+				t.Errorf("%s (query job %v): %v", sql, insert, err)
+			}
+			if _, err := ds.Table([]string{"temp_made_", "temp_using_"}[i] + suffix).Metadata(ctx); err != nil {
+				t.Errorf("%s (query job %v): its table: %v", sql, insert, err)
 			}
 		}
 		// INTO of a query of more than one row fails, as BigQuery's does,

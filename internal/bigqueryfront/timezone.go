@@ -3,6 +3,7 @@ package bigqueryfront
 import (
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -20,6 +21,10 @@ import (
 //   - FORMAT_TIMESTAMP(format, ts), PARSE_TIMESTAMP(format, s) and
 //     TIMESTAMP_TRUNC(ts, part), given two arguments;
 //   - TIMESTAMP(x), given one (every one-argument form takes a zone);
+//   - a TIMESTAMP literal with no zone (#1456): "If no time zone is
+//     specified, the default time zone is used"
+//     (https://cloud.google.com/bigquery/docs/reference/standard-sql/lexical#timestamp_literals),
+//     the zone written into its text;
 //   - DATE(x), DATETIME(x), TIME(x), STRING(x) and EXTRACT(part FROM x),
 //     when x is itself a TIMESTAMP the text shows: a TIMESTAMP literal,
 //     CURRENT_TIMESTAMP, a call of TIMESTAMP, TIMESTAMP_SECONDS,
@@ -30,9 +35,8 @@ import (
 // DATE, DATETIME, TIME, STRING and EXTRACT whose argument is a column or
 // any other expression (the front has no types to tell a TIMESTAMP from a
 // DATETIME, where adding a zone would fail), DATE_TRUNC and the others
-// that take a TIMESTAMP only in one of their forms, a TIMESTAMP literal
-// with no offset, and a cast between TIMESTAMP and STRING, DATE or
-// DATETIME. The job keeps the client's text.
+// that take a TIMESTAMP only in one of their forms, and a cast between
+// TIMESTAMP and STRING, DATE or DATETIME. The job keeps the client's text.
 
 // validTimeZone reports whether BigQuery reads s as a time zone: a tz
 // database name, or an offset from UTC (+05, -08:00, UTC+3).
@@ -70,8 +74,8 @@ func rewriteTimeZone(sql, zone string) (string, bool) {
 	}
 	lit := sqlString(zone)
 	type edit struct {
-		pos  int
-		text string
+		pos, end int // the text replaced, sql[pos:end]; pos == end inserts
+		text     string
 	}
 	var edits []edit
 	for i, t := range toks {
@@ -79,13 +83,21 @@ func rewriteTimeZone(sql, zone string) (string, bool) {
 			continue
 		}
 		name := strings.ToUpper(t.text)
+		if name == "TIMESTAMP" && i+1 < len(toks) && toks[i+1].kind == tokString { // #1456
+			if v, ok := unquoteString(toks[i+1].text); ok {
+				if zoned, ok := zonedLiteral(v, zone); ok {
+					edits = append(edits, edit{toks[i+1].pos, toks[i+1].end, sqlString(zoned)})
+				}
+			}
+			continue
+		}
 		open := i+1 < len(toks) && toks[i+1].punct("(")
 		if zoneFirst[name] {
 			switch {
 			case !open:
-				edits = append(edits, edit{t.end, "(" + lit + ")"})
+				edits = append(edits, edit{t.end, t.end, "(" + lit + ")"})
 			case i+2 < len(toks) && toks[i+2].punct(")"):
-				edits = append(edits, edit{toks[i+2].pos, lit})
+				edits = append(edits, edit{toks[i+2].pos, toks[i+2].pos, lit})
 			}
 			continue
 		}
@@ -100,7 +112,7 @@ func rewriteTimeZone(sql, zone string) (string, bool) {
 		case zoneThird[name] && len(args) == 2,
 			name == "TIMESTAMP" && len(args) == 1,
 			zoneOfTimestamp[name] && len(args) == 1 && isTimestampExpr(args[0]):
-			edits = append(edits, edit{toks[closing].pos, ", " + lit})
+			edits = append(edits, edit{toks[closing].pos, toks[closing].pos, ", " + lit})
 		case name == "EXTRACT" && len(args) == 1:
 			a := args[0]
 			from := -1
@@ -119,19 +131,20 @@ func rewriteTimeZone(sql, zone string) (string, bool) {
 				}
 			}
 			if from >= 0 && !at && isTimestampExpr(a[from+1:]) {
-				edits = append(edits, edit{toks[closing].pos, " AT TIME ZONE " + lit})
+				edits = append(edits, edit{toks[closing].pos, toks[closing].pos, " AT TIME ZONE " + lit})
 			}
 		}
 	}
 	if len(edits) == 0 {
 		return sql, false
 	}
+	sort.SliceStable(edits, func(i, j int) bool { return edits[i].pos < edits[j].pos })
 	var b strings.Builder
 	last := 0
 	for _, e := range edits {
 		b.WriteString(sql[last:e.pos])
 		b.WriteString(e.text)
-		last = e.pos
+		last = e.end
 	}
 	b.WriteString(sql[last:])
 	return b.String(), true
@@ -238,4 +251,26 @@ func (p *projectOptions) hasAny(name string) bool {
 		}
 	}
 	return false
+}
+
+// naiveTimestamp matches a TIMESTAMP literal's text with no zone: a date,
+// and a time or none.
+var naiveTimestamp = regexp.MustCompile(`^\s*\d{4}-\d{1,2}-\d{1,2}([ Tt]\d{1,2}:\d{1,2}(:\d{1,2}(\.\d{0,9})?)?)?\s*$`)
+
+// zonedLiteral returns a TIMESTAMP literal's text, v, with zone written
+// in, and false when v has a zone of its own (or is not one the front
+// reads).
+func zonedLiteral(v, zone string) (string, bool) {
+	m := naiveTimestamp.FindStringSubmatch(v)
+	if m == nil {
+		return "", false
+	}
+	v = strings.TrimSpace(v)
+	if m[1] == "" {
+		v += " 00:00:00"
+	}
+	if offsetZone.MatchString(zone) {
+		return v + strings.TrimPrefix(strings.TrimPrefix(zone, "UTC"), "utc"), true
+	}
+	return v + " " + zone, true
 }

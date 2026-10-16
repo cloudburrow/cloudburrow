@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -148,23 +149,30 @@ func TestBigQueryFailedScriptKeepsItsTable(t *testing.T) {
 // TestBigQueryReplacingATempTableIs501 (#936): measured first, the
 // emulator fails a script that replaces or drops a TEMP table it created,
 // 400 "failed to delete table spec", where BigQuery runs it. Such a
-// script is 501 and nothing of it is run. CREATE OR REPLACE TEMP TABLE of
-// a name the script had not used runs.
+// script was 501 and nothing of it was run; since #1459 it is run as its
+// session's text (tempsession.go), a statement at a time, as BigQuery
+// runs it. CREATE OR REPLACE TEMP TABLE of a name the script had not used
+// runs.
 func TestBigQueryReplacingATempTableIs501(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
 	ds := validationDataset(t, h, c)
 	ctx := h.Context()
 	for _, insert := range []bool{false, true} {
-		for _, sql := range []string{
-			"CREATE TEMP TABLE t AS SELECT 1 AS a; CREATE OR REPLACE TEMP TABLE t AS SELECT 2 AS a; SELECT * FROM t",
-			"CREATE TEMP TABLE t AS SELECT 1 AS a; DROP TABLE t; CREATE TEMP TABLE t AS SELECT 3 AS a; SELECT * FROM t",
-			"CREATE TABLE `" + ds.DatasetID + ".kept` AS SELECT 1 AS a; CREATE TEMP TABLE t (a INT64); DROP TABLE IF EXISTS t",
+		kept := fmt.Sprintf("kept%v", insert)
+		for sql, want := range map[string]string{
+			"CREATE TEMP TABLE t AS SELECT 1 AS a; CREATE OR REPLACE TEMP TABLE t AS SELECT 2 AS a; SELECT * FROM t":                   "[2]",
+			"CREATE TEMP TABLE t AS SELECT 1 AS a; DROP TABLE t; CREATE TEMP TABLE t AS SELECT 3 AS a; SELECT * FROM t":                "[3]",
+			"CREATE TABLE `" + ds.DatasetID + "." + kept + "` AS SELECT 1 AS a; CREATE TEMP TABLE t (a INT64); DROP TABLE IF EXISTS t": "",
 		} {
-			wantReason(t, sql, bqRun(ctx, c, sql, insert), 501, "notImplemented")
+			_, it := runScriptJob(t, c, sql, insert)
+			var out []bigquery.Value
+			if err := it.Next(&out); want != "" && (err != nil || fmt.Sprint(out) != want) {
+				t.Errorf("insert %v: %s: %v (%v), want %s", insert, sql, out, err, want)
+			}
 		}
-		if tableExists(t, ctx, ds.Table("kept")) {
-			t.Error("a statement of a script answered 501 was run")
+		if !tableExists(t, ctx, ds.Table(kept)) {
+			t.Errorf("insert %v: the script's CREATE TABLE was not run", insert)
 		}
 	}
 	t2 := "t2_" + strings.ReplaceAll(h.Project(), "-", "_")

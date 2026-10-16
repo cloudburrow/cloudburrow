@@ -84,7 +84,7 @@ func (p runProvider) DetailActions(ctx context.Context, project string, path []s
 		return nil
 	}
 	if len(path) == 1 {
-		return append(p.trafficAction(svc), p.sourceActions()...)
+		return append(append(p.trafficAction(svc), p.sourceActions()...), p.domainActions(svc)...)
 	}
 	return p.revisionActions(svc, path[1])
 }
@@ -96,6 +96,9 @@ func (p runProvider) ActAt(ctx context.Context, project string, path []string, a
 		// Its file is not in a JSON action: the form sends both to the
 		// upload route, which calls ActAtFile.
 		return errors.New("Deploy from source is sent with its file, to /api/actions/run/upload")
+	}
+	if (action == runMapDomain || action == runUnmapDomain) && len(path) == 1 {
+		return p.actOnDomains(ctx, project, serviceIDOf(path[0]), action, values)
 	}
 	if action == runManageTraffic && len(path) == 1 {
 		if p.runEndpoint() == "" {

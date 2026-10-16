@@ -2,6 +2,7 @@ package bigqueryfront
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -91,4 +92,119 @@ func (f front) defaultTableKey(r *http.Request, dataset string, raw []byte) []by
 	}
 	setBody(r, out)
 	return out
+}
+
+// default_kms_key_name is "the default Cloud KMS key for encrypting table
+// data" (https://cloud.google.com/bigquery/docs/default-configuration),
+// whatever makes the table: a lone CREATE [OR REPLACE] TABLE statement
+// that names no kms_key_name takes it too (#1456), when the table's
+// dataset has no defaultEncryptionConfiguration. The front runs the
+// statement, then writes the key into the table it made with
+// tables.update, as it writes kms_key_name's (ddloptions.go). Not given
+// the key: a CREATE TABLE in a script of several statements, and the
+// destination table a query, load or copy job makes, whose writes the
+// emulator carries out alone.
+
+// defaultKeyKey marks a request whose CREATE TABLE is being given the
+// default key, so that runQuery runs it as it would without one.
+type defaultKeyKey struct{}
+
+// createdTable reads sql as one CREATE [OR REPLACE] TABLE statement that
+// names no kms_key_name, CLONE or COPY: its table's path, and whether it
+// replaces or (ifNotExists) keeps a table that exists.
+func createdTable(sql string) (parts []string, replace, ifNotExists, ok bool) {
+	t, lexed := lex(sql)
+	if !lexed || len(t) < 3 || !t[0].is("CREATE") {
+		return nil, false, false, false
+	}
+	end := len(t)
+	if t[end-1].punct(";") {
+		end--
+	}
+	for _, tok := range t[:end] {
+		if tok.punct(";") || tok.is("kms_key_name") || tok.is("CLONE") || tok.is("COPY") || tok.is("LIKE") {
+			return nil, false, false, false
+		}
+	}
+	i := 1
+	if i+1 < end && t[i].is("OR") && t[i+1].is("REPLACE") {
+		replace = true
+		i += 2
+	}
+	if i >= end || !t[i].is("TABLE") {
+		return nil, false, false, false
+	}
+	i++
+	if i < end && t[i].is("FUNCTION") {
+		return nil, false, false, false
+	}
+	if i+2 < end && t[i].is("IF") && t[i+1].is("NOT") && t[i+2].is("EXISTS") {
+		ifNotExists = true
+		i += 3
+	}
+	parts, _ = path(t[:end], i)
+	if len(parts) == 0 || len(parts) > 3 {
+		return nil, false, false, false
+	}
+	return parts, replace, ifNotExists, true
+}
+
+// withDefaultTableKey runs q, a lone CREATE TABLE, and gives the table it
+// made the default key (above). It reports false, having done nothing,
+// when q is not one or no default key is set.
+func (f front) withDefaultTableKey(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
+	if f.settings == nil || !f.settings.hasAny("default_kms_key_name") || r.Context().Value(defaultKeyKey{}) != nil {
+		return false
+	}
+	parts, replace, _, ok := createdTable(q.Query)
+	if !ok {
+		return false
+	}
+	project := projectOf(f.base)
+	dataset, table := "", parts[len(parts)-1]
+	switch len(parts) {
+	case 1:
+		dataset = defaultDatasetOf(q)
+	case 2:
+		dataset = parts[0]
+	case 3:
+		if parts[0] != project {
+			return false
+		}
+		dataset = parts[1]
+	}
+	if dataset == "" {
+		return false
+	}
+	st, got := f.get(r, "/datasets/"+url.PathEscape(dataset))
+	var ds map[string]json.RawMessage
+	if st != http.StatusOK || json.Unmarshal(got, &ds) != nil || ds == nil {
+		return false
+	}
+	if v, ok := ds["defaultEncryptionConfiguration"]; ok && !isNull(v) {
+		return false
+	}
+	withLocation(ds)
+	var loc string
+	_ = json.Unmarshal(ds["location"], &loc)
+	key := f.settings.effective(project, loc, "default_kms_key_name")
+	if key == "" {
+		return false
+	}
+	existed, _ := f.get(r, tablePath(dataset, table))
+	rec := newRecorder()
+	f.runQuery(rec, r.WithContext(context.WithValue(r.Context(), defaultKeyKey{}, true)), q, insert)
+	if rec.status == http.StatusOK && (existed != http.StatusOK || replace) {
+		if st, got := f.get(r, tablePath(dataset, table)); st == http.StatusOK {
+			var tb map[string]json.RawMessage
+			if json.Unmarshal(got, &tb) == nil && (len(tb["encryptionConfiguration"]) == 0 || isNull(tb["encryptionConfiguration"])) {
+				tb["encryptionConfiguration"], _ = json.Marshal(map[string]string{"kmsKeyName": key})
+				if body, err := json.Marshal(tb); err == nil {
+					f.send(r, http.MethodPut, tablePath(dataset, table), body) // tables.update keeps it, as ddloptions.go's
+				}
+			}
+		}
+	}
+	rec.copyTo(w)
+	return true
 }

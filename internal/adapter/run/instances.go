@@ -136,7 +136,7 @@ func (s *Server) writeInstance(ctx context.Context, w workload, spec *runpb.Inst
 		return err
 	}
 	// A volume an update dropped goes once nothing uses it (#1476).
-	defer func() { go s.collectVolumes(ctx) }()
+	defer s.collectVolumesAfter(ctx)
 	if err := s.writeWorkload(ctx, w, cm, dep, verb, spec.GetServiceAccount()); err != nil {
 		return err
 	}

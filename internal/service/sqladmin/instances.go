@@ -270,11 +270,16 @@ func (s *Server) upInstanceError(e Engine) error {
 	return Errorf(http.StatusBadRequest, "The instance %s cannot be changed or deleted through the API: "+upInstanceWhy, e.Instance(), svc)
 }
 
-// legacyFailoverWhy is why failoverReplica and failoverTarget are refused:
-// they are the first-generation MySQL failover replica, which Cloud SQL
-// replaced with availabilityType REGIONAL (#1408).
-const legacyFailoverWhy = "it is the legacy MySQL failover replica; a high-availability instance is created " +
-	"with settings.availabilityType REGIONAL and failed over with instances.failover (docs/cloudsql.md)"
+// legacyFailoverErr is Cloud SQL's answer to a failoverReplica or a
+// replicaConfiguration.failoverTarget (#1462): the legacy MySQL
+// high-availability configuration, deprecated for every instance on
+// 2025-01-13, with which "you can't create instances" nor enable it on an
+// existing one (docs.cloud.google.com/sql/docs/mysql/configure-legacy-ha).
+// High availability is availabilityType REGIONAL (#1408).
+func legacyFailoverErr() error {
+	return Errorf(http.StatusBadRequest, "Invalid request: the legacy high availability configuration (a failover replica) is deprecated, "+
+		"and instances can't be created with it or have it enabled; set settings.availabilityType to REGIONAL for high availability.")
+}
 
 // instanceBody is the part of DatabaseInstance a write reads.
 type instanceBody struct {
@@ -312,11 +317,10 @@ type instanceBody struct {
 
 func (b instanceBody) unsupported() error {
 	if b.FailoverReplica != nil {
-		return unimplemented("failover replicas", legacyFailoverWhy)
+		return legacyFailoverErr()
 	}
 	if b.InstanceType == "ON_PREMISES_INSTANCE" || b.OnPremisesConfiguration != nil {
-		return unimplemented("source representation instances (instanceType ON_PREMISES_INSTANCE)",
-			"an instance's server is one CloudBurrow runs; a server outside it is not represented or replicated from")
+		return unimplemented("source representation instances (instanceType ON_PREMISES_INSTANCE)", externalPrimaryWhy)
 	}
 	if b.Settings != nil {
 		if a := b.Settings.AvailabilityType; a != "" && a != "ZONAL" && a != "REGIONAL" {
@@ -460,7 +464,7 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, unservedVersionWhy(b.DatabaseVersion))
 		}
 		if strings.HasPrefix(b.DatabaseVersion, "SQLSERVER_") {
-			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, "SQL Server is not run by CloudBurrow")
+			return nil, unimplemented("databaseVersion "+b.DatabaseVersion, sqlServerVersionWhy)
 		}
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid value for databaseVersion: %s.", b.DatabaseVersion)
 	}
@@ -494,8 +498,14 @@ func (s *Server) insertInstance(r *http.Request, base, project string) (any, err
 			return nil, err
 		}
 		b.DatabaseVersion = spec.DatabaseVersion
+		if err := pgBefore12Why(spec.DatabaseVersion, "a read replica"); err != nil {
+			return nil, err
+		}
 	} else if b.Settings == nil || b.Settings.Tier == "" {
 		return nil, Errorf(http.StatusBadRequest, "Invalid request: Invalid request since instance settings are missing tier.")
+	}
+	if err := spec.pgBefore12Unsupported(nil); err != nil {
+		return nil, err
 	}
 	if !s.engineServed(b.DatabaseVersion) {
 		svc := "cloudsql"
@@ -598,11 +608,36 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 			s.emu.Unlock()
 			return nil, Errorf(http.StatusConflict, "Operation failed because the instance is %s.", c.state)
 		}
+		if c.spec.MasterInstanceName != "" {
+			// A MySQL replica upgraded on its own (#1462) is rebuilt on the
+			// new version from its primary, which goes on being the older
+			// version's, as a replica created fresh would be.
+			c.state = "MAINTENANCE"
+			err = s.saveLocked()
+			s.emu.Unlock()
+			if err != nil {
+				return nil, err
+			}
+			op := s.pending(base, project, name, "MAJOR_VERSION_UPGRADE")
+			opID, version, include := op["name"].(string), b.DatabaseVersion, b.IncludeReplicas
+			go func() {
+				err := s.upgradeReplica(name, version)
+				if err == nil && include {
+					err = s.upgradeReplicas(project, name, version)
+				}
+				s.finish(opID, err)
+			}()
+			return op, nil
+		}
 		from := c.spec
 		to := c.spec
 		// Settings sent with the new version apply to the new server.
 		b.apply(&to, replace)
 		to.DatabaseVersion = b.DatabaseVersion
+		if err := to.pgBefore12Unsupported(&from); err != nil {
+			s.emu.Unlock()
+			return nil, err
+		}
 		to.SettingsVersion++
 		c.spec = to
 		c.engine = s.writes.prov.Engine(to)
@@ -626,6 +661,10 @@ func (s *Server) patchInstance(r *http.Request, base, project, name string, repl
 		s.emu.Unlock()
 		return nil, unimplemented("availabilityType REGIONAL on a read replica",
 			"a read replica here is one server; make the primary REGIONAL, and its replicas follow it across a failover (docs/cloudsql.md)")
+	}
+	if err := next.pgBefore12Unsupported(&c.spec); err != nil {
+		s.emu.Unlock()
+		return nil, err
 	}
 	// Turning high availability on adds the standby, and off removes it
 	// (#1408); either is a change the provisioner applies.
@@ -784,7 +823,9 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 	if spec.Regional() {
 		in["secondaryGceZone"] = spec.zone(1 - spec.PrimaryNode())
 	}
-	if up := upgradable(spec.DatabaseVersion); len(up) > 0 && spec.MasterInstanceName == "" {
+	// A MySQL replica is upgraded on its own (#1462); a PostgreSQL one
+	// only with its primary.
+	if up := upgradable(spec.DatabaseVersion); len(up) > 0 && (spec.MasterInstanceName == "" || spec.MySQL()) {
 		in["upgradableDatabaseVersions"] = up
 	}
 	if spec.MySQL() {

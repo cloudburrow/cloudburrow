@@ -311,12 +311,16 @@ func TestExecuteImmediateIsExpanded(t *testing.T) {
 		if path == "/jobs" {
 			body = `{"configuration":{"query":` + body + `}}`
 		}
-		if code, got := do(t, h, "POST", base+path, body); code != 501 || got["error"].(map[string]any)["status"] != "UNIMPLEMENTED" {
-			t.Errorf("%s: %d %v", path, code, got)
+		// #1459: carried out in its turn, the TEMP table a table of the
+		// script's session (tempsession.go): u has no row, so no SQL.
+		if code, _ := do(t, h, "POST", base+path, body); path == "/queries" && code != 400 || path == "/jobs" && code != 200 {
+			t.Errorf("%s: %d", path, code)
 		}
 	}
-	if len(emu.log) != n {
-		t.Errorf("a 501 sent %v", emu.log[n:])
+	for _, q := range emu.log[n:] {
+		if strings.Contains(q, "TEMP") {
+			t.Errorf("sent with its TEMP table: %s", q)
+		}
 	}
 }
 

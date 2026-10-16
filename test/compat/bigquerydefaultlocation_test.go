@@ -74,17 +74,18 @@ func TestBigQueryProjectDefaultLocation(t *testing.T) {
 		t.Errorf("EFFECTIVE_PROJECT_OPTIONS: %v (%v)", rows, err)
 	}
 
-	// One inside a block of a script is refused; a top-level one is not (TestBigQueryProjectConfigurations).
-	for _, sql := range []string{
-		"IF TRUE THEN ALTER PROJECT SET OPTIONS (`default_location` = 'EU'); END IF",
-	} {
-		if err := run(sql); err == nil || !strings.Contains(err.Error(), "501") && !strings.Contains(err.Error(), "Not implemented") {
-			t.Errorf("%s: %v, want 501", sql, err)
-		}
+	// #1459: one inside a block, IF or loop of a script is carried out in
+	// its turn, as BigQuery runs each statement of a script: one in a
+	// branch not taken sets nothing, and one in a branch taken clears the option.
+	if err := run("IF FALSE THEN ALTER PROJECT SET OPTIONS (`default_location` = 'US'); END IF; SELECT 1"); err != nil {
+		t.Fatalf("ALTER PROJECT in an IF not taken: %v", err)
 	}
-
-	if err := run("ALTER PROJECT SET OPTIONS (`default_location` = NULL)"); err != nil {
-		t.Fatalf("ALTER PROJECT NULL: %v", err)
+	job, err = c.Query("SELECT 1").Run(ctx)
+	if err != nil || job.Location() != "EU" {
+		t.Errorf("after an IF not taken, SELECT 1 ran in %v (%v), want EU", job, err)
+	}
+	if err := run("IF TRUE THEN\n  ALTER PROJECT SET OPTIONS (`default_location` = NULL);\nEND IF"); err != nil {
+		t.Fatalf("ALTER PROJECT NULL in an IF taken: %v", err)
 	}
 	job, err = c.Query("SELECT 1").Run(ctx)
 	if err != nil || job.Location() != "US" {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -44,7 +45,7 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 	digest, _ := img.Digest()
 	p := artifactRegistryProvider{defaultProject: "console-ar"}
 	d, err := p.Detail(ctx, "", []string{"images"})
-	if err != nil || len(d.Sections) != 1 || len(d.Sections[0].Listing.Items) != 1 || d.Sections[0].Listing.Items[0].Name != "web" {
+	if err != nil || len(d.Sections) != 3 || len(d.Sections[0].Listing.Items) != 1 || d.Sections[0].Listing.Items[0].Name != "web" {
 		t.Fatalf("repository page = %+v, %v", d, err)
 	}
 	d, err = p.Detail(ctx, "", []string{"images", "web"})
@@ -55,6 +56,59 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 	d, err = p.Detail(ctx, "", vpath)
 	if err != nil || len(d.Sections[0].Listing.Items) != 2 { // config and layer
 		t.Fatalf("version page = %+v, %v", d, err)
+	}
+	// #1449: annotations, a display name, a rule and the VPC-SC policy.
+	if err := p.ActAt(ctx, "", vpath, "annotate", map[string]string{"annotations": "team=core, scan=clean"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := p.Detail(ctx, "", vpath); !strings.Contains(fmt.Sprint(d.Summary), "scan=clean, team=core") {
+		t.Errorf("version annotations = %v", d.Summary)
+	}
+	if err := p.ActAt(ctx, "", []string{"images", "web"}, "display-name", map[string]string{"name": "Web front end"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := p.Detail(ctx, "", []string{"images", "web"}); !strings.Contains(fmt.Sprint(d.Summary), "Web front end") {
+		t.Errorf("display name = %v", d.Summary)
+	}
+	for action, v := range map[string]map[string]string{"add-rule": {"id": "deny-all", "action": "DENY"}, "vpcsc": {"policy": "ALLOW"}} {
+		if err := p.ActAt(ctx, "", []string{"images"}, action, v); err != nil {
+			t.Fatalf("%s: %v", action, err)
+		}
+	}
+	if d, _ := p.Detail(ctx, "", []string{"images"}); len(d.Sections[1].Listing.Items) != 1 || !strings.Contains(fmt.Sprint(d.Summary), "ALLOW") {
+		t.Errorf("rules = %+v, summary %v", d.Sections[1].Listing.Items, d.Summary)
+	}
+	if err := p.ActAt(ctx, "", []string{"images"}, "delete-rule", map[string]string{"id": "deny-all"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = p.ActAt(ctx, "", []string{"images"}, "vpcsc", map[string]string{"policy": "DENY"})
+	file := d.Sections[0].Listing.Items[0].Name
+	if err := p.ActAt(ctx, "", vpath, "annotate-file", map[string]string{"file": file, "annotations": "scan=ok"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := p.Detail(ctx, "", vpath); d.Sections[0].Listing.Items[0].Fields["Annotations"] != "scan=ok" {
+		t.Errorf("file annotations = %+v", d.Sections[0].Listing.Items[0])
+	}
+	if err := p.ActAt(ctx, "", vpath, "attach", map[string]string{"id": "sbom", "type": "application/spdx", "file": file}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := p.Detail(ctx, "", []string{"images"}); len(d.Sections[2].Listing.Items) != 1 {
+		t.Errorf("attachments = %+v", d.Sections[2].Listing.Items)
+	}
+	if err := p.ActAt(ctx, "", []string{"images"}, "delete-attachment", map[string]string{"id": "sbom"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ActAt(ctx, "", []string{"images"}, "pull-percent", map[string]string{"percent": "10"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := p.Detail(ctx, "", []string{"images"}); !strings.Contains(fmt.Sprint(d.Summary), "pull percent 10") {
+		t.Errorf("project settings = %v", d.Summary)
+	}
+	if err := p.ActAt(ctx, "", vpath, "export", map[string]string{"path": "b"}); err == nil || !strings.Contains(err.Error(), "Cloud Storage") {
+		t.Errorf("export with no Cloud Storage = %v", err)
+	}
+	if err := p.ActAt(ctx, "", []string{"images", "web"}, "delete-untagged", nil); err == nil {
+		t.Error("delete-untagged with every version tagged succeeded")
 	}
 	if err := p.ActAt(ctx, "", vpath, "add-tag", map[string]string{"tag": "prod"}); err != nil {
 		t.Fatal(err)

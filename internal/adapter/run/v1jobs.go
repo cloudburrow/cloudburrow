@@ -8,6 +8,7 @@ import (
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	runv1 "google.golang.org/api/run/v1"
+	"google.golang.org/genproto/googleapis/api"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
@@ -20,6 +21,9 @@ import (
 // and the region is the {region}- host's or the cloud.googleapis.com/location
 // label, as for services. replaceJob and run, and executions and tasks
 // (#1379), are in v1executions.go.
+
+// v1LaunchStage is the annotation v1 carries v2's launchStage in.
+const v1LaunchStage = "run.googleapis.com/launch-stage"
 
 // v1JobParent is a jobs request's v2 parent; every call needs a region.
 func v1JobParent(sc v1Scope, label string) (string, error) {
@@ -36,6 +40,10 @@ func v1JobParent(sc v1Scope, label string) (string, error) {
 	return fmt.Sprintf("projects/%s/locations/%s", sc.project, loc), nil
 }
 
+// v1ListJobs is namespaces.jobs.list. At a regional host it is that
+// region's jobs; at the global endpoint (no region) it is every region's,
+// each labelled with its cloud.googleapis.com/location, which is how
+// gcloud run jobs describe with no --region finds a job's region (#1450).
 func (s *Server) v1ListJobs(w http.ResponseWriter, r *http.Request) {
 	sc := scopeOf(r)
 	sel, err := labelSelector(r)
@@ -43,26 +51,37 @@ func (s *Server) v1ListJobs(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	parent, err := v1JobParent(sc, "")
+	cms, err := s.v1JobConfigMaps(r.Context())
 	if err != nil {
 		v1Write(w, err, nil)
 		return
 	}
-	resp, err := s.Jobs().ListJobs(r.Context(), &runpb.ListJobsRequest{Parent: parent, PageSize: 1000})
-	if err != nil {
-		v1Write(w, err, nil)
-		return
+	locs := []string{sc.location}
+	if sc.location == "" {
+		locs = v1JobLocations(cms, sc.project)
 	}
 	byName := map[string]*runv1.Job{}
 	var names []string
-	for _, j := range resp.GetJobs() {
-		v := toV1Job(j)
-		if selected(v.Metadata, sel) {
-			byName[j.GetName()] = v
-			names = append(names, j.GetName())
+	for _, loc := range locs {
+		parent, err := v1JobParent(v1Scope{project: sc.project, location: loc}, "")
+		if err != nil {
+			v1Write(w, err, nil)
+			return
+		}
+		resp, err := s.Jobs().ListJobs(r.Context(), &runpb.ListJobsRequest{Parent: parent, PageSize: 1000})
+		if err != nil {
+			v1Write(w, err, nil)
+			return
+		}
+		for _, j := range resp.GetJobs() {
+			v := v1JobOf(j, cms[j.GetName()].Metadata.Annotations[annV1DelayExecution] == "true")
+			if selected(v.Metadata, sel) {
+				byName[j.GetName()] = v
+				names = append(names, j.GetName())
+			}
 		}
 	}
-	page, next, err := v1Page(r, "run-v1-jobs:"+parent, names)
+	page, next, err := v1Page(r, "run-v1-jobs:projects/"+sc.project+"/locations/"+sc.location, names)
 	if err != nil {
 		v1Write(w, err, nil)
 		return
@@ -86,8 +105,18 @@ func (s *Server) v1GetJob(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
-	j, err := s.Jobs().GetJob(r.Context(), &runpb.GetJobRequest{Name: parent + "/jobs/" + id})
-	v1Write(w, err, toV1Job(j))
+	s.v1WriteJob(w, r, parent+"/jobs/"+id)
+}
+
+// v1WriteJob answers with a job as it is stored, its delayExecution too.
+func (s *Server) v1WriteJob(w http.ResponseWriter, r *http.Request, name string) {
+	j, err := s.Jobs().GetJob(r.Context(), &runpb.GetJobRequest{Name: name})
+	if err != nil {
+		v1Write(w, err, nil)
+		return
+	}
+	delay, err := s.v1JobDelay(r.Context(), name)
+	v1Write(w, err, v1JobOf(j, delay))
 }
 
 func (s *Server) v1CreateJob(w http.ResponseWriter, r *http.Request) {
@@ -121,13 +150,20 @@ func (s *Server) v1CreateJob(w http.ResponseWriter, r *http.Request) {
 		v1Write(w, err, nil)
 		return
 	}
+	delay := in.Spec.Template.Spec.DelayExecution
+	name := parent + "/jobs/" + in.Metadata.Name
 	if validateOnly {
-		job.Name = parent + "/jobs/" + in.Metadata.Name
-		v1Write(w, nil, toV1Job(job))
+		job.Name = name
+		v1Write(w, nil, v1JobOf(job, delay))
 		return
 	}
-	got, err := s.Jobs().GetJob(r.Context(), &runpb.GetJobRequest{Name: parent + "/jobs/" + in.Metadata.Name})
-	v1Write(w, err, toV1Job(got))
+	if delay {
+		if err := s.setV1JobDelay(r.Context(), name, true); err != nil {
+			v1Write(w, err, nil)
+			return
+		}
+	}
+	s.v1WriteJob(w, r, name)
 }
 
 func (s *Server) v1DeleteJob(w http.ResponseWriter, r *http.Request) {
@@ -189,10 +225,8 @@ func fromV1Job(in *runv1.Job) (*runpb.Job, error) {
 		tt.Timeout = durationpb.New(time.Duration(ts.TimeoutSeconds) * time.Second)
 	}
 	// The job's own delayExecution (gcloud beta run jobs create
-	// --delay-execution) would have to be stored and read back on the job,
-	// and v2's Job has no field for it; a run's overrides.delayExecution is
-	// served (#1420).
-	gap(es.DelayExecution, "spec.template.spec.delayExecution")
+	// --delay-execution) has no v2 field; the caller stores it beside the
+	// job (v1delay.go, #1450).
 	job := &runpb.Job{Template: &runpb.ExecutionTemplate{Parallelism: int32(es.Parallelism), TaskCount: int32(es.TaskCount), Template: tt}}
 	if m := in.Metadata; m != nil {
 		labels := map[string]string{}
@@ -211,6 +245,13 @@ func fromV1Job(in *runv1.Job) (*runpb.Job, error) {
 				job.Client = v
 			case v1ClientVersion:
 				job.ClientVersion = v
+			case v1LaunchStage:
+				// gcloud beta and alpha send it; it is v2's launchStage.
+				st, ok := api.LaunchStage_value[v]
+				if !ok {
+					return nil, apierror.InvalidArgument("metadata.annotations[%s]: %q is not a launch stage", k, v)
+				}
+				job.LaunchStage = api.LaunchStage(st)
 			default:
 				gap(strings.HasPrefix(k, "run.googleapis.com/"), "metadata.annotations["+k+"]")
 				ann[k] = v
@@ -251,7 +292,11 @@ func fromV1Job(in *runv1.Job) (*runpb.Job, error) {
 }
 
 // toV1Job renders a v2 job in v1's shape; nil for nil.
-func toV1Job(j *runpb.Job) *runv1.Job {
+func toV1Job(j *runpb.Job) *runv1.Job { return v1JobOf(j, false) }
+
+// v1JobOf renders a v2 job in v1's shape, with the job's delayExecution,
+// which v2 does not hold (v1delay.go); nil for nil.
+func v1JobOf(j *runpb.Job, delay bool) *runv1.Job {
 	if j == nil {
 		return nil
 	}
@@ -271,6 +316,9 @@ func toV1Job(j *runpb.Job) *runv1.Job {
 	if j.GetClientVersion() != "" {
 		ann[v1ClientVersion] = j.GetClientVersion()
 	}
+	if st := j.GetLaunchStage(); st != api.LaunchStage_LAUNCH_STAGE_UNSPECIFIED {
+		ann[v1LaunchStage] = st.String()
+	}
 	if len(ann) == 0 {
 		ann = nil
 	}
@@ -286,7 +334,7 @@ func toV1Job(j *runpb.Job) *runv1.Job {
 		Spec: &runv1.JobSpec{Template: &runv1.ExecutionTemplateSpec{
 			Metadata: &runv1.ObjectMeta{Labels: et.GetLabels(), Annotations: toV1CloudSQL(cloneAnn(et.GetAnnotations()), tt.GetVolumes())},
 			Spec: &runv1.ExecutionSpec{Parallelism: int64(et.GetParallelism()), TaskCount: int64(et.GetTaskCount()),
-				Template: &runv1.TaskTemplateSpec{Spec: ts}}}},
+				DelayExecution: delay, Template: &runv1.TaskTemplateSpec{Spec: ts}}}},
 		Status: &runv1.JobStatus{ObservedGeneration: j.GetObservedGeneration(), ExecutionCount: int64(j.GetExecutionCount())}}
 	if c := j.GetTerminalCondition(); c != nil {
 		out.Status.Conditions = []*runv1.GoogleCloudRunV1Condition{v1Condition("Ready", c)}

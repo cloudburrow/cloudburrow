@@ -99,17 +99,22 @@ func TestInstanceWritesThroughTheGoClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, bad := range []*sqladmin.DatabaseInstance{
-		{Name: "xy", DatabaseVersion: "POSTGRES_12", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
+		{Name: "xy", DatabaseVersion: "POSTGRES_8_4", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
 		{Name: "xy", DatabaseVersion: "MYSQL_5_7", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
 		{Name: "xy", DatabaseVersion: "SQLSERVER_2019_STANDARD", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}},
-		{Name: "xy", DatabaseVersion: "POSTGRES_17", Settings: &sqladmin.Settings{Tier: "db-f1-micro"}, MasterInstanceName: "pg",
-			ReplicaConfiguration: &sqladmin.ReplicaConfiguration{FailoverTarget: true}},
 		{Name: "xy", DatabaseVersion: "POSTGRES_17", Settings: &sqladmin.Settings{Tier: "t",
 			DatabaseFlags: []*sqladmin.DatabaseFlags{{Name: "cloudsql.iam_authentication", Value: "on"}}}},
 	} {
 		if _, err := svc.Instances.Insert("proj", bad).Do(); err == nil || !strings.Contains(err.Error(), "501") {
 			t.Errorf("insert %s %s: %v, want 501", bad.DatabaseVersion, bad.MasterInstanceName, err)
 		}
+	}
+	// Cloud SQL refuses the legacy failover replica (#1462).
+	if _, err := svc.Instances.Insert("proj", &sqladmin.DatabaseInstance{Name: "xy", DatabaseVersion: "POSTGRES_17",
+		Settings: &sqladmin.Settings{Tier: "db-f1-micro"}, MasterInstanceName: "pg",
+		ReplicaConfiguration: &sqladmin.ReplicaConfiguration{FailoverTarget: true}}).Do(); err == nil ||
+		!strings.Contains(err.Error(), "400") || !strings.Contains(err.Error(), "legacy") {
+		t.Errorf("insert of a failover replica: %v, want 400", err)
 	}
 	if _, err := svc.Instances.Insert("proj", &sqladmin.DatabaseInstance{Name: "xy", DatabaseVersion: "MYSQL_8_4",
 		Settings: &sqladmin.Settings{Tier: "t"}}).Do(); err == nil || !strings.Contains(err.Error(), "412") {

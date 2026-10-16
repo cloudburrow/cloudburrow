@@ -16,7 +16,7 @@ import (
 // engineVersions are the served versions of each engine, oldest first:
 // the order a major version upgrade goes in.
 var engineVersions = map[string][]string{
-	"POSTGRES": {"POSTGRES_13", "POSTGRES_14", "POSTGRES_15", "POSTGRES_16", "POSTGRES_17", "POSTGRES_18"},
+	"POSTGRES": {"POSTGRES_9_6", "POSTGRES_10", "POSTGRES_11", "POSTGRES_12", "POSTGRES_13", "POSTGRES_14", "POSTGRES_15", "POSTGRES_16", "POSTGRES_17", "POSTGRES_18"},
 	"MYSQL":    {"MYSQL_8_0", "MYSQL_8_4"},
 }
 
@@ -26,7 +26,8 @@ func EngineVersions(engine string) []string { return append([]string(nil), engin
 
 // versionNames are the displayName Cloud SQL gives each version.
 var versionNames = map[string]string{
-	"POSTGRES_13": "PostgreSQL 13", "POSTGRES_14": "PostgreSQL 14", "POSTGRES_15": "PostgreSQL 15",
+	"POSTGRES_9_6": "PostgreSQL 9.6", "POSTGRES_10": "PostgreSQL 10", "POSTGRES_11": "PostgreSQL 11",
+	"POSTGRES_12": "PostgreSQL 12", "POSTGRES_13": "PostgreSQL 13", "POSTGRES_14": "PostgreSQL 14", "POSTGRES_15": "PostgreSQL 15",
 	"POSTGRES_16": "PostgreSQL 16", "POSTGRES_17": "PostgreSQL 17", "POSTGRES_18": "PostgreSQL 18",
 	"MYSQL_8_0": "MySQL 8.0", "MYSQL_8_4": "MySQL 8.4",
 }
@@ -54,17 +55,47 @@ func versionIndex(version string) int {
 	return -1
 }
 
-// unservedVersionWhy is why a version Cloud SQL lists is not served.
+// unservedVersionWhy is why a version Cloud SQL lists is not served
+// (#1462): each has no official image a linux/arm64 node can run, which
+// was checked, not assumed (docker buildx imagetools inspect, 2026-10-16).
 func unservedVersionWhy(version string) string {
 	switch {
-	case version == "MYSQL_5_7":
-		return "MySQL 5.7's official image was last built in December 2023 (5.7.44, linux/amd64 only) and is no longer " +
-			"maintained, so there is no maintained image to run; CloudBurrow runs MYSQL_8_0 and MYSQL_8_4"
+	case version == "MYSQL_5_7" || version == "MYSQL_5_6":
+		return "MySQL " + strings.ReplaceAll(strings.TrimPrefix(version, "MYSQL_"), "_", ".") + "'s official image (mysql:5.7, last built " +
+			"2023-12 at 5.7.44; mysql:5.6, 2021-12 at 5.6.51) is linux/amd64 only and no longer built, so there is no maintained " +
+			"multi-architecture image to run; CloudBurrow runs " + strings.Join(engineVersions["MYSQL"], ", ")
+	case strings.HasPrefix(version, "MYSQL_8_0_"):
+		return "CloudBurrow runs one MySQL 8.0 minor version, MYSQL_8_0 (8.0.46, the official image's), not each " +
+			"8.0 minor version Cloud SQL pins; create the instance with MYSQL_8_0"
+	case strings.HasPrefix(version, "SQLSERVER_"):
+		return sqlServerVersionWhy
 	case strings.HasPrefix(version, "POSTGRES_"):
-		return "CloudBurrow runs the PostgreSQL versions whose official images are maintained: " +
-			strings.Join(engineVersions["POSTGRES"], ", ")
+		return "CloudBurrow runs the PostgreSQL versions that have an official image: " + strings.Join(engineVersions["POSTGRES"], ", ")
 	}
 	return "CloudBurrow runs the MySQL versions " + strings.Join(engineVersions["MYSQL"], ", ")
+}
+
+// sqlServerVersionWhy is why no SQL Server version is served (#1462).
+const sqlServerVersionWhy = "SQL Server has no Docker Hub official image; Microsoft's own (mcr.microsoft.com/mssql/server, " +
+	"2017, 2019 and 2022) is linux/amd64 only, so a linux/arm64 node cannot run it; CloudBurrow runs PostgreSQL and MySQL"
+
+// pgBefore12 is whether version is a PostgreSQL version before 12 (#1462),
+// whose servers lack what high availability, read replicas and
+// point-in-time recovery are built on here: pg_promote() and the
+// recovery.signal file, both new in PostgreSQL 12.
+func pgBefore12(version string) bool {
+	return engineOf(version) == "POSTGRES" && versionIndex(version) >= 0 && versionIndex(version) < versionIndex("POSTGRES_12")
+}
+
+// pgBefore12Why refuses what, on an instance of version, if version is
+// before PostgreSQL 12.
+func pgBefore12Why(version, what string) error {
+	if !pgBefore12(version) {
+		return nil
+	}
+	return unimplemented(what+" on "+version, "CloudBurrow promotes a PostgreSQL standby with pg_promote() and recovers to a point in time "+
+		"with recovery.signal, which PostgreSQL 12 introduced; "+version+" serves a primary instance's databases, users, backups, "+
+		"imports, exports and major version upgrades. Upgrade it to POSTGRES_12 or later for this")
 }
 
 // upgradable is the upgradableDatabaseVersions of an instance of version:
@@ -111,9 +142,15 @@ func (s *Server) checkUpgrade(c *created, version string, includeReplicas bool) 
 		return unimplemented("changing databaseVersion", "this instance's provisioner cannot replace a server")
 	}
 	if c.spec.MasterInstanceName != "" {
-		return unimplemented("upgrading a read replica's major version on its own",
-			"a replica here replicates its primary's server by the engine's own replication, which does not run across major versions; "+
-				"upgrade the primary with includeReplicasForMajorVersionUpgrade, which upgrades its replicas after it, as Cloud SQL does")
+		if engineOf(cur) != "MYSQL" {
+			return unimplemented("upgrading a PostgreSQL read replica's major version on its own",
+				"a PostgreSQL replica is a physical standby streaming its primary's WAL, which PostgreSQL does not replicate across "+
+					"major versions; upgrade the primary with includeReplicasForMajorVersionUpgrade, which upgrades its replicas after it, as Cloud SQL does")
+		}
+		// MySQL replicates from a source to a replica of the next newer
+		// version (MySQL 8.4, "Replication Compatibility Between MySQL
+		// Versions"), so a replica is upgraded before its primary, as
+		// Cloud SQL documents (#1462).
 	}
 	if rs := s.replicaNamesLocked(c.spec.Project, c.spec.Name); len(rs) > 0 && !includeReplicas {
 		// Cloud SQL: "If you don't include replicas in the upgrade, then you
@@ -240,8 +277,14 @@ func (s *Server) upgrade(name string, from, to Spec, opID string, includeReplica
 	ctx, cancel := context.WithTimeout(context.Background(), 2*startTimeout)
 	defer cancel()
 	err := s.writes.prov.(Upgrader).Upgrade(ctx, from, to)
+	s.emu.Lock()
+	// The replicas upgraded before their primary (#1462) replicated the
+	// old server, which the upgrade replaced with a new one: each is
+	// rebuilt from the new server, at its own version, the primary's now.
+	hasReplicas := len(s.replicaNamesLocked(to.Project, name)) > 0
+	s.emu.Unlock()
 	defer func() {
-		if err == nil && includeReplicas {
+		if err == nil && (includeReplicas || hasReplicas) {
 			err = s.upgradeReplicas(to.Project, name, to.DatabaseVersion)
 		}
 		s.finish(opID, err)
@@ -262,4 +305,19 @@ func (s *Server) upgrade(name string, from, to Spec, opID string, includeReplica
 		_ = s.saveLocked()
 	}
 	s.emu.Unlock()
+}
+
+// pgBefore12Unsupported refuses high availability and point-in-time
+// recovery on a PostgreSQL instance before 12 (pgBefore12), when s turns
+// either on: for a new instance (cur nil), or one that had it off.
+func (s Spec) pgBefore12Unsupported(cur *Spec) error {
+	if s.Regional() && (cur == nil || !cur.Regional()) {
+		if err := pgBefore12Why(s.DatabaseVersion, "high availability (availabilityType REGIONAL)"); err != nil {
+			return err
+		}
+	}
+	if s.PITREnabled() && (cur == nil || !cur.PITREnabled()) {
+		return pgBefore12Why(s.DatabaseVersion, "point-in-time recovery")
+	}
+	return nil
 }

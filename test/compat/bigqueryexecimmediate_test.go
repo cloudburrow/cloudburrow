@@ -28,7 +28,7 @@ import (
 // covers: bigquery.jobs.query, bigquery.jobs.insert
 func TestBigQueryExecuteImmediateForms(t *testing.T) {
 	h := New(t)
-	c, project := bigqueryClient(t, h)
+	c, _ := bigqueryClient(t, h)
 	ds := validationDataset(t, h, c)
 	ctx := h.Context()
 	d := ds.DatasetID
@@ -87,11 +87,10 @@ func TestBigQueryExecuteImmediateForms(t *testing.T) {
 				t.Errorf("%s (query job %v): %q, want %q", tc.sql, insert, got, tc.want)
 			}
 		}
-		// A TEMP table keeps a script in one request, where the emulator
-		// does not know @@row_count: 501, nothing run.
-		sql := "CREATE TEMP TABLE rc (a INT64); INSERT rc VALUES (1); SELECT @@row_count"
-		if code, reason := apiError(runIn(ctx, c, project, "", sql, insert)); code != http.StatusNotImplemented || reason != "notImplemented" {
-			t.Errorf("%s (query job %v): %d %s, want 501 notImplemented", sql, insert, code, reason)
+		// #1459: beside a TEMP table too, the script run as its
+		// session's text (tempsession.go), a statement at a time.
+		if got := read("CREATE TEMP TABLE rc (a INT64); INSERT rc VALUES (1); SELECT @@row_count"); !reflect.DeepEqual(got, []string{"1"}) {
+			t.Errorf("@@row_count beside a TEMP table (query job %v): %q, want [1]", insert, got)
 		}
 	}
 }

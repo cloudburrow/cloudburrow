@@ -23,19 +23,19 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Storage | 5 | 0 | 4 | 1 | 0 |
 | Pub/Sub | 2 | 0 | 0 | 1 | 1 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 3 | 2 | 0 | 0 | 1 |
+| Cloud Run | 2 | 0 | 1 | 0 | 1 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
 | Secret Manager | 2 | 1 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
-| Vertex AI | 5 | 0 | 5 | 0 | 0 |
-| BigQuery | 27 | 6 | 13 | 8 | 0 |
+| Vertex AI | 2 | 0 | 2 | 0 | 0 |
+| BigQuery | 27 | 7 | 12 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **64** | **13** | **32** | **13** | **6** |
+| **Total** | **60** | **12** | **29** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -82,7 +82,8 @@ Closed: IAM policy methods on Services and Jobs (#1216), and `UpdateService` wit
 `update_mask` (#1260); container logs in Cloud Logging as `cloud_run_revision` and
 `cloud_run_job` (#1298); the v1 (Knative) API, with `gcloud run services list`, `describe` and
 `deploy --image` (#1293, #1297), its locations, IAM, jobs and domain mappings (#1349), job runs,
-executions and tasks (#1379), and selectors, `overrides.delayExecution` and job IAM (#1420);
+executions and tasks (#1379), and selectors, `overrides.delayExecution` and job IAM (#1420), and
+domain mappings the gateway routes and `delayExecution` kept on jobs and executions (#1450);
 `Builds.SubmitBuild` (#1268); `Instances.*` (#1299) and `WorkerPools.*` (#1300), with operations
 that wait for readiness and an instance's URL (#1348), and a worker pool's `update_mask` and
 instance splits (#1387); secret and in-memory volumes, the service account and v1 probes (#1297),
@@ -97,8 +98,7 @@ and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_R
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud Build: `options.dynamicSubstitutions`, `secretEnv` on a docker build, docker push or pack step, `ApproveBuild` and `approvalRequired`, and triggers with a repository or Pub/Sub source or a `filename` are refused; Artifact Registry: 27 methods `UNIMPLEMENTED` (rules, attachments, Maven, npm, Python, Apt and Yum artifacts, project and VPC-SC settings, package, version and file updates; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | not built yet | M |
-| v1 (Knative) API: a domain mapping never becomes Ready, as no DNS is served and no certificate issued; a job's own `spec.template.spec.delayExecution` is 501, and a run's `overrides.delayExecution` is not read back on the execution, as v2 has no field for either (#1450) | not built yet | S |
+| Cloud Build: triggers with a repository or Pub/Sub source or a `filename` are refused 501 with the reason (they need a hosted git service or a Google-owned subscription). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | no emulator support: built; the rest is refused with its reason (a hosted git service, a Google-owned subscription, or package formats not served) | M |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
 
 ## Cloud Scheduler
@@ -133,8 +133,8 @@ methods (#1212), and their console (#1219). Closed by the sweep: Locations (#129
 
 | Gap | Why open | Size |
 |---|---|---|
-| EXTERNAL, EXTERNAL_VPC and HSM_SINGLE_TENANT protection levels, `crypto_key_backend`, `external_protection_level_options` (#1469; HSM is served since #1452, without an HSM or an attestation) | no emulator support | L |
-| HsmManagement, `EkmService/VerifyConnectivity`, and IAM on `ekmConfig` and `ekmConnections` (#1469; EkmService CRUD, Autokey and AutokeyAdmin are served since #1452) | no emulator support | L |
+| EXTERNAL, EXTERNAL_VPC and HSM_SINGLE_TENANT protection levels, `crypto_key_backend`, `external_protection_level_options` (#1469; HSM is served since #1452, without an HSM or an attestation; no open-source key manager speaks Google's Cloud EKM protocol, and Google publishes none, checked 2026-10-16) | no emulator support | L |
+| HsmManagement and `EkmService/VerifyConnectivity` (#1469; EkmService CRUD, Autokey and AutokeyAdmin are served since #1452, and IAM on `ekmConfig` and `ekmConnections`, stored and not enforced, since #1469) | no emulator support | L |
 | `key_access_justifications_policy` is stored and returned, not enforced (#1452): no call carries an access justification locally | no emulator support | S |
 | REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` (#1445) | not documented by Google | S |
 | UNVERIFIED error codes ([kms.md](coverage/kms.md)) (#1445) | not documented by Google | S |
@@ -166,15 +166,13 @@ No gap is left open here.
 Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1244);
 `PredictionService.StreamGenerateContent` over gRPC, and an official-SDK test of `GenerateContent`
 over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`, `DirectPredict`,
-`ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285).
+`ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285); `DirectRawPredict`,
+`StreamDirectRawPredict` and `StreamingRawPredict`, relayed to a model's gRPC server on its `h2c` port (#1477).
 
 | Gap | Why open | Size |
 |---|---|---|
 | `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1454) | no emulator support (one text-only model) | S |
-| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served (#1454, #1477) | no emulator support: a model's container is deployed with its HTTP ports only; its `grpcPorts` are not deployed (#1477) | M |
 | `Explain` with integrated gradients, XRAI or examples (#1454); Sampled Shapley is served | no emulator support: they need the model's gradients or an Example index, which a custom container's predict route does not expose | L |
-| `DirectRawPredict`, `StreamDirectRawPredict`, `StreamingRawPredict` call `method_name` on a gRPC model server; none is served: Cloud Run serves an `h2c` port (#1475), but a model's `grpcPorts` are not deployed (#1454) | no emulator support (no gRPC model server) | M |
-| `Explain` (#1454) | no emulator support | L |
 
 ## BigQuery
 
@@ -209,12 +207,12 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 
 | Gap | Why open | Size |
 |---|---|---|
-| `ALTER TABLE` is 501 for a foreign key to another project's table (an instance serves one project), the table options not built, `ALTER COLUMN SET OPTIONS (data_policies, data_governance_tags)`, an `ALTER TABLE` in a script with a `TEMP` table or function or in a dry run of a script, and legacy SQL; a statement of several actions is carried out a step at a time, so a later refusal leaves the earlier steps done; a nested field's `ALTER COLUMN SET DEFAULT`, and a `WRITE_TRUNCATE_DATA` query job whose result lacks a column with a default, are 501 (#1456) | not built yet | S |
+| `ALTER TABLE` is 501 for a foreign key to another project's table (an instance serves one project), the table options not built, `ALTER COLUMN SET OPTIONS (data_policies, data_governance_tags)`, an `ALTER TABLE` in a dry run of a script (one in a script with a `TEMP` table or function is carried out in its turn, #1459), and legacy SQL; a statement of several actions is carried out a step at a time, so a later refusal leaves the earlier steps done; a nested field's `ALTER COLUMN SET DEFAULT`, and a `WRITE_TRUNCATE_DATA` query job whose result lacks a column with a default, are 501 (#1456) | not built yet | S |
 | A dry run of `CREATE VIEW` with a column list, without `OR REPLACE` or `IF NOT EXISTS`, of a view that exists is 501, as what BigQuery's dry run answers for it is not known (#1456) | not documented by Google | S |
 | Table options and materialized views: `ALTER COLUMN … SET OPTIONS (rounding_mode)` is 501 where the Table OPTIONS row says so; `require_partition_filter` checks that the column is named in a `WHERE`, not that it prunes; smart tuning's rewrite of a base-table query to read a materialized view is not built (#1456); `storage_uri` (#1427) is tracked on its own, and what #1426 and #1418 leave in the rows below | not built yet | M |
 | What #1426 leaves of `privacy_policy`: differential privacy (`SELECT WITH DIFFERENTIAL_PRIVACY`, a `differential_privacy_policy`) is 501, no noise mechanism or epsilon/delta budget (#1455); a read of a policy table or view in a subquery, CTE, another view, a script or a non-INNER join is 501 | not built yet | L |
 | What #1418 leaves of change history: an ALTER TABLE that rebuilds the table and CREATE OR REPLACE TABLE start the history over; CHANGES in a multi-statement transaction and on a change-data-capture table are not refused; every table's rows are recorded twice, whatever its options (#1466) | not built yet | M |
-| Project configurations: `default_time_zone` does not reach `DATE`, `DATETIME`, `TIME`, `STRING` or `EXTRACT` given a column or other expression whose type the text does not show, `DATE_TRUNC` and the like, or a `TIMESTAMP` literal with no offset; the job and queue timeouts are stored, not enforced; `default_kms_key_name` reaches `tables.insert` only; `ALTER PROJECT` / `ALTER ORGANIZATION` inside a block, `IF` or loop of a script is 501; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows (#1456) | not built yet | S |
+| Project configurations: `default_time_zone` does not reach `DATE`, `DATETIME`, `TIME`, `STRING` or `EXTRACT` given a column or other expression whose type the text does not show, nor `DATE_TRUNC` and the like (the front has no types to tell a `TIMESTAMP` from a `DATETIME`, and the engine's zone is UTC alone); `default_kms_key_name` reaches `tables.insert` and a lone `CREATE TABLE`, not a table a script or a query, load or copy job makes; `ALTER PROJECT` / `ALTER ORGANIZATION` inside a block, `IF` or loop of a script is carried out in its turn (#1459), and 501 only in a dry run; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows, which Google does not document (#1456) | not built yet | S |
 | `columnNameCharacterMap` `V1` / `V2` when a detected CSV or Parquet name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix, an empty or too long name, a Parquet name with a period) and names the same once replaced are 501: BigQuery documents only that "invalid column names will be normalized" (#1457) | not documented by Google | S |
 | Autodetect: a JSON column whose values mix types BigQuery does not document detecting, `skipLeadingRows` other than 1 into a new table, and a sample with a format or `timeZone` that BigQuery's detection is not documented for, are 501; CSV header detection where BigQuery and the emulator disagree (every column `STRING`, a name that reads as a number, boolean, date or timestamp) is 501 (#1457) | not documented by Google | S |
 | CSV: a multi-character delimiter, a non-ASCII delimiter or quote in data that is not ISO-8859-1, an empty `STRING` with a `nullMarker`, a `maxBadRecords` load the emulator fails, `sourceColumnMatch` `NAME` with no row skipped (ISO-8859-1 delimiters and quotes, a quote's first byte, `skipLeadingRows` N and the header with `autodetect`, and `NAME` after skipped rows are built, #1457); JSON: a null field outside the schema, a `maxBadRecords` load the emulator fails (#1457) | no emulator support | M |
@@ -224,12 +222,12 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | A table made by `CREATE TABLE … AS SELECT`, a temporary table, or one made before the engine had the column keeps no stream time, so its streamed rows are held from DML only while in the 20-second streaming buffer; a table restored from state saved before #1277 keeps no ingestion time (#1458) | no emulator support | S |
 | `PARTITIONS` has no byte counts or `last_modified_time`; region `TABLE_STORAGE` has no byte columns or `storage_last_modified_time` (#1458) | no emulator support (no faithful byte counts or write times) | M |
 | Region-qualified `INFORMATION_SCHEMA.JOBS` has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (#1458) | not documented by Google (their STRUCTs) | S |
-| A script the emulator runs whole (no control flow, no query before its last statement) makes no child jobs; a script's last DML statement has no child of its own, and a `SELECT` child names no destination table (#1459) | no emulator support | M |
-| `MERGE` from a subquery inside a multi-statement script; DML with a `FROM` of several items (#1459) | no emulator support | M |
-| `CREATE OR REPLACE TABLE`, `CREATE OR REPLACE [TEMP] TABLE`, `CREATE SCHEMA` of an existing dataset, `CREATE TABLE … LIKE`, `COPY` or `CLONE`, and `DROP TABLE` of a script's temp table, later in a multi-statement script (#1459) | no emulator support | M |
+| A script the emulator runs whole (no control flow, no query before its last statement, nothing it refuses together) makes no child jobs; a script's last DML statement has no child of its own, and a `SELECT` child names no destination table (#1459) | no emulator support | M |
+| DML with a `FROM` of several items (#1459) | no emulator support | M |
+| `CREATE SCHEMA` of an existing dataset and `CREATE TABLE … CLONE` later in a multi-statement script (#1459) | no emulator support | M |
 | `CREATE [OR REPLACE] [TABLE] FUNCTION` of one that exists, and `DROP [TABLE] FUNCTION`, inside multi-statement scripts (#1459) | no emulator support | M |
 | `DROP SCHEMA` where the script's other statements see the dataset; `CREATE SCHEMA` options other than the supported strings, and `DEFAULT COLLATE` (#1459) | no emulator support | M |
-| `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that changes data; a runtime error or an `ASSERT` in a script with a `TEMP` table or function (#1459) | no emulator support | S |
+| `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that changes data; a dry run of a script with a `TEMP` table or function, beyond what the emulator's own dry run checks (#1459) | not built yet | S |
 | A failed script after a statement that wrote: the emulator does not roll back (#1459) | no emulator support | L |
 | A snapshot or clone `FOR SYSTEM_TIME AS OF` a past time (a query reads one since #1460); `FOR SYSTEM_TIME AS OF` a past time before an ALTER TABLE rebuild or CREATE OR REPLACE TABLE, of an ingestion-time partitioned table, or with a partition decorator (#1460) | not built yet | M |
 | `datasets.undelete`, `UNDROP SCHEMA`, and restoring a dropped table by a copy of `table@time`: the emulator drops a table's rows and change history with it, and a dataset's tables (#1460) | no emulator support | M |
@@ -263,7 +261,7 @@ encryption (#1413), and customer-managed keys and server CA rotation (#1463). IA
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud SQL: legacy failover replicas and external-primary replicas; `MYSQL_5_7`, `POSTGRES_12` and other versions; upgrading a replica on its own; a PostgreSQL database's charset change; `BAK` and `TDE` files; 24 methods 501, each naming what is missing (blue-green deployments and `connect.resolve`, server and Entra ID certificates, `demote` and external sync, `switchover`, `reencrypt`, disk shrink and others; project `Backups`, `executeSql`, `preCheckMajorVersionUpgrade`, `truncateLog` and final backups are built since #1462; [sqladmin.md](coverage/sqladmin.md)) (#1462) | not built yet | L |
+| Cloud SQL: external-primary replicas (no source representation instance is kept); `MYSQL_5_6`, `MYSQL_5_7` and SQL Server versions, and `BAK` and `TDE` files (their images are linux/amd64 only); upgrading a PostgreSQL replica on its own (streaming replication does not cross major versions); high availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (no `pg_promote()` or `recovery.signal`), each 501 naming why (PostgreSQL 9.6 to 12, a MySQL replica's own upgrade, Cloud SQL's 400 for a legacy failover replica and for a PostgreSQL database's charset change are built since #1462); 24 methods 501, each naming what is missing (blue-green deployments and `connect.resolve`, server and Entra ID certificates, `demote` and external sync, `switchover`, `reencrypt`, disk shrink and others; project `Backups`, `executeSql`, `preCheckMajorVersionUpgrade`, `truncateLog` and final backups are built since #1462; [sqladmin.md](coverage/sqladmin.md)) (#1462) | not built yet | L |
 | Backup and DR: workload types other than Cloud SQL instances, `encryptionConfig`, resource backup configs, management servers and trials (23 methods 501, each naming what is missing; `patch`, plan revisions, data source references and `fetchUsable` are built since #1462; [backupdr.md](coverage/backupdr.md)) (#1462) | not built yet | L |
 | Memorystore for Redis: `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image (the Docker official `redis` image last built them in 2018, 2020 and 2022); with a customer-managed key, the RDB snapshots and AOF Valkey writes on a server's own volume are not encrypted with it, and are served only while the key can be used (#1463) | no emulator support: no maintained image; Valkey writes its own files | S |
 
