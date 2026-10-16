@@ -544,7 +544,8 @@
         "method": "google.cloud.run.v2.Revisions/DeleteRevision",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:149 TestRunRevisions"
+          "test/compat/run_test.go:149 TestRunRevisions",
+          "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits"
         ]
       },
       {
@@ -560,7 +561,8 @@
         "method": "google.cloud.run.v2.Revisions/ListRevisions",
         "status": "Verified",
         "tests": [
-          "test/compat/run_test.go:149 TestRunRevisions"
+          "test/compat/run_test.go:149 TestRunRevisions",
+          "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits"
         ]
       },
       {
@@ -696,6 +698,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
+          "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits",
           "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
         ]
       },
@@ -727,6 +730,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
+          "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits",
           "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
         ]
       }

@@ -34,16 +34,43 @@ func mergeServiceMask(current, in *runpb.Service, paths []string) (*runpb.Servic
 			merged.Name = current.GetName()
 			return merged, nil
 		}
-		if err := mergePath(out.ProtoReflect(), in.ProtoReflect(), p); err != nil {
+		if err := mergePath(out.ProtoReflect(), in.ProtoReflect(), p, serviceOutputOnly); err != nil {
 			return nil, err
 		}
 	}
 	return out, nil
 }
 
-func mergePath(dst, src protoreflect.Message, path string) error {
+// workerPoolOutputOnly are the WorkerPool fields a caller cannot set.
+var workerPoolOutputOnly = map[string]bool{
+	"name": true, "uid": true, "generation": true, "create_time": true, "update_time": true,
+	"delete_time": true, "expire_time": true, "creator": true, "last_modifier": true,
+	"observed_generation": true, "terminal_condition": true, "conditions": true,
+	"latest_ready_revision": true, "latest_created_revision": true, "instance_split_statuses": true,
+	"reconciling": true, "etag": true, "satisfies_pzs": true,
+}
+
+// mergeWorkerPoolMask is mergeServiceMask for a worker pool (#1387): the
+// stored pool with the fields the mask names taken from the request, as
+// UpdateService merges a service's (AIP-134).
+func mergeWorkerPoolMask(current, in *runpb.WorkerPool, paths []string) (*runpb.WorkerPool, error) {
+	out := proto.Clone(current).(*runpb.WorkerPool)
+	for _, p := range paths {
+		if p == "*" {
+			merged := proto.Clone(in).(*runpb.WorkerPool)
+			merged.Name = current.GetName()
+			return merged, nil
+		}
+		if err := mergePath(out.ProtoReflect(), in.ProtoReflect(), p, workerPoolOutputOnly); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func mergePath(dst, src protoreflect.Message, path string, outputOnly map[string]bool) error {
 	parts := strings.Split(path, ".")
-	if serviceOutputOnly[parts[0]] {
+	if outputOnly[parts[0]] {
 		return apierror.InvalidArgument("update_mask: %q is output only and cannot be updated", path)
 	}
 	for i, part := range parts {

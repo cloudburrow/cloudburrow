@@ -147,11 +147,21 @@ type podSpec struct {
 	generation             int64
 	// serviceAccount is the account the pods run as (#1388).
 	serviceAccount string
+	// deploymentName, when set, is a worker pool split revision's own
+	// Deployment (#1387), labelled as the pool's split.
+	deploymentName string
 }
 
 // deployment renders the Deployment running replicas pods of p.
 func (s *Server) deployment(w workload, p podSpec, replicas int32) (string, error) {
 	var b strings.Builder
+	name, split := w.objectName(), ""
+	if p.deploymentName != "" {
+		name = p.deploymentName
+		// On the Deployment, to find it, and on its pods, so their template
+		// never hashes like the pool's own ReplicaSet of the revision.
+		split = fmt.Sprintf("    %s: %s\n", labelSplitOf, w.kind+"-"+w.id)
+	}
 	fmt.Fprintf(&b, `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -161,7 +171,7 @@ metadata:
     %s: "true"
     %s: %q
     %s: %s
-  annotations:
+%s  annotations:
     %s: %q
 spec:
   replicas: %d
@@ -169,12 +179,13 @@ spec:
   selector:
     matchLabels:
       %s: %s
-  template:
+%s  template:
     metadata:
       labels:
         %s: %s
-`, w.objectName(), s.kn.namespace(), labelOwned, labelInstance, s.instance, labelWorkload, w.kind+"-"+w.id,
-		annRunName, w.name, replicas, labelWorkload, w.kind+"-"+w.id, labelWorkload, w.kind+"-"+w.id)
+%s`, name, s.kn.namespace(), labelOwned, labelInstance, s.instance, labelWorkload, w.kind+"-"+w.id, split,
+		annRunName, w.name, replicas, labelWorkload, w.kind+"-"+w.id, indent(split, "  "), labelWorkload, w.kind+"-"+w.id,
+		indent(split, "    "))
 	if p.revision != "" {
 		raw, err := protojson.Marshal(p.revisionSpec)
 		if err != nil {
@@ -282,6 +293,12 @@ func (s *Server) writeWorkload(ctx context.Context, w workload, cmManifest, depl
 func (s *Server) deleteWorkload(ctx context.Context, w workload) error {
 	if err := s.kn.deleteObject(ctx, resDeployment, w.objectName()); err != nil {
 		return err
+	}
+	// A worker pool's split revisions' Deployments (#1387).
+	if w.kind == kindWorkerPool {
+		if err := s.writeSplits(ctx, w, nil); err != nil {
+			return err
+		}
 	}
 	if w.kind == kindInstance {
 		if err := s.deleteInstanceRoute(ctx, w); err != nil {
@@ -410,4 +427,18 @@ func (s *Server) podFailure(ctx context.Context, w workload) string {
 		}
 	}
 	return ""
+}
+
+// indent prefixes each line of a rendered YAML fragment.
+func indent(lines, prefix string) string {
+	if lines == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, l := range strings.SplitAfter(lines, "\n") {
+		if l != "" {
+			b.WriteString(prefix + l)
+		}
+	}
+	return b.String()
 }
