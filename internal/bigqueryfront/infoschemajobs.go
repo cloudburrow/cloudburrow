@@ -314,6 +314,8 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 			switch {
 			case key == "JOBS":
 				sub, status, msg = f.jobsRows(r)
+			case key == "SCHEMATA": // #1371, location.go: the region's datasets
+				sub, status, msg = f.regionRows(r, meta, key, "", schemataIn(strings.TrimPrefix(strings.ToLower(ref.region), "region-")))
 			case key == "TABLE_STORAGE":
 				sub, status, msg = f.regionRows(r, meta, "TABLE_STORAGE", storageColumns, front.storageRows)
 			default:

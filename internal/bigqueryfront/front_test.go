@@ -261,8 +261,8 @@ func TestOtherRequestsPassThrough(t *testing.T) {
 	emu := &fakeEmulator{}
 	h := Wrap(emu)
 	for _, c := range []struct{ method, path, body string }{
-		{"POST", base + "/queries", `{"query":"SELECT 1"}`},
-		{"POST", base + "/jobs", `{"jobReference":{"jobId":"j"}}`},
+		{"POST", base + "/queries", `{"location":"US","query":"SELECT 1"}`}, // a location given: #1371
+		{"POST", base + "/jobs", `{"jobReference":{"jobId":"j","location":"US"}}`},
 		{"POST", base + "/datasets", `not json`},
 		{"DELETE", base + "/datasets/d", ``},
 	} {

@@ -164,6 +164,14 @@ func (f front) getTable(w http.ResponseWriter, r *http.Request, dataset, table s
 		rec.copyTo(w)
 		return
 	}
+	// A table's location is its dataset's (#1371, location.go); the
+	// emulator gives none.
+	located := false
+	if loc, _ := meta["location"].(string); loc == "" {
+		if loc = f.datasetLocation(r, dataset); loc != "" {
+			meta["location"], located = loc, true
+		}
+	}
 	if view, _ := meta["view"].(map[string]any); ok && view != nil && view["query"] == t.engine {
 		view["query"] = t.client
 		if t.explicit {
@@ -174,6 +182,10 @@ func (f front) getTable(w http.ResponseWriter, r *http.Request, dataset, table s
 	}
 	if d, _ := meta["snapshotDefinition"].(map[string]any); len(d) > 0 { // #1002, snapshots.go
 		writeRecorded(w, rec, snapshotTyped(meta))
+		return
+	}
+	if located {
+		writeRecorded(w, rec, meta)
 		return
 	}
 	rec.copyTo(w)

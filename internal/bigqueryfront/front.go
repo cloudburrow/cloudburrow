@@ -144,6 +144,9 @@
 //     storagerows.go); which table IDs are shared is kept between
 //     requests, and tabledata.list of such a table reads each page by
 //     LIMIT and OFFSET (tableids.go, qualify.go).
+//   - (#1371) a dataset made without a location is in the default, US,
+//     and datasets.get, datasets.list, tables.get, every job and
+//     INFORMATION_SCHEMA.SCHEMATA say so (location.go).
 //
 // Everything else passes through untouched.
 package bigqueryfront
@@ -255,7 +258,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			})
 		})
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if serveUnserved(w, r) { // unserved.go, #1200
 			return
 		}
@@ -380,7 +383,10 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		case m[4] != "" && strings.Contains(table, "$") && strings.Index(table, "$") > 0 && (m[5] == "" || m[5] == "data"):
 			f.servePartition(w, r, dataset, table, m[5]) // #1273, partitionreads.go
 		case r.Method == http.MethodPost && m[3] == "":
+			datasetInsertLocation(r) // #1371, location.go
 			f.insertDataset(w, r)
+		case r.Method == http.MethodGet && m[3] == "":
+			f.listDatasets(w, r) // #1371, location.go
 		case r.Method == http.MethodPost && m[3] != "" && m[4] == "":
 			f.insertTable(w, r, dataset, "", false)
 		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
@@ -399,6 +405,12 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.listTableData(w, r, dataset, table) // #1015
 		default:
 			next.ServeHTTP(w, r)
+		}
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Every job the front answers has a location (#1371, location.go).
+		if !serveJobLocations(w, r, next, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
+			inner.ServeHTTP(w, r)
 		}
 	})
 }
