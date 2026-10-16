@@ -593,7 +593,7 @@
           "test/compat/runserviceaccount_test.go:42 TestCloudRunWorkloadIsToldItsServiceAccount",
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
-          "test/compat/terraform_cicd_test.go:134 TestTerraformRunServiceCloudSQLVolume",
+          "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -603,7 +603,7 @@
         "tests": [
           "test/compat/run_test.go:58 TestRunServiceLifecycle",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
-          "test/compat/terraform_cicd_test.go:134 TestTerraformRunServiceCloudSQLVolume",
+          "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -626,7 +626,7 @@
           "test/compat/runsettings_test.go:35 TestRunServiceStoredSettingsAndSubPath",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
           "test/compat/runvolumes_test.go:115 TestRunServiceVolumesAndServiceAccount",
-          "test/compat/terraform_cicd_test.go:134 TestTerraformRunServiceCloudSQLVolume",
+          "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -676,7 +676,7 @@
           "test/compat/run_test.go:227 TestRunUpdateService",
           "test/compat/run_test.go:320 TestRunUpdateServiceWithAMask",
           "test/compat/runtraffic_test.go:26 TestRunTrafficSplitAndTags",
-          "test/compat/terraform_cicd_test.go:134 TestTerraformRunServiceCloudSQLVolume",
+          "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
           "test/compat/terraform_run_more_test.go:28 TestTerraformRunVolumesAndServiceAccount"
         ]
       },
@@ -788,7 +788,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
-          "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
+          "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
       {
@@ -826,7 +826,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
-          "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
+          "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
       {
@@ -910,7 +910,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
-          "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
+          "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
       {
@@ -1046,7 +1046,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
-          "test/compat/terraform_cicd_test.go:29 TestTerraformArtifactRegistryRepository"
+          "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
       },
       {
@@ -1077,8 +1077,8 @@
     "Key": "cloudbuild",
     "Title": "Cloud Build",
     "counts": {
-      "Unimplemented": 13,
-      "Verified": 6
+      "Unimplemented": 1,
+      "Verified": 18
     },
     "rows": [
       {
@@ -1110,23 +1110,35 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateBuildTrigger",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/CreateWorkerPool",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/DeleteBuildTrigger",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/DeleteWorkerPool",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetBuild",
@@ -1143,8 +1155,11 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetBuildTrigger",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetDefaultServiceAccount",
@@ -1155,13 +1170,18 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/GetWorkerPool",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuildTriggers",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListBuilds",
@@ -1175,13 +1195,17 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ListWorkerPools",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/ReceiveTriggerWebhook",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/RetryBuild",
@@ -1192,18 +1216,26 @@
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/RunBuildTrigger",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateBuildTrigger",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       },
       {
         "method": "google.devtools.cloudbuild.v1.CloudBuild/UpdateWorkerPool",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/cloudbuildtriggers_test.go:72 TestCloudBuildTriggersAndWorkerPools",
+          "test/compat/terraform_cicd_test.go:96 TestTerraformCloudBuildTriggerAndWorkerPool"
+        ]
       }
     ]
   },
@@ -1220,7 +1252,7 @@
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers"
         ]
       },
       {
@@ -1230,7 +1262,7 @@
           "test/compat/consolefunctionsv1_test.go:95 TestConsoleFunctionsV1",
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers"
         ]
       },
       {
@@ -1253,7 +1285,7 @@
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers"
         ]
       },
       {
@@ -1276,7 +1308,7 @@
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
-          "test/compat/functionsevents_test.go:515 TestGcloudFunctionsEventTriggers"
+          "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers"
         ]
       }
     ]
@@ -1388,8 +1420,8 @@
     "Key": "runv1",
     "Title": "Cloud Run v1 (Knative API)",
     "counts": {
-      "Unknown": 41,
-      "Verified": 35
+      "Unknown": 38,
+      "Verified": 38
     },
     "rows": [
       {
@@ -1700,15 +1732,24 @@
       },
       {
         "method": "run.projects.locations.jobs.getIamPolicy",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1selectors_test.go:29 TestRunV1SelectorsDelayAndJobIAM"
+        ]
       },
       {
         "method": "run.projects.locations.jobs.setIamPolicy",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1selectors_test.go:29 TestRunV1SelectorsDelayAndJobIAM"
+        ]
       },
       {
         "method": "run.projects.locations.jobs.testIamPermissions",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1selectors_test.go:29 TestRunV1SelectorsDelayAndJobIAM"
+        ]
       },
       {
         "method": "run.projects.locations.list",
@@ -3425,7 +3466,7 @@
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
+          "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -3450,8 +3491,9 @@
         "method": "google.logging.v2.ConfigServiceV2/CreateLink",
         "status": "Verified",
         "tests": [
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
-          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
+          "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -3473,7 +3515,7 @@
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
-          "test/compat/terraform_logging_buckets_test.go:131 TestTerraformLoggingLogView"
+          "test/compat/terraform_logging_buckets_test.go:148 TestTerraformLoggingLogView"
         ]
       },
       {
@@ -3482,7 +3524,7 @@
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
+          "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -3500,8 +3542,9 @@
         "method": "google.logging.v2.ConfigServiceV2/DeleteLink",
         "status": "Verified",
         "tests": [
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
-          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
+          "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -3521,7 +3564,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/terraform_logging_buckets_test.go:131 TestTerraformLoggingLogView"
+          "test/compat/terraform_logging_buckets_test.go:148 TestTerraformLoggingLogView"
         ]
       },
       {
@@ -3530,7 +3573,7 @@
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents",
-          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks",
+          "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets"
         ]
@@ -3558,8 +3601,9 @@
         "method": "google.logging.v2.ConfigServiceV2/GetLink",
         "status": "Verified",
         "tests": [
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets",
-          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks"
+          "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks"
         ]
       },
       {
@@ -3588,7 +3632,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/terraform_logging_buckets_test.go:131 TestTerraformLoggingLogView"
+          "test/compat/terraform_logging_buckets_test.go:148 TestTerraformLoggingLogView"
         ]
       },
       {
@@ -3610,6 +3654,7 @@
         "method": "google.logging.v2.ConfigServiceV2/ListLinks",
         "status": "Verified",
         "tests": [
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/logginglinks_test.go:35 TestLoggingLinksSettingsAndAsyncBuckets"
         ]
       },
@@ -3642,7 +3687,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/terraform_logging_buckets_test.go:28 TestTerraformLoggingBucketsAndLinks",
+          "test/compat/terraform_logging_buckets_test.go:33 TestTerraformLoggingBucketsAndLinks",
           "test/compat/terraform_logging_parents_test.go:251 TestTerraformLoggingBillingAccount",
           "test/compat/terraform_logging_parents_test.go:60 TestTerraformLoggingFolderAndOrganizationExclusionsAndBuckets"
         ]
@@ -3696,7 +3741,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/terraform_logging_buckets_test.go:131 TestTerraformLoggingLogView"
+          "test/compat/terraform_logging_buckets_test.go:148 TestTerraformLoggingLogView"
         ]
       },
       {
@@ -3755,6 +3800,7 @@
           "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
           "test/compat/logging_fidelity_test.go:31 TestLoggingPartialSuccessAndScopedPaging",
           "test/compat/logging_test.go:34 TestLoggingWriteAndRead",
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/loggingparents_test.go:112 TestLoggingFolderOrganizationAndBillingParents"
         ]
       },
@@ -3915,16 +3961,21 @@
         "method": "google.cloud.redis.v1.CloudRedis/CreateInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/consolememorystore_test.go:359 TestConsoleMemorystoreInTransitEncryption",
+          "test/compat/gcloudredis_test.go:105 TestGcloudRedisInTransitEncryption",
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
+          "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
           "test/compat/memorystoreha_test.go:170 TestGcloudRedisFailover",
           "test/compat/memorystoreha_test.go:60 TestMemorystoreStandardTierFailover",
           "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
+          "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption",
           "test/compat/memorystoreupgrade_test.go:27 TestMemorystoreVersionsAndUpgrade",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
+          "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },
@@ -3936,6 +3987,7 @@
           "test/compat/memorystorecreate_test.go:51 TestMemorystoreCreateConnectUpdateDelete",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
+          "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
         "unverified": [
@@ -3966,12 +4018,17 @@
         "method": "google.cloud.redis.v1.CloudRedis/GetInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/consolememorystore_test.go:359 TestConsoleMemorystoreInTransitEncryption",
+          "test/compat/gcloudredis_test.go:105 TestGcloudRedisInTransitEncryption",
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/memorystorecreate_test.go:206 TestMemorystoreRDBAcrossRestart",
+          "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption",
           "test/compat/terraform_batch4_test.go:139 TestTerraformRedisMaintenancePolicy",
           "test/compat/terraform_redis_test.go:113 TestTerraformRedisStandardTier",
+          "test/compat/terraform_redis_test.go:175 TestTerraformRedisInTransitEncryption",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },
@@ -4005,7 +4062,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
-          "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer"
+          "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption"
         ]
       },
       {
@@ -7167,6 +7225,7 @@
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
           "test/compat/bigqueryrestart_test.go:50 TestBigQueryEmulatorRestartsPromptly",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_more_test.go:271 TestTerraformBigQueryDatasetIAM",
@@ -7330,8 +7389,9 @@
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerylocation_test.go:120 TestBqCopyFromADatasetWithoutLocation",
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
-          "test/compat/bigquerymaterializedviews_test.go:135 TestBigQueryMaterializedViews",
-          "test/compat/bigquerymaterializedviews_test.go:26 TestBigQueryDDLMoreTableOptions",
+          "test/compat/bigquerymaterializedviews_test.go:141 TestBigQueryMaterializedViews",
+          "test/compat/bigquerymaterializedviews_test.go:28 TestBigQueryDDLMoreTableOptions",
+          "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigqueryobjectprivileges_test.go:25 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigqueryparquetcharmap_test.go:64 TestBigQueryParquetColumnNameCharacterMap",
@@ -7362,6 +7422,7 @@
           "test/compat/bqscript_test.go:17 TestBqRunsAScriptWithControlFlow",
           "test/compat/consolebigqueryjobs_test.go:161 TestConsoleBigQueryLoadExportAndJobHistory",
           "test/compat/consolebigqueryloadfile_test.go:90 TestConsoleBigQueryLoadFromAFile",
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob"
         ]
       },
@@ -7417,8 +7478,9 @@
           "test/compat/bigqueryjsonunknown_test.go:27 TestBigQueryLoadFieldsOutsideTheSchema",
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
-          "test/compat/bigquerymaterializedviews_test.go:135 TestBigQueryMaterializedViews",
-          "test/compat/bigquerymaterializedviews_test.go:26 TestBigQueryDDLMoreTableOptions",
+          "test/compat/bigquerymaterializedviews_test.go:141 TestBigQueryMaterializedViews",
+          "test/compat/bigquerymaterializedviews_test.go:28 TestBigQueryDDLMoreTableOptions",
+          "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigqueryobjectprivileges_test.go:25 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
@@ -7440,7 +7502,8 @@
           "test/compat/bigqueryviewcolumns_test.go:233 TestBigQueryViewColumnListInATempScriptAndADryRun",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bigquerywrites_test.go:145 TestBigQueryBytesParameters",
-          "test/compat/consolebigquerywrites_test.go:403 TestConsoleBigQueryReadWriteEditorRunsDML"
+          "test/compat/consolebigquerywrites_test.go:403 TestConsoleBigQueryReadWriteEditorRunsDML",
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset"
         ]
       },
       {
@@ -7621,6 +7684,7 @@
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
+          "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigquerypartitionrest_test.go:34 TestBigQueryStreamingBuffer",
           "test/compat/bigquerystreamdml_test.go:54 TestBigQueryDMLOfRecentlyStreamedRows"
@@ -7688,8 +7752,9 @@
           "test/compat/bigqueryloaddetect_test.go:27 TestBigQueryJSONAutodetectLoad",
           "test/compat/bigquerylocation_test.go:120 TestBqCopyFromADatasetWithoutLocation",
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
-          "test/compat/bigquerymaterializedviews_test.go:135 TestBigQueryMaterializedViews",
-          "test/compat/bigquerymaterializedviews_test.go:26 TestBigQueryDDLMoreTableOptions",
+          "test/compat/bigquerymaterializedviews_test.go:141 TestBigQueryMaterializedViews",
+          "test/compat/bigquerymaterializedviews_test.go:28 TestBigQueryDDLMoreTableOptions",
+          "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigqueryparquetcharmap_test.go:64 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
@@ -7704,6 +7769,7 @@
           "test/compat/bigqueryviewcolumns_test.go:233 TestBigQueryViewColumnListInATempScriptAndADryRun",
           "test/compat/bigqueryviewcolumns_test.go:28 TestBigQueryCreateViewWithAColumnList",
           "test/compat/bqcopysnapshot_test.go:24 TestBqCopySnapshotCloneAndRestore",
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
           "test/compat/terraform_bigquery_tables_test.go:24 TestTerraformBigQueryPartitionedTableAndJob",
           "test/compat/terraform_iam_test.go:155 TestTerraformBigQueryIAM"
@@ -7727,7 +7793,8 @@
           "test/compat/bigqueryextractdecimal_test.go:37 TestBigQueryExtractOfParameterizedDecimals",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
           "test/compat/bigqueryjsonunknown_test.go:27 TestBigQueryLoadFieldsOutsideTheSchema",
-          "test/compat/bigquerymaterializedviews_test.go:135 TestBigQueryMaterializedViews",
+          "test/compat/bigquerymaterializedviews_test.go:141 TestBigQueryMaterializedViews",
+          "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
           "test/compat/terraform_bigquery_access_test.go:22 TestTerraformBigQueryAccess",
@@ -7739,7 +7806,8 @@
         "method": "bigquery.tables.list",
         "status": "Verified",
         "tests": [
-          "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery"
+          "test/compat/consolebigquery_test.go:89 TestConsoleBigQueryDatasetsSchemaAndQuery",
+          "test/compat/logginganalytics_test.go:41 TestLoggingLogAnalyticsLinkedDataset"
         ]
       },
       {
@@ -7750,6 +7818,7 @@
           "test/compat/bigquerydml_test.go:196 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:255 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:289 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
+          "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigquerysilent_test.go:585 TestBigQueryTableUpdateAddsColumns",
           "test/compat/bigquerytimes_test.go:20 TestBigQueryResourceTimesInMilliseconds",
@@ -7819,24 +7888,24 @@
         "method": "sql.backupRuns.delete",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlbackups_test.go:231 TestGcloudSQLBackups",
-          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups"
+          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups"
         ]
       },
       {
         "method": "sql.backupRuns.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlbackups_test.go:231 TestGcloudSQLBackups",
-          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups"
+          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups"
         ]
       },
       {
         "method": "sql.backupRuns.insert",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlbackups_test.go:231 TestGcloudSQLBackups",
-          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention"
         ]
       },
@@ -7844,8 +7913,8 @@
         "method": "sql.backupRuns.list",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlbackups_test.go:231 TestGcloudSQLBackups",
-          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention"
         ]
       },
@@ -7881,6 +7950,7 @@
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlversions_test.go:104 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:265 TestCloudSQLCascadingAndCrossRegionReplicas"
@@ -7893,6 +7963,7 @@
           "test/compat/cloudsqlconnector_test.go:58 TestCloudSQLConnectorDialsBothServers",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlversions_test.go:104 TestCloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:265 TestCloudSQLCascadingAndCrossRegionReplicas"
@@ -8008,10 +8079,12 @@
         "method": "sql.instances.clone",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
+          "test/compat/cloudsqlparallel_test.go:185 TestCloudSQLCloneToBinLogCoordinates",
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
-          "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery"
+          "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary"
         ]
       },
       {
@@ -8054,6 +8127,8 @@
         "method": "sql.instances.export",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlparallel_test.go:136 TestCloudSQLExportMasterData",
+          "test/compat/cloudsqlparallel_test.go:48 TestCloudSQLParallelExportAndImport",
           "test/compat/cloudsqltransfers_test.go:155 TestCloudSQLImportAndExport"
         ]
       },
@@ -8069,7 +8144,7 @@
         "method": "sql.instances.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlbackups_test.go:231 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
@@ -8079,6 +8154,8 @@
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
+          "test/compat/cloudsqlpitrrestore_test.go:31 TestCloudSQLPointInTimeRestoreFromBackupDR",
+          "test/compat/cloudsqlpitrrestore_test.go:67 TestGcloudSQLPointInTimeRestoreRefused",
           "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
@@ -8096,6 +8173,8 @@
         "method": "sql.instances.import",
         "status": "Verified",
         "tests": [
+          "test/compat/cloudsqlparallel_test.go:48 TestCloudSQLParallelExportAndImport",
+          "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqltransfers_test.go:155 TestCloudSQLImportAndExport"
         ]
       },
@@ -8150,6 +8229,7 @@
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:256 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlparallel_test.go:267 TestCloudSQLUpgradeWithReplicas",
           "test/compat/cloudsqlversions_test.go:172 TestCloudSQLMajorVersionUpgrade",
           "test/compat/cloudsqlversions_test.go:375 TestGcloudSQLDatabaseVersions",
           "test/compat/cloudsqlversions_test.go:412 TestTerraformSQLDatabaseVersion",
@@ -8160,6 +8240,8 @@
         "method": "sql.instances.pointInTimeRestore",
         "status": "Unimplemented",
         "tests": [
+          "test/compat/cloudsqlpitrrestore_test.go:31 TestCloudSQLPointInTimeRestoreFromBackupDR",
+          "test/compat/cloudsqlpitrrestore_test.go:67 TestGcloudSQLPointInTimeRestoreRefused",
           "test/compat/sqladmin_test.go:101 TestSQLAdminRefusesWhatItCannotDoFaithfully"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
@@ -8206,8 +8288,8 @@
         "method": "sql.instances.restoreBackup",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlbackups_test.go:231 TestGcloudSQLBackups",
-          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups"
+          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups"
         ]
       },
       {
@@ -8259,8 +8341,8 @@
         "method": "sql.operations.get",
         "status": "Verified",
         "tests": [
-          "test/compat/cloudsqlbackups_test.go:231 TestGcloudSQLBackups",
-          "test/compat/cloudsqlbackups_test.go:85 TestCloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:247 TestGcloudSQLBackups",
+          "test/compat/cloudsqlbackups_test.go:99 TestCloudSQLBackups",
           "test/compat/cloudsqlha_cli_test.go:20 TestGcloudSQLHighAvailability",
           "test/compat/cloudsqlha_cli_test.go:60 TestTerraformSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:229 TestGcloudSQLInstances",

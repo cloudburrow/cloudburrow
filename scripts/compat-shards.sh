@@ -142,7 +142,7 @@ compat_shard() {
       # and TestGcloudBuildsStepsAndList run here; the refusal without it is
       # TestCloudBuildHostStepsOff, which skips on this instance.
       FIXTURES=(--cloudbuild-host-steps)
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,MYSQL_PASSWORD,BIGQUERY_PROJECT,PREDICTION ;;
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,MYSQL_PASSWORD,BIGQUERY_PROJECT,PREDICTION ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.

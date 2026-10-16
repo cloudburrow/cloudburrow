@@ -517,6 +517,10 @@ func TestGcloudFunctionsEventTriggers(t *testing.T) {
 	h := New(t)
 	storageAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	pubsubAddr := runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_PUBSUB", EnvPubSub)
+	// --trigger-service-account makes gcloud read the project number through
+	// Resource Manager, and the harness points gcloud at the instance's only
+	// with its endpoint: the run shard's own name, so that suite runs once.
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_RESOURCEMANAGER", EnvResourceManager)
 	g := newGcloudSession(t, h)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	t.Cleanup(cancel)
