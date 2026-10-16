@@ -99,7 +99,14 @@ func (p *sqlProvisioner) startAndLoad(ctx context.Context, spec sqladmin.Spec, p
 	defer f.Close()
 	exec := podExec(p.cfg, components.SQLInstancePrefix+spec.Name)
 	if spec.MySQL() {
-		return exec(ctx, f, io.Discard, "sh", "-c", mysqlRootEnv+`exec mysql $MYSQL_LOCAL`)
+		load := `exec mysql $MYSQL_LOCAL`
+		if spec.DatabaseVersion != "MYSQL_8_0" {
+			// MySQL 8.4 removed SET_USER_ID; its in-place upgrade grants
+			// SET_ANY_DEFINER and ALLOW_NONEXISTENT_DEFINER in its place,
+			// and so does this.
+			load = `sed -E '/^GRANT /s/(^|[ ,])SET_USER_ID([ ,])/\1SET_ANY_DEFINER,ALLOW_NONEXISTENT_DEFINER\2/' | ` + load
+		}
+		return exec(ctx, f, io.Discard, "sh", "-c", mysqlRootEnv+load)
 	}
 	// The new server's own postgres role and database exist already, so
 	// pg_dumpall's CREATE ROLE postgres fails, which psql reports and goes
