@@ -1269,6 +1269,9 @@ func (s *scriptRun) send(text string) (*recorder, *scriptFlow) {
 			s.notImpl = msg
 			return nil, &scriptFlow{}
 		}
+		if _, id := jobRef(resp); id == "" {
+			s.failedChild(text, rec, msg)
+		}
 		return nil, &scriptFlow{failed: true, status: status, body: rec.body.Bytes(), msg: msg, text: text}
 	}
 	return rec, nil
