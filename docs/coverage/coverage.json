@@ -3493,8 +3493,8 @@
     "Key": "memorystore",
     "Title": "Memorystore for Redis",
     "counts": {
-      "Unimplemented": 5,
-      "Verified": 6
+      "Unimplemented": 3,
+      "Verified": 8
     },
     "rows": [
       {
@@ -3503,8 +3503,10 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
+          "test/compat/memorystorecreate_test.go:208 TestMemorystoreRDBAcrossRestart",
           "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
-          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
+          "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
+          "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
         "unverified": [
           {
@@ -3520,7 +3522,7 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
-          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
+          "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
         "unverified": [
           {
@@ -3532,8 +3534,11 @@
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/ExportInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudredis_test.go:76 TestGcloudRedisExportImport",
+          "test/compat/memorystoreimport_test.go:71 TestMemorystoreExportImport"
+        ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/FailoverInstance",
@@ -3547,7 +3552,8 @@
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
-          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
+          "test/compat/memorystorecreate_test.go:208 TestMemorystoreRDBAcrossRestart",
+          "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },
       {
@@ -3557,7 +3563,7 @@
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystoreadmin_test.go:38 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystorecreate_test.go:197 TestMemorystoreCreatedAcrossRestart",
-          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
+          "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
         "unverified": [
           {
@@ -3569,8 +3575,11 @@
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/ImportInstance",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/gcloudredis_test.go:76 TestGcloudRedisExportImport",
+          "test/compat/memorystoreimport_test.go:71 TestMemorystoreExportImport"
+        ]
       },
       {
         "method": "google.cloud.redis.v1.CloudRedis/ListInstances",
@@ -3591,7 +3600,8 @@
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
           "test/compat/memorystorecreate_test.go:53 TestMemorystoreCreateConnectUpdateDelete",
-          "test/compat/terraform_redis_test.go:27 TestTerraformRedisInstance"
+          "test/compat/memorystoreimport_test.go:179 TestMemorystoreRDBPersistence",
+          "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ]
       },
       {

@@ -370,6 +370,10 @@ var parityRows = []parityRow{
 		Methods:  []string{"CloudRedis/GetInstanceAuthString"},
 		Provider: "memorystore", Offers: "the AUTH string on the page of an instance with AUTH",
 		Tests: []string{"TestConsoleMemorystoreCreateEditDelete"}},
+	{Resource: "Memorystore import and export", Service: "memorystore",
+		Methods:  []string{"CloudRedis/ExportInstance", "CloudRedis/ImportInstance"},
+		Provider: "memorystore", Offers: "Export and Import (confirmed: it overwrites) on a created instance's page, to and from a gs:// RDB file in this instance's Cloud Storage, each waiting for its operation; Edit's Persistence sets RDB snapshots (#1384)",
+		Tests: []string{"TestConsoleMemorystoreImportExport"}},
 	// Cloud Scheduler
 	{Resource: "Cloud Scheduler jobs", Service: "scheduler",
 		Methods:  []string{"CloudScheduler/CreateJob", "CloudScheduler/DeleteJob", "CloudScheduler/GetJob", "CloudScheduler/ListJobs", "CloudScheduler/PauseJob", "CloudScheduler/ResumeJob", "CloudScheduler/RunJob"},

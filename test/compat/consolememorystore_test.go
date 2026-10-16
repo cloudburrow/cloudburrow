@@ -191,3 +191,51 @@ func TestConsoleMemorystoreCreateEditDelete(t *testing.T) {
 		t.Errorf("GetInstance after Delete = %v, want NOT_FOUND", err)
 	}
 }
+
+// TestConsoleMemorystoreImportExport (#1384): an instance's page offers
+// Export and Import; Export writes its data to a gs:// RDB file in this
+// instance's Cloud Storage through ExportInstance, and Import of that file
+// after changes puts the exported keys back through ImportInstance, each
+// waiting for its operation. Edit's Persistence turns on RDB snapshots
+// through UpdateInstance's persistence_config.
+func TestConsoleMemorystoreImportExport(t *testing.T) {
+	h := New(t)
+	addr := consoleAddr(t, h)
+	c, project := memorystoreAdminClient(t, h)
+	bh := bucket(t, h, instanceStorage(t, h))
+	ctx := h.Context()
+	parent := "projects/" + project + "/locations/us-central1"
+	id := fmt.Sprintf("console-io-%d", time.Now().UnixNano()%1e8)
+	inst, rc := createBasic(t, h, c, parent, id, nil)
+	rc.Set(ctx, "k", "v1", 0)
+
+	q := "?project=" + url.QueryEscape(project)
+	code, out := consoleDo(t, addr, http.MethodGet, "/api/detail/memorystore"+q+"&name="+id, "")
+	if code != http.StatusOK || !strings.Contains(out, `"id":"export"`) || !strings.Contains(out, `"id":"import"`) {
+		t.Fatalf("instance page = %d: %s; want Export and Import", code, out)
+	}
+	uri := "gs://" + bh.BucketName() + "/console.rdb"
+	if code, out := consoleAct(t, addr, "memorystore", project, []string{id}, "export", map[string]string{"uri": uri}); code != http.StatusOK {
+		t.Fatalf("console Export = %d: %s", code, out)
+	}
+	if _, err := bh.Object("console.rdb").Attrs(ctx); err != nil {
+		t.Fatalf("the exported object: %v", err)
+	}
+	rc.Set(ctx, "k", "changed", 0)
+	if code, out := consoleAct(t, addr, "memorystore", project, []string{id}, "import", map[string]string{"uri": uri}); code != http.StatusOK {
+		t.Fatalf("console Import = %d: %s", code, out)
+	}
+	if v, err := rc.Get(ctx, "k").Result(); err != nil || v != "v1" {
+		t.Errorf("after console Import GET k = %q, %v; want v1", v, err)
+	}
+
+	if code, out := consoleEdit(t, addr, "memorystore", project, []string{id}, map[string]string{
+		"displayName": "", "memorySizeGb": "1", "labels": "{}", "redisConfigs": "{}", "persistence": "ONE_HOUR"}); code != http.StatusOK {
+		t.Fatalf("console edit = %d: %s", code, out)
+	}
+	got, err := c.GetInstance(ctx, &redispb.GetInstanceRequest{Name: inst.GetName()})
+	if err != nil || got.GetPersistenceConfig().GetPersistenceMode() != redispb.PersistenceConfig_RDB ||
+		got.GetPersistenceConfig().GetRdbSnapshotPeriod() != redispb.PersistenceConfig_ONE_HOUR {
+		t.Errorf("after Edit's Persistence, GetInstance = %v, %v", got.GetPersistenceConfig(), err)
+	}
+}

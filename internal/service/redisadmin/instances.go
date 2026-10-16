@@ -39,6 +39,10 @@ type Spec struct {
 	// Configs are further server settings, by Valkey's own names
 	// (maxmemory-policy, notify-keyspace-events, ...).
 	Configs map[string]string
+	// RDBSeconds, above 0, is RDB persistence (#1384): a snapshot once
+	// that many seconds have passed with a change, in place of the
+	// CloudBurrow instance's mode's own.
+	RDBSeconds int
 }
 
 // Provisioner runs the server of an instance CreateInstance made.
@@ -56,6 +60,10 @@ type DataPlane interface {
 	Backend
 	// ConfigSet changes settings of the running server (CONFIG SET).
 	ConfigSet(ctx context.Context, settings map[string]string) error
+	// Save snapshots the data (BGSAVE) and returns the RDB file's path.
+	Save(ctx context.Context) (string, error)
+	// Load replaces the data with the one of the server at host:port.
+	Load(ctx context.Context, host string, port int) error
 }
 
 // Dialer reaches the server at addr with an AUTH string ("" for none).
@@ -84,6 +92,9 @@ type record struct {
 	Created      time.Time         `json:"created"`
 	Server       string            `json:"server"`
 
+	// Persistence is persistence_config, as last set; nil when never set.
+	Persistence *persistence `json:"persistence,omitempty"`
+
 	// Not kept: what the running server is now.
 	state   redispb.Instance_State
 	message string
@@ -92,8 +103,11 @@ type record struct {
 
 func (r *record) spec() Spec {
 	return Spec{Server: r.Server, MaxMemory: maxMemory(r.MemorySizeGB, r.RedisConfigs),
-		Password: r.AuthString, Configs: serverConfigs(r.RedisConfigs)}
+		Password: r.AuthString, Configs: serverConfigs(r.RedisConfigs), RDBSeconds: r.Persistence.seconds()}
 }
+
+// binary is the prefix of the server's programs: valkey-server, ...
+func (r *record) binary() string { return "valkey" }
 
 // instances are the instances CreateInstance made.
 type instances struct {
@@ -108,6 +122,20 @@ type instances struct {
 	mu   sync.Mutex
 	byID map[string]*record // by resource name
 	busy map[string]string  // resource name -> pending operation
+	// objs is this instance's Cloud Storage, for import and export; nil
+	// when it is not enabled.
+	objs Objects
+	// aof is whether a server keeps an append-only file when it has no
+	// RDB persistence: the CloudBurrow instance's persistent mode.
+	aof bool
+}
+
+// PersistentMode says the CloudBurrow instance is persistent, so a server
+// without RDB persistence keeps an append-only file (#1384).
+func (s *Server) PersistentMode(on bool) {
+	if s.created != nil {
+		s.created.aof = on
+	}
 }
 
 // EnableCreate makes CreateInstance, UpdateInstance and DeleteInstance
@@ -305,6 +333,7 @@ func (c *instances) render(r *record) *redispb.Instance {
 		AuthEnabled:           r.AuthString != "",
 		TransitEncryptionMode: redispb.Instance_DISABLED,
 		Nodes:                 []*redispb.NodeInfo{{Id: "node-0", Zone: r.LocationID}},
+		PersistenceConfig:     r.Persistence.render(c.now()),
 	}
 	if region == "" {
 		inst.LocationId = ""
@@ -373,6 +402,13 @@ func (s *Server) CreateInstance(ctx context.Context, req *redispb.CreateInstance
 	r := &record{Name: name, DisplayName: in.GetDisplayName(), Labels: copyMap(in.GetLabels()), LocationID: loc,
 		MemorySizeGB: in.GetMemorySizeGb(), RedisConfigs: copyMap(in.GetRedisConfigs()), Created: c.now(),
 		Server: ServerName(name), state: redispb.Instance_CREATING}
+	if p := in.GetPersistenceConfig(); p != nil {
+		pc, err := newPersistence(p, nil, c.now())
+		if err != nil {
+			return nil, err
+		}
+		r.Persistence = pc
+	}
 	if in.GetAuthEnabled() {
 		pw, err := newAuthString()
 		if err != nil {
@@ -418,9 +454,6 @@ func checkCreate(in *redispb.Instance) error {
 	}
 	if in.GetReplicaCount() > 0 || in.GetReadReplicasMode() == redispb.Instance_READ_REPLICAS_ENABLED {
 		return apierror.Unimplemented("read replicas are not supported: CloudBurrow runs one server per instance")
-	}
-	if p := in.GetPersistenceConfig(); p != nil && p.GetPersistenceMode() == redispb.PersistenceConfig_RDB {
-		return apierror.Unimplemented("RDB persistence_config is not supported: a created instance follows the CloudBurrow instance's mode")
 	}
 	if in.GetCustomerManagedKey() != "" {
 		return apierror.Unimplemented("customer_managed_key is not supported")
@@ -470,7 +503,9 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 			set["memory_size_gb"] = true
 		case "redis_configs", "redisConfigs", "redis_config", "redisConfig":
 			set["redis_configs"] = true
-		case "replica_count", "replicaCount", "read_replicas_mode", "readReplicasMode", "persistence_config", "persistenceConfig",
+		case "persistence_config", "persistenceConfig":
+			set["persistence_config"] = true
+		case "replica_count", "replicaCount", "read_replicas_mode", "readReplicasMode",
 			"maintenance_policy", "maintenancePolicy", "auth_enabled", "authEnabled", "secondary_ip_range", "secondaryIpRange":
 			return nil, apierror.Unimplemented("updating %s is not supported", p)
 		default:
@@ -515,6 +550,16 @@ func (s *Server) UpdateInstance(ctx context.Context, req *redispb.UpdateInstance
 		if err := c.dial(r.addr, r.AuthString).ConfigSet(ctx, settings); err != nil {
 			return nil, apierror.InvalidArgument("the server refused the change: %v", err)
 		}
+	}
+	if set["persistence_config"] {
+		pc, err := newPersistence(in.GetPersistenceConfig(), r.Persistence, c.now())
+		if err != nil {
+			return nil, err
+		}
+		if err := c.persist(ctx, r, pc); err != nil {
+			return nil, err
+		}
+		next.Persistence = pc
 	}
 	if err := c.save(&next); err != nil {
 		return nil, apierror.Internal(err, "keep instance %s", r.Name)

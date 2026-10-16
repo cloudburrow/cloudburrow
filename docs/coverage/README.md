@@ -20,7 +20,7 @@ Do not edit these files by hand.
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 42 | 0 | 1 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 14 | 10 | 0 | 4 | 0 | 0 | 0 | 0 |
-| [Memorystore for Redis](memorystore.md) | 11 | 6 | 0 | 5 | 0 | 0 | 0 | 3 |
+| [Memorystore for Redis](memorystore.md) | 11 | 8 | 0 | 3 | 0 | 0 | 0 | 3 |
 | [Pub/Sub](pubsub.md) | 47 | 45 | 2 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 68 | 0 | 19 | 0 | 0 | 0 | 14 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 24 | 22 | 0 | 0 | 2 | 0 | 0 | 0 |

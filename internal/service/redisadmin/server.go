@@ -13,9 +13,10 @@
 // reached through a tunnel), started with the instance's maxmemory, AUTH
 // and redis_configs. Its size and configs are changed on the running
 // server with CONFIG SET, and DeleteInstance removes the server and its
-// data. What no server here can do (another Redis version, Standard tier
-// replicas and failover, import, export, maintenance) is UNIMPLEMENTED
-// rather than a plausible stub.
+// data. Its data is exported to and imported from Cloud Storage RDB files,
+// and RDB persistence is its save point (#1384). What no server here can
+// do (another Redis version, Standard tier replicas and failover,
+// maintenance) is UNIMPLEMENTED rather than a plausible stub.
 package redisadmin
 
 import (

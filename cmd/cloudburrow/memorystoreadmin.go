@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -12,7 +15,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 
+	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/components"
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
@@ -30,6 +35,7 @@ import (
 type memorystoreAdminService struct {
 	cfg       config.Config
 	tunnel    func() *netfwd.Forwarder
+	storage   func() *netfwd.Forwarder
 	calls     grpctransport.Observer
 	interpose []grpc.UnaryServerInterceptor
 	requests  func(rest.Request)
@@ -98,6 +104,21 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	s.cancel = cancel
 	s.prov = newMemorystoreProvisioner(s.cfg, bg)
 	s.api.EnableCreate(bg, s.prov, redisadmin.Dial, db, nil)
+	s.api.PersistentMode(s.cfg.Mode == config.ModePersistent)
+	// Import and export (#1384) read and write this instance's Cloud
+	// Storage, so without it they say so.
+	if serviceEnabled(s.cfg, config.ServiceStorage) {
+		sf := storageSourceFetcher{cfg: s.cfg, client: &http.Client{Timeout: 10 * time.Minute}}
+		if s.storage != nil {
+			sf.addr = func() string {
+				if f := s.storage(); f != nil {
+					return f.HostAddr()
+				}
+				return ""
+			}
+		}
+		s.api.UseStorage(memorystoreObjects{f: sf})
+	}
 	if err := s.api.Restore(); err != nil {
 		return fmt.Errorf("Memorystore instances: %w", err)
 	}
@@ -197,7 +218,8 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
-	b := components.MemorystoreServer(spec.Server, p.cfg.Mode == config.ModePersistent, spec.MaxMemory, spec.Password, spec.Configs)
+	b := components.MemorystoreServerOf(components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
+		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: spec.Configs, RDBSeconds: spec.RDBSeconds})
 	if err := p.installer.InstallBackends(ctx, []components.Backend{b}, memorystoreReadyTimeout); err != nil {
 		return "", err
 	}
@@ -217,6 +239,61 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	p.tunnels[spec.Server] = f
 	p.mu.Unlock()
 	return f.HostAddr(), nil
+}
+
+// Exec runs argv in the server's container, with stdin: the file copies
+// and server processes import and export run (#1384).
+func (p *memorystoreProvisioner) Exec(ctx context.Context, server string, stdin []byte, argv ...string) ([]byte, error) {
+	select {
+	case <-p.ready:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	args := append([]string{"-n", p.cfg.Cluster.Namespace, "exec"}, "deployment/"+server)
+	if stdin != nil {
+		args = append(args, "-i")
+	}
+	out, err := p.installer.KubectlIn(ctx, string(stdin), append(append(args, "--"), argv...)...)
+	return []byte(out), err
+}
+
+// memorystoreObjects reads and writes import and export files in this
+// instance's Cloud Storage, through its JSON API (#1384).
+type memorystoreObjects struct{ f storageSourceFetcher }
+
+func (o memorystoreObjects) Read(ctx context.Context, bucket, object string) ([]byte, error) {
+	rc, err := o.f.Fetch(ctx, bucket, object, 0)
+	if err != nil {
+		if e := apierror.From(err); e.Code == codes.NotFound {
+			return nil, apierror.NotFound("gs://%s/%s not found", bucket, object)
+		}
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
+}
+
+func (o memorystoreObjects) Write(ctx context.Context, bucket, object string, data []byte) error {
+	u := o.f.base() + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=media&name=" + url.QueryEscape(object)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err := o.f.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("write gs://%s/%s: %w", bucket, object, err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotFound:
+		return apierror.NotFound("bucket %s not found", bucket)
+	default:
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return apierror.FailedPrecondition("write gs://%s/%s: HTTP %d %s", bucket, object, resp.StatusCode, strings.TrimSpace(string(b)))
+	}
 }
 
 // Remove closes the server's tunnel and deletes its Deployment, Service

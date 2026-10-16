@@ -421,7 +421,59 @@ func memorystoreBackend(persistent bool) Backend {
 // instance's mode as the first does: an append-only file on a volume of
 // its own when persistent, nothing on disk when ephemeral.
 func MemorystoreServer(name string, persistent bool, maxmemory int64, password string, settings map[string]string) Backend {
-	args := []string{"valkey-server", "--protected-mode", "no", "--maxmemory", fmt.Sprint(maxmemory)}
+	return MemorystoreServerOf(MemorystoreSettings{Name: name, Persistent: persistent, MaxMemory: maxmemory,
+		Password: password, Settings: settings})
+}
+
+// MemorystoreSettings are what MemorystoreServerOf starts a server with.
+type MemorystoreSettings struct {
+	Name       string
+	Persistent bool
+	// MaxMemory is the server's maxmemory, in bytes.
+	MaxMemory int64
+	// Password is its AUTH string, "" for none.
+	Password string
+	// Settings are further server settings, by their own names.
+	Settings map[string]string
+	// Image is the server's image: "" is MemorystoreImage (Valkey,
+	// REDIS_7_2), or one of the Redis images of an older Memorystore
+	// version (#1386).
+	Image string
+	// RDBSeconds, above 0, is RDB persistence (#1384): a snapshot once that
+	// many seconds have passed with a change, written again when the server
+	// stops, in place of the append-only file. In persistent mode the
+	// snapshot is on the server's volume, so its data comes back with it.
+	RDBSeconds int
+}
+
+// Redis images of Memorystore's older versions (#1386), each the last
+// release of its line, pinned by the index digest (linux/amd64 and
+// linux/arm64 among others). Both are BSD-3-Clause, as every Redis before
+// 7.4 is. Memorystore's REDIS_6_X is 6.2, and REDIS_7_0 is 7.0.
+const (
+	MemorystoreRedis62Image = "redis:6.2.24-alpine@sha256:b362b5dff9d14d961dc3352db4776aba6a8c53ca2661d7c74ad2c121f82cdaea"
+	MemorystoreRedis70Image = "redis:7.0.15-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2"
+)
+
+// MemorystoreBinary is the prefix of image's server programs: "valkey"
+// (valkey-server, valkey-cli, valkey-check-rdb) for the Valkey image, and
+// "redis" for a Redis one.
+func MemorystoreBinary(image string) string {
+	if image == "" || strings.HasPrefix(image, "valkey/") {
+		return "valkey"
+	}
+	return "redis"
+}
+
+// MemorystoreServerOf is MemorystoreServer with every setting, the image
+// and RDB persistence among them.
+func MemorystoreServerOf(o MemorystoreSettings) Backend {
+	name, persistent, maxmemory, password, settings := o.Name, o.Persistent, o.MaxMemory, o.Password, o.Settings
+	image := o.Image
+	if image == "" {
+		image = MemorystoreImage
+	}
+	args := []string{MemorystoreBinary(image) + "-server", "--protected-mode", "no", "--maxmemory", fmt.Sprint(maxmemory)}
 	if maxmemory == 1<<30 {
 		args[len(args)-1] = "1gb"
 	}
@@ -443,14 +495,19 @@ func MemorystoreServer(name string, persistent bool, maxmemory int64, password s
 	if password != "" {
 		args = append(args, "--requirepass", password)
 	}
-	if persistent {
+	switch {
+	case o.RDBSeconds > 0 && persistent:
+		args = append(args, "--dir", "/data", "--appendonly", "no", "--save", fmt.Sprintf("%d 1", o.RDBSeconds))
+	case o.RDBSeconds > 0:
+		args = append(args, "--appendonly", "no", "--save", fmt.Sprintf("%d 1", o.RDBSeconds))
+	case persistent:
 		args = append(args, "--dir", "/data", "--appendonly", "yes", "--appendfsync", "everysec")
-	} else {
+	default:
 		args = append(args, "--save", "", "--appendonly", "no")
 	}
 	return Backend{
 		Name:       name,
-		Image:      MemorystoreImage,
+		Image:      image,
 		Port:       MemorystorePort,
 		Args:       args,
 		Persistent: persistent,
