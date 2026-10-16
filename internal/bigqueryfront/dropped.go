@@ -52,17 +52,18 @@ import (
 // description, labels, partitioning, clustering) through tables.insert,
 // and its rows as they were at the time asked for, as timetravel.go reads
 // a table's past from its change table: of each row, its last change at
-// or before the time, when not a DELETE. Its change history starts again
-// at the restore (BigQuery's restored table keeps none either, UNVERIFIED).
+// or before the time, when not a DELETE (or the END of a rebuild, #1466).
+// An undelete keeps its change history, and what the front keeps of the
+// table on its own (#1483, droppedkeep.go).
 //
 // A kept deletion expires once the window of the dataset (as it was when
 // deleted) has passed, by the front's clock, which the admin's
 // clock:advance moves (streamingbuffer.go); the front looks for expired
 // ones whenever it keeps, lists or restores one, and deletes their
-// copies. Not kept: a materialized view, a table snapshot (its own rows),
-// an external table, a dataset's routines and models, the settings the
-// front keeps of a table (enable_change_history, privacy_policy,
-// tableoptions.go), its IAM policy and row access policies.
+// copies. Kept since #1483 (droppedkeep.go): a materialized view, a table
+// snapshot, the settings the front keeps of a table (enable_change_history,
+// privacy_policy, tableoptions.go), its IAM policy and row access
+// policies. Not kept: an external table, a dataset's routines and models.
 
 // droppedDatasetID is the front's dataset of the copies.
 const droppedDatasetID = "_cloudburrow_dropped"
@@ -85,6 +86,14 @@ type droppedTable struct {
 	Hours   int64 `json:"hours"` // the dataset's time travel window
 	// WithDataset: deleted with its dataset, which an undelete restores.
 	WithDataset bool `json:"withDataset,omitempty"`
+	// Kind is the table's type when it is not a TABLE or VIEW:
+	// MATERIALIZED_VIEW (its resource only) or SNAPSHOT (its rows, Final)
+	// (#1483, droppedkeep.go).
+	Kind string `json:"kind,omitempty"`
+	// ForUpdate: Copy keeps each change's _CHANGE_IS_FOR_UPDATE (#1483).
+	ForUpdate bool `json:"forUpdate,omitempty"`
+	// Extras are the front's own records of the table (droppedkeep.go).
+	Extras *keptExtras `json:"extras,omitempty"`
 }
 
 // droppedDataset is a deleted dataset the front keeps.
@@ -191,7 +200,8 @@ func (s *droppedStore) expire(now int64) []string {
 }
 
 // table is the latest kept deletion of project.dataset.table that existed
-// at at (milliseconds), and whether there is one; deleted reports whether
+// at at (milliseconds; the latest of all when at is negative), and whether
+// there is one; deleted reports whether
 // there is any deletion of it, at that time or not.
 func (s *droppedStore) table(project, dataset, table string, at int64) (droppedTable, bool, bool) {
 	s.mu.Lock()
@@ -203,7 +213,7 @@ func (s *droppedStore) table(project, dataset, table string, at int64) (droppedT
 			continue
 		}
 		any = true
-		if t.Created <= at && at < t.Deleted && (!found || t.Deleted > got.Deleted) {
+		if (at < 0 || t.Created <= at && at < t.Deleted) && (!found || t.Deleted > got.Deleted) {
 			got, found = t, true
 		}
 	}
@@ -294,7 +304,14 @@ func (f front) keepTable(r *http.Request, dataset, table string, hours int64) (d
 		return droppedTable{}, false
 	}
 	created, _ := strconv.ParseInt(meta.CreationTime, 10, 64)
-	d := droppedTable{Project: project, Dataset: dataset, Table: table, Resource: got, Created: created, Hours: hours}
+	// The engine's clock, the front's (#1466): the emulator keeps
+	// creationTime by the system's.
+	if start, ok := f.historyStart(r, dataset, table); ok && start/1000 < created {
+		created = start / 1000
+	}
+	d := droppedTable{Project: project, Dataset: dataset, Table: table, Resource: got, Created: created, Hours: hours,
+		Extras: f.keepExtras(dataset, table, meta.CreationTime)}
+	snapshot := len(meta.Snapshot) > 0 && string(meta.Snapshot) != "null"
 	switch strings.ToUpper(meta.Type) {
 	case "VIEW":
 		// The client's text of the view's query, not the engine's
@@ -309,12 +326,20 @@ func (f front) keepTable(r *http.Request, dataset, table string, hours int64) (d
 			}
 		}
 		return d, true
+	case "MATERIALIZED_VIEW":
+		d.Kind = "MATERIALIZED_VIEW"
+		return d, true
+	case "SNAPSHOT":
+		snapshot = true
 	case "", "TABLE":
 	default:
 		return droppedTable{}, false
 	}
-	if len(meta.Snapshot) > 0 && string(meta.Snapshot) != "null" || len(meta.Schema.Fields) == 0 {
+	if len(meta.Schema.Fields) == 0 {
 		return droppedTable{}, false
+	}
+	if snapshot {
+		d.Kind = "SNAPSHOT"
 	}
 	body, _ := json.Marshal(map[string]any{"datasetReference": map[string]string{"projectId": project, "datasetId": droppedDatasetID}})
 	f.send(r, http.MethodPost, "/datasets", body) // made once; 409 after
@@ -337,9 +362,11 @@ func (f front) keepTable(r *http.Request, dataset, table string, hours int64) (d
 		status, _ := f.send(r, http.MethodPost, "/queries", b)
 		return status == http.StatusOK
 	}
-	if run(fmt.Sprintf("CREATE TABLE %s AS SELECT %s, _CHANGE_TYPE AS _cloudburrow_change, googlesqlite_change_micros AS "+
-		"_cloudburrow_micros, googlesqlite_change_rowid AS _cloudburrow_rowid, rowid AS _cloudburrow_order FROM %s",
+	if !snapshot && run(fmt.Sprintf("CREATE TABLE %s AS SELECT %s, _CHANGE_TYPE AS _cloudburrow_change, googlesqlite_change_micros AS "+
+		"_cloudburrow_micros, googlesqlite_change_rowid AS _cloudburrow_rowid, rowid AS _cloudburrow_order, "+
+		"_CHANGE_IS_FOR_UPDATE AS _cloudburrow_for_update FROM %s",
 		dest, list, quotePath([]string{project, dataset, table + changeTableSuffix}))) {
+		d.ForUpdate = true
 		return d, true
 	}
 	d.Final = true
@@ -459,13 +486,17 @@ func droppedRead(t droppedTable, fields []field, at int64) string {
 	list := strings.Join(cols, ", ")
 	return fmt.Sprintf("(SELECT %s FROM (SELECT %s, _cloudburrow_change, ROW_NUMBER() OVER (PARTITION BY _cloudburrow_rowid "+
 		"ORDER BY _cloudburrow_order DESC) AS _cloudburrow_last FROM %s WHERE _cloudburrow_change != 'START' AND "+
-		"_cloudburrow_micros <= %d) WHERE _cloudburrow_last = 1 AND _cloudburrow_change != 'DELETE')",
-		list, list, quotePath([]string{t.Project, droppedDatasetID, t.Copy}), at)
+		"_cloudburrow_micros <= %d) WHERE _cloudburrow_last = 1 AND _cloudburrow_change NOT IN ('DELETE', '%s'))",
+		list, list, quotePath([]string{t.Project, droppedDatasetID, t.Copy}), at, changeEnd)
 }
 
 // droppedStartsAfter reports whether the history kept of t starts after at
-// (microseconds): an ALTER TABLE that rebuilt it started it over (#1466).
+// (microseconds): a table kept as its rows were (Final), or one made
+// before googlesqlite patch 0036 (a rebuild carries the history on, #1466).
 func (f front) droppedStartsAfter(r *http.Request, t droppedTable, at int64) bool {
+	if t.Kind == "SNAPSHOT" {
+		return false // read-only: its rows are its past
+	}
 	if t.Final {
 		return true
 	}
@@ -512,19 +543,49 @@ func (f front) restoreTable(r *http.Request, t droppedTable) string {
 		delete(res, k)
 	}
 	res["tableReference"] = map[string]string{"projectId": t.Project, "datasetId": t.Dataset, "tableId": t.Table}
-	if status, got := f.createTable(r, t.Dataset, res); status != http.StatusOK {
-		return errorMessage(got, status)
-	}
-	if t.Copy == "" {
+	if t.Kind == "MATERIALIZED_VIEW" {
+		// Made again from its query, as tables.insert makes one
+		// (materializedviews.go); its type is the front's.
+		res["type"] = "MATERIALIZED_VIEW"
+		delete(res, "view")
+		raw, _ := json.Marshal(res)
+		rec := newRecorder()
+		f.insertMV(rec, r, t.Dataset, raw)
+		if rec.status != 0 && rec.status != http.StatusOK {
+			return errorMessage(rec.body.Bytes(), rec.status)
+		}
+		if st, got := f.get(r, tablePath(t.Dataset, t.Table)); st == http.StatusOK {
+			f.restoreExtras(t.Dataset, t.Table, createdOf(got), t.Extras)
+		}
 		return ""
 	}
-	_, fields := droppedFields(t)
-	src := copyTable{fields: fields, from: droppedRead(t, fields, 1<<62)}
-	if msg := f.insertSelect(r, tableRef{DatasetID: t.Dataset, TableID: t.Table}, []copyTable{src}); msg != "" {
-		f.send(r, http.MethodDelete, tablePath(t.Dataset, t.Table), nil)
-		return msg
+	if t.Kind == "SNAPSHOT" {
+		res["type"] = "TABLE" // the emulator's; a snapshotDefinition makes it one (snapshots.go)
 	}
-	f.send(r, http.MethodDelete, tablePath(droppedDatasetID, t.Copy), nil)
+	status, got := f.createTable(r, t.Dataset, res)
+	if status != http.StatusOK {
+		return errorMessage(got, status)
+	}
+	created := createdOf(got)
+	if t.Copy != "" {
+		_, fields := droppedFields(t)
+		src := copyTable{fields: fields, from: droppedRead(t, fields, 1<<62)}
+		if msg := f.insertSelect(r, tableRef{DatasetID: t.Dataset, TableID: t.Table}, []copyTable{src}); msg != "" {
+			f.send(r, http.MethodDelete, tablePath(t.Dataset, t.Table), nil)
+			return msg
+		}
+		if msg := f.restoreHistory(r, t, fields); msg != "" {
+			// The table is back with its rows; the copy is kept to its expiry.
+			return historyKept(tableName(t.Project, tableRef{DatasetID: t.Dataset, TableID: t.Table}), msg)
+		}
+		f.send(r, http.MethodDelete, tablePath(droppedDatasetID, t.Copy), nil)
+	}
+	if created == "" {
+		if st, got := f.get(r, tablePath(t.Dataset, t.Table)); st == http.StatusOK {
+			created = createdOf(got)
+		}
+	}
+	f.restoreExtras(t.Dataset, t.Table, created, t.Extras)
 	return ""
 }
 
@@ -604,6 +665,24 @@ func (f front) serveUndelete(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// keepingDrop runs drop, which deletes dataset.table, keeping the table
+// (above) when drop succeeds: a materialized view's DROP and tables.delete
+// (#1483, materializedviews.go).
+func (f front) keepingDrop(r *http.Request, dataset, table string, drop func()) {
+	f.expireDropped(r)
+	hours, _, ok := f.timeTravelHours(r, dataset)
+	var kept []droppedTable
+	if ok {
+		if t, ok := f.keepTable(r, dataset, table, hours); ok {
+			kept = append(kept, t)
+		}
+	}
+	drop()
+	if len(kept) > 0 {
+		f.commitDropped(r, kept, nil)
+	}
+}
+
 // pseudoColumn reports whether name is an ingestion-time partitioned
 // table's pseudo-column, which the change table does not have.
 func pseudoColumn(name string) bool {
@@ -611,11 +690,20 @@ func pseudoColumn(name string) bool {
 	return n == "_PARTITIONTIME" || n == "_PARTITIONDATE"
 }
 
-// undropSchema carries out a lone UNDROP SCHEMA [IF NOT EXISTS] name
+// undropSchema carries out UNDROP SCHEMA [IF NOT EXISTS] name
 // (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#undrop_schema_statement):
 // "Undeletes a dataset within your time travel window"; "IF NOT EXISTS: If
 // a dataset with the same name already exists, the statement has no
-// effect". It reports whether q was one.
+// effect". It reports whether q had one.
+//
+// In a multi-statement query (#1483) each UNDROP SCHEMA is carried out
+// before the query runs, and sent to the engine as a statement that does
+// nothing. That is BigQuery's order only when no other statement can see
+// the dataset, so it is 501, nothing run, when another statement names
+// the dataset (or the query's default dataset is it), when the script has
+// control flow (IF, a loop, an EXCEPTION handler, RETURN), or when an
+// UNDROP SCHEMA after other statements would fail (BigQuery runs those
+// first); one that fails as the first statement fails the query, as alone.
 func (f front) undropSchema(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
 	if !strings.Contains(strings.ToUpper(q.Query), "UNDROP") {
 		return false
@@ -624,45 +712,131 @@ func (f front) undropSchema(w http.ResponseWriter, r *http.Request, q queryOptio
 	if !ok {
 		return false
 	}
-	var stmt []token
-	for _, s := range splitStatements(toks) {
-		if len(s) > 0 {
-			stmt = s
-		}
-	}
-	if len(stmt) < 3 || !stmt[0].is("UNDROP") || !stmt[1].is("SCHEMA") {
-		return false
+	type undrop struct {
+		ds          string
+		ifNotExists bool
+		n           int
+		stmt        []token
 	}
 	project := projectOf(f.base)
-	i, ifNotExists := 2, false
-	if i+2 < len(stmt) && stmt[i].is("IF") && stmt[i+1].is("NOT") && stmt[i+2].is("EXISTS") {
-		i, ifNotExists = i+3, true
-	}
-	p, next := path(stmt, i)
-	if len(p) == 0 || len(p) > 2 || next != len(stmt) || len(p) == 2 && p[0] != project {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: UNDROP SCHEMA of "+
-			strings.Join(p, ".")+": CloudBurrow undeletes a dataset of the instance's project, named alone or with the "+
-			"project (docs/compatibility.md). Nothing was run.")
+	notBuilt := func(why string) bool {
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: UNDROP SCHEMA "+why+
+			" (docs/compatibility.md). Nothing was run.")
 		return true
 	}
-	ds := p[len(p)-1]
-	if st, _ := f.get(r, "/datasets/"+url.PathEscape(ds)); st == http.StatusOK && ifNotExists {
-		// nothing to do
-	} else if code, reason, msg := f.undeleteDataset(r, ds, 0); code != 0 {
-		if code == http.StatusInternalServerError {
-			reason = "backendError"
-		} else if reason == "duplicate" {
-			code = http.StatusConflict
+	var undrops []undrop
+	var others [][]token
+	flow := false
+	n := 0
+	for _, stmt := range splitStatements(toks) {
+		if len(stmt) == 0 {
+			continue
 		}
-		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+		n++
+		body, block, handler := stripControlFlow(stmt)
+		if block != "" || handler || len(body) < len(stmt) || len(body) > 0 && (body[0].is("RETURN") || body[0].is("END") ||
+			body[0].is("BREAK") || body[0].is("LEAVE") || body[0].is("CONTINUE") || body[0].is("ITERATE")) {
+			flow = true
+		}
+		if len(body) < 3 || !body[0].is("UNDROP") || !body[1].is("SCHEMA") {
+			others = append(others, stmt)
+			continue
+		}
+		u := undrop{n: n, stmt: stmt}
+		i := 2
+		if i+2 < len(body) && body[i].is("IF") && body[i+1].is("NOT") && body[i+2].is("EXISTS") {
+			i, u.ifNotExists = i+3, true
+		}
+		p, next := path(body, i)
+		if len(p) == 0 || len(p) > 2 || next != len(body) || len(p) == 2 && p[0] != project {
+			return notBuilt("of " + strings.Join(p, ".") + ": CloudBurrow undeletes a dataset of the instance's project, " +
+				"named alone or with the project")
+		}
+		u.ds = p[len(p)-1]
+		undrops = append(undrops, u)
+	}
+	if len(undrops) == 0 {
+		return false
+	}
+	if n > 1 {
+		var def struct {
+			DatasetID string `json:"datasetId"`
+		}
+		_ = json.Unmarshal(q.DefaultDataset, &def)
+		seen := map[string]bool{}
+		for _, u := range undrops {
+			switch {
+			case flow:
+				return notBuilt("in a script with control flow, which BigQuery may run in another order or not at all")
+			case seen[u.ds]:
+				return notBuilt("of " + u.ds + " twice in one script")
+			case namesDataset(others, u.ds) || def.DatasetID == u.ds:
+				return notBuilt("of " + u.ds + " in a script whose other statements name the dataset (or use it as the " +
+					"default dataset), which would see it before BigQuery undeletes it")
+			}
+			seen[u.ds] = true
+			if u.n == 1 {
+				continue
+			}
+			live, _ := f.get(r, "/datasets/"+url.PathEscape(u.ds))
+			if live == http.StatusOK && !u.ifNotExists || live != http.StatusOK && (f.dropped == nil || !f.dropped.hasDataset(project, u.ds)) {
+				return notBuilt("of " + u.ds + " after other statements of the script, which would fail. BigQuery runs " +
+					"the statements before it and fails there")
+			}
+		}
+	}
+	for _, u := range undrops {
+		if st, _ := f.get(r, "/datasets/"+url.PathEscape(u.ds)); st == http.StatusOK && u.ifNotExists {
+			continue // nothing to do
+		}
+		if code, reason, msg := f.undeleteDataset(r, u.ds, 0); code != 0 {
+			if code == http.StatusInternalServerError {
+				reason = "backendError"
+			}
+			f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: msg})
+			return true
+		}
+	}
+	noop := "DROP TABLE IF EXISTS " + quotePath([]string{"_cloudburrow", scratchTable()})
+	if n == 1 {
+		if !setQueryText(r, insert, noop) {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
+			return true
+		}
+		f.forward(w, r, jobText{query: q.Query})
 		return true
 	}
-	if !setQueryText(r, insert, "DROP TABLE IF EXISTS "+quotePath([]string{"_cloudburrow", scratchTable()})) {
+	var b strings.Builder
+	last := 0
+	for _, u := range undrops {
+		b.WriteString(q.Query[last:u.stmt[0].pos])
+		b.WriteString(noop)
+		last = u.stmt[len(u.stmt)-1].end
+	}
+	b.WriteString(q.Query[last:])
+	text := b.String()
+	if !setQueryText(r, insert, text) {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return true
 	}
-	f.forward(w, r, jobText{query: q.Query})
+	q2 := q
+	q2.Query = text
+	rec := newRecorder()
+	f.runQuery(rec, r, q2, insert)
+	f.answer(w, rec, jobText{query: q.Query})
 	return true
+}
+
+// hasDataset reports whether a deletion of project.dataset is kept.
+func (s *droppedStore) hasDataset(project, dataset string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range s.s.Datasets {
+		if d.Project == project && d.Dataset == dataset {
+			return true
+		}
+	}
+	return false
 }
 
 // keptDropsKey marks a query whose dropped tables keepQueryDrops kept.
@@ -725,16 +899,28 @@ func (f front) keepQueryDrops(w http.ResponseWriter, r *http.Request, q queryOpt
 // change history when it exists (timetravel.go) and from the kept copy of
 // a deleted one when not. It returns the status, reason and message of a
 // refusal.
+//
+// Table decorators (https://cloud.google.com/bigquery/docs/table-decorators,
+// read 2026-10-16) "can be used whenever a table is read, such as when
+// copying a table": "@0 is a special case that references the oldest data
+// available for the table" (#1483: the start of its time travel window, or
+// its creation when later), and a range decorator @t1-t2 references "table
+// data added between" t1 and t2, t2 "optional and defaults to 'now'", both
+// "within the last seven days" (copyRange). Times are the front's clock,
+// which the engine's follows (#1466).
 func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string, string) {
 	project := projectOf(f.base)
 	id, dec, _ := strings.Cut(s.TableID, "@")
 	ref := tableRef{ProjectID: s.ProjectID, DatasetID: s.DatasetID, TableID: id}
 	name := tableName(project, ref)
+	if m := rangeDecorator.FindStringSubmatch(dec); m != nil {
+		return f.copyRange(r, ref, name, dec, m[1], m[2])
+	}
 	ms, err := strconv.ParseInt(dec, 10, 64)
-	if err != nil || ms == 0 {
-		return copyTable{}, http.StatusNotImplemented, "notImplemented", "Not implemented here: a copy job of " + name + "@" +
-			dec + ". CloudBurrow reads a snapshot decorator of milliseconds since the epoch, or of a negative offset from " +
-			"now (@-3600000); @0 and a range decorator are not built (docs/compatibility.md). Nothing was copied."
+	if err != nil {
+		// UNVERIFIED wording.
+		return copyTable{}, http.StatusBadRequest, "invalid", "Invalid table decorator " + name + "@" + dec +
+			": a time decorator is milliseconds since the epoch, or a negative offset from now"
 	}
 	now := f.nowMillis()
 	at := ms
@@ -745,6 +931,9 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 		var m partitionMeta
 		if st, got := f.get(r, tablePath(ref.DatasetID, id)); st == http.StatusOK {
 			_ = json.Unmarshal(got, &m)
+		}
+		if ms == 0 {
+			at = f.oldestOf(r, ref.DatasetID, id, m, now)
 		}
 		past, code, msg := f.systemTime(r, queryOptions{}, ref.DatasetID, name, m, fmt.Sprintf("TIMESTAMP_MILLIS(%d)", at))
 		switch {
@@ -766,7 +955,11 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 		return copyTable{ref: ref}, 0, "", ""
 	}
 	f.expireDropped(r)
-	t, found, deleted := f.dropped.table(project, ref.DatasetID, id, at)
+	lookup := at
+	if ms == 0 {
+		lookup = -1
+	}
+	t, found, deleted := f.dropped.table(project, ref.DatasetID, id, lookup)
 	switch {
 	case !found && deleted:
 		// UNVERIFIED wording.
@@ -775,7 +968,11 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 	case !found:
 		return copyTable{ref: ref}, 0, "", ""
 	}
-	if earliest := now - t.Hours*int64(time.Hour/time.Millisecond); at < earliest {
+	earliest := now - t.Hours*int64(time.Hour/time.Millisecond)
+	if ms == 0 {
+		at = max(earliest, t.Created)
+	}
+	if at < earliest {
 		// As https://cloud.google.com/bigquery/docs/time-travel documents it.
 		return copyTable{}, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid snapshot time %d for table %s@%d. "+
 			"Cannot read before %d", at, name, at, earliest)
@@ -785,11 +982,116 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 	}
 	if f.droppedStartsAfter(r, t, at*1000+999) {
 		return copyTable{}, http.StatusNotImplemented, "notImplemented", "Not implemented here: a copy job of " + name + "@" +
-			dec + ". The history CloudBurrow kept of the deleted table starts after that time: an ALTER TABLE that rebuilds " +
-			"a table, and CREATE OR REPLACE TABLE, start it over, and a table made before CloudBurrow kept row identities " +
-			"is kept as it was when deleted (docs/compatibility.md). Nothing was copied."
+			dec + ". The history CloudBurrow kept of the deleted table starts after that time: a table made before " +
+			"CloudBurrow kept row identities is kept as it was when deleted (docs/compatibility.md). Nothing was copied."
 	}
 	schema, fields := droppedFields(t)
 	return copyTable{ref: ref, exists: true, kind: "TABLE", schema: schema, fields: fields,
 		from: droppedRead(t, fields, at*1000+999)}, 0, "", ""
+}
+
+// rangeDecorator is @t1-t2 or @t1- (above).
+var rangeDecorator = regexp.MustCompile(`^(-?[0-9]+)-(-?[0-9]+)?$`)
+
+// oldestOf is the oldest time (milliseconds) of dataset.table, with m, a
+// read can ask for: the start of its time travel window, or its history's
+// start (its creation by the engine's clock) when later.
+func (f front) oldestOf(r *http.Request, dataset, table string, m partitionMeta, now int64) int64 {
+	hours, _, _ := f.timeTravelHours(r, dataset)
+	if hours == 0 {
+		hours = 168
+	}
+	// A second after the window's start: systemTime reads now again,
+	// a little later.
+	oldest := now - hours*int64(time.Hour/time.Millisecond) + 1000
+	if start, ok := f.historyStart(r, dataset, table); ok && start/1000 > oldest {
+		oldest = (start + 999) / 1000
+	} else if c, err := strconv.ParseInt(m.Created, 10, 64); !ok && err == nil && c > oldest {
+		oldest = c
+	}
+	return oldest
+}
+
+// copyRange is a copy job's source table@t1-t2 (above): the rows inserted
+// between t1 and t2, of the table's change history or of the kept copy of
+// a deleted one. An UPDATE's new values are no data added; a rebuild's
+// copied rows (CARRY, #1466) are none either.
+func (f front) copyRange(r *http.Request, ref tableRef, name, dec, from, to string) (copyTable, int, string, string) {
+	project := projectOf(f.base)
+	notBuilt := func(why string) (copyTable, int, string, string) {
+		return copyTable{}, http.StatusNotImplemented, "notImplemented", "Not implemented here: a copy job of " + name + "@" +
+			dec + ": " + why + " (docs/compatibility.md). Nothing was copied."
+	}
+	now := f.nowMillis()
+	abs := func(v string) int64 {
+		n, _ := strconv.ParseInt(v, 10, 64)
+		if n < 0 || v == "-0" {
+			return now + n
+		}
+		return n
+	}
+	t1, t2 := abs(from), now
+	if to != "" {
+		t2 = abs(to)
+	}
+	switch {
+	case t2 > now || t1 > now:
+		return notBuilt("a range decorator ending after now, which BigQuery's documentation does not describe")
+	case t1 > t2:
+		return notBuilt("a range decorator whose start is after its end, which BigQuery's documentation does not describe")
+	}
+	// "Both values must be within the last seven days."
+	if earliest := now - 7*24*int64(time.Hour/time.Millisecond); t1 < earliest {
+		// UNVERIFIED wording, as the time decorator's.
+		return copyTable{}, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid range decorator %s@%s. "+
+			"Cannot read before %d", name, dec, earliest)
+	}
+	lo, hi := t1*1000, t2*1000+999
+	if live := f.copyTableMeta(r, ref); live.exists {
+		var m partitionMeta
+		if st, got := f.get(r, tablePath(ref.DatasetID, ref.TableID)); st == http.StatusOK {
+			_ = json.Unmarshal(got, &m)
+		}
+		if live.kind != "TABLE" && live.kind != "" {
+			return notBuilt("a range decorator of a " + live.kind)
+		}
+		if m.ingestion() {
+			return notBuilt("the history CloudBurrow keeps of an ingestion-time partitioned table has no _PARTITIONTIME")
+		}
+		if !f.hasHistory(r, ref.DatasetID, ref.TableID) {
+			return notBuilt("CloudBurrow keeps no history of the table")
+		}
+		list := fieldColumns(m.Schema.Fields)
+		live.from = fmt.Sprintf("(SELECT %s FROM %s WHERE _CHANGE_TYPE = 'INSERT' AND googlesqlite_change_micros BETWEEN %d AND %d)",
+			list, quotePath([]string{project, ref.DatasetID, ref.TableID + changeTableSuffix}), lo, hi)
+		return live, 0, "", ""
+	}
+	if f.dropped == nil {
+		return copyTable{ref: ref}, 0, "", ""
+	}
+	f.expireDropped(r)
+	t, found, _ := f.dropped.table(project, ref.DatasetID, ref.TableID, -1)
+	switch {
+	case !found:
+		return copyTable{ref: ref}, 0, "", ""
+	case t.Copy == "":
+		return notBuilt("a range decorator of a view")
+	case t.Final:
+		return notBuilt("the deleted table was kept as it was when deleted, without the times its rows were added")
+	}
+	schema, fields := droppedFields(t)
+	return copyTable{ref: ref, exists: true, kind: "TABLE", schema: schema, fields: fields,
+		from: fmt.Sprintf("(SELECT %s FROM %s WHERE _cloudburrow_change = 'INSERT' AND _cloudburrow_micros BETWEEN %d AND %d)",
+			fieldColumns(fields), quotePath([]string{t.Project, droppedDatasetID, t.Copy}), lo, hi)}, 0, "", ""
+}
+
+// fieldColumns is the quoted names of fields, but the pseudo-columns.
+func fieldColumns(fields []field) string {
+	var cols []string
+	for _, fl := range fields {
+		if !pseudoColumn(fl.Name) {
+			cols = append(cols, quotePath([]string{fl.Name}))
+		}
+	}
+	return strings.Join(cols, ", ")
 }

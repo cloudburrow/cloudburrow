@@ -422,7 +422,10 @@ func (f front) serveMV(w http.ResponseWriter, r *http.Request, q queryOptions, i
 	}
 	switch st.kind {
 	case "drop":
-		if code, msg := f.dropMV(r, ds, table); code != 0 {
+		var code int
+		var msg string
+		f.keepingDrop(r, ds, table, func() { code, msg = f.dropMV(r, ds, table) }) // #1483, dropped.go
+		if code != 0 {
 			failed(code, "backendError", msg)
 			return
 		}
@@ -799,11 +802,11 @@ func (f front) deleteWatched(w http.ResponseWriter, r *http.Request, dataset, ta
 		Type string `json:"type"`
 	}
 	if st != http.StatusOK || json.Unmarshal(got, &meta) != nil || meta.Type != "MATERIALIZED_VIEW" {
-		f.next.ServeHTTP(w, r)
+		f.deleteTableKeeping(w, r, dataset, table) // #1483: a watched table is kept too (dropped.go)
 		return
 	}
 	rec := newRecorder()
-	f.next.ServeHTTP(rec, r)
+	f.keepingDrop(r, dataset, table, func() { f.next.ServeHTTP(rec, r) }) // #1483, dropped.go
 	if rec.status/100 == 2 || rec.status == 0 {
 		f.send(r, http.MethodDelete, tablePath(resultsDataset, mvBacking(dataset, table)), nil)
 	}

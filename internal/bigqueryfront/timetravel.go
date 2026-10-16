@@ -99,7 +99,7 @@ func (f front) historySubquery(r *http.Request, dataset, table string, m partiti
 	status, got := f.send(r, http.MethodPost, "/queries", body)
 	if status != http.StatusOK {
 		return notBuilt("CloudBurrow keeps no history of the table that it can read at that time; it records a table's " +
-			"changes from when it was made, and from when an ALTER TABLE last rebuilt it")
+			"changes from when it was made")
 	}
 	var res struct {
 		Rows []struct {
@@ -112,8 +112,8 @@ func (f front) historySubquery(r *http.Request, dataset, table string, m partiti
 		return "", http.StatusInternalServerError, "cloudburrow: could not read the history of " + ref
 	}
 	if *res.Rows[0].F[0].V != "0" {
-		return notBuilt("CloudBurrow's history of the table starts after that time: an ALTER TABLE that rebuilds a table, " +
-			"and CREATE OR REPLACE TABLE, start it over")
+		return notBuilt("CloudBurrow's history of the table starts after that time (a table made before " +
+			"CloudBurrow recorded changes)")
 	}
 	text := fmt.Sprintf("(SELECT %s FROM (SELECT %s, _CHANGE_TYPE AS _cloudburrow_change, "+
 		"ROW_NUMBER() OVER (PARTITION BY googlesqlite_change_rowid ORDER BY rowid DESC) AS _cloudburrow_last "+

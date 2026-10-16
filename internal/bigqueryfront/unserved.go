@@ -58,10 +58,11 @@ func serveUnserved(w http.ResponseWriter, r *http.Request) bool {
 // front serves before serveUnserved (dropped.go).
 const undropWhy = "the emulator deletes a dataset's tables, their rows and their change history with it (docs/compatibility.md)."
 
-// refuseUndrop answers 501 a query with UNDROP SCHEMA
+// refuseUndrop answers 501 a dry run of a query with UNDROP SCHEMA
 // (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#undrop_schema_statement)
 // among other statements, and reports whether it did. The front carries
-// out a lone UNDROP SCHEMA (undropSchema, dropped.go, #1460).
+// out UNDROP SCHEMA, alone (#1460) and in a script (#1483), when it is
+// run (undropSchema, dropped.go).
 func refuseUndrop(w http.ResponseWriter, q queryOptions) bool {
 	if !strings.Contains(strings.ToUpper(q.Query), "UNDROP") {
 		return false
@@ -79,8 +80,8 @@ func refuseUndrop(w http.ResponseWriter, q queryOptions) bool {
 	}
 	for _, stmt := range stmts {
 		if len(stmt) > 1 && stmt[0].is("UNDROP") && stmt[1].is("SCHEMA") && n > 1 {
-			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: UNDROP SCHEMA in a "+
-				"multi-statement query. CloudBurrow carries out UNDROP SCHEMA as a query of its own (docs/compatibility.md). "+
+			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a dry run of UNDROP SCHEMA in a "+
+				"multi-statement query. CloudBurrow carries out UNDROP SCHEMA when the query runs (docs/compatibility.md). "+
 				"Nothing was run.")
 			return true
 		}
