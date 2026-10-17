@@ -13,30 +13,31 @@ Do not edit these files by hand.
 | [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
 | [Cloud Run v2](run.md) | 41 | 41 | 0 | 0 | 0 | 0 | 0 | 4 |
-| [Artifact Registry](artifactregistry.md) | 50 | 42 | 0 | 8 | 0 | 0 | 0 | 0 |
+| [Artifact Registry](artifactregistry.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Build](cloudbuild.md) | 19 | 19 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Secure Source Manager](securesourcemanager.md) | 53 | 12 | 0 | 41 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 61 | 0 | 15 | 0 | 0 | 0 | 0 |
-| [Cloud KMS](kms.md) | 62 | 60 | 0 | 2 | 0 | 0 | 0 | 86 |
-| [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 52 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Cloud KMS](kms.md) | 62 | 62 | 0 | 0 | 0 | 0 | 0 | 86 |
+| [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 54 | 54 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 38 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Vertex AI PredictionService](vertexai.md) | 14 | 14 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Memorystore for Redis](memorystore.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 2 |
+| [Memorystore for Redis](memorystore.md) | 66 | 22 | 0 | 43 | 1 | 0 | 0 | 2 |
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
-| [Cloud Storage (JSON API)](storage.md) | 87 | 78 | 0 | 9 | 0 | 0 | 0 | 22 |
-| [Cloud Storage (gRPC API v2)](storagegrpc.md) | 24 | 23 | 0 | 0 | 1 | 0 | 0 | 0 |
+| [Cloud Storage (JSON API)](storage.md) | 87 | 84 | 0 | 3 | 0 | 0 | 0 | 27 |
+| [Cloud Storage (gRPC API v2)](storagegrpc.md) | 30 | 29 | 0 | 0 | 1 | 0 | 0 | 0 |
 | [Firestore](firestore.md) | 17 | 16 | 1 | 0 | 0 | 0 | 0 | 0 |
-| [Firestore Admin API](firestoreadmin.md) | 32 | 17 | 0 | 15 | 0 | 0 | 0 | 0 |
+| [Firestore Admin API](firestoreadmin.md) | 32 | 25 | 0 | 7 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Bigtable](bigtable.md) | 84 | 39 | 45 | 0 | 0 | 0 | 0 | 0 |
-| [Spanner](spanner.md) | 65 | 41 | 24 | 0 | 0 | 0 | 0 | 0 |
+| [Bigtable](bigtable.md) | 84 | 80 | 4 | 0 | 0 | 0 | 0 | 0 |
+| [Spanner](spanner.md) | 65 | 63 | 2 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 56 | 0 | 24 | 0 | 0 | 0 | 0 |
+| [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 61 | 0 | 19 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Backup and DR Service API (v1)](backupdr.md) | 61 | 38 | 0 | 23 | 0 | 0 | 0 | 0 |
+| [Backup and DR Service API (v1)](backupdr.md) | 61 | 44 | 0 | 17 | 0 | 0 | 0 | 0 |
 
 **Statuses.** *Verified*: an official-SDK compat test, linked, exercises it. *Refused*: a compat
 test proves the upstream emulator refuses it. *Unimplemented*: CloudBurrow returns `UNIMPLEMENTED`, proven
