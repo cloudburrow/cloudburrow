@@ -4679,7 +4679,7 @@
           "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
           "test/compat/loggingviews_test.go:83 TestLoggingViewFiltersAndRetention",
-          "test/compat/terraform_logging_buckets_test.go:148 TestTerraformLoggingLogView"
+          "test/compat/terraform_logging_buckets_test.go:150 TestTerraformLoggingLogView"
         ]
       },
       {
@@ -4733,7 +4733,7 @@
           "test/compat/logging1519_test.go:62 TestLoggingViewIAMSavedQueriesAndLogScopes",
           "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/terraform_logging_buckets_test.go:148 TestTerraformLoggingLogView"
+          "test/compat/terraform_logging_buckets_test.go:150 TestTerraformLoggingLogView"
         ]
       },
       {
@@ -4805,7 +4805,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/terraform_logging_buckets_test.go:148 TestTerraformLoggingLogView"
+          "test/compat/terraform_logging_buckets_test.go:150 TestTerraformLoggingLogView"
         ]
       },
       {
@@ -4919,7 +4919,7 @@
         "tests": [
           "test/compat/logginganalyticsviews_test.go:184 TestLoggingLinkedDatasetViewsRetentionAndDeleteLog",
           "test/compat/loggingbuckets_test.go:36 TestLoggingBucketsAndViews",
-          "test/compat/terraform_logging_buckets_test.go:148 TestTerraformLoggingLogView"
+          "test/compat/terraform_logging_buckets_test.go:150 TestTerraformLoggingLogView"
         ]
       },
       {
