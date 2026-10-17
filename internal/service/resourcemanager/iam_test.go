@@ -50,9 +50,15 @@ func TestProjectIAMThroughTheOfficialClients(t *testing.T) {
 		Bindings: set.GetBindings()}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"bindings", "etag", "auditConfigs"}}}); err != nil {
 		t.Errorf("SetIamPolicy with Terraform's mask: %v", err)
 	}
+	// Audit configs are stored (#1486), and the mask without bindings keeps them.
 	if _, err := c.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: res, Policy: &iampb.Policy{
-		AuditConfigs: []*iampb.AuditConfig{{Service: "allServices"}}}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"auditConfigs"}}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("audit configs = %v, want Unimplemented", err)
+		AuditConfigs: []*iampb.AuditConfig{{Service: "allServices", AuditLogConfigs: []*iampb.AuditLogConfig{{LogType: iampb.AuditLogConfig_DATA_READ}}}}},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"auditConfigs"}}}); err != nil {
+		t.Errorf("audit configs: %v", err)
+	}
+	if got, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res}); err != nil || len(got.GetAuditConfigs()) != 1 ||
+		got.GetAuditConfigs()[0].GetAuditLogConfigs()[0].GetLogType() != iampb.AuditLogConfig_DATA_READ {
+		t.Errorf("audit configs read back = %v, %v", got, err)
 	}
 	got, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: res})
 	if err != nil || len(got.GetBindings()) != 1 || got.GetBindings()[0].GetMembers()[0] != "user:ada@example.com" {

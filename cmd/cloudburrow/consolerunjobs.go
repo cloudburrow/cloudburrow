@@ -425,7 +425,7 @@ func (runJobsProvider) CreateForm() (string, []console.Field) {
 		},
 		runSecretEnvField("Container"),
 		runVolumeFields("Container")[0], runVolumeFields("Container")[1], runVolumeFields("Container")[2],
-		runVolumeFields("Container")[3], runVolumeFields("Container")[4],
+		runVolumeFields("Container")[3], runVolumeFields("Container")[4], runVolumeFields("Container")[5],
 		runSettingsFields("Settings", false)[0], runSettingsFields("Settings", false)[1], runSettingsFields("Settings", false)[2],
 		runSettingsFields("Settings", false)[3],
 		{

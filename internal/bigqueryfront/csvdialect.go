@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 )
 
@@ -49,9 +52,10 @@ import (
 // comma-separated, quoted with ", every row as wide as the table, a null
 // written as an empty value. What the emulator could not load as BigQuery
 // would fails the load instead (loadDataError): with a custom nullMarker,
-// an empty value, which the emulator would load as NULL (501 for a STRING
-// or BYTES column, where BigQuery loads an empty string, and 400 invalid
-// for any other, which BigQuery refuses); and a quote that is not closed,
+// an empty value in a column that is not STRING or BYTES, which BigQuery
+// refuses (400 invalid; in a STRING or BYTES column, where BigQuery loads
+// an empty string, it is sent as emptyStringMark, which the emulator's
+// patch 0038 loads as one, #1457); and a quote that is not closed,
 // or data between a closing quote and the next delimiter (400 invalid). A
 // fieldDelimiter or quote of more than one byte, or outside ASCII, is 501
 // before anything is read.
@@ -160,9 +164,13 @@ type csvDialect struct {
 	quotedNewlines bool
 	// latin1 is encoding ISO-8859-1.
 	latin1 bool
-	// latin1Only is a delimiter or quote byte outside ASCII, read only in
-	// ISO-8859-1 data (#1457, dialectOf).
-	latin1Only bool
+	// delimText is the fieldDelimiter as the load gave it, when it is not
+	// the default or \t: delim is its first byte, which withOptions
+	// changes for ISO-8859-1 data (#1457, dialectOf).
+	delimText string
+	// repair is UTF-8 data split on a byte outside ASCII: a value's bytes
+	// that are not UTF-8 are each read as U+FFFD (#1457, dialectOf).
+	repair bool
 	// wide is encoding UTF-16BE, UTF-16LE, UTF-32BE or UTF-32LE (#1325).
 	wide string
 	// times are timeZone and the date and time formats (#1325,
@@ -207,48 +215,48 @@ func (d csvDialect) optionsSet() bool {
 
 // dialectOf returns the dialect a load's options give, or why it is 501.
 //
-// Since #1457 a fieldDelimiter or quote outside ASCII is read as BigQuery
-// documents it for ISO-8859-1 data: fieldDelimiter "is interpreted as a
-// single byte. For files encoded in ISO-8859-1, any single character can
-// be used as a separator"; quote: "BigQuery converts the string to
+// fieldDelimiter "is interpreted as a single byte. For files encoded in
+// ISO-8859-1, any single character can be used as a separator. For files
+// encoded in UTF-8, characters represented in decimal range 1-127
+// (U+0001-U+007F) can be used without any modification. UTF-8 characters
+// encoded with multiple bytes (i.e. U+0080 and above) will have only the
+// first byte used for separating fields. The remaining bytes will be
+// treated as a part of the field"; quote: "BigQuery converts the string to
 // ISO-8859-1 encoding, and then uses the first byte of the encoded string
-// to split the data in its raw, binary state" (JobConfigurationLoad), so a
-// quote of several characters is its first. For such data the front
-// splits the raw bytes, and then decodes each value ("BigQuery decodes the
+// to split the data in its raw, binary state"; and "BigQuery decodes the
 // data after the raw, binary data has been split using the values of the
-// quote and fieldDelimiter properties"). A byte outside ASCII in UTF-8
-// data is still 501 (latin1Only, checked in withOptions): the reference
-// has only "the first byte used for separating fields" of a multibyte
-// delimiter, the rest "part of the field", which leaves a value that is
-// not UTF-8, whose repair it does not document byte for byte, and the CSV
-// loading page says of an ISO-8859-1 character there that BigQuery "will
-// interpret it correctly". A delimiter of several characters, and a
-// character outside ISO-8859-1, are 501 too: the reference documents
-// neither.
+// quote and fieldDelimiter properties" (JobConfigurationLoad). So the
+// delimiter is one byte: in ISO-8859-1 data the ISO-8859-1 byte of its
+// first character (#1457), and in UTF-8 data the first byte of its UTF-8
+// encoding (#1457, second part), which is also how a delimiter of several
+// characters is read; the quote is the ISO-8859-1 byte of its first
+// character. The CSV loading page says instead that an ISO-8859-1
+// character outside ASCII "will interpret it correctly" as a delimiter in
+// UTF-8 data; the front follows the API reference, which also matches
+// that page's "if you use a multibyte character as a delimiter, some of
+// the bytes will be interpreted incorrectly as part of the field value".
+// In UTF-8 data split on a byte outside ASCII, a value left with bytes
+// that are not UTF-8 has each such byte read as U+FFFD: "If BigQuery can't
+// convert a character other than the ASCII 0 character, BigQuery converts
+// the character to the standard Unicode replacement character" (the
+// encoding field). Still 501: a quote, or in ISO-8859-1 data a delimiter,
+// whose first character is outside ISO-8859-1, and a delimiter of several
+// bytes or outside ASCII in UTF-16 or UTF-32 data (withOptions), none of
+// which the reference describes.
 func dialectOf(fieldDelimiter string, quote *string, jagged bool, nullMarker *string) (csvDialect, string) {
 	d := csvDialect{delim: ',', quote: '"', jagged: jagged}
-	latin1Byte := func(s string) (byte, bool) {
-		r, n := utf8.DecodeRuneInString(s)
-		if r == utf8.RuneError && n <= 1 || r < 1 || r > 0xFF || r == '\n' || r == '\r' {
-			return 0, false
-		}
-		return byte(r), true
-	}
 	switch fd := fieldDelimiter; {
 	case fd == "":
 	case fd == `\t`:
 		d.delim = '\t'
-	case utf8.RuneCountInString(fd) == 1:
-		b, ok := latin1Byte(fd)
-		if !ok {
-			return d, fmt.Sprintf("fieldDelimiter %q: CloudBurrow reads a delimiter of one ISO-8859-1 character (or "+
-				"\\t), and BigQuery's reference does not document another", fd)
-		}
-		d.delim = b
 	default:
-		return d, fmt.Sprintf("fieldDelimiter %q: CloudBurrow reads a delimiter of one character (or \\t); BigQuery's "+
-			"reference says the separator \"is interpreted as a single byte\" and does not document one of several "+
-			"characters", fd)
+		d.delimText = fd
+		if b := fd[0]; b != 0 && b != '\n' && b != '\r' {
+			d.delim = b
+		} else {
+			return d, fmt.Sprintf("fieldDelimiter %q, whose first byte is a NUL or a line break, which BigQuery's "+
+				"reference does not document as a separator", fd)
+		}
 	}
 	if quote != nil {
 		switch q := *quote; {
@@ -263,9 +271,6 @@ func dialectOf(fieldDelimiter string, quote *string, jagged bool, nullMarker *st
 			d.quote = b
 		}
 	}
-	if d.delim >= 0x80 || d.quote >= 0x80 {
-		d.latin1Only = true
-	}
 	if d.quote != 0 && d.quote == d.delim {
 		return d, fmt.Sprintf("quote %q is also the fieldDelimiter", string(rune(d.quote)))
 	}
@@ -273,6 +278,16 @@ func dialectOf(fieldDelimiter string, quote *string, jagged bool, nullMarker *st
 		d.nullMark, d.nullIsSet = *nullMarker, true
 	}
 	return d, ""
+}
+
+// latin1Byte returns the ISO-8859-1 byte of the first character of s,
+// false when it has none (or is NUL or a line break).
+func latin1Byte(s string) (byte, bool) {
+	r, n := utf8.DecodeRuneInString(s)
+	if r == utf8.RuneError && n <= 1 || r < 1 || r > 0xFF || r == '\n' || r == '\r' {
+		return 0, false
+	}
+	return byte(r), true
 }
 
 // csvOptions are the CSV options of a load besides those dialectOf reads
@@ -324,11 +339,23 @@ func (d csvDialect) withOptions(o csvOptions, nullMarkerSet bool, cols []field, 
 		return d, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid encoding %q: the supported values are UTF-8, "+
 			"ISO-8859-1, UTF-16BE, UTF-16LE, UTF-32BE and UTF-32LE.", o.Encoding)
 	}
-	if d.latin1Only && !d.latin1 {
-		return unimplemented(fmt.Sprintf("a fieldDelimiter or quote outside ASCII (byte 0x%02X) in data that is not "+
-			"ISO-8859-1. BigQuery documents only that of a multibyte delimiter \"the first byte\" splits the fields and "+
-			"\"the remaining bytes will be treated as a part of the field\", which leaves values that are not UTF-8, "+
-			"whose repair it does not document; set encoding ISO-8859-1 for Latin-1 data", max(d.delim, d.quote)))
+	switch {
+	case d.latin1 && d.delimText != "":
+		b, ok := latin1Byte(d.delimText)
+		if !ok {
+			return unimplemented(fmt.Sprintf("fieldDelimiter %q in ISO-8859-1 data: BigQuery reads \"any single "+
+				"character\" of ISO-8859-1 there, and does not document one outside it", d.delimText))
+		}
+		d.delim = b
+	case d.wide != "" && (len(d.delimText) > 1 || d.delim >= 0x80 || d.quote >= 0x80):
+		return unimplemented(fmt.Sprintf("a fieldDelimiter or quote of several bytes or outside ASCII in %s data, "+
+			"which BigQuery's reference, whose separator \"is interpreted as a single byte\", does not describe", d.wide))
+	case !d.latin1 && d.wide == "" && (d.delim >= 0x80 || d.quote >= 0x80):
+		d.repair = true
+	}
+	if d.quote != 0 && d.quote == d.delim {
+		return d, http.StatusBadRequest, "invalid", fmt.Sprintf("Invalid quote %q: in this data it is the same byte as "+
+			"the fieldDelimiter %q.", string(rune(d.quote)), d.delimText)
 	}
 	if n, set := skipLeadingRows(o.MaxBadRecords); set {
 		if n < 0 {
@@ -433,6 +460,8 @@ func (c *csvRecords) read() (rec []string, quoted []bool, empty bool, err error)
 		v := f.String()
 		if c.d.latin1 {
 			v = latin1String(v) // split first, then decoded (#1457)
+		} else if c.d.repair {
+			v = repairUTF8(v)
 		}
 		rec = append(rec, v)
 		quoted = append(quoted, wasQuoted)
@@ -609,7 +638,14 @@ func dialectRecords(cw *csv.Writer, data io.Reader, d csvDialect, cols []field, 
 					"BigQuery reads the values of nullMarkers as NULL, but does not document what it does with an empty "+
 					"value then. Nothing was loaded.", rd.line, columnName(i, cols))}
 			case d.nullIsSet && rec[i] == "":
-				return emptyValue(rd.line, i, cols)
+				if err := emptyValue(rd.line, i, cols); err != nil {
+					return err
+				}
+				rec[i] = emptyStringMark
+			case rec[i] == emptyStringMark:
+				return &loadDataError{code: 501, reason: "notImplemented", msg: fmt.Sprintf("Not implemented here: "+
+					"the value (line %d, %s) is the text CloudBurrow sends its emulator for an empty string. Nothing was "+
+					"loaded.", rd.line, columnName(i, cols))}
 			}
 		}
 		for i := 0; bad == "" && i < len(rec) && i < len(cols); i++ {
@@ -627,6 +663,9 @@ func dialectRecords(cw *csv.Writer, data io.Reader, d csvDialect, cols []field, 
 		}
 		if bad == "" && d.times != nil {
 			bad = d.times.convert(rec, cols) // #1325, csvtimes.go
+		}
+		if bad == "" && d.maxBad > 0 {
+			bad = badValue(rec, cols, d.times != nil) // #1457
 		}
 		if bad != "" {
 			st.bad++
@@ -712,6 +751,21 @@ func latin1String(s string) string {
 	return s
 }
 
+// repairUTF8 returns s with each byte that is not part of a UTF-8
+// character replaced by U+FFFD (see dialectOf).
+func repairUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	for len(s) > 0 {
+		r, n := utf8.DecodeRuneInString(s)
+		b.WriteRune(r) // RuneError for a byte that is not UTF-8
+		s = s[n:]
+	}
+	return b.String()
+}
+
 // columnName names column i of cols, or its position.
 func columnName(i int, cols []field) string {
 	if i < len(cols) {
@@ -720,19 +774,27 @@ func columnName(i int, cols []field) string {
 	return fmt.Sprintf("column %d", i+1)
 }
 
+// emptyStringMark is how the front writes an empty string to the
+// emulator, which loads an empty CSV value as NULL: its patch 0038
+// (#1457) loads this value as an empty string.
+const emptyStringMark = "\uFDD0cloudburrow:empty-string\uFDD0"
+
 // emptyValue is the failure for an empty value in field i of a record
-// ending at line, under a custom nullMarker.
+// ending at line, under a custom nullMarker, or nil for a STRING or BYTES
+// column, where "BigQuery interprets the empty string as an empty value"
+// (nullMarker, JobConfigurationLoad): the front sends it as
+// emptyStringMark (#1457).
 func emptyValue(line, i int, cols []field) error {
 	name, typ := columnName(i, cols), ""
 	if i < len(cols) {
 		typ = strings.ToUpper(cols[i].Type)
 	}
 	switch typ {
-	case "STRING", "BYTES", "":
+	case "STRING", "BYTES":
+		return nil
+	case "":
 		return &loadDataError{code: 501, reason: "notImplemented", msg: fmt.Sprintf("Not implemented here: an empty value "+
-			"(line %d, %s) in a CSV load with a nullMarker. BigQuery loads it into a STRING or BYTES column as an empty "+
-			"value, but the emulator behind CloudBurrow loads every empty CSV value as NULL (measured). Nothing was loaded.",
-			line, name)}
+			"(line %d, %s) beyond the table's columns in a CSV load with a nullMarker. Nothing was loaded.", line, name)}
 	}
 	return &loadDataError{code: 400, reason: "invalid", msg: fmt.Sprintf("Error while reading data, error message: "+
 		"CSV table encountered too many errors, giving up. Line %d: %s (%s) is empty, and with a nullMarker set an empty "+
@@ -745,7 +807,7 @@ func emptyValue(line, i int, cols []field) error {
 // storedvalues.go). An empty value is NULL, and left.
 func csvValues(rec []string, cols []field, line int) error {
 	for i := 0; i < len(rec) && i < len(cols); i++ {
-		if rec[i] == "" {
+		if rec[i] == "" || rec[i] == emptyStringMark {
 			continue
 		}
 		loc := fmt.Sprintf("line %d, column %s", line, cols[i].Name)
@@ -759,4 +821,78 @@ func csvValues(rec []string, cols []field, line int) error {
 		}
 	}
 	return nil
+}
+
+// badValue returns why a record of a CSV load with maxBadRecords is bad
+// for a value its column's type refuses, or "" (#1457). BigQuery's
+// "Number of errors allowed" is "the maximum number of rows containing
+// errors that can be ignored" (loading-data-cloud-storage-csv), and the
+// CSV loading page's "Data types" says what each type takes: a BOOL "1 or
+// 0, true or false, t or f, yes or no, or y or n (all case insensitive)",
+// which badValue writes as true or false for the emulator, whose reader
+// takes fewer; a DATE "must be in the format YYYY-MM-DD"; a TIME "must be
+// in the format HH:MM:SS[.SSSSSS]". An INT64 that is no number at all,
+// and a FLOAT64, NUMERIC or BIGNUMERIC that is not one, are bad too. A
+// value it passes that the emulator still refuses (an INT64 written as a
+// fraction, an exponent or in hex, which the page does not document, or a
+// DATETIME or TIMESTAMP it does not read) leaves the load 501, as before
+// (reportFailure). With a format or timeZone set (formatted), DATE and
+// TIME values are csvTimes's.
+func badValue(rec []string, cols []field, formatted bool) string {
+	for i := 0; i < len(rec) && i < len(cols); i++ {
+		v := rec[i]
+		if v == "" || v == emptyStringMark {
+			continue
+		}
+		bad := func(what string) string {
+			return fmt.Sprintf("the value %q of the %s column %s is not %s", v, strings.ToUpper(cols[i].Type), cols[i].Name, what)
+		}
+		switch strings.ToUpper(cols[i].Type) {
+		case "BOOL", "BOOLEAN":
+			switch strings.ToLower(v) {
+			case "1", "true", "t", "yes", "y":
+				rec[i] = "true"
+			case "0", "false", "f", "no", "n":
+				rec[i] = "false"
+			default:
+				return bad("a boolean (1 or 0, true or false, t or f, yes or no, y or n)")
+			}
+		case "INTEGER", "INT64":
+			if _, err := strconv.ParseInt(v, 10, 64); err != nil && !looksNumeric(v) {
+				return bad("an integer")
+			}
+		case "FLOAT", "FLOAT64", "NUMERIC", "BIGNUMERIC":
+			if !looksNumeric(v) {
+				return bad("a number")
+			}
+		case "DATE":
+			if _, err := time.Parse("2006-01-02", v); !formatted && (err != nil || !csvDate.MatchString(v)) {
+				return bad("a date in the format YYYY-MM-DD")
+			}
+		case "TIME":
+			if !formatted && !validTime(csvTime.FindStringSubmatch(v)) {
+				return bad("a time in the format HH:MM:SS[.SSSSSS]")
+			}
+		}
+	}
+	return ""
+}
+
+var (
+	csvDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	csvTime = regexp.MustCompile(`^(\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?$`)
+)
+
+// looksNumeric reports whether v reads as a number: a decimal or float
+// (Go's ParseFloat, Inf and NaN among them) or a hex integer.
+func looksNumeric(v string) bool {
+	if _, err := strconv.ParseFloat(v, 64); err == nil || errors.Is(err, strconv.ErrRange) {
+		return true
+	}
+	t := strings.TrimLeft(v, "+-")
+	if len(t) > 2 && (t[:2] == "0x" || t[:2] == "0X") {
+		_, err := strconv.ParseUint(t[2:], 16, 64)
+		return err == nil || errors.Is(err, strconv.ErrRange)
+	}
+	return false
 }

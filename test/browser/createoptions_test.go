@@ -226,7 +226,7 @@ func TestStorageCreateBucketOptionsThroughTheForm(t *testing.T) {
 		return { Classes: [...q("#f-storageClass").options].map((o) => o.value), Uniform: q("#f-uniformAccess").checked,
 		         Versioning: q("#f-versioning").checked, Objects: q("#f-objectRetention").checked,
 		         SoftDelete: q("#f-softDeleteSeconds").value }; })()`, &form)
-	if strings.Join(form.Classes, ",") != "STANDARD,NEARLINE,COLDLINE,ARCHIVE" || !form.Uniform || form.Versioning ||
+	if strings.Join(form.Classes, ",") != "STANDARD,NEARLINE,COLDLINE,ARCHIVE,RAPID" || !form.Uniform || form.Versioning ||
 		form.Objects || form.SoftDelete != "604800" {
 		t.Errorf("Create opened with %+v", form)
 	}

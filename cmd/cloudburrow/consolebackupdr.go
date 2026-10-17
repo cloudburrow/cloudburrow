@@ -141,7 +141,7 @@ func (p backupDRProvider) List(ctx context.Context, project string) (console.Lis
 // CreateForm implements console.Creator: Create backup vault.
 func (backupDRProvider) CreateForm() (string, []console.Field) {
 	return "Create backup vault", []console.Field{
-		{Name: "id", Label: "Backup vault ID", Type: "text", Required: true, Pattern: `[a-z][a-z0-9-]{0,61}[a-z0-9]`},
+		{Name: "id", Label: "Backup vault ID", Type: "text", Required: true, Pattern: `[a-z][a-z0-9\-]{0,61}[a-z0-9]`},
 		{Name: "location", Label: "Region", Type: "text", Required: true, Default: "us-central1"},
 		{Name: "retention", Label: "Minimum enforced retention", Type: "text", Required: true, Default: "86400s",
 			Help: "A duration in seconds, such as 86400s (one day)."},

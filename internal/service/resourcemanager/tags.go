@@ -530,6 +530,7 @@ func (r *Registry) DeleteTagKey(name, etag string, validateOnly bool) (*rmpb.Tag
 	if err := r.st.Delete(tagKeyPrefix + id); err != nil {
 		return nil, apierror.Internal(err, "delete tag key")
 	}
+	r.dropIAM(k.GetName())
 	return k, nil
 }
 
@@ -696,6 +697,7 @@ func (r *Registry) DeleteTagValue(name, etag string, validateOnly bool) (*rmpb.T
 	if err := r.st.Delete(tagValuePrefix + id); err != nil {
 		return nil, apierror.Internal(err, "delete tag value")
 	}
+	r.dropIAM(v.GetName())
 	return v, nil
 }
 

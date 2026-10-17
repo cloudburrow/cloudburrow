@@ -97,14 +97,43 @@ func TestTagBindingNamesAndREST(t *testing.T) {
 	if k2, err := c.TagKeys.GetNamespaced().Name(OrganizationNumber + "/env").Do(); err != nil || k2.Name != k.GetName() {
 		t.Errorf("REST TagKeys.GetNamespaced = %+v, %v", k2, err)
 	}
+	// Tag key and value IAM (#1486): stored, and gone with the tag.
+	for _, res := range []string{k.GetName(), v.GetName()} {
+		set := &crmv3.SetIamPolicyRequest{Policy: &crmv3.Policy{Bindings: []*crmv3.Binding{{Role: "roles/resourcemanager.tagUser", Members: []string{"user:ada@example.com"}}}}}
+		var err error
+		var got *crmv3.Policy
+		if res == k.GetName() {
+			_, err = c.TagKeys.SetIamPolicy(res, set).Do()
+			if err == nil {
+				got, err = c.TagKeys.GetIamPolicy(res, &crmv3.GetIamPolicyRequest{}).Do()
+			}
+		} else {
+			_, err = c.TagValues.SetIamPolicy(res, set).Do()
+			if err == nil {
+				got, err = c.TagValues.GetIamPolicy(res, &crmv3.GetIamPolicyRequest{}).Do()
+			}
+		}
+		if err != nil || len(got.Bindings) != 1 || got.Bindings[0].Members[0] != "user:ada@example.com" {
+			t.Errorf("REST IAM of %s = %+v, %v", res, got, err)
+		}
+	}
+	if perms, err := c.TagKeys.TestIamPermissions(k.GetName(), &crmv3.TestIamPermissionsRequest{
+		Permissions: []string{"resourcemanager.tagKeys.get", "storage.buckets.get"}}).Do(); err != nil || len(perms.Permissions) != 1 {
+		t.Errorf("REST TagKeys.TestIamPermissions = %+v, %v", perms, err)
+	}
 	if _, err := c.TagValues.Delete(v.GetName()).Do(); err != nil {
 		t.Errorf("REST TagValues.Delete: %v", err)
 	}
 	if _, err := c.TagKeys.Delete(k.GetName()).Do(); err != nil {
 		t.Errorf("REST TagKeys.Delete: %v", err)
 	}
-	if _, err := c.TagKeys.GetIamPolicy(k.GetName(), &crmv3.GetIamPolicyRequest{}).Do(); err == nil || !strings.Contains(err.Error(), "ADR-0006") {
-		t.Errorf("REST TagKeys.GetIamPolicy = %v; want 501 citing ADR-0006", err)
+	if _, err := c.TagKeys.GetIamPolicy(k.GetName(), &crmv3.GetIamPolicyRequest{}).Do(); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Errorf("REST TagKeys.GetIamPolicy of a deleted key = %v; want 404", err)
+	}
+	if _, err := reg.loadIAMLocked(k.GetName()); err != nil {
+		t.Errorf("load: %v", err)
+	} else if p, _ := reg.loadIAMLocked(k.GetName()); p != nil {
+		t.Errorf("a deleted key's policy is kept: %+v", p)
 	}
 }
 

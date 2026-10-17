@@ -162,3 +162,24 @@ func TestRunHTTP2FieldNamesThePortH2C(t *testing.T) {
 		t.Errorf("without the option the port is named: %v, %v", tmpl, err)
 	}
 }
+
+// TestRunFormsOfferEveryVolumeField: the Deploy container and Create job
+// forms carry each field runVolumeFields defines; the Cloud Storage volumes
+// field (#1474) was defined, read and prefilled but left off both forms, so
+// the browser never showed it.
+func TestRunFormsOfferEveryVolumeField(t *testing.T) {
+	for name, form := range map[string]func() (string, []console.Field){
+		"Deploy container": runProvider{}.CreateForm, "Create job": runJobsProvider{}.CreateForm,
+	} {
+		_, fields := form()
+		have := map[string]bool{}
+		for _, f := range fields {
+			have[f.Name] = true
+		}
+		for _, f := range runVolumeFields("Container") {
+			if !have[f.Name] {
+				t.Errorf("%s has no %s field", name, f.Name)
+			}
+		}
+	}
+}

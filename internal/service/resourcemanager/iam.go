@@ -14,9 +14,14 @@ package resourcemanager
 // the v3 REST paths, v1 REST (projects and organizations, which gcloud
 // projects and Terraform's google_project_iam_* call) and v2 REST folders
 // (gcloud resource-manager folders), through the shared internal/iampolicy:
-// a set returns a new etag and a stale one is ABORTED, conditions and audit
-// configs are UNIMPLEMENTED naming the field, and a version 3 policy without
-// conditions is accepted.
+// a set returns a new etag and a stale one is ABORTED, conditions are
+// UNIMPLEMENTED naming the field, and a version 3 policy without conditions
+// is accepted. Audit configs are stored on a project, a folder and the
+// organization as update_mask says (#1486), and configure no audit log.
+//
+// Tag keys and tag values keep a policy too (#1486), served by TagKeysServer
+// and TagValuesServer, with no audit configs (Google keeps those on projects,
+// folders and organizations only). A tag's policy goes with the tag.
 //
 // A policy is kept in the registry's store beside its resource, so it has
 // the registry's persistence and snapshots. It goes with the resource: a
@@ -33,7 +38,6 @@ import (
 	"strings"
 
 	"cloud.google.com/go/iam/apiv1/iampb"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
@@ -61,9 +65,20 @@ func (r *Registry) iamTargetLocked(resource string) (deleting bool, err error) {
 			return false, err
 		}
 		return f.State == StateDeleteRequested, nil
+	case strings.HasPrefix(resource, "tagKeys/"):
+		_, _, err := r.tagKeyLocked(resource)
+		return false, err
+	case strings.HasPrefix(resource, "tagValues/"):
+		_, _, err := r.tagValueLocked(resource)
+		return false, err
 	default:
 		return false, checkOrg(resource)
 	}
+}
+
+// isTag reports whether a policy's resource is a tag key or a tag value.
+func isTag(resource string) bool {
+	return strings.HasPrefix(resource, "tagKeys/") || strings.HasPrefix(resource, "tagValues/")
 }
 
 // loadIAMLocked reads a stored policy, nil for none. The caller holds r.mu.
@@ -107,7 +122,11 @@ func (r *Registry) SetIAMPolicy(resource string, req *iampb.SetIamPolicyRequest)
 	if err != nil {
 		return nil, err
 	}
-	next, err := iampolicy.Set(current, withoutEmptyAuditConfigs(req))
+	set := iampolicy.SetWithAuditConfigs
+	if isTag(resource) {
+		set = iampolicy.Set
+	}
+	next, err := set(current, req)
 	if err != nil {
 		return nil, err
 	}
@@ -119,29 +138,6 @@ func (r *Registry) SetIAMPolicy(resource string, req *iampb.SetIamPolicyRequest)
 		return nil, apierror.Internal(err, "store the IAM policy")
 	}
 	return next.Proto(), nil
-}
-
-// withoutEmptyAuditConfigs drops "auditConfigs" from a request's update mask
-// when the policy carries none. Terraform's google_project_iam_* send the
-// mask "bindings,etag,auditConfigs" on every set, audit configs or not; with
-// none, that path sets them to none, which is what is stored, so it is a
-// no-op rather than the unsupported change internal/iampolicy refuses. A
-// policy that does carry audit configs is still refused, naming the field.
-func withoutEmptyAuditConfigs(req *iampb.SetIamPolicyRequest) *iampb.SetIamPolicyRequest {
-	paths := req.GetUpdateMask().GetPaths()
-	if len(paths) == 0 || len(req.GetPolicy().GetAuditConfigs()) > 0 {
-		return req
-	}
-	kept := make([]string, 0, len(paths))
-	for _, p := range paths {
-		if p != "auditConfigs" && p != "audit_configs" {
-			kept = append(kept, p)
-		}
-	}
-	if len(kept) == len(paths) {
-		return req
-	}
-	return &iampb.SetIamPolicyRequest{Resource: req.GetResource(), Policy: req.GetPolicy(), UpdateMask: &fieldmaskpb.FieldMask{Paths: kept}}
 }
 
 // ResetIAM deletes the stored policies: every one when project is empty,
@@ -187,6 +183,10 @@ func heldOn(resource string, perms []string) *iampb.TestIamPermissionsResponse {
 		if !permissionPattern.MatchString(p) {
 			continue
 		}
+		// On a tag key or value, the tag permissions alone can be held.
+		if isTag(resource) && !isTagPermission(p) {
+			continue
+		}
 		if strings.HasPrefix(p, "resourcemanager.organizations.") && !strings.HasPrefix(resource, "organizations/") {
 			continue
 		}
@@ -196,6 +196,20 @@ func heldOn(resource string, perms []string) *iampb.TestIamPermissionsResponse {
 		out.Permissions = append(out.Permissions, p)
 	}
 	return out
+}
+
+// tagPermissionPrefixes are the permissions that can be granted on a tag key
+// or value: those of tag keys, values, value bindings and holds.
+var tagPermissionPrefixes = []string{"resourcemanager.tagKeys.", "resourcemanager.tagValues.",
+	"resourcemanager.tagValueBindings.", "resourcemanager.tagHolds."}
+
+func isTagPermission(p string) bool {
+	for _, prefix := range tagPermissionPrefixes {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- the three methods, on each kind ----------------------------------
@@ -358,4 +372,68 @@ func serveIAM(w http.ResponseWriter, r *http.Request, srv iamServer, resource, v
 		}
 		return writeProto(w, resp)
 	}
+}
+
+// tagIAMResource checks a tag key's or value's name for its three methods.
+func tagIAMResource(prefix, name string) (string, error) {
+	if _, err := numericID(prefix, name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// GetIamPolicy is a tag key's stored policy (#1486), enforced by nothing.
+func (s *TagKeysServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+	res, err := tagIAMResource("tagKeys/", req.GetResource())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	return getIAM(s.reg, res, req)
+}
+
+// SetIamPolicy stores a tag key's policy, enforcing none of it.
+func (s *TagKeysServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
+	res, err := tagIAMResource("tagKeys/", req.GetResource())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	p, err := s.reg.SetIAMPolicy(res, req)
+	return p, apierror.Wrap(err)
+}
+
+// TestIamPermissions answers the tag permissions asked of a tag key.
+func (s *TagKeysServer) TestIamPermissions(_ context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
+	res, err := tagIAMResource("tagKeys/", req.GetResource())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	return testIAM(s.reg, res, req)
+}
+
+// GetIamPolicy is a tag value's stored policy (#1486), enforced by nothing.
+func (s *TagValuesServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+	res, err := tagIAMResource("tagValues/", req.GetResource())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	return getIAM(s.reg, res, req)
+}
+
+// SetIamPolicy stores a tag value's policy, enforcing none of it.
+func (s *TagValuesServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
+	res, err := tagIAMResource("tagValues/", req.GetResource())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	p, err := s.reg.SetIAMPolicy(res, req)
+	return p, apierror.Wrap(err)
+}
+
+// TestIamPermissions answers the tag permissions asked of a tag value.
+func (s *TagValuesServer) TestIamPermissions(_ context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
+	res, err := tagIAMResource("tagValues/", req.GetResource())
+	if err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	return testIAM(s.reg, res, req)
 }
