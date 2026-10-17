@@ -3082,9 +3082,25 @@ async function renderDetail(view, route, resourcePath) {
   // A page with a provider-drawn trail goes up to the nearest crumb above it
   // that is a page: a deleted object version's is its folder (#853), where
   // the path's parent would be no page at all.
+  //
+  // The page above can be gone too: deleting a generic repository's last
+  // file deletes its version and its package (#1592), so the package's
+  // page would only say NotFound. The nearest page above that still reads
+  // is the one gone to, and the list when none does.
   const trailUp = (data.trail || []).slice(0, -1).reverse().find((c) => (c.path || []).length);
-  const leavePage = () => navigate(trailUp ? detailHref(route, trailUp.path)
-    : segments.length > 1 ? detailHref(route, segments.slice(0, -1)) : route.path);
+  const leavePage = async () => {
+    const ups = trailUp ? [trailUp.path] : [];
+    for (let n = segments.length - 1; n > 0; n--) ups.push(segments.slice(0, n));
+    for (const up of ups) {
+      // A page that is gone answers unavailable, or fails.
+      try {
+        const above = await api(`/api/detail/${route.service}?project=${encodeURIComponent(project)}` +
+          up.map((sg) => `&name=${encodeURIComponent(sg)}`).join(""));
+        if (!above.unavailable) return navigate(detailHref(route, up));
+      } catch { /* gone as well: one level further up */ }
+    }
+    navigate(route.path);
+  };
   const leaves = (a) => a.leaves || (a.destructive && a.id.startsWith("delete") && segments.length > 1);
   const pageActions = [
     ...(data.actions || []).map((a) =>
@@ -5164,6 +5180,18 @@ async function deleteResource(route, name, onDone, row = NO_ROW) {
 // drawn from, sent back as it came (#923).
 const hiddenValues = (fields) => fields.map((f) => [f.name, f.default || ""]);
 
+// showActionResult opens a dialog with the rows an action performed on
+// click answered (#1592), as openActionForm shows a form's.
+function showActionResult(title, result) {
+  const { dialog, close } = openModal({ labelledBy: "action-title" });
+  const done = el("button", { type: "button", class: "primary", text: "Close", onclick: () => close() });
+  dialog.append(el("div", { class: "modal-body", id: "action-result" },
+    el("h2", { id: "action-title", text: title }),
+    resultTable(result),
+    el("div", { class: "modal-actions" }, done)));
+  done.focus();
+}
+
 async function runAction(route, target, action, onDone, row = NO_ROW, title = null) {
   const path = Array.isArray(target) ? target : null;
   // A page's own heading, when its last segment is an address no reader
@@ -5196,6 +5224,10 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
       row.end();
       notify(`${action.label} applied to ${name}`);
       onDone();
+      // An action performed on click can answer with rows too: Storage
+      // shrink config's minimal size (#1592). They were dropped; they are
+      // shown as a form's action shows them.
+      if (res.result) showActionResult(`${action.label}: ${name}`, res.result);
     } catch (err) {
       op.failed(err.message, err.operation);
       row.end();
