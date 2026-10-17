@@ -17,7 +17,7 @@ Do not edit these files by hand.
 | [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Run v1 (Knative API)](runv1.md) | 76 | 38 | 0 | 0 | 0 | 0 | 38 | 0 |
 | [Cloud KMS](kms.md) | 62 | 50 | 0 | 12 | 0 | 0 | 0 | 84 |
-| [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 46 | 0 | 6 | 0 | 0 | 0 | 0 |
+| [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 52 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 26 | 12 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Scheduler](scheduler.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Logging](logging.md) | 43 | 43 | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -29,8 +29,8 @@ Do not edit these files by hand.
 | [Firestore](firestore.md) | 17 | 16 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Firestore Admin API](firestoreadmin.md) | 32 | 17 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Bigtable](bigtable.md) | 84 | 36 | 48 | 0 | 0 | 0 | 0 | 0 |
-| [Spanner](spanner.md) | 65 | 35 | 30 | 0 | 0 | 0 | 0 | 0 |
+| [Bigtable](bigtable.md) | 84 | 39 | 45 | 0 | 0 | 0 | 0 | 0 |
+| [Spanner](spanner.md) | 65 | 41 | 24 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 46 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 56 | 0 | 24 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 7 | 0 | 3 | 0 | 0 | 0 | 0 |
