@@ -226,6 +226,9 @@ func (p functionsProvider) Detail(ctx context.Context, project string, path []st
 	}
 	add("Instances", fmt.Sprintf("%d to %d", sc.GetMinInstanceCount(), sc.GetMaxInstanceCount()))
 	add("Service account", sc.GetServiceAccountEmail())
+	add("Worker pool", bc.GetWorkerPool())
+	add("KMS key", fn.GetKmsKeyName())
+	add("Binary authorization", sc.GetBinaryAuthorizationPolicy())
 	add("Description", fn.GetDescription())
 	for _, m := range fn.GetStateMessages() {
 		add("Status detail", m.GetMessage())
@@ -237,7 +240,39 @@ func (p functionsProvider) Detail(ctx context.Context, project string, path []st
 	env.Total = len(env.Items)
 	return console.Detail{Summary: summary, Sections: []console.Section{
 		{ID: "variables", Label: "Runtime environment variables", Listing: env},
+		{ID: "secrets", Label: "Secrets", Listing: functionSecretsListing(sc)},
 	}}, nil
+}
+
+// functionSecretsListing is a function's secrets, each exposed as an
+// environment variable or mounted as a volume, as Google's console lists
+// them on the Variables & Secrets tab (#1464).
+func functionSecretsListing(sc *functionspb.ServiceConfig) console.Listing {
+	l := console.Listing{Columns: []string{"Exposed as", "Secret", "Version"}, NameColumn: "Name", Noun: "secrets"}
+	for _, s := range sc.GetSecretEnvironmentVariables() {
+		l.Items = append(l.Items, console.Resource{Name: s.GetKey(), Fields: map[string]string{
+			"Exposed as": "Environment variable", "Secret": functionSecretName(s.GetProjectId(), s.GetSecret()), "Version": s.GetVersion()}})
+	}
+	for _, v := range sc.GetSecretVolumes() {
+		versions := []string{}
+		for _, ver := range v.GetVersions() {
+			versions = append(versions, ver.GetVersion()+" at "+ver.GetPath())
+		}
+		if len(versions) == 0 {
+			versions = append(versions, "latest")
+		}
+		l.Items = append(l.Items, console.Resource{Name: v.GetMountPath(), Fields: map[string]string{
+			"Exposed as": "Mounted volume", "Secret": functionSecretName(v.GetProjectId(), v.GetSecret()), "Version": strings.Join(versions, ", ")}})
+	}
+	l.Total = len(l.Items)
+	return l
+}
+
+func functionSecretName(project, secret string) string {
+	if project == "" || strings.HasPrefix(secret, "projects/") {
+		return secret
+	}
+	return "projects/" + project + "/secrets/" + secret
 }
 
 // gen1Detail is a 1st-gen function's page: its CloudFunction as the v1 API
@@ -295,6 +330,8 @@ func (p functionsProvider) gen1Detail(ctx context.Context, v2 *functionspb.Funct
 	}
 	add("Service account", fn.GetServiceAccountEmail())
 	add("Ingress settings", fn.GetIngressSettings().String())
+	add("Build worker pool", fn.GetBuildWorkerPool())
+	add("KMS key", fn.GetKmsKeyName())
 	add("Description", fn.GetDescription())
 	for _, m := range v2.GetStateMessages() {
 		add("Status detail", m.GetMessage())
@@ -307,6 +344,7 @@ func (p functionsProvider) gen1Detail(ctx context.Context, v2 *functionspb.Funct
 	env.Total = len(env.Items)
 	return console.Detail{Summary: summary, Sections: []console.Section{
 		{ID: "variables", Label: "Runtime environment variables", Listing: env},
+		{ID: "secrets", Label: "Secrets", Listing: functionSecretsListing(v2.GetServiceConfig())},
 	}}, nil
 }
 
@@ -353,6 +391,16 @@ func (p functionsProvider) createAction() console.Action {
 		{Name: "entryPoint", Label: "Entry point", Type: "text", Required: true,
 			Help: "The function the Functions Framework serves, such as Hello"},
 		{Name: "memory", Label: "Memory", Type: "select", Options: []string{"128M", "256M", "512M", "1G", "2G", "4G"}, Default: "256M"},
+		{Name: "secretEnv", Label: "Secret environment variables", Type: "text", Section: "Security and image repo",
+			Help: "KEY=secret:version, comma-separated (version a number or latest), from this instance's Secret Manager, as gcloud functions deploy --set-secrets takes them"},
+		{Name: "secretVolumes", Label: "Secret volumes", Type: "text", Section: "Security and image repo",
+			Help: "/mount/path=secret:version, comma-separated: the version is mounted at /mount/path/{secret}"},
+		{Name: "kmsKey", Label: "Customer-managed encryption key", Type: "text", Section: "Security and image repo",
+			Help: "projects/{project}/locations/{location}/keyRings/{ring}/cryptoKeys/{key}: stored on the function; nothing is encrypted with it here"},
+		{Name: "binaryAuthorization", Label: "Binary Authorization policy (2nd gen)", Type: "text", Section: "Security and image repo",
+			Help: "default, or a policy's name: stored on the function and its service, not enforced"},
+		{Name: "workerPool", Label: "Build worker pool", Type: "text", Section: "Build",
+			Help: "projects/{project}/locations/{region}/workerPools/{pool}: one of Cloud Build's private pools in the function's region; the build runs on this machine"},
 		{Name: "file", Label: "Source (.zip)", Type: console.FileFieldType, Required: true,
 			Help: "A .zip of the function's source, uploaded as gcloud functions deploy uploads it, and built here with Google's buildpacks (linux/amd64 images only)"},
 	}}
@@ -434,6 +482,68 @@ func functionMemoryMB(m string) (int32, error) {
 	}
 	v, err := strconv.Atoi(strings.TrimSuffix(m, "M"))
 	return int32(v), err
+}
+
+// functionSecretSpec is one secret the form names: an environment
+// variable's key or a volume's mount path, the secret and its version.
+type functionSecretSpec struct{ at, secret, version string }
+
+// functionSecretsOf parses a comma-separated list of at=secret[:version].
+func functionSecretsOf(field, v string, mount bool) ([]functionSecretSpec, error) {
+	var out []functionSecretSpec
+	for _, item := range strings.Split(v, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		at, ref, ok := strings.Cut(item, "=")
+		at, ref = strings.TrimSpace(at), strings.TrimSpace(ref)
+		secret, version, _ := strings.Cut(ref, ":")
+		if version == "" {
+			version = "latest"
+		}
+		if !ok || at == "" || secret == "" || (mount && !strings.HasPrefix(at, "/")) {
+			want := "KEY=secret:version"
+			if mount {
+				want = "/mount/path=secret:version"
+			}
+			return nil, fmt.Errorf("%s %q: expected %s", field, item, want)
+		}
+		out = append(out, functionSecretSpec{at: at, secret: secret, version: version})
+	}
+	return out, nil
+}
+
+// functionSecrets is the form's secrets, validated.
+type functionSecrets struct{ env, volumes []functionSecretSpec }
+
+func functionSecretsFrom(values map[string]string) (functionSecrets, error) {
+	env, err := functionSecretsOf("Secret environment variables", values["secretEnv"], false)
+	if err != nil {
+		return functionSecrets{}, err
+	}
+	vols, err := functionSecretsOf("Secret volumes", values["secretVolumes"], true)
+	return functionSecrets{env: env, volumes: vols}, err
+}
+
+func (s functionSecrets) v2(sc *functionspb.ServiceConfig) {
+	for _, e := range s.env {
+		sc.SecretEnvironmentVariables = append(sc.SecretEnvironmentVariables, &functionspb.SecretEnvVar{Key: e.at, Secret: e.secret, Version: e.version})
+	}
+	for _, v := range s.volumes {
+		sc.SecretVolumes = append(sc.SecretVolumes, &functionspb.SecretVolume{MountPath: v.at, Secret: v.secret,
+			Versions: []*functionspb.SecretVolume_SecretVersion{{Version: v.version, Path: v.secret}}})
+	}
+}
+
+func (s functionSecrets) setV1(fn *fv1.CloudFunction) {
+	for _, e := range s.env {
+		fn.SecretEnvironmentVariables = append(fn.SecretEnvironmentVariables, &fv1.SecretEnvVar{Key: e.at, Secret: e.secret, Version: e.version})
+	}
+	for _, v := range s.volumes {
+		fn.SecretVolumes = append(fn.SecretVolumes, &fv1.SecretVolume{MountPath: v.at, Secret: v.secret,
+			Versions: []*fv1.SecretVolume_SecretVersion{{Version: v.version, Path: v.secret}}})
+	}
 }
 
 // functionTriggerSpec is the trigger the form chose, validated.
@@ -558,6 +668,15 @@ func (p functionsProvider) ActAtFile(ctx context.Context, project string, path [
 	if err != nil || mb <= 0 {
 		return nil, fmt.Errorf("memory %q: expected a size such as 256M or 1G", memory)
 	}
+	secrets, err := functionSecretsFrom(values)
+	if err != nil {
+		return nil, err
+	}
+	pool, kms := strings.TrimSpace(values["workerPool"]), strings.TrimSpace(values["kmsKey"])
+	binauthz := strings.TrimSpace(values["binaryAuthorization"])
+	if binauthz != "" && values["environment"] == functionGen1 {
+		return nil, errors.New("a Binary Authorization policy is 2nd gen's: a 1st gen function has none")
+	}
 	parent := "projects/" + project + "/locations/" + region
 	data, err := io.ReadAll(file)
 	if err != nil {
@@ -566,7 +685,7 @@ func (p functionsProvider) ActAtFile(ctx context.Context, project string, path [
 	switch env := values["environment"]; env {
 	case functionGen1:
 		return nil, p.withV1Client(ctx, func(c *functionsv1.CloudFunctionsClient) error {
-			up, err := c.GenerateUploadUrl(ctx, &fv1.GenerateUploadUrlRequest{Parent: parent})
+			up, err := c.GenerateUploadUrl(ctx, &fv1.GenerateUploadUrlRequest{Parent: parent, KmsKeyName: kms})
 			if err != nil {
 				return err
 			}
@@ -575,8 +694,10 @@ func (p functionsProvider) ActAtFile(ctx context.Context, project string, path [
 			}
 			fn := &fv1.CloudFunction{Name: parent + "/functions/" + id, Runtime: values["runtime"],
 				EntryPoint: strings.TrimSpace(values["entryPoint"]), AvailableMemoryMb: mb,
-				SourceCode: &fv1.CloudFunction_SourceUploadUrl{SourceUploadUrl: up.GetUploadUrl()}}
+				SourceCode:      &fv1.CloudFunction_SourceUploadUrl{SourceUploadUrl: up.GetUploadUrl()},
+				BuildWorkerPool: pool, KmsKeyName: kms}
 			trigger.setV1(fn)
+			secrets.setV1(fn)
 			op, err := c.CreateFunction(ctx, &fv1.CreateFunctionRequest{Location: parent, Function: fn})
 			if err != nil {
 				return err
@@ -591,18 +712,21 @@ func (p functionsProvider) ActAtFile(ctx context.Context, project string, path [
 		return nil, fmt.Errorf("unknown environment %q: %s or %s", env, functionGen1, functionGen2)
 	}
 	return nil, p.withClient(ctx, func(c *functions.FunctionClient) error {
-		up, err := c.GenerateUploadUrl(ctx, &functionspb.GenerateUploadUrlRequest{Parent: parent})
+		up, err := c.GenerateUploadUrl(ctx, &functionspb.GenerateUploadUrlRequest{Parent: parent, KmsKeyName: kms})
 		if err != nil {
 			return err
 		}
 		if err := putFunctionSource(ctx, up.GetUploadUrl(), data); err != nil {
 			return err
 		}
+		sc := &functionspb.ServiceConfig{AvailableMemory: memory, BinaryAuthorizationPolicy: binauthz}
+		secrets.v2(sc)
 		op, err := c.CreateFunction(ctx, &functionspb.CreateFunctionRequest{Parent: parent, FunctionId: id, Function: &functionspb.Function{
-			BuildConfig: &functionspb.BuildConfig{Runtime: values["runtime"], EntryPoint: strings.TrimSpace(values["entryPoint"]),
+			BuildConfig: &functionspb.BuildConfig{Runtime: values["runtime"], EntryPoint: strings.TrimSpace(values["entryPoint"]), WorkerPool: pool,
 				Source: &functionspb.Source{Source: &functionspb.Source_StorageSource{StorageSource: up.GetStorageSource()}}},
-			ServiceConfig: &functionspb.ServiceConfig{AvailableMemory: memory},
+			ServiceConfig: sc,
 			EventTrigger:  trigger.v2(),
+			KmsKeyName:    kms,
 		}})
 		if err != nil {
 			return err

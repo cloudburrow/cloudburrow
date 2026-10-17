@@ -387,6 +387,14 @@ func (f front) systemTime(r *http.Request, q queryOptions, dataset, ref string, 
 	tsMs, nowMs := ts/1000, now/1000
 	earliest := nowMs - hours*int64(time.Hour/time.Millisecond)
 	c, err := strconv.ParseInt(m.Created, 10, 64) // milliseconds (#1310)
+	// The table's history starts when it was made, by the engine's clock,
+	// which follows the front's (#1466; the emulator keeps creationTime by
+	// the system's), and a table made again by CREATE OR REPLACE TABLE
+	// keeps the start of the one it replaced: "the data that is replaced
+	// or removed can be recovered through the time travel window".
+	if start, ok := f.historyStart(r, dataset, ref[strings.LastIndex(ref, ".")+1:]); ok {
+		c, err = start/1000, nil
+	}
 	if err == nil && c > earliest {
 		earliest = c
 	}
@@ -474,29 +482,33 @@ func partitionRows(m partitionMeta, dec, name string) (string, int, string) {
 		if !ok {
 			return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording
 		}
-		return "_PARTITIONTIME = TIMESTAMP '" + from.Format(sqlTimestamp) + "'", 0, ""
+		return "_PARTITIONTIME = TIMESTAMP '" + from.Format(utcTimestamp) + "'", 0, ""
 	}
 	tp := m.TimePartitioning
 	col := quoteName(tp.Field)
 	expr := col
 	if t := typeOf(tp.Field); t == "DATE" || t == "DATETIME" {
-		expr = "TIMESTAMP(" + col + ")"
+		expr = "TIMESTAMP(" + col + ", 'UTC')" // in UTC whatever the default_time_zone (#1456)
 	}
 	switch dec {
 	case "__NULL__":
 		return col + " IS NULL", 0, ""
 	case "__UNPARTITIONED__":
-		return "(" + expr + " < TIMESTAMP '1960-01-01' OR " + expr + " >= TIMESTAMP '2160-01-01')", 0, ""
+		return "(" + expr + " < TIMESTAMP '1960-01-01 00:00:00+00' OR " + expr + " >= TIMESTAMP '2160-01-01 00:00:00+00')", 0, ""
 	}
 	from, to, ok := partitionBounds(tp.Type, dec)
 	if !ok {
 		return "", http.StatusBadRequest, "Invalid partition decorator " + name // UNVERIFIED wording
 	}
-	return fmt.Sprintf("(%s >= TIMESTAMP '%s' AND %s < TIMESTAMP '%s')", expr, from.Format(sqlTimestamp), expr,
-		to.Format(sqlTimestamp)), 0, ""
+	return fmt.Sprintf("(%s >= TIMESTAMP '%s' AND %s < TIMESTAMP '%s')", expr, from.Format(utcTimestamp), expr,
+		to.Format(utcTimestamp)), 0, ""
 }
 
 const sqlTimestamp = "2006-01-02 15:04:05"
+
+// utcTimestamp writes a UTC time as a TIMESTAMP literal's text, its zone
+// given, so the project's default_time_zone does not move it (#1456).
+const utcTimestamp = "2006-01-02 15:04:05+00"
 
 // partitionBounds returns the start and end of the partition dec of a
 // table partitioned by the time unit typ (DAY when empty): YYYYMMDD,
@@ -544,13 +556,13 @@ func ingestionColumns(m partitionMeta, dec string) (cols, vals string) {
 		return "", ""
 	}
 	unit := m.ingestionUnit()
-	t := "TIMESTAMP_TRUNC(_PARTITIONTIME, " + unit + ")"
+	t := "TIMESTAMP_TRUNC(_PARTITIONTIME, " + unit + ", 'UTC')"
 	if from, _, ok := partitionBounds(unit, dec); ok {
-		t = "TIMESTAMP '" + from.Format(sqlTimestamp) + "'"
+		t = "TIMESTAMP '" + from.Format(utcTimestamp) + "'"
 	}
 	cols, vals = ", _PARTITIONTIME", ", "+t
 	if unit == "DAY" {
-		cols, vals = cols+", _PARTITIONDATE", vals+", DATE("+t+")"
+		cols, vals = cols+", _PARTITIONDATE", vals+", DATE("+t+", 'UTC')"
 	}
 	return cols, vals
 }

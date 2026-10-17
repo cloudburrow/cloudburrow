@@ -108,8 +108,9 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 		t.Error("functions.yml does not check pack's tarball against a pinned SHA-256")
 	}
 
-	// The selection names exactly the thirteen gated tests, the ungated
-	// TestFunctionsAPI, TestFunctionsEventTriggers and TestFunctionsV1API,
+	// The selection names exactly the fourteen gated tests, the ungated
+	// TestFunctionsAPI, TestFunctionsEventTriggers, TestFunctionsV1API,
+	// TestFunctionsFields and TestFunctionsV1Fields (#1464),
 	// and gcloud's, the console's and Terraform's Functions tests (#1377,
 	// #1414, #1428),
 	// so a renamed one cannot
@@ -137,7 +138,8 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 		"TestFunctionsJavaBuiltWithBuildpacks", "TestFunctionsRubyBuiltWithBuildpacks", "TestFunctionsPHPBuiltWithBuildpacks", "TestFunctionsDotnetBuiltWithBuildpacks",
 		"TestFunctionsAPIBuildsAndServes", "TestFunctionsAPI", "TestGcloudFunctions", "TestTerraformCloudFunctions2Function",
 		"TestFunctionsEventTriggers", "TestFunctionsEventTriggerBuilds", "TestGcloudFunctionsEventTriggers",
-		"TestFunctionsV1API", "TestFunctionsV1BuildsAndServes", "TestGcloudFunctionsV1", "TestConsoleFunctionsV1", "TestTerraformCloudFunctionsFunction"} {
+		"TestFunctionsV1API", "TestFunctionsV1BuildsAndServes", "TestGcloudFunctionsV1", "TestConsoleFunctionsV1", "TestTerraformCloudFunctionsFunction",
+		"TestFunctionsFields", "TestFunctionsV1Fields", "TestFunctionsSecretsBuildsAndMounts"} {
 		found := false
 		for _, g := range got {
 			found = found || g == want
@@ -146,9 +148,9 @@ func TestFunctionsWorkflowRunsTheGatedTests(t *testing.T) {
 			t.Errorf("-run %s does not select %s; it selects %q", functionsSelection, want, got)
 		}
 	}
-	if len(got) != 22 {
-		t.Errorf("-run %s selects %q; want the thirteen gated Functions tests, TestFunctionsAPI, TestFunctionsEventTriggers, "+
-			"TestFunctionsV1API, TestGcloudFunctions, TestGcloudFunctionsEventTriggers, TestGcloudFunctionsV1, "+
+	if len(got) != 25 {
+		t.Errorf("-run %s selects %q; want the fourteen gated Functions tests, TestFunctionsAPI, TestFunctionsEventTriggers, "+
+			"TestFunctionsV1API, TestFunctionsFields, TestFunctionsV1Fields, TestGcloudFunctions, TestGcloudFunctionsEventTriggers, TestGcloudFunctionsV1, "+
 			"TestTerraformCloudFunctions2Function, TestConsoleFunctionsV1 and TestTerraformCloudFunctionsFunction", functionsSelection, got)
 	}
 }

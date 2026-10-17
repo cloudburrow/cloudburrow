@@ -293,6 +293,12 @@ func (f front) addColumns(w http.ResponseWriter, r *http.Request, dataset, table
 		}
 	}
 	lost := "; the table's rows are in " + scratch.DatasetID + "." + scratch.TableID
+	// The table's change history goes on after it is made again (#1466,
+	// changehistorycarry.go).
+	saved, hasHistory := f.saveHistory(r, dataset, table)
+	if hasHistory {
+		defer f.dropSavedHistory(r, saved)
+	}
 	f.send(r, http.MethodDelete, tablePath(dataset, table), nil)
 	if st, got := f.createTable(r, dataset, remade); st != http.StatusOK {
 		return failed(http.StatusInternalServerError, errorMessage(got, st)+lost)
@@ -306,7 +312,7 @@ func (f front) addColumns(w http.ResponseWriter, r *http.Request, dataset, table
 		list := strings.Join(cols, ", ")
 		pcols, pvals := ", _PARTITIONTIME", ", "+ingestionTimeColumn
 		if unit == "DAY" {
-			pcols, pvals = pcols+", _PARTITIONDATE", pvals+", DATE("+ingestionTimeColumn+")"
+			pcols, pvals = pcols+", _PARTITIONDATE", pvals+", DATE("+ingestionTimeColumn+", 'UTC')"
 		}
 		back = f.runDML(r, "INSERT INTO "+quotePath([]string{dataset, table})+" ("+list+pcols+") SELECT "+list+pvals+
 			" FROM "+quotePath([]string{scratch.DatasetID, scratch.TableID}))
@@ -317,6 +323,15 @@ func (f front) addColumns(w http.ResponseWriter, r *http.Request, dataset, table
 		return failed(http.StatusInternalServerError, back+lost)
 	}
 	f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
+	if hasHistory {
+		carried := make([]carriedColumn, len(old)) // an added column's old values are NULL
+		for i, fl := range old {
+			carried[i] = carriedColumn{name: fl.Name, expr: quoteName(fl.Name)}
+		}
+		if msg := f.carryHistory(r, quotePath([]string{saved.DatasetID, saved.TableID}), dataset, table, carried, false); msg != "" {
+			return failed(http.StatusInternalServerError, historyKept(name, msg))
+		}
+	}
 	if created, ok := current["creationTime"]; ok {
 		if patch, err := json.Marshal(map[string]any{"creationTime": created}); err == nil {
 			f.send(r, http.MethodPatch, tablePath(dataset, table), patch)

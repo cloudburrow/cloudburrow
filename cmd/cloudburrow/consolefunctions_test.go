@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"google.golang.org/grpc"
 
@@ -242,6 +243,93 @@ func TestConsoleFunctionsCreateGenerations(t *testing.T) {
 	for _, id := range []string{"gen1-http", "gen1-topic", "gen1-bucket", "gen2-bucket"} {
 		if err := p.Delete(ctx, "", id); err != nil {
 			t.Errorf("Delete %s: %v", id, err)
+		}
+	}
+}
+
+// TestConsoleFunctionsCreateFields (#1464): Create function offers secret
+// environment variables and volumes, a KMS key, a Binary Authorization
+// policy and a build worker pool, and sends each to the v2 or v1 API; the
+// function's page shows them and lists its secrets.
+func TestConsoleFunctionsCreateFields(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	uploads := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer uploads.Close()
+	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
+	builds := s.Builds(stubSource{}, failingBuilder{})
+	fs := s.Functions(builds, func() string { return uploads.URL })
+	srv := grpc.NewServer()
+	fs.Register(srv)
+	runadapter.NewOperationsServer(s).Register(srv)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = srv.Serve(ln) }()
+	defer srv.Stop()
+	p := functionsProvider{defaultProject: "console-fields", runAddr: func() string { return ln.Addr().String() }, storage: true}
+	pool := "projects/console-fields/locations/us-central1/workerPools/fields-pool"
+	if _, err := builds.CloudBuild().CreateWorkerPool(ctx, &cbpb.CreateWorkerPoolRequest{Parent: "projects/console-fields/locations/us-central1",
+		WorkerPoolId: "fields-pool", WorkerPool: &cbpb.WorkerPool{}}); err != nil {
+		t.Fatalf("CreateWorkerPool: %v", err)
+	}
+	fields := map[string]console.Field{}
+	for _, f := range p.createAction().Fields {
+		fields[f.Name] = f
+	}
+	for _, name := range []string{"secretEnv", "secretVolumes", "kmsKey", "binaryAuthorization", "workerPool"} {
+		if _, ok := fields[name]; !ok {
+			t.Errorf("Create function has no %s field", name)
+		}
+	}
+	const key = "projects/console-fields/locations/us/keyRings/r/cryptoKeys/k"
+	for _, env := range []string{functionGen2, functionGen1} {
+		id := map[string]string{functionGen2: "fields-gen2", functionGen1: "fields-gen1"}[env]
+		values := map[string]string{"name": id, "environment": env, "region": "us-central1", "runtime": "go123", "entryPoint": "Hello",
+			"secretEnv": "API_KEY=api-key:2", "secretVolumes": "/etc/secrets=config", "kmsKey": key, "workerPool": pool}
+		if env == functionGen2 {
+			values["binaryAuthorization"] = "default"
+		}
+		_, err := p.ActAtFile(ctx, "", nil, functionsCreateAction, values, console.UploadedFile{Name: "src.zip", Reader: strings.NewReader("not a zip")})
+		if err == nil || !strings.Contains(err.Error(), "no runtime detected") {
+			t.Fatalf("Create function %s = %v; want the build's error", id, err)
+		}
+		d, err := p.Detail(ctx, "", []string{id})
+		if err != nil || d.Unavailable != "" {
+			t.Fatalf("Detail(%s) = %+v, %v", id, d, err)
+		}
+		props := map[string]string{}
+		for _, pr := range d.Summary {
+			props[pr.Label] = pr.Value
+		}
+		if props["KMS key"] != key || (props["Worker pool"] != pool && props["Build worker pool"] != pool) {
+			t.Errorf("%s's page = %v; want the key and the pool", id, props)
+		}
+		if env == functionGen2 && props["Binary authorization"] != "default" {
+			t.Errorf("%s's page = %v; want the policy", id, props)
+		}
+		var secrets console.Listing
+		for _, sec := range d.Sections {
+			if sec.ID == "secrets" {
+				secrets = sec.Listing
+			}
+		}
+		if secrets.Total != 2 || secrets.Items[0].Name != "API_KEY" || secrets.Items[0].Fields["Version"] != "2" ||
+			secrets.Items[1].Name != "/etc/secrets" || !strings.Contains(secrets.Items[1].Fields["Version"], "latest at config") {
+			t.Errorf("%s's secrets = %+v", id, secrets)
+		}
+		if err := p.Delete(ctx, "", id); err != nil {
+			t.Errorf("Delete %s: %v", id, err)
+		}
+	}
+	for _, bad := range []map[string]string{
+		{"secretEnv": "API_KEY"}, {"secretVolumes": "etc=config"}, {"environment": functionGen1, "binaryAuthorization": "default"},
+	} {
+		bad["name"], bad["runtime"], bad["entryPoint"] = "fields-bad", "go123", "Hello"
+		if _, err := p.ActAtFile(ctx, "", nil, functionsCreateAction, bad, console.UploadedFile{Name: "src.zip", Reader: strings.NewReader("x")}); err == nil ||
+			strings.Contains(err.Error(), "no runtime detected") {
+			t.Errorf("Create function %v = %v; want it refused before any create", bad, err)
 		}
 	}
 }

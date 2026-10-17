@@ -21,8 +21,9 @@ import (
 // a literal and as a query parameter, with an alias and in a join with the
 // table as it is. A time before the table was made still fails "Invalid
 // snapshot time"; a time before an ALTER TABLE that rebuilt the table
-// (ADD COLUMN) is 501, CloudBurrow's history starts over there. Measured
-// first: every past time inside the window was 501 "keeps no history".
+// (ADD COLUMN) reads the rows as they were, the column added NULL (#1466;
+// it was 501 until then). Measured first: every past time inside the
+// window was 501 "keeps no history".
 //
 // The times are the engine's CURRENT_TIMESTAMP(), the clock the changes
 // are recorded by, never this machine's.
@@ -120,10 +121,12 @@ func TestBigQueryTimeTravelHistory(t *testing.T) {
 	wantAPIError(t, "before creation", bqRun(ctx, c, "SELECT n FROM "+p+" FOR SYSTEM_TIME AS OF "+
 		lit(t1.Add(-time.Hour)), false), http.StatusBadRequest, "Invalid snapshot time")
 
-	// An ALTER TABLE that rebuilds the table starts CloudBurrow's history over.
+	// An ALTER TABLE that rebuilds the table keeps its history (#1466):
+	// the rows as they were, with the column added NULL.
 	run("ALTER TABLE " + p + " ADD COLUMN extra STRING")
-	wantAPIError(t, "before a rebuild", bqRun(ctx, c, "SELECT n FROM "+p+" FOR SYSTEM_TIME AS OF "+lit(t2), false),
-		http.StatusNotImplemented, "starts after that time")
+	if got := read("SELECT n, s, extra FROM "+p+" FOR SYSTEM_TIME AS OF "+lit(t2)+" ORDER BY n", false); !reflect.DeepEqual(got, []string{"1|c|<nil>", "2|b|<nil>"}) {
+		t.Errorf("before a rebuild: %v, want [1 c NULL 2 b NULL]", got)
+	}
 	t4 := now()
 	run("DELETE " + p + " WHERE n = 1")
 	if got := read("SELECT n, s, extra FROM "+p+" FOR SYSTEM_TIME AS OF "+lit(t4)+" ORDER BY n", false); !reflect.DeepEqual(got, []string{"1|c|<nil>", "3|d|<nil>"}) {
