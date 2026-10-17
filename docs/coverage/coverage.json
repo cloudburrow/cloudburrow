@@ -1615,13 +1615,16 @@
     "Key": "runv1",
     "Title": "Cloud Run v1 (Knative API)",
     "counts": {
-      "Unknown": 38,
-      "Verified": 38
+      "Unimplemented": 15,
+      "Verified": 61
     },
     "rows": [
       {
         "method": "run.namespaces.authorizeddomains.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.namespaces.configurations.get",
@@ -1698,31 +1701,38 @@
       },
       {
         "method": "run.namespaces.instances.create",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
       },
       {
         "method": "run.namespaces.instances.delete",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
       },
       {
         "method": "run.namespaces.instances.get",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
       },
       {
         "method": "run.namespaces.instances.list",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
       },
       {
         "method": "run.namespaces.instances.replaceInstance",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
       },
       {
         "method": "run.namespaces.instances.start",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
       },
       {
         "method": "run.namespaces.instances.stop",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped instances are not mapped: instances are served by v2's Instances service (CreateInstance, GetInstance, ListInstances, StartInstance, StopInstance, DeleteInstance), which the console calls, and no v1 conversion of an Instance is built"
       },
       {
         "method": "run.namespaces.jobs.create",
@@ -1768,7 +1778,10 @@
       },
       {
         "method": "run.namespaces.revisions.delete",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.namespaces.revisions.get",
@@ -1877,23 +1890,28 @@
       },
       {
         "method": "run.namespaces.workerpools.create",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
       },
       {
         "method": "run.namespaces.workerpools.delete",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
       },
       {
         "method": "run.namespaces.workerpools.get",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
       },
       {
         "method": "run.namespaces.workerpools.list",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
       },
       {
         "method": "run.namespaces.workerpools.replaceWorkerPool",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v1's Knative-shaped worker pools are not mapped: worker pools are served by v2's WorkerPools service, which the console and Terraform's google_cloud_run_v2_worker_pool call, and no v1 conversion of a WorkerPool is built (the v1 IAM methods on a pool are served, on its v2 policy)"
       },
       {
         "method": "run.projects.authorizeddomains.list",
@@ -1904,27 +1922,45 @@
       },
       {
         "method": "run.projects.locations.authorizeddomains.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.configurations.get",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.configurations.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.domainmappings.create",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.domainmappings.delete",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.domainmappings.get",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.domainmappings.list",
@@ -1935,15 +1971,18 @@
       },
       {
         "method": "run.projects.locations.instances.getIamPolicy",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v2's Instances service has no IAM methods, so an instance has no stored policy for v1's to read or write; an instance's access is its own, as v2 serves it"
       },
       {
         "method": "run.projects.locations.instances.setIamPolicy",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v2's Instances service has no IAM methods, so an instance has no stored policy for v1's to read or write; an instance's access is its own, as v2 serves it"
       },
       {
         "method": "run.projects.locations.instances.testIamPermissions",
-        "status": "Unknown"
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check): v2's Instances service has no IAM methods, so an instance has no stored policy for v1's to read or write; an instance's access is its own, as v2 serves it"
       },
       {
         "method": "run.projects.locations.jobs.getIamPolicy",
@@ -1975,47 +2014,80 @@
       },
       {
         "method": "run.projects.locations.operations.delete",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:160 TestRunV1OperationsAndWorkerPoolIAM"
+        ]
       },
       {
         "method": "run.projects.locations.operations.get",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:160 TestRunV1OperationsAndWorkerPoolIAM"
+        ]
       },
       {
         "method": "run.projects.locations.operations.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:160 TestRunV1OperationsAndWorkerPoolIAM"
+        ]
       },
       {
         "method": "run.projects.locations.operations.wait",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:160 TestRunV1OperationsAndWorkerPoolIAM"
+        ]
       },
       {
         "method": "run.projects.locations.revisions.delete",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.revisions.get",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.revisions.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.routes.get",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.routes.list",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.services.create",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.services.delete",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.services.get",
@@ -2041,7 +2113,10 @@
       },
       {
         "method": "run.projects.locations.services.replaceService",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:31 TestRunV1ProjectsLocationsAPI"
+        ]
       },
       {
         "method": "run.projects.locations.services.setIamPolicy",
@@ -2060,15 +2135,24 @@
       },
       {
         "method": "run.projects.locations.workerpools.getIamPolicy",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:160 TestRunV1OperationsAndWorkerPoolIAM"
+        ]
       },
       {
         "method": "run.projects.locations.workerpools.setIamPolicy",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:160 TestRunV1OperationsAndWorkerPoolIAM"
+        ]
       },
       {
         "method": "run.projects.locations.workerpools.testIamPermissions",
-        "status": "Unknown"
+        "status": "Verified",
+        "tests": [
+          "test/compat/runv1projects_test.go:160 TestRunV1OperationsAndWorkerPoolIAM"
+        ]
       }
     ]
   },

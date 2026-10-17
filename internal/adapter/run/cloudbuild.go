@@ -259,6 +259,10 @@ func SourceDeployHandler(register func(grpc.ServiceRegistrar), next http.Handler
 	reg := &captureCloudBuild{ServiceRegistrar: t}
 	register(reg)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isRunV1OperationsCall(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if servePush(reg.c, w, r) {
 			return // a Pub/Sub trigger's subscription (#1506)
 		}
@@ -285,6 +289,30 @@ func SourceDeployHandler(register func(grpc.ServiceRegistrar), next http.Handler
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isRunV1OperationsCall reports whether a request is one of Cloud Run v1's
+// projects.locations.operations calls that Cloud Build and Artifact
+// Registry do not bind at the same path (#1533): list, wait and delete. Their
+// get, and Cloud Build's cancel, stay theirs; all read the one store.
+func isRunV1OperationsCall(r *http.Request) bool {
+	rest, ok := strings.CutPrefix(r.URL.Path, "/v1/projects/")
+	if !ok {
+		return false
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) < 4 || parts[1] != "locations" || parts[3] != "operations" {
+		return false
+	}
+	switch {
+	case len(parts) == 4:
+		return r.Method == http.MethodGet
+	case len(parts) == 5 && r.Method == http.MethodDelete:
+		return !strings.Contains(parts[4], ":")
+	case len(parts) == 5 && r.Method == http.MethodPost:
+		return strings.HasSuffix(parts[4], ":wait")
+	}
+	return false
 }
 
 // isSourceDeployPath reports whether a path is Cloud Build's or Artifact

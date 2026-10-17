@@ -119,6 +119,12 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "backupdr.") {
 			continue
 		}
+		// Cloud Run v1's is the adapter's method table, and
+		// TestV1EveryUnservedMethodIsNotImplemented checks its 501s through
+		// the official v1 client (internal/adapter/run).
+		if strings.HasPrefix(m, "run.") {
+			continue
+		}
 		// The Cloud Storage gRPC API's proto is registered under
 		// CloudBurrow's own name, so TestGRPCRegistryMatchesTheServer checks
 		// it in its own package (internal/service/storage).
