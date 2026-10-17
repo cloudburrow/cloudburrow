@@ -802,18 +802,14 @@ func (f *Front) readChangeStream(ss grpc.ServerStream) error {
 		}
 	case req.GetStartTime() != nil:
 		st := req.GetStartTime().AsTime().Truncate(time.Microsecond)
-		f.changes.mu.Lock()
-		earliest := now.Add(-l.retention)
-		if l.since.After(earliest) {
-			earliest = l.since
-		}
-		f.changes.mu.Unlock()
 		if st.After(now) {
 			return grpcstatus.Errorf(codes.InvalidArgument, "start_time %s is in the future", st.Format(time.RFC3339Nano))
 		}
-		if st.Before(earliest.Truncate(time.Microsecond)) {
-			return grpcstatus.Errorf(codes.InvalidArgument, "start_time %s is before the change stream's earliest time %s", st.Format(time.RFC3339Nano), earliest.Format(time.RFC3339Nano))
+		if st.Before(now.Add(-l.retention).Truncate(time.Microsecond)) {
+			return grpcstatus.Errorf(codes.InvalidArgument, "start_time %s is older than the change stream's retention period", st.Format(time.RFC3339Nano))
 		}
+		// A start before the stream was enabled, within the retention,
+		// reads from when it was: nothing was logged before.
 		seq = f.changes.seqAt(l, st)
 	default:
 		seq = f.changes.seqAt(l, now)
