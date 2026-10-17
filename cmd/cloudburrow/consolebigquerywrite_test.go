@@ -37,6 +37,7 @@ func TestTheBigQueryReadWriteEditorScreensStatements(t *testing.T) {
 		"CREATE TABLE IF NOT EXISTS t (x INT64)":    "",
 		"DECLARE x INT64 DEFAULT 1;\nCREATE TABLE t AS SELECT x AS a;\nSELECT * FROM t;": "",
 		"DROP TABLE t":                      "",
+		"UNDROP SCHEMA s":                   "", // #1460
 		"ALTER TABLE t ADD COLUMN c STRING": "",
 		"CREATE TABLE t AS SELECT 'INSERT INTO u' AS s -- ; DELETE FROM u":         "",
 		"BEGIN TRANSACTION; COMMIT TRANSACTION":                                    "",

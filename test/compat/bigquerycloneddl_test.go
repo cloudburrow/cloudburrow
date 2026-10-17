@@ -190,9 +190,9 @@ func TestBigQueryCloneAndSnapshotDDL(t *testing.T) {
 // CREATE TABLE ... CLONE ... OPTIONS(friendly_name) a clone with it. FOR
 // SYSTEM_TIME AS OF a time before the table's time travel window fails
 // invalidQuery, as https://cloud.google.com/bigquery/docs/time-travel
-// documents; a time in the past within it is 501 (a query reads a past
-// time, #1460, but a snapshot or clone does not copy one yet), and so is an option CloudBurrow does not set; neither makes a
-// table.
+// documents; a time in the past within it copies the table as it was
+// then (#1460: the base's two rows, inserted before it); an option
+// CloudBurrow does not set is 501. A refused statement makes no table.
 func TestBigQueryCloneDDLOptionsAndSystemTime(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -243,10 +243,14 @@ func TestBigQueryCloneDDLOptionsAndSystemTime(t *testing.T) {
 	time.Sleep(2 * time.Second) // the base is older than the time read below
 	err = bqRun(ctx, c, "CREATE SNAPSHOT TABLE "+path("past")+" CLONE "+path("base")+
 		" FOR SYSTEM_TIME AS OF TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 SECOND)", false)
-	wantReason(t, "AS OF a time in the past", err, http.StatusNotImplemented, "notImplemented")
+	if err != nil {
+		t.Errorf("AS OF a time in the past: %v", err)
+	} else if got := fmt.Sprint(rows(t, ctx, c, "SELECT COUNT(*) FROM "+path("past"))); got != "[[2]]" {
+		t.Errorf("the snapshot of a second ago holds %s rows, want 2", got)
+	}
 	err = bqRun(ctx, c, "CREATE TABLE "+path("kms")+" CLONE "+path("base")+" OPTIONS(enable_fine_grained_mutations = TRUE)", false)
 	wantReason(t, "an option CloudBurrow does not set", err, http.StatusNotImplemented, "notImplemented")
-	for _, name := range []string{"old", "past", "kms"} {
+	for _, name := range []string{"old", "kms"} {
 		if tableExists(t, ctx, ds.Table(name)) {
 			t.Errorf("a refused statement made %s", name)
 		}
