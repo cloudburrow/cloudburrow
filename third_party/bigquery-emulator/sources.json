@@ -103,7 +103,8 @@
         "patches/googlesqlite/0062-catalog-rebuild-cost.patch",
         "patches/googlesqlite/0063-history-of-other-change-names.patch",
         "patches/googlesqlite/0061-nested-collation.patch",
-        "patches/googlesqlite/0065-change-update-flag-name.patch"
+        "patches/googlesqlite/0065-change-update-flag-name.patch",
+        "patches/googlesqlite/0066-function-body-column-ids.patch"
       ]
     },
     {

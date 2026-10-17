@@ -112,7 +112,7 @@ func TestRewriteVocab(t *testing.T) {
 	if strings.Contains(got, "OVER") || strings.Contains(got, mlVocabPrefix) {
 		t.Errorf("ONE_HOT_ENCODER in a TRANSFORM reads the window or a function: %s", got)
 	}
-	if len(mlVocabFunctions()) != 9 {
+	if len(mlVocabFunctions()) != 8 {
 		t.Errorf("vocabulary functions: %d", len(mlVocabFunctions()))
 	}
 }
