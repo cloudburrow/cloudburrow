@@ -1,0 +1,95 @@
+CloudBurrow patch 49 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1508).
+
+The bug: a STRING column tables.insert gave a collation ('und:ci') was
+made in the engine without it, so its values compared case-sensitively.
+The fix: CreateTable writes the column's COLLATE, which the engine
+compares its values by (googlesqlite patch 0059). Its test
+server/collation_test.go fails without it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -119,6 +119,12 @@
+ 			return err
+ 		}
+ 		def := fmt.Sprintf("`%s` %s", escapeIdent(field.Name), r.encodeSchemaField(field))
++		if c := field.Collation; c != "" && strings.EqualFold(field.Type, "STRING") && !strings.EqualFold(field.Mode, "REPEATED") {
++			// CloudBurrow patch (cloudburrow/cloudburrow#1508): a STRING
++			// column's collation, which the engine compares its values by
++			// (googlesqlite patch 0059).
++			def += " COLLATE '" + strings.ReplaceAll(c, "'", "") + "'"
++		}
+ 		if field.DefaultValueExpression != "" {
+ 			// CloudBurrow patch (cloudburrow/cloudburrow#1340): the
+ 			// column's defaultValueExpression is its DEFAULT in the
+--- /dev/null
++++ b/server/collation_test.go
+@@ -0,0 +1,62 @@
++package server_test
++
++import (
++	"context"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestCollatedColumn is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1508): a STRING column tables.insert gives the
++// collation 'und:ci' compares case-insensitively; the engine's table had
++// no collation, so `s = 'ABC'` did not match 'Abc'.
++func TestCollatedColumn(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test", types.NewDataset("ds")))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	if err := client.Dataset("ds").Table("c").Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{
++		{Name: "s", Type: bigquery.StringFieldType, Collation: "und:ci"},
++	}}); err != nil {
++		t.Fatal(err)
++	}
++	job, err := client.Query("INSERT INTO ds.c (s) VALUES ('Abc')").Run(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if status, err := job.Wait(ctx); err != nil || status.Err() != nil {
++		t.Fatalf("insert: %v, %v", err, status.Err())
++	}
++	it, err := client.Query("SELECT COUNT(*) FROM ds.c WHERE s = 'aBC'").Read(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var row []bigquery.Value
++	if err := it.Next(&row); err != nil {
++		t.Fatal(err)
++	}
++	if len(row) != 1 || row[0] != int64(1) {
++		t.Errorf("COUNT(*) WHERE s = 'aBC' = %v, want 1", row)
++	}
++}

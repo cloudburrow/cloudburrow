@@ -40,7 +40,8 @@
         "patches/bigquery-emulator/0037-default-time-zone-header.patch",
         "patches/bigquery-emulator/0038-csv-empty-string-mark.patch",
         "patches/bigquery-emulator/0041-reported-times-by-the-engine-clock.patch",
-        "patches/bigquery-emulator/0043-range-columns-of-a-schema.patch"
+        "patches/bigquery-emulator/0043-range-columns-of-a-schema.patch",
+        "patches/bigquery-emulator/0049-column-collation.patch"
       ]
     },
     {
@@ -90,7 +91,8 @@
         "patches/googlesqlite/0049-struct-float-type.patch",
         "patches/googlesqlite/0051-catalog-times-by-the-engine-clock.patch",
         "patches/googlesqlite/0053-range-from-text.patch",
-        "patches/googlesqlite/0054-dml-subquery-column-ids.patch"
+        "patches/googlesqlite/0054-dml-subquery-column-ids.patch",
+        "patches/googlesqlite/0059-collation.patch"
       ]
     },
     {
@@ -101,7 +103,8 @@
       "dir": "build/go-googlesql",
       "patches": [
         "patches/go-googlesql/0001-unsigned-wasm-addresses.patch",
-        "patches/go-googlesql/0002-utc-time-zone.patch"
+        "patches/go-googlesql/0002-utc-time-zone.patch",
+        "patches/go-googlesql/0003-annotated-type-argument.patch"
       ]
     }
   ],
