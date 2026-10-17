@@ -103,8 +103,10 @@ func TestBigQueryCreateSchemaMakesTheDataset(t *testing.T) {
 	_ = failed.DeleteWithContents(ctx)
 
 	for what, sql := range map[string]string{
-		"an option the front does not apply": "CREATE SCHEMA %s OPTIONS(default_table_expiration_days=1)",
-		"DEFAULT COLLATE":                    "CREATE SCHEMA %s DEFAULT COLLATE 'und:ci'",
+		// The other options and DEFAULT COLLATE are carried out since
+		// #1459 (TestBigQueryCreateSchemaOptionsAndCollation).
+		"an option the front does not apply": "CREATE SCHEMA %s OPTIONS(primary_replica='us-east4')",
+		"an option value it does not read":   "CREATE SCHEMA %s OPTIONS(default_table_expiration_days=1+1)",
 	} {
 		ds := c.Dataset(prefix + "_refused")
 		sql = strings.ReplaceAll(strings.ReplaceAll(sql, "%[1]s", ds.DatasetID), "%s", ds.DatasetID)

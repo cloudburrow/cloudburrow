@@ -132,9 +132,11 @@ func TestCreateSchemaMakesTheDataset(t *testing.T) {
 // is 501 naming it, and nothing is sent.
 func TestCreateSchemaNotCarriedOut(t *testing.T) {
 	for _, c := range []struct{ sql, names string }{
-		{"CREATE SCHEMA fresh OPTIONS(default_table_expiration_days=1)", "default_table_expiration_days"},
-		{"CREATE SCHEMA fresh OPTIONS(is_case_insensitive=true)", "is_case_insensitive"},
-		{"CREATE SCHEMA fresh DEFAULT COLLATE 'und:ci'", "DEFAULT COLLATE"},
+		// #1459: every option of schema_option_list is carried out but those of replication.
+		{"CREATE SCHEMA fresh OPTIONS(primary_replica='us-east4')", "primary_replica"},
+		{"CREATE SCHEMA fresh OPTIONS(is_primary=true)", "is_primary"},
+		{"CREATE SCHEMA fresh OPTIONS(default_table_expiration_days=1+1)", "default_table_expiration_days"},
+		{"CREATE SCHEMA fresh DEFAULT COLLATE CONCAT('und', ':ci')", "DEFAULT"},
 		{"CREATE SCHEMA fresh OPTIONS(description=CONCAT('a', 'b'))", "description"},
 		{"CREATE SCHEMA fresh OPTIONS(labels=[('k', 1)])", "labels"},
 		{"CREATE SCHEMA fresh OPTIONS(description=b'x')", "description"},
@@ -149,6 +151,40 @@ func TestCreateSchemaNotCarriedOut(t *testing.T) {
 		}
 		if w := emu.writes(); len(w) != 0 {
 			t.Errorf("%s: sent %q", c.sql, w)
+		}
+	}
+}
+
+// TestCreateSchemaOptions (#1459): each option of schema_option_list
+// (but replication's) and DEFAULT COLLATE are the fields of the dataset
+// made; a value BigQuery refuses is 400, and nothing is sent.
+func TestCreateSchemaOptions(t *testing.T) {
+	sql := "CREATE SCHEMA fresh DEFAULT COLLATE 'und:ci' OPTIONS(default_kms_key_name='projects/p/locations/us/keyRings/r/cryptoKeys/k', " +
+		"default_partition_expiration_days=0.5, default_rounding_mode='ROUND_HALF_EVEN', default_table_expiration_days=3.75, " +
+		"is_case_insensitive=TRUE, max_time_travel_hours=72, storage_billing_model='physical', tags=[('p/env', 'prod')], location='us')"
+	emu := &datasetEmulator{datasets: map[string]string{}}
+	if code, got := do(t, Wrap(emu), "POST", base+"/queries", schemaQuery(sql)); code != 200 {
+		t.Fatalf("%d %v", code, got)
+	}
+	want := `{"datasetReference":{"projectId":"p","datasetId":"fresh"},"location":"us","defaultCollation":"und:ci",` +
+		`"defaultEncryptionConfiguration":{"kmsKeyName":"projects/p/locations/us/keyRings/r/cryptoKeys/k"},` +
+		`"defaultPartitionExpirationMs":"43200000","defaultTableExpirationMs":"324000000","defaultRoundingMode":"ROUND_HALF_EVEN",` +
+		`"isCaseInsensitive":true,"maxTimeTravelHours":"72","storageBillingModel":"PHYSICAL","resourceTags":{"p/env":"prod"}}`
+	if got := emu.datasets["fresh"]; !jsonEqual([]byte(got), want) {
+		t.Errorf("made %s, want %s", got, want)
+	}
+	for _, bad := range []string{
+		"CREATE SCHEMA fresh DEFAULT COLLATE 'und:cs'",
+		"CREATE SCHEMA fresh OPTIONS(max_time_travel_hours=50)",
+		"CREATE SCHEMA fresh OPTIONS(default_rounding_mode='UP')",
+		"CREATE SCHEMA fresh OPTIONS(storage_billing_model='COMPRESSED')",
+	} {
+		emu := &datasetEmulator{datasets: map[string]string{}}
+		if code, got := do(t, Wrap(emu), "POST", base+"/queries", schemaQuery(bad)); code != 400 {
+			t.Errorf("%s: %d %v, want 400", bad, code, got)
+		}
+		if w := emu.writes(); len(w) != 0 {
+			t.Errorf("%s: sent %q", bad, w)
 		}
 	}
 }
@@ -183,5 +219,20 @@ func TestCreateSchemaUndoneWhenTheQueryFails(t *testing.T) {
 	})
 	if code, _ := do(t, Wrap(failing), "POST", base+"/queries", schemaQuery("CREATE SCHEMA fresh")); code != 500 || len(emu.writes()) != 0 {
 		t.Errorf("a failed datasets.insert: %d, sent %q", code, emu.writes())
+	}
+}
+
+// TestWithoutDefaultCollate (#1459): the emulator is sent CREATE SCHEMA
+// without its DEFAULT COLLATE clause.
+func TestWithoutDefaultCollate(t *testing.T) {
+	for in, want := range map[string]string{
+		"CREATE SCHEMA d DEFAULT COLLATE 'und:ci' OPTIONS(location='us')":        "CREATE SCHEMA d  OPTIONS(location='us')",
+		"SELECT 1; CREATE SCHEMA IF NOT EXISTS p.d DEFAULT COLLATE ''; SELECT 2": "SELECT 1; CREATE SCHEMA IF NOT EXISTS p.d ; SELECT 2",
+		"CREATE SCHEMA d OPTIONS(description='DEFAULT COLLATE')":                 "",
+	} {
+		got, changed := withoutDefaultCollate(in)
+		if want == "" && changed || want != "" && got != want {
+			t.Errorf("%q: %q %v, want %q", in, got, changed, want)
+		}
 	}
 }

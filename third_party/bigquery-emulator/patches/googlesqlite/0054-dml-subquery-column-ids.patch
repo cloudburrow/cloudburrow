@@ -1,0 +1,148 @@
+CloudBurrow patch 54 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1459).
+
+The bug: an UPDATE or DELETE whose WHERE (or SET) has a subquery of
+several FROM items, such as
+  DELETE ds.t WHERE id IN (SELECT u.id FROM ds.u u JOIN ds.w w USING (k))
+failed 400 "sqlite3: SQL logic error: ambiguous column name: k". The
+formatter writes an UPDATE's or DELETE's column references by their bare
+names, which SQLite's UPDATE and DELETE need for the changed table, and so
+it wrote the subquery's too: two scans with a column of one name could no
+longer be told apart. A query (and a MERGE) names its scans' columns by
+column ID (k#3, k#5).
+
+The fix: an UPDATE or DELETE records its table scan's column IDs; a
+subquery inside it is written with column IDs, as a query is, except for
+the changed table's columns (a correlated reference, t.id), which keep
+their names, and SQLite resolves them to the outer table.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/context.go
++++ b/internal/context.go
+@@ -243,8 +243,32 @@
+ 		return nil
+ 	}
+ 	return value.(*arraySubqueryColumnNames)
++}
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1459): the columns of the
++// table an UPDATE or DELETE changes. Its statement names them by their own
++// names, as SQLite's UPDATE and DELETE know them; a subquery in it names
++// its own scans' columns by their IDs, which keeps a join's two `k`
++// columns apart, and the changed table's columns, correlated, by name.
++type dmlTargetColumnsKey struct{}
++
++func withDMLTargetColumns(ctx context.Context, scan googlesql.ResolvedNode) context.Context {
++	ids := map[int]bool{}
++	if s, ok := scan.(*googlesql.ResolvedTableScan); ok {
++		cols, _ := s.ColumnList()
++		for _, col := range cols {
++			id, _ := col.ColumnId()
++			ids[int(id)] = true
++		}
++	}
++	return context.WithValue(ctx, dmlTargetColumnsKey{}, ids)
+ }
+ 
++func dmlTargetColumns(ctx context.Context) map[int]bool {
++	ids, _ := ctx.Value(dmlTargetColumnsKey{}).(map[int]bool)
++	return ids
++}
++
+ func withUseColumnID(ctx context.Context) context.Context {
+ 	return context.WithValue(ctx, useColumnIDKey{}, true)
+ }
+--- a/internal/formatter.go
++++ b/internal/formatter.go
+@@ -95,6 +95,9 @@
+ 	}
+ 	if useColumnID(ctx) {
+ 		colID, _ := col.ColumnId()
++		if dmlTargetColumns(ctx)[int(colID)] {
++			return colName // CloudBurrow patch (#1459): the changed table's column, by name
++		}
+ 		return fmt.Sprintf("%s#%d", colName, colID)
+ 	}
+ 	return colName
+@@ -1567,6 +1570,12 @@
+ 	}
+ 	columnNames := &arraySubqueryColumnNames{}
+ 	ctx = withArraySubqueryColumnName(ctx, columnNames)
++	if dmlTargetColumns(ctx) != nil && !useColumnID(ctx) {
++		// CloudBurrow patch (#1459): a subquery in an UPDATE or DELETE
++		// names its scans' columns by ID, as a query does; by name, a
++		// join of two tables with a column of one name was "ambiguous".
++		ctx = withUseColumnID(ctx)
++	}
+ 	sql, err := newNode(m1(n.node.Subquery())).FormatSQL(ctx)
+ 	if err != nil {
+ 		return "", err
+@@ -3108,6 +3117,7 @@
+ 	if n == nil {
+ 		return "", nil
+ 	}
++	ctx = withDMLTargetColumns(ctx, m1(n.node.TableScan()))
+ 	table, err := getTableName(ctx, m1(n.node.TableScan()))
+ 	if err != nil {
+ 		return "", err
+@@ -3215,6 +3225,7 @@
+ 	if n == nil {
+ 		return "", nil
+ 	}
++	ctx = withDMLTargetColumns(ctx, m1(n.node.TableScan()))
+ 	table, err := getTableName(ctx, m1(n.node.TableScan()))
+ 	if err != nil {
+ 		return "", err
+--- /dev/null
++++ b/dml_subquery_test.go
+@@ -0,0 +1,45 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestDMLSubqueryOfAJoin is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1459): an UPDATE or DELETE whose subquery joins
++// two tables with a column of one name (k) failed "ambiguous column name:
++// k". The subquery's columns are named by ID, and the changed table's,
++// correlated, by name.
++func TestDMLSubqueryOfAJoin(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=dml_subquery_join")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	for _, q := range []string{
++		"CREATE TABLE `p.d.t` (id INT64, v STRING)",
++		"CREATE TABLE `p.d.u` (id INT64, k INT64)",
++		"CREATE TABLE `p.d.w` (k INT64, v STRING)",
++		"INSERT INTO `p.d.t` (id, v) VALUES (1, 'a'), (2, 'b'), (3, 'c')",
++		"INSERT INTO `p.d.u` (id, k) VALUES (1, 10), (2, 20)",
++		"INSERT INTO `p.d.w` (k, v) VALUES (10, 'X'), (20, 'Y')",
++		"UPDATE `p.d.t` t SET v = (SELECT w.v FROM `p.d.u` u JOIN `p.d.w` w USING (k) WHERE u.id = t.id) WHERE id IN (SELECT u.id FROM `p.d.u` u JOIN `p.d.w` w ON u.k = w.k)",
++		"DELETE FROM `p.d.t` t WHERE EXISTS (SELECT 1 FROM `p.d.u` u, `p.d.w` w WHERE u.k = w.k AND w.v = 'Y' AND u.id = t.id)",
++	} {
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	var got string
++	if err := db.QueryRowContext(ctx, "SELECT STRING_AGG(CONCAT(CAST(id AS STRING), v), ',' ORDER BY id) FROM `p.d.t`").Scan(&got); err != nil {
++		t.Fatal(err)
++	}
++	if got != "1X,3c" {
++		t.Errorf("t is %q, want 1X,3c", got)
++	}
++}

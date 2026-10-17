@@ -323,7 +323,8 @@ func TestCreateViewReadsBackAsWritten(t *testing.T) {
 }
 
 // TestUpdateFromAsMerge (#1027): an UPDATE ... FROM of one table or
-// subquery is run as a MERGE; one of several FROM items is a gap (501).
+// subquery is run as a MERGE, and since #1459 one of several FROM items
+// from a subquery of them; what the front does not read is a gap (501).
 func TestUpdateFromAsMerge(t *testing.T) {
 	for _, c := range []struct{ sql, merge, gap string }{
 		{"UPDATE ds.t x SET a = u.b, c = 1 FROM ds.u WHERE x.a = u.a",
@@ -332,9 +333,16 @@ func TestUpdateFromAsMerge(t *testing.T) {
 			"MERGE orders o USING (SELECT 3 AS id UNION ALL SELECT 4) s ON o.id = s.id WHEN MATCHED THEN UPDATE SET amount = o.amount", ""},
 		{"UPDATE t SET a = 1 FROM u AS s WHERE t.a = s.a AND s.b > (SELECT 1)",
 			"MERGE t AS `t` USING u AS s ON t.a = s.a AND s.b > (SELECT 1) WHEN MATCHED THEN UPDATE SET a = 1", ""},
-		{"UPDATE t SET a = 1 FROM u, v WHERE t.a = u.a", "", "gap"},
-		{"UPDATE t SET a = 1 FROM u JOIN v USING (a) WHERE t.a = u.a", "", "gap"},
-		{"UPDATE t SET a = 1 FROM UNNEST([1]) n WHERE t.a = n", "", "gap"},
+		// #1459: several FROM items are one subquery of their range variables.
+		{"UPDATE t SET a = 1 FROM u, v WHERE t.a = u.a",
+			"MERGE t AS `t` USING (SELECT `u`, `v` FROM u AS `u`, v AS `v`) AS `_cb_from` ON t.a = u.a WHEN MATCHED THEN UPDATE SET a = 1", ""},
+		{"UPDATE ds.t x SET a = v.b FROM ds.u AS s JOIN (SELECT 1 AS a) v USING (a) LEFT OUTER JOIN w ON w.a = s.a AND (v.a > 0) WHERE x.a = s.a",
+			"MERGE ds.t x USING (SELECT `s`, `v`, `w` FROM ds.u AS s JOIN (SELECT 1 AS a) v USING (a) LEFT OUTER JOIN w AS `w` ON w.a = s.a AND (v.a > 0)) " +
+				"AS `_cb_from` ON x.a = s.a WHEN MATCHED THEN UPDATE SET a = v.b", ""},
+		{"UPDATE t SET a = 1 FROM UNNEST([1]) n WITH OFFSET o WHERE t.a = n + o",
+			"MERGE t AS `t` USING (SELECT `n`, `o` FROM UNNEST([1]) n WITH OFFSET o) AS `_cb_from` ON t.a = n + o WHEN MATCHED THEN UPDATE SET a = 1", ""},
+		{"UPDATE t SET a = 1 FROM u FOR SYSTEM_TIME AS OF CURRENT_TIMESTAMP(), v WHERE t.a = u.a", "", "gap"},
+		{"UPDATE t SET a = 1 FROM (u JOIN v USING (a)) WHERE t.a = u.a", "", "gap"},
 	} {
 		d, ok := parseDML(c.sql)
 		if !ok || d.kind != "UPDATE" || d.asMerge != c.merge || (d.fromGap != "") != (c.gap != "") {
