@@ -272,13 +272,12 @@ func TestFirestoreAdminFields(t *testing.T) {
 	}
 }
 
-// TestFirestoreAdminRefusals: the managed export and import, bulk delete,
-// backups, restores, clones and user credentials answer UNIMPLEMENTED, each
-// saying why (#1461): the emulator has no managed export, cannot snapshot a
-// database, and is not Firestore with MongoDB compatibility.
+// TestFirestoreAdminRefusals: user credentials answer UNIMPLEMENTED, saying
+// why: they are for Firestore with MongoDB compatibility, which the
+// emulator is not. Exports, imports, bulk deletes, backups, restores and
+// clones are served (TestFirestoreExportImport,
+// TestFirestoreBackupRestoreClone, #1500).
 //
-// covers: google.firestore.admin.v1.FirestoreAdmin/ExportDocuments (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ImportDocuments (unimplemented), google.firestore.admin.v1.FirestoreAdmin/BulkDeleteDocuments (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ListBackups (unimplemented)
-// covers: google.firestore.admin.v1.FirestoreAdmin/GetBackup (unimplemented), google.firestore.admin.v1.FirestoreAdmin/DeleteBackup (unimplemented), google.firestore.admin.v1.FirestoreAdmin/RestoreDatabase (unimplemented), google.firestore.admin.v1.FirestoreAdmin/CloneDatabase (unimplemented)
 // covers: google.firestore.admin.v1.FirestoreAdmin/CreateUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/GetUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ListUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/EnableUserCreds (unimplemented)
 // covers: google.firestore.admin.v1.FirestoreAdmin/DisableUserCreds (unimplemented), google.firestore.admin.v1.FirestoreAdmin/ResetUserPassword (unimplemented), google.firestore.admin.v1.FirestoreAdmin/DeleteUserCreds (unimplemented)
 func TestFirestoreAdminRefusals(t *testing.T) {
@@ -287,39 +286,6 @@ func TestFirestoreAdminRefusals(t *testing.T) {
 	ctx := h.Context()
 	db := "projects/" + h.Project() + "/databases/(default)"
 	for what, err := range map[string]error{
-		"ExportDocuments": func() error {
-			_, err := c.ExportDocuments(ctx, &adminpb.ExportDocumentsRequest{Name: db, OutputUriPrefix: "gs://b/x"})
-			return err
-		}(),
-		"ImportDocuments": func() error {
-			_, err := c.ImportDocuments(ctx, &adminpb.ImportDocumentsRequest{Name: db, InputUriPrefix: "gs://b/x"})
-			return err
-		}(),
-		"BulkDeleteDocuments": func() error {
-			_, err := c.BulkDeleteDocuments(ctx, &adminpb.BulkDeleteDocumentsRequest{Name: db})
-			return err
-		}(),
-		"ListBackups": func() error {
-			_, err := c.ListBackups(ctx, &adminpb.ListBackupsRequest{Parent: "projects/" + h.Project() + "/locations/-"})
-			return err
-		}(),
-		"GetBackup": func() error {
-			_, err := c.GetBackup(ctx, &adminpb.GetBackupRequest{Name: "projects/" + h.Project() + "/locations/nam5/backups/b1"})
-			return err
-		}(),
-		"DeleteBackup": func() error {
-			return c.DeleteBackup(ctx, &adminpb.DeleteBackupRequest{Name: "projects/" + h.Project() + "/locations/nam5/backups/b1"})
-		}(),
-		"RestoreDatabase": func() error {
-			_, err := c.RestoreDatabase(ctx, &adminpb.RestoreDatabaseRequest{Parent: "projects/" + h.Project(), DatabaseId: "restored",
-				Backup: "projects/" + h.Project() + "/locations/nam5/backups/b1"})
-			return err
-		}(),
-		"CloneDatabase": func() error {
-			_, err := c.CloneDatabase(ctx, &adminpb.CloneDatabaseRequest{Parent: "projects/" + h.Project(), DatabaseId: "cloned",
-				PitrSnapshot: &adminpb.PitrSnapshot{Database: db}})
-			return err
-		}(),
 		"CreateUserCreds": func() error {
 			_, err := c.CreateUserCreds(ctx, &adminpb.CreateUserCredsRequest{Parent: db, UserCredsId: "u1", UserCreds: &adminpb.UserCreds{}})
 			return err
@@ -359,8 +325,8 @@ func TestFirestoreAdminRefusals(t *testing.T) {
 // client, listed and got, a second daily one is refused ALREADY_EXISTS, a
 // retention beyond Google's 7-day cap for a daily schedule is
 // INVALID_ARGUMENT, the daily one's retention is updated and its recurrence
-// cannot be, and both are deleted. They take no backups: backups stay
-// refused (TestFirestoreAdminRefusals).
+// cannot be, and both are deleted. Their backups are
+// TestFirestoreBackupRestoreClone's.
 //
 // covers: google.firestore.admin.v1.FirestoreAdmin/CreateBackupSchedule, google.firestore.admin.v1.FirestoreAdmin/GetBackupSchedule, google.firestore.admin.v1.FirestoreAdmin/ListBackupSchedules, google.firestore.admin.v1.FirestoreAdmin/UpdateBackupSchedule, google.firestore.admin.v1.FirestoreAdmin/DeleteBackupSchedule
 func TestFirestoreAdminBackupSchedules(t *testing.T) {

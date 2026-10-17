@@ -95,6 +95,7 @@ Set by `scripts/compat-env.sh` from a running instance:
 | `CLOUDBURROW_TEST_RUN_RESOURCEMANAGER`, `CLOUDBURROW_TEST_RUN_SERVICEUSAGE` | as `RESOURCEMANAGER` and `SERVICEUSAGE` | gcloud's Resource Manager and Service Usage overrides in the run shard: `gcloud functions deploy --trigger-service-account` reads the project number through the one and checks `run.googleapis.com` is enabled through the other (main run 38929852240), so neither suite runs twice |
 | `CLOUDBURROW_TEST_LOGGING_RESOURCEMANAGER` | as `RESOURCEMANAGER` | the Cloud Logging folder and organization tests, which make a folder (#1395), in the served shard, so the Resource Manager tests stay in storage |
 | `CLOUDBURROW_TEST_SINK_LOGGING`, `CLOUDBURROW_TEST_SINK_STORAGE`, `CLOUDBURROW_TEST_SINK_PUBSUB` | as `LOGGING`, `STORAGE` and `PUBSUB` | the Cloud Logging sinks that deliver to Cloud Storage, Pub/Sub and BigQuery (#1404), in the emulators shard beside BigQuery, and `gcloud logging copy` and `CopyLogEntries` to a bucket (#1394) |
+| `CLOUDBURROW_TEST_FIRESTORE_STORAGE` | as `STORAGE` | the Cloud Storage Firestore's exports and imports go through (#1500), in the emulators shard beside Firestore |
 | `CLOUDBURROW_TEST_RUN_BIGQUERY` | as `BIGQUERY` | the Cloud Run revision refused by the BigQuery front (#874); see below |
 | `CLOUDBURROW_TEST_RUN_SQLADMIN` | as `SQLADMIN` | the Cloud Run services and job with a Cloud SQL volume (#1346), without the Cloud SQL suite |
 | `CLOUDBURROW_TEST_SPANNER` | `SPANNER_EMULATOR_HOST` | Spanner |

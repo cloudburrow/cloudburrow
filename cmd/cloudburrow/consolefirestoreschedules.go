@@ -19,8 +19,8 @@ import (
 // A database's backup schedules (#1461): its Backup schedules tab, Create
 // backup schedule on its page, and Edit retention and Delete backup
 // schedule on a schedule's row, through the official Firestore Admin
-// client. The schedules take no backups: the emulator cannot snapshot a
-// database, and the tab says so.
+// client. The schedules take the backups of the Backups tab
+// (consolefirestorebackups.go).
 
 // firestoreSchedulesSegment is the second segment of a schedule's action path.
 const firestoreSchedulesSegment = "backupSchedules"
@@ -78,7 +78,7 @@ func (p firestoreDatabasesProvider) schedules(ctx context.Context, c *admin.Fire
 		}, Actions: scheduleActions(s), ActsOn: []string{id, firestoreSchedulesSegment, sid}})
 	}
 	list.Total = len(list.Items)
-	list.Note = "Backup schedules are stored with Google's limits and take no backups: the emulator cannot snapshot a database."
+	list.Note = "Backup schedules are stored with Google's limits. A schedule takes its first backup when it is created, then one each day or week: see the Backups tab."
 	return list
 }
 

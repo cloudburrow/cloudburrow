@@ -81,7 +81,7 @@ func TestConsoleFirestoreDatabasesIndexesAndFields(t *testing.T) {
 	}
 
 	d, err := p.Detail(ctx, "p", []string{"orders"})
-	if err != nil || d.Unavailable != "" || len(d.Sections) != 3 {
+	if err != nil || d.Unavailable != "" || len(d.Sections) != 4 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
 	props := map[string]string{}
@@ -193,7 +193,7 @@ func TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides(t *testing.T) {
 		t.Errorf("the created index = %v", resp)
 	}
 	d, err := p.Detail(ctx, "p", []string{"(default)"})
-	if err != nil || len(d.Sections) != 3 || len(d.Sections[0].Listing.Items) != 1 {
+	if err != nil || len(d.Sections) != 4 || len(d.Sections[0].Listing.Items) != 1 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
 	row := d.Sections[0].Listing.Items[0]
@@ -308,7 +308,7 @@ func TestConsoleFirestoreBackupSchedules(t *testing.T) {
 		t.Errorf("a daily schedule keeping 8 days: %v, want the API's INVALID_ARGUMENT", err)
 	}
 	d, err := p.Detail(ctx, "p", []string{"(default)"})
-	if err != nil || len(d.Sections) != 3 || len(d.Sections[2].Listing.Items) != 1 {
+	if err != nil || len(d.Sections) != 4 || len(d.Sections[2].Listing.Items) != 1 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
 	row := d.Sections[2].Listing.Items[0]

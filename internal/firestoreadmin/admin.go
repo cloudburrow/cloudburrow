@@ -18,14 +18,17 @@
 //     and TTL). They are stored and returned READY at once, but change
 //     nothing: the emulator answers any query without an index, and does
 //     not delete expired documents.
-//   - Backup schedules (#1461), with Google's limits. They take no backups:
-//     the emulator cannot snapshot a database.
+//   - Backup schedules (#1461), with Google's limits, and the backups they
+//     take: copies of the documents, read from the emulator (#1500,
+//     backups.go), which RestoreDatabase restores.
 //
 // Operations are done when they are returned, as Google's are once they
 // have finished, with the metadata Google documents for each.
 //
-// ImportDocuments, ExportDocuments, BulkDeleteDocuments, backups, restores,
-// clones and user credentials answer UNIMPLEMENTED (501 over REST), each
+// ExportDocuments and ImportDocuments go through the instance's Cloud
+// Storage, and BulkDeleteDocuments through the emulator's own calls
+// (transfer.go); CloneDatabase copies the documents as they are now
+// (backups.go). User credentials answer UNIMPLEMENTED (501 over REST),
 // naming why.
 package firestoreadmin
 
@@ -89,6 +92,13 @@ type Admin struct {
 	schedules map[string]*adminpb.BackupSchedule // by name
 	ops       map[string]*longrunningpb.Operation
 	opOrder   []string
+	// backups by name, and the time each schedule last took one.
+	backups    map[string]*backup
+	lastBackup map[string]time.Time
+
+	// storage is the instance's Cloud Storage, for exports and imports.
+	storage string
+	emulatorConn
 }
 
 // New returns the API for the emulator at emulator (host:port).
@@ -103,6 +113,9 @@ func New(emulator string) *Admin {
 		fields:    map[string]*adminpb.Field{},
 		schedules: map[string]*adminpb.BackupSchedule{},
 		ops:       map[string]*longrunningpb.Operation{},
+
+		backups:    map[string]*backup{},
+		lastBackup: map[string]time.Time{},
 	}
 	a.grpc = grpc.NewServer()
 	adminpb.RegisterFirestoreAdminServer(a.grpc, a)
@@ -411,6 +424,7 @@ func (a *Admin) DeleteDatabase(ctx context.Context, req *adminpb.DeleteDatabaseR
 	for n := range a.schedules {
 		if strings.HasPrefix(n, db.Name+"/") {
 			delete(a.schedules, n)
+			delete(a.lastBackup, n)
 		}
 	}
 	gone := a.describe(db)
@@ -828,39 +842,13 @@ func (a *Admin) ListFields(_ context.Context, req *adminpb.ListFieldsRequest) (*
 // --- refused ---
 
 const (
-	noExport  = "is not served here: the emulator has no managed export or import, and an export it could write would not be in Firestore's own format. Use the emulator's export (gcloud emulators firestore start --export-on-exit) instead"
-	noBackups = "is not served here: the emulator cannot snapshot a database, so no backups are taken (backup schedules are stored, and take none) and there are no backups or versions to restore or clone from"
-	noCreds   = "is not served here: user credentials are for Firestore with MongoDB compatibility, which the emulator is not"
+	noCreds = "is not served here: user credentials are for Firestore with MongoDB compatibility, which the emulator is not"
 )
 
 func refuse(method, why string) error {
 	return status.Errorf(codes.Unimplemented, "%s %s", method, why)
 }
 
-func (a *Admin) ExportDocuments(context.Context, *adminpb.ExportDocumentsRequest) (*longrunningpb.Operation, error) {
-	return nil, refuse("ExportDocuments", noExport)
-}
-func (a *Admin) ImportDocuments(context.Context, *adminpb.ImportDocumentsRequest) (*longrunningpb.Operation, error) {
-	return nil, refuse("ImportDocuments", noExport)
-}
-func (a *Admin) BulkDeleteDocuments(context.Context, *adminpb.BulkDeleteDocumentsRequest) (*longrunningpb.Operation, error) {
-	return nil, refuse("BulkDeleteDocuments", "is not served here: the emulator has no bulk delete by collection; delete the documents, or the database")
-}
-func (a *Admin) GetBackup(context.Context, *adminpb.GetBackupRequest) (*adminpb.Backup, error) {
-	return nil, refuse("GetBackup", noBackups)
-}
-func (a *Admin) ListBackups(context.Context, *adminpb.ListBackupsRequest) (*adminpb.ListBackupsResponse, error) {
-	return nil, refuse("ListBackups", noBackups)
-}
-func (a *Admin) DeleteBackup(context.Context, *adminpb.DeleteBackupRequest) (*emptypb.Empty, error) {
-	return nil, refuse("DeleteBackup", noBackups)
-}
-func (a *Admin) RestoreDatabase(context.Context, *adminpb.RestoreDatabaseRequest) (*longrunningpb.Operation, error) {
-	return nil, refuse("RestoreDatabase", noBackups)
-}
-func (a *Admin) CloneDatabase(context.Context, *adminpb.CloneDatabaseRequest) (*longrunningpb.Operation, error) {
-	return nil, refuse("CloneDatabase", noBackups)
-}
 func (a *Admin) CreateUserCreds(context.Context, *adminpb.CreateUserCredsRequest) (*adminpb.UserCreds, error) {
 	return nil, refuse("CreateUserCreds", noCreds)
 }
