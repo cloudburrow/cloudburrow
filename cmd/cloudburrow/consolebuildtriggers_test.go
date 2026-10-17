@@ -70,3 +70,70 @@ func TestConsoleBuildTriggersAndWorkerPools(t *testing.T) {
 	}
 	var _ console.Provider = trigs
 }
+
+// A trigger's page (the console parity audit): it shows what
+// GetBuildTrigger reads, Edit trigger changes the description, the step and
+// the pool through UpdateBuildTrigger, and Disable and Enable flip
+// disabled, which takes Run off the page and puts it back.
+func TestConsoleBuildTriggerPageEditAndDisable(t *testing.T) {
+	ctx := context.Background()
+	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
+	g := grpc.NewServer()
+	s.Builds(stubSource{}, blockingBuilder{}).CloudBuild().Register(g)
+	runadapter.NewOperationsServer(s).Register(g)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = g.Serve(ln) }()
+	t.Cleanup(g.Stop)
+	trigs := buildTriggersProvider{b: runBuildsProvider{defaultProject: "console-trig-edit", runAddr: func() string { return ln.Addr().String() }}}
+	if _, err := trigs.Create(ctx, "", map[string]string{"name": "t2", "region": "global", "image": "alpine:3.20",
+		"command": "echo one", "description": "first"}); err != nil {
+		t.Fatalf("trigger Create: %v", err)
+	}
+	t.Cleanup(func() { _ = trigs.Delete(ctx, "", "t2") })
+	ids := func() string {
+		var out []string
+		for _, a := range trigs.DetailActions(ctx, "", []string{"t2"}) {
+			out = append(out, a.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := ids(); got != "edit-trigger,disable-trigger,run" {
+		t.Errorf("an enabled manual trigger's actions: %s", got)
+	}
+	if err := trigs.ActAt(ctx, "", []string{"t2"}, "edit-trigger", map[string]string{"description": "second", "image": "busybox:1.36",
+		"command": "echo two", "pool": ""}); err != nil {
+		t.Fatalf("Edit trigger: %v", err)
+	}
+	d, err := trigs.Detail(ctx, "", []string{"t2"})
+	if err != nil || d.Unavailable != "" {
+		t.Fatalf("Detail = %+v, %v", d, err)
+	}
+	got := map[string]string{}
+	for _, pr := range d.Summary {
+		got[pr.Label] = pr.Value
+	}
+	if got["Description"] != "second" || got["Step image"] != "busybox:1.36" || got["Command"] != "echo two" || got["Status"] != "Enabled" {
+		t.Errorf("the trigger's page after Edit trigger: %v", got)
+	}
+	if err := trigs.ActAt(ctx, "", []string{"t2"}, "disable-trigger", nil); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if got := ids(); got != "edit-trigger,enable-trigger" {
+		t.Errorf("a disabled trigger's actions: %s", got)
+	}
+	if tl, _ := trigs.List(ctx, ""); len(tl.Items) != 1 || tl.Items[0].Status != "Disabled" {
+		t.Errorf("the list after Disable: %+v", tl.Items)
+	}
+	if err := trigs.ActAt(ctx, "", []string{"t2"}, "enable-trigger", nil); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	if d, _ := trigs.Detail(ctx, "", []string{"t2"}); !strings.Contains(consoleDetailText(d), "Enabled") {
+		t.Errorf("the trigger's page after Enable: %+v", d.Summary)
+	}
+	if err := trigs.ActAt(ctx, "", []string{"t2"}, "edit-trigger", map[string]string{"image": "", "command": "x"}); err == nil {
+		t.Error("Edit trigger took an empty step image")
+	}
+}

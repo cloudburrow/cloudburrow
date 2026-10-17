@@ -98,6 +98,11 @@ func (p *tab) pageAction(label string, values map[string]string, confirm string)
 //     9.6 to 18 and MySQL 8.0 and 8.4;
 //   - on an instance made with the Data API allowed, Run SQL (Data API)
 //     answers executeSql's rows, read with a Secret Manager password;
+//   - Add user account and Change password make the user Run SQL signs in
+//     as, and Create database and Delete database a database
+//     databases.get reads and then does not;
+//   - Create project backup makes a backup ListBackups lists and the
+//     Project backups tab shows;
 //   - Edit project backup changes a backup GetBackup then reads, and Delete
 //     project backup, confirmed by the instance's name, deletes it;
 //   - a parallel Export writes a folder, and a parallel Import with Clean and
@@ -138,11 +143,30 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 		}
 	})
 	waitSQL(t, svc, project, op, 10*time.Minute)
-	op, err = svc.Users.Insert(project, name, &sqladmin.User{Name: "browserapi", Password: "Browser-pass1"}).Do()
-	if err != nil {
-		t.Fatal(err)
+
+	// Add user account, then Change password, on the instance's page: Run
+	// SQL below signs in as that user with the changed password.
+	page := "/cloudsql-instances/" + name + "?project=" + project
+	p.navigate(page)
+	p.pageAction("Add user account", map[string]string{"userName": "browserapi", "password": "Browser-tmp1"}, "")
+	if u, err := svc.Users.Get(project, name, "browserapi").Do(); err != nil || u.Name != "browserapi" {
+		t.Fatalf("users.get after Add user account = %+v, %v", u, err)
 	}
-	waitSQL(t, svc, project, op, time.Minute)
+	p.navigate(page)
+	p.pageAction("Change password", map[string]string{"user": "browserapi", "password": "Browser-pass1"}, "")
+	// Create database, which the Databases tab lists, and Delete database.
+	p.navigate(page)
+	p.pageAction("Create database", map[string]string{"dbName": "browserdb"}, "")
+	if db, err := svc.Databases.Get(project, name, "browserdb").Do(); err != nil || db.Name != "browserdb" {
+		t.Fatalf("databases.get after Create database = %+v, %v", db, err)
+	}
+	p.navigate(page)
+	p.clickText(`#view [role="tab"]`, "Databases")
+	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes("browserdb"))`)
+	p.pageAction("Delete database", map[string]string{"dbName": "browserdb"}, name)
+	if _, err := svc.Databases.Get(project, name, "browserdb").Do(); err == nil {
+		t.Error("Delete database left the database databases.get reads")
+	}
 
 	sm, err := secretmanager.NewClient(ctx, option.WithEndpoint(endpoint(t, envSecrets)), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
@@ -163,30 +187,31 @@ func TestCloudSQLInstanceActionsThroughThePage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A project backup of the instance, for Edit and Delete project backup.
-	op, err = svc.Backups.CreateBackup("projects/"+project, &sqladmin.Backup{Instance: name, Description: "browser-" + name}).Do()
-	if err != nil {
-		t.Fatal(err)
-	}
-	waitSQL(t, svc, project, op, 5*time.Minute)
-	list, err := svc.Backups.ListBackups("projects/" + project).Filter(`instance="` + name + `"`).Do()
-	if err != nil {
-		t.Fatal(err)
-	}
+	p.navigate(page)
+	p.waitFor(`document.querySelectorAll("#view .page-actions button").length > 0`)
+
+	// Create project backup, which the Project backups tab then lists, for
+	// Edit and Delete project backup.
+	p.pageAction("Create project backup", map[string]string{"description": "browser-" + name, "ttlDays": "2"}, "")
 	var backup string
-	for _, b := range list.Backups {
-		if b.Description == "browser-"+name {
-			backup = b.Name
+	for deadline := time.Now().Add(5 * time.Minute); backup == "" && time.Now().Before(deadline); time.Sleep(time.Second) {
+		list, err := svc.Backups.ListBackups("projects/" + project).Filter(`instance="` + name + `"`).Do()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, b := range list.Backups {
+			if b.Description == "browser-"+name && b.State == "SUCCESSFUL" {
+				backup = b.Name
+			}
 		}
 	}
 	if backup == "" {
-		t.Fatalf("CreateBackup made no backup of %s: %+v", name, list.Backups)
+		t.Fatalf("Create project backup made no SUCCESSFUL backup of %s that ListBackups lists", name)
 	}
 	t.Cleanup(func() { _, _ = svc.Backups.DeleteBackup(backup).Do() })
-
-	page := "/cloudsql-instances/" + name + "?project=" + project
 	p.navigate(page)
-	p.waitFor(`document.querySelectorAll("#view .page-actions button").length > 0`)
+	p.clickText("#view [role=tab]", "Project backups")
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, "browser-"+name))
 
 	// Run SQL (Data API).
 	rows := p.pageAction("Run SQL (Data API)", map[string]string{"database": "postgres", "user": "browserapi",
