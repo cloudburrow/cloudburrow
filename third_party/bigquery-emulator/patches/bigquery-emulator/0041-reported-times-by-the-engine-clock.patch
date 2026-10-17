@@ -1,5 +1,5 @@
 CloudBurrow patch 41 to github.com/goccy/bigquery-emulator v0.8.1
-(cloudburrow/cloudburrow#1487). Applies after patch 0037; needs
+(cloudburrow/cloudburrow#1487). Applies after patch 0038; needs
 googlesqlite patch 0051.
 
 Since patch 0034 the engine's clock follows CloudBurrow's front's, which
@@ -29,7 +29,7 @@ CloudBurrow Authors.
  
  	"cloud.google.com/go/storage"
  	"github.com/goccy/go-json"
-@@ -885,7 +884,7 @@
+@@ -887,7 +886,7 @@
  	}
  	// BigQuery gives a dataset's creationTime and lastModifiedTime in
  	// milliseconds since the epoch; they are output only.
@@ -38,7 +38,7 @@ CloudBurrow Authors.
  	r.dataset.CreationTime = now
  	r.dataset.LastModifiedTime = now
  	conn, err := r.server.connMgr.Connection(ctx, r.project.ID, datasetID)
-@@ -1371,7 +1370,7 @@
+@@ -1373,7 +1372,7 @@
  	if err != nil {
  		return nil, err
  	}
@@ -47,7 +47,7 @@ CloudBurrow Authors.
  	// The write disposition applies to the load job as a whole, so it is
  	// honored only for the first object imported; every later object (e.g.
  	// the matches of a wildcard URI) appends to what the first one wrote.
-@@ -1433,7 +1432,7 @@
+@@ -1435,7 +1434,7 @@
  			return nil, fmt.Errorf("the number of wildcards in gcs uri must be 0 or 1")
  		}
  	}
@@ -56,7 +56,7 @@ CloudBurrow Authors.
  	job := r.job
  	job.Kind = "bigquery#job"
  	job.Configuration.JobType = "LOAD"
-@@ -1508,7 +1507,7 @@
+@@ -1510,7 +1509,7 @@
  	if err != nil {
  		return nil, err
  	}
@@ -65,7 +65,7 @@ CloudBurrow Authors.
  	conn, err := r.server.connMgr.Connection(ctx, r.project.ID, "")
  	if err != nil {
  		return nil, fmt.Errorf("failed to get connection: %w", err)
-@@ -1549,7 +1548,7 @@
+@@ -1551,7 +1550,7 @@
  			return nil, err
  		}
  	}
@@ -74,7 +74,7 @@ CloudBurrow Authors.
  	job := r.job
  	job.Kind = "bigquery#job"
  	job.Configuration.JobType = "EXTRACT"
-@@ -1703,7 +1702,7 @@
+@@ -1705,7 +1704,7 @@
  	}
  	defer tx.RollbackIfNotCommitted()
  	hasDestinationTable := job.Configuration.Query.DestinationTable != nil
@@ -83,7 +83,7 @@ CloudBurrow Authors.
  	response, jobErr := r.server.contentRepo.Query(
  		ctx,
  		tx,
-@@ -1712,7 +1711,7 @@
+@@ -1714,7 +1713,7 @@
  		job.Configuration.Query.Query,
  		job.Configuration.Query.QueryParameters,
  	)
@@ -92,7 +92,7 @@ CloudBurrow Authors.
  	if job.JobReference.JobId == "" {
  		job.JobReference.JobId = randomID() // generate job id
  	}
-@@ -2099,7 +2098,7 @@
+@@ -2101,7 +2100,7 @@
  		return nil, err
  	}
  	defer tx.RollbackIfNotCommitted()
@@ -101,7 +101,7 @@ CloudBurrow Authors.
  	response, queryErr := r.server.contentRepo.Query(
  		ctx,
  		tx,
-@@ -2111,7 +2110,7 @@
+@@ -2113,7 +2112,7 @@
  	if queryErr != nil {
  		return nil, queryErr
  	}
@@ -110,7 +110,7 @@ CloudBurrow Authors.
  	// jobs.query allocates jobIDs server-side (real BigQuery does the
  	// same). queryRequest.RequestId is the *idempotency* key — same
  	// RequestId on retry should return the cached result — and is
-@@ -3063,7 +3062,7 @@
+@@ -3065,7 +3064,7 @@
  )
  
  func createTableMetadata(ctx context.Context, tx *connection.Tx, server *Server, project *metadata.Project, dataset *metadata.Dataset, table *bigqueryv2.Table) (*bigqueryv2.Table, *ServerError) {
