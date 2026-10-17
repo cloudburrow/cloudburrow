@@ -40,6 +40,7 @@
           "test/compat/appengine1447_test.go:159 TestGcloudAppEngineTargets",
           "test/compat/appengine1447_test.go:35 TestTasksAppEngineTargets",
           "test/compat/appengine1506_test.go:101 TestTasksAppEngineDelivery",
+          "test/compat/consoletasksattempts_test.go:23 TestConsoleTasksAttemptHistory",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
           "test/compat/tasks_test.go:145 TestTasksTaskLifecycle",
           "test/compat/tasktokens_test.go:115 TestTasksOIDCAndOAuthTokens"
@@ -692,6 +693,7 @@
           "test/compat/rungcsfuse_test.go:213 TestTerraformRunCloudStorageVolume",
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
           "test/compat/runnfstools_test.go:50 TestTerraformRunNFSVolume",
+          "test/compat/runownership_test.go:24 TestRunDeleteRefusesAnUnownedKnativeService",
           "test/compat/runvolumegc_test.go:125 TestRunCloudStorageVolumeObjectsGoWithTheirLastWorkload",
           "test/compat/runvolumegc_test.go:203 TestRunNFSVolumeObjectsGoWithTheirLastService",
           "test/compat/terraform_cicd_test.go:218 TestTerraformRunServiceCloudSQLVolume",
@@ -2371,7 +2373,7 @@
           "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:167 TestRunV1VolumesProbesAndServiceAccount",
-          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage",
+          "test/compat/runvolumes_test.go:223 TestGcloudRunDeployImage",
           "test/compat/terraform_batch8_test.go:138 TestTerraformCloudRunV1ServiceIAM",
           "test/compat/terraform_batch8_test.go:78 TestTerraformCloudRunV1Service"
         ]
@@ -2383,7 +2385,7 @@
           "test/compat/rungcsfuse_test.go:184 TestGcloudRunDeployCloudStorageVolume",
           "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
-          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage",
+          "test/compat/runvolumes_test.go:223 TestGcloudRunDeployImage",
           "test/compat/terraform_batch8_test.go:138 TestTerraformCloudRunV1ServiceIAM",
           "test/compat/terraform_batch8_test.go:78 TestTerraformCloudRunV1Service"
         ]
@@ -2399,7 +2401,7 @@
           "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
           "test/compat/runvolumes_test.go:167 TestRunV1VolumesProbesAndServiceAccount",
-          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage",
+          "test/compat/runvolumes_test.go:223 TestGcloudRunDeployImage",
           "test/compat/terraform_batch8_test.go:138 TestTerraformCloudRunV1ServiceIAM",
           "test/compat/terraform_batch8_test.go:78 TestTerraformCloudRunV1Service"
         ]
@@ -2419,7 +2421,7 @@
           "test/compat/rungcsfuse_test.go:184 TestGcloudRunDeployCloudStorageVolume",
           "test/compat/runnfstools_test.go:23 TestGcloudRunDeployNFSVolume",
           "test/compat/runv1_test.go:59 TestRunV1KnativeAPI",
-          "test/compat/runvolumes_test.go:212 TestGcloudRunDeployImage",
+          "test/compat/runvolumes_test.go:223 TestGcloudRunDeployImage",
           "test/compat/terraform_batch8_test.go:78 TestTerraformCloudRunV1Service"
         ]
       },
@@ -7330,14 +7332,15 @@
         "method": "google.storage.v2.Storage/BidiReadObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
+          "test/compat/storagegrpcread_test.go:31 TestStorageGRPCReadObjectMessagesHandleAndRange"
         ]
       },
       {
         "method": "google.storage.v2.Storage/BidiWriteObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
           "test/compat/storagegrpcappend_test.go:28 TestStorageGRPCAppendableObjects",
           "test/compat/storagegrpcresume1530_test.go:59 TestStorageGRPCResumesABrokenWrite"
@@ -7353,7 +7356,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
           "test/compat/storagegrpccompose_test.go:20 TestStorageGRPCComposeDeletesSources",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
@@ -7378,7 +7381,7 @@
         "method": "google.storage.v2.Storage/DeleteObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects"
         ]
       },
       {
@@ -7402,7 +7405,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
@@ -7419,7 +7422,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects"
         ]
       },
       {
@@ -7433,7 +7436,7 @@
         "method": "google.storage.v2.Storage/MoveObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects"
         ]
       },
       {
@@ -7447,15 +7450,16 @@
         "method": "google.storage.v2.Storage/ReadObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
-          "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
+          "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
+          "test/compat/storagegrpcread_test.go:31 TestStorageGRPCReadObjectMessagesHandleAndRange"
         ]
       },
       {
         "method": "google.storage.v2.Storage/RestoreObject",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects"
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects"
         ]
       },
       {
@@ -7463,7 +7467,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity"
         ]
       },
@@ -7479,7 +7483,7 @@
         "method": "google.storage.v2.Storage/StartResumableWrite",
         "status": "Verified",
         "tests": [
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
           "test/compat/storagegrpcresume1530_test.go:59 TestStorageGRPCResumesABrokenWrite"
         ]
       },
@@ -7504,7 +7508,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
-          "test/compat/storagegrpc_test.go:147 TestStorageGRPCObjects",
+          "test/compat/storagegrpc_test.go:153 TestStorageGRPCObjects",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs"
         ]
       },

@@ -186,16 +186,27 @@ func TestRunV1VolumesProbesAndServiceAccount(t *testing.T) {
 				Ports:         []*runv1.ContainerPort{{Name: "http1", ContainerPort: 8080}},
 				StartupProbe:  &runv1.Probe{TcpSocket: &runv1.TCPSocketAction{Port: 8080}, TimeoutSeconds: 1, PeriodSeconds: 1, FailureThreshold: 60},
 				LivenessProbe: &runv1.Probe{HttpGet: &runv1.HTTPGetAction{Path: "/"}, PeriodSeconds: 10},
-				VolumeMounts:  []*runv1.VolumeMount{{Name: "creds", MountPath: "/secrets", ReadOnly: true}, {Name: "tmp", MountPath: "/tmp/mem"}}}}}}}}
+				VolumeMounts: []*runv1.VolumeMount{{Name: "creds", MountPath: "/secrets", ReadOnly: true}, {Name: "tmp", MountPath: "/tmp/mem"},
+					{Name: "tmp", MountPath: "/tmp/sub", SubPath: "a/b"}}}}}}}}
 	if _, err := c.Namespaces.Services.Create(ns, svc).Do(); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	got := runV1Ready(t, c, name).Spec.Template.Spec
 	if got.ServiceAccountName != sa || len(got.Volumes) != 2 || got.Volumes[0].Secret.SecretName != secretID ||
-		got.Volumes[1].EmptyDir.Medium != "Memory" || len(got.Containers[0].VolumeMounts) != 2 ||
+		got.Volumes[1].EmptyDir.Medium != "Memory" || len(got.Containers[0].VolumeMounts) != 3 ||
+		got.Containers[0].VolumeMounts[2].SubPath != "a/b" ||
 		got.Containers[0].StartupProbe == nil || got.Containers[0].StartupProbe.TcpSocket == nil ||
 		got.Containers[0].LivenessProbe == nil || got.Containers[0].LivenessProbe.HttpGet == nil {
 		t.Errorf("v1 template reads back as %+v", got)
+	}
+	// A mount's subPath (#1576) is Kubernetes' subPath on the Knative
+	// Service, as on v2 (TestRunServiceStoredSettingsAndSubPath).
+	if os.Getenv(envKubeconfig) != "" {
+		if y, err := kubectlGet(t, "ksvc", id); err != nil {
+			t.Error(err)
+		} else if !strings.Contains(y, "subPath: a/b") {
+			t.Errorf("the Knative Service should carry the subPath:\n%s", y)
+		}
 	}
 }
 

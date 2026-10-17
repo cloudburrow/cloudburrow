@@ -191,7 +191,7 @@ func toV1Mounts(in []*runpb.VolumeMount, volumes []*runpb.Volume) []*runv1.Volum
 		if sql[m.GetName()] {
 			continue
 		}
-		out = append(out, &runv1.VolumeMount{Name: m.GetName(), MountPath: m.GetMountPath(), ReadOnly: secret[m.GetName()]})
+		out = append(out, &runv1.VolumeMount{Name: m.GetName(), MountPath: m.GetMountPath(), SubPath: m.GetSubPath(), ReadOnly: secret[m.GetName()]})
 	}
 	return out
 }
