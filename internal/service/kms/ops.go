@@ -31,6 +31,7 @@ import (
 // signature checked against the GetPublicKey PEM). Every version here is
 // SOFTWARE. The codes for a version of the wrong purpose or state are
 // UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 
 // wantPurpose refuses a key of a purpose other than want.
 func wantPurpose(k cryptoKey, want ...kmspb.CryptoKey_CryptoKeyPurpose) error {
@@ -503,6 +504,7 @@ func (s *Server) RawDecrypt(_ context.Context, req *kmspb.RawDecryptRequest) (*k
 // service.proto says only the HSM protection level is supported, so HSM is
 // what is accepted, as on Google; no HSM is involved locally. Another level
 // is INVALID_ARGUMENT (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func (s *Server) GenerateRandomBytes(_ context.Context, req *kmspb.GenerateRandomBytesRequest) (*kmspb.GenerateRandomBytesResponse, error) {
 	if err := parseLocation("location", req.GetLocation()); err != nil {
 		return nil, apierror.Wrap(err)
@@ -545,6 +547,7 @@ type decapsulator interface {
 // requires public_key_format for post-quantum algorithms, and NIST_PQC is the
 // FIPS 203 encoding; whether Google also serves ML-KEM keys as PEM or DER is
 // UNVERIFIED, so those are refused.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 func (v keyVersion) kemPublicKey(f kmspb.PublicKey_PublicKeyFormat) (*kmspb.PublicKey, error) {
 	if f != kmspb.PublicKey_NIST_PQC {
 		return nil, apierror.Wrap(apierror.InvalidArgument("public_key_format must be NIST_PQC for %s, not %s", v.algorithm(), f))

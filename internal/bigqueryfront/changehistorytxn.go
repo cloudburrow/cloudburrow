@@ -71,6 +71,7 @@ func committedIn(s tableSetting, start, stop int64) (int64, bool) {
 
 // committedRefused is CHANGES's refusal of a range of ref holding the
 // transaction committed at at (wording CloudBurrow's, UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/change-history
 func committedRefused(ref string, at int64) string {
 	return fmt.Sprintf("CHANGES cannot be used over a time range in which a multi-statement transaction was committed to "+
 		"the table %s (committed at %s); choose a range that leaves it out", ref, micros(at))

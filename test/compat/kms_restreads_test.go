@@ -19,8 +19,11 @@ import (
 // REST; and the JSON API's query-parameter policy holds on the wire.
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/GetKeyRing NOT_FOUND: a well-formed name that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion INVALID_ARGUMENT: a malformed version ID (01)
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/ListKeyRings INVALID_ARGUMENT: an unknown query parameter over REST
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/patch
 func TestKMSReadsAgreeOverREST(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()

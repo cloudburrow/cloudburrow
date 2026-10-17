@@ -39,6 +39,7 @@ import (
 //   - destinationKmsKeyName is refused 501: nothing is re-encrypted.
 //
 // UNVERIFIED: the statuses and messages of every refusal, the progress
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/relocate
 // figures, estimatedWriteDowntimeDuration, and whether a relocation bumps
 // the bucket's metageneration (it does here).
 

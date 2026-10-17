@@ -292,6 +292,7 @@ GROUP BY p.item`)
 }
 
 // An expression over DP aggregates (#1517, UNVERIFIED): each call a hidden
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/analysis-rules
 // aggregate with its share of the epsilon, the expression evaluated on the
 // noisy values.
 func TestDPExpressionItem(t *testing.T) {

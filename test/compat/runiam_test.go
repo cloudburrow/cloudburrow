@@ -74,8 +74,8 @@ func checkRunIamPolicy(t *testing.T, ctx context.Context, name, missing string,
 }
 
 // covers: google.cloud.run.v2.Services/GetIamPolicy, google.cloud.run.v2.Services/SetIamPolicy, google.cloud.run.v2.Services/TestIamPermissions
-// unverified: google.cloud.run.v2.Services/TestIamPermissions OK: an empty set on a missing service, as iam_policy.proto documents
-// unverified: google.cloud.run.v2.Services/SetIamPolicy ABORTED: a stale etag, ADR-0006 rule 2
+// An empty set on a missing resource is iam_policy.proto's documented answer (read 2026-10-17).
+// A stale etag is ABORTED, as https://cloud.google.com/iam/docs/policies documents (read 2026-10-17).
 //
 // TestRunServiceIamPolicyIsStoredNotEnforced (#1216): through the official
 // ServicesClient. The service's own etag is unchanged by a policy change, so
@@ -130,8 +130,8 @@ func TestRunServiceIamPolicyIsStoredNotEnforced(t *testing.T) {
 }
 
 // covers: google.cloud.run.v2.Jobs/GetIamPolicy, google.cloud.run.v2.Jobs/SetIamPolicy, google.cloud.run.v2.Jobs/TestIamPermissions
-// unverified: google.cloud.run.v2.Jobs/TestIamPermissions OK: an empty set on a missing job, as iam_policy.proto documents
-// unverified: google.cloud.run.v2.Jobs/SetIamPolicy ABORTED: a stale etag, ADR-0006 rule 2
+// An empty set on a missing resource is iam_policy.proto's documented answer (read 2026-10-17).
+// A stale etag is ABORTED, as https://cloud.google.com/iam/docs/policies documents (read 2026-10-17).
 //
 // TestRunJobIamPolicyIsStoredNotEnforced (#1216): the same through the
 // official JobsClient. The job's etag is unchanged, and RunJob still runs

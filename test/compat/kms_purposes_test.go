@@ -14,11 +14,14 @@ import (
 	"encoding/pem"
 	"hash/crc32"
 	"testing"
+	"time"
 
 	kms "cloud.google.com/go/kms/apiv1"
 	"cloud.google.com/go/kms/apiv1/kmspb"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -78,7 +81,9 @@ func kmsRing(t *testing.T, h *Harness, c *kms.KeyManagementClient, id string) st
 // covers: google.cloud.kms.v1.KeyManagementService/GetPublicKey, google.cloud.kms.v1.KeyManagementService/AsymmetricSign, google.cloud.kms.v1.KeyManagementService/CreateCryptoKey
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/AsymmetricSign INVALID_ARGUMENT: a digest of the wrong hash, or a data_crc32c that does not match
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 // unverified: google.cloud.kms.v1.KeyManagementService/AsymmetricSign FAILED_PRECONDITION: a key of another purpose
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -151,6 +156,7 @@ func TestKMSAsymmetricSignVerifiesWithThePublicKeyPEM(t *testing.T) {
 // covers: google.cloud.kms.v1.KeyManagementService/GetPublicKey, google.cloud.kms.v1.KeyManagementService/AsymmetricDecrypt
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/AsymmetricDecrypt INVALID_ARGUMENT: a ciphertext that does not decrypt
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSAsymmetricDecryptOpensWhatThePublicKeyEncrypted(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -207,6 +213,7 @@ func TestKMSMacSignAndVerify(t *testing.T) {
 // covers: google.cloud.kms.v1.KeyManagementService/RawEncrypt, google.cloud.kms.v1.KeyManagementService/RawDecrypt
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/RawDecrypt INVALID_ARGUMENT: AES-GCM with the wrong additional authenticated data
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSRawEncryptAndDecrypt(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -255,6 +262,7 @@ func TestKMSRawEncryptAndDecrypt(t *testing.T) {
 // covers: google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes INVALID_ARGUMENT: a length outside 8 to 1024, or a protection level other than HSM
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSGenerateRandomBytes(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -281,8 +289,11 @@ func TestKMSGenerateRandomBytes(t *testing.T) {
 // covers: google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey, google.cloud.kms.v1.KeyManagementService/DeleteCryptoKeyVersion, google.cloud.kms.v1.KeyManagementService/GetRetiredResource, google.cloud.kms.v1.KeyManagementService/ListRetiredResources
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/DeleteCryptoKeyVersion FAILED_PRECONDITION: a version that is not DESTROYED
-// unverified: google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey FAILED_PRECONDITION: a key that still has versions
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
+// unverified: google.cloud.kms.v1.KeyManagementService/DeleteCryptoKey FAILED_PRECONDITION: a key that still has versions, or has automatic rotation scheduled (the rules are delete-kms-resources', the code is not)
+// Docs re-read 2026-10-17, still unanswered: https://cloud.google.com/kms/docs/delete-kms-resources
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey ALREADY_EXISTS: the name of a deleted key
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 func TestKMSDeleteCryptoKeyLeavesARetiredResource(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
@@ -302,6 +313,18 @@ func TestKMSDeleteCryptoKeyLeavesARetiredResource(t *testing.T) {
 			}
 			if _, err := c.DeleteCryptoKey(ctx, &kmspb.DeleteCryptoKeyRequest{Name: ring + "/cryptoKeys/has-versions"}); kmsCode(variant, err) != codes.FailedPrecondition {
 				t.Errorf("delete a key with a version = %v, want FAILED_PRECONDITION", err)
+			}
+			// A key with automatic rotation scheduled cannot be deleted, as
+			// delete-kms-resources documents (read 2026-10-17).
+			rotating, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring, CryptoKeyId: "rotating", SkipInitialVersionCreation: true,
+				CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT,
+					RotationSchedule: &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(30 * 24 * time.Hour)},
+					NextRotationTime: timestamppb.New(time.Now().Add(24 * time.Hour))}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.DeleteCryptoKey(ctx, &kmspb.DeleteCryptoKeyRequest{Name: rotating.GetName()}); kmsCode(variant, err) != codes.FailedPrecondition {
+				t.Errorf("delete a key with rotation scheduled = %v, want FAILED_PRECONDITION", err)
 			}
 			empty, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring, CryptoKeyId: "empty", SkipInitialVersionCreation: true,
 				CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})

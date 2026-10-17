@@ -75,6 +75,7 @@ func (s *Server) encryptTarget(name string) (keyVersion, error) {
 	}
 	// Only an ENABLED version encrypts (key-states); the code for the others
 	// is UNVERIFIED.
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 	if st := v.state(); st != kmspb.CryptoKeyVersion_ENABLED {
 		return keyVersion{}, apierror.Wrap(apierror.FailedPrecondition("CryptoKeyVersion %s is %s: only an ENABLED version can encrypt", vn, st))
 	}
@@ -127,6 +128,7 @@ func (s *Server) Encrypt(_ context.Context, req *kmspb.EncryptRequest) (*kmspb.E
 // errBadCiphertext is Decrypt's one answer for every ciphertext that does not
 // open, so a response does not tell which check failed. The code is
 // UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/decrypt
 var errBadCiphertext = apierror.InvalidArgument("decryption failed: the ciphertext is invalid, was not produced by this key, or the additional authenticated data does not match")
 
 // Decrypt opens ciphertext produced by Encrypt under this CryptoKey. The
@@ -180,6 +182,7 @@ func (s *Server) Decrypt(_ context.Context, req *kmspb.DecryptRequest) (*kmspb.D
 	}
 	// State before material: a DESTROYED version has none (key-states,
 	// destroy-restore). The code is UNVERIFIED.
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/key-states
 	if st := v.state(); st != kmspb.CryptoKeyVersion_ENABLED {
 		return nil, apierror.Wrap(apierror.FailedPrecondition("CryptoKeyVersion %s is %s: only an ENABLED version can decrypt", v.Name, st))
 	}

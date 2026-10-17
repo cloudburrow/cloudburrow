@@ -10,7 +10,7 @@ import (
 	"errors"
 	"math/big"
 	"net"
-	"strings"
+	"regexp"
 	"testing"
 	"time"
 
@@ -247,7 +247,7 @@ func TestAutokeyProvisionsAnHSMKeyInTheKeyProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	h, err := op.Wait(ctx)
-	if err != nil || h.GetName() != region+"/keyHandles/h" || !strings.HasPrefix(h.GetKmsKey(), "projects/key-project/locations/us-central1/keyRings/autokey/cryptoKeys/storage-bucket-") {
+	if err != nil || h.GetName() != region+"/keyHandles/h" || !regexp.MustCompile(`^projects/key-project/locations/us-central1/keyRings/autokey/cryptoKeys/[0-9]+-storage-bucket-[0-9a-f]+$`).MatchString(h.GetKmsKey()) {
 		t.Fatalf("KeyHandle = %v, %v", h, err)
 	}
 	key, err := cs.kms.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: h.GetKmsKey()})

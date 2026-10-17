@@ -23,23 +23,29 @@ import (
 //     enabled, which needs uniform bucket-level access, and the setting is
 //     fixed at creation (hns-overview). A folder call on any other bucket is
 //     400 (UNVERIFIED: the status and message).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/create-folders
 //   - A folder name ends in "/"; one sent without it has it added
 //     (UNVERIFIED). A folder's parent must exist unless recursive is true,
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/create-folders
 //     which creates the missing ones (create-folders); a missing parent is
 //     400 failedPrecondition (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/create-folders
 //   - Writing an object creates the folders in its path that are missing,
 //     as the HNS overview says; deleting an object leaves them.
 //   - delete refuses, 409, a folder that holds objects or folders
 //     (delete-folders: only an empty folder is deleted; the status is
 //     UNVERIFIED). deleteRecursive deletes the folder, the folders under it
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/storage/control/v2/storage_control.proto
 //     and every live object under it, each by the bucket's soft-delete
 //     policy, as objects.delete does.
 //   - rename moves the folder, its folders and its objects to the new name
 //     in one transaction and returns a long-running operation, as Google's
 //     does; here it is done when it is returned, so pendingRenameInfo is
 //     never set. Objects keep their generation (UNVERIFIED). The
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/hns-overview
 //     destination must not exist (409), must not be inside the source
 //     (400), and its parent must exist (400 failedPrecondition, UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/storage/control/v2/storage_control.proto
 //   - Operations are kept by bucket and read with buckets.operations.get and
 //     list. A folder operation is done when it is returned, so cancel
 //     refuses it; an Anywhere Cache create and a relocation run for a while
@@ -119,6 +125,7 @@ func folderV2Name(f folderRecord) string   { return folderResource(f.Bucket) + "
 func hasFolders(tx Tx, bucket string) bool { return len(tx.List(folderPrefix+bucket+"/")) > 0 }
 func folderMissing(bucket, name string) *httpError {
 	// UNVERIFIED: the message; the status is the JSON API's 404.
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/status-codes
 	return notFound("The folder %s does not exist in bucket %s.", name, bucket)
 }
 
@@ -151,6 +158,7 @@ func hierarchical(b bucketRecord) bool {
 // hierarchical namespace needs uniform bucket-level access and excludes
 // object versioning (hns-overview; the statuses and messages are
 // UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/hns-overview
 func checkHierarchical(f map[string]any) error {
 	if !hierarchical(bucketRecord{Fields: f}) {
 		return nil
@@ -481,6 +489,7 @@ func (s *Server) folderJSON(r *http.Request, f folderRecord) map[string]any {
 // operationMetadata is the operation's metadata, typed as the Storage
 // Control API's RenameFolderMetadata or DeleteFolderRecursiveMetadata. The
 // commonMetadata type strings are UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/storage/control/v2/storage_control.proto
 func operationMetadata(op operationRecord) map[string]any {
 	common := map[string]any{"type": op.Type, "createTime": rfc3339(op.Created),
 		"updateTime": rfc3339(op.updated()), "progressPercent": 100}

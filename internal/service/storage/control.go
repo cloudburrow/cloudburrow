@@ -24,6 +24,7 @@ import (
 // Every other v2 call, on gRPC's REST mapping, is 501 UNIMPLEMENTED naming
 // the path. Errors carry the canonical status, as Google's v2 REST errors
 // do; the mapping of each refusal to a code is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/storage/control/v2/storage_control.proto
 
 const controlPrefix = "/v2/"
 

@@ -36,6 +36,7 @@ import (
 //     the cache is then removed. An update's cannot.
 //
 // UNVERIFIED: the statuses and messages of every refusal, the cache's id
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/anywhere-cache
 // ("{bucket}/{anywhereCacheId}", gcloud's CACHE_ID), the operation's
 // commonMetadata.type of an update, and the multi-region and predefined
 // dual-region zone lists.

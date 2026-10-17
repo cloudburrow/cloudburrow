@@ -27,8 +27,11 @@ import (
 // covers: google.iam.v1.IAMPolicy/GetIamPolicy, google.iam.v1.IAMPolicy/SetIamPolicy, google.iam.v1.IAMPolicy/TestIamPermissions
 //
 // unverified: google.iam.v1.IAMPolicy/GetIamPolicy NOT_FOUND: a key ring that does not exist
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/iam/v1/iam_policy.proto
 // unverified: google.iam.v1.IAMPolicy/SetIamPolicy ABORTED: a stale etag
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/iam/v1/policy.proto
 // unverified: google.iam.v1.IAMPolicy/GetIamPolicy UNIMPLEMENTED: an import job, which CloudBurrow does not serve
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys
 func TestKMSIamPolicyIsStoredNotEnforced(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()

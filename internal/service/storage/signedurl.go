@@ -129,6 +129,7 @@ func (s *Server) verifyV4(r *http.Request, q url.Values) error {
 	secs, err := strconv.Atoi(expires)
 	if err != nil || secs < 1 || secs > maxSignedURLExpiry {
 		// UNVERIFIED: the docs state the 604800-second maximum, not the code.
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/access-control/signed-urls
 		return &signatureError{http.StatusBadRequest, "InvalidArgument", fmt.Sprintf("%sExpires must be 1 to %d seconds.", p, maxSignedURLExpiry)}
 	}
 	if now := s.now(); !now.Before(t.Add(time.Duration(secs) * time.Second)) {

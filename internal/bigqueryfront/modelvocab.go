@@ -43,6 +43,7 @@ import (
 // training rows and kept, as constants, in the model's TRANSFORM.
 //
 // UNVERIFIED: BigQuery documents no defaults for ML.BAG_OF_WORDS and
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-bag-of-words
 // ML.TF_IDF; CloudBurrow uses the encoders' (32,000 and 5). The output of
 // a NULL array is an empty array.
 //

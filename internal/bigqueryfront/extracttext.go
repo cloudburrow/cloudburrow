@@ -41,6 +41,7 @@ import (
 //     written: the documentation gives no text for them in an export.
 //
 // Which bytes BigQuery writes for each is UNVERIFIED beyond that text.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 
 // extractText is the CSV and JSON text of a scalar value s of fl, as
 // tabledata.list gives it.
@@ -124,13 +125,16 @@ func timestampSeconds(s string) (time.Time, error) {
 // one NEWLINE_DELIMITED_JSON object, its members in the schema's order
 // with no spaces between them. A NULL is left out, as is an empty
 // REPEATED column, which BigQuery does not tell from a NULL (UNVERIFIED:
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 // the documentation does not say how a NULL is written). A RECORD is a
 // nested object and a REPEATED column an array ("Nested and repeated data
 // are supported for Avro, JSON, and Parquet exports"); INT64, NUMERIC and
 // BIGNUMERIC are JSON strings ("INT64 (integer) data types are encoded as
 // JSON strings to preserve 64-bit precision", NUMERIC and BIGNUMERIC so by
 // analogy, UNVERIFIED); FLOAT64 a JSON number, BOOL a JSON boolean, a JSON
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 // column its JSON value (UNVERIFIED), and the rest JSON strings of their
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 // text (extractText). "The symbols <, >, and & are converted by using the
 // unicode notation": encoding/json writes them so.
 func jsonExtractRow(fields []field, row []any) ([]byte, error) {

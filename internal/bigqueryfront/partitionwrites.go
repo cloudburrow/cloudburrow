@@ -32,6 +32,7 @@ import (
 // tables.get of `t$P` answers the table's resource, which `bq head` and
 // the client libraries read the schema of before tabledata.list, with the
 // decorated tableId and numRows the partition's (UNVERIFIED: BigQuery does
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 // not document what it answers); numBytes and the other storage counts,
 // which the emulator does not keep per partition, are left out.
 //
@@ -39,6 +40,7 @@ import (
 // queryWrite does, so a query that fails changes nothing. Then every row
 // of the result must be in P, or the job fails, reason invalid, the table
 // unchanged (BigQuery's wording UNVERIFIED); the result's columns must be
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 // the table's, or those schemaUpdateOptions make them (partitionSchema,
 // below; #1273). WRITE_APPEND adds the rows; WRITE_TRUNCATE (and
 // WRITE_TRUNCATE_DATA, the same for one partition: the table's schema is
@@ -58,6 +60,7 @@ import (
 // (destination_table "cannot be set for a multi-statement query",
 // https://cloud.google.com/bigquery/docs/multi-statement-queries); the
 // wording of both errors is UNVERIFIED. A dry run is the query's own,
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 // without its destination (partitionDryRun). Into a partition of an ingestion-time partitioned table, the
 // rows are not checked: they are written with the partition's
 // _PARTITIONTIME (and _PARTITIONDATE), as a load or a copy into one
@@ -316,6 +319,7 @@ func (f front) partitionQueryWrite(w http.ResponseWriter, r *http.Request, job j
 		} else if n > 0 {
 			e.Reason, e.Message = "invalid", "Some rows belong to different partitions rather than destination partition "+
 				dec+" of "+name+". The table was not changed." // UNVERIFIED wording
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 		}
 	}
 	if e.Message == "" && (write == "" || write == "WRITE_EMPTY") {
@@ -543,6 +547,7 @@ func (f front) partitionCopy(w http.ResponseWriter, r *http.Request, c *copyConf
 		} else if bad > 0 {
 			return fail("invalid", "Some rows belong to different partitions rather than destination partition "+
 				dest.dec+" of "+tableName(project, dest.ref)+". The table was not changed.") // UNVERIFIED wording
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 		}
 	}
 	bp := quotePath([]string{project, dest.base.DatasetID, dest.base.TableID})
@@ -673,6 +678,7 @@ func (f front) partitionLoad(w http.ResponseWriter, r *http.Request, job *jobBod
 		} else if n > 0 {
 			e.Reason, e.Message = "invalid", "Some rows belong to different partitions rather than destination partition "+
 				dec+" of "+name+". The table was not changed." // UNVERIFIED wording
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/managing-partitioned-table-data
 		}
 		if e.Message == "" && (write == "" || write == "WRITE_EMPTY") {
 			if n, why := f.scalar(r, "SELECT COUNT(*) FROM "+bp+" WHERE "+filter); why != "" {
@@ -903,11 +909,14 @@ func notOneQuery(sql string) string {
 	switch {
 	case len(stmts) > 1:
 		return "configuration.query.destinationTable cannot be set for scripts" // UNVERIFIED wording
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 	case len(stmts) == 1 && (stmts[0][0].is("INSERT") || stmts[0][0].is("UPDATE") || stmts[0][0].is("DELETE") ||
 		stmts[0][0].is("MERGE") || stmts[0][0].is("TRUNCATE")):
 		return "Cannot set destination table in jobs with DML statements" // UNVERIFIED wording
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 	case len(stmts) == 1:
 		return "Cannot set destination table in jobs with DDL statements" // UNVERIFIED wording
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 	}
 	return ""
 }

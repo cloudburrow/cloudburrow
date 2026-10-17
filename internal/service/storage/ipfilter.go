@@ -45,6 +45,7 @@ import (
 //     removed (bypass-ip-filter).
 //
 // UNVERIFIED: the refusal's message (Google does not document it), and the
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/ip-filtering-overview
 // set of operations the exemption covers beyond those three.
 
 // clientAddrHeader is the caller's address the tunnel passes on

@@ -11,7 +11,7 @@ tracks it; a closed issue is named only where it says what was built.
 
 - *not built yet*: nothing stops it but work;
 - *no emulator support*: the upstream emulator refuses it, or there is nothing local for it to act on;
-- *not documented by Google*: CloudBurrow had to choose a code, a message or a rule (`UNVERIFIED`);
+- *not documented by Google*: CloudBurrow had to choose a code, a message or a rule (`UNVERIFIED`); every marker was re-read against Google's docs on 2026-10-17 (#1593), and each still open one carries that date and the page read, so the next audit can skip it (what the docs settled but needs more work is #1595);
 - *needs live GCP*: only an observation of Google would settle it, and nothing here calls Google.
 
 **Size:** S is a day or less, M a few days, L a new subsystem.

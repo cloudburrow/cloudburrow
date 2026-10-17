@@ -11,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"math/big"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -308,7 +309,10 @@ func TestKMSAutokeyProvisionsKeysOnDemand(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantRing := keyProject + "/locations/us-central1/keyRings/autokey/cryptoKeys/"
-			if handle.GetName() != parent+"/keyHandles/bucket-"+variant || !strings.HasPrefix(handle.GetKmsKey(), wantRing) {
+			// The key ID is PROJECT_NUMBER-SERVICE_SHORT_NAME-RESOURCE_TYPE_DESCRIPTOR_NAME-RANDOM_HEX,
+			// as autokey-overview names it (read 2026-10-17).
+			if handle.GetName() != parent+"/keyHandles/bucket-"+variant || !strings.HasPrefix(handle.GetKmsKey(), wantRing) ||
+				!regexp.MustCompile(`^[0-9]+-storage-bucket-[0-9a-f]+$`).MatchString(strings.TrimPrefix(handle.GetKmsKey(), wantRing)) {
 				t.Fatalf("KeyHandle = %v; want a key under %s", handle, wantRing)
 			}
 			kc := kmsClients(t, h)[variant]

@@ -12,7 +12,7 @@ Do not edit these files by hand.
 |---|---|---|---|---|---|---|---|---|
 | [Cloud Tasks](tasks.md) | 20 | 20 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secret Manager](secretmanager.md) | 17 | 15 | 0 | 2 | 0 | 0 | 0 | 2 |
-| [Cloud Run v2](run.md) | 41 | 41 | 0 | 0 | 0 | 0 | 0 | 4 |
+| [Cloud Run v2](run.md) | 41 | 41 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Artifact Registry](artifactregistry.md) | 50 | 50 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Build](cloudbuild.md) | 19 | 19 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Secure Source Manager](securesourcemanager.md) | 53 | 12 | 0 | 41 | 0 | 0 | 0 | 0 |
@@ -28,7 +28,7 @@ Do not edit these files by hand.
 | [Vertex AI PredictionService](vertexai.md) | 14 | 14 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Memorystore for Redis](memorystore.md) | 66 | 62 | 0 | 4 | 0 | 0 | 0 | 2 |
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
-| [Cloud Storage (JSON API)](storage.md) | 87 | 84 | 0 | 3 | 0 | 0 | 0 | 27 |
+| [Cloud Storage (JSON API)](storage.md) | 87 | 84 | 0 | 3 | 0 | 0 | 0 | 26 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 30 | 29 | 0 | 0 | 1 | 0 | 0 | 0 |
 | [Firestore](firestore.md) | 17 | 17 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Firestore Admin API](firestoreadmin.md) | 32 | 32 | 0 | 0 | 0 | 0 | 0 | 0 |

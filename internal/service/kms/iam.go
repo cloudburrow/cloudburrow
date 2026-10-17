@@ -51,6 +51,7 @@ func (r iamResource) label() string {
 // IAM on import jobs is UNIMPLEMENTED, never an empty policy, as
 // CloudBurrow keeps no policy on them. Anything else, a CryptoKeyVersion
 // included, has no IAM on Google and is INVALID_ARGUMENT (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys
 func iamTarget(resource string) (iamResource, error) {
 	if resource == "" {
 		return iamResource{}, apierror.InvalidArgument("resource is required")
@@ -160,6 +161,7 @@ func (i *iamServer) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyReque
 	}
 	if !found {
 		// The code is UNVERIFIED.
+		// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/iam/v1/iam_policy.proto
 		return nil, apierror.Wrap(apierror.NotFound("%s %s not found", r.label(), req.GetResource()))
 	}
 	p, err := iampolicy.Get(policy, req.GetOptions())
@@ -186,7 +188,8 @@ func (i *iamServer) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyReque
 // EkmConnection that exists, or on any location's ekmConfig, since nothing is enforced. On a well-formed name that does not
 // exist it returns an empty set, as Google documents: "If the resource does
 // not exist, this will return an empty set of permissions, not a NOT_FOUND
-// error" (cloudkms_v1.yaml:59-64; measured behaviour UNVERIFIED). Cloud Tasks
+// error" (cloudkms_v1.yaml:59-64, and iam_policy.proto's
+// TestIamPermissions comment, read 2026-10-17). Cloud Tasks
 // answers NOT_FOUND there; the difference follows each service's spec.
 func (i *iamServer) TestIamPermissions(_ context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
 	r, err := iamTarget(req.GetResource())

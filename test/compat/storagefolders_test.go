@@ -96,8 +96,11 @@ func grpcCode(err error) codes.Code {
 // a bucket without hierarchical namespace is refused.
 //
 // unverified: storage.folders.insert 400: a bucket without hierarchical namespace
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/create-folders
 // unverified: storage.folders.insert 400: a missing parent without recursive
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/create-folders
 // unverified: storage.folders.delete 409: a folder holding objects or folders (FAILED_PRECONDITION, 400, on the v2 API)
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/storage/control/v2/storage_control.proto
 // covers: storage.folders.insert, storage.folders.get, storage.folders.list, storage.folders.delete, storage.folders.rename, storage.folders.deleteRecursive
 func TestStorageFoldersControl(t *testing.T) {
 	h := New(t)

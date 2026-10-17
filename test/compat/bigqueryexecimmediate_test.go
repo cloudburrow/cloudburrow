@@ -147,6 +147,7 @@ func TestBigQueryExecuteImmediateErrors(t *testing.T) {
 // a STATEMENT child whose own query is the statement run, with its USING
 // values bound, and whose stack frame is the EXECUTE IMMEDIATE's place in
 // the script (BigQuery's frame of such a statement UNVERIFIED); the SQL
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 // expression and each USING value are EXPRESSION children; the DML
 // child's numDmlAffectedRows is @@row_count, which the script's last
 // query reads. A lone EXECUTE IMMEDIATE is a SCRIPT job with one child.

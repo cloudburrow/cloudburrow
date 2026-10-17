@@ -117,8 +117,10 @@ func TestBigQueryColumnStreamingBuffer(t *testing.T) {
 		"MERGE " + p("cbday") + " t USING (SELECT 2 AS n) s ON t.n = s.n WHEN MATCHED THEN DELETE",
 		"TRUNCATE TABLE " + p("cbday"),
 	} {
-		if err := exec(sql); err == nil || !strings.Contains(err.Error(), "streaming buffer") {
-			t.Errorf("%s: %v, want the streaming buffer's error", sql, err)
+		// The message and reason badRequest are the error-messages page's.
+		if err := exec(sql); err == nil || !strings.Contains(err.Error(), "would affect rows in the streaming buffer, which is not supported") ||
+			!strings.Contains(err.Error(), "badRequest") {
+			t.Errorf("%s: %v, want the streaming buffer's badRequest error", sql, err)
 		}
 	}
 	if err := exec("UPDATE " + p("cbday") + " SET n = 5 WHERE n = 0"); err != nil {

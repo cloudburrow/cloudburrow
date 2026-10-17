@@ -66,6 +66,7 @@ import (
 // in the documentation read (2026-10-16), which takes NULL as the
 // query's start, so the front has none. The error messages are
 // UNVERIFIED: no BigQuery to read them from.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/change-history
 
 // changeFunc is one call of APPENDS or CHANGES in a query: its tokens
 // stmt[at:end], the table, and the start and end expressions ("" when

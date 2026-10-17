@@ -18,6 +18,7 @@ package storage
 //
 // A field outside those, a malformed expression or a regular expression is
 // 400 invalid (UNVERIFIED: the reference does not give the refusal). A path
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/status-codes
 // an operation does not have does not match it.
 
 import (

@@ -28,6 +28,7 @@ import (
 // create, and nothing is stored.
 //
 // unverified: google.cloud.secretmanager.v1.SecretManagerService/CreateSecret NOT_FOUND: a topic in Secret.topics that does not exist (Pub/Sub's code for the failed TOPIC_CONFIGURED publish)
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/secret-manager/docs/event-notifications
 // covers: google.cloud.secretmanager.v1.SecretManagerService/CreateSecret, google.cloud.secretmanager.v1.SecretManagerService/UpdateSecret, google.cloud.secretmanager.v1.SecretManagerService/GetSecret, google.cloud.secretmanager.v1.SecretManagerService/DeleteSecret, google.cloud.secretmanager.v1.SecretManagerService/AddSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/EnableSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/DisableSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/DestroySecretVersion
 func TestSecretManagerTopicNotifications(t *testing.T) {
 	h := New(t)

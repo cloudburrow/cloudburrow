@@ -994,6 +994,7 @@ func (g *grpcStorage) startWrite(ctx context.Context, spec *pb.WriteObjectSpec, 
 	if spec.GetAppendable() {
 		// Appendable objects are written with BidiWriteObject only
 		// (grpcappend.go). UNVERIFIED: the status and message.
+		// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/storage/v2/storage.proto
 		return "", grpcstatus.Error(codes.InvalidArgument, "an appendable object is written with BidiWriteObject")
 	}
 	r := spec.GetResource()

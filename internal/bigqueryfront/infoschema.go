@@ -50,6 +50,7 @@ var unbuiltInfoSchema = map[string]bool{
 // -datasets-schemata-links): a dataset-qualified reference to one is
 // refused 400 invalidQuery (#1458; the wording is BigQuery's documented
 // rule, the error's own text UNVERIFIED). Their region forms are built
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-object-privileges
 // (infoschemaprivileges.go).
 var regionOnlyInfoSchema = map[string]bool{"OBJECT_PRIVILEGES": true, "SCHEMATA_LINKS": true}
 

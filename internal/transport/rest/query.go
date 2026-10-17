@@ -21,6 +21,7 @@ import (
 // named by field path (http.proto@5b03e5ec:87-88), in either the JSON
 // (camelCase) or the proto (snake_case) spelling of each segment. Whether
 // Google accepts snake_case is UNVERIFIED. A leaf is a scalar, an enum (by
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/apis/docs/system-parameters
 // name or number), a repeated one of those (the parameter repeated), or a
 // well-known type with a string JSON form (FieldMask, Timestamp, Duration,
 // the wrappers).
@@ -29,6 +30,7 @@ import (
 //   - alt / $alt = json is accepted. The GAPIC REST client sends
 //     `$alt=json;enum-encoding=int` on every call; enums are then written as
 //     numbers. Whether Google does so is UNVERIFIED; both clients read either.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/apis/docs/system-parameters
 //   - prettyPrint, $prettyPrint and $.xgafv are accepted and ignored: the
 //     discovery client and apitools send alt=json&prettyPrint=false.
 //   - any other alt, and fields / $fields, are UNIMPLEMENTED, naming the
@@ -38,6 +40,7 @@ import (
 // would look as though it had taken effect. The Cloud Tasks and Secret
 // Manager routers ignore unknown parameters instead; the code Google uses is
 // UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/apis/docs/system-parameters
 
 // query is a request's parsed system parameters.
 type query struct {

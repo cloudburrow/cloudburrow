@@ -58,6 +58,7 @@ var mixins = func() []*annotations.HttpRule {
 // one in the body for Encrypt, Decrypt and the IAMPolicy mixin; the methods
 // below refuse a body that names another resource instead. What Google does
 // then is UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/patch
 func transcoder() *rest.Transcoder {
 	return &rest.Transcoder{
 		Packages:     []string{"google.cloud.kms.v1"},

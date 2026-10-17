@@ -20,6 +20,7 @@ import (
 // with its material (#404).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/RestoreCryptoKeyVersion FAILED_PRECONDITION: a version whose destroy_time has passed
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestRestoreBeforeAndAfterDestroyTime(t *testing.T) {
 	ctx := context.Background()
 	clock := sched.NewFakeClock(time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC))

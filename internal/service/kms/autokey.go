@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 )
 
@@ -40,12 +42,15 @@ import (
 //     making: ENCRYPT_DECRYPT, HSM (served without an HSM, protection.go),
 //     rotated every 365 days.
 //
-// The CryptoKey ID is the resource type's service and type and a random
-// suffix; Google's own naming is UNVERIFIED. Which resource types Google
+// The CryptoKey ID follows Google's naming,
+// PROJECT_NUMBER-SERVICE_SHORT_NAME-RESOURCE_TYPE_DESCRIPTOR_NAME-RANDOM_HEX
+// (https://cloud.google.com/kms/docs/autokey-overview, read 2026-10-17), with
+// the key project's number. Which resource types Google
 // accepts is a published list; any {SERVICE}.googleapis.com/{TYPE} is
 // accepted here. IAM grants on the new key, and the Cloud KMS service
 // agent's permissions on the key project, are not modelled: IAM is stored,
 // never enforced (ADR-0006). The codes for refused requests are UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/autokey.proto
 
 const (
 	autokeyConfigPrefix = "kms/autokeyconfig/"
@@ -328,7 +333,10 @@ func (a *AutokeyServer) CreateKeyHandle(ctx context.Context, req *kmspb.CreateKe
 		apierror.From(err).Code != codes.AlreadyExists {
 		return nil, err
 	}
-	keyID := m[1] + "-" + strings.ToLower(m[2]) + "-" + randomSuffix()
+	// PROJECT_NUMBER-SERVICE_SHORT_NAME-RESOURCE_TYPE_DESCRIPTOR_NAME-RANDOM_HEX,
+	// the key project's number first, as autokey-overview names it.
+	keyID := strconv.FormatInt(resource.ProjectNumber(strings.TrimPrefix(kp, "projects/")), 10) + "-" +
+		m[1] + "-" + strings.ToLower(m[2]) + "-" + randomSuffix()
 	now := s.now().UTC()
 	key, err := s.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring, CryptoKeyId: keyID, CryptoKey: &kmspb.CryptoKey{
 		Purpose:          kmspb.CryptoKey_ENCRYPT_DECRYPT,

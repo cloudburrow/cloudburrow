@@ -671,16 +671,19 @@ func (s *Server) bucketsModify(replace bool) http.HandlerFunc {
 			old := map[string]any{"softDeletePolicy": copyMap(b.Fields["softDeletePolicy"]), "retentionPolicy": copyMap(b.Fields["retentionPolicy"])}
 			if loc, ok := next["location"].(string); ok && !strings.EqualFold(loc, b.Fields["location"].(string)) {
 				// UNVERIFIED: Google's answer to changing a bucket's location.
+				// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets
 				return badRequest("The location of a bucket cannot be changed.")
 			}
 			if p, sent := next["customPlacementConfig"]; sent && !reflect.DeepEqual(dataLocations(p), dataLocations(b.Fields["customPlacementConfig"])) {
 				// Custom placement is chosen when a bucket is created.
 				// UNVERIFIED: the status and message.
+				// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets
 				return badRequest("Invalid argument: customPlacementConfig can only be set when a bucket is created.")
 			}
 			if ns, sent := next["hierarchicalNamespace"]; sent && hierarchical(bucketRecord{Fields: map[string]any{"hierarchicalNamespace": ns}}) != hierarchical(b) {
 				// hns-overview: the setting is chosen at creation and cannot
 				// be changed. UNVERIFIED: the status and message.
+				// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/hns-overview
 				return badRequest("Invalid argument: hierarchicalNamespace can only be set when a bucket is created.")
 			}
 			if replace {
@@ -752,6 +755,7 @@ func (s *Server) bucketsDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(tx.List(objectPrefix+name+"/")) > 0 || len(tx.List(noncurrentPrefix+name+"/")) > 0 {
 			// UNVERIFIED for the JSON API: no page states this status. The XML
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/status-codes
 			// API documents 409 BucketNotEmpty, which this mirrors. Noncurrent
 			// versions count as content (#498).
 			return conflict("The bucket you tried to delete is not empty.")
@@ -760,11 +764,13 @@ func (s *Server) bucketsDelete(w http.ResponseWriter, r *http.Request) {
 			// Managed folders count as content too (#828), which is why
 			// gcloud storage rm -r deletes them before the bucket.
 			// UNVERIFIED: the status, as above.
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/delete
 			return conflict("The bucket you tried to delete is not empty: it holds managed folders.")
 		}
 		if hasFolders(tx, name) {
 			// Folders of a hierarchical bucket count as content too (#1203).
 			// UNVERIFIED: the status, as above.
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/delete
 			return conflict("The bucket you tried to delete is not empty: it holds folders.")
 		}
 		tx.Delete(bucketPrefix + name)
@@ -801,6 +807,7 @@ func dataLocations(p any) []string {
 // the only kind that holds appendable objects, is storageClass RAPID with
 // customPlacementConfig naming one zone of its region
 // (docs.cloud.google.com/storage/docs/rapid/rapid-bucket). UNVERIFIED: the
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/rapid/rapid-bucket
 // statuses and messages.
 func checkZonal(f map[string]any) error {
 	class, _ := f["storageClass"].(string)

@@ -183,6 +183,7 @@ func (s *Server) notificationsInsert(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(existing) >= maxNotificationConfigs {
 			// UNVERIFIED: the docs state the limit of 100, not the code.
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/pubsub-notifications
 			return badRequest("The bucket %s already has %d notification configurations, the maximum.", bucket, maxNotificationConfigs)
 		}
 		// IDs are per bucket, increasing and never reused.

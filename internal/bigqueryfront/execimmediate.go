@@ -1070,6 +1070,7 @@ func isRowCount(toks []token, i int) bool {
 // (https://cloud.google.com/bigquery/docs/reference/system-variables). It
 // is NULL before any DML statement, and after a statement of another kind
 // (UNVERIFIED against BigQuery, which documents only the DML case).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/system-variables
 func (s *scriptRun) rowCountEdits(toks []token) []varEdit {
 	var edits []varEdit
 	for i := range toks {
@@ -1147,6 +1148,7 @@ func (s *scriptRun) noteRowCount(text string, rec *recorder) {
 // frames are where the script is (place): a statement EXECUTE IMMEDIATE
 // ran is at that EXECUTE IMMEDIATE, with its text (BigQuery's frame of
 // such a statement UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/Job
 func (s *scriptRun) child(project, id, text string) scriptChild {
 	kind := "STATEMENT"
 	if s.expr > 0 && !s.intoQuery {

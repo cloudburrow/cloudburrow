@@ -330,6 +330,7 @@ func TestBigQueryExtractsTheFrontWrites(t *testing.T) {
 
 	// A NULL is left out of a JSON row, and a BOOL is a JSON boolean
 	// (#957; how BigQuery writes a NULL is UNVERIFIED).
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/exporting-data
 	if _, err := extract("jsnull", func(r *bigquery.GCSReference, _ *bigquery.Extractor) { r.DestinationFormat = bigquery.JSON }, uri("jsnull.json")); err != nil {
 		t.Fatalf("a JSON extract of a NULL: %v", err)
 	}

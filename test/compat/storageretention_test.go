@@ -98,6 +98,7 @@ func TestStorageLockRetentionPolicy(t *testing.T) {
 // locked policy 400 badRequest "already locked", leaving the bucket as it
 // was. Google documents no answer for a repeat lock, so that one is
 // UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/buckets/lockRetentionPolicy
 // covers: storage.buckets.lockRetentionPolicy
 func TestStorageLockRetentionPolicyTwice(t *testing.T) {
 	h := New(t)

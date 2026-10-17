@@ -15,6 +15,7 @@ import (
 // A version can only start ENABLED or DISABLED (#398).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion INVALID_ARGUMENT: an initial state other than ENABLED or DISABLED
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestCreateVersionRefusesOtherInitialStates(t *testing.T) {
 	c := client(t)
 	ctx := context.Background()

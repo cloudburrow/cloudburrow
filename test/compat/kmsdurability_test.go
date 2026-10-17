@@ -87,6 +87,7 @@ func TestKMSRestartSetup(t *testing.T) {
 // measured the ring surviving before that).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/GetKeyRing NOT_FOUND: a key ring that did not survive an ephemeral restart
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 func TestKMSAcrossRestart(t *testing.T) {
 	expect := os.Getenv(envKMSExpect)
 	if expect == "" {

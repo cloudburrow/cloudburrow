@@ -14,6 +14,7 @@ import (
 // destroy_scheduled_duration accepts whole seconds from 24h to 120d (#399).
 //
 // unverified: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey INVALID_ARGUMENT: destroy_scheduled_duration out of range, negative or fractional
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/resources.proto
 func TestDestroyScheduledDurationRange(t *testing.T) {
 	c := client(t)
 	ctx := context.Background()

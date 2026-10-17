@@ -61,6 +61,7 @@ import (
 // job's REST statistics have none of them, and the columns are what a
 // REST field left out reads as: an empty ARRAY for a repeated one, NULL
 // for a RECORD (UNVERIFIED that BigQuery gives the same).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-jobs
 const jobsStatisticsColumns = ", job_stages ARRAY<STRUCT<name STRING, id INT64, start_ms INT64, end_ms INT64, " +
 	"status STRING, parallel_inputs INT64, completed_parallel_inputs INT64, records_read INT64, records_written INT64, " +
 	"shuffle_output_bytes INT64, shuffle_output_bytes_spilled INT64, slot_ms INT64>>, " +
@@ -614,6 +615,7 @@ func (f front) regionRows(r *http.Request, meta *datasetMeta, view, columns stri
 // row for (#1458): those holding rows, with __NULL__ and
 // __UNPARTITIONED__ (whether BigQuery counts those two, and a streaming
 // buffer's rows, is UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-table-storage
 const storageColumns = "STRUCT<project_id STRING, project_number INT64, table_catalog STRING, table_schema STRING, " +
 	"table_name STRING, creation_time TIMESTAMP, total_rows INT64, total_partitions INT64, total_logical_bytes INT64, " +
 	"active_logical_bytes INT64, long_term_logical_bytes INT64, storage_last_modified_time TIMESTAMP, deleted BOOL, table_type STRING, " +
