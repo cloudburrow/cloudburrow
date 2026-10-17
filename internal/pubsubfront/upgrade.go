@@ -26,6 +26,8 @@ import (
 	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
 // frontHTTP is net/http's server for the front, and the connections it
@@ -53,12 +55,18 @@ func (f *Front) httpServer(grpcSrv *grpc.Server) *frontHTTP {
 	}
 	h := f.Handler(grpcSrv)
 	s.Server = &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The Host and Origin checks (#1587) come before an Upgrade: h2c
+		// is taken, so the request asking for it is checked like any
+		// HTTP/1.1 request. The emulator answers any Origin with
+		// Access-Control-Allow-Credentials, so a page another site served
+		// could otherwise read what it sent a pod's port. Pods name the
+		// Service; a kubelet probe the pod's address.
+		Handler: hostguard.WrapService(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.ProtoMajor == 1 && s.upgrade(w, r, h) {
 				return
 			}
 			h.ServeHTTP(w, r)
-		}),
+		}), "pubsub"),
 		ReadHeaderTimeout: time.Minute,
 		Protocols:         &protocols,
 		HTTP2:             &http.HTTP2Config{MaxConcurrentStreams: 1 << 16},

@@ -22,11 +22,6 @@ var guardedElsewhere = map[string]string{
 	"internal/service/secrets/server.go":     "s.handler() returns h2c.NewHandler(hostguard.Wrap(...))",
 	"internal/service/vertexai/lifecycle.go": "mixedHandler serves hostguard.Wrap'd REST and gRPC",
 	"internal/netfwd/guard.go":               "the guard itself: guardHandler checks Host and Origin",
-	"internal/bigtablefront/front.go":        "runs in the Bigtable pod; the host reaches it through a guarded tunnel",
-	"internal/pubsubfront/upgrade.go":        "runs in the Pub/Sub pod; the host reaches it through a guarded tunnel",
-	"internal/pubsubfront/push.go":           "the push relay listens on the Pub/Sub pod's loopback only",
-	"internal/callfront/callfront.go":        "runs in the emulator pods; the host reaches them through a guarded tunnel",
-	"internal/bigqueryfront/run.go":          "runs in the BigQuery pod; the host reaches it through a guarded tunnel",
 }
 
 // TestEveryHTTPListenerIsGuarded (#1586): three in-process REST APIs

@@ -247,12 +247,14 @@ func withState(f *Front) *Front {
 	return f
 }
 
-func callFront(port, upstream int) *Front {
+// service is the Service's name, which pods dial the front by and its Host
+// check passes (#1587).
+func callFront(service string, port, upstream int) *Front {
 	return &Front{
 		Name:       "front",
 		PullPolicy: "Never",
 		Args: []string{"call-front", "--listen", fmt.Sprintf("0.0.0.0:%d", port),
-			"--upstream", fmt.Sprintf("127.0.0.1:%d", upstream)},
+			"--upstream", fmt.Sprintf("127.0.0.1:%d", upstream), "--service", service},
 		UpstreamPort: upstream,
 	}
 }
@@ -273,7 +275,7 @@ func firestoreBackend(project string) Backend {
 // alone; and PartitionQuery, which it does not serve (internal/queryfront,
 // #1405).
 func firestoreFront() *Front {
-	f := callFront(FirestorePort, FirestoreEmulatorPort)
+	f := callFront("firestore", FirestorePort, FirestoreEmulatorPort)
 	f.Args = append(f.Args, "--firestore-admin", "--queries", "firestore")
 	return withState(f)
 }
@@ -283,7 +285,7 @@ func firestoreFront() *Front {
 // #1405), and recording the named databases calls name, for a project's
 // purge (internal/callfront, #1550).
 func datastoreFront() *Front {
-	f := callFront(DatastorePort, DatastoreEmulatorPort)
+	f := callFront("datastore", DatastorePort, DatastoreEmulatorPort)
 	f.Args = append(f.Args, "--queries", "datastore", "--datastore-databases")
 	return f
 }
@@ -389,7 +391,7 @@ func bigtableBackend(project string) Backend {
 // front (#1331), on a second Service port, so the calls the Terraform
 // provider makes over REST are in the same call log as the clients' gRPC.
 func spannerBackend() Backend {
-	front := callFront(SpannerPort, SpannerEmulatorPort)
+	front := callFront("spanner", SpannerPort, SpannerEmulatorPort)
 	front.Args = append(front.Args, "--rest-listen", fmt.Sprintf("0.0.0.0:%d", SpannerRESTPort),
 		"--rest-upstream", fmt.Sprintf("127.0.0.1:%d", SpannerEmulatorRESTPort),
 		"--spanner-instances")
