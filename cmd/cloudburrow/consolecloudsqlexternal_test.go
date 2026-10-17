@@ -154,3 +154,63 @@ func TestCloudSQLConsoleExternalPostgres(t *testing.T) {
 		t.Errorf("startExternalSync body %s", b)
 	}
 }
+
+// TestCloudSQLConsoleDemote (#1524): a standalone MySQL instance offers
+// Demote, which sends demoteMaster with the replication user and the GTID
+// check, or demote; a replica does not offer it.
+func TestCloudSQLConsoleDemote(t *testing.T) {
+	var mu sync.Mutex
+	bodies := map[string]string{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies[r.Method+" "+r.URL.Path] = string(b)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/solo"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "solo", "state": "RUNNABLE", "databaseVersion": "MYSQL_8_4",
+				"instanceType": "CLOUD_SQL_INSTANCE", "settings": map[string]any{"tier": "db-custom-1-3840"}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/rep"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "rep", "state": "RUNNABLE", "databaseVersion": "MYSQL_8_4",
+				"instanceType": "READ_REPLICA_INSTANCE", "masterInstanceName": "proj:solo",
+				"settings": map[string]any{"tier": "db-custom-1-3840", "databaseReplicationEnabled": true}})
+		case r.Method == http.MethodGet:
+			_, _ = io.WriteString(w, `{}`)
+		default:
+			_, _ = io.WriteString(w, `{"kind":"sql#operation","name":"op","status":"DONE"}`)
+		}
+	}))
+	defer ts.Close()
+	p := cloudSQLInstancesProvider{endpoint: strings.TrimPrefix(ts.URL, "http://"), versions: []string{"MYSQL_8_4"}}
+	ctx := context.Background()
+	has := func(name string) bool {
+		d, err := p.Detail(ctx, "proj", []string{name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range d.Actions {
+			if a.ID == "demote" {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("solo") || has("rep") {
+		t.Errorf("Demote offered on solo %v, on a replica %v", has("solo"), has("rep"))
+	}
+	if err := p.ActAt(ctx, "proj", []string{"solo"}, "demote", map[string]string{"source": "ext", "method": "demoteMaster",
+		"username": "repl", "password": "pw", "skipGtidCheck": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/solo/demoteMaster"]; !strings.Contains(b, `"masterInstanceName":"ext"`) ||
+		!strings.Contains(b, `"verifyGtidConsistency":false`) || !strings.Contains(b, `"username":"repl"`) {
+		t.Errorf("demoteMaster body %s", b)
+	}
+	if err := p.ActAt(ctx, "proj", []string{"solo"}, "demote", map[string]string{"source": "ext", "method": "demote"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/solo/demote"]; !strings.Contains(b, `"sourceRepresentativeInstanceName":"ext"`) {
+		t.Errorf("demote body %s", b)
+	}
+}

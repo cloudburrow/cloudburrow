@@ -369,6 +369,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
 	d.Actions = append(d.Actions, externalSyncActions(in, externalReplica(ctx, svc, project, in))...)
+	d.Actions = append(d.Actions, demoteActions(in)...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
 	d.Actions = append(d.Actions, storageActions(in)...)
 	if pitr == "On" && strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
@@ -531,6 +532,27 @@ func externalSyncActions(in *sqladminapi.DatabaseInstance, external bool) []cons
 		{ID: "start-external-sync", Label: "Start external sync", Fields: []console.Field{mode, {Name: "skipVerification",
 			Label: "Skip verification", Type: "checkbox"}},
 			Confirm: "The external server's databases are copied into this replica, which then replicates from it unless the sync is OFFLINE."}}
+}
+
+// demoteActions is Demote on a standalone MySQL instance (#1524): through
+// instances.demoteMaster, which keeps its data and replicates from the
+// external server, or instances.demote, after which Start external sync
+// copies the server's databases.
+func demoteActions(in *sqladminapi.DatabaseInstance) []console.Action {
+	if in.MasterInstanceName != "" || !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") ||
+		(in.InstanceType != "" && in.InstanceType != "CLOUD_SQL_INSTANCE") || len(in.ReplicaNames) > 0 {
+		return nil
+	}
+	return []console.Action{{ID: "demote", Label: "Demote", Destructive: true, Fields: []console.Field{
+		{Name: "source", Label: "Source representation instance", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,93}[a-z0-9]$",
+			Help: "An ON_PREMISES_INSTANCE recording the external server this instance becomes a replica of."},
+		{Name: "method", Label: "Method", Type: "select", Options: []string{"demoteMaster", "demote"},
+			Help: "demoteMaster keeps this instance's data and replicates from the server by GTID; demote leaves it waiting for Start external sync, which copies the server's databases."},
+		{Name: "username", Label: "Replication user", Type: "text", Help: "demoteMaster: the user on the external server; empty takes the source representation instance's."},
+		{Name: "password", Label: "Replication password", Type: "password"},
+		{Name: "skipGtidCheck", Label: "Skip the GTID consistency check", Type: "checkbox",
+			Help: "demoteMaster: demote even if this instance has transactions the external server has not."}},
+		Confirm: "This instance becomes a read replica of the external server and takes no more writes."}}
 }
 
 // externalReplica reports whether in is a replica of a source
@@ -846,6 +868,20 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 	case "start-external-sync":
 		_, err = svc.Projects.Instances.StartExternalSync(project, name, &sqladminapi.SqlInstancesStartExternalSyncRequest{
 			SyncMode: syncMode(v), SkipVerification: v["skipVerification"] == "true"}).Context(ctx).Do()
+	case "demote":
+		src := strings.TrimSpace(v["source"])
+		if v["method"] == "demote" {
+			_, err = svc.Instances.Demote(project, name, &sqladminapi.InstancesDemoteRequest{
+				DemoteContext: &sqladminapi.DemoteContext{SourceRepresentativeInstanceName: src}}).Context(ctx).Do()
+			break
+		}
+		dc := &sqladminapi.DemoteMasterContext{MasterInstanceName: src, VerifyGtidConsistency: v["skipGtidCheck"] != "true",
+			ForceSendFields: []string{"VerifyGtidConsistency"}}
+		if u := strings.TrimSpace(v["username"]); u != "" {
+			dc.ReplicaConfiguration = &sqladminapi.DemoteMasterConfiguration{MysqlReplicaConfiguration: &sqladminapi.DemoteMasterMySqlReplicaConfiguration{
+				Username: u, Password: v["password"]}}
+		}
+		_, err = svc.Instances.DemoteMaster(project, name, &sqladminapi.InstancesDemoteMasterRequest{DemoteMasterContext: dc}).Context(ctx).Do()
 	case "promote-replica":
 		_, err = svc.Instances.PromoteReplica(project, name).Context(ctx).Do()
 	case "stop-replica":

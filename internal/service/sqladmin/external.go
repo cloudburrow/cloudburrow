@@ -81,6 +81,10 @@ type ExternalSource struct {
 	// SyncMode is startExternalSync's: "" (ONLINE), a dump and then
 	// replication, or OFFLINE, the dump alone (#1524).
 	SyncMode string `json:"syncMode,omitempty"`
+	// Demoted is set by demoteMaster (#1524): the instance keeps its data
+	// and replicates from the source by GTID auto-positioning, with no
+	// dump.
+	Demoted bool `json:"demoted,omitempty"`
 }
 
 // instanceServicePrefix and upMySQLService are the Services a created
@@ -527,8 +531,8 @@ func decodeSync(r *http.Request) (syncRequest, error) {
 		return req, Errorf(http.StatusBadRequest, "Invalid request: Invalid value for syncMode: %s.", req.SyncMode)
 	}
 	if req.MigrationType == "PHYSICAL" {
-		return req, unimplemented("migrationType PHYSICAL", "a physical migration restores an XtraBackup physical backup from Cloud Storage; "+
-			"LOGICAL, a dump of the source's databases, is served")
+		return req, unimplemented("migrationType PHYSICAL", "a physical migration restores an XtraBackup physical backup from Cloud Storage into the replica's data directory, "+
+			"and the instance images have no XtraBackup (#1570); LOGICAL, a dump of the source's databases, is served")
 	}
 	return req, nil
 }
