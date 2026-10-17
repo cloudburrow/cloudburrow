@@ -3395,7 +3395,19 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 
 	objects, err := p.objects(ctx, bucket, prefix, path)
 	if err != nil {
-		return console.Detail{Unavailable: err.Error()}, nil
+		// A bucket whose IP filter refuses this console's address still
+		// has its page, whose settings are exempt, so the filter can be
+		// changed (#1505); one that cannot be read at all has none.
+		b, berr := p.readBucket(ctx, bucket)
+		if berr != nil {
+			return console.Detail{Unavailable: err.Error()}, nil
+		}
+		why := err.Error()
+		if b.IPFilter != nil && b.IPFilter.Mode == "Enabled" {
+			why = "The bucket's IP filter is enabled and does not admit this console's address; Edit IP filtering changes it. " + why
+		}
+		objects = console.Listing{Columns: []string{"Size", "Type", "Updated"}, NameColumn: "Name", Noun: "objects",
+			Items: []console.Resource{}, Unavailable: why}
 	}
 
 	// Compose acts on the objects checked in this listing (#790), not on the
@@ -3436,6 +3448,9 @@ func (p storageProvider) Detail(ctx context.Context, project string, path []stri
 			// actions (#1444).
 			sections = append(sections, p.cachesSection(ctx, bucket))
 			actions = append(actions, cacheActions()...)
+			// Its Rapid Caches and IP filtering (#1505).
+			sections = append(sections, p.rapidSection(ctx, bucket))
+			actions = append(actions, createRapidAction(), ipFilterAction(meta))
 		}
 		// Its notifications, and Create notification (#791).
 		notifications, create := p.notificationsSection(ctx, project, bucket)
@@ -3502,14 +3517,14 @@ func (p storageProvider) objects(ctx context.Context, bucket, prefix string, pat
 			Opens:  append(append([]string{}, path...), name),
 			Fields: map[string]string{"Type": "Folder", "Size": "—", "Updated": "—"},
 		}
-		if managed[name] {
+		if mf := managed[name]; mf != nil {
 			delete(managed, name)
-			// A managed folder can be deleted from its row (#828), at the
-			// path that names it whole.
+			// A managed folder can be edited (#1505) and deleted from its
+			// row (#828), at the path that names it whole.
 			full := prefix + name + "/"
 			row.Fields["Type"] = "Managed folder"
 			row.Target = managedFolderPath(bucket, full)
-			row.Actions = []console.Action{deleteManagedFolderAction(full)}
+			row.Actions = []console.Action{editManagedFolderAction(mf), deleteManagedFolderAction(full)}
 		}
 		return row
 	}
@@ -3642,8 +3657,9 @@ func bucketConfigSection(b bucketMeta) console.Section {
 				{Label: "Metageneration", Value: b.Metageneration},
 			}},
 			{Heading: "Labels", Properties: labels},
+			ipFilterGroup(b.IPFilter),
 		},
-		Note: "Edit bucket changes these through buckets.patch; the location cannot be changed. " +
+		Note: "Edit bucket changes these through buckets.patch, and Edit IP filtering the IP filtering; the location cannot be changed. " +
 			"A managed folder needs uniform bucket-level access.",
 	}
 }

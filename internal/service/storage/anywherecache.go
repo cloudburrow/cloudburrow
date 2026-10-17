@@ -57,7 +57,8 @@ type cacheRecord struct {
 	Bucket        string    `json:"bucket"`
 	ID            string    `json:"id"`
 	Zone          string    `json:"zone"`
-	TTL           int64     `json:"ttl"` // seconds
+	CacheType     string    `json:"cacheType,omitempty"` // a Rapid Cache's (rapidcache.go)
+	TTL           int64     `json:"ttl"`                 // seconds
 	Admission     string    `json:"admission"`
 	IngestOnWrite *bool     `json:"ingestOnWrite,omitempty"`
 	State         string    `json:"state"`
@@ -78,6 +79,10 @@ type cacheOp struct {
 	IngestOnWrite *bool  `json:"ingestOnWrite,omitempty"`
 	// Set says which fields an update sets.
 	Set []string `json:"set,omitempty"`
+	// CacheType and CreateOp are a Rapid Cache's type and the create
+	// operation of the cache an update or disable is for (rapidcache.go).
+	CacheType string `json:"cacheType,omitempty"`
+	CreateOp  string `json:"createOp,omitempty"`
 }
 
 const (
@@ -216,7 +221,7 @@ func (s *Server) settle(tx Tx, bucket string) error {
 			tx.Delete(k)
 		}
 	}
-	return nil
+	return s.settleRapid(tx, bucket, now)
 }
 
 // advance does an operation's due work.
@@ -254,6 +259,8 @@ func (s *Server) advance(tx Tx, op *operationRecord, now time.Time) (bool, error
 		op.Result = &c
 		op.finish(now, nil)
 		return true, nil
+	case createRapidType, updateRapidType, disableRapidType:
+		return s.advanceRapid(tx, op, now)
 	case relocateType:
 		return s.advanceRelocationSync(tx, op, now)
 	}

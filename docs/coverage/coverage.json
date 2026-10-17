@@ -5094,8 +5094,8 @@
     "Key": "storage",
     "Title": "Cloud Storage (JSON API)",
     "counts": {
-      "Unimplemented": 9,
-      "Verified": 78
+      "Unimplemented": 3,
+      "Verified": 84
     },
     "rows": [
       {
@@ -5247,6 +5247,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
+          "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
           "test/compat/storagesoftdelete_test.go:137 TestStorageBucketDeleteIgnoresSoftDeleted",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
@@ -5279,6 +5280,10 @@
           "test/compat/storageacl_test.go:40 TestStorageBucketACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
+          "test/compat/storageipfilter_test.go:100 TestStorageIPFilterGRPC",
+          "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
+          "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storageretention_test.go:61 TestStorageLockRetentionPolicy",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
@@ -5310,10 +5315,20 @@
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
+          "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
+          "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/storagexmlpost_test.go:33 TestStorageXMLBucketPutAndServiceGet",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "an ipFilter mode other than Enabled or Disabled",
+            "test": "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON"
+          }
         ]
       },
       {
@@ -5392,6 +5407,10 @@
           "test/compat/storageacl_test.go:186 TestGcloudStorageACL",
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
+          "test/compat/storageipfilter_test.go:100 TestStorageIPFilterGRPC",
+          "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfiltertools_test.go:145 TestTerraformStorageBucketIPFilter",
+          "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storagelifecycle_test.go:45 TestStorageLifecycleUnknownCondition400",
           "test/compat/storageretention_test.go:35 TestStorageRetentionBlocksDelete",
@@ -5598,6 +5617,7 @@
         "method": "storage.managedFolders.delete",
         "status": "Verified",
         "tests": [
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
           "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
@@ -5614,6 +5634,8 @@
         "method": "storage.managedFolders.get",
         "status": "Verified",
         "tests": [
+          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
           "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
@@ -5633,6 +5655,8 @@
         "method": "storage.managedFolders.insert",
         "status": "Verified",
         "tests": [
+          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
           "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
@@ -5650,6 +5674,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudstorage_test.go:238 TestGcloudStorageClearLabels",
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
           "test/compat/storagemanagedfolders_test.go:56 TestStorageManagedFolderLifecycle"
         ]
       },
@@ -5680,8 +5705,18 @@
       },
       {
         "method": "storage.managedFolders.update",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "a policy naming a cache the bucket does not have",
+            "test": "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON"
+          }
+        ]
       },
       {
         "method": "storage.notifications.delete",
@@ -5840,6 +5875,7 @@
           "test/compat/storageacl_test.go:128 TestStoragePredefinedACL",
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
           "test/compat/storagegrpccsek_test.go:28 TestStorageCSEKParity",
+          "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
           "test/compat/storageversioning_test.go:135 TestStorageDoesNotExistWithOnlyNoncurrent",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
           "test/compat/storagexmlpost_test.go:120 TestStorageXMLFormPostPolicyV4",
@@ -5864,6 +5900,9 @@
           "test/compat/storagechannels_test.go:148 TestStorageObjectChangeChannelSelection",
           "test/compat/storagecontexts_test.go:223 TestGcloudStorageObjectContexts",
           "test/compat/storagecontexts_test.go:36 TestStorageObjectContexts",
+          "test/compat/storageipfilter_test.go:100 TestStorageIPFilterGRPC",
+          "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON",
+          "test/compat/storageipfiltertools_test.go:33 TestGcloudStorageIPFilter",
           "test/compat/storagesoftdelete_test.go:59 TestStorageSoftDeleteAndRestore",
           "test/compat/storageversioning_test.go:170 TestStorageVersioningPersistentMode",
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
@@ -5874,6 +5913,11 @@
             "code": "200",
             "case": "the JSON API's CORS defaults beyond Allow-Origin, Allow-Methods and Max-Age (the requested headers echoed)",
             "test": "test/compat/storagecors_test.go:126 TestStorageJSONAlwaysAllowsCORS"
+          },
+          {
+            "code": "403",
+            "case": "a caller outside the bucket's IP filter (the message is not documented)",
+            "test": "test/compat/storageipfilter_test.go:42 TestStorageIPFilterJSON"
           }
         ]
       },
@@ -5990,28 +6034,60 @@
       },
       {
         "method": "storage.rapidCaches.disable",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
+        ]
       },
       {
         "method": "storage.rapidCaches.get",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
+        ]
       },
       {
         "method": "storage.rapidCaches.insert",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
+        ],
+        "unverified": [
+          {
+            "code": "400",
+            "case": "a zone outside the bucket's location",
+            "test": "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON"
+          },
+          {
+            "code": "409",
+            "case": "a second cache in the zone",
+            "test": "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON"
+          }
+        ]
       },
       {
         "method": "storage.rapidCaches.list",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
+        ]
       },
       {
         "method": "storage.rapidCaches.update",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/storageipfilter_test.go:150 TestStorageRapidCachesJSON",
+          "test/compat/storageipfilter_test.go:228 TestStorageRapidCachesControl",
+          "test/compat/storageipfiltertools_test.go:96 TestGcloudStorageRapidCaches"
+        ]
       }
     ]
   },
@@ -6166,7 +6242,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
-          "test/compat/storagegrpcappend_test.go:131 TestStorageGRPCSetIamPolicyUpdateMask"
+          "test/compat/storagegrpcappend_test.go:132 TestStorageGRPCSetIamPolicyUpdateMask"
         ]
       },
       {
@@ -6189,7 +6265,7 @@
         "tests": [
           "test/compat/storagegrpc_test.go:49 TestStorageGRPCBuckets",
           "test/compat/storagegrpcacl_test.go:33 TestStorageGRPCACLs",
-          "test/compat/storagegrpcappend_test.go:131 TestStorageGRPCSetIamPolicyUpdateMask"
+          "test/compat/storagegrpcappend_test.go:132 TestStorageGRPCSetIamPolicyUpdateMask"
         ]
       },
       {

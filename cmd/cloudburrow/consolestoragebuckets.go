@@ -111,6 +111,9 @@ type bucketMeta struct {
 	CustomPlacementConfig *struct {
 		DataLocations []string `json:"dataLocations"`
 	} `json:"customPlacementConfig"`
+	// IPFilter is the bucket's IP filtering, which Edit IP filtering
+	// changes (#1505).
+	IPFilter *storagev1.BucketIpFilter `json:"ipFilter"`
 }
 
 // placement is the bucket's custom placement, or "None".
@@ -182,9 +185,9 @@ func indentJSON(items []json.RawMessage) string {
 // bucketEditForm is Edit bucket, prefilled from the bucket.
 //
 // Only what buckets.patch keeps on this instance, and nothing it refuses:
-// the location is shown and cannot change; IP filtering and object
-// retention's enablement are refused by the API or set only at creation, so
-// they are not on the form. The default object ACL is offered as a
+// the location is shown and cannot change; object retention's enablement is
+// set only at creation, so it is not on the form, and IP filtering has its
+// own action, Edit IP filtering (#1505). The default object ACL is offered as a
 // predefined one while uniform access is off (#1233); single ACL entries
 // are on the Access control tab.
 func bucketEditForm(b bucketMeta) *console.EditForm {
@@ -482,17 +485,17 @@ func stampOrDash(t time.Time) string {
 // managedFolders are the managed folders directly under a prefix, by their
 // name there ("reports" for "logs/reports/" under "logs/"), from
 // managedFolders.list.
-func (p storageProvider) managedFolders(ctx context.Context, bucket, prefix string) (map[string]bool, error) {
+func (p storageProvider) managedFolders(ctx context.Context, bucket, prefix string) (map[string]*storagev1.ManagedFolder, error) {
 	s, err := jsonAPI(ctx, p.endpoint)
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]bool{}
+	out := map[string]*storagev1.ManagedFolder{}
 	err = s.ManagedFolders.List(bucket).Prefix(prefix).Context(ctx).Pages(ctx, func(page *storagev1.ManagedFolders) error {
 		for _, f := range page.Items {
 			rest := strings.TrimSuffix(strings.TrimPrefix(f.Name, prefix), "/")
 			if rest != "" && !strings.Contains(rest, "/") {
-				out[rest] = true
+				out[rest] = f
 			}
 		}
 		return nil
@@ -539,8 +542,8 @@ func deleteManagedFolderAction(name string) console.Action {
 	}
 }
 
-// managedFolderActions offers Delete managed folder on one that is there,
-// read with managedFolders.get.
+// managedFolderActions offers Edit managed folder, prefilled, and Delete
+// managed folder on one that is there, read with managedFolders.get.
 func (p storageProvider) managedFolderActions(ctx context.Context, path []string) []console.Action {
 	if len(path) != 3 || path[0] != managedFolderPage {
 		return nil
@@ -549,10 +552,11 @@ func (p storageProvider) managedFolderActions(ctx context.Context, path []string
 	if err != nil {
 		return nil
 	}
-	if _, err := s.ManagedFolders.Get(path[1], path[2]).Context(ctx).Do(); err != nil {
+	mf, err := s.ManagedFolders.Get(path[1], path[2]).Context(ctx).Do()
+	if err != nil {
 		return nil
 	}
-	return []console.Action{deleteManagedFolderAction(path[2])}
+	return []console.Action{editManagedFolderAction(mf), deleteManagedFolderAction(path[2])}
 }
 
 // createManagedFolder is managedFolders.insert under the page's prefix.

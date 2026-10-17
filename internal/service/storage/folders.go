@@ -497,6 +497,11 @@ func operationMetadata(op operationRecord) map[string]any {
 			common["progressPercent"] = -1
 		}
 		return cacheOpMetadata(op, common)
+	case createRapidType, updateRapidType, disableRapidType:
+		if op.Pending {
+			common["progressPercent"] = -1
+		}
+		return rapidOpMetadata(op, common)
 	case relocateType:
 		return relocateMetadata(op, common)
 	}
@@ -519,6 +524,11 @@ func operationMetadata(op operationRecord) map[string]any {
 }
 
 func operationResponse(op operationRecord) map[string]any {
+	if op.Result != nil && isRapidOp(op.Type) {
+		resp := rapidV2JSON(*op.Result)
+		resp["@type"] = "type.googleapis.com/google.storage.control.v2.RapidCache"
+		return resp
+	}
 	if op.Result != nil {
 		resp := cacheV2JSON(*op.Result)
 		resp["@type"] = "type.googleapis.com/google.storage.control.v2.AnywhereCache"

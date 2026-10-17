@@ -110,6 +110,7 @@ func (g *grpcStorage) call(ctx context.Context, method, path string, q url.Value
 		return nil, grpcstatus.Errorf(codes.Internal, "%v", err)
 	}
 	req.RemoteAddr = "127.0.0.1:0"
+	grpcCaller(ctx, req)
 	for k, v := range hdr {
 		req.Header[k] = v
 	}
