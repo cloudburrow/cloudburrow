@@ -32,11 +32,13 @@ import (
 // The last statement of a script is the client's request (scriptflow.go):
 // a query is run once more as a child of its own, which only reads; a
 // last statement that changes data is not run twice, so it has no child
-// job, and its counts are the parent's. A script with no control flow and
-// no earlier query is sent whole to the emulator, which runs it as one job:
-// it makes no child jobs (documented, docs/compatibility.md), because
-// running it a statement at a time would end a TEMP table or function with
-// the statement that made it.
+// job, and its counts are the parent's. Since #1459 every script of
+// several statements with no TEMP table or function is carried out so
+// (dml.go). One with a TEMP table or function and nothing the front must
+// carry out in its turn is sent whole to the emulator, which runs it as one
+// job: it makes no child jobs (documented, docs/compatibility.md), because
+// running it a statement at a time would end the TEMP table or function
+// with the statement that made it.
 
 // scriptChild is one child job a script ran.
 type scriptChild struct {

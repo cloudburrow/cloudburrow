@@ -757,7 +757,10 @@ func unsupportedInScript(nodes []scriptNode) string {
 // CLONE, CREATE SCHEMA of a dataset that exists, DROP SCHEMA of a dataset
 // the script names, CREATE FUNCTION of one that exists, DROP FUNCTION,
 // MERGE from a subquery), is so run in its turn, each its own child job,
-// as BigQuery runs each statement of a script.
+// as BigQuery runs each statement of a script. So is every other script of
+// several statements that checkDDL passes (dml.go): sent whole, it would
+// make no child jobs, and the emulator would roll it back whole through
+// jobs.query when a statement failed.
 func splitCures(sql string) bool {
 	if !strings.Contains(sql, ";") {
 		return false
