@@ -714,6 +714,18 @@ func (f front) avroLoad(w http.ResponseWriter, r *http.Request, job *jobBody) bo
 			"schema out")
 	}
 
+	if h := hiveFilesOf(r); h != nil { // #1547, loadvariants.go
+		for _, k := range h.keys {
+			for _, fl := range file {
+				if strings.EqualFold(fl.Name, k.name) {
+					return answer(http.StatusBadRequest, "The Avro file's column "+fl.Name+" is a partition key: \"Hive "+
+						"partitioning keys and the columns in the underlying files cannot overlap.\"")
+				}
+			}
+		}
+		file = append(file, h.fields()...)
+	}
+
 	// The plan, as for Parquet.
 	plan := &pqPlan{dest: tableRef{DatasetID: dest.DatasetID, TableID: dest.TableID},
 		createNever: strings.EqualFold(el.CreateDisposition, "CREATE_NEVER")}
@@ -830,7 +842,14 @@ func (f front) avroLoad(w http.ResponseWriter, r *http.Request, job *jobBody) bo
 					var vals map[string]any
 					if vals, err = avRow(af.fields, m, ""); err == nil {
 						parts := make([]string, len(plan.target))
+						hive := hiveFilesOf(r) // #1547
 						for i, t := range plan.target {
+							if hive != nil {
+								if lit, ok := hive.literal(af.uri, t.Name); ok {
+									parts[i] = lit
+									continue
+								}
+							}
 							if parts[i], err = literalFor(t, vals[strings.ToLower(t.Name)]); err != nil {
 								break
 							}

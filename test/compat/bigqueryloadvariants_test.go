@@ -22,8 +22,8 @@ import (
 // the prefix encodes them, into a given schema too); a key layout that is
 // not key=value, keys in another order, a value that is not CUSTOM's
 // type, a file column that is a key, requirePartitionFilter and a missing
-// prefix are 400; CSV with hive partitioning is 501. A Parquet load adds
-// the keys after the file's columns. jsonExtension
+// prefix are 400; CSV with hive partitioning is 501. A Parquet (AUTO) and
+// an Avro (STRINGS) load add the keys after the file's columns. jsonExtension
 // GEOJSON loads Features, by autodetect and with a schema, from Cloud
 // Storage and as an upload; a Feature that is not one is 400, as is
 // GEOJSON with CSV. The generated client: the official one has no
@@ -53,7 +53,11 @@ func TestBigQueryHivePartitionedAndGeoJSONLoads(t *testing.T) {
 		return arrowParquet(t, arrow.NewSchema([]arrow.Field{{Name: "v", Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, nil),
 			func(b *array.RecordBuilder) { b.Field(0).(*array.Int64Builder).Append(v) })
 	}
-	for name, data := range map[string]string{"pq/dt=2024-01-02/n=7/a.parquet": pq(1), "pq/dt=2024-01-03/n=8/b.parquet": pq(2)} {
+	av := func(v int64) string {
+		return avroFile(t, `{"type":"record","name":"R","fields":[{"name":"v","type":"long"}]}`, "", map[string]any{"v": v})
+	}
+	for name, data := range map[string]string{"pq/dt=2024-01-02/n=7/a.parquet": pq(1), "pq/dt=2024-01-03/n=8/b.parquet": pq(2),
+		"av/k=1/a.avro": av(1), "av/k=2/b.avro": av(2)} {
 		w := bucket.Object(name).NewWriter(ctx)
 		if _, err := w.Write([]byte(data)); err != nil {
 			t.Fatal(err)
@@ -153,6 +157,14 @@ func TestBigQueryHivePartitionedAndGeoJSONLoads(t *testing.T) {
 	want("Parquet's columns", types("pqhive"), "v:INTEGER,dt:DATE,n:INTEGER")
 	want("Parquet's rows", q("SELECT v, CAST(dt AS STRING), n FROM DS.pqhive ORDER BY v"),
 		"[[1 2024-01-02 7] [2 2024-01-03 8]]")
+
+	// Avro, STRINGS.
+	if err := run("avhive", &bq.JobConfigurationLoad{SourceFormat: "AVRO",
+		SourceUris: []string{gs + "av/*"}, HivePartitioningOptions: hive("STRINGS", "av/")}, ""); err != nil {
+		t.Fatalf("Avro STRINGS: %v", err)
+	}
+	want("Avro's columns", types("avhive"), "v:INTEGER,k:STRING")
+	want("Avro's rows", q("SELECT v, k FROM DS.avhive ORDER BY v"), "[[1 1] [2 2]]")
 
 	// 400 and 501.
 	for _, tc := range []struct {

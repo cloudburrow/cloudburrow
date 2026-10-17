@@ -23,7 +23,7 @@ import (
 // The load options the official Go client's loader has no field for
 // (#1547): hivePartitioningOptions (mode and sourceUriPrefix) and
 // jsonExtension GEOJSON, which the front serves for a
-// NEWLINE_DELIMITED_JSON load (hive partitioning for Parquet too) (internal/bigqueryfront/loadvariants.go).
+// NEWLINE_DELIMITED_JSON load (hive partitioning for Parquet and Avro too) (internal/bigqueryfront/loadvariants.go).
 // The form's load is still sent by the official client, through a
 // transport that adds the two to the job's configuration.load in
 // jobs.insert's body (JSON, or the metadata part of a multipart upload).
@@ -45,7 +45,7 @@ func bigqueryLoadExtraFields() []console.Field {
 				"GEOGRAPHY column named geometry and each member of its properties a column."},
 		{Name: "hiveMode", Label: "Source data partitioning", Type: "select", Options: bigqueryHiveModes,
 			Section: "Hive partitioning",
-			Help: "Cloud Storage, newline-delimited JSON or Parquet: read partition keys from directories key=value " +
+			Help: "Cloud Storage, newline-delimited JSON, Parquet or Avro: read partition keys from directories key=value " +
 				"after the prefix below, as columns: AUTO detects STRING, INTEGER, DATE or TIMESTAMP, STRINGS makes " +
 				"each a STRING, CUSTOM takes the types the prefix encodes, as gs://bucket/table/{dt:DATE}/{n:INTEGER}."},
 		{Name: "hiveSourceUriPrefix", Label: "Source URI prefix", Type: "text", Section: "Hive partitioning",
