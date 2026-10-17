@@ -137,3 +137,46 @@ func TestConsoleBuildTriggerPageEditAndDisable(t *testing.T) {
 		t.Error("Edit trigger took an empty step image")
 	}
 }
+
+// nopSubs is a Pub/Sub that takes every subscription.
+type nopSubs struct{}
+
+func (nopSubs) CreateTopic(context.Context, string, map[string]string) error { return nil }
+func (nopSubs) DeleteTopic(context.Context, string) error                    { return nil }
+func (nopSubs) CreatePushSubscription(context.Context, runadapter.PushSubscription) error {
+	return nil
+}
+func (nopSubs) DeleteSubscription(context.Context, string) error { return nil }
+func (nopSubs) CreateNotification(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
+func (nopSubs) DeleteNotification(context.Context, string, string) error { return nil }
+
+// The Triggers page makes a Pub/Sub trigger from its topic field and lists
+// its event as the topic's messages (#1506).
+func TestConsoleBuildPubsubTrigger(t *testing.T) {
+	ctx := context.Background()
+	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
+	g := grpc.NewServer()
+	s.Builds(stubSource{}, blockingBuilder{}).WithTriggerEvents(nopSubs{}, func() string { return "http://h:1" }).CloudBuild().Register(g)
+	runadapter.NewOperationsServer(s).Register(g)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = g.Serve(ln) }()
+	t.Cleanup(g.Stop)
+	trigs := buildTriggersProvider{b: runBuildsProvider{defaultProject: "console-ps", runAddr: func() string { return ln.Addr().String() }}}
+	if _, err := trigs.Create(ctx, "", map[string]string{"name": "ps1", "image": "alpine:3.20", "command": "true",
+		"topic": "projects/console-ps/topics/builds"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() { _ = trigs.Delete(context.Background(), "", "ps1") })
+	tl, _ := trigs.List(ctx, "")
+	if len(tl.Items) != 1 || tl.Items[0].Fields["Event"] != "Pub/Sub message: projects/console-ps/topics/builds" {
+		t.Fatalf("triggers = %+v", tl.Items)
+	}
+	if acts := trigs.Actions(tl.Items[0]); len(acts) != 0 {
+		t.Errorf("a Pub/Sub trigger offers %+v; it runs from its topic", acts)
+	}
+}

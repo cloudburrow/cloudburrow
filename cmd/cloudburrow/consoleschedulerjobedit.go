@@ -313,8 +313,8 @@ func schedulerAppEngineEditFields(a *scheduler.AppEngineTarget, deadline time.Du
 			Section: section, Help: "A job's target type cannot be changed from the console."},
 		{Name: "relativeUri", Label: "Relative URI", Type: "text", Required: true, Default: a.RelativeURI,
 			Section: section, Pattern: `^/.*$`,
-			Help: "The path and query, beginning with /. This instance has no App Engine, so each attempt " +
-				"fails with NOT_FOUND (HTTP 404)."},
+			Help: "The path and query, beginning with /. There is no App Engine here: each attempt goes to the " +
+				"--appengine-url server standing in for the app, or, without one, fails with NOT_FOUND (HTTP 404)."},
 		{Name: "httpMethod", Label: "HTTP method", Type: "text", Required: true, Default: a.Method,
 			Section: section, Pattern: `^(POST|GET|HEAD|PUT|DELETE|PATCH|OPTIONS)$`,
 			Help: "One of " + schedulerHTTPMethods + ", in capitals."},

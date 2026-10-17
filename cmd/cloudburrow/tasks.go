@@ -209,3 +209,12 @@ func (t *tasksService) Stop(ctx context.Context) error {
 	}
 	return err
 }
+
+// appEngineURL is --appengine-url, where App Engine tasks are delivered
+// (#1506), or "".
+func (t *tasksService) appEngineURL() string {
+	if t == nil {
+		return ""
+	}
+	return t.cfg.AppEngineURL
+}

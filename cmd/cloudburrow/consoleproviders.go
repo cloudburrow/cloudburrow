@@ -432,8 +432,7 @@ func (p tasksProvider) taskDetail(queue, task string) (console.Detail, error) {
 		sections = append(sections, console.Section{
 			ID: "request", Label: "Request", Kind: console.KindProperties,
 			Groups: []console.PropertyGroup{{Heading: "App Engine HTTP request", Properties: request}},
-			Note: "This instance has no App Engine: every attempt fails with NOT_FOUND (HTTP 404) " +
-				"and is retried by the queue's retry config, as a request to an app that does not exist is.",
+			Note:   appEngineDeliveryNote(p.svc.appEngineURL()),
 		})
 	}
 
@@ -5411,4 +5410,17 @@ func (aiProvider) Detail(_ context.Context, _ string, path []string) (console.De
 		},
 		Sections: sections,
 	}, nil
+}
+
+// appEngineDeliveryNote says where an App Engine task's attempts go: to the
+// --appengine-url server standing in for the app (#1506), or nowhere.
+func appEngineDeliveryNote(url string) string {
+	if url != "" {
+		return "There is no App Engine here: each attempt is sent to " + url + " (--appengine-url), the local server " +
+			"standing in for the app, with this Host and the X-AppEngine-* headers; a non-2xx answer is retried by the " +
+			"queue's retry config."
+	}
+	return "This instance has no App Engine: every attempt fails with NOT_FOUND (HTTP 404) " +
+		"and is retried by the queue's retry config, as a request to an app that does not exist is. " +
+		"Start the instance with --appengine-url to deliver attempts to a local server standing in for the app."
 }

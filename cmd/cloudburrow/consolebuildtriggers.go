@@ -32,13 +32,18 @@ func (p buildTriggersProvider) project(project string) string {
 func (p buildTriggersProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Region", "Event", "Description", "Pool", "Approval", "Age"},
 		NameColumn: "Trigger", Noun: "triggers", AlwaysStatus: true,
-		Note: "Manual and webhook triggers run an inline build. GitHub, GitLab, Bitbucket and Cloud Source Repositories " +
-			"events, and builds read from a repository, need a hosted git service and are refused."}
+		Note: "Manual, webhook and Pub/Sub triggers run an inline build; a Pub/Sub trigger subscribes to its topic on this " +
+			"instance's Pub/Sub, and its builds, which arrive from the cluster, run docker build, docker push and pack steps only. " +
+			"GitHub, GitLab, Bitbucket and Cloud Source Repositories events, and builds read from a repository, need a hosted " +
+			"git service and are refused."}
 	for _, t := range runadapter.Triggers(p.project(project), "") {
 		region := strings.Split(t.GetResourceName(), "/")[3]
 		event, st := "Manual invocation", "Enabled"
 		if t.GetWebhookConfig() != nil {
 			event = "Webhook event"
+		}
+		if pc := t.GetPubsubConfig(); pc != nil {
+			event = "Pub/Sub message: " + pc.GetTopic()
 		}
 		if t.GetDisabled() {
 			st = "Disabled"
@@ -82,6 +87,8 @@ func (buildTriggersProvider) CreateForm() (string, []console.Field) {
 		{Name: "pool", Label: "Worker pool", Type: "text", Help: "optional: projects/PROJECT/locations/REGION/workerPools/POOL"},
 		{Name: "secret", Label: "Webhook secret", Type: "text",
 			Help: "optional: a Secret Manager version, projects/PROJECT/secrets/SECRET/versions/N, which makes a webhook trigger"},
+		{Name: "topic", Label: "Pub/Sub topic", Type: "text",
+			Help: "optional: projects/PROJECT/topics/TOPIC, which makes a Pub/Sub trigger; $(body.message.data.KEY) in a substitution reads the message"},
 		{Name: "approval", Label: "Require approval", Type: "checkbox",
 			Help: "approvalConfig.approvalRequired: each build waits, PENDING, until it is approved on its build page"},
 	}
@@ -109,6 +116,9 @@ func (p buildTriggersProvider) Create(ctx context.Context, project string, v map
 	t := &cbpb.BuildTrigger{Name: strings.TrimSpace(v["name"]), Description: v["description"], BuildTemplate: &cbpb.BuildTrigger_Build{Build: b}}
 	if s := strings.TrimSpace(v["secret"]); s != "" {
 		t.WebhookConfig = &cbpb.WebhookConfig{AuthMethod: &cbpb.WebhookConfig_Secret{Secret: s}}
+	}
+	if topic := strings.TrimSpace(v["topic"]); topic != "" {
+		t.PubsubConfig = &cbpb.PubsubConfig{Topic: topic}
 	}
 	err := p.b.withClient(ctx, func(c *cloudbuild.Client) error {
 		made, err := c.CreateBuildTrigger(ctx, &cbpb.CreateBuildTriggerRequest{ProjectId: project,

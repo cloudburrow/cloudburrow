@@ -4,6 +4,7 @@ package compat
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -93,5 +94,64 @@ func TestCloudBuildPubsubTrigger(t *testing.T) {
 	}
 	if _, err := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub}); status.Code(err) != codes.NotFound {
 		t.Errorf("the subscription after the delete: %v; want NotFound", err)
+	}
+}
+
+// covers: google.devtools.cloudbuild.v1.CloudBuild/CreateBuildTrigger, google.devtools.cloudbuild.v1.CloudBuild/GetBuildTrigger, google.devtools.cloudbuild.v1.CloudBuild/DeleteBuildTrigger
+//
+// TestTerraformCloudBuildPubsubTrigger (#1506): a google_cloudbuild_trigger
+// with pubsub_config and an inline build applies through `cloudburrow
+// terraform` with egress blocked; the official clients read back its
+// subscription on the topic; the plan is clean; destroy removes the
+// trigger and its subscription.
+func TestTerraformCloudBuildPubsubTrigger(t *testing.T) {
+	h := New(t)
+	ps := pubsubClient(t, h)
+	m := newTFModule(t)
+	_ = runClient(t, h) // skips without CLOUDBURROW_TEST_RUN
+	ctx := h.Context()
+	cb := cloudBuildClient(ctx, t, h)
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+	tp := topic(t, h, ps, "tf-cb-"+suffix)
+	m.write(fmt.Sprintf(`
+resource "google_cloudbuild_trigger" "ps" {
+  project  = %[1]q
+  location = "us-central1"
+  name     = "tf-ps-%[2]s"
+  pubsub_config {
+    topic = %[3]q
+  }
+  substitutions = { _TAG = "$(body.message.data.tag)" }
+  build {
+    step {
+      name = "gcr.io/cloud-builders/docker"
+      args = ["version"]
+    }
+  }
+}
+`, h.Project(), suffix, tp))
+	m.must("init", "-input=false", "-no-color")
+	m.apply()
+	var tr *cbpb.BuildTrigger
+	for it := cb.ListBuildTriggers(ctx, &cbpb.ListBuildTriggersRequest{Parent: runParent(h), ProjectId: h.Project()}); ; {
+		x, err := it.Next()
+		if err != nil {
+			break
+		}
+		if x.GetName() == "tf-ps-"+suffix {
+			tr = x
+		}
+	}
+	if tr == nil || tr.GetPubsubConfig().GetTopic() != tp || tr.GetPubsubConfig().GetSubscription() == "" {
+		t.Fatalf("the trigger = %v", tr)
+	}
+	sub := tr.GetPubsubConfig().GetSubscription()
+	if s, err := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub}); err != nil || s.GetTopic() != tp {
+		t.Errorf("the trigger's subscription = %v, %v", s, err)
+	}
+	m.planClean()
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	if _, err := ps.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{Subscription: sub}); status.Code(err) != codes.NotFound {
+		t.Errorf("the subscription after destroy: %v; want NotFound", err)
 	}
 }
