@@ -1,0 +1,600 @@
+CloudBurrow patch 61 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1516).
+
+The bug: a collation on a STRING inside a STRUCT or an ARRAY
+(`st STRUCT<a STRING COLLATE 'und:ci'>`, `arr ARRAY<STRING COLLATE
+'und:ci'>`), and a table's DEFAULT COLLATE on such a STRING, failed
+"GOOGLESQL_RET_CHECK failure (googlesql/analyzer/resolver_stmt.cc)
+annotations != nullptr": the analyzer resolves a nested COLLATE only
+with FEATURE_CREATE_TABLE_FIELD_ANNOTATIONS, and the catalog gave a
+column only a top-level STRING's collation.
+
+The fix, as BigQuery's collation reference documents ("A STRING field in
+a STRUCT", "A STRING element in an ARRAY",
+https://cloud.google.com/bigquery/docs/reference/standard-sql/collation-concepts):
+- the analyzer has FEATURE_CREATE_TABLE_FIELD_ANNOTATIONS on;
+- a CREATE TABLE records the collation of each STRING inside a STRUCT
+  or an ARRAY column (its COLLATE, else the table's DEFAULT COLLATE
+  unless its COLLATE is '') in ColumnSpec.FieldCollation, and the
+  catalog gives the column an annotation map of the type's shape, so
+  the analyzer propagates it to a field access, an UNNEST's element and
+  a subscript (nested_collation.go);
+- a comparison of an und:ci STRUCT or ARRAY (a STRUCT's =, IN UNNEST)
+  compares its und:ci STRINGs case-folded, through a new function,
+  googlesqlite_fold_collation.
+Its test nested_collation_test.go fails without it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- /dev/null
++++ b/nested_collation_test.go
+@@ -0,0 +1,61 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"fmt"
++	"testing"
++)
++
++// TestNestedCollationUndCI is CloudBurrow patch 61's regression test
++// (cloudburrow/cloudburrow#1516): a STRING inside a STRUCT or an ARRAY
++// with the collation 'und:ci', by its COLLATE or the table's DEFAULT
++// COLLATE, compares case-insensitively through a field access, UNNEST,
++// IN UNNEST, a subscript, GROUP BY, COUNT(DISTINCT) and a STRUCT
++// comparison, as BigQuery's collation reference documents; a field whose
++// COLLATE is the empty string keeps the default off. Before the patch
++// the CREATE TABLE failed "GOOGLESQL_RET_CHECK failure ... annotations
++// != nullptr".
++func TestNestedCollationUndCI(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=nested_collation_und_ci")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	ctx := context.Background()
++	for _, q := range []string{
++		"CREATE TABLE `p.d.t` (st STRUCT<a STRING COLLATE 'und:ci', b STRING>, arr ARRAY<STRING COLLATE 'und:ci'>, n INT64)",
++		"INSERT INTO `p.d.t` (st, arr, n) VALUES (STRUCT('Abc', 'Abc'), ['Abc', 'x'], 1)",
++		"CREATE TABLE `p.d.u` (st STRUCT<a STRING, b STRING COLLATE ''>, arr ARRAY<STRING>, sa ARRAY<STRUCT<x STRING>>) DEFAULT COLLATE 'und:ci'",
++		"INSERT INTO `p.d.u` VALUES (STRUCT('Abc', 'Abc'), ['Abc'], [STRUCT('Abc')]), (STRUCT('aBC', 'aBC'), ['aBC'], [STRUCT('aBC')])",
++	} {
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	for _, tc := range []struct{ q, want string }{
++		{"SELECT COUNT(*) FROM `p.d.t` WHERE st.a = 'ABC'", "1"},
++		{"SELECT COUNT(*) FROM `p.d.t` WHERE st.b = 'ABC'", "0"},
++		{"SELECT COUNT(*) FROM `p.d.t`, UNNEST(arr) e WHERE e = 'ABC'", "1"},
++		{"SELECT COUNT(*) FROM `p.d.t` WHERE 'ABC' IN UNNEST(arr)", "1"},
++		{"SELECT COUNT(*) FROM `p.d.t` WHERE arr[OFFSET(0)] = 'ABC'", "1"},
++		{"SELECT COUNT(*) FROM `p.d.u` WHERE st.a = 'ABC'", "2"},
++		{"SELECT COUNT(*) FROM `p.d.u` WHERE st.b = 'ABC'", "0"},
++		{"SELECT COUNT(*) FROM `p.d.u`, UNNEST(arr) e WHERE e = 'ABC'", "2"},
++		{"SELECT COUNT(*) FROM `p.d.u`, UNNEST(sa) e WHERE e.x = 'ABC'", "2"},
++		{"SELECT COUNT(*) FROM (SELECT st.a FROM `p.d.u` GROUP BY st.a)", "1"},
++		{"SELECT COUNT(DISTINCT st.a) FROM `p.d.u`", "1"},
++		{"SELECT COUNT(*) FROM `p.d.u` WHERE st = STRUCT('ABC' AS a, 'Abc' AS b)", "1"},
++		{"SELECT COUNT(*) FROM `p.d.u` WHERE st.a IN ('abc')", "2"},
++		{"SELECT st.a FROM `p.d.t`", "Abc"},
++	} {
++		var v any
++		if err := db.QueryRowContext(ctx, tc.q).Scan(&v); err != nil {
++			t.Errorf("%s: %v", tc.q, err)
++			continue
++		}
++		if got := fmt.Sprint(v); got != tc.want {
++			t.Errorf("%s = %s, want %s", tc.q, got, tc.want)
++		}
++	}
++}
+--- a/catalog.go
++++ b/catalog.go
+@@ -17,6 +17,10 @@
+ 	NameWithType    = internal.NameWithType
+ 	ColumnSpec      = internal.ColumnSpec
+ 	Type            = internal.Type
++	// FieldCollation is a STRUCT or ARRAY column's collation of the
++	// STRINGs inside it. CloudBurrow patch
++	// (cloudburrow/cloudburrow#1516).
++	FieldCollation = internal.FieldCollation
+ )
+ 
+ // ChangedCatalogFromRows retrieve modified catalog information from sql.Rows.
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -137,6 +137,9 @@
+ 	// GROUP BY and ORDER BY that compare collated STRING values.
+ 	googlesql.LanguageFeatureFeatureV13AnnotationFramework,
+ 	googlesql.LanguageFeatureFeatureV13CollationSupport,
++	// CloudBurrow patch (cloudburrow/cloudburrow#1516): a COLLATE on a
++	// STRING inside a STRUCT or an ARRAY column (nested_collation.go).
++	googlesql.LanguageFeatureFeatureCreateTableFieldAnnotations,
+ 	// Function-set feature flags. Enable the families we have
+ 	// runtime support for so the analyzer recognises the new
+ 	// builtins (LAX_*, EDIT_DISTANCE, MAX_BY / MIN_BY, etc.)
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -2468,7 +2468,7 @@
+ 		// ingestion-time pseudo-columns (applyIngestionPartitionRewrite)
+ 		// are pseudo-columns, which SELECT * leaves out.
+ 		// CloudBurrow patch (#1508): a collated column's annotation.
+-		if col := newCollatedColumn(storageName, column.Name, typ, column.Collation, isIngestionPseudoColumn(column.Name)); col != nil {
++		if col := newCollatedColumn(storageName, column.Name, typ, column, isIngestionPseudoColumn(column.Name)); col != nil {
+ 			columns = append(columns, col)
+ 		} else {
+ 			columns = append(columns, m1(googlesql.NewSimpleColumn(storageName, column.Name, typ, isIngestionPseudoColumn(column.Name), true)))
+@@ -2533,7 +2533,7 @@
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		if col := newCollatedColumn(tableName, column.Name, typ, column.Collation, isIngestionPseudoColumn(column.Name)); col != nil {
++		if col := newCollatedColumn(tableName, column.Name, typ, column, isIngestionPseudoColumn(column.Name)); col != nil {
+ 			columns = append(columns, col) // CloudBurrow patch (#1508)
+ 		} else {
+ 			columns = append(columns, m1(googlesql.NewSimpleColumn(
+--- a/internal/collation.go
++++ b/internal/collation.go
+@@ -49,13 +49,17 @@
+ 	"$greater_or_equal": true, "$between": true, "$in": true, "$like": true, "$not_like": true,
+ 	"$is_distinct_from": true, "$is_not_distinct_from": true, "starts_with": true, "ends_with": true,
+ 	"strpos": true, "instr": true, "$case_with_value": true,
++	// CloudBurrow patch (#1516): IN UNNEST of an und:ci ARRAY.
++	"$in_array": true,
+ }
+ 
+ // foldCollatedArgs returns args with each STRING argument case-folded
+ // when call compares them under und:ci.
+ func foldCollatedArgs(call *googlesql.ResolvedFunctionCallBase, args []string) []string {
+ 	list, err := call.CollationList()
+-	if err != nil || len(list) == 0 || !isCI(list[0]) {
++	// CloudBurrow patch (#1516): a STRUCT's or an ARRAY's collation
++	// (nested_collation.go) as well as a STRING's.
++	if err != nil || len(list) == 0 || !hasCI(list[0]) {
+ 		return args
+ 	}
+ 	fn, err := call.Function()
+@@ -72,8 +76,15 @@
+ 		if i >= len(out) || arg == nil {
+ 			break
+ 		}
+-		if typ, _ := arg.Type(); typ != nil && m1(typ.IsString()) {
+-			out[i] = "googlesqlite_lower(" + out[i] + ")"
++		typ, _ := arg.Type()
++		switch {
++		case typ == nil:
++		case m1(typ.IsString()):
++			if isCI(list[0]) {
++				out[i] = "googlesqlite_lower(" + out[i] + ")"
++			}
++		default:
++			out[i] = foldNestedSQL(out[i], collationTreeOf(typ, list[0]))
+ 		}
+ 	}
+ 	return out
+@@ -114,13 +125,18 @@
+ 	return s
+ }
+ 
+-// newCollatedColumn returns a catalog column of typ with the collation,
+-// or nil when it has none or typ is not a STRING.
+-func newCollatedColumn(tableName, name string, typ googlesql.Googlesql_TypeNode, collation string, isPseudo bool) *googlesql.SimpleColumn {
+-	if collation == "" || !m1(typ.IsString()) {
+-		return nil
++// newCollatedColumn returns a catalog column of typ with column's
++// collation, or nil when it has none: a STRING column's Collation, or the
++// collations of the STRINGs inside a STRUCT or an ARRAY column
++// (FieldCollation, CloudBurrow patch #1516).
++func newCollatedColumn(tableName, name string, typ googlesql.Googlesql_TypeNode, column *ColumnSpec, isPseudo bool) *googlesql.SimpleColumn {
++	var am *googlesql.AnnotationMap
++	switch {
++	case column.Collation != "" && m1(typ.IsString()):
++		am = scalarCollationMap(column.Collation, typ)
++	case column.FieldCollation != nil && !m1(typ.IsString()):
++		am = nestedCollationMap(column.FieldCollation, typ)
+ 	}
+-	am := scalarCollationMap(collation, typ)
+ 	if am == nil {
+ 		return nil
+ 	}
+--- /dev/null
++++ b/internal/nested_collation.go
+@@ -0,0 +1,352 @@
++package internal
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1516): the collation of a
++// STRING inside a STRUCT or an ARRAY.
++//
++// BigQuery assigns a collation to "A STRING field in a STRUCT" and "A
++// STRING element in an ARRAY", and a table's DEFAULT COLLATE to each of
++// them that names none
++// (https://cloud.google.com/bigquery/docs/reference/standard-sql/collation-concepts#collate_define).
++// The analyzer resolves a nested COLLATE (FEATURE_CREATE_TABLE_FIELD_
++// ANNOTATIONS, analyzer.go) into the column definition's annotations,
++// whose child_list holds a STRUCT's fields and an ARRAY's element. A
++// CREATE TABLE records them in ColumnSpec.FieldCollation, and the
++// catalog gives the column an annotation map of the same shape, so the
++// analyzer propagates the collation to a field access (st.a), an UNNEST's
++// element and an array subscript, and the comparisons, GROUP BY and
++// ORDER BY over them compare case-folded (collation.go).
++
++import (
++	"encoding/json"
++	"fmt"
++	"strings"
++	"sync"
++
++	"github.com/goccy/go-googlesql"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// FieldCollation is the collation of a STRING inside a STRUCT or an
++// ARRAY: Collation a STRING's, Fields a STRUCT's fields in order (nil for
++// a field without), Element an ARRAY's element.
++type FieldCollation struct {
++	Collation string            `json:"collation,omitempty"`
++	Fields    []*FieldCollation `json:"fields,omitempty"`
++	Element   *FieldCollation   `json:"element,omitempty"`
++}
++
++// fieldCollationOf returns the collation of the STRINGs inside typ, a
++// STRUCT or an ARRAY, from annotations (a column definition's, which may
++// be nil) and else defaultCollation, or nil when none has one. A STRING
++// whose COLLATE is the empty string keeps the default off, as a column's does.
++func fieldCollationOf(typ googlesql.Googlesql_TypeNode, annotations *googlesql.ResolvedColumnAnnotations, defaultCollation string) *FieldCollation {
++	if typ == nil {
++		return nil
++	}
++	var children []*googlesql.ResolvedColumnAnnotations
++	if annotations != nil {
++		children, _ = annotations.ChildList()
++	}
++	child := func(i int) *googlesql.ResolvedColumnAnnotations {
++		if i < len(children) {
++			return children[i]
++		}
++		return nil
++	}
++	switch {
++	case m1(typ.IsString()):
++		c := defaultCollation
++		if annotations != nil {
++			if expr, _ := annotations.CollationName(); expr != nil {
++				c = literalString(expr)
++			}
++		}
++		if c == "" {
++			return nil
++		}
++		return &FieldCollation{Collation: c}
++	case m1(typ.IsStruct()):
++		st, err := typ.AsStruct()
++		if err != nil || st == nil {
++			return nil
++		}
++		fields, _ := st.Fields()
++		out, any := &FieldCollation{Fields: make([]*FieldCollation, len(fields))}, false
++		for i, f := range fields {
++			if out.Fields[i] = fieldCollationOf(f.Type_, child(i), defaultCollation); out.Fields[i] != nil {
++				any = true
++			}
++		}
++		if !any {
++			return nil
++		}
++		return out
++	case m1(typ.IsArray()):
++		at, err := typ.AsArray()
++		if err != nil || at == nil {
++			return nil
++		}
++		elem, _ := at.ElementType()
++		if e := fieldCollationOf(elem, child(0), defaultCollation); e != nil {
++			return &FieldCollation{Element: e}
++		}
++	}
++	return nil
++}
++
++// nestedCollations keeps the annotation map of each nested collation a
++// column is given, owned by the type factory, for the process.
++var nestedCollations = struct {
++	sync.Mutex
++	am map[string]*googlesql.AnnotationMap
++}{am: map[string]*googlesql.AnnotationMap{}}
++
++// nestedCollationMap returns the annotation map of fc on typ, of typ's
++// shape (a struct map for a STRUCT, an array map for an ARRAY), or nil.
++func nestedCollationMap(fc *FieldCollation, typ googlesql.Googlesql_TypeNode) *googlesql.AnnotationMap {
++	shape, err := typ.DebugString(false)
++	if err != nil {
++		return nil
++	}
++	key, err := json.Marshal(fc)
++	if err != nil {
++		return nil
++	}
++	nestedCollations.Lock()
++	defer nestedCollations.Unlock()
++	if am, ok := nestedCollations.am[shape+"\x00"+string(key)]; ok {
++		return am
++	}
++	ca, err := googlesql.NewCollationAnnotation()
++	if err != nil {
++		return nil
++	}
++	id, err := ca.Id()
++	if err != nil {
++		return nil
++	}
++	proto, err := googlesql.NewAnnotationMapProto()
++	if err != nil {
++		return nil
++	}
++	if !fillCollationProto(proto, typ, fc, int64(id)) {
++		return nil
++	}
++	am, err := tf().DeserializeAnnotationMap(proto)
++	if err != nil || am == nil {
++		return nil
++	}
++	if ok, err := am.HasCompatibleStructure(typ); err != nil || !ok {
++		return nil
++	}
++	nestedCollations.am[shape+"\x00"+string(key)] = am
++	return am
++}
++
++// fillCollationProto writes fc on typ into proto, a field of a STRUCT and
++// the element of an ARRAY at every depth, so the map has typ's shape.
++func fillCollationProto(proto *googlesql.AnnotationMapProto, typ googlesql.Googlesql_TypeNode, fc *FieldCollation, id int64) bool {
++	switch {
++	case m1(typ.IsStruct()):
++		st, err := typ.AsStruct()
++		if err != nil || st == nil {
++			return false
++		}
++		fields, _ := st.Fields()
++		for i, f := range fields {
++			sub, err := proto.AddStructFields()
++			if err != nil {
++				return false
++			}
++			var sfc *FieldCollation
++			if fc != nil && i < len(fc.Fields) {
++				sfc = fc.Fields[i]
++			}
++			if !fillCollationProto(sub, f.Type_, sfc, id) {
++				return false
++			}
++		}
++	case m1(typ.IsArray()):
++		at, err := typ.AsArray()
++		if err != nil || at == nil {
++			return false
++		}
++		elem, err := at.ElementType()
++		if err != nil || elem == nil {
++			return false
++		}
++		sub, err := proto.MutableArrayElement()
++		if err != nil {
++			return false
++		}
++		var efc *FieldCollation
++		if fc != nil {
++			efc = fc.Element
++		}
++		return fillCollationProto(sub, elem, efc, id)
++	case fc != nil && fc.Collation != "" && m1(typ.IsString()):
++		ap, err := proto.AddAnnotations()
++		if err != nil || ap.SetId(id) != nil {
++			return false
++		}
++		v, err := ap.MutableValue()
++		if err != nil {
++			return false
++		}
++		sv, err := googlesql.NewSimpleValueString(fc.Collation)
++		if err != nil || sv.Serialize(v) != nil {
++			return false
++		}
++	}
++	return true
++}
++
++// hasCI reports whether c, an operation's collation, is und:ci or holds
++// und:ci for a field or an element.
++func hasCI(c *googlesql.ResolvedCollation) bool {
++	if c == nil {
++		return false
++	}
++	if isCI(c) {
++		return true
++	}
++	children, _ := c.ChildList()
++	for _, child := range children {
++		if hasCI(child) {
++			return true
++		}
++	}
++	return false
++}
++
++// collationTreeOf returns the und:ci collations c, an operation's
++// collation, gives the STRINGs inside typ, or nil when it gives none: a
++// STRUCT's fields and an ARRAY's element by c's children, and an ARRAY's
++// elements by c itself when it is a STRING's (IN UNNEST).
++func collationTreeOf(typ googlesql.Googlesql_TypeNode, c *googlesql.ResolvedCollation) *FieldCollation {
++	if typ == nil || c == nil {
++		return nil
++	}
++	children, _ := c.ChildList()
++	switch {
++	case m1(typ.IsString()):
++		if isCI(c) {
++			return &FieldCollation{Collation: ciCollation}
++		}
++	case m1(typ.IsStruct()):
++		st, err := typ.AsStruct()
++		if err != nil || st == nil {
++			return nil
++		}
++		fields, _ := st.Fields()
++		if len(children) != len(fields) {
++			return nil
++		}
++		out, any := &FieldCollation{Fields: make([]*FieldCollation, len(fields))}, false
++		for i, f := range fields {
++			if out.Fields[i] = collationTreeOf(f.Type_, children[i]); out.Fields[i] != nil {
++				any = true
++			}
++		}
++		if any {
++			return out
++		}
++	case m1(typ.IsArray()):
++		at, err := typ.AsArray()
++		if err != nil || at == nil {
++			return nil
++		}
++		elem, _ := at.ElementType()
++		ec := c
++		if len(children) == 1 {
++			ec = children[0]
++		}
++		if e := collationTreeOf(elem, ec); e != nil {
++			return &FieldCollation{Element: e}
++		}
++	}
++	return nil
++}
++
++// foldNestedSQL returns arg, a STRUCT or ARRAY expression, with each
++// STRING inside it that fc collates und:ci case-folded, or arg when fc is
++// nil.
++func foldNestedSQL(arg string, fc *FieldCollation) string {
++	if fc == nil {
++		return arg
++	}
++	spec, err := json.Marshal(fc)
++	if err != nil {
++		return arg
++	}
++	return "googlesqlite_fold_collation(" + arg + ", '" + strings.ReplaceAll(string(spec), "'", "''") + "')"
++}
++
++func init() {
++	normalFuncs = append(normalFuncs, &funcInfo{Name: "fold_collation", BindFunc: bindFoldCollation})
++}
++
++// bindFoldCollation is googlesqlite_fold_collation(v, spec): v with each
++// STRING inside it that spec, a FieldCollation's JSON, collates und:ci
++// lower-cased.
++func bindFoldCollation(args ...value.Value) (value.Value, error) {
++	if len(args) != 2 {
++		return nil, fmt.Errorf("fold_collation: got %d arguments, want 2", len(args))
++	}
++	if args[0] == nil || args[1] == nil {
++		return args[0], nil
++	}
++	spec, err := args[1].ToString()
++	if err != nil {
++		return nil, err
++	}
++	var fc FieldCollation
++	if err := json.Unmarshal([]byte(spec), &fc); err != nil {
++		return nil, err
++	}
++	return foldValue(args[0], &fc)
++}
++
++func foldValue(v value.Value, fc *FieldCollation) (value.Value, error) {
++	if v == nil || fc == nil {
++		return v, nil
++	}
++	switch tv := v.(type) {
++	case value.StringValue:
++		if strings.EqualFold(fc.Collation, ciCollation) {
++			return value.StringValue(strings.ToLower(string(tv))), nil
++		}
++	case *value.ArrayValue:
++		if fc.Element == nil {
++			return v, nil
++		}
++		out := &value.ArrayValue{Values: make([]value.Value, len(tv.Values))}
++		for i, e := range tv.Values {
++			f, err := foldValue(e, fc.Element)
++			if err != nil {
++				return nil, err
++			}
++			out.Values[i] = f
++		}
++		return out, nil
++	case *value.StructValue:
++		out := &value.StructValue{Keys: tv.Keys, Values: make([]value.Value, len(tv.Values)), M: map[string]value.Value{}}
++		for i, e := range tv.Values {
++			var sub *FieldCollation
++			if i < len(fc.Fields) {
++				sub = fc.Fields[i]
++			}
++			f, err := foldValue(e, sub)
++			if err != nil {
++				return nil, err
++			}
++			out.Values[i] = f
++			if i < len(tv.Keys) {
++				out.M[tv.Keys[i]] = f
++			}
++		}
++		return out, nil
++	}
++	return v, nil
++}
+--- a/internal/spec.go
++++ b/internal/spec.go
+@@ -220,6 +220,10 @@
+ 	// default (collation.go). CloudBurrow patch
+ 	// (cloudburrow/cloudburrow#1508).
+ 	Collation string `json:"collation,omitempty"`
++	// FieldCollation is a STRUCT or ARRAY column's collation of the
++	// STRINGs inside it (nested_collation.go). CloudBurrow patch
++	// (cloudburrow/cloudburrow#1516).
++	FieldCollation *FieldCollation `json:"fieldCollation,omitempty"`
+ }
+ 
+ // TVFSpec captures a `CREATE TABLE FUNCTION` definition so the call
+@@ -746,13 +750,20 @@
+ 		if !named && typ != nil && m1(typ.IsString()) {
+ 			collation = defaultCollation
+ 		}
++		// CloudBurrow patch (#1516): the STRINGs inside a STRUCT or an
++		// ARRAY column, each its COLLATE or else the table's default.
++		var fieldCollation *FieldCollation
++		if typ != nil && !m1(typ.IsString()) {
++			fieldCollation = fieldCollationOf(typ, annotation, defaultCollation)
++		}
+ 		columns = append(columns, &ColumnSpec{
+-			Name:        m1(columnNode.Name()),
+-			Type:        newType(typ),
+-			IsNotNull:   isNotNull,
+-			DefaultExpr: defaultExpr,
+-			DefaultSQL:  defaultSQL,
+-			Collation:   collation,
++			Name:           m1(columnNode.Name()),
++			Type:           newType(typ),
++			IsNotNull:      isNotNull,
++			DefaultExpr:    defaultExpr,
++			DefaultSQL:     defaultSQL,
++			Collation:      collation,
++			FieldCollation: fieldCollation,
+ 		})
+ 	}
+ 	return columns

@@ -1,0 +1,218 @@
+CloudBurrow patch 51 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1516).
+
+The bug: a RECORD's STRING field, or a REPEATED STRING, that
+tables.insert gave a collation ('und:ci') was made in the engine without
+it, so its values compared case-sensitively; and the collation of a
+STRING inside a STRUCT or an ARRAY column that CREATE TABLE made read
+back from tables.get with none.
+The fix: CreateTable writes the field's COLLATE inside the column's
+STRUCT<...> or ARRAY<...> type, which the engine compares its values by
+(googlesqlite patch 0061), and addTableMetadata records the engine's
+collation of each nested STRING (nested_collation.go). Its test
+server/nested_collation_test.go fails without it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -212,7 +212,13 @@
+ 			// CloudBurrow patch (cloudburrow/cloudburrow#1373): the field's
+ 			// name quoted, as a column's is, so a flexible name ("in ner")
+ 			// or a keyword makes the table.
+-			types = append(types, fmt.Sprintf("`%s` %s", f.Name, r.encodeSchemaField(f)))
++			def := fmt.Sprintf("`%s` %s", f.Name, r.encodeSchemaField(f))
++			// CloudBurrow patch (cloudburrow/cloudburrow#1516): a STRING
++			// field's collation (a REPEATED one's is its element's, below).
++			if !strings.EqualFold(f.Mode, "REPEATED") {
++				def += fieldCollate(f)
++			}
++			types = append(types, def)
+ 		}
+ 		elem = fmt.Sprintf("STRUCT<%s>", strings.Join(types, ","))
+ 	} else if field.Type == string(types.RANGE) && field.RangeElementType != nil {
+@@ -222,11 +228,24 @@
+ 		elem = types.Type(field.Type).TypeKind().String()
+ 	}
+ 	if field.Mode == "REPEATED" {
+-		return fmt.Sprintf("ARRAY<%s>", elem)
++		// CloudBurrow patch (#1516): a REPEATED STRING's collation is its
++		// elements'.
++		return fmt.Sprintf("ARRAY<%s%s>", elem, fieldCollate(field))
+ 	}
+ 	return elem
+ }
+ 
++// fieldCollate is the COLLATE clause of field, a STRING with a collation,
++// or "". CloudBurrow patch (cloudburrow/cloudburrow#1516): the engine
++// compares a STRING inside a STRUCT or an ARRAY by it (googlesqlite patch
++// 0061).
++func fieldCollate(field *bigqueryv2.TableFieldSchema) string {
++	if field.Collation == "" || !strings.EqualFold(field.Type, "STRING") {
++		return ""
++	}
++	return " COLLATE '" + strings.ReplaceAll(field.Collation, "'", "") + "'"
++}
++
+ func (r *Repository) Query(ctx context.Context, tx *connection.Tx, projectID, datasetID, query string, params []*bigqueryv2.QueryParameter) (*internaltypes.QueryResponse, error) {
+ 	tx.SetProjectAndDataset(projectID, datasetID)
+ 	if err := tx.ContentRepoMode(); err != nil {
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -1885,6 +1885,11 @@
+ 		// TABLE column's collation (its COLLATE, or the table's DEFAULT
+ 		// COLLATE) reads back as its collation.
+ 		field.Collation = column.Collation
++		// CloudBurrow patch (cloudburrow/cloudburrow#1516): and the
++		// collation of each STRING inside a STRUCT or an ARRAY column.
++		if column.FieldCollation != nil {
++			setFieldCollation(field, column.FieldCollation)
++		}
+ 		fields = append(fields, field)
+ 	}
+ 	conn, err := server.connMgr.Connection(ctx, projectID, datasetID)
+--- /dev/null
++++ b/server/nested_collation.go
+@@ -0,0 +1,35 @@
++package server
++
++import (
++	"strings"
++
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// setFieldCollation writes fc, the engine's collation of the STRINGs
++// inside a STRUCT or an ARRAY column, into field, its TableFieldSchema:
++// a REPEATED field's collation is its element's, a RECORD's fields'
++// their own. CloudBurrow patch (cloudburrow/cloudburrow#1516).
++func setFieldCollation(field *bigqueryv2.TableFieldSchema, fc *googlesqlite.FieldCollation) {
++	if field == nil || fc == nil {
++		return
++	}
++	if strings.EqualFold(field.Mode, "REPEATED") {
++		if fc = fc.Element; fc == nil {
++			return
++		}
++	}
++	if strings.EqualFold(field.Type, "RECORD") || strings.EqualFold(field.Type, "STRUCT") {
++		for i, sub := range field.Fields {
++			if i < len(fc.Fields) {
++				setFieldCollation(sub, fc.Fields[i])
++			}
++		}
++		return
++	}
++	if strings.EqualFold(field.Type, "STRING") {
++		field.Collation = fc.Collation
++	}
++}
+--- /dev/null
++++ b/server/nested_collation_test.go
+@@ -0,0 +1,100 @@
++package server_test
++
++import (
++	"context"
++	"strings"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestNestedCollatedFields is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1516): a RECORD's STRING field and a REPEATED
++// STRING that tables.insert gives the collation 'und:ci' compare
++// case-insensitively, and a CREATE TABLE's nested collations read back
++// from tables.get. Before the patch the engine's table had no nested
++// collation and tables.get read none.
++func TestNestedCollatedFields(t *testing.T) {
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test", types.NewDataset("ds")))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	if err := client.Dataset("ds").Table("n").Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{
++		{Name: "r", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{
++			{Name: "a", Type: bigquery.StringFieldType, Collation: "und:ci"},
++			{Name: "b", Type: bigquery.StringFieldType},
++		}},
++		{Name: "tags", Type: bigquery.StringFieldType, Repeated: true, Collation: "und:ci"},
++	}}); err != nil {
++		t.Fatal(err)
++	}
++	run := func(q string) {
++		t.Helper()
++		job, err := client.Query(q).Run(ctx)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if status, err := job.Wait(ctx); err != nil || status.Err() != nil {
++			t.Fatalf("%s: %v, %v", q, err, status.Err())
++		}
++	}
++	run("INSERT INTO ds.n (r, tags) VALUES (STRUCT('Abc', 'Abc'), ['Abc'])")
++	for q, want := range map[string]int64{
++		"SELECT COUNT(*) FROM ds.n WHERE r.a = 'aBC'":           1,
++		"SELECT COUNT(*) FROM ds.n WHERE r.b = 'aBC'":           0,
++		"SELECT COUNT(*) FROM ds.n WHERE 'aBC' IN UNNEST(tags)": 1,
++	} {
++		it, err := client.Query(q).Read(ctx)
++		if err != nil {
++			t.Fatal(err)
++		}
++		var row []bigquery.Value
++		if err := it.Next(&row); err != nil {
++			t.Fatal(err)
++		}
++		if len(row) != 1 || row[0] != want {
++			t.Errorf("%s = %v, want %d", q, row, want)
++		}
++	}
++	// A CREATE TABLE's nested collations read back from tables.get.
++	run("CREATE TABLE ds.d (st STRUCT<a STRING, b STRING COLLATE ''>, arr ARRAY<STRING>, sa ARRAY<STRUCT<x STRING>>) DEFAULT COLLATE 'und:ci'")
++	md, err := client.Dataset("ds").Table("d").Metadata(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var got []string
++	var walk func(prefix string, s bigquery.Schema)
++	walk = func(prefix string, s bigquery.Schema) {
++		for _, f := range s {
++			if f.Type == bigquery.RecordFieldType {
++				walk(prefix+f.Name+".", f.Schema)
++				continue
++			}
++			got = append(got, prefix+f.Name+"="+f.Collation)
++		}
++	}
++	walk("", md.Schema)
++	if want := "st.a=und:ci st.b= arr=und:ci sa.x=und:ci"; strings.Join(got, " ") != want {
++		t.Errorf("DDL table's collations %q, want %q", strings.Join(got, " "), want)
++	}
++}
