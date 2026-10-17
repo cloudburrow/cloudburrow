@@ -239,3 +239,55 @@ func TestNotificationConfigLimits(t *testing.T) {
 		t.Errorf("a configuration with no Pub/Sub to deliver to = %d; want 501", code)
 	}
 }
+
+// Rewrite, compose, move's destination and restore each make a new live
+// version, and each emits OBJECT_FINALIZE for it, as an upload and a copy
+// do (pubsub-notifications: OBJECT_FINALIZE is "Sent when a new object (or
+// a new generation of an existing object) is successfully created in the
+// bucket"); a move also emits the source's OBJECT_DELETE first (#1576).
+func TestNotificationFinalizeForRewriteComposeMoveAndRestore(t *testing.T) {
+	s, pub, base := notifyServer(t, `{"name":"fin","softDeletePolicy":{"retentionDurationSeconds":"604800"}}`)
+	addConfig(t, base, "fin", `{"topic":"projects/p/topics/t","payload_format":"JSON_API_V1"}`)
+	raw(t, "POST", base+"/upload/storage/v1/b/fin/o?uploadType=media&name=a", "aaaa")
+	raw(t, "POST", base+"/upload/storage/v1/b/fin/o?uploadType=media&name=b", "bbbb")
+	dispatch(t, s, pub)
+
+	step := func(what, method, path, body, want string) {
+		t.Helper()
+		code, resp := raw(t, method, base+path, body)
+		if code != 200 {
+			t.Fatalf("%s = %d %s", what, code, resp)
+		}
+		var o struct {
+			Generation string `json:"generation"`
+			Resource   struct {
+				Generation string `json:"generation"`
+			} `json:"resource"`
+		}
+		_ = json.Unmarshal([]byte(resp), &o)
+		gen := o.Generation
+		if gen == "" {
+			gen = o.Resource.Generation
+		}
+		w := strings.ReplaceAll(want, "GEN", gen)
+		if got := events(dispatch(t, s, pub)); got != w {
+			t.Errorf("%s: events = %q, want %q", what, got, w)
+		}
+	}
+	step("rewrite", "POST", "/storage/v1/b/fin/o/a/rewriteTo/b/fin/o/r", "", "OBJECT_FINALIZE r#GEN")
+	step("compose", "POST", "/storage/v1/b/fin/o/c/compose", `{"sourceObjects":[{"name":"a"},{"name":"b"}]}`, "OBJECT_FINALIZE c#GEN")
+
+	_, mb := raw(t, "GET", base+"/storage/v1/b/fin/o/b", "")
+	bgen := genOf(t, mb)
+	step("move", "POST", "/storage/v1/b/fin/o/b/moveTo/o/m", "", "OBJECT_DELETE b#"+bgen+"; OBJECT_FINALIZE m#GEN")
+
+	_, ab := raw(t, "GET", base+"/storage/v1/b/fin/o/a", "")
+	agen := genOf(t, ab)
+	if code, resp := raw(t, "DELETE", base+"/storage/v1/b/fin/o/a", ""); code != 204 {
+		t.Fatalf("delete = %d %s", code, resp)
+	}
+	if got := events(dispatch(t, s, pub)); got != "OBJECT_DELETE a#"+agen {
+		t.Errorf("delete: events = %q", got)
+	}
+	step("restore", "POST", "/storage/v1/b/fin/o/a/restore?generation="+agen, "", "OBJECT_FINALIZE a#GEN")
+}

@@ -350,7 +350,13 @@ func (t taskLogger) Attempt(queue, task string, attempt int, status int, err err
 	} else if status < 200 || status >= 300 {
 		severity = console.SeverityWarning
 	}
+	// The queue's project, so the attempt is on the queue's page and in a
+	// project's Logs Explorer, which filter on it (#1576).
+	project := ""
+	if rest, ok := strings.CutPrefix(queue, "projects/"); ok {
+		project, _, _ = strings.Cut(rest, "/")
+	}
 	t.recorder.Log(console.Entry{
-		Severity: severity, Source: "tasks", Resource: queue, Message: message,
+		Severity: severity, Source: "tasks", Project: project, Resource: queue, Message: message,
 	})
 }

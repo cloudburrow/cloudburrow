@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -503,6 +504,37 @@ func TestOptionalIntTreatsBlankAsUnset(t *testing.T) {
 	for _, bad := range []string{"-1", "two", "1.5"} {
 		if _, err := optionalInt(bad, "minimum instances"); err == nil {
 			t.Errorf("optionalInt(%q) was accepted", bad)
+		}
+	}
+}
+
+// The CloudBurrow column (#1576): pods, Kubernetes Services and Jobs each
+// list it, and it says "yes" only for an object labelled
+// cloudburrow.dev/owned=true, so a developer can tell what CloudBurrow made
+// from what they made in the same cluster.
+func TestOwnershipColumnOnPodsServicesAndJobs(t *testing.T) {
+	t.Parallel()
+	providers := map[string]kubeProvider{
+		"pods":     podsProvider("", nil, nil),
+		"services": servicesProvider(""),
+		"jobs":     jobsProvider(""),
+	}
+	cases := []struct{ labels, want string }{
+		{`{"cloudburrow.dev/owned":"true","app":"x"}`, "yes"},
+		{`{"app":"x"}`, "no"},
+		{`{"cloudburrow.dev/owned":"false"}`, "no"},
+		{`null`, "no"},
+	}
+	for name, p := range providers {
+		if !slices.Contains(p.columns, "CloudBurrow") {
+			t.Errorf("%s does not list the CloudBurrow column: %v", name, p.columns)
+		}
+		for _, c := range cases {
+			item := podFixture(t, `{"metadata":{"name":"o","namespace":"default","labels":`+c.labels+`},"spec":{},"status":{}}`)
+			r, ok := p.row(item)
+			if !ok || r.Fields["CloudBurrow"] != c.want {
+				t.Errorf("%s with labels %s: CloudBurrow = %q (ok %v), want %q", name, c.labels, r.Fields["CloudBurrow"], ok, c.want)
+			}
 		}
 	}
 }
