@@ -446,7 +446,7 @@ var parityRows = []parityRow{
 	{Resource: "Resource Manager project purge",
 		Routes:   []string{"POST /admin/purge"},
 		Provider: "projects", Offers: "Purge project now on the page of a project pending deletion: the project and what every service keeps under it go, and its ID is free (#1537)",
-		Tests: []string{"TestAPurgedProjectsIDStartsEmpty", "TestProjectUndeleteIsOfferedOnlyWhenDeleted"}},
+		Tests: []string{"TestAPurgedProjectsIDStartsEmpty", "TestProjectUndeleteIsOfferedOnlyWhenDeleted", "TestResourceManagerPurgeProjectThroughThePage"}},
 	// The Cloud SQL Admin API (#1301): the Cloud SQL pages are its
 	// instances, and their databases and users are the API's.
 	{Resource: "Cloud SQL instances", Service: "sqladmin",
