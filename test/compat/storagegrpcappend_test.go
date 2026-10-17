@@ -126,7 +126,8 @@ func readString(t *testing.T, h *Harness, o *storage.ObjectHandle) string {
 // from Google's protos (#1443): fields outside the mask keep the stored
 // policy's values, an etag outside it is not checked, and the result reads
 // back through the official JSON client. custom_placement_config cannot be
-// changed and ip_filter is refused.
+// changed, and an ip_filter mode other than Enabled or Disabled is refused
+// (TestStorageIPFilterGRPC stores one).
 // covers: google.storage.v2.Storage/SetIamPolicy, google.storage.v2.Storage/UpdateBucket
 func TestStorageGRPCSetIamPolicyUpdateMask(t *testing.T) {
 	h := New(t)
@@ -175,11 +176,11 @@ func TestStorageGRPCSetIamPolicyUpdateMask(t *testing.T) {
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("changing custom_placement_config = %v, want INVALID_ARGUMENT", err)
 	}
-	mode := "Enabled"
+	mode := "On"
 	_, err = c.UpdateBucket(ctx, &pb.UpdateBucketRequest{Bucket: &pb.Bucket{Name: res, IpFilter: &pb.Bucket_IpFilter{Mode: &mode}},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"ip_filter"}}})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("ip_filter = %v, want UNIMPLEMENTED", err)
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("ip_filter mode On = %v, want INVALID_ARGUMENT", err)
 	}
 }
 
