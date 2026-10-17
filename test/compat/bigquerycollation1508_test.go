@@ -57,12 +57,12 @@ func TestBigQueryCollationUndCI(t *testing.T) {
 			{"SELECT LOWER(MAX(s)) FROM " + tb, "b"},
 			{"SELECT COUNT(*) FROM " + tb + " WHERE COLLATE(s, '') = 'Abc'", "1"},
 		} {
-			if got := bqValue(ctx, c, tc.q); got != tc.want {
+			if got := bqValue(ctx, c, tc.q); got != "["+tc.want+"]" {
 				t.Errorf("%s = %s, want %s", tc.q, got, tc.want)
 			}
 		}
 	}
-	if got := bqValue(ctx, c, "SELECT COLLATE('a', 'und:ci') = 'A'"); got != "true" {
+	if got := bqValue(ctx, c, "SELECT COLLATE('a', 'und:ci') = 'A'"); got != "[true]" {
 		t.Errorf("COLLATE('a', 'und:ci') = 'A' is %s, want true", got)
 	}
 	if got := bqValue(ctx, c, "SELECT COLLATE('a', 'und:ci') = COLLATE('A', 'binary')"); len(got) < 6 || got[:6] != "error:" {
