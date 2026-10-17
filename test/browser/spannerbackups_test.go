@@ -62,7 +62,9 @@ func TestSpannerBackupsThroughThePage(t *testing.T) {
 	}
 
 	// The backup's page: Restore to a new database.
-	p.clickText("#view tbody a", "nightly")
+	// The create's snackbar can lie over the row: follow the link itself.
+	var opened bool
+	p.eval(`(() => { const a = [...document.querySelectorAll("#view tbody a")].find((a) => a.textContent === "nightly"); a.click(); return true })()`, &opened)
 	p.waitFor(`[...document.querySelectorAll("#view dd, #view td")].some((e) => e.textContent.includes("/backups/nightly"))`)
 	p.waitFor(`document.querySelector(".modal") === null`)
 	p.clickText("#view .page-actions button", "Restore to a new database")
