@@ -35,9 +35,10 @@ import (
 //   - a database's page has a Backup schedules tab (Create backup schedule,
 //     and each row's Edit and Delete) and a Database roles tab;
 //   - the Instance configurations tab's rows open a configuration's page
-//     ([instance, "instanceConfigs", config]); a custom one is renamed and
-//     deleted there; Create custom configuration and Move instance are on
-//     the instance's page, beside an Instance configuration operations tab;
+//     ([instance, "instanceConfigs", config]); a Google-managed one has
+//     Create custom configuration, based on it, and a custom one is renamed
+//     and deleted there; Move instance is on the instance's page, beside a
+//     Configuration operations tab;
 //   - a partition's page has Edit instance partition.
 
 // spannerBackups and spannerConfigs put a backup and a configuration under
@@ -244,19 +245,15 @@ func spannerBackupActions() []console.Action {
 	}
 }
 
-// spannerCreateConfigAction is Create custom configuration; bases are the
-// Google-managed configurations a custom one can be based on.
-func spannerCreateConfigAction(bases []string) console.Action {
-	base := console.Field{Name: "baseConfig", Label: "Base configuration", Type: "text", Required: true,
-		Help: "The Google-managed configuration whose replicas the new one copies."}
-	if len(bases) > 0 {
-		base.Type, base.Options, base.Default = "select", bases, bases[0]
-	}
+// spannerCreateConfigAction is Create custom configuration on a
+// Google-managed configuration's page: the new one is based on it and copies
+// its replicas. It is not on the instance's page, whose actions already fill
+// a row (#1498).
+func spannerCreateConfigAction() console.Action {
 	return console.Action{ID: "createconfig", Label: "Create custom configuration", Fields: []console.Field{
 		{Name: "config", Label: "Configuration ID", Type: "text", Required: true, Pattern: spannerCustomConfigPattern,
-			Help: "Starts with custom-, as Spanner requires of a user-managed configuration."},
+			Help: "Starts with custom-, as Spanner requires of a user-managed configuration. It is based on this configuration and copies its replicas."},
 		{Name: "displayName", Label: "Display name", Type: "text", Help: "Optional; the ID when empty."},
-		base,
 	}}
 }
 
@@ -281,7 +278,7 @@ func spannerMoveInstanceAction(configs []string, current string) console.Action 
 func (p spannerProvider) spannerInstanceExtraActions(ctx context.Context, project, instanceID string) []console.Action {
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
-	var databases, configs, bases []string
+	var databases, configs []string
 	current := ""
 	// The instance is read first: when it cannot be, the forms are offered
 	// with text fields rather than waiting on listings that would fail too.
@@ -296,9 +293,6 @@ func (p spannerProvider) spannerInstanceExtraActions(ctx context.Context, projec
 					break
 				}
 				configs = append(configs, lastSegment(c.GetName()))
-				if c.GetConfigType() != instancepb.InstanceConfig_USER_MANAGED {
-					bases = append(bases, lastSegment(c.GetName()))
-				}
 			}
 		}
 		instAdmin.Close()
@@ -318,8 +312,7 @@ func (p spannerProvider) spannerInstanceExtraActions(ctx context.Context, projec
 	}
 	sort.Strings(databases)
 	sort.Strings(configs)
-	sort.Strings(bases)
-	return []console.Action{spannerCreateBackupAction(databases), spannerCreateConfigAction(bases), spannerMoveInstanceAction(configs, current)}
+	return []console.Action{spannerCreateBackupAction(databases), spannerMoveInstanceAction(configs, current)}
 }
 
 // spannerConfigDetail is one configuration's page, opened from the
@@ -367,10 +360,11 @@ func (p spannerProvider) spannerConfigDetail(ctx context.Context, project, insta
 }
 
 // spannerConfigActions are a configuration's page's: a custom one is renamed
-// and deleted; a Google-managed one has neither.
+// and deleted; a Google-managed one is the base of Create custom
+// configuration.
 func (p spannerProvider) spannerConfigActions(ctx context.Context, project, configID string) []console.Action {
 	if !spannerCustomConfigRe.MatchString(configID) {
-		return nil
+		return []console.Action{spannerCreateConfigAction()}
 	}
 	display := configID
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
@@ -563,7 +557,8 @@ func (p spannerProvider) spannerBackupAct(ctx context.Context, project string, p
 		ok   bool
 		what string
 	}{
-		"createbackup": {len(path) == 1, "an instance's"}, "createconfig": {len(path) == 1, "an instance's"},
+		"createbackup": {len(path) == 1, "an instance's"},
+		"createconfig": {isConfig && !spannerCustomConfigRe.MatchString(path[2]), "a Google-managed instance configuration's"},
 		"moveinstance": {len(path) == 1, "an instance's"},
 		"deletebackup": {isBackup, "a backup's"}, "updatebackup": {isBackup, "a backup's"},
 		"copybackup": {isBackup, "a backup's"}, "restorebackup": {isBackup, "a backup's"},
@@ -690,12 +685,9 @@ func spannerInstanceAct(ctx context.Context, instAdmin *instance.InstanceAdminCl
 	val := func(k string) string { return strings.TrimSpace(values[k]) }
 	switch action {
 	case "createconfig":
-		id, base := val("config"), val("baseConfig")
+		id, base := val("config"), path[2]
 		if !spannerCustomConfigRe.MatchString(id) {
 			return fmt.Errorf("a custom configuration's ID starts with custom-, not %q", id)
-		}
-		if base == "" {
-			return errors.New("a base configuration is required")
 		}
 		b, err := instAdmin.GetInstanceConfig(ctx, &instancepb.GetInstanceConfigRequest{Name: spannerConfigName(project, base)})
 		if err != nil {

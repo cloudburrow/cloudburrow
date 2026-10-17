@@ -223,8 +223,9 @@ func spannerSection(d console.Detail, id string) *console.Section {
 // offers the instance's databases and Move instance the other
 // configurations; the backup's page Updates expiry, Copies, Restores and
 // Deletes it; a database's page lists its backup schedules and roles and
-// Creates, Edits and Deletes a schedule; a custom configuration's page
-// Renames and Deletes it, a Google-managed one offers neither; and a
+// Creates, Edits and Deletes a schedule; a Google-managed configuration's
+// page Creates a custom configuration based on it, a custom one's Renames
+// and Deletes it; the instance page's actions fit one row (#1498); and a
 // partition's page Edits it. Each action sends the official client's
 // request, and a malformed value is refused before any call.
 func TestConsoleSpannerBackupsAndSchedules(t *testing.T) {
@@ -258,15 +259,20 @@ func TestConsoleSpannerBackupsAndSchedules(t *testing.T) {
 	}
 
 	acts := p.DetailActions(ctx, "proj", []string{"inst"})
-	var create, move, config console.Action
+	// The page's buttons must fit one row at the browser tests' width: a
+	// sixth (Create custom configuration) wrapped it, which pushed the
+	// partitions tab's row under the "applied" snackbar, so a click on the
+	// partition's link landed on the snackbar (TestSpannerSchemaAndPartitionsThroughThePage).
+	if len(acts) > 5 {
+		t.Errorf("an instance's page offers %d actions %v, want at most 5 so they fit one row", len(acts), actionIDs(acts))
+	}
+	var create, move console.Action
 	for _, a := range acts {
 		switch a.ID {
 		case "createbackup":
 			create = a
 		case "moveinstance":
 			move = a
-		case "createconfig":
-			config = a
 		}
 	}
 	if create.Fields[0].Type != "select" || strings.Join(create.Fields[0].Options, ",") != "db" {
@@ -274,9 +280,6 @@ func TestConsoleSpannerBackupsAndSchedules(t *testing.T) {
 	}
 	if strings.Join(move.Fields[0].Options, ",") != "custom-mine,nam3" || move.Confirm == "" {
 		t.Errorf("Move instance = %+v, want the other configurations and a confirmation", move)
-	}
-	if strings.Join(config.Fields[2].Options, ",") != "nam3,regional-us-central1" {
-		t.Errorf("Create custom configuration's bases = %v, want the Google-managed ones", config.Fields[2].Options)
 	}
 
 	act := func(path []string, action string, values map[string]string) {
@@ -353,21 +356,22 @@ func TestConsoleSpannerBackupsAndSchedules(t *testing.T) {
 	}
 
 	// Configurations.
-	act([]string{"inst"}, "createconfig", map[string]string{"config": "custom-two", "baseConfig": "regional-us-central1"})
+	base := []string{"inst", spannerConfigs, "regional-us-central1"}
+	act(base, "createconfig", map[string]string{"config": "custom-two"})
 	if r := f.req("CreateInstanceConfig").(*instancepb.CreateInstanceConfigRequest); r.GetInstanceConfigId() != "custom-two" ||
 		r.GetInstanceConfig().GetBaseConfig() != "projects/proj/instanceConfigs/regional-us-central1" || len(r.GetInstanceConfig().GetReplicas()) != 1 ||
 		r.GetInstanceConfig().GetDisplayName() != "custom-two" {
 		t.Errorf("CreateInstanceConfig = %v, want the base's replicas", r)
 	}
-	if err := p.ActAt(ctx, "proj", []string{"inst"}, "createconfig", map[string]string{"config": "mine", "baseConfig": "nam3"}); err == nil {
+	if err := p.ActAt(ctx, "proj", base, "createconfig", map[string]string{"config": "mine"}); err == nil {
 		t.Error("a custom configuration ID without custom- was not refused")
 	}
 	cd, err := p.Detail(ctx, "proj", []string{"inst", spannerConfigs, "regional-us-central1"})
 	if err != nil || cd.Unavailable != "" || len(spannerSection(cd, "replicas").Listing.Items) != 1 {
 		t.Errorf("a configuration's page = %+v, %v", cd, err)
 	}
-	if got := p.DetailActions(ctx, "proj", []string{"inst", spannerConfigs, "regional-us-central1"}); len(got) != 0 {
-		t.Errorf("a Google-managed configuration offers %v", actionIDs(got))
+	if got := strings.Join(actionIDs(p.DetailActions(ctx, "proj", base)), ","); got != "createconfig" {
+		t.Errorf("a Google-managed configuration offers %s, want Create custom configuration alone", got)
 	}
 	cat := []string{"inst", spannerConfigs, "custom-mine"}
 	if got := strings.Join(actionIDs(p.DetailActions(ctx, "proj", cat)), ","); got != "renameconfig,deleteconfig" {
@@ -410,6 +414,8 @@ func TestConsoleSpannerBackupsAndSchedules(t *testing.T) {
 		{"editschedule", []string{"inst", "db"}},
 		{"renameconfig", []string{"inst", spannerBackups, "b1"}},
 		{"moveinstance", []string{"inst", "db"}},
+		{"createconfig", []string{"inst"}},
+		{"createconfig", []string{"inst", spannerConfigs, "custom-mine"}},
 		{"editpartition", []string{"inst", spannerBackups, "b1"}},
 	} {
 		if handled, err := p.spannerBackupAct(ctx, "proj", c.path, c.action, nil); !handled || err == nil {

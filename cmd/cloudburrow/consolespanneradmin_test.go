@@ -47,9 +47,9 @@ func TestSpannerDDLSplitter(t *testing.T) {
 // partition on an instance's; Delete instance partition on a partition's,
 // leaving it; nothing on a table's page or the partitions page (#1207). A
 // partition's path cannot be read as a database's: no database ID has a
-// capital letter. Since #1498 an instance's page also has Create backup,
-// Create custom configuration and Move instance, a database's Create backup
-// schedule, and a partition's Edit instance partition.
+// capital letter. Since #1498 an instance's page also has Create backup
+// and Move instance, a database's Create backup schedule, and a partition's
+// Edit instance partition.
 func TestSpannerAdminActionsAreOfferedWhereTheyBelong(t *testing.T) {
 	_, p := startFakeSpannerAdmin(t)
 	ids := func(path ...string) []string {
@@ -59,7 +59,7 @@ func TestSpannerAdminActionsAreOfferedWhereTheyBelong(t *testing.T) {
 		}
 		return out
 	}
-	if got := ids("inst"); !slices.Equal(got, []string{"editinstance", "createpartition", "createbackup", "createconfig", "moveinstance", "dropinstance"}) {
+	if got := ids("inst"); !slices.Equal(got, []string{"editinstance", "createpartition", "createbackup", "moveinstance", "dropinstance"}) {
 		t.Errorf("an instance's actions = %v", got)
 	}
 	if got := ids("inst", "db"); !slices.Equal(got, []string{"updateddl", "createschedule", "dropdatabase", "dropprotection"}) {

@@ -7387,7 +7387,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
-          "test/compat/spannerbackupstools_test.go:73 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
         ]
       },
       {
@@ -7412,7 +7412,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
-          "test/compat/spannerbackupstools_test.go:73 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
         ]
       },
       {
@@ -7435,7 +7435,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
-          "test/compat/spannerbackupstools_test.go:73 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
         ]
       },
       {
@@ -7584,7 +7584,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
-          "test/compat/spannerbackupstools_test.go:73 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
         ]
       },
       {
@@ -7606,7 +7606,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
-          "test/compat/spannerbackupstools_test.go:73 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
         ]
       },
       {
@@ -7642,7 +7642,7 @@
           "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes",
           "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
-          "test/compat/spannerbackupstools_test.go:73 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
         ]
       },
       {

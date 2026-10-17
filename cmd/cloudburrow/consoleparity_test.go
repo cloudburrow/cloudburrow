@@ -1047,7 +1047,7 @@ var parityRows = []parityRow{
 	{Resource: "Spanner custom instance configurations", Service: "spanner",
 		Methods: []string{"InstanceAdmin/CreateInstanceConfig", "InstanceAdmin/UpdateInstanceConfig", "InstanceAdmin/DeleteInstanceConfig",
 			"InstanceAdmin/ListInstanceConfigOperations"},
-		Provider: "spanner", Offers: "Create custom configuration on an instance's page (a custom- ID, display name, a Google-managed base whose replicas it copies); the Instance configurations tab's rows open a configuration's page (replicas, type, base), where a custom one has Rename configuration and Delete configuration; a Configuration operations tab (#1498)",
+		Provider: "spanner", Offers: "The Instance configurations tab's rows open a configuration's page (replicas, type, base): a Google-managed one has Create custom configuration (a custom- ID and display name, based on it and copying its replicas), a custom one Rename configuration and Delete configuration; a Configuration operations tab on an instance's page (#1498)",
 		Tests: []string{"TestConsoleSpannerBackupsAndSchedules"}},
 	{Resource: "Spanner instance moves", Service: "spanner",
 		Methods:  []string{"InstanceAdmin/MoveInstance"},
