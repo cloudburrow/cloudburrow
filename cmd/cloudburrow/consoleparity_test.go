@@ -641,6 +641,8 @@ var parityRows = []parityRow{
 		Methods:  []string{"Memorystore/ListInstances", "Memorystore/GetInstance", "Memorystore/CreateInstance", "Memorystore/UpdateInstance", "Memorystore/DeleteInstance"},
 		Provider: "memorystore-valkey", Offers: "Memorystore for Valkey page: instances list (location, mode, endpoint, shards, replicas, node type, engine version, state); Create instance (ID, region, cluster mode, shards, replicas per shard, node type, PSC network, engine configs), waiting for it to serve; an instance's page with its discovery or primary and reader endpoints and configuration; Edit (shards, replicas per shard, node type, deletion protection), each change waited for; Delete (#1519)",
 		Tests: []string{"TestConsoleValkeyInstances"}},
+	{Resource: "Memorystore for Valkey migration", Service: "memorystore",
+		Methods: []string{"Memorystore/StartMigration", "Memorystore/FinishMigration"}, Issue: 1557},
 	{Resource: "Memorystore for Valkey CA", Service: "memorystore",
 		Methods:  []string{"Memorystore/GetCertificateAuthority"},
 		Excluded: "no instance here has in-transit encryption, so there is no CA to show; the instance's page shows its In-transit encryption mode"},

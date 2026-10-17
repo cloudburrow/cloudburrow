@@ -360,9 +360,24 @@ export and delete a backup; on a cluster, an **ACL policies** tab to create, upd
 attach the location's policies). gcloud's Redis Cluster token auth commands are
 alpha and beta only, on `v1beta1`, which is not served; use the API or the console.
 
+**CMEK** (`kms_key`, #1557), for a cluster and a Valkey instance (§9) alike: the key must be a
+CryptoKey in the cluster's region that this instance's Cloud KMS (`--services ...,kms`) can use;
+an `Encrypt` with it wraps the cluster's data key (256-bit AES), kept only wrapped. What the key
+protects: the cluster's kept secrets (token auth users' tokens, the default user's password, the
+in-transit CA's private key), sealed with the data key and never kept in the clear, and each
+backup's RDB files, sealed with it (the backup keeps the wrapped data key, so it is restored or
+exported only while the key can be used). What it does not: the nodes' data in memory, which
+Valkey serves to clients as it is; an export, written to the bucket as plain RDB files under the
+bucket's own encryption; and the rest of the cluster's record (its shape, labels, configs). The
+key is checked every 2 seconds: once it cannot be used (disabled, destroyed, its version
+disabled), the cluster is suspended as a Memorystore for Redis instance (§6) and a Cloud SQL
+instance are: not `ACTIVE`, `encryption_info.kms_key_primary_state` says why, and its nodes are
+stopped, their data first kept as RDB files sealed with the data key; once the key can be used
+again new nodes are formed (`UPDATING`) and the data loaded, then `ACTIVE`.
+
 Not served: cross-cluster replication (UNIMPLEMENTED: a Valkey cluster-mode replica replicates
 only a primary of its own cluster, `CLUSTER REPLICATE` taking a node its gossip knows, so one
-cluster cannot be another's secondary) and CMEK (#1557). After a restart of CloudBurrow a cluster is
+cluster cannot be another's secondary). After a restart of CloudBurrow a cluster is
 formed again, empty, with its users and policy.
 
 ## 9. Memorystore for Valkey (#1519)
@@ -401,9 +416,39 @@ maintenance policy. `persistence_config` RDB is `save <period> 1`, AOF `appendon
 again, empty. The console's **Memorystore for Valkey** page lists, creates (either mode), edits
 and deletes instances.
 
-Not served: `engine_version` other than `VALKEY_8_0` (one image, Valkey 8.1, runs; `VALKEY_7_2`
-and `VALKEY_9_0` are 501), node types whose size is not modelled here, CMEK, cross-instance
-replication (as a Redis cluster's, §8), migration and server CA modes, each 501 with the reason.
+**Engine versions** (#1557): `VALKEY_7_2` runs Valkey 7.2.14 (`valkey/valkey:7.2-alpine`),
+`VALKEY_8_0` (the default) Valkey 8.1 and `VALKEY_9_0` Valkey 9.0.6 (`valkey/valkey:9.0-alpine`),
+each pinned by digest, for amd64 and arm64. Valkey 7.2 has no `cluster-announce-client-ipv4`, so
+a 7.2 node in `CLUSTER` mode announces the host's address to clients as its hostname
+(`cluster-preferred-endpoint-type hostname`). An `UpdateInstance` of `engine_version` to a later
+version takes an RDB snapshot of each shard's primary, forms new nodes of the new image, loads the
+snapshots, then removes the old nodes, which serve until then: writes made during the upgrade,
+after the snapshot, are not carried over. A downgrade is INVALID_ARGUMENT.
+
+**Cross-instance replication** (#1557), for `CLUSTER_DISABLED` instances without in-transit
+encryption: an instance created with `cross_instance_replication_config` `instance_role`
+`SECONDARY` and `primary_instance` (an `ACTIVE` `CLUSTER_DISABLED` instance of the same
+`authorization_mode`) has its primary node replicate the primary instance's (`REPLICAOF`), its
+replicas chained to it: it serves the primary's keys and refuses writes (READONLY). Each member
+reports the `membership`. `UpdateInstance` of `cross_instance_replication_config` (alone)
+switches over (a secondary to `PRIMARY`, every other member as its `secondary_instances`) and
+detaches (a secondary to `NONE`; a primary to `NONE`, or to fewer `secondary_instances`). A
+primary with secondaries is not deleted (FAILED_PRECONDITION). In `CLUSTER` mode it is 501, as a
+Redis cluster's (§8).
+
+**Migration** (`StartMigration`, `FinishMigration`, #1557) into a `CLUSTER_DISABLED` instance:
+its primary replicates `self_managed_source`'s `ip_address` and `port` (state `MIGRATING`,
+`migration_config.state` `REPLICATION_ESTABLISHED` once linked); `FinishMigration` waits until
+its offset reaches the source's (unless `force`), stops replicating, and the instance is `ACTIVE`
+and `MIGRATED`. A source that is a server of this CloudBurrow instance (a Memorystore for Redis
+instance, a node of a Valkey instance or Redis cluster) is named by the host address its clients
+use and reached at its in-cluster address; any other address is replicated from as it is.
+`network_attachment` is checked and kept. A source with AUTH (`self_managed_source` has no
+credentials), a `CLUSTER` mode target and in-transit encryption are not served (501 with the
+reason).
+
+Not served: node types whose size is not modelled here and server CA modes, each 501 with the
+reason.
 
 `TOKEN_AUTH`, backups (`BackupInstance`, `ListBackupCollections`, `GetBackupCollection`,
 `ListBackups`, `GetBackup`, `DeleteBackup`, `ExportBackup`, `automated_backup_config`) and

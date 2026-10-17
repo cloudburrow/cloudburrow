@@ -3366,6 +3366,7 @@
           "test/compat/consolememorystore_test.go:430 TestConsoleMemorystoreCustomerManagedKey",
           "test/compat/kms_external_test.go:37 TestKMSExternalKeys",
           "test/compat/kms_test.go:277 TestKMSUpdateCryptoKeyVersion",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey"
         ],
         "unverified": [
@@ -4898,8 +4899,8 @@
     "Key": "memorystore",
     "Title": "Memorystore for Redis",
     "counts": {
-      "Unimplemented": 6,
-      "Verified": 60
+      "Unimplemented": 4,
+      "Verified": 62
     },
     "rows": [
       {
@@ -4923,6 +4924,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
@@ -4932,9 +4934,12 @@
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
+          "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
-          "test/compat/memorystorevalkey_test.go:303 TestMemorystoreValkeyRefusals",
+          "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
@@ -4961,6 +4966,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
@@ -4982,8 +4988,10 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/FinishMigration",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystore1557_test.go:381 TestMemorystoreValkeyMigration"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetAuthToken",
@@ -4997,6 +5005,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
@@ -5012,7 +5021,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
-          "test/compat/memorystorevalkey_test.go:303 TestMemorystoreValkeyRefusals"
+          "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals"
         ]
       },
       {
@@ -5020,6 +5029,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
@@ -5081,14 +5092,18 @@
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/StartMigration",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check)"
+        "status": "Verified",
+        "tests": [
+          "test/compat/memorystore1557_test.go:381 TestMemorystoreValkeyMigration"
+        ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/UpdateInstance",
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
+          "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
+          "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
@@ -5129,8 +5144,9 @@
         "tests": [
           "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
+          "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
-          "test/compat/memorystorecluster_test.go:232 TestMemorystoreRedisClusterRefusals",
+          "test/compat/memorystorecluster_test.go:233 TestMemorystoreRedisClusterRefusals",
           "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
           "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption",
