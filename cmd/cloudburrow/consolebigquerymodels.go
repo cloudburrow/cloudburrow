@@ -235,7 +235,8 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 // modelResultSections are a model's centroids (KMEANS, ML.CENTROIDS),
 // confusion matrix (LOGISTIC_REG, ML.CONFUSION_MATRIX) or principal
 // components (PCA, ML.PRINCIPAL_COMPONENT_INFO and
-// ML.PRINCIPAL_COMPONENTS), each where the model has them (#1481).
+// ML.PRINCIPAL_COMPONENTS), each where the model has them (#1481), or
+// recommendations and factors (MATRIX_FACTORIZATION, #1504).
 func (p bigqueryProvider) modelResultSections(ctx context.Context, c *bigquery.Client, typ, datasetID, modelID string) []console.Section {
 	model := fmt.Sprintf("MODEL `%s.%s.%s`", p.project, datasetID, modelID)
 	read := func(sql string) (bigquery.Schema, [][]bigquery.Value) {
@@ -330,6 +331,36 @@ func (p bigqueryProvider) modelResultSections(ctx context.Context, c *bigquery.C
 		}
 		l.Total = len(l.Items)
 		return []console.Section{{ID: "components", Label: "Components", Listing: l}}
+	case "MATRIX_FACTORIZATION":
+		// The highest predicted ratings (ML.RECOMMEND), and each user's
+		// and item's intercept and factor weights (ML.WEIGHTS) (#1504).
+		schema, recs := read("SELECT * FROM ML.RECOMMEND(" + model + ") ORDER BY 1 DESC LIMIT 50")
+		_, ws := read("SELECT processed_input, feature, intercept, ARRAY(SELECT weight FROM UNNEST(factor_weights) ORDER BY factor) FROM ML.WEIGHTS(" +
+			model + ") ORDER BY processed_input DESC, feature")
+		var out []console.Section
+		if len(recs) > 0 && len(schema) >= 3 {
+			l := console.Listing{Columns: []string{schema[1].Name, schema[2].Name}, NameColumn: schema[0].Name, Noun: "recommendations"}
+			for _, r := range recs {
+				l.Items = append(l.Items, console.Resource{Name: num(r[0]), Fields: map[string]string{schema[1].Name: fmt.Sprint(r[1]), schema[2].Name: fmt.Sprint(r[2])}})
+			}
+			l.Total = len(l.Items)
+			out = append(out, console.Section{ID: "recommendations", Label: "Recommendations", Listing: l})
+		}
+		if len(ws) > 0 {
+			l := console.Listing{Columns: []string{"Column", "Intercept", "Factor weights"}, NameColumn: "Feature", Noun: "users and items"}
+			for _, r := range ws {
+				var f []string
+				arr, _ := r[3].([]bigquery.Value)
+				for _, v := range arr {
+					f = append(f, num(v))
+				}
+				l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[1]), Fields: map[string]string{"Column": fmt.Sprint(r[0]),
+					"Intercept": num(r[2]), "Factor weights": orDash(strings.Join(f, ", "))}})
+			}
+			l.Total = len(l.Items)
+			out = append(out, console.Section{ID: "factors", Label: "Factors", Listing: l})
+		}
+		return out
 	}
 	return nil
 }

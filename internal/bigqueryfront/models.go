@@ -28,10 +28,11 @@ import (
 // ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO and
 // ML.TRAINING_INFO (modelfuncs.go). Training is modeltrain.go's.
 //
-// Served model types: LINEAR_REG and binary LOGISTIC_REG. Refused 501
+// Served model types: LINEAR_REG, LOGISTIC_REG, KMEANS and PCA (#1481),
+// and explicit MATRIX_FACTORIZATION (modelmf.go, #1504). Refused 501
 // with the reason: the other types (their training is Google's, and either
 // undocumented in the detail a faithful result needs, as for boosted
-// trees, DNNs, matrix factorization and ARIMA_PLUS, or Google's
+// trees, DNNs and ARIMA_PLUS, or Google's
 // infrastructure itself: AUTOML_*, imported TENSORFLOW/ONNX/XGBOOST models
 // read from Cloud Storage, and remote models over a Cloud resource
 // connection, which CloudBurrow has none of); a TRANSFORM clause; and the
