@@ -57,8 +57,8 @@ func TestBigQueryLoadMakesItsTableWithItsProperties(t *testing.T) {
 		WriteDisposition:           "WRITE_TRUNCATE",
 		DestinationTableProperties: &bq.DestinationTableProperties{Description: "loaded", FriendlyName: "By day", Labels: map[string]string{"k": "v"}},
 	}}}
-	got, err := svc.Jobs.Insert(project, job).Media(strings.NewReader(`{"a":1,"d":"2024-01-01","s":"x"}`+"\n"+
-		`{"a":2,"d":"2024-01-02","s":"y"}`+"\n")).Context(ctx).Do()
+	got, err := svc.Jobs.Insert(project, job).Media(strings.NewReader(`{"a":1,"d":"2024-01-01","s":"x"}` + "\n" +
+		`{"a":2,"d":"2024-01-02","s":"y"}` + "\n")).Context(ctx).Do()
 	if err != nil {
 		t.Fatalf("JSON load: %v", err)
 	}
@@ -190,5 +190,43 @@ func waitGeneratedJob(t *testing.T, h *Harness, svc *bq.Service, project, id str
 			t.Fatalf("job %s not done", id)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// TestConsoleBigQueryAvroLoadIntoAPartitionedTable (#1457): Load from
+// Cloud Storage in the console loads an Avro file with
+// useAvroLogicalTypes into a new table partitioned by a column's day and
+// clustered, read back with the official Go client.
+//
+// covers: bigquery.jobs.insert, bigquery.tables.get
+func TestConsoleBigQueryAvroLoadIntoAPartitionedTable(t *testing.T) {
+	h := New(t)
+	c, project := bigqueryClient(t, h)
+	addr := consoleAddr(t, h)
+	ctx := h.Context()
+	ds := validationDataset(t, h, c)
+	bucket := loadBucket(t, h, "bq-console-avro", map[string]string{
+		"e.avro": avroFile(t, `{"type":"record","name":"E","fields":[{"name":"k","type":"string"},`+
+			`{"name":"at","type":{"type":"long","logicalType":"timestamp-micros"}}]}`, "",
+			map[string]any{"k": "a", "at": time.Date(2024, 3, 4, 5, 6, 7, 0, time.UTC)}),
+	})
+	_, fields, _ := consoleJobResult(t, addr, project, []string{ds.DatasetID}, "load", map[string]string{
+		"tableId": "events", "uris": "gs://" + bucket.BucketName() + "/e.avro", "format": "AVRO",
+		"writeDisposition": "WRITE_APPEND", "useAvroLogicalTypes": "true", "partitionType": "DAY",
+		"partitionField": "at", "clusteringFields": "k",
+	})
+	if fields["State"] != "Succeeded" || fields["Output rows"] != "1" {
+		t.Errorf("the console's Avro load answered %v", fields)
+	}
+	md, err := ds.Table("events").Metadata(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(md.Schema) != 2 || md.Schema[1].Type != bigquery.TimestampFieldType || md.TimePartitioning == nil ||
+		md.TimePartitioning.Field != "at" || md.Clustering == nil || fmt.Sprint(md.Clustering.Fields) != "[k]" {
+		t.Errorf("the table: %+v %+v %+v", md.Schema, md.TimePartitioning, md.Clustering)
+	}
+	if got := fmt.Sprint(rows(t, ctx, c, "SELECT k FROM "+ds.DatasetID+".`events$20240304`")); got != "[[a]]" {
+		t.Errorf("the partition holds %s", got)
 	}
 }
