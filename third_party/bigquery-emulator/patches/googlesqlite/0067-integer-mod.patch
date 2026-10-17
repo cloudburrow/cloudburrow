@@ -1,0 +1,58 @@
+CloudBurrow patch 67 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1562).
+
+MOD converted both arguments to float64, so an INT64 above 2^53 lost
+its low bits: MOD(9223372036854775807, 3) was 2, not 1. Two INT64s are
+taken by integer remainder, which has the sign of X, as BigQuery
+documents.
+
+--- a/internal/functions/math/mod.go
++++ b/internal/functions/math/mod.go
+@@ -8,6 +8,18 @@
+ )
+ 
+ func MOD(x, y value.Value) (value.Value, error) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1562): two INT64s by
++	// integer remainder, which has X's sign as BigQuery's MOD does; by
++	// float64, an INT64 above 2^53 lost its low bits (MOD(2^63 - 1, 3)
++	// was 2, not 1).
++	if xi, ok := x.(value.IntValue); ok {
++		if yi, ok := y.(value.IntValue); ok {
++			if yi == 0 {
++				return nil, fmt.Errorf("MOD: zero divided")
++			}
++			return value.IntValue(int64(xi) % int64(yi)), nil
++		}
++	}
+ 	xv, err := x.ToFloat64()
+ 	if err != nil {
+ 		return nil, err
+--- /dev/null
++++ b/internal/functions/math/mod_cloudburrow_test.go
+@@ -0,0 +1,26 @@
++package math
++
++import (
++	"testing"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1562): MOD of two INT64s is
++// exact above 2^53, with X's sign.
++func TestMODIntegerExact(t *testing.T) {
++	for _, c := range []struct{ x, y, want int64 }{
++		{9223372036854775807, 3, 1},
++		{9223372036854775806, 7, 6},
++		{-7, 3, -1},
++		{7, -3, 1},
++	} {
++		got, err := MOD(value.IntValue(c.x), value.IntValue(c.y))
++		if err != nil || got != value.IntValue(c.want) {
++			t.Errorf("MOD(%d, %d) = %v, %v; want %d", c.x, c.y, got, err, c.want)
++		}
++	}
++	if _, err := MOD(value.IntValue(1), value.IntValue(0)); err == nil {
++		t.Errorf("MOD(1, 0): no error")
++	}
++}
