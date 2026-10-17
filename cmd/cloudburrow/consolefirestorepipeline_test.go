@@ -55,6 +55,26 @@ func TestConsoleFirestorePipelineAndUserCreds(t *testing.T) {
 	if err != nil || len(res.Items) != 1 || res.Items[0].Name != "orphans/missing/kids/k1" {
 		t.Errorf("Run pipeline over a collection group = %+v, %v", res, err)
 	}
+	// #1523: Output update writes the set field into each document, and
+	// delete deletes each one, both showing the count modified.
+	res, err = p.ActAtResult(ctx, "p", at, "runpipeline", map[string]string{"source": "collection", "path": "cities",
+		"output": "update", "setField": "visited", "setValue": "true"})
+	if err != nil || len(res.Items) != 1 || res.Items[0].Fields["Fields"] != "documents_modified: 2" {
+		t.Errorf("Run pipeline, update = %+v, %v; want documents_modified: 2", res, err)
+	}
+	res, err = p.ActAtResult(ctx, "p", at, "runpipeline", map[string]string{"source": "collection", "path": "cities",
+		"field": "visited", "op": "==", "value": "true"})
+	if err != nil || len(res.Items) != 2 {
+		t.Errorf("cities visited after the update = %+v, %v; want 2", res, err)
+	}
+	res, err = p.ActAtResult(ctx, "p", at, "runpipeline", map[string]string{"source": "collection", "path": "cities",
+		"field": "n", "op": "==", "value": "cities/la", "output": "delete"})
+	if err != nil || len(res.Items) != 1 || res.Items[0].Fields["Fields"] != "documents_modified: 1" {
+		t.Errorf("Run pipeline, delete = %+v, %v; want documents_modified: 1", res, err)
+	}
+	if _, err := p.ActAtResult(ctx, "p", at, "runpipeline", map[string]string{"source": "collection", "path": "cities", "readTime": "yesterday"}); err == nil {
+		t.Error("a read time that is not RFC 3339 was accepted")
+	}
 
 	res, err = p.ActAtResult(ctx, "p", at, "createcreds", map[string]string{"userCredsId": "app-user"})
 	if err != nil || len(res.Items) != 1 || res.Items[0].Fields["Password"] == "" {
