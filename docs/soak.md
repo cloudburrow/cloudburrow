@@ -95,3 +95,36 @@ Expected, and not a leak:
   minutes, then hold.
 - Secret Manager keeps each secret in a Kubernetes Secret and reads it with `kubectl`, so its calls
   take a few hundred milliseconds; see [compatibility.md](compatibility.md).
+
+## Results
+
+The first run (2026-10-17, #1594): every group for 30 minutes on one instance of an Apple silicon
+Mac shared with other work, `CLOUDBURROW_SOAK_RATE=1`. No call failed. It found three leaks, fixed
+in #1594 and measured again in a 15-minute run after:
+
+- **Tasks delivered twice:** 340 of 33,141 tasks that answered 200 arrived twice. A dispatch pass's
+  list of due tasks went stale while it ran; a task whose attempt ended meanwhile was started again.
+  After: 0 of 17,971.
+- **Tasks tombstones never expired**, so the store grew to 10 MB in 30 minutes and `CreateTask`'s
+  p50 went from 6 to 74 ms (every change writes the whole store). After: the state directory held
+  at 17–20 KB, and `CreateTask`'s p50 at 6–10 ms.
+- **Logging** allocated its whole 20,000-entry store again at each write once full; it now drops the
+  oldest in place.
+
+| Group | Ops (30 min) | Errors | p50 / p99, first minute | p50 / p99, last minute | Memory, start → end |
+|-------|-------------:|-------:|-------------------------|------------------------|---------------------|
+| storage (upload) | 12,548 | 0 | 9.1 / 142 ms | 11.7 / 166 ms | pod 30 → 64 MiB |
+| storage (download) | 10,949 | 0 | 2.0 / 90 ms | 2.5 / 212 ms | |
+| pubsub (publish) | 71,513 | 0 | 12.7 / 24 ms | 13.0 / 41 ms | emulator 288 → 390 MiB |
+| pubsub (publish to streaming receipt) | 71,513 | 0 lost, 0 redelivered | 39 / 65 ms | 40 / 76 ms | |
+| tasks (create) | 33,141 | 340 delivered twice | 6.4 / 71 ms | 73.5 / 210 ms | in `up` |
+| secretmanager (access) | 10,399 | 0 | 217 / 390 ms | 300 / 639 ms | in `up` |
+| firestore (set) | 21,412 | 0 | 3.9 / 23 ms | 3.6 / 29 ms | emulator 368 → 542 MiB |
+| bigquery (insert) | 3,410 | 0, 34,100 rows counted | 101 / 269 ms | 139 / 442 ms | emulator 91 → 174 MiB |
+| logging (write) | 35,865 | 0 | 0.6 / 2.2 ms | 0.6 / 7.0 ms | in `up` |
+
+The `up` process stayed at 120–260 MiB, 29–35 threads and about 65 open files; no container
+restarted; each front stayed at 25–35 MiB. BigQuery's queries slow as the table grows (21 → 99 ms
+p50 for the `GROUP BY` over 34,000 rows), and Logging's reads as its store fills, both expected.
+Secret Manager's latency grows with the versions a secret holds, and the JVM emulators' memory
+kept rising slowly; both are followed up in #1596 (Secret Manager also refuses a secret's 905th version).
