@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 )
 
 // relayPath is the relay's path prefix.
@@ -53,7 +55,9 @@ func (f *Front) RelayPushes(ctx context.Context, l net.Listener) {
 	f.mu.Lock()
 	f.relayBase = "http://" + l.Addr().String() + relayPath
 	f.mu.Unlock()
-	srv := &http.Server{Handler: http.HandlerFunc(f.relay), ReadHeaderTimeout: 30 * time.Second}
+	// The emulator pushes to the relay's loopback address, which the Host
+	// check passes, with no Origin (#1587).
+	srv := &http.Server{Handler: hostguard.Wrap(http.HandlerFunc(f.relay)), ReadHeaderTimeout: 30 * time.Second}
 	go func() {
 		<-ctx.Done()
 		_ = srv.Close()

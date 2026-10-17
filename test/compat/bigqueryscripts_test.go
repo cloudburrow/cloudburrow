@@ -116,13 +116,13 @@ func TestBigQueryFailedScriptKeepsItsTable(t *testing.T) {
 			// #955: a query job the emulator failed kept what the
 			// statements before the failing one did, as BigQuery does.
 			_, be := jobError(t, ctx, c, script)
-			if be == nil || be.Reason == "notImplemented" || !strings.Contains(be.Message, "Table not found: nope.nope") {
+			if be == nil || be.Reason == "notImplemented" || !strings.Contains(be.Message, "Not found: Dataset "+c.Project()+":nope was not found in location") {
 				t.Errorf("jobs.insert: %v, want the job failed with the emulator's error", be)
 			}
 		} else {
 			// #1249: run statement by statement, it fails at the SELECT.
 			err := bqRun(ctx, c, script, false)
-			if err == nil || strings.Contains(err.Error(), "notImplemented") || !strings.Contains(err.Error(), "Table not found: nope.nope") {
+			if err == nil || strings.Contains(err.Error(), "notImplemented") || !strings.Contains(err.Error(), "Not found: Dataset "+c.Project()+":nope was not found in location") {
 				t.Errorf("jobs.query: %v, want it failed with the emulator's error", err)
 			}
 		}

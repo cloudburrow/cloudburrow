@@ -462,8 +462,8 @@ func moreTableOptions(t infoTable, add func(name, typ, value string)) {
 	if v := str(t, "maxStaleness"); v != "" {
 		add("max_staleness", "INTERVAL", `INTERVAL "`+v+`" YEAR TO SECOND`)
 	}
-	if st.PrivacyPolicy != nil {
-		add("privacy_policy", "JSON", strconv.Quote(*st.PrivacyPolicy))
+	if v := privacyPolicyOption(t, st); v != "" { // #1580
+		add("privacy_policy", "STRING", strconv.Quote(v))
 	}
 	if b, _ := t["biglakeConfiguration"].(map[string]any); str(b, "storageUri") != "" {
 		add("storage_uri", "STRING", strconv.Quote(str(b, "storageUri")))
@@ -530,9 +530,8 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 		if !f.tables.watched(key) {
 			if !checked && f.tables.anyWatched() {
 				if meta, ok := f.metaOf(r, tr.dataset, tr.table); ok {
-					if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why != "" {
-						writeError(w, http.StatusNotImplemented, "notImplemented", why)
-						return true
+					if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why.msg != "" {
+						return f.refuseViewRead(w, r, q, insert, tr.dataset, clause, why)
 					}
 				}
 			}
@@ -551,17 +550,15 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 					" The policy could not be read: "+why+".")
 				return true
 			}
-			if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why != "" {
-				writeError(w, http.StatusNotImplemented, "notImplemented", why)
-				return true
+			if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why.msg != "" {
+				return f.refuseViewRead(w, r, q, insert, tr.dataset, clause, why)
 			}
 			prot = append(prot, privacyRead{tr: tr, name: tr.dataset + "." + tr.table, pol: pol, columns: schemaColumns(meta)})
 			continue
 		}
 		if !checked {
-			if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why != "" {
-				writeError(w, http.StatusNotImplemented, "notImplemented", why)
-				return true
+			if why := f.viewReadsPrivate(r, project, tr.dataset, tr.table, meta, 0); why.msg != "" {
+				return f.refuseViewRead(w, r, q, insert, tr.dataset, clause, why)
 			}
 		}
 		if tr.decorator != "" {
@@ -580,6 +577,24 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 		return true
 	}
 	return false
+}
+
+// refuseViewRead answers q, which reads a view whose query reads a table
+// with a privacy policy (why): with no privacy clause in q, BigQuery's 400
+// for a read of that table without the clause its policy needs (#1517,
+// UNVERIFIED: the analysis rules document no view of such a view, and a
+// query of it without the clause cannot be one that "can be queried with"
+// it); else the 501, nothing run.
+func (f front) refuseViewRead(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, dataset string, clause bool,
+	why viewPrivacy) bool {
+	if !clause && why.clause != "" {
+		f.failBeforeRun(w, r, q, insert, dataset, http.StatusBadRequest, rowError{Reason: "invalidQuery",
+			Message: "You must use SELECT WITH " + why.clause + " for this query because a privacy policy is set on " +
+				why.name + "."})
+		return true
+	}
+	writeError(w, http.StatusNotImplemented, "notImplemented", why.msg)
+	return true
 }
 
 // partitionFilterRefusal is BigQuery's 400 of tr, a read of a table with
@@ -612,4 +627,60 @@ func partitionFilterRefusal(tr tableRead, meta map[string]any, name string) stri
 	}
 	return fmt.Sprintf("Cannot query over table '%s' without a filter over column(s) %s that can be used for "+
 		"partition elimination", name, strings.Join(quoted, ", "))
+}
+
+// privacyPolicyOption is the privacy_policy TABLE_OPTIONS lists of t (#1580):
+// the DDL's JSON text the front keeps, else a view's privacyPolicy set by
+// tables.insert or tables.patch, as the DDL's JSON (its keys in snake case).
+// TABLE_OPTIONS' documentation lists no privacy_policy; the DDL documents
+// its value as a "JSON-formatted STRING", so it is a STRING option, its
+// value the quoted JSON (UNVERIFIED).
+func privacyPolicyOption(t infoTable, st tableSetting) string {
+	if st.PrivacyPolicy != nil {
+		return *st.PrivacyPolicy
+	}
+	v, _ := t["view"].(map[string]any)
+	pp, ok := v["privacyPolicy"].(map[string]any)
+	if !ok || len(pp) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(snakeKeys(pp))
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// snakeKeys is v with each object key in snake case: joinAllowedColumns,
+// join_allowed_columns.
+func snakeKeys(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[snakeCase(k)] = snakeKeys(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = snakeKeys(e)
+		}
+		return out
+	}
+	return v
+}
+
+func snakeCase(s string) string {
+	var b strings.Builder
+	for i, r := range s {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			r += 'a' - 'A'
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

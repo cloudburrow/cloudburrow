@@ -512,7 +512,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return jobErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { // #1581, errorcodes.go; #1582, engineerrors.go
 		buffers.syncPending(next, r) // #1513: the clock a restarted front kept
 		// The files of the tables for Apache Iceberg whose rows the
 		// request changed are written before it is answered; a failure is
@@ -536,7 +536,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if !serveJobLocations(w, r, next, settings, func(w http.ResponseWriter) { inner.ServeHTTP(w, r) }) {
 			inner.ServeHTTP(w, r)
 		}
-	})
+	}), next, settings, failed)
 }
 
 // now is the instance's clock (#1487): the front's, which the CloudBurrow
@@ -1099,15 +1099,7 @@ func projectOf(base string) string {
 // writeError answers with BigQuery's error body: an ErrorProto list inside
 // the standard Google API error.
 func writeError(w http.ResponseWriter, code int, reason, message string) {
-	status := map[int]string{
-		http.StatusBadRequest:          "INVALID_ARGUMENT",
-		http.StatusConflict:            "ALREADY_EXISTS",
-		http.StatusNotFound:            "NOT_FOUND",
-		http.StatusPreconditionFailed:  "FAILED_PRECONDITION",
-		http.StatusNotImplemented:      "UNIMPLEMENTED",
-		http.StatusInternalServerError: "INTERNAL",
-		http.StatusServiceUnavailable:  "UNAVAILABLE",
-	}[code]
+	status := grpcStatus[code] // errorcodes.go
 	writeJSON(w, code, map[string]any{"error": map[string]any{
 		"code":    code,
 		"message": message,

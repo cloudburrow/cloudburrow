@@ -49,9 +49,31 @@ import (
 // serves (#575).
 const ClusterHostService = "cloudburrow-host"
 
-// Wrap returns next behind the Host check. extra names more hosts the
-// listener answers to: an exact name, or "*.name" for any name below it.
+// Wrap returns next behind the Host check and the Origin check
+// (crosssite.go). extra names more hosts the listener answers to: an exact
+// name, or "*.name" for any name below it.
 func Wrap(next http.Handler, extra ...string) http.Handler {
+	return wrap(next, true, extra, "")
+}
+
+// WrapHost returns next behind the Host check alone, for a listener that
+// checks Origin itself: the builtin storage server, whose CORS answers
+// depend on the origin (#677).
+func WrapHost(next http.Handler, extra ...string) http.Handler {
+	return wrap(next, false, extra, "")
+}
+
+// WrapService is Wrap for a front that serves the cluster's Service named
+// service from inside its pod (#1587): the BigQuery, Bigtable, Pub/Sub and
+// call fronts. Pods reach such a front by the Service's own name, not
+// through a tunnel, so it also answers to the names IsServiceName gives
+// for service, in whatever namespace the instance runs. An empty service
+// is Wrap.
+func WrapService(next http.Handler, service string, extra ...string) http.Handler {
+	return wrap(next, true, extra, normalize(service))
+}
+
+func wrap(next http.Handler, checkOrigin bool, extra []string, service string) http.Handler {
 	names := make([]string, 0, len(extra))
 	for _, e := range extra {
 		if e = normalize(e); e != "" {
@@ -59,11 +81,19 @@ func Wrap(next http.Handler, extra ...string) http.Handler {
 		}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if (r.ProtoMajor >= 2 && r.TLS == nil) || Allowed(r.Host, names...) {
+		if r.ProtoMajor >= 2 && r.TLS == nil {
 			next.ServeHTTP(w, r)
 			return
 		}
-		Refuse(w, r)
+		if !Allowed(r.Host, names...) && (service == "" || !IsServiceName(hostOnly(r.Host), service)) {
+			Refuse(w, r)
+			return
+		}
+		if checkOrigin && !CrossSiteAllowed(r) {
+			RefuseOrigin(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -93,12 +123,7 @@ func Allowed(hostport string, extra ...string) bool {
 	if hostport == "" {
 		return true
 	}
-	host := hostport
-	if h, _, err := net.SplitHostPort(hostport); err == nil {
-		host = h
-	} else if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-		host = host[1 : len(host)-1]
-	}
+	host := hostOnly(hostport)
 	if _, err := netip.ParseAddr(host); err == nil {
 		return true
 	}
@@ -148,6 +173,18 @@ func IsServiceName(host, service string) bool {
 		return labels[1] != "" && labels[2] == "svc" && labels[3] == "cluster" && labels[4] == "local"
 	}
 	return false
+}
+
+// hostOnly is the name or address of a Host header value, without its port
+// or an IPv6 literal's brackets.
+func hostOnly(hostport string) string {
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		return h
+	}
+	if strings.HasPrefix(hostport, "[") && strings.HasSuffix(hostport, "]") {
+		return hostport[1 : len(hostport)-1]
+	}
+	return hostport
 }
 
 // normalize lower-cases a name and drops a trailing root dot, so

@@ -174,6 +174,16 @@ The other service APIs CloudBurrow serves itself send no CORS headers, so a brow
 foreign page read their answers; a simple request a page can still send to them blind is not
 covered by #677, and the upstream emulators behind the tunnels were not examined for it.
 
+*Amended by #1586:* the simple request #677 left open is closed. A review on a running instance
+found a cross-site `text/plain` POST creating a Cloud Tasks queue and a KMS key ring, the Pub/Sub
+and Firestore emulators echoing any `Origin` with `Access-Control-Allow-Credentials`, so any page
+could read and write them, and three in-process REST APIs (Service Usage, Cloud SQL Admin,
+Backup and DR) with no Host check. `hostguard.Wrap` now checks `Origin` as well as `Host` on every
+listener it guards, the tunnel guard does the same in front of the upstream emulators, and the
+three APIs are wrapped. A request with an `Origin` is served only from a loopback origin, the
+listener's own, or one named with `--cors-allow-origin`, which therefore applies to every
+listener, not only Cloud Storage. The model and its tests are in [security.md](../security.md).
+
 *Amended by #1382 (decided 2026-10-16):* **Cloud Build steps get the host's Docker socket.** A
 build step that is not a docker build, docker push or pack step runs as Google's build worker
 runs it: a container on the host's Docker, with `/var/run/docker.sock` mounted, on the

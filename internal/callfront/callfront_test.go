@@ -227,3 +227,39 @@ func TestRunFrontsASecondPortIntoTheSameLog(t *testing.T) {
 		t.Errorf("--rest-listen without --rest-upstream = %v, want ErrUsage", err)
 	}
 }
+
+// #1587: the front checks Host and Origin itself, and answers to the name
+// of the Service it serves, which pods dial it by.
+func TestServerRefusesForeignHostAndOrigin(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer up.Close()
+	srv := httptest.NewServer(Server(Handler(strings.TrimPrefix(up.URL, "http://"), &calllog.Ring{}, t.Logf), t.Logf, "firestore").Handler)
+	defer srv.Close()
+	for _, c := range []struct {
+		host, origin string
+		want         int
+	}{
+		{"attacker.example:8080", "", http.StatusMisdirectedRequest},
+		{"datastore.cloudburrow.svc.cluster.local:8080", "", http.StatusMisdirectedRequest},
+		{"firestore.cloudburrow.svc.cluster.local:8080", "https://evil.example", http.StatusForbidden},
+		{"firestore.cloudburrow.svc.cluster.local:8080", "", http.StatusOK},
+		{"127.0.0.1:8080", "", http.StatusOK},
+	} {
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/projects/p/databases/(default)/documents/c", strings.NewReader("{}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = c.host
+		if c.origin != "" {
+			req.Header.Set("Origin", c.origin)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != c.want {
+			t.Errorf("Host %s, Origin %q: status %d, want %d", c.host, c.origin, resp.StatusCode, c.want)
+		}
+	}
+}

@@ -205,6 +205,8 @@ rdb := goredis.NewClient(&goredis.Options{Addr: fmt.Sprintf("%s:%d", inst.Host, 
 ```sh
 gcloud redis instances create secure --region=us-central1 --size=1 --transit-encryption-mode=server-authentication
 gcloud redis instances describe secure --region=us-central1 --format='value(serverCaCerts[0].cert)' > server-ca.pem
+HOST=$(gcloud redis instances describe secure --region=us-central1 --format='value(host)')
+PORT=$(gcloud redis instances describe secure --region=us-central1 --format='value(port)')
 redis-cli -h "$HOST" -p "$PORT" --tls --cacert server-ca.pem PING
 ```
 
@@ -333,7 +335,7 @@ users; an attached policy cannot be deleted.
 
 **Backups** (#1549): each cluster has a backup collection,
 `projects/P/locations/L/backupCollections/<cluster UID>`, which outlives it.
-`BackupCluster` (`gcloud redis clusters backup`) keeps an RDB snapshot of each shard's
+`BackupCluster` (`gcloud redis clusters create-backup`) keeps an RDB snapshot of each shard's
 primary (`BGSAVE`, then the file, read from the node's container) in the instance's
 Memorystore state: on disk in persistent mode, in memory in ephemeral mode. `ListBackups`,
 `GetBackup` and `DeleteBackup` act on them; a backup past its `ttl` (default 100 years) is

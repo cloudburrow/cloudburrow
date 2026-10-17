@@ -254,7 +254,7 @@ func TestUpgradeToH2C(t *testing.T) {
 	}
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
-	_, err = io.WriteString(c, "GET /v1/projects/"+project+"/topics HTTP/1.1\r\nHost: front\r\n"+
+	_, err = io.WriteString(c, "GET /v1/projects/"+project+"/topics HTTP/1.1\r\nHost: pubsub.cloudburrow.svc.cluster.local:8085\r\n"+
 		"Connection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: \r\n\r\n")
 	if err != nil {
 		t.Fatal(err)
@@ -353,5 +353,45 @@ func TestAMalformedUpgradeIsServedOverHTTP1(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || resp.ProtoMajor != 1 || !bytes.Contains(b, []byte("upstream")) {
 		t.Errorf("= HTTP/%d %d %s; want the upstream's answer over HTTP/1.1", resp.ProtoMajor, resp.StatusCode, b)
+	}
+}
+
+// #1587: the front checks Host and Origin itself, before an upgrade is
+// taken: a pod reaches it by the Service's name, not through the host's
+// guarded tunnel, and the emulator behind it answers any Origin with
+// Access-Control-Allow-Credentials.
+func TestFrontRefusesForeignHostAndOrigin(t *testing.T) {
+	up := newRESTUpstream(t)
+	fx := newFixtureREST(t, up.addr())
+	for _, c := range []struct {
+		host, origin, upgrade string
+		want                  int
+	}{
+		{"attacker.example:8085", "", "", http.StatusMisdirectedRequest},
+		{"attacker.example:8085", "", "h2c", http.StatusMisdirectedRequest},
+		{"pubsub.cloudburrow.svc.cluster.local:8085", "https://evil.example", "", http.StatusForbidden},
+		{"pubsub.cloudburrow.svc.cluster.local:8085", "", "", http.StatusOK},
+	} {
+		req, err := http.NewRequest(http.MethodGet, "http://"+fx.addr+"/v1/projects/"+project+"/topics", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = c.host
+		if c.origin != "" {
+			req.Header.Set("Origin", c.origin)
+		}
+		if c.upgrade != "" {
+			req.Header.Set("Connection", "Upgrade, HTTP2-Settings")
+			req.Header.Set("Upgrade", c.upgrade)
+			req.Header.Set("HTTP2-Settings", "")
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != c.want {
+			t.Errorf("Host %s, Origin %q, Upgrade %q: status %d, want %d", c.host, c.origin, c.upgrade, resp.StatusCode, c.want)
+		}
 	}
 }

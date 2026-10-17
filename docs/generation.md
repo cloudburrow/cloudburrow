@@ -108,8 +108,8 @@ There is no silent substitution.
 # acquire a model artifact (see local-ai.md)
 
 cloudburrow up \
-  -local-ai-model ./models/gemma-4-E2B-it.litertlm \
-  -port-localai 9095
+  --local-ai-model ./models/gemma-4-E2B-it.litertlm \
+  --port-localai 9095
 ```
 
 The runtime image depends on how `cloudburrow` was installed:

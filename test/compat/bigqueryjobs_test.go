@@ -424,7 +424,8 @@ func TestBigQueryFailedScriptFunctionsAndDropSchema(t *testing.T) {
 	}
 	failed := func(what string, err error) {
 		t.Helper()
-		if err == nil || !strings.Contains(err.Error(), "nope.nope") || strings.Contains(err.Error(), "notImplemented") {
+		// #1582: BigQuery's message of the missing dataset nope.
+		if err == nil || !strings.Contains(err.Error(), "Not found: Dataset "+c.Project()+":nope was not found in location") || strings.Contains(err.Error(), "notImplemented") {
 			t.Errorf("%s: %v, want the failing statement's error", what, err)
 		}
 	}
