@@ -84,8 +84,8 @@ func TestBigQueryCollationUndCI(t *testing.T) {
 // (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#create_table_statement).
 // A collation other than 'und:ci' and ” is refused 400 ("und:ci and
 // empty collation are supported, but not other collation
-// specifications"); a collation on a STRING inside a STRUCT, which the
-// engine cannot compare by, is 501. Measured first: the plain CREATE
+// specifications"); a collation on a STRING inside a STRUCT is served
+// since #1516 (bigquerycollation1516_test.go). Measured first: the plain CREATE
 // TABLE's `s = 'aBC'` matched no row of 'Abc' (BigQuery: 1), and
 // COLLATE 'und:cs' was taken and compared by code point.
 //
@@ -144,7 +144,6 @@ func TestBigQueryCollationDefaults(t *testing.T) {
 		{"CREATE TABLE " + tb("cs") + " (s STRING COLLATE 'und:cs')", "cs", http.StatusBadRequest},
 		{"CREATE TABLE " + tb("cs2") + " (s STRING) DEFAULT COLLATE 'binary'", "cs2", http.StatusBadRequest},
 		{"SELECT COLLATE('a', 'und:cs') = 'A'", "", http.StatusBadRequest},
-		{"CREATE TABLE " + tb("nested") + " (r STRUCT<s STRING COLLATE 'und:ci'>)", "nested", http.StatusNotImplemented},
 	} {
 		err := bqRun(ctx, c, tc.q, false)
 		if !errors.As(err, &gerr) || gerr.Code != tc.code {
@@ -162,8 +161,6 @@ func TestBigQueryCollationDefaults(t *testing.T) {
 		code   int
 	}{
 		{"apics", bigquery.Schema{{Name: "s", Type: bigquery.StringFieldType, Collation: "und:cs"}}, http.StatusBadRequest},
-		{"apinested", bigquery.Schema{{Name: "r", Type: bigquery.RecordFieldType, Schema: bigquery.Schema{
-			{Name: "s", Type: bigquery.StringFieldType, Collation: "und:ci"}}}}, http.StatusNotImplemented},
 	} {
 		err := c.Dataset(id).Table(tc.name).Create(ctx, &bigquery.TableMetadata{Schema: tc.schema})
 		if !errors.As(err, &gerr) || gerr.Code != tc.code {

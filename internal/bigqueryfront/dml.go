@@ -189,6 +189,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.withDefaultCollation(w, r, q, insert) { // #1459, collation.go
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.withScriptDefaultCollation(w, r, q, insert) { // #1516, collation.go
+		return
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.withDefaultTableKey(w, r, q, insert) { // #1456, projectdefaults.go
 		return
 	}
