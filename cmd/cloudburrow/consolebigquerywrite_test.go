@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -20,15 +21,15 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/console"
 )
 
-// TestTheBigQueryReadWriteEditorScreensStatements (#994, #1024).
+// TestTheBigQueryReadWriteEditorScreensStatements (#994, #1024, #1567).
 //
-// Read-write mode sends DDL, scripts and a DML statement of its own, whose
-// keyword it returns, and leaves what they may do to the API. Before
-// anything is sent it refuses DML inside a script — after DECLARE, in a
-// BEGIN block or in an exception handler, naming #1028 — an UPDATE with a
-// FROM clause of its own, naming #1027 (not one whose FROM is in a
-// subquery or a function), and a text that is only queries, which belongs in
-// Read-only; a keyword inside quotes or a comment is not a statement.
+// Read-write mode sends DDL, scripts and DML, and leaves what they may do to
+// the API. A DML statement of its own returns its keyword, UPDATE … FROM
+// (#1027) included; a script with DML — after DECLARE, in a BEGIN block, in
+// an exception handler or a transaction — returns SCRIPT (#1028, #1459).
+// Before anything is sent it refuses a text that is only queries, which
+// belongs in Read-only; a keyword inside quotes or a comment is not a
+// statement.
 func TestTheBigQueryReadWriteEditorScreensStatements(t *testing.T) {
 	for stmt, want := range map[string]string{
 		"CREATE SCHEMA s":                           "",
@@ -56,15 +57,19 @@ func TestTheBigQueryReadWriteEditorScreensStatements(t *testing.T) {
 		}
 	}
 	for stmt, want := range map[string]string{
-		"DECLARE x INT64;\nINSERT INTO t (x) VALUES (x)":                               "(#1028)",
-		"INSERT INTO t (x) VALUES (1); SELECT 1":                                       "INSERT is DML inside a script",
-		"BEGIN\n  DELETE FROM t WHERE true;\nEND":                                      "DELETE is DML inside a script",
-		"BEGIN SELECT 1; EXCEPTION WHEN ERROR THEN UPDATE t SET x = 1 WHERE true; END": "UPDATE is DML inside a script",
-		// A transaction (#1201) is a script: its DML is refused as any
-		// DML in a script is, since the rows are not reported (#1028).
-		"BEGIN TRANSACTION; INSERT INTO t (x) VALUES (1); COMMIT TRANSACTION": "INSERT is DML inside a script",
-		"UPDATE t SET x = s.x FROM s WHERE t.id = s.id":                       "Update with joins not supported",
-		"update t set x = 1 from s where true":                                "(#1027)",
+		"DECLARE x INT64;\nINSERT INTO t (x) VALUES (x)":                               "SCRIPT",
+		"INSERT INTO t (x) VALUES (1); SELECT 1":                                       "SCRIPT",
+		"BEGIN\n  DELETE FROM t WHERE true;\nEND":                                      "SCRIPT",
+		"BEGIN SELECT 1; EXCEPTION WHEN ERROR THEN UPDATE t SET x = 1 WHERE true; END": "SCRIPT",
+		"BEGIN TRANSACTION; INSERT INTO t (x) VALUES (1); COMMIT TRANSACTION":          "SCRIPT",
+		"UPDATE t SET x = s.x FROM s WHERE t.id = s.id":                                "UPDATE",
+		"update t set x = 1 from s where true":                                         "UPDATE",
+	} {
+		if got, err := writableBigQuery(stmt); err != nil || got != want {
+			t.Errorf("%q = %q, %v; want %q sent", stmt, got, err, want)
+		}
+	}
+	for stmt, want := range map[string]string{
 		"SELECT * FROM t":                                                     "switch the editor to Read-only",
 		"WITH a AS (SELECT 1) SELECT * FROM a;":                               "switch the editor to Read-only",
 		"(SELECT 1)":                                                          "switch the editor to Read-only",
@@ -115,7 +120,32 @@ func TestBigQueryDMLAnswerSaysWhatChanged(t *testing.T) {
 func TestBigQueryWriteReportSendsJobsQuery(t *testing.T) {
 	var mu sync.Mutex
 	var sent []map[string]any
+	var listed []string
 	emulator := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/projects/served-project/jobs") {
+			// A script's child jobs (#1353), newest first as jobs.list
+			// lists them: an expression, a SELECT and two DML statements.
+			mu.Lock()
+			listed = append(listed, r.URL.Query().Get("parentJobId"))
+			mu.Unlock()
+			child := func(id, typ, kind string, line int, counts string) string {
+				frame := `{"text":"x"}` // the front's last statement has no position
+				if line > 0 {
+					frame = `{"startLine":` + strconv.Itoa(line) + `,"startColumn":1,"text":"x"}`
+				}
+				return `{"jobReference":{"jobId":"` + id + `"},"statistics":{"parentJobId":"script_1","creationTime":"100` + id[1:] + `",` +
+					`"scriptStatistics":{"evaluationKind":"` + kind + `","stackFrames":[` + frame + `]},` +
+					`"query":{"statementType":"` + typ + `"` + counts + `}}}`
+			}
+			_, _ = io.WriteString(w, `{"jobs":[`+strings.Join([]string{
+				child("c5", "DELETE", "STATEMENT", 0, `,"numDmlAffectedRows":"3"`),
+				child("c4", "SELECT", "STATEMENT", 4, ""),
+				child("c3", "MERGE", "STATEMENT", 3, `,"numDmlAffectedRows":"2","dmlStats":{"insertedRowCount":"1","updatedRowCount":"1"}`),
+				child("c2", "INSERT", "STATEMENT", 2, `,"numDmlAffectedRows":"1"`),
+				child("c1", "SELECT", "EXPRESSION", 1, ""),
+			}, ",")+`]}`)
+			return
+		}
 		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/projects/served-project/queries") {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = io.WriteString(w, `{"error":{"code":404,"message":"not found: `+r.URL.Path+`"}}`)
@@ -136,8 +166,12 @@ func TestBigQueryWriteReportSendsJobsQuery(t *testing.T) {
 			// What the front answers for a lone DML statement (#1008).
 			dml = `"numDmlAffectedRows":"2","dmlStats":{"deletedRowCount":"2"},`
 		}
+		id := "job_1"
+		if strings.HasPrefix(body["query"].(string), "DECLARE") {
+			id = "script_1"
+		}
 		_, _ = io.WriteString(w, `{"kind":"bigquery#queryResponse","jobComplete":true,"totalRows":"0",`+dml+
-			`"jobReference":{"projectId":"served-project","jobId":"job_1"}}`)
+			`"jobReference":{"projectId":"served-project","jobId":"`+id+`"}}`)
 	})
 	srv := httptest.NewServer(emulator)
 	t.Cleanup(srv.Close)
@@ -164,8 +198,19 @@ func TestBigQueryWriteReportSendsJobsQuery(t *testing.T) {
 	if err != nil || msg != "This statement removed 2 rows. It ran as job job_1." || len(sent) != 3 {
 		t.Errorf("a DELETE = %q, %v after %d requests, want it sent and its rows said", msg, err, len(sent))
 	}
-	if _, err := p.WriteReport(ctx, "served-project", []string{"ds"}, "DECLARE x INT64; DELETE FROM t WHERE x = 1"); err == nil || len(sent) != 3 {
-		t.Errorf("DML in a script = %v after %d requests, want it refused unsent", err, len(sent))
+	// DML in a script is sent (#1567), and answered with what each DML
+	// child job changed, in the script's order.
+	msg, err = p.WriteReport(ctx, "served-project", []string{"ds"},
+		"DECLARE x INT64 DEFAULT 1;\nINSERT t (x) VALUES (x);\nMERGE t USING s ON t.x = s.x WHEN MATCHED THEN UPDATE SET x = 2 WHEN NOT MATCHED THEN INSERT (x) VALUES (3);\nSELECT * FROM t;\nDELETE FROM t WHERE x = 3")
+	if want := "The script ran as job script_1. Line 2: This statement added 1 row. " +
+		"Line 3: This statement modified 2 rows: 1 inserted, 1 updated, 0 deleted. This statement removed 3 rows."; err != nil || msg != want || len(sent) != 4 ||
+		!slices.Equal(listed, []string{"script_1"}) {
+		t.Errorf("DML in a script = %q, %v after %d requests and listing %v; want %q", msg, err, len(sent), listed, want)
+	}
+	// UPDATE … FROM is sent as it is (#1027), and answered with its rows.
+	if _, err := p.WriteReport(ctx, "served-project", []string{"ds"}, "UPDATE t SET x = s.x FROM s WHERE t.id = s.id"); err != nil ||
+		len(sent) != 5 || sent[4]["query"] != "UPDATE t SET x = s.x FROM s WHERE t.id = s.id" {
+		t.Errorf("UPDATE … FROM = %v after %d requests, want it sent", err, len(sent))
 	}
 	if _, err := p.WriteReport(ctx, "other", []string{"ds"}, "CREATE SCHEMA x"); err == nil || !strings.Contains(err.Error(), `"served-project"`) {
 		t.Errorf("another project = %v, want the one-project refusal", err)
