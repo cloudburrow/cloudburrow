@@ -298,6 +298,10 @@ func (s *Server) serveJSON(w http.ResponseWriter, r *http.Request, rest string, 
 		if upload {
 			what += " (media upload)"
 		}
+		if why, ok := unimplementedReason[m.ID]; ok {
+			apierror.WriteStorageJSON(w, apierror.Unimplemented("%s is not implemented: %s", what, why))
+			return
+		}
 		apierror.WriteStorageJSON(w, apierror.Unimplemented("%s is not implemented", what))
 		return
 	}
