@@ -31,9 +31,14 @@ import (
 // the spec is explanation_spec_override's: parameters.sampled_shapley_attribution
 // and metadata.inputs, a feature name per input with its baselines. Without
 // it Explain is FAILED_PRECONDITION, as Vertex answers for a model deployed
-// without a spec. The other methods are refused: integrated gradients and
-// XRAI need the model's gradients, which a predict route does not expose, and
-// example-based explanations need an Example index, which nothing here builds.
+// without a spec. The other methods are INVALID_ARGUMENT, because Vertex
+// documents them for TensorFlow models only (docs.cloud.google.com/vertex-ai/
+// docs/explainable-ai/overview): integrated gradients and XRAI for a
+// TensorFlow model served from a prebuilt TensorFlow container, and
+// example-based explanations for a TensorFlow model that outputs an
+// embedding. Sampled Shapley is the method Vertex documents for "any
+// custom-trained model (running in any inference container)", which is what
+// a custom endpoint here is (#1454).
 
 // maxExplainPredictions bounds the perturbed instances one Explain sends.
 const maxExplainPredictions = 10000
@@ -59,11 +64,13 @@ func explainSpecOf(endpoint string, req *aiplatformpb.ExplainRequest) (*explainS
 			"so Explain takes it from explanation_spec_override (parameters.sampled_shapley_attribution and metadata.inputs); see docs/compatibility.md", endpoint)
 	}
 	if o.GetExamplesOverride() != nil || p.GetExamples() != nil {
-		return nil, apierror.Unimplemented("example-based explanations are not served: they need an Example index, which nothing here builds")
+		return nil, apierror.InvalidArgument("example-based explanations are not supported for endpoint %s: Vertex supports them for TensorFlow models "+
+			"that output an embedding, and this endpoint serves a custom container; a custom container supports sampled_shapley_attribution", endpoint)
 	}
 	if p.GetIntegratedGradientsAttribution() != nil || p.GetXraiAttribution() != nil {
-		return nil, apierror.Unimplemented("integrated gradients and XRAI attributions are not served: they need the model's gradients, " +
-			"which a custom container's predict route does not expose; sampled_shapley_attribution needs only predictions")
+		return nil, apierror.InvalidArgument("integrated gradients and XRAI attributions are not supported for endpoint %s: Vertex supports them for "+
+			"TensorFlow models served from a prebuilt TensorFlow container, and this endpoint serves a custom container; "+
+			"a custom container supports sampled_shapley_attribution", endpoint)
 	}
 	ss := p.GetSampledShapleyAttribution()
 	if ss == nil {
