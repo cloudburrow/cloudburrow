@@ -1620,8 +1620,8 @@ func (storageProvider) CreateForm() (string, []console.Field) {
 			Help: "The bucket has real folders, which can be created, renamed and deleted as folders. It can be " +
 				"enabled only when the bucket is created, needs uniform bucket-level access and excludes object versioning."},
 		{Name: "uniformAccess", Label: "Uniform bucket-level access", Type: "checkbox", Section: access, Default: "true",
-			Help: "Access is granted by IAM alone, as a managed folder requires. There are no ACLs here, so " +
-				"fine-grained access is not offered."},
+			Help: "On, access is granted by IAM alone, as a managed folder requires. Off, the bucket has " +
+				"fine-grained access: its ACLs are on its Access control tab, stored and not enforced (#1233)."},
 		{Name: "versioning", Label: "Object versioning", Type: "checkbox", Section: protect, Default: "false",
 			Help: "An overwritten or deleted object is kept as a noncurrent version."},
 		{Name: "softDeleteSeconds", Label: "Soft delete retention (seconds)", Type: "text", Section: protect,
