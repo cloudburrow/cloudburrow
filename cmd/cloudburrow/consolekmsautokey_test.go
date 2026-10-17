@@ -41,6 +41,60 @@ func TestConsoleKMSCreateKeyAtHSM(t *testing.T) {
 	}
 }
 
+// Create key makes an EXTERNAL key without a version; Add version names its
+// key URI, Edit key reference on the version's page moves it, and the key
+// encrypts; the official client reads back each (#1469).
+func TestConsoleKMSExternalKey(t *testing.T) {
+	ctx := context.Background()
+	p, c := kmsEditFixture(t)
+	const project = "ext-console"
+	ring, err := p.Create(ctx, project, map[string]string{"keyRingId": "r", "location": "us-central1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.ActAtResult(ctx, project, []string{ring}, "createkey", map[string]string{"cryptoKeyId": "k", "protectionLevel": "EXTERNAL",
+		"skipInitialVersionCreation": "true"}); err != nil {
+		t.Fatalf("create key: %v", err)
+	}
+	key := ring + "/cryptoKeys/k"
+	var add *console.Action
+	for _, a := range p.DetailActions(ctx, project, []string{ring, "k"}) {
+		if a.ID == "addversion" {
+			add = &a
+		}
+	}
+	if add == nil || len(add.Fields) != 1 || add.Fields[0].Name != "externalKeyUri" {
+		t.Fatalf("Add version = %+v; want it to ask for the external key URI", add)
+	}
+	if _, err := p.ActAtResult(ctx, project, []string{ring, "k"}, "addversion", map[string]string{"externalKeyUri": "https://ekm.test/v0/k"}); err != nil {
+		t.Fatalf("add version: %v", err)
+	}
+	if _, err := p.ActAtResult(ctx, project, []string{ring, "k", "1"}, "makeprimary", nil); err != nil {
+		t.Fatalf("make primary: %v", err)
+	}
+	found := false
+	for _, a := range p.DetailActions(ctx, project, []string{ring, "k", "1"}) {
+		if a.ID == "editreference" && len(a.Fields) == 1 && a.Fields[0].Default == "https://ekm.test/v0/k" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the version's page has no Edit key reference opening on its URI")
+	}
+	if _, err := p.ActAtResult(ctx, project, []string{ring, "k", "1"}, "editreference", map[string]string{"externalKeyUri": "https://ekm2.test/v0/k"}); err != nil {
+		t.Fatalf("edit key reference: %v", err)
+	}
+	k, err := c.GetCryptoKey(ctx, &kmspb.GetCryptoKeyRequest{Name: key})
+	if err != nil || k.GetPrimary().GetProtectionLevel() != kmspb.ProtectionLevel_EXTERNAL ||
+		k.GetPrimary().GetExternalProtectionLevelOptions().GetExternalKeyUri() != "https://ekm2.test/v0/k" ||
+		k.GetVersionTemplate().GetAlgorithm() != kmspb.CryptoKeyVersion_EXTERNAL_SYMMETRIC_ENCRYPTION {
+		t.Fatalf("GetCryptoKey = %v, %v", k, err)
+	}
+	if _, err := p.ActAtResult(ctx, project, []string{ring, "k"}, "encrypt", map[string]string{"plaintext": "hi"}); err != nil {
+		t.Errorf("encrypt: %v", err)
+	}
+}
+
 func consoleEkmPEM(t *testing.T) string {
 	t.Helper()
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -107,6 +161,9 @@ func TestConsoleKMSEkmConnections(t *testing.T) {
 	}
 	if err := p.ActAt(ctx, project, []string{name}, "setdefault", nil); err != nil {
 		t.Fatalf("Set as default: %v", err)
+	}
+	if err := p.ActAt(ctx, project, []string{name}, "verifyconnectivity", nil); err != nil {
+		t.Errorf("Verify connectivity: %v", err)
 	}
 	got, err := ec.GetEkmConnection(ctx, &kmspb.GetEkmConnectionRequest{Name: name})
 	if err != nil || got.GetKeyManagementMode() != kmspb.EkmConnection_CLOUD_KMS || got.GetCryptoSpacePath() != "v0/space" {

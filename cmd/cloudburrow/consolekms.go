@@ -417,18 +417,24 @@ func (p kmsProvider) Create(ctx context.Context, project string, values map[stri
 // kmsKeyHelp names what a key created here is, and what is refused, so the
 // form says it before the API has to.
 const kmsKeyHelp = "Creates a key with version 1, of the protection level, purpose and " +
-	"algorithm chosen below; an ENCRYPT_DECRYPT key gets version 1 as its primary. EXTERNAL " +
-	"and EXTERNAL_VPC protection are not implemented locally and are not offered."
+	"algorithm chosen below; an ENCRYPT_DECRYPT key gets version 1 as its primary. An EXTERNAL key, " +
+	"or an EXTERNAL_VPC key on a MANUAL EKM connection, is created without a version: add one naming " +
+	"its external key URI or key path."
 
 // kmsProtectionNote says what HSM means here (#1452).
 const kmsProtectionNote = "HSM keys behave as SOFTWARE keys do, with the same algorithms: their key material " +
 	"is not in a hardware security module, and no version has an attestation."
 
+// kmsExternalNote says what EXTERNAL and EXTERNAL_VPC mean here (#1469).
+const kmsExternalNote = "EXTERNAL and EXTERNAL_VPC keys are kept by CloudBurrow acting as their external key manager: " +
+	"the key URI or key path a version names is stored, never dialled, and the key material is the instance's."
+
 // kmsProtectionField is Create key's and Create import job's Protection
-// level: the levels CreateCryptoKey and CreateImportJob accept (#1452).
-func kmsProtectionField(help string) console.Field {
+// level: the levels CreateCryptoKey and CreateImportJob accept (#1452,
+// #1469).
+func kmsProtectionField(help string, levels ...string) console.Field {
 	return console.Field{Name: "protectionLevel", Label: "Protection level", Type: "select", Default: "SOFTWARE",
-		Options: []string{"SOFTWARE", "HSM"}, Help: help + " " + kmsProtectionNote}
+		Options: append([]string{"SOFTWARE", "HSM"}, levels...), Help: help + " " + kmsProtectionNote}
 }
 
 // kmsCreateKeyFields is the Create key form on a ring's page. A function so
@@ -437,9 +443,13 @@ func kmsCreateKeyFields() []console.Field {
 	return []console.Field{
 		{Name: "cryptoKeyId", Label: "Key name", Type: "text", Required: true,
 			Help: kmsKeyHelp, Pattern: `^[A-Za-z0-9_\-]{1,63}$`},
-		kmsProtectionField("Fixed once the key exists; new versions get it."),
+		kmsProtectionField("Fixed once the key exists; new versions get it. "+kmsExternalNote, "EXTERNAL", "EXTERNAL_VPC"),
 		kmsPurposeField(),
 		kmsAlgorithmField(),
+		{Name: "cryptoKeyBackend", Label: "EKM connection", Type: "text",
+			Help: "EXTERNAL_VPC only: projects/P/locations/L/ekmConnections/C, in the key ring's location. Empty is the location's default connection."},
+		{Name: "skipInitialVersionCreation", Label: "Create without a version", Type: "checkbox",
+			Help: "Required for an EXTERNAL key and for an EXTERNAL_VPC key on a MANUAL connection, whose versions each name their external key."},
 		{Name: "labels", Label: "Labels", Type: "map",
 			Help: "Optional. Lowercase keys and values."},
 		// Both of these are read back by GetCryptoKey as CreateCryptoKey set
@@ -485,8 +495,6 @@ func kmsCreateKeyRequest(ring string, values map[string]string) (*kmspb.CreateCr
 			return nil, fmt.Errorf("algorithm: %q is not a key algorithm", a)
 		}
 		alg = kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm(v)
-	} else if purpose == kmspb.CryptoKey_ENCRYPT_DECRYPT {
-		alg = kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION
 	}
 	level := kmspb.ProtectionLevel_SOFTWARE
 	if pl := strings.TrimSpace(values["protectionLevel"]); pl != "" {
@@ -496,9 +504,16 @@ func kmsCreateKeyRequest(ring string, values map[string]string) (*kmspb.CreateCr
 		}
 		level = kmspb.ProtectionLevel(v)
 	}
+	// Unset, an external ENCRYPT_DECRYPT key gets EXTERNAL_SYMMETRIC_ENCRYPTION
+	// from CreateCryptoKey.
+	external := level == kmspb.ProtectionLevel_EXTERNAL || level == kmspb.ProtectionLevel_EXTERNAL_VPC
+	if alg == 0 && purpose == kmspb.CryptoKey_ENCRYPT_DECRYPT && !external {
+		alg = kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION
+	}
 	key := &kmspb.CryptoKey{
-		Purpose: purpose,
-		Labels:  labels,
+		Purpose:          purpose,
+		Labels:           labels,
+		CryptoKeyBackend: strings.TrimSpace(values["cryptoKeyBackend"]),
 		VersionTemplate: &kmspb.CryptoKeyVersionTemplate{
 			ProtectionLevel: level,
 			Algorithm:       alg,
@@ -527,6 +542,7 @@ func kmsCreateKeyRequest(ring string, values map[string]string) (*kmspb.CreateCr
 	}
 	return &kmspb.CreateCryptoKeyRequest{
 		Parent: ring, CryptoKeyId: strings.TrimSpace(values["cryptoKeyId"]), CryptoKey: key,
+		SkipInitialVersionCreation: checked(values, "skipInitialVersionCreation"),
 	}, nil
 }
 
@@ -552,7 +568,7 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 		if err != nil {
 			return nil
 		}
-		out := []console.Action{{ID: "addversion", Label: "Add version"}}
+		out := []console.Action{{ID: "addversion", Label: "Add version", Fields: kmsExternalFields(k.GetVersionTemplate().GetProtectionLevel(), nil)}}
 		if a, ok := kmsImportVersionAction(ctx, api, ring, k); ok {
 			out = append(out, a)
 		}
@@ -599,14 +615,14 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 			if k.GetPurpose() == kmspb.CryptoKey_ENCRYPT_DECRYPT && k.GetPrimary().GetName() != name {
 				out = append(out, console.Action{ID: "makeprimary", Label: "Make primary"})
 			}
-			return append(out,
+			return append(append(out,
 				console.Action{ID: "disable", Label: "Disable"},
-				console.Action{ID: "destroy", Label: "Schedule destruction", Destructive: true})
+				console.Action{ID: "destroy", Label: "Schedule destruction", Destructive: true}), kmsEditReference(v)...)
 		case kmspb.CryptoKeyVersion_DISABLED:
-			return []console.Action{
+			return append([]console.Action{
 				{ID: "enable", Label: "Enable"},
 				{ID: "destroy", Label: "Schedule destruction", Destructive: true},
-			}
+			}, kmsEditReference(v)...)
 		case kmspb.CryptoKeyVersion_DESTROY_SCHEDULED:
 			return []console.Action{{ID: "restore", Label: "Restore"}}
 		case kmspb.CryptoKeyVersion_DESTROYED:
@@ -685,7 +701,7 @@ func (p kmsProvider) ActAtResult(ctx context.Context, project string, path []str
 
 	case action == "addversion" && len(path) == 2:
 		_, err := api.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{
-			Parent: key, CryptoKeyVersion: &kmspb.CryptoKeyVersion{},
+			Parent: key, CryptoKeyVersion: &kmspb.CryptoKeyVersion{ExternalProtectionLevelOptions: kmsExternalOptions(values)},
 		})
 		return nil, err
 
@@ -720,6 +736,17 @@ func (p kmsProvider) ActAtResult(ctx context.Context, project string, path []str
 			shown, label = base64.StdEncoding.EncodeToString(pt), "Plaintext (base64)"
 		}
 		return kmsResult(label, shown, ""), nil
+
+	case action == "editreference" && len(path) == 3:
+		opts := kmsExternalOptions(values)
+		if opts == nil {
+			opts = &kmspb.ExternalProtectionLevelOptions{}
+		}
+		_, err := api.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{
+			CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: version, ExternalProtectionLevelOptions: opts},
+			UpdateMask:       &fieldmaskpb.FieldMask{Paths: []string{"external_protection_level_options"}},
+		})
+		return nil, err
 
 	case (action == "enable" || action == "disable") && len(path) == 3:
 		state := kmspb.CryptoKeyVersion_ENABLED
@@ -771,4 +798,45 @@ func consoleErr(err error) string {
 		return st.Message()
 	}
 	return err.Error()
+}
+
+// kmsExternalFields are the external key reference a version of an EXTERNAL
+// or EXTERNAL_VPC key names (#1469): Add version asks for it, and Edit key
+// reference on a version's page starts from the version's own. Other levels
+// have none.
+func kmsExternalFields(level kmspb.ProtectionLevel, cur *kmspb.ExternalProtectionLevelOptions) []console.Field {
+	switch level {
+	case kmspb.ProtectionLevel_EXTERNAL:
+		return []console.Field{{Name: "externalKeyUri", Label: "External key URI", Type: "text", Required: true, Default: cur.GetExternalKeyUri(),
+			Help: "The https URI of the key on the external key manager. " + kmsExternalNote}}
+	case kmspb.ProtectionLevel_EXTERNAL_VPC:
+		return []console.Field{
+			{Name: "ekmConnectionKeyPath", Label: "Key path", Type: "text", Default: cur.GetEkmConnectionKeyPath(),
+				Help: "The key's path on the EKM, such as v0/my/key. Leave empty on a CLOUD_KMS (coordinated) connection, whose EKM chooses it. " + kmsExternalNote},
+			{Name: "ekmConnectionBackendOverride", Label: "EKM connection override", Type: "text", Default: cur.GetEkmConnectionBackendOverride(),
+				Help: "Optional: another EKM connection in the key's location, in place of the key's."},
+		}
+	}
+	return nil
+}
+
+// kmsExternalOptions reads kmsExternalFields' values; nil when none is set.
+func kmsExternalOptions(values map[string]string) *kmspb.ExternalProtectionLevelOptions {
+	o := &kmspb.ExternalProtectionLevelOptions{ExternalKeyUri: strings.TrimSpace(values["externalKeyUri"]),
+		EkmConnectionKeyPath: strings.TrimSpace(values["ekmConnectionKeyPath"]), EkmConnectionBackendOverride: strings.TrimSpace(values["ekmConnectionBackendOverride"])}
+	if o.ExternalKeyUri == "" && o.EkmConnectionKeyPath == "" && o.EkmConnectionBackendOverride == "" {
+		return nil
+	}
+	return o
+}
+
+// kmsEditReference is Edit key reference on an external version's page:
+// UpdateCryptoKeyVersion's external_protection_level_options, which moves
+// the version to another key URI or path without rotating the key (#1469).
+func kmsEditReference(v *kmspb.CryptoKeyVersion) []console.Action {
+	f := kmsExternalFields(v.GetProtectionLevel(), v.GetExternalProtectionLevelOptions())
+	if f == nil {
+		return nil
+	}
+	return []console.Action{{ID: "editreference", Label: "Edit key reference", Fields: f}}
 }

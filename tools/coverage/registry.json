@@ -44,7 +44,7 @@
   "google.cloud.kms.v1.EkmService/ListEkmConnections": "implemented",
   "google.cloud.kms.v1.EkmService/UpdateEkmConfig": "implemented",
   "google.cloud.kms.v1.EkmService/UpdateEkmConnection": "implemented",
-  "google.cloud.kms.v1.EkmService/VerifyConnectivity": "unimplemented",
+  "google.cloud.kms.v1.EkmService/VerifyConnectivity": "implemented",
   "google.cloud.kms.v1.HsmManagement/ApproveSingleTenantHsmInstanceProposal": "unimplemented",
   "google.cloud.kms.v1.HsmManagement/CreateSingleTenantHsmInstance": "unimplemented",
   "google.cloud.kms.v1.HsmManagement/CreateSingleTenantHsmInstanceProposal": "unimplemented",
