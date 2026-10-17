@@ -90,8 +90,8 @@ func TestSQL(t *testing.T) {
 	if got := run("SELECT _key FROM users WHERE _key = 'x#1'", nil, nil); len(got) != 1 {
 		t.Errorf("_key = 'x#1' = %d rows", len(got))
 	}
-	if _, err := c.PrepareStatement(ctx, "SELECT COUNT(*) FROM users", nil); status.Code(err) != codes.InvalidArgument {
-		t.Errorf("an aggregate = %v, want InvalidArgument", err)
+	if _, err := c.PrepareStatement(ctx, "SELECT APPROX_QUANTILES(_key, 2) FROM users", nil); status.Code(err) != codes.Unimplemented {
+		t.Errorf("an unbuilt aggregate = %v, want Unimplemented", err)
 	}
 	if _, err := c.PrepareStatement(ctx, "SELECT nope['x'] FROM users", nil); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("an unknown family = %v, want InvalidArgument", err)

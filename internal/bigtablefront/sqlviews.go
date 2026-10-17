@@ -50,8 +50,18 @@ var (
 // sqlViews is the views of both kinds, by name.
 type sqlViews struct {
 	instances *instances
-	mu        sync.Mutex
-	byName    map[string]*sqlView
+	// checkQuery compiles a view's query against the instance (#1511), as
+	// Google does when a view is created or its query changed.
+	checkQuery func(instance, query string) error
+	mu         sync.Mutex
+	byName     map[string]*sqlView
+}
+
+func (s *sqlViews) check(instance, query string) error {
+	if s.checkQuery == nil {
+		return nil
+	}
+	return s.checkQuery(instance, query)
 }
 
 func (s *sqlViews) instanceExists(parent string) error {
@@ -70,6 +80,9 @@ func (s *sqlViews) create(k sqlKind, parent, id string, query string, protected 
 	}
 	if strings.TrimSpace(query) == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "%s.query is required", k.noun)
+	}
+	if err := s.check(parent, query); err != nil {
+		return nil, err
 	}
 	v := &sqlView{name: parent + "/" + k.segment + "/" + id, query: query, etag: newEtag(), protected: protected}
 	s.mu.Lock()
@@ -131,6 +144,13 @@ func (s *sqlViews) list(k sqlKind, parent, token string, size int32) ([]sqlView,
 }
 
 func (s *sqlViews) update(k sqlKind, upd sqlView, mask *fieldmaskpb.FieldMask) (*sqlView, error) {
+	for _, p := range mask.GetPaths() {
+		if i := strings.Index(upd.name, "/"+k.segment+"/"); p == "query" && k.queryMutable && i > 0 && strings.TrimSpace(upd.query) != "" {
+			if err := s.check(upd.name[:i], upd.query); err != nil {
+				return nil, err
+			}
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v, err := s.lookup(k, upd.name)

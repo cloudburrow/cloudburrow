@@ -77,6 +77,7 @@ resource "google_bigtable_logical_view" "l" {
   logical_view_id     = "lv"
   query               = "SELECT _key FROM %s"
   deletion_protection = false
+  depends_on          = [google_bigtable_table.t] # the query is compiled against the table (#1511)
 }
 resource "google_bigtable_materialized_view" "mv" {
   project              = google_bigtable_instance.i.project
@@ -84,6 +85,7 @@ resource "google_bigtable_materialized_view" "mv" {
   materialized_view_id = "mv"
   query                = "SELECT _key, count(*) AS n FROM %s GROUP BY _key"
   deletion_protection  = false
+  depends_on           = [google_bigtable_table.t]
 }
 `, h.Project(), id, cluster, table, base64.StdEncoding.EncodeToString([]byte("eu#")), table, table))
 	m.must("init", "-input=false", "-no-color")

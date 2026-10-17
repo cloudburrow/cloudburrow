@@ -35,6 +35,17 @@ func TestLogicalAndMaterializedViews(t *testing.T) {
 		ClusterId: "views-inst-c1", Zone: "us-central1-b", NumNodes: 1, StorageType: bigtable.SSD}); err != nil {
 		t.Fatal(err)
 	}
+	// A view's query is compiled against the instance's tables (#1511).
+	ac, err := bigtable.NewAdminClient(ctx, "p", "views-inst", option.WithGRPCConn(dial(t, addr)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ac.CreateTable(ctx, "users"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ac.CreateColumnFamily(ctx, "users", "info"); err != nil {
+		t.Fatal(err)
+	}
 	const q = "SELECT _key, info['name'] AS name FROM users"
 	if err := iac.CreateLogicalView(ctx, "views-inst", &bigtable.LogicalViewInfo{LogicalViewID: "lv", Query: q}); err != nil {
 		t.Fatalf("CreateLogicalView: %v", err)

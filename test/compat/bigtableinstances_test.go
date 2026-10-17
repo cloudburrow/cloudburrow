@@ -267,6 +267,21 @@ func TestBigtableLogicalAndMaterializedViews(t *testing.T) {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 	t.Cleanup(func() { _ = iac.DeleteInstance(h.Context(), id) })
+	// A view's query is compiled against the instance's tables (#1511).
+	ac, err := bigtable.NewAdminClient(ctx, h.Project(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ac.Close() })
+	if err := ac.CreateTable(ctx, "users"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ac.CreateColumnFamily(ctx, "users", "info"); err != nil {
+		t.Fatal(err)
+	}
+	if err := iac.CreateLogicalView(ctx, id, &bigtable.LogicalViewInfo{LogicalViewID: "bad", Query: "SELECT _key FROM missing"}); status.Code(err) != codes.NotFound {
+		t.Errorf("a view over a missing table = %v, want NotFound", err)
+	}
 	const q = "SELECT _key, info['name'] AS name FROM users"
 	if err := iac.CreateLogicalView(ctx, id, &bigtable.LogicalViewInfo{LogicalViewID: "lv", Query: q}); err != nil {
 		t.Fatalf("CreateLogicalView: %v", err)

@@ -107,11 +107,17 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	f.copies = newCopies(conn, f.instances)
 	f.views = &authViews{upstream: conn, byName: map[string]*btapb.AuthorizedView{}}
 	f.sqlViews = &sqlViews{instances: f.instances, byName: map[string]*sqlView{}}
+	sql := &sqlFront{upstream: conn, views: f.sqlViews, now: time.Now}
+	f.sqlViews.checkQuery = func(instance, query string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return sql.checkViewQuery(ctx, instance, query)
+	}
 	f.bundles = &schemaBundles{upstream: conn, byName: map[string]*btapb.SchemaBundle{}}
 	f.tableIAM = &tableIAM{upstream: conn, policies: map[string]*iampolicy.Stored{}, views: f.views, copies: f.copies, bundles: f.bundles}
 	for _, ms := range []map[string]method{f.tableIAM.methods(), f.copies.methods(), f.viewMethods(),
 		f.sqlViews.methods(f.copies.op), f.bundles.methods(f.copies.op),
-		(&sqlFront{upstream: conn, now: time.Now}).methods()} {
+		sql.methods()} {
 		for name, m := range ms {
 			f.served[name] = m
 		}
