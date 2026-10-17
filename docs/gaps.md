@@ -23,7 +23,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Storage | 5 | 0 | 4 | 1 | 0 |
 | Pub/Sub | 2 | 0 | 0 | 1 | 1 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
-| Cloud Run | 2 | 0 | 1 | 0 | 1 |
+| Cloud Run | 3 | 1 | 1 | 0 | 1 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 5 | 0 | 2 | 2 | 1 |
@@ -35,7 +35,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **59** | **13** | **27** | **13** | **6** |
+| **Total** | **60** | **14** | **27** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -94,12 +94,14 @@ of one ID (#1400); `gcloud run deploy --source` and `gcloud builds submit` with 
 and Cloud Build (#1347), steps of any image (#1382), a Docker registry for built images (#1383),
 `secretEnv`, `script` and `allowFailure` (#1407), Cloud Build triggers and worker pools (#1422),
 and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_RUN_TASK_ATTEMPT`
-(#1448); Cloud Storage FUSE volumes from the instance's storage (#1474); the `h2c` port name (#1475).
+(#1448); Cloud Storage FUSE volumes from the instance's storage (#1474); the `h2c` port name (#1475); every Cloud Run v1 method classified, with the `projects.locations` forms,
+revision delete, operations, authorized domains at a location and worker pool IAM verified (#1533).
 
 | Gap | Why open | Size |
 |---|---|---|
 | Cloud Build: triggers with a repository or Pub/Sub source or a `filename` are refused 501 with the reason (they need a hosted git service or a Google-owned subscription). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, which the coverage page shows, as only `DOCKER` repositories are served (#1531); remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) (#1506) | no emulator support: built; the rest is refused with its reason (a hosted git service, a Google-owned subscription, or package formats not served) | M |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
+| Cloud Run v1's Knative-shaped instances and worker pools (`run.namespaces.instances.*`, `run.namespaces.workerpools.*`, 12 methods) and the instances' v1 IAM methods (3) are `UNIMPLEMENTED` with the reason, which [runv1.md](coverage/runv1.md) shows: v2 serves both resources, which the console calls, and no v1 conversion is built; v2's Instances has no IAM methods (#1533) | not built yet | M |
 
 ## Cloud Scheduler
 

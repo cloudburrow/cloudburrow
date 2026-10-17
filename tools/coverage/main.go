@@ -49,6 +49,7 @@ import (
 
 	rpccode "google.golang.org/genproto/googleapis/rpc/code"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	bqv2 "google.golang.org/api/bigquery/v2"
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
@@ -117,9 +118,10 @@ var areas = []area{
 	{Key: "functions", Title: "Cloud Functions v2", Own: true, Services: []string{"google.cloud.functions.v2.FunctionService"}},
 	{Key: "functionsv1", Title: "Cloud Functions v1", Own: true, Services: []string{"google.cloud.functions.v1.CloudFunctionsService"}},
 	// The v1 (Knative-shaped) API gcloud run calls (#1293): no proto, so
-	// its methods are the official generated client's, and a method is
-	// Verified only by an annotated official-client test.
-	{Key: "runv1", Title: "Cloud Run v1 (Knative API)", Methods: discoveryMethods("run", reflect.TypeOf(runv1.APIService{}))},
+	// its methods are the official generated client's. It is CloudBurrow's
+	// own, served by the Run adapter's V1Handler, whose method table is its
+	// registry (#1533).
+	{Key: "runv1", Title: "Cloud Run v1 (Knative API)", Own: true, Methods: discoveryMethods("run", reflect.TypeOf(runv1.APIService{}))},
 	// google.iam.v1.IAMPolicy is the mixin cloudkms.googleapis.com serves
 	// (#428). Mixin keys are global, so only one area may list it.
 	// google.cloud.location.Locations too (#1291); Cloud Scheduler lists it
@@ -641,7 +643,8 @@ func loadRegistry(root string) (map[string]string, error) {
 		}
 	}
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
-	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), backupdrStatuses} {
+	// And Cloud Run v1's (#1533).
+	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {
 				r[id] = regImplemented

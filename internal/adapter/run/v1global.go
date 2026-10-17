@@ -47,8 +47,9 @@ var Regions = []string{
 }
 
 // v1IAMRE is a v1 IAM call on a service or, as projects.locations.jobs
-// (#1420), a job: the project, location, collection, ID and method.
-var v1IAMRE = regexp.MustCompile(`^/v1/projects/([^/]+)/locations/([^/]+)/(services|jobs)/([^/:]+):(getIamPolicy|setIamPolicy|testIamPermissions)$`)
+// (#1420), a job, or, as projects.locations.workerpools (#1533), a worker
+// pool: the project, location, collection, ID and method.
+var v1IAMRE = regexp.MustCompile(`^/v1/projects/([^/]+)/locations/([^/]+)/(services|jobs|workerpools)/([^/:]+):(getIamPolicy|setIamPolicy|testIamPermissions)$`)
 
 // v1IAMServer is the v2 server whose IAM methods a v1 IAM call is.
 type v1IAMServer interface {
@@ -103,15 +104,24 @@ func (s *Server) v1Locations(w http.ResponseWriter, r *http.Request) {
 func (s *Server) v1IAM(w http.ResponseWriter, r *http.Request, m []string) {
 	name := "projects/" + m[1] + "/locations/" + m[2] + "/" + m[3] + "/" + m[4]
 	var srv v1IAMServer = s
-	if m[3] == "jobs" {
+	switch m[3] {
+	case "jobs":
 		srv = s.Jobs()
 		if _, err := s.Jobs().GetJob(r.Context(), &runpb.GetJobRequest{Name: name}); err != nil {
 			v1Write(w, err, nil)
 			return
 		}
-	} else if _, _, err := s.v1Service(r.Context(), v1Scope{project: m[1], location: m[2]}, m[4]); err != nil {
-		v1Write(w, err, nil)
-		return
+	case "workerpools":
+		// v1's collection is workerpools, v2's workerPools. The pool's v2
+		// IAM methods find the pool, and answer NOT_FOUND for one that
+		// does not exist.
+		name = "projects/" + m[1] + "/locations/" + m[2] + "/workerPools/" + m[4]
+		srv = s.WorkerPools()
+	default:
+		if _, _, err := s.v1Service(r.Context(), v1Scope{project: m[1], location: m[2]}, m[4]); err != nil {
+			v1Write(w, err, nil)
+			return
+		}
 	}
 	var (
 		resp proto.Message

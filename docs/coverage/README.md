@@ -17,7 +17,7 @@ Do not edit these files by hand.
 | [Cloud Build](cloudbuild.md) | 19 | 19 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v2](functions.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud Functions v1](functionsv1.md) | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Cloud Run v1 (Knative API)](runv1.md) | 76 | 38 | 0 | 0 | 0 | 0 | 38 | 0 |
+| [Cloud Run v1 (Knative API)](runv1.md) | 76 | 61 | 0 | 15 | 0 | 0 | 0 | 0 |
 | [Cloud KMS](kms.md) | 62 | 60 | 0 | 2 | 0 | 0 | 0 | 86 |
 | [Resource Manager v3 (Projects, Folders, Organizations, Tags)](resourcemanager.md) | 52 | 52 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Resource Manager v1 REST (projects, org policies; liens on v1 and v3)](resourcemanagerv1.md) | 38 | 26 | 12 | 0 | 0 | 0 | 0 | 0 |
