@@ -310,8 +310,45 @@ It cannot be changed after the cluster is created, as Google's cannot.
 instance's IAM is not enforced (ADR-0006), so the nodes' default user has no password and takes
 any AUTH string, a token CloudBurrow's credentials issued among them, without checking it.
 
-Not served: token auth, backups, ACL policies, cross-cluster replication and CMEK. After a
-restart of CloudBurrow a cluster is formed again, empty.
+**Token auth** (#1549): with `AUTH_MODE_TOKEN_AUTH` a client logs in as a token auth user
+with a token the service generates: `AddTokenAuthUser`, then `AddAuthToken`, and
+`GetAuthToken` / `ListAuthTokens` return the token. Each user is a Valkey ACL user on every
+node (`ACL SETUSER <user> reset on ><token>... ~* &* +@all`), set again on a node that starts
+and on every node whenever a user or token changes. The nodes' default user has a password
+only CloudBurrow's admin plane knows (and the replicas, `masterauth`), so a client without a
+token is refused (`NOAUTH`), and one with a deleted or wrong token too (`WRONGPASS`):
+
+```go
+rc := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{discovery}, Username: "app", Password: token.GetToken()})
+```
+
+The mode cannot be changed to or from token auth after create (UNIMPLEMENTED).
+
+**ACL policies** (#1549): `CreateAclPolicy` with rules, a username and a Valkey ACL rule
+each (`on >secret ~app:* +@read`), and a cluster's `acl_policy` (at create or by
+`UpdateCluster`) make each rule a Valkey ACL user on every node (`ACL SETUSER <user> reset
+<rule>`). `UpdateAclPolicy` is a new revision (`GetAclPolicyRevision`,
+`ListAclPolicyRevisions`) set on every node of every attached cluster; detaching deletes the
+users; an attached policy cannot be deleted.
+
+**Backups** (#1549): each cluster has a backup collection,
+`projects/P/locations/L/backupCollections/<cluster UID>`, which outlives it.
+`BackupCluster` (`gcloud redis clusters backup`) keeps an RDB snapshot of each shard's
+primary (`BGSAVE`, then the file, read from the node's container) in the instance's
+Memorystore state: on disk in persistent mode, in memory in ephemeral mode. `ListBackups`,
+`GetBackup` and `DeleteBackup` act on them; a backup past its `ttl` (default 100 years) is
+removed. `ExportBackup` writes the files to a bucket of this instance's Cloud Storage, as
+`gs://BUCKET/<backup ID>/<file>` (`--services memorystore,storage`). A cluster created with
+`managed_backup_source` (a backup) or `gcs_source` (RDB files) loads them once its nodes
+serve: each file is served by a second server on a loopback port in the first primary's
+container, which `MIGRATE`s every key to the node that owns its slot, so a backup restores
+into any shard count. `automated_backup_config` is kept and returned, and its daily backup is
+taken at the start hour (UTC), kept for its `retention` (default 35 days).
+
+Not served: cross-cluster replication (UNIMPLEMENTED: a Valkey cluster-mode replica replicates
+only a primary of its own cluster, `CLUSTER REPLICATE` taking a node its gossip knows, so one
+cluster cannot be another's secondary) and CMEK. After a restart of CloudBurrow a cluster is
+formed again, empty, with its users and policy.
 
 ## 9. Memorystore for Valkey (#1519)
 
@@ -350,8 +387,14 @@ again, empty. The console's **Memorystore for Valkey** page lists, creates (eith
 and deletes instances.
 
 Not served: `engine_version` other than `VALKEY_8_0` (one image, Valkey 8.1, runs; `VALKEY_7_2`
-and `VALKEY_9_0` are 501), `TOKEN_AUTH`, node types whose size is not modelled here, CMEK,
-backups, cross-instance replication, migration and server CA modes, each 501 with the reason.
+and `VALKEY_9_0` are 501), node types whose size is not modelled here, CMEK, cross-instance
+replication (as a Redis cluster's, §8), migration and server CA modes, each 501 with the reason.
+
+`TOKEN_AUTH`, backups (`BackupInstance`, `ListBackupCollections`, `GetBackupCollection`,
+`ListBackups`, `GetBackup`, `DeleteBackup`, `ExportBackup`, `automated_backup_config`) and
+restore through `managed_backup_source` or `gcs_source` are a Redis cluster's (§8), for an
+instance in either mode: a `CLUSTER_DISABLED` instance's backup is its primary's file, and a
+restore MIGRATEs the keys to its primary. Memorystore for Valkey has no ACL policies.
 
 In-transit encryption (`SERVER_AUTHENTICATION`) and `IAM_AUTH` are a Redis cluster's (§8): a CA of
 the instance's own, which `GetCertificateAuthority` returns as `managedServerCa` (gRPC

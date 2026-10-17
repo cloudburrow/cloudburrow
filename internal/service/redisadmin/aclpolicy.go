@@ -441,7 +441,7 @@ func (s *ClusterServer) GetAclPolicyRevision(ctx context.Context, req *clusterpb
 	return c.renderRevision(p, p.Revisions[n-1], attached), nil
 }
 
-// ListAclPolicyRevisions lists a policy's revisions, newest first.
+// ListAclPolicyRevisions lists a policy's revisions.
 func (s *ClusterServer) ListAclPolicyRevisions(ctx context.Context, req *clusterpb.ListAclPolicyRevisionsRequest) (*clusterpb.ListAclPolicyRevisionsResponse, error) {
 	c, p, attached, err := s.findPolicy(req.GetParent())
 	if err != nil {

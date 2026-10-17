@@ -297,7 +297,7 @@ func TestMemorystoreValkeyClusterDisabled(t *testing.T) {
 // covers: google.cloud.memorystore.v1.Memorystore/CreateInstance, google.cloud.memorystore.v1.Memorystore/GetCertificateAuthority
 //
 // TestMemorystoreValkeyRefusals (#1519): what an instance here cannot do is
-// refused, creating nothing: token auth is UNIMPLEMENTED with the reason, as is an engine version with no image; shard_count 0 in CLUSTER
+// refused, creating nothing: cross-instance replication is UNIMPLEMENTED with the reason, as is an engine version with no image; shard_count 0 in CLUSTER
 // mode, an engine config Memorystore does not take and a certificate
 // authority of an unknown instance are refused.
 func TestMemorystoreValkeyRefusals(t *testing.T) {
@@ -309,7 +309,8 @@ func TestMemorystoreValkeyRefusals(t *testing.T) {
 		in   *memorystorepb.Instance
 		want codes.Code
 	}{
-		{"token auth", &memorystorepb.Instance{ShardCount: 1, AuthorizationMode: memorystorepb.Instance_TOKEN_AUTH}, codes.Unimplemented},
+		{"cross-instance replication", &memorystorepb.Instance{ShardCount: 1, CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
+			InstanceRole: memorystorepb.CrossInstanceReplicationConfig_SECONDARY}}, codes.Unimplemented},
 		{"VALKEY_7_2", &memorystorepb.Instance{ShardCount: 1, EngineVersion: "VALKEY_7_2"}, codes.Unimplemented},
 		{"0 shards", &memorystorepb.Instance{}, codes.InvalidArgument},
 		{"an unknown config", &memorystorepb.Instance{ShardCount: 1, EngineConfigs: map[string]string{"appendonly": "yes"}}, codes.InvalidArgument},

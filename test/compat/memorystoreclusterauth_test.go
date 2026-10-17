@@ -43,7 +43,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	sfx := time.Now().UnixNano() % 1e8
 
 	pol, err := c.CreateAclPolicy(ctx, &clusterpb.CreateAclPolicyRequest{Parent: parent, AclPolicyId: fmt.Sprintf("compat-acl-%d", sfx),
-		AclPolicy: &clusterpb.AclPolicy{Rules: []*clusterpb.AclRule{{Username: "reader", Rule: "on >readerpass ~app:* +@read +ping"}}}})
+		AclPolicy: &clusterpb.AclPolicy{Rules: []*clusterpb.AclRule{{Username: "reader", Rule: "on >readerpass ~app:* +@read +ping +cluster|slots +cluster|shards"}}}})
 	if err != nil {
 		t.Fatalf("CreateAclPolicy: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 		t.Errorf("the policy's user GET tok-1 = %v, want NOPERM", err)
 	}
 	pop, err := c.UpdateAclPolicy(ctx, &clusterpb.UpdateAclPolicyRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"rules"}},
-		AclPolicy: &clusterpb.AclPolicy{Name: pol.GetName(), Rules: []*clusterpb.AclRule{{Username: "reader", Rule: "on >readerpass ~app:* +@read +@write +ping"}}}})
+		AclPolicy: &clusterpb.AclPolicy{Name: pol.GetName(), Rules: []*clusterpb.AclRule{{Username: "reader", Rule: "on >readerpass ~app:* +@read +@write +ping +cluster|slots +cluster|shards"}}}})
 	if err != nil {
 		t.Fatalf("UpdateAclPolicy: %v", err)
 	}
@@ -165,8 +165,16 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	if rev, err := c.GetAclPolicyRevision(ctx, &clusterpb.GetAclPolicyRevisionRequest{Name: pol.GetName() + "/revisions/2"}); err != nil || rev.GetRevisionNumber() != 2 {
 		t.Errorf("GetAclPolicyRevision = %v, %v", rev, err)
 	}
-	if rev, err := c.ListAclPolicyRevisions(ctx, &clusterpb.ListAclPolicyRevisionsRequest{Parent: pol.GetName()}).Next(); err != nil || rev.GetRevisionNumber() != 2 {
-		t.Errorf("ListAclPolicyRevisions first = %v, %v", rev, err)
+	revs := 0
+	for it := c.ListAclPolicyRevisions(ctx, &clusterpb.ListAclPolicyRevisionsRequest{Parent: pol.GetName()}); ; revs++ {
+		if _, err := it.Next(); errors.Is(err, iterator.Done) {
+			break
+		} else if err != nil {
+			t.Fatalf("ListAclPolicyRevisions: %v", err)
+		}
+	}
+	if revs != 2 {
+		t.Errorf("ListAclPolicyRevisions lists %d revisions, want 2", revs)
 	}
 	if _, err := c.DeleteAclPolicy(ctx, &clusterpb.DeleteAclPolicyRequest{Name: pol.GetName()}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("DeleteAclPolicy of an attached policy = %v, want FAILED_PRECONDITION", err)
