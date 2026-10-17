@@ -14,11 +14,11 @@ import (
 // by the front UNIMPLEMENTED with the reason (#1461): the emulator refuses
 // them with an empty message (measured: TestSpannerAdminRefusals). The
 // backups, schedules, configurations, roles and operations it refused are
-// served by the front since #1498.
+// served by the front since #1498, and AddSplitPoints since #1523
+// (splitpoints.go).
 const databaseService = "/google.spanner.admin.database.v1.DatabaseAdmin/"
 
 var refusedMethods = map[string]string{
-	databaseService + "AddSplitPoints":               "the emulator does not split databases, so split points have nothing to act on",
 	databaseService + "InternalUpdateGraphOperation": "it is an internal method of Google's own services",
 	// The data API's location-aware routing stream, which the emulator
 	// answers UNIMPLEMENTED with an empty message on the first receive.
@@ -30,13 +30,9 @@ var refusedREST = []struct {
 	method string
 	path   *regexp.Regexp
 	name   string
-}{
-	{http.MethodPost, regexp.MustCompile(`^/v1/projects/[^/]+/instances/[^/]+/databases/[^/]+:addSplitPoints$`), "AddSplitPoints"},
-}
+}{}
 
-var restReasons = map[string]string{
-	"AddSplitPoints": refusedMethods[databaseService+"AddSplitPoints"],
-}
+var restReasons = map[string]string{}
 
 // Refusals answers the refused admin methods, over gRPC and REST.
 type Refusals struct{ grpc *grpc.Server }

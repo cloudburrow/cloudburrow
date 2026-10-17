@@ -31,11 +31,11 @@ tracks it; a closed issue is named only where it says what was built.
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
 | BigQuery | 45 | 15 | 16 | 14 | 0 |
-| Spanner, Bigtable, Firestore, Datastore | 4 | 0 | 3 | 0 | 1 |
+| Spanner, Bigtable, Firestore, Datastore | 7 | 0 | 6 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **68** | **17** | **25** | **20** | **6** |
+| **Total** | **71** | **17** | **28** | **20** | **6** |
 
 ## Cloud Storage
 
@@ -254,6 +254,9 @@ Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405)
 
 | Gap | Why open | Size |
 |---|---|---|
+| Spanner: 2 RPCs refused, each naming why: `InternalUpdateGraphOperation` (Google's internal method) and `FetchCacheUpdate` (location-aware routing, with one server to route to; [spanner.md](coverage/spanner.md)). `AddSplitPoints` is a stored no-op of the call front since #1523 (the emulator never splits). Backups and restores, backup schedules, instance configurations (Google's and custom), `MoveInstance`, partition updates, database roles, the operation listings and IAM on backups and roles are served by the call front since #1498 (#1498) (#1523) | no emulator support: the emulator is one server | S |
+| Bigtable: 4 RPCs refused, the session data plane: `GetClientConfiguration`, `OpenTable`, `OpenAuthorizedView`, `OpenMaterializedView` ([bigtable.md](coverage/bigtable.md)); change streams are served since #1523 from a change log the front keeps, with one partition and no garbage-collection records; SQL runs GoogleSQL for Bigtable's `SELECT` with views, with UNPACK, window functions and some documented functions refused (#1461) (#1499) (#1511) (#1523) | no emulator support | M |
+| Firestore: `ExecutePipeline`, and the Firestore Admin user credentials (8 methods, each naming why; [firestoreadmin.md](coverage/firestoreadmin.md)); backups, restore, clone, `ExportDocuments`, `ImportDocuments` and `BulkDeleteDocuments` are served since #1500, and Datastore `explain_options` (#1500) | no emulator support: pipelines and user credentials are Enterprise edition features (MongoDB compatibility), and the emulator is the Standard edition | L |
 | Whether production reorders an array's excluded values after its indexed ones, as the emulator does (#941) | needs live GCP | S |
 | Spanner: 3 RPCs refused, each naming why: `AddSplitPoints` (the emulator does not split databases), `InternalUpdateGraphOperation` (Google's internal method) and `FetchCacheUpdate` (location-aware routing, with one server to route to; [spanner.md](coverage/spanner.md)). Backups and restores, backup schedules, instance configurations (Google's and custom), `MoveInstance`, partition updates, database roles, the operation listings and IAM on backups and roles are served by the call front since #1498 (#1498) (#1523) | no emulator support: the emulator is one server and does not split databases | S |
 | Bigtable: 6 RPCs refused (the change streams, which need a change log nothing keeps, and the session data plane: `GetClientConfiguration`, `OpenTable`, `OpenAuthorizedView`, `OpenMaterializedView`; [bigtable.md](coverage/bigtable.md)); SQL runs GoogleSQL for Bigtable's `SELECT` with views, with UNPACK, window functions and some documented functions refused (#1461) (#1499) (#1511) (#1523) | no emulator support | M |

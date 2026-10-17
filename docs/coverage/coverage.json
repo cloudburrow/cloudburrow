@@ -6799,8 +6799,8 @@
     "Key": "bigtable",
     "Title": "Bigtable",
     "counts": {
-      "Refused": 6,
-      "Verified": 78
+      "Refused": 4,
+      "Verified": 80
     },
     "rows": [
       {
@@ -7071,7 +7071,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CheckConsistency",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:155 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:154 TestBigtableTableMaintenance"
         ]
       },
       {
@@ -7152,7 +7152,7 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:155 TestBigtableTableMaintenance",
+          "test/compat/bigtablemethods_test.go:154 TestBigtableTableMaintenance",
           "test/compat/storediam_test.go:219 TestBigtableTableIAM"
         ]
       },
@@ -7160,14 +7160,14 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DropRowRange",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:155 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:154 TestBigtableTableMaintenance"
         ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GenerateConsistencyToken",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:155 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:154 TestBigtableTableMaintenance"
         ]
       },
       {
@@ -7337,14 +7337,14 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:155 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:154 TestBigtableTableMaintenance"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/CheckAndMutateRow",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:79 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:78 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
@@ -7357,17 +7357,16 @@
       },
       {
         "method": "google.bigtable.v2.Bigtable/GenerateInitialChangeStreamPartitions",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:280 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablechangestreams_test.go:128 TestBigtableChangeStreams"
+        ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/GetClientConfiguration",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:231 TestBigtableRefusedDataMethods"
+          "test/compat/bigtablemethods_test.go:230 TestBigtableRefusedDataMethods"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7382,14 +7381,14 @@
         "method": "google.bigtable.v2.Bigtable/MutateRows",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:79 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:78 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/OpenAuthorizedView",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:231 TestBigtableRefusedDataMethods"
+          "test/compat/bigtablemethods_test.go:230 TestBigtableRefusedDataMethods"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7397,7 +7396,7 @@
         "method": "google.bigtable.v2.Bigtable/OpenMaterializedView",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:231 TestBigtableRefusedDataMethods"
+          "test/compat/bigtablemethods_test.go:230 TestBigtableRefusedDataMethods"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7405,7 +7404,7 @@
         "method": "google.bigtable.v2.Bigtable/OpenTable",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:231 TestBigtableRefusedDataMethods"
+          "test/compat/bigtablemethods_test.go:230 TestBigtableRefusedDataMethods"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7413,7 +7412,7 @@
         "method": "google.bigtable.v2.Bigtable/PingAndWarm",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:215 TestBigtablePingAndWarm"
+          "test/compat/bigtablemethods_test.go:214 TestBigtablePingAndWarm"
         ]
       },
       {
@@ -7426,17 +7425,17 @@
       },
       {
         "method": "google.bigtable.v2.Bigtable/ReadChangeStream",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:280 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablechangestreams_test.go:128 TestBigtableChangeStreams",
+          "test/compat/bigtablechangestreams_test.go:286 TestBigtableChangeLogSurvivesAFrontRestart"
+        ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/ReadModifyWriteRow",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:79 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:78 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
@@ -7453,7 +7452,7 @@
         "method": "google.bigtable.v2.Bigtable/SampleRowKeys",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:79 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:78 TestBigtableBulkAndConditionalWrites"
         ]
       }
     ]
@@ -7462,17 +7461,16 @@
     "Key": "spanner",
     "Title": "Spanner",
     "counts": {
-      "Refused": 3,
-      "Verified": 62
+      "Refused": 2,
+      "Verified": 63
     },
     "rows": [
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:276 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannersplitpoints_test.go:28 TestSpannerAddSplitPoints"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup",
@@ -7526,7 +7524,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DropDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:216 TestSpannerDatabaseAdminSchemaListAndDrop"
+          "test/compat/spanneradmin_test.go:215 TestSpannerDatabaseAdminSchemaListAndDrop"
         ]
       },
       {
@@ -7578,7 +7576,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/InternalUpdateGraphOperation",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:276 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:275 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7623,7 +7621,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabases",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:216 TestSpannerDatabaseAdminSchemaListAndDrop"
+          "test/compat/spanneradmin_test.go:215 TestSpannerDatabaseAdminSchemaListAndDrop"
         ]
       },
       {
@@ -7672,14 +7670,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:271 TestConsoleSpannerEditInstance",
-          "test/compat/spanneradmin_test.go:391 TestSpannerDatabaseDropProtection"
+          "test/compat/spanneradmin_test.go:383 TestSpannerDatabaseDropProtection"
         ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabaseDdl",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:216 TestSpannerDatabaseAdminSchemaListAndDrop"
+          "test/compat/spanneradmin_test.go:215 TestSpannerDatabaseAdminSchemaListAndDrop"
         ]
       },
       {
@@ -7703,14 +7701,14 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstancePartition",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:139 TestSpannerInstancePartitionLifecycle"
+          "test/compat/spanneradmin_test.go:138 TestSpannerInstancePartitionLifecycle"
         ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes"
+          "test/compat/spanneradmin_test.go:73 TestSpannerInstanceAdminListsAndDeletes"
         ]
       },
       {
@@ -7725,7 +7723,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstancePartition",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:139 TestSpannerInstancePartitionLifecycle"
+          "test/compat/spanneradmin_test.go:138 TestSpannerInstancePartitionLifecycle"
         ]
       },
       {
@@ -7754,7 +7752,7 @@
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
           "test/compat/frontstate1514_test.go:415 TestResetClearsTheFrontsState",
           "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
-          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes",
+          "test/compat/spanneradmin_test.go:73 TestSpannerInstanceAdminListsAndDeletes",
           "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
           "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
@@ -7765,7 +7763,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
-          "test/compat/spanneradmin_test.go:139 TestSpannerInstancePartitionLifecycle"
+          "test/compat/spanneradmin_test.go:138 TestSpannerInstancePartitionLifecycle"
         ]
       },
       {
@@ -7780,7 +7778,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
-          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes",
+          "test/compat/spanneradmin_test.go:73 TestSpannerInstanceAdminListsAndDeletes",
           "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
         ]
@@ -7790,14 +7788,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
-          "test/compat/spanneradmin_test.go:139 TestSpannerInstancePartitionLifecycle"
+          "test/compat/spanneradmin_test.go:138 TestSpannerInstancePartitionLifecycle"
         ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstancePartitions",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:139 TestSpannerInstancePartitionLifecycle"
+          "test/compat/spanneradmin_test.go:138 TestSpannerInstancePartitionLifecycle"
         ]
       },
       {
@@ -7805,7 +7803,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances",
-          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes"
+          "test/compat/spanneradmin_test.go:73 TestSpannerInstanceAdminListsAndDeletes"
         ]
       },
       {
@@ -7838,7 +7836,7 @@
         "tests": [
           "test/compat/consolespanneradmin_test.go:271 TestConsoleSpannerEditInstance",
           "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances",
-          "test/compat/spanneradmin_test.go:326 TestSpannerUpdateInstance"
+          "test/compat/spanneradmin_test.go:318 TestSpannerUpdateInstance"
         ]
       },
       {

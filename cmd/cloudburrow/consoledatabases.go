@@ -946,6 +946,8 @@ func (p bigtableProvider) Detail(ctx context.Context, project string, path []str
 		Sections: []console.Section{
 			{ID: "rows", Label: "Rows", Listing: list},
 			p.familiesSection(ctx, project, name),
+			// Since #1523.
+			p.changeStreamSection(ctx, project, name),
 		},
 		Unavailable: list.Unavailable,
 		Prompt:      list.Prompt,

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
@@ -16,6 +17,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/cloudburrow/cloudburrow/internal/callfront"
 	"github.com/cloudburrow/cloudburrow/internal/calllog"
@@ -58,6 +61,16 @@ type fakeDatabases struct {
 func (fakeDatabases) GetDatabase(_ context.Context, r *databasepb.GetDatabaseRequest) (*databasepb.Database, error) {
 	if r.Name == "projects/p/instances/i/databases/d" {
 		return &databasepb.Database{Name: r.Name}, nil
+	}
+	return nil, status.Error(codes.NotFound, "Database not found")
+}
+
+func (fakeDatabases) GetDatabaseDdl(_ context.Context, r *databasepb.GetDatabaseDdlRequest) (*databasepb.GetDatabaseDdlResponse, error) {
+	if r.Database == "projects/p/instances/i/databases/d" {
+		return &databasepb.GetDatabaseDdlResponse{Statements: []string{
+			"CREATE TABLE Items (\n  Id INT64 NOT NULL,\n  Name STRING(MAX),\n) PRIMARY KEY(Id)",
+			"CREATE INDEX ItemsByName ON Items(Name)",
+		}}, nil
 	}
 	return nil, status.Error(codes.NotFound, "Database not found")
 }
@@ -165,19 +178,60 @@ func TestUpdateInstanceOverREST(t *testing.T) {
 }
 
 func TestRefusalsNameWhy(t *testing.T) {
+	serve(t)
+	ctx := context.Background()
+	_, err := databasepb.NewDatabaseAdminClient(lastConn).InternalUpdateGraphOperation(ctx, &databasepb.InternalUpdateGraphOperationRequest{Database: "projects/p/instances/i/databases/d"})
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "internal") {
+		t.Errorf("InternalUpdateGraphOperation: %v, want UNIMPLEMENTED naming why", err)
+	}
+}
+
+// TestAddSplitPointsIsAStoredNoOp (#1523): split points on a table and an
+// index of the database are accepted, over gRPC and REST, and refused as
+// Google refuses them: an unknown table or index, an index named with
+// another table, a split point without keys, an expiry beyond 30 days, an
+// unknown database.
+func TestAddSplitPointsIsAStoredNoOp(t *testing.T) {
 	addr, _ := serve(t)
 	ctx := context.Background()
-	_, err := databasepb.NewDatabaseAdminClient(lastConn).AddSplitPoints(ctx, &databasepb.AddSplitPointsRequest{Database: "projects/p/instances/i/databases/d"})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "split") {
-		t.Errorf("AddSplitPoints: %v, want UNIMPLEMENTED naming why", err)
+	c := databasepb.NewDatabaseAdminClient(lastConn)
+	db := "projects/p/instances/i/databases/d"
+	key := func(v string) []*databasepb.SplitPoints_Key {
+		return []*databasepb.SplitPoints_Key{{KeyParts: &structpb.ListValue{Values: []*structpb.Value{structpb.NewStringValue(v)}}}}
 	}
-	req, _ := http.NewRequest("POST", "http://"+addr+"/v1/projects/p/instances/i/databases/d:addSplitPoints", strings.NewReader("{}"))
+	if _, err := c.AddSplitPoints(ctx, &databasepb.AddSplitPointsRequest{Database: db, SplitPoints: []*databasepb.SplitPoints{
+		{Table: "Items", Keys: key("100")},
+		{Index: "ItemsByName", Keys: key("m"), ExpireTime: timestamppb.New(time.Now().Add(24 * time.Hour))},
+	}}); err != nil {
+		t.Fatalf("AddSplitPoints: %v", err)
+	}
+	for _, tc := range []struct {
+		what string
+		sp   *databasepb.SplitPoints
+		db   string
+		code codes.Code
+	}{
+		{"an unknown table", &databasepb.SplitPoints{Table: "Nope", Keys: key("1")}, db, codes.NotFound},
+		{"an unknown index", &databasepb.SplitPoints{Index: "Nope", Keys: key("1")}, db, codes.NotFound},
+		{"an index named with another table", &databasepb.SplitPoints{Table: "Other", Index: "ItemsByName", Keys: key("1")}, db, codes.InvalidArgument},
+		{"no keys", &databasepb.SplitPoints{Table: "Items"}, db, codes.InvalidArgument},
+		{"an expiry 31 days ahead", &databasepb.SplitPoints{Table: "Items", Keys: key("1"), ExpireTime: timestamppb.New(time.Now().Add(31 * 24 * time.Hour))}, db, codes.InvalidArgument},
+		{"an unknown database", &databasepb.SplitPoints{Table: "Items", Keys: key("1")}, "projects/p/instances/i/databases/gone", codes.NotFound},
+	} {
+		_, err := c.AddSplitPoints(ctx, &databasepb.AddSplitPointsRequest{Database: tc.db, SplitPoints: []*databasepb.SplitPoints{tc.sp}})
+		if status.Code(err) != tc.code {
+			t.Errorf("AddSplitPoints with %s: %v, want %s", tc.what, err, tc.code)
+		}
+	}
+	req, _ := http.NewRequest("POST", "http://"+addr+"/v1/"+db+":addSplitPoints",
+		strings.NewReader(`{"splitPoints":[{"table":"Items","keys":[{"keyParts":["200"]}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 501 {
-		t.Errorf("REST addSplitPoints = %d, want 501", resp.StatusCode)
+	if resp.StatusCode != 200 {
+		t.Errorf("REST addSplitPoints = %d, want 200", resp.StatusCode)
 	}
 }

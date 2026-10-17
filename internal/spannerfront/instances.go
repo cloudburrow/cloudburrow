@@ -101,6 +101,9 @@ type Instances struct {
 	// partitions the changes UpdateInstancePartition made.
 	configs    map[string]*instancepb.InstanceConfig
 	partitions map[string]*partitionChange
+	// splitPoints are each database's unexpired split points
+	// (splitpoints.go).
+	splitPoints map[string][]*databasepb.SplitPoints
 
 	// state is the front's state directory (state.go, #1514); nil keeps
 	// the state in memory alone.
@@ -124,7 +127,8 @@ func New(emulator string) (*Instances, error) {
 		emuOps: longrunningpb.NewOperationsClient(conn), data: spannerpb.NewSpannerClient(conn), now: func() time.Time { return time.Now().UTC() },
 		changes: map[string]*change{}, ops: map[string]*longrunningpb.Operation{}, protected: map[string]bool{}, policies: map[string]*iampolicy.Stored{},
 		backups: map[string]*backup{}, restored: map[string]*databasepb.RestoreInfo{}, schedules: map[string]*schedule{},
-		roleStmts: map[string][]string{}, configs: map[string]*instancepb.InstanceConfig{}, partitions: map[string]*partitionChange{}}
+		roleStmts: map[string][]string{}, configs: map[string]*instancepb.InstanceConfig{}, partitions: map[string]*partitionChange{},
+		splitPoints: map[string][]*databasepb.SplitPoints{}}
 	s.grpc = grpc.NewServer(grpc.ChainUnaryInterceptor(s.persistAfter))
 	instancepb.RegisterInstanceAdminServer(s.grpc, s)
 	databasepb.RegisterDatabaseAdminServer(s.grpc, databases{s: s})
