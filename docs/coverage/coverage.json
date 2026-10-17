@@ -798,6 +798,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
+          "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
           "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
         ]
@@ -825,6 +826,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/runnames_test.go:36 TestRunNamesPerProject",
+          "test/compat/runworkerpoolgcs_test.go:22 TestRunWorkerPoolMountsACloudStorageVolume",
           "test/compat/runworkerpools_test.go:55 TestRunWorkerPoolLifecycle",
           "test/compat/runworkerpoolsplits_test.go:33 TestRunWorkerPoolUpdateMaskAndInstanceSplits",
           "test/compat/terraform_run_more_test.go:213 TestTerraformRunWorkerPool"
