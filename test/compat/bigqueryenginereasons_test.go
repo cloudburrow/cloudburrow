@@ -56,7 +56,7 @@ func TestBigQueryEngineErrorReasons(t *testing.T) {
 		dry      bool
 		// refused: jobs.insert answers the error and makes no job (the
 		// engine refuses the job before it records it; BigQuery's job
-		// fails, a gap filed as a follow-up of #1582).
+		// fails, #1584).
 		refused bool
 	}{
 		{name: "unknown table", sql: func(int) string { return "SELECT * FROM " + d + ".no_such_1582" },
