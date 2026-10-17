@@ -10,8 +10,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-
-	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // datasets.patch, datasets.update and the dataset's etag (#1205).
@@ -224,22 +222,22 @@ func writePreconditionFailed(w http.ResponseWriter, message string) {
 
 // serviceAccountEmail is the BigQuery service agent of project, which
 // projects.getServiceAccount names: bq-PROJECT_NUMBER@bigquery-encryption.iam.gserviceaccount.com,
-// as BigQuery names it, with the project number CloudBurrow derives for
-// every project (resource.ProjectNumber), the one the metadata server and
-// Cloud Storage's service agent use.
-func serviceAccountEmail(project string) string {
-	return "bq-" + strconv.FormatInt(resource.ProjectNumber(project), 10) + "@bigquery-encryption.iam.gserviceaccount.com"
+// as BigQuery names it, with the project's number in its record, which the
+// host sends the front (projectnumbers.go, #1551), the one the metadata
+// server and Cloud Storage's service agent use.
+func serviceAccountEmail(project string, numbers *projectNumbers) string {
+	return "bq-" + strconv.FormatInt(numbers.of(project), 10) + "@bigquery-encryption.iam.gserviceaccount.com"
 }
 
 // serveServiceAccount answers projects.getServiceAccount (#1205).
-func serveServiceAccount(w http.ResponseWriter, r *http.Request) bool {
+func serveServiceAccount(w http.ResponseWriter, r *http.Request, numbers *projectNumbers) bool {
 	m := serviceAccountRoute.FindStringSubmatch(r.URL.Path)
 	if m == nil || r.Method != http.MethodGet {
 		return false
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"kind":  "bigquery#getServiceAccountResponse",
-		"email": serviceAccountEmail(m[1]),
+		"email": serviceAccountEmail(m[1], numbers),
 	})
 	return true
 }

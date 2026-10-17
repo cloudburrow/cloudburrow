@@ -868,15 +868,26 @@ adapter's own deletes, and its Cloud Build state), Spanner, Bigtable and Firesto
 documents in the emulator as well as the front's records), Datastore (every entity of the
 project, in every namespace, through the Datastore API), BigQuery (the project's datasets with
 their contents, and the front's undelete copies) and Memorystore (the project's instances and
-their servers; the instance `up` runs stays). An unknown service name is refused with a 400,
-and resets nothing.
+their servers; the instance `up` runs stays). Since #1550 a purge also reaches what the
+emulators cannot list by project, because the fronts keep what calls name: Firestore documents
+in a database the Admin API never made (the call front shows the Admin API each call's
+database), Bigtable tables under an instance the instance admin never made (the Bigtable front
+keeps every instance a call names), and Datastore entities in a named database (the Datastore
+call front keeps each named database a call's routing header names, as an entity of its own in
+the emulator's `cloudburrow-datastore-named-databases` project, so the record lives exactly as
+long as the data; the purge asks the front for them at `/cloudburrow/datastore/databases/forget`,
+internal). A call over REST names its Datastore database only in its body, which the front does
+not read; the official clients' gRPC calls name it in their routing header. An unknown service
+name is refused with a 400, and resets nothing.
 
 **Project numbers** (#1544). Each project's record keeps its number. A project created under
 an ID never used before gets the number derived from the ID, as before; one created again under
 a purged ID gets a new random one, and a purged project's number is never given out again. `up`
-pushes the numbers that differ from the derived ones to the builtin storage server, at start
-and after every create and purge, over the storage tunnel (`POST /_cloudburrow/project-numbers`,
-internal), so its buckets, ACL entities and service agent report them.
+pushes the numbers that differ from the derived ones to the builtin storage server and (#1551)
+the BigQuery front, at start and after every create and purge, over each one's tunnel
+(`POST /_cloudburrow/project-numbers`, internal), so the buckets, ACL entities and service
+agent, and BigQuery's `projects.getServiceAccount`, report them. The BigQuery front keeps them
+in its state directory.
 
 **Seeding.** One document can seed Cloud Tasks queues, Cloud Storage buckets and objects,
 Pub/Sub schemas, topics and subscriptions, Secret Manager secrets with their versions, and Cloud

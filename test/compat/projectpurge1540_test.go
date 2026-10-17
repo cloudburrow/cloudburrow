@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/bigtable"
@@ -37,6 +38,14 @@ import (
 // instance with a database, a Bigtable instance with a table, a Cloud Run
 // job and a Memorystore instance, through the official clients. Deleted and undeleted it keeps them; deleted, purged
 // (POST /admin/purge) and created again under the ID, none reads back.
+//
+// It also writes, through the data-plane clients alone, what the emulators
+// cannot list by project (#1550): a Firestore document in a database the
+// Admin API never made, a Datastore entity in a named database, and a
+// Bigtable row in a table under an instance the instance admin never made
+// (a table needs the table admin's CreateTable). And the project's BigQuery
+// service agent names the project's number, the re-created project's new
+// one after the purge (#1551).
 func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 	h := New(t)
 	control := h.Endpoint(EnvControl)
@@ -52,8 +61,9 @@ func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 	useFirestore, useDatastore := served(EnvFirestore), served(EnvDatastore)
 	useSpanner, useBigtable := served(EnvSpanner), served(EnvBigtable)
 	useRun, useMemorystore := served(EnvRun), served(EnvMemorystoreAdmin)
-	if !useFirestore && !useDatastore && !useSpanner && !useBigtable && !useRun && !useMemorystore {
-		t.Skip("the instance serves none of Firestore, Datastore, Spanner, Bigtable, Cloud Run and Memorystore")
+	useBigQuery := served(EnvBigQuery)
+	if !useFirestore && !useDatastore && !useSpanner && !useBigtable && !useRun && !useMemorystore && !useBigQuery {
+		t.Skip("the instance serves none of Firestore, Datastore, Spanner, Bigtable, Cloud Run, Memorystore and BigQuery")
 	}
 
 	pc, err := resourcemanager.NewProjectsClient(ctx, rmOptions(h)...)
@@ -105,6 +115,20 @@ func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 			_, err := doc.Get(ctx)
 			return found("Firestore document", err)
 		}})
+		// #1550: a database the Admin API never made.
+		nc, err := firestore.NewClientWithDatabase(ctx, id, "never-made")
+		if err != nil {
+			t.Fatalf("firestore.NewClientWithDatabase: %v", err)
+		}
+		t.Cleanup(func() { _ = nc.Close() })
+		named := nc.Doc("purged/two")
+		if _, err := named.Set(ctx, map[string]any{"v": 2}); err != nil {
+			t.Fatalf("Firestore Set in never-made: %v", err)
+		}
+		extras = append(extras, purgeExtra{"Firestore document in a database the Admin API never made", func() bool {
+			_, err := named.Get(ctx)
+			return found("Firestore document in never-made", err)
+		}})
 	}
 	if useDatastore {
 		dc := datastoreClient(t, h, id)
@@ -120,6 +144,28 @@ func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("Datastore Get: %v", err)
+			}
+			return true
+		}})
+		// #1550: a named database, in a namespace.
+		nc, err := datastore.NewClientWithDatabase(ctx, id, "named-db")
+		if err != nil {
+			t.Fatalf("datastore.NewClientWithDatabase: %v", err)
+		}
+		t.Cleanup(func() { _ = nc.Close() })
+		nkey := datastore.NameKey("Purged", "two", nil)
+		nkey.Namespace = "ns"
+		if _, err := nc.Put(ctx, nkey, &struct{ V int }{2}); err != nil {
+			t.Fatalf("Datastore Put in named-db: %v", err)
+		}
+		extras = append(extras, purgeExtra{"Datastore entity in a named database", func() bool {
+			var v struct{ V int }
+			err := nc.Get(ctx, nkey, &v)
+			if err == datastore.ErrNoSuchEntity {
+				return false
+			}
+			if err != nil {
+				t.Fatalf("Datastore Get in named-db: %v", err)
 			}
 			return true
 		}})
@@ -168,6 +214,38 @@ func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 		}}, purgeExtra{"Bigtable table", func() bool {
 			_, err := ac.TableInfo(ctx, "purged")
 			return found("Bigtable table", err)
+		}})
+		// #1550: a table under an instance the instance admin never made,
+		// with a row the data client wrote.
+		gac, err := bigtable.NewAdminClient(ctx, id, "never-made")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = gac.Close() })
+		if err := gac.CreateTableFromConf(ctx, &bigtable.TableConf{TableID: "ghost",
+			Families: map[string]bigtable.GCPolicy{"f": bigtable.MaxVersionsPolicy(1)}}); err != nil {
+			t.Fatalf("Bigtable CreateTable under never-made: %v", err)
+		}
+		t.Cleanup(func() { _ = gac.DeleteTable(context.Background(), "ghost") })
+		dc, err := bigtable.NewClient(ctx, id, "never-made")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = dc.Close() })
+		mut := bigtable.NewMutation()
+		mut.Set("f", "c", bigtable.Now(), []byte("v"))
+		if err := dc.Open("ghost").Apply(ctx, "row", mut); err != nil {
+			t.Fatalf("Bigtable Apply under never-made: %v", err)
+		}
+		extras = append(extras, purgeExtra{"Bigtable row under an instance never made", func() bool {
+			row, err := dc.Open("ghost").ReadRow(ctx, "row")
+			if status.Code(err) == codes.NotFound {
+				return false
+			}
+			if err != nil {
+				t.Fatalf("Bigtable ReadRow under never-made: %v", err)
+			}
+			return len(row) > 0
 		}})
 	}
 
@@ -224,6 +302,35 @@ func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 		}})
 	}
 
+	// #1551: the BigQuery service agent names the project's number.
+	agentNumber := func() (agent, number string) {
+		t.Helper()
+		if !useBigQuery {
+			return "", ""
+		}
+		p, err := pc.GetProject(ctx, &rmpb.GetProjectRequest{Name: parent})
+		if err != nil {
+			t.Fatalf("GetProject: %v", err)
+		}
+		number = strings.TrimPrefix(p.GetName(), "projects/")
+		svc := bigqueryService(t, h)
+		want := "bq-" + number + "@bigquery-encryption.iam.gserviceaccount.com"
+		// The host sends the front the numbers as a project is made.
+		for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(500 * time.Millisecond) {
+			got, err := svc.Projects.GetServiceAccount(id).Context(ctx).Do()
+			if err != nil {
+				t.Fatalf("projects.getServiceAccount: %v", err)
+			}
+			if agent = got.Email; agent == want || time.Now().After(deadline) {
+				return agent, number
+			}
+		}
+	}
+	firstAgent, firstNumber := agentNumber()
+	if want := "bq-" + firstNumber + "@bigquery-encryption.iam.gserviceaccount.com"; useBigQuery && firstAgent != want {
+		t.Errorf("the BigQuery service agent = %s, want %s", firstAgent, want)
+	}
+
 	left := func() []string {
 		t.Helper()
 		var out []string
@@ -260,6 +367,12 @@ func TestAPurgedProjectsDataGoesEverywhere(t *testing.T) {
 	create()
 	if got := left(); len(got) != 0 {
 		t.Errorf("a project created again under a purged ID reads the old project's %v", got)
+	}
+	if useBigQuery {
+		agent, number := agentNumber()
+		if want := "bq-" + number + "@bigquery-encryption.iam.gserviceaccount.com"; agent != want || number == firstNumber {
+			t.Errorf("the re-created project's BigQuery service agent = %s, want %s, a number not the purged project's %s", agent, want, firstNumber)
+		}
 	}
 }
 

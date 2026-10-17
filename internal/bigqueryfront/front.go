@@ -224,6 +224,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
 	dropped := &droppedStore{}                      // dropped.go, #1460
 	models := &bqModels{}                           // models.go, #1465
+	numbers := &projectNumbers{}                    // projectnumbers.go, #1551
 	if o.stateDir != "" {
 		buffers.keepClock(clockStateFile(o.stateDir), o.logf) // #1513: before any time is read
 	}
@@ -252,6 +253,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		texts.keep(jobTextsStateFile(o.stateDir), o.logf)          // jobtextstate.go, #1028
 		views.keep(viewTextsStateFile(o.stateDir), o.logf)         // viewtextstate.go, #1028
 		linked.keep(linkedDatasetsStateFile(o.stateDir), o.logf)   // loglinks.go, #1435
+		numbers.keep(projectNumbersStateFile(o.stateDir), o.logf)  // projectnumbers.go, #1551
 	}
 	ids := o.ids // #1063
 	if ids == nil {
@@ -297,6 +299,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		})
 	}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if numbers.serve(w, r) { // projectnumbers.go, #1551
+			return
+		}
 		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,
 			functions: functions, records: records, settings: settings, models: models}).serveUndelete(w, r) { // dropped.go, #1460
 			return
@@ -307,8 +312,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if buffers.serveClock(w, r, next) { // streamingbuffer.go, #1370
 			return
 		}
-		buffers.flushDue(next, r)      // streamingbuffer.go, #1273
-		if serveServiceAccount(w, r) { // datasetupdate.go, #1205
+		buffers.flushDue(next, r)               // streamingbuffer.go, #1273
+		if serveServiceAccount(w, r, numbers) { // datasetupdate.go, #1205
 			return
 		}
 		if (front{next: next, records: records, policies: policies, functions: functions, configs: configs}).serveIAM(w, r, iam) { // iam.go, #1231
