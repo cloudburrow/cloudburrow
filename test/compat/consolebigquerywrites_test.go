@@ -468,7 +468,8 @@ func TestConsoleBigQueryReadWriteEditorRunsDML(t *testing.T) {
 		t.Errorf("after the UPDATE … FROM the client reads %v", r)
 	}
 	// DML inside a script (#1567) is sent, and answered from the script's
-	// child jobs (#1353), each DML statement by its line.
+	// child jobs (#1353), each DML statement by its line, the last one's too
+	// (#1569).
 	script := func(statement, want string) {
 		t.Helper()
 		body, _ := json.Marshal(map[string]any{"Path": []string{ds.DatasetID, "orders"}, "Statement": statement, "Mode": "read-write"})
@@ -480,7 +481,7 @@ func TestConsoleBigQueryReadWriteEditorRunsDML(t *testing.T) {
 		}
 	}
 	script("DECLARE k INT64 DEFAULT 7;\nINSERT INTO orders (id, region, amount) VALUES (8, 'ap', 1);\nDELETE FROM orders WHERE id = k;",
-		". Line 2: This statement added 1 row. This statement removed 1 row.")
+		". Line 2: This statement added 1 row. Line 3: This statement removed 1 row.")
 	if r := rows(); len(r) != 6 || r[8] != "ap" || r[7] != "" {
 		t.Errorf("after the script the client reads %v", r)
 	}
