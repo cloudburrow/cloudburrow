@@ -489,6 +489,9 @@ type EditForm struct {
 type Property struct {
 	Label string `json:"label"`
 	Value string `json:"value"`
+	// Link, when set, is a console route the value opens: the Resource
+	// hierarchy list's organization opens the organization's page (#1554).
+	Link string `json:"link,omitempty"`
 }
 
 // SectionKind says what a section actually holds.
@@ -972,6 +975,9 @@ type Server struct {
 	// logViews reads Cloud Logging through a log view, for the Logs
 	// Explorer's view scope (#1410); nil offers none.
 	logViews LogViewReader
+	// logNames lists a parent's log names, for the Logs Explorer's Log name
+	// picker (#1554).
+	logNames LogNameLister
 	// settings are the console's own server-side settings, such as the
 	// upload limit.
 	settings settings
@@ -1059,6 +1065,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/query/{service}", s.handleQuery)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/logs/buckets", s.handleLogBuckets)
+	mux.HandleFunc("GET /api/logs/names", s.handleLogNames)
 	mux.HandleFunc("DELETE /api/logs", s.handleDeleteLog)
 	mux.HandleFunc("GET /api/operations", s.handleOperations)
 	mux.HandleFunc("GET /api/instance", s.handleInstance)

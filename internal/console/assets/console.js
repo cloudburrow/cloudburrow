@@ -2714,7 +2714,7 @@ async function renderDetail(view, route, resourcePath) {
         el("h2", { text: "Details" }),
         el("dl", {}, ...(data.summary).flatMap((prop) => [
           el("dt", { text: prop.label }),
-          el("dd", { text: prop.value }),
+          propertyValue(prop),
         ])))
     : null;
 
@@ -2985,7 +2985,7 @@ async function renderDetail(view, route, resourcePath) {
         group.heading ? el("h2", { text: group.heading }) : null,
         el("dl", {}, ...group.properties.flatMap((prop) => [
           el("dt", { text: prop.label }),
-          el("dd", { text: prop.value }),
+          propertyValue(prop),
         ])))));
   };
 
@@ -3833,6 +3833,12 @@ function serverFilterBox(spec, reload) {
     spec.error ? el("p", { class: "form-error", id: "server-filter-error", role: "alert", text: spec.error }) : null);
 }
 
+// propertyValue is a property's <dd>: its value, as a link when the
+// provider names the page it opens (#1554).
+function propertyValue(prop) {
+  return el("dd", {}, prop.link ? el("a", { href: prop.link, text: prop.value }) : prop.value);
+}
+
 // listingSummary draws a listing's summary groups as the same property cards
 // a resource page uses.
 function listingSummary(data) {
@@ -3841,7 +3847,7 @@ function listingSummary(data) {
       group.heading ? el("h2", { text: group.heading }) : null,
       el("dl", {}, ...group.properties.flatMap((prop) => [
         el("dt", { text: prop.label }),
-        el("dd", { text: prop.value }),
+        propertyValue(prop),
       ]))));
 }
 
@@ -7477,6 +7483,45 @@ async function renderLogs(view) {
     placeholder: "Resource, e.g. api-00002-deployment", "aria-label": "Filter by resource" });
   const contains = el("input", { class: "filter", type: "search", id: "contains",
     placeholder: "Message contains", "aria-label": "Filter by message text" });
+  // The Log name picker (#1554), as Google's Logs Explorer lists the scope's
+  // log names: Cloud Logging's ListLogs of the project, folder or
+  // organization in scope. A log's full name is its entries' resource, so
+  // picking one is the resource filter, and the picker follows that field.
+  const logName = el("select", { id: "log-name", "aria-label": "Log name", hidden: true },
+    el("option", { value: "", text: "All log names" }));
+  const logNameParent = () => {
+    if (scope === "parent") return parentInput.value.trim();
+    if (scope === "view") return viewParentInput.value.trim();
+    return project ? `projects/${project}` : "";
+  };
+  const syncLogName = () => {
+    logName.value = [...logName.options].some((o) => o.value === resource.value) ? resource.value : "";
+  };
+  const loadLogNames = async () => {
+    const parent = logNameParent();
+    let names = [];
+    if (parent) {
+      try {
+        names = (await api(`/api/logs/names?${new URLSearchParams({ parent })}`)).logNames || [];
+      } catch {
+        // No Logging API, or a parent it refuses: there is nothing to pick.
+        names = null;
+      }
+    }
+    if (parent !== logNameParent()) return; // the scope moved on meanwhile
+    logName.hidden = names === null || !parent;
+    setChildren(logName, el("option", { value: "", text: names && names.length ? "All log names" : "No logs in scope" }),
+      ...(names || []).map((n) => el("option", { value: n,
+        text: decodeURIComponent(n.slice(n.indexOf("/logs/") + "/logs/".length)) })));
+    logName.setAttribute("data-parent", parent);
+    syncLogName();
+  };
+  logName.addEventListener("change", () => {
+    resource.value = logName.value;
+    writeFilters();
+    connect();
+    announce(logName.value ? `Showing log ${logName.value}` : "Showing every log name");
+  });
 
   // Every filter is read from the URL and written back to it.
   //
@@ -7673,6 +7718,7 @@ async function renderLogs(view) {
     history.replaceState({}, "", url);
     parentInput.hidden = next !== "parent";
     showViewControls();
+    loadLogNames();
     connect();
     announce(next === "project" ? `Scoped to project ${project}`
       : next === "parent" ? `Scoped to ${parentInput.value.trim() || "a folder or organization"}` : "Showing all sources");
@@ -7869,6 +7915,7 @@ async function renderLogs(view) {
   for (const { control } of FILTER_CONTROLS) {
     control.addEventListener("change", () => { writeFilters(); connect(); });
   }
+  resource.addEventListener("change", syncLogName);
 
   drawScope();
   setChildren(view,
@@ -7879,7 +7926,7 @@ async function renderLogs(view) {
           text: "Delete log is on the Cloud Logging entries (source logging/…) of the selected project. " +
                 "Pod logs and CloudBurrow's own request log are not held by the Logging API, so they cannot be deleted here." })
       : null,
-    el("div", { class: "actions" }, scopeSelect, parentInput, viewControls, severity, source, resource, contains,
+    el("div", { class: "actions" }, scopeSelect, parentInput, viewControls, logName, severity, source, resource, contains,
        pauseButton, reconnectButton, status),
     viewNote,
     chips,
@@ -7888,6 +7935,7 @@ async function renderLogs(view) {
 
   showViewControls();
   if (scope === "view") await loadBuckets(initialView);
+  loadLogNames();
   connect();
   announce(operation ? `Logs Explorer opened, scoped to operation ${operation}`
                      : "Logs Explorer opened");

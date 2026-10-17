@@ -72,7 +72,7 @@ func (p hierarchyProvider) folders() (map[string]resourcemanager.Folder, []resou
 
 const hierarchyNote = "One local organization, " + resourcemanager.OrganizationName + " (" + resourcemanager.OrganizationDomain +
 	"), fixed on every instance; folders nest under it up to 10 deep. A folder is deleted only when it is empty, " +
-	"and is then kept DELETE_REQUESTED for 30 days, when Undelete folder restores it. Folder and organization IAM policies are stored, never enforced and inherited by nothing (ADR-0006, #1368), and read through the API, gcloud and Terraform."
+	"and is then kept DELETE_REQUESTED for 30 days, when Undelete folder restores it. Folder and organization IAM policies are stored, never enforced and inherited by nothing (ADR-0006, #1368); each is on its page's Permissions tab."
 
 func (p hierarchyProvider) List(context.Context, string) (console.Listing, error) {
 	l := console.Listing{NameColumn: "Folder ID", Columns: []string{"Name", "Path", "Parent", "Created"}, Noun: "folders", Note: hierarchyNote}
@@ -86,33 +86,10 @@ func (p hierarchyProvider) List(context.Context, string) (console.Listing, error
 			"Name": f.DisplayName, "Path": rmFolderPath(byName, f), "Parent": parentText(byName, f.Parent), "Created": consoleTime(f.CreateTime)}})
 	}
 	l.Total = len(l.Items)
-	l.Summary = []console.PropertyGroup{p.organizationPolicies()}
+	// The organization above its folders, opening its own page (#1554).
+	l.Summary = []console.PropertyGroup{{Heading: "Organization", Properties: []console.Property{
+		{Label: "Organization", Value: resourcemanager.OrganizationDomain + " (" + resourcemanager.OrganizationName + ")", Link: organizationLink}}}}
 	return l, nil
-}
-
-// organizationPolicies is the organization's own organization policies
-// (#1534), drawn above the folders, where Set and Clear organization policy
-// on the organization are offered (ListActions).
-func (p hierarchyProvider) organizationPolicies() console.PropertyGroup {
-	g := console.PropertyGroup{Heading: "Organization policies on " + resourcemanager.OrganizationDomain}
-	all, err := p.registry.OrgPolicies(resourcemanager.OrganizationName)
-	if err != nil {
-		g.Properties = []console.Property{{Label: "Unavailable", Value: consoleErr(err)}}
-		return g
-	}
-	for _, op := range all {
-		g.Properties = append(g.Properties, console.Property{Label: op.Constraint, Value: orgPolicyText(op)})
-	}
-	if len(g.Properties) == 0 {
-		g.Properties = []console.Property{{Label: "Policies", Value: "None set"}}
-	}
-	return g
-}
-
-// ListActions implements console.ListActor: the organization's Set and
-// Clear organization policy (#1534).
-func (p hierarchyProvider) ListActions(context.Context, string) []console.Action {
-	return orgPolicyActions(p.registry, resourcemanager.OrganizationName, " on the organization")
 }
 
 // parentOptions are the parents a folder or project can be placed under: the
@@ -163,9 +140,12 @@ func (p hierarchyProvider) Delete(_ context.Context, _ string, name string) erro
 	return err
 }
 
-func (p hierarchyProvider) Detail(_ context.Context, _ string, path []string) (console.Detail, error) {
+func (p hierarchyProvider) Detail(ctx context.Context, _ string, path []string) (console.Detail, error) {
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
+	}
+	if isOrganizationPath(path) {
+		return p.organizationDetail(ctx), nil
 	}
 	byName, all, err := p.folders()
 	if err != nil {
@@ -234,7 +214,7 @@ func (p hierarchyProvider) Detail(_ context.Context, _ string, path []string) (c
 }
 
 func (p hierarchyProvider) Edit(_ context.Context, _ string, path []string, values map[string]string) error {
-	if len(path) != 1 {
+	if len(path) != 1 || isOrganizationPath(path) {
 		return fmt.Errorf("only a folder can be edited")
 	}
 	_, err := p.registry.RenameFolder(path[0], strings.TrimSpace(values["displayName"]))
@@ -258,6 +238,9 @@ func (p hierarchyProvider) DetailActions(_ context.Context, _ string, path []str
 	if len(path) != 1 {
 		return nil
 	}
+	if isOrganizationPath(path) {
+		return orgPolicyActions(p.registry, resourcemanager.OrganizationName, "")
+	}
 	f, err := p.registry.Folder(path[0])
 	if err != nil {
 		return nil
@@ -276,10 +259,11 @@ func (p hierarchyProvider) DetailActions(_ context.Context, _ string, path []str
 }
 
 func (p hierarchyProvider) ActAt(_ context.Context, _ string, path []string, action string, values map[string]string) error {
-	if len(path) == 0 {
+	if isOrganizationPath(path) {
 		if ok, err := orgPolicyAct(p.registry, resourcemanager.OrganizationName, action, values); ok {
 			return err
 		}
+		return fmt.Errorf("unknown action %q", action)
 	}
 	if len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
@@ -307,7 +291,6 @@ func (p hierarchyProvider) ActAt(_ context.Context, _ string, path []string, act
 }
 
 var _ console.PathActor = hierarchyProvider{}
-var _ console.ListActor = hierarchyProvider{}
 var _ console.Creator = hierarchyProvider{}
 var _ console.Deleter = hierarchyProvider{}
 var _ console.Driller = hierarchyProvider{}
