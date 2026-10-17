@@ -7225,7 +7225,7 @@
         "method": "google.firestore.v1.Firestore/ExecutePipeline",
         "status": "Verified",
         "tests": [
-          "test/compat/firestorepipeline_test.go:46 TestFirestorePipelines"
+          "test/compat/firestorepipeline_test.go:48 TestFirestorePipelines"
         ]
       },
       {
@@ -7352,7 +7352,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateUserCreds",
         "status": "Verified",
         "tests": [
-          "test/compat/firestorepipeline_test.go:151 TestFirestoreAdminUserCreds"
+          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds"
         ]
       },
       {
@@ -7389,21 +7389,21 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteUserCreds",
         "status": "Verified",
         "tests": [
-          "test/compat/firestorepipeline_test.go:151 TestFirestoreAdminUserCreds"
+          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/DisableUserCreds",
         "status": "Verified",
         "tests": [
-          "test/compat/firestorepipeline_test.go:151 TestFirestoreAdminUserCreds"
+          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/EnableUserCreds",
         "status": "Verified",
         "tests": [
-          "test/compat/firestorepipeline_test.go:151 TestFirestoreAdminUserCreds"
+          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds"
         ]
       },
       {
@@ -7460,7 +7460,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetUserCreds",
         "status": "Verified",
         "tests": [
-          "test/compat/firestorepipeline_test.go:151 TestFirestoreAdminUserCreds"
+          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds"
         ]
       },
       {
@@ -7515,14 +7515,14 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListUserCreds",
         "status": "Verified",
         "tests": [
-          "test/compat/firestorepipeline_test.go:151 TestFirestoreAdminUserCreds"
+          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ResetUserPassword",
         "status": "Verified",
         "tests": [
-          "test/compat/firestorepipeline_test.go:151 TestFirestoreAdminUserCreds"
+          "test/compat/firestorepipeline_test.go:173 TestFirestoreAdminUserCreds"
         ]
       },
       {

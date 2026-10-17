@@ -48,8 +48,12 @@ func pipelineFixture(t *testing.T) (ent, std *firestore.Client) {
 			t.Fatal(err)
 		}
 	}
-	str := func(s string) *firestorepb.Value { return &firestorepb.Value{ValueType: &firestorepb.Value_StringValue{StringValue: s}} }
-	num := func(n int64) *firestorepb.Value { return &firestorepb.Value{ValueType: &firestorepb.Value_IntegerValue{IntegerValue: n}} }
+	str := func(s string) *firestorepb.Value {
+		return &firestorepb.Value{ValueType: &firestorepb.Value_StringValue{StringValue: s}}
+	}
+	num := func(n int64) *firestorepb.Value {
+		return &firestorepb.Value{ValueType: &firestorepb.Value_IntegerValue{IntegerValue: n}}
+	}
 	arr := func(vs ...*firestorepb.Value) *firestorepb.Value {
 		return &firestorepb.Value{ValueType: &firestorepb.Value_ArrayValue{ArrayValue: &firestorepb.ArrayValue{Values: vs}}}
 	}

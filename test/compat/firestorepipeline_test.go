@@ -3,6 +3,8 @@
 package compat
 
 import (
+	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -130,6 +132,26 @@ func TestFirestorePipelines(t *testing.T) {
 	_, err = c.Pipeline().Collection("books").RawStage("search", nil).Execute(ctx).Results().GetAll()
 	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), `"search"`) {
 		t.Errorf("a search stage = %v, want UNIMPLEMENTED naming it", err)
+	}
+
+	// Over REST, the stream is a JSON array of the responses.
+	body := `{"structuredPipeline":{"pipeline":{"stages":[{"name":"collection","args":[{"referenceValue":"/books"}]},` +
+		`{"name":"limit","args":[{"integerValue":"2"}]}]}}}`
+	resp, err := http.Post("http://"+h.Endpoint(EnvFirestore)+"/v1/projects/"+h.Project()+"/databases/piped-ent/documents:executePipeline",
+		"application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("executePipeline over REST: %v", err)
+	}
+	var rest []struct {
+		Results []struct {
+			Name string `json:"name"`
+		} `json:"results"`
+		ExecutionTime string `json:"executionTime"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&rest)
+	_ = resp.Body.Close()
+	if err != nil || resp.StatusCode != http.StatusOK || len(rest) != 1 || len(rest[0].Results) != 2 || rest[0].ExecutionTime == "" {
+		t.Errorf("executePipeline over REST = %d %+v, %v; want one response with 2 results", resp.StatusCode, rest, err)
 	}
 
 	def := firestoreClient(t, h)
