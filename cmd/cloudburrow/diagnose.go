@@ -157,7 +157,7 @@ func collectDiagnostics(ctx context.Context, cfg config.Config, k *kubectl, admi
 	var doc bytes.Buffer
 	report := doctor.Run(ctx, doctor.RealEnv(), doctorOptions(cfg))
 	arch := daemonArch(ctx, prefetch.ExecRunner{})
-	report.Results = append(report.Results, storageEmbedResult(cfg, arch), bigQueryEmbedResult(cfg, arch))
+	report.Results = append(report.Results, storageEmbedResult(cfg, arch), bigQueryEmbedResult(cfg, arch), ephemeralPortsResult(cfg))
 	report.Write(&doc)
 	b.add("doctor", "doctor.txt", doc.Bytes())
 

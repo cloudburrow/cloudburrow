@@ -568,7 +568,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--allow-remote` | `CLOUDBURROW_ALLOW_REMOTE` | — | `false` | Required to bind a non-loopback address. **Flag or environment only**: a config file setting `allowRemote` to true is refused. See [Exposure](#exposure). |
 | `--cloudbuild-host-steps` | `CLOUDBURROW_CLOUDBUILD_HOST_STEPS` | `cloudbuildHostSteps` | `false` | Lets Cloud Build's `CreateBuild` and `RetryBuild` run a step that is not a docker build, docker push or pack step (#1382). Such a step runs as a container on the host's Docker **with the host's Docker socket mounted**, which gives it control of the host, so it is off by default, and even when on it runs only for builds submitted from this machine's loopback, never from a pod through `cloudburrow-host`. Off, a build with one is refused `FAILED_PRECONDITION` naming this flag. A discovered `./cloudburrow.json` cannot set it. See [functions-and-builds.md](functions-and-builds.md) and [ADR-0004](adr/0004-local-access-and-no-authentication.md). |
 | `--cloudsql-connector` | `CLOUDBURROW_CLOUDSQL_CONNECTOR` | `cloudsqlConnector` | `<bind address>:3307` | `host:port` the Cloud SQL connectors' TLS listener binds (#1364); `connect.get` reports its host as the instance's address. The connectors dial that address at port `3307`, a constant in each, so `--port-base` does not move it. A second instance with `cloudsql` or `cloudsql-mysql` takes another loopback address on Linux (`127.0.0.2:3307`), or on macOS another port, which the application's dialer must redirect to. Loopback only, unless `--allow-remote`. See [cloudsql.md](cloudsql.md#running-two-instances-with-the-connectors). |
-| `--port-base` | `CLOUDBURROW_PORT_BASE` | `portBase` | `0` (the defaults, from `9000`) | Moves every fixed default port so the layout starts here: control at the base, each `900x`/`901x` port the same distance above it, ingress at base+80, console at base+90. A port set explicitly by flag, environment or `endpoints.*` is not moved; an OS-assigned one (`0`, and Local AI's by default) stays OS-assigned. `1024`–`65445`. See [Running two instances](#running-two-instances). |
+| `--port-base` | `CLOUDBURROW_PORT_BASE` | `portBase` | `0` (the defaults, from `9000`) | Moves every fixed default port so the layout starts here: control at the base, each `900x`/`901x` port the same distance above it, ingress at base+80, console at base+90. A port set explicitly by flag, environment or `endpoints.*` is not moved; an OS-assigned one (`0`, and Local AI's by default) stays OS-assigned. `1024`–`65445`; keep the block below the OS's ephemeral port range (Linux `32768`, macOS `49152`), which `doctor` and `up` warn about. See [Running two instances](#running-two-instances). |
 | `--port-control` | `CLOUDBURROW_PORT_CONTROL` | `endpoints.control` | `9000` | Health, readiness and admin. Always loopback. |
 | `--port-storage` | `CLOUDBURROW_PORT_STORAGE` | `endpoints.storage` | `9001` | Cloud Storage host endpoint. |
 | `--port-pubsub` | `CLOUDBURROW_PORT_PUBSUB` | `endpoints.pubsub` | `9002` | Pub/Sub host endpoint. |
@@ -711,6 +711,16 @@ on `9180` and the console on `9190`: the default layout moved by 100. Pass the s
 (or set `CLOUDBURROW_PORT_BASE`, or `portBase` in the file) to every command for that instance, so
 `env`, `status` and `doctor` compute the same addresses `up` binds. A multiple of 100 keeps each
 instance's block clear of the next.
+
+**Keep the block below the OS's ephemeral port range** (#1526): Linux's is `32768`–`60999`, macOS's
+`49152`–`65535` (`/proc/sys/net/ipv4/ip_local_port_range`, `sysctl net.inet.ip.portrange`). The OS
+takes a local port from it for every outgoing connection, and on Linux a port held that way cannot
+be listened on, so a port free when `up` checks it can be gone when a tunnel binds it: at
+`--port-base 40200` the Bigtable tunnel's `40212` was, and its `kubectl port-forward` failed with
+`unable to listen on any of the requested ports`. `doctor` and `up` warn, naming each port in the
+range; a base of at most `32677` on Linux (`49061` on macOS) keeps the whole block, up to base+90,
+clear of it. Every tunnel and in-process endpoint has its own offset from the base, so two never
+share a port (`TestEveryForwardGetsADistinctHostPort`).
 
 Before creating anything, `up` checks every fixed port it is about to bind — the always-on
 surfaces, each enabled service, the console, and the ingress the cluster will publish — and, if any

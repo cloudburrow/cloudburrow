@@ -115,6 +115,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}); err != nil {
 		return err
 	}
+	// Free now is not free at bind time for a port in the ephemeral range:
+	// any outgoing connection can take it first (#1526). Said, not refused.
+	if r := ephemeralPortsResult(cfg); r.Level == doctor.LevelWarn {
+		fmt.Fprintf(stderr, "cloudburrow up: warning: %s; %s\n", r.Detail, r.Remedy)
+	}
 
 	// The kind configuration is generated before the cluster is created,
 	// because extraPortMappings can only be applied at creation time.
