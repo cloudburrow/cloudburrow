@@ -855,7 +855,17 @@ events.
 and the notification configurations on them; Pub/Sub subscriptions, snapshots, topics and schemas (#889); and
 Secret Manager secrets with all their versions; and what the Spanner, Bigtable and Firestore
 fronts keep, their backups, schedules, views and the rest, with Bigtable's instances and their
-tables (#1514). Each is cleared through the service's own API or front,
+tables (#1514). And, each by `project=` too, which a project's purge uses (#1537): the Cloud
+SQL Admin API's (component `sqladmin`, #1541) created instances, with their servers, standbys
+and volumes and so their users and databases, its source representation instances, backups
+(final ones too) and their dumps, client certificates and operations, where the servers `up`
+runs stay, being every project's, and lose only the project's client certificates; Backup and
+DR's (`backupdr`, #1542) vaults, data sources, backups with the backup runs that hold them,
+plans, associations, trials and operations; and Artifact Registry's (`artifactregistry`,
+#1543) repositories, with their images, packages, versions, tags, files, rules, attachments and
+IAM policies, and projects' settings, VPC-SC configs and `projectConfig`s, on disk too; images
+built under a repository's URL stay loaded in the cluster, as `DeleteRepository` leaves them.
+Each is cleared through the service's own API or front,
 so a reset is only what a client could have done one call at a time. Two services are
 deliberately left out:
 

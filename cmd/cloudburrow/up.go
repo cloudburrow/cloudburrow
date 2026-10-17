@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
+	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -271,6 +273,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Service Usage is built after the registry, so its reset reads it
 	// through this too (#1537).
 	var serviceUsageRef *serviceusage.Server
+	// And the Cloud SQL Admin API and Backup and DR (#1541, #1542).
+	var sqlAdminRef *sqladmin.Server
+	var backupDRRef *backupdr.Server
 	// The admin token (#553): minted now, required on every /admin route,
 	// written beside the runtime file once the control server is up.
 	adminToken, err := newAdminToken()
@@ -287,6 +292,8 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		projects:     func() []string { return registered() },
 		registry:     func() *resourcemanager.Registry { return projectRegistry },
 		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
+		sqlAdmin:     func() *sqladmin.Server { return sqlAdminRef },
+		backupDR:     func() *backupdr.Server { return backupDRRef },
 		projectStore: func() store.Store {
 			if projectRegistry == nil {
 				return nil
@@ -476,6 +483,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
+		sqlAdminRef = sqlAdminSrv
 		// executeSql reads a user's password from Secret Manager (#1462).
 		if secretsSvc != nil {
 			sqlAdminSrv.SetSecretAccessor(buildSecretAccessor{svc: secretsSvc})
@@ -485,6 +493,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The Backup and DR Service (#1433), over the Admin API's backups.
 	backupDRSrv := newBackupDRServer(cfg, sqlAdminSrv)
 	if backupDRSrv != nil {
+		backupDRRef = backupDRSrv
 		if kmsSvc != nil {
 			// A vault's encryptionConfig (#1501) wraps its data key with
 			// this instance's Cloud KMS, in process.
