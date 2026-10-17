@@ -100,6 +100,26 @@ type copyTable struct {
 	// partitioned by a column leaves out its streaming buffer's (#1273,
 	// streamingbuffer.go).
 	where string
+	// partitionTime is the source's timePartitioning when it is
+	// ingestion-time partitioned and from gives each row's
+	// _PARTITIONTIME as _cb_pt (#1458, timetravel.go), or, from "", the
+	// table's own; else nil. A destination made from it is partitioned
+	// as it is, and insertSelect keeps each row's _PARTITIONTIME.
+	partitionTime any
+}
+
+// partitionExtra returns the Table fields that make a new table
+// partitioned as the sources are when they keep _PARTITIONTIME
+// (partitionTime), with extra's, or extra.
+func partitionExtra(sources []copyTable, extra map[string]any) map[string]any {
+	if len(sources) == 0 || sources[0].partitionTime == nil {
+		return extra
+	}
+	out := map[string]any{"timePartitioning": sources[0].partitionTime}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
 }
 
 // copyJob carries out a copy job (above).
@@ -338,19 +358,20 @@ func (f front) copyJob(w http.ResponseWriter, r *http.Request, c *copyConfig) {
 			}
 			extra["expirationTime"] = expiration
 		}
-		if err = f.makeTableWith(r, dest.ref, sources[0].schema, extra); err == "" {
+		if err = f.makeTableWith(r, dest.ref, sources[0].schema, partitionExtra(sources, extra)); err == "" {
 			if err = f.insertSelect(r, dest.ref, sources); err != "" {
 				f.send(r, http.MethodDelete, tablePath(dest.ref.DatasetID, dest.ref.TableID), nil)
 			}
 		}
 	default: // WRITE_TRUNCATE of a table that exists
 		scratch := tableRef{DatasetID: resultsDataset, TableID: scratchTable()} // scratch.go
-		if err = f.makeTable(r, scratch, sources[0].schema); err == "" {
+		if err = f.makeTableWith(r, scratch, sources[0].schema, partitionExtra(sources, nil)); err == "" {
 			defer f.send(r, http.MethodDelete, tablePath(scratch.DatasetID, scratch.TableID), nil)
 			if err = f.insertSelect(r, scratch, sources); err == "" {
 				f.send(r, http.MethodDelete, tablePath(dest.ref.DatasetID, dest.ref.TableID), nil)
-				if err = f.makeTable(r, dest.ref, sources[0].schema); err == "" {
-					err = f.insertSelect(r, dest.ref, []copyTable{{ref: scratch, fields: sources[0].fields}})
+				if err = f.makeTableWith(r, dest.ref, sources[0].schema, partitionExtra(sources, nil)); err == "" {
+					err = f.insertSelect(r, dest.ref, []copyTable{{ref: scratch, fields: sources[0].fields,
+						partitionTime: sources[0].partitionTime}})
 				}
 			}
 		}
@@ -484,8 +505,9 @@ func (f front) makeTableWith(r *http.Request, ref tableRef, schema json.RawMessa
 }
 
 // selectAll writes SELECT of the columns of fields FROM each source,
-// joined with UNION ALL.
-func selectAll(fields []field, sources []copyTable) string {
+// joined with UNION ALL; with pt, each row's _PARTITIONTIME too, as _cb_pt
+// (partitionTime).
+func selectAll(fields []field, sources []copyTable, pt bool) string {
 	cols := make([]string, len(fields))
 	for i, fl := range fields {
 		cols[i] = quoteName(fl.Name)
@@ -494,8 +516,16 @@ func selectAll(fields []field, sources []copyTable) string {
 	parts := make([]string, len(sources))
 	for i, s := range sources {
 		parts[i] = "SELECT " + list + " FROM " + quotePath([]string{s.ref.DatasetID, s.ref.TableID})
+		if pt {
+			parts[i] = "SELECT " + list + ", _PARTITIONTIME AS " + pastPartitionTime + " FROM " +
+				quotePath([]string{s.ref.DatasetID, s.ref.TableID})
+		}
 		if s.from != "" {
-			parts[i] = "SELECT " + list + " FROM " + s.from + " AS _cloudburrow_past"
+			extra := ""
+			if pt {
+				extra = ", " + pastPartitionTime
+			}
+			parts[i] = "SELECT " + list + extra + " FROM " + s.from + " AS _cloudburrow_past"
 		}
 		if s.where != "" {
 			parts[i] += " WHERE " + s.where
@@ -505,7 +535,9 @@ func selectAll(fields []field, sources []copyTable) string {
 }
 
 // insertSelect writes the sources' rows into dest with one INSERT ...
-// SELECT, and returns the emulator's error, or "".
+// SELECT, and returns the emulator's error, or "". Into an ingestion-time
+// partitioned dest, rows of sources that all keep their _PARTITIONTIME
+// (partitionTime) keep it, truncated to dest's unit (#1458).
 func (f front) insertSelect(r *http.Request, dest tableRef, sources []copyTable) string {
 	fields := sources[0].fields
 	if len(fields) == 0 {
@@ -515,8 +547,22 @@ func (f front) insertSelect(r *http.Request, dest tableRef, sources []copyTable)
 	for i, fl := range fields {
 		cols[i] = quoteName(fl.Name)
 	}
-	sql := "INSERT INTO " + quotePath([]string{dest.DatasetID, dest.TableID}) + " (" + strings.Join(cols, ", ") + ") " +
-		selectAll(fields, sources)
+	list := strings.Join(cols, ", ")
+	keep := true
+	for _, s := range sources {
+		keep = keep && s.partitionTime != nil
+	}
+	rows := selectAll(fields, sources, false)
+	pcols := ""
+	if keep {
+		if m, ok := f.partitionMetaOf(r, dest.DatasetID, dest.TableID); ok && m.ingestion() {
+			var pvals string
+			pcols, pvals = ingestionColumns(m, "")
+			rows = "SELECT " + list + strings.ReplaceAll(pvals, "_PARTITIONTIME", pastPartitionTime) +
+				" FROM (" + selectAll(fields, sources, true) + ")"
+		}
+	}
+	sql := "INSERT INTO " + quotePath([]string{dest.DatasetID, dest.TableID}) + " (" + list + pcols + ") " + rows
 	legacy := false
 	body, err := json.Marshal(queryOptions{Query: sql, UseLegacySQL: &legacy})
 	if err != nil {
@@ -535,7 +581,7 @@ func (f front) countRows(r *http.Request, sources []copyTable) (int64, string) {
 		return 0, ""
 	}
 	legacy := false
-	body, err := json.Marshal(queryOptions{Query: "SELECT COUNT(*) FROM (" + selectAll(sources[0].fields, sources) + ")",
+	body, err := json.Marshal(queryOptions{Query: "SELECT COUNT(*) FROM (" + selectAll(sources[0].fields, sources, false) + ")",
 		UseLegacySQL: &legacy})
 	if err != nil {
 		return 0, err.Error()

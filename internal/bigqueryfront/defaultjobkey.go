@@ -3,6 +3,9 @@ package bigqueryfront
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,8 +21,11 @@ import (
 // (one that did not exist before it) and that has no
 // encryptionConfiguration is given the key with tables.update, as the
 // front gives a CREATE TABLE's, when its dataset has no
-// defaultEncryptionConfiguration. As every key here, it is recorded, not
-// used: the emulator encrypts nothing.
+// defaultEncryptionConfiguration. A load of uploaded data (a multipart
+// upload, whose first part is the job, or a resumable one, whose first
+// request is) is given it the same way. A table a script makes is given
+// it by withDefaultTableKey as each statement is run in its turn. As every
+// key here, it is recorded, not used: the emulator encrypts nothing.
 
 // datasetDefaultKey is the default key a new table of dataset takes, or "".
 func (f front) datasetDefaultKey(r *http.Request, dataset string) string {
@@ -100,14 +106,50 @@ func jobDestination(body []byte, project string) (dataset, table string, ok bool
 // withDefaultJobKey runs insert, jobs.insert, and gives the destination
 // table the job made the default key (above).
 func (f front) withDefaultJobKey(w http.ResponseWriter, r *http.Request, insert func(http.ResponseWriter)) {
-	// An upload's body (a load's data) and a compressed one are not read.
+	// A compressed body is not read.
 	if f.settings == nil || !f.settings.hasAny("default_kms_key_name") || r.Method != http.MethodPost ||
-		strings.HasPrefix(r.URL.Path, "/upload/") || r.Header.Get("Content-Encoding") != "" {
+		r.Header.Get("Content-Encoding") != "" {
 		insert(w)
 		return
 	}
 	body, err := readBody(r)
 	if err != nil {
+		insert(w)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/upload/") {
+		// A media upload (#1456): the job is the multipart body's first
+		// part, the data its second.
+		if body = uploadedJob(r.Header.Get("Content-Type"), body); body == nil {
+			insert(w)
+			return
+		}
+	}
+	f.withDefaultJobKeyOf(w, r, body, insert)
+}
+
+// uploadedJob returns the job of a multipart upload's body, its first
+// part, or nil.
+func uploadedJob(contentType string, body []byte) []byte {
+	mt, params, err := mime.ParseMediaType(contentType)
+	if err != nil || !strings.HasPrefix(mt, "multipart/") || params["boundary"] == "" {
+		return nil
+	}
+	part, err := multipart.NewReader(bytes.NewReader(body), params["boundary"]).NextPart()
+	if err != nil {
+		return nil
+	}
+	job, err := io.ReadAll(io.LimitReader(part, maxBody))
+	if err != nil {
+		return nil
+	}
+	return job
+}
+
+// withDefaultJobKeyOf is withDefaultJobKey of the job body, which a
+// resumable upload keeps from its first request (resumable.go).
+func (f front) withDefaultJobKeyOf(w http.ResponseWriter, r *http.Request, body []byte, insert func(http.ResponseWriter)) {
+	if f.settings == nil || !f.settings.hasAny("default_kms_key_name") {
 		insert(w)
 		return
 	}
