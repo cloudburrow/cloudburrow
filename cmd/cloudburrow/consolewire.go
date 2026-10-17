@@ -205,7 +205,7 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	// Cloud KMS and Cloud Scheduler run in this process too, so their screens
 	// read the objects their APIs serve rather than going through a tunnel.
 	if enabled[config.ServiceKMS] && d.kms != nil {
-		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms})
+		providers = append(providers, kmsProvider{svc: d.kms}, kmsEkmProvider{svc: d.kms}, kmsAutokeyProvider{svc: d.kms}, kmsHsmProvider{svc: d.kms})
 	}
 	if enabled[config.ServiceScheduler] && d.scheduler != nil {
 		providers = append(providers, schedulerProvider{svc: d.scheduler, faults: d.faults})

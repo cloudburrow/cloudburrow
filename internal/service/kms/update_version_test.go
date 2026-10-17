@@ -85,7 +85,7 @@ func TestUpdateVersionNames(t *testing.T) {
 	_, err := c.UpdateCryptoKeyVersion(ctx, &kmspb.UpdateCryptoKeyVersionRequest{
 		UpdateMask:       &fieldmaskpb.FieldMask{Paths: []string{"external_protection_level_options"}},
 		CryptoKeyVersion: &kmspb.CryptoKeyVersion{Name: okVersion}})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("an EKM mask path = %v, want UNIMPLEMENTED", err)
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("an EKM mask path on a missing version = %v, want NOT_FOUND", err)
 	}
 }
