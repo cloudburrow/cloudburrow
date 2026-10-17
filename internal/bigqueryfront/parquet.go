@@ -570,11 +570,25 @@ func (b *badParquet) Error() string {
 }
 
 // spoolParquetUpload reads the schema of the data of r, a multipart
-// upload of a job and its data. The data is kept in a temporary file,
-// which the schema is read from, and r's body is replaced by an equal
-// multipart upload of the same job and data, which removes the file when
-// it is closed.
+// upload of a job and its data, kept as spoolUpload keeps it.
 func spoolParquetUpload(r *http.Request) ([]pqElement, error) {
+	s, err := spoolUpload(r)
+	if err != nil {
+		return nil, err
+	}
+	elems, err := readParquetSchema(s.file, s.size)
+	if err != nil {
+		s.Close()
+		return nil, &badParquet{err}
+	}
+	return elems, nil
+}
+
+// spoolUpload keeps the data of r, a multipart upload of a job and its
+// data, in a temporary file, and replaces r's body by an equal multipart
+// upload of the same job and data, which removes the file when it is
+// closed. It returns that body.
+func spoolUpload(r *http.Request) (*spooled, error) {
 	mt, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || !strings.HasPrefix(mt, "multipart/") || params["boundary"] == "" {
 		return nil, errors.New("the request is not a multipart upload")
@@ -599,11 +613,11 @@ func spoolParquetUpload(r *http.Request) ([]pqElement, error) {
 	if err != nil {
 		return nil, err
 	}
-	tmp, err := os.CreateTemp("", "bigquery-parquet-*")
+	tmp, err := os.CreateTemp("", "bigquery-upload-*")
 	if err != nil {
 		return nil, err
 	}
-	fail := func(err error) ([]pqElement, error) {
+	fail := func(err error) (*spooled, error) {
 		tmp.Close()
 		os.Remove(tmp.Name())
 		return nil, err
@@ -612,10 +626,6 @@ func spoolParquetUpload(r *http.Request) ([]pqElement, error) {
 	_ = body.Close()
 	if err != nil {
 		return fail(err)
-	}
-	elems, err := readParquetSchema(tmp, size)
-	if err != nil {
-		return fail(&badParquet{err})
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		return fail(err)
@@ -628,11 +638,12 @@ func spoolParquetUpload(r *http.Request) ([]pqElement, error) {
 	head = append(head, job...)
 	head = append(head, []byte("\r\n--"+params["boundary"]+"\r\nContent-Type: application/octet-stream\r\n\r\n")...)
 	tail := []byte("\r\n--" + params["boundary"] + "--\r\n")
-	r.Body = &spooled{Reader: io.MultiReader(strings.NewReader(string(head)), io.LimitReader(tmp, size),
+	s := &spooled{Reader: io.MultiReader(strings.NewReader(string(head)), io.NewSectionReader(tmp, 0, size),
 		strings.NewReader(string(tail))), file: tmp, size: size}
+	r.Body = s
 	r.ContentLength = int64(len(head)) + size + int64(len(tail))
 	r.Header.Del("Content-Length")
-	return elems, nil
+	return s, nil
 }
 
 // spooled is a request body read in part from a temporary file, which

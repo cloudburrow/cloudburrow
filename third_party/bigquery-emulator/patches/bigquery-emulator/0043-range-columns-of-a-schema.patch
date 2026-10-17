@@ -212,7 +212,7 @@ CloudBurrow Authors.
  		// given as WKT text inside a RECORD or a REPEATED column is written
 --- a/server/handler.go
 +++ b/server/handler.go
-@@ -504,8 +504,14 @@
+@@ -503,8 +503,14 @@
  		return err
  	}
  	columnToType := map[string]types.Type{}
@@ -227,7 +227,7 @@ CloudBurrow Authors.
  	}
  
  	sourceFormat := load.SourceFormat
-@@ -528,16 +534,18 @@
+@@ -527,16 +533,18 @@
  				break
  			}
  			columns = append(columns, &types.Column{
