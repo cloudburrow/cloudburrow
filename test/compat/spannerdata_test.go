@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"sort"
+	"strings"
 	"testing"
 
 	sp "cloud.google.com/go/spanner/apiv1"
