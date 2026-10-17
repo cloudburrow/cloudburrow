@@ -221,3 +221,15 @@ func TestSchedulerSeedAppEngineJob(t *testing.T) {
 		t.Errorf("seeded App Engine job = %v", j)
 	}
 }
+
+// TestTasksSeedNamesWhyAQueueNameIsRefused (#1583): docs/configuration.md's
+// seed example named project "p", which is too short to be a project ID; the
+// refusal said only that the name was not projects/.../queues/{queue}, which
+// it plainly was.
+func TestTasksSeedNamesWhyAQueueNameIsRefused(t *testing.T) {
+	s := &tasksSeeder{svc: &tasksService{store: tasks.NewStore(store.NewMemory())}}
+	err := s.Validate(json.RawMessage(`{"queues": ["projects/p/locations/us-central1/queues/work"]}`))
+	if err == nil || !strings.Contains(err.Error(), `project "p"`) {
+		t.Errorf("Validate = %v, want the invalid project named", err)
+	}
+}

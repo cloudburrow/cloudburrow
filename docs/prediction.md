@@ -72,7 +72,7 @@ Knative:
 
 ```go
 c.CreateService(ctx, &runpb.CreateServiceRequest{
-    Parent:    "projects/p/locations/us-central1",
+    Parent:    "projects/my-project/locations/us-central1",
     ServiceId: "predictor",
     Service: &runpb.Service{Template: &runpb.RevisionTemplate{
         Containers: []*runpb.Container{{
@@ -180,7 +180,7 @@ c, _ := aiplatform.NewPredictionClient(ctx,
     option.WithoutAuthentication(),
     option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
 resp, err := c.Predict(ctx, &aiplatformpb.PredictRequest{
-    Endpoint:  "projects/p/locations/us-central1/endpoints/predictor",
+    Endpoint:  "projects/my-project/locations/us-central1/endpoints/predictor",
     Instances: []*structpb.Value{structpb.NewNumberValue(1)},
 })
 ```
@@ -215,7 +215,7 @@ as its service's port named `h2c` (#1477):
 
 ```go
 c.CreateService(ctx, &runpb.CreateServiceRequest{
-    Parent:    "projects/p/locations/us-central1",
+    Parent:    "projects/my-project/locations/us-central1",
     ServiceId: "model",
     Service: &runpb.Service{Template: &runpb.RevisionTemplate{
         Containers: []*runpb.Container{{
@@ -238,7 +238,7 @@ response message as `output`, undecoded:
 
 ```go
 resp, err := c.DirectRawPredict(ctx, &aiplatformpb.DirectRawPredictRequest{
-    Endpoint:   "projects/p/locations/us-central1/endpoints/model",
+    Endpoint:   "projects/my-project/locations/us-central1/endpoints/model",
     MethodName: "/tensorflow.serving.PredictionService/Predict",
     Input:      requestBytes, // a serialized tensorflow.serving.PredictRequest
 })

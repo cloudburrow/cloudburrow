@@ -430,14 +430,24 @@ Bigtable, like the others, starts from its pinned image with no network access (
 | `cloudburrow doctor` | Check workstation prerequisites, changing nothing |
 | `cloudburrow diagnose -o bundle.tar.gz` | Collect a redacted diagnostics bundle to attach to a bug report |
 | `cloudburrow env` | Print the environment that points Google tooling at this instance |
-| `cloudburrow up` | Create the environment and run in the foreground; `--offline` uses only the cache |
+| `cloudburrow up` | Create the environment and run in the foreground; `--detach` returns once it is ready; `--offline` uses only the cache |
+| `cloudburrow wait` | Wait for an instance to be ready (exit 0 ready, 1 failed, 2 timed out) |
 | `cloudburrow prefetch` | Store what `up` downloads in the state directory, for [offline use](#offline-and-air-gapped-use) |
+| `cloudburrow trust` | Trust this directory's `./cloudburrow.json` and hooks, which `up` otherwise refuses ([configuration.md](configuration.md#trust)) |
 | `cloudburrow status` | Report the instance, its endpoints and per-service persistence |
+| `cloudburrow logs` | Print emulator, component and Cloud Run logs (`--service`, `--follow`) |
+| `cloudburrow gcloud-setup` / `gcloud-teardown` | Write, or remove, a gcloud configuration for this instance ([credentials.md](credentials.md)) |
+| `cloudburrow terraform -- <args>` | Run terraform (or `--binary tofu`) with the google provider pointed at this instance |
+| `cloudburrow state save\|load <file>` | Save the running instance's state to a file, or load it back |
 | `cloudburrow stop` | Stop the cluster, **preserving** state |
 | `cloudburrow reset` | Destroy managed state, **keeping** the cluster (through the running `up` when there is one) |
 | `cloudburrow seed <file>` | Create the resources in a seed document in the running `up` |
 | `cloudburrow events` | Print the running `up`'s recent admin events |
 | `cloudburrow delete` | Destroy the cluster |
+| `cloudburrow storage-server` | Run the builtin Cloud Storage server alone, without a cluster |
+| `cloudburrow version` | Print version information (`--short` for the version alone) |
+
+`cloudburrow help` lists them, and `cloudburrow <command> --help` gives each one's flags.
 
 These are distinct and none implies another.
 

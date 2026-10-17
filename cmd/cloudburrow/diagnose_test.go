@@ -82,3 +82,17 @@ func TestWithoutEnvValues(t *testing.T) {
 		t.Errorf("unparseable input passed through: %s", got)
 	}
 }
+
+// TestDiagnoseGetArgsPutTheVerbFirst (#1583): `kubectl -A -l ... get ksvc`
+// is refused as a plugin name, so the knative services step always failed.
+func TestDiagnoseGetArgsPutTheVerbFirst(t *testing.T) {
+	for _, ns := range []string{"", "cloudburrow"} {
+		args := diagnoseGetArgs(ns, "ksvc", "demo")
+		if args[0] != "get" || args[1] != "ksvc" {
+			t.Errorf("diagnoseGetArgs(%q) = %q, want the get verb and kind first", ns, args)
+		}
+	}
+	if got := strings.Join(diagnoseGetArgs("", "ksvc", "demo"), " "); got != "get ksvc -o json -A -l cloudburrow.dev/instance=demo" {
+		t.Errorf("all namespaces: %s", got)
+	}
+}

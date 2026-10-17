@@ -353,7 +353,13 @@ func (t *tasksSeeder) Validate(spec json.RawMessage) error {
 	for i, q := range s.Queues {
 		name := q.Name
 		// The store's own parser, so validation cannot disagree with creation.
-		if n, err := resource.Parse(name); err != nil || n.Collection != "queues" {
+		// The parser's reason is kept: "projects/p/..." has the right shape,
+		// and only the reason says that "p" is too short to be a project ID.
+		n, err := resource.Parse(name)
+		if err != nil {
+			return fmt.Errorf("queues[%d] %q is not projects/{project}/locations/{location}/queues/{queue}: %v", i, name, err)
+		}
+		if n.Collection != "queues" {
 			return fmt.Errorf("queues[%d] %q is not projects/{project}/locations/{location}/queues/{queue}", i, name)
 		}
 		if seen[name] {
