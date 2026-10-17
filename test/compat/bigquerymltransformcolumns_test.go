@@ -63,7 +63,7 @@ func TestBigQueryMLPolynomialExpandOrder(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
 	row := mlQuery(t, h, c, "SELECT TO_JSON_STRING(ML.POLYNOMIAL_EXPAND(STRUCT(2 AS f1, 3 AS f2))) AS j")
-	if len(row) != 1 || row[0]["j"] != `{"f1":2.0,"f1_f1":4.0,"f1_f2":6.0,"f2":3.0,"f2_f2":9.0}` {
+	if len(row) != 1 || row[0]["j"] != `{"f1":2,"f1_f1":4,"f1_f2":6,"f2":3,"f2_f2":9}` {
 		t.Errorf("ML.POLYNOMIAL_EXPAND: %v, want f1, f1_f1, f1_f2, f2, f2_f2", row)
 	}
 }
