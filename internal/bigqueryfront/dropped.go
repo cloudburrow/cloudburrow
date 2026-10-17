@@ -305,8 +305,8 @@ func (f front) keepTable(r *http.Request, dataset, table string, hours int64) (d
 	}
 	created, _ := strconv.ParseInt(meta.CreationTime, 10, 64)
 	// The engine's clock, the front's (#1466): the emulator keeps
-	// creationTime by the system's.
-	if start, ok := f.historyStart(r, dataset, table); ok && start/1000 < created {
+	// creationTime by the system's, behind once clock:advance moved it.
+	if start, ok := f.historyStart(r, dataset, table); ok {
 		created = start / 1000
 	}
 	d := droppedTable{Project: project, Dataset: dataset, Table: table, Resource: got, Created: created, Hours: hours,
