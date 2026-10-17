@@ -108,6 +108,20 @@ diff --git a/internal/value/value_int.go b/internal/value/value_int.go
  	}
  	// CloudBurrow patch (cloudburrow/cloudburrow#1484): BigQuery's / (and
  	// SAFE_DIVIDE) of INT64s is FLOAT64, never an integer quotient
+diff --git a/query_test.go b/query_test.go
+--- a/query_test.go
++++ b/query_test.go
+@@ -7490,7 +7490,9 @@
+   SELECT 'bar' AS value UNION ALL
+   SELECT 'baz' AS value)`,
+ 			expectedRows: [][]any{{"Value is foo."}, {"Value is bar."}},
+-			expectedErr:  "Found unexpected value: baz",
++			// CloudBurrow patch (cloudburrow/cloudburrow#1585): ERROR()'s
++			// message is marked for CloudBurrow's front.
++			expectedErr: "ERROR function: Found unexpected value: baz",
+ 		},
+ 
+ 		// begin-end
 diff --git a/runtime_error_messages_test.go b/runtime_error_messages_test.go
 new file mode 100644
 --- /dev/null
