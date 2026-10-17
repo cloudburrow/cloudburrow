@@ -215,9 +215,9 @@ where the source credential is the fixture and every call stays on loopback.
 **`gcloud storage`** — the bucket list came from CloudBurrow:
 
 ```
-$ export CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE="http://127.0.0.1:8462/storage/v1/"
+$ eval "$(cloudburrow env)"   # exports CLOUDSDK_API_ENDPOINT_OVERRIDES_STORAGE and GCE_METADATA_HOST
 $ export CLOUDSDK_AUTH_ACCESS_TOKEN=$(curl -sH 'Metadata-Flavor: Google' \
-    http://127.0.0.1:9005/computeMetadata/v1/instance/service-accounts/default/token | jq -r .access_token)
+    "http://$GCE_METADATA_HOST/computeMetadata/v1/instance/service-accounts/default/token" | jq -r .access_token)
 $ gcloud storage ls
 gs://cb-e2e-21250000-bucket/
 gs://cb-env-bucket/
