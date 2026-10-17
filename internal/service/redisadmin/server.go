@@ -95,6 +95,9 @@ type Server struct {
 	// clusters are the Redis clusters CreateCluster made, when
 	// EnableClusters was called (#1519); nil otherwise.
 	clusters *clusters
+	// valkey are the Memorystore for Valkey instances (memorystore.go),
+	// when EnableValkey was called (#1519); nil otherwise.
+	valkey *clusters
 }
 
 // NewServer returns the API over backend, describing inst.

@@ -146,6 +146,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// API's JSON on its port (Endpoints.MemorystoreAdmin), each instance a
 	// Valkey server of its own.
 	{memorystoreAdminEndpoint, "redis_custom_endpoint", "GOOGLE_REDIS_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Memorystore for Valkey (#1519): google_memorystore_instance applies,
+	// plans clean, changes and destroys in TestTerraformMemorystoreInstance,
+	// over memorystore.googleapis.com's JSON, served under /memorystore/ on
+	// the same port.
+	{memorystoreAdminEndpoint, "memorystore_custom_endpoint", "GOOGLE_MEMORYSTORE_CUSTOM_ENDPOINT", "/memorystore/v1/", true, ""},
 	// google_project_service (#1352): the Service Usage API v1 on its own
 	// port, in TestTerraformProjectService.
 	{serviceUsageService, "service_usage_custom_endpoint", "GOOGLE_SERVICE_USAGE_CUSTOM_ENDPOINT", "/v1/", true, ""},

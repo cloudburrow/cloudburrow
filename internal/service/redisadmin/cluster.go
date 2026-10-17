@@ -17,6 +17,7 @@ import (
 	"time"
 
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
+	memorystorepb "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	clusterpb "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -121,7 +122,10 @@ type clusterRecord struct {
 	NextNode         int               `json:"nextNode"`
 	// Labels are the REST Cluster\'s labels, which the Go proto has not
 	// (clusterlabels.go).
-	Labels          map[string]string `json:"labels,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
+	// Valkey is a Memorystore for Valkey instance's (memorystore.go):
+	// nil for a Redis cluster.
+	Valkey          *valkeyFields `json:"valkey,omitempty"`
 	state           clusterpb.Cluster_State
 	message         string
 	pendingShards   int32
@@ -130,12 +134,15 @@ type clusterRecord struct {
 
 // clusters are the clusters CreateCluster made.
 type clusters struct {
-	rt   ClusterRuntime
-	dial ClusterDialer
-	db   store.Store
-	api  *Server
-	now  func() time.Time
-	bg   context.Context
+	// valkey is Memorystore for Valkey's instances (memorystore.go),
+	// false for Redis clusters.
+	valkey bool
+	rt     ClusterRuntime
+	dial   ClusterDialer
+	db     store.Store
+	api    *Server
+	now    func() time.Time
+	bg     context.Context
 
 	mu     sync.Mutex
 	byName map[string]*clusterRecord
@@ -170,7 +177,26 @@ func (s *Server) EnableClusters(ctx context.Context, rt ClusterRuntime, dial Clu
 
 const clusterPrefix = "clusters/"
 
+// prefix is where c's records are kept.
+func (c *clusters) prefix() string {
+	if c.valkey {
+		return valkeyPrefix
+	}
+	return clusterPrefix
+}
+
+// output is r as its API returns it. Call with mu held.
+func (c *clusters) output(r *clusterRecord) proto.Message {
+	if c.valkey {
+		return renderValkey(r)
+	}
+	return c.render(r)
+}
+
 var clusterRE = regexp.MustCompile(`^projects/([^/]+)/locations/([^/]+)/clusters/([^/]+)$`)
+
+// nodesOwnerRE matches a Redis cluster's or a Valkey instance's name.
+var nodesOwnerRE = regexp.MustCompile(`^projects/([^/]+)/locations/([^/]+)/(?:clusters|instances)/([^/]+)$`)
 
 // clusterIDRE is Google's rule for a cluster ID: 4 to 63 lowercase
 // letters, digits and hyphens, starting with a letter, not ending with a
@@ -185,7 +211,7 @@ func (c *clusters) save(r *clusterRecord) error {
 	if err != nil {
 		return err
 	}
-	return c.db.Put(clusterPrefix+clusterKey(r.Name), b)
+	return c.db.Put(c.prefix()+clusterKey(r.Name), b)
 }
 
 func clusterKey(name string) string {
@@ -196,7 +222,7 @@ func clusterKey(name string) string {
 // clusterServerName is node n's server: "redis-" and the cluster's ID (cut
 // to fit), a hash of its whole name, and "-c" and n.
 func clusterServerName(name string, n int) string {
-	id := clusterRE.FindStringSubmatch(name)[3]
+	id := nodesOwnerRE.FindStringSubmatch(name)[3]
 	if len(id) > 36 {
 		id = id[:36]
 	}
@@ -214,16 +240,18 @@ func trimHyphen(s string) string {
 // ClusterServers are the servers of every cluster's nodes, which a caller
 // tidying the cluster must keep.
 func (s *Server) ClusterServers() []string {
-	if s.clusters == nil {
-		return nil
-	}
-	s.clusters.mu.Lock()
-	defer s.clusters.mu.Unlock()
 	var out []string
-	for _, r := range s.clusters.byName {
-		for _, n := range r.Nodes {
-			out = append(out, n.Server)
+	for _, c := range []*clusters{s.clusters, s.valkey} {
+		if c == nil {
+			continue
 		}
+		c.mu.Lock()
+		for _, r := range c.byName {
+			for _, n := range r.Nodes {
+				out = append(out, n.Server)
+			}
+		}
+		c.mu.Unlock()
 	}
 	sort.Strings(out)
 	return out
@@ -233,11 +261,17 @@ func (s *Server) ClusterServers() []string {
 // background: its nodes start empty, as a cluster's do after a restart
 // without persistence.
 func (s *Server) RestoreClusters() error {
-	c := s.clusters
+	if err := s.clusters.restore(); err != nil {
+		return err
+	}
+	return s.valkey.restore()
+}
+
+func (c *clusters) restore() error {
 	if c == nil || c.db == nil {
 		return nil
 	}
-	keys, err := c.db.List(clusterPrefix)
+	keys, err := c.db.List(c.prefix())
 	if err != nil {
 		return err
 	}
@@ -251,6 +285,7 @@ func (s *Server) RestoreClusters() error {
 			return fmt.Errorf("Redis cluster %s: %w", k, err)
 		}
 		r.state, r.message = clusterpb.Cluster_CREATING, "CloudBurrow is forming the cluster again"
+		r.pendingReplicas = -1
 		c.mu.Lock()
 		c.byName[r.Name] = r
 		c.mu.Unlock()
@@ -267,9 +302,14 @@ func (s *ClusterServer) clusters() (*clusters, error) {
 }
 
 func (c *clusters) newOperation(target, verb string) string {
-	m := clusterRE.FindStringSubmatch(target)
+	m := nodesOwnerRE.FindStringSubmatch(target)
 	ops := c.api.created.ops
 	op := ops.Create("projects/"+m[1]+"/locations/"+m[2], target)
+	if c.valkey {
+		_ = ops.SetMetadata(op.Name, &memorystorepb.OperationMetadata{CreateTime: timestamppb.New(c.now()),
+			Target: target, Verb: verb, ApiVersion: "v1"})
+		return op.Name
+	}
 	_ = ops.SetMetadata(op.Name, &clusterpb.OperationMetadata{CreateTime: timestamppb.New(c.now()),
 		Target: target, Verb: verb, ApiVersion: "v1"})
 	return op.Name
@@ -280,6 +320,11 @@ func (c *clusters) finish(op string, response proto.Message, err error) {
 	if got, gerr := ops.Get(op); gerr == nil {
 		if md, ok := got.Metadata.(*clusterpb.OperationMetadata); ok {
 			md = proto.Clone(md).(*clusterpb.OperationMetadata)
+			md.EndTime = timestamppb.New(c.now())
+			_ = ops.SetMetadata(op, md)
+		}
+		if md, ok := got.Metadata.(*memorystorepb.OperationMetadata); ok {
+			md = proto.Clone(md).(*memorystorepb.OperationMetadata)
 			md.EndTime = timestamppb.New(c.now())
 			_ = ops.SetMetadata(op, md)
 		}
@@ -468,14 +513,26 @@ func (r *clusterRecord) firstPrimary() *clusterNode {
 
 func (r *clusterRecord) password() string { return "" }
 
+// standalone is whether r's nodes run without cluster mode: a Valkey
+// instance in CLUSTER_DISABLED mode, a primary and its replicas.
+func (r *clusterRecord) standalone() bool {
+	return r.Valkey != nil && r.Valkey.Mode == "CLUSTER_DISABLED"
+}
+
 // maxMemory is a node's maxmemory, in bytes.
 func (r *clusterRecord) maxMemory() int64 {
+	if r.Valkey != nil {
+		return int64(r.Valkey.nodeGB() * (1 << 30))
+	}
 	gb := nodeSizes[clusterpb.NodeType(clusterpb.NodeType_value[r.NodeType])]
 	return int64(gb * (1 << 30))
 }
 
 func (r *clusterRecord) spec(server string) Spec {
 	cfg := serverConfigs(r.RedisConfigs)
+	if r.standalone() {
+		return Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg}
+	}
 	cfg["cluster-enabled"] = "yes"
 	cfg["cluster-port"] = strconv.Itoa(clusterBusPort)
 	cfg["cluster-config-file"] = "/tmp/nodes.conf"
@@ -634,7 +691,7 @@ func (c *clusters) create(name, op string) {
 		if op != "" {
 			delete(c.byName, name)
 			if c.db != nil {
-				_ = c.db.Delete(clusterPrefix + clusterKey(name))
+				_ = c.db.Delete(c.prefix() + clusterKey(name))
 			}
 			go c.removeNodes(nodes)
 		} else {
@@ -643,9 +700,9 @@ func (c *clusters) create(name, op string) {
 	} else {
 		r.state, r.message = clusterpb.Cluster_ACTIVE, ""
 	}
-	var out *clusterpb.Cluster
+	var out proto.Message
 	if err == nil {
-		out = c.render(r)
+		out = c.output(r)
 	}
 	c.mu.Unlock()
 	if op != "" {
@@ -679,6 +736,20 @@ func (c *clusters) startNodes(ctx context.Context, r *clusterRecord, nodes []*cl
 		if err != nil {
 			return err
 		}
+	}
+	if r.Valkey != nil {
+		// Persistence (memorystore.go) is set on the running server, as an
+		// update sets it, after the arguments of CloudBurrow's own mode.
+		for _, n := range nodes {
+			for _, kv := range r.Valkey.persistenceSettings() {
+				if err := c.do(ctx, r, n, "CONFIG", "SET", kv[0], kv[1]); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if r.standalone() {
+		return nil
 	}
 	for _, n := range nodes {
 		cl := c.dial(n.addr, r.password())
@@ -714,6 +785,12 @@ func slotRanges(shards int) [][2]int {
 // form joins nodes, all new, into one cluster: slots to the primaries,
 // MEET from the first, replicas to their shard's primary.
 func (c *clusters) form(ctx context.Context, r *clusterRecord, nodes []*clusterNode) error {
+	if r.standalone() {
+		if err := c.replicate(ctx, r, nodes, nodes); err != nil {
+			return err
+		}
+		return c.settle(ctx, r, nodes)
+	}
 	ranges := slotRanges(int(r.ShardCount))
 	for _, n := range nodes {
 		if n.Primary {
@@ -780,6 +857,12 @@ func (c *clusters) replicate(ctx context.Context, r *clusterRecord, these, all [
 		if p == nil {
 			return fmt.Errorf("shard %d has no primary", n.Shard)
 		}
+		if r.standalone() {
+			if err := c.do(ctx, r, n, "REPLICAOF", p.podIP, p.port); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := c.do(ctx, r, n, "CLUSTER", "REPLICATE", p.id); err != nil {
 			return err
 		}
@@ -793,7 +876,7 @@ func (c *clusters) settle(ctx context.Context, r *clusterRecord, nodes []*cluste
 	return c.until(ctx, "cluster_state:ok on every node", func() bool {
 		for _, n := range r.Nodes {
 			cl := c.dial(n.addr, r.password())
-			ok := known(ctx, cl, "cluster_state") == "ok"
+			ok := r.standalone() || known(ctx, cl, "cluster_state") == "ok"
 			if ok && !n.Primary {
 				info, err := cl.Do(ctx, "INFO", "replication")
 				ok = err == nil && clusterInfoField(fmt.Sprint(info), "master_link_status") == "up"
@@ -1128,7 +1211,7 @@ func (c *clusters) reshape(name, op string, shards, replicas int32) {
 		err = c.save(r)
 	}
 	r.state, r.message = clusterpb.Cluster_ACTIVE, ""
-	out := c.render(r)
+	out := c.output(r)
 	c.mu.Unlock()
 	if removed != nil && err == nil {
 		c.removeNodes(removed)
@@ -1250,8 +1333,10 @@ func (c *clusters) addReplicas(ctx context.Context, r *clusterRecord, replicas i
 		c.removeNodes(added)
 		return err
 	}
-	if err := c.meet(ctx, r, r.firstPrimary(), added); err != nil {
-		return err
+	if !r.standalone() {
+		if err := c.meet(ctx, r, r.firstPrimary(), added); err != nil {
+			return err
+		}
 	}
 	if err := c.replicate(ctx, r, added, r.Nodes); err != nil {
 		return err
@@ -1284,6 +1369,10 @@ func (c *clusters) removeReplicas(ctx context.Context, r *clusterRecord, replica
 // forget removes gone from the cluster: CLUSTER RESET on each, so it stops
 // gossiping, and FORGET on every node kept.
 func (c *clusters) forget(ctx context.Context, r *clusterRecord, keep, gone []*clusterNode) error {
+	if r.standalone() {
+		r.Nodes = keep
+		return nil
+	}
 	for _, g := range gone {
 		_ = c.do(ctx, r, g, "CLUSTER", "RESET", "HARD")
 	}
@@ -1331,7 +1420,7 @@ func (s *ClusterServer) DeleteCluster(ctx context.Context, req *clusterpb.Delete
 		delete(c.byName, name)
 		var err error
 		if c.db != nil {
-			if derr := c.db.Delete(clusterPrefix + clusterKey(name)); derr != nil && !errors.Is(derr, store.ErrNotFound) {
+			if derr := c.db.Delete(c.prefix() + clusterKey(name)); derr != nil && !errors.Is(derr, store.ErrNotFound) {
 				err = derr
 			}
 		}

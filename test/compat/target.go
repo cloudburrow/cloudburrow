@@ -209,6 +209,7 @@ var gcloudOverrides = []struct {
 	{"cloudfunctions", []string{"RUN"}},
 	{"sql", []string{"SQLADMIN"}},
 	{"redis", []string{"MEMORYSTORE_ADMIN"}},
+	{"memorystore", []string{"MEMORYSTORE_ADMIN"}},
 	{"backupdr", []string{"BACKUPDR"}},
 	// Bigtable's admin REST API, on the Bigtable front's port (#1440).
 	{"bigtableadmin", []string{"BIGTABLE"}},

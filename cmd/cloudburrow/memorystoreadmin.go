@@ -113,6 +113,9 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	// Memorystore for Redis Cluster (#1519): a real Redis Cluster per
 	// cluster, its nodes Valkey servers in cluster mode.
 	s.api.EnableClusters(bg, s.prov, redisadmin.DialCluster, db)
+	// Memorystore for Valkey (#1519): each instance's nodes as a Redis
+	// cluster's are, cluster mode or a primary and its replicas.
+	s.api.EnableValkey(bg, s.prov, redisadmin.DialCluster, db)
 	// Import and export (#1384) read and write this instance's Cloud
 	// Storage, so without it they say so.
 	if serviceEnabled(s.cfg, config.ServiceStorage) {
@@ -161,12 +164,28 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 		ops.Register(g)
 		locs.Register(g)
 	}
-	var jsonAPI http.Handler = s.api.ClusterLabels(redisadmin.NewRESTHandler(register))
+	// Memorystore for Valkey (#1519): gRPC on this port beside the rest,
+	// its JSON API under /memorystore, as its paths are CloudRedis's.
+	valkey := redisadmin.NewMemorystoreServer(s.api)
+	registerValkey := func(g grpc.ServiceRegistrar) {
+		valkey.Register(g)
+		ops.Register(g)
+		locs.Register(g)
+	}
+	redisJSON := s.api.ClusterLabels(redisadmin.NewRESTHandler(register))
+	valkeyJSON := redisadmin.NewMemorystoreRESTHandler(registerValkey)
+	var jsonAPI http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, redisadmin.MemorystoreRESTPrefix+"/") {
+			valkeyJSON.ServeHTTP(w, r)
+			return
+		}
+		redisJSON.ServeHTTP(w, r)
+	})
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
 	s.server.ServeHTTP(jsonAPI)
-	if err := s.server.Register(func(g *grpc.Server) { register(g) }); err != nil {
+	if err := s.server.Register(func(g *grpc.Server) { register(g); valkey.Register(g) }); err != nil {
 		return err
 	}
 	return s.server.Start(ctx)

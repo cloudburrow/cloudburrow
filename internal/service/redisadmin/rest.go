@@ -43,3 +43,13 @@ func NewRESTHandler(register func(grpc.ServiceRegistrar)) http.Handler {
 	register(t)
 	return t
 }
+
+// NewMemorystoreRESTHandler returns the JSON API of
+// google.cloud.memorystore.v1 (#1519) for what register adds, with the
+// Operations and Locations mixins, its paths under MemorystoreRESTPrefix:
+// memorystore.googleapis.com's paths are the same as redis.googleapis.com's.
+func NewMemorystoreRESTHandler(register func(grpc.ServiceRegistrar)) http.Handler {
+	t := &rest.Transcoder{Packages: []string{"google.cloud.memorystore.v1"}, Mixins: mixins, SnakeCaseMasks: true}
+	register(t)
+	return http.StripPrefix(MemorystoreRESTPrefix, t)
+}
