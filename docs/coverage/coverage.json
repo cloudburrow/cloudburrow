@@ -8015,7 +8015,9 @@
           "test/compat/bigquerycolumnbuffer_test.go:34 TestBigQueryColumnStreamingBuffer",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycolumnoptions_test.go:29 TestBigQueryCreateTableColumnOptions",
-          "test/compat/bigquerycolumns1490_test.go:27 TestBigQueryColumnsOfEveryType",
+          "test/compat/bigquerycolumns1490_test.go:29 TestBigQueryColumnsOfEveryType",
+          "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
+          "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigqueryddlleftovers_test.go:133 TestBigQueryAlterColumnSetOptionsRoundingMode",
@@ -8151,7 +8153,9 @@
           "test/compat/bigquerycolumnbuffer_test.go:34 TestBigQueryColumnStreamingBuffer",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycolumnoptions_test.go:29 TestBigQueryCreateTableColumnOptions",
-          "test/compat/bigquerycolumns1490_test.go:27 TestBigQueryColumnsOfEveryType",
+          "test/compat/bigquerycolumns1490_test.go:29 TestBigQueryColumnsOfEveryType",
+          "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
+          "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
           "test/compat/bigquerycorrectness_test.go:322 TestBigQueryCreateTableLikeAndCopy",
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigqueryddlleftovers_test.go:133 TestBigQueryAlterColumnSetOptionsRoundingMode",
@@ -8432,6 +8436,8 @@
           "test/compat/bigquerychangehistory_test.go:120 TestBigQueryChangeHistoryWritePaths",
           "test/compat/bigquerycolumnbuffer_test.go:34 TestBigQueryColumnStreamingBuffer",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
+          "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
+          "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
           "test/compat/bigqueryiceberg_test.go:46 TestBigQueryIcebergTablesWriteIcebergFiles",
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
           "test/compat/bigqueryjson_test.go:43 TestBigQueryToJSONStringOfStoredRows",
@@ -8499,6 +8505,8 @@
           "test/compat/bigquerycolumnbuffer_test.go:34 TestBigQueryColumnStreamingBuffer",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
           "test/compat/bigquerycolumnoptions_test.go:29 TestBigQueryCreateTableColumnOptions",
+          "test/compat/bigquerycolumntypes_test.go:267 TestBigQueryParameterizedColumnsByDDL",
+          "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
           "test/compat/bigqueryddlleftovers_test.go:133 TestBigQueryAlterColumnSetOptionsRoundingMode",
           "test/compat/bigqueryddlleftovers_test.go:199 TestBigQueryAlterTableDryRun",
           "test/compat/bigqueryddlleftovers_test.go:283 TestBigQueryDDLThroughExecuteImmediate",
@@ -8563,6 +8571,7 @@
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigquerychangehistory_test.go:120 TestBigQueryChangeHistoryWritePaths",
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
+          "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigqueryddlleftovers_test.go:31 TestBigQueryAlterTableSetDataTypeArraysAndKeyedColumns",
           "test/compat/bigqueryextractdecimal_test.go:37 TestBigQueryExtractOfParameterizedDecimals",
@@ -8596,6 +8605,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerycolumndefaults_test.go:33 TestBigQueryColumnDefaults",
+          "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
           "test/compat/bigquerydml_test.go:193 TestBigQueryTablePatchLabelsAndDescription",
           "test/compat/bigquerydml_test.go:252 TestBigQueryTablePatchRefusesSchemaChanges",
           "test/compat/bigquerydml_test.go:286 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
@@ -8628,6 +8638,7 @@
         "method": "bigquery.tables.update",
         "status": "Verified",
         "tests": [
+          "test/compat/bigquerycolumntypes_test.go:80 TestBigQueryRangeColumnsThroughTheAPI",
           "test/compat/bigquerysilent_test.go:594 TestBigQueryTableUpdateAddsColumns"
         ]
       }
