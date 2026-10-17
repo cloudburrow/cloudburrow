@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/version"
 	"net/http"
@@ -57,6 +59,11 @@ type adminDeps struct {
 	// serviceUsage is the Service Usage API, for its per-project API
 	// states' reset (#1537); read at reset time for the same reason.
 	serviceUsage func() *serviceusage.Server
+	// sqlAdmin and backupDR are the Cloud SQL Admin API and Backup and
+	// DR, for their per-project resets (#1541, #1542); built after the
+	// routes are mounted, so read at reset time.
+	sqlAdmin func() *sqladmin.Server
+	backupDR func() *backupdr.Server
 }
 
 // mountAdmin attaches the admin API to the control server.
@@ -144,6 +151,17 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		// Which APIs each project disabled, and the operations that did it
 		// (#1537), kept in the registry's store.
 		api.RegisterResetter(&serviceUsageResetter{srv: d.serviceUsage})
+	}
+	if d.run != nil {
+		// Repositories and projects' settings (#1543), served beside Cloud Run.
+		api.RegisterResetter(artifactRegistryResetter{})
+	}
+	// Backup and DR before the Admin API it takes its backups through.
+	if d.backupDR != nil && backupDREnabled(cfg) {
+		api.RegisterResetter(&backupDRResetter{srv: d.backupDR})
+	}
+	if d.sqlAdmin != nil && sqlAdminEnabled(cfg) {
+		api.RegisterResetter(&sqlAdminResetter{srv: d.sqlAdmin})
 	}
 
 	// State snapshots (#289): the services whose state is theirs to keep,
