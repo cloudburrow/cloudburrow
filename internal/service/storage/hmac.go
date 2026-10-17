@@ -277,7 +277,8 @@ func (s *Server) hmacKeysList(w http.ResponseWriter, r *http.Request) {
 
 // serviceAccountGet is the project's Cloud Storage service agent,
 // service-PROJECT_NUMBER@gs-project-accounts.iam.gserviceaccount.com, with
-// the project number CloudBurrow derives for every project.
+// the project's number (resource.ProjectNumber; the host sends the
+// registry's, projectnumbers.go).
 func (s *Server) serviceAccountGet(w http.ResponseWriter, r *http.Request) {
 	project := pathVar(r, jsonPrefix, 1)
 	writeResponse(w, r, http.StatusOK, map[string]any{

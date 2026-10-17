@@ -58,7 +58,7 @@ func V3Name(id string) string {
 
 func toProto(p Project) *rmpb.Project {
 	out := &rmpb.Project{
-		Name:        V3Name(p.ProjectID),
+		Name:        "projects/" + strconv.FormatInt(numberOf(p), 10),
 		ProjectId:   p.ProjectID,
 		DisplayName: p.DisplayName,
 		Labels:      p.Labels,
@@ -93,7 +93,7 @@ func (s *ProjectsServer) idFromName(name string) (string, error) {
 		return "", err
 	}
 	for _, p := range projects {
-		if projectNumber(p.ProjectID) == n {
+		if numberOf(p) == n {
 			return p.ProjectID, nil
 		}
 	}
