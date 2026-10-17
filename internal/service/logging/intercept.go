@@ -280,3 +280,24 @@ func addIntercept(a *Admin, p parent, raw []byte) []byte {
 	}
 	return out
 }
+
+// SinkIntercepts is the intercept_children a sink ConfigServiceV2 answered
+// carries (field 10), for an in-process caller such as the console (#1572).
+func SinkIntercepts(sk *loggingpb.LogSink) bool {
+	v, _ := requestIntercept(context.Background(), sk)
+	return v
+}
+
+// SetSinkIntercept sets intercept_children on a sink an in-process caller
+// sends ConfigServiceV2, as a newer gRPC client does (field 10). An update
+// applies it when its mask names intercept_children.
+func SetSinkIntercept(sk *loggingpb.LogSink, v bool) {
+	if !v {
+		// field 10 present and false, so a create or update says false
+		// rather than leaving it unset.
+		u := protowire.AppendTag(nil, interceptField, protowire.VarintType)
+		sk.ProtoReflect().SetUnknown(protowire.AppendVarint(u, 0))
+		return
+	}
+	markIntercept(sk, true)
+}

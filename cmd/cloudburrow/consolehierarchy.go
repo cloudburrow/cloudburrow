@@ -16,6 +16,18 @@ import (
 // scoped to a project: it is the tree projects sit in.
 type hierarchyProvider struct {
 	registry *resourcemanager.Registry
+	// sinks reads a folder's or organization's log sinks for its Log
+	// router tab (#1572); nil when Cloud Logging is not on the instance.
+	sinks *loggingAdminScreen
+}
+
+// logRouter adds parent's Log router link to its Details and its Log
+// router tab, when Cloud Logging is on the instance (#1572).
+func (p hierarchyProvider) logRouter(ctx context.Context, parent string, props []console.Property, sections []console.Section) ([]console.Property, []console.Section) {
+	if p.sinks == nil || p.sinks.svc == nil {
+		return props, sections
+	}
+	return append(props, sinkRouterProperty(parent)), append(sections, p.sinks.sinkSection(ctx, parent))
 }
 
 func (hierarchyProvider) ID() string    { return "hierarchy" }
@@ -194,15 +206,20 @@ func (p hierarchyProvider) Detail(ctx context.Context, _ string, path []string) 
 		}
 	}
 	projects.Total = len(projects.Items)
+	sections := []console.Section{
+		{ID: "folders", Label: "Folders", Listing: children},
+		{ID: "projects", Label: "Projects", Listing: projects},
+		{ID: "org-policies", Label: "Organization policies", Listing: orgPolicyListing(p.registry, f.Name)},
+		tagSection(p.registry, resourcemanager.CRMPrefix+f.Name),
+	}
+	if f.State == resourcemanager.StateActive {
+		props, sections = p.logRouter(ctx, f.Name, props, sections)
+	}
 	d := console.Detail{
 		Summary: props[:2],
-		Sections: []console.Section{
+		Sections: append([]console.Section{
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Folder", Properties: props}}},
-			{ID: "folders", Label: "Folders", Listing: children},
-			{ID: "projects", Label: "Projects", Listing: projects},
-			{ID: "org-policies", Label: "Organization policies", Listing: orgPolicyListing(p.registry, f.Name)},
-			tagSection(p.registry, resourcemanager.CRMPrefix+f.Name),
-		},
+		}, sections...),
 	}
 	if f.State == resourcemanager.StateActive {
 		d.Edit = &console.EditForm{Label: "Rename folder", Fields: []console.Field{
