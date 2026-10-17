@@ -271,8 +271,9 @@ func TestConsoleLoggingViews(t *testing.T) {
 		}
 		return nil
 	}
-	if r := viewRow(d, "_AllLogs"); r == nil || len(r.Actions) != 0 {
-		t.Errorf("_AllLogs row = %+v; want it listed with no actions", r)
+	// _AllLogs cannot change, but its Permissions can (#1519).
+	if r := viewRow(d, "_AllLogs"); r == nil || len(r.Actions) != 1 || r.Actions[0].ID != viewPermissions {
+		t.Errorf("_AllLogs row = %+v; want it listed with Permissions alone", r)
 	}
 
 	if code, out := consolePost(t, acts, map[string]any{"Path": []string{bucket}, "Action": viewCreate,
@@ -287,9 +288,9 @@ func TestConsoleLoggingViews(t *testing.T) {
 	d = console.Detail{}
 	getJSON200(t, detailURL(bucket), &d)
 	r := viewRow(d, "errors")
-	if r == nil || len(r.Actions) != 2 || r.Actions[0].ID != viewEdit || r.Actions[1].ID != viewDelete ||
-		r.Actions[0].Fields[0].Default != "severity>=ERROR" {
-		t.Fatalf("the new view's row = %+v; want Edit with its filter, and Delete", r)
+	if r == nil || len(r.Actions) != 3 || r.Actions[0].ID != viewEdit || r.Actions[1].ID != viewDelete ||
+		r.Actions[2].ID != viewPermissions || r.Actions[0].Fields[0].Default != "severity>=ERROR" {
+		t.Fatalf("the new view's row = %+v; want Edit with its filter, Delete and Permissions (#1519)", r)
 	}
 	if code, out := consolePost(t, acts, map[string]any{"Path": []string{bucket, "errors"}, "Action": viewEdit,
 		"Values": map[string]string{"filter": "severity>=WARNING", "description": "warnings"}}); code != http.StatusOK {

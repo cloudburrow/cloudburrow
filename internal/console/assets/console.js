@@ -191,6 +191,11 @@ const ROUTES = [
   // Logs Storage's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
   { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Logs Storage settings",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  // Saved queries and log scopes (#1519).
+  { path: "/logs/saved-queries", service: "logging-saved-queries", icon: "logs", title: "Saved queries",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Log scopes",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
@@ -5081,6 +5086,8 @@ const DELETE_DETAIL = {
   "logging-metrics": "The metric's definition is deleted. No log entry is removed.",
   "logging-sinks": "The sink's definition is deleted. It delivered nothing, so nothing downstream changes.",
   "logging-exclusions": "Entries it matches are stored again from now on. Entries it dropped are not brought back.",
+  "logging-saved-queries": "The saved query is deleted. No log entry is removed.",
+  "logging-log-scopes": "The log scope is deleted. The projects and views it named are not changed.",
   "logging-buckets": "The bucket is kept as Delete requested for 7 days and can be undeleted until then. No log entry is removed.",
   "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
             "schema settings, which then name _deleted-schema_.",

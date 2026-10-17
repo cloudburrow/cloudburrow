@@ -226,7 +226,9 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 	if enabled[config.ServiceLogging] && d.logging != nil {
 		screen := loggingAdminScreen{svc: d.logging, faults: d.faults}
 		providers = append(providers, loggingMetricsProvider{screen}, loggingSinksProvider{screen}, loggingExclusionsProvider{screen}, loggingBucketsProvider{screen},
-			loggingSettingsProvider{screen})
+			loggingSettingsProvider{screen},
+			// Saved queries and log scopes (#1519).
+			loggingSavedQueriesProvider{screen}, loggingLogScopesProvider{screen})
 	}
 	// The opt-in databases. Each had a working backend and no screen, which
 	// reads as "not implemented" to anyone looking at the console. The

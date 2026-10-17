@@ -120,7 +120,8 @@ resources (#1403); sink delivery to Cloud Storage, Pub/Sub, BigQuery and another
 TailLogEntries on views and over JSON (#1410); `CopyLogEntries` from folder, organization and
 billing-account buckets (#1411); Log Analytics, a link making a read-only BigQuery linked dataset
 (#1423), with a view per log view, retention and DeleteLog applied to its rows, and links refused
-on folder and organization buckets, as Google refuses them (#1435).
+on folder and organization buckets, as Google refuses them (#1435); log view IAM, saved queries
+and log scopes, with their console and the view IAM Terraform resources (#1519).
 
 | Gap | Why open | Size |
 |---|---|---|
