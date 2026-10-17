@@ -592,7 +592,7 @@ flags, deletion protection, automated backups and their start time, sent as one
 `instances.clone` are served, for created instances and for the servers `up` runs, so
 `gcloud sql backups create`, `list`, `restore` and `delete` work.
 
-- **A backup is a real dump**, taken with the mechanism `cloudburrow snapshot` uses for
+- **A backup is a real dump**, taken with the mechanism `cloudburrow state save` uses for
   Cloud SQL: `pg_dump -Fc` of each database (or `mysqldump --single-transaction --routines
   --triggers --events` of each database but MySQL's own), run inside the server's pod, and
   kept on the host in `cloudsql-backups/<id>/` in the instance directory. A created

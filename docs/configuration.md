@@ -422,7 +422,7 @@ server trusts every connection. See [cloudsql.md](cloudsql.md#2-what-you-get).
 **Resource Manager v3** is always served, on `--port-resourcemanager` (default `9007`). `env`
 exports `CLOUDBURROW_RESOURCEMANAGER_ENDPOINT`, to pass to `option.WithEndpoint`, and
 `CLOUDSDK_API_ENDPOINT_OVERRIDES_CLOUDRESOURCEMANAGER`. Only the v3 Projects API is served; see
-[compatibility.md](compatibility.md#resource-manager--googlecloudresourcemanagerv3-projects-only).
+[compatibility.md](compatibility.md#resource-manager--googlecloudresourcemanagerv3-projects-folders-organizations-tags-liens).
 
 **BigQuery has no emulator variable in any official client library**, so `env` exports
 CloudBurrow's own: `CLOUDBURROW_BIGQUERY_ENDPOINT` for REST and
@@ -816,7 +816,7 @@ From the CLI, against the running `up` of the configured instance (`--name`):
 ```sh
 cloudburrow seed seed.json                   # POST /admin/seed; --if-not-exists to repeat safely
 cloudburrow reset                            # POST /admin/reset
-cloudburrow reset --service pubsub --project p
+cloudburrow reset --service pubsub --project dev-project
 cloudburrow reset --reseed                   # reset, then re-apply up's --seed-file
 cloudburrow events --service tasks --limit 20
 cloudburrow events --since 10m --format json # one JSON object per line
@@ -831,10 +831,10 @@ The same with curl:
 ```sh
 TOKEN="Authorization: Bearer $(cat ~/.cloudburrow/cloudburrow/admin-token)"
 curl -H "$TOKEN" -X POST localhost:9000/admin/seed -d '{
-  "components": {"tasks": {"queues": ["projects/p/locations/us-central1/queues/work"]}}
+  "components": {"tasks": {"queues": ["projects/dev-project/locations/us-central1/queues/work"]}}
 }'
 curl -H "$TOKEN" -X POST localhost:9000/admin/reset
-curl -H "$TOKEN" -X POST "localhost:9000/admin/reset?service=pubsub&project=p"
+curl -H "$TOKEN" -X POST "localhost:9000/admin/reset?service=pubsub&project=dev-project"
 curl -H "$TOKEN" "localhost:9000/admin/events?service=tasks&limit=20"
 ```
 
@@ -913,10 +913,14 @@ in its state directory.
 **Seeding.** One document can seed Cloud Tasks queues, Cloud Storage buckets and objects,
 Pub/Sub schemas, topics and subscriptions, Secret Manager secrets with their versions, and Cloud
 Scheduler jobs (#600). The schema is
-[`seed.schema.json`](seed.schema.json):
+[`seed.schema.json`](seed.schema.json). A component is seeded only on an instance that serves it,
+and Cloud Scheduler is opt-in, so this one needs an `up` whose `--services` include `scheduler`
+as well as `storage`, `pubsub` and `secretmanager`; on the default services it is refused with
+`unknown component "scheduler"` and nothing is seeded. `$TOKEN` is the header from the curl
+example above:
 
 ```sh
-curl -X POST localhost:9000/admin/seed -d '{"components": {
+curl -H "$TOKEN" -X POST localhost:9000/admin/seed -d '{"components": {
   "storage": {"buckets": [{"name": "assets", "objects": [
     {"name": "config.json", "content": "{\"debug\": true}", "contentType": "application/json"},
     {"name": "logo.png", "contentBase64": "iVBORw0KGgo="}]}]},
