@@ -72,9 +72,16 @@ func init() {
 }
 
 // datasetMeta keeps the tables.get resources of each dataset one query
-// reads, so two views of one dataset read them once.
+// reads, so two views of one dataset read them once. With only, it reads
+// and keeps only the tables only keeps (pushedNameFilter, #1510).
 type datasetMeta struct {
 	tables map[string][]map[string]any
+	only   *nameFilter
+}
+
+// keeps reports whether m reads table.
+func (m *datasetMeta) keeps(table string) bool {
+	return m == nil || m.only.table(table)
 }
 
 // infoTable is one table's tables.get resource.
@@ -112,6 +119,9 @@ func (f front) tablesOf(r *http.Request, dataset string, m *datasetMeta) ([]info
 		for _, tb := range list.Tables {
 			if dataset == resultsDataset && tb.TableReference.TableID == jobsTableName {
 				continue // the front's table of JOBS rows (jobstable.go, #1378)
+			}
+			if !m.keeps(tb.TableReference.TableID) {
+				continue // no row of it can pass the query's WHERE
 			}
 			st, got := f.get(r, tablePath(dataset, tb.TableReference.TableID))
 			if st == http.StatusNotFound {

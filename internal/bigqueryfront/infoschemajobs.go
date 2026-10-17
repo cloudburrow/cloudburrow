@@ -402,7 +402,14 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 		if jobsViews[key] && !hierarchyJobsViews[key] {
 			key = "JOBS"
 		}
-		sub, ok := subs[key]
+		// The datasets and tables the query can read (#1510,
+		// infoschemanames.go), read with their own datasetMeta.
+		only := pushedNameFilter(q.Query, ref.pos, ref.end, ref.alias, ref.view)
+		m := meta
+		if only != nil {
+			m = &datasetMeta{only: only}
+		}
+		sub, ok := subs[key+only.key()]
 		if !ok {
 			var status int
 			var msg string
@@ -414,9 +421,9 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 			case hierarchyJobsViews[key]: // #1392, infoschemahierarchy.go
 				sub, status, msg = f.hierarchyJobsRows(r, key, pushedJobsFilter(q.Query, refs, f.now()))
 			case key == "TABLE_STORAGE":
-				sub, status, msg = f.regionRows(r, meta, "TABLE_STORAGE", storageColumns, inRegion(location, front.storageRows))
+				sub, status, msg = f.regionRows(r, m, "TABLE_STORAGE", storageColumns, inRegion(location, front.storageRows))
 			default: // the region's datasets alone (#1375, projectoptions.go)
-				sub, status, msg = f.regionRows(r, meta, key, "", inRegion(location, infoSchemaBuilders[key]))
+				sub, status, msg = f.regionRows(r, m, key, "", inRegion(location, infoSchemaBuilders[key]))
 			}
 			if status != 0 {
 				reason := map[int]string{http.StatusNotFound: "notFound", http.StatusNotImplemented: "notImplemented",
@@ -427,7 +434,7 @@ func (f front) withInformationSchemaJobs(w http.ResponseWriter, r *http.Request,
 				writeError(w, status, reason, msg)
 				return
 			}
-			subs[key] = sub
+			subs[key+only.key()] = sub
 		}
 		b.WriteString(q.Query[last:ref.pos])
 		b.WriteString(sub)
@@ -496,7 +503,8 @@ func (f front) datasetIDs(r *http.Request) ([]string, int, string) {
 	return out, 0, ""
 }
 
-// regionRows is the subquery of view's rows of every dataset.
+// regionRows is the subquery of view's rows of every dataset meta reads
+// (all of them, or those its filter keeps).
 func (f front) regionRows(r *http.Request, meta *datasetMeta, view, columns string,
 	build func(front, *http.Request, string, *datasetMeta) (string, int, string)) (string, int, string) {
 	if columns == "" {
@@ -508,6 +516,9 @@ func (f front) regionRows(r *http.Request, meta *datasetMeta, view, columns stri
 	}
 	var subs []string
 	for _, ds := range datasets {
+		if !meta.only.schema(ds) {
+			continue // no row of it can pass the query's WHERE (#1510)
+		}
 		sub, st, msg := build(f, r, ds, meta)
 		if st == http.StatusNotFound {
 			continue // deleted meanwhile
@@ -607,6 +618,45 @@ func (f front) storageBytes(r *http.Request, project, dataset string, t infoTabl
 	return logical, active, long, modified, 0, ""
 }
 
+// storageAtOnce is totalPartitions and storageBytes of table t read by
+// one query of the engine, not five (#1510): its partitions, its logical
+// bytes and its change table's last change. ok is false when that query
+// fails, a column the engine keeps under another name or a table with no
+// change table, and the two are read one by one, as they say.
+func (f front) storageAtOnce(r *http.Request, project, dataset string, t infoTable) (parts int64, logical, active, long, modified string, ok bool) {
+	raw, err := json.Marshal(t)
+	var pm partitionMeta
+	if err != nil || json.Unmarshal(raw, &pm) != nil {
+		return 0, "", "", "", "", false
+	}
+	name := str(t, "tableId")
+	id, ok := partitionIDExpr(pm)
+	if !ok {
+		return 0, "", "", "", "", false
+	}
+	path := quotePath([]string{project, dataset, name})
+	count := "0"
+	if id != "" {
+		count = "(SELECT COUNT(DISTINCT " + id + ") FROM " + path + ")"
+	}
+	got, msg := f.scalars(r, "SELECT "+count+", (SELECT IFNULL(SUM("+logicalBytesExpr(pm.Schema.Fields)+"), 0) FROM "+path+"), "+
+		"(SELECT IFNULL(UNIX_MICROS(MAX(_CHANGE_TIMESTAMP)), -1) FROM "+quotePath([]string{project, dataset, name + changeTableSuffix})+
+		" WHERE _CHANGE_TYPE != 'START')", 3)
+	if msg != "" {
+		return 0, "", "", "", "", false
+	}
+	n := got[1]
+	logical, active, long, modified = strconv.FormatInt(n, 10), "NULL", "NULL", "NULL"
+	if ms, err := strconv.ParseInt(str(t, "creationTime"), 10, 64); err == nil && f.now().Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
+		active, long = logical, "0"
+	}
+	rows, _ := strconv.ParseInt(str(t, "numRows"), 10, 64)
+	if us := got[2]; us >= 0 && (rows > 0 || n > 0) {
+		modified = "TIMESTAMP_MICROS(" + strconv.FormatInt(us, 10) + ")"
+	}
+	return got[0], logical, active, long, modified, true
+}
+
 // storageRows are a dataset's TABLE_STORAGE rows: its tables, snapshots
 // and clones (no view), none deleted (the instance keeps none).
 func (f front) storageRows(r *http.Request, dataset string, m *datasetMeta) (string, int, string) {
@@ -627,13 +677,16 @@ func (f front) storageRows(r *http.Request, dataset string, m *datasetMeta) (str
 		} else if t["cloneDefinition"] != nil {
 			tt = "CLONE"
 		}
-		parts, st, msg := f.totalPartitions(r, project, dataset, t)
-		if st != 0 {
-			return "", st, msg
-		}
-		logical, active, long, modified, st, msg := f.storageBytes(r, project, dataset, t)
-		if st != 0 {
-			return "", st, msg
+		parts, logical, active, long, modified, ok := f.storageAtOnce(r, project, dataset, t)
+		if !ok {
+			var st int
+			var msg string
+			if parts, st, msg = f.totalPartitions(r, project, dataset, t); st != 0 {
+				return "", st, msg
+			}
+			if logical, active, long, modified, st, msg = f.storageBytes(r, project, dataset, t); st != 0 {
+				return "", st, msg
+			}
 		}
 		rows = append(rows, []string{sqlString(project), "NULL", sqlString(project), sqlString(dataset), sqlString(str(t, "tableId")),
 			millisTimestamp(t["creationTime"]), int64Or(t["numRows"]), strconv.FormatInt(parts, 10), logical, active, long, modified,

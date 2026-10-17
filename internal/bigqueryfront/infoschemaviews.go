@@ -97,7 +97,7 @@ const viewsColumns = "STRUCT<table_catalog STRING, table_schema STRING, table_na
 
 // viewsRows returns the subquery of dataset's views, or the status and
 // message of why it cannot.
-func (f front) viewsRows(r *http.Request, dataset string, _ *datasetMeta) (string, int, string) {
+func (f front) viewsRows(r *http.Request, dataset string, m *datasetMeta) (string, int, string) {
 	project := projectOf(f.base)
 	if st, _ := f.get(r, "/datasets/"+url.PathEscape(dataset)); st == http.StatusNotFound {
 		return "", http.StatusNotFound, fmt.Sprintf("Not found: Dataset %s:%s", project, dataset)
@@ -123,7 +123,7 @@ func (f front) viewsRows(r *http.Request, dataset string, _ *datasetMeta) (strin
 			return "", http.StatusInternalServerError, "cloudburrow: could not list the dataset's tables: " + errorMessage(got, st)
 		}
 		for _, tb := range list.Tables {
-			if tb.Type != "VIEW" {
+			if tb.Type != "VIEW" || !m.keeps(tb.TableReference.TableID) {
 				continue
 			}
 			st, got := f.get(r, tablePath(dataset, tb.TableReference.TableID))
@@ -190,12 +190,23 @@ func (f front) withInformationSchemaViews(w http.ResponseWriter, r *http.Request
 				" is not built (docs/compatibility.md), so nothing was run.")
 			return
 		}
-		key := ref.dataset + "\x00" + ref.view
+		// The tables the query can read (#1510, infoschemanames.go), read
+		// with their own datasetMeta. The dataset is the reference's.
+		only := pushedNameFilter(q.Query, ref.pos, ref.end, ref.alias, ref.view)
+		if only != nil && only.tables == nil {
+			only = nil
+		}
+		m := meta
+		if only != nil {
+			only.schemas = nil
+			m = &datasetMeta{only: only}
+		}
+		key := ref.dataset + "\x00" + ref.view + only.key()
 		sub, ok := subs[key]
 		if !ok {
 			var status int
 			var msg string
-			sub, status, msg = infoSchemaBuilders[ref.view](f, r, ref.dataset, meta)
+			sub, status, msg = infoSchemaBuilders[ref.view](f, r, ref.dataset, m)
 			if status != 0 {
 				reason := map[int]string{http.StatusNotFound: "notFound", http.StatusNotImplemented: "notImplemented"}[status]
 				if reason == "" {
