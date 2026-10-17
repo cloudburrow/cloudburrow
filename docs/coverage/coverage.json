@@ -10334,6 +10334,7 @@
           "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
@@ -10353,6 +10354,7 @@
           "test/compat/cloudsqlfields_test.go:64 TestCloudSQLFieldsNeverSilentlyDropped",
           "test/compat/cloudsqlha_test.go:34 TestCloudSQLHighAvailability",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlproxy_test.go:135 TestCloudSQLAuthProxyBinary",
           "test/compat/cloudsqlreplicas_test.go:28 TestCloudSQLReadReplicas",
           "test/compat/cloudsqlreplicaupgrade_test.go:25 TestCloudSQLMySQLReplicaUpgradedOnItsOwn",
@@ -10527,6 +10529,7 @@
           "test/compat/cloudsqlinstances_test.go:230 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlreplicas_test.go:203 TestCloudSQLReplicaOfUpsServer",
           "test/compat/cloudsqlreplicas_test.go:268 TestGcloudSQLReadReplica",
@@ -10604,6 +10607,7 @@
           "test/compat/cloudsqlinstances_test.go:230 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
@@ -10658,6 +10662,7 @@
           "test/compat/cloudsqlinstances_test.go:230 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:244 TestCloudSQLPointInTimeRetention",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
@@ -10864,6 +10869,7 @@
           "test/compat/cloudsqlinstances_test.go:230 TestGcloudSQLInstances",
           "test/compat/cloudsqlinstances_test.go:257 TestTerraformSQLDatabaseInstance",
           "test/compat/cloudsqlinstances_test.go:55 TestCloudSQLInstanceWrites",
+          "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical",
           "test/compat/cloudsqlpitr_test.go:193 TestGcloudSQLPointInTimeClone",
           "test/compat/cloudsqlpitr_test.go:83 TestCloudSQLPointInTimeRecovery",
           "test/compat/cloudsqlreplicaupgrade_test.go:111 TestCloudSQLPostgresOldVersionsAndRefusals",
@@ -10932,7 +10938,8 @@
           "test/compat/cloudsqlexternal_cli_test.go:26 TestGcloudSQLExternalPostgresOffline",
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
-          "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary"
+          "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
+          "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical"
         ]
       },
       {
@@ -10942,7 +10949,8 @@
           "test/compat/cloudsqlexternal_cli_test.go:26 TestGcloudSQLExternalPostgresOffline",
           "test/compat/cloudsqlexternal_test.go:25 TestCloudSQLExternalPrimaryReplica",
           "test/compat/cloudsqlexternaldump_test.go:26 TestCloudSQLExternalMySQLDumpFileAndOffline",
-          "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary"
+          "test/compat/cloudsqlexternalpg_test.go:28 TestCloudSQLExternalPostgresPrimary",
+          "test/compat/cloudsqlphysical_test.go:35 TestCloudSQLExternalMySQLPhysical"
         ]
       },
       {
