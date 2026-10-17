@@ -27,7 +27,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
 | Cloud KMS | 6 | 0 | 3 | 2 | 1 |
-| Secret Manager | 2 | 1 | 0 | 0 | 1 |
+| Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 2 | 0 | 2 | 0 | 0 |
 | BigQuery | 29 | 9 | 12 | 8 | 0 |
@@ -35,7 +35,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **62** | **14** | **29** | **13** | **6** |
+| **Total** | **61** | **13** | **29** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -149,7 +149,6 @@ delayed destruction (#1278). IAM conditions are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| A Cloud Run `secretKeyRef` to a version under a customer-managed key is `UNIMPLEMENTED`: the mounted Kubernetes Secret holds ciphertext (#1453) | not built yet | S |
 | Replication immutability is documented, not measured; 1 UNVERIFIED code (ephemeral restart) (#1445) | needs live GCP | S |
 
 ## Resource Manager
@@ -220,10 +219,10 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | CSV: a quote outside ISO-8859-1, a delimiter of several bytes or outside ASCII in UTF-16 or UTF-32 data, a `maxBadRecords` load the emulator still fails on a value the front passes (a number written as a fraction into an INTEGER, a DATETIME or TIMESTAMP), `sourceColumnMatch` `NAME` with no row skipped (ISO-8859-1 delimiters and quotes, a quote's first byte, `skipLeadingRows` N and the header with `autodetect`, `NAME` after skipped rows, and, in #1457's second part, a delimiter's first byte, a delimiter or quote outside ASCII in UTF-8 data and an empty `STRING` with a `nullMarker` and, under `maxBadRecords`, a BOOL, DATE, TIME or number its column refuses as a bad record are built); JSON: a null field outside the schema (the reference does not say whether a null is an "extra value"), a `maxBadRecords` load the emulator still fails on a value the front passes (a value its column refuses is a bad record since #1457) | no emulator support | M |
 | Parquet: the refused columns left (an INT96 with a part of a microsecond, a DECIMAL that would round, DECIMAL to STRING, a NULL element or a LIST of lists with list inference); a NaN loads and unlisted types are 400 since #1457 | not documented by Google | S |
 | A load of several Cloud Storage objects when the front was given no Cloud Storage (#1457) | no emulator support | S |
-| Partition decorators: `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination, a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, and through a partition a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order or a RECORD's fields changed, are 501, none documented by BigQuery (#1458) | not documented by Google | S |
+| Partition decorators: `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination, a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, and through a partition a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order or a RECORD's fields changed, are 501, none documented by BigQuery (docs read again 2026-10-16: streaming to a decorator is documented for daily ingestion-time tables only, and schemaUpdateOptions name no rule for these) (#1458) | not documented by Google | S |
 | A table made by `CREATE TABLE … AS SELECT`, a temporary table, or one made before the engine had the column keeps no stream time, so its streamed rows are held from DML only while in the 20-second streaming buffer; a table restored from state saved before #1277 keeps no ingestion time (#1458) | no emulator support | S |
-| `PARTITIONS` has no byte counts or `last_modified_time`; region `TABLE_STORAGE` has no byte columns or `storage_last_modified_time` (#1458) | no emulator support (no faithful byte counts or write times) | M |
-| Region-qualified `INFORMATION_SCHEMA.JOBS` has no `bi_engine_statistics`, `job_stages`, `object_storage_stats`, `session_info`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `continuous_query_info`, `vector_search_statistics`, `external_service_costs` or `ml_statistics` (#1458) | not documented by Google (their STRUCTs) | S |
+| `PARTITIONS`' `last_modified_time` is NULL for an ingestion-time partitioned table's partitions and where the engine's change table holds no write (seven days kept), and its write times do not follow the front's `clock:advance`; region `TABLE_STORAGE` has no physical byte columns, and an older table than 90 days no active or long-term split (#1458) | no emulator support (no compressed sizes; write times kept seven days) | S |
+| Region-qualified `INFORMATION_SCHEMA.JOBS` has no `job_stages`, `object_storage_stats`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `vector_search_statistics` or `external_service_costs` (#1458) | not documented by Google (what a job without such statistics holds) | S |
 | A script the emulator runs whole (no control flow, no query before its last statement, nothing it refuses together) makes no child jobs; a script's last DML statement has no child of its own, and a `SELECT` child names no destination table (#1459) | no emulator support | M |
 | DML with a `FROM` of several items (#1459) | no emulator support | M |
 | `CREATE SCHEMA` of an existing dataset and `CREATE TABLE … CLONE` later in a multi-statement script (#1459) | no emulator support | M |

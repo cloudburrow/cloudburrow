@@ -22,7 +22,12 @@ import (
 )
 
 // artifactRegistryProvider is the Artifact Registry Repositories page.
-type artifactRegistryProvider struct{ defaultProject string }
+// runAddr is the Run port, where Create repository and Edit repository
+// reach the Artifact Registry API as an SDK does.
+type artifactRegistryProvider struct {
+	defaultProject string
+	runAddr        func() string
+}
 
 func (artifactRegistryProvider) ID() string    { return "artifact-registry" }
 func (artifactRegistryProvider) Title() string { return "Artifact Registry repositories" }

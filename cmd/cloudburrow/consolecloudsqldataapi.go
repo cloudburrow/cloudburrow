@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -33,6 +34,28 @@ func projectBackupNames(ctx context.Context, svc *sqladminapi.Service, project s
 		labels = append(labels, b.Instance+" "+b.Type)
 	}
 	return names, labels
+}
+
+// projectBackupsListing is the Project backups tab: the project's backups
+// of instance, through ListBackups.
+func projectBackupsListing(ctx context.Context, svc *sqladminapi.Service, project, instance string) console.Listing {
+	l := console.Listing{Columns: []string{"Type", "Description", "Created", "Expires"}, NameColumn: "Backup", Noun: "project backups",
+		Note: "The project's backups of this instance (the Backups API): Create project backup takes one; a FINAL backup outlives its instance."}
+	list, err := svc.Backups.ListBackups("projects/" + project).Filter(`instance="` + instance + `"`).Context(ctx).Do()
+	if err != nil {
+		l.Unavailable = sqlAPIError(err).Error()
+		return l
+	}
+	for _, b := range list.Backups {
+		created := ""
+		if b.BackupInterval != nil {
+			created = b.BackupInterval.StartTime
+		}
+		l.Items = append(l.Items, console.Resource{Name: lastSegment(b.Name), Status: b.State, Fields: map[string]string{
+			"Type": b.Type, "Description": b.Description, "Created": created, "Expires": b.ExpiryTime}})
+	}
+	l.Total = len(l.Items)
+	return l
 }
 
 // dataAPIActions are the #1462 actions an instance's page offers.
@@ -69,11 +92,17 @@ func dataAPIActions(ctx context.Context, svc *sqladminapi.Service, project strin
 			Fields: []console.Field{{Name: "description", Label: "Final backup description", Type: "text"},
 				{Name: "ttlDays", Label: "Keep for (days)", Type: "number", Default: "30"}}})
 	}
+	if in.State == "RUNNABLE" {
+		acts = append(acts, console.Action{ID: "create-project-backup", Label: "Create project backup", Fields: []console.Field{
+			{Name: "description", Label: "Description", Type: "text"},
+			{Name: "ttlDays", Label: "Keep for (days)", Type: "number",
+				Help: "Empty keeps it until it is deleted. The backup is the project's (Backups API), listed in Project backups."}}})
+	}
 	if names, _ := projectBackupNames(ctx, svc, project); len(names) > 0 {
 		acts = append(acts,
 			console.Action{ID: "edit-project-backup", Label: "Edit project backup", Fields: []console.Field{
 				{Name: "backup", Label: "Backup", Type: "select", Required: true, Options: names, Default: names[0]},
-				{Name: "description", Label: "Description", Type: "text"},
+				{Name: "description", Label: "Description", Type: "text", Help: "Empty keeps it."},
 				{Name: "ttlDays", Label: "Keep for (days)", Type: "number",
 					Help: "A FINAL backup's retention, from now; leave empty to keep it."}}},
 			console.Action{ID: "restore-project-backup", Label: "Restore project backup", Destructive: true,
@@ -191,9 +220,24 @@ func dataAPIAct(ctx context.Context, svc *sqladminapi.Service, project, name, ac
 			call = call.FinalBackupTtlDays(n)
 		}
 		_, err = call.Context(ctx).Do()
+	case "create-project-backup":
+		b := &sqladminapi.Backup{Instance: name, Description: strings.TrimSpace(v["description"])}
+		if s := strings.TrimSpace(v["ttlDays"]); s != "" {
+			n, perr := strconv.ParseInt(s, 10, 64)
+			if perr != nil || n <= 0 {
+				return true, fmt.Errorf("days %q is not a number of days", s)
+			}
+			b.TtlDays = n
+		}
+		_, err = svc.Backups.CreateBackup("projects/"+project, b).Context(ctx).Do()
 	case "edit-project-backup":
+		// Only what the form was given is in the mask: an empty Description
+		// keeps the backup's, where it used to clear it.
 		b := &sqladminapi.Backup{Description: strings.TrimSpace(v["description"])}
-		mask := []string{"description"}
+		var mask []string
+		if b.Description != "" {
+			mask = append(mask, "description")
+		}
 		if s := strings.TrimSpace(v["ttlDays"]); s != "" {
 			n, perr := strconv.ParseInt(s, 10, 64)
 			if perr != nil {
@@ -201,6 +245,9 @@ func dataAPIAct(ctx context.Context, svc *sqladminapi.Service, project, name, ac
 			}
 			b.TtlDays = n
 			mask = append(mask, "ttl_days")
+		}
+		if len(mask) == 0 {
+			return true, errors.New("nothing to change: set a description or a number of days")
 		}
 		_, err = svc.Backups.UpdateBackup(v["backup"], b).UpdateMask(strings.Join(mask, ",")).Context(ctx).Do()
 	case "restore-project-backup":

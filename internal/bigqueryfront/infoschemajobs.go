@@ -23,7 +23,7 @@ import (
 // leaves out, the client's texts, the jobs the front carried out and the
 // failures it gave), with BigQuery's documented columns
 // (https://cloud.google.com/bigquery/docs/information-schema-jobs) but
-// those whose STRUCTs Google does not document (jobsLeftOut). Every user
+// those it cannot fill (jobsLeftOut). Every user
 // is the instance's one, so JOBS_BY_USER is JOBS. The jobs are the
 // project's top-level ones and the child jobs of scripts (scriptjobs.go,
 // #1353), and not the query reading the view, which has no record yet.
@@ -37,18 +37,25 @@ import (
 //
 // The region-qualified forms of the dataset views (regionViews, #1329) are
 // the union of every dataset's rows, and region TABLE_STORAGE a row per
-// table but the counts the emulator keeps nothing faithful of
-// (storageColumns). Measured first: each was 400 "Table not found". The
-// JOBS columns jobsLeftOut stay left out: the INFORMATION_SCHEMA.JOBS page
-// gives them as RECORD with no field list, and the front knows none of
-// their contents (the emulator gives no query plan, timeline, session or
-// BI Engine statistics); destination_table, referenced_tables and labels
+// table but its physical byte counts (storageColumns). Measured first: each was 400 "Table not found". The
+// JOBS columns jobsLeftOut stay left out (why: jobsLeftOut);
+// bi_engine_statistics, session_info, continuous_query_info and
+// ml_statistics are given (#1458); destination_table, referenced_tables and labels
 // are read from the job record.
 
 // jobsLeftOut are JOBS columns the front does not give.
-var jobsLeftOut = []string{"bi_engine_statistics", "job_stages", "object_storage_stats", "session_info", "timeline",
-	"query_info", "materialized_view_statistics", "metadata_cache_statistics", "search_statistics",
-	"continuous_query_info", "vector_search_statistics", "external_service_costs", "ml_statistics"}
+// The INFORMATION_SCHEMA.JOBS page (read again 2026-10-16) gives
+// job_stages, timeline, materialized_view_statistics,
+// metadata_cache_statistics, search_statistics and
+// vector_search_statistics by their REST types, object_storage_stats and
+// query_info by their fields, external_service_costs by none, and says of
+// none of them what a job that has no such statistics holds (NULL, or
+// empty): the emulator makes no query plan, timeline or index, so the
+// front would have to choose, and they stay left out (#1458).
+// bi_engine_statistics, session_info, continuous_query_info and
+// ml_statistics are given (jobRow).
+var jobsLeftOut = []string{"job_stages", "object_storage_stats", "timeline", "query_info", "materialized_view_statistics",
+	"metadata_cache_statistics", "search_statistics", "vector_search_statistics", "external_service_costs"}
 
 // jobsRef is a reference to a region's INFORMATION_SCHEMA.JOBS view.
 type jobsRef struct {
@@ -109,7 +116,10 @@ const jobsColumns = "STRUCT<cache_hit BOOL, creation_time TIMESTAMP, " +
 	"reservation_id STRING, reservation_group_path ARRAY<STRING>, edition STRING, start_time TIMESTAMP, state STRING, " +
 	"statement_type STRING, total_bytes_billed INT64, total_bytes_processed INT64, total_modified_partitions INT64, " +
 	"total_slot_ms INT64, total_services_sku_slot_ms INT64, transaction_id STRING, user_email STRING, " +
-	"principal_subject STRING, transferred_bytes INT64, query_dialect STRING, continuous BOOL>"
+	"principal_subject STRING, transferred_bytes INT64, query_dialect STRING, continuous BOOL, " +
+	"bi_engine_statistics STRUCT<bi_engine_mode STRING, acceleration_mode STRING, " +
+	"bi_engine_reasons ARRAY<STRUCT<code STRING, message STRING>>>, session_info STRUCT<session_id STRING>, " +
+	"continuous_query_info STRUCT<output_watermark TIMESTAMP>, ml_statistics STRUCT<model_type STRING>>"
 
 // int64Or is a resource's int64 (a string or number) as SQL, or NULL.
 func int64Or(v any) string {
@@ -240,7 +250,34 @@ func jobRow(project string, job map[string]any) []string {
 		priority, sqlString(project), "NULL", sqlOrNull(str(qc, "query")), tableRefsSQL(qs["referencedTables"]),
 		tableRefsSQL(nil), "NULL", "ARRAY<STRING>[]", "NULL", millisTimestamp(stats["startTime"]), sqlOrNull(state),
 		sqlOrNull(str(qs, "statementType")), int64Or(qs["totalBytesBilled"]), int64Or(bytesProcessed), "NULL",
-		int64Or(stats["totalSlotMs"]), "NULL", tx, sqlOrNull(str(job, "user_email")), "NULL", "NULL", dialect, "FALSE"}
+		int64Or(stats["totalSlotMs"]), "NULL", tx, sqlOrNull(str(job, "user_email")), "NULL", "NULL", dialect, "FALSE",
+		// bi_engine_statistics: "If the project is configured to use the BI
+		// Engine, then this field contains BiEngineStatistics. Otherwise
+		// NULL"; an instance has no BI Engine. continuous_query_info: no
+		// job is continuous (continuous FALSE). ml_statistics.model_type:
+		// "For all other jobs" than a model's creation "the value is NULL"
+		// (#1458).
+		"NULL", sessionInfoSQL(stats), "NULL", modelTypeSQL(qs)}
+}
+
+// sessionInfoSQL is JOBS' session_info of a job's statistics: its
+// sessionInfo.sessionId (REST SessionInfo), NULL for a job in no session.
+func sessionInfoSQL(stats map[string]any) string {
+	si, _ := stats["sessionInfo"].(map[string]any)
+	if id := str(si, "sessionId"); id != "" {
+		return "STRUCT(" + sqlString(id) + " AS session_id)"
+	}
+	return "NULL"
+}
+
+// modelTypeSQL is JOBS' ml_statistics of a query job's statistics: its
+// mlStatistics.modelType, NULL for a job that made no model.
+func modelTypeSQL(qs map[string]any) string {
+	ml, _ := qs["mlStatistics"].(map[string]any)
+	if t := str(ml, "modelType"); t != "" {
+		return "STRUCT(" + sqlString(t) + " AS model_type)"
+	}
+	return "NULL"
 }
 
 // jobsRows returns the subquery of the project's jobs, or the status and
@@ -464,17 +501,17 @@ func (f front) regionRows(r *http.Request, meta *datasetMeta, view, columns stri
 
 // storageColumns are region-qualified TABLE_STORAGE's columns
 // (https://cloud.google.com/bigquery/docs/information-schema-table-storage)
-// but those the emulator keeps no faithful count of, left out: every
-// *_bytes column (the engine's tables.get answers numBytes 0, measured,
-// loadstats.go) and storage_last_modified_time (it keeps no time of a
-// table's last write apart from its metadata's). project_number is NULL:
-// an instance has none. total_partitions, "the number of partitions
-// present in the table" (0 for a table not partitioned), counts the
-// partitions PARTITIONS has a row for (#1458): those holding rows, with
-// __NULL__ and __UNPARTITIONED__ (whether BigQuery counts those two, and
-// a streaming buffer's rows, is UNVERIFIED).
+// but the physical byte columns, which are compressed sizes no value
+// defines (left out). The logical ones and storage_last_modified_time:
+// storageBytes (#1458). project_number is NULL: an instance has none.
+// total_partitions, "the number of partitions present in the table" (0
+// for a table not partitioned), counts the partitions PARTITIONS has a
+// row for (#1458): those holding rows, with __NULL__ and
+// __UNPARTITIONED__ (whether BigQuery counts those two, and a streaming
+// buffer's rows, is UNVERIFIED).
 const storageColumns = "STRUCT<project_id STRING, project_number INT64, table_catalog STRING, table_schema STRING, " +
-	"table_name STRING, creation_time TIMESTAMP, total_rows INT64, total_partitions INT64, deleted BOOL, table_type STRING, " +
+	"table_name STRING, creation_time TIMESTAMP, total_rows INT64, total_partitions INT64, total_logical_bytes INT64, " +
+	"active_logical_bytes INT64, long_term_logical_bytes INT64, storage_last_modified_time TIMESTAMP, deleted BOOL, table_type STRING, " +
 	"managed_table_type STRING, last_metadata_index_refresh_time TIMESTAMP, table_deletion_reason STRING, " +
 	"table_deletion_time TIMESTAMP>"
 
@@ -502,6 +539,47 @@ func (f front) totalPartitions(r *http.Request, project, dataset string, t infoT
 	return n, 0, ""
 }
 
+// storageBytes is TABLE_STORAGE's total_logical_bytes,
+// active_logical_bytes, long_term_logical_bytes and
+// storage_last_modified_time of table t, as SQL (#1458). The logical
+// bytes are the rows' documented sizes (logicalbytes.go); a snapshot's
+// and a clone's "as if they were complete tables". Data is long-term once
+// unmodified for 90 days: a table made less than 90 days ago (by the
+// front's clock) has none, and for an older one, whose partitions' last
+// writes the engine keeps for seven days only, active and long-term are
+// NULL. storage_last_modified_time is "the most recent time that data was
+// written to the table", the latest change in the engine's change table
+// (changeWrites), and NULL "if no data exists", or when that table holds
+// no change (none in the last seven days, or none kept).
+func (f front) storageBytes(r *http.Request, project, dataset string, t infoTable) (logical, active, long, modified string, st int, msg string) {
+	raw, err := json.Marshal(t)
+	var pm partitionMeta
+	if err != nil || json.Unmarshal(raw, &pm) != nil {
+		return "", "", "", "", http.StatusInternalServerError, "cloudburrow: could not read a table's schema"
+	}
+	name := str(t, "tableId")
+	path := quotePath([]string{project, dataset, name})
+	logical, active, long, modified = "NULL", "NULL", "NULL", "NULL"
+	n := int64(0)
+	if e := f.tableBytesExpr(r, path, pm.Schema.Fields); e != "" {
+		var m string
+		if n, m = f.scalar(r, "SELECT IFNULL(SUM("+e+"), 0) FROM "+path); m != "" {
+			return "", "", "", "", http.StatusInternalServerError, "cloudburrow: could not count the bytes of " + name + ": " + m
+		}
+		logical = strconv.FormatInt(n, 10)
+	}
+	if ms, err := strconv.ParseInt(str(t, "creationTime"), 10, 64); err == nil && logical != "NULL" && f.buffers.clock().Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
+		active, long = logical, "0"
+	}
+	rows, _ := strconv.ParseInt(str(t, "numRows"), 10, 64)
+	if c := f.changeWrites(r, project, dataset, name); c != "" && (rows > 0 || n > 0) {
+		if us, m := f.scalar(r, "SELECT IFNULL(UNIX_MICROS(MAX(_CHANGE_TIMESTAMP)), -1) FROM "+c); m == "" && us >= 0 {
+			modified = "TIMESTAMP_MICROS(" + strconv.FormatInt(us, 10) + ")"
+		}
+	}
+	return logical, active, long, modified, 0, ""
+}
+
 // storageRows are a dataset's TABLE_STORAGE rows: its tables, snapshots
 // and clones (no view), none deleted (the instance keeps none).
 func (f front) storageRows(r *http.Request, dataset string, m *datasetMeta) (string, int, string) {
@@ -526,8 +604,13 @@ func (f front) storageRows(r *http.Request, dataset string, m *datasetMeta) (str
 		if st != 0 {
 			return "", st, msg
 		}
+		logical, active, long, modified, st, msg := f.storageBytes(r, project, dataset, t)
+		if st != 0 {
+			return "", st, msg
+		}
 		rows = append(rows, []string{sqlString(project), "NULL", sqlString(project), sqlString(dataset), sqlString(str(t, "tableId")),
-			millisTimestamp(t["creationTime"]), int64Or(t["numRows"]), strconv.FormatInt(parts, 10), "FALSE", sqlString(tt), managed, "NULL", "NULL", "NULL"})
+			millisTimestamp(t["creationTime"]), int64Or(t["numRows"]), strconv.FormatInt(parts, 10), logical, active, long, modified,
+			"FALSE", sqlString(tt), managed, "NULL", "NULL", "NULL"})
 	}
 	return rowsSubquery(storageColumns, rows), 0, ""
 }

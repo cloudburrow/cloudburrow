@@ -111,6 +111,9 @@ func (s *Store) Sweep() (time.Time, error) {
 // failed sweep, such as before the cluster holding the store exists, is
 // retried with backoff from a second up to a minute.
 func (s *Store) Run(ctx context.Context) {
+	// Mounted versions under customer-managed keys are re-checked apart
+	// from the sweep (#1489).
+	go s.runMounts(ctx)
 	retry := time.Second
 	for {
 		next, err := s.Sweep()

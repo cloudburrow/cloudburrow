@@ -28,6 +28,9 @@ import (
 // memory. Its operations are returned already done, except RunJob's, which
 // carries the new execution as its metadata as the adapter's does.
 type fakeRunJobs struct {
+	// also registers more servers on the fake's port before it serves,
+	// as the Run port serves Cloud Build beside Cloud Run.
+	also func(*grpc.Server)
 	runpb.UnimplementedJobsServer
 	runpb.UnimplementedExecutionsServer
 	runpb.UnimplementedRevisionsServer
@@ -256,6 +259,9 @@ func (f *fakeRunJobs) serve(t *testing.T) string {
 	runpb.RegisterTasksServer(g, f)
 	runpb.RegisterWorkerPoolsServer(g, &f.pools)
 	runpb.RegisterInstancesServer(g, &f.instances)
+	if f.also != nil {
+		f.also(g)
+	}
 	go func() { _ = g.Serve(ln) }()
 	t.Cleanup(g.Stop)
 	return ln.Addr().String()
