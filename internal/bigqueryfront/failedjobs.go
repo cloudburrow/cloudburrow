@@ -214,10 +214,6 @@ func (j *frontJobs) failedJobResults(w http.ResponseWriter, project, rawID strin
 	if !ok {
 		return false
 	}
-	code := http.StatusBadRequest
-	if e.Reason == "notFound" {
-		code = http.StatusNotFound
-	}
-	writeError(w, code, e.Reason, e.Message)
+	writeError(w, reasonStatus(e.Reason, http.StatusBadRequest), e.Reason, e.Message) // #1581, errorcodes.go
 	return true
 }

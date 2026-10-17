@@ -615,15 +615,11 @@ func queryFailure(rec *recorder, job map[string]any) (string, bool) {
 
 // fail answers a query as failed with e: a query job (job, from
 // jobs.insert) as done with e as its errorResult, which jobs.get and
-// jobs.list then report too; jobs.query as an error, 501 for
-// notImplemented and 400 for any other reason.
+// jobs.list then report too; jobs.query as an error, with the code its
+// reason documents (reasonStatus, #1581).
 func (f front) fail(w http.ResponseWriter, rec *recorder, job map[string]any, e rowError) {
 	if job == nil {
-		code := http.StatusBadRequest
-		if e.Reason == "notImplemented" {
-			code = http.StatusNotImplemented
-		}
-		writeError(w, code, e.Reason, e.Message)
+		writeError(w, reasonStatus(e.Reason, http.StatusBadRequest), e.Reason, e.Message)
 		return
 	}
 	project, id := projectOf(f.base), ""
