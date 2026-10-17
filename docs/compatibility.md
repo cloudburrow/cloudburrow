@@ -2053,10 +2053,14 @@ fault-injectable exactly when `up` has wired the fault interceptor into its serv
 interceptor is what makes its rules accepted, so there is no separate list to fall out of step, and
 a rule for a service that is not enabled is refused rather than accepted and never applied.
 
+Like every `/admin` route it needs the instance's admin token, or it answers 401
+([configuration.md](configuration.md#admin-api)):
+
 ```sh
-curl -X POST http://<control>/admin/faults -d '{"service":"secretmanager","method":"AccessSecretVersion","code":"UNAVAILABLE","count":2}'
-curl http://<control>/admin/faults              # list, with each rule's injected and remaining counts
-curl -X DELETE http://<control>/admin/faults    # all rules; ?id=fault-1 for one
+TOKEN="Authorization: Bearer $(cat ~/.cloudburrow/cloudburrow/admin-token)"
+curl -H "$TOKEN" -X POST http://<control>/admin/faults -d '{"service":"secretmanager","method":"AccessSecretVersion","code":"UNAVAILABLE","count":2}'
+curl -H "$TOKEN" http://<control>/admin/faults              # list, with each rule's injected and remaining counts
+curl -H "$TOKEN" -X DELETE http://<control>/admin/faults    # all rules; ?id=fault-1 for one
 ```
 
 | Field | Meaning |

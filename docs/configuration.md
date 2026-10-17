@@ -395,7 +395,7 @@ no external key manager, and IAM is not enforced. It exists so an application th
 with Cloud KMS can run locally. Never use it to protect real data. See
 [compatibility.md](compatibility.md#cloud-kms--googlecloudkmsv1).
 
-## Console
+## Opt-in emulators and their variables
 
 `--port-firestore` (default `9010`), `--port-datastore` (`9011`), `--port-bigtable` (`9012`) and
 `--port-spanner` (`9013`, and `--port-spanner-rest` `9022` for its REST API), `--port-bigquery` (`9014`), `--port-bigquery-storage` (`9015`) and
@@ -441,6 +441,8 @@ client, err := bigquery.NewClient(ctx, os.Getenv("GOOGLE_CLOUD_PROJECT"),
     option.WithEndpoint(os.Getenv("CLOUDBURROW_BIGQUERY_ENDPOINT")),
     option.WithoutAuthentication())
 ```
+
+## Console
 
 `--port-console` (default `9090`, `CLOUDBURROW_PORT_CONSOLE`) serves the web console, and
 `up` prints the URL. The assets are embedded in the binary, so it works with no network.

@@ -41,6 +41,9 @@ var docInvocation = regexp.MustCompile(`(?:^|[\s"'(|;&$])(?:\./bin/|\$ )?cloudbu
 // line, so its first word must be a command the CLI has.
 var docCommandStart = regexp.MustCompile(`^(?:\$ |eval "\$\()?(?:\./bin/)?cloudburrow[ \t]+([a-z][a-z-]*)\b`)
 
+// docAdminCurl is a curl command line that calls the admin API.
+var docAdminCurl = regexp.MustCompile(`(?:^|[\s;&|(])curl\s[^#]*/admin/`)
+
 var docFlag = regexp.MustCompile(`^--?([a-zA-Z][a-zA-Z0-9-]*)(?:=.*)?$`)
 
 var helpFlag = regexp.MustCompile(`(?m)(?:^|[\s\[])--?([a-z][a-z0-9-]*)`)
@@ -125,6 +128,11 @@ func docFlagProblems(t *testing.T, files map[string]string) []string {
 	for _, path := range paths {
 		lines, at := docCodeLines(files[path])
 		for i, line := range lines {
+			// Every /admin route needs the instance's token (#553); two of the
+			// docs' curl examples sent none and got 401.
+			if docAdminCurl.MatchString(line) && !strings.Contains(line, "$TOKEN") && !strings.Contains(line, "Authorization") {
+				problems = append(problems, path+":"+strconv.Itoa(at[i])+": a curl to /admin sends no admin token, so it is refused with 401 (docs/configuration.md#admin-api)")
+			}
 			if m := docCommandStart.FindStringSubmatch(line); m != nil && !cmds[m[1]] {
 				problems = append(problems, path+":"+strconv.Itoa(at[i])+": `cloudburrow "+m[1]+"` is not a command (cloudburrow help lists them)")
 			}
@@ -183,19 +191,23 @@ func TestDocumentedCommandsAndFlagsExist(t *testing.T) {
 }
 
 // TestDocFlagCheckCatchesAPlantedWrongFlag proves the check above can fail:
-// a renamed flag, an unknown command and a flag after terraform's `--`.
+// a renamed flag, an unknown command and an admin curl with no token, while a
+// flag after terraform's `--` and a curl that sends the token pass.
 func TestDocFlagCheckCatchesAPlantedWrongFlag(t *testing.T) {
 	doc := "```sh\n" +
 		"cloudburrow up --detach \\\n  --port-bse 9100\n" + // a typo, on a continuation line
 		"eval \"$(cloudburrow env --name beta --format json)\"\n" +
 		"cloudburrow terraform --binary tofu -- plan -refresh=false\n" +
+		"curl -X POST localhost:9000/admin/reset\n" +
+		"curl -H \"$TOKEN\" localhost:9000/admin/events\n" +
 		"```\n" +
 		"Run `cloudburrow snapshot` or `cloudburrow logs --folow`; the `cloudburrow` namespace is prose.\n"
 	got := docFlagProblems(t, map[string]string{"planted.md": doc})
 	want := []string{
 		"planted.md:2: `cloudburrow up` has no flag --port-bse",
-		"planted.md:7: `cloudburrow snapshot` is not a command",
-		"planted.md:7: `cloudburrow logs` has no flag --folow",
+		"planted.md:6: a curl to /admin sends no admin token",
+		"planted.md:9: `cloudburrow snapshot` is not a command",
+		"planted.md:9: `cloudburrow logs` has no flag --folow",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("problems = %q, want %d", got, len(want))
@@ -203,6 +215,29 @@ func TestDocFlagCheckCatchesAPlantedWrongFlag(t *testing.T) {
 	for i := range want {
 		if !strings.HasPrefix(got[i], want[i]) {
 			t.Errorf("problem %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestInstallCommandTableListsEveryCommand (#1583): docs/install.md's
+// Commands table, which a new user reads for what the CLI does, named 11 of
+// the CLI's 20 commands besides help.
+func TestInstallCommandTableListsEveryCommand(t *testing.T) {
+	b, err := os.ReadFile("../../docs/install.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, table, ok := strings.Cut(string(b), "\n## Commands\n")
+	if !ok {
+		t.Fatal("docs/install.md has no ## Commands section")
+	}
+	table, _, _ = strings.Cut(table, "\n## ")
+	for cmd := range cliCommands() {
+		if cmd == "help" {
+			continue
+		}
+		if !regexp.MustCompile("`(?:cloudburrow )?" + regexp.QuoteMeta(cmd) + "[` ]").MatchString(table) {
+			t.Errorf("docs/install.md's Commands table does not name `cloudburrow %s`", cmd)
 		}
 	}
 }
