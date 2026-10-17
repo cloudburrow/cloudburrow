@@ -104,3 +104,40 @@ func TestMountAdminRequiresTheToken(t *testing.T) {
 		t.Error("GET /healthz asks for the token")
 	}
 }
+
+// The instance directory is owner-only even when it already existed with a
+// looser mode, which os.MkdirAll would leave alone (#1586): the admin token
+// file's own 0600 is not enough once a later file is written 0644.
+func TestTheInstanceDirectoryIsMadeOwnerOnly(t *testing.T) {
+	cfg := config.Default()
+	cfg.Name = "loose"
+	cfg.StateDir = t.TempDir()
+	if err := os.MkdirAll(cfg.InstanceDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(cfg.InstanceDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	control := lifecycle.NewControlServer(0, nil)
+	if err := control.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = control.Stop(context.Background()) })
+	r := &runtimeFile{cfg: cfg, control: control, token: "t"}
+	if err := r.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.Stop(context.Background()) })
+	fi, err := os.Stat(cfg.InstanceDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o700 {
+		t.Errorf("the instance directory is %v after up, want 0700", perm)
+	}
+	for _, f := range []string{adminTokenPath(cfg), runtimePath(cfg)} {
+		if fi, err := os.Stat(f); err != nil || fi.Mode().Perm()&0o077 != 0 {
+			t.Errorf("%s: %v %v, want owner-only", filepath.Base(f), fi.Mode(), err)
+		}
+	}
+}

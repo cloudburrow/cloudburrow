@@ -304,6 +304,48 @@ func TestGuardRefusesAForeignHost(t *testing.T) {
 // can send cleartext HTTP/2, and a gRPC client's :authority is whatever it
 // dialed. A call with a foreign :authority reaches the emulator, unary and
 // streaming, with that authority unchanged.
+// #1586: the Pub/Sub and Firestore emulators echo any Origin with
+// Access-Control-Allow-Credentials, so a page on another site could read and
+// write them through the tunnel. The guard refuses a foreign Origin, a
+// preflight included, before a byte reaches the emulator, and passes a
+// loopback one.
+func TestGuardRefusesAForeignOrigin(t *testing.T) {
+	t.Parallel()
+	emu := startFakeEmulator(t)
+	addr := startTestGuard(t, emu.addr)
+
+	for _, method := range []string{http.MethodOptions, http.MethodGet, http.MethodPost, http.MethodPut} {
+		req, _ := http.NewRequest(method, "http://"+addr+"/v1/projects/p/topics", strings.NewReader("{}"))
+		req.Header.Set("Origin", "https://evil.example")
+		req.Header.Set("Content-Type", "text/plain")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusForbidden {
+			t.Errorf("%s from https://evil.example: status %d, want 403", method, res.StatusCode)
+		}
+		if v := res.Header.Get("Access-Control-Allow-Origin"); v != "" {
+			t.Errorf("%s from https://evil.example: Access-Control-Allow-Origin %q, want none", method, v)
+		}
+	}
+	if n := emu.restHits.Load(); n != 0 {
+		t.Errorf("the emulator saw %d requests from a foreign origin; want none", n)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/v1/projects/p/topics", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode == http.StatusForbidden || emu.restHits.Load() != 1 {
+		t.Errorf("a loopback origin was refused: status %d, emulator hits %d", res.StatusCode, emu.restHits.Load())
+	}
+}
+
 func TestGuardPassesGRPCWhateverItsAuthority(t *testing.T) {
 	t.Parallel()
 	emu := startFakeEmulator(t)

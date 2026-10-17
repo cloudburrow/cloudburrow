@@ -147,7 +147,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var protocols http.Protocols
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
-	hs := &http.Server{Handler: hostguard.Wrap(srv, AllowedHosts(names)...), ReadHeaderTimeout: 30 * time.Second, Protocols: &protocols}
+	hs := &http.Server{Handler: hostguard.WrapHost(srv, AllowedHosts(names)...), ReadHeaderTimeout: 30 * time.Second, Protocols: &protocols}
 	fmt.Fprintf(stdout, "Cloud Storage (builtin, in development) listening on http://%s\n", ln.Addr())
 	errc := make(chan error, 1)
 	go func() { errc <- hs.Serve(ln) }()

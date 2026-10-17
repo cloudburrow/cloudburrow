@@ -49,9 +49,21 @@ import (
 // serves (#575).
 const ClusterHostService = "cloudburrow-host"
 
-// Wrap returns next behind the Host check. extra names more hosts the
-// listener answers to: an exact name, or "*.name" for any name below it.
+// Wrap returns next behind the Host check and the Origin check
+// (crosssite.go). extra names more hosts the listener answers to: an exact
+// name, or "*.name" for any name below it.
 func Wrap(next http.Handler, extra ...string) http.Handler {
+	return wrap(next, true, extra)
+}
+
+// WrapHost returns next behind the Host check alone, for a listener that
+// checks Origin itself: the builtin storage server, whose CORS answers
+// depend on the origin (#677).
+func WrapHost(next http.Handler, extra ...string) http.Handler {
+	return wrap(next, false, extra)
+}
+
+func wrap(next http.Handler, checkOrigin bool, extra []string) http.Handler {
 	names := make([]string, 0, len(extra))
 	for _, e := range extra {
 		if e = normalize(e); e != "" {
@@ -59,11 +71,19 @@ func Wrap(next http.Handler, extra ...string) http.Handler {
 		}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if (r.ProtoMajor >= 2 && r.TLS == nil) || Allowed(r.Host, names...) {
+		if r.ProtoMajor >= 2 && r.TLS == nil {
 			next.ServeHTTP(w, r)
 			return
 		}
-		Refuse(w, r)
+		if !Allowed(r.Host, names...) {
+			Refuse(w, r)
+			return
+		}
+		if checkOrigin && !CrossSiteAllowed(r) {
+			RefuseOrigin(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

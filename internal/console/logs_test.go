@@ -29,6 +29,13 @@ func TestCredentialsAreRedactedBeforeStorage(t *testing.T) {
 		{"password: hunter2hunter2", "hunter2hunter2"},
 		{"-----BEGIN PRIVATE KEY-----", "BEGIN PRIVATE KEY"},
 		{"token eyJhbGciOiJSUzI1NiIs.eyJzdWIiOiIxMjM0NTY.signature", "eyJhbGciOiJSUzI1NiIs"},
+		// #1586: the forms the patterns above missed.
+		{`{"admin_token": "4f9c2d7e1a0b3c5d"}`, "4f9c2d7e1a0b3c5d"},
+		{`"password":"hunter2hunter2"`, "hunter2hunter2"},
+		{`curl -H "Bearer 4f9c2d7e1a0b3c5d6e7f" http://127.0.0.1:9090/admin/reset`, "4f9c2d7e1a0b3c5d6e7f"},
+		{"-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----", "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"},
+		{`"private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----\n"`, "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"},
+		{"-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC", "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC"},
 	} {
 		got := r.Log(Entry{Message: tc.in})
 		if strings.Contains(got.Message, tc.mustNotContain) {
@@ -37,6 +44,11 @@ func TestCredentialsAreRedactedBeforeStorage(t *testing.T) {
 		if !strings.Contains(got.Message, "REDACTED") {
 			t.Errorf("redaction left no marker: %q -> %q", tc.in, got.Message)
 		}
+	}
+
+	// A quoted value keeps its quotes, so a JSON line stays JSON.
+	if got := r.Log(Entry{Message: `{"access_token": "abc123def456"}`}).Message; got != `{"access_token": "[REDACTED]"}` {
+		t.Errorf("a JSON token was redacted to %q", got)
 	}
 
 	// An ordinary line must survive intact, or the view becomes useless.

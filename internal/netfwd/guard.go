@@ -149,7 +149,7 @@ func setClientAddr(r *http.Request) {
 	r.Header.Set(ClientAddrHeader, host)
 }
 
-// guardHandler checks Host, then proxies to upstream.
+// guardHandler checks Host and Origin, then proxies to upstream.
 //
 // gRPC (cleartext HTTP/2 with an application/grpc content type) is not
 // checked, as hostguard.Wrap does not check it: browsers speak HTTP/2 only
@@ -166,6 +166,13 @@ func guardHandler(upstream string, logf func(string, ...any)) http.Handler {
 		}
 		if !hostguard.Allowed(r.Host) {
 			hostguard.Refuse(w, r)
+			return
+		}
+		// The Pub/Sub and Firestore emulators echo any Origin with
+		// Access-Control-Allow-Credentials, so without this any page could
+		// read and write them (#1586).
+		if !hostguard.CrossSiteAllowed(r) {
+			hostguard.RefuseOrigin(w, r)
 			return
 		}
 		proxy.ServeHTTP(w, r)

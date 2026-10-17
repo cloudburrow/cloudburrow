@@ -46,7 +46,8 @@ security report and asks a maintainer to contact you. Put no details in it.
 
 CloudBurrow is a local emulator for development and testing, and several things that would be
 vulnerabilities in Google Cloud are documented properties here, not bugs
-([docs/status.md](docs/status.md)):
+([docs/status.md](docs/status.md)). What CloudBurrow does defend, and how, is in
+[docs/security.md](docs/security.md):
 
 - **No IAM enforcement anywhere.** No identity is checked and no policy is evaluated; stored IAM
   policies are never enforced.
