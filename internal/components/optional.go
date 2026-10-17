@@ -732,7 +732,19 @@ func CloudSQLInstanceBackend(name, version string, persistent bool, rootPassword
 		if len(flags) > 0 {
 			b.Args = []string{"postgres"}
 			for _, f := range flags {
-				b.Args = append(b.Args, "-c", f.Name+"="+f.Value)
+				switch f.Name {
+				case "cloudsql.logical_decoding":
+					// Cloud SQL's switch for logical decoding (#1524).
+					if strings.EqualFold(f.Value, "on") {
+						b.Args = append(b.Args, "-c", "wal_level=logical")
+					}
+				case "cloudsql.enable_pglogical":
+					// Recorded: an external replica's sync uses the
+					// built-in logical replication, and the images have
+					// no pglogical.
+				default:
+					b.Args = append(b.Args, "-c", f.Name+"="+f.Value)
+				}
 			}
 		}
 	}
@@ -756,6 +768,10 @@ type SQLReplicaSource struct {
 	// (#1501); "" and 0 are SQLReplicaUser and the primary's 3306.
 	User string
 	Port int
+	// Logical is a PostgreSQL replica of an external primary (#1524): its
+	// server starts empty, and the provisioner subscribes it to the
+	// source's databases by logical replication at startExternalSync.
+	Logical bool
 }
 
 // SQLReplicaUser is the replication user a replica connects to its
@@ -778,6 +794,9 @@ func CloudSQLReplicaBackend(b Backend, mysql bool, src SQLReplicaSource) Backend
 	}
 	if src.Port != 0 {
 		b.Env["CLOUDSQL_PRIMARY_PORT"] = fmt.Sprint(src.Port)
+	}
+	if src.Logical {
+		return b
 	}
 	if mysql {
 		b.Args = append(append([]string{}, b.Args...), fmt.Sprintf("--server-id=%d", src.ServerID),

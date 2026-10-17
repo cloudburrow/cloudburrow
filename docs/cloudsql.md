@@ -105,8 +105,8 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), a PostgreSQL
-external primary (Cloud SQL replicates from an external MySQL server; see [External primaries](#external-primaries-1501)), `MYSQL_5_6`, `MYSQL_5_7`
+What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), a physical
+(`PHYSICAL`) external sync (see [External primaries](#external-primaries-1501-1524)), `MYSQL_5_6`, `MYSQL_5_7`
 and SQL Server versions (their images are linux/amd64 only), BAK and TDE imports and exports (SQL Server's files),
 upgrading a PostgreSQL read replica on its own (streaming replication does not cross major versions), and high
 availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (#1462). A legacy failover replica
@@ -293,11 +293,12 @@ the region is not a place here, and replication has none of the latency a real c
 replica has. On the console, a replica's page also offers **Create read replica**, with a
 **Region** field.
 
-### External primaries (#1501)
+### External primaries (#1501, #1524)
 
-Cloud SQL's managed import from a MySQL server outside Cloud SQL
-([configure-replication-from-external](https://docs.cloud.google.com/sql/docs/mysql/replication/configure-replication-from-external))
-is served:
+Cloud SQL's replication from a MySQL or PostgreSQL server outside Cloud SQL
+([MySQL](https://docs.cloud.google.com/sql/docs/mysql/replication/configure-replication-from-external),
+[PostgreSQL](https://docs.cloud.google.com/sql/docs/postgres/replication/configure-replication-from-external))
+is served. For MySQL:
 
 1. **A source representation instance**: `instances.insert` with `instanceType`
    `ON_PREMISES_INSTANCE` (or just `onPremisesConfiguration`), a MySQL `databaseVersion` and
@@ -326,10 +327,51 @@ is served:
    reach the replica afterwards.
 5. **`promoteReplica`** ends the migration: the replica stops replicating and takes writes.
 
-501, naming why: a PostgreSQL source (PostgreSQL migrates through Database Migration Service and
-pglogical), `dumpFilePath` (a custom import from a dump file in Cloud Storage), `syncMode`
-`OFFLINE`, `migrationType` `PHYSICAL` (an XtraBackup physical backup), and `demote` and
-`demoteMaster` (the reverse direction).
+**Seeding from a dump file** (#1524): with `onPremisesConfiguration.dumpFilePath` (or the
+replica's `mysqlReplicaConfiguration.dumpFilePath`), a `gs://` dump in the instance's Cloud
+Storage written with the source's GTIDs as purged (`mysqldump --set-gtid-purged=ON`), the
+replica resets its GTIDs, loads the dump when it is created, and then replicates from the source
+on its own, with no `startExternalSync`; its creation is done once it replicates. It needs
+`--services storage`; without it the replica's creation is 501.
+
+**`syncMode` `OFFLINE`** (#1524), for MySQL and PostgreSQL: `startExternalSync` copies the
+source's databases once (`mysqldump --set-gtid-purged=OFF`, or `pg_dump` of the schema and then
+the rows) and does not replicate after. Its verification skips the binary log, GTID,
+`wal_level` and replication-privilege checks.
+
+For PostgreSQL (#1524):
+
+1. **The source** needs `wal_level` `logical` (on a Cloud SQL source, the flag
+   `cloudsql.logical_decoding=on`, which a CloudBurrow instance takes and restarts its server
+   with), a `max_replication_slots`, `max_wal_senders` and `max_worker_processes` of at least
+   its number of databases, and a replication user with `REPLICATION` that can read every table.
+   Google's steps also install pglogical; CloudBurrow's images have none, so the sync uses
+   PostgreSQL's built-in logical replication, and `cloudsql.enable_pglogical` is recorded
+   without effect. The publication it makes needs the user to be a superuser, or to own the
+   tables and have `CREATE` on each database.
+2. **A source representation instance** with a `POSTGRES_` `databaseVersion`, `hostPort`
+   (`sqlinst-NAME:5432` for another CloudBurrow instance, `cloudsql:5432` for the server `up`
+   runs), `username`, `password` and optionally `selectedObjects` (the databases; none is every
+   database but the templates). `dumpFilePath` is 400: Google documents it for MySQL only.
+3. **A replica of it**, a PostgreSQL server of its own of the source's major version or later.
+4. **`verifyExternalSyncSettings`** answers `CONNECTION_FAILURE`,
+   `INCOMPATIBLE_DATABASE_VERSION` (a source newer than the replica, or before 10),
+   `INVALID_WAL_LEVEL`, `INSUFFICIENT_MAX_REPLICATION_SLOTS`, `INSUFFICIENT_MAX_WAL_SENDERS`,
+   `INSUFFICIENT_MAX_WORKER_PROCESSES`, `INSUFFICIENT_PRIVILEGE` and `REPLICA_ALREADY_SETUP`.
+5. **`startExternalSync`** copies each database's schema (`pg_dump --schema-only --no-owner
+   --no-privileges`), publishes its tables on the source and subscribes the replica's database
+   to them, which copies the rows and goes on replicating them.
+6. **`promoteReplica`** drops the subscriptions, and with them their slots on the source;
+   `stopReplica` and `startReplica` disable and enable them.
+
+Not as Google: sequences are set by the schema copy but not replicated after (pglogical
+synchronises them); users are not migrated, as on Cloud SQL; the publication stays on the
+source after the promotion.
+
+501, naming why: `migrationType` `PHYSICAL` (an XtraBackup physical backup), and `demote` and
+`demoteMaster` (the reverse direction; Google's custom import demotes a promoted instance and
+then sets replication up with Cloud SQL's `mysql.*` stored procedures, which CloudBurrow's
+servers do not have).
 
 ### Database versions and major version upgrades (#1381)
 

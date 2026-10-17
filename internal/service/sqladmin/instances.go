@@ -236,6 +236,9 @@ func (s *Server) bringUp(name, opID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
 	err := s.writes.prov.Start(ctx, spec)
+	if err == nil {
+		err = s.seedExternal(ctx, name, spec)
+	}
 	if err == nil && spec.PITREnabled() && spec.MasterInstanceName == "" {
 		// The first base, so the instance is recoverable from its start.
 		if err = s.takePITRBase(name); err != nil {
@@ -356,7 +359,9 @@ func (b instanceBody) unsupported() error {
 				if f.Name == "" {
 					return Errorf(http.StatusBadRequest, "Invalid request: a database flag has no name.")
 				}
-				if strings.HasPrefix(f.Name, "cloudsql.") || strings.HasPrefix(f.Name, "cloudsql_") {
+				if LogicalDecodingFlags[f.Name] {
+					// An external primary's prerequisites (#1524).
+				} else if strings.HasPrefix(f.Name, "cloudsql.") || strings.HasPrefix(f.Name, "cloudsql_") {
 					return unimplemented("the database flag "+f.Name,
 						"it is a Cloud SQL flag, not the server's (IAM authentication and Cloud SQL's extensions are not served); only flags the server itself takes are passed to it")
 				}
@@ -854,7 +859,7 @@ func (s *Server) createdJSON(ctx context.Context, base string, c *created) (map[
 		in["instanceType"] = "READ_REPLICA_INSTANCE"
 		in["masterInstanceName"] = spec.Project + ":" + spec.MasterInstanceName
 		rc := map[string]any{"kind": "sql#replicaConfiguration", "failoverTarget": false}
-		if ext := spec.External; ext != nil {
+		if ext := spec.External; ext != nil && spec.MySQL() {
 			rc["mysqlReplicaConfiguration"] = map[string]any{"kind": "sql#mysqlReplicaConfiguration", "username": ext.User}
 		}
 		in["replicaConfiguration"] = rc
