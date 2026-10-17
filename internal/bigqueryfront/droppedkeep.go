@@ -24,6 +24,16 @@ import (
 // its rows (it is read-only, its past is its rows) and its
 // snapshotDefinition.
 //
+// An external table (#1522) keeps its definition, its resource with its
+// externalDataConfiguration: BigQuery keeps none of its data, which stays
+// in its source ("External tables ... the data is not stored in BigQuery",
+// https://cloud.google.com/bigquery/docs/external-tables, read
+// 2026-10-17). The emulator keeps the definition itself (tables.get answers
+// it, type EXTERNAL) and reads the source once, when the table is made, so
+// an undelete makes it again through tables.insert with that resource,
+// which reads the source as it is then. A copy of table@TIME of a deleted
+// one fails as a copy of a live one does (copyjob.go).
+//
 // A restored table keeps its change history (#1483): the kept changes are
 // carried into its new change table as a rebuild carries them
 // (changehistorycarry.go), each row still there ended at the deletion, so

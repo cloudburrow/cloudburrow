@@ -41,7 +41,8 @@
         "patches/bigquery-emulator/0038-csv-empty-string-mark.patch",
         "patches/bigquery-emulator/0041-reported-times-by-the-engine-clock.patch",
         "patches/bigquery-emulator/0043-range-columns-of-a-schema.patch",
-        "patches/bigquery-emulator/0045-ranges-in-a-record.patch"
+        "patches/bigquery-emulator/0045-ranges-in-a-record.patch",
+        "patches/bigquery-emulator/0053-routines-kept-in-metadata.patch"
       ]
     },
     {
@@ -94,7 +95,8 @@
         "patches/googlesqlite/0055-coerced-timestamp-literal-in-the-default-zone.patch",
         "patches/googlesqlite/0050-change-history-partition-time.patch",
         "patches/googlesqlite/0056-ctas-streamed-at-column.patch",
-        "patches/googlesqlite/0054-dml-subquery-column-ids.patch"
+        "patches/googlesqlite/0054-dml-subquery-column-ids.patch",
+        "patches/googlesqlite/0063-history-of-other-change-names.patch"
       ]
     },
     {
