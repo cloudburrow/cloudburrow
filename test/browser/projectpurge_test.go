@@ -65,5 +65,7 @@ func TestResourceManagerPurgeProjectThroughThePage(t *testing.T) {
 	if _, err := again.Wait(ctx); err != nil {
 		t.Fatalf("CreateProject of the purged ID: %v", err)
 	}
-	t.Cleanup(func() { _, _ = projects.DeleteProject(context.Background(), &rmpb.DeleteProjectRequest{Name: "projects/" + id}) })
+	t.Cleanup(func() {
+		_, _ = projects.DeleteProject(context.Background(), &rmpb.DeleteProjectRequest{Name: "projects/" + id})
+	})
 }
