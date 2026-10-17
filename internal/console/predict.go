@@ -147,9 +147,11 @@ const predictDeploy = "Deploy a container that honours the Vertex AI custom pred
 var predictNotServed = []string{
 	"Vertex AI Endpoint and DeployedModel resources (the container is called directly), so no explanation " +
 		"spec is stored on a deployed model: Explain sends it as explanation_spec_override",
-	"Explain with integrated gradients or XRAI attributions: they need the model's gradients, which a custom " +
-		"container's predict route does not expose (Sampled Shapley needs only predictions, and is offered here)",
-	"Example-based explanations: they need an Example index, which nothing here builds",
+	"Explain with integrated gradients or XRAI attributions: Vertex supports them only for TensorFlow models " +
+		"served from a prebuilt TensorFlow container, and refuses them for a custom container, as the API here does " +
+		"(Sampled Shapley is the method for any container, and is offered here)",
+	"Example-based explanations: Vertex supports them only for TensorFlow models that output an embedding, " +
+		"so a custom container's Explain refuses them",
 	"Model Registry upload and versions",
 	"Batch prediction",
 }

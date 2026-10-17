@@ -1161,8 +1161,8 @@ var parityRows = []parityRow{
 		Screen:  "/ai/predict", Offers: "Online prediction: Explain sends the instances and parameters with " +
 			"explanation_spec_override (Sampled Shapley path count, each feature's input_baselines) to the endpoint's " +
 			":explain, and shows the attributions per feature, the baseline and instance outputs, and the API's " +
-			"body or refusal verbatim; integrated gradients, XRAI and example-based explanations are named as not " +
-			"served (#1454)",
+			"body or refusal verbatim; integrated gradients, XRAI and example-based explanations are named as " +
+			"refused for a custom container, as Vertex documents them for TensorFlow models only (#1454)",
 		Tests: []string{"TestConsoleExplainMatchesThePredictionClient", "TestPredictionClientReachesACustomEndpoint",
 			"TestExplainSendsTheSpecOverrideAndShowsAttributionsPerFeature", "TestCloudRunPredictorAnswersOnlinePredictionInTheBrowser"}},
 	{Resource: "Vertex AI PredictionService: EmbedContent", Service: "vertexai",

@@ -124,8 +124,9 @@ request refuses rather than producing anything.
 - **Vertex's prediction management surface.** No `Endpoint` or `DeployedModel` resource, model
   upload or batch prediction is served ([prediction.md](prediction.md#versus-vertex-ais-own-apis)),
   so §8's page offers none of them and lists them as not served. Its **Explain** (#1454) is
-  Sampled Shapley only; integrated gradients, XRAI and example-based explanations are refused by
-  the API and listed as not served.
+  Sampled Shapley only, the one method Vertex documents for a custom container; integrated
+  gradients, XRAI and example-based explanations, which Vertex documents for TensorFlow models
+  only, are `INVALID_ARGUMENT` from the API and listed as not served.
 - **Pixel parity with the Vertex reference screens.** Structural parity only, for the reason
   in [console-verification.md](console-verification.md): no dated reference screenshots exist.
 
@@ -145,7 +146,7 @@ onto Knative. The page works only on that.
 | Response | The container's HTTP status and body, **verbatim**. An error the container returned is shown in its own words. A `200` that breaks the one-prediction-per-instance rule is shown and flagged (`prediction.ValidateResponse`). |
 | Request sent | The URL and the exact body. |
 | Explain (#1454) | The same instances and parameters, with an **Explanation spec**: the Sampled Shapley **Path count** (`sampled_shapley_attribution.path_count`, 1–50) and **Feature baselines**, a JSON object naming each feature to attribute with its `input_baselines` list (`metadata.inputs`; `[]` is a baseline of 0 for a number). Sent as the `ExplainRequest` the official client sends, with `explanation_spec_override`, to `POST /v1/projects/{p}/locations/{l}/endpoints/{service}:explain` on the local AI endpoint, whose `PredictionService` perturbs the instances and calls the container ([compatibility.md](compatibility.md#vertex-ai-predictionservice--googlecloudaiplatformv1)). Shown: per instance, its prediction, each explained output's baseline and instance values, and a table of the attribution per feature, largest first; the API's body verbatim; the request sent. A refusal (a path count out of range, a feature an instance lacks) is the API's status and message. |
-| Not served | Vertex's `Endpoint` and `DeployedModel` (so no stored explanation spec), integrated gradients and XRAI attributions (they need gradients, which a predict route does not expose), example-based explanations (they need an Example index), the Model Registry and batch prediction, named rather than drawn. |
+| Not served | Vertex's `Endpoint` and `DeployedModel` (so no stored explanation spec), integrated gradients and XRAI attributions and example-based explanations (Vertex supports them for TensorFlow models only, and refuses them for a custom container), the Model Registry and batch prediction, named rather than drawn. |
 
 With nothing deployed, the page says how to deploy one — Cloud Run's **Deploy container** here
 with the `AIP_*` variables set, or `CreateService` — and links to the form. Without Cloud Run

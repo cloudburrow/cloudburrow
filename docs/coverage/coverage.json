@@ -4280,7 +4280,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/Explain",
         "status": "Verified",
         "tests": [
-          "test/compat/predictiongrpc_test.go:203 TestConsoleExplainMatchesThePredictionClient",
+          "test/compat/predictiongrpc_test.go:213 TestConsoleExplainMatchesThePredictionClient",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
         ]
       },
