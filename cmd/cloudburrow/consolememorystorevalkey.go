@@ -138,8 +138,18 @@ func (valkeyProvider) CreateForm() (string, []console.Field) {
 			Help: "TOKEN_AUTH: clients log in as a token auth user with a token the service generates, which the instance's page adds and shows."},
 		{Name: "restoreBackup", Label: "Restore from backup", Type: "text",
 			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the instance starts with its keys."},
+		{Name: "engineVersion", Label: "Engine version", Type: "select", Default: redisadmin.DefaultValkeyVersion, Options: valkeyEngineVersions},
+		{Name: "persistence", Label: "Persistence", Type: "select", Default: "DISABLED", Options: []string{"DISABLED", "RDB", "AOF"},
+			Help: "RDB snapshots or the append-only file keep the data across a restart of CloudBurrow; without, it is lost."},
+		{Name: "kmsKey", Label: "Customer-managed encryption key", Type: "text",
+			Help: "Optional. projects/{project}/locations/{region}/keyRings/{ring}/cryptoKeys/{key}, a Cloud KMS key in the instance's region (#1557)."},
+		{Name: "primaryInstance", Label: "Secondary of (cross-instance replication)", Type: "text",
+			Help: "Optional, CLUSTER_DISABLED only. projects/{project}/locations/{location}/instances/{instance}: the instance replicates that primary and is read-only."},
 	}
 }
+
+// valkeyEngineVersions are the engine_version values served (#1557).
+var valkeyEngineVersions = []string{"VALKEY_7_2", "VALKEY_8_0", "VALKEY_9_0"}
 
 // CreateOnPage implements console.PageCreator.
 func (valkeyProvider) CreateOnPage() bool { return true }
@@ -181,6 +191,17 @@ func (p valkeyProvider) Create(ctx context.Context, project string, values map[s
 		in.Endpoints = []*memorystorepb.Instance_InstanceEndpoint{{Connections: []*memorystorepb.Instance_ConnectionDetail{{
 			Connection: &memorystorepb.Instance_ConnectionDetail_PscAutoConnection{PscAutoConnection: &memorystorepb.PscAutoConnection{
 				ProjectId: project, Network: n}}}}}}
+	}
+	in.EngineVersion = values["engineVersion"]
+	if m := values["persistence"]; m != "" && m != "DISABLED" {
+		in.PersistenceConfig = &memorystorepb.PersistenceConfig{Mode: memorystorepb.PersistenceConfig_PersistenceMode(memorystorepb.PersistenceConfig_PersistenceMode_value[m])}
+	}
+	if k := strings.TrimSpace(values["kmsKey"]); k != "" {
+		in.KmsKey = proto.String(k)
+	}
+	if pi := strings.TrimSpace(values["primaryInstance"]); pi != "" {
+		in.CrossInstanceReplicationConfig = &memorystorepb.CrossInstanceReplicationConfig{InstanceRole: memorystorepb.CrossInstanceReplicationConfig_SECONDARY,
+			PrimaryInstance: &memorystorepb.CrossInstanceReplicationConfig_RemoteInstance{Instance: pi}}
 	}
 	region, id := strings.TrimSpace(values["region"]), strings.TrimSpace(values["id"])
 	op, err := api.CreateInstance(ctx, &memorystorepb.CreateInstanceRequest{Parent: "projects/" + project + "/locations/" + region, InstanceId: id, Instance: in})
@@ -263,7 +284,13 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 		console.Property{Label: "Engine configs", Value: orDash(memorystorePairs(i.GetEngineConfigs()))},
 		console.Property{Label: "Labels", Value: orDash(memorystorePairs(i.GetLabels()))},
 		console.Property{Label: "Deletion protection", Value: strconv.FormatBool(i.GetDeletionProtectionEnabled())},
+		console.Property{Label: "Encryption", Value: i.GetEncryptionInfo().GetEncryptionType().String()},
+		console.Property{Label: "Customer-managed key", Value: orDash(i.GetKmsKey())},
 	)
+	if ks := i.GetEncryptionInfo().GetKmsKeyPrimaryState(); i.GetKmsKey() != "" && ks != memorystorepb.EncryptionInfo_KMS_KEY_STATE_UNSPECIFIED {
+		props = append(props, console.Property{Label: "Key state", Value: ks.String()})
+	}
+	props = append(props, valkeyReplicationProps(i)...)
 	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}}}}}
 	if i.GetTransitEncryptionMode() == memorystorepb.Instance_SERVER_AUTHENTICATION {
@@ -289,7 +316,9 @@ func (p valkeyProvider) Detail(ctx context.Context, project string, path []strin
 		console.Field{Name: "replicaCount", Label: "Replicas per shard", Type: "number", Required: true, Pattern: `^[0-5]$`,
 			Default: strconv.Itoa(int(i.GetReplicaCount()))},
 		console.Field{Name: "nodeType", Label: "Node type", Type: "select", Default: i.GetNodeType().String(), Options: valkeyNodeTypes},
-		console.Field{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox", Default: strconv.FormatBool(i.GetDeletionProtectionEnabled())})
+		console.Field{Name: "deletionProtection", Label: "Deletion protection", Type: "checkbox", Default: strconv.FormatBool(i.GetDeletionProtectionEnabled())},
+		console.Field{Name: "engineVersion", Label: "Engine version", Type: "select", Default: i.GetEngineVersion(), Options: valkeyEngineVersions,
+			Help: "A later version upgrades the instance: new nodes are formed and loaded with a snapshot of its data."})
 	d.Edit = &console.EditForm{Label: "Edit instance", Fields: fields,
 		Note: "Saved through UpdateInstance, shards or replicas one change at a time."}
 	return d, nil
@@ -338,6 +367,11 @@ func (p valkeyProvider) Edit(ctx context.Context, project string, path []string,
 			return err
 		}
 	}
+	if ev := values["engineVersion"]; ev != "" && ev != cur.GetEngineVersion() {
+		if err := update("engine_version", &memorystorepb.Instance{EngineVersion: ev}); err != nil {
+			return err
+		}
+	}
 	if shards != cur.GetShardCount() {
 		if err := update("shard_count", &memorystorepb.Instance{ShardCount: shards}); err != nil {
 			return err
@@ -347,4 +381,113 @@ func (p valkeyProvider) Edit(ctx context.Context, project string, path []string,
 		return update("replica_count", &memorystorepb.Instance{ReplicaCount: proto.Int32(replicas)})
 	}
 	return nil
+}
+
+// valkeyReplicationProps are an instance's cross-instance replication and
+// migration (#1557): its role, its primary or secondaries, its membership,
+// and a migration's state and source.
+func valkeyReplicationProps(i *memorystorepb.Instance) []console.Property {
+	cfg := i.GetCrossInstanceReplicationConfig()
+	role := "NONE"
+	if cfg != nil {
+		role = cfg.GetInstanceRole().String()
+	}
+	props := []console.Property{{Label: "Cross-instance replication", Value: role}}
+	if cfg != nil {
+		var secs []string
+		for _, s := range cfg.GetSecondaryInstances() {
+			secs = append(secs, s.GetInstance())
+		}
+		var members []string
+		if m := cfg.GetMembership(); m != nil {
+			members = append(members, m.GetPrimaryInstance().GetInstance()+" (primary)")
+			for _, s := range m.GetSecondaryInstances() {
+				members = append(members, s.GetInstance())
+			}
+		}
+		props = append(props,
+			console.Property{Label: "Primary instance", Value: orDash(cfg.GetPrimaryInstance().GetInstance())},
+			console.Property{Label: "Secondary instances", Value: orDash(strings.Join(secs, ", "))},
+			console.Property{Label: "Replication membership", Value: orDash(strings.Join(members, ", "))})
+	}
+	if m := i.GetMigrationConfig(); m != nil {
+		src := m.GetSelfManagedSource()
+		props = append(props, console.Property{Label: "Migration", Value: m.GetState().String()},
+			console.Property{Label: "Migration source", Value: valkeySourceAddr(src)})
+	}
+	return props
+}
+
+func valkeySourceAddr(src *memorystorepb.SelfManagedSource) string {
+	if src.GetIpAddress() == "" {
+		return "-"
+	}
+	return net.JoinHostPort(src.GetIpAddress(), strconv.Itoa(int(src.GetPort())))
+}
+
+// valkeyReplicationActions are a CLUSTER_DISABLED instance's (#1557):
+// a secondary's Switchover and Detach; a migration's Start and Finish.
+func valkeyReplicationActions(i *memorystorepb.Instance) []console.Action {
+	if i.GetMode() != memorystorepb.Instance_CLUSTER_DISABLED {
+		return nil
+	}
+	var out []console.Action
+	role := i.GetCrossInstanceReplicationConfig().GetInstanceRole()
+	switch {
+	case role == memorystorepb.CrossInstanceReplicationConfig_SECONDARY:
+		out = append(out,
+			console.Action{ID: "switchover", Label: "Switchover", Confirm: "This instance becomes the primary, writable; its primary and the other secondaries replicate it."},
+			console.Action{ID: "detach-replication", Label: "Detach", Destructive: true, Confirm: "This instance stops replicating its primary and becomes writable."})
+	case i.GetState() == memorystorepb.Instance_MIGRATING:
+		out = append(out, console.Action{ID: "finish-migration", Label: "Finish migration",
+			Confirm: "The instance stops replicating the source and becomes writable."})
+	case role != memorystorepb.CrossInstanceReplicationConfig_PRIMARY:
+		out = append(out, console.Action{ID: "start-migration", Label: "Start migration", Fields: []console.Field{
+			{Name: "ip", Label: "Source IP address", Type: "text", Required: true},
+			{Name: "port", Label: "Source port", Type: "number", Required: true, Default: "6379", Pattern: `^[0-9]{1,5}$`},
+			{Name: "attachment", Label: "Network attachment", Type: "text", Help: "Optional. projects/{project}/regions/{region}/networkAttachments/{attachment}; default the region's default."}}})
+	}
+	return out
+}
+
+// valkeyReplicationAct runs one of valkeyReplicationActions; ok is false
+// for an action of another kind.
+func valkeyReplicationAct(ctx context.Context, api *redisadmin.MemorystoreServer, i *memorystorepb.Instance, action string, values map[string]string) (op interface{ GetName() string }, ok bool, err error) {
+	cir := func(cfg *memorystorepb.CrossInstanceReplicationConfig) (interface{ GetName() string }, bool, error) {
+		op, err := api.UpdateInstance(ctx, &memorystorepb.UpdateInstanceRequest{
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"cross_instance_replication_config"}},
+			Instance:   &memorystorepb.Instance{Name: i.GetName(), CrossInstanceReplicationConfig: cfg}})
+		return op, true, err
+	}
+	switch action {
+	case "detach-replication":
+		return cir(&memorystorepb.CrossInstanceReplicationConfig{InstanceRole: memorystorepb.CrossInstanceReplicationConfig_NONE})
+	case "switchover":
+		cfg := i.GetCrossInstanceReplicationConfig()
+		secs := []*memorystorepb.CrossInstanceReplicationConfig_RemoteInstance{{Instance: cfg.GetPrimaryInstance().GetInstance()}}
+		for _, s := range cfg.GetMembership().GetSecondaryInstances() {
+			if s.GetInstance() != i.GetName() {
+				secs = append(secs, &memorystorepb.CrossInstanceReplicationConfig_RemoteInstance{Instance: s.GetInstance()})
+			}
+		}
+		return cir(&memorystorepb.CrossInstanceReplicationConfig{InstanceRole: memorystorepb.CrossInstanceReplicationConfig_PRIMARY, SecondaryInstances: secs})
+	case "start-migration":
+		port, perr := strconv.Atoi(strings.TrimSpace(values["port"]))
+		if perr != nil {
+			return nil, true, fmt.Errorf("source port %q is not a number", values["port"])
+		}
+		att := strings.TrimSpace(values["attachment"])
+		if parts := strings.Split(i.GetName(), "/"); att == "" && len(parts) > 3 {
+			// The region's default, as no network is real here.
+			att = "projects/" + parts[1] + "/regions/" + parts[3] + "/networkAttachments/default"
+		}
+		op, err := api.StartMigration(ctx, &memorystorepb.StartMigrationRequest{Name: i.GetName(),
+			Source: &memorystorepb.StartMigrationRequest_SelfManagedSource{SelfManagedSource: &memorystorepb.SelfManagedSource{
+				IpAddress: strings.TrimSpace(values["ip"]), Port: int32(port), NetworkAttachment: att}}})
+		return op, true, err
+	case "finish-migration":
+		op, err := api.FinishMigration(ctx, &memorystorepb.FinishMigrationRequest{Name: i.GetName()})
+		return op, true, err
+	}
+	return nil, false, nil
 }

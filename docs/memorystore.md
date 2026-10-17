@@ -377,8 +377,27 @@ again new nodes are formed (`UPDATING`) and the data loaded, then `ACTIVE`.
 
 Not served: cross-cluster replication (UNIMPLEMENTED: a Valkey cluster-mode replica replicates
 only a primary of its own cluster, `CLUSTER REPLICATE` taking a node its gossip knows, so one
-cluster cannot be another's secondary). After a restart of CloudBurrow a cluster is
-formed again, empty, with its users and policy.
+cluster cannot be another's secondary).
+
+**Across a restart** (#1557). After `cloudburrow stop` and `up` (persistent mode, the same state
+directory) a cluster is formed again with its users, policy and backups (`CREATING` until it
+serves). Its data follows its `persistence_config`, set on every node (RDB: `save <period> 1`;
+AOF: `appendonly yes` with its `appendfsync`): each node keeps its files on its own volume, in a
+directory of its formation (`/data/g<N>`), and each formation after a restart starts empty in the
+next one. **With RDB or AOF**, the previous formation's files of each shard's primary are served by
+a loopback server in that node's container and their keys moved (`MIGRATE`) to the primaries that
+own their slots now, then the previous directory is removed: every key the files held comes back
+(RDB: as of the last snapshot, which Valkey also writes when it stops; AOF: as of the last fsync).
+**Without persistence** (`DISABLED`, the default) nothing is loaded and the cluster comes back
+empty, as Google documents: without persistence a node's data is lost when it restarts, and nodes
+do not load snapshots made before persistence was disabled. In ephemeral mode nothing is kept.
+`TestMemorystoreClustersAcrossRestart` checks both, for Redis clusters and Valkey instances in
+either mode.
+
+**gcloud and Terraform** (#1557): `gcloud redis clusters create --kms-key` and
+`google_redis_cluster`'s `kms_key` are tested (`TestGcloudMemorystore1557`,
+`TestTerraformMemorystore1557`); the console's Create cluster has **Customer-managed encryption
+key** and **Persistence**, and the cluster's page shows its Encryption, key and Persistence.
 
 ## 9. Memorystore for Valkey (#1519)
 
@@ -412,9 +431,10 @@ An instance is built as a Redis cluster is (§8), of the same Valkey 8.1 image:
 6.5, 13 or 58 GB of `maxmemory`), `engine_configs` and `persistence_config`, set on every running
 node, and keeps `labels`, `deletion_protection_enabled`, `endpoints`, zone distribution and
 maintenance policy. `persistence_config` RDB is `save <period> 1`, AOF `appendonly yes` with its
-`appendfsync`; but as for a Redis cluster, after a restart of CloudBurrow an instance is formed
-again, empty. The console's **Memorystore for Valkey** page lists, creates (either mode), edits
-and deletes instances.
+`appendfsync`; after a restart of CloudBurrow an instance comes back with its data when it has
+RDB or AOF persistence, and empty without, as a Redis cluster does (§8, Across a restart). The
+console's **Memorystore for Valkey** page lists, creates (either mode), edits and deletes
+instances.
 
 **Engine versions** (#1557): `VALKEY_7_2` runs Valkey 7.2.14 (`valkey/valkey:7.2-alpine`),
 `VALKEY_8_0` (the default) Valkey 8.1 and `VALKEY_9_0` Valkey 9.0.6 (`valkey/valkey:9.0-alpine`),
@@ -446,6 +466,23 @@ use and reached at its in-cluster address; any other address is replicated from 
 `network_attachment` is checked and kept. A source with AUTH (`self_managed_source` has no
 credentials), a `CLUSTER` mode target and in-transit encryption are not served (501 with the
 reason).
+
+**gcloud, Terraform and the console** (#1557). gcloud 587.0.0's `memorystore instances create
+--kms-key`, `--engine-version`, `--cross-instance-replication-config-role=secondary
+--primary-instance`, `instances update --engine-version` and
+`--cross-instance-replication-config-role=none`, `start-migration` and `finish-migration` are
+tested (`TestGcloudMemorystore1557`); `UpdateInstance` takes a message field's own paths in its
+`update_mask` (`cross_instance_replication_config.instance_role`), as gcloud sends them.
+`google_memorystore_instance`'s `kms_key`, `engine_version` (changed in place, the same `uid`) and
+`cross_instance_replication_config` apply and plan empty (`TestTerraformMemorystore1557`); the
+provider has no migration fields. The console's Create instance has **Engine version**,
+**Persistence**, **Customer-managed encryption key** and **Secondary of (cross-instance
+replication)**; Edit has **Engine version** (an upgrade); the instance's page shows its
+Encryption, key and key state, its cross-instance replication role, primary, secondaries and
+membership, and a migration's state and source; a secondary's page has **Switchover** and
+**Detach**, a `CLUSTER_DISABLED` instance's **Start migration** (source IP and port) and, while
+migrating, **Finish migration** (`TestConsoleValkeyReplicationMigrationVersions`,
+`TestMemorystoreValkeySecondaryThroughThePage`).
 
 Not served: node types whose size is not modelled here and server CA modes, each 501 with the
 reason.

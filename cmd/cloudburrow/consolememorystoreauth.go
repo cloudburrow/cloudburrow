@@ -279,7 +279,7 @@ func (p valkeyProvider) DetailActions(ctx context.Context, project string, path 
 	if err != nil {
 		return nil
 	}
-	return memorystoreAuthActions(i.GetAuthorizationMode() == memorystorepb.Instance_TOKEN_AUTH, false)
+	return append(memorystoreAuthActions(i.GetAuthorizationMode() == memorystorepb.Instance_TOKEN_AUTH, false), valkeyReplicationActions(i)...)
 }
 
 // ActAt implements console.PathActor, each operation waited for.
@@ -299,6 +299,13 @@ func (p valkeyProvider) ActAt(ctx context.Context, project string, path []string
 	user := name + "/tokenAuthUsers/" + strings.TrimSpace(values["user"])
 	backup := i.GetBackupCollection() + "/backups/" + strings.TrimSpace(values["backup"])
 	var op interface{ GetName() string }
+	if rop, ok, err := valkeyReplicationAct(ctx, api, i, action, values); ok {
+		// Cross-instance replication and migration (#1557).
+		if err != nil {
+			return err
+		}
+		return waitRedisOp(ctx, srv, rop.GetName())
+	}
 	switch action {
 	case "add-token-user":
 		op, err = api.AddTokenAuthUser(ctx, &memorystorepb.AddTokenAuthUserRequest{Instance: name, TokenAuthUser: strings.TrimSpace(values["user"])})

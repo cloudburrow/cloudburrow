@@ -106,6 +106,10 @@ func (redisClusterProvider) CreateForm() (string, []console.Field) {
 		{Name: "tokenAuth", Label: "Token authentication", Type: "checkbox",
 			Help: "AUTH_MODE_TOKEN_AUTH: clients log in as a token auth user with a token the service generates, which the cluster's page adds and shows."},
 		{Name: "aclPolicy", Label: "ACL policy", Type: "text", Help: "Optional. projects/{project}/locations/{location}/aclPolicies/{policy}: its rules become ACL users on every node."},
+		{Name: "kmsKey", Label: "Customer-managed encryption key", Type: "text",
+			Help: "Optional. projects/{project}/locations/{region}/keyRings/{ring}/cryptoKeys/{key}, a Cloud KMS key in the cluster's region (#1557)."},
+		{Name: "persistence", Label: "Persistence", Type: "select", Default: "DISABLED", Options: []string{"DISABLED", "RDB", "AOF"},
+			Help: "RDB snapshots or the append-only file keep the data across a restart of CloudBurrow; without, it is lost."},
 		{Name: "restoreBackup", Label: "Restore from backup", Type: "text",
 			Help: "Optional. projects/{project}/locations/{location}/backupCollections/{collection}/backups/{backup}: the cluster starts with its keys."},
 	}
@@ -156,6 +160,12 @@ func (p redisClusterProvider) Create(ctx context.Context, project string, values
 		in.AuthorizationMode = clusterpb.AuthorizationMode_AUTH_MODE_TOKEN_AUTH
 	}
 	in.AclPolicy = strings.TrimSpace(values["aclPolicy"])
+	if k := strings.TrimSpace(values["kmsKey"]); k != "" {
+		in.KmsKey = proto.String(k)
+	}
+	if m := values["persistence"]; m != "" && m != "DISABLED" {
+		in.PersistenceConfig = &clusterpb.ClusterPersistenceConfig{Mode: clusterpb.ClusterPersistenceConfig_PersistenceMode(clusterpb.ClusterPersistenceConfig_PersistenceMode_value[m])}
+	}
 	if b := strings.TrimSpace(values["restoreBackup"]); b != "" {
 		in.ImportSources = &clusterpb.Cluster_ManagedBackupSource_{ManagedBackupSource: &clusterpb.Cluster_ManagedBackupSource{Backup: b}}
 	}
@@ -252,6 +262,9 @@ func (p redisClusterProvider) Detail(ctx context.Context, project string, path [
 		{Label: "Deletion protection", Value: strconv.FormatBool(c.GetDeletionProtectionEnabled())},
 		{Label: "ACL policy", Value: orDash(c.GetAclPolicy())},
 		{Label: "Backup collection", Value: orDash(c.GetBackupCollection())},
+		{Label: "Persistence", Value: c.GetPersistenceConfig().GetMode().String()},
+		{Label: "Encryption", Value: c.GetEncryptionInfo().GetEncryptionType().String()},
+		{Label: "Customer-managed key", Value: orDash(c.GetKmsKey())},
 	}
 	d := console.Detail{Sections: []console.Section{{ID: "config", Label: "Configuration", Kind: console.KindProperties,
 		Groups: []console.PropertyGroup{{Properties: props}}}}}

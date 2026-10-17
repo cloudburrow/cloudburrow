@@ -4932,15 +4932,18 @@
         "method": "google.cloud.memorystore.v1.Memorystore/CreateInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
+          "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
           "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption"
@@ -4990,6 +4993,7 @@
         "method": "google.cloud.memorystore.v1.Memorystore/FinishMigration",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/memorystore1557_test.go:381 TestMemorystoreValkeyMigration"
         ]
       },
@@ -5031,6 +5035,7 @@
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
@@ -5094,6 +5099,7 @@
         "method": "google.cloud.memorystore.v1.Memorystore/StartMigration",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/memorystore1557_test.go:381 TestMemorystoreValkeyMigration"
         ]
       },
@@ -5101,11 +5107,13 @@
         "method": "google.cloud.memorystore.v1.Memorystore/UpdateInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
+          "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
       },
@@ -5142,12 +5150,15 @@
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/CreateCluster",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
           "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
           "test/compat/memorystorecluster_test.go:233 TestMemorystoreRedisClusterRefusals",
           "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
+          "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
           "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
@@ -5240,6 +5251,7 @@
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
+          "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
