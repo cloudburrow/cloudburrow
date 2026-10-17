@@ -187,7 +187,7 @@ func TestConsoleBigQuerySnapshotCloneAndRestoreActions(t *testing.T) {
 	if err != nil || md.Type != bigquery.Snapshot || md.SnapshotDefinition == nil {
 		t.Fatalf("the snapshot: %+v, %v", md, err)
 	}
-	if want := time.Now().Add(24 * time.Hour); md.ExpirationTime.Before(want.Add(-5*time.Minute)) || md.ExpirationTime.After(want.Add(5*time.Minute)) {
+	if want := advanceBigQueryClock(t, h, 0).Add(24 * time.Hour); md.ExpirationTime.Before(want.Add(-5*time.Minute)) || md.ExpirationTime.After(want.Add(5*time.Minute)) {
 		t.Errorf("the snapshot expires %v, want about %v", md.ExpirationTime, want)
 	}
 	act("a", "clonetable", map[string]string{"datasetId": d, "tableId": "cl"})

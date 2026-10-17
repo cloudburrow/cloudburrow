@@ -333,7 +333,7 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 			return
 		}
 	}
-	start := time.Now().UTC().Format(time.RFC3339Nano)
+	start := f.now().UTC().Format(time.RFC3339Nano)
 	if !asOf.IsZero() {
 		start = asOf.Format(time.RFC3339Nano) // the snapshot's or clone's time (#1460)
 	}

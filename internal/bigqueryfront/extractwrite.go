@@ -279,7 +279,7 @@ func (f front) startOwnJob(w http.ResponseWriter, r *http.Request, what string) 
 		writeError(w, http.StatusConflict, "duplicate", fmt.Sprintf("Already Exists: Job %s:%s", project, id))
 		return nil, false
 	}
-	return &ownJob{project: project, id: id, ref: job.JobReference, conf: job.Configuration, start: time.Now()}, true
+	return &ownJob{project: project, id: id, ref: job.JobReference, conf: job.Configuration, start: f.now()}, true
 }
 
 // finishOwnJob records j done, of jobType, with stats as its
@@ -287,7 +287,7 @@ func (f front) startOwnJob(w http.ResponseWriter, r *http.Request, what string) 
 // answers w with it. jobs.get, jobs.list, jobs.cancel and jobs.delete of
 // it are then answered by the front (frontJobs).
 func (f front) finishOwnJob(w http.ResponseWriter, r *http.Request, j *ownJob, jobType, statsKey string, stats map[string]any, failure *rowError) {
-	end := time.Now()
+	end := f.now()
 	conf := map[string]any{}
 	for k, v := range j.conf {
 		var val any

@@ -71,7 +71,7 @@ func TestBigQueryCloneAndSnapshotDDL(t *testing.T) {
 		return fmt.Sprint(rows(t, ctx, c, "SELECT COUNT(*) FROM "+path(table)))
 	}
 
-	before := time.Now().Add(-time.Minute)
+	before := advanceBigQueryClock(t, h, 0).Add(-time.Minute) // the instance's clock, #1487
 	// CREATE TABLE ... CLONE, through jobs.query and jobs.insert.
 	if err := bqRun(ctx, c, "CREATE TABLE "+path("clone_q")+" CLONE "+path("base"), false); err != nil {
 		t.Fatalf("CLONE through jobs.query: %v", err)
@@ -90,7 +90,7 @@ func TestBigQueryCloneAndSnapshotDDL(t *testing.T) {
 			t.Errorf("%s: type %q, schema %s, want TABLE and the base's schema", table, md.Type, schemaText(md.Schema))
 		}
 		if cd := md.CloneDefinition; cd == nil || cd.BaseTableReference == nil || cd.BaseTableReference.TableID != "base" ||
-			cd.CloneTime.Before(before) || cd.CloneTime.After(time.Now().Add(time.Minute)) {
+			cd.CloneTime.Before(before) || cd.CloneTime.After(advanceBigQueryClock(t, h, 0).Add(time.Minute)) {
 			t.Errorf("%s: the cloneDefinition %+v", table, md.CloneDefinition)
 		}
 		if got := count(table); got != "[[2]]" {
@@ -220,7 +220,7 @@ func TestBigQueryCloneDDLOptionsAndSystemTime(t *testing.T) {
 	if md.Type != bigquery.Snapshot || md.SnapshotDefinition == nil || md.SnapshotDefinition.BaseTableReference.TableID != "base" {
 		t.Errorf("the snapshot reads back type %q, %+v", md.Type, md.SnapshotDefinition)
 	}
-	if want := time.Now().Add(48 * time.Hour); md.ExpirationTime.Before(want.Add(-5*time.Minute)) || md.ExpirationTime.After(want.Add(5*time.Minute)) {
+	if want := advanceBigQueryClock(t, h, 0).Add(48 * time.Hour); md.ExpirationTime.Before(want.Add(-5*time.Minute)) || md.ExpirationTime.After(want.Add(5*time.Minute)) {
 		t.Errorf("the snapshot expires %v, want about %v", md.ExpirationTime, want)
 	}
 	if md.Description != "two rows" || md.Labels["team"] != "data" {
