@@ -92,7 +92,8 @@ func TestManagedFolderInsertRefusals(t *testing.T) {
 		{"mfb", `{"name":"a\nb"}`, 400, "line feed"},
 		{"mfb", `{"name":"` + strings.Repeat("a", 1025) + `"}`, 400, "1024"},
 		{"mfb", `{"name":"a","colour":"red"}`, 400, "colour is not a ManagedFolder field"},
-		{"mfb", `{"name":"a","rapidCacheConfig":{"enabled":true}}`, 501, "rapidCacheConfig"},
+		{"mfb", `{"name":"a","rapidCacheConfig":{"enabled":true}}`, 400, "enabled is not a RapidCacheConfig field"},
+		{"mfb", `{"name":"a","rapidCacheConfig":{"policies":{"us-east1-b":{"ingestOnWrite":"enabled"}}}}`, 400, "does not have"},
 		{"fine-grained", `{"name":"a"}`, 400, "uniform bucket-level access"},
 		{"nobucket", `{"name":"a"}`, 404, "bucket"},
 	} {
@@ -269,9 +270,9 @@ func TestManagedFolderIAM(t *testing.T) {
 			t.Errorf("%s %s = %d, want 404", c.m, c.u, code)
 		}
 	}
-	// managedFolders.update stays 501 by name.
-	if code, body := raw(t, "PATCH", mfURL(h, "team/"), `{}`); code != 501 || !strings.Contains(body, "storage.managedFolders.update") {
-		t.Errorf("update = %d %s, want 501 naming it", code, body)
+	// managedFolders.update with no Rapid Cache to name is refused.
+	if code, body := raw(t, "PATCH", mfURL(h, "team/"), `{"rapidCacheConfig":{"policies":{"us-east1-b":{"rapidCacheId":"us-east1-b"}}}}`); code != 400 || !strings.Contains(body, "us-east1-b") {
+		t.Errorf("update naming no cache = %d %s, want 400", code, body)
 	}
 }
 

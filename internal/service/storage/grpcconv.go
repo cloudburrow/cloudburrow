@@ -288,6 +288,7 @@ type jsonBucket struct {
 	Encryption            *struct{ DefaultKmsKeyName string }
 	Autoclass             *struct{ Enabled bool }
 	CustomPlacementConfig *struct{ DataLocations []string }
+	IpFilter              *jsonIPFilter
 	HierarchicalNamespace *struct{ Enabled bool }
 	ObjectRetention       *struct{ Mode string }
 	Lifecycle             *struct{ Rule []jsonRule }
@@ -344,6 +345,9 @@ func (b jsonBucket) proto() *pb.Bucket {
 	if c := b.CustomPlacementConfig; c != nil {
 		out.CustomPlacementConfig = &pb.Bucket_CustomPlacementConfig{DataLocations: c.DataLocations}
 	}
+	if f := b.IpFilter; f != nil {
+		out.IpFilter = f.proto()
+	}
 	if h := b.HierarchicalNamespace; h != nil {
 		out.HierarchicalNamespace = &pb.Bucket_HierarchicalNamespace{Enabled: h.Enabled}
 	}
@@ -390,18 +394,12 @@ var bucketMaskFields = map[string]string{
 	"website": "website", "logging": "logging", "billing": "billing", "encryption": "encryption",
 	"autoclass": "autoclass", "lifecycle": "lifecycle", "rpo": "rpo",
 	"acl": "acl", "default_object_acl": "defaultObjectAcl", "custom_placement_config": "customPlacementConfig",
+	"ip_filter": "ipFilter",
 }
 
 // bucketToJSON is b as JSON API metadata: every field it sets, or, with
 // paths (an update_mask), those fields, null where b leaves one unset.
 func bucketToJSON(b *pb.Bucket, paths []string) (map[string]any, error) {
-	if b.GetIpFilter() != nil {
-		// The JSON API refuses ipFilter too (buckets.go): a filter is only
-		// worth its name enforced, and enforcing it needs the caller's VPC
-		// network and the storage.buckets.exemptFromIpFilter permission,
-		// neither of which CloudBurrow models.
-		return nil, grpcstatus.Error(codes.Unimplemented, "ip_filter is not implemented: bucket IP filtering is not enforced by CloudBurrow, so it is refused rather than stored")
-	}
 	all := map[string]any{}
 	set := func(k string, v any, ok bool) {
 		if ok {
@@ -467,6 +465,9 @@ func bucketToJSON(b *pb.Bucket, paths []string) (map[string]any, error) {
 			return nil, grpcstatus.Error(codes.Unimplemented, "encryption enforcement configs are not implemented over gRPC")
 		}
 		all["encryption"] = map[string]any{"defaultKmsKeyName": e.GetDefaultKmsKey()}
+	}
+	if f := b.GetIpFilter(); f != nil {
+		all["ipFilter"] = ipFilterToJSON(f)
 	}
 	if a := b.GetAutoclass(); a != nil {
 		all["autoclass"] = map[string]any{"enabled": a.GetEnabled()}
@@ -594,6 +595,59 @@ func bucketACLToJSON(acl []*pb.BucketAccessControl) []any {
 	out := []any{}
 	for _, e := range acl {
 		out = append(out, map[string]any{"entity": e.GetEntity(), "role": e.GetRole()})
+	}
+	return out
+}
+
+// jsonIPFilter is a bucket's ipFilter as the JSON API returns it (ipfilter.go).
+type jsonIPFilter struct {
+	Mode                *string
+	PublicNetworkSource *struct{ AllowedIpCidrRanges []string }
+	VpcNetworkSources   []struct {
+		Network             *string
+		AllowedIpCidrRanges []string
+	}
+	AllowCrossOrgVpcs          bool
+	AllowAllServiceAgentAccess *bool
+}
+
+func (f jsonIPFilter) proto() *pb.Bucket_IpFilter {
+	out := &pb.Bucket_IpFilter{Mode: f.Mode, AllowCrossOrgVpcs: f.AllowCrossOrgVpcs, AllowAllServiceAgentAccess: f.AllowAllServiceAgentAccess}
+	if p := f.PublicNetworkSource; p != nil {
+		out.PublicNetworkSource = &pb.Bucket_IpFilter_PublicNetworkSource{AllowedIpCidrRanges: p.AllowedIpCidrRanges}
+	}
+	for _, v := range f.VpcNetworkSources {
+		out.VpcNetworkSources = append(out.VpcNetworkSources, &pb.Bucket_IpFilter_VpcNetworkSource{Network: v.Network, AllowedIpCidrRanges: v.AllowedIpCidrRanges})
+	}
+	return out
+}
+
+// ipFilterToJSON is a gRPC Bucket.IpFilter as the JSON API's ipFilter,
+// which validateIPFilter then checks.
+func ipFilterToJSON(f *pb.Bucket_IpFilter) map[string]any {
+	out := map[string]any{"allowCrossOrgVpcs": f.GetAllowCrossOrgVpcs()}
+	if f.Mode != nil {
+		out["mode"] = f.GetMode()
+	}
+	if f.AllowAllServiceAgentAccess != nil {
+		out["allowAllServiceAgentAccess"] = f.GetAllowAllServiceAgentAccess()
+	}
+	strs := func(l []string) []any {
+		o := []any{}
+		for _, s := range l {
+			o = append(o, s)
+		}
+		return o
+	}
+	if p := f.GetPublicNetworkSource(); p != nil {
+		out["publicNetworkSource"] = map[string]any{"allowedIpCidrRanges": strs(p.GetAllowedIpCidrRanges())}
+	}
+	if v := f.GetVpcNetworkSources(); len(v) > 0 {
+		list := []any{}
+		for _, src := range v {
+			list = append(list, map[string]any{"network": src.GetNetwork(), "allowedIpCidrRanges": strs(src.GetAllowedIpCidrRanges())})
+		}
+		out["vpcNetworkSources"] = list
 	}
 	return out
 }

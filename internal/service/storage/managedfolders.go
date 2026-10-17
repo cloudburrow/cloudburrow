@@ -37,8 +37,15 @@ import (
 //   - A bucket that holds a managed folder cannot be deleted (409), as one
 //     that holds an object cannot.
 //
-// managedFolders.update, whose only settable field is rapidCacheConfig,
-// stays 501, as rapidCaches do; so is an insert carrying rapidCacheConfig.
+// rapidCacheConfig (#1505), the only field managedFolders.update sets, is a
+// map of Rapid Cache IDs to policies (rapidcache.go): each key is its
+// policy's rapidCacheId, a Rapid Cache of the bucket that is not disabled,
+// and ingestOnWrite is enabled or unspecified. update has patch semantics:
+// a policy sent replaces that key's, a null one removes it, and a null
+// rapidCacheConfig clears them all; it bumps the metageneration and takes
+// ifMetagenerationMatch and ifMetagenerationNotMatch. The policies are
+// stored and have no effect, as the caches have none. UNVERIFIED: the
+// refusals' statuses and messages.
 
 const managedFolderPrefix = "managedfolder/"
 
@@ -49,6 +56,13 @@ type managedFolderRecord struct {
 	Updated        time.Time     `json:"updated"`
 	Metageneration int64         `json:"metageneration"`
 	Policy         *bucketPolicy `json:"policy,omitempty"`
+	// RapidCache is rapidCacheConfig.policies, by Rapid Cache ID.
+	RapidCache map[string]rapidPolicy `json:"rapidCache,omitempty"`
+}
+
+type rapidPolicy struct {
+	RapidCacheID  string `json:"rapidCacheId"`
+	IngestOnWrite string `json:"ingestOnWrite"`
 }
 
 func managedFolderKey(bucket, name string) string { return managedFolderPrefix + bucket + "/" + name }
@@ -141,6 +155,170 @@ func withSlash(name string) string {
 }
 
 func (s *Server) managedFolderJSON(r *http.Request, f managedFolderRecord) map[string]any {
+	out := managedFolderBase(r, f)
+	if len(f.RapidCache) > 0 {
+		pol := map[string]any{}
+		for k, p := range f.RapidCache {
+			pol[k] = map[string]any{"rapidCacheId": p.RapidCacheID, "ingestOnWrite": p.IngestOnWrite}
+		}
+		out["rapidCacheConfig"] = map[string]any{"policies": pol}
+	}
+	return out
+}
+
+// parseRapidCacheConfig reads rapidCacheConfig's policies: a key with a nil
+// policy is one a patch removes.
+func parseRapidCacheConfig(v any) (map[string]*rapidPolicy, error) {
+	out := map[string]*rapidPolicy{}
+	if v == nil {
+		return out, nil
+	}
+	cfg, ok := v.(map[string]any)
+	if !ok {
+		return nil, badRequest("Invalid argument: rapidCacheConfig must be an object")
+	}
+	for k := range cfg {
+		if k != "policies" {
+			return nil, badRequest("Invalid argument: %s is not a RapidCacheConfig field", k)
+		}
+	}
+	if cfg["policies"] == nil {
+		return out, nil
+	}
+	pols, ok := cfg["policies"].(map[string]any)
+	if !ok {
+		return nil, badRequest("Invalid argument: rapidCacheConfig.policies must be an object")
+	}
+	for key, pv := range pols {
+		if pv == nil {
+			out[key] = nil
+			continue
+		}
+		pm, ok := pv.(map[string]any)
+		if !ok {
+			return nil, badRequest("Invalid argument: rapidCacheConfig.policies[%q] must be an object", key)
+		}
+		p := rapidPolicy{IngestOnWrite: "unspecified"}
+		for f, x := range pm {
+			switch f {
+			case "rapidCacheId":
+				p.RapidCacheID, _ = x.(string)
+			case "ingestOnWrite":
+				s, _ := x.(string)
+				switch strings.ToLower(s) {
+				case "enabled", "ingest_on_write_enabled":
+					p.IngestOnWrite = "enabled"
+				case "unspecified", "ingest_on_write_unspecified", "":
+					p.IngestOnWrite = "unspecified"
+				default:
+					return nil, badRequest("Invalid argument: rapidCacheConfig.policies[%q].ingestOnWrite %v must be enabled or unspecified", key, x)
+				}
+			default:
+				return nil, badRequest("Invalid argument: %s is not a RapidCachePolicy field", f)
+			}
+		}
+		if p.RapidCacheID == "" {
+			p.RapidCacheID = key
+		}
+		if p.RapidCacheID != key {
+			return nil, badRequest("Invalid argument: rapidCacheConfig.policies[%q].rapidCacheId %q must be its key", key, p.RapidCacheID)
+		}
+		out[key] = &p
+	}
+	return out, nil
+}
+
+// applyRapidCacheConfig sets f's policies from pols, each naming a Rapid
+// Cache of the bucket that is not disabled.
+func (s *Server) applyRapidCacheConfig(tx Tx, f *managedFolderRecord, pols map[string]*rapidPolicy, replace bool) error {
+	if err := s.settle(tx, f.Bucket); err != nil {
+		return err
+	}
+	if replace || f.RapidCache == nil {
+		f.RapidCache = map[string]rapidPolicy{}
+	}
+	for k, p := range pols {
+		if p == nil {
+			delete(f.RapidCache, k)
+			continue
+		}
+		c, ok, err := getRapid(tx, f.Bucket, k)
+		if err != nil {
+			return err
+		}
+		if !ok || c.State == cacheDisabled {
+			return badRequest("Invalid argument: rapidCacheConfig names the Rapid Cache %s, which bucket %s does not have.", k, f.Bucket)
+		}
+		f.RapidCache[k] = *p
+	}
+	if len(f.RapidCache) == 0 {
+		f.RapidCache = nil
+	}
+	return nil
+}
+
+// replacePoliciesHeader makes an update replace every policy rather than
+// patch them: a gRPC update whose mask is rapid_cache_config (grpcrapid.go).
+const replacePoliciesHeader = "X-Cloudburrow-Replace-Policies"
+
+func (s *Server) managedFoldersUpdate(w http.ResponseWriter, r *http.Request) {
+	bucket, name := pathVar(r, jsonPrefix, 1), pathVar(r, jsonPrefix, 3)
+	pre, err := parsePreconditions(r, "ifMetagenerationMatch", "ifMetagenerationNotMatch")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	body, err := readBody(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var pols map[string]*rapidPolicy
+	clear := r.Header.Get(replacePoliciesHeader) == "true"
+	for k, v := range body {
+		switch k {
+		case "rapidCacheConfig":
+			if v == nil {
+				clear = true
+			}
+			if pols, err = parseRapidCacheConfig(v); err != nil {
+				writeError(w, err)
+				return
+			}
+			if m, _ := v.(map[string]any); m != nil {
+				if _, has := m["policies"]; has && m["policies"] == nil {
+					clear = true
+				}
+			}
+		case "kind", "id", "bucket", "selfLink", "metageneration", "createTime", "updateTime", "name":
+		default:
+			writeError(w, badRequest("Invalid argument: %s is not a ManagedFolder field", k))
+			return
+		}
+	}
+	var f managedFolderRecord
+	err = s.meta.Update(func(tx Tx) error {
+		if f, err = s.existingManagedFolder(tx, bucket, name); err != nil {
+			return err
+		}
+		if err := pre.check(f.Metageneration, false); err != nil {
+			return err
+		}
+		if err := s.applyRapidCacheConfig(tx, &f, pols, clear); err != nil {
+			return err
+		}
+		f.Metageneration++
+		f.Updated = s.now().UTC()
+		return putManagedFolder(tx, f)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeResponse(w, r, http.StatusOK, s.managedFolderJSON(r, f))
+}
+
+func managedFolderBase(r *http.Request, f managedFolderRecord) map[string]any {
 	return map[string]any{
 		"kind": "storage#managedFolder", "id": f.Bucket + "/" + f.Name,
 		"bucket": f.Bucket, "name": f.Name,
@@ -171,14 +349,15 @@ func (s *Server) managedFoldersInsert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	var rapid map[string]*rapidPolicy
 	for k, v := range body {
 		switch k {
 		case "name":
 		case "kind", "id", "bucket", "selfLink", "metageneration", "createTime", "updateTime":
 			// Output only, and ignored, as Google ignores them.
 		case "rapidCacheConfig":
-			if !empty(v) {
-				writeError(w, errorf(http.StatusNotImplemented, "notImplemented", "rapidCacheConfig is not implemented: rapid caches are not implemented"))
+			if rapid, err = parseRapidCacheConfig(v); err != nil {
+				writeError(w, err)
 				return
 			}
 		default:
@@ -210,6 +389,9 @@ func (s *Server) managedFoldersInsert(w http.ResponseWriter, r *http.Request) {
 			return err
 		} else if exists {
 			return conflict("The managed folder %s already exists in bucket %s.", name, bucket)
+		}
+		if err := s.applyRapidCacheConfig(tx, &f, rapid, true); err != nil {
+			return err
 		}
 		return putManagedFolder(tx, f)
 	})

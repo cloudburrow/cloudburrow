@@ -63,13 +63,13 @@ var bucketFields = map[string]string{
 	"softDeleteTime": "output", "timeCreated": "output", "updated": "output", "owner": "output",
 	"satisfiesPZI": "output", "satisfiesPZS": "output", "name": "output", "objectRetention": "output",
 
-	"ipFilter": "IP filtering is not implemented", "acl": "acl", "defaultObjectAcl": "acl",
+	"ipFilter": "kept", "acl": "acl", "defaultObjectAcl": "acl",
 }
 
 // storedObjects are the stored fields whose value is an object; rpo is a
 // string.
 var storedObjects = map[string]bool{"website": true, "logging": true, "encryption": true, "billing": true,
-	"iamConfiguration": true, "autoclass": true, "customPlacementConfig": true, "hierarchicalNamespace": true}
+	"iamConfiguration": true, "autoclass": true, "customPlacementConfig": true, "hierarchicalNamespace": true, "ipFilter": true}
 
 var storageClasses = map[string]bool{"STANDARD": true, "NEARLINE": true, "COLDLINE": true, "ARCHIVE": true,
 	"MULTI_REGIONAL": true, "REGIONAL": true, "DURABLE_REDUCED_AVAILABILITY": true, "RAPID": true}
@@ -176,6 +176,9 @@ func validateKept(f map[string]any) error {
 		if s, _ := v.(string); s != "DEFAULT" && s != "ASYNC_TURBO" {
 			return badRequest("Invalid argument: rpo %v must be DEFAULT or ASYNC_TURBO", v)
 		}
+	}
+	if err := validateIPFilter(f["ipFilter"]); err != nil {
+		return err
 	}
 	if _, err := parseLifecycle(f["lifecycle"]); err != nil {
 		return err

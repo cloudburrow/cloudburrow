@@ -163,6 +163,12 @@ func NewServer(o Options) (*Server, error) {
 	s.handlers["storage.buckets.operations.cancel"] = s.operationsCancel
 	s.handlers["storage.buckets.operations.advanceRelocateBucket"] = s.operationsAdvanceRelocateBucket
 	s.handlers["storage.buckets.relocate"] = s.bucketsRelocate
+	s.handlers["storage.managedFolders.update"] = s.managedFoldersUpdate
+	s.handlers["storage.rapidCaches.insert"] = s.rapidCachesInsert
+	s.handlers["storage.rapidCaches.update"] = s.rapidCachesUpdate
+	s.handlers["storage.rapidCaches.get"] = s.rapidCachesGet
+	s.handlers["storage.rapidCaches.list"] = s.rapidCachesList
+	s.handlers["storage.rapidCaches.disable"] = s.rapidCachesDisable
 	s.handlers["storage.anywhereCaches.insert"] = s.anywhereCachesInsert
 	s.handlers["storage.anywhereCaches.update"] = s.anywhereCachesUpdate
 	s.handlers["storage.anywhereCaches.get"] = s.anywhereCachesGet
@@ -221,6 +227,9 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.cloudBuildLogsGuard(w, r) {
+		return
+	}
+	if s.ipFilterGuard(w, r) {
 		return
 	}
 	switch {

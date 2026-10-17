@@ -222,7 +222,7 @@ func TestStorageBucketUnkeptFieldRefused(t *testing.T) {
 	_, h := sdk(t)
 	b := h.URL + "/storage/v1/b"
 	for field, body := range map[string]string{
-		"ipFilter":   `{"name":"web","ipFilter":{"mode":"Enabled"}}`,
+		"ipFilter":   `{"name":"web","ipFilter":{"mode":"On"}}`,
 		"bogusField": `{"name":"web","bogusField":1}`,
 	} {
 		code, resp := raw(t, "POST", b+"?project=p", body)
@@ -231,7 +231,7 @@ func TestStorageBucketUnkeptFieldRefused(t *testing.T) {
 		}
 	}
 	raw(t, "POST", b+"?project=p", `{"name":"web"}`)
-	if code, resp := raw(t, "PATCH", b+"/web", `{"ipFilter":{"mode":"Enabled"}}`); code != 400 || !strings.Contains(resp, "ipFilter") {
+	if code, resp := raw(t, "PATCH", b+"/web", `{"ipFilter":{"mode":"On"}}`); code != 400 || !strings.Contains(resp, "ipFilter") {
 		t.Errorf("patch ipFilter = %d %s", code, resp)
 	}
 	// A null or empty unkept field says nothing: Terraform's NullFields send
