@@ -68,7 +68,8 @@ type moreOption struct {
 // moreOptionNames are the options readMoreOption reads.
 var moreOptionNames = map[string]bool{"max_staleness": true, "default_rounding_mode": true, "tags": true,
 	"require_partition_filter": true, "enable_change_history": true, "storage_uri": true, "privacy_policy": true,
-	"file_format": true, "table_format": true} // #1427, iceberg.go
+	"file_format": true, "table_format": true, // #1427, iceberg.go
+	"enable_fine_grained_mutations": true} // #1456
 
 // readMoreOption reads name = val, one of moreOptionNames, of the statement
 // text sql. msg is why it cannot be read, a 400's.
@@ -144,11 +145,11 @@ func readMoreOption(name string, val []token, sql string) (o moreOption, msg str
 		}
 		k := map[string]string{"file_format": "fileFormat", "table_format": "tableFormat"}[name]
 		o.value = map[string]any{k: strings.ToUpper(v.(string))}
-	case "enable_change_history":
+	case "enable_change_history", "enable_fine_grained_mutations":
 		o.setting = true
 		v, ok := boolean()
 		if !ok {
-			return o, "the option enable_change_history must be a BOOL literal"
+			return o, "the option " + name + " must be a BOOL literal"
 		}
 		if v != nil {
 			o.value = strings.ToLower(fmt.Sprint(v))
@@ -199,7 +200,11 @@ func (o moreOption) put(meta map[string]json.RawMessage) {
 type tableSetting struct {
 	Created       string  `json:"created,omitempty"`
 	ChangeHistory *string `json:"changeHistory,omitempty"`
-	PrivacyPolicy *string `json:"privacyPolicy,omitempty"`
+	// FineGrainedMutations is enable_fine_grained_mutations (#1456):
+	// BigQuery's "fine-grained DML optimization", which changes how DML
+	// stores its writes, not what they write, so it is kept and read back.
+	FineGrainedMutations *string `json:"fineGrainedMutations,omitempty"`
+	PrivacyPolicy        *string `json:"privacyPolicy,omitempty"`
 	// MVChanged marks a materialized view whose base tables changed
 	// since its last refresh, its backing table already brought up to
 	// date by a read (materializedviews.go, #1415).
@@ -300,6 +305,8 @@ func (s *tableSettings) set(key, created string, o moreOption) {
 	switch o.name {
 	case "enable_change_history":
 		t.ChangeHistory = v
+	case "enable_fine_grained_mutations":
+		t.FineGrainedMutations = v
 	case "privacy_policy":
 		t.PrivacyPolicy = v
 		if v != nil {
@@ -400,6 +407,9 @@ func moreTableOptions(t infoTable, add func(name, typ, value string)) {
 	st, _ := t[settingsKey].(tableSetting)
 	if st.ChangeHistory != nil {
 		add("enable_change_history", "BOOL", *st.ChangeHistory)
+	}
+	if st.FineGrainedMutations != nil {
+		add("enable_fine_grained_mutations", "BOOL", *st.FineGrainedMutations)
 	}
 	if mv, _ := t["materializedView"].(map[string]any); mv != nil { // materializedviews.go
 		add("enable_refresh", "BOOL", strconv.FormatBool(mv["enableRefresh"] == true))

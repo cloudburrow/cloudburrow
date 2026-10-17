@@ -40,7 +40,8 @@
         "patches/bigquery-emulator/0037-default-time-zone-header.patch",
         "patches/bigquery-emulator/0038-csv-empty-string-mark.patch",
         "patches/bigquery-emulator/0041-reported-times-by-the-engine-clock.patch",
-        "patches/bigquery-emulator/0043-range-columns-of-a-schema.patch"
+        "patches/bigquery-emulator/0043-range-columns-of-a-schema.patch",
+        "patches/bigquery-emulator/0045-ranges-in-a-record.patch"
       ]
     },
     {

@@ -366,7 +366,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows,
 				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, models: models}
 			if j[3] == "jobs" {
-				f.insertJob(w, r)
+				f.withDefaultJobKey(w, r, func(w http.ResponseWriter) { f.insertJob(w, r) }) // #1456, defaultjobkey.go
 			} else {
 				withInfinities(w, r, func(w http.ResponseWriter) { f.query(w, r) }) // #1077, #1101
 			}

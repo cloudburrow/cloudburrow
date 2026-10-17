@@ -40,8 +40,11 @@ func TestParseAlter(t *testing.T) {
 		t.Errorf("ADD COLUMN with rounding_mode: %+v, %q, %q", st.actions, unsupported, msg)
 	}
 	for sql, want := range map[string]string{
-		"ALTER TABLE ds.t SET OPTIONS (enable_fine_grained_mutations=true)": "enable_fine_grained_mutations",
-		"ALTER TABLE ds.t ADD COLUMN a INT64 OPTIONS (x = 1) y":             "after the column's type",
+		"ALTER TABLE ds.t SET OPTIONS (enable_fine_grained_mutations=true)":                              "", // #1456
+		"ALTER TABLE ds.t SET OPTIONS (not_an_option=true)":                                              "not_an_option",
+		"ALTER TABLE ds.t ALTER COLUMN a SET OPTIONS (data_governance_tags=[(\"p/k\", \"v\")])":          "data_governance_tags",
+		"ALTER TABLE ds.t ALTER COLUMN a SET OPTIONS (data_policies += [\"{'name':'p.region-us.dp'}\"])": "",
+		"ALTER TABLE ds.t ADD COLUMN a INT64 OPTIONS (x = 1) y":                                          "after the column's type",
 	} {
 		toks, _ := lex(sql)
 		if got := alterUnsupported(toks); !strings.Contains(got, want) {
