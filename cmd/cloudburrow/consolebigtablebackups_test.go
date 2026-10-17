@@ -219,6 +219,14 @@ func TestConsoleBigtableSQLSnapshotsBundlesAndViews(t *testing.T) {
 	if lv, err := iac.LogicalViewInfo(ctx, "shop-inst", "logical-v"); err != nil || lv.Query != "SELECT _key FROM items" {
 		t.Errorf("LogicalViewInfo = %+v, %v", lv, err)
 	}
+	// A view runs (#1511): the tab counts its rows, and the query form reads them.
+	if out := detail(); !strings.Contains(out, `"Rows":"1"`) {
+		t.Errorf("the Logical views tab does not count the view's rows: %s", out)
+	}
+	if code, out := pickerDo(t, srv, http.MethodPost, "/api/query/bigtable?"+scoped, map[string]any{"Path": []string{"items"},
+		"Values": map[string]string{"sql": "SELECT _key, COUNT(*) AS n FROM `logical-v` GROUP BY _key"}}); code != http.StatusOK || !strings.Contains(out, "i#1") {
+		t.Errorf("a logical view in the query form = %d: %s", code, out)
+	}
 	if code, out := iact([]string{"shop-inst", "logicalViews", "logical-v"}, "editview", map[string]string{"query": "SELECT _key FROM items2"}); code != http.StatusOK {
 		t.Errorf("Edit query = %d: %s", code, out)
 	}

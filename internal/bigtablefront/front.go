@@ -54,7 +54,6 @@ const (
 // either (#1499), each with the message the front answers it UNIMPLEMENTED
 // with.
 var Refused = map[string]string{
-	admin + "UndeleteTable":                        "the emulator does not currently support undeleting tables",
 	data + "GenerateInitialChangeStreamPartitions": changeStreams,
 	data + "ReadChangeStream":                      changeStreams,
 }
@@ -62,7 +61,9 @@ var Refused = map[string]string{
 // The messages, worded as the emulator's own refusals are ("the emulator
 // does not currently support authorized views").
 const (
-	changeStreams = "the emulator does not currently support change streams"
+	// The front forwards mutations to the emulator undecoded and keeps no
+	// change log, and the emulator keeps none either (#1511).
+	changeStreams = "the emulator does not currently support change streams: it keeps no log of the mutations it applies"
 )
 
 // Front forwards Bigtable calls to the emulator, refusing the Refused ones.
@@ -372,6 +373,7 @@ func (f *Front) dropTables(ctx context.Context, instance string) error {
 	f.tableIAM.drop(instance)
 	f.views.drop(instance)
 	f.copies.drop(instance)
+	f.copies.dropDeleted(instance)
 	f.sqlViews.drop(instance)
 	f.bundles.drop(instance)
 	c := btapb.NewBigtableTableAdminClient(f.upstream)

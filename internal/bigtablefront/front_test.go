@@ -134,10 +134,6 @@ func TestFrontRefusesWhatWouldCrashTheEmulator(t *testing.T) {
 	tbl := inst + "/tables/kept"
 
 	calls := map[string]func() error{
-		"UndeleteTable": func() error {
-			_, err := a.UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl})
-			return err
-		},
 		"GenerateInitialChangeStreamPartitions": func() error {
 			s, err := d.GenerateInitialChangeStreamPartitions(ctx, &bigtablepb.GenerateInitialChangeStreamPartitionsRequest{TableName: tbl})
 			if err != nil {
@@ -174,6 +170,41 @@ func TestFrontRefusesWhatWouldCrashTheEmulator(t *testing.T) {
 	}
 	if _, err := ac.TableInfo(ctx, "kept"); err != nil {
 		t.Errorf("the table after the refusals: %v", err)
+	}
+
+	// UndeleteTable (#1511) brings back a table deleted through the front,
+	// with its families and cells, and refuses one never deleted.
+	if _, err := a.UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl}); status.Code(err) != codes.NotFound {
+		t.Errorf("UndeleteTable of a live table = %v, want NotFound", err)
+	}
+	if err := ac.CreateColumnFamily(ctx, "kept", "cf"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := bigtable.NewClient(ctx, "p", "i", option.WithGRPCConn(conn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := bigtable.NewMutation()
+	m.Set("cf", "q", bigtable.Timestamp(5000), []byte("v"))
+	if err := c.Open("kept").Apply(ctx, "r1", m); err != nil {
+		t.Fatal(err)
+	}
+	if err := ac.DeleteTable(ctx, "kept"); err != nil {
+		t.Fatal(err)
+	}
+	op, err := ac.TableAdminClientV2().UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl})
+	if err != nil {
+		t.Fatalf("UndeleteTable: %v", err)
+	}
+	if got, err := op.Wait(ctx); err != nil || got.GetName() != tbl {
+		t.Fatalf("UndeleteTable.Wait = %v, %v", got, err)
+	}
+	r, err := c.Open("kept").ReadRow(ctx, "r1")
+	if err != nil || len(r["cf"]) != 1 || string(r["cf"][0].Value) != "v" || r["cf"][0].Timestamp != 5000 {
+		t.Errorf("the undeleted row = %v, %v", r, err)
+	}
+	if _, err := a.UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl}); status.Code(err) != codes.NotFound {
+		t.Errorf("UndeleteTable twice = %v, want NotFound", err)
 	}
 }
 

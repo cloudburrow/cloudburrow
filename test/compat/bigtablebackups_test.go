@@ -344,8 +344,8 @@ func TestBigtableSQL(t *testing.T) {
 	if got := run("SELECT _key FROM `sql-users` WHERE _key >= 'u#2' AND _key < 'x#2'", nil, nil); len(got) != 2 {
 		t.Errorf("a key range read %d rows, want 2", len(got))
 	}
-	if _, err := c.PrepareStatement(ctx, "SELECT COUNT(*) FROM `sql-users`", nil); status.Code(err) != codes.InvalidArgument {
-		t.Errorf("an aggregate = %v, want InvalidArgument", err)
+	if _, err := c.PrepareStatement(ctx, "SELECT APPROX_QUANTILES(_key, 2) FROM `sql-users`", nil); status.Code(err) != codes.Unimplemented {
+		t.Errorf("an aggregate the emulator's SQL does not build = %v, want Unimplemented", err)
 	}
 	if _, err := c.PrepareStatement(ctx, "SELECT _key FROM missing", nil); status.Code(err) != codes.NotFound {
 		t.Errorf("a missing table = %v, want NotFound", err)

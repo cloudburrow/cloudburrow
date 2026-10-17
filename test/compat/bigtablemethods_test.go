@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"cloud.google.com/go/bigtable"
-	"cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	"cloud.google.com/go/bigtable/apiv2/bigtablepb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -26,8 +25,9 @@ import (
 // which restarts the pod and loses every table. The front before the
 // emulator (internal/bigtablefront, #1206) serves backups itself since
 // #1499 (TestBigtableBackups), and schema bundles
-// (TestBigtableSchemaBundles), and answers the rest, UndeleteTable and the
-// change stream reads, UNIMPLEMENTED;
+// (TestBigtableSchemaBundles), and UndeleteTable since #1511
+// (TestBigtableUndeleteTable), and answers the rest, the change stream
+// reads, UNIMPLEMENTED;
 // TestBigtableCrashingMethodsAreRefused calls each.
 
 const bigtableInstance = "cb-instance"
@@ -270,26 +270,21 @@ func TestBigtableRefusedDataMethods(t *testing.T) {
 
 // TestBigtableCrashingMethodsAreRefused calls each method the emulator would
 // panic on (#1206): CloudBurrow's front answers UNIMPLEMENTED, a table
-// created before is still there after all three, and, given the
+// created before is still there after both, and, given the
 // instance's kubeconfig, the Bigtable pod's containers restarted no more
 // than before. Admin calls go through the generated admin client the
 // veneer wraps; the change stream reads, which the veneer does not send,
 // through the module's generated data stub.
 //
-// covers: google.bigtable.admin.v2.BigtableTableAdmin/UndeleteTable (unimplemented)
 // covers: google.bigtable.v2.Bigtable/GenerateInitialChangeStreamPartitions (unimplemented), google.bigtable.v2.Bigtable/ReadChangeStream (unimplemented)
 func TestBigtableCrashingMethodsAreRefused(t *testing.T) {
 	h := New(t)
 	admin, _ := bigtableTable(t, h, "crashers")
 	restarts := bigtableRestarts(t)
 	before := restarts()
-	a := admin.TableAdminClientV2()
 	ctx := h.Context()
 	inst := fmt.Sprintf("projects/%s/instances/%s", h.Project(), bigtableInstance)
 	tbl := inst + "/tables/crashers"
-
-	_, err := a.UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl})
-	wantRefused(t, "UndeleteTable", err, codes.Unimplemented, "the emulator does not currently support undeleting tables")
 
 	conn, err := grpc.NewClient(h.Endpoint(EnvBigtable), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -297,7 +292,7 @@ func TestBigtableCrashingMethodsAreRefused(t *testing.T) {
 	}
 	defer conn.Close()
 	d := bigtablepb.NewBigtableClient(conn)
-	const streams = "the emulator does not currently support change streams"
+	const streams = "the emulator does not currently support change streams: it keeps no log of the mutations it applies"
 	gp, err := d.GenerateInitialChangeStreamPartitions(ctx, &bigtablepb.GenerateInitialChangeStreamPartitionsRequest{TableName: tbl})
 	if err == nil {
 		_, err = gp.Recv()
@@ -311,7 +306,7 @@ func TestBigtableCrashingMethodsAreRefused(t *testing.T) {
 
 	// A crash would have lost the table with the emulator's memory.
 	if _, err := admin.TableInfo(ctx, "crashers"); err != nil {
-		t.Errorf("the table after the three calls: %v; did the emulator restart?", err)
+		t.Errorf("the table after the two calls: %v; did the emulator restart?", err)
 	}
 	if after := restarts(); after != before {
 		t.Errorf("the Bigtable pod's restarts went from %s to %s", before, after)

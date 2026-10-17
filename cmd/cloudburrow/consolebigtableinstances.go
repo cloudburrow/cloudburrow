@@ -186,8 +186,8 @@ func (p bigtableInstancesProvider) Detail(ctx context.Context, project string, p
 		{ID: "appprofiles", Label: "App profiles", Listing: p.profilesListing(ctx, c, path[0], clusters)},
 		{ID: "tables", Label: "Tables", Listing: p.tablesListing(ctx, project, path[0])},
 		{ID: "backups", Label: "Backups", Listing: p.backupsListing(ctx, project, path[0])},
-		{ID: "logicalviews", Label: "Logical views", Listing: p.sqlViewsListing(ctx, c, path[0], false)},
-		{ID: "materializedviews", Label: "Materialized views", Listing: p.sqlViewsListing(ctx, c, path[0], true)},
+		{ID: "logicalviews", Label: "Logical views", Listing: p.sqlViewsListing(ctx, c, project, path[0], false)},
+		{ID: "materializedviews", Label: "Materialized views", Listing: p.sqlViewsListing(ctx, c, project, path[0], true)},
 	}, p.tableExtrasListings(ctx, project, path[0])...)}, nil
 }
 

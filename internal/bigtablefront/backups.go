@@ -76,6 +76,9 @@ type copies struct {
 	mu        sync.Mutex
 	backups   map[string]*backupEntry
 	snapshots map[string]*snapshotEntry
+	// deleted is the tables deleted through the front, kept for
+	// UndeleteTable (undelete.go).
+	deleted map[string]*deletedTable
 }
 
 func newCopies(upstream *grpc.ClientConn, in *instances) *copies {
@@ -95,6 +98,7 @@ func (c *copies) methods() map[string]method {
 		admin + "GetSnapshot":             unary(func() *btapb.GetSnapshotRequest { return &btapb.GetSnapshotRequest{} }, c.getSnapshot),
 		admin + "ListSnapshots":           unary(func() *btapb.ListSnapshotsRequest { return &btapb.ListSnapshotsRequest{} }, c.listSnapshots),
 		admin + "DeleteSnapshot":          unary(func() *btapb.DeleteSnapshotRequest { return &btapb.DeleteSnapshotRequest{} }, c.deleteSnapshot),
+		admin + "UndeleteTable":           unary(func() *btapb.UndeleteTableRequest { return &btapb.UndeleteTableRequest{} }, c.undeleteTable),
 		admin + "CreateTableFromSnapshot": unary(func() *btapb.CreateTableFromSnapshotRequest { return &btapb.CreateTableFromSnapshotRequest{} }, c.createTableFromSnapshot),
 	}
 }

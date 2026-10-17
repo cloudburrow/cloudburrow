@@ -207,16 +207,16 @@ func TestSQLLanguage(t *testing.T) {
 	}
 	// Refusals.
 	for sql, want := range map[string]codes.Code{
-		"SELECT _key FROM orders ORDER BY o":                   codes.InvalidArgument,
-		"SELECT _key FROM orders ORDER BY _key DESC":           codes.InvalidArgument,
-		"SELECT * FROM UNPACK((SELECT * FROM orders))":         codes.Unimplemented,
-		"SELECT SOUNDEX('x')":                                  codes.Unimplemented,
-		"SELECT NOPE(1)":                                       codes.InvalidArgument,
-		"SELECT _key, COUNT(*) FROM orders":                    codes.InvalidArgument,
+		"SELECT _key FROM orders ORDER BY o":                    codes.InvalidArgument,
+		"SELECT _key FROM orders ORDER BY _key DESC":            codes.InvalidArgument,
+		"SELECT * FROM UNPACK((SELECT * FROM orders))":          codes.Unimplemented,
+		"SELECT SOUNDEX('x')":                                   codes.Unimplemented,
+		"SELECT NOPE(1)":                                        codes.InvalidArgument,
+		"SELECT _key, COUNT(*) FROM orders":                     codes.InvalidArgument,
 		"SELECT _key FROM orders(after => CURRENT_TIMESTAMP())": codes.InvalidArgument,
-		"SELECT CAST(o['qty'] AS INT64) FROM orders":           codes.InvalidArgument,
-		"SELECT a._key FROM orders a JOIN orders b":            codes.InvalidArgument,
-		"DELETE FROM orders":                                   codes.InvalidArgument,
+		"SELECT CAST(o['qty'] AS INT64) FROM orders":            codes.InvalidArgument,
+		"SELECT a._key FROM orders a JOIN orders b":             codes.InvalidArgument,
+		"DELETE FROM orders":                                    codes.InvalidArgument,
 	} {
 		if _, err := c.PrepareStatement(ctx, sql, nil); status.Code(err) != want {
 			t.Errorf("%s = %v, want %v", sql, err, want)

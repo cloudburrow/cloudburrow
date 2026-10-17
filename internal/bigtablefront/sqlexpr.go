@@ -896,10 +896,10 @@ func (in *inExpr) eval(e *env) (any, error) {
 func (in *inExpr) String() string { return fmt.Sprintf("in(%s,%v,%v)", in.x, in.list, in.not) }
 
 type caseExpr struct {
-	operand     expr
+	operand      expr
 	whens, thens []expr
-	els         expr
-	t           *btpb.Type
+	els          expr
+	t            *btpb.Type
 }
 
 func (c *caseExpr) check(s *scope) (*btpb.Type, error) {
@@ -994,7 +994,9 @@ func (c *caseExpr) eval(e *env) (any, error) {
 	}
 	return nil, nil
 }
-func (c *caseExpr) String() string { return fmt.Sprintf("case(%v,%v,%v,%v)", c.operand, c.whens, c.thens, c.els) }
+func (c *caseExpr) String() string {
+	return fmt.Sprintf("case(%v,%v,%v,%v)", c.operand, c.whens, c.thens, c.els)
+}
 
 // --- values ---
 

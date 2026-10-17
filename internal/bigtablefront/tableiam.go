@@ -109,9 +109,17 @@ func (t *tableIAM) test(ctx context.Context, req *iampb.TestIamPermissionsReques
 // deleteTable forwards DeleteTable to the emulator and drops the table's
 // policy.
 func (t *tableIAM) deleteTable(ctx context.Context, req *btapb.DeleteTableRequest) (proto.Message, error) {
+	// The copy UndeleteTable restores (undelete.go, #1511).
+	kept, err := t.copies.read(ctx, req.GetName())
+	if err != nil && status.Code(err) != codes.NotFound {
+		return nil, err
+	}
 	resp, err := btapb.NewBigtableTableAdminClient(t.upstream).DeleteTable(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if kept != nil {
+		t.copies.keepDeleted(req.GetName(), kept)
 	}
 	t.drop(req.GetName())
 	t.views.drop(req.GetName())

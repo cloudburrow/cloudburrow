@@ -742,8 +742,12 @@ func init() {
 		"UNIX_SECONDS": {sig: fixed(int64Type, "TIMESTAMP"), run: func(c *call, vs []any, _ *env) (any, error) {
 			return floorDiv(vs[0].(time.Time).UnixMicro(), 1000000), nil
 		}},
-		"TIMESTAMP_ADD": {sig: intervalSig, run: func(c *call, vs []any, _ *env) (any, error) { return addInterval(vs[0].(time.Time), vs[1].(intervalValue), 1) }},
-		"TIMESTAMP_SUB": {sig: intervalSig, run: func(c *call, vs []any, _ *env) (any, error) { return addInterval(vs[0].(time.Time), vs[1].(intervalValue), -1) }},
+		"TIMESTAMP_ADD": {sig: intervalSig, run: func(c *call, vs []any, _ *env) (any, error) {
+			return addInterval(vs[0].(time.Time), vs[1].(intervalValue), 1)
+		}},
+		"TIMESTAMP_SUB": {sig: intervalSig, run: func(c *call, vs []any, _ *env) (any, error) {
+			return addInterval(vs[0].(time.Time), vs[1].(intervalValue), -1)
+		}},
 		"TIMESTAMP_DIFF": {sig: func(c *call, ts []*btpb.Type) (*btpb.Type, error) {
 			if len(ts) != 3 || !argOK(ts[0], "TIMESTAMP") || !argOK(ts[1], "TIMESTAMP") || !isPart(c.args[2]) {
 				return nil, sigErr(c, ts)

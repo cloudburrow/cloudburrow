@@ -767,9 +767,9 @@ func decode(v *btpb.Value, t *btpb.Type) (any, error) {
 
 // temporal is the FROM table's temporal arguments, evaluated.
 type temporal struct {
-	history                     bool
+	history                      bool
 	asOf, after, afterEq, before *time.Time
-	latestN                     int64
+	latestN                      int64
 }
 
 func temporalArgs(args []tableArg, params map[string]*btpb.Type, base env) (temporal, error) {

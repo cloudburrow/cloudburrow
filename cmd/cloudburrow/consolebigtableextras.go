@@ -35,7 +35,8 @@ const (
 // bigtableSQLField is the query form's SQL editor.
 func bigtableSQLField() console.Field {
 	return console.Field{Name: "sql", Label: "SQL", Type: "textarea",
-		Help: "Optional: GoogleSQL for Bigtable, such as SELECT _key, CAST(cf['col'] AS STRING) AS col FROM t WHERE STARTS_WITH(_key, 'a') LIMIT 10. " +
+		Help: "Optional: GoogleSQL for Bigtable, such as SELECT _key, CAST(cf['col'] AS STRING) AS col FROM t WHERE STARTS_WITH(_key, 'a') LIMIT 10, " +
+			"with functions, GROUP BY and aggregates, t(with_history => TRUE), or FROM a logical or materialized view. " +
 			"When given, it runs instead of the row range."}
 }
 
@@ -213,12 +214,12 @@ func sqlViewActions(materialized bool) []console.Action {
 	return []console.Action{edit, {ID: "deleteview", Label: "Delete view", Destructive: true}}
 }
 
-func (p bigtableInstancesProvider) sqlViewsListing(ctx context.Context, c *bigtable.InstanceAdminClient, instance string, materialized bool) console.Listing {
+func (p bigtableInstancesProvider) sqlViewsListing(ctx context.Context, c *bigtable.InstanceAdminClient, project, instance string, materialized bool) console.Listing {
 	noun, segment := "logical views", bigtableLogicalSegment
 	if materialized {
 		noun, segment = "materialized views", bigtableMaterializedSegment
 	}
-	list := console.Listing{Columns: []string{"Query", "Deletion protection"}, NameColumn: "View ID", Noun: noun}
+	list := console.Listing{Columns: []string{"Query", "Rows", "Deletion protection"}, NameColumn: "View ID", Noun: noun}
 	type view struct {
 		id, query string
 		protected bool
@@ -245,12 +246,36 @@ func (p bigtableInstancesProvider) sqlViewsListing(ctx context.Context, c *bigta
 	}
 	for _, v := range views {
 		list.Items = append(list.Items, console.Resource{Name: lastSegment(v.id),
-			Fields:  map[string]string{"Query": v.query, "Deletion protection": strconv.FormatBool(v.protected)},
+			Fields:  map[string]string{"Query": v.query, "Rows": p.viewRows(ctx, project, instance, lastSegment(v.id)), "Deletion protection": strconv.FormatBool(v.protected)},
 			Actions: sqlViewActions(materialized), ActsOn: []string{instance, segment, lastSegment(v.id)}})
 	}
 	list.Total = len(list.Items)
-	list.Note = "The query is kept as written; the emulator does not run views, so a view is never read."
+	list.Note = "Each view runs its query (#1511): Rows is how many rows it returns now. Read them from any table's query form " +
+		"in this instance, with SQL such as SELECT * FROM `view-id`."
 	return list
+}
+
+// viewRows runs the view, counting the rows it returns now.
+func (p bigtableInstancesProvider) viewRows(ctx context.Context, project, instance, view string) string {
+	c, err := bigtable.NewClient(ctx, project, instance, localOpts(p.endpoint)...)
+	if err != nil {
+		return "unavailable: " + err.Error()
+	}
+	defer c.Close()
+	ps, err := c.PrepareStatement(ctx, "SELECT COUNT(*) AS n FROM `"+view+"`", nil)
+	if err != nil {
+		return "unavailable: " + err.Error()
+	}
+	bs, err := ps.Bind(nil)
+	if err != nil {
+		return "unavailable: " + err.Error()
+	}
+	var n int64
+	err = bs.Execute(ctx, func(r bigtable.ResultRow) bool { _ = r.GetByIndex(0, &n); return false })
+	if err != nil {
+		return "unavailable: " + err.Error()
+	}
+	return strconv.FormatInt(n, 10)
 }
 
 func sqlViewCreateFields() []console.Field {
