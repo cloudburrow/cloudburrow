@@ -92,6 +92,14 @@ type jobRecords struct {
 	now func() time.Time
 }
 
+// nowTime is the time now by j.now.
+func (j *jobRecords) nowTime() time.Time {
+	if j == nil || j.now == nil {
+		return time.Now()
+	}
+	return j.now()
+}
+
 func (j *jobRecords) clock() int64 {
 	if j == nil || j.now == nil {
 		return time.Now().UnixMilli()

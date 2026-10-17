@@ -139,3 +139,45 @@ func TestSpannerEditInstanceAndDropProtectionThroughThePage(t *testing.T) {
 	setProtection(true)
 	setProtection(false)
 }
+
+// TestSpannerCreateInstanceThroughTheListScreen (#1491), in the emulators
+// shard. An instance was made only as a side effect of Create database:
+// Create instance on the Spanner list screen makes one the official admin
+// client's GetInstance reads with the form's display name and processing
+// units, and the list shows it.
+func TestSpannerCreateInstanceThroughTheListScreen(t *testing.T) {
+	needService(t, "spanner")
+	addr := strings.TrimSpace(os.Getenv(envSpanner))
+	if addr == "" {
+		t.Skipf("%s is not set: the instance is read back through the Admin API itself", envSpanner)
+	}
+	ctx := context.Background()
+	instAdmin, err := instance.NewInstanceAdminClient(ctx, option.WithEndpoint(addr), option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = instAdmin.Close() })
+	project := uniqueProject(t)
+	q := "?project=" + project
+	inst := fmt.Sprintf("browser-new-%d", time.Now().UnixNano()%1e8)
+	t.Cleanup(func() {
+		b, _ := json.Marshal(map[string]any{"Path": []string{inst}, "Action": "dropinstance"})
+		consoleDo(t, http.MethodPost, "/api/actions/spanner"+q, string(b))
+	})
+
+	p := open(t)
+	p.navigate("/spanner" + q)
+	p.clickText("#view button", "Create instance")
+	p.waitFor(`document.querySelector(".modal.is-open #f-instance") !== null`)
+	setField(p, ".modal.is-open", "f-instance", inst)
+	setField(p, ".modal.is-open", "f-displayName", "Made in browser")
+	setField(p, ".modal.is-open", "f-processingUnits", "300")
+	p.run(chromedp.Click(`.modal.is-open button[type="submit"]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector(".modal") === null`)
+	got, err := instAdmin.GetInstance(ctx, &instancepb.GetInstanceRequest{Name: "projects/" + project + "/instances/" + inst})
+	if err != nil || got.GetDisplayName() != "Made in browser" || got.GetProcessingUnits() != 300 {
+		t.Fatalf("GetInstance after Create instance = %v, %v; want the form's display name and 300 processing units", got, err)
+	}
+	p.waitFor(fmt.Sprintf(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.textContent.includes(%q))`, inst))
+}

@@ -219,12 +219,15 @@ func (p artifactRegistryProvider) versionDetail(st *registry.Store, repo registr
 
 // DetailActions are Delete at each level, and Add tag and Remove tag on a
 // version.
-func (p artifactRegistryProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
+func (p artifactRegistryProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	switch len(path) {
 	case 1:
 		var acts []console.Action
 		if r, _, err := p.repository(project, path[0]); err == nil {
-			acts = append(acts, editRepositoryAction(r))
+			acts = append(acts, editRepositoryAction(r), editCleanupAction(r))
+			if a, ok := editRuleAction(ctx, r.GetName()); ok {
+				acts = append(acts, a)
+			}
 		}
 		return append(acts, []console.Action{
 			{ID: "add-rule", Label: "Add rule", Fields: []console.Field{
@@ -287,6 +290,12 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 	}
 	if len(path) == 1 && action == "edit-repository" {
 		return p.editRepository(ctx, r.GetName(), values)
+	}
+	if len(path) == 1 && action == "edit-cleanup" {
+		return p.editCleanup(ctx, r.GetName(), values)
+	}
+	if len(path) == 1 && action == "edit-rule" {
+		return editRule(ctx, r.GetName(), values)
 	}
 	st := runadapter.RegistryStore()
 	if st == nil {

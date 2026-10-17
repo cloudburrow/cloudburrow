@@ -343,22 +343,30 @@ func (p backupDRProvider) DetailActions(ctx context.Context, project string, pat
 		}
 		return acts
 	}
-	var plans, allPlans, assocs, rules []string
+	var plans, allPlans, assocs, rules, triggers []string
+	planRules := map[string][]string{}
 	if out, err := p.get(ctx, loc+"/backupPlans"); err == nil {
 		for _, x := range bdrItems(out, "backupPlans") {
 			allPlans = append(allPlans, lastSegment(str(x, "name")))
+			for _, r := range bdrItems(x, "backupRules") {
+				planRules[str(x, "name")] = append(planRules[str(x, "name")], str(r, "ruleId"))
+			}
 			if str(x, "backupVault") == vault {
 				plans = append(plans, lastSegment(str(x, "name")))
-				for _, r := range bdrItems(x, "backupRules") {
-					rules = append(rules, str(r, "ruleId"))
-				}
+				rules = append(rules, planRules[str(x, "name")]...)
 			}
 		}
 	}
 	if out, err := p.get(ctx, loc+"/backupPlanAssociations"); err == nil {
 		for _, x := range bdrItems(out, "backupPlanAssociations") {
 			if strings.HasPrefix(str(x, "dataSource"), vault+"/") {
-				assocs = append(assocs, lastSegment(str(x, "name")))
+				a := lastSegment(str(x, "name"))
+				assocs = append(assocs, a)
+				// Trigger backup offers each association with its own
+				// plan's rules only (#1491): another plan's rule fails.
+				for _, r := range planRules[str(x, "backupPlan")] {
+					triggers = append(triggers, a+bdrTriggerSep+r)
+				}
 			}
 		}
 	}
@@ -395,10 +403,10 @@ func (p backupDRProvider) DetailActions(ctx context.Context, project string, pat
 			{Name: "plan", Label: "New backup plan", Type: "select", Required: true, Options: allPlans,
 				Help: "A plan storing into another vault gives the instance a data source there."}}})
 	}
-	if len(assocs) > 0 && len(rules) > 0 {
+	if len(triggers) > 0 {
 		acts = append(acts, console.Action{ID: "trigger", Label: "Trigger backup", Fields: []console.Field{
-			{Name: "association", Label: "Association", Type: "select", Required: true, Options: assocs},
-			{Name: "rule", Label: "Rule", Type: "select", Required: true, Options: rules}}})
+			{Name: "target", Label: "Association and rule", Type: "select", Required: true, Options: triggers,
+				Help: "Each association with the rules of the backup plan it applies."}}})
 	}
 	if len(assocs) > 0 {
 		acts = append(acts, console.Action{ID: "assocdelete", Label: "Delete association", Destructive: true,
@@ -583,6 +591,12 @@ func (p backupDRProvider) ActAt(ctx context.Context, project string, path []stri
 		}
 		_, err = p.call(ctx, p.bdr, http.MethodDelete, "/v1/"+vault+"/dataSources/"+path[1]+"/backups/"+url.PathEscape(v["backup"]), nil)
 	case "trigger":
+		if a, r, ok := strings.Cut(v["target"], bdrTriggerSep); ok {
+			v = map[string]string{"association": a, "rule": r}
+		}
+		if err := p.checkTriggerRule(ctx, loc, v["association"], v["rule"]); err != nil {
+			return err
+		}
 		_, err = p.call(ctx, p.bdr, http.MethodPost, "/v1/"+loc+"/backupPlanAssociations/"+v["association"]+":triggerBackup",
 			map[string]any{"ruleId": v["rule"]})
 	case "restore":
@@ -601,4 +615,29 @@ func (p backupDRProvider) ActAt(ctx context.Context, project string, path []stri
 		return fmt.Errorf("unknown action %q", action)
 	}
 	return err
+}
+
+// bdrTriggerSep joins an association and a rule in Trigger backup's choice.
+const bdrTriggerSep = " / "
+
+// checkTriggerRule refuses a rule that is not in the association's plan,
+// naming the plan's rules, before triggerBackup would fail on it.
+func (p backupDRProvider) checkTriggerRule(ctx context.Context, loc, assoc, rule string) error {
+	a, err := p.get(ctx, loc+"/backupPlanAssociations/"+url.PathEscape(assoc))
+	if err != nil {
+		return err
+	}
+	plan, err := p.get(ctx, strings.TrimPrefix(str(a, "backupPlan"), "/"))
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for _, r := range bdrItems(plan, "backupRules") {
+		if str(r, "ruleId") == rule {
+			return nil
+		}
+		ids = append(ids, str(r, "ruleId"))
+	}
+	return fmt.Errorf("rule %q is not in backup plan %s, which association %s applies; its rules are %s",
+		rule, lastSegment(str(a, "backupPlan")), assoc, strings.Join(ids, ", "))
 }

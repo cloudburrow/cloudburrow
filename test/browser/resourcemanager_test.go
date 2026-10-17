@@ -258,7 +258,9 @@ func TestServiceUsageDisableAndEnableThroughThePage(t *testing.T) {
 	if got := state(); got != "ENABLED" {
 		t.Fatalf("%s in a new project is %s, want ENABLED", api, got)
 	}
-	t.Cleanup(func() { _, _ = c.Services.Enable("projects/"+project+"/services/"+api, &su.EnableServiceRequest{}).Do() })
+	t.Cleanup(func() {
+		_, _ = c.Services.Enable("projects/"+project+"/services/"+api, &su.EnableServiceRequest{}).Do()
+	})
 
 	p := open(t)
 	p.navigateByDrawer("Management tools", "/apis", "APIs & Services")

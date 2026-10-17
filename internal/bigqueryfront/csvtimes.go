@@ -83,6 +83,9 @@ type csvTimes struct {
 	loc     *time.Location // timeZone, or UTC
 	zoneSet bool
 	formats map[string]string // by column type: DATE, DATETIME, TIME, TIMESTAMP
+	// now is the instance's clock (#1487), which a format without a
+	// year reads the year from; nil is the system's.
+	now func() time.Time
 }
 
 // csvTimesOf reads o's timeZone and formats, for a load whose columns are
@@ -175,7 +178,11 @@ const (
 // convert rewrites the values of rec, a record of a load into cols, by t
 // (above). It returns why the record is bad, or "".
 func (t *csvTimes) convert(rec []string, cols []field) string {
-	now := time.Now().In(t.loc)
+	clock := time.Now
+	if t.now != nil {
+		clock = t.now
+	}
+	now := clock().In(t.loc)
 	for i := 0; i < len(rec) && i < len(cols); i++ {
 		v := rec[i]
 		if v == "" {

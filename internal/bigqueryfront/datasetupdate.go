@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
@@ -143,7 +142,7 @@ func (f front) updateDataset(w http.ResponseWriter, r *http.Request, dataset str
 		}
 	}
 	delete(next, "etag")
-	next["lastModifiedTime"], _ = json.Marshal(strconv.FormatInt(time.Now().UnixMilli(), 10))
+	next["lastModifiedTime"], _ = json.Marshal(strconv.FormatInt(f.now().UnixMilli(), 10))
 	body, err := json.Marshal(next)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internalError", "Could not encode dataset "+name+".")

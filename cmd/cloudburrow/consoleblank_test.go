@@ -390,6 +390,15 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	t.Cleanup(func() {
 		_, _ = cb.DeleteBuildTrigger(context.Background(), &cbpb.DeleteBuildTriggerRequest{Name: trig.GetResourceName(), ProjectId: blankProject, TriggerId: trig.GetId()})
 	})
+	// And the sparsest worker pool CreateWorkerPool takes, for a pool's
+	// page (#1491).
+	if _, err := cb.CreateWorkerPool(ctx, &cbpb.CreateWorkerPoolRequest{Parent: "projects/" + blankProject + "/locations/us-central1",
+		WorkerPoolId: "blank-pool", WorkerPool: &cbpb.WorkerPool{}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = cb.DeleteWorkerPool(context.Background(), &cbpb.DeleteWorkerPoolRequest{Name: "projects/" + blankProject + "/locations/us-central1/workerPools/blank-pool"})
+	})
 	d.run = fixedRunAdapter(jobs.serve(t))
 	for _, id := range []string{"blank-job", "blank-ran"} {
 		name := "projects/" + blankProject + "/locations/us-central1/jobs/" + id

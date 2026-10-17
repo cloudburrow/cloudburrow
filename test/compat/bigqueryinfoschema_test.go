@@ -116,7 +116,7 @@ func TestBigQueryInformationSchemaDatasetViews(t *testing.T) {
 			rows[0][0] != project || rows[0][1] != ds.DatasetID || rows[0][5] != "YES" || rows[1][5] != "NO" {
 			t.Fatalf("insert=%v: TABLES rows %v", insert, rows)
 		}
-		if ct, ok := rows[0][9].(time.Time); !ok || time.Since(ct) > time.Hour || time.Since(ct) < -time.Hour {
+		if ct, ok := rows[0][9].(time.Time); !ok || advanceBigQueryClock(t, h, 0).Sub(ct) > time.Hour || advanceBigQueryClock(t, h, 0).Sub(ct) < -time.Hour { // #1487
 			t.Errorf("insert=%v: TABLES creation_time %v", insert, rows[0][9])
 		}
 		if ddl, _ := rows[0][19].(string); !strings.HasPrefix(ddl, "CREATE TABLE `"+project+"."+ds.DatasetID+".t`") ||

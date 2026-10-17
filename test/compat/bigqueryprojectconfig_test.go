@@ -113,8 +113,9 @@ func TestBigQueryProjectConfigurations(t *testing.T) {
 		got[3] != true || got[4] != "00:00" {
 		t.Errorf("time functions in Asia/Tokyo: %v", got)
 	}
-	if d := got[5].(interface{ String() string }).String(); d != time.Now().In(tokyo).Format("2006-01-02") &&
-		d != time.Now().Add(-time.Minute).In(tokyo).Format("2006-01-02") {
+	now := advanceBigQueryClock(t, h, 0) // the instance's clock, #1487
+	if d := got[5].(interface{ String() string }).String(); d != now.In(tokyo).Format("2006-01-02") &&
+		d != now.Add(-time.Minute).In(tokyo).Format("2006-01-02") {
 		t.Errorf("CURRENT_DATE() = %s, want Tokyo's date", d)
 	}
 	// Another region's jobs keep UTC.

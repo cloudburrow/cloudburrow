@@ -38,7 +38,8 @@
         "patches/bigquery-emulator/0022-list-job-configurations.patch",
         "patches/bigquery-emulator/0034-front-clock.patch",
         "patches/bigquery-emulator/0037-default-time-zone-header.patch",
-        "patches/bigquery-emulator/0038-csv-empty-string-mark.patch"
+        "patches/bigquery-emulator/0038-csv-empty-string-mark.patch",
+        "patches/bigquery-emulator/0041-reported-times-by-the-engine-clock.patch"
       ]
     },
     {
@@ -85,7 +86,8 @@
         "patches/googlesqlite/0041-change-row-identities.patch",
         "patches/googlesqlite/0044-replaced-history-and-clock.patch",
         "patches/googlesqlite/0047-default-time-zone-of-a-query.patch",
-        "patches/googlesqlite/0049-struct-float-type.patch"
+        "patches/googlesqlite/0049-struct-float-type.patch",
+        "patches/googlesqlite/0051-catalog-times-by-the-engine-clock.patch"
       ]
     },
     {

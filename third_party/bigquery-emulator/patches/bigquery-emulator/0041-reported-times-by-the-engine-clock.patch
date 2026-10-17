@@ -1,0 +1,259 @@
+CloudBurrow patch 41 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1487). Applies after patch 0038; needs
+googlesqlite patch 0051.
+
+Since patch 0034 the engine's clock follows CloudBurrow's front's, which
+compat tests move forward, but the emulator still stamped the times it
+reports by the system clock: a dataset's and a table's creationTime and
+lastModifiedTime, a job's startTime and endTime, and a Storage API read
+session's expireTime and a write stream's createTime and commitTime. So a
+table made after the clock was advanced was older than the
+CURRENT_TIMESTAMP() of its creation, and a test comparing the two failed.
+The patch stamps each by googlesqlite.Now, the engine's clock.
+server/front_clock_times_test.go fails without the patch and passes with
+it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the
+MIT License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -17,7 +17,6 @@
+ 	"strconv"
+ 	"strings"
+ 	"sync"
+-	"time"
+ 
+ 	"cloud.google.com/go/storage"
+ 	"github.com/goccy/go-json"
+@@ -887,7 +886,7 @@
+ 	}
+ 	// BigQuery gives a dataset's creationTime and lastModifiedTime in
+ 	// milliseconds since the epoch; they are output only.
+-	now := time.Now().UnixMilli()
++	now := googlesqlite.Now().UnixMilli() // CloudBurrow patch (#1487): the front's clock
+ 	r.dataset.CreationTime = now
+ 	r.dataset.LastModifiedTime = now
+ 	conn, err := r.server.connMgr.Connection(ctx, r.project.ID, datasetID)
+@@ -1373,7 +1372,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	startTime := time.Now()
++	startTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	// The write disposition applies to the load job as a whole, so it is
+ 	// honored only for the first object imported; every later object (e.g.
+ 	// the matches of a wildcard URI) appends to what the first one wrote.
+@@ -1435,7 +1434,7 @@
+ 			return nil, fmt.Errorf("the number of wildcards in gcs uri must be 0 or 1")
+ 		}
+ 	}
+-	endTime := time.Now()
++	endTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	job := r.job
+ 	job.Kind = "bigquery#job"
+ 	job.Configuration.JobType = "LOAD"
+@@ -1510,7 +1509,7 @@
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	startTime := time.Now()
++	startTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	conn, err := r.server.connMgr.Connection(ctx, r.project.ID, "")
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to get connection: %w", err)
+@@ -1551,7 +1550,7 @@
+ 			return nil, err
+ 		}
+ 	}
+-	endTime := time.Now()
++	endTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	job := r.job
+ 	job.Kind = "bigquery#job"
+ 	job.Configuration.JobType = "EXTRACT"
+@@ -1705,7 +1704,7 @@
+ 	}
+ 	defer tx.RollbackIfNotCommitted()
+ 	hasDestinationTable := job.Configuration.Query.DestinationTable != nil
+-	startTime := time.Now()
++	startTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	response, jobErr := r.server.contentRepo.Query(
+ 		ctx,
+ 		tx,
+@@ -1714,7 +1713,7 @@
+ 		job.Configuration.Query.Query,
+ 		job.Configuration.Query.QueryParameters,
+ 	)
+-	endTime := time.Now()
++	endTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	if job.JobReference.JobId == "" {
+ 		job.JobReference.JobId = randomID() // generate job id
+ 	}
+@@ -2101,7 +2100,7 @@
+ 		return nil, err
+ 	}
+ 	defer tx.RollbackIfNotCommitted()
+-	startTime := time.Now()
++	startTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	response, queryErr := r.server.contentRepo.Query(
+ 		ctx,
+ 		tx,
+@@ -2113,7 +2112,7 @@
+ 	if queryErr != nil {
+ 		return nil, queryErr
+ 	}
+-	endTime := time.Now()
++	endTime := googlesqlite.Now() // CloudBurrow patch (#1487): the front's clock
+ 	// jobs.query allocates jobIDs server-side (real BigQuery does the
+ 	// same). queryRequest.RequestId is the *idempotency* key — same
+ 	// RequestId on retry should return the cached result — and is
+@@ -3065,7 +3064,7 @@
+ )
+ 
+ func createTableMetadata(ctx context.Context, tx *connection.Tx, server *Server, project *metadata.Project, dataset *metadata.Dataset, table *bigqueryv2.Table) (*bigqueryv2.Table, *ServerError) {
+-	now := time.Now().UnixMilli()
++	now := googlesqlite.Now().UnixMilli() // CloudBurrow patch (#1487): the front's clock
+ 	table.Id = fmt.Sprintf("%s:%s.%s", project.ID, dataset.ID, table.TableReference.TableId)
+ 	table.CreationTime = now
+ 	table.LastModifiedTime = uint64(now)
+--- a/server/storage_handler.go
++++ b/server/storage_handler.go
+@@ -15,6 +15,7 @@
+ 	"github.com/apache/arrow-go/v18/arrow/ipc"
+ 	"github.com/apache/arrow-go/v18/arrow/memory"
+ 	"github.com/goccy/go-json"
++	"github.com/goccy/googlesqlite"
+ 	goavro "github.com/linkedin/goavro/v2"
+ 	bigqueryv2 "google.golang.org/api/bigquery/v2"
+ 	"google.golang.org/genproto/googleapis/rpc/status"
+@@ -93,7 +94,7 @@
+ 	streams := []*storagepb.ReadStream{{Name: streamName}}
+ 	readSession := &storagepb.ReadSession{
+ 		Name:                       sessionName,
+-		ExpireTime:                 timestamppb.New(time.Now().Add(1 * time.Hour)),
++		ExpireTime:                 timestamppb.New(googlesqlite.Now().Add(1 * time.Hour)), // CloudBurrow patch (#1487): the front's clock
+ 		Streams:                    streams,
+ 		EstimatedTotalBytesScanned: 0,
+ 		DataFormat:                 req.ReadSession.DataFormat,
+@@ -404,7 +405,7 @@
+ 	}
+ 	streamID := randomID()
+ 	streamName := fmt.Sprintf("%s/streams/%s", req.Parent, streamID)
+-	createTime := timestamppb.New(time.Now())
++	createTime := timestamppb.New(googlesqlite.Now()) // CloudBurrow patch (#1487): the front's clock
+ 	streamType := req.GetWriteStream().GetType()
+ 	var commitTime *timestamppb.Timestamp
+ 	if streamType == storagepb.WriteStream_COMMITTED {
+@@ -795,7 +796,7 @@
+ 		}
+ 	}
+ 	return &storagepb.BatchCommitWriteStreamsResponse{
+-		CommitTime:   timestamppb.New(time.Now()),
++		CommitTime:   timestamppb.New(googlesqlite.Now()), // CloudBurrow patch (#1487): the front's clock
+ 		StreamErrors: streamErrors,
+ 	}, nil
+ }
+--- a/types/types.go
++++ b/types/types.go
+@@ -38,7 +38,7 @@
+ 	for i, col := range t.Columns {
+ 		fields[i] = col.TableFieldSchema()
+ 	}
+-	now := time.Now().UnixMilli()
++	now := googlesqlite.Now().UnixMilli() // CloudBurrow patch (#1487): the front's clock
+ 	return &bigqueryv2.Table{
+ 		Type: "TABLE",
+ 		Kind: "bigquery#table",
+--- /dev/null
++++ b/server/front_clock_times_test.go
+@@ -0,0 +1,87 @@
++package server_test
++
++import (
++	"context"
++	"testing"
++	"time"
++
++	"cloud.google.com/go/bigquery"
++	"github.com/goccy/googlesqlite"
++	"google.golang.org/api/option"
++
++	"github.com/goccy/bigquery-emulator/server"
++	"github.com/goccy/bigquery-emulator/types"
++)
++
++// TestReportedTimesReadTheEngineClock is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1487): a dataset's and a table's creationTime
++// and lastModifiedTime, and a job's startTime and endTime, were stamped by
++// the system clock, while CURRENT_TIMESTAMP() and the change history read
++// the engine's, which CloudBurrow's front moves forward (patch 0034).
++func TestReportedTimesReadTheEngineClock(t *testing.T) {
++	const ahead = 48 * time.Hour
++	googlesqlite.SetClockOffset(ahead)
++	defer googlesqlite.SetClockOffset(0)
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	defer cancel()
++	bqServer, err := server.New(server.TempStorage)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := bqServer.Load(server.StructSource(types.NewProject("test"))); err != nil {
++		t.Fatal(err)
++	}
++	testServer := bqServer.TestServer()
++	defer func() {
++		testServer.Close()
++		bqServer.Stop(ctx)
++	}()
++	client, err := bigquery.NewClient(ctx, "test", option.WithEndpoint(testServer.URL), option.WithoutAuthentication())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer client.Close()
++	near := func(what string, got time.Time) {
++		t.Helper()
++		if d := time.Until(got) - ahead; d < -time.Minute || d > time.Minute {
++			t.Errorf("%s = %v, want within a minute of the engine's clock, %v", what, got, googlesqlite.Now())
++		}
++	}
++
++	ds := client.Dataset("ds")
++	if err := ds.Create(ctx, &bigquery.DatasetMetadata{}); err != nil {
++		t.Fatal(err)
++	}
++	dmd, err := ds.Metadata(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	near("dataset CreationTime", dmd.CreationTime)
++	near("dataset LastModifiedTime", dmd.LastModifiedTime)
++
++	table := ds.Table("t")
++	if err := table.Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{{Name: "id", Type: bigquery.IntegerFieldType}}}); err != nil {
++		t.Fatal(err)
++	}
++	tmd, err := table.Metadata(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	near("table CreationTime", tmd.CreationTime)
++	near("table LastModifiedTime", tmd.LastModifiedTime)
++
++	job, err := client.Query("SELECT 1").Run(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if status, err := job.Wait(ctx); err != nil || status.Err() != nil {
++		t.Fatalf("query: %v, %v", err, status)
++	}
++	got, err := client.JobFromID(ctx, job.ID())
++	if err != nil {
++		t.Fatal(err)
++	}
++	stats := got.LastStatus().Statistics
++	near("job StartTime", stats.StartTime)
++	near("job EndTime", stats.EndTime)
++}

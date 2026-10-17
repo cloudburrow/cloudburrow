@@ -88,6 +88,9 @@ func (f front) csvLoad(w http.ResponseWriter, r *http.Request, job jobBody, next
 		writeError(w, code, reason, msg)
 		return r, next, nil, false
 	}
+	if d.times != nil {
+		d.times.now = f.now // #1487
+	}
 	if l.Autodetect && len(cols) > 0 && !skipSet {
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a CSV load with autodetect, "+
 			"columns given (by its schema, or by the table it loads into) and no skipLeadingRows. BigQuery then decides "+

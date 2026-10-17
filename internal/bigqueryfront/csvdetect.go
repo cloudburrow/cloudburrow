@@ -120,6 +120,7 @@ func (f front) csvDetect(w http.ResponseWriter, r *http.Request, job *jobBody) b
 	if times == nil {
 		times = &csvTimes{loc: time.UTC, formats: map[string]string{}}
 	}
+	times.now = f.now // #1487
 	if code != 0 {
 		if code == http.StatusNotImplemented {
 			return notImplemented(why)

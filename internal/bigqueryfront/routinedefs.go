@@ -59,7 +59,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // routineRoute matches routines.get, routines.update and routines.delete.
@@ -141,7 +140,7 @@ func (k *knownFunctions) noteDefs(project string, q queryOptions, v ddlVerdict) 
 			continue
 		}
 		def := routineFromDDL(q.Query[s.pathEnd:s.end], s.table)
-		now := strconv.FormatInt(time.Now().UnixMilli(), 10)
+		now := strconv.FormatInt(k.clock().UnixMilli(), 10)
 		def["routineReference"] = map[string]any{"projectId": project, "datasetId": p[0], "routineId": p[1]}
 		def["creationTime"], def["lastModifiedTime"] = now, now
 		def["etag"] = etagOf(now)
@@ -667,7 +666,7 @@ func (f front) updateRoutine(w http.ResponseWriter, r *http.Request, project, da
 		rec.copyTo(w)
 		return
 	}
-	now := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	now := strconv.FormatInt(f.now().UnixMilli(), 10)
 	if ref, ok := made["routineReference"].(map[string]any); ok && ref["projectId"] == nil {
 		ref["projectId"] = project
 	}

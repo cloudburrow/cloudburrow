@@ -237,10 +237,20 @@ type knownFunctions struct {
 	// the projects whose jobs from before it were read (scan).
 	started int64
 	scanned map[string]bool
+	// now is the instance's clock (#1487); nil is the system's.
+	now func() time.Time
 	// path is the file they are kept in, and logf logs a failure to
 	// write it (functionstate.go); empty: memory alone.
 	path string
 	logf func(string, ...any)
+}
+
+// clock is the time now by k.now.
+func (k *knownFunctions) clock() time.Time {
+	if k == nil || k.now == nil {
+		return time.Now()
+	}
+	return k.now()
 }
 
 // add records a function, path its dataset and name.
@@ -449,7 +459,7 @@ func (f front) insertRoutine(w http.ResponseWriter, r *http.Request, project str
 		f.functions.add(project, []string{made.RoutineReference.DatasetID, made.RoutineReference.RoutineID})
 		var def map[string]any
 		if json.Unmarshal(rec.body.Bytes(), &def) == nil { // #1177: routines.get
-			now := strconv.FormatInt(time.Now().UnixMilli(), 10)
+			now := strconv.FormatInt(f.now().UnixMilli(), 10)
 			if ref, ok := def["routineReference"].(map[string]any); ok && ref["projectId"] == nil {
 				ref["projectId"] = project
 			}
