@@ -708,6 +708,15 @@ func (s *MemorystoreServer) UpdateInstance(ctx context.Context, req *memorystore
 	}
 	set := map[string]bool{}
 	for _, p := range paths {
+		if head, _, ok := strings.Cut(p, "."); ok {
+			// gcloud names a message's fields (#1557):
+			// cross_instance_replication_config.instance_role and the like.
+			switch head {
+			case "cross_instance_replication_config", "crossInstanceReplicationConfig",
+				"persistence_config", "persistenceConfig", "automated_backup_config", "automatedBackupConfig":
+				p = head
+			}
+		}
 		switch p {
 		case "shard_count", "shardCount":
 			set["shard_count"] = true
