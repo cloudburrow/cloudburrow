@@ -35,9 +35,20 @@ import (
 //     changehistorycarry.go), the rows a rebuild copied marked CARRY and
 //     the old ones ended by an END, which this read takes as a delete;
 //   - a change table made before patch 0041, which has no row identities;
-//   - an ingestion-time partitioned table: the change table keeps no
-//     _PARTITIONTIME;
-//   - a partition decorator with FOR SYSTEM_TIME AS OF.
+//   - an ingestion-time partitioned table whose change table was made
+//     before googlesqlite patch 0050, which keeps each change's
+//     _PARTITIONTIME (#1458), and a snapshot, clone or copy of a past time
+//     of one: a copy keeps no _PARTITIONTIME (copyjob.go);
+//   - a query that reads _PARTITIONTIME or _PARTITIONDATE of a past time
+//     and also has a *: the past rows are a subquery, whose SELECT * would
+//     give the pseudo-columns.
+//
+// An ingestion-time partitioned table's past rows have their
+// _PARTITIONTIME (and, by day, _PARTITIONDATE) when the query names them
+// (#1458). A partition decorator with FOR SYSTEM_TIME AS OF reads the
+// partition's rows of then: those of the past rows the decorator's
+// condition holds of (partitionRows); the streaming buffer of then is not
+// kept, so a row in it then reads in its partition.
 //
 // The table is read with its columns of now; a column the change table
 // does not have (it is made again with the table's new columns) leaves
@@ -53,11 +64,30 @@ func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref s
 		return "", http.StatusNotImplemented, "Not implemented here: FOR SYSTEM_TIME AS OF a past time of " + ref + ": " + why +
 			" (docs/compatibility.md). Nothing was run."
 	}
-	switch {
-	case tr.decorator != "":
-		return notBuilt("CloudBurrow does not read a partition decorator with FOR SYSTEM_TIME AS OF")
+	where := ""
+	if tr.decorator != "" {
+		var code int
+		var msg string
+		if where, code, msg = partitionRows(m, tr.decorator, ref+"$"+tr.decorator); code != 0 {
+			return "", code, msg
+		}
 	}
-	text, code, msg := f.historySubquery(r, tr.dataset, tr.table, m, ref, past, expr)
+	pseudo := false
+	if m.ingestion() {
+		star := false
+		for i, t := range tr.stmt {
+			pseudo = pseudo || t.is("_PARTITIONTIME") || t.is("_PARTITIONDATE")
+			// A select list's * (SELECT *, x.*), not COUNT(*) or a product.
+			if t.kind != tokWord && t.kind != tokQuoted && t.text == "*" && i > 0 {
+				p := tr.stmt[i-1]
+				star = star || p.is("SELECT") || p.is("DISTINCT") || p.is("ALL") || p.text == "," || p.text == "."
+			}
+		}
+		if pseudo && star {
+			return notBuilt("CloudBurrow does not read _PARTITIONTIME or _PARTITIONDATE of a past time in a query whose select list has a *")
+		}
+	}
+	text, code, msg := f.pastRows(r, tr.dataset, tr.table, m, ref, past, expr, true, pseudo, where)
 	if code != 0 {
 		return "", code, msg
 	}
@@ -72,12 +102,23 @@ func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref s
 // alias; a CREATE SNAPSHOT TABLE or CLONE and a copy job of table@time
 // read a past time through it too (#1460, cloneddl.go, dropped.go).
 func (f front) historySubquery(r *http.Request, dataset, table string, m partitionMeta, ref string, past int64, expr string) (string, int, string) {
+	return f.pastRows(r, dataset, table, m, ref, past, expr, false, false, "")
+}
+
+// pastRows is historySubquery. inQuery is a query's read, which may read
+// an ingestion-time partitioned table (a copy may not: it keeps no
+// _PARTITIONTIME); pseudo gives the subquery that table's _PARTITIONTIME
+// (and, by day, _PARTITIONDATE) columns; where, when not "", is a
+// partition decorator's condition the rows must hold (#1458).
+func (f front) pastRows(r *http.Request, dataset, table string, m partitionMeta, ref string, past int64, expr string,
+	inQuery, pseudo bool, where string) (string, int, string) {
 	notBuilt := func(why string) (string, int, string) {
 		return "", http.StatusNotImplemented, "Not implemented here: FOR SYSTEM_TIME AS OF a past time of " + ref + ": " + why +
 			" (docs/compatibility.md). Nothing was run."
 	}
-	if m.ingestion() {
-		return notBuilt("the history CloudBurrow keeps of an ingestion-time partitioned table has no _PARTITIONTIME")
+	ingestion := m.ingestion()
+	if ingestion && !inQuery {
+		return notBuilt("a snapshot, clone or copy of an ingestion-time partitioned table keeps no _PARTITIONTIME")
 	}
 	project := projectOf(f.base)
 	var cols []string
@@ -88,15 +129,32 @@ func (f front) historySubquery(r *http.Request, dataset, table string, m partiti
 		return notBuilt("the table has no columns")
 	}
 	list := strings.Join(cols, ", ")
+	out := list
+	inner := list
+	if ingestion {
+		// The change table keeps each change's _PARTITIONTIME
+		// (googlesqlite patch 0050).
+		inner += ", _PARTITIONTIME"
+		if pseudo {
+			out += ", _PARTITIONTIME"
+			if m.ingestionUnit() == "DAY" {
+				out += ", DATE(_PARTITIONTIME) AS _PARTITIONDATE"
+			}
+		}
+	}
 	changes := quotePath([]string{project, dataset, table + changeTableSuffix})
 	legacy := false
 	body, err := json.Marshal(queryOptions{UseLegacySQL: &legacy, Query: fmt.Sprintf(
 		"SELECT COUNTIF(_CHANGE_TYPE = 'START' AND googlesqlite_change_micros > %d), COUNT(googlesqlite_change_rowid) + COUNT(rowid) "+
-			"FROM (SELECT %s, _CHANGE_TYPE, googlesqlite_change_micros, googlesqlite_change_rowid, rowid FROM %s)", past, list, changes)})
+			"FROM (SELECT %s, _CHANGE_TYPE, googlesqlite_change_micros, googlesqlite_change_rowid, rowid FROM %s)", past, inner, changes)})
 	if err != nil {
 		return "", http.StatusInternalServerError, err.Error()
 	}
 	status, got := f.send(r, http.MethodPost, "/queries", body)
+	if status != http.StatusOK && ingestion {
+		return notBuilt("CloudBurrow's history of the table keeps no _PARTITIONTIME (its change table was made before " +
+			"CloudBurrow kept it), or none it can read at that time")
+	}
 	if status != http.StatusOK {
 		return notBuilt("CloudBurrow keeps no history of the table that it can read at that time; it records a table's " +
 			"changes from when it was made")
@@ -115,9 +173,12 @@ func (f front) historySubquery(r *http.Request, dataset, table string, m partiti
 		return notBuilt("CloudBurrow's history of the table starts after that time (a table made before " +
 			"CloudBurrow recorded changes)")
 	}
+	if where != "" {
+		where = " AND " + where
+	}
 	text := fmt.Sprintf("(SELECT %s FROM (SELECT %s, _CHANGE_TYPE AS _cloudburrow_change, "+
 		"ROW_NUMBER() OVER (PARTITION BY googlesqlite_change_rowid ORDER BY rowid DESC) AS _cloudburrow_last "+
 		"FROM %s WHERE _CHANGE_TYPE != 'START' AND googlesqlite_change_micros <= %d AND (%s) IS NOT NULL) "+
-		"WHERE _cloudburrow_last = 1 AND _cloudburrow_change NOT IN ('DELETE', '"+changeEnd+"'))", list, list, changes, past, expr)
+		"WHERE _cloudburrow_last = 1 AND _cloudburrow_change NOT IN ('DELETE', '"+changeEnd+"')%s)", out, inner, changes, past, expr, where)
 	return text, 0, ""
 }

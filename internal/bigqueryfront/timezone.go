@@ -27,9 +27,9 @@ import (
 // https://cloud.google.com/bigquery/docs/reference/standard-sql/lexical#timestamp_literals).
 // The query text is not changed, so the job keeps the client's.
 //
-// Still in UTC (docs/compatibility.md): a string literal the analyzer
-// coerces to a TIMESTAMP, as in ts > '2020-01-01 00:00:00'. The front's
-// own queries (send) run in UTC, and the SQL it writes into a client's
+// A string literal the analyzer coerces to a TIMESTAMP, as in
+// ts > '2020-01-01 00:00:00', is read in the zone too (googlesqlite patch
+// 0055, #1456). Still in UTC: the front's own queries (send) run in UTC, and the SQL it writes into a client's
 // query (partition decorators, partitionreads.go) names UTC.
 
 // validTimeZone reports whether BigQuery reads s as a time zone: a tz

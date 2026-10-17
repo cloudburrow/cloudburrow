@@ -50,7 +50,7 @@ func TestBigQueryLoadFromAFileThroughTheForm(t *testing.T) {
 	p.eval(`(() => ({ Type: document.querySelector(".modal #f-file").type,
 		URIs: document.querySelector(".modal #f-uris") !== null,
 		Options: [...document.querySelectorAll(".modal #f-format option")].map((o) => o.value) }))()`, &shape)
-	if shape.Type != "file" || shape.URIs || strings.Join(shape.Options, ",") != "CSV,NEWLINE_DELIMITED_JSON,PARQUET" {
+	if shape.Type != "file" || shape.URIs || strings.Join(shape.Options, ",") != "CSV,NEWLINE_DELIMITED_JSON,PARQUET,AVRO" {
 		t.Errorf("Load from a file's form is %+v, want a file control, no URIs and Load from Cloud Storage's formats", shape)
 	}
 	p.run(chromedp.SendKeys(`.modal #f-tableId`, "people", chromedp.ByQuery))
