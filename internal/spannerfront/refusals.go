@@ -20,6 +20,9 @@ const databaseService = "/google.spanner.admin.database.v1.DatabaseAdmin/"
 var refusedMethods = map[string]string{
 	databaseService + "AddSplitPoints":               "the emulator does not split databases, so split points have nothing to act on",
 	databaseService + "InternalUpdateGraphOperation": "it is an internal method of Google's own services",
+	// The data API's location-aware routing stream, which the emulator
+	// answers UNIMPLEMENTED with an empty message on the first receive.
+	"/google.spanner.v1.Spanner/FetchCacheUpdate": "location-aware routing has nowhere to route: the emulator is one server, with no splits or replicas to send a client to",
 }
 
 // refusedREST are the same methods' REST bindings.

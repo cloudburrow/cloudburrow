@@ -177,14 +177,17 @@ func (s *Instances) CreateInstanceConfig(ctx context.Context, req *instancepb.Cr
 	if base == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: base_config %q is not a Google-managed configuration.", method, in.GetBaseConfig())
 	}
-	// The replicas are the base's, with read-only replicas added.
-	need := map[string]int{}
+	// The replicas are the base's, with read-only replicas added: each
+	// location and type of the base's is among them, and any other is a
+	// read-only replica in one of the base's optional locations.
+	inBase := map[string]bool{}
 	for _, r := range base.GetReplicas() {
-		need[replicaKey(r)]++
+		inBase[replicaKey(r)] = true
 	}
+	given := map[string]bool{}
 	for _, r := range in.GetReplicas() {
-		if need[replicaKey(r)] > 0 {
-			need[replicaKey(r)]--
+		given[replicaKey(r)] = true
+		if inBase[replicaKey(r)] {
 			continue
 		}
 		if r.GetType() != instancepb.ReplicaInfo_READ_ONLY {
@@ -198,8 +201,8 @@ func (s *Instances) CreateInstanceConfig(ctx context.Context, req *instancepb.Cr
 			return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: %s is not an optional replica location of %s.", method, r.GetLocation(), in.GetBaseConfig())
 		}
 	}
-	for k, n := range need {
-		if n > 0 {
+	for k := range inBase {
+		if !given[k] {
 			return nil, status.Errorf(codes.InvalidArgument, "Invalid %s request: replicas must include every replica of the base configuration; %s is missing.", method, k)
 		}
 	}

@@ -150,7 +150,15 @@ var routes = []route{
 		if err := r.into(b); err != nil {
 			return nil, err
 		}
-		return databases{s: s}.CreateBackupSchedule(ctx, &databasepb.CreateBackupScheduleRequest{Parent: r.m[1], BackupScheduleId: r.q.Get("backupScheduleId"), BackupSchedule: b})
+		id := r.q.Get("backupScheduleId")
+		if id == "" {
+			id = r.q.Get("backup_schedule_id")
+		}
+		// The Terraform provider names the schedule in the body alone.
+		if n := b.GetName(); id == "" && n != "" {
+			id = n[strings.LastIndex(n, "/")+1:]
+		}
+		return databases{s: s}.CreateBackupSchedule(ctx, &databasepb.CreateBackupScheduleRequest{Parent: r.m[1], BackupScheduleId: id, BackupSchedule: b})
 	}},
 	{http.MethodGet, rx(`(` + pDB + `)/backupSchedules`), func(ctx context.Context, s *Instances, r restReq) (proto.Message, error) {
 		return databases{s: s}.ListBackupSchedules(ctx, &databasepb.ListBackupSchedulesRequest{Parent: r.m[1], PageSize: r.size(), PageToken: r.q.Get("pageToken")})
