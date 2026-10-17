@@ -20,12 +20,38 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 )
 
+// minExpiry and maxExpiry bound how far away an expiry may be: "A
+// secret's expiration cannot be less than 60 seconds away or more than 100
+// years away" (Limitations,
+// https://docs.cloud.google.com/secret-manager/docs/creating-and-managing-expiring-secrets,
+// read 2026-10-17). The page gives no code; INVALID_ARGUMENT naming the
+// field is the code of every other refused Secret field here.
+const minExpiry = 60 * time.Second
+
+const maxExpiryYears = 100
+
+// CheckExpiryBounds refuses an expiry nearer than 60 seconds or further
+// than 100 years from now; field names it in the message.
+func CheckExpiryBounds(field string, expire, now time.Time) error {
+	if expire.Before(now.Add(minExpiry)) {
+		return apierror.InvalidArgument("Secret.%s must be at least 60 seconds in the future, got %s", field, expire.UTC().Format(time.RFC3339Nano))
+	}
+	if expire.After(now.AddDate(maxExpiryYears, 0, 0)) {
+		return apierror.InvalidArgument("Secret.%s must be at most 100 years in the future, got %s", field, expire.UTC().Format(time.RFC3339Nano))
+	}
+	return nil
+}
+
 // expireOf is a request Secret's expiry: its expire_time, or now plus its
-// ttl, zero for neither. Both set is refused: they are one oneof.
+// ttl, zero for neither. Both set is refused: they are one oneof. Either
+// must land between 60 seconds and 100 years from now.
 func expireOf(sec *secretmanagerpb.Secret, now time.Time) (time.Time, error) {
 	if t := sec.GetExpireTime(); t != nil {
 		if err := t.CheckValid(); err != nil {
 			return time.Time{}, apierror.InvalidArgument("Secret.expire_time is not a valid timestamp: %v", err)
+		}
+		if err := CheckExpiryBounds("expire_time", t.AsTime(), now); err != nil {
+			return time.Time{}, err
 		}
 		return t.AsTime().UTC(), nil
 	}
@@ -35,6 +61,9 @@ func expireOf(sec *secretmanagerpb.Secret, now time.Time) (time.Time, error) {
 		}
 		if d.AsDuration() <= 0 {
 			return time.Time{}, apierror.InvalidArgument("Secret.ttl must be positive, got %s", d.AsDuration())
+		}
+		if err := CheckExpiryBounds("ttl", now.Add(d.AsDuration()), now); err != nil {
+			return time.Time{}, err
 		}
 		return now.Add(d.AsDuration()).UTC(), nil
 	}

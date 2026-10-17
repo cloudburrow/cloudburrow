@@ -15,6 +15,15 @@ import (
 // (service.proto EncryptRequest).
 const maxSoftwareBytes = 64 * 1024
 
+// maxHSMBytes is the HSM keys' limit on plaintext and AAD together: "For
+// HSM keys, the combined length of the plaintext and
+// additionalAuthenticatedData fields must be no larger than 8KiB"
+// (https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/encrypt,
+// read 2026-10-17). The page gives no code; INVALID_ARGUMENT is the code
+// of the 64KiB limit (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys/encrypt
+const maxHSMBytes = 8 * 1024
+
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
 
 func crc32c(b []byte) int64 { return int64(crc32.Checksum(b, castagnoli)) }
@@ -106,6 +115,9 @@ func (s *Server) Encrypt(_ context.Context, req *kmspb.EncryptRequest) (*kmspb.E
 	v, err := s.encryptTarget(req.GetName())
 	if err != nil {
 		return nil, err
+	}
+	if v.protectionLevel() == kmspb.ProtectionLevel_HSM && len(pt)+len(aad) > maxHSMBytes {
+		return nil, apierror.Wrap(apierror.InvalidArgument("plaintext and additional_authenticated_data are %d bytes together: the limit for an HSM key is %d", len(pt)+len(aad), maxHSMBytes))
 	}
 	_, number, err := parseCryptoKeyVersion("name", v.Name)
 	if err != nil {
