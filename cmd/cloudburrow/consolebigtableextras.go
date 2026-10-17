@@ -21,7 +21,8 @@ import (
 // The console's reach into what the Bigtable front keeps (#1499): SQL in
 // the table's query form; Snapshot table and Create schema bundle on a
 // table's page; an instance's Backups, Logical views and Materialized views
-// tabs, with Create logical view and Create materialized view, and Restore
+// tabs, with Create logical view, Create materialized view and Undelete
+// table (#1511), and Restore
 // and Delete on each row; and a cluster's Edit memory layer.
 
 const (
@@ -289,6 +290,8 @@ func instanceExtraActions() []console.Action {
 	return []console.Action{
 		{ID: "createlogical", Label: "Create logical view", Fields: sqlViewCreateFields()},
 		{ID: "creatematerialized", Label: "Create materialized view", Fields: sqlViewCreateFields()},
+		{ID: "undeletetable", Label: "Undelete table", Fields: []console.Field{{Name: "table", Label: "Table ID", Type: "text", Required: true,
+			Help: "A table of this instance deleted in the last seven days (#1511)."}}},
 	}
 }
 
@@ -315,6 +318,18 @@ func (p bigtableInstancesProvider) actInstanceExtra(ctx context.Context, c *bigt
 	switch {
 	case len(path) == 1 && action == "createlogical":
 		return true, c.CreateLogicalView(ctx, inst, &bigtable.LogicalViewInfo{LogicalViewID: strings.TrimSpace(values["view"]), Query: values["query"]})
+	case len(path) == 1 && action == "undeletetable":
+		admin, err := bigtable.NewAdminClient(ctx, project, inst, localOpts(p.endpoint)...)
+		if err != nil {
+			return true, err
+		}
+		defer admin.Close()
+		op, err := admin.TableAdminClientV2().UndeleteTable(ctx, &btapb.UndeleteTableRequest{Name: name + "/tables/" + strings.TrimSpace(values["table"])})
+		if err != nil {
+			return true, err
+		}
+		_, err = op.Wait(ctx)
+		return true, err
 	case len(path) == 1 && action == "creatematerialized":
 		return true, c.CreateMaterializedView(ctx, inst, &bigtable.MaterializedViewInfo{MaterializedViewID: strings.TrimSpace(values["view"]), Query: values["query"]})
 	case len(path) == 3 && path[1] == bigtableLogicalSegment && action == "editview":

@@ -6680,8 +6680,8 @@
     "Key": "bigtable",
     "Title": "Bigtable",
     "counts": {
-      "Refused": 7,
-      "Verified": 77
+      "Refused": 6,
+      "Verified": 78
     },
     "rows": [
       {
@@ -6712,6 +6712,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews",
+          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
           "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews"
         ]
       },
@@ -6720,6 +6721,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews",
+          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
           "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews"
         ]
       },
@@ -6816,7 +6818,7 @@
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetMemoryLayer",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:325 TestBigtableMemoryLayersAndHotTablets"
+          "test/compat/bigtableinstances_test.go:340 TestBigtableMemoryLayersAndHotTablets"
         ]
       },
       {
@@ -6839,7 +6841,7 @@
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListHotTablets",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:325 TestBigtableMemoryLayersAndHotTablets"
+          "test/compat/bigtableinstances_test.go:340 TestBigtableMemoryLayersAndHotTablets"
         ]
       },
       {
@@ -6867,7 +6869,7 @@
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListMemoryLayers",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:325 TestBigtableMemoryLayersAndHotTablets"
+          "test/compat/bigtableinstances_test.go:340 TestBigtableMemoryLayersAndHotTablets"
         ]
       },
       {
@@ -6940,7 +6942,7 @@
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateMemoryLayer",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:325 TestBigtableMemoryLayersAndHotTablets"
+          "test/compat/bigtableinstances_test.go:340 TestBigtableMemoryLayersAndHotTablets"
         ]
       },
       {
@@ -6970,7 +6972,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
-          "test/compat/bigtableviewstools_test.go:112 TestGcloudBigtableBackups"
+          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups"
         ]
       },
       {
@@ -7007,7 +7009,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
-          "test/compat/bigtableviewstools_test.go:112 TestGcloudBigtableBackups"
+          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups"
         ]
       },
       {
@@ -7059,7 +7061,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
-          "test/compat/bigtableviewstools_test.go:112 TestGcloudBigtableBackups"
+          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups"
         ]
       },
       {
@@ -7109,7 +7111,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
-          "test/compat/bigtableviewstools_test.go:112 TestGcloudBigtableBackups"
+          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups"
         ]
       },
       {
@@ -7147,7 +7149,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
-          "test/compat/bigtableviewstools_test.go:112 TestGcloudBigtableBackups"
+          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups"
         ]
       },
       {
@@ -7177,11 +7179,10 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UndeleteTable",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:281 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablesql1511_test.go:241 TestBigtableUndeleteTable"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateAuthorizedView",
@@ -7222,14 +7223,15 @@
         "method": "google.bigtable.v2.Bigtable/ExecuteQuery",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablebackups_test.go:288 TestBigtableSQL"
+          "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
+          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/GenerateInitialChangeStreamPartitions",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:281 TestBigtableCrashingMethodsAreRefused"
+          "test/compat/bigtablemethods_test.go:280 TestBigtableCrashingMethodsAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7290,14 +7292,15 @@
         "method": "google.bigtable.v2.Bigtable/PrepareQuery",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablebackups_test.go:288 TestBigtableSQL"
+          "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
+          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/ReadChangeStream",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:281 TestBigtableCrashingMethodsAreRefused"
+          "test/compat/bigtablemethods_test.go:280 TestBigtableCrashingMethodsAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },

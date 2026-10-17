@@ -219,6 +219,16 @@ func TestConsoleBigtableSQLSnapshotsBundlesAndViews(t *testing.T) {
 	if lv, err := iac.LogicalViewInfo(ctx, "shop-inst", "logical-v"); err != nil || lv.Query != "SELECT _key FROM items" {
 		t.Errorf("LogicalViewInfo = %+v, %v", lv, err)
 	}
+	// Undelete table (#1511) brings back a table deleted in the last seven days.
+	if err := admin.DeleteTable(ctx, "items3"); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := iact([]string{"shop-inst"}, "undeletetable", map[string]string{"table": "items3"}); code != http.StatusOK {
+		t.Errorf("Undelete table = %d: %s", code, out)
+	}
+	if _, err := admin.TableInfo(ctx, "items3"); err != nil {
+		t.Errorf("the undeleted table: %v", err)
+	}
 	// A view runs (#1511): the tab counts its rows, and the query form reads them.
 	if out := detail(); !strings.Contains(out, `"Rows":"1"`) {
 		t.Errorf("the Logical views tab does not count the view's rows: %s", out)
