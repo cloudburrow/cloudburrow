@@ -249,84 +249,112 @@ func TestBigtableInstanceDeletesItsTables(t *testing.T) {
 	}
 }
 
-// TestBigtableInstanceAdminRefusals calls the instance admin methods the
-// front does not serve: each is UNIMPLEMENTED, not a panic of the emulator.
+// TestBigtableLogicalAndMaterializedViews creates, reads, lists, updates
+// and deletes a logical and a materialized view of an instance with the
+// official instance admin client (#1499): the queries are kept as given, a
+// materialized view's query cannot change, and a protected view is not
+// deleted.
 //
-// covers: google.bigtable.admin.v2.BigtableInstanceAdmin/ListHotTablets (unimplemented), google.bigtable.admin.v2.BigtableInstanceAdmin/CreateLogicalView (unimplemented), google.bigtable.admin.v2.BigtableInstanceAdmin/GetLogicalView (unimplemented), google.bigtable.admin.v2.BigtableInstanceAdmin/ListLogicalViews (unimplemented), google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateLogicalView (unimplemented), google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteLogicalView (unimplemented)
-// covers: google.bigtable.admin.v2.BigtableInstanceAdmin/CreateMaterializedView (unimplemented), google.bigtable.admin.v2.BigtableInstanceAdmin/GetMaterializedView (unimplemented), google.bigtable.admin.v2.BigtableInstanceAdmin/ListMaterializedViews (unimplemented), google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateMaterializedView (unimplemented), google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteMaterializedView (unimplemented)
-// covers: google.bigtable.admin.v2.BigtableInstanceAdmin/GetMemoryLayer (unimplemented), google.bigtable.admin.v2.BigtableInstanceAdmin/ListMemoryLayers (unimplemented), google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateMemoryLayer (unimplemented)
-func TestBigtableInstanceAdminRefusals(t *testing.T) {
+// covers: google.bigtable.admin.v2.BigtableInstanceAdmin/CreateLogicalView, google.bigtable.admin.v2.BigtableInstanceAdmin/GetLogicalView, google.bigtable.admin.v2.BigtableInstanceAdmin/ListLogicalViews, google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateLogicalView, google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteLogicalView
+// covers: google.bigtable.admin.v2.BigtableInstanceAdmin/CreateMaterializedView, google.bigtable.admin.v2.BigtableInstanceAdmin/GetMaterializedView, google.bigtable.admin.v2.BigtableInstanceAdmin/ListMaterializedViews, google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateMaterializedView, google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteMaterializedView
+func TestBigtableLogicalAndMaterializedViews(t *testing.T) {
 	h := New(t)
+	iac := bigtableInstanceAdmin(t, h)
+	ctx := h.Context()
+	const id = "cb-inst-views"
+	if err := iac.CreateInstance(ctx, &bigtable.InstanceConf{InstanceId: id, DisplayName: "SQL views",
+		ClusterId: id + "-c1", Zone: "us-central1-b", NumNodes: 1, StorageType: bigtable.SSD}); err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	t.Cleanup(func() { _ = iac.DeleteInstance(h.Context(), id) })
+	const q = "SELECT _key, info['name'] AS name FROM users"
+	if err := iac.CreateLogicalView(ctx, id, &bigtable.LogicalViewInfo{LogicalViewID: "lv", Query: q}); err != nil {
+		t.Fatalf("CreateLogicalView: %v", err)
+	}
+	if lv, err := iac.LogicalViewInfo(ctx, id, "lv"); err != nil || lv.Query != q {
+		t.Errorf("LogicalViewInfo = %+v, %v", lv, err)
+	}
+	if err := iac.UpdateLogicalView(ctx, id, bigtable.LogicalViewInfo{LogicalViewID: "lv", Query: "SELECT _key FROM users", DeletionProtection: bigtable.Protected}); err != nil {
+		t.Fatalf("UpdateLogicalView: %v", err)
+	}
+	if lvs, err := iac.LogicalViews(ctx, id); err != nil || len(lvs) != 1 || lvs[0].Query != "SELECT _key FROM users" || lvs[0].DeletionProtection != bigtable.Protected {
+		t.Errorf("LogicalViews = %+v, %v", lvs, err)
+	}
+	if err := iac.DeleteLogicalView(ctx, id, "lv"); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("DeleteLogicalView of a protected view = %v, want FailedPrecondition", err)
+	}
+	if err := iac.UpdateLogicalView(ctx, id, bigtable.LogicalViewInfo{LogicalViewID: "lv", DeletionProtection: bigtable.Unprotected}); err != nil {
+		t.Fatal(err)
+	}
+	if err := iac.DeleteLogicalView(ctx, id, "lv"); err != nil {
+		t.Errorf("DeleteLogicalView: %v", err)
+	}
+	if _, err := iac.LogicalViewInfo(ctx, id, "lv"); status.Code(err) != codes.NotFound {
+		t.Errorf("LogicalViewInfo after DeleteLogicalView = %v, want NotFound", err)
+	}
+
+	if err := iac.CreateMaterializedView(ctx, id, &bigtable.MaterializedViewInfo{MaterializedViewID: "mv", Query: q}); err != nil {
+		t.Fatalf("CreateMaterializedView: %v", err)
+	}
+	if err := iac.UpdateMaterializedView(ctx, id, bigtable.MaterializedViewInfo{MaterializedViewID: "mv", Query: "SELECT 1"}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("changing a materialized view's query = %v, want InvalidArgument", err)
+	}
+	if err := iac.UpdateMaterializedView(ctx, id, bigtable.MaterializedViewInfo{MaterializedViewID: "mv", DeletionProtection: bigtable.Protected}); err != nil {
+		t.Errorf("UpdateMaterializedView: %v", err)
+	}
+	if mv, err := iac.MaterializedViewInfo(ctx, id, "mv"); err != nil || mv.Query != q || mv.DeletionProtection != bigtable.Protected {
+		t.Errorf("MaterializedViewInfo = %+v, %v", mv, err)
+	}
+	if mvs, err := iac.MaterializedViews(ctx, id); err != nil || len(mvs) != 1 {
+		t.Errorf("MaterializedViews = %+v, %v", mvs, err)
+	}
+	if err := iac.UpdateMaterializedView(ctx, id, bigtable.MaterializedViewInfo{MaterializedViewID: "mv", DeletionProtection: bigtable.Unprotected}); err != nil {
+		t.Fatal(err)
+	}
+	if err := iac.DeleteMaterializedView(ctx, id, "mv"); err != nil {
+		t.Errorf("DeleteMaterializedView: %v", err)
+	}
+}
+
+// TestBigtableMemoryLayersAndHotTablets: a cluster's memory layer, through
+// the module's generated instance admin stub (the veneer has no call for
+// it), is disabled until UpdateMemoryLayer enables it; ListHotTablets
+// answers none, since the emulator splits no table into tablets (#1499).
+//
+// covers: google.bigtable.admin.v2.BigtableInstanceAdmin/GetMemoryLayer, google.bigtable.admin.v2.BigtableInstanceAdmin/ListMemoryLayers, google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateMemoryLayer, google.bigtable.admin.v2.BigtableInstanceAdmin/ListHotTablets
+func TestBigtableMemoryLayersAndHotTablets(t *testing.T) {
+	h := New(t)
+	iac := bigtableInstanceAdmin(t, h)
+	ctx := h.Context()
+	const id = "cb-inst-mem"
+	if err := iac.CreateInstance(ctx, &bigtable.InstanceConf{InstanceId: id, DisplayName: "Memory layer",
+		ClusterId: id + "-c1", Zone: "us-central1-b", NumNodes: 1, StorageType: bigtable.SSD}); err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	t.Cleanup(func() { _ = iac.DeleteInstance(h.Context(), id) })
 	conn, err := grpc.NewClient(h.Endpoint(EnvBigtable), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	c := adminpb.NewBigtableInstanceAdminClient(conn)
-	ctx := h.Context()
-	inst := "projects/" + h.Project() + "/instances/cb-inst-r"
-	calls := map[string]func() error{
-		"ListHotTablets": func() error {
-			_, err := c.ListHotTablets(ctx, &adminpb.ListHotTabletsRequest{Parent: inst + "/clusters/c"})
-			return err
-		},
-		"CreateLogicalView": func() error {
-			_, err := c.CreateLogicalView(ctx, &adminpb.CreateLogicalViewRequest{Parent: inst, LogicalViewId: "v"})
-			return err
-		},
-		"GetLogicalView": func() error {
-			_, err := c.GetLogicalView(ctx, &adminpb.GetLogicalViewRequest{Name: inst + "/logicalViews/v"})
-			return err
-		},
-		"ListLogicalViews": func() error {
-			_, err := c.ListLogicalViews(ctx, &adminpb.ListLogicalViewsRequest{Parent: inst})
-			return err
-		},
-		"UpdateLogicalView": func() error {
-			_, err := c.UpdateLogicalView(ctx, &adminpb.UpdateLogicalViewRequest{LogicalView: &adminpb.LogicalView{Name: inst + "/logicalViews/v"}})
-			return err
-		},
-		"DeleteLogicalView": func() error {
-			_, err := c.DeleteLogicalView(ctx, &adminpb.DeleteLogicalViewRequest{Name: inst + "/logicalViews/v"})
-			return err
-		},
-		"CreateMaterializedView": func() error {
-			_, err := c.CreateMaterializedView(ctx, &adminpb.CreateMaterializedViewRequest{Parent: inst, MaterializedViewId: "v"})
-			return err
-		},
-		"GetMaterializedView": func() error {
-			_, err := c.GetMaterializedView(ctx, &adminpb.GetMaterializedViewRequest{Name: inst + "/materializedViews/v"})
-			return err
-		},
-		"ListMaterializedViews": func() error {
-			_, err := c.ListMaterializedViews(ctx, &adminpb.ListMaterializedViewsRequest{Parent: inst})
-			return err
-		},
-		"UpdateMaterializedView": func() error {
-			_, err := c.UpdateMaterializedView(ctx, &adminpb.UpdateMaterializedViewRequest{MaterializedView: &adminpb.MaterializedView{Name: inst + "/materializedViews/v"}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"deletion_protection"}}})
-			return err
-		},
-		"DeleteMaterializedView": func() error {
-			_, err := c.DeleteMaterializedView(ctx, &adminpb.DeleteMaterializedViewRequest{Name: inst + "/materializedViews/v"})
-			return err
-		},
-		"GetMemoryLayer": func() error {
-			_, err := c.GetMemoryLayer(ctx, &adminpb.GetMemoryLayerRequest{Name: inst + "/clusters/c/memoryLayer"})
-			return err
-		},
-		"ListMemoryLayers": func() error {
-			_, err := c.ListMemoryLayers(ctx, &adminpb.ListMemoryLayersRequest{Parent: inst + "/clusters/c"})
-			return err
-		},
-		"UpdateMemoryLayer": func() error {
-			_, err := c.UpdateMemoryLayer(ctx, &adminpb.UpdateMemoryLayerRequest{MemoryLayer: &adminpb.MemoryLayer{Name: inst + "/clusters/c/memoryLayer"}})
-			return err
-		},
+	cluster := "projects/" + h.Project() + "/instances/" + id + "/clusters/" + id + "-c1"
+	l, err := c.GetMemoryLayer(ctx, &adminpb.GetMemoryLayerRequest{Name: cluster + "/memoryLayer"})
+	if err != nil || l.GetMemoryConfig() != nil {
+		t.Fatalf("GetMemoryLayer = %v, %v; want disabled", l, err)
 	}
-	for name, call := range calls {
-		if err := call(); status.Code(err) != codes.Unimplemented {
-			t.Errorf("%s: %v, want Unimplemented", name, err)
-		}
+	op, err := c.UpdateMemoryLayer(ctx, &adminpb.UpdateMemoryLayerRequest{
+		MemoryLayer: &adminpb.MemoryLayer{Name: l.GetName(), MemoryConfig: &adminpb.MemoryLayer_MemoryConfig{}, Etag: l.GetEtag()},
+		UpdateMask:  &fieldmaskpb.FieldMask{Paths: []string{"memory_config"}}})
+	if err != nil || !op.GetDone() {
+		t.Fatalf("UpdateMemoryLayer = %v, %v", op, err)
+	}
+	ls, err := c.ListMemoryLayers(ctx, &adminpb.ListMemoryLayersRequest{Parent: "projects/" + h.Project() + "/instances/" + id + "/clusters/-"})
+	if err != nil || len(ls.GetMemoryLayers()) != 1 || ls.GetMemoryLayers()[0].GetMemoryConfig() == nil {
+		t.Errorf("ListMemoryLayers = %v, %v; want one enabled", ls, err)
+	}
+	if ht, err := c.ListHotTablets(ctx, &adminpb.ListHotTabletsRequest{Parent: cluster}); err != nil || len(ht.GetHotTablets()) != 0 {
+		t.Errorf("ListHotTablets = %v, %v; want none", ht, err)
 	}
 }
 

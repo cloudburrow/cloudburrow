@@ -49,11 +49,6 @@ const (
 // panic on, measured one by one (#1206), each with the message the front
 // answers it UNIMPLEMENTED with.
 var Refused = map[string]string{
-	admin + "CreateSchemaBundle":                   schemaBundles,
-	admin + "GetSchemaBundle":                      schemaBundles,
-	admin + "ListSchemaBundles":                    schemaBundles,
-	admin + "UpdateSchemaBundle":                   schemaBundles,
-	admin + "DeleteSchemaBundle":                   schemaBundles,
 	admin + "UndeleteTable":                        "the emulator does not currently support undeleting tables",
 	data + "GenerateInitialChangeStreamPartitions": changeStreams,
 	data + "ReadChangeStream":                      changeStreams,
@@ -62,7 +57,6 @@ var Refused = map[string]string{
 // The messages, worded as the emulator's own refusals are ("the emulator
 // does not currently support authorized views").
 const (
-	schemaBundles = "the emulator does not currently support schema bundles"
 	changeStreams = "the emulator does not currently support change streams"
 )
 
@@ -80,9 +74,11 @@ type Front struct {
 	tableIAM  *tableIAM
 	// copies is the backups and snapshots, views the authorized views
 	// (#1499).
-	copies *copies
-	views  *authViews
-	served map[string]method
+	copies   *copies
+	views    *authViews
+	sqlViews *sqlViews
+	bundles  *schemaBundles
+	served   map[string]method
 }
 
 // New returns a front for the emulator at upstream (host:port). The
@@ -100,10 +96,16 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	f := &Front{upstream: conn, addr: upstream, logf: logf}
 	f.instances = newInstances(f.dropTables)
 	f.served = f.instances.methods()
+	for name, m := range f.instances.memoryLayerMethods() {
+		f.served[name] = m
+	}
 	f.copies = newCopies(conn, f.instances)
 	f.views = &authViews{upstream: conn, byName: map[string]*btapb.AuthorizedView{}}
-	f.tableIAM = &tableIAM{upstream: conn, policies: map[string]*iampolicy.Stored{}, views: f.views, copies: f.copies}
-	for _, ms := range []map[string]method{f.tableIAM.methods(), f.copies.methods(), f.viewMethods()} {
+	f.sqlViews = &sqlViews{instances: f.instances, byName: map[string]*sqlView{}}
+	f.bundles = &schemaBundles{upstream: conn, byName: map[string]*btapb.SchemaBundle{}}
+	f.tableIAM = &tableIAM{upstream: conn, policies: map[string]*iampolicy.Stored{}, views: f.views, copies: f.copies, bundles: f.bundles}
+	for _, ms := range []map[string]method{f.tableIAM.methods(), f.copies.methods(), f.viewMethods(),
+		f.sqlViews.methods(f.copies.op), f.bundles.methods(f.copies.op)} {
 		for name, m := range ms {
 			f.served[name] = m
 		}
@@ -358,6 +360,8 @@ func (f *Front) dropTables(ctx context.Context, instance string) error {
 	f.tableIAM.drop(instance)
 	f.views.drop(instance)
 	f.copies.drop(instance)
+	f.sqlViews.drop(instance)
+	f.bundles.drop(instance)
 	c := btapb.NewBigtableTableAdminClient(f.upstream)
 	var token string
 	for {

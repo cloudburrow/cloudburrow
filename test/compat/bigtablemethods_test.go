@@ -22,11 +22,13 @@ import (
 
 // The Bigtable RPCs TestBigtableTableAndRows does not reach (#1198).
 //
-// Fifteen methods the emulator (bttest) has no implementation of panic it,
-// which restarts the pod and loses every table: the backup methods, the
-// schema bundle methods, UndeleteTable and the change stream reads. The
-// front before the emulator (internal/bigtablefront, #1206) answers them
-// UNIMPLEMENTED itself; TestBigtableCrashingMethodsAreRefused calls each.
+// The methods the emulator (bttest) has no implementation of panic it,
+// which restarts the pod and loses every table. The front before the
+// emulator (internal/bigtablefront, #1206) serves backups itself since
+// #1499 (TestBigtableBackups), and schema bundles
+// (TestBigtableSchemaBundles), and answers the rest, UndeleteTable and the
+// change stream reads, UNIMPLEMENTED;
+// TestBigtableCrashingMethodsAreRefused calls each.
 
 const bigtableInstance = "cb-instance"
 
@@ -218,49 +220,6 @@ func TestBigtablePingAndWarm(t *testing.T) {
 	}
 }
 
-// TestBigtableRefusedAdminMethods records the table admin methods the
-// emulator answers UNIMPLEMENTED (table IAM the front serves since #1486,
-// TestBigtableTableIAM), called through the generated admin client
-// the veneer wraps (TableAdminClientV2).
-//
-// covers: google.bigtable.admin.v2.BigtableTableAdmin/CreateAuthorizedView (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/GetAuthorizedView (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/ListAuthorizedViews (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/UpdateAuthorizedView (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/DeleteAuthorizedView (unimplemented)
-// covers: google.bigtable.admin.v2.BigtableTableAdmin/SnapshotTable (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/GetSnapshot (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/ListSnapshots (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/DeleteSnapshot (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/CreateTableFromSnapshot (unimplemented)
-func TestBigtableRefusedAdminMethods(t *testing.T) {
-	h := New(t)
-	admin, _ := bigtableTable(t, h, "refusals")
-	a := admin.TableAdminClientV2()
-	ctx := h.Context()
-	inst := fmt.Sprintf("projects/%s/instances/%s", h.Project(), bigtableInstance)
-	tbl, cl := inst+"/tables/refusals", inst+"/clusters/c"
-	view, snap := tbl+"/authorizedViews/v", cl+"/snapshots/s"
-
-	const views = "the emulator does not currently support authorized views"
-	_, err := a.CreateAuthorizedView(ctx, &adminpb.CreateAuthorizedViewRequest{Parent: tbl, AuthorizedViewId: "v", AuthorizedView: &adminpb.AuthorizedView{
-		AuthorizedView: &adminpb.AuthorizedView_SubsetView_{SubsetView: &adminpb.AuthorizedView_SubsetView{RowPrefixes: [][]byte{[]byte("a")}}},
-	}})
-	wantRefused(t, "CreateAuthorizedView", err, codes.Unimplemented, views)
-	_, err = a.GetAuthorizedView(ctx, &adminpb.GetAuthorizedViewRequest{Name: view})
-	wantRefused(t, "GetAuthorizedView", err, codes.Unimplemented, views)
-	_, err = a.ListAuthorizedViews(ctx, &adminpb.ListAuthorizedViewsRequest{Parent: tbl}).Next()
-	wantRefused(t, "ListAuthorizedViews", err, codes.Unimplemented, views)
-	_, err = a.UpdateAuthorizedView(ctx, &adminpb.UpdateAuthorizedViewRequest{AuthorizedView: &adminpb.AuthorizedView{Name: view}})
-	wantRefused(t, "UpdateAuthorizedView", err, codes.Unimplemented, views)
-	err = a.DeleteAuthorizedView(ctx, &adminpb.DeleteAuthorizedViewRequest{Name: view})
-	wantRefused(t, "DeleteAuthorizedView", err, codes.Unimplemented, views)
-
-	const snaps = "the emulator does not currently support snapshots"
-	_, err = a.SnapshotTable(ctx, &adminpb.SnapshotTableRequest{Name: tbl, Cluster: cl, SnapshotId: "s"})
-	wantRefused(t, "SnapshotTable", err, codes.Unimplemented, snaps)
-	_, err = a.GetSnapshot(ctx, &adminpb.GetSnapshotRequest{Name: snap})
-	wantRefused(t, "GetSnapshot", err, codes.Unimplemented, snaps)
-	_, err = a.ListSnapshots(ctx, &adminpb.ListSnapshotsRequest{Parent: cl}).Next()
-	wantRefused(t, "ListSnapshots", err, codes.Unimplemented, snaps)
-	err = a.DeleteSnapshot(ctx, &adminpb.DeleteSnapshotRequest{Name: snap})
-	wantRefused(t, "DeleteSnapshot", err, codes.Unimplemented, snaps)
-	_, err = a.CreateTableFromSnapshot(ctx, &adminpb.CreateTableFromSnapshotRequest{Parent: inst, TableId: "fs", SourceSnapshot: snap})
-	wantRefused(t, "CreateTableFromSnapshot", err, codes.Unimplemented, snaps)
-}
-
 // TestBigtableRefusedDataMethods records the data methods the emulator
 // answers UNIMPLEMENTED: SQL (PrepareQuery, ExecuteQuery) and the session
 // data plane (GetClientConfiguration, OpenTable, OpenAuthorizedView,
@@ -321,14 +280,12 @@ func TestBigtableRefusedDataMethods(t *testing.T) {
 
 // TestBigtableCrashingMethodsAreRefused calls each method the emulator would
 // panic on (#1206): CloudBurrow's front answers UNIMPLEMENTED, a table
-// created before is still there after all fifteen, and, given the
+// created before is still there after all three, and, given the
 // instance's kubeconfig, the Bigtable pod's containers restarted no more
 // than before. Admin calls go through the generated admin client the
 // veneer wraps; the change stream reads, which the veneer does not send,
 // through the module's generated data stub.
 //
-// covers: google.bigtable.admin.v2.BigtableTableAdmin/CreateBackup (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/CopyBackup (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/GetBackup (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/ListBackups (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/UpdateBackup (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/DeleteBackup (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/RestoreTable (unimplemented)
-// covers: google.bigtable.admin.v2.BigtableTableAdmin/CreateSchemaBundle (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/GetSchemaBundle (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/ListSchemaBundles (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/UpdateSchemaBundle (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/DeleteSchemaBundle (unimplemented)
 // covers: google.bigtable.admin.v2.BigtableTableAdmin/UndeleteTable (unimplemented)
 // covers: google.bigtable.v2.Bigtable/GenerateInitialChangeStreamPartitions (unimplemented), google.bigtable.v2.Bigtable/ReadChangeStream (unimplemented)
 func TestBigtableCrashingMethodsAreRefused(t *testing.T) {
@@ -339,38 +296,9 @@ func TestBigtableCrashingMethodsAreRefused(t *testing.T) {
 	a := admin.TableAdminClientV2()
 	ctx := h.Context()
 	inst := fmt.Sprintf("projects/%s/instances/%s", h.Project(), bigtableInstance)
-	tbl, cl := inst+"/tables/crashers", inst+"/clusters/c"
-	backup, bundle := cl+"/backups/b", tbl+"/schemaBundles/s"
+	tbl := inst + "/tables/crashers"
 
-	const backups = "the emulator does not currently support backups"
-	_, err := a.CreateBackup(ctx, &adminpb.CreateBackupRequest{Parent: cl, BackupId: "b", Backup: &adminpb.Backup{SourceTable: tbl}})
-	wantRefused(t, "CreateBackup", err, codes.Unimplemented, backups)
-	_, err = a.CopyBackup(ctx, &adminpb.CopyBackupRequest{Parent: cl, BackupId: "b2", SourceBackup: backup})
-	wantRefused(t, "CopyBackup", err, codes.Unimplemented, backups)
-	_, err = a.GetBackup(ctx, &adminpb.GetBackupRequest{Name: backup})
-	wantRefused(t, "GetBackup", err, codes.Unimplemented, backups)
-	_, err = a.ListBackups(ctx, &adminpb.ListBackupsRequest{Parent: cl}).Next()
-	wantRefused(t, "ListBackups", err, codes.Unimplemented, backups)
-	_, err = a.UpdateBackup(ctx, &adminpb.UpdateBackupRequest{Backup: &adminpb.Backup{Name: backup}})
-	wantRefused(t, "UpdateBackup", err, codes.Unimplemented, backups)
-	err = a.DeleteBackup(ctx, &adminpb.DeleteBackupRequest{Name: backup})
-	wantRefused(t, "DeleteBackup", err, codes.Unimplemented, backups)
-	err = a.RestoreTable(ctx, &adminpb.RestoreTableRequest{Parent: inst, TableId: "restored", Source: &adminpb.RestoreTableRequest_Backup{Backup: backup}})
-	wantRefused(t, "RestoreTable", err, codes.Unimplemented, backups)
-
-	const bundles = "the emulator does not currently support schema bundles"
-	_, err = a.CreateSchemaBundle(ctx, &adminpb.CreateSchemaBundleRequest{Parent: tbl, SchemaBundleId: "s", SchemaBundle: &adminpb.SchemaBundle{}})
-	wantRefused(t, "CreateSchemaBundle", err, codes.Unimplemented, bundles)
-	_, err = a.GetSchemaBundle(ctx, &adminpb.GetSchemaBundleRequest{Name: bundle})
-	wantRefused(t, "GetSchemaBundle", err, codes.Unimplemented, bundles)
-	_, err = a.ListSchemaBundles(ctx, &adminpb.ListSchemaBundlesRequest{Parent: tbl}).Next()
-	wantRefused(t, "ListSchemaBundles", err, codes.Unimplemented, bundles)
-	_, err = a.UpdateSchemaBundle(ctx, &adminpb.UpdateSchemaBundleRequest{SchemaBundle: &adminpb.SchemaBundle{Name: bundle}})
-	wantRefused(t, "UpdateSchemaBundle", err, codes.Unimplemented, bundles)
-	err = a.DeleteSchemaBundle(ctx, &adminpb.DeleteSchemaBundleRequest{Name: bundle})
-	wantRefused(t, "DeleteSchemaBundle", err, codes.Unimplemented, bundles)
-
-	_, err = a.UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl})
+	_, err := a.UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl})
 	wantRefused(t, "UndeleteTable", err, codes.Unimplemented, "the emulator does not currently support undeleting tables")
 
 	conn, err := grpc.NewClient(h.Endpoint(EnvBigtable), grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -393,7 +321,7 @@ func TestBigtableCrashingMethodsAreRefused(t *testing.T) {
 
 	// A crash would have lost the table with the emulator's memory.
 	if _, err := admin.TableInfo(ctx, "crashers"); err != nil {
-		t.Errorf("the table after the fifteen calls: %v; did the emulator restart?", err)
+		t.Errorf("the table after the three calls: %v; did the emulator restart?", err)
 	}
 	if after := restarts(); after != before {
 		t.Errorf("the Bigtable pod's restarts went from %s to %s", before, after)

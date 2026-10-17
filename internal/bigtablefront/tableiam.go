@@ -43,6 +43,7 @@ type tableIAM struct {
 	policies map[string]*iampolicy.Stored // by table, view or backup name
 	views    *authViews
 	copies   *copies
+	bundles  *schemaBundles
 }
 
 func (t *tableIAM) methods() map[string]method {
@@ -114,6 +115,7 @@ func (t *tableIAM) deleteTable(ctx context.Context, req *btapb.DeleteTableReques
 	}
 	t.drop(req.GetName())
 	t.views.drop(req.GetName())
+	t.bundles.drop(req.GetName())
 	return resp, nil
 }
 

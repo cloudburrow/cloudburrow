@@ -132,29 +132,8 @@ func TestFrontRefusesWhatWouldCrashTheEmulator(t *testing.T) {
 	d := bigtablepb.NewBigtableClient(conn)
 	inst := "projects/p/instances/i"
 	tbl := inst + "/tables/kept"
-	bundle := tbl + "/schemaBundles/s"
 
 	calls := map[string]func() error{
-		"CreateSchemaBundle": func() error {
-			_, err := a.CreateSchemaBundle(ctx, &adminpb.CreateSchemaBundleRequest{Parent: tbl, SchemaBundleId: "s", SchemaBundle: &adminpb.SchemaBundle{}})
-			return err
-		},
-		"GetSchemaBundle": func() error {
-			_, err := a.GetSchemaBundle(ctx, &adminpb.GetSchemaBundleRequest{Name: bundle})
-			return err
-		},
-		"ListSchemaBundles": func() error {
-			_, err := a.ListSchemaBundles(ctx, &adminpb.ListSchemaBundlesRequest{Parent: tbl})
-			return err
-		},
-		"UpdateSchemaBundle": func() error {
-			_, err := a.UpdateSchemaBundle(ctx, &adminpb.UpdateSchemaBundleRequest{SchemaBundle: &adminpb.SchemaBundle{Name: bundle}})
-			return err
-		},
-		"DeleteSchemaBundle": func() error {
-			_, err := a.DeleteSchemaBundle(ctx, &adminpb.DeleteSchemaBundleRequest{Name: bundle})
-			return err
-		},
 		"UndeleteTable": func() error {
 			_, err := a.UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl})
 			return err
