@@ -265,6 +265,8 @@ func controlStatus(e *httpError) (int, string) {
 		return http.StatusNotImplemented, "UNIMPLEMENTED"
 	case e.status == http.StatusTooManyRequests:
 		return e.status, "RESOURCE_EXHAUSTED"
+	case e.status == http.StatusServiceUnavailable:
+		return e.status, "UNAVAILABLE"
 	}
 	return http.StatusInternalServerError, "INTERNAL"
 }

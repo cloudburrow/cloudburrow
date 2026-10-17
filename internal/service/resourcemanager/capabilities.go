@@ -11,12 +11,26 @@ package resourcemanager
 // configuredCapabilities (folders.get on REST: the Go v3 Folder message of
 // the official client has no such field).
 //
-// Stored, nothing acts on it: Google documents that enabling app management
-// makes the folder app-enabled for App Hub, which CloudBurrow does not serve,
-// and creates a management project in it, whose project ID scheme is
-// undocumented, so none is created and the folder's managementProject stays
-// empty. UNVERIFIED: the statuses and messages of the refusals, and the
-// operation's metadata (UpdateCapabilityConfigMetadata, empty).
+// Enabling app-management makes the folder's management project, as Google
+// documents (docs.cloud.google.com/resource-manager/docs/manage-applications,
+// #1532): "The system creates the management project in the folder", "Each
+// folder contains only one management project", and disabling
+// "automatically and permanently deletes the management project". The
+// folder names it as managementProject, and the project carries
+// isManagementProject and configuredCapabilities, its folder's
+// (cloudresourcemanager v3's discovery document), on REST: the Go v3
+// messages have none of these fields. Its project ID is
+// google-mp-{folder number}, shaped as the discovery document's one example
+// (`projects/google-mp-123`): the ID Google assigns is not documented
+// ("Make note of the project name and ID of the management project"). It is
+// an ordinary project here, so a folder holding one is not empty, and the
+// APIs Google enables on it and App Hub, which CloudBurrow does not serve,
+// are not modelled. v3 projects.get names isManagementProject and
+// configuredCapabilities; projects.list and search do not (UNVERIFIED
+// there).
+// UNVERIFIED: the project ID and display name, the statuses and messages of
+// the refusals, and the operation's metadata (UpdateCapabilityConfigMetadata,
+// empty).
 
 import (
 	"encoding/json"
@@ -26,14 +40,22 @@ import (
 	"strings"
 	"time"
 
+	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
 
 	"github.com/cloudburrow/cloudburrow/internal/apierror"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
 
+// appManagement is the capability that gives a folder a management project.
+const appManagement = "app-management"
+
 // folderCapabilities are the capability names a folder accepts.
-var folderCapabilities = []string{"app-management"}
+var folderCapabilities = []string{appManagement}
+
+// ManagementProjectID is the project ID of folder's management project
+// (UNVERIFIED: shaped as the discovery document's example).
+func ManagementProjectID(folder string) string { return "google-mp-" + folder }
 
 // Capability is cloudresourcemanager v3's Capability.
 type Capability struct {
@@ -87,8 +109,22 @@ func (r *Registry) SetFolderCapability(folder, capability string, value bool) (C
 	case value && !has:
 		f.Capabilities = append(f.Capabilities, name)
 		slices.Sort(f.Capabilities)
+		if capability == appManagement {
+			p, err := r.registerLocked(Project{ProjectID: ManagementProjectID(f.ID()), Parent: f.Name,
+				ConfiguredCapabilities: []string{name}})
+			if err != nil {
+				return Capability{}, apierror.FailedPrecondition("cannot create the management project of %s: %v", f.Name, err)
+			}
+			f.ManagementProject = p.Name
+		}
 	case !value && has:
 		f.Capabilities = slices.DeleteFunc(f.Capabilities, func(c string) bool { return c == name })
+		if capability == appManagement && f.ManagementProject != "" {
+			// Permanently: no DELETE_REQUESTED, no undelete.
+			_ = r.st.Delete(key(strings.TrimPrefix(f.ManagementProject, "projects/")))
+			r.dropIAM(f.ManagementProject)
+			f.ManagementProject = ""
+		}
 	default:
 		return Capability{Name: name, Value: value}, nil
 	}
@@ -103,17 +139,43 @@ func writeFolderJSON(w http.ResponseWriter, f Folder) error {
 	if err != nil {
 		return apierror.Internal(err, "encode response")
 	}
-	if len(f.Capabilities) > 0 {
+	if len(f.Capabilities) > 0 || f.ManagementProject != "" {
 		m := map[string]any{}
 		if err := json.Unmarshal(b, &m); err != nil {
 			return apierror.Internal(err, "encode response")
 		}
-		m["configuredCapabilities"] = f.Capabilities
+		if len(f.Capabilities) > 0 {
+			m["configuredCapabilities"] = f.Capabilities
+		}
+		if f.ManagementProject != "" {
+			m["managementProject"] = f.ManagementProject
+		}
 		return rest.WriteJSON(w, http.StatusOK, m)
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, err = w.Write(b)
 	return err
+}
+
+// writeProjectJSON is a project on REST, with isManagementProject and
+// configuredCapabilities when it is a management project, which the Go v3
+// Project message lacks.
+func (s *ProjectsServer) writeProjectJSON(w http.ResponseWriter, p *rmpb.Project) error {
+	rec, err := s.reg.Get(p.GetProjectId())
+	if err != nil || len(rec.ConfiguredCapabilities) == 0 {
+		return writeProto(w, p)
+	}
+	b, err := pj.Marshal(p)
+	if err != nil {
+		return apierror.Internal(err, "encode response")
+	}
+	m := map[string]any{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return apierror.Internal(err, "encode response")
+	}
+	m["isManagementProject"] = true
+	m["configuredCapabilities"] = rec.ConfiguredCapabilities
+	return rest.WriteJSON(w, http.StatusOK, m)
 }
 
 func (s *FoldersServer) capabilityRoutes(r *rest.Router, ops *v1Ops) {

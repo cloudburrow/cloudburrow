@@ -55,6 +55,11 @@ type Project struct {
 	// Parent is "folders/{number}" or OrganizationName, or empty for a
 	// top-level project, as every project was before #1294.
 	Parent string `json:"parent,omitempty"`
+	// ConfiguredCapabilities, on the management project of an app-enabled
+	// folder (#1532, capabilities.go), are its folder's capabilities;
+	// "presence of any capability implies that this is a Management
+	// Project".
+	ConfiguredCapabilities []string `json:"configuredCapabilities,omitempty"`
 }
 
 // RetentionPeriod is how long a deleted project is kept in DELETE_REQUESTED
@@ -138,7 +143,11 @@ func (r *Registry) register(p Project) (Project, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.registerLocked(p)
+}
 
+// registerLocked is register with r.mu held.
+func (r *Registry) registerLocked(p Project) (Project, error) {
 	if old, err := r.load(p.ProjectID); err == nil {
 		if old.State == StateDeleteRequested {
 			return Project{}, apierror.AlreadyExists(

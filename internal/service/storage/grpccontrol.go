@@ -364,42 +364,42 @@ func controlGRPCError(err error) error {
 
 // The IntelligenceConfig methods (intelligence.go), one pair per kind.
 
-func (c *grpcControl) getIntelligence(name, kind string) (*controlpb.IntelligenceConfig, error) {
-	out, err := c.g.s.GetIntelligenceConfig(name, kind)
+func (c *grpcControl) getIntelligence(ctx context.Context, name, kind string) (*controlpb.IntelligenceConfig, error) {
+	out, err := c.g.s.GetIntelligenceConfig(ctx, name, kind)
 	if err != nil {
 		return nil, controlGRPCError(err)
 	}
 	return out, nil
 }
 
-func (c *grpcControl) updateIntelligence(in *controlpb.IntelligenceConfig, paths []string, kind string) (*controlpb.IntelligenceConfig, error) {
-	out, err := c.g.s.UpdateIntelligenceConfig(in, paths, kind)
+func (c *grpcControl) updateIntelligence(ctx context.Context, in *controlpb.IntelligenceConfig, paths []string, kind string) (*controlpb.IntelligenceConfig, error) {
+	out, err := c.g.s.UpdateIntelligenceConfig(ctx, in, paths, kind)
 	if err != nil {
 		return nil, controlGRPCError(err)
 	}
 	return out, nil
 }
 
-func (c *grpcControl) GetProjectIntelligenceConfig(_ context.Context, req *controlpb.GetProjectIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
-	return c.getIntelligence(req.GetName(), "projects")
+func (c *grpcControl) GetProjectIntelligenceConfig(ctx context.Context, req *controlpb.GetProjectIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.getIntelligence(ctx, req.GetName(), "projects")
 }
 
-func (c *grpcControl) UpdateProjectIntelligenceConfig(_ context.Context, req *controlpb.UpdateProjectIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
-	return c.updateIntelligence(req.GetIntelligenceConfig(), req.GetUpdateMask().GetPaths(), "projects")
+func (c *grpcControl) UpdateProjectIntelligenceConfig(ctx context.Context, req *controlpb.UpdateProjectIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.updateIntelligence(ctx, req.GetIntelligenceConfig(), req.GetUpdateMask().GetPaths(), "projects")
 }
 
-func (c *grpcControl) GetFolderIntelligenceConfig(_ context.Context, req *controlpb.GetFolderIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
-	return c.getIntelligence(req.GetName(), "folders")
+func (c *grpcControl) GetFolderIntelligenceConfig(ctx context.Context, req *controlpb.GetFolderIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.getIntelligence(ctx, req.GetName(), "folders")
 }
 
-func (c *grpcControl) UpdateFolderIntelligenceConfig(_ context.Context, req *controlpb.UpdateFolderIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
-	return c.updateIntelligence(req.GetIntelligenceConfig(), req.GetUpdateMask().GetPaths(), "folders")
+func (c *grpcControl) UpdateFolderIntelligenceConfig(ctx context.Context, req *controlpb.UpdateFolderIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.updateIntelligence(ctx, req.GetIntelligenceConfig(), req.GetUpdateMask().GetPaths(), "folders")
 }
 
-func (c *grpcControl) GetOrganizationIntelligenceConfig(_ context.Context, req *controlpb.GetOrganizationIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
-	return c.getIntelligence(req.GetName(), "organizations")
+func (c *grpcControl) GetOrganizationIntelligenceConfig(ctx context.Context, req *controlpb.GetOrganizationIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.getIntelligence(ctx, req.GetName(), "organizations")
 }
 
-func (c *grpcControl) UpdateOrganizationIntelligenceConfig(_ context.Context, req *controlpb.UpdateOrganizationIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
-	return c.updateIntelligence(req.GetIntelligenceConfig(), req.GetUpdateMask().GetPaths(), "organizations")
+func (c *grpcControl) UpdateOrganizationIntelligenceConfig(ctx context.Context, req *controlpb.UpdateOrganizationIntelligenceConfigRequest) (*controlpb.IntelligenceConfig, error) {
+	return c.updateIntelligence(ctx, req.GetIntelligenceConfig(), req.GetUpdateMask().GetPaths(), "organizations")
 }

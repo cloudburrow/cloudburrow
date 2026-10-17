@@ -168,6 +168,10 @@ func (p hierarchyProvider) Detail(_ context.Context, _ string, path []string) (c
 		}
 		props = append(props, console.Property{Label: "App management", Value: v})
 	}
+	// The management project app management makes (#1532).
+	if f.ManagementProject != "" {
+		props = append(props, console.Property{Label: "Management project", Value: strings.TrimPrefix(f.ManagementProject, "projects/")})
+	}
 	children := console.Listing{NameColumn: "Folder ID", Columns: []string{"Name"}, Noun: "folders"}
 	for _, c := range all {
 		if c.Parent == f.Name && c.State == resourcemanager.StateActive {

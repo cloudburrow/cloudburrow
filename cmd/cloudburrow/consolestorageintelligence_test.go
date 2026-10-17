@@ -86,7 +86,7 @@ func TestConsoleStorageIntelligence(t *testing.T) {
 	if err := p.Act(ctx, project, "projects/"+project, "inherit"); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := gcs.GetIntelligenceConfig("projects/"+project+"/locations/global/intelligenceConfig", "projects")
+	cfg, err := gcs.GetIntelligenceConfig(context.Background(), "projects/"+project+"/locations/global/intelligenceConfig", "projects")
 	if err != nil || cfg.GetEditionConfig().String() != "INHERIT" || cfg.GetFilter() != nil {
 		t.Errorf("the project's configuration after Inherit = %v, %v", cfg, err)
 	}
@@ -104,7 +104,8 @@ func TestConsoleStorageIntelligence(t *testing.T) {
 // TestConsoleFolderAppManagement (#1519): a folder's page shows App
 // management Disabled and offers Enable app management, which sets the
 // app-management capability (folders.capabilities.patch); the page then
-// shows Enabled and offers Disable, which clears it.
+// shows Enabled and its Management project (#1532), and offers Disable,
+// which clears both.
 func TestConsoleFolderAppManagement(t *testing.T) {
 	ctx := context.Background()
 	reg := resourcemanager.New(store.NewMemory())
@@ -113,16 +114,17 @@ func TestConsoleFolderAppManagement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	appProp := func() string {
+	prop := func(label string) string {
 		t.Helper()
 		d, _ := h.Detail(ctx, "", []string{id})
 		for _, p := range d.Sections[0].Groups[0].Properties {
-			if p.Label == "App management" {
+			if p.Label == label {
 				return p.Value
 			}
 		}
 		return ""
 	}
+	appProp := func() string { return prop("App management") }
 	if got := appProp(); got != "Disabled" || !strings.Contains(settingsActionIDs(h.DetailActions(ctx, "", []string{id})), folderAppOn) {
 		t.Fatalf("a new folder's App management = %q", got)
 	}
@@ -132,13 +134,17 @@ func TestConsoleFolderAppManagement(t *testing.T) {
 	if c, err := reg.FolderCapability(id, appManagement); err != nil || !c.Value || appProp() != "Enabled" {
 		t.Errorf("after Enable = %+v, %v, %q", c, err, appProp())
 	}
+	// Its management project (#1532) is on the page.
+	if got := prop("Management project"); got != resourcemanager.ManagementProjectID(id) {
+		t.Errorf("Management project = %q; want %s", got, resourcemanager.ManagementProjectID(id))
+	}
 	if !strings.Contains(settingsActionIDs(h.DetailActions(ctx, "", []string{id})), folderAppOff) {
 		t.Error("an enabled folder does not offer Disable app management")
 	}
 	if err := h.ActAt(ctx, "", []string{id}, folderAppOff, nil); err != nil {
 		t.Fatal(err)
 	}
-	if c, _ := reg.FolderCapability(id, appManagement); c.Value {
-		t.Error("Disable app management left the capability set")
+	if c, _ := reg.FolderCapability(id, appManagement); c.Value || prop("Management project") != "" {
+		t.Error("Disable app management left the capability set or its management project")
 	}
 }

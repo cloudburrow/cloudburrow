@@ -463,7 +463,7 @@ var parityRows = []parityRow{
 		Tests: []string{"TestConsoleResourceHierarchy", "TestResourceManagerV3Folders", "TestResourceHierarchyAndTagsThroughTheDrawer", "TestNoDetailShowsABlankProperty"}},
 	{Resource: "Resource Manager folder capabilities", Service: "resourcemanager",
 		Methods:  []string{"cloudresourcemanager.folders.capabilities.get", "cloudresourcemanager.folders.capabilities.patch"},
-		Provider: "hierarchy", Offers: "Resource hierarchy: App management (Enabled or Disabled) on a folder's page, and Enable app management or Disable app management, the app-management capability (#1519)",
+		Provider: "hierarchy", Offers: "Resource hierarchy: App management (Enabled or Disabled) and the Management project it makes (#1532) on a folder's page, and Enable app management or Disable app management, the app-management capability (#1519)",
 		Tests: []string{"TestConsoleFolderAppManagement", "TestResourceManagerFolderCapabilities"}},
 	{Resource: "Resource Manager folder search", Service: "resourcemanager",
 		Methods:  []string{"Folders/SearchFolders"},

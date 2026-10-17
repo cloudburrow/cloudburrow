@@ -366,3 +366,27 @@ func TestPersistentDatastoreIsFrontedAndWaitsForTheOldEmulator(t *testing.T) {
 		t.Errorf("manifest has no front or no volume:\n%s", m)
 	}
 }
+
+// Given Resource Manager's in-cluster address, the storage server is told
+// it, and its egress policy lets it reach that port, the cloudburrow-host
+// Service's endpoint on the developer's machine (#1532).
+func TestStorageServerReachesResourceManager(t *testing.T) {
+	var cfg config.Config
+	cfg.Services = []config.Service{config.ServiceStorage}
+	c := NewLifecycleComponent("kc", cfg, io.Discard)
+	c.SetBuiltinStorageImage("img")
+	c.SetResourceManager("cloudburrow-host.cloudburrow.svc.cluster.local:9031")
+	for _, b := range c.Backends() {
+		if b.Name != "storage" {
+			continue
+		}
+		if args := strings.Join(b.Args, " "); !strings.Contains(args, "--resourcemanager http://cloudburrow-host.cloudburrow.svc.cluster.local:9031") {
+			t.Errorf("args %q do not name Resource Manager", args)
+		}
+		if m := b.Manifest("cloudburrow", "i"); !strings.Contains(m, "    - ports:\n        - protocol: TCP\n          port: 9031\n") {
+			t.Errorf("the egress policy does not allow port 9031:\n%s", m)
+		}
+		return
+	}
+	t.Fatal("no storage backend")
+}

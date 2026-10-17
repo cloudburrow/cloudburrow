@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/cloudburrow/cloudburrow/internal/cluster"
@@ -40,12 +42,13 @@ type LifecycleComponent struct {
 	corsOrigins []string
 	// resourceManager is Resource Manager's in-cluster address
 	// (host:port), which BigQuery's front reads a project's ancestry
-	// from (#1392), or "".
+	// from (#1392), and the storage server a project's and a folder's
+	// parents (#1532), or "".
 	resourceManager string
 }
 
 // SetResourceManager records Resource Manager's in-cluster address, for
-// BigQuery's front (#1392).
+// BigQuery's front (#1392) and the storage server (#1532).
 func (c *LifecycleComponent) SetResourceManager(addr string) { c.resourceManager = addr }
 
 // SetStorageSigningKeys records the PEM public keys, by service account
@@ -144,7 +147,18 @@ func (c *LifecycleComponent) Backends() []Backend {
 			}
 		case config.ServiceStorage:
 			// One Deployment serves the host and the cluster (#514).
-			out = append(out, BuiltinStorageBackend(c.installer.Namespace, c.storageImage, persistent, c.enabled(config.ServicePubSub), c.signingKeys, c.corsOrigins))
+			b := BuiltinStorageBackend(c.installer.Namespace, c.storageImage, persistent, c.enabled(config.ServicePubSub), c.signingKeys, c.corsOrigins)
+			// Storage Intelligence inheritance walks the projects and
+			// folders of Resource Manager, through cloudburrow-host (#1532).
+			if c.resourceManager != "" {
+				b.Args = append(b.Args, "--resourcemanager", "http://"+c.resourceManager)
+				if _, p, err := net.SplitHostPort(c.resourceManager); err == nil {
+					if port, err := strconv.Atoi(p); err == nil {
+						b.EgressPorts = append(b.EgressPorts, port)
+					}
+				}
+			}
+			out = append(out, b)
 		}
 	}
 	return out

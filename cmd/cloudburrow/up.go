@@ -146,10 +146,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	comps.SetStorageSigningKeys(signingKeys)
-	if serviceEnabled(cfg, config.ServiceBigQuery) {
+	if serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) {
 		// BigQuery's front reads a project's folders and organization
 		// from Resource Manager, through cloudburrow-host (#1392,
-		// INFORMATION_SCHEMA.JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION).
+		// INFORMATION_SCHEMA.JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION),
+		// and the storage server a project's and a folder's parents, for
+		// Storage Intelligence inheritance (#1532).
 		comps.SetResourceManager(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ResourceManager))
 	}
@@ -610,10 +612,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// cluster name when a cluster workload can need them (#575): with Cloud
 	// Run, whose containers are the reason. Registered after every service,
 	// so each has its bound address. Control and admin are never included.
-	// With BigQuery alone, Resource Manager alone is published: the
-	// BigQuery front reads a project's ancestry from it (#1392).
+	// With BigQuery or Cloud Storage and no Cloud Run, Resource Manager
+	// alone is published: the BigQuery front reads a project's ancestry
+	// from it (#1392), and the storage server a project's and a folder's
+	// parents (#1532).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,

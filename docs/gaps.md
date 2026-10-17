@@ -53,7 +53,6 @@ and object IAM on the JSON API are excluded (below).
 | `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) (#1505) | no emulator support (no cache tier) | S |
 | `rapidCaches.*` (#1444; Anywhere Caches, as records with no cache tier, `buckets.relocate`, `advanceRelocateBucket` and `operations.cancel` are built) (#1505) | no emulator support (no cache tier) | M |
 | Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444) (#1505) | no emulator support (needs Pub/Sub) | S |
-| Storage Intelligence: a project or folder that inherits takes the local organization's configuration, never its folder's, as the storage server does not see the hierarchy (#1519) (#1532) | not built yet | S |
 | UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
 
 ## Pub/Sub
@@ -160,11 +159,11 @@ Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216); v1 org pol
 (#1296), and regional tag bindings and effective tags through the
 `{location}-cloudresourcemanager` endpoints (#1350); project, folder and organization IAM, stored
 and never enforced (#1368); folder capabilities (`app-management`), stored with nothing acting on
-them (#1519).
+them (#1519), and the management project an app-enabled folder gets (#1532).
 
 | Gap | Why open | Size |
 |---|---|---|
-| An app-enabled folder (`app-management` capability) gets no management project: Google creates one, with an undocumented project ID, and `managementProject` stays empty (#1519) (#1532) | not documented by Google | S |
+| An app-enabled folder's management project is `google-mp-{folder number}`, shaped as the discovery document's one example: the project ID and display name Google assigns are not documented, and the APIs it enables on the project are not modelled (built in #1532) (#1445) | not documented by Google | S |
 
 ## Vertex AI
 

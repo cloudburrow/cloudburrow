@@ -55,6 +55,8 @@ type Server struct {
 	// relayChannels hands channel messages to a relay (#1290) instead of
 	// POSTing them.
 	relayChannels bool
+	// hierarchy reads a project's and a folder's parent (#1532), or nil.
+	hierarchy Hierarchy
 	// grpc serves google.storage.v2.Storage (#1321) on the same port, as
 	// h2c.
 	grpc http.Handler
@@ -92,6 +94,10 @@ type Options struct {
 	// CLI delivers them on the developer's machine, so the pod needs no
 	// egress.
 	RelayChannels bool
+	// Hierarchy reads the parents Storage Intelligence inheritance walks
+	// (#1532); nil means none: what inherits inherits the local
+	// organization's configuration.
+	Hierarchy Hierarchy
 }
 
 // NewServer returns the server.
@@ -102,7 +108,7 @@ func NewServer(o Options) (*Server, error) {
 	}
 	s := &Server{methods: ms, handlers: map[string]http.HandlerFunc{}, hosts: o.Hosts, meta: o.Meta, blobs: o.Blobs, now: o.Now}
 	s.signingKeys, s.observe, s.faults = o.SigningKeys, o.Observe, o.Faults
-	s.relayChannels = o.RelayChannels
+	s.relayChannels, s.hierarchy = o.RelayChannels, o.Hierarchy
 	s.allowOrigins = map[string]bool{}
 	for _, v := range o.CORSAllowOrigins {
 		origin, err := hostguard.ParseOrigin(v)

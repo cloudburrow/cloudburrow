@@ -42,6 +42,19 @@ func TestFolderCapabilities(t *testing.T) {
 	if got, err := c.Folders.Get(f.Name).Context(ctx).Do(); err != nil || len(got.ConfiguredCapabilities) != 1 || got.ConfiguredCapabilities[0] != name {
 		t.Errorf("folder = %+v, %v", got, err)
 	}
+	// The management project (#1532): in the folder, named by it, and
+	// marked as one.
+	mp := "projects/" + ManagementProjectID(f.ID())
+	if got, err := c.Folders.Get(f.Name).Context(ctx).Do(); err != nil || got.ManagementProject != mp {
+		t.Errorf("folder managementProject = %+v, %v; want %s", got, err, mp)
+	}
+	if got, err := c.Projects.Get(mp).Context(ctx).Do(); err != nil || !got.IsManagementProject || got.Parent != f.Name ||
+		len(got.ConfiguredCapabilities) != 1 || got.ConfiguredCapabilities[0] != name {
+		t.Errorf("management project = %+v, %v", got, err)
+	}
+	if _, err := reg.DeleteFolder(f.Name); err == nil {
+		t.Errorf("deleting an app-enabled folder succeeded; its management project is in it")
+	}
 	if _, err := c.Folders.Capabilities.Patch(f.Name+"/capabilities/other", &crmv3.Capability{Value: true}).Context(ctx).Do(); err == nil || err.(*googleapi.Error).Code != 400 {
 		t.Errorf("an unknown capability = %v; want 400", err)
 	}
@@ -51,7 +64,14 @@ func TestFolderCapabilities(t *testing.T) {
 	if _, err := c.Folders.Capabilities.Patch(name, &crmv3.Capability{Value: false}).Context(ctx).Do(); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := c.Folders.Get(f.Name).Context(ctx).Do(); len(got.ConfiguredCapabilities) != 0 {
+	if got, _ := c.Folders.Get(f.Name).Context(ctx).Do(); len(got.ConfiguredCapabilities) != 0 || got.ManagementProject != "" {
 		t.Errorf("folder after unset = %+v", got)
+	}
+	// Disabling deletes the management project permanently.
+	if _, err := reg.Get(ManagementProjectID(f.ID())); err == nil {
+		t.Errorf("the management project outlived app management")
+	}
+	if _, err := reg.DeleteFolder(f.Name); err != nil {
+		t.Errorf("DeleteFolder after unset: %v", err)
 	}
 }

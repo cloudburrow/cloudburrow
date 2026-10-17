@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -54,15 +55,17 @@ import (
 // (projects/{project_number}/...); a project ID is accepted as the
 // provider and gcloud send it. UNVERIFIED: the statuses and messages of the
 // refusals, that a second trial is refused, the effective edition of
-// ESSENTIALS (STANDARD here), and the parent: the storage server does not
-// see the resource hierarchy, so a project or a folder that inherits
-// inherits the local organization's configuration (organizations/
-// 100000000001, resourcemanager.OrganizationName), never a folder's.
+// ESSENTIALS (STANDARD here), and the parent of a project or a folder
+// Resource Manager does not have. Inheritance walks the instance's Resource
+// Manager hierarchy, project → folder(s) → organization (#1532,
+// hierarchy.go); a storage server given no Resource Manager resolves it to
+// the local organization's configuration (organizations/100000000001,
+// resourcemanager.OrganizationName), never a folder's.
 
 const intelligencePrefix = "intelligence/"
 
-// localOrganization is the instance's one organization, the parent this
-// resolves inheritance to.
+// localOrganization is the instance's one organization, the parent
+// inheritance resolves to when the hierarchy cannot be read.
 const localOrganization = "100000000001"
 
 // trialPeriod is how long a TRIAL edition lasts.
@@ -142,9 +145,11 @@ func (rec intelligenceRecord) edition(now time.Time) controlpb.IntelligenceConfi
 	return e
 }
 
-// effective is the configuration that applies to t.
-func effectiveIntelligence(tx Tx, t intelligenceTarget, now time.Time) (*controlpb.IntelligenceConfig_EffectiveIntelligenceConfig, error) {
-	for {
+// effectiveIntelligence is the configuration that applies to chain[0]:
+// the nearest of chain (it and its ancestors, intelligenceAncestry) whose
+// edition is set; a DISABLED one applies as effective edition NONE.
+func effectiveIntelligence(tx Tx, chain []intelligenceTarget, now time.Time) (*controlpb.IntelligenceConfig_EffectiveIntelligenceConfig, error) {
+	for _, t := range chain {
 		rec, _, err := getIntelligence(tx, t)
 		if err != nil {
 			return nil, err
@@ -154,20 +159,18 @@ func effectiveIntelligence(tx Tx, t intelligenceTarget, now time.Time) (*control
 			return &controlpb.IntelligenceConfig_EffectiveIntelligenceConfig{
 				EffectiveEdition: controlpb.IntelligenceConfig_EffectiveIntelligenceConfig_NONE, IntelligenceConfig: t.name()}, nil
 		case controlpb.IntelligenceConfig_INHERIT:
-			if t.kind == "organizations" {
-				return &controlpb.IntelligenceConfig_EffectiveIntelligenceConfig{
-					EffectiveEdition: controlpb.IntelligenceConfig_EffectiveIntelligenceConfig_NONE}, nil
-			}
-			t = intelligenceTarget{kind: "organizations", id: localOrganization}
 		default:
 			return &controlpb.IntelligenceConfig_EffectiveIntelligenceConfig{
 				EffectiveEdition: controlpb.IntelligenceConfig_EffectiveIntelligenceConfig_STANDARD, IntelligenceConfig: t.name()}, nil
 		}
 	}
+	return &controlpb.IntelligenceConfig_EffectiveIntelligenceConfig{
+		EffectiveEdition: controlpb.IntelligenceConfig_EffectiveIntelligenceConfig_NONE}, nil
 }
 
 // intelligenceProto is t's configuration as Google returns it.
-func intelligenceProto(tx Tx, t intelligenceTarget, now time.Time) (*controlpb.IntelligenceConfig, error) {
+func intelligenceProto(tx Tx, chain []intelligenceTarget, now time.Time) (*controlpb.IntelligenceConfig, error) {
+	t := chain[0]
 	rec, found, err := getIntelligence(tx, t)
 	if err != nil {
 		return nil, err
@@ -186,7 +189,7 @@ func intelligenceProto(tx Tx, t intelligenceTarget, now time.Time) (*controlpb.I
 			out.TrialConfig = &controlpb.IntelligenceConfig_TrialConfig{ExpireTime: timestamppb.New(rec.TrialExpire)}
 		}
 	}
-	if out.EffectiveIntelligenceConfig, err = effectiveIntelligence(tx, t, now); err != nil {
+	if out.EffectiveIntelligenceConfig, err = effectiveIntelligence(tx, chain, now); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -194,14 +197,18 @@ func intelligenceProto(tx Tx, t intelligenceTarget, now time.Time) (*controlpb.I
 
 // GetIntelligenceConfig returns the configuration name names; kind, when
 // set, is the kind the caller's method serves.
-func (s *Server) GetIntelligenceConfig(name, kind string) (*controlpb.IntelligenceConfig, error) {
+func (s *Server) GetIntelligenceConfig(ctx context.Context, name, kind string) (*controlpb.IntelligenceConfig, error) {
 	t, err := parseIntelligenceName(name, kind)
+	if err != nil {
+		return nil, err
+	}
+	chain, err := s.intelligenceAncestry(ctx, t)
 	if err != nil {
 		return nil, err
 	}
 	var out *controlpb.IntelligenceConfig
 	err = s.meta.View(func(tx Tx) error {
-		out, err = intelligenceProto(tx, t, s.now())
+		out, err = intelligenceProto(tx, chain, s.now())
 		return err
 	})
 	return out, err
@@ -229,8 +236,12 @@ func checkFilter(f *controlpb.IntelligenceConfig_Filter) error {
 }
 
 // UpdateIntelligenceConfig sets the fields paths name of in's configuration.
-func (s *Server) UpdateIntelligenceConfig(in *controlpb.IntelligenceConfig, paths []string, kind string) (*controlpb.IntelligenceConfig, error) {
+func (s *Server) UpdateIntelligenceConfig(ctx context.Context, in *controlpb.IntelligenceConfig, paths []string, kind string) (*controlpb.IntelligenceConfig, error) {
 	t, err := parseIntelligenceName(in.GetName(), kind)
+	if err != nil {
+		return nil, err
+	}
+	chain, err := s.intelligenceAncestry(ctx, t)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +310,7 @@ func (s *Server) UpdateIntelligenceConfig(in *controlpb.IntelligenceConfig, path
 			return err
 		}
 		tx.Put(t.key(), raw)
-		out, err = intelligenceProto(tx, t, now)
+		out, err = intelligenceProto(tx, chain, now)
 		return err
 	})
 	return out, err
@@ -338,7 +349,7 @@ func (s *Server) serveIntelligence(w http.ResponseWriter, r *http.Request, name 
 	mo := protojson.MarshalOptions{}
 	switch r.Method {
 	case http.MethodGet:
-		out, err := s.GetIntelligenceConfig(name, "")
+		out, err := s.GetIntelligenceConfig(r.Context(), name, "")
 		if err != nil {
 			writeControlError(w, err)
 			return
@@ -362,7 +373,7 @@ func (s *Server) serveIntelligence(w http.ResponseWriter, r *http.Request, name 
 		if m := r.URL.Query().Get("updateMask"); m != "" {
 			paths = strings.Split(m, ",")
 		}
-		out, err := s.UpdateIntelligenceConfig(in, paths, "")
+		out, err := s.UpdateIntelligenceConfig(r.Context(), in, paths, "")
 		if err != nil {
 			writeControlError(w, err)
 			return

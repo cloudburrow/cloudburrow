@@ -3061,16 +3061,16 @@
         "method": "cloudresourcemanager.folders.capabilities.get",
         "status": "Verified",
         "tests": [
-          "test/compat/storageintelligence_test.go:328 TestResourceManagerFolderCapabilities",
-          "test/compat/storageintelligence_test.go:389 TestTerraformResourceManagerCapability"
+          "test/compat/storageintelligence_test.go:330 TestResourceManagerFolderCapabilities",
+          "test/compat/storageintelligence_test.go:405 TestTerraformResourceManagerCapability"
         ]
       },
       {
         "method": "cloudresourcemanager.folders.capabilities.patch",
         "status": "Verified",
         "tests": [
-          "test/compat/storageintelligence_test.go:328 TestResourceManagerFolderCapabilities",
-          "test/compat/storageintelligence_test.go:389 TestTerraformResourceManagerCapability"
+          "test/compat/storageintelligence_test.go:330 TestResourceManagerFolderCapabilities",
+          "test/compat/storageintelligence_test.go:405 TestTerraformResourceManagerCapability"
         ]
       },
       {
@@ -6601,7 +6601,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageintelligence_test.go:209 TestTerraformStorageIntelligenceConfigs",
-          "test/compat/storageintelligence_test.go:51 TestStorageIntelligenceConfigs"
+          "test/compat/storageintelligence_test.go:51 TestStorageIntelligenceConfigs",
+          "test/compat/storageintelligenceinherit_test.go:25 TestStorageIntelligenceInheritsThroughFolders"
         ]
       },
       {
@@ -6610,7 +6611,8 @@
         "tests": [
           "test/compat/storageintelligence_test.go:145 TestGcloudStorageIntelligenceConfigs",
           "test/compat/storageintelligence_test.go:209 TestTerraformStorageIntelligenceConfigs",
-          "test/compat/storageintelligence_test.go:51 TestStorageIntelligenceConfigs"
+          "test/compat/storageintelligence_test.go:51 TestStorageIntelligenceConfigs",
+          "test/compat/storageintelligenceinherit_test.go:25 TestStorageIntelligenceInheritsThroughFolders"
         ]
       },
       {
@@ -6619,14 +6621,16 @@
         "tests": [
           "test/compat/storageintelligence_test.go:145 TestGcloudStorageIntelligenceConfigs",
           "test/compat/storageintelligence_test.go:209 TestTerraformStorageIntelligenceConfigs",
-          "test/compat/storageintelligence_test.go:51 TestStorageIntelligenceConfigs"
+          "test/compat/storageintelligence_test.go:51 TestStorageIntelligenceConfigs",
+          "test/compat/storageintelligenceinherit_test.go:25 TestStorageIntelligenceInheritsThroughFolders"
         ]
       },
       {
         "method": "google.storage.control.v2.StorageControl/UpdateOrganizationIntelligenceConfig",
         "status": "Verified",
         "tests": [
-          "test/compat/storageintelligence_test.go:209 TestTerraformStorageIntelligenceConfigs"
+          "test/compat/storageintelligence_test.go:209 TestTerraformStorageIntelligenceConfigs",
+          "test/compat/storageintelligenceinherit_test.go:25 TestStorageIntelligenceInheritsThroughFolders"
         ]
       },
       {

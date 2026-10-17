@@ -320,9 +320,11 @@ func capabilitiesV3(t *testing.T, h *Harness) *crmv3.Service {
 // TestResourceManagerFolderCapabilities: through Google's generated v3
 // client, a new folder's app-management capability is false; a patch is a
 // done operation found by operations.get, after which the capability is
-// true and the folder lists it in configuredCapabilities; an unknown
-// capability is 400 and a missing folder's 404; patching it false removes
-// it from the folder.
+// true, the folder lists it in configuredCapabilities and names its
+// management project, which is in the folder with isManagementProject and
+// configuredCapabilities (#1532); an unknown capability is 400 and a
+// missing folder's 404; patching it false removes it from the folder and
+// deletes the management project.
 //
 // covers: cloudresourcemanager.folders.capabilities.get, cloudresourcemanager.folders.capabilities.patch
 func TestResourceManagerFolderCapabilities(t *testing.T) {
@@ -359,6 +361,16 @@ func TestResourceManagerFolderCapabilities(t *testing.T) {
 	if got, err := c.Folders.Get(folder.GetName()).Context(ctx).Do(); err != nil || len(got.ConfiguredCapabilities) != 1 || got.ConfiguredCapabilities[0] != name {
 		t.Errorf("folder = %+v, %v; want configuredCapabilities [%s]", got, err, name)
 	}
+	// The management project the capability makes (#1532): named by the
+	// folder, in it, marked as one, with the folder's capabilities.
+	f, err := c.Folders.Get(folder.GetName()).Context(ctx).Do()
+	if err != nil || !strings.HasPrefix(f.ManagementProject, "projects/") {
+		t.Fatalf("folder managementProject = %+v, %v", f, err)
+	}
+	mp, err := c.Projects.Get(f.ManagementProject).Context(ctx).Do()
+	if err != nil || !mp.IsManagementProject || mp.Parent != folder.GetName() || len(mp.ConfiguredCapabilities) != 1 || mp.ConfiguredCapabilities[0] != name {
+		t.Errorf("management project = %+v, %v", mp, err)
+	}
 	var gerr *googleapi.Error
 	if _, err := c.Folders.Capabilities.Patch(folder.GetName()+"/capabilities/other", &crmv3.Capability{Value: true}).Context(ctx).Do(); !asAPIError(err, &gerr) || gerr.Code != 400 {
 		t.Errorf("an unknown capability = %v; want 400", err)
@@ -369,8 +381,12 @@ func TestResourceManagerFolderCapabilities(t *testing.T) {
 	if _, err := c.Folders.Capabilities.Patch(name, &crmv3.Capability{Name: name, Value: false}).Context(ctx).Do(); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := c.Folders.Get(folder.GetName()).Context(ctx).Do(); err != nil || len(got.ConfiguredCapabilities) != 0 {
+	if got, err := c.Folders.Get(folder.GetName()).Context(ctx).Do(); err != nil || len(got.ConfiguredCapabilities) != 0 || got.ManagementProject != "" {
 		t.Errorf("folder after patching false = %+v, %v", got, err)
+	}
+	// Disabling app management deletes the management project permanently.
+	if _, err := c.Projects.Get(f.ManagementProject).Context(ctx).Do(); !asAPIError(err, &gerr) || gerr.Code != 404 {
+		t.Errorf("management project after patching false = %v; want 404", err)
 	}
 }
 

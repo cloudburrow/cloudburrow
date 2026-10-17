@@ -50,6 +50,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.Var(&origins, "cors-allow-origin", "scheme://host[:port]: a web origin, beyond loopback ones, whose browser requests are answered; any other Origin is refused with 403 (repeatable or comma-separated, #677)")
 	pubsubAddr := fs.String("pubsub-emulator", "", "host:port of a Pub/Sub emulator to deliver notifications to (default: notifications cannot be configured)")
 	relayChannels := fs.Bool("relay-channels", false, "hand object change notification messages to a relay at "+storage.ChannelOutboxPath+" instead of POSTing them (what `up` passes: the CLI delivers them on the host, #1290)")
+	resourceManager := fs.String("resourcemanager", "", "http://host:port of Resource Manager, whose projects and folders Storage Intelligence inheritance walks (what `up` passes, #1532; default: what inherits inherits the local organization's configuration)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -67,6 +68,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	opts := storage.Options{Hosts: names, CORSAllowOrigins: origins, RelayChannels: *relayChannels}
+	if *resourceManager != "" {
+		opts.Hierarchy = storage.ResourceManagerHierarchy{Base: *resourceManager}
+	}
 	if *mode != "persistent" && *mode != "ephemeral" {
 		return fmt.Errorf("--mode %q: want persistent or ephemeral", *mode)
 	}
