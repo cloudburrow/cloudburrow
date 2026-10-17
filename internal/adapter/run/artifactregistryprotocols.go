@@ -56,7 +56,7 @@ var arServer atomic.Pointer[ArtifactRegistryServer]
 // A VIRTUAL repository serves the reads from its upstream repositories,
 // highest priority first, and refuses writes, as Google's does.
 
-var pkgHostRE = regexp.MustCompile(`^([a-z0-9-]+)-(python|npm|maven|apt)\.pkg\.(dev|localhost)$`)
+var pkgHostRE = regexp.MustCompile(`^([a-z0-9-]+)-(python|npm|maven|apt|yum)\.pkg\.(dev|localhost)$`)
 
 // pkgRequest is a protocol request resolved to its repository.
 type pkgRequest struct {
@@ -88,8 +88,11 @@ func resolvePkgRequest(r *http.Request) (*pkgRequest, string, bool) {
 		prefix += "/" + seg
 		p = "/" + rest
 	}
-	if m[2] == "apt" {
+	switch m[2] {
+	case "apt":
 		return resolveAptRequest(m[1], prefix, p)
+	case "yum":
+		return resolveYumRequest(m[1], prefix, p)
 	}
 	parts := strings.SplitN(strings.TrimPrefix(p, "/"), "/", 3)
 	if len(parts) < 2 {
@@ -153,6 +156,8 @@ func servePackages(w http.ResponseWriter, r *http.Request) bool {
 		serveMaven(w, r, pr)
 	case arpb.Repository_APT:
 		serveApt(w, r, pr)
+	case arpb.Repository_YUM:
+		serveYum(w, r, pr)
 	}
 	return true
 }

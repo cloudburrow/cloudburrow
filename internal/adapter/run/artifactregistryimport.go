@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -229,6 +229,7 @@ func (a *ArtifactRegistryServer) ImportYumArtifacts(ctx context.Context, req *ar
 		}
 		resp.YumArtifacts = append(resp.YumArtifacts, art)
 	}
+	refreshYumRepodata(r.GetName())
 	return a.doneWith(req.GetParent(), &arpb.ImportYumArtifactsMetadata{}, resp)
 }
 
@@ -237,71 +238,27 @@ func importRPM(ctx context.Context, r *arpb.Repository, uri string) (*arpb.YumAr
 	if err != nil {
 		return nil, err
 	}
-	h, err := rpmHeader(b)
+	p, err := parseRPM(b)
 	if err != nil {
 		return nil, err
 	}
-	name, ver, rel, arch := h[1000], h[1001], h[1002], h[1022]
-	if name == "" || ver == "" || arch == "" {
-		return nil, errors.New("the RPM header has no name, version or architecture")
-	}
+	name, ver, rel, arch := p.Name, p.Version, p.Release, p.Arch
 	full := ver
 	if rel != "" {
 		full += "-" + rel
 	}
-	id := name + "-" + full + "." + arch + ".rpm"
 	typ := arpb.YumArtifact_BINARY
-	if h[1044] == "" { // SOURCERPM is unset on a source package
+	if p.SourceRPM == "" { // SOURCERPM is unset on a source package
 		typ = arpb.YumArtifact_SOURCE
 	}
-	if _, err := addFile(r.GetName(), id, name, full, b, map[string]string{"arch": arch}); err != nil {
+	id := name + "-" + full + "." + arch + ".rpm"
+	info, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := addFile(r.GetName(), id, name, full, b, map[string]string{"arch": arch, "rpm": string(info)}); err != nil {
 		return nil, err
 	}
 	return &arpb.YumArtifact{Name: r.GetName() + "/yumArtifacts/" + esc(name) + ":" + esc(full) + ":" + esc(arch),
 		PackageName: name, PackageType: typ, Architecture: arch}, nil
-}
-
-// rpmHeader reads an .rpm's string tags: its 96-byte lead, the signature
-// header (padded to 8 bytes), then the header whose tags name it.
-func rpmHeader(b []byte) (map[int32]string, error) {
-	if len(b) < 96 || !bytes.Equal(b[:4], []byte{0xed, 0xab, 0xee, 0xdb}) {
-		return nil, errors.New("not an RPM package: no lead")
-	}
-	off := 96
-	readHeader := func(off int) (map[int32]string, int, error) {
-		if off+16 > len(b) || !bytes.Equal(b[off:off+3], []byte{0x8e, 0xad, 0xe8}) {
-			return nil, 0, errors.New("not an RPM package: bad header")
-		}
-		n := int(binary.BigEndian.Uint32(b[off+8:]))
-		size := int(binary.BigEndian.Uint32(b[off+12:]))
-		idx := off + 16
-		store := idx + 16*n
-		if n < 0 || size < 0 || store+size > len(b) {
-			return nil, 0, errors.New("not an RPM package: truncated header")
-		}
-		out := map[int32]string{}
-		for i := 0; i < n; i++ {
-			e := b[idx+16*i:]
-			tag := int32(binary.BigEndian.Uint32(e))
-			typ := binary.BigEndian.Uint32(e[4:])
-			o := int(binary.BigEndian.Uint32(e[8:]))
-			if (typ == 6 || typ == 9) && o >= 0 && o < size { // STRING, I18NSTRING
-				s := b[store+o : store+size]
-				if j := bytes.IndexByte(s, 0); j >= 0 {
-					s = s[:j]
-				}
-				out[tag] = string(s)
-			}
-		}
-		return out, store + size, nil
-	}
-	_, end, err := readHeader(off)
-	if err != nil {
-		return nil, err
-	}
-	if pad := end % 8; pad != 0 {
-		end += 8 - pad
-	}
-	h, _, err := readHeader(end)
-	return h, err
 }

@@ -98,6 +98,9 @@ func fmtRepoLocked(repoName string) *fmtRepo {
 }
 
 func dropFormatRepo(repoName string) {
+	yumCache.mu.Lock()
+	delete(yumCache.repos, repoName)
+	yumCache.mu.Unlock()
 	fmtState.mu.Lock()
 	defer fmtState.mu.Unlock()
 	if _, ok := fmtState.repos[repoName]; ok {
@@ -284,8 +287,17 @@ func setFmtTag(repoName, pkg, tag, version string) {
 }
 
 // removeFiles drops the files drop selects, and the tags and npm documents
-// of versions left with no file.
+// of versions left with no file; a YUM repository's metadata is made
+// again without them (#1539).
 func removeFiles(repoName string, drop func(fmtFile) bool) int {
+	n := removeFromIndex(repoName, drop)
+	if n > 0 {
+		refreshYumRepodata(repoName)
+	}
+	return n
+}
+
+func removeFromIndex(repoName string, drop func(fmtFile) bool) int {
 	fmtState.mu.Lock()
 	defer fmtState.mu.Unlock()
 	r := fmtState.repos[repoName]
