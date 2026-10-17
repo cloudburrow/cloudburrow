@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // rowError is one ErrorProto in an insertErrors entry.
@@ -140,6 +141,13 @@ func checkValue(f field, v any, loc string, ignoreUnknown bool, errs *[]rowError
 		*errs = append(*errs, invalid(loc, "Field %s is not REPEATED; found a JSON array", loc))
 		return v
 	}
+	if obj, isObject := v.(map[string]any); isObject && typ == "RANGE" {
+		// A RANGE is an object of start and end, each a value of the
+		// element type or null for UNBOUNDED, as the official clients
+		// send it (cloud.google.com/go/bigquery RangeValue, #1492); it
+		// goes to the engine as its text, "[start, end)".
+		return rangeObjectText(obj, loc, errs)
+	}
 	if _, isObject := v.(map[string]any); isObject && typ != "JSON" {
 		*errs = append(*errs, invalid(loc, "Field %s is %s; found a JSON object", loc, typ))
 		return v
@@ -147,8 +155,67 @@ func checkValue(f field, v any, loc string, ignoreUnknown bool, errs *[]rowError
 	if why := scalarProblem(typ, v); why != "" {
 		shown, _ := json.Marshal(v)
 		*errs = append(*errs, invalid(loc, "Cannot convert value %s of field %s to %s: %s", shown, loc, typ, why))
+	} else if msg := overMaxLength(f, typ, v, loc); msg != "" {
+		*errs = append(*errs, invalid(loc, "%s", msg))
 	}
 	return v
+}
+
+// overMaxLength is why v, a STRING or BYTES value of f, is refused for
+// being longer than f's maxLength, in characters or bytes, or "" (#1493:
+// "a value is checked against the maximum length when it is written",
+// https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#parameterized_data_types;
+// the wording is CloudBurrow's).
+func overMaxLength(f field, typ string, v any, loc string) string {
+	limit, err := strconv.ParseInt(string(f.MaxLength), 10, 64)
+	s, ok := v.(string)
+	if err != nil || limit <= 0 || !ok {
+		return ""
+	}
+	n := int64(utf8.RuneCountInString(s))
+	if typ == "BYTES" {
+		b, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			return ""
+		}
+		n = int64(len(b))
+	} else if typ != "STRING" {
+		return ""
+	}
+	if n <= limit {
+		return ""
+	}
+	return fmt.Sprintf("Field %s: the value's length %d exceeds the maximum length %d of its type %s(%d)", loc, n, limit, typ, limit)
+}
+
+// rangeObjectText is obj, a RANGE value given as an object of start and
+// end, as its text "[start, end)", a bound null or absent UNBOUNDED; a key
+// other than those two, or a bound not a string, is an error in errs
+// (#1492).
+func rangeObjectText(obj map[string]any, loc string, errs *[]rowError) any {
+	bounds := [2]string{"UNBOUNDED", "UNBOUNDED"}
+	for k, b := range obj {
+		i := 0
+		switch strings.ToLower(k) {
+		case "start":
+		case "end":
+			i = 1
+		default:
+			*errs = append(*errs, invalid(loc, "Field %s is RANGE; its object has %q, where it takes start and end", loc, k))
+			return obj
+		}
+		switch b := b.(type) {
+		case nil:
+		case string:
+			if b != "" {
+				bounds[i] = b
+			}
+		default:
+			*errs = append(*errs, invalid(loc, "Field %s is RANGE; its %s is %s, not a string", loc, k, jsonKind(b)))
+			return obj
+		}
+	}
+	return "[" + bounds[0] + ", " + bounds[1] + ")"
 }
 
 // jsonKind names the JSON type of a decoded value, for messages.

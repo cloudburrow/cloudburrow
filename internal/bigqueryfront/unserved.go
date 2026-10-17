@@ -54,16 +54,15 @@ func serveUnserved(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// undropWhy is why datasets.undelete and UNDROP SCHEMA are 501 (#1460):
-// CloudBurrow reads a table's past rows from its change history
-// (timetravel.go), but the engine drops a table's change history with the
-// table, and a dataset's tables with it.
-const undropWhy = "the emulator deletes a dataset's tables, their rows and their change history with it, and keeps no " +
-	"deleted dataset to restore (docs/compatibility.md)."
+// undropWhy is why datasets.undelete was 501 before #1460, which the
+// front serves before serveUnserved (dropped.go).
+const undropWhy = "the emulator deletes a dataset's tables, their rows and their change history with it (docs/compatibility.md)."
 
-// refuseUndrop answers 501 a query that is UNDROP SCHEMA
-// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#undrop_schema_statement),
-// which the engine fails as a syntax error, and reports whether it did.
+// refuseUndrop answers 501 a dry run of a query with UNDROP SCHEMA
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#undrop_schema_statement)
+// among other statements, and reports whether it did. The front carries
+// out UNDROP SCHEMA, alone (#1460) and in a script (#1483), when it is
+// run (undropSchema, dropped.go).
 func refuseUndrop(w http.ResponseWriter, q queryOptions) bool {
 	if !strings.Contains(strings.ToUpper(q.Query), "UNDROP") {
 		return false
@@ -72,9 +71,18 @@ func refuseUndrop(w http.ResponseWriter, q queryOptions) bool {
 	if !ok {
 		return false
 	}
-	for _, stmt := range splitStatements(toks) {
-		if len(stmt) > 1 && stmt[0].is("UNDROP") && stmt[1].is("SCHEMA") {
-			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: UNDROP SCHEMA. "+undropWhy+" Nothing was run.")
+	stmts := splitStatements(toks)
+	n := 0
+	for _, stmt := range stmts {
+		if len(stmt) > 0 {
+			n++
+		}
+	}
+	for _, stmt := range stmts {
+		if len(stmt) > 1 && stmt[0].is("UNDROP") && stmt[1].is("SCHEMA") && n > 1 {
+			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a dry run of UNDROP SCHEMA in a "+
+				"multi-statement query. CloudBurrow carries out UNDROP SCHEMA when the query runs (docs/compatibility.md). "+
+				"Nothing was run.")
 			return true
 		}
 	}

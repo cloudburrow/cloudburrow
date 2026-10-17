@@ -24,6 +24,14 @@ import (
 // setTableOptions): the emulator's tables.update makes the triggers, which
 // round by the column's roundingMode, else the table's
 // default_rounding_mode, else ROUND_HALF_AWAY_FROM_ZERO.
+//
+// STRING(L) and BYTES(L) are read the same way (#1493): measured, CREATE
+// TABLE (ps STRING(10)) and CREATE TABLE AS SELECT made the column with
+// no maxLength, and STRUCT<a STRING(3)> and ARRAY<STRING(4)> failed 400
+// "GOOGLESQL_RET_CHECK failure ... annotations != nullptr", as a nested
+// NUMERIC(P) did. The length is cut from a nested type the engine is
+// sent and written to the table's resource, which tabledata.insertAll
+// checks a value against (overMaxLength, rows.go).
 
 // decimalColumn is one such column, or a STRUCT's field: precision and
 // scale as the REST TableFieldSchema gives them (scale "" when the
@@ -43,6 +51,7 @@ import (
 // rounding_mode (data_policies) is 501 and nothing is run.
 type decimalColumn struct {
 	name, precision, scale, rounding string
+	maxLength                        string // STRING(L), BYTES(L): #1493
 	description                      *string
 	descExpr                         string
 	fields                           []decimalColumn
@@ -83,7 +92,8 @@ func roundingModeRefused(f map[string]any) string {
 // read from sql with exprs, named name, and whether it has a parameter,
 // rounding mode or description at any depth.
 func decimalsOf(sql, name string, f map[string]any) (decimalColumn, bool) {
-	d := decimalColumn{name: name, precision: str(f, "precision"), scale: str(f, "scale"), rounding: str(f, "roundingMode")}
+	d := decimalColumn{name: name, precision: str(f, "precision"), scale: str(f, "scale"), rounding: str(f, "roundingMode"),
+		maxLength: str(f, "maxLength")}
 	if s, ok := f["description"].(string); ok {
 		d.description = &s
 	}
@@ -99,7 +109,7 @@ func decimalsOf(sql, name string, f map[string]any) (decimalColumn, bool) {
 			}
 		}
 	}
-	return d, d.precision != "" || d.rounding != "" || d.description != nil || d.descExpr != "" || len(d.fields) > 0
+	return d, d.precision != "" || d.maxLength != "" || d.rounding != "" || d.description != nil || d.descExpr != "" || len(d.fields) > 0
 }
 
 // readDecimalColumns reads cols, the tokens of sql's CREATE TABLE column
@@ -234,6 +244,9 @@ func putDecimalFields(fields []any, cols []decimalColumn) {
 					m["scale"] = c.scale
 				}
 			}
+			if c.maxLength != "" { // #1493
+				m["maxLength"] = c.maxLength
+			}
 			if c.rounding != "" {
 				m["roundingMode"] = c.rounding
 			}
@@ -266,7 +279,7 @@ func withoutFieldRounding(sql string, cols []token) string {
 			depth++
 		case cols[j].punct(">"):
 			depth--
-		case depth > 0 && j+1 < len(cols) && cols[j+1].punct("(") && decimalTypeName(cols[j]):
+		case depth > 0 && j+1 < len(cols) && cols[j+1].punct("(") && (decimalTypeName(cols[j]) || lengthTypeName(cols[j])):
 			close := closing(cols, j+1)
 			if close < 0 {
 				return ""
@@ -305,6 +318,21 @@ func decimalTypeName(t token) bool {
 		kind = alias
 	}
 	return kind == "NUMERIC" || kind == "BIGNUMERIC"
+}
+
+// lengthTypeName reports whether t names STRING or BYTES, whose
+// parameter (a maximum length) the engine refuses inside a STRUCT<...> or
+// ARRAY<...> as it does a NUMERIC's (measured: 400 "GOOGLESQL_RET_CHECK
+// failure ... annotations != nullptr" for STRUCT<a STRING(3)>, #1493).
+func lengthTypeName(t token) bool {
+	if t.kind != tokWord {
+		return false
+	}
+	kind := strings.ToUpper(t.text)
+	if alias, ok := typeAliases[kind]; ok {
+		kind = alias
+	}
+	return kind == "STRING" || kind == "BYTES"
 }
 
 // evalColumnDescriptions evaluates each description of cols that is a

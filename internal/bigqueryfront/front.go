@@ -222,6 +222,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	tables := &tableSettings{}                      // tableoptions.go, #1390
 	linked := &linkedDatasets{}                     // loglinks.go, #1423
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
+	dropped := &droppedStore{}                      // dropped.go, #1460
 	models := &bqModels{}                           // models.go, #1465
 	// Every time the front reports, and the engine's (bigquery-emulator
 	// patches 0034, 0041), is the instance's clock, the front's, which
@@ -236,6 +237,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	models.now = clock
 	functions := &knownFunctions{started: clock().UnixMilli(), now: clock}
 	if o.stateDir != "" {
+		dropped.keep(droppedStateFile(o.stateDir), o.logf)         // dropped.go, #1460
 		icebergs.keep(o.stateDir, o.logf)                          // iceberg.go, #1427
 		models.keep(modelsStateFile(o.stateDir), o.logf)           // models.go, #1465
 		tables.keep(tableSettingsStateFile(o.stateDir), o.logf)    // tableoptions.go, #1390
@@ -292,6 +294,10 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		})
 	}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,
+			functions: functions, records: records, settings: settings, models: models}).serveUndelete(w, r) { // dropped.go, #1460
+			return
+		}
 		if serveUnserved(w, r) { // unserved.go, #1200
 			return
 		}
@@ -364,7 +370,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f := front{next: next, base: j[1] + "/projects/" + j[2], failed: failed, texts: texts, storage: storage, storageHost: storageHost,
 				configs: configs, jobs: own, records: records, functions: functions, views: views, ids: ids, policies: policies,
 				listJobs: listJobs, iam: iam, buffers: buffers, settings: settings, jobsTable: jobRows,
-				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, models: models}
+				resourceManager: o.resourceManager, tables: tables, linked: linked, icebergs: icebergs, dropped: dropped, models: models}
 			if j[3] == "jobs" {
 				f.insertJob(w, r)
 			} else {
@@ -424,7 +430,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		f := front{next: next, base: prefix + "/projects/" + project, failed: failed, records: records, views: views, ids: ids, policies: policies,
-			buffers: buffers, tables: tables, linked: linked, settings: settings, icebergs: icebergs, storageHost: storageHost}
+			buffers: buffers, tables: tables, linked: linked, settings: settings, icebergs: icebergs, storageHost: storageHost,
+			dropped: dropped, iam: iam, functions: functions, models: models} // functions, models: #1483, droppedroutines.go
 		if f.serveLinkedWriter(w, r, m[3], func(w http.ResponseWriter, r *http.Request) { // #1423, loglinks.go
 			if r.Method == http.MethodPost {
 				datasetInsertLocation(r, settings.defaultLocation(projectOf(f.base)))
@@ -446,12 +453,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 				writeError(w, http.StatusBadRequest, "resourceInUse", fmt.Sprintf("Dataset %s:%s is still in use", projectOf(f.base), dataset))
 				return
 			}
-			sw := &statusWriter{ResponseWriter: w}
-			next.ServeHTTP(sw, r)
-			if sw.status/100 == 2 || sw.status == 0 {
-				models.dropDataset(projectOf(f.base), dataset)
-			}
-			return
+			// deleteDatasetKeeping (below) keeps them with the dataset and
+			// drops them (#1483, droppedroutines.go).
 		}
 		switch {
 		case m[4] != "" && strings.Contains(table, "$") && strings.Index(table, "$") > 0 && (m[5] == "" || m[5] == "data"):
@@ -480,6 +483,10 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.listTableData(w, r, dataset, table) // #1015
 		case r.Method == http.MethodDelete && m[4] != "" && m[5] == "" && f.tables.watched(streamKey(projectOf(f.base), dataset, table)):
 			f.deleteWatched(w, r, dataset, table) // #1390, materializedviews.go
+		case r.Method == http.MethodDelete && m[4] != "" && m[5] == "":
+			f.deleteTableKeeping(w, r, dataset, table) // #1460, dropped.go
+		case r.Method == http.MethodDelete && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
+			f.deleteDatasetKeeping(w, r, dataset) // #1460, dropped.go
 		default:
 			next.ServeHTTP(w, r)
 		}
@@ -577,6 +584,9 @@ type front struct {
 	// linked are the Log Analytics linked datasets, read-only to clients
 	// (loglinks.go, #1423), or nil.
 	linked *linkedDatasets
+	// dropped are the deleted tables and datasets kept for their time
+	// travel window (dropped.go, #1460), or nil.
+	dropped *droppedStore
 	// models are the BigQuery ML models (models.go, #1465), or nil.
 	models *bqModels
 }

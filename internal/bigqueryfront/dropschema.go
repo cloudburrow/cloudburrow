@@ -151,7 +151,8 @@ func (f front) planDropSchema(w http.ResponseWriter, r *http.Request, q queryOpt
 		}
 		d.funcs = append(d.funcs, p)
 	}
-	inUse := len(d.funcs)+len(d.tableFuncs)+len(f.functions.procsIn(project, c.ds)) > 0 // procedures, #1217
+	inUse := len(d.funcs)+len(d.tableFuncs)+len(f.functions.procsIn(project, c.ds)) > 0 || // procedures, #1217
+		len(f.models.list(project, c.ds)) > 0 // models, #1483
 	if !d.cascade && !inUse {
 		status, got := f.get(r, "/datasets/"+url.PathEscape(c.ds)+"/tables")
 		var list struct {
@@ -175,10 +176,23 @@ func (f front) dropDataset(r *http.Request, d dropSchema) (int, []byte) {
 	if d.cascade {
 		p += "?deleteContents=true"
 	}
+	var kept []droppedTable
+	var ds *droppedDataset
+	if f.dropped != nil { // kept for its time travel window (#1460, dropped.go)
+		f.expireDropped(r)
+		kept, ds = f.keepDataset(r, d.ds)
+	}
 	status, got := f.send(r, http.MethodDelete, p, nil)
 	if status != http.StatusOK && status != http.StatusNoContent {
+		if f.dropped != nil {
+			f.commitDropped(r, kept, nil)
+		}
 		return status, got
 	}
+	if f.dropped != nil {
+		f.commitDropped(r, kept, ds)
+	}
+	f.models.dropDataset(projectOf(f.base), d.ds) // kept in ds (#1483, droppedroutines.go)
 	for _, fn := range d.funcs {
 		f.sendDDL(r, "DROP FUNCTION IF EXISTS "+functionName(fn))
 	}

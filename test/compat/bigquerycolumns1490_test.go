@@ -15,7 +15,9 @@ import (
 // INFORMATION_SCHEMA.COLUMNS and COLUMN_FIELD_PATHS, through jobs.query
 // and jobs.insert, list every column of a table of nested, GEOGRAPHY,
 // JSON, RANGE, INTERVAL, parameterized and collated columns and of an
-// ingestion-time partitioned table, with the data_type strings BigQuery
+// ingestion-time partitioned table, the RANGE and parameterized columns
+// made both by tables.insert and by DDL (#1492, #1493), with the
+// data_type strings BigQuery
 // documents (https://cloud.google.com/bigquery/docs/information-schema-columns,
 // .../information-schema-column-field-paths). Measured first: COLUMNS of
 // a dataset (or region) holding the ingestion-time partitioned table
@@ -48,9 +50,21 @@ func TestBigQueryColumnsOfEveryType(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	// A RANGE column by DDL: tables.insert of one fails 500 "Type not
-	// found: TYPE_UNKNOWN" (#1492).
+	// RANGE columns made both ways: by DDL, and by tables.insert (which
+	// failed 500 "Type not found: TYPE_UNKNOWN" before #1492).
 	if err := bqRun(ctx, c, "CREATE TABLE `"+ds.DatasetID+".rng` (r RANGE<DATE>, ts RANGE<TIMESTAMP>)", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := ds.Table("rngapi").Create(ctx, &bigquery.TableMetadata{Schema: bigquery.Schema{
+		{Name: "r", Type: bigquery.RangeFieldType, RangeElementType: &bigquery.RangeElementType{Type: bigquery.DateFieldType}},
+		{Name: "ts", Type: bigquery.RangeFieldType, RangeElementType: &bigquery.RangeElementType{Type: bigquery.TimestampFieldType}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	// Parameterized columns made by DDL too, as by tables.insert above
+	// (CREATE TABLE dropped a STRING's or BYTES's maxLength before #1493).
+	if err := bqRun(ctx, c, "CREATE TABLE `"+ds.DatasetID+".wideddl` (ps STRING(10), pb BYTES(5), pn NUMERIC(5, 2), "+
+		"pbn BIGNUMERIC(40, 10))", false); err != nil {
 		t.Fatal(err)
 	}
 	if err := ds.Table("ing").Create(ctx, &bigquery.TableMetadata{
@@ -67,6 +81,8 @@ func TestBigQueryColumnsOfEveryType(t *testing.T) {
 		"wide.arr ARRAY<INT64>", "wide.coll STRING", "wide.geo GEOGRAPHY", "wide.iv INTERVAL", "wide.js JSON",
 		"wide.pb BYTES(5)", "wide.pbn BIGNUMERIC(40, 10)", "wide.pn NUMERIC(5, 2)", "wide.ps STRING(10)",
 		"rng.r RANGE<DATE>", "rng.ts RANGE<TIMESTAMP>", "wide.st STRUCT<a STRING, b ARRAY<STRUCT<c INT64>>>",
+		"rngapi.r RANGE<DATE>", "rngapi.ts RANGE<TIMESTAMP>", "wideddl.pb BYTES(5)", "wideddl.pbn BIGNUMERIC(40, 10)",
+		"wideddl.pn NUMERIC(5, 2)", "wideddl.ps STRING(10)",
 	}
 	wantPaths := []string{
 		"ing.g GEOGRAPHY", "ing.j JSON",
@@ -74,6 +90,8 @@ func TestBigQueryColumnsOfEveryType(t *testing.T) {
 		"wide.pb BYTES(5)", "wide.pbn BIGNUMERIC(40, 10)", "wide.pn NUMERIC(5, 2)", "wide.ps STRING(10)",
 		"rng.r RANGE<DATE>", "rng.ts RANGE<TIMESTAMP>", "wide.st STRUCT<a STRING, b ARRAY<STRUCT<c INT64>>>", "wide.st.a STRING",
 		"wide.st.b ARRAY<STRUCT<c INT64>>", "wide.st.b.c INT64",
+		"rngapi.r RANGE<DATE>", "rngapi.ts RANGE<TIMESTAMP>", "wideddl.pb BYTES(5)", "wideddl.pbn BIGNUMERIC(40, 10)",
+		"wideddl.pn NUMERIC(5, 2)", "wideddl.ps STRING(10)",
 	}
 	sort.Strings(wantColumns)
 	sort.Strings(wantPaths)

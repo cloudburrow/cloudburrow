@@ -157,12 +157,22 @@ func TestPredictionClientReachesACustomEndpoint(t *testing.T) {
 		math.Abs(a.GetFeatureAttributions().GetStructValue().GetFields()["x"].GetNumberValue()-6) > 1e-9 {
 		t.Errorf("attribution = %v, want x: 6 from 0 to 6", a)
 	}
-	_, err = pc.Explain(ctx, &aiplatformpb.ExplainRequest{Endpoint: endpoint, Instances: inst(1),
-		ExplanationSpecOverride: &aiplatformpb.ExplanationSpecOverride{Parameters: &aiplatformpb.ExplanationParameters{
-			Method: &aiplatformpb.ExplanationParameters_IntegratedGradientsAttribution{
-				IntegratedGradientsAttribution: &aiplatformpb.IntegratedGradientsAttribution{StepCount: 50}}}}})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("Explain with integrated gradients: %v, want UNIMPLEMENTED", err)
+	// Vertex documents integrated gradients and XRAI for TensorFlow models
+	// in a prebuilt TensorFlow container, and example-based explanations for
+	// TensorFlow models that output an embedding; a custom container gets
+	// INVALID_ARGUMENT (#1454).
+	for name, p := range map[string]*aiplatformpb.ExplanationParameters{
+		"integrated gradients": {Method: &aiplatformpb.ExplanationParameters_IntegratedGradientsAttribution{
+			IntegratedGradientsAttribution: &aiplatformpb.IntegratedGradientsAttribution{StepCount: 50}}},
+		"XRAI": {Method: &aiplatformpb.ExplanationParameters_XraiAttribution{
+			XraiAttribution: &aiplatformpb.XraiAttribution{StepCount: 50}}},
+		"examples": {Method: &aiplatformpb.ExplanationParameters_Examples{Examples: &aiplatformpb.Examples{NeighborCount: 3}}},
+	} {
+		_, err = pc.Explain(ctx, &aiplatformpb.ExplainRequest{Endpoint: endpoint, Instances: inst(1),
+			ExplanationSpecOverride: &aiplatformpb.ExplanationSpecOverride{Parameters: p}})
+		if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "custom container") {
+			t.Errorf("Explain with %s: %v, want INVALID_ARGUMENT naming the custom container", name, err)
+		}
 	}
 
 	// The doubler's model declares no grpcPorts (#1477): DirectRawPredict

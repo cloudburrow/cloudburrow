@@ -19,11 +19,11 @@ import (
 
 // The EKM service (google.cloud.kms.v1.EkmService, #1452) is CRUD over
 // stored records: EkmConnections and each location's EkmConfig are kept and
-// returned as written, and nothing dials the external key manager they name.
-// A connection is only ever used by EXTERNAL_VPC keys, which are
-// UNIMPLEMENTED (protection.go), so a stored connection protects nothing.
-// VerifyConnectivity is UNIMPLEMENTED: it would reach the EKM over the Cloud
-// EKM protocol through Service Directory, and neither is served locally.
+// returned as written, and nothing dials the external key manager they name:
+// the instance acts as the EKM of every connection (external.go, #1469), so
+// an EXTERNAL_VPC key's versions keep their key material locally.
+// VerifyConnectivity checks a connection against that local EKM, which is
+// always reachable.
 // IAM policies on a connection and on a location's EkmConfig are stored on
 // their records and never enforced (iam.go, #1469).
 // Server certificates are parsed as Google documents (Certificate.parsed and
@@ -402,11 +402,21 @@ func (e *EkmServer) UpdateEkmConfig(_ context.Context, req *kmspb.UpdateEkmConfi
 	return &kmspb.EkmConfig{Name: c.Name, DefaultEkmConnection: c.Default}, nil
 }
 
-// VerifyConnectivity is UNIMPLEMENTED: nothing local speaks the Cloud EKM
-// protocol, so a connection cannot be reached, and answering that it can
-// would be a lie.
+// VerifyConnectivity "performs checks to ensure that the EkmConnection is
+// configured correctly and can be reached" (ekm_service.proto). The EKM of
+// every connection is the instance itself (external.go, #1469), which is
+// always reachable, so a connection that exists verifies: the response is
+// empty, as Google's is on success. An absent one is NOT_FOUND. Nothing
+// dials the connection's hostname or Service Directory service.
 func (e *EkmServer) VerifyConnectivity(_ context.Context, req *kmspb.VerifyConnectivityRequest) (*kmspb.VerifyConnectivityResponse, error) {
-	return nil, apierror.Wrap(apierror.Unimplemented("VerifyConnectivity is not implemented: CloudBurrow does not reach external key managers over the Cloud EKM protocol"))
+	if err := parseEkmConnection("name", req.GetName()); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	var c ekmConnection
+	if err := e.s.load(dbKey(ekmConnectionPrefix, req.GetName()), &c, "EkmConnection", req.GetName()); err != nil {
+		return nil, err
+	}
+	return &kmspb.VerifyConnectivityResponse{}, nil
 }
 
 // EkmConnectionsInProject returns every EkmConnection of project, in every

@@ -159,6 +159,14 @@ func (s *Server) CreateImportJob(_ context.Context, req *kmspb.CreateImportJobRe
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	// An external key's material stays in its key manager; Google documents
+	// no import into one (#1469).
+	if isExternal(level) {
+		return nil, apierror.Wrap(apierror.Unimplemented("import_job.protection_level %s is not implemented: Google documents importing into SOFTWARE and HSM keys only", level))
+	}
+	if level == kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
+		return nil, apierror.Wrap(apierror.Unimplemented("import_job.protection_level HSM_SINGLE_TENANT is not implemented: importing into a SingleTenantHsmInstance is not"))
+	}
 	if in.GetCryptoKeyBackend() != "" {
 		return nil, apierror.Wrap(apierror.Unimplemented("import_job.crypto_key_backend is not implemented"))
 	}
@@ -397,8 +405,8 @@ func (s *Server) ImportCryptoKeyVersion(_ context.Context, req *kmspb.ImportCryp
 		return nil, apierror.Wrap(apierror.InvalidArgument("algorithm is required"))
 	}
 	ap, ok := algorithmPurpose(a)
-	if !ok {
-		return nil, apierror.Wrap(apierror.Unimplemented("algorithm %s is not implemented", a))
+	if !ok || a == kmspb.CryptoKeyVersion_EXTERNAL_SYMMETRIC_ENCRYPTION {
+		return nil, apierror.Wrap(apierror.Unimplemented("algorithm %s is not implemented for import", a))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

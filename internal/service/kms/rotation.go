@@ -118,12 +118,11 @@ func (s *Server) rotateDue(key string, now time.Time) (time.Time, error) {
 	if k.NextRotation.IsZero() || now.Before(k.NextRotation) {
 		return k.NextRotation, nil
 	}
-	mat, err := newMaterial(k)
+	n := k.Next
+	v, err := s.newVersion(k, n, now, kmspb.CryptoKeyVersion_ENABLED, nil)
 	if err != nil {
 		return time.Time{}, err
 	}
-	n := k.Next
-	v := keyVersion{Name: versionName(k.Name, n), Created: now.UTC(), Material: mat, Algorithm: k.Algorithm, ProtectionLevel: k.ProtectionLevel}
 	// The version is written before the key names it, so a failure
 	// between leaves an extra version, never a primary that is missing.
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {

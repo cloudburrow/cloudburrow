@@ -12,8 +12,12 @@
 // enforced (iam.go, ADR-0006 as amended by #421). HSM keys are served as
 // SOFTWARE ones are, without an HSM or an attestation (protection.go); EKM
 // connections and configuration are stored (ekm.go), and Autokey creates
-// keys on demand (autokey.go, #1452). EXTERNAL and EXTERNAL_VPC protection,
-// single-tenant HSMs, trusted key wrapping and IAM on anything else are UNIMPLEMENTED. Automatic rotation (rotation_period, next_rotation_time) is
+// keys on demand (autokey.go, #1452). EXTERNAL and EXTERNAL_VPC keys are
+// served with the instance acting as their external key manager
+// (external.go, #1469). Single-tenant HSM instances and their
+// quorum-approved proposals are served by HsmManagement, and keys in them
+// as HSM keys are (hsm.go, #1469). Trusted key wrapping and IAM on
+// anything else are UNIMPLEMENTED. Automatic rotation (rotation_period, next_rotation_time) is
 // served on the Server's clock (rotation.go, #816).
 package kms
 
@@ -82,6 +86,11 @@ type cryptoKey struct {
 	// KAJPolicy is key_access_justifications_policy, stored and returned,
 	// never enforced (protection.go).
 	KAJPolicy *kajPolicy `json:"keyAccessJustificationsPolicy,omitempty"`
+	// Backend is crypto_key_backend, the EkmConnection of an EXTERNAL_VPC
+	// key, and Coordinated whether that connection was CLOUD_KMS-mode when
+	// the key was created (external.go, #1469).
+	Backend     string `json:"cryptoKeyBackend,omitempty"`
+	Coordinated bool   `json:"coordinated,omitempty"`
 }
 
 // Destroy scheduling (resources.proto destroy_scheduled_duration; the range
@@ -120,6 +129,11 @@ type keyVersion struct {
 	// DestroyEventTime when a DESTROYED one was.
 	DestroyTime      time.Time `json:"destroyTime,omitempty"`
 	DestroyEventTime time.Time `json:"destroyEventTime,omitempty"`
+	// ExternalKeyURI, KeyPath and Backend are an external version's
+	// external_protection_level_options (external.go, #1469).
+	ExternalKeyURI string `json:"externalKeyUri,omitempty"`
+	KeyPath        string `json:"ekmConnectionKeyPath,omitempty"`
+	Backend        string `json:"ekmConnectionBackendOverride,omitempty"`
 }
 
 // effective returns the version as it is at now: a DESTROY_SCHEDULED version
@@ -182,7 +196,7 @@ func (s *Server) Register(g grpc.ServiceRegistrar) {
 	kmspb.RegisterEkmServiceServer(g, s.Ekm())
 	kmspb.RegisterAutokeyServer(g, s.Autokey())
 	kmspb.RegisterAutokeyAdminServer(g, s.AutokeyAdmin())
-	kmspb.RegisterHsmManagementServer(g, HsmManagementServer{})
+	kmspb.RegisterHsmManagementServer(g, s.HsmManagement())
 	iampb.RegisterIAMPolicyServer(g, s.IAMPolicy())
 	locations.Register(g, s.Locations())
 }
@@ -373,6 +387,8 @@ func (s *Server) toVersion(v keyVersion) *kmspb.CryptoKeyVersion {
 		Algorithm:       v.algorithm(),
 		CreateTime:      timestamppb.New(v.Created),
 		GenerateTime:    timestamppb.New(v.Created),
+
+		ExternalProtectionLevelOptions: v.externalOptions(),
 	}
 	if v.ImportJob != "" {
 		out.ImportJob = v.ImportJob
@@ -406,6 +422,7 @@ func (s *Server) toKey(k cryptoKey) (*kmspb.CryptoKey, error) {
 			Algorithm:       k.algorithm(),
 		},
 		KeyAccessJustificationsPolicy: k.KAJPolicy.proto(),
+		CryptoKeyBackend:              k.Backend,
 	}
 	if k.RotationPeriod > 0 {
 		out.RotationSchedule = &kmspb.CryptoKey_RotationPeriod{RotationPeriod: durationpb.New(k.RotationPeriod)}
@@ -439,11 +456,15 @@ func unsupportedKey(k *kmspb.CryptoKey) error {
 	if p := k.GetPurpose(); !purposes[p] {
 		return apierror.Unimplemented("crypto_key.purpose %s is not implemented", p)
 	}
-	if _, err := protectionLevelOf("crypto_key.version_template.protection_level", k.GetVersionTemplate().GetProtectionLevel()); err != nil {
+	pl, err := protectionLevelOf("crypto_key.version_template.protection_level", k.GetVersionTemplate().GetProtectionLevel())
+	if err != nil {
 		return err
 	}
-	if k.GetCryptoKeyBackend() != "" {
-		return apierror.Unimplemented("crypto_key.crypto_key_backend is not implemented: it names an EkmConnection for EXTERNAL_VPC keys or a single-tenant HSM instance, and neither protection level is served")
+	// crypto_key_backend is "only applicable" to EXTERNAL_VPC and
+	// HSM_SINGLE_TENANT keys (resources.proto); Google's answer for another
+	// level is not documented.
+	if k.GetCryptoKeyBackend() != "" && pl != kmspb.ProtectionLevel_EXTERNAL_VPC && pl != kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
+		return apierror.Unimplemented("crypto_key.crypto_key_backend is not implemented for protection level %s: it applies to EXTERNAL_VPC keys, naming their EkmConnection, and HSM_SINGLE_TENANT keys, naming their SingleTenantHsmInstance", pl)
 	}
 	if k.GetImportOnly() {
 		return apierror.Unimplemented("crypto_key.import_only is not implemented")
@@ -486,7 +507,8 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	if err := unsupportedKey(in); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	alg, err := keyAlgorithm(in.GetPurpose(), in.GetVersionTemplate().GetAlgorithm())
+	level, _ := protectionLevelOf("", in.GetVersionTemplate().GetProtectionLevel())
+	alg, err := levelAlgorithm(level, in.GetPurpose(), in.GetVersionTemplate().GetAlgorithm())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -494,7 +516,6 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	level, _ := protectionLevelOf("", in.GetVersionTemplate().GetProtectionLevel())
 	kaj, err := kajPolicyOf(in.GetKeyAccessJustificationsPolicy())
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -542,12 +563,35 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 		RotationPeriod: period, NextRotation: nextRotation,
 		Purpose: storedPurpose(in.GetPurpose()), Algorithm: storedAlgorithm(alg),
 		ProtectionLevel: storedLevel(level), KAJPolicy: kaj}
-	if !req.GetSkipInitialVersionCreation() {
-		mat, err := newMaterial(k)
+	if level == kmspb.ProtectionLevel_EXTERNAL_VPC {
+		c, err := s.keyBackend("crypto_key.crypto_key_backend", in.GetCryptoKeyBackend(), req.GetParent())
 		if err != nil {
 			return nil, apierror.Wrap(err)
 		}
-		if err := s.put(dbKey(versionPrefix, versionName(name, 1)), keyVersion{Name: versionName(name, 1), Created: now, Material: mat, Algorithm: k.Algorithm, ProtectionLevel: k.ProtectionLevel}); err != nil {
+		k.Backend, k.Coordinated = c.Name, c.mode() == kmspb.EkmConnection_CLOUD_KMS
+	}
+	if level == kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
+		if k.Backend, err = s.hsmBackend("crypto_key.crypto_key_backend", in.GetCryptoKeyBackend(), req.GetParent()); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+	}
+	if k.manualExternal() {
+		// create-external-key creates these keys with
+		// --skip-initial-version-creation: each version names its external
+		// key, which CreateCryptoKey cannot carry.
+		if !req.GetSkipInitialVersionCreation() {
+			return nil, apierror.Wrap(apierror.InvalidArgument("skip_initial_version_creation must be set for the %s key %s: each version names its external key in external_protection_level_options, which CreateCryptoKeyVersion takes", level, name))
+		}
+		if period > 0 || !nextRotation.IsZero() {
+			return nil, apierror.Wrap(apierror.Unimplemented("automatic rotation is not implemented for %s keys whose versions name their own external key: Google documents it for symmetric coordinated external keys only", level))
+		}
+	}
+	if !req.GetSkipInitialVersionCreation() {
+		v, err := s.newVersion(k, 1, now, kmspb.CryptoKeyVersion_ENABLED, nil)
+		if err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 			return nil, apierror.Wrap(err)
 		}
 		k.Next = 2
@@ -667,12 +711,14 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 	if err := s.load(dbKey(keyPrefix, req.GetParent()), &k, "CryptoKey", req.GetParent()); err != nil {
 		return nil, err
 	}
-	mat, err := newMaterial(k)
+	if err := s.backendUsable(k); err != nil {
+		return nil, err
+	}
+	n := k.Next
+	v, err := s.newVersion(k, n, s.now(), initial, req.GetCryptoKeyVersion().GetExternalProtectionLevelOptions())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	n := k.Next
-	v := keyVersion{Name: versionName(k.Name, n), Created: s.now().UTC(), Material: mat, State: initial.String(), Algorithm: k.Algorithm, ProtectionLevel: k.ProtectionLevel}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -798,30 +844,39 @@ func (s *Server) UpdateCryptoKeyPrimaryVersion(_ context.Context, req *kmspb.Upd
 	return s.toKey(k)
 }
 
-// UpdateCryptoKeyVersion moves a version between ENABLED and DISABLED, the
-// only change this method makes (service.proto: DestroyCryptoKeyVersion and
-// RestoreCryptoKeyVersion move between the others). The codes for a bad mask,
-// a bad target and a version past disabling are UNVERIFIED.
+// UpdateCryptoKeyVersion moves a version between ENABLED and DISABLED
+// (service.proto: DestroyCryptoKeyVersion and RestoreCryptoKeyVersion move
+// between the others), and changes an external version's
+// external_protection_level_options: the key URI or key path it names,
+// without rotating the key (update-external-key-path, #1469). The codes for
+// a bad mask, a bad target and a version past disabling are UNVERIFIED.
 func (s *Server) UpdateCryptoKeyVersion(_ context.Context, req *kmspb.UpdateCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
 	in := req.GetCryptoKeyVersion()
-	if _, _, err := parseCryptoKeyVersion("crypto_key_version.name", in.GetName()); err != nil {
+	key, _, err := parseCryptoKeyVersion("crypto_key_version.name", in.GetName())
+	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	paths := req.GetUpdateMask().GetPaths()
 	if len(paths) == 0 {
-		return nil, apierror.Wrap(apierror.InvalidArgument("update_mask is required and must contain state"))
+		return nil, apierror.Wrap(apierror.InvalidArgument("update_mask is required and must contain state or external_protection_level_options"))
 	}
+	// external_protection_level_options is replaced whole, or one field of
+	// it at a time, as gcloud kms keys versions update sends it.
+	var setState bool
+	external := map[string]bool{}
 	for _, p := range paths {
 		switch p {
 		case "state":
-		case "external_protection_level_options":
-			return nil, apierror.Wrap(apierror.Unimplemented(errExternal, "update_mask path", p))
+			setState = true
+		case "external_protection_level_options", "external_protection_level_options.external_key_uri",
+			"external_protection_level_options.ekm_connection_key_path", "external_protection_level_options.ekm_connection_backend_override":
+			external[strings.TrimPrefix(strings.TrimPrefix(p, "external_protection_level_options"), ".")] = true
 		default:
-			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask path %q is not a field that can be updated: only state is", p))
+			return nil, apierror.Wrap(apierror.InvalidArgument("update_mask path %q is not a field that can be updated: only state and external_protection_level_options are", p))
 		}
 	}
 	target := in.GetState()
-	if target != kmspb.CryptoKeyVersion_ENABLED && target != kmspb.CryptoKeyVersion_DISABLED {
+	if setState && target != kmspb.CryptoKeyVersion_ENABLED && target != kmspb.CryptoKeyVersion_DISABLED {
 		return nil, apierror.Wrap(apierror.InvalidArgument(
 			"crypto_key_version.state %s is not allowed: UpdateCryptoKeyVersion moves between ENABLED and DISABLED only; use DestroyCryptoKeyVersion or RestoreCryptoKeyVersion", target))
 	}
@@ -835,9 +890,44 @@ func (s *Server) UpdateCryptoKeyVersion(_ context.Context, req *kmspb.UpdateCryp
 		return nil, apierror.Wrap(apierror.FailedPrecondition(
 			"CryptoKeyVersion %s is %s: only an ENABLED or DISABLED version can be updated; restore it first", in.GetName(), cur))
 	}
+	if len(external) > 0 {
+		var k cryptoKey
+		if err := s.load(dbKey(keyPrefix, key), &k, "CryptoKey", key); err != nil {
+			return nil, err
+		}
+		if !isExternal(v.protectionLevel()) {
+			return nil, apierror.Wrap(apierror.InvalidArgument("external_protection_level_options is only for EXTERNAL and EXTERNAL_VPC versions, not %s", v.protectionLevel()))
+		}
+		// The key material is the version's own, so the version keeps naming
+		// the same key under its new reference.
+		given, all := in.GetExternalProtectionLevelOptions(), external[""]
+		opts := &kmspb.ExternalProtectionLevelOptions{ExternalKeyUri: v.ExternalKeyURI, EkmConnectionKeyPath: v.KeyPath, EkmConnectionBackendOverride: v.Backend}
+		if all || external["external_key_uri"] {
+			opts.ExternalKeyUri = given.GetExternalKeyUri()
+		}
+		if all || external["ekm_connection_key_path"] {
+			opts.EkmConnectionKeyPath = given.GetEkmConnectionKeyPath()
+		}
+		if all || external["ekm_connection_backend_override"] {
+			opts.EkmConnectionBackendOverride = given.GetEkmConnectionBackendOverride()
+		}
+		// A coordinated version's path is the EKM's (external.go), and Google
+		// documents no change to it.
+		if k.Coordinated && v.Backend == "" {
+			return nil, apierror.Wrap(apierror.Unimplemented("external_protection_level_options is not implemented for %s, a coordinated external key's version: its key path is chosen by the EKM", v.Name))
+		}
+		updated := v
+		updated.ExternalKeyURI, updated.KeyPath, updated.Backend = "", "", ""
+		if err := s.externalRef(k, opts, &updated); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		v = updated
+	}
 	// Disabling the primary is allowed: the key keeps it as its primary,
 	// now DISABLED, and Encrypt by key name refuses it.
-	v.State = target.String()
+	if setState {
+		v.State = target.String()
+	}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -1218,7 +1308,7 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 		// A template names an algorithm of the key's own purpose; new
 		// versions get it, existing ones keep theirs (resources.proto
 		// version_template). The codes are UNVERIFIED.
-		a, err := keyAlgorithm(k.purpose(), templateAlg)
+		a, err := levelAlgorithm(k.protectionLevel(), k.purpose(), templateAlg)
 		if err != nil {
 			return nil, apierror.Wrap(err)
 		}
@@ -1226,6 +1316,9 @@ func (s *Server) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRe
 	}
 	if (k.RotationPeriod > 0 || !k.NextRotation.IsZero()) && k.purpose() != kmspb.CryptoKey_ENCRYPT_DECRYPT {
 		return nil, apierror.Wrap(apierror.InvalidArgument("automatic rotation is only supported for ENCRYPT_DECRYPT keys, not %s", k.purpose()))
+	}
+	if (k.RotationPeriod > 0 || !k.NextRotation.IsZero()) && k.manualExternal() {
+		return nil, apierror.Wrap(apierror.Unimplemented("automatic rotation is not implemented for %s keys whose versions name their own external key: Google documents it for symmetric coordinated external keys only", k.protectionLevel()))
 	}
 	// The schedule is checked as it will be stored, so a period set on a key
 	// that already has a next_rotation_time needs no second path, and
