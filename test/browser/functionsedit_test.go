@@ -18,6 +18,8 @@ import (
 	fv1 "cloud.google.com/go/functions/apiv1/functionspb"
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"github.com/chromedp/chromedp"
+	"github.com/cloudburrow/cloudburrow/internal/buildpacks"
+	"github.com/cloudburrow/cloudburrow/internal/images"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -37,6 +39,7 @@ func TestCloudRunFunctionsEditDownloadAndPermissionsThroughThePage(t *testing.T)
 		t.Skipf("%s is not set: the function is made and read back through the Cloud Functions v1 API itself", envRun)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	requireAmd64FunctionBuilds(ctx, t)
 	defer cancel()
 	c, err := functionsv1.NewCloudFunctionsClient(ctx, option.WithEndpoint(addr), option.WithoutAuthentication(),
 		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())))
@@ -120,5 +123,30 @@ func TestCloudRunFunctionsEditDownloadAndPermissionsThroughThePage(t *testing.T)
 	b, _ := json.Marshal(pol.GetBindings())
 	if err != nil || !strings.Contains(string(b), "allUsers") || !strings.Contains(string(b), "roles/cloudfunctions.invoker") {
 		t.Errorf("GetIamPolicy after Grant access = %s, %v; want allUsers as invoker", b, err)
+	}
+}
+
+// requireAmd64FunctionBuilds skips unless function builds are asked for, as
+// the compat suite's Functions tests are (CLOUDBURROW_TEST_FUNCTIONS), and
+// the cluster's nodes are amd64: the function is built from source with
+// Google's builder, whose images are linux/amd64 only, so on an arm64
+// machine the build fails "image architecture does not match the cluster".
+func requireAmd64FunctionBuilds(ctx context.Context, t *testing.T) {
+	t.Helper()
+	if os.Getenv("CLOUDBURROW_TEST_FUNCTIONS") == "" {
+		t.Skip("CLOUDBURROW_TEST_FUNCTIONS is not set; this test builds a function from source with Google's builder, so it runs only when asked for")
+	}
+	cluster := strings.TrimSpace(os.Getenv(envCluster))
+	kubeconfig := strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_KUBECONFIG"))
+	if cluster == "" || kubeconfig == "" {
+		t.Fatalf("%s and CLOUDBURROW_TEST_KUBECONFIG are required to read the node architecture", envCluster)
+	}
+	loader := &images.Loader{ClusterName: cluster, Runner: buildpacks.ExecRunner{}}
+	arch, err := loader.NodeArchitecture(ctx, kubeconfig)
+	if err != nil {
+		t.Fatalf("read the node architecture: %v", err)
+	}
+	if want := strings.TrimPrefix(buildpacks.BuilderPlatform, "linux/"); arch != want {
+		t.Skipf("the cluster's nodes are %s; the Google builder produces %s images only, which cannot run here", arch, want)
 	}
 }
