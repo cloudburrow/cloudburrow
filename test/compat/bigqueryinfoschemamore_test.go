@@ -64,8 +64,8 @@ func infoSchemaColumns(schema bigquery.Schema) string {
 // dataset's INFORMATION_SCHEMA PARTITIONS, TABLE_CONSTRAINTS,
 // KEY_COLUMN_USAGE, CONSTRAINT_COLUMN_USAGE, TABLE_SNAPSHOTS,
 // ROUTINE_OPTIONS and SEARCH_INDEXES, through jobs.query and jobs.insert,
-// have BigQuery's documented columns (PARTITIONS but its byte counts and
-// last_modified_time, which the emulator keeps none of) and a row for
+// have BigQuery's documented columns (PARTITIONS' logical bytes from the
+// documented data type sizes, #1458) and a row for
 // what the dataset holds: a DATE-partitioned table, an integer-range
 // partitioned one, a table with a primary key, one with a foreign key, a
 // snapshot and a function with a description. Measured first: each was
@@ -142,17 +142,19 @@ func TestBigQueryInformationSchemaPartitionsAndConstraints(t *testing.T) {
 		}
 	}
 	for _, insert := range []bool{false, true} {
-		check(insert, "PARTITIONS", "SELECT * FROM "+from("PARTITIONS")+" ORDER BY table_name, partition_id",
-			"table_catalog STRING, table_schema STRING, table_name STRING, partition_id STRING, total_rows INTEGER, storage_tier STRING",
-			project+"|"+ds.DatasetID+"|o|<nil>|0|ACTIVE",
-			project+"|"+ds.DatasetID+"|p|20240101|2|ACTIVE",
-			project+"|"+ds.DatasetID+"|p|20240102|1|ACTIVE",
-			project+"|"+ds.DatasetID+"|p|__NULL__|1|ACTIVE",
-			project+"|"+ds.DatasetID+"|r|0|1|ACTIVE",
-			project+"|"+ds.DatasetID+"|r|10|1|ACTIVE",
-			project+"|"+ds.DatasetID+"|r|__UNPARTITIONED__|1|ACTIVE",
-			project+"|"+ds.DatasetID+"|snap|<nil>|2|ACTIVE",
-			project+"|"+ds.DatasetID+"|u|<nil>|2|ACTIVE")
+		// last_modified_time: TestBigQueryPartitionsBytesAndWriteTimes.
+		check(insert, "PARTITIONS", "SELECT * EXCEPT (last_modified_time) FROM "+from("PARTITIONS")+" ORDER BY table_name, partition_id",
+			"table_catalog STRING, table_schema STRING, table_name STRING, partition_id STRING, total_rows INTEGER, "+
+				"total_logical_bytes INTEGER, total_billable_bytes INTEGER, storage_tier STRING",
+			project+"|"+ds.DatasetID+"|o|<nil>|0|0|0|ACTIVE",
+			project+"|"+ds.DatasetID+"|p|20240101|2|32|32|ACTIVE",
+			project+"|"+ds.DatasetID+"|p|20240102|1|16|16|ACTIVE",
+			project+"|"+ds.DatasetID+"|p|__NULL__|1|8|8|ACTIVE",
+			project+"|"+ds.DatasetID+"|r|0|1|8|8|ACTIVE",
+			project+"|"+ds.DatasetID+"|r|10|1|8|8|ACTIVE",
+			project+"|"+ds.DatasetID+"|r|__UNPARTITIONED__|1|8|8|ACTIVE",
+			project+"|"+ds.DatasetID+"|snap|<nil>|2|22|22|ACTIVE",
+			project+"|"+ds.DatasetID+"|u|<nil>|2|22|22|ACTIVE")
 		check(insert, "TABLE_CONSTRAINTS", "SELECT constraint_name, table_name, constraint_type, is_deferrable, initially_deferred, enforced FROM "+
 			from("TABLE_CONSTRAINTS")+" ORDER BY table_name", "",
 			"fk_u|o|FOREIGN KEY|NO|NO|NO", "u.pk$|u|PRIMARY KEY|NO|NO|NO")

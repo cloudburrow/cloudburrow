@@ -199,7 +199,11 @@ func (s *Store) destroyNowQuiet(project, id string, v Version) (Version, error) 
 		v.Replicas[i].WrappedKey = nil
 	}
 	v.Etag = s.etag()
-	return v, s.put(versionKey(project, id, v.Number), v)
+	if err := s.put(versionKey(project, id, v.Number), v); err != nil {
+		return Version{}, err
+	}
+	// Its decrypted copy goes with it (#1489).
+	return v, s.dropMount(project, id, v)
 }
 
 // Advance moves the store's clock forward by d, runs everything that is due
