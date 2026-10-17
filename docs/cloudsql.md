@@ -883,12 +883,15 @@ pointed at it by its own flags:
 ```sh
 export CLOUDBURROW_TEST_CLOUD_SQL_PROXY=$(make -s cloud-sql-proxy)   # pinned, SHA-256 checked
 $CLOUDBURROW_TEST_CLOUD_SQL_PROXY --sqladmin-api-endpoint "$CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL" --token local \
-  "$PROJECT:us-central1:postgres?port=6432" "$PROJECT:us-central1:mysql?port=6306"
+  "${GOOGLE_CLOUD_PROJECT}:us-central1:postgres?port=6432" "${GOOGLE_CLOUD_PROJECT}:us-central1:mysql?port=6306"
 psql "host=127.0.0.1 port=6432 user=cloudburrow dbname=cloudburrow sslmode=disable"
 ```
 
 `--sqladmin-api-endpoint` is the Admin API's URL, which `cloudburrow env` exports as
-`CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL`. Any `--token` will do, as tokens are not checked; pass one,
+`CLOUDSDK_API_ENDPOINT_OVERRIDES_SQL`, and the project is the `GOOGLE_CLOUD_PROJECT` it exports.
+Keep the braces: in zsh, macOS's default shell, an unbraced variable followed by `:us-central1`
+takes `:u` as its (uppercase) modifier, so a project `demo-a` gives `DEMO-As-central1:postgres`,
+which the proxy refuses as a connection name. Any `--token` will do, as tokens are not checked; pass one,
 so the proxy does not go looking for Google credentials. Leave
 `--auto-iam-authn` off: it is IAM database authentication, which is 501 (below). The proxy then
 calls `connectSettings` and `generateEphemeralCert` and dials the reported address at 3307. It
@@ -915,7 +918,7 @@ Run gives it: a Unix socket at `<mountPath>/<connection name>`, PostgreSQL's at
 `/cloudsql/<connection name>/.s.PGSQL.5432`. An application connects as it would on Cloud Run:
 
 ```sh
-psql -h /cloudsql/$PROJECT:us-central1:postgres -U cloudburrow -d cloudburrow
+psql -h "/cloudsql/${PROJECT}:us-central1:postgres" -U cloudburrow -d cloudburrow
 ```
 
 ```go
@@ -956,13 +959,13 @@ Cloud SQL connections field shows its instances.
 
 ```sh
 gcloud run deploy web --image=$IMAGE --region=us-central1 \
-  --add-cloudsql-instances=$PROJECT:us-central1:postgres
+  --add-cloudsql-instances="${GOOGLE_CLOUD_PROJECT}:us-central1:postgres"
 ```
 
 MySQL's socket is `/cloudsql/<connection name>` itself:
 
 ```sh
-mysql -S /cloudsql/$PROJECT:us-central1:mysql -u cloudburrow cloudburrow
+mysql -S "/cloudsql/${PROJECT}:us-central1:mysql" -u cloudburrow cloudburrow
 ```
 
 Verified by `TestRunServiceCloudSQLVolume` and `TestRunJobCloudSQLVolume` (PostgreSQL),

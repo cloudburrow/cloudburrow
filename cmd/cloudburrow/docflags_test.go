@@ -44,6 +44,13 @@ var docCommandStart = regexp.MustCompile(`^(?:\$ |eval "\$\()?(?:\./bin/)?cloudb
 // docAdminCurl is a curl command line that calls the admin API.
 var docAdminCurl = regexp.MustCompile(`(?:^|[\s;&|(])curl\s[^#]*/admin/`)
 
+// docZshModifier is an unbraced parameter followed by a colon and a letter:
+// zsh, macOS's default shell, reads `$P:us-central1` as $P with the `:u`
+// (uppercase) modifier, so docs/cloudsql.md's Auth Proxy line,
+// "$PROJECT:us-central1:postgres", named no instance there (#1583). Braces,
+// "${P}:us-central1", mean the same in every shell.
+var docZshModifier = regexp.MustCompile(`\$[A-Za-z_][A-Za-z0-9_]*:[A-Za-z&]`)
+
 var docFlag = regexp.MustCompile(`^--?([a-zA-Z][a-zA-Z0-9-]*)(?:=.*)?$`)
 
 var helpFlag = regexp.MustCompile(`(?m)(?:^|[\s\[])--?([a-z][a-z0-9-]*)`)
@@ -133,6 +140,9 @@ func docFlagProblems(t *testing.T, files map[string]string) []string {
 			if docAdminCurl.MatchString(line) && !strings.Contains(line, "$TOKEN") && !strings.Contains(line, "Authorization") {
 				problems = append(problems, path+":"+strconv.Itoa(at[i])+": a curl to /admin sends no admin token, so it is refused with 401 (docs/configuration.md#admin-api)")
 			}
+			if m := docZshModifier.FindString(line); m != "" {
+				problems = append(problems, path+":"+strconv.Itoa(at[i])+": "+m+" is a zsh history modifier, not a colon after a variable; write ${"+strings.TrimPrefix(m[:len(m)-2], "$")+"}:")
+			}
 			if m := docCommandStart.FindStringSubmatch(line); m != nil && !cmds[m[1]] {
 				problems = append(problems, path+":"+strconv.Itoa(at[i])+": `cloudburrow "+m[1]+"` is not a command (cloudburrow help lists them)")
 			}
@@ -191,8 +201,9 @@ func TestDocumentedCommandsAndFlagsExist(t *testing.T) {
 }
 
 // TestDocFlagCheckCatchesAPlantedWrongFlag proves the check above can fail:
-// a renamed flag, an unknown command and an admin curl with no token, while a
-// flag after terraform's `--` and a curl that sends the token pass.
+// a renamed flag, an unknown command, an admin curl with no token and an
+// unbraced $VAR:word, while a flag after terraform's `--`, a curl that sends
+// the token and ${VAR}:word pass.
 func TestDocFlagCheckCatchesAPlantedWrongFlag(t *testing.T) {
 	doc := "```sh\n" +
 		"cloudburrow up --detach \\\n  --port-bse 9100\n" + // a typo, on a continuation line
@@ -200,14 +211,17 @@ func TestDocFlagCheckCatchesAPlantedWrongFlag(t *testing.T) {
 		"cloudburrow terraform --binary tofu -- plan -refresh=false\n" +
 		"curl -X POST localhost:9000/admin/reset\n" +
 		"curl -H \"$TOKEN\" localhost:9000/admin/events\n" +
+		"psql -h /cloudsql/$PROJECT:us-central1:postgres\n" +
+		"psql -h \"/cloudsql/${PROJECT}:us-central1:postgres\"\n" +
 		"```\n" +
 		"Run `cloudburrow snapshot` or `cloudburrow logs --folow`; the `cloudburrow` namespace is prose.\n"
 	got := docFlagProblems(t, map[string]string{"planted.md": doc})
 	want := []string{
 		"planted.md:2: `cloudburrow up` has no flag --port-bse",
 		"planted.md:6: a curl to /admin sends no admin token",
-		"planted.md:9: `cloudburrow snapshot` is not a command",
-		"planted.md:9: `cloudburrow logs` has no flag --folow",
+		"planted.md:8: $PROJECT:u is a zsh history modifier",
+		"planted.md:11: `cloudburrow snapshot` is not a command",
+		"planted.md:11: `cloudburrow logs` has no flag --folow",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("problems = %q, want %d", got, len(want))

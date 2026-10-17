@@ -581,7 +581,7 @@ the size of each archive in the cache. linux/amd64 sizes were not measured and w
 | `mysql:8.4@sha256:0744ee5e…` | Cloud SQL for MySQL | 222.9 MiB |
 | `dev.local/cloudburrow-bigquery:<hash>` (built by this CLI, #1061) | BigQuery | not measured as an archive; the linux/arm64 image is 263 MB (`docker images`) |
 | `valkey/valkey:8.1-alpine@sha256:081c2f5c…` | Memorystore | 17.1 MiB |
-| `gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:2b156513…` | the console terminal (optional) | not measured as an archive; the image is 1033 MB compressed (above) |
+| `gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:2b156513…` | the console terminal (optional) | 984.8 MiB (measured by `prefetch --services memorystore`, 2026-10-17) |
 
 The default services plus Bigtable are 13 artifacts, **862.3 MiB**; every service is 18,
 1356.3 MiB. Those totals were measured before the terminal image was added to the cache, and
