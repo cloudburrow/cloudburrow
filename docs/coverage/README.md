@@ -29,8 +29,8 @@ Do not edit these files by hand.
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
 | [Cloud Storage (JSON API)](storage.md) | 87 | 84 | 0 | 3 | 0 | 0 | 0 | 27 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 30 | 29 | 0 | 0 | 1 | 0 | 0 | 0 |
-| [Firestore](firestore.md) | 17 | 16 | 1 | 0 | 0 | 0 | 0 | 0 |
-| [Firestore Admin API](firestoreadmin.md) | 32 | 25 | 0 | 7 | 0 | 0 | 0 | 0 |
+| [Firestore](firestore.md) | 17 | 17 | 0 | 0 | 0 | 0 | 0 | 0 |
+| [Firestore Admin API](firestoreadmin.md) | 32 | 32 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Bigtable](bigtable.md) | 84 | 80 | 4 | 0 | 0 | 0 | 0 | 0 |
 | [Spanner](spanner.md) | 65 | 63 | 2 | 0 | 0 | 0 | 0 | 0 |
