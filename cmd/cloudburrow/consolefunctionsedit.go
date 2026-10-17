@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"cloud.google.com/go/iam/apiv1/iampb"
 	functionsv1 "cloud.google.com/go/functions/apiv1"
 	fv1 "cloud.google.com/go/functions/apiv1/functionspb"
 	functions "cloud.google.com/go/functions/apiv2"
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
+	"cloud.google.com/go/iam/apiv1/iampb"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
@@ -215,7 +215,9 @@ func (functionsProvider) PolicyOn(_ context.Context, path []string) *console.Pol
 }
 
 // v1FunctionsIAM is the v1 client's IAM methods as iamServer.
-type v1FunctionsIAM struct{ c *functionsv1.CloudFunctionsClient }
+type v1FunctionsIAM struct {
+	c *functionsv1.CloudFunctionsClient
+}
 
 func (i v1FunctionsIAM) GetIamPolicy(ctx context.Context, r *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
 	return i.c.GetIamPolicy(ctx, r)
