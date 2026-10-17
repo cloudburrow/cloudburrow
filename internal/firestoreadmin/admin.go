@@ -98,6 +98,9 @@ type Admin struct {
 	// backups by name, and the time each schedule last took one.
 	backups    map[string]*backup
 	lastBackup map[string]time.Time
+	// seen is every database a documents call has named (seen.go,
+	// #1550), by name.
+	seen map[string]bool
 
 	// storage is the instance's Cloud Storage, for exports and imports.
 	storage string
@@ -124,6 +127,7 @@ func New(emulator string) *Admin {
 
 		backups:    map[string]*backup{},
 		lastBackup: map[string]time.Time{},
+		seen:       map[string]bool{},
 	}
 	a.grpc = grpc.NewServer(grpc.ChainUnaryInterceptor(a.persistAfter))
 	adminpb.RegisterFirestoreAdminServer(a.grpc, a)
@@ -161,7 +165,12 @@ var documentsPath = regexp.MustCompile(`^/v1/projects/[^/]+/databases/[^/]+/docu
 // ServeHTTP answers an admin call Claims claimed.
 func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == frontstate.ResetPath {
-		frontstate.ServeReset(w, r, a.ResetState)
+		frontstate.ServeReset(w, r, func(project string) error {
+			if project == "" {
+				return a.ResetState()
+			}
+			return a.ResetProject(r.Context(), project)
+		})
 		return
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {

@@ -116,7 +116,8 @@ func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 // resourceOf reads the resource a gRPC call names from the routing headers
 // the official clients send: Firestore's google-cloud-resource-prefix
 // ("projects/p/databases/(default)"), or x-goog-request-params, whose
-// "database=..." or "project_id=p" names it.
+// "database=..." or "project_id=p" (with "database_id=d", a named
+// Datastore database) names it.
 func resourceOf(h http.Header) string {
 	if v := h.Get("Google-Cloud-Resource-Prefix"); strings.HasPrefix(v, "projects/") {
 		return v
@@ -131,6 +132,10 @@ func resourceOf(h http.Header) string {
 		}
 	}
 	if p := q.Get("project_id"); p != "" {
+		// Datastore's named databases (#1550).
+		if d := q.Get("database_id"); d != "" {
+			return "projects/" + p + "/databases/" + d
+		}
 		return "projects/" + p
 	}
 	return ""

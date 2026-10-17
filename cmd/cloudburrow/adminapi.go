@@ -36,8 +36,12 @@ type adminDeps struct {
 	kms       *kmsService
 	scheduler *schedulerService
 	logging   *loggingService
-	// run is Cloud Run, for its unused volume objects' reset (#1476).
+	// run is Cloud Run, for its unused volume objects' reset (#1476), and
+	// a project's workloads (#1540).
 	run *runService
+	// memorystore is the Memorystore admin API, for its created instances'
+	// reset (#1540).
+	memorystore *memorystoreAdminService
 	// mysql is Cloud SQL for MySQL's credentials, for its resetter.
 	mysql      components.MySQLCredentials
 	forwarders []*netfwd.Forwarder
@@ -84,11 +88,18 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		}})
 		api.RegisterSeeder(&pubsubSeeder{tunnel: f})
 	}
-	// What the Spanner, Bigtable and Firestore fronts keep (#1514).
+	// What the Spanner, Bigtable and Firestore fronts keep (#1514), and,
+	// per project, the emulators' data too (#1540).
 	for _, svc := range []config.Service{config.ServiceSpanner, config.ServiceBigtable, config.ServiceFirestore} {
 		if f := forwarderFor(d.forwarders, string(svc)); f != nil {
 			api.RegisterResetter(&frontStateResetter{name: string(svc), tunnel: f})
 		}
+	}
+	if f := forwarderFor(d.forwarders, string(config.ServiceDatastore)); f != nil {
+		// A project's entities, through the Datastore API (#1540).
+		api.RegisterResetter(&datastoreResetter{tunnel: f, projects: func() []string {
+			return knownProjects(cfg.DefaultProject(), d.projects)
+		}})
 	}
 	if f := forwarderFor(d.forwarders, string(config.ServiceCloudSQLMySQL)); f != nil {
 		api.RegisterResetter(&mysqlResetter{tunnel: f, creds: d.mysql})
@@ -110,6 +121,18 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 	if d.run != nil {
 		// The volume objects no Cloud Run workload uses (#1476).
 		api.RegisterResetter(&runVolumesResetter{svc: d.run})
+	}
+	// A project's datasets (#1540), through the front.
+	if f := forwarderFor(d.forwarders, "bigquery"); f != nil {
+		api.RegisterResetter(&bigqueryResetter{tunnel: func() *netfwd.Forwarder { return f }, projects: func() []string {
+			return knownProjects(cfg.DefaultProject(), d.projects)
+		}})
+	}
+	if d.memorystore != nil {
+		// The instances CreateInstance made (#1540).
+		api.RegisterResetter(&memorystoreResetter{svc: d.memorystore, projects: func() []string {
+			return knownProjects(cfg.DefaultProject(), d.projects)
+		}})
 	}
 	if d.registry != nil {
 		// Project, folder and organization IAM policies (#1368), stored as

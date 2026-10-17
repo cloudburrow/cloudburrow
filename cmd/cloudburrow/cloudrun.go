@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"log/slog"
@@ -62,6 +63,9 @@ type runService struct {
 	// adapter is the started adapter, which the metadata server asks for a
 	// workload's account (#1388); nil before Start.
 	adapter atomic.Pointer[runadapter.Server]
+	// functions is the started Cloud Functions server, whose functions a
+	// project's reset deletes with their event triggers (#1540).
+	functions atomic.Pointer[runadapter.FunctionsServer]
 }
 
 // metadataAccount is the metadata server's AccountResolver: the account a
@@ -254,6 +258,7 @@ func (r *runService) Start(ctx context.Context) error {
 		tokens = r.events.tokens
 	}
 	functions.WithIngress(ingress, tokens)
+	r.functions.Store(functions)
 	if r.events != nil {
 		functions.WithEvents(runadapter.Events{Transport: r.events.transport, Tokens: r.events.tokens,
 			PushBase: r.events.pushBase, Ingress: ingress})
@@ -298,22 +303,29 @@ func (r *runService) Start(ctx context.Context) error {
 
 // runVolumesResetter is Cloud Run's part of a reset (#1476): every gcsfuse
 // pod, PersistentVolume and claim that no service, job, worker pool or
-// instance uses. Cloud Run's workloads themselves are not reset. The
-// objects are shared across projects by bucket or export, so a project's
-// reset removes the same unused ones a full reset does.
+// instance uses. A full reset leaves Cloud Run's workloads. A project's
+// reset (#1540), as at a purge, first deletes the project's services,
+// jobs, worker pools, instances and functions, and forgets its Cloud Build
+// state, as Google drops them with a deleted project. The volume objects
+// are shared across projects by bucket or export, so a project's reset
+// then removes the same unused ones a full reset does.
 type runVolumesResetter struct{ svc *runService }
 
 func (r *runVolumesResetter) Name() string { return "run" }
 
 func (r *runVolumesResetter) Reset(ctx context.Context) error { return r.ResetProject(ctx, "") }
 
-func (r *runVolumesResetter) ResetProject(ctx context.Context, _ string) error {
+func (r *runVolumesResetter) ResetProject(ctx context.Context, project string) error {
 	a := r.svc.adapter.Load()
 	if a == nil {
 		return nil
 	}
+	var errs []error
+	if project != "" {
+		errs = append(errs, a.ResetProject(ctx, project, r.svc.functions.Load()))
+	}
 	_, err := a.CollectVolumes(ctx)
-	return err
+	return errors.Join(append(errs, err)...)
 }
 
 func (r *runService) Stop(ctx context.Context) error {

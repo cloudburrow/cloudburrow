@@ -805,7 +805,7 @@ printing it, and it is never written into the runtime file or a diagnose bundle.
 |---|---|
 | `POST /admin/reset` | Destroy CloudBurrow-managed state, keeping the cluster |
 | `POST /admin/seed` | Create resources from a seed document |
-| `POST /admin/purge?project=` | Purge a project pending deletion now, in place of Google's 30 days (#1537): the project and what every service that can reset one project keeps under it go, and its ID is free. 404 for a project that does not exist, 400 for one not deleted. The console's **Purge project now** on the project's page does the same |
+| `POST /admin/purge?project=` | Purge a project pending deletion now, in place of Google's 30 days (#1537): the project and what every service that can reset one project keeps under it go (Cloud Run, Firestore, Datastore, Bigtable, Spanner, BigQuery and Memorystore too since #1540), its ID is free, and its number is retired (#1544). 404 for a project that does not exist, 400 for one not deleted. The console's **Purge project now** on the project's page does the same |
 | `GET /admin/events` | Recent events, newest first, filterable by `service`, `kind` and `since` |
 | `GET /admin/instance` | What the other routes accept here: each component `reset` clears, in order, and whether it can be scoped to a project (`byProject`); the startup seed's components, which `reseed=true` re-applies (empty without `--seed-file`); the components a seed document may name; and the manifest an export would begin with. The console's Instance page offers exactly this (#801, `TestInstanceInfoSaysWhatResetSeedAndStateAccept`) |
 | `GET /admin/local-models`, `POST /admin/local-models/{id}/{action}` | The local AI models (#1396): each catalogued model's state, and `download` (with `{"confirmBytes": N}`, the exact pinned size; every file verified against its pinned SHA-256), `cancel`, `load`, `unload` and `delete`, through the same manager as the console's Local models page ([embeddings.md](embeddings.md)) |
@@ -855,7 +855,9 @@ events.
 and the notification configurations on them; Pub/Sub subscriptions, snapshots, topics and schemas (#889); and
 Secret Manager secrets with all their versions; and what the Spanner, Bigtable and Firestore
 fronts keep, their backups, schedules, views and the rest, with Bigtable's instances and their
-tables (#1514). Each is cleared through the service's own API or front,
+tables (#1514); Datastore entities, BigQuery datasets and Memorystore instances, for the default
+and the registered projects (#1540). Cloud Run's workloads are left by a full reset and deleted
+by a project's. Each is cleared through the service's own API or front,
 so a reset is only what a client could have done one call at a time. Two services are
 deliberately left out:
 
@@ -869,10 +871,34 @@ deliberately left out:
 Services always reset in registration order (tasks, storage, pubsub, secretmanager) whatever
 order they are named in: storage goes before Pub/Sub so that notification configurations are
 removed before the topics they point at. `project=` limits a reset to one project, for the
-services that can honour it: Cloud Tasks, Pub/Sub and Secret Manager. **Cloud Storage cannot**,
-because its backend lists every bucket whatever project is asked for. A project-scoped reset
-that includes storage is refused with a 400 naming it, rather than guessed at. An unknown
-service name is refused the same way. Either refusal resets nothing.
+services that can honour it (`GET /admin/instance` names them as `byProject`); a project's
+purge runs the same per-project resets. Since #1540 that includes Cloud Run (the project's
+services, jobs, worker pools, instances and functions with their Eventarc triggers, through the
+adapter's own deletes, and its Cloud Build state), Spanner, Bigtable and Firestore (each front's
+`/cloudburrow/front-state/reset?project=`, which deletes the project's instances, tables or
+documents in the emulator as well as the front's records), Datastore (every entity of the
+project, in every namespace, through the Datastore API), BigQuery (the project's datasets with
+their contents, and the front's undelete copies) and Memorystore (the project's instances and
+their servers; the instance `up` runs stays). Since #1550 a purge also reaches what the
+emulators cannot list by project, because the fronts keep what calls name: Firestore documents
+in a database the Admin API never made (the call front shows the Admin API each call's
+database), Bigtable tables under an instance the instance admin never made (the Bigtable front
+keeps every instance a call names), and Datastore entities in a named database (the Datastore
+call front keeps each named database a call's routing header names, as an entity of its own in
+the emulator's `cloudburrow-datastore-named-databases` project, so the record lives exactly as
+long as the data; the purge asks the front for them at `/cloudburrow/datastore/databases/forget`,
+internal). A call over REST names its Datastore database only in its body, which the front does
+not read; the official clients' gRPC calls name it in their routing header. An unknown service
+name is refused with a 400, and resets nothing.
+
+**Project numbers** (#1544). Each project's record keeps its number. A project created under
+an ID never used before gets the number derived from the ID, as before; one created again under
+a purged ID gets a new random one, and a purged project's number is never given out again. `up`
+pushes the numbers that differ from the derived ones to the builtin storage server and (#1551)
+the BigQuery front, at start and after every create and purge, over each one's tunnel
+(`POST /_cloudburrow/project-numbers`, internal), so the buckets, ACL entities and service
+agent, and BigQuery's `projects.getServiceAccount`, report them. The BigQuery front keeps them
+in its state directory.
 
 **Seeding.** One document can seed Cloud Tasks queues, Cloud Storage buckets and objects,
 Pub/Sub schemas, topics and subscriptions, Secret Manager secrets with their versions, and Cloud

@@ -190,7 +190,12 @@ func (s *Instances) Claims(r *http.Request) bool {
 // ServeHTTP answers a call Claims claimed.
 func (s *Instances) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == frontstate.ResetPath {
-		frontstate.ServeReset(w, r, s.ResetState)
+		frontstate.ServeReset(w, r, func(project string) error {
+			if project == "" {
+				return s.ResetState()
+			}
+			return s.ResetProject(r.Context(), project)
+		})
 		return
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {

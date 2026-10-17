@@ -154,6 +154,9 @@ Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216); v1 org pol
 (#1296), and regional tag bindings and effective tags through the
 `{location}-cloudresourcemanager` endpoints (#1350); project, folder and organization IAM, stored
 and never enforced (#1368).
+and never enforced (#1368); v1 org policy on folders and the organization, with the effective
+policy evaluated down the hierarchy (#1534); a purge drops the project's state in every service
+(#1537, #1540), and a project made again under a purged ID gets a new number (#1544).
 
 No gap is left open here.
 
