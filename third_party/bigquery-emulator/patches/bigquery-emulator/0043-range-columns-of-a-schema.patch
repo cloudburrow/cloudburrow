@@ -1,0 +1,252 @@
+CloudBurrow patch 43 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1492).
+
+The bug: tables.insert of a schema with a RANGE column (type RANGE,
+rangeElementType DATE, DATETIME or TIMESTAMP), at the top level or in a
+RECORD, failed 500 "failed to analyze: Type not found: TYPE_UNKNOWN", and
+the official Go client retried it until its deadline: the DDL made for the
+table wrote the column's type as GoogleSQL's TYPE_UNKNOWN, Column having no
+element type and Type.TypeKind no RANGE. tables.update and tables.patch of
+a new RANGE column failed the same way (they make the table again by
+CreateOrReplaceTable). BigQuery makes the table
+(https://cloud.google.com/bigquery/docs/reference/rest/v2/tables#TableFieldSchema.FIELDS.range_element_type).
+
+The patch gives Column the element type, writes the column as
+RANGE<DATE|DATETIME|TIMESTAMP> in both DDL paths, keeps rangeElementType in
+the schema made from a Column (and a CSV load's columns), and binds a RANGE
+value a row gives (tabledata.insertAll, a JSON or CSV load), an object of
+start and end (null for UNBOUNDED) at any depth or the text
+"[start, end)", as that text, a top-level one CAST to the column's type.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/types/types.go
++++ b/types/types.go
+@@ -97,6 +97,10 @@
+ 	// the engine writes the default. CloudBurrow patch
+ 	// (cloudburrow/cloudburrow#1340).
+ 	DefaultValueExpression string `yaml:"-"`
++	// RangeElementType is a RANGE column's element type (DATE, DATETIME
++	// or TIMESTAMP), its TableFieldSchema.rangeElementType. CloudBurrow
++	// patch (cloudburrow/cloudburrow#1492).
++	RangeElementType Type `yaml:"-"`
+ }
+ 
+ func (c *Column) FormatType() string {
+@@ -107,6 +111,8 @@
+ 			formatTypes = append(formatTypes, fmt.Sprintf("`%s` %s", field.Name, field.FormatType()))
+ 		}
+ 		typ = fmt.Sprintf("STRUCT<%s>", strings.Join(formatTypes, ","))
++	} else if c.Type == RANGE {
++		typ = RangeSQLType(string(c.RangeElementType))
+ 	} else {
+ 		typ = c.Type.TypeKind().String()
+ 	}
+@@ -123,6 +129,15 @@
+ }
+ 
+ func tableFieldSchemaFromColumn(c *Column) *bigqueryv2.TableFieldSchema {
++	if c.Type == RANGE {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1492).
++		return &bigqueryv2.TableFieldSchema{
++			Name:             c.Name,
++			Type:             string(RANGE),
++			Mode:             string(c.Mode),
++			RangeElementType: &bigqueryv2.TableFieldSchemaRangeElementType{Type: string(c.RangeElementType)},
++		}
++	}
+ 	if len(c.Fields) == 0 {
+ 		return &bigqueryv2.TableFieldSchema{
+ 			Name: c.Name,
+@@ -327,10 +342,58 @@
+ 		return FieldJSON
+ 	case RECORD:
+ 		return FieldRecord
++	case RANGE: // cloudburrow/cloudburrow#1492
++		return FieldType(RANGE)
+ 	}
+ 	return ""
+ }
+ 
++// RangeSQLType is the GoogleSQL type of a RANGE column whose
++// rangeElementType is elem: RANGE<DATE>, RANGE<DATETIME> or
++// RANGE<TIMESTAMP>. Without it a table made by tables.insert (or a column
++// added by tables.patch) with a RANGE column was refused 500 "Type not
++// found: TYPE_UNKNOWN": the DDL made for it named no type. CloudBurrow
++// patch (cloudburrow/cloudburrow#1492).
++func RangeSQLType(elem string) string {
++	return "RANGE<" + Type(elem).TypeKind().String() + ">"
++}
++
++// RangeText is v, a RANGE value as tabledata.insertAll or a JSON load
++// gives it, an object of start and end (each null or absent when
++// UNBOUNDED), or its text "[start, end)", as the text a CAST to RANGE
++// takes; ok is false for anything else. CloudBurrow patch
++// (cloudburrow/cloudburrow#1492).
++func RangeText(v interface{}) (string, bool) {
++	switch x := v.(type) {
++	case string:
++		return x, true
++	case map[string]interface{}:
++		for k := range x {
++			if !strings.EqualFold(k, "start") && !strings.EqualFold(k, "end") {
++				return "", false
++			}
++		}
++		bound := func(key string) string {
++			for k, b := range x {
++				if !strings.EqualFold(k, key) || b == nil {
++					continue
++				}
++				s, ok := b.(string)
++				if !ok {
++					s = fmt.Sprint(b)
++				}
++				if s != "" {
++					return s
++				}
++			}
++			return "UNBOUNDED"
++		}
++		start, end := bound("start"), bound("end")
++		return "[" + start + ", " + end + ")", true
++	}
++	return "", false
++}
++
+ // rangeKind is GoogleSQL's TYPE_RANGE, 30 in go-googlesql's TypeKind
+ // (TypeKindTypeRange), which zsqltypes does not name.
+ const rangeKind zsqltypes.TypeKind = 30
+@@ -417,6 +480,8 @@
+ 	GEOGRAPHY  Type = "GEOGRAPHY"
+ 	JSON       Type = "JSON"
+ 	RECORD     Type = "RECORD"
++	// RANGE is CloudBurrow's (cloudburrow/cloudburrow#1492).
++	RANGE Type = "RANGE"
+ )
+ 
+ type FieldType string
+@@ -555,13 +620,17 @@
+ 	for _, field := range s.Fields {
+ 		fields = append(fields, NewColumnWithSchema(field))
+ 	}
+-	return &Column{
++	c := &Column{
+ 		Name:                   s.Name,
+ 		Type:                   Type(s.Type),
+ 		Mode:                   Mode(s.Mode),
+ 		Fields:                 fields,
+ 		DefaultValueExpression: s.DefaultValueExpression,
+ 	}
++	if s.RangeElementType != nil { // cloudburrow/cloudburrow#1492
++		c.RangeElementType = Type(s.RangeElementType.Type)
++	}
++	return c
+ }
+ 
+ func parseDate(v string) (time.Time, error) {
+@@ -590,6 +659,18 @@
+ 	if Type(field.Type) == JSON {
+ 		return v, nil
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1492): a RANGE value is
++	// an object of start and end, not a RECORD; it is kept as its text,
++	// which the engine casts.
++	if Type(field.Type) == RANGE && Mode(field.Mode) != RepeatedMode {
++		if v == nil {
++			return nil, nil
++		}
++		if text, ok := RangeText(v); ok {
++			return text, nil
++		}
++		return nil, fmt.Errorf("invalid value %v for RANGE column %s", v, field.Name)
++	}
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1124): in BigQuery a
+ 	// stored array is never NULL: "each array is written as an empty
+ 	// array" (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#array_type).
+--- a/internal/contentdata/repository.go
++++ b/internal/contentdata/repository.go
+@@ -209,6 +209,9 @@
+ 			types = append(types, fmt.Sprintf("`%s` %s", f.Name, r.encodeSchemaField(f)))
+ 		}
+ 		elem = fmt.Sprintf("STRUCT<%s>", strings.Join(types, ","))
++	} else if field.Type == string(types.RANGE) && field.RangeElementType != nil {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1492).
++		elem = types.RangeSQLType(field.RangeElementType.Type)
+ 	} else {
+ 		elem = types.Type(field.Type).TypeKind().String()
+ 	}
+@@ -704,6 +707,11 @@
+ 			// it as a JSON string literal (double-encoded). PARSE_JSON turns
+ 			// the bound JSON text into a proper JSON value.
+ 			placeholders = append(placeholders, "PARSE_JSON(?)")
++		} else if col.Type == types.RANGE && col.Mode != types.RepeatedMode {
++			// CloudBurrow patch (cloudburrow/cloudburrow#1492): a RANGE
++			// value is bound as its text, "[start, end)", which the
++			// engine casts.
++			placeholders = append(placeholders, "CAST(? AS "+types.RangeSQLType(string(col.RangeElementType))+")")
+ 		} else {
+ 			placeholders = append(placeholders, "?")
+ 		}
+@@ -831,6 +839,17 @@
+ 			return nil, fmt.Errorf("invalid base64 BYTES value: %w", err)
+ 		}
+ 		return b, nil
++	case types.RANGE:
++		// CloudBurrow patch (cloudburrow/cloudburrow#1492): a RANGE given
++		// as an object of start and end (a JSON load, at any depth) is
++		// bound as its text.
++		if m, ok := v.(map[string]interface{}); ok {
++			if text, ok := types.RangeText(m); ok {
++				return text, nil
++			}
++			return nil, fmt.Errorf("invalid RANGE value %v", m)
++		}
++		return v, nil
+ 	case types.GEOGRAPHY:
+ 		// CloudBurrow patch (cloudburrow/cloudburrow#1138): a GEOGRAPHY
+ 		// given as WKT text inside a RECORD or a REPEATED column is written
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -504,8 +504,14 @@
+ 		return err
+ 	}
+ 	columnToType := map[string]types.Type{}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1492): a RANGE column's
++	// element type, so a CSV load casts its text to the column's type.
++	columnToRange := map[string]types.Type{}
+ 	for _, field := range tableContent.Schema.Fields {
+ 		columnToType[field.Name] = types.Type(field.Type)
++		if field.RangeElementType != nil {
++			columnToRange[field.Name] = types.Type(field.RangeElementType.Type)
++		}
+ 	}
+ 
+ 	sourceFormat := load.SourceFormat
+@@ -528,16 +534,18 @@
+ 				break
+ 			}
+ 			columns = append(columns, &types.Column{
+-				Name: col,
+-				Type: columnToType[col],
++				Name:             col,
++				Type:             columnToType[col],
++				RangeElementType: columnToRange[col],
+ 			})
+ 		}
+ 		if ignoreHeader {
+ 			columns = []*types.Column{}
+ 			for _, field := range tableContent.Schema.Fields {
+ 				columns = append(columns, &types.Column{
+-					Name: field.Name,
+-					Type: types.Type(field.Type),
++					Name:             field.Name,
++					Type:             types.Type(field.Type),
++					RangeElementType: columnToRange[field.Name],
+ 				})
+ 			}
+ 		}

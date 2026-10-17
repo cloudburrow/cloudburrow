@@ -26,6 +26,8 @@ type field struct {
 	// (#957, extracts): int64s, which REST gives as strings.
 	Precision int64String `json:"precision,omitempty"`
 	Scale     int64String `json:"scale,omitempty"`
+	// MaxLength is a parameterized STRING's or BYTES's (#1493).
+	MaxLength int64String `json:"maxLength,omitempty"`
 	// RoundingMode is a NUMERIC's or BIGNUMERIC's (#1401), kept so that a
 	// table made from these fields rounds as its source does.
 	RoundingMode string `json:"roundingMode,omitempty"`

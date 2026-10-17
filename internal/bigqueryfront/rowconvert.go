@@ -155,6 +155,8 @@ func fieldTypeSQL(f field, element bool) (string, string) {
 		t = "STRUCT<" + strings.Join(parts, ", ") + ">"
 	case ddlTypes[u] != "":
 		t = ddlTypes[u]
+	case u == "RANGE" && f.RangeElementType != nil && ddlTypes[canonicalType(f.RangeElementType.Type)] != "": // #1492
+		t = "RANGE<" + ddlTypes[canonicalType(f.RangeElementType.Type)] + ">"
 	default:
 		return "", "CloudBurrow does not write a NULL of type " + strings.ToUpper(f.Type)
 	}
