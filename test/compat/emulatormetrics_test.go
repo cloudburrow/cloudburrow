@@ -127,17 +127,17 @@ func TestBigtableCallsReachMetricsAndTheRequestLog(t *testing.T) {
 	if err := tbl.ReadRows(h.Context(), bigtable.InfiniteRange(""), func(bigtable.Row) bool { return true }); err != nil {
 		t.Fatalf("ReadRows: %v", err)
 	}
-	// A call the front refuses: the session data plane's
-	// GetClientConfiguration (ListBackups, the refused call this used,
-	// is served since #1499). The official client has no method for it,
-	// so it is sent by name.
+	// A call the front refuses itself: the session data plane's
+	// GetClientConfiguration naming no instance, INVALID_ARGUMENT (the
+	// front serves it since #1523; ListBackups, the refused call this
+	// used first, since #1499). Sent by name, with an empty request.
 	conn, err := grpc.NewClient(h.Endpoint(EnvBigtable), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	if err := conn.Invoke(h.Context(), "/google.bigtable.v2.Bigtable/GetClientConfiguration", &emptypb.Empty{}, &emptypb.Empty{}); status.Code(err) != codes.Unimplemented {
-		t.Fatalf("GetClientConfiguration = %v, want UNIMPLEMENTED", err)
+	if err := conn.Invoke(h.Context(), "/google.bigtable.v2.Bigtable/GetClientConfiguration", &emptypb.Empty{}, &emptypb.Empty{}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("GetClientConfiguration = %v, want INVALID_ARGUMENT", err)
 	}
 	ev := waitEvents(t, h, "bigtable", since, "CreateTable", "MutateRow", "ReadRows")
 	name := fmt.Sprintf("projects/%s/instances/%s/tables/%s", h.Project(), bigtableInstance, table)
@@ -147,13 +147,13 @@ func TestBigtableCallsReachMetricsAndTheRequestLog(t *testing.T) {
 	if e := ev["ReadRows"]; e.Detail["stream"] != "true" {
 		t.Errorf("ReadRows recorded %v; want a stream", e.Detail)
 	}
-	// A refused call is answered before its request is read, so it names
-	// no resource, and no project: it is looked for among every project's.
+	// The refused call names no instance, so no resource and no project:
+	// it is looked for among every project's.
 	url := fmt.Sprintf("http://%s/admin/events?service=bigtable&kind=request&limit=1000&since=%s",
 		h.Endpoint(EnvControl), since.UTC().Format(time.RFC3339Nano))
 	if _, raw := adminDo(t, http.MethodGet, url, "", nil); !strings.Contains(raw, `"target":"/google.bigtable.v2.Bigtable/GetClientConfiguration"`) ||
-		!strings.Contains(raw, `"code":"UNIMPLEMENTED"`) {
-		t.Errorf("no UNIMPLEMENTED GetClientConfiguration in /admin/events: %.500s", raw)
+		!strings.Contains(raw, `"code":"INVALID_ARGUMENT"`) {
+		t.Errorf("no INVALID_ARGUMENT GetClientConfiguration in /admin/events: %.500s", raw)
 	}
 	measuredInConsole(t, h, "bigtable", `cloudburrow_requests_total{service="bigtable",method="MutateRow",code="OK"}`)
 }
