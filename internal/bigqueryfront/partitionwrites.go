@@ -156,10 +156,20 @@ func (f front) partitionTable(w http.ResponseWriter, r *http.Request, dataset, b
 
 // scalar runs sql, a query of one INT64 value, through jobs.query.
 func (f front) scalar(r *http.Request, sql string) (int64, string) {
+	got, msg := f.scalars(r, sql, 1)
+	if msg != "" {
+		return 0, msg
+	}
+	return got[0], ""
+}
+
+// scalars runs sql, a query of one row of n INT64 columns, and returns
+// them, or the error's message.
+func (f front) scalars(r *http.Request, sql string, n int) ([]int64, string) {
 	legacy := false
 	body, err := json.Marshal(queryOptions{Query: sql, UseLegacySQL: &legacy})
 	if err != nil {
-		return 0, err.Error()
+		return nil, err.Error()
 	}
 	status, got := f.send(r, http.MethodPost, "/queries", body)
 	var res struct {
@@ -170,16 +180,20 @@ func (f front) scalar(r *http.Request, sql string) (int64, string) {
 		} `json:"rows"`
 	}
 	if status != http.StatusOK {
-		return 0, errorMessage(got, status)
+		return nil, errorMessage(got, status)
 	}
-	if json.Unmarshal(got, &res) != nil || len(res.Rows) != 1 || len(res.Rows[0].F) != 1 {
-		return 0, "could not read the count"
+	if json.Unmarshal(got, &res) != nil || len(res.Rows) != 1 || len(res.Rows[0].F) != n {
+		return nil, "could not read the count"
 	}
-	n, err := strconv.ParseInt(res.Rows[0].F[0].V, 10, 64)
-	if err != nil {
-		return 0, "could not read the count"
+	out := make([]int64, n)
+	for i, c := range res.Rows[0].F {
+		v, err := strconv.ParseInt(c.V, 10, 64)
+		if err != nil {
+			return nil, "could not read the count"
+		}
+		out[i] = v
 	}
-	return n, ""
+	return out, ""
 }
 
 // partitionQueryWrite carries out a query job whose destination is a
