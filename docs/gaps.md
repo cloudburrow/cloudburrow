@@ -30,12 +30,12 @@ tracks it; a closed issue is named only where it says what was built.
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
-| BigQuery | 37 | 17 | 11 | 9 | 0 |
+| BigQuery | 42 | 17 | 14 | 11 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
 | Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **65** | **19** | **26** | **14** | **6** |
+| **Total** | **70** | **19** | **29** | **16** | **6** |
 
 ## Cloud Storage
 
@@ -230,6 +230,12 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | Partition decorators: `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination, a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, and through a partition a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order or a RECORD's fields changed, are 501, none documented by BigQuery (docs read again 2026-10-16, and Google's docs are silent on each, so they stay 501: streaming to a decorator is documented for daily ingestion-time tables only, and schemaUpdateOptions name no rule for these) (#1458) | not documented by Google | S |
 | A table made before the engine had the stream-time column (googlesqlite patch 0030; `CREATE TABLE … AS SELECT` has it since patch 0056, #1458; a temporary table cannot be streamed to) keeps no stream time, so its streamed rows are held from DML only while in the 20-second streaming buffer; a table restored from state saved before #1277 keeps no ingestion time (#1458) | no emulator support (the times were never recorded) | S |
 | `PARTITIONS`' `last_modified_time` is NULL where the engine's change table holds no write (seven days kept), and for an ingestion-time partitioned table whose change table was made before googlesqlite patch 0050 (#1458); region `TABLE_STORAGE` has no physical byte columns, and an older table than 90 days no active or long-term split (#1458) | no emulator support (no compressed sizes; write times kept seven days) | S |
+| Avro loads (built in #1457): a union of several types, a `map`, a recursive record, an array whose items may be null, a `decimal` made STRING by `decimalTargetTypes` and `referenceFileSchemaUri` are 501, as BigQuery does not document how it loads them; zstandard files are 501, as goavro reads null, deflate and snappy only (#1457) | not documented by Google | S |
+| `ORC` loads (no Go module in go.mod reads ORC), `DATASTORE_BACKUP` loads, `hivePartitioningOptions`, `jsonExtension` `GEOJSON` and a manifest `fileSetSpecType` are 501 (#1457) | no emulator support | M |
+| Partition decorators: `tabledata.insertAll` into a partition of a column-partitioned table, `$__UNPARTITIONED__` of an ingestion-time partitioned table as a destination, a `CLONE`, `SNAPSHOT` or `RESTORE` of a partition, and through a partition a NULLABLE or the partitioning column left out without `ALLOW_FIELD_RELAXATION`, columns in another order or a RECORD's fields changed, are 501, none documented by BigQuery (docs read again 2026-10-16: streaming to a decorator is documented for daily ingestion-time tables only, and schemaUpdateOptions name no rule for these) (#1458) | not documented by Google | S |
+| A table made by `CREATE TABLE … AS SELECT`, a temporary table, or one made before the engine had the column keeps no stream time, so its streamed rows are held from DML only while in the 20-second streaming buffer; a table restored from state saved before #1277 keeps no ingestion time (#1458) | no emulator support | S |
+| `PARTITIONS`' `last_modified_time` is NULL for an ingestion-time partitioned table's partitions and where the engine's change table holds no write (seven days kept), and its write times do not follow the front's `clock:advance`; region `TABLE_STORAGE` has no physical byte columns, and an older table than 90 days no active or long-term split (#1458) | no emulator support (no compressed sizes; write times kept seven days) | S |
+| Region-qualified `INFORMATION_SCHEMA.JOBS` has no `job_stages`, `object_storage_stats`, `timeline`, `query_info`, `materialized_view_statistics`, `metadata_cache_statistics`, `search_statistics`, `vector_search_statistics` or `external_service_costs` (#1458) | not documented by Google (what a job without such statistics holds) | S |
 | A script the emulator runs whole (no control flow, no query before its last statement, nothing it refuses together) makes no child jobs; a script's last DML statement has no child of its own, and a `SELECT` child names no destination table (#1459) | no emulator support | M |
 | DML with a `FROM` of several items (#1459) | no emulator support | M |
 | `CREATE SCHEMA` of an existing dataset and `CREATE TABLE … CLONE` later in a multi-statement script (#1459) | no emulator support | M |

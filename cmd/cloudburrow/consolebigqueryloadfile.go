@@ -98,6 +98,9 @@ func (p bigqueryProvider) loadFile(ctx context.Context, project, datasetID, tabl
 	loader := c.Dataset(datasetID).Table(tableID).LoaderFrom(src)
 	loader.WriteDisposition = bigquery.TableWriteDisposition(write)
 	loader.MediaOptions = []googleapi.MediaOption{googleapi.ChunkSize(bigqueryUploadChunk)}
+	if loader.TimePartitioning, loader.Clustering, err = loadTableOptions(values); err != nil {
+		return nil, err
+	}
 	job, err := loader.Run(ctx)
 	if err != nil {
 		return nil, bigqueryRefusal(err)
