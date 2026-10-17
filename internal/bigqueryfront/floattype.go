@@ -231,6 +231,16 @@ func (f front) remakeFloat(r *http.Request, ref tableRef, schema json.RawMessage
 	if json.Unmarshal(schema, &s) != nil || !hasFloat(s.Fields) {
 		return ""
 	}
+	return f.remakeTable(r, ref, schema, nil)
+}
+
+// remakeTable makes ref again with schema and the Table fields extra
+// (#1457, loadtable.go), its rows kept, through a scratch table.
+func (f front) remakeTable(r *http.Request, ref tableRef, schema json.RawMessage, extra map[string]any) string {
+	var s tableSchema
+	if json.Unmarshal(schema, &s) != nil {
+		return "could not read the table's schema"
+	}
 	scratch := tableRef{DatasetID: resultsDataset, TableID: scratchTable()} // scratch.go
 	if err := f.makeTable(r, scratch, schema); err != "" {
 		return err
@@ -240,7 +250,7 @@ func (f front) remakeFloat(r *http.Request, ref tableRef, schema json.RawMessage
 		return err
 	}
 	f.send(r, http.MethodDelete, tablePath(ref.DatasetID, ref.TableID), nil)
-	if err := f.makeTable(r, ref, schema); err != "" {
+	if err := f.makeTableWith(r, ref, schema, extra); err != "" {
 		return err + "; the loaded rows are in " + scratch.DatasetID + "." + scratch.TableID
 	}
 	if err := f.insertSelect(r, ref, []copyTable{{ref: scratch, fields: s.Fields}}); err != "" {
@@ -266,6 +276,14 @@ func loadSucceeded(body []byte) bool {
 // could not make again: the job, rec's answer, fails with why, and
 // jobs.get and jobs.list report it failed (jobFailures).
 func (f front) failLoadedFloat(w http.ResponseWriter, rec *recorder, job jobBody, why string) {
+	f.failLoaded(w, rec, job, "CloudBurrow could not make the loaded table's FLOAT columns 64-bit in "+
+		"the emulator behind it, which makes a detected FLOAT column 32-bit (#1000): "+why)
+}
+
+// failLoaded answers a load whose table the front could not finish: the
+// job, rec's answer, fails with msg, and jobs.get and jobs.list report it
+// failed (jobFailures).
+func (f front) failLoaded(w http.ResponseWriter, rec *recorder, job jobBody, msg string) {
 	resp, ok := decodeMap(rec.body.Bytes())
 	project, id := job.JobReference.ProjectID, job.JobReference.JobID
 	if ref, _ := resp["jobReference"].(map[string]any); ref != nil {
@@ -279,8 +297,7 @@ func (f front) failLoadedFloat(w http.ResponseWriter, rec *recorder, job jobBody
 	if project == "" {
 		project = projectOf(f.base)
 	}
-	e := rowError{Reason: "backendError", Message: "CloudBurrow could not make the loaded table's FLOAT columns 64-bit in " +
-		"the emulator behind it, which makes a detected FLOAT column 32-bit (#1000): " + why}
+	e := rowError{Reason: "backendError", Message: msg}
 	f.failed.add(project, id, e)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, e.Reason, e.Message)
