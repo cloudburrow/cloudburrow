@@ -38,8 +38,10 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/random"
 )
 
-// blankProject is the project every seeded resource belongs to.
-const blankProject = "blank-check"
+// blankProject is the project every seeded resource belongs to, fresh on
+// each run (freshProject) because some of them live in process-wide
+// stores.
+var blankProject = "blank-check"
 
 // emulatorOnly are the screens whose backend is a container image with no
 // in-process equivalent, so this test cannot open their rows. Each is still
@@ -84,6 +86,7 @@ func TestNoDetailShowsABlankProperty(t *testing.T) {
 		t.Skip("the cluster screens are driven through a shell-script kubectl")
 	}
 	ctx := context.Background()
+	blankProject = freshProject("blank-check")
 	d := blankCheckDeps(t)
 
 	providers := consoleProviders(d, clusterMetrics(d.cfg.KubeconfigPath()), console.NewSeries(console.SeriesLimit, nil))
