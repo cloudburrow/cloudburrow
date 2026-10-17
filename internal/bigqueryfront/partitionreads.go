@@ -215,6 +215,14 @@ func (f front) partitionReads(w http.ResponseWriter, r *http.Request, q queryOpt
 		text     string
 	}
 	var edits []edit
+	// The scratch tables of past rows historyRead fills (timetravel.go),
+	// deleted once the query is answered.
+	var scratches []string
+	defer func() {
+		for _, id := range scratches {
+			f.send(r, http.MethodDelete, tablePath(resultsDataset, id), nil)
+		}
+	}()
 	for _, tr := range reads {
 		ref := fmt.Sprintf("%s:%s.%s", project, tr.dataset, tr.table)
 		// FOR SYSTEM_TIME AS OF (#1276).
@@ -237,7 +245,7 @@ func (f front) partitionReads(w http.ResponseWriter, r *http.Request, q queryOpt
 			past, code, msg := f.systemTime(r, q, tr.dataset, ref, m, expr)
 			if code == 0 && past != 0 {
 				var text string
-				if text, code, msg = f.historyRead(r, tr, m, ref, past, expr); code == 0 {
+				if text, code, msg = f.historyRead(r, tr, m, ref, past, expr, &scratches); code == 0 {
 					edits = append(edits, edit{tr.stmt[tr.at].pos, tr.stmt[tr.next-1].end, text})
 				}
 			}

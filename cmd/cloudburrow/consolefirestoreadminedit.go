@@ -242,12 +242,25 @@ func (p firestoreDatabasesProvider) DetailActions(ctx context.Context, project s
 			{Name: "collectionGroup", Label: "Collection ID", Type: "text", Required: true, Pattern: firestoreCollectionPattern},
 			{Name: "field", Label: "Field path", Type: "text", Required: true},
 		}, add...)
-		return append([]console.Action{
+		acts := append([]console.Action{
 			{ID: "editdatabase", Label: "Edit database", Fields: databaseEditFields(d)},
 			{ID: "createindex", Label: "Create index", Fields: createIndexFields()},
 			{ID: "addfield", Label: "Add field override", Fields: add},
 			{ID: "createschedule", Label: "Create backup schedule", Fields: createScheduleFields()},
 		}, firestoreTransferActions()...)
+		if d.DatabaseEdition == adminpb.Database_ENTERPRISE {
+			acts = append(acts,
+				console.Action{ID: "runpipeline", Label: "Run pipeline", Fields: runPipelineFields()},
+				console.Action{ID: "createcreds", Label: "Create user credentials", Fields: createCredsFields()})
+		}
+		return acts
+	}
+	if len(path) == 3 && path[1] == firestoreCredsSegment {
+		uc, err := c.GetUserCreds(ctx, &adminpb.GetUserCredsRequest{Name: db + "/userCreds/" + path[2]})
+		if err != nil {
+			return nil
+		}
+		return credsActions(uc)
 	}
 	if len(path) == 3 {
 		if path[1] == firestoreBackupsSegment {

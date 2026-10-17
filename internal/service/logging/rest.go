@@ -44,11 +44,15 @@ func Routes() []rest.Route { return Transcoder().Routes() }
 // the same set.
 //
 // POST /v2/entries:tail is served beside the transcoder (tailjson.go), and
-// the settings answers are completed by serveSettingsJSON.
+// sink requests carry interceptChildren around it (intercept.go); the
+// settings answers are completed by serveSettingsJSON.
 func NewRESTHandler(register func(grpc.ServiceRegistrar)) http.Handler {
 	t := Transcoder()
 	rec := &tailRecorder{next: t}
 	register(rec)
+	if rec.srv == nil && rec.admin == nil {
+		return t
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if rec.srv != nil && r.Method == http.MethodPost && r.URL.Path == tailJSONPath {
 			rec.srv.serveTailJSON(w, r)
@@ -56,6 +60,9 @@ func NewRESTHandler(register func(grpc.ServiceRegistrar)) http.Handler {
 		}
 		if settingsPathRe.MatchString(r.URL.Path) && (r.Method == http.MethodGet || r.Method == http.MethodPatch) {
 			serveSettingsJSON(t, w, r)
+			return
+		}
+		if serveSinkJSON(rec.admin, t, w, r) { // interceptChildren, intercept.go
 			return
 		}
 		t.ServeHTTP(w, r)

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -117,6 +118,11 @@ func TestRunJobDeliversAtOnce(t *testing.T) {
 	h.mu.Unlock()
 	if hdr.Get("X-CloudScheduler") != "true" || hdr.Get("X-CloudScheduler-JobName") != "every-minute" || hdr.Get("User-Agent") != "Google-Cloud-Scheduler" {
 		t.Errorf("delivery headers = %v", hdr)
+	}
+	// X-CloudScheduler-ScheduleTime is the attempt's time, RFC 3339 in UTC
+	// (#1567).
+	if st, err := time.Parse(time.RFC3339, hdr.Get("X-CloudScheduler-ScheduleTime")); err != nil || st.Location() != time.UTC {
+		t.Errorf("X-CloudScheduler-ScheduleTime = %q (%v), want an RFC 3339 time in UTC", hdr.Get("X-CloudScheduler-ScheduleTime"), err)
 	}
 }
 
@@ -302,5 +308,34 @@ func TestRefusalsAndCRUD(t *testing.T) {
 	}
 	if _, err := c.GetJob(ctx, &schedulerpb.GetJobRequest{Name: j.GetName()}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetJob after delete = %v", err)
+	}
+}
+
+// TestCronRangesStepsAndNames (#1567): a job's schedule_time, through the
+// official client, from unix-cron with steps, ranges, month and day names,
+// in IANA zones, at the fake clock's Thursday 2026-09-24 10:00:30 UTC.
+func TestCronRangesStepsAndNames(t *testing.T) {
+	c, _, _, _ := start(t)
+	ctx := context.Background()
+	for i, tc := range []struct {
+		schedule, zone string
+		want           time.Time
+	}{
+		{"*/15 * * * *", "UTC", time.Date(2026, 9, 24, 10, 15, 0, 0, time.UTC)},
+		{"30 9-17/2 * * MON-FRI", "America/New_York", time.Date(2026, 9, 24, 13, 30, 0, 0, time.UTC)}, // 09:30 EDT
+		{"0 0 1 JAN *", "UTC", time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"0 12 * * SUN", "Asia/Tokyo", time.Date(2026, 9, 27, 3, 0, 0, 0, time.UTC)},             // 12:00 JST
+		{"5,35 10 * SEP,OCT THU", "Europe/London", time.Date(2026, 10, 1, 9, 5, 0, 0, time.UTC)}, // 11:00 BST now: next Thursday, 10:05 BST
+	} {
+		job := httpJob(fmt.Sprintf("cron-%d", i), "http://127.0.0.1:1/")
+		job.Schedule, job.TimeZone = tc.schedule, tc.zone
+		j, err := c.CreateJob(ctx, &schedulerpb.CreateJobRequest{Parent: parent, Job: job})
+		if err != nil {
+			t.Errorf("%q in %s: %v", tc.schedule, tc.zone, err)
+			continue
+		}
+		if got := j.GetScheduleTime().AsTime(); !got.Equal(tc.want) {
+			t.Errorf("%q in %s: schedule time %v, want %v", tc.schedule, tc.zone, got, tc.want)
+		}
 	}
 }

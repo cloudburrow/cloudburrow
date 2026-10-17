@@ -369,6 +369,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
 	d.Actions = append(d.Actions, externalSyncActions(in, externalReplica(ctx, svc, project, in))...)
+	d.Actions = append(d.Actions, demoteActions(in)...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
 	d.Actions = append(d.Actions, storageActions(in)...)
 	if pitr == "On" && strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
@@ -525,12 +526,40 @@ func externalSyncActions(in *sqladminapi.DatabaseInstance, external bool) []cons
 	}
 	mode := console.Field{Name: "syncMode", Label: "Sync mode", Type: "select", Options: []string{"ONLINE", "OFFLINE"},
 		Help: "ONLINE copies the external server's databases and goes on replicating; OFFLINE only copies them (#1524)."}
-	return []console.Action{{ID: "verify-external-sync", Label: "Verify external sync settings", Fields: []console.Field{mode, {
+	fields := []console.Field{mode}
+	if strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
+		// A MySQL replica's migration type (#1570).
+		fields = append(fields, console.Field{Name: "migrationType", Label: "Migration type", Type: "select",
+			Options: []string{"LOGICAL", "PHYSICAL"},
+			Help:    "LOGICAL dumps the external server's databases; PHYSICAL restores a Percona XtraBackup backup of it, from the dumpFilePath folder or taken by the sync."})
+	}
+	return []console.Action{{ID: "verify-external-sync", Label: "Verify external sync settings", Fields: append(fields, console.Field{
 		Name: "verifyConnectionOnly", Label: "Check the connection only", Type: "checkbox",
-		Help: "Only whether the replica's replication user can connect to the external server."}}},
-		{ID: "start-external-sync", Label: "Start external sync", Fields: []console.Field{mode, {Name: "skipVerification",
-			Label: "Skip verification", Type: "checkbox"}},
+		Help: "Only whether the replica's replication user can connect to the external server."})},
+		{ID: "start-external-sync", Label: "Start external sync", Fields: append(append([]console.Field{}, fields...), console.Field{Name: "skipVerification",
+			Label: "Skip verification", Type: "checkbox"}),
 			Confirm: "The external server's databases are copied into this replica, which then replicates from it unless the sync is OFFLINE."}}
+}
+
+// demoteActions is Demote on a standalone MySQL instance (#1524): through
+// instances.demoteMaster, which keeps its data and replicates from the
+// external server, or instances.demote, after which Start external sync
+// copies the server's databases.
+func demoteActions(in *sqladminapi.DatabaseInstance) []console.Action {
+	if in.MasterInstanceName != "" || !strings.HasPrefix(in.DatabaseVersion, "MYSQL_") ||
+		(in.InstanceType != "" && in.InstanceType != "CLOUD_SQL_INSTANCE") || len(in.ReplicaNames) > 0 {
+		return nil
+	}
+	return []console.Action{{ID: "demote", Label: "Demote", Destructive: true, Fields: []console.Field{
+		{Name: "source", Label: "Source representation instance", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,93}[a-z0-9]$",
+			Help: "An ON_PREMISES_INSTANCE recording the external server this instance becomes a replica of."},
+		{Name: "method", Label: "Method", Type: "select", Options: []string{"demoteMaster", "demote"},
+			Help: "demoteMaster keeps this instance's data and replicates from the server by GTID; demote leaves it waiting for Start external sync, which copies the server's databases."},
+		{Name: "username", Label: "Replication user", Type: "text", Help: "demoteMaster: the user on the external server; empty takes the source representation instance's."},
+		{Name: "password", Label: "Replication password", Type: "password"},
+		{Name: "skipGtidCheck", Label: "Skip the GTID consistency check", Type: "checkbox",
+			Help: "demoteMaster: demote even if this instance has transactions the external server has not."}},
+		Confirm: "This instance becomes a read replica of the external server and takes no more writes."}}
 }
 
 // externalReplica reports whether in is a replica of a source
@@ -549,6 +578,15 @@ func externalReplica(ctx context.Context, svc *sqladminapi.Service, project stri
 	}
 	m, err := svc.Instances.Get(project, master).Context(ctx).Do()
 	return err == nil && m.InstanceType == "ON_PREMISES_INSTANCE"
+}
+
+// migrationType is a sync action's migrationType: PHYSICAL, or "" for
+// LOGICAL, the default.
+func migrationType(v map[string]string) string {
+	if v["migrationType"] == "PHYSICAL" {
+		return "PHYSICAL"
+	}
+	return ""
 }
 
 // syncMode is a sync action's syncMode, ONLINE by default.
@@ -734,7 +772,7 @@ func (p cloudSQLInstancesProvider) ActAtResult(ctx context.Context, project stri
 			return nil, err
 		}
 		res, err := svc.Projects.Instances.VerifyExternalSyncSettings(project, path[0],
-			&sqladminapi.SqlInstancesVerifyExternalSyncSettingsRequest{SyncMode: syncMode(v),
+			&sqladminapi.SqlInstancesVerifyExternalSyncSettingsRequest{SyncMode: syncMode(v), MigrationType: migrationType(v),
 				VerifyConnectionOnly: v["verifyConnectionOnly"] == "true"}).Context(ctx).Do()
 		if err != nil {
 			return nil, sqlAPIError(err)
@@ -845,7 +883,21 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 		}
 	case "start-external-sync":
 		_, err = svc.Projects.Instances.StartExternalSync(project, name, &sqladminapi.SqlInstancesStartExternalSyncRequest{
-			SyncMode: syncMode(v), SkipVerification: v["skipVerification"] == "true"}).Context(ctx).Do()
+			SyncMode: syncMode(v), MigrationType: migrationType(v), SkipVerification: v["skipVerification"] == "true"}).Context(ctx).Do()
+	case "demote":
+		src := strings.TrimSpace(v["source"])
+		if v["method"] == "demote" {
+			_, err = svc.Instances.Demote(project, name, &sqladminapi.InstancesDemoteRequest{
+				DemoteContext: &sqladminapi.DemoteContext{SourceRepresentativeInstanceName: src}}).Context(ctx).Do()
+			break
+		}
+		dc := &sqladminapi.DemoteMasterContext{MasterInstanceName: src, VerifyGtidConsistency: v["skipGtidCheck"] != "true",
+			ForceSendFields: []string{"VerifyGtidConsistency"}}
+		if u := strings.TrimSpace(v["username"]); u != "" {
+			dc.ReplicaConfiguration = &sqladminapi.DemoteMasterConfiguration{MysqlReplicaConfiguration: &sqladminapi.DemoteMasterMySqlReplicaConfiguration{
+				Username: u, Password: v["password"]}}
+		}
+		_, err = svc.Instances.DemoteMaster(project, name, &sqladminapi.InstancesDemoteMasterRequest{DemoteMasterContext: dc}).Context(ctx).Do()
 	case "promote-replica":
 		_, err = svc.Instances.PromoteReplica(project, name).Context(ctx).Do()
 	case "stop-replica":

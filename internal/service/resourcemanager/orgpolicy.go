@@ -27,6 +27,7 @@ package resourcemanager
 // child's allowed values (only those).
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -138,6 +139,21 @@ func policyEtag(raw []byte) string {
 	return base64.StdEncoding.EncodeToString(sum[:8])
 }
 
+// sameEtag reports whether given names the etag cur. The v1 etag is a
+// bytes field, so a client that decodes it may send it back in the
+// URL-safe alphabet: gcloud's apitools does, turning a "/" into "_".
+func sameEtag(given, cur string) bool {
+	if given == cur {
+		return true
+	}
+	a, err := base64.URLEncoding.DecodeString(strings.NewReplacer("+", "-", "/", "_").Replace(given))
+	if err != nil {
+		return false
+	}
+	b, err := base64.StdEncoding.DecodeString(cur)
+	return err == nil && bytes.Equal(a, b)
+}
+
 // OrgPolicy is the policy stored for constraint on resource (a project ID,
 // projects/..., folders/... or organizations/...), or an unset one.
 func (r *Registry) OrgPolicy(resource, constraint string) (*crmv1.OrgPolicy, error) {
@@ -219,7 +235,7 @@ func (r *Registry) SetOrgPolicy(resource string, p *crmv1.OrgPolicy) (*crmv1.Org
 	if err != nil {
 		return nil, err
 	}
-	if p.Etag != "" && p.Etag != cur.Etag {
+	if p.Etag != "" && !sameEtag(p.Etag, cur.Etag) {
 		return nil, apierror.Aborted("policy %s: etag %q is not the current one; read the policy and try again", p.Constraint, p.Etag)
 	}
 	out := *p
@@ -261,7 +277,7 @@ func (r *Registry) ClearOrgPolicy(resource, constraint, etag string) error {
 	if err != nil {
 		return err
 	}
-	if etag != "" && etag != cur.Etag {
+	if etag != "" && !sameEtag(etag, cur.Etag) {
 		return apierror.Aborted("policy %s: etag %q is not the current one; read the policy and try again", constraint, etag)
 	}
 	if err := r.st.Delete(scope + strings.TrimPrefix(constraint, "constraints/")); err != nil && !errors.Is(err, store.ErrNotFound) {

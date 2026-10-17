@@ -657,7 +657,9 @@ func (s configServer) ListSinks(_ context.Context, req *loggingpb.ListSinksReque
 	}
 	resp := &loggingpb.ListSinksResponse{NextPageToken: next}
 	for _, m := range page {
-		resp.Sinks = append(resp.Sinks, m.(*loggingpb.LogSink))
+		sk := m.(*loggingpb.LogSink)
+		markIntercept(sk, s.a.intercepts(project, sk.GetName()))
+		resp.Sinks = append(resp.Sinks, sk)
 	}
 	return resp, nil
 }
@@ -671,7 +673,9 @@ func (s configServer) GetSink(_ context.Context, req *loggingpb.GetSinkRequest) 
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	return m.(*loggingpb.LogSink), nil
+	sk := m.(*loggingpb.LogSink)
+	markIntercept(sk, s.a.intercepts(project, id))
+	return sk, nil
 }
 
 // stampSink fills a sink's output-only fields. writer_identity is the
@@ -698,7 +702,7 @@ func (a *Admin) stampSink(p parent, sk *loggingpb.LogSink, old *loggingpb.LogSin
 	}
 }
 
-func (s configServer) CreateSink(_ context.Context, req *loggingpb.CreateSinkRequest) (*loggingpb.LogSink, error) {
+func (s configServer) CreateSink(ctx context.Context, req *loggingpb.CreateSinkRequest) (*loggingpb.LogSink, error) {
 	project, err := s.a.parseParent(req.GetParent())
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -710,6 +714,10 @@ func (s configServer) CreateSink(_ context.Context, req *loggingpb.CreateSinkReq
 	if err := s.a.checkSink(project, sk); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	intercept, _ := requestIntercept(ctx, req.GetSink())
+	if err := checkIntercept(project, sk, intercept); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
 	if _, err := s.a.get(kindSink, project, sk.GetName()); err == nil {
@@ -719,13 +727,18 @@ func (s configServer) CreateSink(_ context.Context, req *loggingpb.CreateSinkReq
 	if err := s.a.put(kindSink, project, sk.GetName(), sk); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	if err := s.a.putIntercept(project, sk.GetName(), intercept); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	markIntercept(sk, intercept)
 	return sk, nil
 }
 
 // UpdateSink applies the update_mask. An empty mask is
 // destination,filter,include_children, as the proto documents for backwards
-// compatibility.
-func (s configServer) UpdateSink(_ context.Context, req *loggingpb.UpdateSinkRequest) (*loggingpb.LogSink, error) {
+// compatibility. intercept_children, which loggingpb lacks, is applied
+// when the mask names it (intercept.go).
+func (s configServer) UpdateSink(ctx context.Context, req *loggingpb.UpdateSinkRequest) (*loggingpb.LogSink, error) {
 	project, id, err := s.a.parseName(kindSink, "sink_name", req.GetSinkName())
 	if err != nil {
 		return nil, apierror.Wrap(err)
@@ -737,6 +750,8 @@ func (s configServer) UpdateSink(_ context.Context, req *loggingpb.UpdateSinkReq
 	if len(mask.GetPaths()) == 0 {
 		mask = &fieldmaskpb.FieldMask{Paths: []string{"destination", "filter", "include_children"}}
 	}
+	paths, named := withoutInterceptPath(mask.GetPaths())
+	mask = &fieldmaskpb.FieldMask{Paths: paths}
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
 	o, err := s.a.get(kindSink, project, id)
@@ -751,10 +766,21 @@ func (s configServer) UpdateSink(_ context.Context, req *loggingpb.UpdateSinkReq
 	if err := s.a.checkSink(project, sk); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	intercept := s.a.intercepts(project, id)
+	if named {
+		intercept, _ = requestIntercept(ctx, req.GetSink())
+	}
+	if err := checkIntercept(project, sk, intercept); err != nil {
+		return nil, apierror.Wrap(err)
+	}
 	s.a.stampSink(project, sk, old)
 	if err := s.a.put(kindSink, project, id, sk); err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	if err := s.a.putIntercept(project, id, intercept); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	markIntercept(sk, intercept)
 	return sk, nil
 }
 
@@ -766,6 +792,9 @@ func (s configServer) DeleteSink(_ context.Context, req *loggingpb.DeleteSinkReq
 	s.a.mu.Lock()
 	defer s.a.mu.Unlock()
 	if err := s.a.delete(kindSink, project, id); err != nil {
+		return nil, apierror.Wrap(err)
+	}
+	if err := s.a.putIntercept(project, id, false); err != nil {
 		return nil, apierror.Wrap(err)
 	}
 	return &emptypb.Empty{}, nil
@@ -952,7 +981,8 @@ func (a *Admin) sinkRoutes(p parent, children bool) []sinkRoute {
 			continue
 		}
 		r := sinkRoute{match: match, sink: kindSink.name(p, sk.GetName()), parent: p, dest: dest,
-			partitioned: sk.GetBigqueryOptions().GetUsePartitionedTables()}
+			partitioned: sk.GetBigqueryOptions().GetUsePartitionedTables(),
+			intercept:   children && a.intercepts(p, sk.GetName())}
 		var ex []pred
 		for _, e := range sk.GetExclusions() {
 			if c, err := compile(e.GetFilter()); err == nil && !e.GetDisabled() {
