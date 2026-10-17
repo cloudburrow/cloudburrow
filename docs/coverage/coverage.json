@@ -3575,57 +3575,57 @@
     "Key": "resourcemanagerv1",
     "Title": "Resource Manager v1 REST (projects, org policies; liens on v1 and v3)",
     "counts": {
-      "Refused": 12,
-      "Verified": 26
+      "Verified": 38
     },
     "rows": [
       {
         "method": "cloudresourcemanager.folders.clearOrgPolicy",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:203 TestGcloudFolderAndOrganizationOrgPolicies",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:271 TestTerraformFolderAndOrganizationPolicy",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.folders.getEffectiveOrgPolicy",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:203 TestGcloudFolderAndOrganizationOrgPolicies",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.folders.getOrgPolicy",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:203 TestGcloudFolderAndOrganizationOrgPolicies",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:271 TestTerraformFolderAndOrganizationPolicy",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.folders.listAvailableOrgPolicyConstraints",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.folders.listOrgPolicies",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.folders.setOrgPolicy",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:203 TestGcloudFolderAndOrganizationOrgPolicies",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:271 TestTerraformFolderAndOrganizationPolicy",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.liens.create",
@@ -3664,11 +3664,12 @@
       },
       {
         "method": "cloudresourcemanager.organizations.clearOrgPolicy",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:203 TestGcloudFolderAndOrganizationOrgPolicies",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:271 TestTerraformFolderAndOrganizationPolicy",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.organizations.get",
@@ -3679,11 +3680,10 @@
       },
       {
         "method": "cloudresourcemanager.organizations.getEffectiveOrgPolicy",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.organizations.getIamPolicy",
@@ -3695,27 +3695,27 @@
       },
       {
         "method": "cloudresourcemanager.organizations.getOrgPolicy",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:203 TestGcloudFolderAndOrganizationOrgPolicies",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:271 TestTerraformFolderAndOrganizationPolicy",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.organizations.listAvailableOrgPolicyConstraints",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.organizations.listOrgPolicies",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:203 TestGcloudFolderAndOrganizationOrgPolicies",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.organizations.search",
@@ -3734,11 +3734,12 @@
       },
       {
         "method": "cloudresourcemanager.organizations.setOrgPolicy",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerv1_test.go:136 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/resourcemanagerv1orgpolicy_test.go:203 TestGcloudFolderAndOrganizationOrgPolicies",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:271 TestTerraformFolderAndOrganizationPolicy",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
+        ]
       },
       {
         "method": "cloudresourcemanager.organizations.testIamPermissions",
@@ -3761,6 +3762,7 @@
         "tests": [
           "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
           "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy",
           "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
         ]
       },
@@ -3778,7 +3780,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
-          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
         ]
       },
       {
@@ -3786,14 +3789,16 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:309 TestGcloudFoldersAndOrganizations",
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
         ]
       },
       {
         "method": "cloudresourcemanager.projects.getEffectiveOrgPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy"
         ]
       },
       {
@@ -3854,6 +3859,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy",
+          "test/compat/resourcemanagerv1orgpolicy_test.go:43 TestResourceManagerV1FolderAndOrganizationOrgPolicy",
           "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
         ]
       },
