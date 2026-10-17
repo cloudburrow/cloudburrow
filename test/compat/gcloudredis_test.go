@@ -142,6 +142,7 @@ func TestGcloudRedisInTransitEncryption(t *testing.T) {
 // client made in its region, and describe prints the key back.
 func TestGcloudRedisCustomerManagedKey(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envCMEKKMS, EnvKMS)
 	c, _ := memorystoreAdminClient(t, h)
 	g := newGcloudSession(t, h)
 	key := memorystoreKey(t, h, g.project)

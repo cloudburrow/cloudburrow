@@ -40,6 +40,7 @@ import (
 // deletes it.
 func TestLoggingLogAnalyticsLinkedDataset(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envSinkLogging, EnvLogging)
 	ctx := h.Context()
 	bq, project := bigqueryClient(t, h)
 	cfg, err := vlogging.NewConfigClient(ctx, loggingClientOptions(h)...)

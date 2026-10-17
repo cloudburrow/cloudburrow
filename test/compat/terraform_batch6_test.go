@@ -476,6 +476,8 @@ resource "google_pubsub_subscription" "s" {
 // covers: google.cloud.kms.v1.KeyManagementService/Decrypt, google.cloud.kms.v1.KeyManagementService/GetCryptoKey, google.cloud.secretmanager.v1.SecretManagerService/AccessSecretVersion, google.cloud.secretmanager.v1.SecretManagerService/GetSecret, storage.objects.get
 func TestTerraformDataSources(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_KMS", EnvKMS)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	h.Endpoint(EnvKMS)
 	h.Endpoint(EnvSecrets)
 	h.Endpoint(EnvStorage)

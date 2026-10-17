@@ -34,6 +34,7 @@ import (
 // changed and read back, and a KMS key is refused UNIMPLEMENTED.
 func TestLoggingLinksSettingsAndAsyncBuckets(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envSinkLogging, EnvLogging)
 	ctx := h.Context()
 	c, err := vlogging.NewConfigClient(ctx, loggingClientOptions(h)...)
 	if err != nil {

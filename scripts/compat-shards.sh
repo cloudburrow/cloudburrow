@@ -118,6 +118,8 @@ compat_shard() {
       # (#1395) make their folder with it, which every instance serves, as
       # LOGGING_RESOURCEMANAGER, so they run here and nowhere else (CI run
       # 38910752877: in storage gcloud had no logging override).
+      # Cloud KMS Autokey's folder and project tests (#1568) make their
+      # folder with it too.
       TEST_VARS+=,KMS,LOGGING,LOGGING_RESOURCEMANAGER
       # Cloud KMS (#418): a key with ENABLED, DISABLED and
       # DESTROY_SCHEDULED versions and a ciphertext.
@@ -151,8 +153,16 @@ compat_shard() {
       # only with it (ADR-0004), so TestCloudBuildArbitraryStepsFilterAndRetry
       # and TestGcloudBuildsStepsAndList run here; the refusal without it is
       # TestCloudBuildHostStepsOff, which skips on this instance.
-      FIXTURES=(--cloudbuild-host-steps)
-      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,MYSQL_PASSWORD,BIGQUERY_PROJECT,PREDICTION ;;
+      # --appengine-url (#1506): Cloud Tasks and Cloud Scheduler deliver App
+      # Engine targets to the stand-in app TestTasksAppEngineDelivery and
+      # TestSchedulerAppEngineDelivery (with RUN_SCHEDULER) serve there, as
+      # APPENGINE_URL; the 404s without it are the storage shard's (#1568).
+      # The tests that need Cloud KMS, Cloud Storage or Pub/Sub beside
+      # Secret Manager or Cloud Run read RUN_KMS, RUN_STORAGE and RUN_PUBSUB
+      # (#1568): the customer-managed and regional secrets, Terraform's data
+      # sources, Cloud Storage volumes and Pub/Sub build triggers.
+      FIXTURES=(--cloudbuild-host-steps --appengine-url http://127.0.0.1:18506)
+      TEST_VARS+=,RUN,SECRETS,TASKS,RUN_STORAGE,RUN_PUBSUB,RUN_KMS,RUN_SCHEDULER,RUN_LOGGING,RUN_BIGQUERY,RUN_SQLADMIN,RUN_RESOURCEMANAGER,RUN_SERVICEUSAGE,MYSQL_PASSWORD,BIGQUERY_PROJECT,PREDICTION,APPENGINE_URL ;;
     acceptance)
       # The acceptance workflow uploads, publishes and runs a Cloud Run
       # worker; test/k8s needs the cluster and Knative.
@@ -161,7 +171,7 @@ compat_shard() {
       # pubsub for TestEmulatorsBehindAFrontRefuseOtherPods (#1114), which
       # dials both emulators from a pod; PUBSUB is not exported, so the
       # Pub/Sub tests stay in the storage shard.
-      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,storage,pubsub,logging
+      SERVICES=spanner,datastore,firestore,bigtable,bigquery,memorystore,storage,pubsub,logging,kms
       # logging for the sinks that deliver to Cloud Storage, Pub/Sub and
       # BigQuery (#1404), as SINK_LOGGING, SINK_STORAGE and SINK_PUBSUB, so
       # those suites stay in their shards; the copies to a Cloud Storage
@@ -179,7 +189,12 @@ compat_shard() {
       # Resource Manager as BIGQUERY_RESOURCEMANAGER (#1392): only
       # BigQuery's JOBS_BY_FOLDER test reads it, to move the project into a
       # folder, so the Resource Manager tests stay in storage.
-      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE
+      # The Logging tests that need BigQuery (linked datasets, Log Analytics)
+      # or Cloud Storage (the copies) read SINK_LOGGING and SINK_STORAGE, and
+      # the copies from a folder LOGGING_RESOURCEMANAGER (#1568). Cloud KMS
+      # as CMEK_KMS, for Memorystore's customer-managed keys (#1568), so the
+      # KMS suite stays in served.
+      TEST_VARS+=,LOGGING_RESOURCEMANAGER,CMEK_KMS,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE
       # A created Memorystore instance follows the mode too (#1302), with RDB
       # persistence as well (#1384), and Redis clusters and Valkey instances
       # with and without persistence_config (#1557).
@@ -200,8 +215,12 @@ compat_shard() {
       # is a secret version (TestCloudSQLInstanceActionsThroughThePage);
       # SECRETS is not in TEST_VARS, so the Secret Manager tests stay in
       # the storage and run shards.
-      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager
-      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR
+      # Cloud KMS as CMEK_KMS, for a backup vault's customer-managed key;
+      # Secret Manager as CLOUDSQL_SECRETS, for the Data API's password; and
+      # Cloud Storage as NOPUBSUB_STORAGE, on the one instance that serves
+      # no Pub/Sub, for the notifications' refusal (#1568).
+      SERVICES=cloudsql,cloudsql-mysql,backupdr,storage,secretmanager,kms
+      TEST_VARS+=,MYSQL,MYSQL_PASSWORD,CLOUDSQL,SQLADMIN,BACKUPDR,CMEK_KMS,CLOUDSQL_SECRETS,NOPUBSUB_STORAGE
       # Cloud SQL for PostgreSQL (#701): a table with a row.
       SETUP_TESTS="TestCloudSQLRestartSetup"
       PROBE_TESTS="TestCloudSQLMySQLAcrossRestart TestCloudSQLAcrossRestart"

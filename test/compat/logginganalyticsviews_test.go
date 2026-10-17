@@ -183,6 +183,7 @@ func (f *linkFixture) expect(when, view, want string) {
 // Log Analytics, so CreateLink on it is FAILED_PRECONDITION.
 func TestLoggingLinkedDatasetViewsRetentionAndDeleteLog(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envSinkLogging, EnvLogging)
 	f := newLinkFixture(t, h, "lav")
 	ctx := f.ctx
 	f.write("old", ltype.LogSeverity_ERROR, time.Now().Add(-3*24*time.Hour))
@@ -260,6 +261,7 @@ func TestLoggingLinkedDatasetViewsRetentionAndDeleteLog(t *testing.T) {
 // read-only (403).
 func TestLoggingLinkedDatasetAcrossRestarts(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, envSinkLogging, EnvLogging)
 	// The fixture first: it skips where BigQuery is not served, before the
 	// restarter looks for the emulator's pod (main run 38946612957).
 	f := newLinkFixture(t, h, "lar")

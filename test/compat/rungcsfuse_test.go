@@ -48,6 +48,7 @@ func fuseObject(ctx context.Context, c *storage.Client, bucket, name string) (st
 //     gcsfuse elsewhere is refused INVALID_ARGUMENT.
 func TestRunCloudStorageFUSEVolumes(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	h.Endpoint(EnvRun)
 	sc := storageClient(t, h)
 	c := runClient(t, h)
@@ -183,6 +184,7 @@ func fuseBucket(t *testing.T, h *Harness, sc *storage.Client, prefix string) str
 // back.
 func TestGcloudRunDeployCloudStorageVolume(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	h.Endpoint(EnvRun)
 	sc := storageClient(t, h)
 	bucket := fuseBucket(t, h, sc, "gcloud-fuse")
@@ -212,6 +214,7 @@ func TestGcloudRunDeployCloudStorageVolume(t *testing.T) {
 // clean; destroy removes it.
 func TestTerraformRunCloudStorageVolume(t *testing.T) {
 	h := New(t)
+	shardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	svcs := runClient(t, h)
 	sc := storageClient(t, h)
 	m := newTFModule(t)

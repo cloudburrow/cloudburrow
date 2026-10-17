@@ -27,10 +27,6 @@ var compatEnvExceptions = map[string]string{
 	// fetches unless asked (`up -local-ai-embeddings`); set it to run
 	// TestEmbeddingGemmaThroughTheOfficialSDK where the model is present.
 	"CLOUDBURROW_TEST_EMBEDDINGS": "opt-in switch: needs the downloaded embeddings model and an onnx build",
-	// The stand-in App Engine app (#1506): the test serves it, so it is the
-	// --appengine-url the instance was started with, chosen by whoever
-	// started it; no instance reports one the test could listen on.
-	"CLOUDBURROW_TEST_APPENGINE_URL": "opt-in: the --appengine-url the instance was started with, which the test listens on",
 	// Restart probes: which half of a probe a run is, and where the probe
 	// keeps what it wrote. ci.yml sets them around a stop and an up.
 	"CLOUDBURROW_TEST_KMS_PROBE":                "restart probe fixture file",
@@ -290,7 +286,7 @@ func runCompatEnv(t *testing.T, envFile, statusFile string, extra ...string) (in
 // the source ci.yml's shards used to read it from inline.
 func TestCompatEnvFromARecordedInstance(t *testing.T) {
 	dir, envFile, statusFile := compatEnvFixture(t, nil)
-	flags := []string{"--", "--name", "ct", "--state-dir", filepath.Dir(dir), "--cors-allow-origin", "https://app.test:8443,https://b.test"}
+	flags := []string{"--", "--name", "ct", "--state-dir", filepath.Dir(dir), "--cors-allow-origin", "https://app.test:8443,https://b.test", "--appengine-url", "http://127.0.0.1:18506"}
 	code, got, stderr := runCompatEnv(t, envFile, statusFile, append([]string{"--strict"}, flags...)...)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
@@ -304,7 +300,7 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"CONSOLE":                  "127.0.0.1:9090",
 		"ADMIN_TOKEN":              "fixture-admin-token",
 		"CLI":                      "/opt/cb/bin/cloudburrow",
-		"CLI_ARGS":                 "--name ct --state-dir " + filepath.Dir(dir) + " --cors-allow-origin https://app.test:8443,https://b.test",
+		"CLI_ARGS":                 "--name ct --state-dir " + filepath.Dir(dir) + " --cors-allow-origin https://app.test:8443,https://b.test --appengine-url http://127.0.0.1:18506",
 		"STORAGE":                  "http://127.0.0.1:50003",
 		"CORS_ORIGIN":              "https://app.test:8443",
 		"PUBSUB":                   "127.0.0.1:50004",
@@ -353,6 +349,10 @@ func TestCompatEnvFromARecordedInstance(t *testing.T) {
 		"SINK_STORAGE":             "http://127.0.0.1:50003",
 		"SINK_PUBSUB":              "127.0.0.1:50004",
 		"FIRESTORE_STORAGE":        "http://127.0.0.1:50003",
+		"CMEK_KMS":                 "127.0.0.1:9018",
+		"CLOUDSQL_SECRETS":         "127.0.0.1:9006",
+		"NOPUBSUB_STORAGE":         "http://127.0.0.1:50003",
+		"APPENGINE_URL":            "http://127.0.0.1:18506",
 	}
 	list := compatEnvList(t)
 	if len(want) != len(list) {

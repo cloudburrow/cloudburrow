@@ -56,6 +56,7 @@ ALL=(
   CREDENTIALS KUBECONFIG CLUSTER CONTROL METADATA CONSOLE ADMIN_TOKEN CLI CLI_ARGS
   STORAGE CORS_ORIGIN PUBSUB TASKS SECRETS SCHEDULER RUN KMS LOGGING RESOURCEMANAGER SERVICEUSAGE
   RUN_STORAGE RUN_PUBSUB RUN_KMS RUN_SCHEDULER RUN_LOGGING RUN_BIGQUERY RUN_SQLADMIN TASKS_LOGGING BIGQUERY_RESOURCEMANAGER LOGGING_RESOURCEMANAGER RUN_RESOURCEMANAGER RUN_SERVICEUSAGE SINK_LOGGING SINK_STORAGE SINK_PUBSUB FIRESTORE_STORAGE
+  CMEK_KMS CLOUDSQL_SECRETS NOPUBSUB_STORAGE APPENGINE_URL
   SPANNER SPANNER_REST DATASTORE FIRESTORE BIGTABLE MEMORYSTORE MEMORYSTORE_ADMIN MEMORYSTORE_PROJECT MYSQL MYSQL_PASSWORD CLOUDSQL SQLADMIN CLOUDSQL_CONNECTOR BACKUPDR
   BIGQUERY BIGQUERY_STORAGE BIGQUERY_PROJECT
   LOCALAI PREDICTION GCLOUD TOFU
@@ -186,6 +187,21 @@ cors_origin() {
   VALUE=${v%%,*}
 }
 
+# flag_value <name>: the value the instance was started with --<name> for,
+# from the flags; empty when it was given none.
+flag_value() {
+  local i v=""
+  for ((i = 0; i < ${#FLAGS[@]}; i++)); do
+    case "${FLAGS[$i]}" in
+      "--$1"|"-$1") v=${FLAGS[$((i + 1))]:-} ;;
+      "--$1="*|"-$1="*) v=${FLAGS[$i]#*=} ;;
+      *) continue ;;
+    esac
+    break
+  done
+  VALUE=$v
+}
+
 # The tests run the CLI with CLOUDBURROW_TEST_CLI_ARGS from test/compat, not
 # from here, so a relative state directory would name another one.
 warn_relative_state_dir() {
@@ -264,16 +280,21 @@ value() {
     # cloudburrow command, such as `cloudburrow terraform`.
     CLI) VALUE=$cli ;;
     CLI_ARGS) cli_args; warn_relative_state_dir ;;
-    STORAGE|RUN_STORAGE|SINK_STORAGE|FIRESTORE_STORAGE) from_env '.STORAGE_EMULATOR_HOST // empty' ;;
+    # NOPUBSUB_STORAGE, CMEK_KMS and CLOUDSQL_SECRETS: the shards' names for a
+    # service beside their own (#1568), as RUN_STORAGE and the rest.
+    STORAGE|RUN_STORAGE|SINK_STORAGE|FIRESTORE_STORAGE|NOPUBSUB_STORAGE) from_env '.STORAGE_EMULATOR_HOST // empty' ;;
     # An origin the storage server answers beyond loopback ones (#677).
     CORS_ORIGIN) cors_origin ;;
+    # Where Cloud Tasks and Cloud Scheduler deliver App Engine targets
+    # (#1506), from the flags; empty when the instance was given none.
+    APPENGINE_URL) flag_value appengine-url ;;
     PUBSUB|RUN_PUBSUB|SINK_PUBSUB) from_env '.PUBSUB_EMULATOR_HOST // empty' ;;
     # Cloud Tasks, Secret Manager and Cloud Run have no emulator variable.
     TASKS) from_runtime '.endpoints.tasks // empty' ;;
-    SECRETS) from_runtime '.endpoints.secretmanager // empty' ;;
+    SECRETS|CLOUDSQL_SECRETS) from_runtime '.endpoints.secretmanager // empty' ;;
     RUN) from_runtime '.endpoints.run // empty' ;;
     SCHEDULER|RUN_SCHEDULER) from_env '.CLOUDBURROW_SCHEDULER_ENDPOINT // empty' ;;
-    KMS|RUN_KMS) from_env '.CLOUDBURROW_KMS_ENDPOINT // empty' ;;
+    KMS|RUN_KMS|CMEK_KMS) from_env '.CLOUDBURROW_KMS_ENDPOINT // empty' ;;
     LOGGING|RUN_LOGGING|TASKS_LOGGING|SINK_LOGGING) from_env '.CLOUDBURROW_LOGGING_ENDPOINT // empty' ;;
     # BIGQUERY_RESOURCEMANAGER: the same, for BigQuery's JOBS_BY_FOLDER test
     # in the emulators shard, and LOGGING_RESOURCEMANAGER, for the Logging
