@@ -1,0 +1,208 @@
+CloudBurrow patch 55 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1456). Needs 0047.
+
+The bug: with a default time zone (patch 0047, BigQuery's project option
+default_time_zone), a string literal the analyzer coerces to a TIMESTAMP
+(ts > '2020-01-01 00:00:00', ts = '2019-12-31 22:00:00') was still read
+in UTC: 0047 gave the zone to TIMESTAMP literals and casts written in the
+text, but a coerced string is typed only by the analyzer, whose zone is
+UTC (go-googlesql can build no other), and it folds the string into a
+TIMESTAMP literal there. BigQuery reads it in the default zone ("if no
+time zone is specified, the default time zone is used").
+
+The patch gives the formatter the query text for a query with a default
+zone, and a TIMESTAMP literal whose text in the query (its parse
+location) is a quoted string with no zone is written as the TIMESTAMP of
+its wall time in that zone. A string with a zone, a TIMESTAMP '...'
+literal (0047's) and a query with no default zone are as before.
+coerced_timestamp_literal_test.go has each form.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -1793,6 +1793,9 @@
+ 			ctx = a.context(ctx, funcMap, tvfMap)
+ 			ctx = withSystemVars(ctx, conn.systemVars)
+ 			ctx = withConn(ctx, conn)
++			if zoned { // CloudBurrow patch (cloudburrow/cloudburrow#1456), coerced_timestamp_literal.go
++				ctx = withQueryText(ctx, query)
++			}
+ 			action, err := a.newStmtAction(ctx, query, stmtArgs, stmtNode)
+ 			if err != nil {
+ 				return nil, err
+--- a/internal/formatter.go
++++ b/internal/formatter.go
+@@ -226,6 +226,11 @@
+ 	if n.node == nil {
+ 		return "", nil
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1456): a string coerced
++	// to a TIMESTAMP is read in the default zone (coerced_timestamp_literal.go).
++	if lit, ok := zonedCoercedTimestamp(ctx, n.node); ok {
++		return lit, nil
++	}
+ 	return literalFromGoogleSQLValue(*m1(n.node.Value()))
+ }
+ 
+--- /dev/null
++++ b/internal/coerced_timestamp_literal.go
+@@ -0,0 +1,96 @@
++package internal
++
++import (
++	"context"
++	"regexp"
++	"strings"
++	"time"
++
++	googlesql "github.com/goccy/go-googlesql"
++
++	"github.com/goccy/googlesqlite/internal/value"
++)
++
++// CloudBurrow patch (cloudburrow/cloudburrow#1456): a string literal the
++// analyzer coerces to a TIMESTAMP (ts > '2020-01-01 00:00:00', a TIMESTAMP
++// column compared with a string, an INSERT of a string into one) is read in
++// the query's default time zone (WithDefaultTimeZone), as BigQuery reads a
++// TIMESTAMP with no zone ("if no time zone is specified, the default time
++// zone is used"). Patch 0047 gave the zone to TIMESTAMP literals and casts
++// written in the text; a coerced string is typed only by the analyzer,
++// whose own zone is UTC (go-googlesql can build no other), so it folded
++// the string to a TIMESTAMP in UTC. The formatter now finds such a
++// literal by its text in the query (its parse location): a quoted string
++// with no zone, whose wall time the literal holds in UTC, and writes the
++// TIMESTAMP of that wall time in the zone.
++
++type queryTextKey struct{}
++
++// withQueryText gives ctx the text the statement was analyzed from.
++func withQueryText(ctx context.Context, query string) context.Context {
++	return context.WithValue(ctx, queryTextKey{}, query)
++}
++
++func queryText(ctx context.Context) string {
++	q, _ := ctx.Value(queryTextKey{}).(string)
++	return q
++}
++
++// naiveTimestampString is the text of a TIMESTAMP with no zone: a date,
++// with or without a time.
++var naiveTimestampString = regexp.MustCompile(`^\d{4}-\d{1,2}-\d{1,2}([ Tt]\d{1,2}:\d{1,2}(:\d{1,2}(\.\d{1,9})?)?)?$`)
++
++// zonedCoercedTimestamp returns the literal n written in ctx's default
++// zone when it is a string coerced to a TIMESTAMP (above); ok is false
++// for any other literal.
++func zonedCoercedTimestamp(ctx context.Context, n *googlesql.ResolvedLiteral) (string, bool) {
++	zone := DefaultTimeZone(ctx)
++	query := queryText(ctx)
++	if zone == "" || query == "" || n == nil {
++		return "", false
++	}
++	v, err := n.Value()
++	if err != nil || v == nil {
++		return "", false
++	}
++	if kind, err := v.TypeKind(); err != nil || kind != googlesql.TypeKindTypeTimestamp {
++		return "", false
++	}
++	if null, err := v.IsNull(); err != nil || null {
++		return "", false
++	}
++	loc, err := n.GetParseLocationOrNULL()
++	if err != nil || loc == nil {
++		return "", false
++	}
++	text, err := loc.GetTextFrom(query)
++	if err != nil {
++		return "", false
++	}
++	text = strings.TrimSpace(text)
++	if len(text) < 2 || (text[0] != '\'' && text[0] != '"') || text[len(text)-1] != text[0] {
++		return "", false
++	}
++	if !naiveTimestampString.MatchString(strings.TrimSpace(text[1 : len(text)-1])) {
++		return "", false
++	}
++	z, err := value.ToLocation(zone)
++	if err != nil {
++		return "", false
++	}
++	got, err := valueFromGoogleSQLValue(*v)
++	if err != nil {
++		return "", false
++	}
++	ts, ok := got.(value.TimestampValue)
++	if !ok {
++		return "", false
++	}
++	w := time.Time(ts).UTC()
++	zoned := time.Date(w.Year(), w.Month(), w.Day(), w.Hour(), w.Minute(), w.Second(), w.Nanosecond(), z)
++	lit, err := literalFromValue(value.TimestampValue(zoned))
++	if err != nil {
++		return "", false
++	}
++	return lit, true
++}
+--- /dev/null
++++ b/coerced_timestamp_literal_test.go
+@@ -0,0 +1,55 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// A string literal the analyzer coerces to a TIMESTAMP is read in the
++// query's default time zone; one with a zone, and a query with no default
++// zone, read as before (cloudburrow/cloudburrow#1456).
++func TestCoercedTimestampLiteralInTheDefaultZone(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=coerced_timestamp_literal")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	for _, q := range []string{
++		"CREATE TABLE t (ts TIMESTAMP)",
++		"INSERT INTO t VALUES (TIMESTAMP '2020-01-01 03:00:00+00')",
++	} {
++		if _, err := db.Exec(q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	count := func(ctx context.Context, where string) int64 {
++		t.Helper()
++		var n int64
++		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM t WHERE "+where).Scan(&n); err != nil {
++			t.Fatalf("%s: %v", where, err)
++		}
++		return n
++	}
++	ny := googlesqlite.WithDefaultTimeZone(context.Background(), "America/New_York")
++	for _, c := range []struct {
++		ctx   context.Context
++		where string
++		want  int64
++	}{
++		{ny, "ts = '2019-12-31 22:00:00'", 1},
++		{ny, "ts > '2020-01-01 00:00:00'", 0},
++		{ny, "ts < '2020-01-01'", 1},
++		{ny, "ts = \"2019-12-31T22:00:00\"", 1},
++		{ny, "ts = '2020-01-01 03:00:00+00'", 1},
++		{ny, "ts = TIMESTAMP '2019-12-31 22:00:00'", 1},
++		{context.Background(), "ts > '2020-01-01 00:00:00'", 1},
++		{context.Background(), "ts = '2020-01-01 03:00:00'", 1},
++	} {
++		if got := count(c.ctx, c.where); got != c.want {
++			t.Errorf("%s (zoned %v): %d rows, want %d", c.where, c.ctx == ny, got, c.want)
++		}
++	}
++}

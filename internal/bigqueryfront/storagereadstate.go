@@ -86,7 +86,7 @@ func (s *storageRead) keepStreams(path string, logf func(string, ...any)) {
 	case err != nil:
 		logf("bigquery front: read %s: %v; starting without the read streams it kept", path, err)
 	}
-	now := time.Now()
+	now := s.records.nowTime() // the instance's clock, as the engine's expire_time (#1513)
 	var kept []savedReadStream
 	sc := bufio.NewScanner(bytes.NewReader(b))
 	sc.Buffer(nil, 64<<20)

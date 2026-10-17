@@ -79,17 +79,38 @@ func TestBigQueryLoadFormBecomesTheLoadsSource(t *testing.T) {
 	if err != nil || src.SourceFormat != bigquery.Parquet || src.MaxBadRecords != 2 {
 		t.Errorf("a Parquet load gives %+v, %v", src, err)
 	}
+	src, err = loadSource(with(map[string]string{"format": "AVRO", "useAvroLogicalTypes": "true"}))
+	if err != nil || src.SourceFormat != bigquery.Avro || src.AvroOptions == nil || !src.AvroOptions.UseAvroLogicalTypes {
+		t.Errorf("an Avro load gives %+v, %v", src, err)
+	}
+	// The table a load makes (#1457).
+	if tp, cl, err := loadTableOptions(map[string]string{"partitionType": "MONTH", "partitionField": " d ",
+		"clusteringFields": "a, b,"}); err != nil || tp == nil || tp.Type != bigquery.MonthPartitioningType || tp.Field != "d" ||
+		cl == nil || !reflect.DeepEqual(cl.Fields, []string{"a", "b"}) {
+		t.Errorf("partitioning and clustering give %+v %+v %v", tp, cl, err)
+	}
+	if tp, cl, err := loadTableOptions(map[string]string{"partitionType": "NONE"}); tp != nil || cl != nil || err != nil {
+		t.Errorf("none gives %+v %+v %v", tp, cl, err)
+	}
+	for values, why := range map[string]string{"partitionField=d": "needs a partitioning unit", "partitionType=WEEK": `not "WEEK"`,
+		"clusteringFields=a,b,c,d,e": "up to four"} {
+		k, v, _ := strings.Cut(values, "=")
+		if _, _, err := loadTableOptions(map[string]string{k: v}); err == nil || !strings.Contains(err.Error(), why) {
+			t.Errorf("%s = %v, want %q", values, err, why)
+		}
+	}
 	for values, why := range map[*map[string]string]string{
 		ptr(with(map[string]string{"format": "NEWLINE_DELIMITED_JSON", "fieldDelimiter": "|", "allowJaggedRows": "true"})): "allowJaggedRows, fieldDelimiter applies to CSV only",
-		ptr(with(map[string]string{"format": "AVRO"})):                                                                     `not "AVRO"`,
-		ptr(with(map[string]string{"skipLeadingRows": "-1"})):                                                              "whole number",
-		ptr(with(map[string]string{"maxBadRecords": "two"})):                                                               "whole number",
-		ptr(with(map[string]string{"encoding": "UTF-7"})):                                                                  `not "UTF-7"`,
-		ptr(with(map[string]string{"format": "PARQUET", "timeZone": "UTC"})):                                               "timeZone applies to CSV only",
-		ptr(with(map[string]string{"uris": " \n "})):                                                                       "at least one gs:// URI",
-		ptr(with(map[string]string{"schema": "not json"})):                                                                 "JSON array",
-		ptr(with(map[string]string{"sourceColumnMatch": "WHATEVER"})):                                                      `not "WHATEVER"`,
-		ptr(with(map[string]string{"format": "PARQUET", "quote": "'"})):                                                    "quote applies to CSV only",
+		ptr(with(map[string]string{"format": "ORC"})):                                    `not "ORC"`,
+		ptr(with(map[string]string{"format": "PARQUET", "useAvroLogicalTypes": "true"})): "useAvroLogicalTypes applies to Avro only",
+		ptr(with(map[string]string{"skipLeadingRows": "-1"})):                            "whole number",
+		ptr(with(map[string]string{"maxBadRecords": "two"})):                             "whole number",
+		ptr(with(map[string]string{"encoding": "UTF-7"})):                                `not "UTF-7"`,
+		ptr(with(map[string]string{"format": "PARQUET", "timeZone": "UTC"})):             "timeZone applies to CSV only",
+		ptr(with(map[string]string{"uris": " \n "})):                                     "at least one gs:// URI",
+		ptr(with(map[string]string{"schema": "not json"})):                               "JSON array",
+		ptr(with(map[string]string{"sourceColumnMatch": "WHATEVER"})):                    `not "WHATEVER"`,
+		ptr(with(map[string]string{"format": "PARQUET", "quote": "'"})):                  "quote applies to CSV only",
 	} {
 		if _, err := loadSource(*values); err == nil || !strings.Contains(err.Error(), why) {
 			t.Errorf("%v = %v, want %q", *values, err, why)

@@ -35,8 +35,16 @@ func TestColumnDescriptions(t *testing.T) {
 		`{"fields":[{"description":"field","name":"f","type":"INTEGER"}],"name":"s","type":"RECORD"}]}` {
 		t.Errorf("schema %s", got)
 	}
+	// A column's data_policies (#1456): kept; one not a policy's
+	// {'name': ...} is 400. A STRUCT field's stays 501.
+	if d, msg, ok := parseDDLOptions("CREATE TABLE ds.t (a STRING OPTIONS (data_policies = [\"{'name':'p.region-us.dp'}\"]))"); !ok || msg != "" ||
+		len(d.decimals) != 1 || len(d.decimals[0].dataPolicies) != 1 {
+		t.Errorf("data_policies: %+v %q %v", d.decimals, msg, ok)
+	}
+	if d, _, _ := parseDDLOptions("CREATE TABLE ds.t (a STRING OPTIONS (data_policies = ['x']))"); !strings.Contains(d.invalid, "data_policies") {
+		t.Errorf("data_policies of a bare name: invalid %q", d.invalid)
+	}
 	for _, bad := range []string{
-		"CREATE TABLE ds.t (a STRING OPTIONS (data_policies = ['x']))",
 		"CREATE TABLE ds.t (s STRUCT<a STRING OPTIONS (data_policies = ['x'])>)",
 	} {
 		if _, msg, ok := parseDDLOptions(bad); !ok || !strings.Contains(msg, "data_policies") {

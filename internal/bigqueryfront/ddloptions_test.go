@@ -23,7 +23,7 @@ func TestParseDDLOptions(t *testing.T) {
 		{sql: "CREATE VIEW ds.v OPTIONS(expiration_timestamp=TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)) AS SELECT 1", ok: true, exp: "TIMESTAMP_ADD(CURRENT_TIMESTAMP(), INTERVAL 1 DAY)", view: true},
 		{sql: "CREATE TABLE ds.t LIKE ds.src OPTIONS(description='liked')", ok: true, desc: "liked"},
 		{sql: "ALTER VIEW IF EXISTS ds.v SET OPTIONS(friendly_name='n')", ok: true, friendly: "n", alter: true, view: true},
-		{sql: "CREATE TABLE ds.t OPTIONS(enable_fine_grained_mutations=true, description='d')", ok: true, desc: "d", msg: "enable_fine_grained_mutations"},
+		{sql: "CREATE TABLE ds.t OPTIONS(not_an_option=true, description='d')", ok: true, desc: "d", msg: "not_an_option"},
 		{sql: "CREATE TABLE ds.t OPTIONS(description=CONCAT('a','b'))", ok: true, msg: "string literal"},
 		{sql: "CREATE TABLE ds.t AS SELECT 1 AS x", ok: false},
 		{sql: "CREATE TABLE ds.t AS SELECT * FROM ML.PREDICT(MODEL m, TABLE t, STRUCT() AS OPTIONS)", ok: false},

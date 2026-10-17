@@ -19,7 +19,7 @@ import (
 // rows counted; PARTITIONS' last_modified_time is "the most recent time
 // that data was written to the partition" and TABLE_STORAGE's
 // storage_last_modified_time the table's, the engine's transaction time
-// (bounded by its CURRENT_TIMESTAMP before and after), and a write to one partition moves only its time. JOBS
+// (bounded by the instance clock before and after), and a write to one partition moves only its time. JOBS
 // has bi_engine_statistics, session_info, continuous_query_info and
 // ml_statistics, NULL for a query job outside a session.
 // Measured first: PARTITIONS and TABLE_STORAGE had no byte columns or
@@ -42,16 +42,12 @@ func TestBigQueryPartitionsBytesAndWriteTimes(t *testing.T) {
 		ts, _ := v.(time.Time)
 		return ts
 	}
-	// The write times are the engine's transaction times, which do not
-	// follow the front's clock (clock:advance moves the front's only), so
-	// the bounds are the engine's CURRENT_TIMESTAMP, in microseconds.
+	// The write times are the engine's transaction times, which follow
+	// the instance clock since #1487, so the bounds are the front's clock
+	// (advanceBigQueryClock by 0 reads it).
 	engineNow := func() time.Time {
 		t.Helper()
-		_, rows, err := infoSchemaRead(ctx, c, "SELECT CURRENT_TIMESTAMP()", false)
-		if err != nil || len(rows) != 1 {
-			t.Fatalf("CURRENT_TIMESTAMP(): %v, %v", rows, err)
-		}
-		return at(rows[0][0])
+		return advanceBigQueryClock(t, h, 0)
 	}
 	within := func(what string, got, from, to time.Time) {
 		t.Helper()

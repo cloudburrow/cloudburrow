@@ -1,0 +1,110 @@
+CloudBurrow patch 56 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1458). Applies after patch 0050; needs patch
+0030.
+
+Patch 0030 gave a table made by CREATE TABLE with a column list the
+pseudo-column _PARTITION_STREAMED, the time CloudBurrow's front streamed
+a row, which DML reads to refuse a row streamed in the last 30 minutes;
+a table made by CREATE TABLE ... AS SELECT got none, so its streamed
+rows were held from DML only while in the streaming buffer. It now gets
+the column too, NULL on the rows the SELECT gives (none of them was
+streamed); not a temporary table, which tabledata.insertAll cannot
+stream to, nor CREATE TABLE IF NOT EXISTS, which may name a table made
+without it. ctas_streamed_at_column_test.go fails without the patch and
+passes with it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/spec.go
++++ b/internal/spec.go
+@@ -938,10 +938,22 @@
+ 		)
+ 	}
+ 	now := clock.Now() // CloudBurrow patch (#1487): the front's clock
+-	return &TableSpec{
+-		IsTemp:     resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
++	// CloudBurrow patch (cloudburrow/cloudburrow#1458): the table gets the
++	// pseudo-column of the time a row was streamed, as one made by CREATE
++	// TABLE with a column list does (withStreamedAtColumn), NULL on each
++	// row the SELECT gives; not a temporary table, nor CREATE TABLE IF NOT
++	// EXISTS, which may name a table made without it.
++	isTemp := resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp
++	ifNotExists := m1(stmt.CreateMode()) == googlesql.ResolvedCreateStatementEnums_CreateModeCreateIfNotExists
++	columns := newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList()))
++	if with := withStreamedAtColumn(columns, isTemp || ifNotExists); len(with) > len(columns) {
++		columns = with
++		outputColumns = append(outputColumns, "NULL AS `"+streamedAtColumn+"`")
++	}
++	return &TableSpec{
++		IsTemp:     isTemp,
+ 		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
+-		Columns:    newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
++		Columns:    columns,
+ 		PrimaryKey: newPrimaryKey(m1(stmt.PrimaryKey())),
+ 		CreateMode: m1(stmt.CreateMode()),
+ 		Query:      fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(outputColumns, ","), query),
+--- /dev/null
++++ b/ctas_streamed_at_column_test.go
+@@ -0,0 +1,58 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestCreateTableAsSelectStreamedAtColumn is CloudBurrow's regression
++// test of its patch 0056 (cloudburrow/cloudburrow#1458): a table made by
++// CREATE TABLE ... AS SELECT gets the pseudo-column _PARTITION_STREAMED,
++// as one made with a column list does (patch 0030): NULL on the rows the
++// SELECT gave, left out of SELECT *, and an INSERT may give it; a
++// temporary table and CREATE TABLE IF NOT EXISTS get none.
++func TestCreateTableAsSelectStreamedAtColumn(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	exec := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	exec("CREATE TABLE `p.d.ctas` AS SELECT 1 AS id, 'a' AS s")
++	exec("INSERT INTO `p.d.ctas` (id, s, _PARTITION_STREAMED) VALUES (2, 'b', TIMESTAMP '2026-01-01 00:00:00+00')")
++	rows, err := db.QueryContext(ctx, "SELECT * FROM `p.d.ctas`")
++	if err != nil {
++		t.Fatal(err)
++	}
++	cols, _ := rows.Columns()
++	rows.Close()
++	if strings.Join(cols, ",") != "id,s" {
++		t.Errorf("SELECT * columns = %v, want [id s]", cols)
++	}
++	var got string
++	if err := db.QueryRowContext(ctx, "SELECT STRING_AGG(FORMAT('%d:%s', id, IF(_PARTITION_STREAMED IS NULL, 'true', 'false')), ',' ORDER BY id) FROM `p.d.ctas`").Scan(&got); err != nil {
++		t.Fatal(err)
++	}
++	if got != "1:true,2:false" {
++		t.Errorf("_PARTITION_STREAMED IS NULL by id = %s, want 1:true,2:false", got)
++	}
++	exec("CREATE OR REPLACE TABLE `p.d.ctas` AS SELECT 3 AS id")
++	if err := db.QueryRowContext(ctx, "SELECT FORMAT('%d:%s', id, IF(_PARTITION_STREAMED IS NULL, 'true', 'false')) FROM `p.d.ctas`").Scan(&got); err != nil || got != "3:true" {
++		t.Errorf("CREATE OR REPLACE ... AS SELECT: %s (%v), want 3:true", got, err)
++	}
++	exec("CREATE TABLE IF NOT EXISTS `p.d.ine` AS SELECT 1 AS id")
++	if _, err := db.QueryContext(ctx, "SELECT _PARTITION_STREAMED FROM `p.d.ine`"); err == nil {
++		t.Error("CREATE TABLE IF NOT EXISTS ... AS SELECT has _PARTITION_STREAMED")
++	}
++}
