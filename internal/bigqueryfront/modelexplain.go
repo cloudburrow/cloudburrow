@@ -327,6 +327,10 @@ func sqlTypeName(typ string) string {
 func (f front) explainSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall) (string, int, string) {
 	t := md.Trained
 	typ := md.Options.ModelType
+	if isDNN(typ) {
+		return "", 501, "Not implemented here: ML." + c.fn + " of a " + typ + " model: its integrated gradients attributions " +
+			"(integrated_gradients_num_steps) are not carried out. ML.PREDICT, ML.EVALUATE and ML.TRAINING_INFO serve it. Nothing was run."
+	}
 	if typ != "LINEAR_REG" && typ != "LOGISTIC_REG" && !isTreeModel(typ) {
 		return "", 400, "ML." + c.fn + " is not supported for model type " + typ
 	}
