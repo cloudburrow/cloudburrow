@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // embeddingModel is the one embedding model served: a community ONNX
@@ -89,4 +90,86 @@ func TestStudioManagesLocalModelsAndTestsEmbeddings(t *testing.T) {
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q) !== null`, model+` button[data-action="unload"]`))
 	p.navigate("/ai/playground")
 	p.waitFor(fmt.Sprintf(`document.querySelector(%q)?.children[3]?.textContent === "Loaded"`, row))
+}
+
+// multimodalModel is the local CLIP model (#1454): a community ONNX
+// conversion of OpenAI's CLIP, NOT a Google model.
+const multimodalModel = "clip-vit-base-patch32-onnx-community"
+
+// TestEmbeddingsScreenEmbedsAnImage (#1454), on the same -tags onnx instance
+// as the test above: the CLIP model is downloaded (the pinned, checksummed
+// fetch) and loaded through the Local models actions, and the Embeddings
+// screen's image and text card embeds a red square chosen as a file with two
+// captions, showing "a red square" closer to it than "a blue square".
+func TestEmbeddingsScreenEmbedsAnImage(t *testing.T) {
+	needService(t, "ai-local")
+	needService(t, "ai-embed")
+	state := func() (st string, loaded bool, bytes int64) {
+		_, body := consoleDo(t, http.MethodGet, "/api/ai/local-models", "")
+		var list struct {
+			Models []struct {
+				ID, State string
+				Loaded    bool
+				Bytes     int64
+			}
+		}
+		_ = json.Unmarshal([]byte(body), &list)
+		for _, m := range list.Models {
+			if m.ID == multimodalModel {
+				return m.State, m.Loaded, m.Bytes
+			}
+		}
+		t.Fatalf("%s is not on the Local models page: %s", multimodalModel, body)
+		return
+	}
+	st, loaded, size := state()
+	if st != "downloaded" {
+		if code, body := consoleDo(t, http.MethodPost, "/api/ai/local-models/"+multimodalModel+"/download",
+			fmt.Sprintf(`{"confirmBytes":%d}`, size)); code >= 300 {
+			t.Fatalf("download = %d %s", code, body)
+		}
+		deadline := time.Now().Add(15 * time.Minute)
+		for st != "downloaded" && time.Now().Before(deadline) {
+			time.Sleep(2 * time.Second)
+			st, loaded, _ = state()
+		}
+	}
+	if !loaded {
+		if code, body := consoleDo(t, http.MethodPost, "/api/ai/local-models/"+multimodalModel+"/load", "{}"); code != http.StatusOK {
+			t.Fatalf("load = %d %s", code, body)
+		}
+	}
+
+	p := open(t)
+	p.navigate("/ai/embeddings")
+	p.waitFor(`document.querySelector("#emb-mm-file") !== null`)
+	// A 64x64 red PNG, drawn on a canvas and set as the chosen file.
+	var ok bool
+	p.eval(`(() => {
+	  const c = document.createElement("canvas"); c.width = 64; c.height = 64;
+	  const g = c.getContext("2d"); g.fillStyle = "rgb(220,20,20)"; g.fillRect(0, 0, 64, 64);
+	  const bin = atob(c.toDataURL("image/png").split(",")[1]);
+	  const bytes = new Uint8Array(bin.length);
+	  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+	  const dt = new DataTransfer();
+	  dt.items.add(new File([bytes], "red.png", { type: "image/png" }));
+	  document.querySelector("#emb-mm-file").files = dt.files;
+	  return true;
+	})()`, &ok)
+	p.setField("#emb-mm-texts", "a red square\na blue square")
+	p.clickText("button", "Embed image and captions")
+	p.waitFor(`document.querySelectorAll("#emb-mm-results tbody tr").length === 2 || /\[error\]/.test(document.querySelector("#emb-mm-result").textContent)`)
+	var cos []string
+	p.eval(`[...document.querySelectorAll("#emb-mm-results td[data-cosine]")].map((td) => td.dataset.cosine)`, &cos)
+	if len(cos) != 2 {
+		var text string
+		p.eval(`document.querySelector("#emb-mm-result").textContent`, &text)
+		t.Fatalf("the image and text card shows %v: %s", cos, text)
+	}
+	var red, blue float64
+	fmt.Sscan(cos[0], &red)
+	fmt.Sscan(cos[1], &blue)
+	if red <= blue {
+		t.Errorf("cosine to \"a red square\" %v, to \"a blue square\" %v; want the matching caption closer", red, blue)
+	}
 }

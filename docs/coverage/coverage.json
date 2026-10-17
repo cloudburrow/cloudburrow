@@ -4276,7 +4276,8 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/EmbedContent",
         "status": "Verified",
         "tests": [
-          "test/compat/embedcontent_test.go:34 TestEmbedContentThroughThePredictionClient"
+          "test/compat/embedcontent_test.go:34 TestEmbedContentThroughThePredictionClient",
+          "test/compat/multimodal_test.go:94 TestMultimodalEmbeddingsThroughThePredictionClient"
         ]
       },
       {
@@ -4298,6 +4299,7 @@
         "method": "google.cloud.aiplatform.v1.PredictionService/Predict",
         "status": "Verified",
         "tests": [
+          "test/compat/multimodal_test.go:94 TestMultimodalEmbeddingsThroughThePredictionClient",
           "test/compat/predictiongrpc_test.go:63 TestPredictionClientReachesACustomEndpoint"
         ]
       },

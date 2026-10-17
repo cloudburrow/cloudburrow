@@ -47,6 +47,21 @@
 > - Measured against the real model on 2026-10-15 and 2026-10-16: see the Local AI section of
 >   [compatibility.md](compatibility.md#local-ai).
 >
+> **Multimodal (#1454).** A second pinned model, `clip-vit-base-patch32-onnx-community`, is a
+> **community** ONNX int8 conversion (`Xenova/clip-vit-base-patch32` at revision
+> `d15189d7028b43f1d3e65039190477f6af591c2a`: `onnx/text_model_quantized.onnx`,
+> `onnx/vision_model_quantized.onnx`, `tokenizer.json`, ~156 MB, each with its SHA-256) of
+> OpenAI's CLIP ViT-B/32 — **not a Google model**. Its text and image encoders share one
+> 512-dimensional space. It is not fetched at startup: download and load it on Local models
+> (or through `/admin/local-models`) in the same `-tags onnx` build. It serves
+> `multimodalembedding`'s `:predict` shape (`text`, `image.bytesBase64Encoded` or
+> `image.gcsUri` from this instance's Cloud Storage, `parameters.dimension` 512/256/128) and
+> `EmbedContent` with text parts or one image part (`inline_data`, or `file_data` with a
+> `gs://` URI). Video, audio and PDF parts, and 1408 dimensions, are `UNIMPLEMENTED`: CLIP has
+> no such encoders, and no vector is made up. Vertex AI → Embeddings has an Image and text
+> card that embeds an image file or `gs://` object with captions and shows each caption's
+> cosine similarity to the image.
+>
 > Everything below records why the official LiteRT route is still blocked.
 
 Issue: [#41](https://github.com/cloudburrow/cloudburrow/issues/41) · Investigated 2026-09-21

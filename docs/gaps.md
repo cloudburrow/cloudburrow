@@ -172,7 +172,7 @@ models only; Sampled Shapley, the custom-container method, is served) (#1454).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are `INVALID_ARGUMENT`, because the one embedding model served (EmbeddingGemma) is text-only, as Google's text-only `gemini-embedding-001` is; multimodal input needs a multimodal model (Google's `gemini-embedding-2`) run locally: an image, video, audio and PDF encoder sharing one vector space, which no local model here provides (#1454) | no emulator support (one text-only model) | L |
+| Multimodal `EmbedContent` and `:predict` (#1454) are served from a local CLIP model (text and images, inline or `gs://`), but `TestMultimodalEmbeddingsThroughThePredictionClient` and the Embeddings screen's image test have not been run: they need a `-tags onnx` build with ONNX Runtime ≥ 1.29; video, audio and PDF parts, and 1408 dimensions, are `UNIMPLEMENTED` (CLIP has no such encoders) | not yet run against the official SDK; no local video, audio or PDF encoder | M |
 
 ## BigQuery
 
