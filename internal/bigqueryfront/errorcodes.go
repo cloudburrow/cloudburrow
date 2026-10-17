@@ -90,17 +90,39 @@ var grpcStatus = map[int]string{
 }
 
 // jobErrors returns next, answering jobs.query, jobs.insert and
-// jobs.getQueryResults as above; failed are the jobs the front failed,
-// from which a dry run's is dropped.
-func jobErrors(next http.Handler, failed *jobFailures) http.Handler {
+// jobs.getQueryResults as above, and giving the engine's errors of those,
+// jobs.get and jobs.list BigQuery's reasons and messages (#1582,
+// engineerrors.go); failed are the jobs the front failed, from which a
+// dry run's is dropped. engine is the emulator, settings the projects'
+// options.
+func jobErrors(next, engine http.Handler, settings *projectOptions, failed *jobFailures) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.EscapedPath()
-		project, dry := "", false
+		project, dry, all := "", false, false
+		ec := &engineContext{r: r, engine: engine, settings: settings, location: r.URL.Query().Get("location")}
+		var queryResults []string // jobs.getQueryResults: the route's match
 		switch m := jobsRoute.FindStringSubmatch(path); {
 		case m != nil && r.Method == http.MethodPost:
 			project = projectOf("/" + m[2])
-			dry = m[3] == "jobs" && !strings.HasPrefix(path, "/upload/") && dryRun(r, true)
-		case r.Method == http.MethodGet && jobRoute.MatchString(path) && jobRoute.FindStringSubmatch(path)[3] == "queries":
+			ec.prefix, ec.project = m[1], project
+			insert := m[3] == "jobs"
+			dry = insert && !strings.HasPrefix(path, "/upload/") && dryRun(r, true)
+			all = insert && !strings.HasPrefix(path, "/upload/")
+			if r.Header.Get("Content-Encoding") == "" && !strings.HasPrefix(path, "/upload/") {
+				if b, err := readBody(r); err == nil {
+					ec.fromRequest(b, !insert)
+				}
+			}
+		case m != nil && r.Method == http.MethodGet && m[3] == "jobs": // jobs.list
+			ec.prefix, ec.project, all = m[1], projectOf("/"+m[2]), true
+		case r.Method == http.MethodGet && jobRoute.MatchString(path):
+			jm := jobRoute.FindStringSubmatch(path)
+			ec.prefix, ec.project = jm[1], projectOf("/"+jm[2])
+			if jm[3] == "queries" {
+				queryResults = jm
+			} else {
+				all = true // jobs.get
+			}
 		default:
 			next.ServeHTTP(w, r)
 			return
@@ -118,17 +140,26 @@ func jobErrors(next http.Handler, failed *jobFailures) http.Handler {
 				}
 			}
 		}
-		ew := &errorWriter{w: w, all: dry}
+		ew := &errorWriter{w: w, all: all || dry}
 		next.ServeHTTP(ew, r)
 		if ew.rec == nil {
 			return
 		}
 		rec := ew.rec
+		if rec.status >= 400 {
+			if queryResults != nil && needsJob(rec) {
+				ec.fromJobOf(next, queryResults)
+			}
+			ec.mapErrorAnswer(rec)
+		} else if !dry {
+			ec.mapJobs(rec)
+		}
 		if dry && rec.status == http.StatusOK {
 			var job struct {
 				JobReference struct {
 					ProjectID string `json:"projectId"`
 					JobID     string `json:"jobId"`
+					Location  string `json:"location"`
 				} `json:"jobReference"`
 				Status struct {
 					ErrorResult *rowError `json:"errorResult"`
@@ -145,6 +176,8 @@ func jobErrors(next http.Handler, failed *jobFailures) http.Handler {
 				if e.Reason == "" {
 					e.Reason = "invalidQuery"
 				}
+				ec.fromJob(map[string]any{"jobReference": map[string]any{"location": job.JobReference.Location}})
+				e, _ = ec.mapError(e) // #1582, engineerrors.go
 				writeError(w, reasonStatus(e.Reason, http.StatusBadRequest), e.Reason, e.Message)
 				return
 			}

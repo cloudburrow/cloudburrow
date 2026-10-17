@@ -47,7 +47,7 @@ func TestJobErrors(t *testing.T) {
 			writeJSON(w, http.StatusOK, map[string]any{"rows": []any{}})
 		}
 	})
-	h := jobErrors(next, failed)
+	h := jobErrors(next, next, nil, failed)
 	do := func(method, path, body string) (int, map[string]any) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))

@@ -1,0 +1,104 @@
+CloudBurrow patch 71 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1582).
+
+A syntax error was reported without its position ("failed to parse
+statement: Syntax error: Unexpected identifier \"blah\""), where an
+analysis error ends with it ("[at 1:15]"): the script parser's options
+have no error message mode. The statement that failed is read again by
+AnalyzeNextStatement, whose errors are written in the analyzer's one-line
+mode with the position in the whole query, and that error is taken when
+it is the same one with the position after it.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License (third_party/bigquery-emulator/licenses/googlesqlite.LICENSE).
+This patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/analyzer.go
++++ b/internal/analyzer.go
+@@ -1323,6 +1323,32 @@
+ 		return true
+ 	}
+ 	return false
++}
++
++// locatedSyntaxError is CloudBurrow patch 71 (cloudburrow/cloudburrow#1582):
++// ParseNextScriptStatement reports a syntax error without its position
++// ("Syntax error: Unexpected identifier \"blah\""), where an analysis
++// error ends with it ("[at 1:15]"): the parser options have no error
++// message mode, and ParseScript's error message options fail a RET_CHECK
++// through the WebAssembly bridge. So the statement that failed, at byte
++// pos of input, is read again by AnalyzeNextStatement, whose errors are
++// written in the analyzer's mode, with the position in the whole input;
++// its error is taken when it is the same error with the position after
++// it, else err is kept (a script statement, which only the script parser
++// reads).
++func (a *Analyzer) locatedSyntaxError(input string, pos int32, err error) error {
++	if !strings.HasPrefix(err.Error(), "Syntax error") {
++		return err
++	}
++	loc, _ := googlesql.NewParseResumeLocationFromString(input)
++	if loc == nil || loc.SetBytePosition(pos) != nil {
++		return err
++	}
++	_, located := googlesql.AnalyzeNextStatement(loc, a.opt, a.catalog.catalog, tf())
++	if located == nil || !strings.HasPrefix(located.Error(), err.Error()+" [at ") {
++		return err
++	}
++	return located
+ }
+ 
+ func (a *Analyzer) parseScript(query string) (*parsedScript, error) {
+@@ -1350,9 +1376,11 @@
+ 	input, _ := loc.Input()
+ 	inputLen := int32(len(input))
+ 	for {
++		start, _ := loc.BytePosition()
+ 		out, err := googlesql.ParseNextScriptStatement(loc, parserOpts)
+ 		if err != nil {
+-			return nil, fmt.Errorf("failed to parse statement: %w", err)
++			// CloudBurrow patch (cloudburrow/cloudburrow#1582): with its position.
++			return nil, fmt.Errorf("failed to parse statement: %w", a.locatedSyntaxError(input, start, err))
+ 		}
+ 		if out == nil {
+ 			break
+--- /dev/null
++++ b/syntax_error_position_test.go
+@@ -0,0 +1,37 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"strings"
++	"testing"
++)
++
++// TestSyntaxErrorPosition is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1582): a syntax error was reported without its
++// position ("Syntax error: Unexpected identifier \"blah\""), where an
++// analysis error ends with it ("[at 1:15]"); BigQuery gives a syntax
++// error's position too. It is the position in the whole query, a later
++// statement's too.
++func TestSyntaxErrorPosition(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=syntax_error_position")
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { db.Close() })
++	ctx := context.Background()
++	for _, tc := range []struct{ query, want string }{
++		{"blah blah broken", `Syntax error: Unexpected identifier "blah" [at 1:1]`},
++		{"SELECT 1 FROM", "Syntax error: Unexpected end of statement [at 1:14]"},
++		{"SELECT 1;\nSELECT FROM x", "Syntax error: SELECT list must not be empty [at 2:8]"},
++	} {
++		_, err := db.ExecContext(ctx, tc.query)
++		if err == nil {
++			t.Errorf("%q: no error", tc.query)
++			continue
++		}
++		if !strings.HasSuffix(err.Error(), "failed to parse statement: "+tc.want) {
++			t.Errorf("%q: got %q, want it to end %q", tc.query, err, tc.want)
++		}
++	}
++}
