@@ -94,8 +94,11 @@ func TestRESTAdmin(t *testing.T) {
 	if tb, err := svc.Projects.Instances.Tables.Get(inst + "/tables/rest-table").Context(ctx).Do(); err != nil || len(tb.ColumnFamilies) != 1 {
 		t.Errorf("Tables.Get = %+v, %v", tb, err)
 	}
-	if _, err := svc.Projects.Instances.Clusters.Backups.List(inst + "/clusters/rest-inst-c1").Context(ctx).Do(); httpCode(err) != http.StatusNotImplemented {
-		t.Errorf("Backups.List: %v, want 501", err)
+	if l, err := svc.Projects.Instances.Clusters.Backups.List(inst + "/clusters/rest-inst-c1").Context(ctx).Do(); err != nil || len(l.Backups) != 0 {
+		t.Errorf("Backups.List = %+v, %v; want none", l, err)
+	}
+	if _, err := svc.Projects.Instances.Tables.SchemaBundles.List(inst + "/tables/rest-table").Context(ctx).Do(); httpCode(err) != http.StatusNotImplemented {
+		t.Errorf("SchemaBundles.List: %v, want 501", err)
 	}
 	resp, err := http.Get("http://" + addr + "/v2/projects/p/nowhere")
 	if err != nil {

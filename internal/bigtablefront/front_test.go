@@ -131,32 +131,10 @@ func TestFrontRefusesWhatWouldCrashTheEmulator(t *testing.T) {
 	a := adminpb.NewBigtableTableAdminClient(conn)
 	d := bigtablepb.NewBigtableClient(conn)
 	inst := "projects/p/instances/i"
-	tbl, cl := inst+"/tables/kept", inst+"/clusters/c"
-	backup, bundle := cl+"/backups/b", tbl+"/schemaBundles/s"
+	tbl := inst + "/tables/kept"
+	bundle := tbl + "/schemaBundles/s"
 
 	calls := map[string]func() error{
-		"CreateBackup": func() error {
-			_, err := a.CreateBackup(ctx, &adminpb.CreateBackupRequest{Parent: cl, BackupId: "b", Backup: &adminpb.Backup{SourceTable: tbl}})
-			return err
-		},
-		"CopyBackup": func() error {
-			_, err := a.CopyBackup(ctx, &adminpb.CopyBackupRequest{Parent: cl, BackupId: "b2", SourceBackup: backup})
-			return err
-		},
-		"GetBackup": func() error { _, err := a.GetBackup(ctx, &adminpb.GetBackupRequest{Name: backup}); return err },
-		"ListBackups": func() error {
-			_, err := a.ListBackups(ctx, &adminpb.ListBackupsRequest{Parent: cl})
-			return err
-		},
-		"UpdateBackup": func() error {
-			_, err := a.UpdateBackup(ctx, &adminpb.UpdateBackupRequest{Backup: &adminpb.Backup{Name: backup}})
-			return err
-		},
-		"DeleteBackup": func() error { _, err := a.DeleteBackup(ctx, &adminpb.DeleteBackupRequest{Name: backup}); return err },
-		"RestoreTable": func() error {
-			_, err := a.RestoreTable(ctx, &adminpb.RestoreTableRequest{Parent: inst, TableId: "r", Source: &adminpb.RestoreTableRequest_Backup{Backup: backup}})
-			return err
-		},
 		"CreateSchemaBundle": func() error {
 			_, err := a.CreateSchemaBundle(ctx, &adminpb.CreateSchemaBundleRequest{Parent: tbl, SchemaBundleId: "s", SchemaBundle: &adminpb.SchemaBundle{}})
 			return err

@@ -49,13 +49,6 @@ const (
 // panic on, measured one by one (#1206), each with the message the front
 // answers it UNIMPLEMENTED with.
 var Refused = map[string]string{
-	admin + "CreateBackup":                         backups,
-	admin + "CopyBackup":                           backups,
-	admin + "GetBackup":                            backups,
-	admin + "ListBackups":                          backups,
-	admin + "UpdateBackup":                         backups,
-	admin + "DeleteBackup":                         backups,
-	admin + "RestoreTable":                         backups,
 	admin + "CreateSchemaBundle":                   schemaBundles,
 	admin + "GetSchemaBundle":                      schemaBundles,
 	admin + "ListSchemaBundles":                    schemaBundles,
@@ -69,7 +62,6 @@ var Refused = map[string]string{
 // The messages, worded as the emulator's own refusals are ("the emulator
 // does not currently support authorized views").
 const (
-	backups       = "the emulator does not currently support backups"
 	schemaBundles = "the emulator does not currently support schema bundles"
 	changeStreams = "the emulator does not currently support change streams"
 )
@@ -86,7 +78,11 @@ type Front struct {
 	// (#1331), and served is its methods.
 	instances *instances
 	tableIAM  *tableIAM
-	served    map[string]method
+	// copies is the backups and snapshots, views the authorized views
+	// (#1499).
+	copies *copies
+	views  *authViews
+	served map[string]method
 }
 
 // New returns a front for the emulator at upstream (host:port). The
@@ -104,11 +100,34 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	f := &Front{upstream: conn, addr: upstream, logf: logf}
 	f.instances = newInstances(f.dropTables)
 	f.served = f.instances.methods()
-	f.tableIAM = &tableIAM{upstream: conn, policies: map[string]*iampolicy.Stored{}}
-	for name, m := range f.tableIAM.methods() {
-		f.served[name] = m
+	f.copies = newCopies(conn, f.instances)
+	f.views = &authViews{upstream: conn, byName: map[string]*btapb.AuthorizedView{}}
+	f.tableIAM = &tableIAM{upstream: conn, policies: map[string]*iampolicy.Stored{}, views: f.views, copies: f.copies}
+	for _, ms := range []map[string]method{f.tableIAM.methods(), f.copies.methods(), f.viewMethods()} {
+		for name, m := range ms {
+			f.served[name] = m
+		}
 	}
 	return f, nil
+}
+
+// viewMethods are the authorized view admin methods, whose operations are
+// kept with the instance admin's.
+func (f *Front) viewMethods() map[string]method {
+	op := f.copies.op
+	return map[string]method{
+		admin + "CreateAuthorizedView": unary(func() *btapb.CreateAuthorizedViewRequest { return &btapb.CreateAuthorizedViewRequest{} },
+			func(ctx context.Context, req *btapb.CreateAuthorizedViewRequest) (proto.Message, error) {
+				return f.views.create(ctx, req, op)
+			}),
+		admin + "GetAuthorizedView":   unary(func() *btapb.GetAuthorizedViewRequest { return &btapb.GetAuthorizedViewRequest{} }, f.views.get),
+		admin + "ListAuthorizedViews": unary(func() *btapb.ListAuthorizedViewsRequest { return &btapb.ListAuthorizedViewsRequest{} }, f.views.list),
+		admin + "UpdateAuthorizedView": unary(func() *btapb.UpdateAuthorizedViewRequest { return &btapb.UpdateAuthorizedViewRequest{} },
+			func(ctx context.Context, req *btapb.UpdateAuthorizedViewRequest) (proto.Message, error) {
+				return f.views.update(ctx, req, op)
+			}),
+		admin + "DeleteAuthorizedView": unary(func() *btapb.DeleteAuthorizedViewRequest { return &btapb.DeleteAuthorizedViewRequest{} }, f.views.delete),
+	}
 }
 
 // Close releases the connection to the emulator.
@@ -171,6 +190,20 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 		f.logf("bigtable front: refused %s, which the emulator does not implement", method)
 		return status.Error(codes.Unimplemented, msg)
 	}
+	var first *frame
+	if viewMethods[method] {
+		// A data call naming an authorized view is served on its
+		// table, limited to the view (authviews.go).
+		var in frame
+		if err := ss.RecvMsg(&in); err != nil {
+			return err
+		}
+		out, err := f.views.rewrite(method, in)
+		if err != nil {
+			return err
+		}
+		first = &out
+	}
 	ctx, cancel := context.WithCancel(ss.Context())
 	defer cancel()
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
@@ -182,7 +215,15 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 		return err
 	}
 	reqErr := make(chan error, 1)
-	go func() { reqErr <- pumpRequests(ss, cs) }()
+	go func() {
+		if first != nil {
+			if err := cs.SendMsg(first); err != nil && !errors.Is(err, io.EOF) {
+				reqErr <- err
+				return
+			}
+		}
+		reqErr <- pumpRequests(ss, cs)
+	}()
 	respErr := make(chan error, 1)
 	go func() { respErr <- pumpResponses(ss, cs) }()
 	for {
@@ -315,6 +356,8 @@ func (f *Front) httpHandler() http.Handler {
 // dropTables deletes every table of the instance in the emulator.
 func (f *Front) dropTables(ctx context.Context, instance string) error {
 	f.tableIAM.drop(instance)
+	f.views.drop(instance)
+	f.copies.drop(instance)
 	c := btapb.NewBigtableTableAdminClient(f.upstream)
 	var token string
 	for {

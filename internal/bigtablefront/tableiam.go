@@ -27,8 +27,8 @@ import (
 // instance's deletion, drop it, so a table made again starts with none.
 // Policies are kept in memory, as the emulator keeps its tables.
 //
-// Authorized views and backups, which the emulator does not keep, answer
-// the three methods UNIMPLEMENTED with the emulator's own reason.
+// Authorized views and backups, which the front keeps (#1499), have
+// policies too, under the same rules.
 
 var (
 	tableNameRe      = regexp.MustCompile(`^projects/[^/]+/instances/[^/]+/tables/[^/]+$`)
@@ -40,7 +40,9 @@ var (
 type tableIAM struct {
 	upstream *grpc.ClientConn
 	mu       sync.Mutex
-	policies map[string]*iampolicy.Stored // by table name
+	policies map[string]*iampolicy.Stored // by table, view or backup name
+	views    *authViews
+	copies   *copies
 }
 
 func (t *tableIAM) methods() map[string]method {
@@ -59,9 +61,15 @@ func (t *tableIAM) target(ctx context.Context, resource string) error {
 		_, err := btapb.NewBigtableTableAdminClient(t.upstream).GetTable(ctx, &btapb.GetTableRequest{Name: resource, View: btapb.Table_NAME_ONLY})
 		return err
 	case authorizedViewRe.MatchString(resource):
-		return status.Error(codes.Unimplemented, "the emulator does not currently support authorized views")
+		if !t.views.exists(resource) {
+			return notFound("AuthorizedView", resource)
+		}
+		return nil
 	case backupNameRe.MatchString(resource):
-		return status.Error(codes.Unimplemented, backups)
+		t.copies.mu.Lock()
+		defer t.copies.mu.Unlock()
+		_, err := t.copies.backup(resource)
+		return err
 	}
 	return status.Errorf(codes.InvalidArgument, "invalid resource %q: want projects/{project}/instances/{instance}/tables/{table}", resource)
 }
@@ -105,6 +113,7 @@ func (t *tableIAM) deleteTable(ctx context.Context, req *btapb.DeleteTableReques
 		return nil, err
 	}
 	t.drop(req.GetName())
+	t.views.drop(req.GetName())
 	return resp, nil
 }
 
