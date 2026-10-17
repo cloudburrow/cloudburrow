@@ -37,6 +37,10 @@ func modelsAPI(t *testing.T, calls *[]string) *httptest.Server {
 			fmt.Fprint(w, testModel)
 		case strings.HasSuffix(r.URL.Path, "/datasets/d/models/m"):
 			fmt.Fprint(w, testModel)
+		case strings.HasSuffix(r.URL.Path, "/queries") && strings.Contains(string(b), "ML.GLOBAL_EXPLAIN"):
+			// A model trained without enable_global_explain.
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":{"code":400,"message":"ML.GLOBAL_EXPLAIN requires a model trained with enable_global_explain = TRUE"}}`)
 		case strings.HasSuffix(r.URL.Path, "/queries"):
 			if !strings.Contains(string(b), "ML.WEIGHTS(MODEL `p.d.m`)") {
 				t.Errorf("query %s", b)
@@ -130,6 +134,8 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		case strings.Contains(q, "ML.FEATURE_IMPORTANCE"):
 			fmt.Fprint(w, rows(`{"name":"feature","type":"STRING"},{"name":"importance_weight","type":"INTEGER"},{"name":"importance_gain","type":"FLOAT"},`+
 				`{"name":"importance_cover","type":"FLOAT"}`, `{"f":[{"v":"x"},{"v":"20"},{"v":"3.5"},{"v":"10"}]}`))
+		case strings.Contains(q, "ML.GLOBAL_EXPLAIN"):
+			fmt.Fprint(w, rows(`{"name":"feature","type":"STRING"},{"name":"attribution","type":"FLOAT"}`, `{"f":[{"v":"x"},{"v":"1.25"}]}`))
 		case strings.Contains(q, "ML.FORECAST"):
 			fmt.Fprint(w, rows(`{"name":"forecast_timestamp","type":"TIMESTAMP"},{"name":"forecast_value","type":"FLOAT"},{"name":"standard_error","type":"FLOAT"},`+
 				`{"name":"confidence_level","type":"FLOAT"},{"name":"prediction_interval_lower_bound","type":"FLOAT"},{"name":"prediction_interval_upper_bound","type":"FLOAT"}`,
@@ -163,7 +169,7 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		"lg": {"Confusion matrix", "Predicted a:7", "Predicted b:9", "Accuracy"},
 		"pc": {"Components", "Eigenvalue:1.5", "x=0.6", "Total explained variance ratio"},
 		"bt": {"Feature importance", "Splits:20", "Mean gain:3.5", "Mean cover:10"},
-		"rf": {"Feature importance", "Splits:20"},
+		"rf": {"Feature importance", "Splits:20", "Global explanation", "Attribution:1.25"},
 		"ar": {"Forecast", "Name:2024-01-11T00:00:00Z", "Forecast:19.5", "Interval:18 – 21", "Candidate models", "AIC:23"},
 		"mf": {"Recommendations", "Name:4.5", "user:7", "item:film", "Factors", "Intercept:0.25", "Factor weights:1.5, -2"},
 	} {

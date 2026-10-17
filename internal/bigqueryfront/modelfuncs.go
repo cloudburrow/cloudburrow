@@ -30,7 +30,8 @@ import (
 // mlFunctionsServed are the ML functions of a model CloudBurrow answers.
 var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIGHTS": true, "FEATURE_INFO": true, "TRAINING_INFO": true,
 	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true, "FEATURE_IMPORTANCE": true,
-	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true}
+	"FORECAST": true, "EXPLAIN_FORECAST": true, "DETECT_ANOMALIES": true, "ARIMA_EVALUATE": true, "ARIMA_COEFFICIENTS": true,
+	"EXPLAIN_PREDICT": true, "GLOBAL_EXPLAIN": true}
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
@@ -229,7 +230,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: ML."+c.fn+
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
 				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO, ML.RECOMMEND, ML.FEATURE_IMPORTANCE, ML.FORECAST, "+
-				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE and ML.ARIMA_COEFFICIENTS. Nothing was run.")
+				"ML.EXPLAIN_FORECAST, ML.DETECT_ANOMALIES, ML.ARIMA_EVALUATE, ML.ARIMA_COEFFICIENTS, ML.EXPLAIN_PREDICT and ML.GLOBAL_EXPLAIN. Nothing was run.")
 			return true
 		}
 		project, dataset, id, ok := f.resolveModel(c.path, defaultDatasetOf(q))
@@ -524,6 +525,8 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		return f.arimaSubquery(r, q, md, c)
 	}
 	switch c.fn {
+	case "EXPLAIN_PREDICT", "GLOBAL_EXPLAIN":
+		return f.explainSubquery(r, q, md, c)
 	case "DETECT_ANOMALIES":
 		if typ == "KMEANS" || typ == "PCA" {
 			return "", 501, "Not implemented here: ML.DETECT_ANOMALIES of a " + typ + " model: CloudBurrow detects anomalies with ARIMA_PLUS models. Nothing was run."

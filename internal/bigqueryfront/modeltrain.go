@@ -89,6 +89,8 @@ type mlOptions struct {
 	UserCol      string `json:"userCol,omitempty"`
 	ItemCol      string `json:"itemCol,omitempty"`
 	RatingCol    string `json:"ratingCol,omitempty"`
+	// GlobalExplain is enable_global_explain (modelexplain.go).
+	GlobalExplain bool `json:"enableGlobalExplain,omitempty"`
 	// ARIMA_PLUS (modelarima.go).
 	TS tsOptions `json:"timeSeries"`
 	// Set are the options CREATE MODEL gave, lower case.
@@ -213,6 +215,8 @@ type mlTrained struct {
 	BaseScore float64    `json:"baseScore,omitempty"`
 	// MF is a MATRIX_FACTORIZATION model's weights (modelmf.go).
 	MF *mfTrained `json:"mf,omitempty"`
+	// Global are ML.GLOBAL_EXPLAIN's rows (modelexplain.go).
+	Global []mlGlobal `json:"global,omitempty"`
 	// Arima is an ARIMA_PLUS model's series and fits (modelarima.go).
 	Arima *arimaTrained `json:"arima,omitempty"`
 }
@@ -431,6 +435,7 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 			K = len(t.Classes)
 		}
 		t.trainBoosted(opts, X, Y, EX, EY, logistic, K)
+		t.computeGlobal(opts, evalRows(X, EX))
 		return t, nil
 	}
 	dim := len(X[0])
@@ -531,7 +536,17 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 			t.Eval = regressionMetrics(evY, pred)
 		}
 	}
+	t.computeGlobal(opts, evalRows(X, EX))
 	return t, nil
+}
+
+// evalRows are the evaluation rows EX, or the training rows X with no
+// split.
+func evalRows(X, EX [][]float64) [][]float64 {
+	if len(EX) > 0 {
+		return EX
+	}
+	return X
 }
 
 // learnFeatures learns each feature's statistics or categories over the

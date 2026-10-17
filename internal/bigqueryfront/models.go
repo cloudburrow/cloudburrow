@@ -1240,7 +1240,13 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 			if s, ok := str(); !ok || !strings.EqualFold(s, "ONE_HOT_ENCODING") {
 				return 501, "Not implemented here: category_encoding_method other than ONE_HOT_ENCODING. Nothing was run."
 			}
-		case "auto_class_weights", "enable_global_explain", "calculate_p_values", "warm_start":
+		case "enable_global_explain":
+			b, ok := boolv()
+			if !ok {
+				return bad()
+			}
+			o.GlobalExplain = b
+		case "auto_class_weights", "calculate_p_values", "warm_start":
 			b, ok := boolv()
 			if !ok {
 				return bad()

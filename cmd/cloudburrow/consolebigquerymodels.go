@@ -244,6 +244,37 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 // importance (BOOSTED_TREE_*, #1504), or forecasts and candidate models
 // (ARIMA_PLUS, ML.FORECAST and ML.ARIMA_EVALUATE, #1504).
 func (p bigqueryProvider) modelResultSections(ctx context.Context, c *bigquery.Client, typ, datasetID, modelID string) []console.Section {
+	out := p.modelTypeSections(ctx, c, typ, datasetID, modelID)
+	switch typ {
+	case "LINEAR_REGRESSION", "LOGISTIC_REGRESSION", "BOOSTED_TREE_REGRESSOR", "BOOSTED_TREE_CLASSIFIER", "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER":
+	default:
+		return out
+	}
+	// Each feature's global attribution (ML.GLOBAL_EXPLAIN, #1504), for a
+	// model trained with enable_global_explain; the front refuses it
+	// otherwise, and the section is left out.
+	it, err := c.Query(fmt.Sprintf("SELECT feature, attribution FROM ML.GLOBAL_EXPLAIN(MODEL `%s.%s.%s`)", p.project, datasetID, modelID)).Read(ctx)
+	if err != nil {
+		return out
+	}
+	l := console.Listing{Columns: []string{"Attribution"}, NameColumn: "Feature", Noun: "features"}
+	for {
+		var row []bigquery.Value
+		if it.Next(&row) != nil {
+			break
+		}
+		v, _ := row[1].(float64)
+		l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(row[0]), Fields: map[string]string{"Attribution": strconv.FormatFloat(v, 'g', 8, 64)}})
+	}
+	if len(l.Items) == 0 {
+		return out
+	}
+	l.Total = len(l.Items)
+	return append(out, console.Section{ID: "explain", Label: "Global explanation", Listing: l})
+}
+
+// modelTypeSections are modelResultSections' sections of a model type.
+func (p bigqueryProvider) modelTypeSections(ctx context.Context, c *bigquery.Client, typ, datasetID, modelID string) []console.Section {
 	model := fmt.Sprintf("MODEL `%s.%s.%s`", p.project, datasetID, modelID)
 	read := func(sql string) (bigquery.Schema, [][]bigquery.Value) {
 		it, err := c.Query(sql).Read(ctx)
