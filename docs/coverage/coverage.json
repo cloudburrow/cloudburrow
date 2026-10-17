@@ -6474,7 +6474,7 @@
           {
             "code": "409",
             "case": "a bucket that holds a managed folder",
-            "test": "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
+            "test": "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle"
           },
           {
             "code": "409",
@@ -6836,7 +6836,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle",
+          "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
@@ -6844,7 +6844,7 @@
           {
             "code": "409",
             "case": "a managed folder with objects or managed folders under it, without allowNonEmpty",
-            "test": "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
+            "test": "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle"
           }
         ]
       },
@@ -6854,7 +6854,7 @@
         "tests": [
           "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
           "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle",
+          "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
@@ -6864,7 +6864,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
-          "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM",
+          "test/compat/storagemanagedfolders_test.go:161 TestStorageManagedFolderIAM",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ]
@@ -6875,7 +6875,7 @@
         "tests": [
           "test/compat/storageipfilter_test.go:155 TestStorageRapidCachesJSON",
           "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle",
+          "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
@@ -6883,7 +6883,12 @@
           {
             "code": "400",
             "case": "a bucket without uniform bucket-level access (the managed folders page states the requirement, not the status)",
-            "test": "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
+            "test": "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle"
+          },
+          {
+            "code": "400",
+            "case": "a name with more than 15 /s, or starting .well-known/acme-challenge/ (the page states the rules, not the status)",
+            "test": "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle"
           }
         ]
       },
@@ -6893,7 +6898,7 @@
         "tests": [
           "test/compat/gcloudstorage_test.go:238 TestGcloudStorageClearLabels",
           "test/compat/storageipfilter_test.go:233 TestStorageRapidCachesControl",
-          "test/compat/storagemanagedfolders_test.go:59 TestStorageManagedFolderLifecycle"
+          "test/compat/storagemanagedfolders_test.go:65 TestStorageManagedFolderLifecycle"
         ]
       },
       {
@@ -6901,7 +6906,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
-          "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM",
+          "test/compat/storagemanagedfolders_test.go:161 TestStorageManagedFolderIAM",
           "test/compat/terraform_batch5_test.go:50 TestTerraformStorageManagedFolderIAM",
           "test/compat/terraform_more_test.go:177 TestTerraformStorageACLsAndManagedFolder"
         ],
@@ -6909,7 +6914,7 @@
           {
             "code": "412",
             "case": "a stale etag (as for buckets.setIamPolicy)",
-            "test": "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM"
+            "test": "test/compat/storagemanagedfolders_test.go:161 TestStorageManagedFolderIAM"
           }
         ]
       },
@@ -6918,7 +6923,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolepermissions_test.go:372 TestConsolePermissionsOnAManagedFolder",
-          "test/compat/storagemanagedfolders_test.go:146 TestStorageManagedFolderIAM"
+          "test/compat/storagemanagedfolders_test.go:161 TestStorageManagedFolderIAM"
         ]
       },
       {
@@ -7023,7 +7028,7 @@
         "method": "storage.objects.bulkRestore",
         "status": "Verified",
         "tests": [
-          "test/compat/storagebulkrestore_test.go:33 TestStorageBulkRestore"
+          "test/compat/storagebulkrestore_test.go:37 TestStorageBulkRestore"
         ]
       },
       {
@@ -7078,7 +7083,7 @@
           {
             "code": "200",
             "case": "the JSON API's defaults beyond Allow-Origin, Allow-Methods and Max-Age (Allow-Headers echoed)",
-            "test": "internal/service/storage/cors_test.go:112 TestStorageJSONAllowsAllowedOriginsInProcess"
+            "test": "internal/service/storage/cors_test.go:113 TestStorageJSONAllowsAllowedOriginsInProcess"
           }
         ]
       },
@@ -7128,7 +7133,7 @@
           {
             "code": "200",
             "case": "the JSON API's CORS defaults beyond Allow-Origin, Allow-Methods and Max-Age (the requested headers echoed)",
-            "test": "test/compat/storagecors_test.go:127 TestStorageJSONAlwaysAllowsCORS"
+            "test": "test/compat/storagecors_test.go:131 TestStorageJSONAlwaysAllowsCORS"
           },
           {
             "code": "403",

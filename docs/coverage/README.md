@@ -28,7 +28,7 @@ Do not edit these files by hand.
 | [Vertex AI PredictionService](vertexai.md) | 14 | 14 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Memorystore for Redis](memorystore.md) | 66 | 62 | 0 | 4 | 0 | 0 | 0 | 2 |
 | [Pub/Sub](pubsub.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 4 |
-| [Cloud Storage (JSON API)](storage.md) | 87 | 84 | 0 | 3 | 0 | 0 | 0 | 26 |
+| [Cloud Storage (JSON API)](storage.md) | 87 | 84 | 0 | 3 | 0 | 0 | 0 | 27 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 30 | 29 | 0 | 0 | 1 | 0 | 0 | 0 |
 | [Firestore](firestore.md) | 17 | 17 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Firestore Admin API](firestoreadmin.md) | 32 | 32 | 0 | 0 | 0 | 0 | 0 | 0 |
