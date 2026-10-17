@@ -185,13 +185,8 @@ func TestRefusalsNameWhatIsMissing(t *testing.T) {
 		{"GET", loc + "/resourceBackupConfigs", "Cloud Asset Inventory"},
 		{"GET", "/v1/folders/f/locations/us-central1/resourceBackupConfigs:fetch", "folder"},
 		{"POST", loc + "/serviceConfig:initialize", "default backup vault"},
-		{"POST", loc + "/backupVaults?backupVaultId=k", "Cloud KMS"},
 	} {
-		body := `{}`
-		if strings.Contains(c.path, "backupVaultId=k") {
-			body = `{"backupMinimumEnforcedRetentionDuration":"86400s","encryptionConfig":{"kmsKeyName":"k"}}`
-		}
-		code, out := call(t, s, c.method, c.path, body)
+		code, out := call(t, s, c.method, c.path, `{}`)
 		msg, _ := out["error"].(map[string]any)["message"].(string)
 		if code != 501 || !strings.Contains(msg, c.want) {
 			t.Errorf("%s %s: %d %q, want 501 naming %q", c.method, c.path, code, msg, c.want)

@@ -51,6 +51,14 @@ type Instance struct {
 	Tier            string
 	CreateTime      string
 	Region          string
+	// BackupEnabled is the instance's own automated backups (#1501).
+	BackupEnabled bool
+}
+
+// InstanceLister is a CloudSQL that can list a project's instances, for
+// resourceBackupConfigs.list (#1501).
+type InstanceLister interface {
+	Instances(project string) []string
 }
 
 // Run is a backup run's state, as Cloud SQL reports it.
@@ -120,6 +128,9 @@ type Server struct {
 	Observe func(method string, code int)
 	// now is the clock, for tests.
 	now func() time.Time
+	// kms is Cloud KMS, for a vault's encryptionConfig (#1501); nil when
+	// it is not enabled. mu guards it.
+	kms KeyService
 }
 
 // state is every record, as it is kept.
@@ -134,6 +145,10 @@ type state struct {
 type vault struct {
 	Name, Description, CreateTime, UpdateTime, UID, MinRetention, AccessRestriction string
 	Labels                                                                          map[string]string
+	// KMSKey is encryptionConfig.kmsKeyName (#1501); WrappedKey the
+	// vault's data key, wrapped by it.
+	KMSKey     string `json:",omitempty"`
+	WrappedKey []byte `json:",omitempty"`
 }
 
 type rule struct {
@@ -364,6 +379,10 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 		return "backupdr.projects.locations.get", locationJSON(p[1], p[3]), nil
 	}
 	rest := p[4:]
+	if len(rest) == 1 && rest[0] == "resourceBackupConfigs" && verb == "" && r.Method == http.MethodGet {
+		out, err := s.listResourceBackupConfigs(r, p[1], p[3])
+		return "backupdr.projects.locations.resourceBackupConfigs.list", out, err
+	}
 	if len(rest) == 0 && verb == "msComplianceMetadata" {
 		return "backupdr.projects.locations.managementServers.msComplianceMetadata", nil,
 			unimplemented("managementServers.msComplianceMetadata", managementServerWhy)
@@ -672,6 +691,9 @@ func (s *Server) vaultJSON(v *vault) map[string]any {
 	if len(v.Labels) > 0 {
 		out["labels"] = v.Labels
 	}
+	if v.KMSKey != "" {
+		out["encryptionConfig"] = map[string]any{"kmsKeyName": v.KMSKey}
+	}
 	return out
 }
 
@@ -696,10 +718,6 @@ func (s *Server) createVault(r *http.Request, loc string) (any, error) {
 	if d, err := parseDuration(body.MinRetention); err != nil || d < 0 {
 		return nil, invalid("backupVault.backupMinimumEnforcedRetentionDuration %q is not a duration such as \"100000s\".", body.MinRetention)
 	}
-	if len(body.EncryptionConfig) > 0 && string(body.EncryptionConfig) != "null" && string(body.EncryptionConfig) != "{}" {
-		return nil, unimplemented("backupVault.encryptionConfig", "a customer-managed encryption key needs Cloud KMS to wrap the vault's backups, "+
-			"and CloudBurrow's Backup and DR Service does not use Cloud KMS: a vault's backups are Cloud SQL backup runs, unencrypted at rest (docs/backupdr.md)")
-	}
 	switch body.AccessRestriction {
 	case "":
 		body.AccessRestriction = "WITHIN_ORGANIZATION"
@@ -709,15 +727,25 @@ func (s *Server) createVault(r *http.Request, loc string) (any, error) {
 	}
 	name := loc + "/backupVaults/" + id
 	s.mu.Lock()
+	exists := s.st.Vaults[name] != nil
+	s.mu.Unlock()
+	if exists {
+		return nil, errorf(http.StatusConflict, "ALREADY_EXISTS", "Backup vault %s already exists.", name)
+	}
+	key, wrapped, err := s.vaultKey(r.Context(), loc, body.EncryptionConfig)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
 	if s.st.Vaults[name] != nil {
 		s.mu.Unlock()
 		return nil, errorf(http.StatusConflict, "ALREADY_EXISTS", "Backup vault %s already exists.", name)
 	}
 	now := s.stamp()
 	v := &vault{Name: name, Description: body.Description, Labels: body.Labels, CreateTime: now, UpdateTime: now,
-		UID: newID(), MinRetention: body.MinRetention, AccessRestriction: body.AccessRestriction}
+		UID: newID(), MinRetention: body.MinRetention, AccessRestriction: body.AccessRestriction, KMSKey: key, WrappedKey: wrapped}
 	s.st.Vaults[name] = v
-	err := s.saveLocked()
+	err = s.saveLocked()
 	out := s.vaultJSON(v)
 	s.mu.Unlock()
 	if err != nil {

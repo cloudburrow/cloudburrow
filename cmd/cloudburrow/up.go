@@ -471,6 +471,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The Backup and DR Service (#1433), over the Admin API's backups.
 	backupDRSrv := newBackupDRServer(cfg, sqlAdminSrv)
 	if backupDRSrv != nil {
+		if kmsSvc != nil {
+			// A vault's encryptionConfig (#1501) wraps its data key with
+			// this instance's Cloud KMS, in process.
+			backupDRSrv.UseKMS(memorystoreKMS{svc: kmsSvc})
+		}
 		coord.Register(backupDRSrv)
 	}
 

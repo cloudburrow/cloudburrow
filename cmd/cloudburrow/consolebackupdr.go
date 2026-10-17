@@ -146,6 +146,9 @@ func (backupDRProvider) CreateForm() (string, []console.Field) {
 		{Name: "retention", Label: "Minimum enforced retention", Type: "text", Required: true, Default: "86400s",
 			Help: "A duration in seconds, such as 86400s (one day)."},
 		{Name: "description", Label: "Description", Type: "text"},
+		{Name: "kmsKeyName", Label: "Customer-managed encryption key (Cloud KMS)", Type: "text",
+			Help: "projects/P/locations/REGION/keyRings/R/cryptoKeys/K, a key of this instance's Cloud KMS in the vault's region. " +
+				"Backups into the vault, and restores from it, work only while the key can be used."},
 	}
 }
 
@@ -157,6 +160,9 @@ func (p backupDRProvider) Create(ctx context.Context, project string, v map[stri
 	body := map[string]any{"backupMinimumEnforcedRetentionDuration": v["retention"]}
 	if v["description"] != "" {
 		body["description"] = v["description"]
+	}
+	if k := strings.TrimSpace(v["kmsKeyName"]); k != "" {
+		body["encryptionConfig"] = map[string]any{"kmsKeyName": k}
 	}
 	_, err := p.call(ctx, p.bdr, http.MethodPost, "/v1/projects/"+project+"/locations/"+url.PathEscape(v["location"])+
 		"/backupVaults?backupVaultId="+url.QueryEscape(v["id"]), body)
@@ -184,6 +190,9 @@ func (p backupDRProvider) Detail(ctx context.Context, project string, path []str
 		{Label: "Backups", Value: str(v, "backupCount")},
 		{Label: "Minimum enforced retention", Value: str(v, "backupMinimumEnforcedRetentionDuration")},
 		{Label: "Created", Value: str(v, "createTime")}}}
+	if ec, _ := v["encryptionConfig"].(map[string]any); ec != nil {
+		d.Summary = append(d.Summary, console.Property{Label: "Encryption key", Value: str(ec, "kmsKeyName")})
+	}
 
 	ds := console.Listing{Columns: []string{"Instance", "Version", "Backups", "Last backup", "Configuration"}, NameColumn: "Data source", Noun: "data sources"}
 	if out, err := p.get(ctx, vault+"/dataSources"); err != nil {
@@ -252,11 +261,32 @@ func (p backupDRProvider) Detail(ctx context.Context, project string, path []str
 	}
 	revs.Total = len(revs.Items)
 
+	// Protected resources (#1501): resourceBackupConfigs.list, the
+	// resources whose backups this vault holds.
+	prot := console.Listing{Columns: []string{"Type", "Association", "Last successful backup"}, NameColumn: "Resource", Noun: "protected resources",
+		Note: "resourceBackupConfigs.list: each Cloud SQL instance whose backup plan association backs it up into this vault."}
+	if out, err := p.get(ctx, loc+"/resourceBackupConfigs"); err != nil {
+		prot.Unavailable = err.Error()
+	} else {
+		for _, x := range bdrItems(out, "resourceBackupConfigs") {
+			for _, dt := range bdrItems(x, "backupConfigsDetails") {
+				if str(dt, "type") != "BACKUPDR" || str(dt, "backupVault") != vault {
+					continue
+				}
+				prot.Items = append(prot.Items, console.Resource{Name: str(x, "targetResourceDisplayName"), Status: str(dt, "state"),
+					Fields: map[string]string{"Type": str(x, "targetResourceType"), "Association": lastSegment(str(dt, "backupConfigSource")),
+						"Last successful backup": str(dt, "latestSuccessfulBackupTime")}})
+			}
+		}
+	}
+	prot.Total = len(prot.Items)
+
 	d.Sections = []console.Section{
 		{ID: "datasources", Label: "Data sources", Listing: ds},
 		{ID: "plans", Label: "Backup plans", Listing: plans},
 		{ID: "revisions", Label: "Plan revisions", Listing: revs},
 		{ID: "associations", Label: "Associations", Listing: assocs},
+		{ID: "protected", Label: "Protected resources", Listing: prot},
 	}
 	return d, nil
 }

@@ -201,8 +201,9 @@ var areas = []area{
 // false: its targets are Compute Engine instances and disks, and it
 // answers 501 (a Cloud SQL backup is restored by Cloud SQL). Patches,
 // plan revisions, the fetch and reference views and operations.cancel and
-// delete are served since #1462; management servers, the appliance's
-// data source methods, trials, resource backup configs and
+// delete are served since #1462, resourceBackupConfigs.list (Cloud SQL
+// instances) since #1501; management servers, the appliance's
+// data source methods, trials, resource backup configs' fetch and
 // serviceConfig.initialize answer 501 naming what they need.
 var backupdrStatuses = map[string]bool{
 	"backupdr.folders.locations.resourceBackupConfigs.fetch":                            false,
@@ -262,7 +263,7 @@ var backupdrStatuses = map[string]bool{
 	"backupdr.projects.locations.operations.get":                                        true,
 	"backupdr.projects.locations.operations.list":                                       true,
 	"backupdr.projects.locations.resourceBackupConfigs.fetch":                           false,
-	"backupdr.projects.locations.resourceBackupConfigs.list":                            false,
+	"backupdr.projects.locations.resourceBackupConfigs.list":                            true,
 	"backupdr.projects.locations.serviceConfig.initialize":                              false,
 	"backupdr.projects.locations.trial.end":                                             false,
 	"backupdr.projects.locations.trial.subscribe":                                       false,

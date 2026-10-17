@@ -105,8 +105,8 @@ svc, _ := sqladmin.NewService(ctx,
 _, err := svc.Databases.Insert(project, "postgres", &sqladmin.Database{Name: "orders"}).Do()
 ```
 
-What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), external-primary replicas
-(no source representation instance is kept, so there is no outside server to replicate from), `MYSQL_5_6`, `MYSQL_5_7`
+What answers 501, saying why: IAM database authentication (CloudBurrow has no identities, ADR-0004), `pointInTimeRestore` and `restoreBackup` with `backupdrBackup` unless the instance runs `--services backupdr` ([backupdr.md](backupdr.md), #1433), a PostgreSQL
+external primary (Cloud SQL replicates from an external MySQL server; see [External primaries](#external-primaries-1501)), `MYSQL_5_6`, `MYSQL_5_7`
 and SQL Server versions (their images are linux/amd64 only), BAK and TDE imports and exports (SQL Server's files),
 upgrading a PostgreSQL read replica on its own (streaming replication does not cross major versions), and high
 availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (#1462). A legacy failover replica
@@ -147,7 +147,7 @@ Refused with 501, each naming what is missing:
 | `connect.resolve` | needs the instance's Cloud DNS records (Private Service Connect and write endpoint DNS names) |
 | `listServerCertificates`, `addServerCertificate`, `rotateServerCertificate` | per-instance server certificates are for `GOOGLE_MANAGED_CAS_CA` and `CUSTOMER_MANAGED_CAS_CA` instances, issued by Certificate Authority Service; instances here are `GOOGLE_MANAGED_INTERNAL_CA`, rotated with `addServerCa` and `rotateServerCa` |
 | Entra ID certificates, `acquireSsrsLease`, `releaseSsrsLease` | SQL Server features; CloudBurrow runs PostgreSQL and MySQL |
-| `demote`, `demoteMaster`, `startExternalSync`, `verifyExternalSyncSettings` | need an external primary (a source representation instance) |
+| `demote`, `demoteMaster` | they make a Cloud SQL instance a replica of an external primary, to migrate back out of Cloud SQL; the other direction, `startExternalSync`, is served (#1501) |
 | `instances.switchover` | swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster; CloudBurrow has one region |
 | `reencrypt` | the server's volume is not encrypted with a customer-managed Cloud KMS key |
 | `getDiskShrinkConfig`, `performDiskShrink`, `resetReplicaSize` | storage is the server's volume in the cluster, not a provisioned persistent disk |
@@ -292,6 +292,44 @@ without one is in its primary's region. The server runs in the same cluster as e
 the region is not a place here, and replication has none of the latency a real cross-region
 replica has. On the console, a replica's page also offers **Create read replica**, with a
 **Region** field.
+
+### External primaries (#1501)
+
+Cloud SQL's managed import from a MySQL server outside Cloud SQL
+([configure-replication-from-external](https://docs.cloud.google.com/sql/docs/mysql/replication/configure-replication-from-external))
+is served:
+
+1. **A source representation instance**: `instances.insert` with `instanceType`
+   `ON_PREMISES_INSTANCE` (or just `onPremisesConfiguration`), a MySQL `databaseVersion` and
+   `onPremisesConfiguration.hostPort`, `username` and `password` (the replication user). It is
+   a record of the outside server: no server runs for it, `get` and `list` answer it
+   (`backendType` `EXTERNAL`, the password never), `delete` removes it once it has no replica,
+   and other methods on it are 400. Terraform's `google_sql_source_representation_instance`
+   applies. `hostPort` is dialed as given from the replica's pod; another CloudBurrow instance is
+   `sqlinst-NAME:3306` (its Service in the cluster, `cloudsql-mysql:3306` for the server `up`
+   runs) or the address of its host tunnel, which are mapped to each other.
+2. **A replica of it**: `instances.insert` with `masterInstanceName` naming it (and
+   optionally `replicaConfiguration.mysqlReplicaConfiguration.username` and `password`, which
+   win over the source's). It is a MySQL server of its own, read-only, idle until the sync starts;
+   `replicaConfiguration.mysqlReplicaConfiguration.username` is answered.
+3. **`verifyExternalSyncSettings`** connects to the source from this machine as the
+   replication user and answers each problem as Cloud SQL names it: `CONNECTION_FAILURE`,
+   `INCOMPATIBLE_DATABASE_VERSION` (another major version), `BINLOG_NOT_ENABLED`,
+   `UNSUPPORTED_GTID_MODE` (not `ON`), `UNSUPPORTED_BINLOG_FORMAT` (not `ROW`),
+   `INSUFFICIENT_PRIVILEGE` (one of `REPLICATION SLAVE`, `REPLICATION CLIENT`, `SELECT`,
+   `SHOW VIEW`, `RELOAD`, `TRIGGER` on `*.*` missing) and `REPLICA_ALREADY_SETUP`.
+   `verifyConnectionOnly` keeps the connection's.
+4. **`startExternalSync`** (`syncMode` `ONLINE`, the default) verifies first unless
+   `skipVerification`, then dumps the source's databases into the replica with `mysqldump
+   --single-transaction --set-gtid-purged=ON` and starts GTID replication from it (`SOURCE_SSL`);
+   the operation is `START_EXTERNAL_SYNC`, done once the replica replicates. Writes on the source
+   reach the replica afterwards.
+5. **`promoteReplica`** ends the migration: the replica stops replicating and takes writes.
+
+501, naming why: a PostgreSQL source (PostgreSQL migrates through Database Migration Service and
+pglogical), `dumpFilePath` (a custom import from a dump file in Cloud Storage), `syncMode`
+`OFFLINE`, `migrationType` `PHYSICAL` (an XtraBackup physical backup), and `demote` and
+`demoteMaster` (the reverse direction).
 
 ### Database versions and major version upgrades (#1381)
 

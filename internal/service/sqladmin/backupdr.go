@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"time"
 )
 
@@ -49,6 +50,30 @@ type InstanceInfo struct {
 	Tier            string
 	CreateTime      string
 	Region          string
+	// BackupEnabled is settings.backupConfiguration.enabled: the
+	// instance's own automated backups (#1501).
+	BackupEnabled bool
+}
+
+// InstanceNames are the instances served in project, by name (#1501):
+// the servers `up` runs and the instances created there. A source
+// representation instance has no server and is not one.
+func (s *Server) InstanceNames(project string) []string {
+	var out []string
+	for _, e := range s.engines {
+		out = append(out, e.Instance())
+	}
+	s.emu.RLock()
+	if s.writes != nil {
+		for n, c := range s.writes.byName {
+			if c.spec.Project == project {
+				out = append(out, n)
+			}
+		}
+	}
+	s.emu.RUnlock()
+	sort.Strings(out)
+	return out
 }
 
 // LookupInstance is project's instance, if it is served.
@@ -65,7 +90,7 @@ func (s *Server) LookupInstance(project, instance string) (InstanceInfo, bool) {
 			if c.spec.Project != project {
 				return InstanceInfo{}, false
 			}
-			info.Tier, info.CreateTime = c.spec.Tier, c.spec.CreateTime
+			info.Tier, info.CreateTime, info.BackupEnabled = c.spec.Tier, c.spec.CreateTime, c.spec.BackupEnabled
 		}
 	}
 	return info, true

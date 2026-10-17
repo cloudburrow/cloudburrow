@@ -201,8 +201,20 @@ func (s *Server) prepareReplica(ctx context.Context, project string, b instanceB
 			return unimplemented("cascadableReplica", "it is SQL Server's setting; a MySQL or PostgreSQL replica of a replica "+
 				"is created with masterInstanceName naming the replica")
 		}
+	}
+	if master, err := masterName(project, b.MasterInstanceName); err == nil {
+		if rep := s.sourceNamed(project, master); rep != nil {
+			return s.prepareExternalReplica(b, rep, spec)
+		}
+	}
+	if b.ReplicaConfiguration != nil {
+		var rc struct {
+			Mysql json.RawMessage `json:"mysqlReplicaConfiguration"`
+		}
+		_ = json.Unmarshal(*b.ReplicaConfiguration, &rc)
 		if len(rc.Mysql) > 0 {
-			return unimplemented("replicas of an external server (mysqlReplicaConfiguration)", externalPrimaryWhy)
+			return Errorf(http.StatusBadRequest, "Invalid request: mysqlReplicaConfiguration is for a replica of a source representation instance "+
+				"(ON_PREMISES_INSTANCE); %s is not one.", b.MasterInstanceName)
 		}
 	}
 	if b.InstanceType != "" && b.InstanceType != "READ_REPLICA_INSTANCE" {
@@ -421,6 +433,7 @@ func (s *Server) replicaVerb(base, project, name, verb string) (any, error) {
 	case "promoteReplica":
 		// MasterUp stays: it says whose users the data has.
 		c.spec.MasterInstanceName, c.spec.ReplicationPassword, c.spec.ReplicationStopped = "", "", false
+		c.spec.External, c.spec.ExternalSyncStarted = nil, false
 	case "stopReplica":
 		c.spec.ReplicationStopped = true
 	case "startReplica":

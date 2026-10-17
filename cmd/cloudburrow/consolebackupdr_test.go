@@ -35,6 +35,8 @@ func (f *fakeBackupDRSQL) Run(id string) (backupdr.Run, bool) {
 
 func (f *fakeBackupDRSQL) DeleteRun(id string) error { delete(f.runs, id); return nil }
 
+func (f *fakeBackupDRSQL) Instances(string) []string { return []string{"pg"} }
+
 // The Backup and DR page (#1433): Create backup vault, a vault's Create
 // backup plan, Associate an instance and Trigger backup through the Backup
 // and DR Service, the data source and its backup on their pages, and
@@ -80,7 +82,7 @@ func TestConsoleBackupDRVaultPlanAssociationRestore(t *testing.T) {
 	}
 
 	d, err := p.Detail(ctx, project, []string{"vault-1"})
-	if err != nil || len(d.Sections) != 4 {
+	if err != nil || len(d.Sections) != 5 {
 		t.Fatalf("vault page: %v %+v", err, d)
 	}
 	ds := d.Sections[0].Listing.Items
@@ -89,6 +91,9 @@ func TestConsoleBackupDRVaultPlanAssociationRestore(t *testing.T) {
 	}
 	if plans := d.Sections[1].Listing.Items; len(plans) != 1 || plans[0].Fields["Rules"] != "daily: DAILY, 7 days" {
 		t.Errorf("plans: %+v", plans)
+	}
+	if pr := d.Sections[4].Listing.Items; len(pr) != 1 || pr[0].Name != "pg" || pr[0].Fields["Association"] != "assoc-1" {
+		t.Errorf("protected resources: %+v (%s)", pr, d.Sections[4].Listing.Unavailable)
 	}
 	if as := d.Sections[3].Listing.Items; len(as) != 1 || as[0].Fields["Resource"] != "projects/"+project+"/instances/pg" {
 		t.Errorf("associations: %+v", as)
