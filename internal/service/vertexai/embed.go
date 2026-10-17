@@ -97,10 +97,11 @@ func checkEmbeddingModel(requested, verb string) error {
 		return nil
 	}
 	return apierror.NotFound(
-		"model %q is not served for %s; the only embedding model here is %q, "+
-			"a community ONNX conversion of EmbeddingGemma that is not an official Google artifact. "+
+		"model %q is not served for %s; the embedding models here are %q, "+
+			"a community ONNX conversion of EmbeddingGemma that is not an official Google artifact, "+
+			"and %q, a community ONNX conversion of CLIP for text and images. "+
 			"No substitution is performed",
-		requested, verb, localai.EmbeddingGemmaONNXID)
+		requested, verb, localai.EmbeddingGemmaONNXID, localai.CLIPONNXID)
 }
 
 // embeddingsUnavailable is the 501 every embedding method answers when the
@@ -116,6 +117,9 @@ func embeddingsUnavailable(why error) error {
 // gRPC PredictionService alike, so the two answer the same request the same
 // way. body is the JSON request.
 func (s *Server) embedPredict(ctx context.Context, requested string, body io.Reader) (map[string]any, error) {
+	if isMultimodalModel(requested) {
+		return s.multimodalPredict(ctx, body)
+	}
 	e, err := s.embedderFor(requested, ":predict")
 	if err != nil {
 		return nil, err

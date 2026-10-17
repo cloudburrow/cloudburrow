@@ -8399,7 +8399,75 @@ async function renderEmbeddings(view) {
     el("div", { class: "card" }, texts,
       el("div", {}, el("label", { text: "Model " }), model, models, el("label", { text: " Method " }), method, el("label", { text: " Task type " }), task,
         el("label", { text: " Dimensions " }), dim, " ", send)),
-    result);
+    result, ...(status.multimodal ? [multimodalEmbedCard(status.multimodal)] : []));
+}
+
+// multimodalEmbedCard (#1454) embeds an image — a file from this computer,
+// or a gs:// object in this instance's Cloud Storage — and captions with the
+// local CLIP model, over multimodalembedding's :predict shape, and shows how
+// close each caption lands to the image. The API's own refusal (501 while
+// the model is not loaded) is what it shows.
+function multimodalEmbedCard(mm) {
+  const file = el("input", { id: "emb-mm-file", type: "file", accept: "image/png,image/jpeg,image/gif",
+    "aria-label": "Image file" });
+  const gcs = el("input", { id: "emb-mm-gcs", class: "mono", placeholder: "or gs://bucket/object.png",
+    "aria-label": "Image gs:// URI" });
+  const captions = el("textarea", { id: "emb-mm-texts", rows: "3",
+    placeholder: "Captions, one per line", "aria-label": "Captions, one per line" });
+  const dim = el("select", { id: "emb-mm-dim", "aria-label": "Multimodal dimension" },
+    ...mm.dimensions.map((d) => el("option", { value: String(d), text: String(d) })));
+  const send = el("button", { id: "emb-mm-send", text: "Embed image and captions" });
+  const result = el("div", { id: "emb-mm-result", "aria-live": "polite" });
+  const post = async (instance) => {
+    const resp = await fetch("/api/ai/embeddings?" + new URLSearchParams({ method: "predict", model: mm.model }), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instances: [instance], parameters: { dimension: Number(dim.value) } }),
+    });
+    const body = await resp.text();
+    if (!resp.ok) throw new Error(errorMessageOf(body) || `HTTP ${resp.status}`);
+    return JSON.parse(body).predictions?.[0] || {};
+  };
+  const readImage = () => new Promise((resolve, reject) => {
+    const f = file.files && file.files[0];
+    if (!f) { resolve(null); return; }
+    const r = new FileReader();
+    r.onload = () => resolve({ bytesBase64Encoded: String(r.result).split(",")[1] || "", mimeType: f.type });
+    r.onerror = () => reject(new Error("could not read " + f.name));
+    r.readAsDataURL(f);
+  });
+  send.addEventListener("click", async () => {
+    const lines = captions.value.split("\n").map((l) => l.trim()).filter(Boolean);
+    send.disabled = true;
+    setChildren(result, el("p", { class: "unavailable", text: "running…" }));
+    try {
+      const image = (await readImage()) || (gcs.value.trim() ? { gcsUri: gcs.value.trim() } : null);
+      if (!image) throw new Error("choose an image file or name a gs:// object");
+      const img = (await post({ image })).imageEmbedding || [];
+      const rows = [];
+      for (const text of lines) {
+        const v = (await post({ text })).textEmbedding || [];
+        rows.push(el("tr", {}, el("td", { text }), el("td", { class: "mono", text: String(v.length) }),
+          el("td", { class: "mono", "data-cosine": embeddingCosine(img, v).toFixed(4), text: embeddingCosine(img, v).toFixed(4) })));
+      }
+      setChildren(result,
+        el("p", { text: `Image embedding: ${img.length} values, first ${img.slice(0, 4).map((x) => x.toFixed(4)).join(", ")}…` }),
+        ...(rows.length ? [el("table", { id: "emb-mm-results" },
+          el("caption", { text: "Cosine similarity of each caption to the image" }),
+          el("thead", {}, el("tr", {}, el("th", { text: "Caption" }), el("th", { text: "Dimensions" }), el("th", { text: "Cosine" }))),
+          el("tbody", {}, ...rows))] : []));
+    } catch (err) {
+      setChildren(result, el("p", { class: "unavailable", text: `[error] ${err.message}` }));
+    } finally {
+      send.disabled = false;
+    }
+  });
+  return el("div", { class: "card", id: "emb-multimodal" },
+    el("h2", { text: "Image and text (multimodal)" }),
+    el("dl", {}, el("dt", { text: "Model" }), el("dd", { class: "mono", text: mm.model }),
+      el("dt", { text: "Endpoint" }), el("dd", { class: "mono", text: mm.endpoint })),
+    el("p", { class: "unavailable", text: mm.note }),
+    el("div", {}, file, " ", gcs), captions,
+    el("div", {}, el("label", { text: "Dimension " }), dim, " ", send), result);
 }
 
 // playgroundModelsCard is the Studio's view of the local models (#1396):

@@ -29,6 +29,12 @@ type Server struct {
 	embedder         embedding.Embedder
 	embedUnavailable error
 
+	// multimodal serves the CLIP model (#1454), loaded on the console's
+	// Local models page; objects reads its gs:// images.
+	multimodal            embedding.MultimodalEmbedder
+	multimodalUnavailable error
+	objects               ObjectReader
+
 	// endpoints resolves custom prediction endpoints, reached through
 	// ingress with client; nil serves none (see endpoints.go).
 	endpoints EndpointResolver

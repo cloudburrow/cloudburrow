@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"github.com/cloudburrow/cloudburrow/internal/config"
@@ -224,6 +226,16 @@ func (r embedRuntime) Loads(m localai.Model) (bool, string) {
 }
 
 func (r embedRuntime) Load(m localai.Model, dir string) error {
+	if m.Modality == localai.ModalityMultimodalEmbedding {
+		e, err := embedding.OpenCLIP(dir, m.ID)
+		if err != nil {
+			return err
+		}
+		if old := r.srv.SwapMultimodalEmbedder(e, nil); old != nil {
+			_ = old.Close()
+		}
+		return nil
+	}
 	e, err := embedding.Open(dir, m.ID)
 	if err != nil {
 		return err
@@ -235,6 +247,13 @@ func (r embedRuntime) Load(m localai.Model, dir string) error {
 }
 
 func (r embedRuntime) Unload(m localai.Model) error {
+	if m.Modality == localai.ModalityMultimodalEmbedding {
+		old := r.srv.SwapMultimodalEmbedder(nil, fmt.Errorf("%s was unloaded on the console's Local models page; load it there to serve it again", m.ID))
+		if old != nil {
+			return old.Close()
+		}
+		return nil
+	}
 	old := r.srv.SwapEmbedder(nil, fmt.Errorf("%s was unloaded on the console's Local models page; load it there to serve it again", m.ID))
 	if old != nil {
 		return old.Close()
@@ -243,6 +262,9 @@ func (r embedRuntime) Unload(m localai.Model) error {
 }
 
 func (r embedRuntime) Loaded(m localai.Model) bool {
+	if m.Modality == localai.ModalityMultimodalEmbedding {
+		return r.srv.MultimodalLoaded()
+	}
 	if m.Runtime == localai.RuntimeONNX {
 		return m.ID == localai.EmbeddingGemmaONNXID && r.srv.EmbedderLoaded()
 	}
@@ -255,6 +277,12 @@ func localModelsFor(cfg config.Config, srv *vertexai.Server) *localai.Manager {
 	g := &localai.Manager{Cache: embeddingCache(cfg)}
 	if srv != nil {
 		g.Runtime = embedRuntime{srv: srv}
+		// The multimodal model's gs:// images come from this instance's
+		// Cloud Storage, read through its JSON API as any client would.
+		src := storageSourceFetcher{cfg: cfg, client: &http.Client{Timeout: 2 * time.Minute}}
+		srv.SetObjectReader(func(ctx context.Context, bucket, object string) (io.ReadCloser, error) {
+			return src.Fetch(ctx, bucket, object, 0)
+		})
 	}
 	return g
 }

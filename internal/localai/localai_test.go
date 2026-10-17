@@ -248,7 +248,7 @@ func TestEveryCatalogueEntryIsFullyDescribed(t *testing.T) {
 			t.Errorf("%s has an unrecognised publisher %q", m.ID, m.Publisher)
 		}
 		switch m.Modality {
-		case ModalityText, ModalityEmbedding:
+		case ModalityText, ModalityEmbedding, ModalityMultimodalEmbedding:
 		default:
 			t.Errorf("%s has an unrecognised modality %q", m.ID, m.Modality)
 		}

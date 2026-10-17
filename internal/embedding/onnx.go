@@ -16,9 +16,8 @@ import (
 var envOnce sync.Once
 var envErr error
 
-// Open loads the pinned model from modelDir, the revision directory that
-// localai.Cache.PinnedDir names. ONNXRUNTIME_LIB points at libonnxruntime.
-func Open(modelDir, modelID string) (Embedder, error) {
+// initORT initialises ONNX Runtime once, for every model.
+func initORT() error {
 	envOnce.Do(func() {
 		if lib := os.Getenv("ONNXRUNTIME_LIB"); lib != "" {
 			ort.SetSharedLibraryPath(lib)
@@ -26,7 +25,16 @@ func Open(modelDir, modelID string) (Embedder, error) {
 		envErr = ort.InitializeEnvironment()
 	})
 	if envErr != nil {
-		return nil, fmt.Errorf("initialise ONNX Runtime (set ONNXRUNTIME_LIB to libonnxruntime): %w", envErr)
+		return fmt.Errorf("initialise ONNX Runtime (set ONNXRUNTIME_LIB to libonnxruntime): %w", envErr)
+	}
+	return nil
+}
+
+// Open loads the pinned model from modelDir, the revision directory that
+// localai.Cache.PinnedDir names. ONNXRUNTIME_LIB points at libonnxruntime.
+func Open(modelDir, modelID string) (Embedder, error) {
+	if err := initORT(); err != nil {
+		return nil, err
 	}
 	tok, err := tokenizers.FromFile(filepath.Join(modelDir, "tokenizer.json"))
 	if err != nil {

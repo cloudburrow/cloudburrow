@@ -30,9 +30,17 @@ var strictJSON = protojson.UnmarshalOptions{}
 
 // embedContentREST serves POST .../models/{model}:embedContent.
 func (s *Server) embedContentREST(w http.ResponseWriter, r *http.Request, requested string) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes))
+	limit := int64(maxRequestBytes)
+	if isMultimodalModel(requested) {
+		limit = maxMultimodalBytes // an inline image
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
 		apierror.WriteJSON(w, apierror.InvalidArgument("reading the request body: %v", err))
+		return
+	}
+	if int64(len(body)) > limit {
+		apierror.WriteJSON(w, apierror.InvalidArgument("the request is larger than %d bytes", limit))
 		return
 	}
 	req := &aiplatformpb.EmbedContentRequest{}
@@ -74,6 +82,9 @@ func (s *Server) embedContentREST(w http.ResponseWriter, r *http.Request, reques
 // embedContent embeds one EmbedContentRequest. requested is the model ID,
 // from the REST path or the gRPC request's resource name.
 func (s *Server) embedContent(ctx context.Context, requested string, req *aiplatformpb.EmbedContentRequest) (*aiplatformpb.EmbedContentResponse, error) {
+	if isMultimodalModel(requested) {
+		return s.multimodalEmbedContent(ctx, req)
+	}
 	e, err := s.embedderFor(requested, ":embedContent")
 	if err != nil {
 		return nil, err

@@ -15,6 +15,10 @@ import (
 // client sees must not read as Google's own model.
 const EmbeddingGemmaONNXID = "embeddinggemma-300m-onnx-community"
 
+// CLIPONNXID is the catalogue and API identity of the community CLIP
+// conversion that serves multimodal embeddings (#1454).
+const CLIPONNXID = "clip-vit-base-patch32-onnx-community"
+
 // RuntimeONNX names ONNX Runtime.
 const RuntimeONNX = "onnxruntime"
 

@@ -1,9 +1,13 @@
 package console
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,5 +128,77 @@ func TestEmbeddingsScreenSendsTheNamedModel(t *testing.T) {
 		if resp, _ := postJSON(t, srv, "/api/ai/embeddings?model="+bad, `{}`); resp.StatusCode != 400 {
 			t.Fatalf("%s relayed: %d", bad, resp.StatusCode)
 		}
+	}
+}
+
+// unitMultimodal puts every text and image on e0.
+type unitMultimodal struct{}
+
+func (unitMultimodal) Model() string { return localai.CLIPONNXID }
+func (unitMultimodal) Close() error  { return nil }
+func (unitMultimodal) EmbedText(_ context.Context, _ string, dim int) (embedding.Output, error) {
+	v := make([]float32, embedding.CLIPDimensions)
+	v[0] = 1
+	return embedding.Output{Values: embedding.Truncate(v, dim), TokenCount: 3}, nil
+}
+func (u unitMultimodal) EmbedImage(ctx context.Context, _ image.Image, dim int) (embedding.Output, error) {
+	return u.EmbedText(ctx, "", dim)
+}
+
+// TestEmbeddingsScreenEmbedsAnImage (#1454): the status names the
+// multimodal model and its dimensions, and the relay carries an inline image
+// larger than the old 1 MB bound to the real multimodal :predict, returning
+// its answer, and its 501 while the model is not loaded, unchanged.
+func TestEmbeddingsScreenEmbedsAnImage(t *testing.T) {
+	api := vertexai.NewServer(nil)
+	api.SetEmbedder(unitEmbedder{}, nil)
+	apiSrv := httptest.NewServer(api.Handler())
+	defer apiSrv.Close()
+	addr := strings.TrimPrefix(apiSrv.URL, "http://")
+	srv := newPlaygroundServer(t, &Playground{Addr: func() string { return addr }, Model: "m",
+		EmbeddingModel: localai.EmbeddingGemmaONNXID})
+
+	code, body := getJSON(t, srv, "/api/ai/embeddings")
+	var st struct {
+		Multimodal struct {
+			Model      string `json:"model"`
+			Endpoint   string `json:"endpoint"`
+			Dimensions []int  `json:"dimensions"`
+		} `json:"multimodal"`
+	}
+	if err := json.Unmarshal([]byte(body), &st); code != 200 || err != nil || st.Multimodal.Model != localai.CLIPONNXID ||
+		!strings.HasSuffix(st.Multimodal.Endpoint, localai.CLIPONNXID+":predict") || len(st.Multimodal.Dimensions) != 3 {
+		t.Fatalf("status %d: %s", code, body)
+	}
+
+	// A noisy 800x800 PNG: well over 1 MB once base64-encoded.
+	img := image.NewRGBA(image.Rect(0, 0, 800, 800))
+	x := uint32(2463534242)
+	for i := range img.Pix {
+		x ^= x << 13
+		x ^= x >> 17
+		x ^= x << 5
+		img.Pix[i] = byte(x)
+	}
+	var buf bytes.Buffer
+	_ = png.Encode(&buf, img)
+	b64 := base64.StdEncoding.EncodeToString(buf.Bytes())
+	if len(b64) < 1<<20 {
+		t.Fatalf("test image only %d bytes encoded", len(b64))
+	}
+	req := `{"instances":[{"image":{"bytesBase64Encoded":"` + b64 + `","mimeType":"image/png"}}],"parameters":{"dimension":256}}`
+	path := "/api/ai/embeddings?method=predict&model=" + localai.CLIPONNXID
+	if resp, out := postJSON(t, srv, path, req); resp.StatusCode != http.StatusNotImplemented || !strings.Contains(out, "Local models") {
+		t.Fatalf("unloaded: %d %s", resp.StatusCode, out)
+	}
+	api.SwapMultimodalEmbedder(unitMultimodal{}, nil)
+	resp, out := postJSON(t, srv, path, req)
+	var got struct {
+		Predictions []struct {
+			ImageEmbedding []float32 `json:"imageEmbedding"`
+		} `json:"predictions"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); resp.StatusCode != 200 || err != nil || len(got.Predictions) != 1 || len(got.Predictions[0].ImageEmbedding) != 256 {
+		t.Fatalf("loaded: %d %.300s", resp.StatusCode, out)
 	}
 }

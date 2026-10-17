@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/localai"
 )
 
 // EmbeddingsNote is shown on the Embeddings screen, above the output. The
@@ -17,6 +19,12 @@ import (
 const EmbeddingsNote = "embeddinggemma-300m-onnx-community is a COMMUNITY ONNX int8 conversion " +
 	"of EmbeddingGemma by onnx-community. It is NOT an official Google artifact, and its " +
 	"vectors are not guaranteed to match Google's model. The Gemma terms apply."
+
+// MultimodalNote is shown on the Embeddings screen's image and text card.
+const MultimodalNote = localai.CLIPONNXID + " is a COMMUNITY ONNX int8 conversion of OpenAI's " +
+	"CLIP ViT-B/32 by Xenova, NOT a Google model: Vertex's multimodalembedding is not published. " +
+	"Text and images share its 512-dimensional space; it has no video, audio or document encoder. " +
+	"Download and load it on the Local models page."
 
 // embeddingsConfigured reports whether the Embeddings screen is offered.
 func (p *Playground) embeddingsConfigured() bool {
@@ -79,6 +87,14 @@ func (s *Server) handleEmbeddingsStatus(w http.ResponseWriter, _ *http.Request) 
 		"dimensions": []int{768, 512, 256, 128},
 		// Names to try; the API refuses each with 404 and no substitution.
 		"notServed": notServedEmbeddingModels,
+		// The image and text card (#1454): multimodalembedding's :predict
+		// shape, on the local CLIP model, loaded on the Local models page.
+		"multimodal": map[string]any{
+			"model":      localai.CLIPONNXID,
+			"endpoint":   "http://" + p.endpoint() + p.embeddingPathFor(localai.CLIPONNXID, "predict"),
+			"dimensions": []int{512, 256, 128},
+			"note":       MultimodalNote,
+		},
 	})
 }
 
@@ -114,7 +130,9 @@ func (s *Server) handleEmbeddingsPredict(w http.ResponseWriter, r *http.Request)
 			"error": fmt.Sprintf("model %q is not a publisher model ID", model)})
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	// An inline image travels base64-encoded, so the bound is the
+	// multimodal model's 20 MB image limit, encoded, rather than 1 MB.
+	body, err := io.ReadAll(io.LimitReader(r.Body, 28<<20))
 	if err != nil || !json.Valid(body) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the request body must be JSON"})
 		return

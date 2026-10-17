@@ -46,6 +46,8 @@ type Modality string
 const (
 	ModalityText      Modality = "text-generation"
 	ModalityEmbedding Modality = "embedding"
+	// ModalityMultimodalEmbedding embeds text and images into one space.
+	ModalityMultimodalEmbedding Modality = "multimodal-embedding"
 )
 
 // Model is a catalogued artifact.
@@ -204,6 +206,38 @@ var catalog = map[string]Model{
 					SHA256: "705626e28e4c23c82ade34566b4197d97f534c12275fa406dfb71e9937d388c0"},
 				{Path: "tokenizer.json", Bytes: 20323312,
 					SHA256: "4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47"},
+			},
+		},
+	},
+	// A community ONNX conversion of OpenAI's CLIP ViT-B/32, the local
+	// multimodal embedding model (#1454): separate text and vision encoders
+	// projecting into one 512-dimensional space. Not a Google model at all;
+	// Vertex's multimodalembedding is not published. Pinned values were read
+	// from the Hugging Face API (tree?expand=true, LFS oids) on 2026-10-16;
+	// tokenizer.json is not in LFS, so its SHA-256 was taken from the file at
+	// the pinned revision, whose git blob id the API reports.
+	CLIPONNXID: {
+		ID:        CLIPONNXID,
+		Repo:      "Xenova/clip-vit-base-patch32",
+		Publisher: PublisherCommunity,
+		Access:    AccessOpen,
+		License:   "mit",
+		Modality:  ModalityMultimodalEmbedding,
+		Artifact:  "onnx/vision_model_quantized.onnx",
+		Runtime:   RuntimeONNX,
+		Official:  false,
+		Notes: "A COMMUNITY ONNX int8 conversion (Xenova) of openai/clip-vit-base-patch32, " +
+			"NOT a Google model. Text and image share one 512-dimensional space; it has no " +
+			"video, audio or document encoder. Runs on ONNX Runtime in a build made with -tags onnx.",
+		Pin: &Pin{
+			Revision: "d15189d7028b43f1d3e65039190477f6af591c2a",
+			Files: []PinnedFile{
+				{Path: "onnx/text_model_quantized.onnx", Bytes: 64504507,
+					SHA256: "73baab855d406190da9faa498cfedf65f15cf309f4cc7385b7b032e6d08e5c3a"},
+				{Path: "onnx/vision_model_quantized.onnx", Bytes: 89117001,
+					SHA256: "583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299"},
+				{Path: "tokenizer.json", Bytes: 2224119,
+					SHA256: "f7f3b7af117d467b58374797691a6438d3e6b9e9cef800dfd5dced7f697a90cd"},
 			},
 		},
 	},
