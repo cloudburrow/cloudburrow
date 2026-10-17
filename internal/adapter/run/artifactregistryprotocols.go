@@ -54,7 +54,9 @@ var arServer atomic.Pointer[ArtifactRegistryServer]
 // only reach this port by address puts the host first in the path,
 // http://127.0.0.1:PORT/{location}-{format}.pkg.dev/{project}/{repository}/.
 // A VIRTUAL repository serves the reads from its upstream repositories,
-// highest priority first, and refuses writes, as Google's does.
+// highest priority first, and refuses writes, as Google's does; a REMOTE
+// one serves them from its cache, then its upstream, keeping what it read
+// (#1546, artifactregistryremote.go).
 
 var pkgHostRE = regexp.MustCompile(`^([a-z0-9-]+)-(python|npm|maven|apt|yum)\.pkg\.(dev|localhost)$`)
 
@@ -108,29 +110,6 @@ func resolvePkgRequest(r *http.Request) (*pkgRequest, string, bool) {
 		pr.rest = parts[2]
 	}
 	return pr, "", true
-}
-
-// readRepos are the repositories a read searches: the repository, or a
-// virtual one's upstreams by descending priority.
-func (p *pkgRequest) readRepos() []string {
-	if p.repo.GetMode() != arpb.Repository_VIRTUAL_REPOSITORY {
-		return []string{p.repo.GetName()}
-	}
-	ups := append([]*arpb.UpstreamPolicy(nil), p.repo.GetVirtualRepositoryConfig().GetUpstreamPolicies()...)
-	sort.SliceStable(ups, func(i, j int) bool { return ups[i].GetPriority() > ups[j].GetPriority() })
-	var out []string
-	for _, u := range ups {
-		out = append(out, u.GetRepository())
-	}
-	return out
-}
-
-func (p *pkgRequest) writable(w http.ResponseWriter) bool {
-	if p.repo.GetMode() == arpb.Repository_VIRTUAL_REPOSITORY {
-		http.Error(w, "a virtual repository is read-only: upload to one of its upstream repositories", http.StatusMethodNotAllowed)
-		return false
-	}
-	return true
 }
 
 // servePackages serves a format protocol or generic upload or download
@@ -253,7 +232,7 @@ func servePython(w http.ResponseWriter, r *http.Request, p *pkgRequest) {
 		if ok {
 			for _, repo := range p.readRepos() {
 				if f, found := fileByID(repo, file); found && f.Package == normalizePython(pkg) {
-					serveBlob(w, r, f, "application/octet-stream")
+					p.serveFile(w, r, repo, f, "application/octet-stream")
 					return
 				}
 			}
@@ -355,7 +334,7 @@ func serveNpm(w http.ResponseWriter, r *http.Request, p *pkgRequest) {
 		f, _ := url.PathUnescape(file)
 		for _, repo := range p.readRepos() {
 			if x, ok := fileByID(repo, pkg+"/-/"+f); ok {
-				serveBlob(w, r, x, "application/octet-stream")
+				p.serveFile(w, r, repo, x, "application/octet-stream")
 				return
 			}
 		}
@@ -581,7 +560,7 @@ func serveMaven(w http.ResponseWriter, r *http.Request, p *pkgRequest) {
 	case http.MethodGet, http.MethodHead:
 		for _, repo := range p.readRepos() {
 			if f, ok := fileByID(repo, path); ok {
-				serveBlob(w, r, f, mavenType(path))
+				p.serveFile(w, r, repo, f, mavenType(path))
 				return
 			}
 		}

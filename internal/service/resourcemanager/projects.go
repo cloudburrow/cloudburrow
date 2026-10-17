@@ -60,6 +60,10 @@ type Project struct {
 	// "presence of any capability implies that this is a Management
 	// Project".
 	ConfiguredCapabilities []string `json:"configuredCapabilities,omitempty"`
+	// Number is the project's number, given when it was created and never
+	// given to another project (#1544, numbers.go). A record written before
+	// it was kept has none, and numberOf derives its number as before.
+	Number int64 `json:"number,omitempty"`
 }
 
 // RetentionPeriod is how long a deleted project is kept in DELETE_REQUESTED
@@ -101,6 +105,10 @@ type Registry struct {
 	// r.mu was taken, whose hooks unlock runs (purge.go).
 	onPurge []func(projectID string) error
 	purged  []string
+	// onNumbers are the OnNumbersChanged hooks, and numbersChanged whether
+	// a project was created or purged since r.mu was taken (numbers.go).
+	onNumbers      []func()
+	numbersChanged bool
 	// now is the clock deletion and purging read; a test sets it.
 	now func() time.Time
 }
@@ -169,6 +177,12 @@ func (r *Registry) registerLocked(p Project) (Project, error) {
 		p.CreateTime = r.now().UTC().Format(time.RFC3339)
 	}
 	p.DeleteTime = ""
+	n, err := r.assignNumberLocked(p.ProjectID)
+	if err != nil {
+		return Project{}, err
+	}
+	p.Number = n
+	r.numbersChanged = true
 	// A project made under a purged one's ID starts with nothing the
 	// registry keeps for a project, as on Google (#1368, #1537): state an
 	// earlier version left behind at the purge goes now.
@@ -248,7 +262,7 @@ func (r *Registry) load(id string) (Project, error) {
 	}
 	if p.State == StateDeleteRequested {
 		if t, err := time.Parse(time.RFC3339, p.DeleteTime); err == nil && !r.now().Before(t.Add(RetentionPeriod)) {
-			r.purgeLocked(id)
+			r.purgeLocked(p)
 			return Project{}, apierror.NotFound("project %q not found", id)
 		}
 	}

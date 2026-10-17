@@ -1147,7 +1147,11 @@ func (f *FunctionsServer) ListRuntimes(_ context.Context, req *functionspb.ListR
 }
 
 // functionsIAM is the google.iam.v1.IAMPolicy mixin on functions, stored
-// and never enforced (ADR-0006).
+// and never enforced (ADR-0006). Over gRPC the Run port has one
+// IAMPolicy service, which Secure Source Manager's instances share
+// (securesourcemanager.googleapis.com names theirs so too), so a call on
+// an instance is passed to ssmInstanceIAM (#1304: the official client's
+// GetIamPolicy on an instance was refused as a bad function name).
 type functionsIAM struct{ f *FunctionsServer }
 
 func (functionsIAM) stored(resourceName string) (*storedFunction, error) {
@@ -1161,7 +1165,10 @@ func (functionsIAM) stored(resourceName string) (*storedFunction, error) {
 	return sf, nil
 }
 
-func (i functionsIAM) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+func (i functionsIAM) GetIamPolicy(ctx context.Context, req *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
+	if isSSMInstanceName(req.GetResource()) {
+		return ssmInstanceIAM{}.GetIamPolicy(ctx, req)
+	}
 	functions.mu.Lock()
 	defer functions.mu.Unlock()
 	sf, err := i.stored(req.GetResource())
@@ -1171,7 +1178,10 @@ func (i functionsIAM) GetIamPolicy(_ context.Context, req *iampb.GetIamPolicyReq
 	return iampolicy.Get(sf.policy, req.GetOptions())
 }
 
-func (i functionsIAM) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
+func (i functionsIAM) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
+	if isSSMInstanceName(req.GetResource()) {
+		return ssmInstanceIAM{}.SetIamPolicy(ctx, req)
+	}
 	functions.mu.Lock()
 	defer functions.mu.Unlock()
 	sf, err := i.stored(req.GetResource())
@@ -1186,7 +1196,10 @@ func (i functionsIAM) SetIamPolicy(_ context.Context, req *iampb.SetIamPolicyReq
 	return p.Proto(), nil
 }
 
-func (i functionsIAM) TestIamPermissions(_ context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
+func (i functionsIAM) TestIamPermissions(ctx context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
+	if isSSMInstanceName(req.GetResource()) {
+		return ssmInstanceIAM{}.TestIamPermissions(ctx, req)
+	}
 	functions.mu.Lock()
 	defer functions.mu.Unlock()
 	if _, err := i.stored(req.GetResource()); err != nil {

@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/cloudburrow/cloudburrow/internal/hostguard"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/sched"
 	"github.com/cloudburrow/cloudburrow/internal/service/storage"
 )
@@ -133,6 +134,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// The numbers the host's registry gave projects (#1544), for every
+	// number this server reports.
+	resource.SetProjectNumberResolver(srv.ProjectNumberOf)
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
 		return err

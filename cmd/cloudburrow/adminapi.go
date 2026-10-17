@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/version"
 	"net/http"
@@ -36,8 +38,12 @@ type adminDeps struct {
 	kms       *kmsService
 	scheduler *schedulerService
 	logging   *loggingService
-	// run is Cloud Run, for its unused volume objects' reset (#1476).
+	// run is Cloud Run, for its unused volume objects' reset (#1476), and
+	// a project's workloads (#1540).
 	run *runService
+	// memorystore is the Memorystore admin API, for its created instances'
+	// reset (#1540).
+	memorystore *memorystoreAdminService
 	// mysql is Cloud SQL for MySQL's credentials, for its resetter.
 	mysql      components.MySQLCredentials
 	forwarders []*netfwd.Forwarder
@@ -53,6 +59,11 @@ type adminDeps struct {
 	// serviceUsage is the Service Usage API, for its per-project API
 	// states' reset (#1537); read at reset time for the same reason.
 	serviceUsage func() *serviceusage.Server
+	// sqlAdmin and backupDR are the Cloud SQL Admin API and Backup and
+	// DR, for their per-project resets (#1541, #1542); built after the
+	// routes are mounted, so read at reset time.
+	sqlAdmin func() *sqladmin.Server
+	backupDR func() *backupdr.Server
 }
 
 // mountAdmin attaches the admin API to the control server.
@@ -84,11 +95,18 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		}})
 		api.RegisterSeeder(&pubsubSeeder{tunnel: f})
 	}
-	// What the Spanner, Bigtable and Firestore fronts keep (#1514).
+	// What the Spanner, Bigtable and Firestore fronts keep (#1514), and,
+	// per project, the emulators' data too (#1540).
 	for _, svc := range []config.Service{config.ServiceSpanner, config.ServiceBigtable, config.ServiceFirestore} {
 		if f := forwarderFor(d.forwarders, string(svc)); f != nil {
 			api.RegisterResetter(&frontStateResetter{name: string(svc), tunnel: f})
 		}
+	}
+	if f := forwarderFor(d.forwarders, string(config.ServiceDatastore)); f != nil {
+		// A project's entities, through the Datastore API (#1540).
+		api.RegisterResetter(&datastoreResetter{tunnel: f, projects: func() []string {
+			return knownProjects(cfg.DefaultProject(), d.projects)
+		}})
 	}
 	if f := forwarderFor(d.forwarders, string(config.ServiceCloudSQLMySQL)); f != nil {
 		api.RegisterResetter(&mysqlResetter{tunnel: f, creds: d.mysql})
@@ -111,6 +129,18 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		// The volume objects no Cloud Run workload uses (#1476).
 		api.RegisterResetter(&runVolumesResetter{svc: d.run})
 	}
+	// A project's datasets (#1540), through the front.
+	if f := forwarderFor(d.forwarders, "bigquery"); f != nil {
+		api.RegisterResetter(&bigqueryResetter{tunnel: func() *netfwd.Forwarder { return f }, projects: func() []string {
+			return knownProjects(cfg.DefaultProject(), d.projects)
+		}})
+	}
+	if d.memorystore != nil {
+		// The instances CreateInstance made (#1540).
+		api.RegisterResetter(&memorystoreResetter{svc: d.memorystore, projects: func() []string {
+			return knownProjects(cfg.DefaultProject(), d.projects)
+		}})
+	}
 	if d.registry != nil {
 		// Project, folder and organization IAM policies (#1368), stored as
 		// every other service's are, so a reset clears them as it clears
@@ -121,6 +151,17 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		// Which APIs each project disabled, and the operations that did it
 		// (#1537), kept in the registry's store.
 		api.RegisterResetter(&serviceUsageResetter{srv: d.serviceUsage})
+	}
+	if d.run != nil {
+		// Repositories and projects' settings (#1543), served beside Cloud Run.
+		api.RegisterResetter(artifactRegistryResetter{})
+	}
+	// Backup and DR before the Admin API it takes its backups through.
+	if d.backupDR != nil && backupDREnabled(cfg) {
+		api.RegisterResetter(&backupDRResetter{srv: d.backupDR})
+	}
+	if d.sqlAdmin != nil && sqlAdminEnabled(cfg) {
+		api.RegisterResetter(&sqlAdminResetter{srv: d.sqlAdmin})
 	}
 
 	// State snapshots (#289): the services whose state is theirs to keep,

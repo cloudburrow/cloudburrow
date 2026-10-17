@@ -123,6 +123,9 @@ func (f *Front) call(ctx context.Context, full string, req proto.Message, out pr
 		f.logf("bigtable front: refused %s over REST, which the emulator does not implement", full)
 		return nil, status.Error(codes.Unimplemented, msg)
 	}
+	if b, err := proto.Marshal(req); err == nil {
+		f.sawIf(f.seen.seeFrame(b))
+	}
 	resp, err := newMessage(out)
 	if err != nil {
 		return nil, err

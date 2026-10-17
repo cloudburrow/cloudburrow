@@ -541,6 +541,10 @@ func (s *Server) connectSettings(r *http.Request, project string, e Engine) (any
 	if err := s.connectorReady(r); err != nil {
 		return nil, err
 	}
+	// A suspended instance, whose key cannot be used, is not reached (#1538).
+	if err := s.keyBlocksConnections(e.Instance()); err != nil {
+		return nil, err
+	}
 	host, _, _ := net.SplitHostPort(s.conn.addr)
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
@@ -576,6 +580,10 @@ const iamWhy = "IAM database authentication signs in as a Google identity, and C
 
 func (s *Server) generateEphemeralCert(r *http.Request, project string, e Engine) (any, error) {
 	if err := s.connectorReady(r); err != nil {
+		return nil, err
+	}
+	// A suspended instance, whose key cannot be used, is not reached (#1538).
+	if err := s.keyBlocksConnections(e.Instance()); err != nil {
 		return nil, err
 	}
 	var req struct {

@@ -62,8 +62,8 @@ import (
 // jobs") (https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/list).
 // The front does each over the whole list (serveJobList), after the
 // front's own jobs and the times above are in it, and leaves out the
-// queries the front ran itself for its checks (internal), which are no
-// client's jobs. allUsers changes nothing: the emulator has one user, so
+// queries the front ran itself for its checks, which are no client's
+// jobs: named so (internaljobs.go, #1555), or recorded (internal). allUsers changes nothing: the emulator has one user, so
 // every job is the caller's.
 
 // maxJobRecords bounds what jobRecords keeps of each kind.
@@ -145,11 +145,12 @@ func (j *jobRecords) time(project, id string) (jobTime, bool) {
 
 // internalText reports whether a job of jobs.list is one of the
 // statements that write the table of JOBS rows (jobstable.go), known by
-// its text, which the engine keeps (#1553). internal, which markInternal
-// writes, keeps the last maxJobRecords of the front's own jobs, in memory
-// alone: one evicted from it, and every one after the front restarts,
-// was listed by jobs.list as the client's, and so was a row of
-// INFORMATION_SCHEMA.JOBS. The table's INSERTs are literals of up to a
+// its text, which the engine keeps (#1553): one made before the front
+// named its own jobs (internaljobs.go, #1555), which a state directory
+// keeps. internal, which markInternal wrote for each of the front's own
+// jobs, kept the last maxJobRecords of them, in memory alone: one evicted
+// from it, and every one after the front restarted, was listed by
+// jobs.list as the client's, and so was a row of INFORMATION_SCHEMA.JOBS. The table's INSERTs are literals of up to a
 // thousand rows, and the next sync wrote each one's text into a row of
 // its own, which the INSERT after it carried again: measured in the
 // BigQuery compat suite (shuffled, seed 1792237754362941000, --services
@@ -165,7 +166,10 @@ func internalText(job map[string]any) bool {
 	return isJobsTableStatement(s)
 }
 
-// markInternal records a job the front ran itself (front.send).
+// markInternal records a job the front ran for a script, hidden until the
+// script is answered and adopts it as a child (scriptjobs.go). The
+// front's own jobs are named so (internaljobs.go, #1555) and need no
+// record.
 func (j *jobRecords) markInternal(project, id string) {
 	if j == nil || id == "" {
 		return
@@ -462,7 +466,7 @@ func (j *jobRecords) serveJobList(w http.ResponseWriter, r *http.Request, projec
 		if p == "" {
 			p = project
 		}
-		if j.isInternal(p, id) || internalText(job) {
+		if isInternalJobID(id) || j.isInternal(p, id) || internalText(job) { // internaljobs.go, #1555
 			continue
 		}
 		j.patch(job, p)

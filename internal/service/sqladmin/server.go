@@ -119,7 +119,10 @@ type Server struct {
 	certs *sslCertStore
 	// secrets reads executeSql's passwordSecretVersion (#1462), nil
 	// unless SetSecretAccessor was called; emu guards it.
-	secrets  SecretAccessor
+	secrets SecretAccessor
+	// kms is Cloud KMS, for diskEncryptionConfiguration (#1538), nil unless
+	// UseKMS was called; emu guards it.
+	kms      KeyService
 	stopAuto chan struct{}
 	// advances are the retention clock's Advances (#1330), oldest first.
 	clockMu  sync.Mutex
@@ -680,7 +683,7 @@ func (s *Server) databases(r *http.Request, base, project string, e Engine, rest
 			return "sql.databases.list", map[string]any{"kind": "sql#databasesList", "items": items}, nil
 		case http.MethodPost:
 			var d struct{ Name, Charset, Collation string }
-			if err := decode(r, &d); err != nil {
+			if err := readChecked(r, "database", databaseFields, &d); err != nil {
 				return "sql.databases.insert", nil, err
 			}
 			if d.Name == "" {
@@ -723,7 +726,7 @@ func (s *Server) databases(r *http.Request, base, project string, e Engine, rest
 			return method, nil, err
 		}
 		var d struct{ Name, Charset, Collation string }
-		if err := decode(r, &d); err != nil {
+		if err := readChecked(r, "database", databaseFields, &d); err != nil {
 			return method, nil, err
 		}
 		if d.Name != "" && d.Name != name {
@@ -802,7 +805,7 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		var u struct {
 			Name, Host, Password, Type string
 		}
-		if err := decode(r, &u); err != nil {
+		if err := readChecked(r, "user", userFields, &u); err != nil {
 			return "sql.users.insert", nil, err
 		}
 		if u.Name == "" {
@@ -818,7 +821,7 @@ func (s *Server) users(r *http.Request, base, project string, e Engine, rest []s
 		return "sql.users.insert", s.done(base, project, e, "CREATE_USER", u.Name), nil
 	case http.MethodPut:
 		var u struct{ Name, Host, Password string }
-		if err := decode(r, &u); err != nil {
+		if err := readChecked(r, "user", userFields, &u); err != nil {
 			return "sql.users.update", nil, err
 		}
 		name, host := q.Get("name"), q.Get("host")

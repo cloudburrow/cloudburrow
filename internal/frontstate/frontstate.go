@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"google.golang.org/protobuf/encoding/protowire"
@@ -253,19 +254,51 @@ func Decode(b []byte, m proto.Message) (bool, error) {
 }
 
 // ResetPath is the path on a front's port that forgets the front's records
-// and copies (`cloudburrow reset`, #1514): a POST, answered 204.
+// and copies (`cloudburrow reset`, #1514): a POST, answered 204. With
+// ?project= it forgets one project's only, and deletes that project's data
+// in the emulator too, as a project's purge does on Google (#1540).
 const ResetPath = "/cloudburrow/front-state/reset"
 
-// ServeReset answers a call to ResetPath with reset.
-func ServeReset(w http.ResponseWriter, r *http.Request, reset func() error) {
+// DatastoreForgetPath is the path on the Datastore call front
+// (internal/callfront) that answers a POST ?project= with the named
+// databases calls have named in that project, {"databases": [...]}, and
+// forgets them, for the project's purge (#1550).
+const DatastoreForgetPath = "/cloudburrow/datastore/databases/forget"
+
+// ServeReset answers a call to ResetPath with reset, passing it the
+// project= parameter: "" for every project.
+func ServeReset(w http.ResponseWriter, r *http.Request, reset func(project string) error) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := reset(); err != nil {
+	if err := reset(r.URL.Query().Get("project")); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// DropProject deletes from m every key naming a resource of project, those
+// beginning "projects/<project>/" (#1540).
+func DropProject[T any](m map[string]T, project string) {
+	prefix := "projects/" + project + "/"
+	for k := range m {
+		if strings.HasPrefix(k, prefix) || k == "projects/"+project {
+			delete(m, k)
+		}
+	}
+}
+
+// KeepOthers returns the names in names not of project's resources.
+func KeepOthers(names []string, project string) []string {
+	prefix := "projects/" + project + "/"
+	out := names[:0:0]
+	for _, n := range names {
+		if !strings.HasPrefix(n, prefix) {
+			out = append(out, n)
+		}
+	}
+	return out
 }

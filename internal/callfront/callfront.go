@@ -77,6 +77,38 @@ func (is Intercepts) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
+// Watcher is an intercept that is shown the resource each call through the
+// front names, its own or the emulator's (#1550): the Firestore Admin API
+// keeps the databases documents calls name, which the emulator cannot list.
+type Watcher interface {
+	SawResource(resource string)
+}
+
+// Peeker is an intercept that is shown each request it does not claim
+// before the emulator is, and may read its body, putting it back (#1550):
+// a Datastore REST call names its database in its body alone.
+type Peeker interface {
+	SawRequest(r *http.Request)
+}
+
+// SawRequest shows r to each of the intercepts that is a Peeker.
+func (is Intercepts) SawRequest(r *http.Request) {
+	for _, i := range is {
+		if p, ok := i.(Peeker); ok {
+			p.SawRequest(r)
+		}
+	}
+}
+
+// SawResource shows resource to each of the intercepts that is a Watcher.
+func (is Intercepts) SawResource(resource string) {
+	for _, i := range is {
+		if w, ok := i.(Watcher); ok {
+			w.SawResource(resource)
+		}
+	}
+}
+
 // Handler is the front for the emulator at upstream, recording into ring.
 func Handler(upstream string, ring *calllog.Ring, logf func(string, ...any)) http.Handler {
 	return HandlerWith(upstream, ring, logf, nil)
@@ -88,15 +120,23 @@ func HandlerWith(upstream string, ring *calllog.Ring, logf func(string, ...any),
 	var next http.Handler = netfwd.PassThrough(upstream, logf)
 	if icpt != nil {
 		pass := next
+		peeker, _ := icpt.(Peeker)
 		next = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if icpt.Claims(r) {
 				icpt.ServeHTTP(w, r)
 				return
 			}
+			if peeker != nil {
+				peeker.SawRequest(r)
+			}
 			pass.ServeHTTP(w, r)
 		})
 	}
+	watcher, _ := icpt.(Watcher)
 	proxy := netfwd.Observed(next, func(c netfwd.Call) {
+		if watcher != nil && c.Resource != "" {
+			watcher.SawResource(c.Resource)
+		}
 		transport := "http"
 		if c.GRPC {
 			transport = "grpc"
@@ -165,6 +205,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Where the Firestore Admin API and the Spanner front keep their
 	// records and data copies (#1514): the pod's emptyDir.
 	stateDir := fs.String("state-dir", "", "directory the Firestore Admin API or the Spanner front keeps its state in")
+	// The named Datastore databases calls name, which the emulator cannot
+	// list, kept for the project's purge (#1550).
+	datastoreDBs := fs.Bool("datastore-databases", false, "record the named Datastore databases calls name, for a project's purge")
 	queries := fs.String("queries", "", "answer the query RPCs the emulator does not serve: datastore (RunAggregationQuery) or firestore (PartitionQuery)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -191,6 +234,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		icpts = append(icpts, queryfront.NewDatastore(*upstream))
 	case "firestore":
 		icpts = append(icpts, queryfront.NewFirestore(*upstream))
+	}
+	if *datastoreDBs {
+		icpts = append(icpts, newDatastoreDatabases(*upstream, logger.Printf))
 	}
 	if *firestoreAdmin {
 		fa := firestoreadmin.New(*upstream)

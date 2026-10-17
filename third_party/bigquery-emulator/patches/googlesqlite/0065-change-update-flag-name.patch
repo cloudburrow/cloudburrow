@@ -1,0 +1,438 @@
+CloudBurrow patch 65 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1548). Applies after patch 0061.
+
+Patch 0036 named the change table's flag of a DELETE that is half of an
+UPDATE _CHANGE_IS_FOR_UPDATE, and patch 0063 gave a table with a column
+of that name no change table. BigQuery reserves only the prefixes
+_CHANGE_TYPE, _CHANGE_TIMESTAMP and _CHANGE_SEQUENCE_NUMBER
+(https://cloud.google.com/bigquery/docs/schemas, "Column names", read
+2026-10-17), so such a column is the table's own, and its history must
+be kept. The flag is now _CHANGE_TYPE_FOR_UPDATE, under the reserved
+prefix _CHANGE_TYPE, which no BigQuery table can have; patches 0036,
+0041, 0044 and 0063's statements and tests name it so, and a table with a
+column _CHANGE_IS_FOR_UPDATE has a change table with that column among
+the table's. A change table made before this patch keeps its history:
+the catalog's first sync of a database renames its flag, in SQLite
+(ALTER TABLE ... RENAME COLUMN, which renames it in the table's
+triggers) and in its catalog spec.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License (third_party/bigquery-emulator/licenses/googlesqlite.LICENSE).
+This patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/catalog.go
++++ b/internal/catalog.go
+@@ -87,11 +87,14 @@
+ 	// keysMigrated: the catalog table's rows have their kind-qualified
+ 	// keys (CloudBurrow patch, cloudburrow/cloudburrow#1186).
+ 	keysMigrated bool
+-	mu           sync.Mutex
+-	tables       []*TableSpec
+-	functions    []*FunctionSpec
+-	tvfs         []*TVFSpec
+-	catalog      *googlesql.SimpleCatalog
++	// changeFlagMigrated: the change tables have patch 0065's update flag
++	// (CloudBurrow patch, cloudburrow/cloudburrow#1548).
++	changeFlagMigrated bool
++	mu                 sync.Mutex
++	tables             []*TableSpec
++	functions          []*FunctionSpec
++	tvfs               []*TVFSpec
++	catalog            *googlesql.SimpleCatalog
+ 	// descriptorPool is the protobuf DescriptorPool attached to the
+ 	// SimpleCatalog at construction time. Consumers register FileDescriptorProto
+ 	// payloads through Catalog.RegisterProto (Conn.RegisterProto on the
+@@ -2314,6 +2317,14 @@
+ 			return fmt.Errorf("failed to migrate catalog keys: %w", err)
+ 		}
+ 		c.keysMigrated = true
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1548): the update flag
++	// of a change table made before patch 0065 (change_history_flag.go).
++	if !c.changeFlagMigrated {
++		if err := migrateChangeForUpdateColumn(ctx, conn); err != nil {
++			return fmt.Errorf("failed to migrate change tables: %w", err)
++		}
++		c.changeFlagMigrated = true
+ 	}
+ 	return nil
+ }
+--- a/internal/change_history.go
++++ b/internal/change_history.go
+@@ -26,7 +26,8 @@
+ // emulator's own metadata tables are named by one name) gets a change
+ // table of its own: the same
+ // columns (not its pseudo-columns) and _CHANGE_TYPE STRING,
+-// _CHANGE_TIMESTAMP TIMESTAMP and _CHANGE_IS_FOR_UPDATE BOOL, filled by
++// _CHANGE_TIMESTAMP TIMESTAMP and _CHANGE_TYPE_FOR_UPDATE BOOL (patch
++// 0065: _CHANGE_IS_FOR_UPDATE before it), filled by
+ // SQLite triggers on the table. Every write reaches the table by SQLite
+ // INSERT, UPDATE or DELETE (DML, MERGE, TRUNCATE TABLE, and the
+ // emulator's tabledata.insertAll, loads, Storage Write API and query
+@@ -96,7 +97,7 @@
+ 	cs.Columns = append(cs.Columns,
+ 		&ColumnSpec{Name: "_CHANGE_TYPE", Type: &Type{Kind: int(googlesql.TypeKindTypeString)}},
+ 		&ColumnSpec{Name: "_CHANGE_TIMESTAMP", Type: &Type{Kind: int(googlesql.TypeKindTypeTimestamp)}},
+-		&ColumnSpec{Name: "_CHANGE_IS_FOR_UPDATE", Type: &Type{Kind: int(googlesql.TypeKindTypeBool)}},
++		&ColumnSpec{Name: changeForUpdateColumn, Type: &Type{Kind: int(googlesql.TypeKindTypeBool)}},
+ 	)
+ 	return cs
+ }
+@@ -106,7 +107,7 @@
+ // compared, without case (CloudBurrow patch, cloudburrow/cloudburrow#1522).
+ func isChangeColumn(name string) bool {
+ 	switch strings.ToUpper(name) {
+-	case "_CHANGE_TYPE", "_CHANGE_TIMESTAMP", "_CHANGE_IS_FOR_UPDATE":
++	case "_CHANGE_TYPE", "_CHANGE_TIMESTAMP", changeForUpdateColumn:
+ 		return true
+ 	}
+ 	return false
+@@ -176,7 +177,7 @@
+ 	if n > 0 {
+ 		all += ","
+ 	}
+-	target := fmt.Sprintf("INSERT INTO `%s` (%s`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`_CHANGE_IS_FOR_UPDATE`,`%s`,`%s`)",
++	target := fmt.Sprintf("INSERT INTO `%s` (%s`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`"+changeForUpdateColumn+"`,`%s`,`%s`)",
+ 		change, all, changeMicrosColumn, changeRowidColumn)
+ 	row := func(prefix, typ, forUpdate string) string {
+ 		vals := make([]string, n)
+--- a/internal/change_history_replace.go
++++ b/internal/change_history_replace.go
+@@ -99,13 +99,13 @@
+ 	}
+ 	start, del, no := encodedLiteral(value.StringValue(changeStartType)), encodedLiteral(value.StringValue("DELETE")),
+ 		encodedLiteral(value.BoolValue(false))
+-	target := fmt.Sprintf("INSERT INTO `%s` (%s`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`_CHANGE_IS_FOR_UPDATE`,`%s`,`%s`)",
++	target := fmt.Sprintf("INSERT INTO `%s` (%s`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`"+changeForUpdateColumn+"`,`%s`,`%s`)",
+ 		change, list, changeMicrosColumn, changeRowidColumn)
+ 	for _, s := range []string{
+ 		// The history starts when the replaced table's did.
+ 		fmt.Sprintf("DELETE FROM `%s` WHERE `_CHANGE_TYPE` = %s AND EXISTS (SELECT 1 FROM `%s` WHERE `_CHANGE_TYPE` = %s)",
+ 			change, start, rep.table, start),
+-		fmt.Sprintf("%s SELECT %s`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`_CHANGE_IS_FOR_UPDATE`,`%s`,`%s` - %d FROM `%s` ORDER BY rowid",
++		fmt.Sprintf("%s SELECT %s`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`"+changeForUpdateColumn+"`,`%s`,`%s` - %d FROM `%s` ORDER BY rowid",
+ 			target, list, changeMicrosColumn, changeRowidColumn, shift, rep.table),
+ 		// The rows the replaced table still had are deleted by the replace.
+ 		fmt.Sprintf("%s SELECT %s%s, googlesqlite_change_timestamp(), %s, googlesqlite_change_micros(), `%s` - %d FROM "+
+--- a/internal/change_history_rows.go
++++ b/internal/change_history_rows.go
+@@ -47,7 +47,7 @@
+ // changeStartRow is the statement that records, in the change table
+ // named change, the time it was made.
+ func changeStartRow(change string) string {
+-	return fmt.Sprintf("INSERT INTO `%s` (`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`_CHANGE_IS_FOR_UPDATE`,`%s`) "+
++	return fmt.Sprintf("INSERT INTO `%s` (`_CHANGE_TYPE`,`_CHANGE_TIMESTAMP`,`"+changeForUpdateColumn+"`,`%s`) "+
+ 		"VALUES (%s, googlesqlite_change_timestamp(), %s, googlesqlite_change_micros())",
+ 		change, changeMicrosColumn, encodedLiteral(value.StringValue(changeStartType)), encodedLiteral(value.BoolValue(false)))
+ }
+--- /dev/null
++++ b/internal/change_history_flag.go
+@@ -0,0 +1,103 @@
++package internal
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++	"fmt"
++	"strings"
++)
++
++// The change table's update flag (CloudBurrow patch,
++// cloudburrow/cloudburrow#1548).
++//
++// Patch 0036 named the change table's flag of a DELETE that is half of an
++// UPDATE _CHANGE_IS_FOR_UPDATE, a name BigQuery does not reserve: it
++// reserves only the prefixes _CHANGE_TYPE, _CHANGE_TIMESTAMP and
++// _CHANGE_SEQUENCE_NUMBER (https://cloud.google.com/bigquery/docs/schemas,
++// "Column names", read 2026-10-17), so a table may have a column of that
++// name, and patch 0063 gave such a table no history. The flag is now
++// changeForUpdateColumn, a name under the reserved prefix _CHANGE_TYPE,
++// which no BigQuery table has, and a column _CHANGE_IS_FOR_UPDATE is the
++// table's own. A change table made before keeps its history: the catalog's
++// first sync renames its flag (migrateChangeForUpdateColumn).
++
++// changeForUpdateColumn is the change table's column that marks the
++// DELETE of an UPDATE's old row.
++const changeForUpdateColumn = "_CHANGE_TYPE_FOR_UPDATE"
++
++// oldChangeForUpdateColumn is changeForUpdateColumn's name before patch
++// 0065.
++const oldChangeForUpdateColumn = "_CHANGE_IS_FOR_UPDATE"
++
++// migrateChangeForUpdateColumn renames the flag of every change table
++// made before patch 0065, in SQLite (which renames it in the table's
++// triggers too) and in the catalog. A change table of that time with a
++// column _CHANGE_IS_FOR_UPDATE has no other of the name (patch 0063 gave a
++// table with one no change table), and none has changeForUpdateColumn.
++func migrateChangeForUpdateColumn(ctx context.Context, conn *Conn) error {
++	rows, err := conn.QueryContext(ctx,
++		"SELECT name, spec FROM googlesqlite_catalog WHERE kind = @kind AND name LIKE @suffix AND instr(spec, @old) > 0",
++		sql.Named("kind", string(TableSpecKind)), sql.Named("suffix", "%"+changeTableSuffix),
++		sql.Named("old", `"`+oldChangeForUpdateColumn+`"`))
++	if err != nil {
++		return err
++	}
++	type old struct {
++		name string
++		spec *TableSpec
++	}
++	var olds []old
++	for rows.Next() {
++		var name, encoded string
++		if err := rows.Scan(&name, &encoded); err != nil {
++			rows.Close()
++			return err
++		}
++		var spec TableSpec
++		if err := json.Unmarshal([]byte(encoded), &spec); err != nil || !isChangeTableName(name) {
++			continue
++		}
++		flag := -1
++		for i, c := range spec.Columns {
++			switch {
++			case strings.EqualFold(c.Name, changeForUpdateColumn):
++				flag = -2
++			case flag == -1 && c.Name == oldChangeForUpdateColumn:
++				flag = i
++			}
++		}
++		if flag < 0 {
++			continue
++		}
++		spec.Columns[flag].Name = changeForUpdateColumn
++		olds = append(olds, old{name, &spec})
++	}
++	if err := rows.Err(); err != nil {
++		rows.Close()
++		return err
++	}
++	rows.Close()
++	for _, o := range olds {
++		var n int
++		if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info(@t) WHERE name = @c",
++			sql.Named("t", o.name), sql.Named("c", oldChangeForUpdateColumn)).Scan(&n); err != nil {
++			return err
++		}
++		if n > 0 {
++			if _, err := conn.ExecContext(ctx, fmt.Sprintf("ALTER TABLE `%s` RENAME COLUMN `%s` TO `%s`",
++				o.name, oldChangeForUpdateColumn, changeForUpdateColumn)); err != nil {
++				return fmt.Errorf("change table %s: %w", o.name, err)
++			}
++		}
++		encoded, err := json.Marshal(o.spec)
++		if err != nil {
++			return err
++		}
++		if _, err := conn.ExecContext(ctx, "UPDATE googlesqlite_catalog SET spec = @spec WHERE name = @name",
++			sql.Named("spec", string(encoded)), sql.Named("name", o.name)); err != nil {
++			return err
++		}
++	}
++	return nil
++}
+--- a/change_history_test.go
++++ b/change_history_test.go
+@@ -13,7 +13,7 @@
+ // TestChangeHistory is CloudBurrow's regression test of its patch 0036
+ // (cloudburrow/cloudburrow#1418): every table a CREATE TABLE makes gets a
+ // change table, `name$changes`, of each row inserted, deleted and updated
+-// (a DELETE of the old row, _CHANGE_IS_FOR_UPDATE, and an UPDATE of the
++// (a DELETE of the old row, _CHANGE_TYPE_FOR_UPDATE, and an UPDATE of the
+ // new), with the time of the change, one time per statement; MERGE and
+ // TRUNCATE TABLE are recorded; a wildcard and INFORMATION_SCHEMA leave
+ // the change table out; DROP TABLE drops it. (Its START row, patch 0041,
+@@ -54,7 +54,7 @@
+ 		}
+ 		return strings.Join(out, "; ")
+ 	}
+-	const read = "SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.Produce$changes` WHERE _CHANGE_TYPE != 'START' ORDER BY _CHANGE_TIMESTAMP, _CHANGE_TYPE DESC, product"
++	const read = "SELECT product, inventory, _CHANGE_TYPE, _CHANGE_TYPE_FOR_UPDATE FROM `p.d.Produce$changes` WHERE _CHANGE_TYPE != 'START' ORDER BY _CHANGE_TIMESTAMP, _CHANGE_TYPE DESC, product"
+ 	exec("CREATE TABLE `p.d.Produce` (product STRING, inventory INT64)")
+ 	exec("INSERT INTO `p.d.Produce` VALUES ('bananas', 20), ('carrots', 30)")
+ 	exec("DELETE `p.d.Produce` WHERE product = 'bananas'")
+@@ -79,7 +79,7 @@
+ 		t.Errorf("after MERGE: %d changes (%v), want 8", n, err)
+ 	}
+ 	exec("TRUNCATE TABLE `p.d.Produce`")
+-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `p.d.Produce$changes` WHERE _CHANGE_TYPE = 'DELETE' AND NOT _CHANGE_IS_FOR_UPDATE").Scan(&n); err != nil || n != 3 {
++	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM `p.d.Produce$changes` WHERE _CHANGE_TYPE = 'DELETE' AND NOT _CHANGE_TYPE_FOR_UPDATE").Scan(&n); err != nil || n != 3 {
+ 		t.Errorf("after TRUNCATE: %d deletes (%v), want 3", n, err)
+ 	}
+ 
+@@ -102,12 +102,12 @@
+ 		t.Fatal(err)
+ 	}
+ 	exec("UPDATE `p.d.tx` SET inventory = 3 WHERE TRUE")
+-	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.tx$changes` WHERE _CHANGE_TYPE != 'START' ORDER BY _CHANGE_TIMESTAMP, _CHANGE_TYPE DESC"); got != "kiwis 2 INSERT false; kiwis 3 UPDATE false; kiwis 2 DELETE true" {
++	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_TYPE_FOR_UPDATE FROM `p.d.tx$changes` WHERE _CHANGE_TYPE != 'START' ORDER BY _CHANGE_TIMESTAMP, _CHANGE_TYPE DESC"); got != "kiwis 2 INSERT false; kiwis 3 UPDATE false; kiwis 2 DELETE true" {
+ 		t.Errorf("insert and update in one transaction, then an update: %s", got)
+ 	}
+ 
+ 	exec("CREATE TABLE `p.d.ctas` AS SELECT 'apples' AS product, 10 AS inventory")
+-	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.ctas$changes` WHERE _CHANGE_TYPE != 'START'"); got != "apples 10 INSERT false" {
++	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_TYPE_FOR_UPDATE FROM `p.d.ctas$changes` WHERE _CHANGE_TYPE != 'START'"); got != "apples 10 INSERT false" {
+ 		t.Errorf("CREATE TABLE AS SELECT: %s", got)
+ 	}
+ 	exec("CREATE TABLE `proj.ds.wild_1` (product STRING)")
+@@ -135,7 +135,7 @@
+ 	}
+ 	// CREATE TABLE IF NOT EXISTS of a table that is there keeps its history.
+ 	exec("CREATE TABLE IF NOT EXISTS `p.d.ctas` (product STRING, inventory INT64)")
+-	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.ctas$changes` WHERE _CHANGE_TYPE != 'START'"); got != "apples 10 INSERT false" {
++	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_TYPE_FOR_UPDATE FROM `p.d.ctas$changes` WHERE _CHANGE_TYPE != 'START'"); got != "apples 10 INSERT false" {
+ 		t.Errorf("after CREATE TABLE IF NOT EXISTS: %s", got)
+ 	}
+ 	// A table taken out of the catalog by a DROP TABLE rolled back, and
+@@ -153,7 +153,7 @@
+ 	}
+ 	exec("CREATE TABLE IF NOT EXISTS `p.d.ctas` (product STRING, inventory INT64)")
+ 	exec("INSERT INTO `p.d.ctas` VALUES ('pears', 3)")
+-	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_IS_FOR_UPDATE FROM `p.d.ctas$changes` WHERE _CHANGE_TYPE != 'START' ORDER BY _CHANGE_TIMESTAMP"); got != "apples 10 INSERT false; pears 3 INSERT false" {
++	if got := changes("SELECT product, inventory, _CHANGE_TYPE, _CHANGE_TYPE_FOR_UPDATE FROM `p.d.ctas$changes` WHERE _CHANGE_TYPE != 'START' ORDER BY _CHANGE_TIMESTAMP"); got != "apples 10 INSERT false; pears 3 INSERT false" {
+ 		t.Errorf("after a rolled-back DROP TABLE and CREATE TABLE IF NOT EXISTS: %s", got)
+ 	}
+ 	exec("DROP TABLE `p.d.ctas`")
+--- a/change_history_rows_test.go
++++ b/change_history_rows_test.go
+@@ -88,7 +88,7 @@
+ 	}
+ 	cols, _ := rows.Columns()
+ 	rows.Close()
+-	if got := strings.Join(cols, ","); got != "id,v,_CHANGE_TYPE,_CHANGE_TIMESTAMP,_CHANGE_IS_FOR_UPDATE" {
++	if got := strings.Join(cols, ","); got != "id,v,_CHANGE_TYPE,_CHANGE_TIMESTAMP,_CHANGE_TYPE_FOR_UPDATE" {
+ 		t.Errorf("SELECT * columns: %s", got)
+ 	}
+ 	// No other table has them.
+--- a/change_history_partition_time_test.go
++++ b/change_history_partition_time_test.go
+@@ -39,7 +39,7 @@
+ 	}
+ 	cols, _ := rows.Columns()
+ 	rows.Close()
+-	if strings.Join(cols, ",") != "id,_CHANGE_TYPE,_CHANGE_TIMESTAMP,_CHANGE_IS_FOR_UPDATE" {
++	if strings.Join(cols, ",") != "id,_CHANGE_TYPE,_CHANGE_TIMESTAMP,_CHANGE_TYPE_FOR_UPDATE" {
+ 		t.Errorf("SELECT * of the change table: %v, want _PARTITIONTIME left out", cols)
+ 	}
+ 	rows, err = db.QueryContext(ctx, "SELECT id, _CHANGE_TYPE, FORMAT_TIMESTAMP('%F', _PARTITIONTIME) FROM `p.d.ing$changes` "+
+--- a/change_history_change_names_test.go
++++ b/change_history_change_names_test.go
+@@ -11,7 +11,8 @@
+ // TestChangeHistoryChangeNames is CloudBurrow's regression test of its
+ // patch 0063 (cloudburrow/cloudburrow#1522): a table with a column whose
+ // name starts _CHANGE_ but is not one of the change table's own
+-// (_CHANGE_TYPE, _CHANGE_TIMESTAMP, _CHANGE_IS_FOR_UPDATE) keeps its
++// (_CHANGE_TYPE, _CHANGE_TIMESTAMP, _CHANGE_TYPE_FOR_UPDATE since patch
++// 0065) keeps its
+ // history, the column among it, through a CREATE OR REPLACE too; one with
+ // a column of a change column's name keeps none.
+ func TestChangeHistoryChangeNames(t *testing.T) {
+@@ -53,8 +54,8 @@
+ 	if n := count("SELECT COUNT(*) FROM `p.d.t$changes` WHERE _CHANGE_NOTE = 'a'"); n == 0 {
+ 		t.Errorf("after CREATE OR REPLACE, the replaced table's history of _CHANGE_NOTE was not carried")
+ 	}
+-	exec("CREATE TABLE `p.d.u` (id INT64, _change_is_for_update BOOL)")
++	exec("CREATE TABLE `p.d.u` (id INT64, _change_type_for_update BOOL)")
+ 	if _, err := db.ExecContext(ctx, "SELECT COUNT(*) FROM `p.d.u$changes`"); err == nil {
+-		t.Errorf("a table with a column _change_is_for_update has a change table")
++		t.Errorf("a table with a column _change_type_for_update has a change table")
+ 	}
+ }
+--- /dev/null
++++ b/change_history_flag_test.go
+@@ -0,0 +1,94 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"path/filepath"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestChangeHistoryUpdateFlag is CloudBurrow's regression test of its
++// patch 0065 (cloudburrow/cloudburrow#1548): a table with a column of
++// its own named _CHANGE_IS_FOR_UPDATE, a name BigQuery does not reserve,
++// keeps its history, the column's values among it, beside the change
++// table's flag, _CHANGE_TYPE_FOR_UPDATE; and a change table made before
++// the patch, its flag named _CHANGE_IS_FOR_UPDATE, has it renamed when
++// the database is opened, and keeps its history.
++func TestChangeHistoryUpdateFlag(t *testing.T) {
++	ctx := context.Background()
++	open := func(dsn string) *sql.DB {
++		t.Helper()
++		db, err := sql.Open("googlesqlite", dsn)
++		if err != nil {
++			t.Fatal(err)
++		}
++		db.SetMaxOpenConns(1)
++		return db
++	}
++	exec := func(db *sql.DB, q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	count := func(db *sql.DB, q string) int64 {
++		t.Helper()
++		var n int64
++		if err := db.QueryRowContext(ctx, q).Scan(&n); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		return n
++	}
++
++	db := open(":memory:")
++	exec(db, "CREATE TABLE `p.d.t` (id INT64, _CHANGE_IS_FOR_UPDATE BOOL)")
++	exec(db, "INSERT INTO `p.d.t` VALUES (1, TRUE), (2, FALSE)")
++	exec(db, "UPDATE `p.d.t` SET id = 3 WHERE id = 2")
++	if n := count(db, "SELECT COUNT(*) FROM `p.d.t$changes` WHERE _CHANGE_TYPE != 'START'"); n != 4 {
++		t.Errorf("changes of a table with a column _CHANGE_IS_FOR_UPDATE: %d, want 4", n)
++	}
++	if n := count(db, "SELECT COUNT(*) FROM `p.d.t$changes` WHERE _CHANGE_TYPE = 'DELETE' AND _CHANGE_TYPE_FOR_UPDATE AND id = 2 AND NOT _CHANGE_IS_FOR_UPDATE"); n != 1 {
++		t.Errorf("the UPDATE's DELETE of the old row with the table's own _CHANGE_IS_FOR_UPDATE: %d rows, want 1", n)
++	}
++	if n := count(db, "SELECT COUNT(*) FROM `p.d.t$changes` WHERE _CHANGE_TYPE = 'INSERT' AND _CHANGE_IS_FOR_UPDATE AND NOT _CHANGE_TYPE_FOR_UPDATE"); n != 1 {
++		t.Errorf("the INSERT of the row whose _CHANGE_IS_FOR_UPDATE is TRUE: %d rows, want 1", n)
++	}
++	exec(db, "CREATE OR REPLACE TABLE `p.d.t` (id INT64, _CHANGE_IS_FOR_UPDATE BOOL)")
++	if n := count(db, "SELECT COUNT(*) FROM `p.d.t$changes` WHERE _CHANGE_IS_FOR_UPDATE AND _CHANGE_TYPE = 'DELETE'"); n != 1 {
++		t.Errorf("after CREATE OR REPLACE, the replace's DELETE of the row whose _CHANGE_IS_FOR_UPDATE was TRUE: %d, want 1", n)
++	}
++	db.Close()
++
++	// A change table of before the patch: made now, its flag renamed back
++	// in SQLite (its tables are named by their paths joined with _) and in
++	// the catalog.
++	path := filepath.Join(t.TempDir(), "old.db")
++	db = open("file:" + path)
++	exec(db, "CREATE TABLE `p.d.old` (id INT64, v STRING)")
++	exec(db, "INSERT INTO `p.d.old` VALUES (1, 'a')")
++	db.Close()
++	raw, err := sql.Open("googlesqlite_sqlite3", "file:"+path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, q := range []string{
++		"ALTER TABLE `p_d_old$changes` RENAME COLUMN `_CHANGE_TYPE_FOR_UPDATE` TO `_CHANGE_IS_FOR_UPDATE`",
++		`UPDATE googlesqlite_catalog SET spec = replace(spec, '"_CHANGE_TYPE_FOR_UPDATE"', '"_CHANGE_IS_FOR_UPDATE"') WHERE name = 'p_d_old$changes'`,
++	} {
++		if _, err := raw.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	raw.Close()
++	db = open("file:" + path + "?_pragma=busy_timeout(5000)")
++	defer db.Close()
++	exec(db, "UPDATE `p.d.old` SET v = 'b' WHERE id = 1")
++	if n := count(db, "SELECT COUNT(*) FROM `p.d.old$changes` WHERE _CHANGE_TYPE = 'DELETE' AND _CHANGE_TYPE_FOR_UPDATE AND v = 'a'"); n != 1 {
++		t.Errorf("an old change table's UPDATE, after the rename: %d DELETEs for the update, want 1", n)
++	}
++	if n := count(db, "SELECT COUNT(*) FROM `p.d.old$changes` WHERE _CHANGE_TYPE IN ('INSERT', 'UPDATE')"); n != 2 {
++		t.Errorf("an old change table's INSERT and UPDATE: %d, want 2", n)
++	}
++}

@@ -41,6 +41,8 @@ type Server struct {
 	// without a Pub/Sub emulator.
 	publisher Publisher
 	notify    *notifier
+	// numbers are the project numbers the host sent (#1544).
+	numbers projectNumbers
 	// signingKeys verify RSA signed URLs, by service account (#509).
 	signingKeys map[string]*rsa.PublicKey
 	// observe, faults and ring measure and fault requests (#513).
@@ -284,6 +286,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.serveLifecycle(w, r)
 	case path == resetPath:
 		s.serveReset(w, r)
+	case path == ProjectNumbersPath:
+		s.serveProjectNumbers(w, r)
 	case path == statePath:
 		s.serveState(w, r)
 	case path == ChannelsPath:

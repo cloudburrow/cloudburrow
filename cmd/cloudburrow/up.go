@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
+	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
+	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -271,6 +273,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Service Usage is built after the registry, so its reset reads it
 	// through this too (#1537).
 	var serviceUsageRef *serviceusage.Server
+	// And the Cloud SQL Admin API and Backup and DR (#1541, #1542).
+	var sqlAdminRef *sqladmin.Server
+	var backupDRRef *backupdr.Server
 	// The admin token (#553): minted now, required on every /admin route,
 	// written beside the runtime file once the control server is up.
 	adminToken, err := newAdminToken()
@@ -284,9 +289,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		scheduler:    schedulerSvc,
 		logging:      loggingSvc,
 		run:          runSvc,
+		memorystore:  memorystoreAdminSvc,
 		projects:     func() []string { return registered() },
 		registry:     func() *resourcemanager.Registry { return projectRegistry },
 		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
+		sqlAdmin:     func() *sqladmin.Server { return sqlAdminRef },
+		backupDR:     func() *backupdr.Server { return backupDRRef },
 		projectStore: func() store.Store {
 			if projectRegistry == nil {
 				return nil
@@ -431,6 +439,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err == nil && projects != nil {
 		projectRegistry = projects
 		wirePurge(adminAPI, projects)
+		wireProjectNumbers(ctx, projects, map[string]func() *netfwd.Forwarder{
+			"storage":  func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") },
+			"bigquery": func() *netfwd.Forwarder { return forwarderFor(forwarders, "bigquery") }, // #1551
+		})
 		registered = func() []string {
 			list, err := projects.List()
 			if err != nil {
@@ -476,15 +488,25 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// The Cloud SQL Admin API (#1301), over whichever database servers run.
 	sqlAdminSrv := newSQLAdminServer(cfg, forwarders, mysqlCreds, stderr)
 	if sqlAdminSrv != nil {
+		sqlAdminRef = sqlAdminSrv
 		// executeSql reads a user's password from Secret Manager (#1462).
 		if secretsSvc != nil {
 			sqlAdminSrv.SetSecretAccessor(buildSecretAccessor{svc: secretsSvc})
+		}
+		// diskEncryptionConfiguration (#1538) wraps an instance's data key
+		// with this instance's Cloud KMS, in process.
+		if kmsSvc != nil {
+			sqlAdminSrv.UseKMS(sqlAdminKMS{svc: kmsSvc})
 		}
 		coord.Register(sqlAdminSrv)
 	}
 	// The Backup and DR Service (#1433), over the Admin API's backups.
 	backupDRSrv := newBackupDRServer(cfg, sqlAdminSrv)
 	if backupDRSrv != nil {
+		// A folder's and the organization's resourceBackupConfigs.fetch
+		// answer the projects under them (#1536), in process.
+		backupDRSrv.UseHierarchy(backupDRHierarchy{reg: projects})
+		backupDRRef = backupDRSrv
 		if kmsSvc != nil {
 			// A vault's encryptionConfig (#1501) wraps its data key with
 			// this instance's Cloud KMS, in process.

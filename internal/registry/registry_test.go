@@ -110,3 +110,54 @@ func TestLocationOf(t *testing.T) {
 		t.Fatal("package escaping")
 	}
 }
+
+// A remote repository (#1546) pulls an image, and an index, through from
+// its upstream and keeps them: they are its own once pulled, still served
+// when the upstream deletes them, and a push to it is refused.
+func TestRemotePullThrough(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, cache := Repo{"us-central1", "p", "r"}, Repo{"us-central1", "p", "cache"}
+	h := &Handler{Store: st, Lookup: func(loc, project, repo string) (Repo, bool) {
+		switch repo {
+		case "r":
+			return up, true
+		case "cache":
+			return cache, true
+		}
+		return Repo{}, false
+	}, Remote: func(r Repo) (Repo, bool) { return up, r == cache }}
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	host := strings.TrimPrefix(srv.URL, "http://")
+	img, _ := random.Image(512, 2)
+	if err := crane.Push(img, host+"/p/r/app:v1"); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := img.Digest()
+	if d, err := crane.Digest(host + "/p/cache/app:v1"); err != nil || d != want.String() {
+		t.Fatalf("the remote repository's v1 = %q, %v; want %s", d, err, want)
+	}
+	if _, err := crane.Pull(host + "/p/cache/app@" + want.String()); err != nil {
+		t.Fatalf("pull through by digest: %v", err)
+	}
+	idx := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{Add: img})
+	r, _ := name.ParseReference(host + "/p/r/app:multi")
+	if err := remote.WriteIndex(r, idx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := crane.Digest(host + "/p/cache/app:multi"); err != nil {
+		t.Fatalf("pull through of an index: %v", err)
+	}
+	if err := st.DeleteImage(up, "app"); err != nil {
+		t.Fatal(err)
+	}
+	if d, err := crane.Digest(host + "/p/cache/app:v1"); err != nil || d != want.String() {
+		t.Errorf("the cached v1 after the upstream deleted it = %q, %v", d, err)
+	}
+	if err := crane.Push(img, host+"/p/cache/app:v2"); err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Errorf("a push to the remote repository = %v; want it refused as read-only", err)
+	}
+}

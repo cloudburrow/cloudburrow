@@ -181,8 +181,9 @@ compat_shard() {
       # folder, so the Resource Manager tests stay in storage.
       TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE
       # A created Memorystore instance follows the mode too (#1302), with RDB
-      # persistence as well (#1384).
-      PROBE_TESTS="TestMemorystoreAcrossRestart TestMemorystoreCreatedAcrossRestart TestMemorystoreRDBAcrossRestart TestDatastoreAcrossRestart"
+      # persistence as well (#1384), and Redis clusters and Valkey instances
+      # with and without persistence_config (#1557).
+      PROBE_TESTS="TestMemorystoreAcrossRestart TestMemorystoreCreatedAcrossRestart TestMemorystoreRDBAcrossRestart TestMemorystoreClustersAcrossRestart TestDatastoreAcrossRestart"
       PROBE_VARS=MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,DATASTORE ;;
     sql)
       # Cloud SQL for PostgreSQL (#311, #584) and for MySQL with its

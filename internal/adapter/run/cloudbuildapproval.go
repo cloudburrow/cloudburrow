@@ -181,6 +181,18 @@ func takeApprovalConfig(r *http.Request) (*http.Request, error) {
 	if json.Unmarshal(raw, &body) != nil {
 		return r, nil // the transcoder reports it
 	}
+	if _, ok := body["developerConnectEventConfig"]; ok {
+		// #1546: Developer Connect's git repository links reach this
+		// instance only over a Secure Source Manager connection, and
+		// Google documents such a link's triggers in the repository's
+		// .cloudbuild/triggers.yaml (devConnectGitRepositoryLink), not as a
+		// BuildTrigger: gitRepositoryLinkType names no Secure Source
+		// Manager type.
+		return r, apierror.Unimplemented("BuildTrigger field developerConnectEventConfig is not supported: its links name " +
+			"hosted git providers (gitRepositoryLinkType has no Secure Source Manager type); a Developer Connect link " +
+			"to this instance's Secure Source Manager runs builds from the repository's .cloudbuild/triggers.yaml, " +
+			"whose trigger names it in devConnectGitRepositoryLink")
+	}
 	ac, ok := body["approvalConfig"]
 	if !ok {
 		return r, nil

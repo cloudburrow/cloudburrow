@@ -254,7 +254,8 @@ func (md bqModel) resource(full bool) map[string]any {
 		"modelType": map[string]string{"LINEAR_REG": "LINEAR_REGRESSION", "LOGISTIC_REG": "LOGISTIC_REGRESSION", "KMEANS": "KMEANS", "PCA": "PCA",
 			"MATRIX_FACTORIZATION": "MATRIX_FACTORIZATION", "BOOSTED_TREE_REGRESSOR": "BOOSTED_TREE_REGRESSOR",
 			"BOOSTED_TREE_CLASSIFIER": "BOOSTED_TREE_CLASSIFIER", "ARIMA_PLUS": "ARIMA_PLUS",
-			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER"}[md.Options.ModelType],
+			"RANDOM_FOREST_REGRESSOR": "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER": "RANDOM_FOREST_CLASSIFIER",
+			"DNN_REGRESSOR": "DNN_REGRESSOR", "DNN_CLASSIFIER": "DNN_CLASSIFIER", "AUTOENCODER": "AUTOENCODER"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -330,6 +331,8 @@ func (md bqModel) resource(full bool) map[string]any {
 		metrics = map[string]any{"arimaForecastingMetrics": map[string]any{"arimaSingleModelForecastingMetrics": single}}
 	case "MATRIX_FACTORIZATION":
 		opts, metrics = md.mfResource(res)
+	case "AUTOENCODER":
+		opts, metrics = md.autoencoderResource(res)
 	case "KMEANS":
 		res["labelColumns"] = []map[string]any{{"name": "centroid_id", "type": map[string]string{"typeKind": "INT64"}}}
 		opts = map[string]any{"numClusters": ms(int64(len(t.Centroids))), "kmeansInitializationMethod": o.KMeansInit,
@@ -415,6 +418,22 @@ func (md bqModel) resource(full bool) map[string]any {
 				delete(opts, "boosterType")
 				delete(opts, "maxIterations")
 			}
+		case isDNN(o.ModelType):
+			for _, k := range []string{"learnRateStrategy", "optimizationStrategy"} {
+				delete(opts, k)
+			}
+			var hidden []string
+			if t.DNN != nil {
+				for _, ly := range t.DNN.Layers[:len(t.DNN.Layers)-1] {
+					hidden = append(hidden, ms(int64(len(ly.B))))
+				}
+			}
+			batch := o.BatchSize
+			if batch == 0 {
+				batch = min(32, t.Rows)
+			}
+			opts["learnRate"], opts["optimizer"], opts["activationFn"], opts["hiddenUnits"] = o.LearnRate, o.Optimizer, o.Activation, hidden
+			opts["batchSize"], opts["dropout"] = ms(int64(batch)), o.Dropout
 		case o.LearnRateStrat == "CONSTANT":
 			opts["learnRate"] = o.LearnRate
 		default:
@@ -628,11 +647,8 @@ type modelDDL struct {
 // unsupportedModelTypes are the model types CloudBurrow refuses, and
 // why.
 var unsupportedModelTypes = map[string]string{
-	"DNN_REGRESSOR":                  "it is a TensorFlow network trained on Google's infrastructure",
-	"DNN_CLASSIFIER":                 "it is a TensorFlow network trained on Google's infrastructure",
-	"DNN_LINEAR_COMBINED_REGRESSOR":  "it is a TensorFlow network trained on Google's infrastructure",
-	"DNN_LINEAR_COMBINED_CLASSIFIER": "it is a TensorFlow network trained on Google's infrastructure",
-	"AUTOENCODER":                    "it is a TensorFlow network trained on Google's infrastructure",
+	"DNN_LINEAR_COMBINED_REGRESSOR":  "its wide-and-deep network's split of the features between the linear and the deep part is Google's, undocumented in the detail a faithful result needs",
+	"DNN_LINEAR_COMBINED_CLASSIFIER": "its wide-and-deep network's split of the features between the linear and the deep part is Google's, undocumented in the detail a faithful result needs",
 	"AUTOML_REGRESSOR":               "AutoML is Google's service (Vertex AI)",
 	"AUTOML_CLASSIFIER":              "AutoML is Google's service (Vertex AI)",
 	"ARIMA_PLUS_XREG":                "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
@@ -725,7 +741,7 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	}
 	if why, ok := unsupportedModelTypes[d.opts.ModelType]; ok {
 		return d, true, 501, "Not implemented here: model_type " + d.opts.ModelType + ": " + why +
-			". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA, MATRIX_FACTORIZATION, BOOSTED_TREE_REGRESSOR / BOOSTED_TREE_CLASSIFIER, RANDOM_FOREST_REGRESSOR / RANDOM_FOREST_CLASSIFIER and ARIMA_PLUS models. Nothing was run."
+			". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA, MATRIX_FACTORIZATION, BOOSTED_TREE_REGRESSOR / BOOSTED_TREE_CLASSIFIER, RANDOM_FOREST_REGRESSOR / RANDOM_FOREST_CLASSIFIER, DNN_REGRESSOR / DNN_CLASSIFIER, AUTOENCODER and ARIMA_PLUS models. Nothing was run."
 	}
 	if c, m := checkModelOptions(d.opts); c != 0 {
 		return d, true, c, m
@@ -735,6 +751,12 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	}
 	if isTreeModel(d.opts.ModelType) {
 		applyTreeDefaults(&d.opts)
+	}
+	if isNetwork(d.opts.ModelType) {
+		applyDNNDefaults(&d.opts)
+		if c, m := checkDNNOptions(d.opts); c != 0 {
+			return d, true, c, m
+		}
 	}
 	if d.opts.ModelType == "ARIMA_PLUS" {
 		applyArimaDefaults(&d.opts)
@@ -852,6 +874,12 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 		}
 		bad := func() (int, string) { return 400, "Invalid value for option " + name }
 		o.Set = append(o.Set, name)
+		if c, m, ok := parseDNNOption(name, val, o); ok { // modeldnn.go, #1548
+			if c != 0 {
+				return c, m
+			}
+			continue
+		}
 		switch name {
 		case "model_type":
 			s, ok := str()
@@ -1309,6 +1337,11 @@ var modelTypeOptions = map[string][]string{
 	"RANDOM_FOREST_REGRESSOR": {"input_label_cols", "l1_reg", "l2_reg", "early_stop", "min_rel_progress", "data_split_method",
 		"data_split_eval_fraction", "data_split_col", "enable_global_explain", "max_tree_depth", "min_split_loss", "min_tree_child_weight",
 		"tree_method", "num_parallel_tree", "subsample", "colsample_bytree", "colsample_bylevel", "colsample_bynode"},
+	"DNN_REGRESSOR": {"input_label_cols", "optimizer", "l1_reg", "l2_reg", "max_iterations", "learn_rate", "early_stop", "min_rel_progress",
+		"data_split_method", "data_split_eval_fraction", "data_split_col", "category_encoding_method", "hidden_units", "activation_fn",
+		"batch_size", "dropout", "warm_start", "enable_global_explain"},
+	"AUTOENCODER": {"optimizer", "learn_rate", "activation_fn", "batch_size", "dropout", "hidden_units", "early_stop", "min_rel_progress",
+		"max_iterations", "warm_start", "l1_reg_activation"},
 	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "max_iterations", "early_stop",
 		"min_rel_progress", "data_split_method", "data_split_eval_fraction", "data_split_col"},
 }
@@ -1325,6 +1358,9 @@ func checkModelOptions(o mlOptions) (int, string) {
 	}
 	if o.ModelType == "RANDOM_FOREST_CLASSIFIER" {
 		allowed, ok = append(append([]string(nil), modelTypeOptions["RANDOM_FOREST_REGRESSOR"]...), "auto_class_weights"), true
+	}
+	if o.ModelType == "DNN_CLASSIFIER" {
+		allowed, ok = append(append([]string(nil), modelTypeOptions["DNN_REGRESSOR"]...), "auto_class_weights", "class_weights"), true
 	}
 	if c, m := checkTreeSampling(o); c != 0 {
 		return c, m

@@ -46,6 +46,10 @@ func (artifactRegistryProvider) CreateForm() (string, []console.Field) {
 		{Name: "format", Label: "Format", Type: "select", Options: []string{"DOCKER", "PYTHON", "NPM", "MAVEN", "GENERIC", "APT", "YUM"}, Default: "DOCKER",
 			Help: "Each format serves its own protocol on the Run port; the repository's page says how its client reaches it."},
 		{Name: "location", Label: "Region", Type: "text", Required: true, Default: "us-central1"},
+		{Name: "mode", Label: "Mode", Type: "select", Options: []string{"STANDARD_REPOSITORY", "REMOTE_REPOSITORY", "VIRTUAL_REPOSITORY"}, Default: "STANDARD_REPOSITORY",
+			Help: "A remote repository pulls through from, and caches, another repository of this instance (DOCKER, PYTHON, NPM, MAVEN); a virtual one reads its upstreams (PYTHON, NPM, MAVEN)."},
+		{Name: "upstream", Label: "Upstream repositories", Type: "text",
+			Help: "remote or virtual only: repository IDs in the region, or projects/*/locations/*/repositories/* names, comma separated; a remote repository takes one, a standard repository of its format"},
 		{Name: "description", Label: "Description", Type: "text"},
 		{Name: "labels", Label: "Labels", Type: "text", Help: "optional: key=value pairs, comma separated"},
 	}
@@ -73,9 +77,13 @@ func (p artifactRegistryProvider) Create(ctx context.Context, project string, v 
 		}
 		format = arpb.Repository_Format(n)
 	}
+	parent := "projects/" + project + "/locations/" + loc
+	repo := &arpb.Repository{Format: format, Description: strings.TrimSpace(v["description"]), Labels: labels}
+	if err := setRepositoryMode(repo, parent, v["mode"], v["upstream"]); err != nil {
+		return "", err
+	}
 	err = p.withClient(ctx, func(c *artifactregistry.Client) error {
-		op, err := c.CreateRepository(ctx, &arpb.CreateRepositoryRequest{Parent: "projects/" + project + "/locations/" + loc, RepositoryId: id,
-			Repository: &arpb.Repository{Format: format, Description: strings.TrimSpace(v["description"]), Labels: labels}})
+		op, err := c.CreateRepository(ctx, &arpb.CreateRepositoryRequest{Parent: parent, RepositoryId: id, Repository: repo})
 		if err != nil {
 			return err
 		}
@@ -83,6 +91,47 @@ func (p artifactRegistryProvider) Create(ctx context.Context, project string, v 
 		return err
 	})
 	return id, err
+}
+
+// setRepositoryMode sets a new repository's mode and its upstreams, from
+// the create form: a remote repository's common_repository, the one
+// upstream, or a virtual one's upstream policies, the first highest.
+func setRepositoryMode(r *arpb.Repository, parent, mode, upstream string) error {
+	var ups []string
+	for _, u := range strings.Split(upstream, ",") {
+		if u = strings.TrimSpace(u); u != "" {
+			if !strings.HasPrefix(u, "projects/") {
+				u = parent + "/repositories/" + u
+			}
+			ups = append(ups, u)
+		}
+	}
+	switch strings.TrimSpace(mode) {
+	case "", "STANDARD_REPOSITORY":
+		if len(ups) > 0 {
+			return errors.New("a standard repository has no upstream: choose a remote or virtual mode")
+		}
+	case "REMOTE_REPOSITORY":
+		if len(ups) != 1 {
+			return errors.New("a remote repository needs exactly one upstream repository")
+		}
+		r.Mode = arpb.Repository_REMOTE_REPOSITORY
+		r.ModeConfig = &arpb.Repository_RemoteRepositoryConfig{RemoteRepositoryConfig: &arpb.RemoteRepositoryConfig{
+			RemoteSource: &arpb.RemoteRepositoryConfig_CommonRepository{CommonRepository: &arpb.RemoteRepositoryConfig_CommonRemoteRepository{Uri: ups[0]}}}}
+	case "VIRTUAL_REPOSITORY":
+		if len(ups) == 0 {
+			return errors.New("a virtual repository needs at least one upstream repository")
+		}
+		vc := &arpb.VirtualRepositoryConfig{}
+		for i, u := range ups {
+			vc.UpstreamPolicies = append(vc.UpstreamPolicies, &arpb.UpstreamPolicy{Id: u[strings.LastIndex(u, "/")+1:], Repository: u, Priority: int32(100 - i)})
+		}
+		r.Mode = arpb.Repository_VIRTUAL_REPOSITORY
+		r.ModeConfig = &arpb.Repository_VirtualRepositoryConfig{VirtualRepositoryConfig: vc}
+	default:
+		return fmt.Errorf("unknown mode %q", mode)
+	}
+	return nil
 }
 
 // editRepositoryAction is Edit repository on a repository's page,

@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync/atomic"
 )
 
 // ErrMalformed means a name does not match its pattern.
@@ -182,11 +183,36 @@ func (n Name) LocationName() string {
 // collision cannot be introduced by a caller forgetting to prefix.
 func (n Name) Key() string { return n.String() }
 
-// ProjectNumber is a stable number for a project ID. The registry keeps
-// none, so it is derived: the same every time for the same ID, the same in
-// every service that reports one, and never claimed to match a real
-// project's.
+// ProjectNumber is a project's number. The project registry assigns each
+// project one when it is created and keeps it in the project's record
+// (#1544), so a project created again under a purged project's ID gets a
+// new one, as on Google; a process that can read the registry installs it
+// with SetProjectNumberResolver, and a builtin server in a pod is sent
+// the numbers. A project the resolver does not know, and every project in
+// a process without one, gets DerivedProjectNumber, which is also the
+// number the registry gives an ID the first time it is used.
 func ProjectNumber(id string) int64 {
+	if fn, _ := projectNumberResolver.Load().(func(string) (int64, bool)); fn != nil {
+		if n, ok := fn(id); ok {
+			return n
+		}
+	}
+	return DerivedProjectNumber(id)
+}
+
+// projectNumberResolver holds the func SetProjectNumberResolver set.
+var projectNumberResolver atomic.Value
+
+// SetProjectNumberResolver makes ProjectNumber ask fn first; fn reports
+// false for a project it does not know. A nil fn removes it. It is safe
+// for concurrent use, and fn must be too.
+func SetProjectNumberResolver(fn func(id string) (int64, bool)) {
+	projectNumberResolver.Store(fn)
+}
+
+// DerivedProjectNumber is a stable number for a project ID: the same every
+// time for the same ID, and never claimed to match a real project's.
+func DerivedProjectNumber(id string) int64 {
 	var h uint64 = 14695981039346656037
 	for i := 0; i < len(id); i++ {
 		h ^= uint64(id[i])

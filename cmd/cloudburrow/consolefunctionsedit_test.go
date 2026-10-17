@@ -25,7 +25,8 @@ import (
 // offers Edit function, prefilled, which sends UpdateFunction through the
 // API of its generation; Download source answers GenerateDownloadUrl's
 // link; a 1st-gen function has a Permissions tab, through the v1 API's IAM
-// methods, and a 2nd-gen one has none.
+// methods, and a 2nd-gen one through the v2 API's (#1556), each its own
+// function's policy.
 func TestConsoleFunctionsEditDownloadAndPermissions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -132,11 +133,14 @@ func TestConsoleFunctionsEditDownloadAndPermissions(t *testing.T) {
 		}
 	}
 
-	if p.PolicyOn(ctx, []string{"f2"}) != nil {
-		t.Error("a 2nd-gen function has a Permissions tab")
+	if p.PolicyOn(ctx, []string{"f2"}) == nil {
+		t.Fatal("a 2nd-gen function has no Permissions tab")
 	}
 	if p.PolicyOn(ctx, []string{"f1"}) == nil {
 		t.Fatal("a 1st-gen function has no Permissions tab")
+	}
+	if p.PolicyOn(ctx, []string{"nope"}) != nil {
+		t.Error("a missing function has a Permissions tab")
 	}
 	pol, err := p.GetPolicy(ctx, "", []string{"f1"})
 	if err != nil {
@@ -151,5 +155,24 @@ func TestConsoleFunctionsEditDownloadAndPermissions(t *testing.T) {
 	}
 	if held, err := p.TestPermissions(ctx, "", []string{"f1"}, []string{"cloudfunctions.functions.invoke"}); err != nil || len(held) != 1 {
 		t.Errorf("TestIamPermissions = %v, %v", held, err)
+	}
+
+	// The 2nd-gen function's tab is the v2 API's policy on that function.
+	pol2, err := p.GetPolicy(ctx, "", []string{"f2"})
+	if err != nil || len(pol2.Bindings) != 0 {
+		t.Fatalf("a 2nd-gen function's GetIamPolicy = %+v, %v; want its own, empty, policy", pol2, err)
+	}
+	pol2.Bindings = []console.Binding{{Role: "roles/cloudfunctions.developer", Members: []string{"user:ada@example.com"}}}
+	if err := p.SetPolicy(ctx, "", []string{"f2"}, pol2); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := p.GetPolicy(ctx, "", []string{"f2"}); err != nil || len(got.Bindings) != 1 || got.Bindings[0].Role != "roles/cloudfunctions.developer" {
+		t.Errorf("a 2nd-gen function's GetIamPolicy after SetIamPolicy = %+v, %v", got, err)
+	}
+	if got, err := p.GetPolicy(ctx, "", []string{"f1"}); err != nil || len(got.Bindings) != 1 || got.Bindings[0].Members[0] != "allUsers" {
+		t.Errorf("the 2nd-gen grant changed the 1st-gen function's policy: %+v, %v", got, err)
+	}
+	if held, err := p.TestPermissions(ctx, "", []string{"f2"}, []string{"cloudfunctions.functions.get"}); err != nil || len(held) != 1 {
+		t.Errorf("a 2nd-gen function's TestIamPermissions = %v, %v", held, err)
 	}
 }

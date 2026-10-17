@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -72,6 +73,8 @@ type savedState struct {
 	// ChangeStreams is the change logs (changestreams.go, #1523), each
 	// full segment a copy file.
 	ChangeStreams map[string]savedChangeLog `json:"changeStreams,omitempty"`
+	// Seen is every instance a call has named (seen.go, #1550).
+	Seen []string `json:"seen,omitempty"`
 }
 
 // persister is the front's state directory.
@@ -261,6 +264,7 @@ func (f *Front) restoreState(st *frontstate.Store, s *savedState) error {
 	f.instances.mu.Lock()
 	f.instances.byNm, f.instances.ops, f.instances.opsQ, f.instances.layers = byNm, ops, s.OpsQ, layers
 	f.instances.mu.Unlock()
+	f.seen.set(s.Seen)
 	f.copies.mu.Lock()
 	f.copies.backups, f.copies.snapshots, f.copies.deleted = backups, snapshots, deleted
 	f.copies.mu.Unlock()
@@ -303,7 +307,10 @@ func (f *Front) save() error {
 
 // snapshotState is the state to write, each part read under its own lock.
 func (f *Front) snapshotState() (*savedState, map[string]frontstate.Copy, error) {
-	s := &savedState{}
+	s := &savedState{Seen: f.seen.list()}
+	if len(s.Seen) == 0 {
+		s.Seen = nil
+	}
 	copies := map[string]frontstate.Copy{}
 	var err error
 	in := f.instances
@@ -428,6 +435,7 @@ func (f *Front) ResetState(ctx context.Context) error {
 	f.instances.opsQ = nil
 	f.instances.layers = map[string]*btapb.MemoryLayer{}
 	f.instances.mu.Unlock()
+	names = withSeen(names, f.seen.take(""))
 	var dropErr error
 	for _, name := range names {
 		if err := f.dropTables(ctx, name); err != nil && dropErr == nil {
@@ -466,5 +474,72 @@ func (f *Front) ResetState(ctx context.Context) error {
 
 // serveReset answers frontstate.ResetPath.
 func (f *Front) serveReset(w http.ResponseWriter, r *http.Request) {
-	frontstate.ServeReset(w, r, func() error { return f.ResetState(r.Context()) })
+	frontstate.ServeReset(w, r, func(project string) error {
+		if project == "" {
+			return f.ResetState(r.Context())
+		}
+		return f.ResetProject(r.Context(), project)
+	})
+}
+
+// ResetProject deletes one project's Bigtable state, as Google does when the
+// project is purged (#1540): its instances, which only the front holds,
+// with their clusters' memory layers and their operations, and every table
+// of them in the emulator, with the backups, snapshots, deleted tables,
+// authorized and SQL views, schema bundles and table IAM policies the front
+// keeps for those tables.
+func (f *Front) ResetProject(ctx context.Context, project string) error {
+	if project == "" {
+		return fmt.Errorf("a project is required")
+	}
+	prefix := "projects/" + project + "/"
+	f.instances.mu.Lock()
+	var names []string
+	for name := range f.instances.byNm {
+		if strings.HasPrefix(name, prefix) {
+			names = append(names, name)
+			delete(f.instances.byNm, name)
+		}
+	}
+	for name := range f.instances.ops {
+		if strings.HasPrefix(name, "operations/"+prefix) {
+			delete(f.instances.ops, name)
+		}
+	}
+	var q []string
+	for _, name := range f.instances.opsQ {
+		if !strings.HasPrefix(name, "operations/"+prefix) {
+			q = append(q, name)
+		}
+	}
+	f.instances.opsQ = q
+	frontstate.DropProject(f.instances.layers, project)
+	f.instances.mu.Unlock()
+	// The instances calls named that the instance admin never made hold
+	// tables too (#1550).
+	names = withSeen(names, f.seen.take(project))
+	var dropErr error
+	for _, name := range names {
+		if err := f.dropTables(ctx, name); err != nil && dropErr == nil {
+			dropErr = fmt.Errorf("drop the tables of %s: %w", name, err)
+		}
+	}
+	if err := f.save(); err != nil {
+		return err
+	}
+	return dropErr
+}
+
+// withSeen is names with the seen instances not among them added.
+func withSeen(names, seen []string) []string {
+	have := make(map[string]bool, len(names))
+	for _, n := range names {
+		have[n] = true
+	}
+	for _, n := range seen {
+		if !have[n] {
+			names = append(names, n)
+		}
+	}
+	return names
 }

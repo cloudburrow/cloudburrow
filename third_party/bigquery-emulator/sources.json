@@ -45,7 +45,8 @@
         "patches/bigquery-emulator/0049-column-collation.patch",
         "patches/bigquery-emulator/0064-list-jobs-after-one.patch",
         "patches/bigquery-emulator/0051-nested-collation.patch",
-        "patches/bigquery-emulator/0053-routines-kept-in-metadata.patch"
+        "patches/bigquery-emulator/0053-routines-kept-in-metadata.patch",
+        "patches/bigquery-emulator/0057-job-id-prefix.patch"
       ]
     },
     {
@@ -102,7 +103,9 @@
         "patches/googlesqlite/0059-collation.patch",
         "patches/googlesqlite/0062-catalog-rebuild-cost.patch",
         "patches/googlesqlite/0063-history-of-other-change-names.patch",
-        "patches/googlesqlite/0061-nested-collation.patch"
+        "patches/googlesqlite/0061-nested-collation.patch",
+        "patches/googlesqlite/0065-change-update-flag-name.patch",
+        "patches/googlesqlite/0066-function-body-column-ids.patch"
       ]
     },
     {

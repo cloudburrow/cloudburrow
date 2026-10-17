@@ -41,6 +41,7 @@ func TestConsoleSourceManagerInstancesAndRepositories(t *testing.T) {
 	g := grpc.NewServer()
 	cb.Register(g)
 	ssm.Register(g)
+	s.DeveloperConnect().Register(g)
 	runadapter.NewOperationsServer(s).Register(g)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -58,14 +59,14 @@ func TestConsoleSourceManagerInstancesAndRepositories(t *testing.T) {
 		t.Fatalf("the Instances list = %+v, %v", l, err)
 	}
 	acts := p.DetailActions(ctx, "", []string{"inst"})
-	if len(acts) != 1 || acts[0].ID != "create-repo" {
+	if len(acts) != 2 || acts[0].ID != "create-repo" || acts[1].ID != "create-connection" {
 		t.Fatalf("the instance's actions = %+v", acts)
 	}
 	if err := p.ActAt(ctx, "", []string{"inst"}, "create-repo", map[string]string{"id": "app", "description": "first", "branch": "main"}); err != nil {
 		t.Fatal(err)
 	}
 	d, err := p.Detail(ctx, "", []string{"inst"})
-	if err != nil || d.Unavailable != "" || len(d.Sections) != 1 || len(d.Sections[0].Listing.Items) != 1 ||
+	if err != nil || d.Unavailable != "" || len(d.Sections) != 2 || len(d.Sections[0].Listing.Items) != 1 ||
 		d.Sections[0].Listing.Items[0].Name != "app" || !d.Sections[0].Listing.RowsOpenable {
 		t.Fatalf("the instance's page = %+v, %v", d, err)
 	}
@@ -142,6 +143,38 @@ func TestConsoleSourceManagerInstancesAndRepositories(t *testing.T) {
 		t.Errorf("the repository's builds = %+v (%s)", b, secs["builds"].Unavailable)
 	}
 
+	// Developer Connect (#1546): Connect to Developer Connect on the
+	// instance's page, then Link repository and Delete link on the
+	// repository's, and Delete connection.
+	if err := p.ActAt(ctx, "", []string{"inst"}, "create-connection", map[string]string{"id": "conn"}); err != nil {
+		t.Fatalf("create-connection: %v", err)
+	}
+	if d, _ := p.Detail(ctx, "", []string{"inst"}); len(d.Sections) != 2 || len(d.Sections[1].Listing.Items) != 1 || d.Sections[1].Listing.Items[0].Name != "conn" {
+		t.Errorf("the instance's connections = %+v", d.Sections)
+	}
+	if err := p.ActAt(ctx, "", []string{"inst", "app"}, "create-link", map[string]string{"connection": "conn", "id": "link"}); err != nil {
+		t.Fatalf("create-link: %v", err)
+	}
+	link := "projects/console-ssm/locations/us-central1/connections/conn/gitRepositoryLinks/link"
+	linked := false
+	if d, _ := p.Detail(ctx, "", []string{"inst", "app"}); true {
+		for _, sec := range d.Sections {
+			linked = linked || (sec.ID == "links" && len(sec.Listing.Items) == 1 && sec.Listing.Items[0].Name == link)
+		}
+	}
+	if !linked {
+		t.Error("the repository's page does not list the link")
+	}
+	if acts := p.DetailActions(ctx, "", []string{"inst", "app"}); len(acts) != 4 || acts[3].ID != "delete-link" {
+		t.Errorf("the linked repository's actions = %+v", acts)
+	}
+	if err := p.ActAt(ctx, "", []string{"inst", "app"}, "delete-link", map[string]string{"link": link}); err != nil {
+		t.Fatalf("delete-link: %v", err)
+	}
+	if err := p.ActAt(ctx, "", []string{"inst"}, "delete-connection", map[string]string{"connection": "conn"}); err != nil {
+		t.Fatalf("delete-connection: %v", err)
+	}
+
 	acts = p.DetailActions(ctx, "", []string{"inst", "app"})
 	if len(acts) != 2 || acts[0].ID != "edit-description" || acts[0].Fields[0].Default != "first" || acts[1].ID != "delete-repo" || !acts[1].Leaves {
 		t.Fatalf("the repository's actions = %+v", acts)
@@ -176,7 +209,7 @@ func TestConsoleSourceManagerInstancesAndRepositories(t *testing.T) {
 	if err := p.ActAt(ctx, "", []string{"inst", "app"}, "delete-repo", nil); err != nil {
 		t.Fatal(err)
 	}
-	if d, _ := p.Detail(ctx, "", []string{"inst"}); len(d.Sections) != 1 || len(d.Sections[0].Listing.Items) != 0 {
+	if d, _ := p.Detail(ctx, "", []string{"inst"}); len(d.Sections) != 2 || len(d.Sections[0].Listing.Items) != 0 {
 		t.Errorf("the instance's repositories after Delete repository = %+v", d.Sections)
 	}
 	if err := p.ActAt(ctx, "", []string{"inst"}, "create-repo", map[string]string{"id": "again"}); err != nil {

@@ -67,6 +67,7 @@ import (
 	_ "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
 	_ "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	_ "cloud.google.com/go/datastore/apiv1/datastorepb"
+	_ "cloud.google.com/go/developerconnect/apiv1/developerconnectpb"
 	_ "cloud.google.com/go/firestore/apiv1/admin/adminpb"
 	_ "cloud.google.com/go/firestore/apiv1/firestorepb"
 	_ "cloud.google.com/go/functions/apiv1/functionspb"
@@ -118,6 +119,7 @@ var areas = []area{
 	// Secure Source Manager (#1521), on the Run port: a repository is a git
 	// host whose pushes run Cloud Build triggers.
 	{Key: "securesourcemanager", Title: "Secure Source Manager", Own: true, Services: []string{"google.cloud.securesourcemanager.v1.SecureSourceManager"}},
+	{Key: "developerconnect", Title: "Developer Connect", Own: true, Services: []string{"google.cloud.developerconnect.v1.DeveloperConnect"}},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// SubmitBuild buildpacks build and a Cloud Run service. Its IAM and
 	// Locations mixins are KMS's keys, which are global.
@@ -216,14 +218,14 @@ var areas = []area{
 // answers 501 (a Cloud SQL backup is restored by Cloud SQL). Patches,
 // plan revisions, the fetch and reference views and operations.cancel and
 // delete are served since #1462, resourceBackupConfigs.list (Cloud SQL
-// instances) since #1501, resourceBackupConfigs.fetch, trials and
-// msComplianceMetadata since #1536; management servers, the appliance's
-// data source methods, a folder's or organization's fetch and
+// instances) since #1501, resourceBackupConfigs.fetch (a project's, a
+// folder's and the organization's), trials and msComplianceMetadata since
+// #1536; management servers, the appliance's data source methods and
 // serviceConfig.initialize answer 501 naming what they need
 // (reasons.json says why).
 var backupdrStatuses = map[string]bool{
-	"backupdr.folders.locations.resourceBackupConfigs.fetch":                            false,
-	"backupdr.organizations.locations.resourceBackupConfigs.fetch":                      false,
+	"backupdr.folders.locations.resourceBackupConfigs.fetch":                            true,
+	"backupdr.organizations.locations.resourceBackupConfigs.fetch":                      true,
 	"backupdr.projects.locations.backupPlanAssociations.create":                         true,
 	"backupdr.projects.locations.backupPlanAssociations.delete":                         true,
 	"backupdr.projects.locations.backupPlanAssociations.fetchForResourceType":           true,

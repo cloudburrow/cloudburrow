@@ -54,7 +54,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// failure (engine.go, #989). The watch drops what the front keeps
 	// when the emulator restarts (restart.go, #1016).
 	watch := newEmulatorWatch(*upstream, logger.Printf)
-	results := Results(Guard(TimeZoneHeader(Proxy(*upstream, logger.Printf)), *upstream, logger.Printf)) // #1456, timezone.go
+	results := Results(Guard(TimeZoneHeader(JobIDPrefix(Proxy(*upstream, logger.Printf))), *upstream, logger.Printf)) // #1456, timezone.go; #1555, internaljobs.go
 	watch.onRestart(results.reset)
 	// The table IDs the REST front keeps (tableids.go, #1063), and its job
 	// records, which leave the Storage Read front's queries out of

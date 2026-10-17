@@ -226,6 +226,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	models := &bqModels{}                           // models.go, #1465
 	// The jobs the table of JOBS rows syncs in the background (#1528).
 	records.made, own.made = jobRows.noteMade, jobRows.noteMade
+	numbers := &projectNumbers{} // projectnumbers.go, #1551
 	if o.stateDir != "" {
 		buffers.keepClock(clockStateFile(o.stateDir), o.logf) // #1513: before any time is read
 	}
@@ -254,6 +255,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		texts.keep(jobTextsStateFile(o.stateDir), o.logf)          // jobtextstate.go, #1028
 		views.keep(viewTextsStateFile(o.stateDir), o.logf)         // viewtextstate.go, #1028
 		linked.keep(linkedDatasetsStateFile(o.stateDir), o.logf)   // loglinks.go, #1435
+		numbers.keep(projectNumbersStateFile(o.stateDir), o.logf)  // projectnumbers.go, #1551
 	}
 	ids := o.ids // #1063
 	if ids == nil {
@@ -299,6 +301,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		})
 	}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if numbers.serve(w, r) { // projectnumbers.go, #1551
+			return
+		}
 		if (front{next: next, buffers: buffers, dropped: dropped, tables: tables, iam: iam, policies: policies, views: views, ids: ids,
 			functions: functions, records: records, settings: settings, models: models}).serveUndelete(w, r) { // dropped.go, #1460
 			return
@@ -309,8 +314,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if buffers.serveClock(w, r, next) { // streamingbuffer.go, #1370
 			return
 		}
-		buffers.flushDue(next, r)      // streamingbuffer.go, #1273
-		if serveServiceAccount(w, r) { // datasetupdate.go, #1205
+		buffers.flushDue(next, r)               // streamingbuffer.go, #1273
+		if serveServiceAccount(w, r, numbers) { // datasetupdate.go, #1205
 			return
 		}
 		if (front{next: next, records: records, policies: policies, functions: functions, configs: configs}).serveIAM(w, r, iam) { // iam.go, #1231
@@ -355,6 +360,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		if j := jobActionRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil {
 			project := projectOf("/" + j[2])
+			if serveInternalJob(w, r, project, j[3]) { // internaljobs.go, #1555
+				return
+			}
 			if id, err := url.PathUnescape(j[3]); err == nil {
 				defer jobRows.noteMade(project, id) // jobstable.go, #1528
 			}
@@ -389,6 +397,9 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 		if j := jobRoute.FindStringSubmatch(r.URL.EscapedPath()); j != nil && r.Method == http.MethodGet {
 			project := projectOf("/" + j[2])
+			if serveInternalJob(w, r, project, j[4]) { // internaljobs.go, #1555
+				return
+			}
 			if j[3] == "jobs" && own.serveJobAction(w, r, project, j[4], "") {
 				return
 			}
@@ -493,6 +504,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.deleteWatched(w, r, dataset, table) // #1390, materializedviews.go
 		case r.Method == http.MethodDelete && m[4] != "" && m[5] == "":
 			f.deleteTableKeeping(w, r, dataset, table) // #1460, dropped.go
+		case r.Method == http.MethodDelete && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables") && r.Header.Get(PurgeHeader) != "":
+			f.deleteDatasetPurging(w, r, dataset) // #1540, purge.go
 		case r.Method == http.MethodDelete && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
 			f.deleteDatasetKeeping(w, r, dataset) // #1460, dropped.go
 		default:
@@ -1057,8 +1070,9 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 		rd = bytes.NewReader(body)
 	}
 	// The front's own request runs in UTC, whatever the client query's
-	// default_time_zone (timezone.go, #1456).
-	req, err := http.NewRequestWithContext(inUTC(r.Context()), method, u.String(), rd)
+	// default_time_zone (timezone.go, #1456), and the jobs it makes are
+	// named as the front's (internaljobs.go, #1555).
+	req, err := http.NewRequestWithContext(asInternal(inUTC(r.Context())), method, u.String(), rd)
 	if err != nil {
 		return 0, nil
 	}
@@ -1070,17 +1084,6 @@ func (f front) send(r *http.Request, method, path string, body []byte) (int, []b
 	req.Proto, req.ProtoMajor, req.ProtoMinor = "HTTP/1.1", 1, 1
 	rec := newRecorder()
 	f.next.ServeHTTP(rec, req)
-	if method == http.MethodPost && path == "/queries" && (rec.status == 0 || rec.status == http.StatusOK) {
-		// The front's own query: not a job of the client's (#972).
-		var resp map[string]any
-		if json.Unmarshal(rec.body.Bytes(), &resp) == nil {
-			project, id := jobRef(resp)
-			if project == "" {
-				project = projectOf(f.base)
-			}
-			f.records.markInternal(project, id)
-		}
-	}
 	return rec.status, rec.body.Bytes()
 }
 

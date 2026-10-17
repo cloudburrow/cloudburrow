@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
 	"log/slog"
@@ -62,6 +63,9 @@ type runService struct {
 	// adapter is the started adapter, which the metadata server asks for a
 	// workload's account (#1388); nil before Start.
 	adapter atomic.Pointer[runadapter.Server]
+	// functions is the started Cloud Functions server, whose functions a
+	// project's reset deletes with their event triggers (#1540).
+	functions atomic.Pointer[runadapter.FunctionsServer]
 }
 
 // metadataAccount is the metadata server's AccountResolver: the account a
@@ -254,6 +258,7 @@ func (r *runService) Start(ctx context.Context) error {
 		tokens = r.events.tokens
 	}
 	functions.WithIngress(ingress, tokens)
+	r.functions.Store(functions)
 	if r.events != nil {
 		functions.WithEvents(runadapter.Events{Transport: r.events.transport, Tokens: r.events.tokens,
 			PushBase: r.events.pushBase, Ingress: ingress})
@@ -265,11 +270,15 @@ func (r *runService) Start(ctx context.Context) error {
 	// (its v1 paths are Artifact Registry's), and its repositories' git URLs,
 	// whose pushes run the triggers file's builds.
 	ssm := adapter.SecureSourceManager(func() string { return hostURL(r.server.Addr()) })
+	// Developer Connect (#1546): connections to that Secure Source Manager
+	// and links to its repositories, under /developerconnect/v1/.
+	devConnect := adapter.DeveloperConnect()
 	cloudBuild := builds.CloudBuild()
 	var jsonAPI http.Handler = runadapter.RegistryHandlerOr(runadapter.SourceManagerHandlerOr(ssm, cloudBuild,
 		func(g grpc.ServiceRegistrar) { ssm.Register(g); ops.Register(g) },
-		functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
-			adapter.V1Handler(runadapter.NewRESTHandler(register))))))
+		runadapter.DeveloperConnectHandlerOr(func(g grpc.ServiceRegistrar) { devConnect.Register(g); ops.Register(g) },
+			functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
+				adapter.V1Handler(runadapter.NewRESTHandler(register)))))))
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}
@@ -279,6 +288,7 @@ func (r *runService) Start(ctx context.Context) error {
 		adapter.ArtifactRegistry().Register(g)
 		builds.CloudBuild().Register(g)
 		ssm.Register(g)
+		devConnect.Register(g)
 		functions.Register(g)
 	}); err != nil {
 		return err
@@ -298,22 +308,29 @@ func (r *runService) Start(ctx context.Context) error {
 
 // runVolumesResetter is Cloud Run's part of a reset (#1476): every gcsfuse
 // pod, PersistentVolume and claim that no service, job, worker pool or
-// instance uses. Cloud Run's workloads themselves are not reset. The
-// objects are shared across projects by bucket or export, so a project's
-// reset removes the same unused ones a full reset does.
+// instance uses. A full reset leaves Cloud Run's workloads. A project's
+// reset (#1540), as at a purge, first deletes the project's services,
+// jobs, worker pools, instances and functions, and forgets its Cloud Build
+// state, as Google drops them with a deleted project. The volume objects
+// are shared across projects by bucket or export, so a project's reset
+// then removes the same unused ones a full reset does.
 type runVolumesResetter struct{ svc *runService }
 
 func (r *runVolumesResetter) Name() string { return "run" }
 
 func (r *runVolumesResetter) Reset(ctx context.Context) error { return r.ResetProject(ctx, "") }
 
-func (r *runVolumesResetter) ResetProject(ctx context.Context, _ string) error {
+func (r *runVolumesResetter) ResetProject(ctx context.Context, project string) error {
 	a := r.svc.adapter.Load()
 	if a == nil {
 		return nil
 	}
+	var errs []error
+	if project != "" {
+		errs = append(errs, a.ResetProject(ctx, project, r.svc.functions.Load()))
+	}
 	_, err := a.CollectVolumes(ctx)
-	return err
+	return errors.Join(append(errs, err)...)
 }
 
 func (r *runService) Stop(ctx context.Context) error {

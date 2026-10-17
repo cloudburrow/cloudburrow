@@ -25,8 +25,9 @@ import (
 // the window it had, or the shorter it gets, first (#1503,
 // changehistoryretention.go), and then sends the query on as a statement
 // that does nothing, so the job is the emulator's as any other. One in a
-// multi-statement query is 501: BigQuery sets the options when the
-// statement runs, which the front cannot do in between the others. Other
+// multi-statement query is carried out so in its turn, the script run a
+// statement at a time (#1548, runScript); 501 only in a script with a TEMP
+// table or function, or a transaction's, which cannot be run so. Other
 // forms of ALTER SCHEMA (SET DEFAULT COLLATE, ADD or DROP REPLICA) are left
 // to the emulator.
 func (f front) alterSchema(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool) bool {
@@ -62,8 +63,15 @@ func (f front) alterSchema(w http.ResponseWriter, r *http.Request, q queryOption
 		return false
 	}
 	if n > 1 {
+		if !txnRequest(r) && !hasTemp(q.Query) {
+			// #1548: carried out a statement at a time (runScript), each
+			// ALTER SCHEMA alone, in its turn, as below.
+			f.runScript(w, r, q, insert)
+			return true
+		}
 		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: ALTER SCHEMA … SET OPTIONS in a "+
-			"multi-statement query. CloudBurrow carries it out as a query of its own (docs/compatibility.md). Nothing was run.")
+			"multi-statement query with a TEMP table or function, or in a transaction, which CloudBurrow cannot run a "+
+			"statement at a time (docs/compatibility.md). Nothing was run.")
 		return true
 	}
 	project := projectOf(f.base)

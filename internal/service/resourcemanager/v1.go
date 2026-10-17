@@ -59,8 +59,9 @@ func (o *v1Ops) get(name string) (*crmv1.Operation, bool) {
 	return op, ok
 }
 
-// projectNumber is resource.ProjectNumber: v1 carries one and gcloud prints
-// it, and Cloud Storage's buckets report the same number.
+// projectNumber is resource.ProjectNumber, which reads the registry's
+// records in `cloudburrow up` (#1544): v1 carries one and gcloud prints it,
+// and Cloud Storage's buckets report the same number.
 func projectNumber(id string) int64 { return resource.ProjectNumber(id) }
 
 func toV1(p Project) *crmv1.Project {
@@ -70,7 +71,7 @@ func toV1(p Project) *crmv1.Project {
 	}
 	return &crmv1.Project{
 		ProjectId:      p.ProjectID,
-		ProjectNumber:  projectNumber(p.ProjectID),
+		ProjectNumber:  numberOf(p),
 		Name:           p.DisplayName,
 		Labels:         p.Labels,
 		LifecycleState: state,

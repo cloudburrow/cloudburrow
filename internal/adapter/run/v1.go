@@ -36,8 +36,9 @@ import (
 // projects.locations.list and the services' IAM methods (#1349), and, in
 // v1jobs.go, jobs (list, get, create, delete), and in v1domains.go domain
 // mappings and authorized domains; in v1executions.go replaceJob, run,
-// executions and tasks (#1379); and in v1selector.go the list calls'
-// labelSelector and fieldSelector (#1420). Everything else under /apis/
+// executions and tasks (#1379); in v1selector.go the list calls'
+// labelSelector and fieldSelector (#1420); and in v1instances.go and
+// v1workerpools.go instances and worker pools (#1546). Everything else under /apis/
 // and /v1/ answers 501 UNIMPLEMENTED.
 
 // v1LocationLabel is the label Cloud Run v1 reports a resource's region in.
@@ -122,6 +123,19 @@ func (s *Server) V1Handler(next http.Handler) http.Handler {
 	tasks := "/apis/run.googleapis.com/v1/namespaces/{ns}/tasks"
 	v1.HandleFunc("GET "+tasks, s.v1ListTasks)
 	v1.HandleFunc("GET "+tasks+"/{name}", s.v1GetTask)
+	insts := "/apis/run.googleapis.com/v1/namespaces/{ns}/instances"
+	v1.HandleFunc("GET "+insts, s.v1ListInstances)
+	v1.HandleFunc("POST "+insts, s.v1CreateInstance)
+	v1.HandleFunc("GET "+insts+"/{name}", s.v1GetInstance)
+	v1.HandleFunc("PUT "+insts+"/{name}", s.v1ReplaceInstance)
+	v1.HandleFunc("DELETE "+insts+"/{name}", s.v1DeleteInstance)
+	v1.HandleFunc("POST "+insts+"/{name}", s.v1StartStopInstance)
+	pools := "/apis/run.googleapis.com/v1/namespaces/{ns}/workerpools"
+	v1.HandleFunc("GET "+pools, s.v1ListWorkerPools)
+	v1.HandleFunc("POST "+pools, s.v1CreateWorkerPool)
+	v1.HandleFunc("GET "+pools+"/{name}", s.v1GetWorkerPool)
+	v1.HandleFunc("PUT "+pools+"/{name}", s.v1ReplaceWorkerPool)
+	v1.HandleFunc("DELETE "+pools+"/{name}", s.v1DeleteWorkerPool)
 	v1.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		rest.WriteError(w, apierror.Unimplemented("%s %s is not served by the Cloud Run v1 API locally", r.Method, r.URL.Path))
 	})

@@ -307,7 +307,7 @@ func (s *scriptRun) failedChild(text string, rec *recorder, msg string) {
 		reason = e.Error.Errors[0].Reason
 	}
 	legacy := false
-	body, err := json.Marshal(map[string]any{"jobReference": map[string]any{"projectId": projectOf(s.f.base), "jobId": newJobID()},
+	body, err := json.Marshal(map[string]any{"jobReference": map[string]any{"projectId": projectOf(s.f.base), "jobId": jobIDFor(s.r.Context())},
 		"configuration": map[string]any{"query": map[string]any{
 			"query": "DROP TABLE IF EXISTS " + quotePath([]string{"_cloudburrow", scratchTable()}), "useLegacySql": &legacy}}})
 	if err != nil {

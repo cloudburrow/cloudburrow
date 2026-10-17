@@ -187,7 +187,7 @@ func (s *Server) insertSSLCert(r *http.Request, base, project string, e Engine, 
 	var req struct {
 		CommonName string `json:"commonName"`
 	}
-	if err := decode(r, &req); err != nil {
+	if err := readChecked(r, "sslCertsInsertRequest", sslCertFields, &req); err != nil {
 		return nil, err
 	}
 	if req.CommonName == "" {

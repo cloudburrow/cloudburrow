@@ -122,7 +122,9 @@ func (r *Registry) SetFolderCapability(folder, capability string, value bool) (C
 		if capability == appManagement && f.ManagementProject != "" {
 			// Permanently: no DELETE_REQUESTED, no undelete. A purge, so the
 			// project's state goes with it in every service (#1537).
-			r.purgeLocked(strings.TrimPrefix(f.ManagementProject, "projects/"))
+			if mp, err := r.load(strings.TrimPrefix(f.ManagementProject, "projects/")); err == nil {
+				r.purgeLocked(mp) // its number retired too (#1544)
+			}
 			f.ManagementProject = ""
 		}
 	default:
