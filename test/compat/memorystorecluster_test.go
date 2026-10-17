@@ -41,6 +41,20 @@ func redisClusterAdminClient(t *testing.T, h *Harness) (*cluster.CloudRedisClust
 	return c, project
 }
 
+// waitClusterOp polls a cluster operation until it is done, each poll
+// under a fresh harness context: a reshard of a real cluster can take
+// longer than one context allows, as Google's takes minutes.
+func waitClusterOp(t *testing.T, h *Harness, op *cluster.UpdateClusterOperation) (*clusterpb.Cluster, error) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Minute); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+		cl, err := op.Poll(h.Context())
+		if err != nil || op.Done() {
+			return cl, err
+		}
+	}
+	return nil, fmt.Errorf("operation %s is still running after 5 minutes", op.Name())
+}
+
 // clusterKeys writes n keys through a cluster client, spread over every
 // slot range, and reads them back.
 func clusterKeys(t *testing.T, h *Harness, rc *redis.ClusterClient, prefix string, n int, write bool) {
@@ -152,7 +166,7 @@ func TestMemorystoreRedisCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateCluster shard_count: %v", err)
 	}
-	if cl, err = uop.Wait(h.Context()); err != nil || cl.GetShardCount() != 4 {
+	if cl, err = waitClusterOp(t, h, uop); err != nil || cl.GetShardCount() != 4 {
 		t.Fatalf("UpdateCluster shard_count operation = %v, %v", cl, err)
 	}
 	rc.ReloadState(h.Context())
@@ -166,7 +180,7 @@ func TestMemorystoreRedisCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateCluster replica_count: %v", err)
 	}
-	if cl, err = uop.Wait(h.Context()); err != nil || cl.GetReplicaCount() != 0 {
+	if cl, err = waitClusterOp(t, h, uop); err != nil || cl.GetReplicaCount() != 0 {
 		t.Fatalf("UpdateCluster replica_count operation = %v, %v", cl, err)
 	}
 	nodes, err := rc.ClusterNodes(h.Context()).Result()
