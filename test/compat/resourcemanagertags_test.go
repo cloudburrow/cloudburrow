@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"cloud.google.com/go/iam/apiv1/iampb"
 	resourcemanager "cloud.google.com/go/resourcemanager/apiv3"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
@@ -82,7 +81,7 @@ func tagsProject(t *testing.T, h *Harness, prefix string) (*rmpb.Project, *rmpb.
 	return p, f
 }
 
-// covers: google.cloud.resourcemanager.v3.TagKeys/CreateTagKey, google.cloud.resourcemanager.v3.TagKeys/GetTagKey, google.cloud.resourcemanager.v3.TagKeys/GetNamespacedTagKey, google.cloud.resourcemanager.v3.TagKeys/ListTagKeys, google.cloud.resourcemanager.v3.TagKeys/UpdateTagKey, google.cloud.resourcemanager.v3.TagKeys/DeleteTagKey, google.cloud.resourcemanager.v3.TagKeys/GetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.TagKeys/SetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.TagKeys/TestIamPermissions (unimplemented), google.cloud.resourcemanager.v3.TagValues/CreateTagValue, google.cloud.resourcemanager.v3.TagValues/GetTagValue, google.cloud.resourcemanager.v3.TagValues/GetNamespacedTagValue, google.cloud.resourcemanager.v3.TagValues/ListTagValues, google.cloud.resourcemanager.v3.TagValues/UpdateTagValue, google.cloud.resourcemanager.v3.TagValues/DeleteTagValue, google.cloud.resourcemanager.v3.TagValues/GetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.TagValues/SetIamPolicy (unimplemented), google.cloud.resourcemanager.v3.TagValues/TestIamPermissions (unimplemented), google.cloud.resourcemanager.v3.TagBindings/CreateTagBinding, google.cloud.resourcemanager.v3.TagBindings/ListTagBindings, google.cloud.resourcemanager.v3.TagBindings/DeleteTagBinding, google.cloud.resourcemanager.v3.TagBindings/ListEffectiveTags, google.cloud.resourcemanager.v3.TagHolds/CreateTagHold, google.cloud.resourcemanager.v3.TagHolds/ListTagHolds, google.cloud.resourcemanager.v3.TagHolds/DeleteTagHold
+// covers: google.cloud.resourcemanager.v3.TagKeys/CreateTagKey, google.cloud.resourcemanager.v3.TagKeys/GetTagKey, google.cloud.resourcemanager.v3.TagKeys/GetNamespacedTagKey, google.cloud.resourcemanager.v3.TagKeys/ListTagKeys, google.cloud.resourcemanager.v3.TagKeys/UpdateTagKey, google.cloud.resourcemanager.v3.TagKeys/DeleteTagKey, google.cloud.resourcemanager.v3.TagValues/CreateTagValue, google.cloud.resourcemanager.v3.TagValues/GetTagValue, google.cloud.resourcemanager.v3.TagValues/GetNamespacedTagValue, google.cloud.resourcemanager.v3.TagValues/ListTagValues, google.cloud.resourcemanager.v3.TagValues/UpdateTagValue, google.cloud.resourcemanager.v3.TagValues/DeleteTagValue, google.cloud.resourcemanager.v3.TagBindings/CreateTagBinding, google.cloud.resourcemanager.v3.TagBindings/ListTagBindings, google.cloud.resourcemanager.v3.TagBindings/DeleteTagBinding, google.cloud.resourcemanager.v3.TagBindings/ListEffectiveTags, google.cloud.resourcemanager.v3.TagHolds/CreateTagHold, google.cloud.resourcemanager.v3.TagHolds/ListTagHolds, google.cloud.resourcemanager.v3.TagHolds/DeleteTagHold
 //
 // TestResourceManagerV3Tags (#1295), through cloud.google.com/go/
 // resourcemanager/apiv3 TagKeysClient, TagValuesClient, TagBindingsClient
@@ -313,37 +312,6 @@ func TestResourceManagerV3Tags(t *testing.T) {
 	}
 	if _, err := c.keys.GetTagKey(ctx, &rmpb.GetTagKeyRequest{Name: key.GetName()}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetTagKey after delete = %v; want NotFound", err)
-	}
-
-	for what, err := range map[string]error{
-		"TagKeys.GetIamPolicy": func() error {
-			_, err := c.keys.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: key.GetName()})
-			return err
-		}(),
-		"TagKeys.SetIamPolicy": func() error {
-			_, err := c.keys.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: key.GetName()})
-			return err
-		}(),
-		"TagKeys.TestIamPermissions": func() error {
-			_, err := c.keys.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: key.GetName()})
-			return err
-		}(),
-		"TagValues.GetIamPolicy": func() error {
-			_, err := c.values.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: prod.GetName()})
-			return err
-		}(),
-		"TagValues.SetIamPolicy": func() error {
-			_, err := c.values.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: prod.GetName()})
-			return err
-		}(),
-		"TagValues.TestIamPermissions": func() error {
-			_, err := c.values.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: prod.GetName()})
-			return err
-		}(),
-	} {
-		if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "ADR-0006") {
-			t.Errorf("%s = %v; want Unimplemented citing ADR-0006", what, err)
-		}
 	}
 }
 

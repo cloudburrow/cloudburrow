@@ -224,7 +224,7 @@ func (p artifactRegistryProvider) DetailActions(_ context.Context, project strin
 	case 1:
 		return []console.Action{
 			{ID: "add-rule", Label: "Add rule", Fields: []console.Field{
-				{Name: "id", Label: "Rule ID", Type: "text", Required: true, Pattern: "^[a-z0-9]([a-z0-9._-]{0,126}[a-z0-9])?$"},
+				{Name: "id", Label: "Rule ID", Type: "text", Required: true, Pattern: "^[a-z0-9]([a-z0-9._\\-]{0,126}[a-z0-9])?$"},
 				{Name: "action", Label: "Action", Type: "select", Options: []string{"DENY", "ALLOW"}, Default: "DENY"},
 				{Name: "package", Label: "Package", Type: "text", Help: "optional: the image the rule applies to; empty is every image"},
 				{Name: "condition", Label: "Condition", Type: "text", Help: "optional: a CEL expression, as CreateRule takes"}}},

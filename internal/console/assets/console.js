@@ -104,6 +104,17 @@ const ROUTES = [
     product: "cloudsql", productTitle: "Cloud SQL" },
   { path: "/cloudsql-mysql", service: "cloudsql-mysql", title: "MySQL",      section: "Databases",
     product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
+  // Every instance the Admin API serves (#1330), with Create instance, its
+  // backups, replicas, exports and imports, Run SQL and Upgrade. It had a
+  // provider but no route, so /cloudsql-instances was "No such screen".
+  { path: "/cloudsql-instances", service: "cloudsql-instances", title: "Instances", section: "Databases",
+    product: "cloudsql", productTitle: "Cloud SQL", icon: "cloudsql" },
+  // Memorystore for Redis (#1302) and the Backup and DR Service (#1433) had
+  // providers, and console API pages, but no route: /memorystore and
+  // /backupdr were "No such screen", so nothing of either was reachable from
+  // the console (found by TestMemorystoreRotateServerCAThroughThePage).
+  { path: "/memorystore", service: "memorystore", title: "Memorystore", section: "Databases" },
+  { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", section: "Storage" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
   // drawn without one (#698). It is one product with two pages: datasets,
@@ -183,7 +194,20 @@ const ROUTES = [
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
 
-  { path: "/projects", service: "projects", title: "Resource Manager", section: "Management tools" },
+  // Resource Manager is one product with three pages here: projects, the
+  // organization and its folders (#1294), and tags (#1295). The product key
+  // stays "projects", so a pin made before the other pages were routed keeps
+  // pointing at it. Resource hierarchy and Tags had providers but no route,
+  // so neither was reachable from the console.
+  { path: "/projects", service: "projects", title: "Projects", section: "Management tools",
+    product: "projects", productTitle: "Resource Manager" },
+  { path: "/resource-hierarchy", service: "hierarchy", icon: "hierarchy", title: "Resource hierarchy", section: "Management tools",
+    product: "projects", productTitle: "Resource Manager" },
+  { path: "/tags", service: "tags", title: "Tags", section: "Management tools",
+    product: "projects", productTitle: "Resource Manager" },
+  // APIs & Services (#1352): a project's APIs, Enable and Disable. It had a
+  // provider but no route.
+  { path: "/apis", service: "serviceusage", title: "APIs & Services", section: "Management tools" },
   // Connect (#802): what `env`, `gcloud-setup`, `terraform`, `version` and
   // `diagnose` give at a terminal. Not a Google Cloud product, so it carries
   // no product icon.
@@ -277,6 +301,12 @@ const ICONS = {
   // Resource Manager: a folder of projects.
   projects:  '<path d="M3 7h6l2 2h10v10H3z"/><path d="M3 7V5h6l2 2"/>',
   // IAM: a person beside a key.
+  // Resource hierarchy: an organization over two folders.
+  hierarchy: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>',
+  // Tags: a tag with its hole.
+  tags:      '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8" r="1.5"/>',
+  // APIs & Services: braces around three calls (Connect has the plug).
+  serviceusage: '<path d="M8 4H5v16h3M16 4h3v16h-3"/><path d="M9 12h.01M12 12h.01M15 12h.01" stroke-width="2.5"/>',
   iam:       '<circle cx="8" cy="8" r="3"/><path d="M3 19a5 5 0 0 1 10 0"/><circle cx="17" cy="13" r="2"/><path d="M17 15v5M17 18h2"/>',
   // Firestore: stacked documents.
   firestore: '<path d="M8 3h9l3 3v11H8z"/><path d="M5 7v14h11"/><path d="M11 9h6M11 13h6"/>',
@@ -286,6 +316,8 @@ const ICONS = {
   bigtable:  '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 9.7h18M3 14.3h18M7.5 5v14M12 5v14M16.5 5v14"/>',
   // Spanner: a globe, for a database that spans regions.
   spanner:   '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.5 3.8 5.5 3.8 9s-1.3 6.5-3.8 9c-2.5-2.5-3.8-5.5-3.8-9S9.5 5.5 12 3z"/>',
+  // Memorystore: a memory module, for an in-memory store.
+  memorystore: '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 17v3M12 17v3M17 17v3M7 11h2M11 11h2M15 11h2"/>',
   // Cloud SQL: a database cylinder with a query line.
   cloudsql:  '<ellipse cx="12" cy="5.5" rx="7" ry="2.5"/><path d="M5 5.5v13c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-13"/><path d="M9 12h6M9 16h4"/>',
   monitoring:'<path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/>',
@@ -5143,17 +5175,22 @@ async function runAction(route, target, action, onDone, row = NO_ROW, title = nu
     }
   };
 
-  if (!action.destructive) {
+  if (!action.destructive && !action.confirm) {
     try { await apply(); } catch { /* reported by notify */ }
     return;
   }
   // An action that says what it puts at stake — Lock retention policy,
   // which cannot be undone (#789) — says it, and its button is its own verb.
+  // One that changes state without deleting anything, and has no form to
+  // submit — Rotate server CA, Restart, Set as default — is confirmed the
+  // same way before it is sent, as its Confirm promises, without the
+  // closing "cannot be undone".
   await confirmDestructive({
     title: `${action.label} ${name}?`,
     detail: action.confirm || undefined,
     confirmWord: name,
     confirmLabel: action.confirm ? action.label : undefined,
+    consequence: action.destructive ? undefined : "",
     onConfirm: apply,
   });
 }

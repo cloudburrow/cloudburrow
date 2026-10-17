@@ -15,7 +15,6 @@ import (
 	"cloud.google.com/go/bigtable"
 	"cloud.google.com/go/bigtable/admin/apiv2/adminpb"
 	"cloud.google.com/go/bigtable/apiv2/bigtablepb"
-	"cloud.google.com/go/iam/apiv1/iampb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -220,12 +219,12 @@ func TestBigtablePingAndWarm(t *testing.T) {
 }
 
 // TestBigtableRefusedAdminMethods records the table admin methods the
-// emulator answers UNIMPLEMENTED, called through the generated admin client
+// emulator answers UNIMPLEMENTED (table IAM the front serves since #1486,
+// TestBigtableTableIAM), called through the generated admin client
 // the veneer wraps (TableAdminClientV2).
 //
 // covers: google.bigtable.admin.v2.BigtableTableAdmin/CreateAuthorizedView (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/GetAuthorizedView (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/ListAuthorizedViews (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/UpdateAuthorizedView (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/DeleteAuthorizedView (unimplemented)
 // covers: google.bigtable.admin.v2.BigtableTableAdmin/SnapshotTable (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/GetSnapshot (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/ListSnapshots (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/DeleteSnapshot (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/CreateTableFromSnapshot (unimplemented)
-// covers: google.bigtable.admin.v2.BigtableTableAdmin/GetIamPolicy (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/SetIamPolicy (unimplemented), google.bigtable.admin.v2.BigtableTableAdmin/TestIamPermissions (unimplemented)
 func TestBigtableRefusedAdminMethods(t *testing.T) {
 	h := New(t)
 	admin, _ := bigtableTable(t, h, "refusals")
@@ -260,14 +259,6 @@ func TestBigtableRefusedAdminMethods(t *testing.T) {
 	wantRefused(t, "DeleteSnapshot", err, codes.Unimplemented, snaps)
 	_, err = a.CreateTableFromSnapshot(ctx, &adminpb.CreateTableFromSnapshotRequest{Parent: inst, TableId: "fs", SourceSnapshot: snap})
 	wantRefused(t, "CreateTableFromSnapshot", err, codes.Unimplemented, snaps)
-
-	const iam = "unimplemented feature"
-	_, err = a.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: tbl})
-	wantRefused(t, "GetIamPolicy", err, codes.Unimplemented, iam)
-	_, err = a.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{Resource: tbl, Policy: &iampb.Policy{}})
-	wantRefused(t, "SetIamPolicy", err, codes.Unimplemented, iam)
-	_, err = a.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: tbl, Permissions: []string{"bigtable.tables.get"}})
-	wantRefused(t, "TestIamPermissions", err, codes.Unimplemented, iam)
 }
 
 // TestBigtableRefusedDataMethods records the data methods the emulator

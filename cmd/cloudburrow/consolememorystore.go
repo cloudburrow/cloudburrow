@@ -155,7 +155,7 @@ func (p memorystoreProvider) Act(ctx context.Context, project, name, action stri
 // API refuses are not offered.
 func (memorystoreProvider) CreateForm() (string, []console.Field) {
 	return "Create instance", []console.Field{
-		{Name: "id", Label: "Instance ID", Type: "text", Required: true, Pattern: `^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$`,
+		{Name: "id", Label: "Instance ID", Type: "text", Required: true, Pattern: `^[a-z]([a-z0-9\-]{0,38}[a-z0-9])?$`,
 			Help: "1 to 40 lowercase letters, digits and hyphens, starting with a letter."},
 		{Name: "displayName", Label: "Display name", Type: "text"},
 		{Name: "region", Label: "Region", Type: "text", Required: true, Default: redisadmin.Region,
@@ -175,7 +175,7 @@ func (memorystoreProvider) CreateForm() (string, []console.Field) {
 		{Name: "transitEncryption", Label: "Enable in-transit encryption", Type: "checkbox",
 			Help: "SERVER_AUTHENTICATION: the server serves TLS only, with a certificate of the instance's own CA, which its page shows. It cannot be changed later."},
 		{Name: "customerManagedKey", Label: "Customer-managed encryption key (CMEK)", Type: "text",
-			Pattern: `^(projects/[^/]+/locations/[^/]+/keyRings/[^/]+/cryptoKeys/[^/]+)?$`,
+			Pattern: `^(projects/[^\/]+/locations/[^\/]+/keyRings/[^\/]+/cryptoKeys/[^\/]+)?$`,
 			Help:    "Optional. projects/{project}/locations/{region}/keyRings/{ring}/cryptoKeys/{key}: a Cloud KMS key in the instance's region. It cannot be changed later; while the key is disabled or destroyed the instance is suspended."},
 		{Name: "labels", Label: "Labels", Type: "map", Help: "Optional. One key=value per line."},
 		{Name: "redisConfigs", Label: "Redis configs", Type: "map",
@@ -475,11 +475,11 @@ func (p memorystoreProvider) DetailActions(ctx context.Context, project string, 
 	}
 	return append(upgrade, []console.Action{
 		{ID: "export", Label: "Export", Fields: []console.Field{{Name: "uri", Label: "Destination", Type: "text", Required: true,
-			Pattern: "^gs://[^/]+/.+$", Help: "gs://bucket/object: the RDB file ExportInstance writes, in this instance's Cloud Storage."}}},
+			Pattern: "^gs://[^\\/]+/.+$", Help: "gs://bucket/object: the RDB file ExportInstance writes, in this instance's Cloud Storage."}}},
 		{ID: "import", Label: "Import", Destructive: true,
 			Confirm: "Every key of the instance is replaced by the RDB file's (ImportInstance overwrites the data).",
 			Fields: []console.Field{{Name: "uri", Label: "Source", Type: "text", Required: true,
-				Pattern: "^gs://[^/]+/.+$", Help: "gs://bucket/object: an RDB file in this instance's Cloud Storage."}}},
+				Pattern: "^gs://[^\\/]+/.+$", Help: "gs://bucket/object: an RDB file in this instance's Cloud Storage."}}},
 	}...)
 }
 

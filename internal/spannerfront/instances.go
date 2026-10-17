@@ -41,6 +41,8 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
 const instanceService = "/google.spanner.admin.instance.v1.InstanceAdmin/"
@@ -71,6 +73,8 @@ type Instances struct {
 	opOrder []string
 	// protected are the databases with drop protection on, by name.
 	protected map[string]bool
+	// policies are the IAM policies of instances and databases (iam.go).
+	policies map[string]*iampolicy.Stored
 }
 
 type change struct {
@@ -87,7 +91,7 @@ func New(emulator string) (*Instances, error) {
 	}
 	s := &Instances{emu: instancepb.NewInstanceAdminClient(conn), emuDB: databasepb.NewDatabaseAdminClient(conn),
 		emuOps: longrunningpb.NewOperationsClient(conn), now: func() time.Time { return time.Now().UTC() },
-		changes: map[string]*change{}, ops: map[string]*longrunningpb.Operation{}, protected: map[string]bool{}}
+		changes: map[string]*change{}, ops: map[string]*longrunningpb.Operation{}, protected: map[string]bool{}, policies: map[string]*iampolicy.Stored{}}
 	s.grpc = grpc.NewServer()
 	instancepb.RegisterInstanceAdminServer(s.grpc, s)
 	databasepb.RegisterDatabaseAdminServer(s.grpc, databases{s: s})
@@ -124,12 +128,15 @@ func (s *Instances) Claims(r *http.Request) bool {
 			return true
 		}
 		if m, ok := strings.CutPrefix(r.URL.Path, databaseService); ok {
-			return databaseClaimed[m]
+			return databaseClaimed[m] || iamMethods[m]
 		}
 		m, ok := strings.CutPrefix(r.URL.Path, instanceService)
-		return ok && claimed[m]
+		return ok && (claimed[m] || iamMethods[m])
 	}
 	if r.Method == http.MethodGet && s.ownOperation(strings.TrimPrefix(r.URL.Path, "/v1/")) {
+		return true
+	}
+	if r.Method == http.MethodPost && restIAM.MatchString(r.URL.Path) {
 		return true
 	}
 	_, ok := restCall(r)
@@ -140,6 +147,10 @@ func (s *Instances) Claims(r *http.Request) bool {
 func (s *Instances) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		s.grpc.ServeHTTP(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && restIAM.MatchString(r.URL.Path) {
+		s.serveRESTIAM(w, r)
 		return
 	}
 	s.serveREST(w, r)
@@ -202,6 +213,7 @@ func (s *Instances) DeleteInstance(ctx context.Context, req *instancepb.DeleteIn
 	if err != nil {
 		return nil, err
 	}
+	s.dropPolicies(req.GetName())
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.changes, req.GetName())

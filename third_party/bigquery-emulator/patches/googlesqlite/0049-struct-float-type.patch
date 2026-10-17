@@ -1,0 +1,268 @@
+CloudBurrow patch 49 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1484). Applies after patch 0041.
+
+The gap: a whole FLOAT64 (3.0) in a STRUCT field or an ARRAY element was
+encoded with json.Marshal as the JSON integer 3, which DecodeValue (and
+SQLite's json_each, under UNNEST) read back as an INT64. The analyzer
+types the field FLOAT64 and adds no cast, so IntValue's arithmetic ran:
+`SELECT s.x / 2 FROM (SELECT STRUCT(CAST(3 AS FLOAT64) AS x) AS s)` was 1,
+s.x * 0.5 was 0 and s.x + 0.5 was 3, for a literal, a column, CAST, an
+expression, a nested STRUCT, ARRAY<STRUCT>, ARRAY<FLOAT64>, a subquery's
+STRUCT and a stored STRUCT column. BigQuery keeps FLOAT64, and / is
+FLOAT64 for INT64 and FLOAT64 operands
+(https://cloud.google.com/bigquery/docs/reference/standard-sql/operators#arithmetic_operators).
+
+The patch writes a whole FLOAT64 inside an encoded STRUCT or ARRAY with a
+fraction (3.0), and makes IntValue's +, - and * with a FLOAT64 operand, and
+its /, FLOAT64, for a value a CloudBurrow before this patch already
+stored. struct_float_test.go, TestIntValueFloatArithmetic and
+TestEncodeWholeFloatInStruct fail without the patch and pass with it;
+upstream's TestIntValue/Div now expects FLOAT64 5.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2026 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/value/encoder.go
++++ b/internal/value/encoder.go
+@@ -6,6 +6,7 @@
+ 	"math"
+ 	"reflect"
+ 	"strconv"
++	"strings"
+ 	"time"
+ 
+ 	"github.com/goccy/go-json"
+@@ -64,6 +65,18 @@
+ 		}
+ 		return base64.StdEncoding.EncodeToString(b), nil
+ 	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1484): json.Marshal writes
++	// a whole FLOAT64 as an integer (3.0 as 3), which DecodeValue, and
++	// SQLite's json_each under UNNEST, read back as an INT64, so a FLOAT64
++	// field of a STRUCT or element of an ARRAY lost its type: s.x / 2 was an
++	// integer quotient and s.x * 0.5 was 0. It is written with a fraction.
++	if f, ok := v.(FloatValue); ok && !math.IsNaN(float64(f)) {
++		s := strconv.FormatFloat(float64(f), 'g', -1, 64)
++		if !strings.ContainsAny(s, ".eE") {
++			s += ".0"
++		}
++		return json.Number(s), nil
++	}
+ 	return EncodeValue(v)
+ }
+ 
+--- a/internal/value/value_int.go
++++ b/internal/value/value_int.go
+@@ -9,6 +9,11 @@
+ type IntValue int64
+ 
+ func (iv IntValue) Add(v Value) (Value, error) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1484): INT64 + FLOAT64 is
++	// FLOAT64, not the float truncated to an INT64 (3 * 0.5 was 0).
++	if f, ok := v.(FloatValue); ok {
++		return FloatValue(float64(iv) + float64(f)), nil
++	}
+ 	v2, err := v.ToInt64()
+ 	if err != nil {
+ 		return nil, err
+@@ -17,6 +22,11 @@
+ }
+ 
+ func (iv IntValue) Sub(v Value) (Value, error) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1484): INT64 - FLOAT64 is
++	// FLOAT64, not the float truncated to an INT64 (3 * 0.5 was 0).
++	if f, ok := v.(FloatValue); ok {
++		return FloatValue(float64(iv) - float64(f)), nil
++	}
+ 	v2, err := v.ToInt64()
+ 	if err != nil {
+ 		return nil, err
+@@ -25,6 +35,11 @@
+ }
+ 
+ func (iv IntValue) Mul(v Value) (Value, error) {
++	// CloudBurrow patch (cloudburrow/cloudburrow#1484): INT64 * FLOAT64 is
++	// FLOAT64, not the float truncated to an INT64 (3 * 0.5 was 0).
++	if f, ok := v.(FloatValue); ok {
++		return FloatValue(float64(iv) * float64(f)), nil
++	}
+ 	v2, err := v.ToInt64()
+ 	if err != nil {
+ 		return nil, err
+@@ -33,14 +48,19 @@
+ }
+ 
+ func (iv IntValue) Div(v Value) (Value, error) {
+-	v2, err := v.ToInt64()
++	v2, err := v.ToFloat64()
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 	if v2 == 0 {
+ 		return nil, fmt.Errorf("zero divided error ( %d / 0 )", iv)
+ 	}
+-	return IntValue(int64(iv) / v2), nil
++	// CloudBurrow patch (cloudburrow/cloudburrow#1484): BigQuery's / (and
++	// SAFE_DIVIDE) of INT64s is FLOAT64, never an integer quotient
++	// (https://cloud.google.com/bigquery/docs/reference/standard-sql/operators#arithmetic_operators).
++	// The analyzer casts INT64 operands to FLOAT64, so an IntValue reaches
++	// here only from a FLOAT64 whose type was lost.
++	return FloatValue(float64(iv) / v2), nil
+ }
+ 
+ func (iv IntValue) EQ(v Value) (bool, error) {
+--- a/internal/value/value_int_test.go
++++ b/internal/value/value_int_test.go
+@@ -66,8 +66,9 @@
+ 		if err != nil {
+ 			t.Fatal(err)
+ 		}
+-		if got != value.IntValue(5) {
+-			t.Fatalf("Div: got %v, want 5", got)
++		// CloudBurrow patch (cloudburrow/cloudburrow#1484): / is FLOAT64.
++		if got != value.FloatValue(5) {
++			t.Fatalf("Div: got %v (%T), want FLOAT64 5", got, got)
+ 		}
+ 	})
+ 
+@@ -230,3 +231,29 @@
+ 		}
+ 	})
+ }
++
++// TestIntValueFloatArithmetic is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1484): INT64 with a FLOAT64 operand is FLOAT64,
++// not the float truncated to an INT64, and / is FLOAT64.
++func TestIntValueFloatArithmetic(t *testing.T) {
++	for _, tc := range []struct {
++		name string
++		op   func() (value.Value, error)
++		want value.Value
++	}{
++		{"add", func() (value.Value, error) { return value.IntValue(3).Add(value.FloatValue(0.5)) }, value.FloatValue(3.5)},
++		{"sub", func() (value.Value, error) { return value.IntValue(3).Sub(value.FloatValue(0.5)) }, value.FloatValue(2.5)},
++		{"mul", func() (value.Value, error) { return value.IntValue(3).Mul(value.FloatValue(0.5)) }, value.FloatValue(1.5)},
++		{"div", func() (value.Value, error) { return value.IntValue(3).Div(value.IntValue(2)) }, value.FloatValue(1.5)},
++		{"div float", func() (value.Value, error) { return value.IntValue(3).Div(value.FloatValue(0.5)) }, value.FloatValue(6)},
++		{"add int", func() (value.Value, error) { return value.IntValue(3).Add(value.IntValue(1)) }, value.IntValue(4)},
++	} {
++		got, err := tc.op()
++		if err != nil {
++			t.Fatalf("%s: %v", tc.name, err)
++		}
++		if got != tc.want {
++			t.Errorf("%s = %v (%T), want %v (%T)", tc.name, got, got, tc.want, tc.want)
++		}
++	}
++}
+--- a/internal/value/encoder_test.go
++++ b/internal/value/encoder_test.go
+@@ -320,3 +320,38 @@
+ 		}
+ 	})
+ }
++
++// TestEncodeWholeFloatInStruct is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1484): a whole FLOAT64 in a STRUCT or an ARRAY
++// decodes back as FLOAT64, not INT64.
++func TestEncodeWholeFloatInStruct(t *testing.T) {
++	for _, v := range []value.Value{
++		&value.StructValue{Keys: []string{"x", "n"}, Values: []value.Value{value.FloatValue(3), value.IntValue(3)},
++			M: map[string]value.Value{"x": value.FloatValue(3), "n": value.IntValue(3)}},
++		&value.ArrayValue{Values: []value.Value{value.FloatValue(-2), value.FloatValue(1e21), value.FloatValue(0.5)}},
++	} {
++		enc, err := value.EncodeValue(v)
++		if err != nil {
++			t.Fatal(err)
++		}
++		dec, err := value.DecodeValue(enc)
++		if err != nil {
++			t.Fatal(err)
++		}
++		switch d := dec.(type) {
++		case *value.StructValue:
++			if _, ok := d.Values[0].(value.FloatValue); !ok {
++				t.Errorf("struct field x decoded as %T, want FloatValue", d.Values[0])
++			}
++			if _, ok := d.Values[1].(value.IntValue); !ok {
++				t.Errorf("struct field n decoded as %T, want IntValue", d.Values[1])
++			}
++		case *value.ArrayValue:
++			for i, e := range d.Values {
++				if _, ok := e.(value.FloatValue); !ok {
++					t.Errorf("array element %d decoded as %T, want FloatValue", i, e)
++				}
++			}
++		}
++	}
++}
+--- /dev/null
++++ b/struct_float_test.go
+@@ -0,0 +1,64 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestStructFloatKeepsType is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1484): a whole FLOAT64 (3.0) in a STRUCT field
++// or an ARRAY element was encoded as the JSON integer 3 and read back as an
++// INT64, so s.x / 2 was 1, s.x * 0.5 was 0 and s.x + 0.5 was 3. It keeps
++// FLOAT64 for a literal, a column, CAST, an expression, a nested STRUCT,
++// ARRAY<STRUCT> (by UNNEST and by OFFSET), ARRAY<FLOAT64>, a subquery's
++// STRUCT and a stored STRUCT column, and an INT64 field stays INT64.
++func TestStructFloatKeepsType(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=struct_float")
++	if err != nil {
++		t.Fatalf("sql.Open: %v", err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	for _, q := range []string{
++		"CREATE TABLE `p.d.t` (f FLOAT64, i INT64, s STRUCT<x FLOAT64, n INT64>, a ARRAY<FLOAT64>)",
++		"INSERT INTO `p.d.t` (f, i, s, a) VALUES (3.0, 3, STRUCT(3.0 AS x, 3 AS n), [3.0, 4.0])",
++	} {
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	for _, tc := range []struct{ q, want string }{
++		{"SELECT TO_JSON_STRING(s.x / 2) FROM (SELECT STRUCT(CAST(3 AS FLOAT64) AS x) AS s)", "1.5"},
++		{"SELECT TO_JSON_STRING(s.x / 2) FROM (SELECT STRUCT(3.0 AS x) AS s)", "1.5"},
++		{"SELECT TO_JSON_STRING(s.x / 2) FROM (SELECT STRUCT(f AS x) AS s FROM `p.d.t`)", "1.5"},
++		{"SELECT TO_JSON_STRING(s.x / 2) FROM (SELECT STRUCT(f * 1 AS x) AS s FROM `p.d.t`)", "1.5"},
++		{"SELECT TO_JSON_STRING(s.x / 2) FROM (SELECT STRUCT(CAST(i AS FLOAT64) AS x) AS s FROM `p.d.t`)", "1.5"},
++		{"SELECT TO_JSON_STRING(s.x * 0.5) FROM (SELECT STRUCT(CAST(i AS FLOAT64) AS x) AS s FROM `p.d.t`)", "1.5"},
++		{"SELECT TO_JSON_STRING(s.x + 0.5) FROM (SELECT STRUCT(CAST(i AS FLOAT64) AS x) AS s FROM `p.d.t`)", "3.5"},
++		{"SELECT TO_JSON_STRING(s.x - 0.5) FROM (SELECT STRUCT(CAST(i AS FLOAT64) AS x) AS s FROM `p.d.t`)", "2.5"},
++		{"SELECT TO_JSON_STRING(IEEE_DIVIDE(s.x, 2)) FROM (SELECT STRUCT(CAST(i AS FLOAT64) AS x) AS s FROM `p.d.t`)", "1.5"},
++		{"SELECT TO_JSON_STRING(s.y.x / 2) FROM (SELECT STRUCT(STRUCT(CAST(i AS FLOAT64) AS x) AS y) AS s FROM `p.d.t`)", "1.5"},
++		{"SELECT TO_JSON_STRING(e.x / 2) FROM (SELECT [STRUCT(CAST(i AS FLOAT64) AS x)] AS a FROM `p.d.t`), UNNEST(a) e", "1.5"},
++		{"SELECT TO_JSON_STRING(a[OFFSET(0)].x / 2) FROM (SELECT [STRUCT(CAST(i AS FLOAT64) AS x)] AS a FROM `p.d.t`)", "1.5"},
++		{"SELECT TO_JSON_STRING((SELECT AS STRUCT CAST(i AS FLOAT64) AS x).x / 2) FROM `p.d.t`", "1.5"},
++		{"SELECT TO_JSON_STRING(s.x * 0.5) FROM `p.d.t`", "1.5"},
++		{"SELECT TO_JSON_STRING(e * 0.5) FROM `p.d.t`, UNNEST(a) e ORDER BY e LIMIT 1", "1.5"},
++		{"SELECT TO_JSON_STRING(a[OFFSET(1)] / 8) FROM `p.d.t`", "0.5"},
++		{"SELECT TO_JSON_STRING(s.n + 1) FROM `p.d.t`", "4"},
++		{"SELECT TO_JSON_STRING(DIV(s.n, 2)) FROM `p.d.t`", "1"},
++		{"SELECT TO_JSON_STRING(s.n / 2) FROM `p.d.t`", "1.5"},
++	} {
++		var got sql.NullString
++		if err := db.QueryRowContext(ctx, tc.q).Scan(&got); err != nil {
++			t.Errorf("%s: %v", tc.q, err)
++			continue
++		}
++		if got.String != tc.want {
++			t.Errorf("%s = %s, want %s", tc.q, got.String, tc.want)
++		}
++	}
++}

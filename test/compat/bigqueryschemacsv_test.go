@@ -186,7 +186,9 @@ func TestBigQueryCSVLoadOtherOptions(t *testing.T) {
 		{"too_many_bad", "1\n2\n3,x\n", loadSchema, func(s *bigquery.ReaderSource) { s.MaxBadRecords = 1 }, http.StatusBadRequest, "invalid"},
 		{"required_empty", "1,\n", required, func(*bigquery.ReaderSource) {}, http.StatusBadRequest, "invalid"},
 		{"control", "1,a\x01b\n", loadSchema, func(*bigquery.ReaderSource) {}, http.StatusNotImplemented, "notImplemented"},
-		{"bad_value_max_bad", "x,y\n", loadSchema, func(s *bigquery.ReaderSource) { s.MaxBadRecords = 1 }, http.StatusNotImplemented, "notImplemented"},
+		// #1457: x is a bad record, left out; 1.5, which the front passes
+		// as a number, the emulator refuses as an INTEGER.
+		{"bad_value_max_bad", "x,y\n1.5,z\n", loadSchema, func(s *bigquery.ReaderSource) { s.MaxBadRecords = 1 }, http.StatusNotImplemented, "notImplemented"},
 	} {
 		err := load(c2.table, c2.data, c2.schema, c2.set)
 		if c2.reason == "invalid" {

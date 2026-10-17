@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -51,5 +52,43 @@ func TestJSONLoadUnknownFields(t *testing.T) {
 		`{"fields":[{"name":"i","type":"INTEGER"},{"name":"n","type":"STRING"}]}`, 1)
 	if w := upload(t, Wrap(emu), j, `{"i":1,"n":"x"}`+"\n"); w.Code != 200 {
 		t.Errorf("a field the load's schema adds: %d %s", w.Code, w.Body)
+	}
+}
+
+// TestJSONLoadBadValues (#1457): with maxBadRecords, a JSON record holding
+// a top-level value its column's type refuses is bad and left out, a
+// BOOL in the forms BigQuery documents is written as a JSON boolean, and
+// a REPEATED field's null element makes the record bad.
+func TestJSONLoadBadValues(t *testing.T) {
+	const schema = `{"fields":[{"name":"i","type":"INTEGER"},{"name":"b","type":"BOOLEAN"},{"name":"d","type":"DATE"},` +
+		`{"name":"s","type":"STRING","mode":"REPEATED"}]}`
+	job := `{"jobReference":{"projectId":"p","jobId":"j1"},"configuration":{"load":{"sourceFormat":"NEWLINE_DELIMITED_JSON",` +
+		`"destinationTable":{"datasetId":"ds","tableId":"t"},"schema":` + schema + `,"maxBadRecords":5}}}`
+	data := `{"i":1,"b":"yes","d":"2024-01-02","s":["a"]}` + "\n" +
+		`{"i":"x"}` + "\n" + `{"i":2,"b":"maybe"}` + "\n" + `{"i":3,"d":"2024-13-01"}` + "\n" +
+		`{"i":4,"s":["a",null]}` + "\n" + `{"i":5,"i2":1,"b":{"x":1}}` + "\n" + `{"i":6,"b":0}` + "\n"
+	emu := &valuesEmulator{}
+	w := upload(t, Wrap(emu), job, data)
+	if w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	want := `{"b":true,"d":"2024-01-02","i":1,"s":["a"]}` + "\n" + `{"b":false,"i":6}` + "\n"
+	if len(emu.data) != 1 || emu.data[0] != want {
+		t.Errorf("sent %q, want %q", emu.data, want)
+	}
+}
+
+// TestJSONColumnValues (#1457): a JSON column's value, of any JSON type,
+// is sent as its JSON text, in a RECORD and a REPEATED column too.
+func TestJSONColumnValues(t *testing.T) {
+	fields := []field{{Name: "j", Type: "JSON"}, {Name: "js", Type: "JSON", Mode: "REPEATED"},
+		{Name: "r", Type: "RECORD", Fields: []field{{Name: "j", Type: "JSON"}}}, {Name: "s", Type: "STRING"}}
+	obj := map[string]any{"j": "a b", "js": []any{map[string]any{"x": 1.0}, nil}, "r": map[string]any{"J": []any{"x"}}, "s": "t"}
+	if !jsonColumnValues(fields, obj) {
+		t.Fatal("nothing written")
+	}
+	got, _ := json.Marshal(obj)
+	if want := `{"j":"\"a b\"","js":["{\"x\":1}",null],"r":{"J":"[\"x\"]"},"s":"t"}`; string(got) != want {
+		t.Errorf("got %s, want %s", got, want)
 	}
 }

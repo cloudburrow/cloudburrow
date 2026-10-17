@@ -7,8 +7,11 @@
 //   - SetIamPolicy stores the bindings and returns them with a new etag. A
 //     request whose policy carries an etag that is not the stored one is
 //     ABORTED, as on Google, so read-modify-write loops behave.
-//   - IAM Conditions and audit configs are UNIMPLEMENTED, with the field
-//     named. They are never stored and ignored. A version 3 policy without
+//   - IAM Conditions are UNIMPLEMENTED, with the field named. They are never
+//     stored and ignored. Audit configs are UNIMPLEMENTED too, except through
+//     SetWithAuditConfigs, which the resources Google keeps them on (projects,
+//     folders and the organization, #1486) call: there they are stored, as
+//     update_mask says, and, as everything here, configure nothing. A version 3 policy without
 //     conditions is accepted, as Google accepts it: Terraform's google
 //     provider sets version 3 on every *_iam_member, conditions or not.
 //   - TestIamPermissions returns every requested permission: nothing is
@@ -28,8 +31,24 @@ import (
 
 // Stored is a policy as a service keeps it, beside its resource.
 type Stored struct {
-	Bindings []Binding `json:"bindings,omitempty"`
-	Etag     []byte    `json:"etag,omitempty"`
+	Bindings     []Binding     `json:"bindings,omitempty"`
+	AuditConfigs []AuditConfig `json:"auditConfigs,omitempty"`
+	Etag         []byte        `json:"etag,omitempty"`
+}
+
+// AuditConfig is a policy's audit logging configuration for one service
+// ("allServices" for every one). It is stored and returned; no audit log is
+// written or withheld because of it (#1486).
+type AuditConfig struct {
+	Service    string           `json:"service"`
+	LogConfigs []AuditLogConfig `json:"auditLogConfigs,omitempty"`
+}
+
+// AuditLogConfig is one log type of an AuditConfig, and the principals
+// exempted from it. LogType is the enum's name, such as "DATA_READ".
+type AuditLogConfig struct {
+	LogType         string   `json:"logType"`
+	ExemptedMembers []string `json:"exemptedMembers,omitempty"`
 }
 
 // Binding is one role and its members.
@@ -60,6 +79,16 @@ func (s *Stored) Proto() *iampb.Policy {
 	for _, b := range s.Bindings {
 		p.Bindings = append(p.Bindings, &iampb.Binding{Role: b.Role, Members: append([]string(nil), b.Members...)})
 	}
+	for _, a := range s.AuditConfigs {
+		ac := &iampb.AuditConfig{Service: a.Service}
+		for _, l := range a.LogConfigs {
+			ac.AuditLogConfigs = append(ac.AuditLogConfigs, &iampb.AuditLogConfig{
+				LogType:         iampb.AuditLogConfig_LogType(iampb.AuditLogConfig_LogType_value[l.LogType]),
+				ExemptedMembers: append([]string(nil), l.ExemptedMembers...),
+			})
+		}
+		p.AuditConfigs = append(p.AuditConfigs, ac)
+	}
 	return p
 }
 
@@ -77,18 +106,41 @@ func Get(current *Stored, opts *iampb.GetPolicyOptions) (*iampb.Policy, error) {
 
 // Set applies a SetIamPolicy request to the current policy and returns the
 // policy to store. The caller stores it only when this returns no error.
+// Audit configs are UNIMPLEMENTED, naming the field.
 func Set(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
+	return apply(current, req, false)
+}
+
+// SetWithAuditConfigs is Set for a resource whose policy carries audit
+// configs on Google: a project, a folder or an organization (#1486). As
+// iam_policy.proto documents update_mask, only the fields it names change,
+// and with no mask "bindings, etag" is used, so a set without a mask, or
+// whose mask does not name audit_configs, keeps the stored audit configs.
+// They are stored, never acted on: no audit log is written or withheld.
+func SetWithAuditConfigs(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
+	return apply(current, req, true)
+}
+
+func apply(current *Stored, req *iampb.SetIamPolicyRequest, audit bool) (Stored, error) {
+	masked := map[string]bool{}
 	for _, path := range req.GetUpdateMask().GetPaths() {
 		switch path {
 		// version is a Policy field too: gcloud kms ekm-config
 		// set-iam-policy and add-iam-policy-binding send
 		// "bindings,etag,version" (#1469).
 		case "bindings", "etag", "version":
+			masked[path] = true
 		case "audit_configs", "auditConfigs":
-			return Stored{}, apierror.Unimplemented("update_mask %q: audit configs are not supported", path)
+			if !audit {
+				return Stored{}, apierror.Unimplemented("update_mask %q: audit configs are not supported", path)
+			}
+			masked["audit_configs"] = true
 		default:
 			return Stored{}, apierror.InvalidArgument("update_mask path %q is not a Policy field", path)
 		}
+	}
+	if len(masked) == 0 {
+		masked["bindings"], masked["etag"] = true, true
 	}
 	p := req.GetPolicy()
 	if p == nil {
@@ -102,7 +154,7 @@ func Set(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
 	default:
 		return Stored{}, apierror.InvalidArgument("policy.version %d is not 1 or 3", p.GetVersion())
 	}
-	if len(p.GetAuditConfigs()) > 0 {
+	if !audit && len(p.GetAuditConfigs()) > 0 {
 		return Stored{}, apierror.Unimplemented("policy.audit_configs: audit configs are not supported")
 	}
 	var bindings []Binding
@@ -119,12 +171,52 @@ func Set(current *Stored, req *iampb.SetIamPolicyRequest) (Stored, error) {
 		}
 		bindings = append(bindings, Binding{Role: b.GetRole(), Members: append([]string(nil), b.GetMembers()...)})
 	}
+	audits, err := auditConfigs(p.GetAuditConfigs())
+	if err != nil {
+		return Stored{}, err
+	}
 	if e := p.GetEtag(); len(e) > 0 && !bytes.Equal(e, current.etag()) {
 		return Stored{}, apierror.Aborted("the policy's etag does not match the current policy; read it again and retry")
 	}
-	etag := make([]byte, 8)
-	_, _ = rand.Read(etag)
-	return Stored{Bindings: bindings, Etag: etag}, nil
+	next := Stored{Bindings: bindings}
+	if audit {
+		// Without "bindings" in the mask the stored bindings stay; without
+		// "audit_configs", the stored audit configs.
+		if !masked["bindings"] && current != nil {
+			next.Bindings = current.Bindings
+		}
+		if masked["audit_configs"] {
+			next.AuditConfigs = audits
+		} else if current != nil {
+			next.AuditConfigs = current.AuditConfigs
+		}
+	}
+	next.Etag = make([]byte, 8)
+	_, _ = rand.Read(next.Etag)
+	return next, nil
+}
+
+// auditConfigs validates a policy's audit configs and returns them to store.
+func auditConfigs(in []*iampb.AuditConfig) ([]AuditConfig, error) {
+	var out []AuditConfig
+	for i, a := range in {
+		if a.GetService() == "" {
+			return nil, apierror.InvalidArgument("policy.audit_configs[%d].service is required: a service name, or allServices", i)
+		}
+		ac := AuditConfig{Service: a.GetService()}
+		for j, l := range a.GetAuditLogConfigs() {
+			if l.GetLogType() == iampb.AuditLogConfig_LOG_TYPE_UNSPECIFIED {
+				return nil, apierror.InvalidArgument("policy.audit_configs[%d].audit_log_configs[%d].log_type is required: ADMIN_READ, DATA_WRITE or DATA_READ", i, j)
+			}
+			if _, ok := iampb.AuditLogConfig_LogType_name[int32(l.GetLogType())]; !ok {
+				return nil, apierror.InvalidArgument("policy.audit_configs[%d].audit_log_configs[%d].log_type %d is not ADMIN_READ, DATA_WRITE or DATA_READ", i, j, l.GetLogType())
+			}
+			ac.LogConfigs = append(ac.LogConfigs, AuditLogConfig{LogType: l.GetLogType().String(),
+				ExemptedMembers: append([]string(nil), l.GetExemptedMembers()...)})
+		}
+		out = append(out, ac)
+	}
+	return out, nil
 }
 
 // Permissions answers TestIamPermissions: every requested permission, since
