@@ -44,7 +44,7 @@ func (g gaxServer) TestIamPermissions(ctx context.Context, r *iampb.TestIamPermi
 // --- Spanner: an instance's page and a database's ----------------------
 
 func (spannerProvider) PolicyOn(_ context.Context, path []string) *console.PolicyTarget {
-	if (len(path) != 1 && len(path) != 2) || isSpannerPartitionPath(path) {
+	if (len(path) != 1 && len(path) != 2) || isSpannerChildPath(path) {
 		return nil
 	}
 	return &console.PolicyTarget{Link: compatibilityDoc + "optional-services",

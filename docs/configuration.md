@@ -842,7 +842,9 @@ events.
 
 **What a reset clears.** Cloud Tasks queues and tasks; every Cloud Storage bucket and object,
 and the notification configurations on them; Pub/Sub subscriptions, snapshots, topics and schemas (#889); and
-Secret Manager secrets with all their versions. Each is cleared through the service's own API,
+Secret Manager secrets with all their versions; and what the Spanner, Bigtable and Firestore
+fronts keep, their backups, schedules, views and the rest, with Bigtable's instances and their
+tables (#1514). Each is cleared through the service's own API or front,
 so a reset is only what a client could have done one call at a time. Two services are
 deliberately left out:
 

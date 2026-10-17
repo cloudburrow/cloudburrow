@@ -14,9 +14,15 @@
 // passes to the emulator and drops them.
 //
 // What an emulator instance cannot carry is refused UNIMPLEMENTED, naming
-// why: autoscaling (the emulator does not scale), a move to another
-// configuration (MoveInstance), the edition and the default backup schedule
-// type (the emulator has no editions and takes no backups).
+// why: autoscaling (the emulator does not scale), the edition and the
+// default backup schedule type (the emulator has no editions). A move to
+// another configuration is MoveInstance (configs.go).
+//
+// Since #1498 the front also serves what the emulator does not keep:
+// backups and restores (backups.go), backup schedules (schedules.go),
+// Google's and custom instance configurations and partition updates
+// (configs.go), database roles and the operation listings (roles.go), over
+// gRPC and REST (restroutes.go).
 package spannerfront
 
 import (
@@ -33,6 +39,7 @@ import (
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	"cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	"cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
+	"cloud.google.com/go/spanner/apiv1/spannerpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -42,13 +49,17 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/cloudburrow/cloudburrow/internal/frontstate"
 	"github.com/cloudburrow/cloudburrow/internal/iampolicy"
 )
 
 const instanceService = "/google.spanner.admin.instance.v1.InstanceAdmin/"
 
 // claimed are the InstanceAdmin methods the front answers.
-var claimed = map[string]bool{"GetInstance": true, "ListInstances": true, "UpdateInstance": true, "DeleteInstance": true}
+var claimed = map[string]bool{"GetInstance": true, "ListInstances": true, "UpdateInstance": true, "DeleteInstance": true,
+	"GetInstanceConfig": true, "ListInstanceConfigs": true, "CreateInstanceConfig": true, "UpdateInstanceConfig": true,
+	"DeleteInstanceConfig": true, "ListInstanceConfigOperations": true, "MoveInstance": true,
+	"GetInstancePartition": true, "ListInstancePartitions": true, "UpdateInstancePartition": true, "DeleteInstancePartition": true}
 
 var instanceNameRe = regexp.MustCompile(`^projects/[^/]+/instances/[^/]+$`)
 
@@ -60,6 +71,7 @@ type Instances struct {
 	emu    instancepb.InstanceAdminClient
 	emuDB  databasepb.DatabaseAdminClient
 	emuOps longrunningpb.OperationsClient
+	data   spannerpb.SpannerClient
 	grpc   *grpc.Server
 	now    func() time.Time
 
@@ -75,6 +87,25 @@ type Instances struct {
 	protected map[string]bool
 	// policies are the IAM policies of instances and databases (iam.go).
 	policies map[string]*iampolicy.Stored
+	// backups are the backups taken (backups.go), by name; restored the
+	// restore information of the databases restored from them.
+	backups  map[string]*backup
+	restored map[string]*databasepb.RestoreInfo
+	// schedules are the backup schedules (schedules.go), by name.
+	schedules map[string]*schedule
+	// roleStmts are each database's role statements (roles.go).
+	roleStmts map[string][]string
+	// emuOpNames are the emulator's database operations, for listing.
+	emuOpNames []string
+	// configs are the custom instance configurations (configs.go), and
+	// partitions the changes UpdateInstancePartition made.
+	configs    map[string]*instancepb.InstanceConfig
+	partitions map[string]*partitionChange
+
+	// state is the front's state directory (state.go, #1514); nil keeps
+	// the state in memory alone.
+	state *frontstate.Store
+	logf  func(string, ...any)
 }
 
 type change struct {
@@ -90,12 +121,15 @@ func New(emulator string) (*Instances, error) {
 		return nil, err
 	}
 	s := &Instances{emu: instancepb.NewInstanceAdminClient(conn), emuDB: databasepb.NewDatabaseAdminClient(conn),
-		emuOps: longrunningpb.NewOperationsClient(conn), now: func() time.Time { return time.Now().UTC() },
-		changes: map[string]*change{}, ops: map[string]*longrunningpb.Operation{}, protected: map[string]bool{}, policies: map[string]*iampolicy.Stored{}}
-	s.grpc = grpc.NewServer()
+		emuOps: longrunningpb.NewOperationsClient(conn), data: spannerpb.NewSpannerClient(conn), now: func() time.Time { return time.Now().UTC() },
+		changes: map[string]*change{}, ops: map[string]*longrunningpb.Operation{}, protected: map[string]bool{}, policies: map[string]*iampolicy.Stored{},
+		backups: map[string]*backup{}, restored: map[string]*databasepb.RestoreInfo{}, schedules: map[string]*schedule{},
+		roleStmts: map[string][]string{}, configs: map[string]*instancepb.InstanceConfig{}, partitions: map[string]*partitionChange{}}
+	s.grpc = grpc.NewServer(grpc.ChainUnaryInterceptor(s.persistAfter))
 	instancepb.RegisterInstanceAdminServer(s.grpc, s)
 	databasepb.RegisterDatabaseAdminServer(s.grpc, databases{s: s})
 	longrunningpb.RegisterOperationsServer(s.grpc, s)
+	go s.scheduleLoop()
 	return s, nil
 }
 
@@ -123,6 +157,9 @@ func (s *Instances) ownOperation(name string) bool {
 
 // Claims reports whether r is one of the instance calls the front answers.
 func (s *Instances) Claims(r *http.Request) bool {
+	if r.URL.Path == frontstate.ResetPath {
+		return true
+	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		if r.URL.Path == getOperation {
 			return true
@@ -136,6 +173,9 @@ func (s *Instances) Claims(r *http.Request) bool {
 	if r.Method == http.MethodGet && s.ownOperation(strings.TrimPrefix(r.URL.Path, "/v1/")) {
 		return true
 	}
+	if rt, _ := matchRoute(r); rt != nil {
+		return true
+	}
 	if r.Method == http.MethodPost && restIAM.MatchString(r.URL.Path) {
 		return true
 	}
@@ -145,12 +185,23 @@ func (s *Instances) Claims(r *http.Request) bool {
 
 // ServeHTTP answers a call Claims claimed.
 func (s *Instances) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == frontstate.ResetPath {
+		frontstate.ServeReset(w, r, s.ResetState)
+		return
+	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
 		s.grpc.ServeHTTP(w, r)
 		return
 	}
+	// The state is written as the call returns (state.go); a gRPC call's
+	// before it is answered, by the server's interceptor.
+	defer s.persist()
 	if r.Method == http.MethodPost && restIAM.MatchString(r.URL.Path) {
 		s.serveRESTIAM(w, r)
+		return
+	}
+	if rt, m := matchRoute(r); rt != nil {
+		s.serveRoute(w, r, rt, m)
 		return
 	}
 	s.serveREST(w, r)
@@ -175,6 +226,9 @@ func apply(dst, src *instancepb.Instance, paths map[string]bool) {
 	}
 	if paths["labels"] {
 		dst.Labels = src.Labels
+	}
+	if paths["config"] {
+		dst.Config = src.Config
 	}
 }
 
@@ -214,18 +268,36 @@ func (s *Instances) DeleteInstance(ctx context.Context, req *instancepb.DeleteIn
 		return nil, err
 	}
 	s.dropPolicies(req.GetName())
+	s.dropRoles(req.GetName())
+	s.dropSchedules(req.GetName())
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.changes, req.GetName())
+	// Google deletes an instance's backups with it.
+	for name := range s.backups {
+		if strings.HasPrefix(name, req.GetName()+"/") {
+			delete(s.backups, name)
+		}
+	}
+	for name := range s.restored {
+		if strings.HasPrefix(name, req.GetName()+"/") {
+			delete(s.restored, name)
+		}
+	}
+	for name := range s.partitions {
+		if strings.HasPrefix(name, req.GetName()+"/") {
+			delete(s.partitions, name)
+		}
+	}
 	return resp, nil
 }
 
 // refused are the update paths an emulator instance cannot carry.
 var refused = map[string]string{
-	"config":                       "a move to another instance configuration is MoveInstance, which the emulator does not serve",
+	"config":                       "a move to another instance configuration is MoveInstance",
 	"autoscaling_config":           "the emulator does not autoscale: set node_count or processing_units",
 	"edition":                      "the emulator has no editions",
-	"default_backup_schedule_type": "the emulator takes no backups",
+	"default_backup_schedule_type": "new databases get no default backup schedule here: create one with CreateBackupSchedule",
 	"instance_type":                "an instance's type cannot change",
 }
 

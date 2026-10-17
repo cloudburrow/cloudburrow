@@ -22,7 +22,7 @@ import (
 // emulators shard. On a database's page, Create backup schedule, weekly on
 // Friday with 14 days' retention, makes the schedule the official admin
 // client's ListBackupSchedules returns; the Backup schedules tab lists it,
-// with its note that the emulator takes no backups. Edit retention on its
+// with its note on the backups it takes. Edit retention on its
 // row, to 21 days, is read back by GetBackupSchedule, and Delete backup
 // schedule, confirmed by its ID, removes it.
 func TestFirestoreBackupSchedulesTabThroughTheBrowser(t *testing.T) {
@@ -71,8 +71,8 @@ func TestFirestoreBackupSchedulesTabThroughTheBrowser(t *testing.T) {
 	p.waitFor(`[...document.querySelectorAll("#view tbody tr")].some((r) => r.offsetParent && r.textContent.includes("Weekly"))`)
 	var tab string
 	p.eval(`[...document.querySelectorAll("#view [role=tabpanel]")].filter((e) => !e.hidden).map((e) => e.textContent).join(" ")`, &tab)
-	if !strings.Contains(tab, id) || !strings.Contains(tab, "336h0m0s") || !strings.Contains(tab, "take no backups") {
-		t.Errorf("the Backup schedules tab reads %q; want schedule %s, 336h retention and the note that no backups are taken", tab, id)
+	if !strings.Contains(tab, id) || !strings.Contains(tab, "336h0m0s") || !strings.Contains(tab, "first backup") {
+		t.Errorf("the Backup schedules tab reads %q; want schedule %s, 336h retention and the note on the backups it takes", tab, id)
 	}
 
 	// Edit retention on the row.

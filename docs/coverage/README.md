@@ -29,10 +29,10 @@ Do not edit these files by hand.
 | [Cloud Storage (JSON API)](storage.md) | 87 | 78 | 0 | 9 | 0 | 0 | 0 | 22 |
 | [Cloud Storage (gRPC API v2)](storagegrpc.md) | 24 | 23 | 0 | 0 | 1 | 0 | 0 | 0 |
 | [Firestore](firestore.md) | 17 | 16 | 1 | 0 | 0 | 0 | 0 | 0 |
-| [Firestore Admin API](firestoreadmin.md) | 32 | 17 | 0 | 15 | 0 | 0 | 0 | 0 |
+| [Firestore Admin API](firestoreadmin.md) | 32 | 25 | 0 | 7 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Bigtable](bigtable.md) | 84 | 39 | 45 | 0 | 0 | 0 | 0 | 0 |
-| [Spanner](spanner.md) | 65 | 41 | 24 | 0 | 0 | 0 | 0 | 0 |
+| [Bigtable](bigtable.md) | 84 | 78 | 6 | 0 | 0 | 0 | 0 | 0 |
+| [Spanner](spanner.md) | 65 | 62 | 3 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 56 | 0 | 24 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |

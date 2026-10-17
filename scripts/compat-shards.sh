@@ -165,7 +165,8 @@ compat_shard() {
       # logging for the sinks that deliver to Cloud Storage, Pub/Sub and
       # BigQuery (#1404), as SINK_LOGGING, SINK_STORAGE and SINK_PUBSUB, so
       # those suites stay in their shards; the copies to a Cloud Storage
-      # bucket (#1394) run here under the same names.
+      # bucket (#1394) run here under the same names. Cloud Storage again as
+      # FIRESTORE_STORAGE, for Firestore's exports and imports (#1500).
       # Spanner with its REST API for Terraform (#1331), Datastore (#307),
       # Firestore and Bigtable (#346), Memorystore
       # (#296), and BigQuery with the one
@@ -178,7 +179,7 @@ compat_shard() {
       # Resource Manager as BIGQUERY_RESOURCEMANAGER (#1392): only
       # BigQuery's JOBS_BY_FOLDER test reads it, to move the project into a
       # folder, so the Resource Manager tests stay in storage.
-      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB
+      TEST_VARS+=,SPANNER,SPANNER_REST,DATASTORE,FIRESTORE,BIGTABLE,MEMORYSTORE,MEMORYSTORE_ADMIN,MEMORYSTORE_PROJECT,BIGQUERY,BIGQUERY_STORAGE,BIGQUERY_PROJECT,BIGQUERY_RESOURCEMANAGER,SINK_LOGGING,SINK_STORAGE,SINK_PUBSUB,FIRESTORE_STORAGE
       # A created Memorystore instance follows the mode too (#1302), with RDB
       # persistence as well (#1384).
       PROBE_TESTS="TestMemorystoreAcrossRestart TestMemorystoreCreatedAcrossRestart TestMemorystoreRDBAcrossRestart TestDatastoreAcrossRestart"

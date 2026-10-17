@@ -6362,31 +6362,31 @@
     "Key": "firestoreadmin",
     "Title": "Firestore Admin API",
     "counts": {
-      "Unimplemented": 15,
-      "Verified": 17
+      "Unimplemented": 7,
+      "Verified": 25
     },
     "rows": [
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/BulkDeleteDocuments",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/CloneDatabase",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/firestoreadmin_test.go:332 TestFirestoreAdminBackupSchedules",
           "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
         ]
       },
@@ -6408,23 +6408,23 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/CreateUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteBackup",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/firestoreadmin_test.go:332 TestFirestoreAdminBackupSchedules",
           "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
         ]
       },
@@ -6446,7 +6446,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/DeleteUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6454,7 +6454,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/DisableUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6462,31 +6462,33 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/EnableUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ExportDocuments",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackup",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules"
+          "test/compat/firestoreadmin_test.go:332 TestFirestoreAdminBackupSchedules",
+          "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
+          "test/compat/frontstate1514_test.go:415 TestResetClearsTheFrontsState"
         ]
       },
       {
@@ -6494,7 +6496,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolefirestoreadmin_test.go:89 TestConsoleFirestoreDatabaseEditsIndexesAndFieldOverrides",
-          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases"
+          "test/compat/firestoreadmin_test.go:47 TestFirestoreAdminDatabases",
+          "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
         ]
       },
       {
@@ -6509,40 +6512,42 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetIndex",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes"
+          "test/compat/firestoreadmin_test.go:145 TestFirestoreAdminIndexes",
+          "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/GetUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ImportDocuments",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:94 TestFirestoreExportImport",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackupSchedules",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/firestoreadmin_test.go:332 TestFirestoreAdminBackupSchedules",
           "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
         ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListBackups",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
+          "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListDatabases",
@@ -6571,7 +6576,7 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ListUserCreds",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
@@ -6579,23 +6584,24 @@
         "method": "google.firestore.admin.v1.FirestoreAdmin/ResetUserPassword",
         "status": "Unimplemented",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
+          "test/compat/firestoreadmin_test.go:283 TestFirestoreAdminRefusals"
         ],
         "note": "returns UNIMPLEMENTED (in-process check)"
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/RestoreDatabase",
-        "status": "Unimplemented",
+        "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:284 TestFirestoreAdminRefusals"
-        ],
-        "note": "returns UNIMPLEMENTED (in-process check)"
+          "test/compat/firestoretransfer_test.go:194 TestFirestoreBackupRestoreClone",
+          "test/compat/frontstate1514_test.go:310 TestFirestoreFrontRestartKeepsItsState",
+          "test/compat/gcloudfirestoretransfer_test.go:24 TestGcloudFirestoreTransfer"
+        ]
       },
       {
         "method": "google.firestore.admin.v1.FirestoreAdmin/UpdateBackupSchedule",
         "status": "Verified",
         "tests": [
-          "test/compat/firestoreadmin_test.go:366 TestFirestoreAdminBackupSchedules",
+          "test/compat/firestoreadmin_test.go:332 TestFirestoreAdminBackupSchedules",
           "test/compat/gcloudspannerfirestore_test.go:79 TestGcloudFirestoreBackupSchedules"
         ]
       },
@@ -6680,6 +6686,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledocs_test.go:289 TestConsoleDatastoreEntityCreateEditDelete",
+          "test/compat/datastoregql_test.go:84 TestDatastoreExplain",
           "test/compat/optional_test.go:105 TestDatastoreQueriesSeeAFreshWrite",
           "test/compat/optional_test.go:130 TestDatastoreEntityCRUD"
         ]
@@ -6690,8 +6697,8 @@
     "Key": "bigtable",
     "Title": "Bigtable",
     "counts": {
-      "Refused": 45,
-      "Verified": 39
+      "Refused": 6,
+      "Verified": 78
     },
     "rows": [
       {
@@ -6719,19 +6726,21 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateLogicalView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews",
+          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
+          "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/CreateMaterializedView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews",
+          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage",
+          "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteAppProfile",
@@ -6758,19 +6767,19 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteLogicalView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews",
+          "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/DeleteMaterializedView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews",
+          "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetAppProfile",
@@ -6803,32 +6812,34 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtableinstances_test.go:44 TestBigtableInstancesAndClusters",
-          "test/compat/consolebigtableinstances_test.go:74 TestConsoleBigtableInstanceAdmin"
+          "test/compat/consolebigtableinstances_test.go:74 TestConsoleBigtableInstanceAdmin",
+          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState",
+          "test/compat/frontstate1514_test.go:415 TestResetClearsTheFrontsState"
         ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetLogicalView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews",
+          "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews",
+          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetMaterializedView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews",
+          "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/GetMemoryLayer",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:340 TestBigtableMemoryLayersAndHotTablets"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListAppProfiles",
@@ -6848,11 +6859,10 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListHotTablets",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:340 TestBigtableMemoryLayersAndHotTablets"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListInstances",
@@ -6863,27 +6873,24 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListLogicalViews",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListMaterializedViews",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/ListMemoryLayers",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:340 TestBigtableMemoryLayersAndHotTablets"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/PartialUpdateCluster",
@@ -6939,66 +6946,61 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateLogicalView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateMaterializedView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:260 TestBigtableLogicalAndMaterializedViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableInstanceAdmin/UpdateMemoryLayer",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtableinstances_test.go:258 TestBigtableInstanceAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtableinstances_test.go:340 TestBigtableMemoryLayersAndHotTablets"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CheckConsistency",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:153 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:155 TestBigtableTableMaintenance"
         ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CopyBackup",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:32 TestBigtableBackups"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateAuthorizedView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:228 TestBigtableRefusedAdminMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:156 TestBigtableAuthorizedViews",
+          "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateBackup",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
+          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateSchemaBundle",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:241 TestBigtableSchemaBundles"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateTable",
@@ -7009,49 +7011,46 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/CreateTableFromSnapshot",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:228 TestBigtableRefusedAdminMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:115 TestBigtableSnapshots"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteAuthorizedView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:228 TestBigtableRefusedAdminMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:156 TestBigtableAuthorizedViews",
+          "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteBackup",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
+          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteSchemaBundle",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:241 TestBigtableSchemaBundles"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteSnapshot",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:228 TestBigtableRefusedAdminMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:115 TestBigtableSnapshots"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DeleteTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:153 TestBigtableTableMaintenance",
+          "test/compat/bigtablemethods_test.go:155 TestBigtableTableMaintenance",
           "test/compat/storediam_test.go:219 TestBigtableTableIAM"
         ]
       },
@@ -7059,36 +7058,39 @@
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/DropRowRange",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:153 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:155 TestBigtableTableMaintenance"
         ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GenerateConsistencyToken",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:153 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:155 TestBigtableTableMaintenance"
         ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetAuthorizedView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:228 TestBigtableRefusedAdminMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:156 TestBigtableAuthorizedViews",
+          "test/compat/bigtableviewstools_test.go:29 TestTerraformBigtableViews",
+          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetBackup",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
+          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups",
+          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState",
           "test/compat/storediam_test.go:219 TestBigtableTableIAM",
           "test/compat/storediam_test.go:243 TestTerraformBigtableTableIAM",
           "test/compat/storediam_test.go:293 TestGcloudBigtableTableIAM",
@@ -7097,19 +7099,18 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetSchemaBundle",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:241 TestBigtableSchemaBundles"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetSnapshot",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:228 TestBigtableRefusedAdminMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:115 TestBigtableSnapshots",
+          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/GetTable",
@@ -7124,35 +7125,32 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListAuthorizedViews",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:228 TestBigtableRefusedAdminMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:156 TestBigtableAuthorizedViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListBackups",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
+          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListSchemaBundles",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:241 TestBigtableSchemaBundles"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListSnapshots",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:228 TestBigtableRefusedAdminMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:115 TestBigtableSnapshots"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/ListTables",
@@ -7172,11 +7170,12 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/RestoreTable",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:32 TestBigtableBackups",
+          "test/compat/bigtableviewstools_test.go:114 TestGcloudBigtableBackups",
+          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/SetIamPolicy",
@@ -7190,11 +7189,10 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/SnapshotTable",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:228 TestBigtableRefusedAdminMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:115 TestBigtableSnapshots"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/TestIamPermissions",
@@ -7206,63 +7204,60 @@
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UndeleteTable",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablesql1511_test.go:241 TestBigtableUndeleteTable",
+          "test/compat/frontstate1514_test.go:185 TestBigtableFrontRestartKeepsItsState"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateAuthorizedView",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:228 TestBigtableRefusedAdminMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:156 TestBigtableAuthorizedViews"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateBackup",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:32 TestBigtableBackups"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateSchemaBundle",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:241 TestBigtableSchemaBundles"
+        ]
       },
       {
         "method": "google.bigtable.admin.v2.BigtableTableAdmin/UpdateTable",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:153 TestBigtableTableMaintenance"
+          "test/compat/bigtablemethods_test.go:155 TestBigtableTableMaintenance"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/CheckAndMutateRow",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:77 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:79 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/ExecuteQuery",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:273 TestBigtableRefusedDataMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
+          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage"
+        ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/GenerateInitialChangeStreamPartitions",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
+          "test/compat/bigtablemethods_test.go:280 TestBigtableCrashingMethodsAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7270,7 +7265,7 @@
         "method": "google.bigtable.v2.Bigtable/GetClientConfiguration",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:273 TestBigtableRefusedDataMethods"
+          "test/compat/bigtablemethods_test.go:231 TestBigtableRefusedDataMethods"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7285,14 +7280,14 @@
         "method": "google.bigtable.v2.Bigtable/MutateRows",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:77 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:79 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/OpenAuthorizedView",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:273 TestBigtableRefusedDataMethods"
+          "test/compat/bigtablemethods_test.go:231 TestBigtableRefusedDataMethods"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7300,7 +7295,7 @@
         "method": "google.bigtable.v2.Bigtable/OpenMaterializedView",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:273 TestBigtableRefusedDataMethods"
+          "test/compat/bigtablemethods_test.go:231 TestBigtableRefusedDataMethods"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7308,7 +7303,7 @@
         "method": "google.bigtable.v2.Bigtable/OpenTable",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:273 TestBigtableRefusedDataMethods"
+          "test/compat/bigtablemethods_test.go:231 TestBigtableRefusedDataMethods"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7316,22 +7311,22 @@
         "method": "google.bigtable.v2.Bigtable/PingAndWarm",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:213 TestBigtablePingAndWarm"
+          "test/compat/bigtablemethods_test.go:215 TestBigtablePingAndWarm"
         ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/PrepareQuery",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:273 TestBigtableRefusedDataMethods"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/bigtablebackups_test.go:288 TestBigtableSQL",
+          "test/compat/bigtablesql1511_test.go:29 TestBigtableSQLLanguage"
+        ]
       },
       {
         "method": "google.bigtable.v2.Bigtable/ReadChangeStream",
         "status": "Refused",
         "tests": [
-          "test/compat/bigtablemethods_test.go:334 TestBigtableCrashingMethodsAreRefused"
+          "test/compat/bigtablemethods_test.go:280 TestBigtableCrashingMethodsAreRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7339,7 +7334,7 @@
         "method": "google.bigtable.v2.Bigtable/ReadModifyWriteRow",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:77 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:79 TestBigtableBulkAndConditionalWrites"
         ]
       },
       {
@@ -7356,7 +7351,7 @@
         "method": "google.bigtable.v2.Bigtable/SampleRowKeys",
         "status": "Verified",
         "tests": [
-          "test/compat/bigtablemethods_test.go:77 TestBigtableBulkAndConditionalWrites"
+          "test/compat/bigtablemethods_test.go:79 TestBigtableBulkAndConditionalWrites"
         ]
       }
     ]
@@ -7365,41 +7360,40 @@
     "Key": "spanner",
     "Title": "Spanner",
     "counts": {
-      "Refused": 24,
-      "Verified": 41
+      "Refused": 3,
+      "Verified": 62
     },
     "rows": [
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:276 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackup",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateBackupSchedule",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CreateDatabase",
@@ -7412,19 +7406,19 @@
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackup",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackupSchedule",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DropDatabase",
@@ -7435,19 +7429,21 @@
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackup",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetBackupSchedule",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules",
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetDatabase",
@@ -7469,6 +7465,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/GetIamPolicy",
         "status": "Verified",
         "tests": [
+          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
           "test/compat/storediam_test.go:108 TestTerraformSpannerIAM",
           "test/compat/storediam_test.go:157 TestGcloudSpannerIAM",
           "test/compat/storediam_test.go:181 TestConsoleSpannerPermissions",
@@ -7479,49 +7476,46 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/InternalUpdateGraphOperation",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:276 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupOperations",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackupSchedules",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListBackups",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseOperations",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseRoles",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/spannerbackups_test.go:461 TestSpannerDatabaseRoles"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabases",
@@ -7532,11 +7526,12 @@
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/RestoreDatabase",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/SetIamPolicy",
@@ -7557,26 +7552,25 @@
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackup",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:67 TestSpannerBackupAndRestore",
+          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackupSchedule",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:246 TestSpannerBackupSchedules"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabase",
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:271 TestConsoleSpannerEditInstance",
-          "test/compat/spanneradmin_test.go:564 TestSpannerDatabaseDropProtection"
+          "test/compat/spanneradmin_test.go:391 TestSpannerDatabaseDropProtection"
         ]
       },
       {
@@ -7597,11 +7591,11 @@
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstanceConfig",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstancePartition",
@@ -7619,11 +7613,11 @@
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstanceConfig",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstancePartition",
@@ -7647,6 +7641,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consoledatabases_test.go:120 TestConsoleSpannerCreateAndDropDatabase",
+          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
           "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances"
         ]
       },
@@ -7655,7 +7650,12 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
-          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes"
+          "test/compat/frontstate1514_test.go:415 TestResetClearsTheFrontsState",
+          "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
+          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes",
+          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
+          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
+          "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
         ]
       },
       {
@@ -7668,18 +7668,19 @@
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigOperations",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigs",
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
-          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes"
+          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes",
+          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
+          "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
         ]
       },
       {
@@ -7707,11 +7708,10 @@
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/MoveInstance",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/SetIamPolicy",
@@ -7736,37 +7736,35 @@
         "tests": [
           "test/compat/consolespanneradmin_test.go:271 TestConsoleSpannerEditInstance",
           "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances",
-          "test/compat/spanneradmin_test.go:499 TestSpannerUpdateInstance"
+          "test/compat/spanneradmin_test.go:326 TestSpannerUpdateInstance"
         ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstanceConfig",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs"
+        ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstancePartition",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:300 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannerbackups_test.go:418 TestSpannerUpdateInstancePartition"
+        ]
       },
       {
         "method": "google.spanner.v1.Spanner/BatchCreateSessions",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+          "test/compat/spannerdata_test.go:80 TestSpannerSessionLifecycle"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/BatchWrite",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerdata_test.go:293 TestSpannerBatchWrite"
+          "test/compat/spannerdata_test.go:294 TestSpannerBatchWrite"
         ]
       },
       {
@@ -7800,21 +7798,21 @@
         "method": "google.spanner.v1.Spanner/DeleteSession",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+          "test/compat/spannerdata_test.go:80 TestSpannerSessionLifecycle"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/ExecuteBatchDml",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+          "test/compat/spannerdata_test.go:138 TestSpannerUnaryQueryDMLAndRollback"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/ExecuteSql",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+          "test/compat/spannerdata_test.go:138 TestSpannerUnaryQueryDMLAndRollback"
         ]
       },
       {
@@ -7828,7 +7826,7 @@
         "method": "google.spanner.v1.Spanner/FetchCacheUpdate",
         "status": "Refused",
         "tests": [
-          "test/compat/spannerdata_test.go:340 TestSpannerFetchCacheUpdateIsRefused"
+          "test/compat/spannerdata_test.go:342 TestSpannerFetchCacheUpdateIsRefused"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7836,42 +7834,42 @@
         "method": "google.spanner.v1.Spanner/GetSession",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+          "test/compat/spannerdata_test.go:80 TestSpannerSessionLifecycle"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/ListSessions",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerdata_test.go:79 TestSpannerSessionLifecycle"
+          "test/compat/spannerdata_test.go:80 TestSpannerSessionLifecycle"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/PartitionQuery",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerdata_test.go:216 TestSpannerPartitionedQueryAndRead"
+          "test/compat/spannerdata_test.go:217 TestSpannerPartitionedQueryAndRead"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/PartitionRead",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerdata_test.go:216 TestSpannerPartitionedQueryAndRead"
+          "test/compat/spannerdata_test.go:217 TestSpannerPartitionedQueryAndRead"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/Read",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+          "test/compat/spannerdata_test.go:138 TestSpannerUnaryQueryDMLAndRollback"
         ]
       },
       {
         "method": "google.spanner.v1.Spanner/Rollback",
         "status": "Verified",
         "tests": [
-          "test/compat/spannerdata_test.go:137 TestSpannerUnaryQueryDMLAndRollback"
+          "test/compat/spannerdata_test.go:138 TestSpannerUnaryQueryDMLAndRollback"
         ]
       },
       {

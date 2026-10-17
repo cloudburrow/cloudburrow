@@ -200,7 +200,6 @@ func TestAggregationRefusals(t *testing.T) {
 		"negative":  {aggReq(&dspb.Query{}, count("a", &neg)), codes.InvalidArgument},
 		"gql":       {&dspb.RunAggregationQueryRequest{QueryType: &dspb.RunAggregationQueryRequest_GqlQuery{GqlQuery: &dspb.GqlQuery{QueryString: "SELECT name FROM k"}}}, codes.InvalidArgument},
 		"gql count": {&dspb.RunAggregationQueryRequest{QueryType: &dspb.RunAggregationQueryRequest_GqlQuery{GqlQuery: &dspb.GqlQuery{QueryString: "SELECT COUNT(x) FROM k"}}}, codes.InvalidArgument},
-		"explain":   {&dspb.RunAggregationQueryRequest{ExplainOptions: &dspb.ExplainOptions{}, QueryType: &dspb.RunAggregationQueryRequest_GqlQuery{GqlQuery: &dspb.GqlQuery{QueryString: "SELECT COUNT(*) FROM k"}}}, codes.Unimplemented},
 	} {
 		if _, err := d.RunAggregationQuery(ctx, c.req); status.Code(err) != c.code {
 			t.Errorf("%s: err = %v, want %v", name, err, c.code)

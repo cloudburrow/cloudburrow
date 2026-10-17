@@ -84,6 +84,12 @@ func mountAdmin(control *lifecycle.ControlServer, rec *admin.Recorder, cfg confi
 		}})
 		api.RegisterSeeder(&pubsubSeeder{tunnel: f})
 	}
+	// What the Spanner, Bigtable and Firestore fronts keep (#1514).
+	for _, svc := range []config.Service{config.ServiceSpanner, config.ServiceBigtable, config.ServiceFirestore} {
+		if f := forwarderFor(d.forwarders, string(svc)); f != nil {
+			api.RegisterResetter(&frontStateResetter{name: string(svc), tunnel: f})
+		}
+	}
 	if f := forwarderFor(d.forwarders, string(config.ServiceCloudSQLMySQL)); f != nil {
 		api.RegisterResetter(&mysqlResetter{tunnel: f, creds: d.mysql})
 	}

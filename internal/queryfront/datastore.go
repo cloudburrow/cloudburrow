@@ -42,18 +42,26 @@ func NewDatastore(emulator string) *Datastore {
 	return d
 }
 
-// Claims reports whether r is a RunAggregationQuery call, over gRPC or REST.
+// Claims reports whether r is a RunAggregationQuery call, or a RunQuery
+// call with explain_options (explain.go), over gRPC or REST.
 func (d *Datastore) Claims(r *http.Request) bool {
 	if isGRPC(r) {
-		return r.URL.Path == datastoreAggregation
+		return r.URL.Path == datastoreAggregation || (r.URL.Path == datastoreRunQuery && asksExplain(r))
 	}
-	return r.Method == http.MethodPost && datastoreAggregationREST.MatchString(r.URL.Path)
+	if r.Method != http.MethodPost {
+		return false
+	}
+	return datastoreAggregationREST.MatchString(r.URL.Path) || (datastoreRunQueryREST.MatchString(r.URL.Path) && asksExplain(r))
 }
 
 // ServeHTTP answers a call Claims claimed.
 func (d *Datastore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if isGRPC(r) {
 		d.grpc.ServeHTTP(w, r)
+		return
+	}
+	if datastoreRunQueryREST.MatchString(r.URL.Path) {
+		d.serveRunQueryREST(w, r)
 		return
 	}
 	req := &pb.RunAggregationQueryRequest{}
@@ -235,7 +243,7 @@ func property(e *pb.Entity, name string) *pb.Value {
 
 func (d *Datastore) runAggregation(ctx context.Context, req *pb.RunAggregationQueryRequest) (*pb.RunAggregationQueryResponse, error) {
 	if req.GetExplainOptions() != nil {
-		return nil, status.Error(codes.Unimplemented, "explain_options are not served here: the Datastore emulator does not plan queries, so there are no query plan or execution statistics to return")
+		return d.explainAggregation(ctx, req)
 	}
 	if req.GetGqlQuery() != nil {
 		structured, err := d.fromGQL(ctx, req)

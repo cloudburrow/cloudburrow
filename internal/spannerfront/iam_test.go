@@ -63,8 +63,8 @@ func TestIAMPoliciesAreStoredOnInstancesAndDatabases(t *testing.T) {
 	if _, err := c.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/p/instances/nope"}); status.Code(err) != codes.NotFound {
 		t.Errorf("a missing instance = %v, want NotFound", err)
 	}
-	if _, err := db.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/p/instances/i/backups/b"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("a backup = %v, want Unimplemented", err)
+	if _, err := db.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/p/instances/i/backups/b"}); status.Code(err) != codes.NotFound {
+		t.Errorf("a missing backup = %v, want NotFound", err)
 	}
 	perms, err := db.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: dbName, Permissions: []string{"spanner.databases.read"}})
 	if err != nil || len(perms.GetPermissions()) != 1 {
