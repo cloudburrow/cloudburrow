@@ -4906,21 +4906,24 @@
         "method": "google.cloud.memorystore.v1.Memorystore/AddAuthToken",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/AddTokenAuthUser",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/BackupInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -4934,6 +4937,7 @@
           "test/compat/memorystorevalkey_test.go:303 TestMemorystoreValkeyRefusals",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance",
+          "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
           "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption"
         ]
       },
@@ -4941,14 +4945,15 @@
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteAuthToken",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteBackup",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -4965,14 +4970,14 @@
         "method": "google.cloud.memorystore.v1.Memorystore/DeleteTokenAuthUser",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ExportBackup",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -4984,21 +4989,22 @@
         "method": "google.cloud.memorystore.v1.Memorystore/GetAuthToken",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetBackup",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/GetBackupCollection",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -5027,28 +5033,30 @@
         "method": "google.cloud.memorystore.v1.Memorystore/GetTokenAuthUser",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListAuthTokens",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListBackupCollections",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
         "method": "google.cloud.memorystore.v1.Memorystore/ListBackups",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -5063,7 +5071,7 @@
         "method": "google.cloud.memorystore.v1.Memorystore/ListTokenAuthUsers",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclusterauth_test.go:294 TestMemorystoreValkeyTokenAuthBackups"
+          "test/compat/memorystoreclusterauth_test.go:293 TestMemorystoreValkeyTokenAuthBackups"
         ]
       },
       {
@@ -5104,6 +5112,7 @@
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/BackupCluster",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
           "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
         ]
       },
@@ -5123,6 +5132,7 @@
           "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
           "test/compat/memorystorecluster_test.go:232 TestMemorystoreRedisClusterRefusals",
           "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption",
+          "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
           "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
@@ -5145,6 +5155,7 @@
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/DeleteBackup",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
           "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
         ]
       },
@@ -5196,6 +5207,7 @@
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetBackup",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
           "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
         ]
       },
@@ -5259,6 +5271,7 @@
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListBackupCollections",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
           "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
         ]
       },
@@ -5266,6 +5279,7 @@
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/ListBackups",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystorebackups_test.go:29 TestGcloudMemorystoreTokenAuthBackups",
           "test/compat/memorystoreclusterauth_test.go:36 TestMemorystoreRedisClusterTokenAuthBackups"
         ]
       },

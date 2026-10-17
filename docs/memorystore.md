@@ -345,9 +345,24 @@ container, which `MIGRATE`s every key to the node that owns its slot, so a backu
 into any shard count. `automated_backup_config` is kept and returned, and its daily backup is
 taken at the start hour (UTC), kept for its `retention` (default 35 days).
 
+```sh
+gcloud redis clusters create-backup orders --region=us-central1 --backup-id=nightly --ttl=7d
+gcloud redis clusters backups list --backup-collection=COLLECTION --region=us-central1
+gcloud memorystore instances create cache --location=us-central1 --authorization-mode=token-auth ...
+gcloud memorystore instances create-token-auth-user cache --location=us-central1 --token-auth-user=app
+gcloud memorystore instances token-auth-users create-auth-token app --instance=cache --location=us-central1
+```
+
+Terraform's `automated_backup_config` works on both resources. The console's Create has **Token
+authentication**, **Restore from backup** and (a cluster's) **ACL policy**; a page has **Token
+auth** and **Backups** tabs and their actions (add and delete users and tokens, back up now,
+export and delete a backup; on a cluster, an **ACL policies** tab to create, update, delete and
+attach the location's policies). gcloud's Redis Cluster token auth commands are
+alpha and beta only, on `v1beta1`, which is not served; use the API or the console.
+
 Not served: cross-cluster replication (UNIMPLEMENTED: a Valkey cluster-mode replica replicates
 only a primary of its own cluster, `CLUSTER REPLICATE` taking a node its gossip knows, so one
-cluster cannot be another's secondary) and CMEK. After a restart of CloudBurrow a cluster is
+cluster cannot be another's secondary) and CMEK (#1557). After a restart of CloudBurrow a cluster is
 formed again, empty, with its users and policy.
 
 ## 9. Memorystore for Valkey (#1519)

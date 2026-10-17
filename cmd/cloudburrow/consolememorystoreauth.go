@@ -69,8 +69,17 @@ func memorystoreAuthActions(tokenAuth bool, cluster bool) []console.Action {
 			{Name: "bucket", Label: "Bucket", Type: "text", Required: true, Help: "A bucket of this instance's Cloud Storage: the files go under the backup ID."}}},
 		console.Action{ID: "delete-backup", Label: "Delete backup", Destructive: true, Confirm: "The backup's files are deleted.", Fields: []console.Field{backupID}})
 	if cluster {
-		out = append(out, console.Action{ID: "acl-policy", Label: "Set ACL policy", Fields: []console.Field{{Name: "policy", Label: "ACL policy", Type: "text",
-			Help: "projects/{project}/locations/{location}/aclPolicies/{policy}; empty detaches it."}}})
+		rules := console.Field{Name: "rules", Label: "Rules", Type: "map", Required: true,
+			Help: "One username=rule per line, the rule a Valkey ACL rule such as on >secret ~app:* +@read."}
+		policyID := console.Field{Name: "policyId", Label: "ACL policy ID", Type: "text", Required: true, Pattern: `^[a-z][a-z0-9\-]{2,61}[a-z0-9]$`}
+		out = append(out,
+			console.Action{ID: "acl-policy", Label: "Set ACL policy", Fields: []console.Field{{Name: "policy", Label: "ACL policy", Type: "text",
+				Help: "projects/{project}/locations/{location}/aclPolicies/{policy}; empty detaches it."}}},
+			console.Action{ID: "create-acl-policy", Label: "Create ACL policy", Fields: []console.Field{policyID, rules}},
+			console.Action{ID: "update-acl-policy", Label: "Update ACL policy", Confirm: "The rules are set on every node of every cluster the policy is attached to.",
+				Fields: []console.Field{policyID, rules}},
+			console.Action{ID: "delete-acl-policy", Label: "Delete ACL policy", Destructive: true, Confirm: "The policy is deleted; one attached to a cluster is refused.",
+				Fields: []console.Field{policyID}})
 	}
 	return out
 }
@@ -103,7 +112,40 @@ func (p redisClusterProvider) authSections(ctx context.Context, api *redisadmin.
 			}
 		}
 	}
-	return append(out, backupSection(rows))
+	out = append(out, backupSection(rows))
+	// The location's ACL policies, which the page's actions create, update,
+	// delete and attach.
+	loc := c.GetName()[:strings.Index(c.GetName(), "/clusters/")]
+	pl := console.Listing{Columns: []string{"Rules", "Attached to", "Revision"}, NameColumn: "ACL policy", Noun: "ACL policies",
+		Note: "Each rule is a Valkey ACL user on every node of each cluster the policy is attached to."}
+	if resp, err := api.ListAclPolicies(ctx, &clusterpb.ListAclPoliciesRequest{Parent: loc, PageSize: 1000}); err == nil {
+		for _, pol := range resp.GetAclPolicies() {
+			var rules, at []string
+			for _, r := range pol.GetRules() {
+				rules = append(rules, r.GetUsername()+": "+r.GetRule())
+			}
+			for _, a := range pol.GetClusterAclPolicyAttachments() {
+				at = append(at, memorystoreID(a.GetCluster()))
+			}
+			pl.Items = append(pl.Items, console.Resource{Name: pol.GetName()[strings.LastIndex(pol.GetName(), "/")+1:], Status: pol.GetState().String(),
+				Fields: map[string]string{"Rules": strings.Join(rules, "; "), "Attached to": orDash(strings.Join(at, ", ")), "Revision": pol.GetEtag()}})
+		}
+	}
+	pl.Total = len(pl.Items)
+	return append(out, console.Section{ID: "acl-policies", Label: "ACL policies", Listing: pl})
+}
+
+// aclRules reads the Rules field: username=rule per line.
+func aclRules(v string) ([]*clusterpb.AclRule, error) {
+	m, err := console.ParseMap(v)
+	if err != nil {
+		return nil, err
+	}
+	var out []*clusterpb.AclRule
+	for u, r := range m {
+		out = append(out, &clusterpb.AclRule{Username: u, Rule: r})
+	}
+	return out, nil
 }
 
 // DetailActions implements console.PathActor.
@@ -160,6 +202,26 @@ func (p redisClusterProvider) ActAt(ctx context.Context, project string, path []
 			Destination: &clusterpb.ExportBackupRequest_GcsBucket{GcsBucket: strings.TrimSpace(values["bucket"])}})
 	case "delete-backup":
 		op, err = api.DeleteBackup(ctx, &clusterpb.DeleteBackupRequest{Name: backup})
+	case "create-acl-policy", "update-acl-policy", "delete-acl-policy":
+		loc := name[:strings.Index(name, "/clusters/")]
+		pname := loc + "/aclPolicies/" + strings.TrimSpace(values["policyId"])
+		var rules []*clusterpb.AclRule
+		if action != "delete-acl-policy" {
+			if rules, err = aclRules(values["rules"]); err != nil {
+				return err
+			}
+		}
+		switch action {
+		case "create-acl-policy":
+			_, err = api.CreateAclPolicy(ctx, &clusterpb.CreateAclPolicyRequest{Parent: loc, AclPolicyId: strings.TrimSpace(values["policyId"]),
+				AclPolicy: &clusterpb.AclPolicy{Rules: rules}})
+			return err
+		case "update-acl-policy":
+			op, err = api.UpdateAclPolicy(ctx, &clusterpb.UpdateAclPolicyRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"rules"}},
+				AclPolicy: &clusterpb.AclPolicy{Name: pname, Rules: rules}})
+		default:
+			op, err = api.DeleteAclPolicy(ctx, &clusterpb.DeleteAclPolicyRequest{Name: pname})
+		}
 	case "acl-policy":
 		op, err = api.UpdateCluster(ctx, &clusterpb.UpdateClusterRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"acl_policy"}},
 			Cluster: &clusterpb.Cluster{Name: name, AclPolicy: strings.TrimSpace(values["policy"])}})

@@ -38,20 +38,19 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	c, project := redisClusterAdminClient(t, h)
 	sc := instanceStorage(t, h)
 	bh := bucket(t, h, sc)
-	ctx := h.Context()
 	parent := "projects/" + project + "/locations/us-central1"
 	sfx := time.Now().UnixNano() % 1e8
 
-	pol, err := c.CreateAclPolicy(ctx, &clusterpb.CreateAclPolicyRequest{Parent: parent, AclPolicyId: fmt.Sprintf("compat-acl-%d", sfx),
+	pol, err := c.CreateAclPolicy(h.Context(), &clusterpb.CreateAclPolicyRequest{Parent: parent, AclPolicyId: fmt.Sprintf("compat-acl-%d", sfx),
 		AclPolicy: &clusterpb.AclPolicy{Rules: []*clusterpb.AclRule{{Username: "reader", Rule: "on >readerpass ~app:* +@read +ping +cluster|slots +cluster|shards"}}}})
 	if err != nil {
 		t.Fatalf("CreateAclPolicy: %v", err)
 	}
-	if got, err := c.GetAclPolicy(ctx, &clusterpb.GetAclPolicyRequest{Name: pol.GetName()}); err != nil || len(got.GetRules()) != 1 {
+	if got, err := c.GetAclPolicy(h.Context(), &clusterpb.GetAclPolicyRequest{Name: pol.GetName()}); err != nil || len(got.GetRules()) != 1 {
 		t.Errorf("GetAclPolicy = %v, %v", got, err)
 	}
 	found := false
-	for it := c.ListAclPolicies(ctx, &clusterpb.ListAclPoliciesRequest{Parent: parent}); ; {
+	for it := c.ListAclPolicies(h.Context(), &clusterpb.ListAclPoliciesRequest{Parent: parent}); ; {
 		p, err := it.Next()
 		if errors.Is(err, iterator.Done) {
 			break
@@ -68,7 +67,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	create := func(id string, in *clusterpb.Cluster) *clusterpb.Cluster {
 		t.Helper()
 		name := parent + "/clusters/" + id
-		op, err := c.CreateCluster(ctx, &clusterpb.CreateClusterRequest{Parent: parent, ClusterId: id, Cluster: in})
+		op, err := c.CreateCluster(h.Context(), &clusterpb.CreateClusterRequest{Parent: parent, ClusterId: id, Cluster: in})
 		if err != nil {
 			t.Fatalf("CreateCluster %s: %v", id, err)
 		}
@@ -77,7 +76,7 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 				_ = op.Wait(h.Context())
 			}
 		})
-		cl, err := op.Wait(ctx)
+		cl, err := op.Wait(h.Context())
 		if err != nil {
 			t.Fatalf("CreateCluster %s operation: %v", id, err)
 		}
@@ -95,78 +94,78 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 
 	none := redis.NewClient(&redis.Options{Addr: addr, MaxRetries: -1})
 	defer none.Close()
-	if err := none.Set(ctx, "x", "1", 0).Err(); err == nil || !strings.Contains(err.Error(), "NOAUTH") {
+	if err := none.Set(h.Context(), "x", "1", 0).Err(); err == nil || !strings.Contains(err.Error(), "NOAUTH") {
 		t.Errorf("SET without a token = %v, want NOAUTH", err)
 	}
 
-	uop, err := c.AddTokenAuthUser(ctx, &clusterpb.AddTokenAuthUserRequest{Cluster: name, TokenAuthUser: "app"})
+	uop, err := c.AddTokenAuthUser(h.Context(), &clusterpb.AddTokenAuthUserRequest{Cluster: name, TokenAuthUser: "app"})
 	if err != nil {
 		t.Fatalf("AddTokenAuthUser: %v", err)
 	}
-	if _, err := uop.Wait(ctx); err != nil {
+	if _, err := uop.Wait(h.Context()); err != nil {
 		t.Fatalf("AddTokenAuthUser operation: %v", err)
 	}
 	user := name + "/tokenAuthUsers/app"
-	top, err := c.AddAuthToken(ctx, &clusterpb.AddAuthTokenRequest{TokenAuthUser: user, AuthToken: &clusterpb.AuthToken{}})
+	top, err := c.AddAuthToken(h.Context(), &clusterpb.AddAuthTokenRequest{TokenAuthUser: user, AuthToken: &clusterpb.AuthToken{}})
 	if err != nil {
 		t.Fatalf("AddAuthToken: %v", err)
 	}
-	if u, err := top.Wait(ctx); err != nil || u.GetName() != user {
+	if u, err := top.Wait(h.Context()); err != nil || u.GetName() != user {
 		t.Fatalf("AddAuthToken operation = %v, %v", u, err)
 	}
-	if u, err := c.GetTokenAuthUser(ctx, &clusterpb.GetTokenAuthUserRequest{Name: user}); err != nil || u.GetState() != clusterpb.TokenAuthUser_ACTIVE {
+	if u, err := c.GetTokenAuthUser(h.Context(), &clusterpb.GetTokenAuthUserRequest{Name: user}); err != nil || u.GetState() != clusterpb.TokenAuthUser_ACTIVE {
 		t.Errorf("GetTokenAuthUser = %v, %v", u, err)
 	}
-	if u, err := c.ListTokenAuthUsers(ctx, &clusterpb.ListTokenAuthUsersRequest{Parent: name}).Next(); err != nil || u.GetName() != user {
+	if u, err := c.ListTokenAuthUsers(h.Context(), &clusterpb.ListTokenAuthUsersRequest{Parent: name}).Next(); err != nil || u.GetName() != user {
 		t.Errorf("ListTokenAuthUsers = %v, %v", u, err)
 	}
-	tok, err := c.ListAuthTokens(ctx, &clusterpb.ListAuthTokensRequest{Parent: user}).Next()
+	tok, err := c.ListAuthTokens(h.Context(), &clusterpb.ListAuthTokensRequest{Parent: user}).Next()
 	if err != nil || tok.GetToken() == "" {
 		t.Fatalf("ListAuthTokens = %v, %v", tok, err)
 	}
-	if got, err := c.GetAuthToken(ctx, &clusterpb.GetAuthTokenRequest{Name: tok.GetName()}); err != nil || got.GetToken() != tok.GetToken() {
+	if got, err := c.GetAuthToken(h.Context(), &clusterpb.GetAuthTokenRequest{Name: tok.GetName()}); err != nil || got.GetToken() != tok.GetToken() {
 		t.Errorf("GetAuthToken = %v, %v", got, err)
 	}
 	wrong := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{addr}, Username: "app", Password: "not-the-token", MaxRetries: -1})
 	defer wrong.Close()
-	if err := wrong.Set(ctx, "x", "1", 0).Err(); err == nil || !strings.Contains(err.Error(), "WRONGPASS") {
+	if err := wrong.Set(h.Context(), "x", "1", 0).Err(); err == nil || !strings.Contains(err.Error(), "WRONGPASS") {
 		t.Errorf("SET with a wrong token = %v, want WRONGPASS", err)
 	}
 	rc := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{addr}, Username: "app", Password: tok.GetToken()})
 	defer rc.Close()
 	clusterKeys(t, h, rc, "tok", 30, true)
-	if err := rc.Set(ctx, "app:greeting", "hello", 0).Err(); err != nil {
+	if err := rc.Set(h.Context(), "app:greeting", "hello", 0).Err(); err != nil {
 		t.Fatalf("SET app:greeting: %v", err)
 	}
 
 	// The ACL policy's user: read app:* only, then, after an update, write too.
 	reader := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{addr}, Username: "reader", Password: "readerpass", MaxRetries: -1})
 	defer reader.Close()
-	if v, err := reader.Get(ctx, "app:greeting").Result(); err != nil || v != "hello" {
+	if v, err := reader.Get(h.Context(), "app:greeting").Result(); err != nil || v != "hello" {
 		t.Errorf("the policy's user GET app:greeting = %q, %v", v, err)
 	}
-	if err := reader.Set(ctx, "app:other", "x", 0).Err(); err == nil || !strings.Contains(err.Error(), "NOPERM") {
+	if err := reader.Set(h.Context(), "app:other", "x", 0).Err(); err == nil || !strings.Contains(err.Error(), "NOPERM") {
 		t.Errorf("the policy's user SET = %v, want NOPERM", err)
 	}
-	if err := reader.Get(ctx, "tok-1").Err(); err == nil || !strings.Contains(err.Error(), "NOPERM") {
+	if err := reader.Get(h.Context(), "tok-1").Err(); err == nil || !strings.Contains(err.Error(), "NOPERM") {
 		t.Errorf("the policy's user GET tok-1 = %v, want NOPERM", err)
 	}
-	pop, err := c.UpdateAclPolicy(ctx, &clusterpb.UpdateAclPolicyRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"rules"}},
+	pop, err := c.UpdateAclPolicy(h.Context(), &clusterpb.UpdateAclPolicyRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"rules"}},
 		AclPolicy: &clusterpb.AclPolicy{Name: pol.GetName(), Rules: []*clusterpb.AclRule{{Username: "reader", Rule: "on >readerpass ~app:* +@read +@write +ping +cluster|slots +cluster|shards"}}}})
 	if err != nil {
 		t.Fatalf("UpdateAclPolicy: %v", err)
 	}
-	if p, err := pop.Wait(ctx); err != nil || len(p.GetClusterAclPolicyAttachments()) != 1 {
+	if p, err := pop.Wait(h.Context()); err != nil || len(p.GetClusterAclPolicyAttachments()) != 1 {
 		t.Fatalf("UpdateAclPolicy operation = %v, %v", p, err)
 	}
-	if err := reader.Set(ctx, "app:other", "x", 0).Err(); err != nil {
+	if err := reader.Set(h.Context(), "app:other", "x", 0).Err(); err != nil {
 		t.Errorf("the policy's user SET after the update: %v", err)
 	}
-	if rev, err := c.GetAclPolicyRevision(ctx, &clusterpb.GetAclPolicyRevisionRequest{Name: pol.GetName() + "/revisions/2"}); err != nil || rev.GetRevisionNumber() != 2 {
+	if rev, err := c.GetAclPolicyRevision(h.Context(), &clusterpb.GetAclPolicyRevisionRequest{Name: pol.GetName() + "/revisions/2"}); err != nil || rev.GetRevisionNumber() != 2 {
 		t.Errorf("GetAclPolicyRevision = %v, %v", rev, err)
 	}
 	revs := 0
-	for it := c.ListAclPolicyRevisions(ctx, &clusterpb.ListAclPolicyRevisionsRequest{Parent: pol.GetName()}); ; revs++ {
+	for it := c.ListAclPolicyRevisions(h.Context(), &clusterpb.ListAclPolicyRevisionsRequest{Parent: pol.GetName()}); ; revs++ {
 		if _, err := it.Next(); errors.Is(err, iterator.Done) {
 			break
 		} else if err != nil {
@@ -176,42 +175,42 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	if revs != 2 {
 		t.Errorf("ListAclPolicyRevisions lists %d revisions, want 2", revs)
 	}
-	if _, err := c.DeleteAclPolicy(ctx, &clusterpb.DeleteAclPolicyRequest{Name: pol.GetName()}); status.Code(err) != codes.FailedPrecondition {
+	if _, err := c.DeleteAclPolicy(h.Context(), &clusterpb.DeleteAclPolicyRequest{Name: pol.GetName()}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("DeleteAclPolicy of an attached policy = %v, want FAILED_PRECONDITION", err)
 	}
 
 	// Backups.
-	bop, err := c.BackupCluster(ctx, &clusterpb.BackupClusterRequest{Name: name, BackupId: proto.String("first")})
+	bop, err := c.BackupCluster(h.Context(), &clusterpb.BackupClusterRequest{Name: name, BackupId: proto.String("first")})
 	if err != nil {
 		t.Fatalf("BackupCluster: %v", err)
 	}
-	if _, err := bop.Wait(ctx); err != nil {
+	if _, err := bop.Wait(h.Context()); err != nil {
 		t.Fatalf("BackupCluster operation: %v", err)
 	}
-	col, err := c.GetBackupCollection(ctx, &clusterpb.GetBackupCollectionRequest{Name: cl.GetBackupCollection()})
+	col, err := c.GetBackupCollection(h.Context(), &clusterpb.GetBackupCollectionRequest{Name: cl.GetBackupCollection()})
 	if err != nil || col.GetCluster() != name {
 		t.Fatalf("GetBackupCollection = %v, %v", col, err)
 	}
-	if got, err := c.ListBackupCollections(ctx, &clusterpb.ListBackupCollectionsRequest{Parent: parent}).Next(); err != nil || got.GetName() == "" {
+	if got, err := c.ListBackupCollections(h.Context(), &clusterpb.ListBackupCollectionsRequest{Parent: parent}).Next(); err != nil || got.GetName() == "" {
 		t.Errorf("ListBackupCollections = %v, %v", got, err)
 	}
 	bname := cl.GetBackupCollection() + "/backups/first"
-	b, err := c.GetBackup(ctx, &clusterpb.GetBackupRequest{Name: bname})
+	b, err := c.GetBackup(h.Context(), &clusterpb.GetBackupRequest{Name: bname})
 	if err != nil || b.GetState() != clusterpb.Backup_ACTIVE || len(b.GetBackupFiles()) != 2 || b.GetShardCount() != 2 {
 		t.Fatalf("GetBackup = %v, %v", b, err)
 	}
-	if got, err := c.ListBackups(ctx, &clusterpb.ListBackupsRequest{Parent: cl.GetBackupCollection()}).Next(); err != nil || got.GetName() != bname {
+	if got, err := c.ListBackups(h.Context(), &clusterpb.ListBackupsRequest{Parent: cl.GetBackupCollection()}).Next(); err != nil || got.GetName() != bname {
 		t.Errorf("ListBackups = %v, %v", got, err)
 	}
-	eop, err := c.ExportBackup(ctx, &clusterpb.ExportBackupRequest{Name: bname, Destination: &clusterpb.ExportBackupRequest_GcsBucket{GcsBucket: bh.BucketName()}})
+	eop, err := c.ExportBackup(h.Context(), &clusterpb.ExportBackupRequest{Name: bname, Destination: &clusterpb.ExportBackupRequest_GcsBucket{GcsBucket: bh.BucketName()}})
 	if err != nil {
 		t.Fatalf("ExportBackup: %v", err)
 	}
-	if _, err := eop.Wait(ctx); err != nil {
+	if _, err := eop.Wait(h.Context()); err != nil {
 		t.Fatalf("ExportBackup operation: %v", err)
 	}
 	for _, f := range b.GetBackupFiles() {
-		if _, err := bh.Object("first/" + f.GetFileName()).Attrs(ctx); err != nil {
+		if _, err := bh.Object("first/" + f.GetFileName()).Attrs(h.Context()); err != nil {
 			t.Errorf("exported %s: %v", f.GetFileName(), err)
 		}
 	}
@@ -226,58 +225,58 @@ func TestMemorystoreRedisClusterTokenAuthBackups(t *testing.T) {
 	rrc := redis.NewClusterClient(&redis.ClusterOptions{Addrs: []string{net.JoinHostPort(rep.GetAddress(), strconv.Itoa(int(rep.GetPort())))}})
 	defer rrc.Close()
 	clusterKeys(t, h, rrc, "tok", 30, false)
-	if v, err := rrc.Get(ctx, "app:greeting").Result(); err != nil || v != "hello" {
+	if v, err := rrc.Get(h.Context(), "app:greeting").Result(); err != nil || v != "hello" {
 		t.Errorf("restored app:greeting = %q, %v", v, err)
 	}
 
-	dop, err := c.DeleteAuthToken(ctx, &clusterpb.DeleteAuthTokenRequest{Name: tok.GetName()})
+	dop, err := c.DeleteAuthToken(h.Context(), &clusterpb.DeleteAuthTokenRequest{Name: tok.GetName()})
 	if err != nil {
 		t.Fatalf("DeleteAuthToken: %v", err)
 	}
-	if err := dop.Wait(ctx); err != nil {
+	if err := dop.Wait(h.Context()); err != nil {
 		t.Fatalf("DeleteAuthToken operation: %v", err)
 	}
 	gone := redis.NewClient(&redis.Options{Addr: addr, Username: "app", Password: tok.GetToken(), MaxRetries: -1})
 	defer gone.Close()
-	if err := gone.Ping(ctx).Err(); err == nil || !strings.Contains(err.Error(), "WRONGPASS") {
+	if err := gone.Ping(h.Context()).Err(); err == nil || !strings.Contains(err.Error(), "WRONGPASS") {
 		t.Errorf("PING with a deleted token = %v, want WRONGPASS", err)
 	}
-	duop, err := c.DeleteTokenAuthUser(ctx, &clusterpb.DeleteTokenAuthUserRequest{Name: user})
+	duop, err := c.DeleteTokenAuthUser(h.Context(), &clusterpb.DeleteTokenAuthUserRequest{Name: user})
 	if err != nil {
 		t.Fatalf("DeleteTokenAuthUser: %v", err)
 	}
-	if err := duop.Wait(ctx); err != nil {
+	if err := duop.Wait(h.Context()); err != nil {
 		t.Fatalf("DeleteTokenAuthUser operation: %v", err)
 	}
-	delop, err := c.DeleteBackup(ctx, &clusterpb.DeleteBackupRequest{Name: bname})
+	delop, err := c.DeleteBackup(h.Context(), &clusterpb.DeleteBackupRequest{Name: bname})
 	if err != nil {
 		t.Fatalf("DeleteBackup: %v", err)
 	}
-	if err := delop.Wait(ctx); err != nil {
+	if err := delop.Wait(h.Context()); err != nil {
 		t.Fatalf("DeleteBackup operation: %v", err)
 	}
-	if _, err := c.GetBackup(ctx, &clusterpb.GetBackupRequest{Name: bname}); status.Code(err) != codes.NotFound {
+	if _, err := c.GetBackup(h.Context(), &clusterpb.GetBackupRequest{Name: bname}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetBackup of a deleted backup = %v, want NOT_FOUND", err)
 	}
-	if _, err := c.UpdateCluster(ctx, &clusterpb.UpdateClusterRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"cross_cluster_replication_config"}},
+	if _, err := c.UpdateCluster(h.Context(), &clusterpb.UpdateClusterRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"cross_cluster_replication_config"}},
 		Cluster: &clusterpb.Cluster{Name: name}}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("UpdateCluster cross_cluster_replication_config = %v, want UNIMPLEMENTED", err)
 	}
 	// Detach the policy so it can be deleted.
-	upd, err := c.UpdateCluster(ctx, &clusterpb.UpdateClusterRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"acl_policy"}},
+	upd, err := c.UpdateCluster(h.Context(), &clusterpb.UpdateClusterRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"acl_policy"}},
 		Cluster: &clusterpb.Cluster{Name: name}})
 	if err != nil {
 		t.Fatalf("UpdateCluster acl_policy: %v", err)
 	}
-	if _, err := upd.Wait(ctx); err != nil {
+	if _, err := upd.Wait(h.Context()); err != nil {
 		t.Fatalf("UpdateCluster acl_policy operation: %v", err)
 	}
-	if err := reader.Ping(ctx).Err(); err == nil {
+	if err := reader.Ping(h.Context()).Err(); err == nil {
 		t.Error("the policy's user still logs in after the policy is detached")
 	}
-	if op, err := c.DeleteAclPolicy(ctx, &clusterpb.DeleteAclPolicyRequest{Name: pol.GetName()}); err != nil {
+	if op, err := c.DeleteAclPolicy(h.Context(), &clusterpb.DeleteAclPolicyRequest{Name: pol.GetName()}); err != nil {
 		t.Errorf("DeleteAclPolicy: %v", err)
-	} else if err := op.Wait(ctx); err != nil {
+	} else if err := op.Wait(h.Context()); err != nil {
 		t.Errorf("DeleteAclPolicy operation: %v", err)
 	}
 }
@@ -296,14 +295,13 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 	c, project := valkeyAdminClient(t, h)
 	sc := instanceStorage(t, h)
 	bh := bucket(t, h, sc)
-	ctx := h.Context()
 	parent := "projects/" + project + "/locations/us-central1"
 	net0 := []*memorystorepb.PscAutoConnection{{ProjectId: project, Network: "projects/" + project + "/global/networks/default"}}
 	sfx := time.Now().UnixNano() % 1e8
 	create := func(id string, in *memorystorepb.Instance) *memorystorepb.Instance {
 		t.Helper()
 		name := parent + "/instances/" + id
-		op, err := c.CreateInstance(ctx, &memorystorepb.CreateInstanceRequest{Parent: parent, InstanceId: id, Instance: in})
+		op, err := c.CreateInstance(h.Context(), &memorystorepb.CreateInstanceRequest{Parent: parent, InstanceId: id, Instance: in})
 		if err != nil {
 			t.Fatalf("CreateInstance %s: %v", id, err)
 		}
@@ -312,7 +310,7 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 				_ = op.Wait(h.Context())
 			}
 		})
-		inst, err := op.Wait(ctx)
+		inst, err := op.Wait(h.Context())
 		if err != nil {
 			t.Fatalf("CreateInstance %s operation: %v", id, err)
 		}
@@ -328,41 +326,41 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 	paddr := valkeyEndpoint(t, inst, memorystorepb.ConnectionType_CONNECTION_TYPE_PRIMARY)
 	none := redis.NewClient(&redis.Options{Addr: paddr, MaxRetries: -1})
 	defer none.Close()
-	if err := none.Set(ctx, "x", "1", 0).Err(); err == nil || !strings.Contains(err.Error(), "NOAUTH") {
+	if err := none.Set(h.Context(), "x", "1", 0).Err(); err == nil || !strings.Contains(err.Error(), "NOAUTH") {
 		t.Errorf("SET without a token = %v, want NOAUTH", err)
 	}
-	uop, err := c.AddTokenAuthUser(ctx, &memorystorepb.AddTokenAuthUserRequest{Instance: name, TokenAuthUser: "app"})
+	uop, err := c.AddTokenAuthUser(h.Context(), &memorystorepb.AddTokenAuthUserRequest{Instance: name, TokenAuthUser: "app"})
 	if err != nil {
 		t.Fatalf("AddTokenAuthUser: %v", err)
 	}
-	if _, err := uop.Wait(ctx); err != nil {
+	if _, err := uop.Wait(h.Context()); err != nil {
 		t.Fatalf("AddTokenAuthUser operation: %v", err)
 	}
 	user := name + "/tokenAuthUsers/app"
-	top, err := c.AddAuthToken(ctx, &memorystorepb.AddAuthTokenRequest{TokenAuthUser: user, AuthToken: &memorystorepb.AuthToken{}})
+	top, err := c.AddAuthToken(h.Context(), &memorystorepb.AddAuthTokenRequest{TokenAuthUser: user, AuthToken: &memorystorepb.AuthToken{}})
 	if err != nil {
 		t.Fatalf("AddAuthToken: %v", err)
 	}
-	if _, err := top.Wait(ctx); err != nil {
+	if _, err := top.Wait(h.Context()); err != nil {
 		t.Fatalf("AddAuthToken operation: %v", err)
 	}
-	if u, err := c.GetTokenAuthUser(ctx, &memorystorepb.GetTokenAuthUserRequest{Name: user}); err != nil || u.GetState() != memorystorepb.TokenAuthUser_ACTIVE {
+	if u, err := c.GetTokenAuthUser(h.Context(), &memorystorepb.GetTokenAuthUserRequest{Name: user}); err != nil || u.GetState() != memorystorepb.TokenAuthUser_ACTIVE {
 		t.Errorf("GetTokenAuthUser = %v, %v", u, err)
 	}
-	if u, err := c.ListTokenAuthUsers(ctx, &memorystorepb.ListTokenAuthUsersRequest{Parent: name}).Next(); err != nil || u.GetName() != user {
+	if u, err := c.ListTokenAuthUsers(h.Context(), &memorystorepb.ListTokenAuthUsersRequest{Parent: name}).Next(); err != nil || u.GetName() != user {
 		t.Errorf("ListTokenAuthUsers = %v, %v", u, err)
 	}
-	tok, err := c.ListAuthTokens(ctx, &memorystorepb.ListAuthTokensRequest{Parent: user}).Next()
+	tok, err := c.ListAuthTokens(h.Context(), &memorystorepb.ListAuthTokensRequest{Parent: user}).Next()
 	if err != nil || tok.GetToken() == "" {
 		t.Fatalf("ListAuthTokens = %v, %v", tok, err)
 	}
-	if got, err := c.GetAuthToken(ctx, &memorystorepb.GetAuthTokenRequest{Name: tok.GetName()}); err != nil || got.GetToken() != tok.GetToken() {
+	if got, err := c.GetAuthToken(h.Context(), &memorystorepb.GetAuthTokenRequest{Name: tok.GetName()}); err != nil || got.GetToken() != tok.GetToken() {
 		t.Errorf("GetAuthToken = %v, %v", got, err)
 	}
 	rc := redis.NewClient(&redis.Options{Addr: paddr, Username: "app", Password: tok.GetToken()})
 	defer rc.Close()
 	for i := 0; i < 20; i++ {
-		if err := rc.Set(ctx, fmt.Sprintf("vk-%d", i), strconv.Itoa(i), 0).Err(); err != nil {
+		if err := rc.Set(h.Context(), fmt.Sprintf("vk-%d", i), strconv.Itoa(i), 0).Err(); err != nil {
 			t.Fatalf("SET with the token: %v", err)
 		}
 	}
@@ -370,7 +368,7 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 	defer reader.Close()
 	var v string
 	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
-		if v, _ = reader.Get(ctx, "vk-3").Result(); v == "3" {
+		if v, _ = reader.Get(h.Context(), "vk-3").Result(); v == "3" {
 			break
 		}
 	}
@@ -378,33 +376,33 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 		t.Errorf("the reader, with the token, GET vk-3 = %q, want 3 (replicated with the service's own password)", v)
 	}
 
-	bop, err := c.BackupInstance(ctx, &memorystorepb.BackupInstanceRequest{Name: name, BackupId: proto.String("first")})
+	bop, err := c.BackupInstance(h.Context(), &memorystorepb.BackupInstanceRequest{Name: name, BackupId: proto.String("first")})
 	if err != nil {
 		t.Fatalf("BackupInstance: %v", err)
 	}
-	if _, err := bop.Wait(ctx); err != nil {
+	if _, err := bop.Wait(h.Context()); err != nil {
 		t.Fatalf("BackupInstance operation: %v", err)
 	}
-	if col, err := c.GetBackupCollection(ctx, &memorystorepb.GetBackupCollectionRequest{Name: inst.GetBackupCollection()}); err != nil ||
+	if col, err := c.GetBackupCollection(h.Context(), &memorystorepb.GetBackupCollectionRequest{Name: inst.GetBackupCollection()}); err != nil ||
 		col.GetInstance() != name || col.GetTotalBackupCount() != 1 {
 		t.Errorf("GetBackupCollection = %v, %v", col, err)
 	}
-	if got, err := c.ListBackupCollections(ctx, &memorystorepb.ListBackupCollectionsRequest{Parent: parent}).Next(); err != nil || got.GetName() == "" {
+	if got, err := c.ListBackupCollections(h.Context(), &memorystorepb.ListBackupCollectionsRequest{Parent: parent}).Next(); err != nil || got.GetName() == "" {
 		t.Errorf("ListBackupCollections = %v, %v", got, err)
 	}
 	bname := inst.GetBackupCollection() + "/backups/first"
-	b, err := c.GetBackup(ctx, &memorystorepb.GetBackupRequest{Name: bname})
+	b, err := c.GetBackup(h.Context(), &memorystorepb.GetBackupRequest{Name: bname})
 	if err != nil || len(b.GetBackupFiles()) != 1 || b.GetNodeType() != memorystorepb.Instance_SHARED_CORE_NANO {
 		t.Fatalf("GetBackup = %v, %v", b, err)
 	}
-	if got, err := c.ListBackups(ctx, &memorystorepb.ListBackupsRequest{Parent: inst.GetBackupCollection()}).Next(); err != nil || got.GetName() != bname {
+	if got, err := c.ListBackups(h.Context(), &memorystorepb.ListBackupsRequest{Parent: inst.GetBackupCollection()}).Next(); err != nil || got.GetName() != bname {
 		t.Errorf("ListBackups = %v, %v", got, err)
 	}
-	eop, err := c.ExportBackup(ctx, &memorystorepb.ExportBackupRequest{Name: bname, Destination: &memorystorepb.ExportBackupRequest_GcsBucket{GcsBucket: bh.BucketName()}})
+	eop, err := c.ExportBackup(h.Context(), &memorystorepb.ExportBackupRequest{Name: bname, Destination: &memorystorepb.ExportBackupRequest_GcsBucket{GcsBucket: bh.BucketName()}})
 	if err != nil {
 		t.Fatalf("ExportBackup: %v", err)
 	}
-	if _, err := eop.Wait(ctx); err != nil {
+	if _, err := eop.Wait(h.Context()); err != nil {
 		t.Fatalf("ExportBackup operation: %v", err)
 	}
 	restored := create(fmt.Sprintf("compat-vkrst-%d", sfx), &memorystorepb.Instance{ShardCount: 2, NodeType: memorystorepb.Instance_SHARED_CORE_NANO,
@@ -419,37 +417,37 @@ func TestMemorystoreValkeyTokenAuthBackups(t *testing.T) {
 			Uris: []string{"gs://" + bh.BucketName() + "/first/" + b.GetBackupFiles()[0].GetFileName()}}}})
 	grc := redis.NewClient(&redis.Options{Addr: valkeyEndpoint(t, fromGCS, memorystorepb.ConnectionType_CONNECTION_TYPE_PRIMARY)})
 	defer grc.Close()
-	if v, err := grc.Get(ctx, "vk-7").Result(); err != nil || v != "7" {
+	if v, err := grc.Get(h.Context(), "vk-7").Result(); err != nil || v != "7" {
 		t.Errorf("instance from gcs_source GET vk-7 = %q, %v", v, err)
 	}
 
-	dop, err := c.DeleteAuthToken(ctx, &memorystorepb.DeleteAuthTokenRequest{Name: tok.GetName()})
+	dop, err := c.DeleteAuthToken(h.Context(), &memorystorepb.DeleteAuthTokenRequest{Name: tok.GetName()})
 	if err != nil {
 		t.Fatalf("DeleteAuthToken: %v", err)
 	}
-	if err := dop.Wait(ctx); err != nil {
+	if err := dop.Wait(h.Context()); err != nil {
 		t.Fatalf("DeleteAuthToken operation: %v", err)
 	}
 	gone := redis.NewClient(&redis.Options{Addr: paddr, Username: "app", Password: tok.GetToken(), MaxRetries: -1})
 	defer gone.Close()
-	if err := gone.Ping(ctx).Err(); err == nil || !strings.Contains(err.Error(), "WRONGPASS") {
+	if err := gone.Ping(h.Context()).Err(); err == nil || !strings.Contains(err.Error(), "WRONGPASS") {
 		t.Errorf("PING with a deleted token = %v, want WRONGPASS", err)
 	}
-	duop, err := c.DeleteTokenAuthUser(ctx, &memorystorepb.DeleteTokenAuthUserRequest{Name: user})
+	duop, err := c.DeleteTokenAuthUser(h.Context(), &memorystorepb.DeleteTokenAuthUserRequest{Name: user})
 	if err != nil {
 		t.Fatalf("DeleteTokenAuthUser: %v", err)
 	}
-	if err := duop.Wait(ctx); err != nil {
+	if err := duop.Wait(h.Context()); err != nil {
 		t.Fatalf("DeleteTokenAuthUser operation: %v", err)
 	}
-	delop, err := c.DeleteBackup(ctx, &memorystorepb.DeleteBackupRequest{Name: bname})
+	delop, err := c.DeleteBackup(h.Context(), &memorystorepb.DeleteBackupRequest{Name: bname})
 	if err != nil {
 		t.Fatalf("DeleteBackup: %v", err)
 	}
-	if err := delop.Wait(ctx); err != nil {
+	if err := delop.Wait(h.Context()); err != nil {
 		t.Fatalf("DeleteBackup operation: %v", err)
 	}
-	if _, err := c.CreateInstance(ctx, &memorystorepb.CreateInstanceRequest{Parent: parent, InstanceId: fmt.Sprintf("compat-vkccr-%d", sfx),
+	if _, err := c.CreateInstance(h.Context(), &memorystorepb.CreateInstanceRequest{Parent: parent, InstanceId: fmt.Sprintf("compat-vkccr-%d", sfx),
 		Instance: &memorystorepb.Instance{ShardCount: 1, CrossInstanceReplicationConfig: &memorystorepb.CrossInstanceReplicationConfig{
 			InstanceRole: memorystorepb.CrossInstanceReplicationConfig_SECONDARY}}}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("CreateInstance with cross-instance replication = %v, want UNIMPLEMENTED", err)

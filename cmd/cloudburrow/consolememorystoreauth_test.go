@@ -30,7 +30,8 @@ func msHasAction(as []console.Action, id string) bool {
 // TestConsoleMemorystoreTokenAuthBackups (#1549): the Memorystore for
 // Valkey and Redis Cluster pages create a token auth instance and cluster;
 // their pages offer Add token auth user, Add auth token, Back up now,
-// Export and Delete backup (and Set ACL policy on a cluster); a user and
+// Export and Delete backup (and Create, Update, Delete and Set ACL policy
+// on a cluster, its ACL policies tab showing the attachment); a user and
 // its generated token appear on the Token auth tab, a backup on the
 // Backups tab, and Delete backup removes it.
 func TestConsoleMemorystoreTokenAuthBackups(t *testing.T) {
@@ -89,6 +90,32 @@ func TestConsoleMemorystoreTokenAuthBackups(t *testing.T) {
 		}
 		if bk == nil || len(bk.Listing.Items) != 1 || bk.Listing.Items[0].Name != "first" {
 			t.Errorf("%s's Backups tab = %+v", tc.id, bk)
+		}
+		if tc.cluster {
+			for _, a := range []struct {
+				id     string
+				values map[string]string
+			}{{"create-acl-policy", map[string]string{"policyId": "readers", "rules": `{"reader":"on >pw ~app:* +@read"}`}},
+				{"acl-policy", map[string]string{"policy": "projects/p/locations/" + redisadmin.Region + "/aclPolicies/readers"}},
+				{"update-acl-policy", map[string]string{"policyId": "readers", "rules": `{"reader":"on >pw ~* +@read"}`}}} {
+				if err := tc.p.ActAt(ctx, "p", path, a.id, a.values); err != nil {
+					t.Fatalf("%s %s: %v", tc.id, a.id, err)
+				}
+			}
+			d, _ := tc.p.Detail(ctx, "p", path)
+			pol := sectionByID(d, "acl-policies")
+			if pol == nil || len(pol.Listing.Items) != 1 || pol.Listing.Items[0].Fields["Attached to"] != tc.id || pol.Listing.Items[0].Fields["Revision"] != "2" {
+				t.Errorf("%s's ACL policies tab = %+v", tc.id, pol)
+			}
+			if err := tc.p.ActAt(ctx, "p", path, "delete-acl-policy", map[string]string{"policyId": "readers"}); err == nil {
+				t.Errorf("Delete ACL policy of an attached policy succeeded")
+			}
+			if err := tc.p.ActAt(ctx, "p", path, "acl-policy", map[string]string{"policy": ""}); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.p.ActAt(ctx, "p", path, "delete-acl-policy", map[string]string{"policyId": "readers"}); err != nil {
+				t.Errorf("Delete ACL policy: %v", err)
+			}
 		}
 		if err := tc.p.ActAt(ctx, "p", path, "delete-backup", map[string]string{"backup": "first"}); err != nil {
 			t.Fatalf("%s delete-backup: %v", tc.id, err)

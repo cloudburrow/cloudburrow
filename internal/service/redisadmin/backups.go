@@ -411,6 +411,8 @@ func (c *clusters) snapshotNode(ctx context.Context, r *clusterRecord, n *cluste
 
 // readBackup is the files of a backup, for a create from it.
 func (c *clusters) readBackup(name, field string) ([][]byte, error) {
+	// gcloud may send the backup's full resource name.
+	name = strings.TrimPrefix(strings.TrimPrefix(name, "//memorystore.googleapis.com/"), "//redis.googleapis.com/")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if backupRE.FindStringSubmatch(name) == nil {
