@@ -33,9 +33,9 @@ tracks it; a closed issue is named only where it says what was built.
 | BigQuery | 42 | 17 | 14 | 11 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
-| Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **70** | **19** | **29** | **16** | **6** |
+| **Total** | **71** | **20** | **29** | **16** | **6** |
 
 ## Cloud Storage
 
