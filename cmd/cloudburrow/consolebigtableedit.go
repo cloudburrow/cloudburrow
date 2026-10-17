@@ -416,6 +416,9 @@ func (p bigtableProvider) ActAt(ctx context.Context, project string, path []stri
 		return p.admin(ctx, project, func(a *bigtable.AdminClient) error {
 			return a.CreateAuthorizedView(ctx, &bigtable.AuthorizedViewConf{TableID: path[0], AuthorizedViewID: strings.TrimSpace(values["view"]), AuthorizedView: sv})
 		})
+	case len(path) == 1 && (action == "snapshot" || action == "schemabundle"):
+		_, err := p.actTableExtra(ctx, project, path[0], action, values)
+		return err
 	case action == "protection" && len(path) == 1:
 		protection := bigtable.Unprotected
 		if values["protected"] == "true" {
@@ -589,6 +592,7 @@ func (p bigtableProvider) tableActions(ctx context.Context, project, table strin
 			{Name: "columns", Label: "Columns", Type: "text", Required: true,
 				Help: "Comma-separated family:qualifier, or family:prefix* for a qualifier prefix, family:* for a whole family."}}},
 	}
+	out = append(out, bigtableTableExtraActions()...)
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 	var info *bigtable.TableInfo

@@ -278,7 +278,7 @@ func TestBigtableActionsAreOfferedWhereTheyApply(t *testing.T) {
 	if err := admin.DeleteColumnFamily(ctx, table, "cf"); err != nil {
 		t.Fatal(err)
 	}
-	if ids := strings.Join(actionIDs(bigtableDetail(t, srv, table).Actions), ","); ids != "addfamily,deleteprefix,deleteallrows,backup,restore,authview,protection" {
+	if ids := strings.Join(actionIDs(bigtableDetail(t, srv, table).Actions), ","); ids != "addfamily,deleteprefix,deleteallrows,backup,restore,authview,snapshot,schemabundle,protection" {
 		t.Errorf("a table without families offers %s, want no write", ids)
 	}
 	code, out := bigtableAct(t, srv, []string{table}, "writecell", map[string]string{"row": "r", "family": "cf"})
@@ -288,7 +288,7 @@ func TestBigtableActionsAreOfferedWhereTheyApply(t *testing.T) {
 	if code, out := bigtableAct(t, srv, []string{table}, "addfamily", map[string]string{"family": "cf"}); code != http.StatusOK {
 		t.Fatalf("addfamily = %d: %s", code, out)
 	}
-	if ids := strings.Join(actionIDs(bigtableDetail(t, srv, table).Actions), ","); ids != "addfamily,writecell,deleteprefix,deleteallrows,backup,restore,authview,protection" {
+	if ids := strings.Join(actionIDs(bigtableDetail(t, srv, table).Actions), ","); ids != "addfamily,writecell,deleteprefix,deleteallrows,backup,restore,authview,snapshot,schemabundle,protection" {
 		t.Errorf("a table with a family offers %s", ids)
 	}
 	// Both row deletes ask for the table's name back: Delete all rows as a

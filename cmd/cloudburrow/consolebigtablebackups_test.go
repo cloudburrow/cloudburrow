@@ -2,10 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigtable"
+	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // TestConsoleBigtableBackupsAndViews (#1499): a table page's Create backup,
@@ -69,5 +77,114 @@ func TestConsoleBigtableBackupsAndViews(t *testing.T) {
 	}
 	if code, out := act("authview", map[string]string{"view": "bad", "columns": "nofamily"}); code != http.StatusBadRequest {
 		t.Errorf("a column with no family = %d: %s", code, out)
+	}
+}
+
+// TestConsoleBigtableSQLSnapshotsBundlesAndViews (#1499): the query form's
+// SQL; a table page's Snapshot table and Create schema bundle; an
+// instance's Backups tab with Restore and Delete, Create logical and
+// materialized view with their tabs and Delete; and a cluster's Edit memory
+// layer, each read back through the official clients.
+func TestConsoleBigtableSQLSnapshotsBundlesAndViews(t *testing.T) {
+	srv, addr := bigtablePickerConsole(t)
+	ctx := context.Background()
+	iac, err := bigtable.NewInstanceAdminClient(ctx, "demo", localOpts(addr)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = iac.Close() })
+	if err := iac.CreateInstance(ctx, &bigtable.InstanceConf{InstanceId: "shop-inst", DisplayName: "Shop",
+		ClusterId: "shop-c1", Zone: "us-central1-b", NumNodes: 1, StorageType: bigtable.SSD}); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := bigtable.NewAdminClient(ctx, "demo", "shop-inst", localOpts(addr)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+	client, err := bigtable.NewClient(ctx, "demo", "shop-inst", localOpts(addr)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if err := admin.CreateTable(ctx, "items"); err != nil {
+		t.Fatal(err)
+	}
+	if err := admin.CreateColumnFamily(ctx, "items", "cf"); err != nil {
+		t.Fatal(err)
+	}
+	m := bigtable.NewMutation()
+	m.Set("cf", "name", bigtable.Now(), []byte("lamp"))
+	if err := client.Open("items").Apply(ctx, "i#1", m); err != nil {
+		t.Fatal(err)
+	}
+	const scoped = "project=demo&instance=shop-inst"
+	act := func(path []string, action string, values map[string]string) (int, string) {
+		return pickerDo(t, srv, http.MethodPost, "/api/actions/bigtable?"+scoped, map[string]any{"Path": path, "Action": action, "Values": values})
+	}
+	if code, out := pickerDo(t, srv, http.MethodPost, "/api/query/bigtable?"+scoped, map[string]any{"Path": []string{"items"},
+		"Values": map[string]string{"sql": "SELECT _key, CAST(cf['name'] AS STRING) AS name FROM items"}}); code != http.StatusOK || !strings.Contains(out, "lamp") || !strings.Contains(out, "i#1") {
+		t.Errorf("SQL in the query form = %d: %s", code, out)
+	}
+	if code, out := act([]string{"items"}, "snapshot", map[string]string{"cluster": "shop-c1", "snapshot": "s1"}); code != http.StatusOK {
+		t.Errorf("Snapshot table = %d: %s", code, out)
+	}
+	if s, err := admin.SnapshotInfo(ctx, "shop-c1", "s1"); err != nil || s.SourceTable != "items" {
+		t.Errorf("SnapshotInfo = %+v, %v", s, err)
+	}
+	fd := protodesc.ToFileDescriptorProto(timestamppb.File_google_protobuf_timestamp_proto)
+	set, _ := proto.Marshal(&descriptorpb.FileDescriptorSet{File: []*descriptorpb.FileDescriptorProto{fd}})
+	if code, out := act([]string{"items"}, "schemabundle", map[string]string{"bundle": "b1", "descriptors": base64.StdEncoding.EncodeToString(set)}); code != http.StatusOK {
+		t.Errorf("Create schema bundle = %d: %s", code, out)
+	}
+	if names, err := admin.SchemaBundles(ctx, "items"); err != nil || len(names) != 1 {
+		t.Errorf("SchemaBundles = %v, %v", names, err)
+	}
+	if err := admin.CreateBackup(ctx, "items", "shop-c1", "bk", time.Now().Add(48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	iact := func(path []string, action string, values map[string]string) (int, string) {
+		return pickerDo(t, srv, http.MethodPost, "/api/actions/bigtable-instances?project=demo", map[string]any{"Path": path, "Action": action, "Values": values})
+	}
+	detail := func() string {
+		_, out := pickerDo(t, srv, http.MethodGet, "/api/detail/bigtable-instances?project=demo&name=shop-inst", nil)
+		return out
+	}
+	if out := detail(); !strings.Contains(out, `"bk"`) {
+		t.Errorf("the Backups tab lists no bk: %s", out)
+	}
+	if code, out := iact([]string{"shop-inst", "backups", "shop-c1:bk"}, "restorebackup", map[string]string{"table": "items2"}); code != http.StatusOK {
+		t.Errorf("Restore = %d: %s", code, out)
+	}
+	if _, err := admin.TableInfo(ctx, "items2"); err != nil {
+		t.Errorf("the restored table: %v", err)
+	}
+	if code, out := iact([]string{"shop-inst", "backups", "shop-c1:bk"}, "deletebackup", nil); code != http.StatusOK {
+		t.Errorf("Delete backup = %d: %s", code, out)
+	}
+	for _, kind := range []string{"logical", "materialized"} {
+		if code, out := iact([]string{"shop-inst"}, "create"+kind, map[string]string{"view": kind + "-v", "query": "SELECT _key FROM items"}); code != http.StatusOK {
+			t.Errorf("Create %s view = %d: %s", kind, code, out)
+		}
+	}
+	if lv, err := iac.LogicalViewInfo(ctx, "shop-inst", "logical-v"); err != nil || lv.Query != "SELECT _key FROM items" {
+		t.Errorf("LogicalViewInfo = %+v, %v", lv, err)
+	}
+	if out := detail(); !strings.Contains(out, "materialized-v") {
+		t.Errorf("the Materialized views tab lists no view: %s", out)
+	}
+	if code, out := iact([]string{"shop-inst", "materializedViews", "materialized-v"}, "deleteview", nil); code != http.StatusOK {
+		t.Errorf("Delete view = %d: %s", code, out)
+	}
+	if _, err := iac.MaterializedViewInfo(ctx, "shop-inst", "materialized-v"); err == nil {
+		t.Error("the materialized view is still there")
+	}
+	if code, out := iact([]string{"shop-inst", "clusters", "shop-c1"}, "memorylayer", map[string]string{"enabled": "true"}); code != http.StatusOK {
+		t.Errorf("Edit memory layer = %d: %s", code, out)
+	}
+	l, err := iac.InstanceAdminClientV2().GetMemoryLayer(ctx, &btapb.GetMemoryLayerRequest{Name: "projects/demo/instances/shop-inst/clusters/shop-c1/memoryLayer"})
+	if err != nil || l.GetMemoryConfig() == nil {
+		t.Errorf("the memory layer = %v, %v; want enabled", l, err)
 	}
 }

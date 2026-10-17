@@ -2613,6 +2613,7 @@ func (p bigtableProvider) QueryForm(path []string) (string, []console.Field) {
 		{Name: "limit", Label: "Limit", Type: "text", Default: "50",
 			Pattern: `^[0-9]{1,4}$`,
 			Help:    fmt.Sprintf("At most %d.", detailLimit)},
+		bigtableSQLField(),
 	}
 }
 
@@ -2631,6 +2632,9 @@ func (p bigtableProvider) Build(ctx context.Context, project string, path []stri
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
+	if sql := strings.TrimSpace(values["sql"]); sql != "" {
+		return p.bigtableSQL(ctx, project, sql)
+	}
 	c, err := p.newData(ctx, project)
 	if err != nil {
 		out.Unavailable = "cannot reach Bigtable: " + err.Error()

@@ -185,6 +185,9 @@ func (p bigtableInstancesProvider) Detail(ctx context.Context, project string, p
 		{ID: "clusters", Label: "Clusters", Listing: clustersListing(path[0], clusters, cerr)},
 		{ID: "appprofiles", Label: "App profiles", Listing: p.profilesListing(ctx, c, path[0], clusters)},
 		{ID: "tables", Label: "Tables", Listing: p.tablesListing(ctx, project, path[0])},
+		{ID: "backups", Label: "Backups", Listing: p.backupsListing(ctx, project, path[0])},
+		{ID: "logicalviews", Label: "Logical views", Listing: p.sqlViewsListing(ctx, c, path[0], false)},
+		{ID: "materializedviews", Label: "Materialized views", Listing: p.sqlViewsListing(ctx, c, path[0], true)},
 	}}, nil
 }
 
@@ -553,19 +556,23 @@ func (p bigtableInstancesProvider) DetailActions(ctx context.Context, project st
 	if len(path) == 1 {
 		add := append(clusterFields(""), nodeFields(nil, "")...)
 		create := append([]console.Field{profileIDField()}, profileFields(nil, clusters)...)
-		return []console.Action{
+		return append([]console.Action{
 			{ID: "editinstance", Label: "Edit instance", Fields: instanceEditFields(in)},
 			{ID: "addcluster", Label: "Add cluster", Fields: add},
 			{ID: "createprofile", Label: "Create app profile", Fields: create},
-			{ID: "deleteinstance", Label: "Delete instance", Destructive: true, Leaves: true,
-				Confirm: "The instance is deleted with its clusters, app profiles and every table in it."},
-		}
+		}, append(instanceExtraActions(),
+			console.Action{ID: "deleteinstance", Label: "Delete instance", Destructive: true, Leaves: true,
+				Confirm: "The instance is deleted with its clusters, app profiles and every table in it."})...)
 	}
 	switch path[1] {
+	case bigtableBackupsSegment:
+		return backupActions()
+	case bigtableLogicalSegment, bigtableMaterializedSegment:
+		return sqlViewActions()
 	case bigtableClustersSegment:
 		for _, cl := range clusters {
 			if cl.Name == path[2] {
-				return clusterActions(cl)
+				return append(clusterActions(cl), memoryLayerAction(memoryLayerEnabled(ctx, c, "projects/"+project+"/instances/"+path[0]+"/clusters/"+cl.Name)))
 			}
 		}
 	case bigtableProfilesSegment:
@@ -586,6 +593,9 @@ func (p bigtableInstancesProvider) ActAt(ctx context.Context, project string, pa
 		return err
 	}
 	defer c.Close()
+	if ok, err := p.actInstanceExtra(ctx, c, project, path, action, values); ok {
+		return err
+	}
 	inst := path[0]
 	name := "projects/" + project + "/instances/" + inst
 	switch {
