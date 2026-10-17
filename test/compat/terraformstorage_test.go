@@ -103,8 +103,9 @@ func (m *tfModule) apply() {
 // covers: storage.buckets.insert, storage.buckets.get, storage.buckets.patch, storage.buckets.delete, storage.objects.insert, storage.objects.get, storage.objects.patch, storage.objects.delete, storage.buckets.getIamPolicy, storage.buckets.setIamPolicy, storage.projects.hmacKeys.create, storage.projects.hmacKeys.get, storage.projects.hmacKeys.update, storage.projects.hmacKeys.delete, storage.notifications.insert, storage.notifications.get, storage.notifications.delete
 func TestTerraformStorageResources(t *testing.T) {
 	h := New(t)
-	m := newTFModule(t)
 	c := storageClient(t, h)
+	h.Endpoint(EnvPubSub) // the notification's topic
+	m := newTFModule(t)
 	bucket, held := h.Project()+"-tfb", h.Project()+"-tfo"
 	topic := "tf-note-" + h.Project()
 	email := "tf-hmac@" + m.project + ".iam.gserviceaccount.com"

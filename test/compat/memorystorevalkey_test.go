@@ -83,6 +83,11 @@ func valkeyEndpoint(t *testing.T, inst *memorystorepb.Instance, kind memorystore
 // node_type, engine_configs and persistence_config are set on every node.
 // DeleteInstance removes it.
 func TestMemorystoreValkeyInstance(t *testing.T) {
+	// Forming the nodes, replacing them for a new node type and deleting
+	// them each outlast h.Context()'s minute on a loaded runner; the
+	// reshapes poll for five minutes (CI run 39038657629).
+	ops, cancelOps := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancelOps()
 	h := New(t)
 	c, project := valkeyAdminClient(t, h)
 	parent := "projects/" + project + "/locations/us-central1"
@@ -105,7 +110,7 @@ func TestMemorystoreValkeyInstance(t *testing.T) {
 			_ = op.Wait(h.Context())
 		}
 	})
-	inst, err := op.Wait(h.Context())
+	inst, err := op.Wait(ops)
 	if err != nil {
 		t.Fatalf("CreateInstance operation: %v", err)
 	}
@@ -171,8 +176,7 @@ func TestMemorystoreValkeyInstance(t *testing.T) {
 	if inst, err = waitValkeyOp(t, h, uop); err != nil || inst.GetReplicaCount() != 0 {
 		t.Fatalf("UpdateInstance replica_count operation = %v, %v", inst, err)
 	}
-	nodes, err := rc.ClusterNodes(h.Context()).Result()
-	if err != nil || strings.Count(strings.TrimSpace(nodes), "\n")+1 != 4 || strings.Contains(nodes, "slave") {
+	if nodes, err := primariesOnly(h, rc, 4); err != nil {
 		t.Errorf("after 0 replicas CLUSTER NODES = %q, %v; want 4 primaries", nodes, err)
 	}
 
@@ -185,7 +189,7 @@ func TestMemorystoreValkeyInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateInstance node_type: %v", err)
 	}
-	if inst, err = uop.Wait(h.Context()); err != nil || inst.GetNodeType() != memorystorepb.Instance_STANDARD_SMALL ||
+	if inst, err = uop.Wait(ops); err != nil || inst.GetNodeType() != memorystorepb.Instance_STANDARD_SMALL ||
 		inst.GetPersistenceConfig().GetMode() != memorystorepb.PersistenceConfig_AOF {
 		t.Fatalf("UpdateInstance node_type operation = %v, %v", inst, err)
 	}
@@ -210,7 +214,7 @@ func TestMemorystoreValkeyInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteInstance: %v", err)
 	}
-	if err := dop.Wait(h.Context()); err != nil {
+	if err := dop.Wait(ops); err != nil {
 		t.Fatalf("DeleteInstance operation: %v", err)
 	}
 	if _, err := c.GetInstance(h.Context(), &memorystorepb.GetInstanceRequest{Name: name}); status.Code(err) != codes.NotFound {

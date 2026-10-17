@@ -5179,8 +5179,8 @@
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
-          "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
-          "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals",
+          "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
+          "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance",
@@ -5209,7 +5209,7 @@
         "tests": [
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
-          "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
+          "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
@@ -5264,7 +5264,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
-          "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals"
+          "test/compat/memorystorevalkey_test.go:308 TestMemorystoreValkeyRefusals"
         ]
       },
       {
@@ -5350,7 +5350,7 @@
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
-          "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
+          "test/compat/memorystorevalkey_test.go:233 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
@@ -5393,8 +5393,8 @@
           "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
-          "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
-          "test/compat/memorystorecluster_test.go:233 TestMemorystoreRedisClusterRefusals",
+          "test/compat/memorystorecluster_test.go:127 TestMemorystoreRedisCluster",
+          "test/compat/memorystorecluster_test.go:257 TestMemorystoreRedisClusterRefusals",
           "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
@@ -5430,7 +5430,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
-          "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
+          "test/compat/memorystorecluster_test.go:127 TestMemorystoreRedisCluster",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
@@ -5489,7 +5489,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
-          "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
+          "test/compat/memorystorecluster_test.go:127 TestMemorystoreRedisCluster",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
@@ -5555,7 +5555,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
-          "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster"
+          "test/compat/memorystorecluster_test.go:127 TestMemorystoreRedisCluster"
         ]
       },
       {
@@ -5582,7 +5582,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudrediscluster_test.go:23 TestGcloudRedisCluster",
-          "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
+          "test/compat/memorystorecluster_test.go:127 TestMemorystoreRedisCluster",
           "test/compat/terraform_rediscluster_test.go:25 TestTerraformRedisCluster"
         ]
       },
@@ -6432,7 +6432,7 @@
           "test/compat/storagesoftdelete_test.go:137 TestStorageBucketDeleteIgnoresSoftDeleted",
           "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
-          "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:237 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
           {
@@ -7018,7 +7018,7 @@
           "test/compat/terraform_batch5_test.go:103 TestTerraformStorageObjectCustomerKey",
           "test/compat/terraform_batch6_test.go:178 TestTerraformStorageObjectRetention",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
-          "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:237 TestTerraformForceDestroyVersionedBucket"
         ]
       },
       {
@@ -7092,7 +7092,7 @@
           "test/compat/storageversioning_test.go:63 TestStorageVersioningKeepsNoncurrent",
           "test/compat/terraform_batch10_test.go:164 TestTerraformDataSourcesBatch10",
           "test/compat/terraform_batch11_test.go:929 TestTerraformStorageObjectContentsDataSource",
-          "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
+          "test/compat/terraformstorage_test.go:237 TestTerraformForceDestroyVersionedBucket"
         ],
         "unverified": [
           {

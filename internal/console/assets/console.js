@@ -2726,6 +2726,11 @@ async function renderDetail(view, route, resourcePath) {
   const drawPanel = () => {
     const section = sections[current];
     const reload = () => renderDetail(view, route, segments);
+    // The previous tab's list poll redraws its table into this same panel:
+    // left running, it replaced a Query tab, editor, results and all, with
+    // the Tables listing at its next tick (#1568). A listing section
+    // registers its own again as it draws.
+    stopListPoll();
 
     // A section that cannot be read says so inside its own panel, whatever
     // kind it is. Rendering it as an empty table would claim the resource

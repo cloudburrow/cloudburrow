@@ -250,7 +250,20 @@ func noGoogleEgress() []string {
 	return append(os.Environ(), "HTTPS_PROXY=http://127.0.0.1:1", "https_proxy=http://127.0.0.1:1",
 		"NO_PROXY=127.0.0.1,localhost", "no_proxy=127.0.0.1,localhost",
 		// Terraform's own update check, which the proxy would refuse anyway.
-		"CHECKPOINT_DISABLE=1")
+		"CHECKPOINT_DISABLE=1",
+		"PLUGIN_UNIX_SOCKET_DIR="+pluginSocketDir())
+}
+
+// pluginSocketDir is where a provider makes its go-plugin socket: the
+// temporary directory, unless its path is too long for a Unix socket's
+// (104 bytes on macOS), as a scratch directory's can be. There every
+// provider failed to start, "Failed to read any lines from plugin's
+// stdout", and every Terraform test with it (#1568).
+func pluginSocketDir() string {
+	if d := os.TempDir(); len(d) <= 64 {
+		return d
+	}
+	return "/tmp"
 }
 
 func lastLines(s string, n int) string {

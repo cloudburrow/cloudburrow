@@ -61,12 +61,17 @@ func TestCloudSQLReadWriteEditorsThroughThePage(t *testing.T) {
 				p.forgive()
 				return text
 			}
+			// The open dialog's button, found when it is clicked: a dialog on
+			// its way out stays in the page for its exit, with the same title
+			// and button, and a click resolved against it found no node once
+			// it was removed (CI run 39038657629).
 			confirmed := func(want string) {
 				t.Helper()
 				p.clickText("#view .query-pane button.primary", "Run statement")
-				p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
-				p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
+				p.waitFor(`document.querySelector(".modal.is-open #dml-confirm-title") !== null`)
+				p.clickText(".modal.is-open button[type=submit]", "Run statement")
 				p.waitFor(fmt.Sprintf(`document.querySelector("#view .query-results").textContent.includes(%q)`, want))
+				p.waitFor(`document.querySelector(".modal") === null`)
 			}
 
 			create := "CREATE TABLE " + table + " (id integer PRIMARY KEY, name varchar(40))"
@@ -116,6 +121,14 @@ func TestCloudSQLReadWriteEditorsThroughThePage(t *testing.T) {
 			p.eval(`[...document.querySelectorAll("#view .query-results tbody tr")].map((r) => r.textContent.trim())`, &names)
 			if strings.Join(names, ",") != "one,two" {
 				t.Errorf("the read-only SELECT reads %v, want one and two", names)
+			}
+			// The Tables tab's list poll, had it outlived the switch to Query,
+			// would redraw the Tables listing over the pane and its results.
+			var kept int
+			p.eval(`(async () => { if (LIST_POLL_TICK) await LIST_POLL_TICK();
+				return document.querySelectorAll("#view .query-pane .query-results tbody tr").length; })()`, &kept, awaitPromise)
+			if kept != 2 {
+				t.Fatalf("after the list poll the Query tab shows %d result rows, want the SELECT's 2", kept)
 			}
 
 			p.run(chromedp.Click(`#view .query-mode input[value="read-write"]`, chromedp.ByQuery))

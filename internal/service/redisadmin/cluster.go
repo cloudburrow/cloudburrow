@@ -1156,11 +1156,16 @@ func (c *clusters) until(ctx context.Context, what string, cond func() bool) err
 // moveSlots moves slots, keys and all, from src to dst: IMPORTING on dst,
 // MIGRATING on src, MIGRATE of every key, then NODE on both, as
 // redis-cli --cluster reshard does, each step pipelined over the slots.
+//
+// Valkey 8 replicates each CLUSTER SETSLOT to the node's replicas and
+// holds the client until they acknowledge it, so one connection's pipeline
+// of thousands of SETSLOTs is one replica round trip per slot: more than a
+// minute on a loaded CI runner (run 39038657629). The SETSLOT steps are
+// spread over setslotConns connections instead, whose blocked commands one
+// acknowledgement releases together.
 func (c *clusters) moveSlots(ctx context.Context, r *clusterRecord, src, dst *clusterNode, slots []int) error {
 	s := c.dial(src.addr, r.password(), r.TransitCA)
 	defer s.Close()
-	d := c.dial(dst.addr, r.password(), r.TransitCA)
-	defer d.Close()
 	each := func(f func(slot int) []any) [][]any {
 		out := make([][]any, len(slots))
 		for i, slot := range slots {
@@ -1168,10 +1173,10 @@ func (c *clusters) moveSlots(ctx context.Context, r *clusterRecord, src, dst *cl
 		}
 		return out
 	}
-	if _, err := d.Pipe(ctx, each(func(slot int) []any { return []any{"CLUSTER", "SETSLOT", slot, "IMPORTING", src.id} })); err != nil {
+	if err := c.setslots(ctx, r, dst, each(func(slot int) []any { return []any{"CLUSTER", "SETSLOT", slot, "IMPORTING", src.id} })); err != nil {
 		return fmt.Errorf("importing on %s: %w", dst.Server, err)
 	}
-	if _, err := s.Pipe(ctx, each(func(slot int) []any { return []any{"CLUSTER", "SETSLOT", slot, "MIGRATING", dst.id} })); err != nil {
+	if err := c.setslots(ctx, r, src, each(func(slot int) []any { return []any{"CLUSTER", "SETSLOT", slot, "MIGRATING", dst.id} })); err != nil {
 		return fmt.Errorf("migrating on %s: %w", src.Server, err)
 	}
 	counts, err := s.Pipe(ctx, each(func(slot int) []any { return []any{"CLUSTER", "COUNTKEYSINSLOT", slot} }))
@@ -1203,13 +1208,37 @@ func (c *clusters) moveSlots(ctx context.Context, r *clusterRecord, src, dst *cl
 		}
 	}
 	node := each(func(slot int) []any { return []any{"CLUSTER", "SETSLOT", slot, "NODE", dst.id} })
-	if _, err := d.Pipe(ctx, node); err != nil {
+	if err := c.setslots(ctx, r, dst, node); err != nil {
 		return fmt.Errorf("slots to %s: %w", dst.Server, err)
 	}
-	if _, err := s.Pipe(ctx, node); err != nil {
+	if err := c.setslots(ctx, r, src, node); err != nil {
 		return fmt.Errorf("slots off %s: %w", src.Server, err)
 	}
 	return nil
+}
+
+// setslotConns is how many connections setslots spreads its commands over.
+const setslotConns = 32
+
+// setslots runs cmds, CLUSTER SETSLOTs of distinct slots, on n, pipelined
+// over up to setslotConns connections at once (see moveSlots); their
+// order across slots does not matter.
+func (c *clusters) setslots(ctx context.Context, r *clusterRecord, n *clusterNode, cmds [][]any) error {
+	conns := min(setslotConns, len(cmds))
+	errs := make([]error, conns)
+	var wg sync.WaitGroup
+	for i := range conns {
+		lo, hi := i*len(cmds)/conns, (i+1)*len(cmds)/conns
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cl := c.dial(n.addr, r.password(), r.TransitCA)
+			defer cl.Close()
+			_, errs[i] = cl.Pipe(ctx, cmds[lo:hi])
+		}()
+	}
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 // ownedSlots reads which primary serves each slot, by node ID, from via.
