@@ -34,8 +34,8 @@ func TestProjectUndeleteIsOfferedOnlyWhenDeleted(t *testing.T) {
 		t.Fatalf("list after delete = %+v, %v; want the project DELETE_REQUESTED", l.Items, err)
 	}
 	a := p.DetailActions(ctx, "", []string{"undelete-me"})
-	if len(a) != 1 || a[0].ID != projectUndelete || a[0].Label != "Undelete project" {
-		t.Fatalf("a deleted project's page offers %+v, want Undelete project", a)
+	if len(a) != 2 || a[0].ID != projectUndelete || a[0].Label != "Undelete project" || a[1].ID != projectPurge || !a[1].Destructive {
+		t.Fatalf("a deleted project's page offers %+v, want Undelete project and Purge project now", a)
 	}
 	if err := p.ActAt(ctx, "", []string{"undelete-me"}, projectUndelete, nil); err != nil {
 		t.Fatal(err)
@@ -45,6 +45,20 @@ func TestProjectUndeleteIsOfferedOnlyWhenDeleted(t *testing.T) {
 	}
 	if err := p.ActAt(ctx, "", []string{"undelete-me"}, projectUndelete, nil); err == nil {
 		t.Error("undeleting an active project succeeded")
+	}
+	// Purge project now (#1537): refused on an active project, and on a
+	// deleted one frees the ID.
+	if err := p.ActAt(ctx, "", []string{"undelete-me"}, projectPurge, nil); err == nil {
+		t.Error("purging an active project succeeded")
+	}
+	if err := p.Delete(ctx, "", "undelete-me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ActAt(ctx, "", []string{"undelete-me"}, projectPurge, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Create(resourcemanager.Project{ProjectID: "undelete-me"}); err != nil {
+		t.Errorf("the purged project's ID is not free: %v", err)
 	}
 }
 

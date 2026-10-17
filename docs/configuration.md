@@ -794,6 +794,7 @@ printing it, and it is never written into the runtime file or a diagnose bundle.
 |---|---|
 | `POST /admin/reset` | Destroy CloudBurrow-managed state, keeping the cluster |
 | `POST /admin/seed` | Create resources from a seed document |
+| `POST /admin/purge?project=` | Purge a project pending deletion now, in place of Google's 30 days (#1537): the project and what every service that can reset one project keeps under it go, and its ID is free. 404 for a project that does not exist, 400 for one not deleted. The console's **Purge project now** on the project's page does the same |
 | `GET /admin/events` | Recent events, newest first, filterable by `service`, `kind` and `since` |
 | `GET /admin/instance` | What the other routes accept here: each component `reset` clears, in order, and whether it can be scoped to a project (`byProject`); the startup seed's components, which `reseed=true` re-applies (empty without `--seed-file`); the components a seed document may name; and the manifest an export would begin with. The console's Instance page offers exactly this (#801, `TestInstanceInfoSaysWhatResetSeedAndStateAccept`) |
 | `GET /admin/local-models`, `POST /admin/local-models/{id}/{action}` | The local AI models (#1396): each catalogued model's state, and `download` (with `{"confirmBytes": N}`, the exact pinned size; every file verified against its pinned SHA-256), `cancel`, `load`, `unload` and `delete`, through the same manager as the console's Local models page ([embeddings.md](embeddings.md)) |
