@@ -397,13 +397,12 @@ resource "google_organization_iam_binding" "o" {
 
 // covers: sql.instances.insert, sql.instances.get, sql.instances.delete
 //
-// TestTerraformSQLSourceRepresentationRefused (#1304, #1501): a MySQL
+// TestTerraformSQLSourceRepresentation (#1304, #1501, #1524): a MySQL
 // google_sql_source_representation_instance, a record of a server outside
-// Cloud SQL, applies, is read back as an ON_PREMISES_INSTANCE with its host
-// and port, and is destroyed; a PostgreSQL one is refused 501 with why
-// (Cloud SQL replicates from an external MySQL server; PostgreSQL migrates
-// through Database Migration Service), and nothing is created.
-func TestTerraformSQLSourceRepresentationRefused(t *testing.T) {
+// Cloud SQL, with a dump_file_path, and a PostgreSQL one each apply, are
+// read back as an ON_PREMISES_INSTANCE with their host and port (and the
+// dump file), plan no changes, and are destroyed.
+func TestTerraformSQLSourceRepresentation(t *testing.T) {
 	h := New(t)
 	svc := sqlAdminService(t, h)
 	if os.Getenv(EnvCloudSQL) == "" {
@@ -411,7 +410,7 @@ func TestTerraformSQLSourceRepresentationRefused(t *testing.T) {
 	}
 	m := newTFModule(t)
 	n := time.Now().UnixNano() % 1e6
-	my, name := fmt.Sprintf("tf-extmy-%d", n), fmt.Sprintf("tf-ext-%d", n)
+	my, pg := fmt.Sprintf("tf-extmy-%d", n), fmt.Sprintf("tf-ext-%d", n)
 	m.write(fmt.Sprintf(`
 resource "google_sql_source_representation_instance" "my" {
   project          = %q
@@ -422,24 +421,10 @@ resource "google_sql_source_representation_instance" "my" {
   port             = 3306
   username         = "repl"
   password         = "not-a-secret"
+  dump_file_path   = "gs://a-bucket/source.sql.gz"
 }
-`, m.project, my))
-	m.must("init", "-input=false", "-no-color")
-	m.must("apply", "-auto-approve", "-input=false", "-no-color")
-	got, err := svc.Instances.Get(m.project, my).Do()
-	if err != nil || got.InstanceType != "ON_PREMISES_INSTANCE" || got.OnPremisesConfiguration == nil ||
-		got.OnPremisesConfiguration.HostPort != "10.0.0.6:3306" || got.OnPremisesConfiguration.Password != "" {
-		t.Fatalf("the MySQL source representation instance: %+v %v", got, err)
-	}
-	if out := m.must("plan", "-detailed-exitcode", "-input=false", "-no-color"); !strings.Contains(out, "No changes") {
-		t.Errorf("a plan after apply is not empty:\n%s", lastLines(out, 30))
-	}
-	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
-	_, err = svc.Instances.Get(m.project, my).Do()
-	wantHTTP(t, "instances.get of the destroyed instance", err, http.StatusNotFound)
 
-	m.write(fmt.Sprintf(`
-resource "google_sql_source_representation_instance" "ext" {
+resource "google_sql_source_representation_instance" "pg" {
   project          = %q
   name             = %q
   region           = "us-central1"
@@ -449,15 +434,25 @@ resource "google_sql_source_representation_instance" "ext" {
   username         = "repl"
   password         = "not-a-secret"
 }
-`, m.project, name))
-	out, err := m.tf("apply", "-auto-approve", "-input=false", "-no-color")
-	if err == nil {
-		t.Fatalf("the apply succeeded:\n%s", lastLines(out, 30))
+`, m.project, my, m.project, pg))
+	m.must("init", "-input=false", "-no-color")
+	m.must("apply", "-auto-approve", "-input=false", "-no-color")
+	for name, want := range map[string]string{my: "10.0.0.6:3306", pg: "10.0.0.5:5432"} {
+		got, err := svc.Instances.Get(m.project, name).Do()
+		if err != nil || got.InstanceType != "ON_PREMISES_INSTANCE" || got.OnPremisesConfiguration == nil ||
+			got.OnPremisesConfiguration.HostPort != want || got.OnPremisesConfiguration.Password != "" {
+			t.Fatalf("the source representation instance %s: %+v %v", name, got, err)
+		}
+		if name == my && got.OnPremisesConfiguration.DumpFilePath != "gs://a-bucket/source.sql.gz" {
+			t.Errorf("the MySQL source's dumpFilePath: %q", got.OnPremisesConfiguration.DumpFilePath)
+		}
 	}
-	// Egress to Google is blocked, so a 501 can only be this instance's.
-	if !strings.Contains(out, "Error 501") || !strings.Contains(out, "source representation") {
-		t.Errorf("the instance was not refused 501 by this instance:\n%s", lastLines(out, 30))
+	if out := m.must("plan", "-detailed-exitcode", "-input=false", "-no-color"); !strings.Contains(out, "No changes") {
+		t.Errorf("a plan after apply is not empty:\n%s", lastLines(out, 30))
 	}
-	_, err = svc.Instances.Get(m.project, name).Do()
-	wantHTTP(t, "instances.get of the refused instance", err, http.StatusNotFound)
+	m.must("destroy", "-auto-approve", "-input=false", "-no-color")
+	for _, name := range []string{my, pg} {
+		_, err := svc.Instances.Get(m.project, name).Do()
+		wantHTTP(t, "instances.get of the destroyed instance", err, http.StatusNotFound)
+	}
 }

@@ -368,7 +368,9 @@ marker="$(dirname "$PGDATA")/cloudsql-external-synced"
 if [ -f "$marker" ]; then exit 0; fi
 i=0; until pg_isready -q -h 127.0.0.1 -U postgres; do i=$((i+1)); if [ "$i" -ge 120 ]; then echo "postgres did not answer" >&2; exit 1; fi; sleep 1; done
 export PGPASSWORD="$CLOUDSQL_REPLICATION_PASSWORD"
-conn="host=$CLOUDSQL_PRIMARY_HOST port=${CLOUDSQL_PRIMARY_PORT:-5432} user=$CLOUDSQL_PRIMARY_USER password=$CLOUDSQL_REPLICATION_PASSWORD"
+conn="host=$CLOUDSQL_PRIMARY_HOST port=${CLOUDSQL_PRIMARY_PORT:-5432} user=$CLOUDSQL_PRIMARY_USER"
+# An empty "password=" would take the next keyword as its value.
+if [ -n "$CLOUDSQL_REPLICATION_PASSWORD" ]; then conn="$conn password=$CLOUDSQL_REPLICATION_PASSWORD"; fi
 dst() { PGPASSWORD= psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -qAt "$@"; }
 dbs="$CLOUDSQL_DATABASES"
 if [ -z "$dbs" ]; then
