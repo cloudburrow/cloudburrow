@@ -44,8 +44,8 @@ func (f front) pruneHistory(r *http.Request, dataset, table string, earliest int
 		fmt.Sprintf("DELETE FROM %s WHERE %s AND rowid NOT IN (SELECT cloudburrow_order FROM (SELECT rowid AS cloudburrow_order, "+
 			"_CHANGE_TYPE AS cloudburrow_change, ROW_NUMBER() OVER (PARTITION BY googlesqlite_change_rowid ORDER BY rowid DESC) AS cloudburrow_last "+
 			"FROM %s WHERE %s) WHERE cloudburrow_last = 1 AND cloudburrow_change NOT IN ('DELETE', '%s'))", changes, old, changes, old, changeEnd),
-		fmt.Sprintf("UPDATE %s SET _CHANGE_TYPE = '%s', _CHANGE_IS_FOR_UPDATE = FALSE WHERE %s AND _CHANGE_TYPE != '%s'",
-			changes, changeCarry, old, changeCarry),
+		fmt.Sprintf("UPDATE %s SET _CHANGE_TYPE = '%s', %s = FALSE WHERE %s AND _CHANGE_TYPE != '%s'",
+			changes, changeCarry, changeForUpdateColumn, old, changeCarry),
 	} {
 		if msg := f.runDML(r, q); msg != "" {
 			return msg

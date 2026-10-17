@@ -25,7 +25,8 @@ import (
 //     and updated rows still there;
 //   - CHANGES(TABLE table, start_timestamp DEFAULT NULL, end_timestamp),
 //     on a table with enable_change_history = TRUE: INSERT, DELETE, and
-//     an update as a DELETE (_CHANGE_IS_FOR_UPDATE TRUE) of the old row
+//     an update as a DELETE (_CHANGE_IS_FOR_UPDATE TRUE, changeForUpdateColumn
+//     in the change table) of the old row
 //     and an UPDATE of the new; the range at most one day;
 //   - start NULL is the table's creation, a start before it the creation;
 //     a start before the time travel window fails, and so does a NULL
@@ -202,12 +203,16 @@ func (f front) changeReads(w http.ResponseWriter, r *http.Request, q queryOption
 				return fail(c.dataset, http.StatusBadRequest, "invalidQuery", committedRefused(ref, at))
 			}
 		}
-		cols := "*"
+		// The change table's flag of an update's DELETE is
+		// changeForUpdateColumn (googlesqlite patch 0065), which CHANGES
+		// names _CHANGE_IS_FOR_UPDATE; APPENDS has none. A table of a
+		// column of its own named _CHANGE_IS_FOR_UPDATE keeps it.
+		cols := "* EXCEPT (" + changeForUpdateColumn + "), " + changeForUpdateColumn + " AS _CHANGE_IS_FOR_UPDATE"
 		// The engine's START row marks when the change table was made
 		// (googlesqlite patch 0041, timetravel.go).
 		filter := fmt.Sprintf("_CHANGE_TIMESTAMP >= TIMESTAMP_MICROS(%d) AND _CHANGE_TIMESTAMP < TIMESTAMP_MICROS(%d) AND _CHANGE_TYPE NOT IN ('START', '%s', '%s')", start, stop, changeCarry, changeEnd)
 		if c.name == "APPENDS" {
-			cols = "* EXCEPT (_CHANGE_IS_FOR_UPDATE)"
+			cols = "* EXCEPT (" + changeForUpdateColumn + ")"
 			filter += " AND _CHANGE_TYPE = 'INSERT'"
 		}
 		b.WriteString(q.Query[last:c.pos])
@@ -231,6 +236,12 @@ func (f front) changeReads(w http.ResponseWriter, r *http.Request, q queryOption
 // changeTableSuffix ends the name of a table's change table in the engine
 // (googlesqlite patch 0036).
 const changeTableSuffix = "$changes"
+
+// changeForUpdateColumn is the change table's column that marks the
+// DELETE of an update's old row, CHANGES' _CHANGE_IS_FOR_UPDATE
+// (googlesqlite patch 0065, #1548): a name under the reserved prefix
+// _CHANGE_TYPE, so that no table's own column has it.
+const changeForUpdateColumn = "_CHANGE_TYPE_FOR_UPDATE"
 
 // changeWindow evaluates the window of c, a call on the table ref made at
 // created (milliseconds), as microseconds since the epoch: [start, stop).

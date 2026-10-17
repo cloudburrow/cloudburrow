@@ -91,7 +91,7 @@ type droppedTable struct {
 	// MATERIALIZED_VIEW (its resource only) or SNAPSHOT (its rows, Final)
 	// (#1483, droppedkeep.go), or EXTERNAL (its resource only, #1522).
 	Kind string `json:"kind,omitempty"`
-	// ForUpdate: Copy keeps each change's _CHANGE_IS_FOR_UPDATE (#1483).
+	// ForUpdate: Copy keeps each change's update flag (#1483).
 	ForUpdate bool `json:"forUpdate,omitempty"`
 	// Extras are the front's own records of the table (droppedkeep.go).
 	Extras *keptExtras `json:"extras,omitempty"`
@@ -374,8 +374,8 @@ func (f front) keepTable(r *http.Request, dataset, table string, hours int64) (d
 	}
 	if !snapshot && run(fmt.Sprintf("CREATE TABLE %s AS SELECT %s, _CHANGE_TYPE AS _cloudburrow_change, googlesqlite_change_micros AS "+
 		"_cloudburrow_micros, googlesqlite_change_rowid AS _cloudburrow_rowid, rowid AS _cloudburrow_order, "+
-		"_CHANGE_IS_FOR_UPDATE AS _cloudburrow_for_update FROM %s",
-		dest, list, quotePath([]string{project, dataset, table + changeTableSuffix}))) {
+		"%s AS _cloudburrow_for_update FROM %s",
+		dest, list, changeForUpdateColumn, quotePath([]string{project, dataset, table + changeTableSuffix}))) {
 		d.ForUpdate = true
 		return d, true
 	}
