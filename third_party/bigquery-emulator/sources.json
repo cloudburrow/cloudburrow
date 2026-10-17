@@ -83,7 +83,8 @@
         "patches/googlesqlite/0036-change-history.patch",
         "patches/googlesqlite/0041-change-row-identities.patch",
         "patches/googlesqlite/0044-replaced-history-and-clock.patch",
-        "patches/googlesqlite/0047-default-time-zone-of-a-query.patch"
+        "patches/googlesqlite/0047-default-time-zone-of-a-query.patch",
+        "patches/googlesqlite/0049-struct-float-type.patch"
       ]
     },
     {
