@@ -189,7 +189,7 @@ func (p secretsProvider) secretIAM(project string, path []string) (iamServer, st
 	if project == "" {
 		return nil, "", errors.New("choose a project first")
 	}
-	return secrets.NewGRPCServer(st), "projects/" + project + "/secrets/" + lastSegment(path[0]), nil
+	return secrets.NewGRPCServer(st), secrets.SecretName(secretAt(project, path[0])), nil
 }
 
 func (p secretsProvider) GetPolicy(ctx context.Context, project string, path []string) (console.Policy, error) {

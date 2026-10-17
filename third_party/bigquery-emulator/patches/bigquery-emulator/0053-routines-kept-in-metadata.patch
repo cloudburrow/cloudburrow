@@ -1,0 +1,150 @@
+CloudBurrow patch 53 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1522). Applies after patch 0045.
+
+routines.insert made the function in the engine's catalog alone, and
+routines.get and routines.list, which read the emulator's metadata store,
+were stubs ("unsupported bigquery.routines.get", 500). So CloudBurrow's
+front, which serves those methods from what it sees made, knew nothing of
+a function routines.insert made before it started, and a deletion of its
+dataset could not keep it for undelete. The patch keeps each Routine
+routines.insert makes in the metadata store (replacing one of the same
+ID), with creation and modification times by the engine's clock, and
+routines.get and routines.list answer what it keeps.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the
+MIT License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -2516,7 +2516,7 @@
+ }
+ 
+ func (h *routinesGetHandler) Handle(ctx context.Context, r *routinesGetRequest) (*bigqueryv2.Routine, error) {
+-	return nil, fmt.Errorf("unsupported bigquery.routines.get")
++	return r.routine.Content() // CloudBurrow patch (#1522)
+ }
+ 
+ func (h *routinesInsertHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+@@ -2560,6 +2560,12 @@
+ 	}
+ 	defer tx.RollbackIfNotCommitted()
+ 	if err := r.server.contentRepo.AddRoutineByMetaData(ctx, tx, r.routine); err != nil {
++		return nil, err
++	}
++	// CloudBurrow patch (cloudburrow/cloudburrow#1522): the Routine is
++	// kept in the metadata store too, which routines.get and
++	// routines.list read (cloudburrow_routines.go).
++	if err := keepRoutine(ctx, r.server, tx.Tx(), r.project.ID, r.dataset, r.routine); err != nil {
+ 		return nil, err
+ 	}
+ 	if err := tx.Commit(); err != nil {
+@@ -2592,14 +2598,18 @@
+ }
+ 
+ func (h *routinesListHandler) Handle(ctx context.Context, r *routinesListRequest) (*bigqueryv2.ListRoutinesResponse, error) {
+-	var routineList []*bigqueryv2.Routine
++	// CloudBurrow patch (#1522): each Routine the metadata store keeps.
++	routineList := []*bigqueryv2.Routine{}
+ 	for _, routine := range r.dataset.Routines() {
+-		_ = routine
+-		routineList = append(routineList, &bigqueryv2.Routine{})
++		content, err := routine.Content()
++		if err != nil {
++			return nil, err
++		}
++		routineList = append(routineList, content)
+ 	}
+ 	return &bigqueryv2.ListRoutinesResponse{
+ 		Routines: routineList,
+-	}, fmt.Errorf("unsupported bigquery.routines.list")
++	}, nil
+ }
+ 
+ func (h *routinesUpdateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+--- /dev/null
++++ b/internal/metadata/cloudburrow_routine.go
+@@ -0,0 +1,21 @@
++package metadata
++
++import (
++	"encoding/json"
++
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++)
++
++// Content is the Routine resource kept of r (CloudBurrow patch,
++// cloudburrow/cloudburrow#1522).
++func (r *Routine) Content() (*bigqueryv2.Routine, error) {
++	b, err := json.Marshal(r.metadata)
++	if err != nil {
++		return nil, err
++	}
++	var content bigqueryv2.Routine
++	if err := json.Unmarshal(b, &content); err != nil {
++		return nil, err
++	}
++	return &content, nil
++}
+--- /dev/null
++++ b/server/cloudburrow_routines.go
+@@ -0,0 +1,57 @@
++package server
++
++import (
++	"context"
++	"database/sql"
++	"encoding/json"
++
++	"github.com/goccy/googlesqlite"
++	bigqueryv2 "google.golang.org/api/bigquery/v2"
++
++	"github.com/goccy/bigquery-emulator/internal/metadata"
++)
++
++// keepRoutine records routine, which routines.insert just made in the
++// engine, in the metadata store (CloudBurrow patch,
++// cloudburrow/cloudburrow#1522). The emulator made the function in the
++// engine's catalog alone, so routines.get and routines.list, which read
++// the metadata store, had nothing of it (they were stubs, answering
++// "unsupported"). CloudBurrow's front serves those methods itself, and
++// reads the emulator's when it needs the definition of a function it did
++// not see made: one routines.insert made before the front started, when a
++// deletion of its dataset is kept for undelete. A routine made again
++// under the same ID replaces the one kept. The creation and modification
++// times are the engine's clock, the front's (googlesqlite.Now).
++func keepRoutine(ctx context.Context, server *Server, tx *sql.Tx, projectID string, dataset *metadata.Dataset, routine *bigqueryv2.Routine) error {
++	ref := routine.RoutineReference
++	if ref == nil || ref.RoutineId == "" {
++		return nil
++	}
++	kept := *routine
++	keptRef := *ref
++	if keptRef.ProjectId == "" {
++		keptRef.ProjectId = projectID
++	}
++	if keptRef.DatasetId == "" {
++		keptRef.DatasetId = dataset.ID
++	}
++	kept.RoutineReference = &keptRef
++	now := googlesqlite.Now().UnixMilli()
++	if kept.CreationTime == 0 {
++		kept.CreationTime = now
++	}
++	kept.LastModifiedTime = now
++	b, err := json.Marshal(&kept)
++	if err != nil {
++		return err
++	}
++	var m map[string]interface{}
++	if err := json.Unmarshal(b, &m); err != nil {
++		return err
++	}
++	r := metadata.NewRoutine(server.metaRepo, keptRef.ProjectId, keptRef.DatasetId, keptRef.RoutineId, m)
++	if dataset.Routine(keptRef.RoutineId) != nil {
++		return server.metaRepo.UpdateRoutine(ctx, tx, r)
++	}
++	return server.metaRepo.AddRoutine(ctx, tx, r)
++}

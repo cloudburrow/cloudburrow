@@ -97,3 +97,60 @@ func TestCloudSQLConsoleExternalPrimary(t *testing.T) {
 		t.Errorf("startExternalSync body %s", b)
 	}
 }
+
+// TestCloudSQLConsoleExternalPostgres (#1524): a PostgreSQL source
+// representation instance is created with its selected databases, and a
+// replica of it, which has no mysqlReplicaConfiguration, offers the sync
+// actions, whose sync mode OFFLINE reaches startExternalSync.
+func TestCloudSQLConsoleExternalPostgres(t *testing.T) {
+	var mu sync.Mutex
+	bodies := map[string]string{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies[r.Method+" "+r.URL.Path] = string(b)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/pgsrc"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "pgsrc", "state": "RUNNABLE", "databaseVersion": "POSTGRES_16",
+				"instanceType": "ON_PREMISES_INSTANCE", "onPremisesConfiguration": map[string]any{"hostPort": "10.0.0.6:5432"}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/pgrep"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "pgrep", "state": "RUNNABLE", "databaseVersion": "POSTGRES_17",
+				"instanceType": "READ_REPLICA_INSTANCE", "masterInstanceName": "proj:pgsrc",
+				"replicaConfiguration": map[string]any{"failoverTarget": false},
+				"settings":             map[string]any{"tier": "db-custom-1-3840", "databaseReplicationEnabled": true}})
+		case r.Method == http.MethodGet:
+			_, _ = io.WriteString(w, `{}`)
+		default:
+			_, _ = io.WriteString(w, `{"kind":"sql#operation","name":"op","status":"DONE"}`)
+		}
+	}))
+	defer ts.Close()
+	p := cloudSQLInstancesProvider{endpoint: strings.TrimPrefix(ts.URL, "http://"), versions: []string{"POSTGRES_16", "POSTGRES_17"}}
+	ctx := context.Background()
+	if _, err := p.Create(ctx, "proj", map[string]string{"name": "pgsrc", "databaseVersion": "POSTGRES_16",
+		"sourceHostPort": "10.0.0.6:5432", "sourceUser": "repl", "sourceDatabases": "shop, crm"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances"]; !strings.Contains(b, `"selectedObjects":[{"database":"shop"},{"database":"crm"}]`) {
+		t.Errorf("insert body %s", b)
+	}
+	d, err := p.Detail(ctx, "proj", []string{"pgrep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, a := range d.Actions {
+		ids[a.ID] = true
+	}
+	if !ids["verify-external-sync"] || !ids["start-external-sync"] {
+		t.Errorf("a PostgreSQL external replica's actions: %v", ids)
+	}
+	if err := p.ActAt(ctx, "proj", []string{"pgrep"}, "start-external-sync", map[string]string{"syncMode": "OFFLINE"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/pgrep/startExternalSync"]; !strings.Contains(b, `"syncMode":"OFFLINE"`) {
+		t.Errorf("startExternalSync body %s", b)
+	}
+}

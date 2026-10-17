@@ -166,11 +166,9 @@ func TestBigQueryCreateSchemaOptionsAndCollation(t *testing.T) {
 		if tm.DefaultCollation != "und:ci" || tm.Schema[0].Collation != "und:ci" || tm.Schema[1].Collation != "" {
 			t.Errorf("%s: defaultCollation %q, columns %q %q", name, tm.DefaultCollation, tm.Schema[0].Collation, tm.Schema[1].Collation)
 		}
-		// BigQuery collates r.x too; the engine collates only a
-		// top-level STRING column, so r.x has none here rather than one
-		// it would ignore (#1508, docs/compatibility.md).
-		if name == "ddl" && tm.Schema[2].Schema[0].Collation != "" {
-			t.Errorf("ddl: r.x collation %q, want none here", tm.Schema[2].Schema[0].Collation)
+		// BigQuery collates r.x too, and so does the engine since #1516.
+		if name == "ddl" && tm.Schema[2].Schema[0].Collation != "und:ci" {
+			t.Errorf("ddl: r.x collation %q, want und:ci", tm.Schema[2].Schema[0].Collation)
 		}
 	}
 	got := queryRows(t, ctx, c, project, id, "SELECT STRING_AGG(CONCAT(table_name, '.', column_name, ':', IFNULL(collation_name, '-')), ',' "+

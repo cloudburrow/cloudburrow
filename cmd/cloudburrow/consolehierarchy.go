@@ -72,7 +72,7 @@ func (p hierarchyProvider) folders() (map[string]resourcemanager.Folder, []resou
 
 const hierarchyNote = "One local organization, " + resourcemanager.OrganizationName + " (" + resourcemanager.OrganizationDomain +
 	"), fixed on every instance; folders nest under it up to 10 deep. A folder is deleted only when it is empty, " +
-	"and is then kept DELETE_REQUESTED for 30 days, when Undelete folder restores it. Folder and organization IAM policies are stored, never enforced and inherited by nothing (ADR-0006, #1368), and read through the API, gcloud and Terraform."
+	"and is then kept DELETE_REQUESTED for 30 days, when Undelete folder restores it. Folder and organization IAM policies are stored, never enforced and inherited by nothing (ADR-0006, #1368); each is on its page's Permissions tab."
 
 func (p hierarchyProvider) List(context.Context, string) (console.Listing, error) {
 	l := console.Listing{NameColumn: "Folder ID", Columns: []string{"Name", "Path", "Parent", "Created"}, Noun: "folders", Note: hierarchyNote}
@@ -86,6 +86,9 @@ func (p hierarchyProvider) List(context.Context, string) (console.Listing, error
 			"Name": f.DisplayName, "Path": rmFolderPath(byName, f), "Parent": parentText(byName, f.Parent), "Created": consoleTime(f.CreateTime)}})
 	}
 	l.Total = len(l.Items)
+	// The organization above its folders, opening its own page (#1554).
+	l.Summary = []console.PropertyGroup{{Heading: "Organization", Properties: []console.Property{
+		{Label: "Organization", Value: resourcemanager.OrganizationDomain + " (" + resourcemanager.OrganizationName + ")", Link: organizationLink}}}}
 	return l, nil
 }
 
@@ -137,9 +140,12 @@ func (p hierarchyProvider) Delete(_ context.Context, _ string, name string) erro
 	return err
 }
 
-func (p hierarchyProvider) Detail(_ context.Context, _ string, path []string) (console.Detail, error) {
+func (p hierarchyProvider) Detail(ctx context.Context, _ string, path []string) (console.Detail, error) {
 	if len(path) > 1 {
 		return console.DeeperThan(1, path), nil
+	}
+	if isOrganizationPath(path) {
+		return p.organizationDetail(ctx), nil
 	}
 	byName, all, err := p.folders()
 	if err != nil {
@@ -159,6 +165,18 @@ func (p hierarchyProvider) Detail(_ context.Context, _ string, path []string) (c
 	}
 	if f.DeleteTime != "" {
 		props = append(props, console.Property{Label: "Deleted", Value: consoleTime(f.DeleteTime)})
+	}
+	// folders.capabilities.get (#1519).
+	if c, err := p.registry.FolderCapability(f.ID(), appManagement); err == nil {
+		v := "Disabled"
+		if c.Value {
+			v = "Enabled"
+		}
+		props = append(props, console.Property{Label: "App management", Value: v})
+	}
+	// The management project app management makes (#1532).
+	if f.ManagementProject != "" {
+		props = append(props, console.Property{Label: "Management project", Value: strings.TrimPrefix(f.ManagementProject, "projects/")})
 	}
 	children := console.Listing{NameColumn: "Folder ID", Columns: []string{"Name"}, Noun: "folders"}
 	for _, c := range all {
@@ -182,6 +200,7 @@ func (p hierarchyProvider) Detail(_ context.Context, _ string, path []string) (c
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Folder", Properties: props}}},
 			{ID: "folders", Label: "Folders", Listing: children},
 			{ID: "projects", Label: "Projects", Listing: projects},
+			{ID: "org-policies", Label: "Organization policies", Listing: orgPolicyListing(p.registry, f.Name)},
 			tagSection(p.registry, resourcemanager.CRMPrefix+f.Name),
 		},
 	}
@@ -195,7 +214,7 @@ func (p hierarchyProvider) Detail(_ context.Context, _ string, path []string) (c
 }
 
 func (p hierarchyProvider) Edit(_ context.Context, _ string, path []string, values map[string]string) error {
-	if len(path) != 1 {
+	if len(path) != 1 || isOrganizationPath(path) {
 		return fmt.Errorf("only a folder can be edited")
 	}
 	_, err := p.registry.RenameFolder(path[0], strings.TrimSpace(values["displayName"]))
@@ -205,13 +224,22 @@ func (p hierarchyProvider) Edit(_ context.Context, _ string, path []string, valu
 const (
 	folderMove     = "move"
 	folderUndelete = "undelete"
+	// The app-management capability's actions (#1519).
+	folderAppOn  = "enable-app-management"
+	folderAppOff = "disable-app-management"
 )
+
+// appManagement is the one folder capability (folders.capabilities).
+const appManagement = "app-management"
 
 // DetailActions offers Move folder on an active folder and Undelete folder
 // on one pending deletion.
 func (p hierarchyProvider) DetailActions(_ context.Context, _ string, path []string) []console.Action {
 	if len(path) != 1 {
 		return nil
+	}
+	if isOrganizationPath(path) {
+		return orgPolicyActions(p.registry, resourcemanager.OrganizationName, "")
 	}
 	f, err := p.registry.Folder(path[0])
 	if err != nil {
@@ -220,15 +248,28 @@ func (p hierarchyProvider) DetailActions(_ context.Context, _ string, path []str
 	if f.State == resourcemanager.StateDeleteRequested {
 		return []console.Action{{ID: folderUndelete, Label: "Undelete folder"}}
 	}
+	app := console.Action{ID: folderAppOn, Label: "Enable app management"}
+	if c, err := p.registry.FolderCapability(f.ID(), appManagement); err == nil && c.Value {
+		app = console.Action{ID: folderAppOff, Label: "Disable app management"}
+	}
 	return append([]console.Action{{ID: folderMove, Label: "Move folder", Fields: []console.Field{
 		{Name: "parent", Label: "Destination", Type: "select", Required: true, Options: p.parentOptions(f.Name), Default: f.Parent,
 			Help: "The organization, or a folder that is not this one or under it."},
-	}}}, tagActions(p.registry, resourcemanager.CRMPrefix+f.Name)...)
+	}}, app}, append(orgPolicyActions(p.registry, f.Name, ""), tagActions(p.registry, resourcemanager.CRMPrefix+f.Name)...)...)
 }
 
 func (p hierarchyProvider) ActAt(_ context.Context, _ string, path []string, action string, values map[string]string) error {
+	if isOrganizationPath(path) {
+		if ok, err := orgPolicyAct(p.registry, resourcemanager.OrganizationName, action, values); ok {
+			return err
+		}
+		return fmt.Errorf("unknown action %q", action)
+	}
 	if len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
+	}
+	if ok, err := orgPolicyAct(p.registry, "folders/"+strings.TrimPrefix(path[0], "folders/"), action, values); ok {
+		return err
 	}
 	if ok, err := tagAct(p.registry, resourcemanager.CRMPrefix+"folders/"+strings.TrimPrefix(path[0], "folders/"), action, values); ok {
 		return err
@@ -239,6 +280,10 @@ func (p hierarchyProvider) ActAt(_ context.Context, _ string, path []string, act
 		_, err = p.registry.MoveFolder(path[0], values["parent"])
 	case folderUndelete:
 		_, err = p.registry.UndeleteFolder(path[0])
+	case folderAppOn, folderAppOff:
+		// folders.capabilities.patch: stored, nothing acts on it (App Hub
+		// is not served).
+		_, err = p.registry.SetFolderCapability(strings.TrimPrefix(path[0], "folders/"), appManagement, action == folderAppOn)
 	default:
 		err = fmt.Errorf("unknown action %q", action)
 	}

@@ -72,7 +72,7 @@ import (
 //     schema BigQuery takes.
 //   - A load whose job gives a schema: BigQuery's documentation does not
 //     say how it reads a Parquet file by a given schema, so a schema that
-//     is not the file's is 501, and so is referenceFileSchemaUri. The
+//     is not the file's is 501. referenceFileSchemaUri: referencefile.go. The
 //     file's own schema is loaded as if none were given, and so is one
 //     that gives NULLABLE a column the file has REQUIRED (which loads the
 //     same values), a new table then taking the given schema; which modes
@@ -137,9 +137,6 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 	var extra parquetJob
 	_ = decodeJob(r, &extra)
 	el := extra.Configuration.Load
-	if el.ReferenceFileSchemaURI != "" {
-		return notImplemented("with referenceFileSchemaUri, which CloudBurrow does not read")
-	}
 	if dest.ProjectID != "" && dest.ProjectID != projectOf(f.base) {
 		return notImplemented("into another project's table, " + dest.ProjectID + ":" + name +
 			", whose schema CloudBurrow does not check the file's columns against")
@@ -172,6 +169,30 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 		closeBody()
 		writeError(w, status, "notFound", msg)
 		return false
+	}
+	if ref := el.ReferenceFileSchemaURI; ref != "" {
+		// The table's schema is the reference file's (#1457,
+		// referencefile.go).
+		var refCols []*pqCol
+		_, status, msg := f.referenceObject(r, ref)
+		if status == 0 {
+			refCols, _, status, msg = f.parquetFileColumns(r, []string{ref}, opts)
+		}
+		switch status {
+		case 0:
+		case http.StatusBadRequest:
+			return invalid(msg)
+		case http.StatusNotImplemented:
+			return notImplemented(msg)
+		default:
+			closeBody()
+			writeError(w, status, "notFound", msg)
+			return false
+		}
+		if why, code := sameParquetColumns(refCols, cols); code != 0 {
+			return notImplemented("of files whose schema differs from the reference file " + ref + "'s (" + why + ")" +
+				referenceDiffersWhy)
+		}
 	}
 	file := make([]field, len(cols))
 	for i, c := range cols {

@@ -714,7 +714,7 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 		}
 	}
 	for i, p := range plan {
-		if (p.kind == stepDockerBuild || p.kind == stepPack) && src == nil && !containers {
+		if (p.kind == stepDockerBuild || p.kind == stepPack) && src == nil && trig.repoArchive() == nil && !containers {
 			return nil, apierror.InvalidArgument("invalid build: step %d builds /workspace, but the build has no source", i)
 		}
 	}
@@ -738,6 +738,9 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	}
 	if trig != nil {
 		b.BuildTriggerId = trig.id
+		if trig.source != nil {
+			b.Source = proto.Clone(trig.source).(*cbpb.Source)
+		}
 	}
 	if pool != "" {
 		// The pool is recorded as named (#1422); the build runs on the
@@ -792,7 +795,7 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 	_ = s.ops.SetMetadata(op.Name, &cbpb.BuildOperationMetadata{Build: queued})
 
 	r := &buildRun{c: c, name: b.Name, op: op.Name, project: project, plan: plan, deps: deps, src: src.GetStorageSource(),
-		runner: runner, logsBucket: b.LogsBucket, createBucket: createBucket, secretDefs: secretDefs}
+		archive: trig.repoArchive(), runner: runner, logsBucket: b.LogsBucket, createBucket: createBucket, secretDefs: secretDefs}
 	base := context.WithoutCancel(ctx)
 	start := func() {
 		// The build's timeout starts when it runs, not while it waits.
@@ -817,12 +820,15 @@ func (c *CloudBuildServer) createBuild(ctx context.Context, project, location st
 
 // buildRun is one CreateBuild build running.
 type buildRun struct {
-	c            *CloudBuildServer
-	name, op     string
-	project      string
-	plan         []plannedStep
-	deps         [][]int // each step's waitFor, as step indexes
-	src          *cbpb.StorageSource
+	c        *CloudBuildServer
+	name, op string
+	project  string
+	plan     []plannedStep
+	deps     [][]int // each step's waitFor, as step indexes
+	src      *cbpb.StorageSource
+	// archive, when set, is the build's /workspace from a repository
+	// push (securesourcemanagergit.go, #1521), in place of src.
+	archive      func(context.Context) (io.ReadCloser, error)
 	runner       StepRunner     // nil: no arbitrary steps
 	ws           BuildWorkspace // the build's /workspace, with runner
 	logsBucket   string
@@ -972,6 +978,9 @@ func (r *buildRun) run(ctx context.Context, cancel context.CancelFunc) {
 	if r.src != nil {
 		r.logf("Fetching storage object: gs://%s/%s#%d\n", r.src.GetBucket(), r.src.GetObject(), r.src.GetGeneration())
 	}
+	if r.archive != nil {
+		r.logf("Fetching the pushed commit's tree\n")
+	}
 	var once sync.Once
 	failed := func(status cbpb.Build_Status, step int, detail string) {
 		once.Do(func() {
@@ -1026,6 +1035,14 @@ func (r *buildRun) run(ctx context.Context, cancel context.CancelFunc) {
 		var archive io.Reader
 		if r.src != nil {
 			rc, err := r.c.builds.fetch.Fetch(ctx, r.src.GetBucket(), r.src.GetObject(), r.src.GetGeneration())
+			if err != nil {
+				failed(cbpb.Build_FAILURE, -1, "failed to fetch source: "+firstLine(err.Error()))
+				return
+			}
+			defer rc.Close()
+			archive = rc
+		} else if r.archive != nil {
+			rc, err := r.archive(ctx)
 			if err != nil {
 				failed(cbpb.Build_FAILURE, -1, "failed to fetch source: "+firstLine(err.Error()))
 				return
@@ -1261,6 +1278,8 @@ func (r *buildRun) runStep(ctx context.Context, p plannedStep, w *stepWriter) er
 		if r.ws != nil {
 			// What earlier steps wrote to /workspace is built.
 			rc, err = r.ws.Archive(ctx)
+		} else if r.archive != nil {
+			rc, err = r.archive(ctx)
 		} else {
 			rc, err = r.c.builds.fetch.Fetch(ctx, r.src.GetBucket(), r.src.GetObject(), r.src.GetGeneration())
 		}

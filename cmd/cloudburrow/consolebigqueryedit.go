@@ -422,6 +422,8 @@ func (p bigqueryProvider) ActAt(ctx context.Context, project string, path []stri
 		return err
 	}
 	switch {
+	case action == actUndeleteDataset && len(path) == 0: // #1552, consolebigqueryundelete.go
+		return p.undeleteDataset(ctx, values)
 	case action == "createtable" && len(path) == 1:
 		return p.createTable(ctx, path[0], values)
 	case action == actEditDataset && len(path) == 1:

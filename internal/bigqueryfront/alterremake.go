@@ -147,6 +147,9 @@ func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte
 			return failWith(http.StatusBadRequest, "invalidQuery", "Column not found: "+a.column+" in table "+name, text)
 		}
 		if a.kind == "set type" {
+			if msg := collationRetypeRefused(cols[i].field, a.field, a.column); msg != "" { // #1516, collationddl.go
+				return failWith(http.StatusBadRequest, "invalidQuery", msg, text)
+			}
 			code, msg := coercion(cols[i].field, a.field)
 			switch {
 			case code == http.StatusBadRequest:

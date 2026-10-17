@@ -57,7 +57,7 @@ func TestRESTLifecycle(t *testing.T) {
 		status, names           string
 	}{
 		{"unbound version verb", "POST", key + "/cryptoKeyVersions/1:nope", "{}", 404, "NOT_FOUND", ":nope"},
-		{"bound, not transcoded", "POST", key + "/cryptoKeyVersions:importTrustedKeyWrappedCryptoKeyVersion", `{}`, 501, "UNIMPLEMENTED", "ImportTrustedKeyWrappedCryptoKeyVersion"},
+		{"refused 501 with the reason", "POST", key + "/cryptoKeyVersions:importTrustedKeyWrappedCryptoKeyVersion", `{"importingKey":"k","cryptoKeyVersion":"v"}`, 501, "UNIMPLEMENTED", "re-import"},
 		{"sign with a symmetric key", "POST", key + "/cryptoKeyVersions/1:asymmetricSign", `{"data":"aGk="}`, 400, "FAILED_PRECONDITION", "purpose"},
 		{"DeleteCryptoKey with versions", "DELETE", key, "", 400, "FAILED_PRECONDITION", "DeleteCryptoKeyVersion first"},
 		{"DeleteCryptoKeyVersion not destroyed", "DELETE", key + "/cryptoKeyVersions/1", "", 400, "FAILED_PRECONDITION", "DESTROYED"},

@@ -82,6 +82,14 @@ func TestConsoleArtifactRegistryImagesAndTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = p.ActAt(ctx, "", []string{"images"}, "vpcsc", map[string]string{"policy": "DENY"})
+	// #1519: the location's projectConfig platform logs.
+	if err := p.ActAt(ctx, "", []string{"images"}, "platform-logs", map[string]string{"state": "ENABLED", "severity": "WARNING"}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := p.Detail(ctx, "", []string{"images"}); !strings.Contains(fmt.Sprint(d.Summary), "ENABLED, severity WARNING") {
+		t.Errorf("platform logs = %v", d.Summary)
+	}
+	_ = p.ActAt(ctx, "", []string{"images"}, "platform-logs", map[string]string{"state": "LOGGING_STATE_UNSPECIFIED", "severity": "SEVERITY_LEVEL_UNSPECIFIED"})
 	file := d.Sections[0].Listing.Items[0].Name
 	if err := p.ActAt(ctx, "", vpath, "annotate-file", map[string]string{"file": file, "annotations": "scan=ok"}); err != nil {
 		t.Fatal(err)

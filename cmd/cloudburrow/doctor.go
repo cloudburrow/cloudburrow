@@ -35,6 +35,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	arch := daemonArch(ctx, prefetch.ExecRunner{})
 	report.Results = append(report.Results, storageEmbedResult(cfg, arch), bigQueryEmbedResult(cfg, arch))
 	report.Results = append(report.Results, offlineCacheResult(ctx, cfg, prefetch.ExecRunner{}, report))
+	report.Results = append(report.Results, ephemeralPortsResult(cfg))
 	report.Write(stdout)
 
 	if report.Blocking() {

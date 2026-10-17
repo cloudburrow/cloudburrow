@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16), #1527 (Secure Source Manager instances and repositories, 2026-10-17)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -412,11 +412,29 @@ them, and so reverses rule 3 for audit configs on the resources Google keeps the
    tag key's and value's page.
 6. Every compatibility.md row for these methods reads ***Stored, not enforced***.
 
+### Secure Source Manager instances and repositories (amended by #1527)
+
+`SecureSourceManager.GetIamPolicyRepo`, `SetIamPolicyRepo` and `TestIamPermissionsRepo` on
+`projects/*/locations/*/repositories/*`, and the `google.iam.v1.IAMPolicy` mixin on
+`projects/*/locations/*/instances/*`, store a policy as Artifact Registry's do, with the same
+rules: nothing enforces it, a stale `etag` is ABORTED, conditions are UNIMPLEMENTED, and the test
+methods grant every permission on a resource that exists. #1521 served the instances and
+repositories, and Terraform's `google_secure_source_manager_instance_iam_*` and
+`_repository_iam_*`, and gcloud source-manager's IAM commands, otherwise failed on the first
+call. The instance mixin is served on the JSON API only (`/securesourcemanager/v1/…` on the Run
+port), since the Run port's gRPC `IAMPolicy` service is Cloud Functions'. A policy is saved with
+the instances and repositories in their state file and removed with its resource, so one made
+again under the same name starts with none. Required tests: `TestSecureSourceManagerIAM` (the
+official client, gRPC and REST), `TestTerraformSecureSourceManager` (`_repository_iam_member`,
+`_instance_iam_member`), and the console's Permissions tab on an instance's and a repository's
+page. Every compatibility.md row for these methods reads ***Stored, not enforced***.
+
 Every service other than these nine (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
 Storage's buckets and their ACLs, Cloud Run's services and jobs, BigQuery's tables, routines and row
 access policies, Pub/Sub's topics, subscriptions, snapshots and schemas, Resource Manager's
 projects, folders and organization, and Artifact Registry's repositories), and Spanner's instances and databases, Bigtable's
-tables and Resource Manager's tag keys and values (#1486), keeps its current behaviour.
+tables and Resource Manager's tag keys and values (#1486), and Secure Source Manager's instances and
+repositories (#1527), keeps its current behaviour.
 
 ## Consequences
 

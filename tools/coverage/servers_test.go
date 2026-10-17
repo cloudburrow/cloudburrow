@@ -67,6 +67,10 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	redis := redisadmin.NewServer(redisadmin.Instance{Project: "coverage"}, nil)
 	redis.EnableCreate(context.Background(), nil, nil, nil, nil)
 	redis.Register(srv)
+	redis.EnableClusters(context.Background(), nil, nil, nil)
+	redisadmin.NewClusterServer(redis).Register(srv)
+	redis.EnableValkey(context.Background(), nil, nil, nil)
+	redisadmin.NewMemorystoreServer(redis).Register(srv)
 	vertexai.NewServer(nil).RegisterGRPC(srv)
 	adminpb.RegisterFirestoreAdminServer(srv, firestoreadmin.New(""))
 	logging.NewAdmin(store.NewMemory()).Register(srv)
@@ -83,6 +87,7 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	runSrv.Builds(nil, nil).Register(srv)
 	runSrv.ArtifactRegistry().Register(srv)
 	runSrv.CloudBuild().Register(srv)
+	runSrv.SecureSourceManager(func() string { return "" }).Register(srv)
 	// FunctionService alone: its IAM and Locations mixins are KMS's above;
 	// and Cloud Functions v1 (#1428) over the same functions.
 	fns := runSrv.Functions(runSrv.Builds(nil, nil), func() string { return "" })
@@ -114,10 +119,21 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 		if strings.HasPrefix(m, "sql.") || strings.HasPrefix(m, "serviceusage.") || strings.HasPrefix(m, "backupdr.") {
 			continue
 		}
+		// Cloud Run v1's is the adapter's method table, and
+		// TestV1EveryUnservedMethodIsNotImplemented checks its 501s through
+		// the official v1 client (internal/adapter/run).
+		if strings.HasPrefix(m, "run.") {
+			continue
+		}
 		// The Cloud Storage gRPC API's proto is registered under
 		// CloudBurrow's own name, so TestGRPCRegistryMatchesTheServer checks
 		// it in its own package (internal/service/storage).
-		if strings.HasPrefix(m, "google.storage.v2.") {
+		if strings.HasPrefix(m, "google.storage.v2.") || strings.HasPrefix(m, "google.storage.control.v2.") {
+			continue
+		}
+		// Folder capabilities are v3 REST only (#1519), checked over HTTP
+		// by TestFolderCapabilities (internal/service/resourcemanager).
+		if strings.HasPrefix(m, "cloudresourcemanager.folders.capabilities.") {
 			continue
 		}
 		methods = append(methods, m)

@@ -107,11 +107,13 @@ func (p cloudSQLInstancesProvider) CreateForm() (string, []console.Field) {
 		{Name: "pitr", Label: "Point-in-time recovery", Type: "checkbox",
 			Help: "Keeps the transaction log, PostgreSQL's archived WAL or MySQL's binary log, so a clone can be restored to any time since the instance started."},
 		{Name: "sourceHostPort", Label: "External server host:port (source representation)", Type: "text",
-			Help: "Set to record a MySQL server outside Cloud SQL as a source representation instance (ON_PREMISES_INSTANCE) instead: " +
-				"no server runs for it; create a read replica of it, then Start external sync. Another CloudBurrow instance is sqlinst-NAME:3306."},
+			Help: "Set to record a MySQL or PostgreSQL server outside Cloud SQL as a source representation instance (ON_PREMISES_INSTANCE) instead: " +
+				"no server runs for it; create a read replica of it, then Start external sync. Another CloudBurrow instance is sqlinst-NAME:3306 (MySQL) or sqlinst-NAME:5432 (PostgreSQL)."},
 		{Name: "sourceUser", Label: "External server replication user", Type: "text",
 			Help: "The user the replica connects to the external server as."},
 		{Name: "sourcePassword", Label: "External server replication password", Type: "password"},
+		{Name: "sourceDatabases", Label: "External server databases (PostgreSQL)", Type: "text",
+			Help: "Comma-separated databases to migrate (selectedObjects); empty migrates every database but the templates."},
 	}
 }
 
@@ -170,7 +172,7 @@ func (p cloudSQLInstancesProvider) Create(ctx context.Context, project string, v
 		_, err = svc.Instances.Insert(project, &sqladminapi.DatabaseInstance{Name: name, DatabaseVersion: v["databaseVersion"],
 			InstanceType: "ON_PREMISES_INSTANCE", Region: regionOr(v["region"]),
 			OnPremisesConfiguration: &sqladminapi.OnPremisesConfiguration{HostPort: hp, Username: strings.TrimSpace(v["sourceUser"]),
-				Password: v["sourcePassword"]}}).Context(ctx).Do()
+				Password: v["sourcePassword"], SelectedObjects: selectedObjects(v["sourceDatabases"])}}).Context(ctx).Do()
 		if err != nil {
 			return "", sqlAPIError(err)
 		}
@@ -357,8 +359,9 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
 	d.Actions = append(d.Actions, failoverActions(in)...)
-	d.Actions = append(d.Actions, externalSyncActions(in)...)
+	d.Actions = append(d.Actions, externalSyncActions(in, externalReplica(ctx, svc, project, in))...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
+	d.Actions = append(d.Actions, storageActions(in)...)
 	if pitr == "On" && strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
 		d.Actions = append(d.Actions, console.Action{ID: "binlog-clone", Label: "Clone to binary log position", Fields: []console.Field{
 			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$",
@@ -505,16 +508,55 @@ func sourceRepDetail(in *sqladminapi.DatabaseInstance) console.Detail {
 // externalSyncActions are Verify external sync settings and Start external
 // sync on a replica of a source representation instance (#1501), before
 // its sync has started.
-func externalSyncActions(in *sqladminapi.DatabaseInstance) []console.Action {
-	if in.ReplicaConfiguration == nil || in.ReplicaConfiguration.MysqlReplicaConfiguration == nil {
+func externalSyncActions(in *sqladminapi.DatabaseInstance, external bool) []console.Action {
+	if !external {
 		return nil
 	}
-	return []console.Action{{ID: "verify-external-sync", Label: "Verify external sync settings", Fields: []console.Field{{
+	mode := console.Field{Name: "syncMode", Label: "Sync mode", Type: "select", Options: []string{"ONLINE", "OFFLINE"},
+		Help: "ONLINE copies the external server's databases and goes on replicating; OFFLINE only copies them (#1524)."}
+	return []console.Action{{ID: "verify-external-sync", Label: "Verify external sync settings", Fields: []console.Field{mode, {
 		Name: "verifyConnectionOnly", Label: "Check the connection only", Type: "checkbox",
 		Help: "Only whether the replica's replication user can connect to the external server."}}},
-		{ID: "start-external-sync", Label: "Start external sync", Fields: []console.Field{{Name: "skipVerification",
+		{ID: "start-external-sync", Label: "Start external sync", Fields: []console.Field{mode, {Name: "skipVerification",
 			Label: "Skip verification", Type: "checkbox"}},
-			Confirm: "The external server's databases are dumped into this replica, which then replicates from it."}}
+			Confirm: "The external server's databases are copied into this replica, which then replicates from it unless the sync is OFFLINE."}}
+}
+
+// externalReplica reports whether in is a replica of a source
+// representation instance: a MySQL one says so in its
+// mysqlReplicaConfiguration, a PostgreSQL one (#1524) by its primary.
+func externalReplica(ctx context.Context, svc *sqladminapi.Service, project string, in *sqladminapi.DatabaseInstance) bool {
+	if in.ReplicaConfiguration != nil && in.ReplicaConfiguration.MysqlReplicaConfiguration != nil {
+		return true
+	}
+	if in.MasterInstanceName == "" || strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
+		return false
+	}
+	_, master, _ := strings.Cut(in.MasterInstanceName, ":")
+	if master == "" {
+		master = in.MasterInstanceName
+	}
+	m, err := svc.Instances.Get(project, master).Context(ctx).Do()
+	return err == nil && m.InstanceType == "ON_PREMISES_INSTANCE"
+}
+
+// syncMode is a sync action's syncMode, ONLINE by default.
+func syncMode(v map[string]string) string {
+	if v["syncMode"] == "OFFLINE" {
+		return "OFFLINE"
+	}
+	return "ONLINE"
+}
+
+// selectedObjects are a comma-separated list's databases.
+func selectedObjects(v string) []*sqladminapi.SelectedObjects {
+	var out []*sqladminapi.SelectedObjects
+	for _, d := range strings.Split(v, ",") {
+		if d = strings.TrimSpace(d); d != "" {
+			out = append(out, &sqladminapi.SelectedObjects{Database: d})
+		}
+	}
+	return out
 }
 
 // replicaActions are Create read replica on a primary, and Promote, Stop
@@ -681,7 +723,7 @@ func (p cloudSQLInstancesProvider) ActAtResult(ctx context.Context, project stri
 			return nil, err
 		}
 		res, err := svc.Projects.Instances.VerifyExternalSyncSettings(project, path[0],
-			&sqladminapi.SqlInstancesVerifyExternalSyncSettingsRequest{SyncMode: "ONLINE",
+			&sqladminapi.SqlInstancesVerifyExternalSyncSettingsRequest{SyncMode: syncMode(v),
 				VerifyConnectionOnly: v["verifyConnectionOnly"] == "true"}).Context(ctx).Do()
 		if err != nil {
 			return nil, sqlAPIError(err)
@@ -693,6 +735,14 @@ func (p cloudSQLInstancesProvider) ActAtResult(ctx context.Context, project stri
 		}
 		out.Total = len(out.Items)
 		return out, nil
+	}
+	if action == "storage-shrink-config" && len(path) == 1 {
+		svc, err := p.api(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out, _, err := storageResult(ctx, svc, project, path[0], action)
+		return out, err
 	}
 	if (action == "run-sql" || action == "precheck-upgrade") && len(path) == 1 {
 		svc, err := p.api(ctx)
@@ -784,7 +834,7 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 		}
 	case "start-external-sync":
 		_, err = svc.Projects.Instances.StartExternalSync(project, name, &sqladminapi.SqlInstancesStartExternalSyncRequest{
-			SyncMode: "ONLINE", SkipVerification: v["skipVerification"] == "true"}).Context(ctx).Do()
+			SyncMode: syncMode(v), SkipVerification: v["skipVerification"] == "true"}).Context(ctx).Do()
 	case "promote-replica":
 		_, err = svc.Instances.PromoteReplica(project, name).Context(ctx).Do()
 	case "stop-replica":
@@ -842,6 +892,9 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 			return err
 		}
 		if ok, err := dataAPIAct(ctx, svc, project, name, action, v); ok {
+			return err
+		}
+		if ok, err := storageAct(ctx, svc, project, name, action, v); ok {
 			return err
 		}
 		return fmt.Errorf("unknown action %q", action)

@@ -273,8 +273,8 @@ eval "$(cloudburrow gcloud-teardown)"  # unset CLOUDSDK_ACTIVE_CONFIG_NAME
 gcloud's configuration directory (`CLOUDSDK_CONFIG`, or `~/.config/gcloud`). It sets
 `core/project`, turns on `auth/disable_credentials` and names the ADC fixture. It writes
 `api_endpoint_overrides` **only** for the services whose gcloud use is Verified below.
-Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `cloudresourcemanager`, `serviceusage`, `sql`, `redis`, `bigtableadmin`, `spanner`, `firestore` and `backupdr` (the Backup and DR Service, with `backupdr` and a Cloud SQL service, #1433)
-(written whatever `--services` selects, since Resource Manager and Service Usage are always served; `sql` with either Cloud SQL service; `redis`, the Memorystore admin API, with `memorystore`; `bigtableadmin`, Bigtable's admin REST API on the Bigtable port, with `bigtable`, #1440; `spanner`, Spanner's admin REST port, with `spanner`, and `firestore`, the Firestore Admin API on the Firestore port, with `firestore`, #1461). `run` (#1293) is
+Overrides written: `storage`, `pubsub`, `cloudkms`, `secretmanager`, `cloudtasks`, `cloudscheduler`, `logging`, `run`, `artifactregistry`, `cloudbuild`, `cloudfunctions`, `securesourcemanager`, `cloudresourcemanager`, `serviceusage`, `sql`, `redis`, `memorystore`, `bigtableadmin`, `spanner`, `firestore` and `backupdr` (the Backup and DR Service, with `backupdr` and a Cloud SQL service, #1433)
+(written whatever `--services` selects, since Resource Manager and Service Usage are always served; `sql` with either Cloud SQL service; `redis`, the Memorystore admin API, and `memorystore`, its Memorystore for Valkey JSON under `/memorystore/` (#1519), with `memorystore`; `bigtableadmin`, Bigtable's admin REST API on the Bigtable port, with `bigtable`, #1440; `spanner`, Spanner's admin REST port, with `spanner`, and `firestore`, the Firestore Admin API on the Firestore port, with `firestore`, #1461). `run` (#1293) is
 `http://run.localhost:<port>/` on a loopback bind: gcloud run calls `{region}-{host}` for a
 command given `--region`, and `us-central1-run.localhost` is still loopback. `cloudresourcemanager`
 is `http://cloudresourcemanager.localhost:<port>/` on a loopback bind for the same reason (#1350):
@@ -287,7 +287,9 @@ refuses every domain as not verified, since no domain is verified without Search
 `artifactregistry` and `cloudbuild` (#1347) are the Run port too, which serves the Artifact
 Registry repository calls and the Cloud Build builds and operations `gcloud run deploy --source`
 and `gcloud builds submit` make. `cloudfunctions` (#1377) is the Run port as well, which serves
-Cloud Functions v2 for `gcloud functions … --gen2`.
+Cloud Functions v2 for `gcloud functions … --gen2`. `securesourcemanager` (#1527) is the Run port
+under `/securesourcemanager/`, since Secure Source Manager's v1 paths are Artifact Registry's, for
+`gcloud source-manager instances` and `repos`.
 `gcloud tasks` covers queues (#590) and, since tasks are transcoded (#591), tasks;
 `gcloud tasks run` is RunTask, which is not implemented, so it answers 501 (which gcloud retries)
 rather than reaching Google. `gcloud scheduler` needs `--location`: without it gcloud looks for an

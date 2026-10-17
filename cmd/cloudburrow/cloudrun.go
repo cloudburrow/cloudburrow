@@ -155,6 +155,11 @@ func (r *runService) Start(ctx context.Context) error {
 		return fmt.Errorf("open the Artifact Registry store: %w", err)
 	}
 	runadapter.UseRegistry(regStore)
+	// Secure Source Manager's repositories (#1521), bare git directories
+	// beside it.
+	if err := runadapter.UseSourceManagerRoot(filepath.Join(r.cfg.InstanceDir(), "securesourcemanager")); err != nil {
+		return fmt.Errorf("open the Secure Source Manager store: %w", err)
+	}
 
 	addr := net.JoinHostPort(r.cfg.BindAddress, strconv.Itoa(r.cfg.Endpoints.Run))
 	r.server = grpctransport.New(addr)
@@ -185,6 +190,8 @@ func (r *runService) Start(ctx context.Context) error {
 		fetch = sf
 		// ExportArtifact writes a version's files there (#1449).
 		runadapter.UseExportWriter(sf)
+		// ImportAptArtifacts and ImportYumArtifacts read from there (#1531).
+		runadapter.UseImportReader(sf)
 	}
 	// Arbitrary steps run only with --cloudbuild-host-steps, from loopback (#1382).
 	builds := adapter.Builds(fetch, newLocalImageBuilder(r.cfg)).AllowHostSteps(r.cfg.CloudBuildHostSteps)
@@ -254,8 +261,15 @@ func (r *runService) Start(ctx context.Context) error {
 	// The Docker Registry HTTP API v2 at /v2/ (#1383), before the JSON
 	// APIs: no Google API's path starts with v2/ on this port but Cloud
 	// Run's own, /v2/projects/..., which the registry passes on.
-	var jsonAPI http.Handler = runadapter.RegistryHandlerOr(functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
-		adapter.V1Handler(runadapter.NewRESTHandler(register)))))
+	// Secure Source Manager (#1521): its JSON API under /securesourcemanager/v1/
+	// (its v1 paths are Artifact Registry's), and its repositories' git URLs,
+	// whose pushes run the triggers file's builds.
+	ssm := adapter.SecureSourceManager(func() string { return hostURL(r.server.Addr()) })
+	cloudBuild := builds.CloudBuild()
+	var jsonAPI http.Handler = runadapter.RegistryHandlerOr(runadapter.SourceManagerHandlerOr(ssm, cloudBuild,
+		func(g grpc.ServiceRegistrar) { ssm.Register(g); ops.Register(g) },
+		functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
+			adapter.V1Handler(runadapter.NewRESTHandler(register))))))
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}
@@ -264,6 +278,7 @@ func (r *runService) Start(ctx context.Context) error {
 		register(g)
 		adapter.ArtifactRegistry().Register(g)
 		builds.CloudBuild().Register(g)
+		ssm.Register(g)
 		functions.Register(g)
 	}); err != nil {
 		return err

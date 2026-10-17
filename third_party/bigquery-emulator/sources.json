@@ -43,7 +43,9 @@
         "patches/bigquery-emulator/0043-range-columns-of-a-schema.patch",
         "patches/bigquery-emulator/0045-ranges-in-a-record.patch",
         "patches/bigquery-emulator/0049-column-collation.patch",
-        "patches/bigquery-emulator/0064-list-jobs-after-one.patch"
+        "patches/bigquery-emulator/0064-list-jobs-after-one.patch",
+        "patches/bigquery-emulator/0051-nested-collation.patch",
+        "patches/bigquery-emulator/0053-routines-kept-in-metadata.patch"
       ]
     },
     {
@@ -98,7 +100,9 @@
         "patches/googlesqlite/0056-ctas-streamed-at-column.patch",
         "patches/googlesqlite/0054-dml-subquery-column-ids.patch",
         "patches/googlesqlite/0059-collation.patch",
-        "patches/googlesqlite/0062-catalog-rebuild-cost.patch"
+        "patches/googlesqlite/0062-catalog-rebuild-cost.patch",
+        "patches/googlesqlite/0063-history-of-other-change-names.patch",
+        "patches/googlesqlite/0061-nested-collation.patch"
       ]
     },
     {

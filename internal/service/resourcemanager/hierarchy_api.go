@@ -309,7 +309,7 @@ func (r *Registry) CheckParentExists(parent string) error {
 		return err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	_, err := r.checkParentLocked(parent)
 	return err
 }
@@ -381,6 +381,7 @@ func (OrganizationsServer) SearchOrganizations(_ context.Context, req *rmpb.Sear
 // --- v3 REST -----------------------------------------------------------
 
 func (s *FoldersServer) restRoutes(r *rest.Router, orgs OrganizationsServer, v1ops *v1Ops) {
+	s.capabilityRoutes(r, v1ops)
 	r.Handle("GET /v3/folders", func(w http.ResponseWriter, req *http.Request) error {
 		size, err := rest.QueryInt(req, "pageSize", 0)
 		if err != nil {
@@ -427,11 +428,11 @@ func (s *FoldersServer) restRoutes(r *rest.Router, orgs OrganizationsServer, v1o
 		if err != nil {
 			return err
 		}
-		f, err := s.GetFolder(req.Context(), &rmpb.GetFolderRequest{Name: "folders/" + id})
+		f, err := s.reg.Folder("folders/" + id)
 		if err != nil {
 			return err
 		}
-		return writeProto(w, f)
+		return writeFolderJSON(w, f)
 	})
 	r.Handle("PATCH /v3/folders/{folder}", func(w http.ResponseWriter, req *http.Request) error {
 		id, err := rest.PathValue(req, "folder")
@@ -731,18 +732,16 @@ func (s *ProjectsServer) v1OrgRoutes(r *rest.Router, orgs OrganizationsServer) {
 		if isIAMVerb(verb) {
 			return serveIAM(w, req, orgs, "organizations/"+id, verb)
 		}
-		return ErrNotImplemented("organizations." + verb)
+		return s.v1OrgPolicy(w, req, "organizations/"+id, verb)
 	})
-	// v1 has six folder methods, all org policy, which is stored on projects
-	// alone: each is 501, as the organization's are, not the 404 of a path
-	// nothing serves.
+	// v1 has six folder methods, all org policy (#1534, orgpolicy.go).
 	r.Handle("POST /v1/folders/{folder}", func(w http.ResponseWriter, req *http.Request) error {
 		raw, err := rest.PathValue(req, "folder")
 		if err != nil {
 			return err
 		}
-		_, verb, _ := strings.Cut(raw, ":")
-		return ErrNotImplemented("folders." + verb)
+		id, verb, _ := strings.Cut(raw, ":")
+		return s.v1OrgPolicy(w, req, "folders/"+id, verb)
 	})
 }
 

@@ -90,6 +90,33 @@ type route struct {
 // Reset removes every entry.
 func (s *Store) Reset() { s.mu.Lock(); s.entries, s.routed = nil, nil; s.mu.Unlock() }
 
+// ResetProject removes the entries written to a project's logs, the
+// project named by any of names (its ID and its number), for a reset or a
+// purge of that project (#1537).
+func (s *Store) ResetProject(names ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.entries[:0]
+	for _, e := range s.entries {
+		mine := false
+		for _, n := range names {
+			if n != "" && strings.HasPrefix(e.GetLogName(), "projects/"+n+"/") {
+				mine = true
+				break
+			}
+		}
+		if mine {
+			delete(s.routed, e)
+			continue
+		}
+		kept = append(kept, e)
+	}
+	for i := len(kept); i < len(s.entries); i++ {
+		s.entries[i] = nil
+	}
+	s.entries = kept
+}
+
 func (s *Store) append(es []*loggingpb.LogEntry, routes map[*loggingpb.LogEntry]*route) {
 	s.mu.Lock()
 	s.entries = append(s.entries, es...)

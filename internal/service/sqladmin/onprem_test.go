@@ -44,9 +44,9 @@ func TestSourceRepresentationInstance(t *testing.T) {
 		want string
 	}{
 		{&sqladmin.DatabaseInstance{Name: "pgext", DatabaseVersion: "POSTGRES_17", InstanceType: "ON_PREMISES_INSTANCE",
-			OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: "10.0.0.5:5432", Username: "repl"}}, "501"},
+			OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: "10.0.0.5:5432", Username: "repl", DumpFilePath: "gs://b/d.sql"}}, "400"},
 		{&sqladmin.DatabaseInstance{Name: "dump", DatabaseVersion: "MYSQL_8_4",
-			OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: "10.0.0.5:3306", DumpFilePath: "gs://b/d.sql"}}, "501"},
+			OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: "10.0.0.5:3306", DumpFilePath: "b/d.sql"}}, "400"},
 		{&sqladmin.DatabaseInstance{Name: "bad", DatabaseVersion: "MYSQL_8_4",
 			OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: "10.0.0.5"}}, "400"},
 	} {
@@ -118,13 +118,44 @@ func TestSourceRepresentationInstance(t *testing.T) {
 		t.Errorf("start sync from an unreachable source: %v; want its verification", err)
 	}
 	if _, err := svc.Projects.Instances.StartExternalSync("proj", "rep",
-		&sqladmin.SqlInstancesStartExternalSyncRequest{SyncMode: "OFFLINE"}).Do(); err == nil || !strings.Contains(err.Error(), "501") {
-		t.Errorf("offline sync: %v; want 501", err)
+		&sqladmin.SqlInstancesStartExternalSyncRequest{SyncMode: "OFFLINE"}).Do(); err == nil || !strings.Contains(err.Error(), "CONNECTION_FAILURE") {
+		t.Errorf("offline sync from an unreachable source: %v; want its verification", err)
 	}
 	if _, err := svc.Projects.Instances.StartExternalSync("proj", "my",
 		&sqladmin.SqlInstancesStartExternalSyncRequest{SkipVerification: true}).Do(); err == nil {
 		t.Error("start sync on a server `up` runs succeeded")
 	}
+	// A PostgreSQL source (#1524): its replica is a PostgreSQL server
+	// with the source's selected databases, verified the same way.
+	op, err = svc.Instances.Insert("proj", &sqladmin.DatabaseInstance{Name: "pgext", DatabaseVersion: "POSTGRES_16",
+		InstanceType: "ON_PREMISES_INSTANCE", OnPremisesConfiguration: &sqladmin.OnPremisesConfiguration{HostPort: dead,
+			Username: "repl", Password: "secret", SelectedObjects: []*sqladmin.SelectedObjects{{Database: "shop"}}}}).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait(t, svc, "proj", op)
+	if _, err := svc.Instances.Insert("proj", &sqladmin.DatabaseInstance{Name: "pgbad", MasterInstanceName: "pgext",
+		DatabaseVersion: "MYSQL_8_4"}).Do(); err == nil || !strings.Contains(err.Error(), "400") {
+		t.Errorf("a MySQL replica of a PostgreSQL source: %v; want 400", err)
+	}
+	op, err = svc.Instances.Insert("proj", &sqladmin.DatabaseInstance{Name: "pgrep", MasterInstanceName: "pgext", DatabaseVersion: "POSTGRES_17"}).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := wait(t, svc, "proj", op); got.Error != nil {
+		t.Fatalf("PostgreSQL replica: %+v", got.Error.Errors[0])
+	}
+	if sp := prov.started["pgrep"]; sp.External == nil || len(sp.External.Databases) != 1 || sp.External.Databases[0] != "shop" || sp.DatabaseVersion != "POSTGRES_17" {
+		t.Errorf("PostgreSQL replica's spec: %+v", sp.External)
+	}
+	if pr, err := svc.Instances.Get("proj", "pgrep").Do(); err != nil || pr.ReplicaConfiguration == nil || pr.ReplicaConfiguration.MysqlReplicaConfiguration != nil {
+		t.Errorf("PostgreSQL replica: %+v %v", pr, err)
+	}
+	if v, err := svc.Projects.Instances.VerifyExternalSyncSettings("proj", "pgrep",
+		&sqladmin.SqlInstancesVerifyExternalSyncSettingsRequest{}).Do(); err != nil || len(v.Errors) == 0 || v.Errors[0].Type != "CONNECTION_FAILURE" {
+		t.Errorf("verify of an unreachable PostgreSQL source: %+v %v", v, err)
+	}
+
 	op, err = svc.Projects.Instances.StartExternalSync("proj", "rep",
 		&sqladmin.SqlInstancesStartExternalSyncRequest{SyncMode: "ONLINE", SkipVerification: true}).Do()
 	if err != nil {

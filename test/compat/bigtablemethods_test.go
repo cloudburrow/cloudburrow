@@ -26,9 +26,8 @@ import (
 // emulator (internal/bigtablefront, #1206) serves backups itself since
 // #1499 (TestBigtableBackups), and schema bundles
 // (TestBigtableSchemaBundles), and UndeleteTable since #1511
-// (TestBigtableUndeleteTable), and answers the rest, the change stream
-// reads, UNIMPLEMENTED;
-// TestBigtableCrashingMethodsAreRefused calls each.
+// (TestBigtableUndeleteTable), and the change stream reads since #1523
+// (TestBigtableChangeStreams), from a change log it keeps.
 
 const bigtableInstance = "cb-instance"
 
@@ -265,51 +264,6 @@ func TestBigtableRefusedDataMethods(t *testing.T) {
 			err = nil
 		}
 		wantRefused(t, tc.name, err, codes.Unimplemented, "the emulator does not currently support "+tc.name)
-	}
-}
-
-// TestBigtableCrashingMethodsAreRefused calls each method the emulator would
-// panic on (#1206): CloudBurrow's front answers UNIMPLEMENTED, a table
-// created before is still there after both, and, given the
-// instance's kubeconfig, the Bigtable pod's containers restarted no more
-// than before. Admin calls go through the generated admin client the
-// veneer wraps; the change stream reads, which the veneer does not send,
-// through the module's generated data stub.
-//
-// covers: google.bigtable.v2.Bigtable/GenerateInitialChangeStreamPartitions (unimplemented), google.bigtable.v2.Bigtable/ReadChangeStream (unimplemented)
-func TestBigtableCrashingMethodsAreRefused(t *testing.T) {
-	h := New(t)
-	admin, _ := bigtableTable(t, h, "crashers")
-	restarts := bigtableRestarts(t)
-	before := restarts()
-	ctx := h.Context()
-	inst := fmt.Sprintf("projects/%s/instances/%s", h.Project(), bigtableInstance)
-	tbl := inst + "/tables/crashers"
-
-	conn, err := grpc.NewClient(h.Endpoint(EnvBigtable), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	d := bigtablepb.NewBigtableClient(conn)
-	const streams = "the emulator does not currently support change streams: it keeps no log of the mutations it applies"
-	gp, err := d.GenerateInitialChangeStreamPartitions(ctx, &bigtablepb.GenerateInitialChangeStreamPartitionsRequest{TableName: tbl})
-	if err == nil {
-		_, err = gp.Recv()
-	}
-	wantRefused(t, "GenerateInitialChangeStreamPartitions", err, codes.Unimplemented, streams)
-	rc, err := d.ReadChangeStream(ctx, &bigtablepb.ReadChangeStreamRequest{TableName: tbl})
-	if err == nil {
-		_, err = rc.Recv()
-	}
-	wantRefused(t, "ReadChangeStream", err, codes.Unimplemented, streams)
-
-	// A crash would have lost the table with the emulator's memory.
-	if _, err := admin.TableInfo(ctx, "crashers"); err != nil {
-		t.Errorf("the table after the two calls: %v; did the emulator restart?", err)
-	}
-	if after := restarts(); after != before {
-		t.Errorf("the Bigtable pod's restarts went from %s to %s", before, after)
 	}
 }
 

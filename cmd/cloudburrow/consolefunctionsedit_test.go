@@ -58,7 +58,10 @@ func TestConsoleFunctionsEditDownloadAndPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() { _ = srv.Serve(ln) }()
-	defer srv.Stop()
+	// Registered before the functions' cleanups, so it runs after them: a
+	// deferred Stop ran first, their DeleteFunction failed unseen, and a
+	// rerun found f1's policy from the run before (#1529).
+	t.Cleanup(srv.Stop)
 	p := functionsProvider{defaultProject: "console-edit", runAddr: func() string { return ln.Addr().String() }, storage: true}
 	for _, env := range []string{functionGen1, functionGen2} {
 		id := "f1"
@@ -67,7 +70,11 @@ func TestConsoleFunctionsEditDownloadAndPermissions(t *testing.T) {
 		}
 		_, _ = p.ActAtFile(ctx, "", nil, functionsCreateAction, map[string]string{"name": id, "environment": env, "region": "us-central1",
 			"runtime": "go123", "entryPoint": "Hello", "memory": "256M"}, console.UploadedFile{Name: "src.zip", Reader: strings.NewReader("zip")})
-		t.Cleanup(func() { _ = p.Delete(context.Background(), "", id) })
+		t.Cleanup(func() {
+			if err := p.Delete(context.Background(), "", id); err != nil {
+				t.Errorf("delete %s: %v", id, err)
+			}
+		})
 	}
 
 	fields := func(id string) map[string]string {

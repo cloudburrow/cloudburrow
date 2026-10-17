@@ -8,9 +8,11 @@
 // (tableiam.go), backups and snapshots (backups.go), authorized views and
 // the data calls through them (authviews.go), logical and materialized views
 // (sqlviews.go), schema bundles (schemabundles.go), memory layers and hot
-// tablets (memlayers.go) and SQL (query.go). It answers the Refused methods
-// UNIMPLEMENTED, and forwards every other call to the emulator unchanged,
-// each message passed through undecoded.
+// tablets (memlayers.go), SQL (query.go) and change streams
+// (changestreams.go). It answers the Refused methods UNIMPLEMENTED, and
+// forwards every other call to the emulator, each message passed through
+// undecoded but the writes to a table with a change stream, which it
+// decodes to log them.
 //
 // It serves gRPC and, on the same port, the admin REST API (rest.go) and the readiness path the emulator's
 // container is probed through (internal/frontready), since the emulator
@@ -53,19 +55,10 @@ const (
 // Refused are the methods the emulator has no implementation of and would
 // panic on, measured one by one (#1206), that the front does not serve
 // either (#1499), each with the message the front answers it UNIMPLEMENTED
-// with.
-var Refused = map[string]string{
-	data + "GenerateInitialChangeStreamPartitions": changeStreams,
-	data + "ReadChangeStream":                      changeStreams,
-}
-
-// The messages, worded as the emulator's own refusals are ("the emulator
-// does not currently support authorized views").
-const (
-	// The front forwards mutations to the emulator undecoded and keeps no
-	// change log, and the emulator keeps none either (#1511).
-	changeStreams = "the emulator does not currently support change streams: it keeps no log of the mutations it applies"
-)
+// with, worded as the emulator's own refusals are ("the emulator does not
+// currently support authorized views"). The change stream reads, the last
+// of them, are served since #1523 (changestreams.go).
+var Refused = map[string]string{}
 
 // Front forwards Bigtable calls to the emulator, refusing the Refused ones.
 type Front struct {
@@ -86,6 +79,10 @@ type Front struct {
 	sqlViews *sqlViews
 	bundles  *schemaBundles
 	served   map[string]method
+	// changes is the change logs (changestreams.go, #1523), streams the
+	// server-streaming methods the front serves.
+	changes *changeStreams
+	streams map[string]func(grpc.ServerStream) error
 	// persist is the state directory (state.go, #1514), when there is one.
 	persist persister
 }
@@ -102,7 +99,8 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	if logf == nil {
 		logf = log.Printf
 	}
-	f := &Front{upstream: conn, addr: upstream, logf: logf}
+	f := &Front{upstream: conn, addr: upstream, logf: logf, changes: newChangeStreams()}
+	f.streams = f.streamMethods()
 	f.instances = newInstances(f.dropTables)
 	f.served = f.instances.methods()
 	for name, m := range f.instances.memoryLayerMethods() {
@@ -121,10 +119,22 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 	f.tableIAM = &tableIAM{upstream: conn, policies: map[string]*iampolicy.Stored{}, views: f.views, copies: f.copies, bundles: f.bundles}
 	for _, ms := range []map[string]method{f.tableIAM.methods(), f.copies.methods(), f.viewMethods(),
 		f.sqlViews.methods(f.copies.op), f.bundles.methods(f.copies.op),
-		sql.methods()} {
+		sql.methods(), f.changeStreamMethods()} {
 		for name, m := range ms {
 			f.served[name] = m
 		}
+	}
+	// A deleted table's change log goes with it.
+	deleteTable := f.served[admin+"DeleteTable"]
+	f.served[admin+"DeleteTable"] = func(ctx context.Context, in []byte) (proto.Message, error) {
+		resp, err := deleteTable(ctx, in)
+		if err == nil {
+			var req btapb.DeleteTableRequest
+			if proto.Unmarshal(in, &req) == nil {
+				f.changes.drop(req.GetName())
+			}
+		}
+		return resp, err
 	}
 	return f, nil
 }
@@ -202,6 +212,9 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 		defer f.flush()
 		return serveUnary(ss, m)
 	}
+	if serve, ok := f.streams[method]; ok {
+		return serve(ss)
+	}
 	if strings.HasPrefix(method, instanceAdmin) || strings.HasPrefix(method, operations) {
 		f.logf("bigtable front: refused %s, which neither the emulator nor the front implements", method)
 		return status.Errorf(codes.Unimplemented, "the emulator does not currently support %s", strings.TrimPrefix(method[strings.LastIndexByte(method, '/'):], "/"))
@@ -224,6 +237,17 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 		}
 		first = &out
 	}
+	var change *pendingChange
+	if first != nil {
+		out, p, err := f.prepareChange(ss.Context(), method, *first)
+		if err != nil {
+			return err
+		}
+		if p != nil {
+			defer p.release()
+			first, change = &out, p
+		}
+	}
 	ctx, cancel := context.WithCancel(ss.Context())
 	defer cancel()
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
@@ -245,7 +269,11 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 		reqErr <- pumpRequests(ss, cs)
 	}()
 	respErr := make(chan error, 1)
-	go func() { respErr <- pumpResponses(ss, cs) }()
+	var observe func(frame)
+	if change != nil {
+		observe = change.observe
+	}
+	go func() { respErr <- pumpResponses(ss, cs, observe) }()
 	for {
 		select {
 		case err := <-reqErr:
@@ -256,6 +284,12 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 			}
 			reqErr = nil
 		case err := <-respErr:
+			if err == nil && change != nil {
+				// The record is written as the call returns, as
+				// the front's other state is (state.go).
+				change.commit()
+				f.flush()
+			}
 			return err
 		}
 	}
@@ -298,8 +332,9 @@ func pumpRequests(ss grpc.ServerStream, cs grpc.ClientStream) error {
 }
 
 // pumpResponses copies the emulator's answer to the client: headers, every
-// message and the trailer, and returns its status (nil for OK).
-func pumpResponses(ss grpc.ServerStream, cs grpc.ClientStream) error {
+// message and the trailer, and returns its status (nil for OK). observe,
+// when not nil, sees each message.
+func pumpResponses(ss grpc.ServerStream, cs grpc.ClientStream, observe func(frame)) error {
 	sentHeader := false
 	for {
 		var fr frame
@@ -316,6 +351,9 @@ func pumpResponses(ss grpc.ServerStream, cs grpc.ClientStream) error {
 				return nil
 			}
 			return err
+		}
+		if observe != nil {
+			observe(fr)
 		}
 		if err := ss.SendMsg(&fr); err != nil {
 			return err
@@ -386,6 +424,7 @@ func (f *Front) dropTables(ctx context.Context, instance string) error {
 	f.copies.dropDeleted(instance)
 	f.sqlViews.drop(instance)
 	f.bundles.drop(instance)
+	f.changes.drop(instance)
 	c := btapb.NewBigtableTableAdminClient(f.upstream)
 	var token string
 	for {

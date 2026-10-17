@@ -200,7 +200,8 @@ func TestCSVLoadWithColumnsLoadsEveryRow(t *testing.T) {
 // columns given is 501 unless skipLeadingRows is 1; a load with no columns
 // into a table that does not exist is 400, as BigQuery refuses it (#1079).
 // With autodetect and columns given, skipLeadingRows must be set (#945). A
-// load of several objects is 501 (#1079).
+// load of several objects names objects there is no Cloud Storage to
+// hold: 404 notFound, as a URI that names none (#1079, #1457).
 func TestCSVLoadFromCloudStorage(t *testing.T) {
 	const schema = `"schema":{"fields":[{"name":"a","type":"STRING"}]}`
 	for _, c := range []struct {
@@ -216,8 +217,8 @@ func TestCSVLoadFromCloudStorage(t *testing.T) {
 		// No columns, into a table that does not exist (#1079).
 		{`{"configuration":{"load":{"sourceUris":["gs://b/o"],"destinationTable":{"datasetId":"ds","tableId":"t"}}}}`, 400},
 		// Several objects, which the emulator would load one at a time (#1079).
-		{`{"configuration":{"load":{"sourceUris":["gs://b/o*"],"skipLeadingRows":1,"destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 501},
-		{`{"configuration":{"load":{"sourceUris":["gs://b/o","gs://b/p"],"sourceFormat":"NEWLINE_DELIMITED_JSON","destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 501},
+		{`{"configuration":{"load":{"sourceUris":["gs://b/o*"],"skipLeadingRows":1,"destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 404},
+		{`{"configuration":{"load":{"sourceUris":["gs://b/o","gs://b/p"],"sourceFormat":"NEWLINE_DELIMITED_JSON","destinationTable":{"datasetId":"ds","tableId":"t"},` + schema + `}}}`, 404},
 	} {
 		emu := &fakeEmulator{}
 		code, got := do(t, Wrap(emu), "POST", base+"/jobs", c.job)

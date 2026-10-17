@@ -47,6 +47,9 @@ const ROUTES = [
     product: "cloud-build", productTitle: "Cloud Build" },
   { path: "/cloud-build/worker-pools", service: "cloud-build-worker-pools", title: "Worker pools", section: "CI/CD",
     product: "cloud-build", productTitle: "Cloud Build" },
+  // Secure Source Manager's instances and repositories (#1527).
+  { path: "/secure-source-manager", service: "secure-source-manager", title: "Instances", section: "CI/CD",
+    product: "secure-source-manager", productTitle: "Secure Source Manager" },
   { path: "/artifact-registry", service: "artifact-registry", title: "Repositories", section: "CI/CD",
     product: "artifact-registry", productTitle: "Artifact Registry" },
   // Cloud Functions v2, served on the Run port (#1377).
@@ -84,6 +87,8 @@ const ROUTES = [
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/settings", service: "storage-settings", icon: "storage", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/intelligence", service: "storage-intelligence", icon: "storage", title: "Storage Intelligence", section: "Storage",
+    product: "storage", productTitle: "Cloud Storage" },
 
   { path: "/firestore", service: "firestore", title: "Firestore", section: "Databases" },
   // The project's Firestore databases, each with its settings, indexes and
@@ -114,6 +119,11 @@ const ROUTES = [
   // /backupdr were "No such screen", so nothing of either was reachable from
   // the console (found by TestMemorystoreRotateServerCAThroughThePage).
   { path: "/memorystore", service: "memorystore", title: "Memorystore", section: "Databases" },
+  // Memorystore for Redis Cluster (#1519), a page of its own beside the
+  // instances, as the Memorystore console's Redis Cluster tab is.
+  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Memorystore Redis Cluster", section: "Databases" },
+  // Memorystore for Valkey (#1519), memorystore.googleapis.com's instances.
+  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Memorystore for Valkey", section: "Databases" },
   { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", section: "Storage" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
@@ -191,6 +201,11 @@ const ROUTES = [
   // Logs Storage's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
   { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Logs Storage settings",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  // Saved queries and log scopes (#1519).
+  { path: "/logs/saved-queries", service: "logging-saved-queries", icon: "logs", title: "Saved queries",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Log scopes",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
   { path: "/faults",   service: null, screen: "faults",   title: "Fault injection", section: "Operations" },
@@ -209,6 +224,9 @@ const ROUTES = [
   // APIs & Services (#1352): a project's APIs, Enable and Disable. It had a
   // provider but no route.
   { path: "/apis", service: "serviceusage", title: "APIs & Services", section: "Management tools" },
+  // Service Usage operations (#1530): what operations.list answers, with
+  // Delete.
+  { path: "/apis/operations", service: "serviceusage-operations", icon: "serviceusage", title: "Service Usage operations", section: "Management tools" },
   // Connect (#802): what `env`, `gcloud-setup`, `terraform`, `version` and
   // `diagnose` give at a terminal. Not a Google Cloud product, so it carries
   // no product icon.
@@ -265,6 +283,8 @@ const ICONS = {
   "run-builds": '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   "cloud-build-triggers": '<path d="M13 3L5 13h6l-1 8 8-10h-6z"/>',
   "cloud-build-worker-pools": '<rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/>',
+  // Secure Source Manager: a branch.
+  "secure-source-manager": '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-12 7"/>',
   // Cloud Functions: braces around a bolt.
   functions: '<path d="M8 4c-2 0-3 1-3 3v2l-2 3 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2l2 3-2 3v2c0 2-1 3-3 3"/><path d="M13 7l-3 5h4l-3 5"/>',
   // Artifact Registry: stacked boxes.
@@ -2694,7 +2714,7 @@ async function renderDetail(view, route, resourcePath) {
         el("h2", { text: "Details" }),
         el("dl", {}, ...(data.summary).flatMap((prop) => [
           el("dt", { text: prop.label }),
-          el("dd", { text: prop.value }),
+          propertyValue(prop),
         ])))
     : null;
 
@@ -2965,7 +2985,7 @@ async function renderDetail(view, route, resourcePath) {
         group.heading ? el("h2", { text: group.heading }) : null,
         el("dl", {}, ...group.properties.flatMap((prop) => [
           el("dt", { text: prop.label }),
-          el("dd", { text: prop.value }),
+          propertyValue(prop),
         ])))));
   };
 
@@ -3813,6 +3833,12 @@ function serverFilterBox(spec, reload) {
     spec.error ? el("p", { class: "form-error", id: "server-filter-error", role: "alert", text: spec.error }) : null);
 }
 
+// propertyValue is a property's <dd>: its value, as a link when the
+// provider names the page it opens (#1554).
+function propertyValue(prop) {
+  return el("dd", {}, prop.link ? el("a", { href: prop.link, text: prop.value }) : prop.value);
+}
+
 // listingSummary draws a listing's summary groups as the same property cards
 // a resource page uses.
 function listingSummary(data) {
@@ -3821,7 +3847,7 @@ function listingSummary(data) {
       group.heading ? el("h2", { text: group.heading }) : null,
       el("dl", {}, ...group.properties.flatMap((prop) => [
         el("dt", { text: prop.label }),
-        el("dd", { text: prop.value }),
+        propertyValue(prop),
       ]))));
 }
 
@@ -5081,6 +5107,8 @@ const DELETE_DETAIL = {
   "logging-metrics": "The metric's definition is deleted. No log entry is removed.",
   "logging-sinks": "The sink's definition is deleted. It delivered nothing, so nothing downstream changes.",
   "logging-exclusions": "Entries it matches are stored again from now on. Entries it dropped are not brought back.",
+  "logging-saved-queries": "The saved query is deleted. No log entry is removed.",
+  "logging-log-scopes": "The log scope is deleted. The projects and views it named are not changed.",
   "logging-buckets": "The bucket is kept as Delete requested for 7 days and can be undeleted until then. No log entry is removed.",
   "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
             "schema settings, which then name _deleted-schema_.",
@@ -7455,6 +7483,45 @@ async function renderLogs(view) {
     placeholder: "Resource, e.g. api-00002-deployment", "aria-label": "Filter by resource" });
   const contains = el("input", { class: "filter", type: "search", id: "contains",
     placeholder: "Message contains", "aria-label": "Filter by message text" });
+  // The Log name picker (#1554), as Google's Logs Explorer lists the scope's
+  // log names: Cloud Logging's ListLogs of the project, folder or
+  // organization in scope. A log's full name is its entries' resource, so
+  // picking one is the resource filter, and the picker follows that field.
+  const logName = el("select", { id: "log-name", "aria-label": "Log name", hidden: true },
+    el("option", { value: "", text: "All log names" }));
+  const logNameParent = () => {
+    if (scope === "parent") return parentInput.value.trim();
+    if (scope === "view") return viewParentInput.value.trim();
+    return project ? `projects/${project}` : "";
+  };
+  const syncLogName = () => {
+    logName.value = [...logName.options].some((o) => o.value === resource.value) ? resource.value : "";
+  };
+  const loadLogNames = async () => {
+    const parent = logNameParent();
+    let names = [];
+    if (parent) {
+      try {
+        names = (await api(`/api/logs/names?${new URLSearchParams({ parent })}`)).logNames || [];
+      } catch {
+        // No Logging API, or a parent it refuses: there is nothing to pick.
+        names = null;
+      }
+    }
+    if (parent !== logNameParent()) return; // the scope moved on meanwhile
+    logName.hidden = names === null || !parent;
+    setChildren(logName, el("option", { value: "", text: names && names.length ? "All log names" : "No logs in scope" }),
+      ...(names || []).map((n) => el("option", { value: n,
+        text: decodeURIComponent(n.slice(n.indexOf("/logs/") + "/logs/".length)) })));
+    logName.setAttribute("data-parent", parent);
+    syncLogName();
+  };
+  logName.addEventListener("change", () => {
+    resource.value = logName.value;
+    writeFilters();
+    connect();
+    announce(logName.value ? `Showing log ${logName.value}` : "Showing every log name");
+  });
 
   // Every filter is read from the URL and written back to it.
   //
@@ -7651,6 +7718,7 @@ async function renderLogs(view) {
     history.replaceState({}, "", url);
     parentInput.hidden = next !== "parent";
     showViewControls();
+    loadLogNames();
     connect();
     announce(next === "project" ? `Scoped to project ${project}`
       : next === "parent" ? `Scoped to ${parentInput.value.trim() || "a folder or organization"}` : "Showing all sources");
@@ -7847,6 +7915,7 @@ async function renderLogs(view) {
   for (const { control } of FILTER_CONTROLS) {
     control.addEventListener("change", () => { writeFilters(); connect(); });
   }
+  resource.addEventListener("change", syncLogName);
 
   drawScope();
   setChildren(view,
@@ -7857,7 +7926,7 @@ async function renderLogs(view) {
           text: "Delete log is on the Cloud Logging entries (source logging/…) of the selected project. " +
                 "Pod logs and CloudBurrow's own request log are not held by the Logging API, so they cannot be deleted here." })
       : null,
-    el("div", { class: "actions" }, scopeSelect, parentInput, viewControls, severity, source, resource, contains,
+    el("div", { class: "actions" }, scopeSelect, parentInput, viewControls, logName, severity, source, resource, contains,
        pauseButton, reconnectButton, status),
     viewNote,
     chips,
@@ -7866,6 +7935,7 @@ async function renderLogs(view) {
 
   showViewControls();
   if (scope === "view") await loadBuckets(initialView);
+  loadLogNames();
   connect();
   announce(operation ? `Logs Explorer opened, scoped to operation ${operation}`
                      : "Logs Explorer opened");

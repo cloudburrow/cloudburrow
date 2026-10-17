@@ -38,14 +38,17 @@ var instances atomic.Int32
 // upArgs are the flags for an instance of these tests: its own name and
 // state dir, an OS-assigned control port, and its own port block, well
 // clear of the defaults (from 9000), which a developer's instance may hold,
-// and of the blocks the port-base and offline tests use (below 50000).
+// and of the blocks the port-base and offline tests use (20000 to 32090),
+// and below Linux's ephemeral range (32768 and up), where an outgoing
+// connection can already hold a port the layout needs (#1158, #1526):
+// 10000 to 19990.
 // Storage and Pub/Sub, the two in-cluster backends, rather than the
 // defaults: Cloud Run's Knative install is minutes on its own, and the
 // compatibility suite's run shard covers it.
 func upArgs(t *testing.T) []string {
 	t.Helper()
 	name, stateDir := uniqueInstance(t)
-	base := 50000 + int(time.Now().UnixNano()%60)*200 + int(instances.Add(1)%2)*100
+	base := 10000 + int(time.Now().UnixNano()%50)*200 + int(instances.Add(1)%2)*100
 	return []string{"--name", name, "--state-dir", stateDir, "--port-control", "0",
 		"--port-base", strconv.Itoa(base), "--services", "storage,pubsub"}
 }

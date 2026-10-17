@@ -161,6 +161,7 @@ func (p loggingBucketsProvider) Detail(ctx context.Context, project string, path
 			if viewChangeable(b, id) {
 				row.Actions = viewRowActions(v) // #1283
 			}
+			row.Actions = append(row.Actions, p.viewPermissionsAction(ctx, v.GetName())) // #1519
 			views.Items = append(views.Items, row)
 		}
 		views.Total = len(views.Items)

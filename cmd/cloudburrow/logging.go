@@ -25,6 +25,7 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/lifecycle"
 	"github.com/cloudburrow/cloudburrow/internal/netfwd"
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/logging"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/store"
@@ -313,13 +314,22 @@ func (s *loggingService) Start(ctx context.Context) error {
 	}
 	// One port for gRPC and JSON, as logging.googleapis.com (#591): the same
 	// server, transcoded, for REST clients and gcloud.
-	register := func(g grpc.ServiceRegistrar) { s.api.Register(g); s.admin.Register(g) }
+	register := func(g grpc.ServiceRegistrar) {
+		s.api.Register(g)
+		s.admin.Register(g)
+		s.admin.RegisterViewIAM(g) // log views' IAM (#1519)
+	}
 	var jsonAPI http.Handler = logging.NewRESTHandler(register)
 	// The Logging clock (#1404), a CloudBurrow extension on the API's port.
 	transcoded := jsonAPI
 	jsonAPI = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == logging.ClockPath {
 			s.api.ServeClock(w, r)
+			return
+		}
+		// Saved queries and log scopes (#1519), which no published
+		// google.logging.v2 proto carries, so the transcoder cannot.
+		if s.admin.ServeExtra(w, r) {
 			return
 		}
 		transcoded.ServeHTTP(w, r)
@@ -371,6 +381,40 @@ func (r *loggingResetter) Reset(context.Context) error {
 			if err := db.Delete(k); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// ResetProject removes one project's entries, metrics, sinks, exclusions,
+// buckets, views, links and settings (#1537). Every record is kept under
+// logging/{collection}/{project ID, as named}/..., and a project's ID or
+// number names it.
+func (r *loggingResetter) ResetProject(_ context.Context, project string) error {
+	if r.svc == nil || r.svc.store == nil {
+		return errors.New("Cloud Logging is not enabled")
+	}
+	number := strconv.FormatInt(resource.ProjectNumber(project), 10)
+	r.svc.store.ResetProject(project, number)
+	db := r.svc.db
+	if db == nil {
+		return nil
+	}
+	keys, err := db.List("logging/")
+	if err != nil {
+		return err
+	}
+	for _, k := range keys {
+		_, rest, ok := strings.Cut(strings.TrimPrefix(k, "logging/"), "/")
+		if !ok {
+			continue
+		}
+		seg, _, _ := strings.Cut(rest, "/")
+		if seg != project && seg != number {
+			continue
+		}
+		if err := db.Delete(k); err != nil {
+			return err
 		}
 	}
 	return nil

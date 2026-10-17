@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
-
 	"github.com/cloudburrow/cloudburrow/internal/console"
 	"github.com/cloudburrow/cloudburrow/internal/resource"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -63,8 +61,7 @@ func (p projectsProvider) List(ctx context.Context, project string) (console.Lis
 		Items:      out,
 		Total:      len(out),
 		Note: "Projects are a local registry. Deleting one marks it DELETE_REQUESTED for 30 days, " +
-			"when Undelete project on its page restores it, and then removes the registration; " +
-			"never the resources created under it, which live in the services that own them.",
+			"when Undelete project on its page restores it; then it is purged with what every service keeps under it (#1537).",
 	}, nil
 }
 
@@ -137,9 +134,10 @@ func (p projectsProvider) Detail(_ context.Context, _ string, path []string) (co
 			"Absent: billing, which returns UNIMPLEMENTED " +
 			"rather than a plausible answer.\n\n" +
 			"Deleting this project marks it DELETE_REQUESTED for 30 days, as Google " +
-			"does, and Undelete project restores it until then. It changes the " +
-			"registration only: resources created under the identifier live in the " +
-			"services that own them, and are not reached by a delete here.",
+			"does, and Undelete project restores it, whole, until then. Then it is " +
+			"purged (or at once with Purge project now): its IAM and org policies, " +
+			"tags, liens, API states and the resources every service that can reset " +
+			"one project keeps under it go too, and its ID is free (#1537).",
 	}
 
 	return console.Detail{
@@ -257,6 +255,10 @@ func (p projectsProvider) Delete(ctx context.Context, project, name string) erro
 // projectUndelete is the Undelete project action on a deleted project.
 const projectUndelete = "undelete"
 
+// projectPurge is Purge project now on a deleted project (#1537): the purge
+// Google makes 30 days after the delete, now, as POST /admin/purge does.
+const projectPurge = "purge"
+
 // DetailActions implements console.PathActor: Undelete project, on a project
 // pending deletion only (#1216).
 func (p projectsProvider) DetailActions(_ context.Context, _ string, path []string) []console.Action {
@@ -268,31 +270,16 @@ func (p projectsProvider) DetailActions(_ context.Context, _ string, path []stri
 		return nil
 	}
 	if project.State == resourcemanager.StateDeleteRequested {
-		return []console.Action{{ID: projectUndelete, Label: "Undelete project"}}
-	}
-	// The org policy actions (#1296), over the registry the v1 methods use.
-	names := make([]string, 0, len(resourcemanager.Constraints))
-	for _, c := range resourcemanager.Constraints {
-		names = append(names, c.Name)
+		return []console.Action{{ID: projectUndelete, Label: "Undelete project"},
+			{ID: projectPurge, Label: "Purge project now", Destructive: true,
+				Confirm: "the project and everything kept under it in every service, which Google drops 30 days after the delete; its ID is then free"}}
 	}
 	out := []console.Action{{ID: projectMove, Label: "Move project", Fields: []console.Field{
 		{Name: "parent", Label: "Destination", Type: "select", Required: true, Options: p.parentOptions()[1:], Default: project.Parent,
 			Help: "The organization or a folder (#1294)."},
-	}}, {ID: projectSetPolicy, Label: "Set organization policy", Fields: []console.Field{
-		{Name: "constraint", Label: "Constraint", Type: "select", Required: true, Options: names, Default: names[0]},
-		{Name: "enforced", Label: "Enforce (boolean constraints)", Type: "checkbox"},
-		{Name: "allowed", Label: "Allowed values (list constraints)", Type: "text",
-			Help: "Comma-separated, e.g. in:eu-locations. Leave empty with Deny all unset to allow all."},
-		{Name: "denyAll", Label: "Deny all values (list constraints)", Type: "checkbox"},
 	}}}
-	if set := p.orgPolicies(path[0]).Items; len(set) > 0 {
-		ids := make([]string, 0, len(set))
-		for _, r := range set {
-			ids = append(ids, r.Name)
-		}
-		out = append(out, console.Action{ID: projectClearPolicy, Label: "Clear organization policy", Destructive: true,
-			Fields: []console.Field{{Name: "constraint", Label: "Constraint", Type: "select", Required: true, Options: ids, Default: ids[0]}}})
-	}
+	// The org policy actions (#1296), over the registry the v1 methods use.
+	out = append(out, orgPolicyActions(p.registry, "projects/"+project.ProjectID, "")...)
 	// Tags and liens (#1295).
 	out = append(out, tagActions(p.registry, projectTarget(project.ProjectID))...)
 	return append(out, lienActions(p.registry, project.ProjectID)...)
@@ -300,49 +287,13 @@ func (p projectsProvider) DetailActions(_ context.Context, _ string, path []stri
 
 const (
 	projectMove        = "move"
-	projectSetPolicy   = "set-org-policy"
-	projectClearPolicy = "clear-org-policy"
+	projectSetPolicy   = orgPolicySet
+	projectClearPolicy = orgPolicyClear
 )
 
-// orgPolicies is the project's organization policies, as listOrgPolicies
-// answers them (#1296).
+// orgPolicies is the project's organization policies (#1296, #1534).
 func (p projectsProvider) orgPolicies(project string) console.Listing {
-	l := console.Listing{Columns: []string{"Policy", "Updated"}, NameColumn: "Constraint", Noun: "policies",
-		Note: "Stored, never enforced, as IAM policies are; a project has no organization above it, so its effective policy is its own."}
-	all, err := p.registry.OrgPolicies(project)
-	if err != nil {
-		l.Unavailable = consoleErr(err)
-		return l
-	}
-	for _, op := range all {
-		l.Items = append(l.Items, console.Resource{Name: op.Constraint, Fields: map[string]string{
-			"Policy": orgPolicyText(op), "Updated": op.UpdateTime}})
-	}
-	l.Total = len(l.Items)
-	return l
-}
-
-func orgPolicyText(op *crmv1.OrgPolicy) string {
-	switch {
-	case op.BooleanPolicy != nil && op.BooleanPolicy.Enforced:
-		return "Enforced"
-	case op.BooleanPolicy != nil:
-		return "Not enforced"
-	case op.ListPolicy != nil && op.ListPolicy.AllValues != "":
-		return op.ListPolicy.AllValues + " all"
-	case op.ListPolicy != nil:
-		parts := []string{}
-		if len(op.ListPolicy.AllowedValues) > 0 {
-			parts = append(parts, "allow "+strings.Join(op.ListPolicy.AllowedValues, ", "))
-		}
-		if len(op.ListPolicy.DeniedValues) > 0 {
-			parts = append(parts, "deny "+strings.Join(op.ListPolicy.DeniedValues, ", "))
-		}
-		return strings.Join(parts, "; ")
-	case op.RestoreDefault != nil:
-		return "Restore default"
-	}
-	return "-"
+	return orgPolicyListing(p.registry, "projects/"+project)
 }
 
 // ActAt implements console.PathActor through the registry's Undelete, the
@@ -361,33 +312,14 @@ func (p projectsProvider) ActAt(_ context.Context, _ string, path []string, acti
 	case projectUndelete:
 		_, err := p.registry.Undelete(path[0])
 		return err
+	case projectPurge:
+		return p.registry.Purge(path[0])
 	case projectMove:
 		_, err := p.registry.Move(path[0], values["parent"])
 		return err
-	case projectSetPolicy:
-		op := &crmv1.OrgPolicy{Constraint: values["constraint"]}
-		c := resourcemanager.KnownConstraint(op.Constraint)
-		switch {
-		case c != nil && c.BooleanConstraint != nil:
-			op.BooleanPolicy = &crmv1.BooleanPolicy{Enforced: values["enforced"] == "true"}
-		case values["denyAll"] == "true":
-			op.ListPolicy = &crmv1.ListPolicy{AllValues: "DENY"}
-		default:
-			lp := &crmv1.ListPolicy{}
-			for _, v := range strings.Split(values["allowed"], ",") {
-				if v = strings.TrimSpace(v); v != "" {
-					lp.AllowedValues = append(lp.AllowedValues, v)
-				}
-			}
-			if len(lp.AllowedValues) == 0 {
-				lp.AllValues = "ALLOW"
-			}
-			op.ListPolicy = lp
-		}
-		_, err := p.registry.SetOrgPolicy(path[0], op)
+	}
+	if ok, err := orgPolicyAct(p.registry, "projects/"+path[0], action, values); ok {
 		return err
-	case projectClearPolicy:
-		return p.registry.ClearOrgPolicy(path[0], values["constraint"], "")
 	}
 	return fmt.Errorf("unknown action %q", action)
 }

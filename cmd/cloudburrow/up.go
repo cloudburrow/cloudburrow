@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
+	"github.com/cloudburrow/cloudburrow/internal/service/serviceusage"
 	"github.com/cloudburrow/cloudburrow/internal/store"
 	"github.com/cloudburrow/cloudburrow/internal/telemetry"
 	grpctransport "github.com/cloudburrow/cloudburrow/internal/transport/grpc"
@@ -115,6 +116,11 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}); err != nil {
 		return err
 	}
+	// Free now is not free at bind time for a port in the ephemeral range:
+	// any outgoing connection can take it first (#1526). Said, not refused.
+	if r := ephemeralPortsResult(cfg); r.Level == doctor.LevelWarn {
+		fmt.Fprintf(stderr, "cloudburrow up: warning: %s; %s\n", r.Detail, r.Remedy)
+	}
 
 	// The kind configuration is generated before the cluster is created,
 	// because extraPortMappings can only be applied at creation time.
@@ -146,10 +152,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	comps.SetStorageSigningKeys(signingKeys)
-	if serviceEnabled(cfg, config.ServiceBigQuery) {
+	if serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) {
 		// BigQuery's front reads a project's folders and organization
 		// from Resource Manager, through cloudburrow-host (#1392,
-		// INFORMATION_SCHEMA.JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION).
+		// INFORMATION_SCHEMA.JOBS_BY_FOLDER and JOBS_BY_ORGANIZATION),
+		// and the storage server a project's and a folder's parents, for
+		// Storage Intelligence inheritance (#1532).
 		comps.SetResourceManager(fmt.Sprintf("%s.%s.svc.cluster.local:%d", ClusterHostService, cfg.Cluster.Namespace,
 			cfg.Endpoints.ResourceManager))
 	}
@@ -260,6 +268,9 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// reads it through this at reset time.
 	var registered func() []string = func() []string { return nil }
 	var projectRegistry *resourcemanager.Registry
+	// Service Usage is built after the registry, so its reset reads it
+	// through this too (#1537).
+	var serviceUsageRef *serviceusage.Server
 	// The admin token (#553): minted now, required on every /admin route,
 	// written beside the runtime file once the control server is up.
 	adminToken, err := newAdminToken()
@@ -268,13 +279,14 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
 		tasks: tasksSvc, secrets: secretsSvc, forwarders: forwarders,
-		kms:       kmsSvc,
-		mysql:     mysqlCreds,
-		scheduler: schedulerSvc,
-		logging:   loggingSvc,
-		run:       runSvc,
-		projects:  func() []string { return registered() },
-		registry:  func() *resourcemanager.Registry { return projectRegistry },
+		kms:          kmsSvc,
+		mysql:        mysqlCreds,
+		scheduler:    schedulerSvc,
+		logging:      loggingSvc,
+		run:          runSvc,
+		projects:     func() []string { return registered() },
+		registry:     func() *resourcemanager.Registry { return projectRegistry },
+		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
 		projectStore: func() store.Store {
 			if projectRegistry == nil {
 				return nil
@@ -418,6 +430,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	projects, releaseProjects, err := openProjects(cfg)
 	if err == nil && projects != nil {
 		projectRegistry = projects
+		wirePurge(adminAPI, projects)
 		registered = func() []string {
 			list, err := projects.List()
 			if err != nil {
@@ -456,6 +469,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// kept in the registry's store so it persists as the projects do.
 	serviceUsageSrv := newServiceUsageServer(cfg, projects, projects.Backing())
 	if serviceUsageSrv != nil {
+		serviceUsageRef = serviceUsageSrv
 		coord.Register(serviceUsageSrv)
 	}
 
@@ -561,6 +575,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if v := loggingSvc.logViewReader(faults); v != nil {
 			consoleSrv.SetLogViewReader(v)
 		}
+		// And its Log name picker lists ListLogs (#1554).
+		if l := loggingSvc.logNameLister(faults); l != nil {
+			consoleSrv.SetLogNameLister(l)
+		}
 	}
 
 	if localAISrv != nil {
@@ -615,10 +633,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// cluster name when a cluster workload can need them (#575): with Cloud
 	// Run, whose containers are the reason. Registered after every service,
 	// so each has its bound address. Control and admin are never included.
-	// With BigQuery alone, Resource Manager alone is published: the
-	// BigQuery front reads a project's ancestry from it (#1392).
+	// With BigQuery or Cloud Storage and no Cloud Run, Resource Manager
+	// alone is published: the BigQuery front reads a project's ancestry
+	// from it (#1392), and the storage server a project's and a folder's
+	// parents (#1532).
 	runEnabled := serviceEnabled(cfg, config.ServiceRun)
-	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) {
+	if runEnabled || serviceEnabled(cfg, config.ServiceBigQuery) || serviceEnabled(cfg, config.ServiceStorage) {
 		// The Cloud SQL Admin API and its connector are published for Cloud
 		// SQL volumes (#1346): the Auth Proxy a revision runs reaches both.
 		published := map[string]bool{"run": true, "tasks": true, "secretmanager": true, "kms": true,

@@ -43,16 +43,16 @@ func (artifactRegistryProvider) CreateForm() (string, []console.Field) {
 	return "Create repository", []console.Field{
 		{Name: "id", Label: "Name", Type: "text", Required: true, Pattern: "^[a-z]([a-z0-9\\-]{0,61}[a-z0-9])?$",
 			Help: "Lowercase letters, digits and hyphens."},
-		{Name: "format", Label: "Format", Type: "select", Options: []string{"DOCKER"}, Default: "DOCKER",
-			Help: "Docker is the format served: images built and pushed on this instance are its artifacts."},
+		{Name: "format", Label: "Format", Type: "select", Options: []string{"DOCKER", "PYTHON", "NPM", "MAVEN", "GENERIC", "APT", "YUM"}, Default: "DOCKER",
+			Help: "Each format serves its own protocol on the Run port; the repository's page says how its client reaches it."},
 		{Name: "location", Label: "Region", Type: "text", Required: true, Default: "us-central1"},
 		{Name: "description", Label: "Description", Type: "text"},
 		{Name: "labels", Label: "Labels", Type: "text", Help: "optional: key=value pairs, comma separated"},
 	}
 }
 
-// Create implements console.Creator: CreateRepository, a standard DOCKER
-// repository.
+// Create implements console.Creator: CreateRepository, a standard
+// repository of the chosen format.
 func (p artifactRegistryProvider) Create(ctx context.Context, project string, v map[string]string) (string, error) {
 	if project == "" {
 		project = p.defaultProject
@@ -65,9 +65,17 @@ func (p artifactRegistryProvider) Create(ctx context.Context, project string, v 
 	if id == "" || loc == "" {
 		return "", errors.New("a name and a region are required")
 	}
+	format := arpb.Repository_DOCKER
+	if f := strings.TrimSpace(v["format"]); f != "" {
+		n, ok := arpb.Repository_Format_value[f]
+		if !ok {
+			return "", fmt.Errorf("unknown format %q", f)
+		}
+		format = arpb.Repository_Format(n)
+	}
 	err = p.withClient(ctx, func(c *artifactregistry.Client) error {
 		op, err := c.CreateRepository(ctx, &arpb.CreateRepositoryRequest{Parent: "projects/" + project + "/locations/" + loc, RepositoryId: id,
-			Repository: &arpb.Repository{Format: arpb.Repository_DOCKER, Description: strings.TrimSpace(v["description"]), Labels: labels}})
+			Repository: &arpb.Repository{Format: format, Description: strings.TrimSpace(v["description"]), Labels: labels}})
 		if err != nil {
 			return err
 		}

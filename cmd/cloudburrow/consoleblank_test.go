@@ -7,6 +7,7 @@ import (
 	"time"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
+	ssmpb "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	"context"
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	"net"
@@ -38,8 +39,10 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/random"
 )
 
-// blankProject is the project every seeded resource belongs to.
-const blankProject = "blank-check"
+// blankProject is the project every seeded resource belongs to, fresh on
+// each run (freshProject) because some of them live in process-wide
+// stores.
+var blankProject = "blank-check"
 
 // emulatorOnly are the screens whose backend is a container image with no
 // in-process equivalent, so this test cannot open their rows. Each is still
@@ -50,17 +53,19 @@ const blankProject = "blank-check"
 // through: the server drops a blank Property before it is served
 // (TestTheServerDropsBlankProperties).
 var emulatorOnly = map[string]string{
-	"firestore":           "the Firestore emulator is a Java container; there is no in-process fake",
-	"firestore-databases": "Firestore's databases screen reads the Admin API the emulator pod's call front serves",
-	"bigtable-instances":  "the instance admin API is the Bigtable front's, which bttest does not serve (TestConsoleBigtableInstancesScreen drives the front)",
-	"datastore":           "the Datastore emulator is a Java container; there is no in-process fake",
-	"spanner":             "the screens read the instance and database admin APIs, which spannertest does not serve",
-	"cloudsql":            "a PostgreSQL server; there is no in-process one",
-	"cloudsql-mysql":      "a MySQL server; there is no in-process one",
-	"memorystore":         "a Valkey server per instance; there is no in-process one (unit-tested in consolememorystore_test.go)",
-	"bigquery":            "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
-	"bigquery-jobs":       "BigQuery's Job history reads the same emulator, through the validating front",
-	"cloudsql-instances":  "the Cloud SQL Admin API over PostgreSQL and MySQL servers; there is no in-process one",
+	"firestore":            "the Firestore emulator is a Java container; there is no in-process fake",
+	"firestore-databases":  "Firestore's databases screen reads the Admin API the emulator pod's call front serves",
+	"bigtable-instances":   "the instance admin API is the Bigtable front's, which bttest does not serve (TestConsoleBigtableInstancesScreen drives the front)",
+	"datastore":            "the Datastore emulator is a Java container; there is no in-process fake",
+	"spanner":              "the screens read the instance and database admin APIs, which spannertest does not serve",
+	"cloudsql":             "a PostgreSQL server; there is no in-process one",
+	"cloudsql-mysql":       "a MySQL server; there is no in-process one",
+	"memorystore":          "a Valkey server per instance; there is no in-process one (unit-tested in consolememorystore_test.go)",
+	"memorystore-clusters": "a Redis Cluster of Valkey servers; there is no in-process one (TestConsoleRedisCluster drives the page)",
+	"memorystore-valkey":   "Valkey servers per instance; there is no in-process one (TestConsoleValkeyInstances drives the page over fake nodes)",
+	"bigquery":             "goccy/bigquery-emulator is a container built on ZetaSQL; there is no in-process fake",
+	"bigquery-jobs":        "BigQuery's Job history reads the same emulator, through the validating front",
+	"cloudsql-instances":   "the Cloud SQL Admin API over PostgreSQL and MySQL servers; there is no in-process one",
 }
 
 // TestNoDetailShowsABlankProperty enforces console parity §4.4: "Only fields
@@ -84,6 +89,7 @@ func TestNoDetailShowsABlankProperty(t *testing.T) {
 		t.Skip("the cluster screens are driven through a shell-script kubectl")
 	}
 	ctx := context.Background()
+	blankProject = freshProject("blank-check")
 	d := blankCheckDeps(t)
 
 	providers := consoleProviders(d, clusterMetrics(d.cfg.KubeconfigPath()), console.NewSeries(console.SeriesLimit, nil))
@@ -385,7 +391,24 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	// Cloud Build on the same port, for a trigger's page, with the
 	// sparsest trigger CreateBuildTrigger takes: one step, nothing else.
 	cb := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute).Builds(stubSource{}, stubBuilder{}).CloudBuild()
-	jobs.also = func(g *grpc.Server) { cb.Register(g) }
+	// Secure Source Manager on the same port (#1527): the sparsest instance
+	// and repository on it.
+	if err := runadapter.UseSourceManagerRoot(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	ssm := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute).SecureSourceManager(nil)
+	jobs.also = func(g *grpc.Server) { cb.Register(g); ssm.Register(g) }
+	ssmParent := "projects/" + blankProject + "/locations/us-central1"
+	if _, err := ssm.CreateInstance(ctx, &ssmpb.CreateInstanceRequest{Parent: ssmParent, InstanceId: "blank-instance"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ssm.CreateRepository(ctx, &ssmpb.CreateRepositoryRequest{Parent: ssmParent, RepositoryId: "blank-repo",
+		Repository: &ssmpb.Repository{Instance: ssmParent + "/instances/blank-instance"}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = ssm.DeleteInstance(context.Background(), &ssmpb.DeleteInstanceRequest{Name: ssmParent + "/instances/blank-instance", Force: true})
+	})
 	trig, err := cb.CreateBuildTrigger(ctx, &cbpb.CreateBuildTriggerRequest{ProjectId: blankProject,
 		Parent: "projects/" + blankProject + "/locations/global", Trigger: &cbpb.BuildTrigger{Name: "blank-trigger",
 			BuildTemplate: &cbpb.BuildTrigger_Build{Build: &cbpb.Build{Steps: []*cbpb.BuildStep{{Name: "alpine:3.20"}}}}}})

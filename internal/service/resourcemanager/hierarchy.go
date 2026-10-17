@@ -61,6 +61,12 @@ type Folder struct {
 	CreateTime  string `json:"createTime"`
 	UpdateTime  string `json:"updateTime"`
 	DeleteTime  string `json:"deleteTime,omitempty"`
+	// Capabilities are the names of the capabilities set true on it
+	// (capabilities.go), as configuredCapabilities lists them.
+	Capabilities []string `json:"capabilities,omitempty"`
+	// ManagementProject is "projects/{id}", the management project made
+	// when app-management was enabled (#1532, capabilities.go), or "".
+	ManagementProject string `json:"managementProject,omitempty"`
 }
 
 // ID is the folder's number.
@@ -152,14 +158,14 @@ func (r *Registry) folders() ([]Folder, error) {
 // Folders returns every folder, those pending deletion included.
 func (r *Registry) Folders() ([]Folder, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	return r.folders()
 }
 
 // Folder returns one folder.
 func (r *Registry) Folder(name string) (Folder, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	return r.loadFolder(name)
 }
 
@@ -200,7 +206,7 @@ func (r *Registry) CheckParent(parent string) error {
 		return nil
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	_, err := r.checkParentLocked(parent)
 	return err
 }
@@ -248,7 +254,7 @@ func (r *Registry) CreateFolder(parent, display string) (Folder, error) {
 		return Folder{}, apierror.InvalidArgument("parent is required: folders/{folder_number} or %s", OrganizationName)
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	depth, err := r.checkParentLocked(parent)
 	if err != nil {
 		return Folder{}, err
@@ -281,7 +287,7 @@ func (r *Registry) RenameFolder(name, display string) (Folder, error) {
 		return Folder{}, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	f, err := r.loadFolder(name)
 	if err != nil {
 		return Folder{}, err
@@ -304,7 +310,7 @@ func (r *Registry) RenameFolder(name, display string) (Folder, error) {
 // MoveFolder places a folder under another parent.
 func (r *Registry) MoveFolder(name, parent string) (Folder, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	f, err := r.loadFolder(name)
 	if err != nil {
 		return Folder{}, err
@@ -346,7 +352,7 @@ func (r *Registry) MoveFolder(name, parent string) (Folder, error) {
 // folder or project under it is FAILED_PRECONDITION, as on Google.
 func (r *Registry) DeleteFolder(name string) (Folder, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	f, err := r.loadFolder(name)
 	if err != nil {
 		return Folder{}, err
@@ -382,7 +388,7 @@ func (r *Registry) DeleteFolder(name string) (Folder, error) {
 // active.
 func (r *Registry) UndeleteFolder(name string) (Folder, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	f, err := r.loadFolder(name)
 	if err != nil {
 		return Folder{}, err
@@ -417,7 +423,7 @@ type Ancestor struct {
 // when it has one, last.
 func (r *Registry) Ancestry(projectID string) ([]Ancestor, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	defer r.unlock()
 	p, err := r.load(projectID)
 	if err != nil {
 		return nil, err

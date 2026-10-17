@@ -79,17 +79,16 @@ func (p loggingBucketsProvider) DetailActions(ctx context.Context, project strin
 		out = append(out, p.linkActions(ctx, project, path)...)
 		return append(out, p.copyActions(ctx, project, path)...) // #1394
 	}
-	if !viewsChangeable(b) {
-		return nil
-	}
-	if !viewChangeable(b, path[1]) {
-		return nil
-	}
 	v, err := p.view(ctx, path[0]+"/views/"+path[1])
 	if err != nil {
 		return nil
 	}
-	return viewRowActions(v)
+	var out []console.Action
+	if viewChangeable(b, path[1]) {
+		out = viewRowActions(v)
+	}
+	// Any view's permissions, _AllLogs' too (#1519).
+	return append(out, p.viewPermissionsAction(ctx, v.GetName()))
 }
 
 func (p loggingBucketsProvider) view(ctx context.Context, name string) (*loggingpb.LogView, error) {
@@ -139,6 +138,8 @@ func (p loggingBucketsProvider) ActAt(ctx context.Context, project string, path 
 			View:       &loggingpb.LogView{Filter: strings.TrimSpace(values["filter"]), Description: values["description"]},
 			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"filter", "description"}}})
 		return err
+	case action == viewPermissions && len(path) == 2:
+		return setViewPermissions(ctx, a.ViewIAM(), path[0]+"/views/"+path[1], values["bindings"])
 	case action == viewDelete && len(path) == 2:
 		name := path[0] + "/views/" + path[1]
 		if err := p.fault(ctx, loggingpb.ConfigServiceV2_DeleteView_FullMethodName, name); err != nil {

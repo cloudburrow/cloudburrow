@@ -69,6 +69,9 @@ type savedState struct {
 	SQLViews     map[string]savedSQLView      `json:"sqlViews,omitempty"`
 	Bundles      map[string][]byte            `json:"bundles,omitempty"`
 	TablePolicys map[string]*iampolicy.Stored `json:"tablePolicies,omitempty"`
+	// ChangeStreams is the change logs (changestreams.go, #1523), each
+	// full segment a copy file.
+	ChangeStreams map[string]savedChangeLog `json:"changeStreams,omitempty"`
 }
 
 // persister is the front's state directory.
@@ -252,6 +255,9 @@ func (f *Front) restoreState(st *frontstate.Store, s *savedState) error {
 			policies[name] = p
 		}
 	}
+	if err := f.changes.restore(s.ChangeStreams, st.ReadCopy, st.MarkRead); err != nil {
+		return err
+	}
 	f.instances.mu.Lock()
 	f.instances.byNm, f.instances.ops, f.instances.opsQ, f.instances.layers = byNm, ops, s.OpsQ, layers
 	f.instances.mu.Unlock()
@@ -399,6 +405,11 @@ func (f *Front) snapshotState() (*savedState, map[string]frontstate.Copy, error)
 		s.TablePolicys[name] = &c
 	}
 	f.tableIAM.mu.Unlock()
+	if s.ChangeStreams, err = f.changes.snapshot(func(key string, data any, encode func() ([]byte, error)) {
+		copies[key] = frontstate.Copy{Data: data, Encode: encode}
+	}); err != nil {
+		return nil, nil, err
+	}
 	return s, copies, nil
 }
 
@@ -438,6 +449,7 @@ func (f *Front) ResetState(ctx context.Context) error {
 	f.tableIAM.mu.Lock()
 	f.tableIAM.policies = map[string]*iampolicy.Stored{}
 	f.tableIAM.mu.Unlock()
+	f.changes.reset()
 	f.persist.mu.Lock()
 	st := f.persist.state
 	f.persist.mu.Unlock()

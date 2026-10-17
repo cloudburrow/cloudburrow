@@ -45,7 +45,10 @@ import (
 // (github, triggerTemplate, repositoryEventConfig), and a build read from a
 // repository (filename, gitFileSource, sourceToBuild, autodetect), which
 // Google clones from a hosted git service, never from a path on the
-// developer's machine; this instance serves no git service. A Pub/Sub
+// developer's machine; this instance serves none of those. A Secure Source
+// Manager repository's push triggers are its .cloudbuild/triggers.yaml, as
+// Google documents them, not BuildTriggers (securesourcemanagergit.go,
+// #1521). A Pub/Sub
 // trigger (pubsubConfig) runs from a subscription on the instance's Pub/Sub
 // (cloudbuildpubsub.go, #1506).
 //
@@ -64,13 +67,31 @@ type triggerContext struct {
 	id, name string
 	// approval is the trigger's approvalConfig.approvalRequired (#1449).
 	approval bool
+	// subs are a repository push's built-in substitutions, which override
+	// the ones below (#1521); archive is its /workspace, and source the
+	// build's recorded source.
+	subs    map[string]string
+	archive func(context.Context) (io.ReadCloser, error)
+	source  *cbpb.Source
+}
+
+// repoArchive is the push's /workspace, or nil.
+func (t *triggerContext) repoArchive() func(context.Context) (io.ReadCloser, error) {
+	if t == nil {
+		return nil
+	}
+	return t.archive
 }
 
 // builtins are the substitutions Cloud Build adds to a triggered build.
 // The repository ones (REPO_NAME, BRANCH_NAME, COMMIT_SHA, ...) are absent:
 // no trigger here has a repository.
 func (t *triggerContext) builtins() map[string]string {
-	return map[string]string{"TRIGGER_NAME": t.name, "TRIGGER_BUILD_CONFIG_PATH": ""}
+	out := map[string]string{"TRIGGER_NAME": t.name, "TRIGGER_BUILD_CONFIG_PATH": ""}
+	for k, v := range t.subs {
+		out[k] = v
+	}
+	return out
 }
 
 var (
@@ -109,8 +130,9 @@ func unsupportedTrigger(t *cbpb.BuildTrigger) error {
 	}
 	events := func(field string) error {
 		return apierror.Unimplemented("BuildTrigger field %s is not supported: its events come from a hosted git "+
-			"service (GitHub, GitLab, Bitbucket, Cloud Source Repositories), which no instance runs; use a manual "+
-			"trigger (RunBuildTrigger) or a webhook trigger (webhookConfig)", field)
+			"service (GitHub, GitLab, Bitbucket, Cloud Source Repositories, Developer Connect), which no instance runs; "+
+			"use a manual trigger (RunBuildTrigger), a webhook or Pub/Sub trigger, or a Secure Source Manager repository, "+
+			"whose .cloudbuild/triggers.yaml runs builds on push", field)
 	}
 	switch {
 	case t.GetGithub() != nil:

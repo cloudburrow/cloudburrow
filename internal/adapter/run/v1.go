@@ -100,6 +100,12 @@ func (s *Server) V1Handler(next http.Handler) http.Handler {
 	}
 	v1.HandleFunc("GET /v1/projects/{ns}/locations", s.v1Locations)
 	v1.HandleFunc("GET /v1/projects/{ns}/authorizeddomains", s.v1AuthorizedDomains)
+	v1.HandleFunc("GET /v1/projects/{ns}/locations/{loc}/authorizeddomains", s.v1AuthorizedDomains)
+	ops := "/v1/projects/{ns}/locations/{loc}/operations"
+	v1.HandleFunc("GET "+ops, s.v1ListOperations)
+	v1.HandleFunc("GET "+ops+"/{name}", s.v1GetOperation)
+	v1.HandleFunc("DELETE "+ops+"/{name}", s.v1DeleteOperation)
+	v1.HandleFunc("POST "+ops+"/{name}", s.v1WaitOperation)
 	v1.HandleFunc("GET /apis/domains.cloudrun.com/v1/namespaces/{ns}/authorizeddomains", s.v1AuthorizedDomains)
 	jobs := "/apis/run.googleapis.com/v1/namespaces/{ns}/jobs"
 	v1.HandleFunc("GET "+jobs, s.v1ListJobs)

@@ -56,8 +56,8 @@ import (
 // and the decoder does not keep the file's); a recursive record ("dropped
 // beyond the first nesting level", not measured); an array whose items
 // may be null; a file compressed with zstandard (the Avro decoder in
-// go.mod, goavro, reads null, deflate and snappy); referenceFileSchemaUri;
-// a decimal decimalTargetTypes makes STRING; a dry run; a partition
+// go.mod, goavro, reads null, deflate and snappy); a file whose schema is
+// not its referenceFileSchemaUri's (referencefile.go); a decimal decimalTargetTypes makes STRING; a dry run; a partition
 // decorator; another project's table.
 
 // avNode is a column's type as the front reads it from an Avro schema.
@@ -598,8 +598,6 @@ func (f front) avroLoad(w http.ResponseWriter, r *http.Request, job *jobBody) bo
 	_ = decodeJob(r, &extra)
 	el := extra.Configuration.Load
 	switch {
-	case el.ReferenceFileSchemaURI != "":
-		return answer(http.StatusNotImplemented, "with referenceFileSchemaUri, which CloudBurrow does not read")
 	case strings.Contains(dest.TableID, "$"):
 		return answer(http.StatusNotImplemented, "into a partition ("+name+"), which CloudBurrow does not carry out "+
 			"for Avro")
@@ -667,6 +665,41 @@ func (f front) avroLoad(w http.ResponseWriter, r *http.Request, job *jobBody) bo
 			return answer(http.StatusNotImplemented, "of files whose columns differ ("+files[0].uri+": "+describeFields(file)+
 				"; "+files[i].uri+": "+describeFields(got)+"); BigQuery then takes the schema of the alphabetically last "+
 				"file, which CloudBurrow does not reproduce")
+		}
+	}
+	if ref := el.ReferenceFileSchemaURI; ref != "" {
+		// The table's schema is the reference file's (#1457,
+		// referencefile.go).
+		obj, status, msg := f.referenceObject(r, ref)
+		if status == http.StatusNotFound {
+			writeError(w, status, "notFound", msg)
+			return false
+		} else if status != 0 {
+			return answer(status, msg)
+		}
+		where := " " + obj.uri()
+		rd, err := f.storage.open(r.Context(), obj)
+		if err != nil {
+			var le *loadDataError
+			if errors.As(err, &le) {
+				writeError(w, le.code, le.reason, le.msg)
+				return false
+			}
+			return fromErr(err, where)
+		}
+		ocf, err := avroReader(rd, where)
+		if err != nil {
+			rd.Close()
+			return fromErr(err, where)
+		}
+		cols, err := avColumns(ocf.Codec().Schema(), el.UseAvroLogicalTypes, opts)
+		rd.Close()
+		if err != nil {
+			return fromErr(err, where)
+		}
+		if refFields := avTableFields(cols); !sameFields(refFields, file) {
+			return answer(http.StatusNotImplemented, "of files whose columns differ from the reference file "+ref+"'s ("+
+				describeFields(refFields)+"; the files': "+describeFields(file)+")"+referenceDiffersWhy)
 		}
 	}
 	if l.Schema != nil && !givenFits(l.Schema.Fields, file) {

@@ -286,10 +286,10 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 const (
 	externalPrimaryWhy = "demoting makes a Cloud SQL instance a replica of an external primary, a server outside Cloud SQL, which a migration back out of Cloud SQL " +
 		"replicates to; CloudBurrow serves the other direction, a replica of a source representation instance (ON_PREMISES_INSTANCE) " +
-		"synced with startExternalSync and promoted with promoteReplica, but does not turn a primary into a replica (docs/cloudsql.md)"
+		"synced with startExternalSync (or seeded from dumpFilePath) and promoted with promoteReplica, but does not turn a primary into a replica: " +
+		"Google's custom import demotes a promoted instance and then sets its replication up with Cloud SQL's mysql.* stored procedures, " +
+		"which a MySQL server's own mysql schema does not take (docs/cloudsql.md)"
 	sqlServerWhy = "it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
-	diskWhy      = "an instance's storage is its server's volume in the cluster, not a provisioned Compute Engine persistent disk, " +
-		"so it has no provisioned size (settings.dataDiskSizeGb) to shrink or reset"
 	BlueGreenWhy = "a blue-green deployment's switchover moves the blue instance's write endpoint (its IP address and DNS name) to the green instance, " +
 		"which needs Google-managed networking; CloudBurrow's instances are reached by connection name through the connector. " +
 		"Read replicas and promoteReplica are served (docs/cloudsql.md)"
@@ -317,8 +317,6 @@ func verbWhy(verb string) string {
 		return "per-instance server certificates are for instances whose serverCaMode is GOOGLE_MANAGED_CAS_CA or CUSTOMER_MANAGED_CAS_CA, " +
 			"issued by Certificate Authority Service, which is not served; instances here are GOOGLE_MANAGED_INTERNAL_CA, " +
 			"whose server CA is rotated with addServerCa and rotateServerCa"
-	case "getDiskShrinkConfig", "performDiskShrink", "resetReplicaSize":
-		return diskWhy
 	case "rescheduleMaintenance":
 		return "CloudBurrow's servers have no Google-managed maintenance: no maintenance event is ever scheduled (scheduledMaintenance is never set), " +
 			"so there is none to reschedule"
@@ -538,6 +536,21 @@ func (s *Server) route(r *http.Request, base string, p []string) (string, any, e
 		if len(rest) == 3 && r.Method == http.MethodPost {
 			out, err := s.startExternalSync(r, base, project, name)
 			return "sql.projects.instances.startExternalSync", out, err
+		}
+	case "getDiskShrinkConfig":
+		if len(rest) == 3 && r.Method == http.MethodGet {
+			out, err := s.getDiskShrinkConfig(ctx, project, name)
+			return "sql.projects.instances.getDiskShrinkConfig", out, err
+		}
+	case "performDiskShrink":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.performDiskShrink(r, base, project, name)
+			return "sql.projects.instances.performDiskShrink", out, err
+		}
+	case "resetReplicaSize":
+		if len(rest) == 3 && r.Method == http.MethodPost {
+			out, err := s.resetReplicaSize(r, base, project, name)
+			return "sql.projects.instances.resetReplicaSize", out, err
 		}
 	}
 	return "sql.instances." + rest[2], nil, unimplemented("instances/{instance}/"+rest[2], verbWhy(rest[2]))

@@ -73,8 +73,8 @@ func arRepoWithImage(ctx context.Context, t *testing.T, h *Harness, repoID strin
 //   - ExportArtifact, by tag, writes each of the version's files to a
 //     bucket in the instance's Cloud Storage;
 //   - BatchDeleteVersions with validate_only deletes nothing, then deletes
-//     the tagged version; ListMavenArtifacts is UNIMPLEMENTED with the
-//     reason.
+//     the tagged version; ListMavenArtifacts of this DOCKER repository is
+//     FAILED_PRECONDITION naming its format (#1531).
 func TestArtifactRegistryConfigAndMetadata(t *testing.T) {
 	h := New(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
@@ -250,9 +250,9 @@ func TestArtifactRegistryConfigAndMetadata(t *testing.T) {
 	if _, err := ar.GetVersion(ctx, &arpb.GetVersionRequest{Name: version}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetVersion after BatchDeleteVersions = %v; want NotFound", err)
 	}
-	if _, err := ar.ListMavenArtifacts(ctx, &arpb.ListMavenArtifactsRequest{Parent: repo}).Next(); status.Code(err) != codes.Unimplemented ||
-		!strings.Contains(err.Error(), "only DOCKER repositories") {
-		t.Errorf("ListMavenArtifacts = %v; want UNIMPLEMENTED with the reason", err)
+	if _, err := ar.ListMavenArtifacts(ctx, &arpb.ListMavenArtifactsRequest{Parent: repo}).Next(); status.Code(err) != codes.FailedPrecondition ||
+		!strings.Contains(err.Error(), "is a DOCKER repository") {
+		t.Errorf("ListMavenArtifacts of a DOCKER repository = %v; want FAILED_PRECONDITION naming its format (#1531)", err)
 	}
 }
 

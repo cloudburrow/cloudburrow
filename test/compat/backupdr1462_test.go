@@ -224,10 +224,11 @@ func TestBackupDRUpdatesAndViews(t *testing.T) {
 }
 
 // TestBackupDRRefusals (#1462): what needs Compute Engine, Google-managed
-// networking, billing or an inventory is refused 501, naming it.
-// covers: backupdr.projects.locations.managementServers.create (unimplemented), backupdr.projects.locations.managementServers.delete (unimplemented), backupdr.projects.locations.managementServers.get (unimplemented), backupdr.projects.locations.managementServers.list (unimplemented), backupdr.projects.locations.managementServers.getIamPolicy (unimplemented), backupdr.projects.locations.managementServers.setIamPolicy (unimplemented), backupdr.projects.locations.managementServers.testIamPermissions (unimplemented), backupdr.projects.locations.managementServers.msComplianceMetadata (unimplemented)
+// networking, the appliance or Resource Manager's hierarchy is refused 501,
+// naming it.
+// covers: backupdr.projects.locations.managementServers.create (unimplemented), backupdr.projects.locations.managementServers.delete (unimplemented), backupdr.projects.locations.managementServers.get (unimplemented), backupdr.projects.locations.managementServers.list (unimplemented), backupdr.projects.locations.managementServers.getIamPolicy (unimplemented), backupdr.projects.locations.managementServers.setIamPolicy (unimplemented), backupdr.projects.locations.managementServers.testIamPermissions (unimplemented)
 // covers: backupdr.projects.locations.backupVaults.dataSources.initiateBackup (unimplemented), backupdr.projects.locations.backupVaults.dataSources.finalizeBackup (unimplemented), backupdr.projects.locations.backupVaults.dataSources.abandonBackup (unimplemented), backupdr.projects.locations.backupVaults.dataSources.fetchAccessToken (unimplemented), backupdr.projects.locations.backupVaults.dataSources.setInternalStatus (unimplemented), backupdr.projects.locations.backupVaults.dataSources.remove (unimplemented)
-// covers: backupdr.projects.locations.getTrial (unimplemented), backupdr.projects.locations.trial.subscribe (unimplemented), backupdr.projects.locations.trial.end (unimplemented), backupdr.projects.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.folders.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.organizations.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.projects.locations.serviceConfig.initialize (unimplemented)
+// covers: backupdr.folders.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.organizations.locations.resourceBackupConfigs.fetch (unimplemented), backupdr.projects.locations.serviceConfig.initialize (unimplemented)
 func TestBackupDRRefusals(t *testing.T) {
 	h := New(t)
 	if os.Getenv(EnvBackupDR) == "" {
@@ -258,10 +259,6 @@ func TestBackupDRRefusals(t *testing.T) {
 			_, err := l.ManagementServers.TestIamPermissions(ms, &backupdr.TestIamPermissionsRequest{Permissions: []string{"x"}}).Do()
 			return err
 		}},
-		{"managementServers.msComplianceMetadata", "management server", func() error {
-			_, err := l.ManagementServers.MsComplianceMetadata(loc, &backupdr.FetchMsComplianceMetadataRequest{}).Do()
-			return err
-		}},
 		{"dataSources.initiateBackup", "appliance", func() error {
 			_, err := l.BackupVaults.DataSources.InitiateBackup(ds, &backupdr.InitiateBackupRequest{}).Do()
 			return err
@@ -286,13 +283,6 @@ func TestBackupDRRefusals(t *testing.T) {
 			_, err := l.BackupVaults.DataSources.Remove(ds, &backupdr.RemoveDataSourceRequest{}).Do()
 			return err
 		}},
-		{"getTrial", "billing", func() error { _, err := l.GetTrial(loc + "/trial").Do(); return err }},
-		{"trial.subscribe", "billing", func() error {
-			_, err := l.Trial.Subscribe(loc, &backupdr.SubscribeTrialRequest{}).Do()
-			return err
-		}},
-		{"trial.end", "billing", func() error { _, err := l.Trial.End(loc, &backupdr.EndTrialRequest{}).Do(); return err }},
-		{"resourceBackupConfigs.fetch", "Cloud Asset Inventory", func() error { _, err := l.ResourceBackupConfigs.Fetch(loc).Do(); return err }},
 		{"folders resourceBackupConfigs.fetch", "folder", func() error {
 			_, err := bdr.Folders.Locations.ResourceBackupConfigs.Fetch("folders/1/locations/us-central1").Do()
 			return err

@@ -48,7 +48,11 @@ func TestPrefetchThenUpOfflineWithNoEgress(t *testing.T) {
 	}
 	suffix := time.Now().UnixNano() % 1e6
 	name := fmt.Sprintf("off-%d", suffix)
-	base := 21000 + int(time.Now().UnixNano()%200)*100
+	// A block wholly below Linux's ephemeral range (32768–60999): at
+	// --port-base 40200 a connection already open held the Bigtable
+	// tunnel's 40212, and kubectl could not listen on it (#1526). 21000 to
+	// 31900, whose top port, base+90, is 31990.
+	base := 21000 + int(time.Now().UnixNano()%110)*100
 	flags := []string{"--name", name, "--state-dir", t.TempDir(), "--port-base", strconv.Itoa(base),
 		"--services", "storage,pubsub,tasks,run,secretmanager,bigtable", "--mode", "ephemeral"}
 	t.Cleanup(func() {

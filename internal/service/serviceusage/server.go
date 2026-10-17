@@ -21,7 +21,9 @@
 // not enforced (ADR-0006). docs/serviceusage.md says so.
 //
 // Every change happens before the call returns, so each operation is
-// returned done, and operations.get answers it afterwards.
+// returned done, and operations.get answers it afterwards; operations.list
+// lists them, cancel answers Empty and leaves a done one done, and delete
+// forgets one (#1530).
 package serviceusage
 
 import (
@@ -79,6 +81,9 @@ type Server struct {
 
 	mu  sync.Mutex
 	ops map[string]map[string]any
+	// opOrder is ops' names in the order they were made, which
+	// operations.list answers in.
+	opOrder []string
 
 	srv *http.Server
 	ln  net.Listener
@@ -205,15 +210,27 @@ func (s *Server) route(r *http.Request) (string, any, error) {
 	case len(p) >= 2 && p[0] == "operations" && verb == "" && r.Method == http.MethodGet:
 		out, err := s.operation(strings.Join(p, "/"))
 		return "serviceusage.operations.get", out, err
-	case len(p) == 1 && p[0] == "operations" && r.Method == http.MethodGet:
-		return "serviceusage.operations.list", nil, errorf(http.StatusNotImplemented, "UNIMPLEMENTED",
-			"CloudBurrow does not implement operations.list: every operation is returned done, and operations.get answers it by name")
-	case len(p) >= 2 && p[0] == "operations":
-		// cancel and delete: every operation is done before it is
-		// returned, so there is nothing to cancel, and they are kept.
-		return "serviceusage.operations." + map[bool]string{true: "cancel", false: "delete"}[verb == "cancel"], nil,
-			errorf(http.StatusNotImplemented, "UNIMPLEMENTED",
-				"CloudBurrow does not implement operations.cancel or operations.delete: every operation is done when it is returned")
+	case len(p) == 1 && p[0] == "operations" && verb == "" && r.Method == http.MethodGet:
+		out, err := s.listOperations(r.URL.Query())
+		return "serviceusage.operations.list", out, err
+	case len(p) >= 2 && p[0] == "operations" && verb == "cancel" && r.Method == http.MethodPost:
+		// Every operation is done before it is returned, and cancelling a
+		// done operation changes nothing (google.longrunning): the answer
+		// is Empty, and operations.get still reports it done.
+		if err := decode(r, &struct{}{}); err != nil {
+			return "serviceusage.operations.cancel", nil, err
+		}
+		_, err := s.operation(strings.Join(p, "/"))
+		if err != nil {
+			return "serviceusage.operations.cancel", nil, err
+		}
+		return "serviceusage.operations.cancel", map[string]any{}, nil
+	case len(p) >= 2 && p[0] == "operations" && verb == "" && r.Method == http.MethodDelete:
+		err := s.DeleteOperation(strings.Join(p, "/"))
+		if err != nil {
+			return "serviceusage.operations.delete", nil, err
+		}
+		return "serviceusage.operations.delete", map[string]any{}, nil
 	}
 	// {projects|folders|organizations}/{id}/services[/{service}]
 	if len(p) < 3 || p[2] != "services" || len(p) > 4 {
@@ -585,8 +602,103 @@ func (s *Server) done(project, target, respType string, resp map[string]any) map
 	}
 	s.mu.Lock()
 	s.ops[name] = op
+	s.opOrder = append(s.opOrder, name)
 	s.mu.Unlock()
 	return op
+}
+
+// listOperations is operations.list (#1530): every operation this instance
+// returned and nobody deleted, oldest first, paged as services.list is.
+// Google documents filter and name without a grammar for this API, so a
+// filter, or a name other than "operations", is refused saying so rather
+// than guessed.
+func (s *Server) listOperations(q url.Values) (any, error) {
+	if f := strings.TrimSpace(q.Get("filter")); f != "" {
+		return nil, errorf(http.StatusNotImplemented, "UNIMPLEMENTED",
+			"operations.list filter %q is not supported: Google documents no filter grammar for Service Usage operations; list without one", f)
+	}
+	if n := q.Get("name"); n != "" && n != "operations" {
+		return nil, errorf(http.StatusNotImplemented, "UNIMPLEMENTED",
+			"operations.list name %q is not supported: only \"operations\", every operation, is", n)
+	}
+	size := defaultPageSize
+	if v := q.Get("pageSize"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return nil, invalid("Invalid pageSize %q", v)
+		}
+		if n > 0 {
+			size = min(n, maxPageSize)
+		}
+	}
+	start := 0
+	if tok := q.Get("pageToken"); tok != "" {
+		n, err := strconv.Atoi(tok)
+		if err != nil || n < 0 {
+			return nil, invalid("Invalid pageToken %q", tok)
+		}
+		start = n
+	}
+	all := s.Operations()
+	out := map[string]any{}
+	if start < len(all) {
+		end := min(start+size, len(all))
+		page := make([]any, 0, end-start)
+		for _, op := range all[start:end] {
+			page = append(page, op)
+		}
+		out["operations"] = page
+		if end < len(all) {
+			out["nextPageToken"] = strconv.Itoa(end)
+		}
+	}
+	return out, nil
+}
+
+// Operations is every kept operation, oldest first, for operations.list
+// and the console.
+func (s *Server) Operations() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]map[string]any, 0, len(s.opOrder))
+	for _, n := range s.opOrder {
+		out = append(out, s.ops[n])
+	}
+	return out
+}
+
+// ProjectOperations is the kept operations that changed project's APIs,
+// oldest first, for the console.
+func (s *Server) ProjectOperations(project string) []map[string]any {
+	prefix := parent(project) + "/services/"
+	var out []map[string]any
+	for _, op := range s.Operations() {
+		md, _ := op["metadata"].(map[string]any)
+		names, _ := md["resourceNames"].([]string)
+		if len(names) > 0 && strings.HasPrefix(names[0], prefix) {
+			out = append(out, op)
+		}
+	}
+	return out
+}
+
+// DeleteOperation is operations.delete (#1530): the operation is forgotten,
+// so operations.get and operations.list no longer answer it. The change it
+// made stays.
+func (s *Server) DeleteOperation(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.ops[name]; !ok {
+		return errorf(http.StatusNotFound, "NOT_FOUND", "Operation %s not found", name)
+	}
+	delete(s.ops, name)
+	for i, n := range s.opOrder {
+		if n == name {
+			s.opOrder = append(s.opOrder[:i], s.opOrder[i+1:]...)
+			break
+		}
+	}
+	return nil
 }
 
 func (s *Server) operation(name string) (any, error) {
@@ -641,10 +753,10 @@ type Method struct {
 // it, and a unit test calls each one, so a method moves to implemented in
 // the change that serves it.
 var Methods = []Method{
-	{"serviceusage.operations.cancel", "POST", "v1/operations/x:cancel", false},
-	{"serviceusage.operations.delete", "DELETE", "v1/operations/x", false},
+	{"serviceusage.operations.cancel", "POST", "v1/operations/x:cancel", true},
+	{"serviceusage.operations.delete", "DELETE", "v1/operations/x", true},
 	{"serviceusage.operations.get", "GET", "v1/operations/x", true},
-	{"serviceusage.operations.list", "GET", "v1/operations", false},
+	{"serviceusage.operations.list", "GET", "v1/operations", true},
 	{"serviceusage.services.batchEnable", "POST", "v1/projects/p/services:batchEnable", true},
 	{"serviceusage.services.batchGet", "GET", "v1/projects/p/services:batchGet", true},
 	{"serviceusage.services.disable", "POST", "v1/projects/p/services/s:disable", true},
@@ -660,4 +772,39 @@ func MethodStatuses() map[string]bool {
 		out[m.ID] = m.Implemented
 	}
 	return out
+}
+
+// ResetProject forgets a project's API states and the operations that
+// changed them, or every project's for "" (#1537): /admin/reset's, and a
+// purged project's, so a project created again under the ID starts with
+// every API at its default, as a new project on Google starts with its own.
+func (s *Server) ResetProject(project string) error {
+	if s.st != nil {
+		keys, err := s.st.List(keyPrefix)
+		if err != nil {
+			return err
+		}
+		for _, k := range keys {
+			if project == "" || k == keyPrefix+project {
+				if err := s.st.Delete(k); err != nil && !errors.Is(err, store.ErrNotFound) {
+					return err
+				}
+			}
+		}
+	}
+	prefix := parent(project) + "/services/"
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := s.opOrder[:0]
+	for _, n := range s.opOrder {
+		md, _ := s.ops[n]["metadata"].(map[string]any)
+		names, _ := md["resourceNames"].([]string)
+		if project == "" || (len(names) > 0 && strings.HasPrefix(names[0], prefix)) {
+			delete(s.ops, n)
+			continue
+		}
+		kept = append(kept, n)
+	}
+	s.opOrder = kept
+	return nil
 }

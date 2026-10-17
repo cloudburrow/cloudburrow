@@ -2156,6 +2156,7 @@ func TestTheDrawerListsProductsNotPages(t *testing.T) {
 		"Buckets /storage/browser storage Cloud Storage",
 		"Deleted buckets /storage/deleted storage-deleted Cloud Storage",
 		"Settings /storage/settings storage-settings Cloud Storage",
+		"Storage Intelligence /storage/intelligence storage-intelligence Cloud Storage",
 	}
 	if strings.Join(gcs, "|") != strings.Join(wantGCS, "|") {
 		t.Errorf("Cloud Storage pages = %q, want %q", gcs, wantGCS)

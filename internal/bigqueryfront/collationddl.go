@@ -20,12 +20,12 @@ import (
 // collation, a Dataset resource's defaultCollation. BigQuery documents no
 // error text; the message here is CloudBurrow's (UNVERIFIED wording).
 //
-// A STRING inside a STRUCT or an ARRAY can carry a collation in BigQuery
-// ("A STRUCT can have STRING fields with different collation
-// specifications"). The engine gives a collation only to a top-level
-// STRING column (its analyzer has no nested column annotations), so such
-// a collation is refused 501, Not implemented here, before anything is
-// run or made, rather than kept in the schema and ignored.
+// A STRING inside a STRUCT or an ARRAY carries a collation too ("A
+// STRUCT can have STRING fields with different collation
+// specifications"), in DDL (STRUCT<a STRING COLLATE 'und:ci'>,
+// ARRAY<STRING COLLATE 'und:ci'>) and in a Table resource (a RECORD's
+// field, a REPEATED STRING); since #1516 the engine compares it by its
+// collation (googlesqlite patch 0061, bigquery-emulator patch 0051).
 
 // collationSpecRefused returns BigQuery's refusal of spec, or "" for the
 // two it supports.
@@ -34,14 +34,6 @@ func collationSpecRefused(spec string) string {
 		return ""
 	}
 	return fmt.Sprintf("Invalid collation specification '%s': only 'und:ci' and '' are supported", spec)
-}
-
-// nestedCollationRefused is the 501 for a collation on a STRING inside a
-// STRUCT or an ARRAY; what names it.
-func nestedCollationRefused(what string) string {
-	return "Not implemented here: a collation on " + what + ". BigQuery supports it; the engine behind " +
-		"CloudBurrow compares only a top-level STRING column by its collation, so the collation would be " +
-		"kept and ignored. Nothing was run."
 }
 
 // queryCollationRefusal returns the code, reason and message that refuse
@@ -54,18 +46,9 @@ func queryCollationRefusal(sql string) (int, string, string) {
 	if !ok {
 		return 0, "", ""
 	}
-	nest := 0 // open STRUCT< and ARRAY< of a type
 	for i := 0; i < len(t); i++ {
 		switch {
-		case (t[i].is("STRUCT") || t[i].is("ARRAY")) && i+1 < len(t) && t[i+1].punct("<"):
-			nest++
-			i++
-		case nest > 0 && t[i].punct(">"):
-			nest--
 		case t[i].is("COLLATE") && i+1 < len(t) && t[i+1].kind == tokString:
-			if nest > 0 {
-				return http.StatusNotImplemented, "notImplemented", nestedCollationRefused("a STRING inside a STRUCT or an ARRAY type")
-			}
 			if spec, ok := stringLiteral(t[i+1]); ok {
 				if msg := collationSpecRefused(spec); msg != "" {
 					return http.StatusBadRequest, "invalidQuery", msg
@@ -126,23 +109,19 @@ func tableCollationRefusal(raw []byte) (int, string, string) {
 	if msg := collationSpecRefused(body.DefaultCollation); msg != "" {
 		return http.StatusBadRequest, "invalid", msg
 	}
-	var walk func(fields []collationField, nested bool, prefix string) (int, string, string)
-	walk = func(fields []collationField, nested bool, prefix string) (int, string, string) {
+	var walk func(fields []collationField) (int, string, string)
+	walk = func(fields []collationField) (int, string, string) {
 		for _, f := range fields {
 			if msg := collationSpecRefused(f.Collation); msg != "" {
 				return http.StatusBadRequest, "invalid", msg
 			}
-			if f.Collation != "" && (nested || strings.EqualFold(f.Mode, "REPEATED")) {
-				return http.StatusNotImplemented, "notImplemented", nestedCollationRefused("the field " + prefix + f.Name +
-					", a STRING inside a RECORD or a REPEATED STRING")
-			}
-			if code, reason, msg := walk(f.Fields, true, prefix+f.Name+"."); code != 0 {
+			if code, reason, msg := walk(f.Fields); code != 0 {
 				return code, reason, msg
 			}
 		}
 		return 0, "", ""
 	}
-	return walk(body.Schema.Fields, false, "")
+	return walk(body.Schema.Fields)
 }
 
 // datasetCollationRefused returns the refusal of raw, a Dataset
@@ -205,4 +184,38 @@ func tableDefaultCollate(sql string) (spec string, named bool, at int, ok bool) 
 		}
 	}
 	return "", false, at, true
+}
+
+// collationRetypeRefused returns the 400 of ALTER COLUMN SET DATA TYPE
+// next on old, a column's TableFieldSchema, that names a COLLATE other
+// than the column's (or a field's) collation, or "": "You cannot update
+// an existing collation specification on a column"
+// (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#alter_table_collate_statement).
+// A type that names none keeps the column's (#1516; the wording is
+// CloudBurrow's, UNVERIFIED).
+func collationRetypeRefused(old, next map[string]any, name string) string {
+	if c, named := next["collation"].(string); named {
+		if was, _ := old["collation"].(string); c != was {
+			return fmt.Sprintf("ALTER COLUMN SET DATA TYPE cannot change the collation of %s from '%s' to '%s': "+
+				"an existing collation specification on a column cannot be updated", name, was, c)
+		}
+	}
+	of, _ := old["fields"].([]any)
+	nf, _ := next["fields"].([]any)
+	for i, n := range nf {
+		nm, _ := n.(map[string]any)
+		if nm == nil {
+			continue
+		}
+		om := map[string]any{}
+		if i < len(of) {
+			if m, ok := of[i].(map[string]any); ok {
+				om = m
+			}
+		}
+		if msg := collationRetypeRefused(om, nm, name+"."+str(nm, "name")); msg != "" {
+			return msg
+		}
+	}
+	return ""
 }

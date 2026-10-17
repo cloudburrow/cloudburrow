@@ -345,17 +345,11 @@ func (s *Server) deliverNow(ctx context.Context, ds []delivery) {
 			s.d.bqMu.Lock()
 			n, rejected, err := streamToBigQuery(ctx, dest.BigQuery, g.sink, parts[2], parts[4], g.partitioned, g.entries)
 			s.d.bqMu.Unlock()
-			if n > 0 {
-				s.delivered(g.sink, n)
-			}
-			if rejected > 0 {
-				s.d.mu.Lock()
-				s.d.statusOf(g.sink).ErrorRows += int64(rejected)
-				s.d.mu.Unlock()
-			}
+			code, detail := "", ""
 			if err != nil {
-				s.sinkError(g, errorCode(err, "dataset_not_found"), err.Error())
+				code, detail = errorCode(err, "dataset_not_found"), err.Error()
 			}
+			s.recordDelivery(g, n, rejected, code, detail)
 		}
 	}
 }
@@ -441,9 +435,29 @@ const sinkErrorLog = "logging.googleapis.com/sink_error"
 // and code, as the entry Google documents
 // (docs.cloud.google.com/logging/docs/export/troubleshoot).
 func (s *Server) sinkError(g *group, code, detail string) {
+	s.recordDelivery(g, 0, 0, code, detail)
+}
+
+// recordDelivery records what one delivery did, in one step so the console
+// never reads part of it (#1529): n entries written, rejected entries sent
+// to the dataset's export_errors table, and the error, code empty for
+// none, reported as sinkError says.
+func (s *Server) recordDelivery(g *group, n, rejected int, code, detail string) {
+	if n == 0 && rejected == 0 && code == "" {
+		return
+	}
 	now := s.clock()
 	s.d.mu.Lock()
 	st := s.d.statusOf(g.sink)
+	if n > 0 {
+		st.Delivered += int64(n)
+		st.LastDelivery = now
+	}
+	st.ErrorRows += int64(rejected)
+	if code == "" {
+		s.d.mu.Unlock()
+		return
+	}
 	st.LastError, st.LastErrorAt = code+": "+detail, now
 	key := g.sink + "|" + code
 	last, seen := s.d.reported[key]

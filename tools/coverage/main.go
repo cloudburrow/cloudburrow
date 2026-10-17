@@ -49,6 +49,7 @@ import (
 
 	rpccode "google.golang.org/genproto/googleapis/rpc/code"
 
+	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 	gcs "github.com/cloudburrow/cloudburrow/internal/service/storage"
 	bqv2 "google.golang.org/api/bigquery/v2"
 	crmv1 "google.golang.org/api/cloudresourcemanager/v1"
@@ -73,12 +74,15 @@ import (
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
+	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
+	_ "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
 	_ "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	_ "cloud.google.com/go/run/apiv2/runpb"
 	_ "cloud.google.com/go/scheduler/apiv1/schedulerpb"
 	_ "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	_ "cloud.google.com/go/securesourcemanager/apiv1/securesourcemanagerpb"
 	_ "cloud.google.com/go/spanner/admin/database/apiv1/databasepb"
 	_ "cloud.google.com/go/spanner/admin/instance/apiv1/instancepb"
 	_ "cloud.google.com/go/spanner/apiv1/spannerpb"
@@ -111,15 +115,19 @@ var areas = []area{
 	// repository calls and the builds SubmitBuild runs.
 	{Key: "artifactregistry", Title: "Artifact Registry", Own: true, Services: []string{"google.devtools.artifactregistry.v1.ArtifactRegistry"}},
 	{Key: "cloudbuild", Title: "Cloud Build", Own: true, Services: []string{"google.devtools.cloudbuild.v1.CloudBuild"}},
+	// Secure Source Manager (#1521), on the Run port: a repository is a git
+	// host whose pushes run Cloud Build triggers.
+	{Key: "securesourcemanager", Title: "Secure Source Manager", Own: true, Services: []string{"google.cloud.securesourcemanager.v1.SecureSourceManager"}},
 	// Cloud Functions v2 (#1377), on the Run port: a function is a
 	// SubmitBuild buildpacks build and a Cloud Run service. Its IAM and
 	// Locations mixins are KMS's keys, which are global.
 	{Key: "functions", Title: "Cloud Functions v2", Own: true, Services: []string{"google.cloud.functions.v2.FunctionService"}},
 	{Key: "functionsv1", Title: "Cloud Functions v1", Own: true, Services: []string{"google.cloud.functions.v1.CloudFunctionsService"}},
 	// The v1 (Knative-shaped) API gcloud run calls (#1293): no proto, so
-	// its methods are the official generated client's, and a method is
-	// Verified only by an annotated official-client test.
-	{Key: "runv1", Title: "Cloud Run v1 (Knative API)", Methods: discoveryMethods("run", reflect.TypeOf(runv1.APIService{}))},
+	// its methods are the official generated client's. It is CloudBurrow's
+	// own, served by the Run adapter's V1Handler, whose method table is its
+	// registry (#1533).
+	{Key: "runv1", Title: "Cloud Run v1 (Knative API)", Own: true, Methods: discoveryMethods("run", reflect.TypeOf(runv1.APIService{}))},
 	// google.iam.v1.IAMPolicy is the mixin cloudkms.googleapis.com serves
 	// (#428). Mixin keys are global, so only one area may list it.
 	// google.cloud.location.Locations too (#1291); Cloud Scheduler lists it
@@ -130,7 +138,10 @@ var areas = []area{
 	// Liens (#1295) have no gRPC service: they are on resourcemanagerv1.
 	{Key: "resourcemanager", Title: "Resource Manager v3 (Projects, Folders, Organizations, Tags)", Own: true, Services: []string{"google.cloud.resourcemanager.v3.Projects",
 		"google.cloud.resourcemanager.v3.Folders", "google.cloud.resourcemanager.v3.Organizations", "google.cloud.resourcemanager.v3.TagKeys",
-		"google.cloud.resourcemanager.v3.TagValues", "google.cloud.resourcemanager.v3.TagBindings", "google.cloud.resourcemanager.v3.TagHolds"}},
+		"google.cloud.resourcemanager.v3.TagValues", "google.cloud.resourcemanager.v3.TagBindings", "google.cloud.resourcemanager.v3.TagHolds"},
+		// Folder capabilities (#1519) are v3 REST only: the Go v3 proto
+		// has no Capability, so they are named by their discovery IDs.
+		Extra: []string{"cloudresourcemanager.folders.capabilities.get", "cloudresourcemanager.folders.capabilities.patch"}},
 	// Resource Manager's JSON-only surface: v1 REST, which gcloud projects
 	// and Terraform's google_project and google_project_organization_policy
 	// call (#301, #1296), and liens (#1295), which have no gRPC service. A
@@ -151,8 +162,9 @@ var areas = []area{
 	// The local AI endpoint's PredictionService (#1193).
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
-	// server --services memorystore runs.
-	{Key: "memorystore", Title: "Memorystore for Redis", Own: true, Services: []string{"google.cloud.redis.v1.CloudRedis"}},
+	// server --services memorystore runs, and Memorystore for Redis
+	// Cluster and Memorystore for Valkey (#1519) on the same port.
+	{Key: "memorystore", Title: "Memorystore for Redis", Own: true, Services: []string{"google.cloud.redis.v1.CloudRedis", "google.cloud.redis.cluster.v1.CloudRedisCluster", "google.cloud.memorystore.v1.Memorystore"}},
 	// Pub/Sub's IAM (#1367) is the google.iam.v1.IAMPolicy mixin, which the
 	// kms area lists (mixin keys are global), served by the Pub/Sub front
 	// over gRPC and REST: its rows are named by the REST methods' discovery
@@ -164,7 +176,9 @@ var areas = []area{
 	// is registered under CloudBurrow's own name, since the CLI links the Go
 	// client's copy too, so its methods come from the server's service
 	// descriptor, under the name clients call.
-	{Key: "storagegrpc", Title: "Cloud Storage (gRPC API v2)", Own: true, Methods: gcs.GRPCMethods()},
+	// Storage Control's IntelligenceConfig methods (#1519) are on the same
+	// port; its Anywhere Cache methods are named by the JSON API's rows.
+	{Key: "storagegrpc", Title: "Cloud Storage (gRPC API v2)", Own: true, Methods: append(gcs.GRPCMethods(), gcs.ControlGRPCMethods()...)},
 	// The opt-in emulators (#717) are Google's, like Pub/Sub's: a method is
 	// Verified only by an annotated official-client test, and Unknown
 	// otherwise. Bigtable's instance admin service (#1331) is the Bigtable
@@ -202,9 +216,11 @@ var areas = []area{
 // answers 501 (a Cloud SQL backup is restored by Cloud SQL). Patches,
 // plan revisions, the fetch and reference views and operations.cancel and
 // delete are served since #1462, resourceBackupConfigs.list (Cloud SQL
-// instances) since #1501; management servers, the appliance's
-// data source methods, trials, resource backup configs' fetch and
-// serviceConfig.initialize answer 501 naming what they need.
+// instances) since #1501, resourceBackupConfigs.fetch, trials and
+// msComplianceMetadata since #1536; management servers, the appliance's
+// data source methods, a folder's or organization's fetch and
+// serviceConfig.initialize answer 501 naming what they need
+// (reasons.json says why).
 var backupdrStatuses = map[string]bool{
 	"backupdr.folders.locations.resourceBackupConfigs.fetch":                            false,
 	"backupdr.organizations.locations.resourceBackupConfigs.fetch":                      false,
@@ -248,25 +264,25 @@ var backupdrStatuses = map[string]bool{
 	"backupdr.projects.locations.dataSourceReferences.get":                              true,
 	"backupdr.projects.locations.dataSourceReferences.list":                             true,
 	"backupdr.projects.locations.get":                                                   true,
-	"backupdr.projects.locations.getTrial":                                              false,
+	"backupdr.projects.locations.getTrial":                                              true,
 	"backupdr.projects.locations.list":                                                  true,
 	"backupdr.projects.locations.managementServers.create":                              false,
 	"backupdr.projects.locations.managementServers.delete":                              false,
 	"backupdr.projects.locations.managementServers.get":                                 false,
 	"backupdr.projects.locations.managementServers.getIamPolicy":                        false,
 	"backupdr.projects.locations.managementServers.list":                                false,
-	"backupdr.projects.locations.managementServers.msComplianceMetadata":                false,
+	"backupdr.projects.locations.managementServers.msComplianceMetadata":                true,
 	"backupdr.projects.locations.managementServers.setIamPolicy":                        false,
 	"backupdr.projects.locations.managementServers.testIamPermissions":                  false,
 	"backupdr.projects.locations.operations.cancel":                                     true,
 	"backupdr.projects.locations.operations.delete":                                     true,
 	"backupdr.projects.locations.operations.get":                                        true,
 	"backupdr.projects.locations.operations.list":                                       true,
-	"backupdr.projects.locations.resourceBackupConfigs.fetch":                           false,
+	"backupdr.projects.locations.resourceBackupConfigs.fetch":                           true,
 	"backupdr.projects.locations.resourceBackupConfigs.list":                            true,
 	"backupdr.projects.locations.serviceConfig.initialize":                              false,
-	"backupdr.projects.locations.trial.end":                                             false,
-	"backupdr.projects.locations.trial.subscribe":                                       false,
+	"backupdr.projects.locations.trial.end":                                             true,
+	"backupdr.projects.locations.trial.subscribe":                                       true,
 }
 
 // backupdrMethods is backupdrStatuses' methods, sorted.
@@ -642,7 +658,8 @@ func loadRegistry(root string) (map[string]string, error) {
 		}
 	}
 	// The Cloud SQL Admin API's too (#1301), and Service Usage's (#1352).
-	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), backupdrStatuses} {
+	// And Cloud Run v1's (#1533).
+	for _, statuses := range []map[string]bool{sqladminsvc.MethodStatuses(), serviceusagesvc.MethodStatuses(), backupdrStatuses, runadapter.V1MethodStatuses()} {
 		for id, isBuilt := range statuses {
 			if isBuilt {
 				r[id] = regImplemented
@@ -654,8 +671,31 @@ func loadRegistry(root string) (map[string]string, error) {
 	return r, nil
 }
 
+// loadReasons reads tools/coverage/reasons.json: why a method CloudBurrow
+// refuses (Unimplemented), or serves with no official-SDK test that can
+// reach it (Implemented), stays so (#1530). The coverage page shows it, so
+// a gap names its cause. A reason on any other row is an error.
+func loadReasons(root string) (map[string]string, error) {
+	b, err := os.ReadFile(filepath.Join(root, "tools", "coverage", "reasons.json"))
+	if os.IsNotExist(err) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var r map[string]string
+	if err := json.Unmarshal(b, &r); err != nil {
+		return nil, fmt.Errorf("reasons.json: %w", err)
+	}
+	return r, nil
+}
+
 func build(root string) ([]Page, error) {
 	reg, err := loadRegistry(root)
+	if err != nil {
+		return nil, err
+	}
+	reasons, err := loadReasons(root)
 	if err != nil {
 		return nil, err
 	}
@@ -738,9 +778,24 @@ func build(root string) ([]Page, error) {
 			default:
 				row.Status = "Unknown"
 			}
+			if why, ok := reasons[m]; ok {
+				switch row.Status {
+				case "Unimplemented":
+					row.Note = "returns UNIMPLEMENTED (in-process check): " + why
+				case "Implemented":
+					row.Note = "no official-SDK test can reach it: " + why
+				default:
+					problems = append(problems, fmt.Sprintf("reasons.json gives %s a reason, but it is %s: only an Unimplemented or Implemented method has one", m, row.Status))
+				}
+			}
 			p.Rows = append(p.Rows, row)
 		}
 		pages = append(pages, p)
+	}
+	for m := range reasons {
+		if !known[m] {
+			problems = append(problems, fmt.Sprintf("reasons.json entry %s names no method in the proto surface", m))
+		}
 	}
 	for m := range reg {
 		if !known[m] {
@@ -790,6 +845,8 @@ func render(pages []Page) map[string][]byte {
 		"(`tools/coverage/registry.json`) and `// covers:` annotations on `test/compat` tests. CI runs\n" +
 		"`go run ./tools/coverage -check` and fails when this is stale or an annotation is wrong, and\n" +
 		"`tools/coverage/servers_test.go` proves every Unimplemented method returns `codes.Unimplemented`.\n" +
+		"Where a method stays Unimplemented, or Implemented with no official-SDK test that can reach it,\n" +
+		"`tools/coverage/reasons.json` says why, and its row shows the reason.\n" +
 		"Do not edit these files by hand.\n\n")
 	readme.WriteString("| Service | RPCs | " + strings.Join(statusOrder, " | ") + " | Unverified codes |\n|---|---|" + strings.Repeat("---|", len(statusOrder)+1) + "\n")
 	for _, p := range pages {

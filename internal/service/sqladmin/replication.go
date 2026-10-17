@@ -85,11 +85,17 @@ func (p *Postgres) PrepareReplicationSource(ctx context.Context, password string
 
 // Promote ends recovery: the standby becomes a primary.
 func (p *Postgres) Promote(ctx context.Context) error {
+	if p.Logical {
+		return p.promoteLogical(ctx)
+	}
 	return p.exec(ctx, "SELECT pg_promote(true, 60)")
 }
 
 // PauseReplication pauses or resumes replay of the primary's WAL.
 func (p *Postgres) PauseReplication(ctx context.Context, pause bool) error {
+	if p.Logical {
+		return p.pauseLogical(ctx, pause)
+	}
 	if pause {
 		return p.exec(ctx, "SELECT pg_wal_replay_pause()")
 	}

@@ -20,11 +20,11 @@ import (
 // google_project, which call v1 rather than v3.
 //
 // Only projects.list, get, create, update (#1265), delete, undelete and
-// getAncestry (#1294), the org policy methods (#1296, orgpolicy.go),
-// organizations.get and search (#1294, hierarchy_api.go), and operations.get
-// for the operations create returns, over the same Registry the v3 API and
-// the console use. Every other v1 method — the IAM methods, liens — answers
-// UNIMPLEMENTED.
+// getAncestry (#1294), the org policy methods on projects (#1296), folders
+// and the organization (#1534, orgpolicy.go), organizations.get and search
+// (#1294, hierarchy_api.go), IAM (#1368, iam.go), liens (#1295) and
+// operations.get for the operations create returns, over the same Registry
+// the v3 API and the console use.
 //
 // Also served, because google_project reads it on every refresh: a Cloud
 // Billing projects.getBillingInfo that says billing is disabled. There is no
@@ -103,7 +103,7 @@ func (s *ProjectsServer) v1Routes(r *rest.Router, ops *v1Ops) {
 	// Cloud Billing's read of a project's billing, for google_project.
 	r.Handle("GET /v1/projects/{project}/billingInfo", s.billingInfo)
 	r.Handle("GET /v1/{rest...}", func(http.ResponseWriter, *http.Request) error {
-		return apierror.Unimplemented("this v1 method is not implemented: only projects.list, get, create, update, delete and undelete are served")
+		return apierror.Unimplemented("this v1 method is not implemented")
 	})
 }
 
@@ -311,7 +311,7 @@ func (s *ProjectsServer) v1Verb(w http.ResponseWriter, r *http.Request) error {
 	case "getIamPolicy", "setIamPolicy", "testIamPermissions":
 		return serveIAM(w, r, s, "projects/"+id, verb)
 	}
-	return s.v1OrgPolicy(w, r, id, verb)
+	return s.v1OrgPolicy(w, r, "projects/"+id, verb)
 }
 
 // billingInfo is Cloud Billing's projects.getBillingInfo. Billing is never

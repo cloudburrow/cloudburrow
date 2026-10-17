@@ -812,25 +812,31 @@ type dpMemo struct {
 }
 
 // dpScript carries out q, a script of statements stmts with SELECT WITH
-// DIFFERENTIAL_PRIVACY, a statement at a time (scriptflow.go), each in its
-// turn, so it reads what the statements before it made (#1482); ok false
-// when q is not such a script.
-func (f front) dpScript(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, stmts [][]token) bool {
+// DIFFERENTIAL_PRIVACY (#1482) or SELECT WITH AGGREGATION_THRESHOLD, or
+// reading a table or view with a privacy policy (prot, #1502), a statement
+// at a time (scriptflow.go), each in its turn, so it reads what the
+// statements before it made and is checked as a lone query; ok false when
+// q is not such a script.
+func (f front) dpScript(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, stmts [][]token, prot []privacyRead) bool {
 	if len(stmts) < 2 {
 		return false
 	}
 	has := false
 	for _, s := range stmts {
 		for i := 0; i+2 < len(s) && !has; i++ {
-			has = s[i].is("SELECT") && s[i+1].is("WITH") && s[i+2].is("DIFFERENTIAL_PRIVACY")
+			has = s[i].is("SELECT") && s[i+1].is("WITH") && (s[i+2].is("DIFFERENTIAL_PRIVACY") || s[i+2].is("AGGREGATION_THRESHOLD"))
 		}
+	}
+	for _, p := range prot {
+		has = has || !createsView(p.tr.stmt)
 	}
 	if !has {
 		return false
 	}
 	if r.Context().Value(dpMemoKey{}) != nil || txnRequest(r) {
-		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: SELECT WITH DIFFERENTIAL_PRIVACY "+
-			"in a script CloudBurrow cannot run a statement at a time. Nothing was run.")
+		writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: a script that reads a table "+
+			"or view with a privacy_policy, or has SELECT WITH DIFFERENTIAL_PRIVACY or AGGREGATION_THRESHOLD, which "+
+			"CloudBurrow cannot run a statement at a time. Nothing was run.")
 		return true
 	}
 	f.runScript(w, r.WithContext(context.WithValue(r.Context(), dpMemoKey{}, &dpMemo{})), q, insert)

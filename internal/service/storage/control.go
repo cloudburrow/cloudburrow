@@ -28,6 +28,10 @@ import (
 const controlPrefix = "/v2/"
 
 func (s *Server) serveControl(w http.ResponseWriter, r *http.Request) {
+	if name := strings.TrimPrefix(r.URL.Path, controlPrefix); isIntelligencePath(name) {
+		s.serveIntelligence(w, r, name)
+		return
+	}
 	rest := strings.TrimPrefix(r.URL.Path, controlPrefix+"projects/_/buckets/")
 	if rest == r.URL.Path {
 		writeControlError(w, errorf(http.StatusNotImplemented, "notImplemented", "%s %s is not implemented", r.Method, r.URL.Path))
@@ -261,6 +265,8 @@ func controlStatus(e *httpError) (int, string) {
 		return http.StatusNotImplemented, "UNIMPLEMENTED"
 	case e.status == http.StatusTooManyRequests:
 		return e.status, "RESOURCE_EXHAUSTED"
+	case e.status == http.StatusServiceUnavailable:
+		return e.status, "UNAVAILABLE"
 	}
 	return http.StatusInternalServerError, "INTERNAL"
 }

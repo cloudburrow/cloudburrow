@@ -94,13 +94,18 @@ var algorithms = map[algo]algSpec{
 
 	kmspb.CryptoKeyVersion_ML_KEM_768:  {purpose: kmspb.CryptoKey_KEY_ENCAPSULATION, kem: 768},
 	kmspb.CryptoKeyVersion_ML_KEM_1024: {purpose: kmspb.CryptoKey_KEY_ENCAPSULATION, kem: 1024},
+
+	// AES_256_KWP is "AES key wrap with zero padding algorithm (RFC 5649).
+	// Can only be used by keys with purpose AES_WRAPPING", served at
+	// HSM_SINGLE_TENANT only, as trusted wrapping keys (trusted.go, #1521).
+	kmspb.CryptoKeyVersion_AES_256_KWP: {purpose: kmspb.CryptoKey_AES_WRAPPING, keyLen: 32},
 }
 
 // algorithmPurpose is the purpose of an implemented algorithm. The documented
 // algorithms missing from the table are UNIMPLEMENTED: Go's standard library
-// has no secp256k1, ML-DSA, SLH-DSA or X-Wing, and AES_256_KWP
-// (AES_WRAPPING) needs trusted wrapping. EXTERNAL_SYMMETRIC_ENCRYPTION is
-// served for external keys only (levelAlgorithm). ML-KEM is crypto/mlkem.
+// has no secp256k1, ML-DSA, SLH-DSA or X-Wing. EXTERNAL_SYMMETRIC_ENCRYPTION
+// is served for external keys only, and AES_256_KWP (AES_WRAPPING) for
+// HSM_SINGLE_TENANT keys only (levelAlgorithm). ML-KEM is crypto/mlkem.
 func algorithmPurpose(a algo) (kmspb.CryptoKey_CryptoKeyPurpose, bool) {
 	if s, ok := algorithms[a]; ok {
 		return s.purpose, true
@@ -116,6 +121,7 @@ var purposes = map[kmspb.CryptoKey_CryptoKeyPurpose]bool{
 	kmspb.CryptoKey_MAC:                 true,
 	kmspb.CryptoKey_RAW_ENCRYPT_DECRYPT: true,
 	kmspb.CryptoKey_KEY_ENCAPSULATION:   true,
+	kmspb.CryptoKey_AES_WRAPPING:        true,
 }
 
 // keyAlgorithm resolves the algorithm a new key's versions get: the
@@ -232,7 +238,7 @@ func Algorithms(purpose kmspb.CryptoKey_CryptoKeyPurpose) []string {
 
 // Purposes lists the implemented purposes by name, ENCRYPT_DECRYPT first.
 func Purposes() []string {
-	return []string{"ENCRYPT_DECRYPT", "ASYMMETRIC_SIGN", "ASYMMETRIC_DECRYPT", "MAC", "RAW_ENCRYPT_DECRYPT", "KEY_ENCAPSULATION"}
+	return []string{"ENCRYPT_DECRYPT", "ASYMMETRIC_SIGN", "ASYMMETRIC_DECRYPT", "MAC", "RAW_ENCRYPT_DECRYPT", "KEY_ENCAPSULATION", "AES_WRAPPING"}
 }
 
 func parsePublicPEM(p string) (any, error) {

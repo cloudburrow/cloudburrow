@@ -34,8 +34,8 @@ func TestProjectUndeleteIsOfferedOnlyWhenDeleted(t *testing.T) {
 		t.Fatalf("list after delete = %+v, %v; want the project DELETE_REQUESTED", l.Items, err)
 	}
 	a := p.DetailActions(ctx, "", []string{"undelete-me"})
-	if len(a) != 1 || a[0].ID != projectUndelete || a[0].Label != "Undelete project" {
-		t.Fatalf("a deleted project's page offers %+v, want Undelete project", a)
+	if len(a) != 2 || a[0].ID != projectUndelete || a[0].Label != "Undelete project" || a[1].ID != projectPurge || !a[1].Destructive {
+		t.Fatalf("a deleted project's page offers %+v, want Undelete project and Purge project now", a)
 	}
 	if err := p.ActAt(ctx, "", []string{"undelete-me"}, projectUndelete, nil); err != nil {
 		t.Fatal(err)
@@ -45,6 +45,20 @@ func TestProjectUndeleteIsOfferedOnlyWhenDeleted(t *testing.T) {
 	}
 	if err := p.ActAt(ctx, "", []string{"undelete-me"}, projectUndelete, nil); err == nil {
 		t.Error("undeleting an active project succeeded")
+	}
+	// Purge project now (#1537): refused on an active project, and on a
+	// deleted one frees the ID.
+	if err := p.ActAt(ctx, "", []string{"undelete-me"}, projectPurge, nil); err == nil {
+		t.Error("purging an active project succeeded")
+	}
+	if err := p.Delete(ctx, "", "undelete-me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ActAt(ctx, "", []string{"undelete-me"}, projectPurge, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Create(resourcemanager.Project{ProjectID: "undelete-me"}); err != nil {
+		t.Errorf("the purged project's ID is not free: %v", err)
 	}
 }
 
@@ -88,6 +102,79 @@ func TestConsoleProjectOrgPolicies(t *testing.T) {
 	}
 }
 
+// TestConsoleFolderAndOrganizationOrgPolicies (#1534): Set organization
+// policy on the organization (on its page, #1554) and on a folder, through the registry the v1 methods use; the folder's
+// and a project's pages show the inherited policy and the effective one, and
+// Clear organization policy on the folder unsets its own.
+func TestConsoleFolderAndOrganizationOrgPolicies(t *testing.T) {
+	ctx := context.Background()
+	reg := resourcemanager.New(store.NewMemory())
+	h := hierarchyProvider{registry: reg}
+	p := projectsProvider{registry: reg}
+	eng, err := h.Create(ctx, "", map[string]string{"displayName": "Engineering", "parent": resourcemanager.OrganizationName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Create(ctx, "", map[string]string{"projectId": "eng-proj", "parent": "folders/" + eng}); err != nil {
+		t.Fatal(err)
+	}
+	const boolC, listC = "constraints/compute.requireOsLogin", "constraints/gcp.resourceLocations"
+	org := []string{organizationSegment}
+	if a := h.DetailActions(ctx, "", org); len(a) != 1 || a[0].ID != orgPolicySet {
+		t.Fatalf("the organization's page offers %+v; want Set organization policy", a)
+	}
+	if err := h.ActAt(ctx, "", org, orgPolicySet, map[string]string{"constraint": boolC, "enforced": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.ActAt(ctx, "", org, orgPolicySet, map[string]string{"constraint": listC, "allowed": "in:eu-locations"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := reg.OrgPolicy(resourcemanager.OrganizationName, boolC); err != nil || got.BooleanPolicy == nil || !got.BooleanPolicy.Enforced {
+		t.Fatalf("the organization's %s = %+v, %v", boolC, got, err)
+	}
+	od, _ := h.Detail(ctx, "", org)
+	for _, sec := range od.Sections {
+		if sec.ID == "org-policies" && (sec.Listing.Total != 2 || sec.Listing.Items[0].Fields["Policy"] != "Enforced") {
+			t.Errorf("the organization's Organization policies = %+v", sec.Listing.Items)
+		}
+	}
+	if a := h.DetailActions(ctx, "", org); len(a) != 2 || a[1].ID != orgPolicyClear {
+		t.Errorf("with policies set, the organization's page offers %+v; want Set and Clear", a)
+	}
+	if err := h.ActAt(ctx, "", []string{eng}, orgPolicySet, map[string]string{"constraint": listC, "allowed": "in:us-locations", "inherit": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := h.Detail(ctx, "", []string{eng})
+	var sec *console.Listing
+	for i := range d.Sections {
+		if d.Sections[i].ID == "org-policies" {
+			sec = &d.Sections[i].Listing
+		}
+	}
+	if sec == nil || sec.Total != 2 {
+		t.Fatalf("the folder's Organization policies = %+v", sec)
+	}
+	byName := map[string]map[string]string{}
+	for _, it := range sec.Items {
+		byName[it.Name] = it.Fields
+	}
+	if f := byName[boolC]; f["Policy"] != "Inherited" || f["Effective"] != "Enforced" {
+		t.Errorf("the folder's %s row = %v", boolC, f)
+	}
+	if f := byName[listC]; f["Effective"] != "allow in:eu-locations, in:us-locations" {
+		t.Errorf("the folder's %s row = %v", listC, f)
+	}
+	if pl := p.orgPolicies("eng-proj"); pl.Total != 2 {
+		t.Errorf("the project's Organization policies = %+v; want both inherited", pl.Items)
+	}
+	if err := h.ActAt(ctx, "", []string{eng}, orgPolicyClear, map[string]string{"constraint": listC}); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := reg.OrgPolicies("folders/" + eng); len(all) != 0 {
+		t.Errorf("after Clear on the folder, its policies are %+v", all)
+	}
+}
+
 // TestConsoleResourceHierarchy (#1294): Create folder under the organization
 // and under a folder, a project created in a folder, Move folder and Move
 // project, Rename folder, Delete refused while the folder holds a project,
@@ -127,7 +214,7 @@ func TestConsoleResourceHierarchy(t *testing.T) {
 	}
 	// Move folder offers neither the folder itself nor one under it.
 	moves := h.DetailActions(ctx, "", []string{eng})
-	if len(moves) != 1 || len(moves[0].Fields[0].Options) != 1 {
+	if len(moves) == 0 || moves[0].ID != folderMove || len(moves[0].Fields[0].Options) != 1 {
 		t.Errorf("Engineering's Move folder = %+v; want only the organization", moves)
 	}
 	if err := h.ActAt(ctx, "", []string{team}, folderMove, map[string]string{"parent": resourcemanager.OrganizationName}); err != nil {

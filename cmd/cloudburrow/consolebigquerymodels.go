@@ -152,6 +152,10 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 	if runs := md.RawTrainingRuns(); len(runs) > 0 {
 		run := runs[0]
 		for _, r := range run.Results {
+			if r.ArimaResult != nil {
+				// An ARIMA_PLUS model has no iterations (#1504).
+				continue
+			}
 			iters.Items = append(iters.Items, console.Resource{Name: fmt.Sprint(r.Index), Fields: map[string]string{
 				"Loss": strconv.FormatFloat(r.TrainingLoss, 'g', 8, 64), "Eval loss": evalLoss(r.EvalLoss),
 				"Learn rate": strconv.FormatFloat(r.LearnRate, 'g', 6, 64), "Duration (ms)": fmt.Sprint(r.DurationMs)}})
@@ -235,8 +239,42 @@ func (p bigqueryProvider) modelDetail(ctx context.Context, datasetID, modelID st
 // modelResultSections are a model's centroids (KMEANS, ML.CENTROIDS),
 // confusion matrix (LOGISTIC_REG, ML.CONFUSION_MATRIX) or principal
 // components (PCA, ML.PRINCIPAL_COMPONENT_INFO and
-// ML.PRINCIPAL_COMPONENTS), each where the model has them (#1481).
+// ML.PRINCIPAL_COMPONENTS), each where the model has them (#1481), or
+// recommendations and factors (MATRIX_FACTORIZATION, #1504), or feature
+// importance (BOOSTED_TREE_*, #1504), or forecasts and candidate models
+// (ARIMA_PLUS, ML.FORECAST and ML.ARIMA_EVALUATE, #1504).
 func (p bigqueryProvider) modelResultSections(ctx context.Context, c *bigquery.Client, typ, datasetID, modelID string) []console.Section {
+	out := p.modelTypeSections(ctx, c, typ, datasetID, modelID)
+	switch typ {
+	case "LINEAR_REGRESSION", "LOGISTIC_REGRESSION", "BOOSTED_TREE_REGRESSOR", "BOOSTED_TREE_CLASSIFIER", "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER":
+	default:
+		return out
+	}
+	// Each feature's global attribution (ML.GLOBAL_EXPLAIN, #1504), for a
+	// model trained with enable_global_explain; the front refuses it
+	// otherwise, and the section is left out.
+	it, err := c.Query(fmt.Sprintf("SELECT feature, attribution FROM ML.GLOBAL_EXPLAIN(MODEL `%s.%s.%s`)", p.project, datasetID, modelID)).Read(ctx)
+	if err != nil {
+		return out
+	}
+	l := console.Listing{Columns: []string{"Attribution"}, NameColumn: "Feature", Noun: "features"}
+	for {
+		var row []bigquery.Value
+		if it.Next(&row) != nil {
+			break
+		}
+		v, _ := row[1].(float64)
+		l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(row[0]), Fields: map[string]string{"Attribution": strconv.FormatFloat(v, 'g', 8, 64)}})
+	}
+	if len(l.Items) == 0 {
+		return out
+	}
+	l.Total = len(l.Items)
+	return append(out, console.Section{ID: "explain", Label: "Global explanation", Listing: l})
+}
+
+// modelTypeSections are modelResultSections' sections of a model type.
+func (p bigqueryProvider) modelTypeSections(ctx context.Context, c *bigquery.Client, typ, datasetID, modelID string) []console.Section {
 	model := fmt.Sprintf("MODEL `%s.%s.%s`", p.project, datasetID, modelID)
 	read := func(sql string) (bigquery.Schema, [][]bigquery.Value) {
 		it, err := c.Query(sql).Read(ctx)
@@ -330,6 +368,98 @@ func (p bigqueryProvider) modelResultSections(ctx context.Context, c *bigquery.C
 		}
 		l.Total = len(l.Items)
 		return []console.Section{{ID: "components", Label: "Components", Listing: l}}
+	case "BOOSTED_TREE_REGRESSOR", "BOOSTED_TREE_CLASSIFIER", "RANDOM_FOREST_REGRESSOR", "RANDOM_FOREST_CLASSIFIER":
+		// Each feature's importance (ML.FEATURE_IMPORTANCE, #1504).
+		_, rows := read("SELECT feature, importance_weight, importance_gain, importance_cover FROM ML.FEATURE_IMPORTANCE(" + model + ") ORDER BY feature")
+		if len(rows) == 0 {
+			return nil
+		}
+		l := console.Listing{Columns: []string{"Splits", "Mean gain", "Mean cover"}, NameColumn: "Feature", Noun: "features"}
+		for _, r := range rows {
+			l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: map[string]string{"Splits": fmt.Sprint(r[1]),
+				"Mean gain": num(r[2]), "Mean cover": num(r[3])}})
+		}
+		l.Total = len(l.Items)
+		return []console.Section{{ID: "importance", Label: "Feature importance", Listing: l}}
+	case "ARIMA_PLUS":
+		var out []console.Section
+		schema, fc := read("SELECT * FROM ML.FORECAST(" + model + ") ORDER BY 1, 2 LIMIT 100")
+		if len(fc) > 0 {
+			// The series ID, when there is one, comes before
+			// forecast_timestamp.
+			off := 0
+			if len(schema) > 0 && schema[0].Name != "forecast_timestamp" {
+				off = 1
+			}
+			cols := []string{"Forecast", "Standard error", "Interval"}
+			if off == 1 {
+				cols = append([]string{"Series"}, cols...)
+			}
+			l := console.Listing{Columns: cols, NameColumn: "Time", Noun: "forecasts"}
+			for _, r := range fc {
+				name := fmt.Sprint(r[off])
+				if tm, ok := r[off].(time.Time); ok {
+					name = tm.UTC().Format(time.RFC3339)
+				}
+				fields := map[string]string{"Forecast": num(r[off+1]), "Standard error": num(r[off+2]),
+					"Interval": num(r[off+4]) + " – " + num(r[off+5])}
+				if off == 1 {
+					fields["Series"] = fmt.Sprint(r[0])
+				}
+				l.Items = append(l.Items, console.Resource{Name: name, Fields: fields})
+			}
+			l.Total = len(l.Items)
+			out = append(out, console.Section{ID: "forecast", Label: "Forecast", Listing: l})
+		}
+		_, ev := read("SELECT FORMAT('ARIMA(%d, %d, %d)%s', non_seasonal_p, non_seasonal_d, non_seasonal_q, IF(has_drift, ' with drift', '')), " +
+			"log_likelihood, AIC, variance, ARRAY_TO_STRING(seasonal_periods, ', '), has_spikes_and_dips, has_step_changes " +
+			"FROM ML.ARIMA_EVALUATE(" + model + ") WHERE error_message IS NULL")
+		if len(ev) > 0 {
+			// The pipeline's stages too: the seasonal periods found, and
+			// whether spikes and dips or step changes were (#1518).
+			l := console.Listing{Columns: []string{"Log likelihood", "AIC", "Variance", "Seasonal periods", "Spikes and dips", "Step changes"},
+				NameColumn: "Model", Noun: "candidate models"}
+			for _, r := range ev {
+				f := map[string]string{"Log likelihood": num(r[1]), "AIC": num(r[2]), "Variance": num(r[3])}
+				if len(r) >= 7 {
+					f["Seasonal periods"], f["Spikes and dips"], f["Step changes"] = fmt.Sprint(r[4]), fmt.Sprint(r[5]), fmt.Sprint(r[6])
+				}
+				l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: f})
+			}
+			l.Total = len(l.Items)
+			out = append(out, console.Section{ID: "candidates", Label: "Candidate models", Listing: l})
+		}
+		return out
+	case "MATRIX_FACTORIZATION":
+		// The highest predicted ratings (ML.RECOMMEND), and each user's
+		// and item's intercept and factor weights (ML.WEIGHTS) (#1504).
+		schema, recs := read("SELECT * FROM ML.RECOMMEND(" + model + ") ORDER BY 1 DESC LIMIT 50")
+		_, ws := read("SELECT processed_input, feature, intercept, ARRAY(SELECT weight FROM UNNEST(factor_weights) ORDER BY factor) FROM ML.WEIGHTS(" +
+			model + ") ORDER BY processed_input DESC, feature")
+		var out []console.Section
+		if len(recs) > 0 && len(schema) >= 3 {
+			l := console.Listing{Columns: []string{schema[1].Name, schema[2].Name}, NameColumn: schema[0].Name, Noun: "recommendations"}
+			for _, r := range recs {
+				l.Items = append(l.Items, console.Resource{Name: num(r[0]), Fields: map[string]string{schema[1].Name: fmt.Sprint(r[1]), schema[2].Name: fmt.Sprint(r[2])}})
+			}
+			l.Total = len(l.Items)
+			out = append(out, console.Section{ID: "recommendations", Label: "Recommendations", Listing: l})
+		}
+		if len(ws) > 0 {
+			l := console.Listing{Columns: []string{"Column", "Intercept", "Factor weights"}, NameColumn: "Feature", Noun: "users and items"}
+			for _, r := range ws {
+				var f []string
+				arr, _ := r[3].([]bigquery.Value)
+				for _, v := range arr {
+					f = append(f, num(v))
+				}
+				l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[1]), Fields: map[string]string{"Column": fmt.Sprint(r[0]),
+					"Intercept": num(r[2]), "Factor weights": orDash(strings.Join(f, ", "))}})
+			}
+			l.Total = len(l.Items)
+			out = append(out, console.Section{ID: "factors", Label: "Factors", Listing: l})
+		}
+		return out
 	}
 	return nil
 }

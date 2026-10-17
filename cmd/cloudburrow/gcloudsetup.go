@@ -97,6 +97,11 @@ var gcloudVerified = []struct {
 	// v2/. TestGcloudFunctions drives deploy --gen2, describe, list and
 	// delete, gated as the Functions tests are.
 	{config.ServiceRun, "cloudfunctions", "/", false, false},
+	// Secure Source Manager (#1521, #1527), on the Run port under
+	// /securesourcemanager/, since its v1 paths are Artifact Registry's;
+	// gcloud source-manager appends v1/. TestGcloudSourceManager drives
+	// instances and repos create, describe, list, update and delete.
+	{config.ServiceRun, "securesourcemanager", "/securesourcemanager/", false, false},
 	// The Cloud SQL Admin API (#1301): gcloud sql appends sql/v1beta4/.
 	// TestGcloudSQL drives instances list and describe, and databases and
 	// users create, list and delete, with either Cloud SQL service.
@@ -105,6 +110,11 @@ var gcloudVerified = []struct {
 	// gcloud redis appends v1/. TestGcloudRedis creates, describes, lists,
 	// updates and deletes an instance, given --region.
 	{memorystoreAdminEndpoint, "redis", "/", false, false},
+	// Memorystore for Valkey (#1519): memorystore.googleapis.com's JSON on
+	// the same port, under /memorystore/ as its paths are redis's; gcloud
+	// memorystore appends v1/. TestGcloudMemorystoreValkey creates,
+	// describes, lists, updates and deletes an instance.
+	{memorystoreAdminEndpoint, "memorystore", "/memorystore/", false, false},
 	// The Backup and DR Service (#1433): gcloud backup-dr appends v1/.
 	// TestGcloudBackupDR drives vaults, plans, associations, data sources
 	// and backups.

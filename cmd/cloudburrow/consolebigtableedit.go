@@ -23,7 +23,9 @@ package main
 // rows (DropRowRange) and Edit deletion protection (UpdateTable); a cell
 // offers Increment and Append value (ReadModifyWriteRow); Delete row and
 // Delete cells are one CheckAndMutateRow each, applied only when the row or
-// the column holds a cell.
+// the column holds a cell. Since #1523 it offers Edit change stream
+// (UpdateTable's change_stream_config), whose retention the Bigtable front
+// keeps the table's change log for.
 //
 // Row pages are [table, row key], so a family cannot be addressed as
 // [table, family]: a row key can be any string, including a family's name.
@@ -427,8 +429,48 @@ func (p bigtableProvider) ActAt(ctx context.Context, project string, path []stri
 		return p.admin(ctx, project, func(a *bigtable.AdminClient) error {
 			return a.UpdateTableWithDeletionProtection(ctx, path[0], protection)
 		})
+	case action == "changestream" && len(path) == 1:
+		retention, err := parseChangeStreamRetention(values["retention"])
+		if err != nil {
+			return err
+		}
+		return p.admin(ctx, project, func(a *bigtable.AdminClient) error {
+			if retention == 0 {
+				return a.UpdateTableDisableChangeStream(ctx, path[0])
+			}
+			return a.UpdateTableWithChangeStream(ctx, path[0], retention)
+		})
 	}
 	return fmt.Errorf("unknown action %q", action)
+}
+
+// parseChangeStreamRetention reads the Edit change stream form's retention:
+// a number of days, or a duration such as 36h; 0 or nothing disables the
+// change stream. Bigtable takes 1 to 7 days, which the front checks.
+func parseChangeStreamRetention(v string) (time.Duration, error) {
+	v = strings.TrimSpace(v)
+	if v == "" || v == "0" {
+		return 0, nil
+	}
+	if days, err := strconv.ParseFloat(v, 64); err == nil {
+		return time.Duration(days * float64(24*time.Hour)), nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("retention %q: want a number of days from 1 to 7, a duration such as 36h, or 0 to disable", v)
+	}
+	return d, nil
+}
+
+// formatChangeStreamRetention is a retention as the form shows it.
+func formatChangeStreamRetention(d time.Duration) string {
+	if d == 0 {
+		return "0"
+	}
+	if d%(24*time.Hour) == 0 {
+		return strconv.Itoa(int(d / (24 * time.Hour)))
+	}
+	return d.String()
 }
 
 // bigtableBackupCluster is the cluster the console's backup forms offer.
@@ -602,10 +644,18 @@ func (p bigtableProvider) tableActions(ctx context.Context, project, table strin
 	}); err != nil {
 		return out
 	}
+	var retention time.Duration
+	if d, ok := info.ChangeStreamRetention.(time.Duration); ok {
+		retention = d
+	}
 	return append(out, console.Action{ID: "protection", Label: "Edit deletion protection", Fields: []console.Field{{
 		Name: "protected", Label: "Deletion protection", Type: "checkbox",
 		Default: strconv.FormatBool(info.DeletionProtection == bigtable.Protected),
-		Help:    "While it is on, Bigtable refuses to delete the table."}}})
+		Help:    "While it is on, Bigtable refuses to delete the table."}}},
+		console.Action{ID: "changestream", Label: "Edit change stream", Fields: []console.Field{{
+			Name: "retention", Label: "Change stream retention (days)", Type: "text",
+			Default: formatChangeStreamRetention(retention),
+			Help:    "From 1 to 7 days (or a duration such as 36h); 0 disables the change stream and drops its log."}}})
 }
 
 var _ console.PathActor = bigtableProvider{}
