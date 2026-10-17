@@ -64,6 +64,9 @@ func (p artifactRegistryProvider) packageRepoDetail(ctx context.Context, r *arpb
 			}
 			mode += ": " + strings.Join(names, ", ")
 		}
+		if u := r.GetRemoteRepositoryConfig().GetCommonRepository().GetUri(); u != "" {
+			mode += ": pulls through from " + u
+		}
 		sections := []console.Section{{ID: "packages", Label: "Packages", Listing: pkgs}}
 		if l, label, ok := formatListing(ctx, r); ok {
 			sections = append(sections, console.Section{ID: "artifacts", Label: label, Listing: l})
