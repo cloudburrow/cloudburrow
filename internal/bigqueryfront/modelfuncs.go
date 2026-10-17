@@ -29,7 +29,7 @@ import (
 
 // mlFunctionsServed are the ML functions of a model CloudBurrow answers.
 var mlFunctionsServed = map[string]bool{"PREDICT": true, "EVALUATE": true, "WEIGHTS": true, "FEATURE_INFO": true, "TRAINING_INFO": true,
-	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true}
+	"CONFUSION_MATRIX": true, "ROC_CURVE": true, "CENTROIDS": true, "PRINCIPAL_COMPONENTS": true, "PRINCIPAL_COMPONENT_INFO": true, "RECOMMEND": true}
 
 // mlCall is one ML.<fn>(MODEL ...) call in a query's text.
 type mlCall struct {
@@ -203,12 +203,22 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 	if f.models == nil {
 		return false
 	}
-	calls, msg := findMLCalls(q.Query)
+	// The ML functions of no model first (modelpreprocess.go).
+	text, code, msg := rewritePreprocess(q.Query, nil)
+	if code == 501 {
+		writeError(w, code, "notImplemented", msg)
+		return true
+	}
+	if code != 0 {
+		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: "invalidQuery", Message: msg})
+		return true
+	}
+	calls, msg := findMLCalls(text)
 	if msg != "" {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
 		return true
 	}
-	if len(calls) == 0 {
+	if len(calls) == 0 && text == q.Query {
 		return false
 	}
 	var b strings.Builder
@@ -217,7 +227,7 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		if !mlFunctionsServed[c.fn] {
 			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: ML."+c.fn+
 				". CloudBurrow answers ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, "+
-				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS and ML.PRINCIPAL_COMPONENT_INFO. Nothing was run.")
+				"ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO and ML.RECOMMEND. Nothing was run.")
 			return true
 		}
 		project, dataset, id, ok := f.resolveModel(c.path, defaultDatasetOf(q))
@@ -242,11 +252,11 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 			f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: reason, Message: why})
 			return true
 		}
-		b.WriteString(q.Query[last:c.pos])
+		b.WriteString(text[last:c.pos])
 		b.WriteString(sub)
 		last = c.end
 	}
-	b.WriteString(q.Query[last:])
+	b.WriteString(text[last:])
 	sql := b.String()
 	if !setQueryText(r, insert, sql) {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
@@ -497,7 +507,12 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	needInput := func() (string, int, string) {
 		return "", 400, "ML." + c.fn + " requires an input: a query in parentheses or TABLE name"
 	}
+	if typ == "MATRIX_FACTORIZATION" {
+		return f.mfSubquery(r, q, md, c)
+	}
 	switch c.fn {
+	case "RECOMMEND":
+		return unsupported()
 	case "PREDICT":
 		if c.input == "" {
 			return needInput()

@@ -250,7 +250,8 @@ func (md bqModel) resource(full bool) map[string]any {
 		"modelReference":   map[string]string{"projectId": md.Project, "datasetId": md.Dataset, "modelId": md.ID},
 		"creationTime":     ms(md.Created),
 		"lastModifiedTime": ms(md.Modified),
-		"modelType":        map[string]string{"LINEAR_REG": "LINEAR_REGRESSION", "LOGISTIC_REG": "LOGISTIC_REGRESSION", "KMEANS": "KMEANS", "PCA": "PCA"}[md.Options.ModelType],
+		"modelType": map[string]string{"LINEAR_REG": "LINEAR_REGRESSION", "LOGISTIC_REG": "LOGISTIC_REGRESSION", "KMEANS": "KMEANS", "PCA": "PCA",
+			"MATRIX_FACTORIZATION": "MATRIX_FACTORIZATION"}[md.Options.ModelType],
 	}
 	if md.Location != "" {
 		res["location"] = md.Location
@@ -281,7 +282,7 @@ func (md bqModel) resource(full bool) map[string]any {
 	var results []map[string]any
 	for _, it := range t.Iterations {
 		r := map[string]any{"index": it.Index, "durationMs": ms(it.DurationMs), "trainingLoss": it.Loss}
-		if o.ModelType != "KMEANS" {
+		if o.ModelType != "KMEANS" && o.ModelType != "MATRIX_FACTORIZATION" {
 			r["learnRate"] = it.LearnRate
 		}
 		if it.EvalLoss != nil {
@@ -296,6 +297,8 @@ func (md bqModel) resource(full bool) map[string]any {
 		return nil
 	}
 	switch o.ModelType {
+	case "MATRIX_FACTORIZATION":
+		opts, metrics = md.mfResource(res)
 	case "KMEANS":
 		res["labelColumns"] = []map[string]any{{"name": "centroid_id", "type": map[string]string{"typeKind": "INT64"}}}
 		opts = map[string]any{"numClusters": ms(int64(len(t.Centroids))), "kmeansInitializationMethod": o.KMeansInit,
@@ -593,7 +596,6 @@ var unsupportedModelTypes = map[string]string{
 	"AUTOML_CLASSIFIER":              "AutoML is Google's service (Vertex AI)",
 	"ARIMA_PLUS":                     "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
 	"ARIMA_PLUS_XREG":                "its automatic model selection, holiday effects and decomposition are Google's and undocumented in the detail a faithful result needs",
-	"MATRIX_FACTORIZATION":           "its alternating least squares training is Google's, on reserved slots",
 	"TENSORFLOW":                     "an imported TensorFlow model runs on Google's infrastructure",
 	"TENSORFLOW_LITE":                "an imported TensorFlow Lite model runs on Google's infrastructure",
 	"ONNX":                           "an imported ONNX model runs on Google's infrastructure",
@@ -683,10 +685,13 @@ func parseModelDDL(stmt []token, sql string) (d modelDDL, isModel bool, code int
 	}
 	if why, ok := unsupportedModelTypes[d.opts.ModelType]; ok {
 		return d, true, 501, "Not implemented here: model_type " + d.opts.ModelType + ": " + why +
-			". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS and PCA models. Nothing was run."
+			". CloudBurrow trains LINEAR_REG, LOGISTIC_REG, KMEANS, PCA and MATRIX_FACTORIZATION models. Nothing was run."
 	}
 	if c, m := checkModelOptions(d.opts); c != 0 {
 		return d, true, c, m
+	}
+	if d.opts.ModelType == "MATRIX_FACTORIZATION" {
+		applyMFDefaults(&d.opts)
 	}
 	if i >= len(stmt) || !stmt[i].is("AS") {
 		return d, true, 400, "CREATE MODEL of model_type " + d.opts.ModelType + " requires a query (AS SELECT ...)"
@@ -820,6 +825,35 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 				}
 				o.LabelCols = append(o.LabelCols, s)
 			}
+		case "feedback_type":
+			s, ok := str()
+			if !ok || !strings.EqualFold(s, "EXPLICIT") && !strings.EqualFold(s, "IMPLICIT") {
+				return bad()
+			}
+			o.FeedbackType = strings.ToUpper(s)
+			if o.FeedbackType == "IMPLICIT" {
+				return 501, "Not implemented here: feedback_type IMPLICIT: implicit feedback's confidence weighting (wals_alpha) and ranking metrics " +
+					"are not carried out; CloudBurrow trains EXPLICIT matrix factorization. Nothing was run."
+			}
+		case "user_col", "item_col", "rating_col":
+			s, ok := str()
+			if !ok || s == "" {
+				return bad()
+			}
+			switch name {
+			case "user_col":
+				o.UserCol = s
+			case "item_col":
+				o.ItemCol = s
+			default:
+				o.RatingCol = s
+			}
+		case "num_factors":
+			v, ok := num()
+			if !ok || v != float64(int(v)) || v < 1 || v > 200 {
+				return 400, "num_factors must be an integer between 1 and 200"
+			}
+			o.NumFactors = int(v)
 		case "num_clusters", "num_principal_components":
 			v, ok := num()
 			if !ok || v != float64(int(v)) || v < 1 {
@@ -970,7 +1004,7 @@ func parseModelOptions(toks []token, o *mlOptions) (int, string) {
 				"optimize_strategy, l1_reg, l2_reg, max_iterations, learn_rate_strategy, learn_rate, ls_init_learn_rate, early_stop, " +
 				"min_rel_progress, data_split_method, data_split_eval_fraction, data_split_col, category_encoding_method, num_clusters, " +
 				"kmeans_init_method, kmeans_init_col, distance_type, standardize_features, num_principal_components, " +
-				"pca_explained_variance_ratio, scale_features and pca_solver. Nothing was run."
+				"pca_explained_variance_ratio, scale_features, pca_solver, feedback_type, user_col, item_col, rating_col and num_factors. Nothing was run."
 		}
 	}
 	return 0, ""
@@ -985,6 +1019,8 @@ var modelTypeOptions = map[string][]string{
 	"KMEANS": {"num_clusters", "kmeans_init_method", "kmeans_init_col", "distance_type", "standardize_features", "max_iterations",
 		"early_stop", "min_rel_progress", "warm_start"},
 	"PCA": {"num_principal_components", "pca_explained_variance_ratio", "scale_features", "pca_solver"},
+	"MATRIX_FACTORIZATION": {"feedback_type", "user_col", "item_col", "rating_col", "num_factors", "l2_reg", "max_iterations", "early_stop",
+		"min_rel_progress", "data_split_method", "data_split_eval_fraction", "data_split_col"},
 }
 
 // checkModelOptions refuses an option the model type does not take, and
@@ -1152,6 +1188,12 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 					break
 				}
 			}
+			items, c, m := f.learnTransform(r, q, d.transform, d.query)
+			if c != 0 {
+				fail(c, m)
+				return true
+			}
+			d.transform = items
 			trainSQL = "SELECT " + strings.Join(d.transform, ", ") + " FROM (" + d.query + ")"
 		}
 		cols, rows, c, m := f.queryAllRows(r, q, trainSQL)

@@ -70,6 +70,12 @@ type mlOptions struct {
 	PCAVarRatio   float64 `json:"pcaExplainedVarianceRatio,omitempty"`
 	ScaleFeatures bool    `json:"scaleFeatures"`
 	PCASolver     string  `json:"pcaSolver,omitempty"`
+	// MATRIX_FACTORIZATION (modelmf.go).
+	NumFactors   int    `json:"numFactors,omitempty"`
+	FeedbackType string `json:"feedbackType,omitempty"`
+	UserCol      string `json:"userCol,omitempty"`
+	ItemCol      string `json:"itemCol,omitempty"`
+	RatingCol    string `json:"ratingCol,omitempty"`
 	// Set are the options CREATE MODEL gave, lower case.
 	Set []string `json:"set,omitempty"`
 }
@@ -185,6 +191,8 @@ type mlTrained struct {
 	// (binary) or the predicted class index (multiclass).
 	EvalY     []float64 `json:"evalY,omitempty"`
 	EvalScore []float64 `json:"evalScore,omitempty"`
+	// MF is a MATRIX_FACTORIZATION model's weights (modelmf.go).
+	MF *mfTrained `json:"mf,omitempty"`
 }
 
 // multiclass reports whether t is a multiclass logistic model.
@@ -237,6 +245,8 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		return trainKMeans(opts, cols, rows)
 	case "PCA":
 		return trainPCA(opts, cols, rows)
+	case "MATRIX_FACTORIZATION":
+		return trainMF(opts, cols, rows)
 	}
 	var t mlTrained
 	label := "label"

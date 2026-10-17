@@ -150,7 +150,7 @@ func TestParseModelDDL(t *testing.T) {
 	}
 	for _, bad := range []string{
 		"CREATE MODEL ds.m OPTIONS(model_type='boosted_tree_regressor') AS SELECT 1",
-		"CREATE MODEL ds.m TRANSFORM(ML.STANDARD_SCALER(x) OVER () AS x, y) OPTIONS(model_type='linear_reg') AS SELECT 1",
+		"CREATE MODEL ds.m OPTIONS(model_type='autoencoder') AS SELECT 1",
 		"CREATE MODEL ds.m OPTIONS(model_type='pca', num_principal_components=2, pca_solver='randomized') AS SELECT 1",
 		"CREATE MODEL ds.m REMOTE WITH CONNECTION `us.c` OPTIONS(endpoint='gemini')",
 		"CREATE MODEL ds.m OPTIONS(model_type='linear_reg', warm_start=true) AS SELECT 1",

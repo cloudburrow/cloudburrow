@@ -15,10 +15,11 @@ import (
 // so the input needs only the columns the other items read, and its other
 // columns pass through to the output, as BigQuery documents.
 //
-// Refused 501 with the reason: an item that calls an ML preprocessing
-// function (ML.STANDARD_SCALER, ML.QUANTILE_BUCKETIZE, ...) or a window
-// (OVER): they are analytic over the training rows, and CloudBurrow would
-// have to keep what they learned.
+// The ML preprocessing functions in an item are written as SQL
+// (modelpreprocess.go), the analytic ones (ML.STANDARD_SCALER, ...
+// OVER ()) with the statistics they learn over the training rows, kept in
+// the model as constants. Refused 501 with the reason: the preprocessing
+// functions CloudBurrow does not carry out, and any other window (OVER).
 
 // transformItems reads TRANSFORM(...)'s select list (toks, inside the
 // parentheses) into its items' text.
@@ -30,14 +31,9 @@ func transformItems(toks []token, sql string) ([]string, int, string) {
 			if k == start {
 				return nil, 400, "Syntax error: empty item in TRANSFORM"
 			}
+			// ML functions and windows are the front's learnTransform's
+			// (modelpreprocess.go).
 			item := toks[start:k]
-			for j, t := range item {
-				if t.is("ML") && j+1 < len(item) && item[j+1].punct(".") || t.is("OVER") {
-					return nil, 501, "Not implemented here: a TRANSFORM item that calls an ML preprocessing function or a window (" +
-						strings.TrimSpace(sql[item[0].pos:item[len(item)-1].end]) + "): it is analytic over the training rows. " +
-						"CloudBurrow carries out TRANSFORM items that read their own row only. Nothing was run."
-				}
-			}
 			items = append(items, strings.TrimSpace(sql[item[0].pos:item[len(item)-1].end]))
 			start = k + 1
 			continue
