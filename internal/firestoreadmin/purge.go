@@ -29,6 +29,12 @@ func (a *Admin) ResetProject(ctx context.Context, project string) error {
 			dbs[name] = true
 		}
 	}
+	// The databases documents calls named that the Admin API never made
+	// hold documents too (#1550).
+	for _, name := range a.seenList(project) {
+		dbs[name] = true
+		delete(a.seen, name)
+	}
 	frontstate.DropProject(a.databases, project)
 	delete(a.seeded, project)
 	frontstate.DropProject(a.indexes, project)

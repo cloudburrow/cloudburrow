@@ -257,10 +257,11 @@ func firestoreFront() *Front {
 
 // datastoreFront is the call front, answering RunAggregationQuery, which
 // the emulator does not serve, from its RunQuery (internal/queryfront,
-// #1405).
+// #1405), and recording the named databases calls name, for a project's
+// purge (internal/callfront, #1550).
 func datastoreFront() *Front {
 	f := callFront(DatastorePort, DatastoreEmulatorPort)
-	f.Args = append(f.Args, "--queries", "datastore")
+	f.Args = append(f.Args, "--queries", "datastore", "--datastore-databases")
 	return f
 }
 

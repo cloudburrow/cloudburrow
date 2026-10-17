@@ -77,3 +77,74 @@ func TestResetProjectDropsOnlyThatProject(t *testing.T) {
 		t.Errorf("the purged project's tables in the emulator = %v, %v", tables, err)
 	}
 }
+
+// TestResetProjectDropsTablesOfInstancesItNeverMade (#1550): a table
+// created under an instance ID the instance admin never made, which the
+// emulator accepts, goes with its project too, though the front was
+// restarted in between, and another project's such table stays.
+func TestResetProjectDropsTablesOfInstancesItNeverMade(t *testing.T) {
+	emu, err := bttest.NewServer("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(emu.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	dir := t.TempDir()
+	addr, stop := serveKept(t, emu.Addr, dir)
+	for _, p := range []string{"gone", "kept"} {
+		opt := option.WithGRPCConn(dial(t, addr))
+		ac, err := bigtable.NewAdminClient(ctx, p, "never-made", opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ac.CreateTable(ctx, "t"); err != nil {
+			t.Fatalf("CreateTable in %s: %v", p, err)
+		}
+		c, err := bigtable.NewClient(ctx, p, "never-made", opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ac.CreateColumnFamily(ctx, "t", "f"); err != nil {
+			t.Fatal(err)
+		}
+		m := bigtable.NewMutation()
+		m.Set("f", "c", bigtable.Now(), []byte("v"))
+		if err := c.Open("t").Apply(ctx, "row", m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stop()
+	addr, _ = serveKept(t, emu.Addr, dir)
+
+	resp, err := http.Post("http://"+addr+frontstate.ResetPath+"?project=gone", "", nil)
+	if err != nil || resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("reset = %v, %v", resp, err)
+	}
+	_ = resp.Body.Close()
+
+	conn := dial(t, emu.Addr)
+	for p, want := range map[string]int{"gone": 0, "kept": 1} {
+		direct, err := bigtable.NewAdminClient(ctx, p, "never-made", option.WithGRPCConn(conn))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tables, err := direct.Tables(ctx); err != nil || len(tables) != want {
+			t.Errorf("%s's tables in the emulator after the reset = %v, %v; want %d", p, tables, err, want)
+		}
+	}
+}
+
+func TestSeenInstanceOf(t *testing.T) {
+	for in, want := range map[string]string{
+		"projects/p/instances/i/tables/t":   "projects/p/instances/i",
+		"projects/p/instances/i":            "projects/p/instances/i",
+		"projects/p/instances/-":            "",
+		"projects/p":                        "",
+		"operations/projects/p/instances/i": "",
+	} {
+		if got := seenInstanceOf(in); got != want {
+			t.Errorf("seenInstanceOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

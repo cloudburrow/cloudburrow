@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -43,7 +45,8 @@ func (s *frontStateResetter) ResetProject(ctx context.Context, project string) e
 }
 
 // datastoreResetter deletes a project's entities from the Datastore
-// emulator, every namespace's, through the Datastore API itself: the
+// emulator, every database's and namespace's, through the Datastore API
+// itself: the
 // emulator keeps entities by project and has no per-project reset of its
 // own (its /reset clears every project). It is a ProjectResetter only in
 // spirit: Reset, every project, reaches the projects CloudBurrow knows, as
@@ -65,12 +68,56 @@ func (d *datastoreResetter) Reset(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// ResetProject deletes every entity of project, in every namespace.
+// ResetProject deletes every entity of project, in every namespace of its
+// default database and of each named database a call has named, which the
+// Datastore call front keeps (internal/callfront, #1550).
 func (d *datastoreResetter) ResetProject(ctx context.Context, project string) error {
 	if d.tunnel == nil || d.tunnel.HostAddr() == "" {
 		return errors.New("the datastore tunnel is not running")
 	}
-	c, err := datastore.NewClient(ctx, project, localOpts(d.tunnel.HostAddr())...)
+	named, err := d.namedDatabases(ctx, project)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, db := range append([]string{""}, named...) {
+		if err := d.clearDatabase(ctx, project, db); err != nil {
+			errs = append(errs, fmt.Errorf("database %q: %w", db, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// namedDatabases asks the call front for project's named databases, which
+// it forgets as it answers.
+func (d *datastoreResetter) namedDatabases(ctx context.Context, project string) ([]string, error) {
+	u := "http://" + d.tunnel.HostAddr() + frontstate.DatastoreForgetPath + "?project=" + url.QueryEscape(project)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := (&http.Client{Timeout: time.Minute}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("the Datastore front's named databases of %s: %s: %s", project, resp.Status, strings.TrimSpace(string(b)))
+	}
+	var out struct {
+		Databases []string `json:"databases"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Databases, nil
+}
+
+// clearDatabase deletes every entity of the database ("" the default) of
+// project, in every namespace.
+func (d *datastoreResetter) clearDatabase(ctx context.Context, project, database string) error {
+	c, err := datastore.NewClientWithDatabase(ctx, project, database, localOpts(d.tunnel.HostAddr())...)
 	if err != nil {
 		return err
 	}

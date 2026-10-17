@@ -61,3 +61,52 @@ func TestResetProjectDropsOnlyThatProject(t *testing.T) {
 		t.Errorf("seeded %v, databases %v", a.seeded, a.databases)
 	}
 }
+
+// TestResetProjectClearsDatabasesCallsNamed (#1550): a database the Admin
+// API never made, that a documents call named, has its documents cleared
+// with its project's, though the API was restarted in between; another
+// project's is left.
+func TestResetProjectClearsDatabasesCallsNamed(t *testing.T) {
+	var mu sync.Mutex
+	var cleared []string
+	emu := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/emulator/v1/") {
+			mu.Lock()
+			cleared = append(cleared, strings.TrimPrefix(r.URL.Path, "/emulator/v1/"))
+			mu.Unlock()
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(emu.Close)
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	a := New(strings.TrimPrefix(emu.URL, "http://"))
+	if err := a.KeepState(ctx, dir, t.Logf); err != nil {
+		t.Fatal(err)
+	}
+	a.SawResource("projects/gone/databases/never-made")
+	a.SawResource("projects/gone/databases/never-made/documents/c/d")
+	a.SawResource("projects/kept/databases/other")
+	a.SawResource("projects/gone")
+	cancel()
+
+	b := New(strings.TrimPrefix(emu.URL, "http://"))
+	if err := b.KeepState(context.Background(), dir, t.Logf); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ResetProject(context.Background(), "gone"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	got := strings.Join(cleared, ",")
+	mu.Unlock()
+	if got != "projects/gone/databases/(default)/documents,projects/gone/databases/never-made/documents" {
+		t.Errorf("cleared %s", got)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.seen) != 1 || !b.seen["projects/kept/databases/other"] {
+		t.Errorf("seen after the reset: %v", b.seen)
+	}
+}

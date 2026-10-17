@@ -88,6 +88,8 @@ type Front struct {
 	served   map[string]method
 	// persist is the state directory (state.go, #1514), when there is one.
 	persist persister
+	// seen is every instance a call has named (seen.go, #1550).
+	seen seenInstances
 }
 
 // New returns a front for the emulator at upstream (host:port). The
@@ -197,6 +199,9 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 	if !ok {
 		return status.Error(codes.Internal, "no method on the stream")
 	}
+	if md, ok := metadata.FromIncomingContext(ss.Context()); ok {
+		f.sawIf(f.seen.seeMetadata(md))
+	}
 	if m, ok := f.served[method]; ok {
 		// The state is written as the call returns (state.go).
 		defer f.flush()
@@ -218,6 +223,7 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 		if err := ss.RecvMsg(&in); err != nil {
 			return err
 		}
+		f.sawIf(f.seen.seeFrame(in))
 		out, err := f.views.rewrite(method, in)
 		if err != nil {
 			return err
@@ -242,7 +248,7 @@ func (f *Front) handle(_ any, ss grpc.ServerStream) error {
 				return
 			}
 		}
-		reqErr <- pumpRequests(ss, cs)
+		reqErr <- pumpRequests(ss, cs, func(b []byte) bool { return f.sawIf(f.seen.seeFrame(b)) })
 	}()
 	respErr := make(chan error, 1)
 	go func() { respErr <- pumpResponses(ss, cs) }()
@@ -276,8 +282,9 @@ func forwardable(md metadata.MD) metadata.MD {
 	return out
 }
 
-// pumpRequests copies the client's requests to the emulator.
-func pumpRequests(ss grpc.ServerStream, cs grpc.ClientStream) error {
+// pumpRequests copies the client's requests to the emulator, the first
+// one shown to first.
+func pumpRequests(ss grpc.ServerStream, cs grpc.ClientStream, first func([]byte) bool) error {
 	for {
 		var fr frame
 		if err := ss.RecvMsg(&fr); err != nil {
@@ -285,6 +292,10 @@ func pumpRequests(ss grpc.ServerStream, cs grpc.ClientStream) error {
 				return cs.CloseSend()
 			}
 			return err
+		}
+		if first != nil {
+			first(fr)
+			first = nil
 		}
 		if err := cs.SendMsg(&fr); err != nil {
 			if errors.Is(err, io.EOF) {

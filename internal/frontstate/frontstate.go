@@ -259,6 +259,12 @@ func Decode(b []byte, m proto.Message) (bool, error) {
 // in the emulator too, as a project's purge does on Google (#1540).
 const ResetPath = "/cloudburrow/front-state/reset"
 
+// DatastoreForgetPath is the path on the Datastore call front
+// (internal/callfront) that answers a POST ?project= with the named
+// databases calls have named in that project, {"databases": [...]}, and
+// forgets them, for the project's purge (#1550).
+const DatastoreForgetPath = "/cloudburrow/datastore/databases/forget"
+
 // ServeReset answers a call to ResetPath with reset, passing it the
 // project= parameter: "" for every project.
 func ServeReset(w http.ResponseWriter, r *http.Request, reset func(project string) error) {
