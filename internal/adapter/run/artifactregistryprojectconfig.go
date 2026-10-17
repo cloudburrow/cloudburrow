@@ -158,3 +158,35 @@ func updateProjectConfig(name string, r *http.Request) (*arProjectConfig, error)
 	arConfig.mu.Unlock()
 	return getProjectConfig(name), nil
 }
+
+// ProjectPlatformLogs is a location's projectConfig platform logs state
+// and severity level, "" for unset: the console's view of it.
+func ProjectPlatformLogs(project, location string) (state, severity string) {
+	c := getProjectConfig("projects/" + project + "/locations/" + location + "/projectConfig")
+	if c.PlatformLogsConfig == nil {
+		return "", ""
+	}
+	return c.PlatformLogsConfig.LoggingState, c.PlatformLogsConfig.SeverityLevel
+}
+
+// SetProjectPlatformLogs sets a location's projectConfig platform logs, as
+// updateProjectConfig with the mask platformLogsConfig does: the console's
+// Set platform logs.
+func SetProjectPlatformLogs(project, location, state, severity string) error {
+	name := "projects/" + project + "/locations/" + location + "/projectConfig"
+	if state != "" && !arLoggingStates[state] {
+		return apierror.InvalidArgument("invalid platformLogsConfig.loggingState %q", state)
+	}
+	if severity != "" && !arSeverityLevels[severity] {
+		return apierror.InvalidArgument("invalid platformLogsConfig.severityLevel %q", severity)
+	}
+	c := &arProjectConfig{Name: name}
+	if state != "" || severity != "" {
+		c.PlatformLogsConfig = &arPlatformLogsConfig{LoggingState: state, SeverityLevel: severity}
+	}
+	arConfig.mu.Lock()
+	arConfig.projectConfigs[name] = c
+	saveARConfigLocked()
+	arConfig.mu.Unlock()
+	return nil
+}

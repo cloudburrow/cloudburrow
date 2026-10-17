@@ -124,6 +124,10 @@ func (p artifactRegistryProvider) repositoryDetail(st *registry.Store, r *arpb.R
 	if c, err := cs.GetVPCSCConfig(ctx, &arpb.GetVPCSCConfigRequest{Name: "projects/" + repo.Project + "/locations/" + repo.Location + "/vpcscConfig"}); err == nil {
 		vpcsc = c.GetVpcscPolicy().String()
 	}
+	platformLogs := "-"
+	if st, sev := runadapter.ProjectPlatformLogs(repo.Project, repo.Location); st != "" || sev != "" {
+		platformLogs = strings.Trim(st+", severity "+orDash(sev), ", ")
+	}
 	settings := "-"
 	if ps, err := cs.GetProjectSettings(ctx, &arpb.GetProjectSettingsRequest{Name: "projects/" + repo.Project + "/projectSettings"}); err == nil {
 		settings = fmt.Sprintf("%s, pull percent %d", ps.GetLegacyRedirectionState(), ps.GetPullPercent())
@@ -132,7 +136,8 @@ func (p artifactRegistryProvider) repositoryDetail(st *registry.Store, r *arpb.R
 		Summary: []console.Property{{Label: "Format", Value: r.GetFormat().String()}, {Label: "Location", Value: repo.Location},
 			{Label: "URL", Value: r.GetRegistryUri()}, {Label: "Push to", Value: registryPushHint(repo)},
 			{Label: "Description", Value: orDash(r.GetDescription())}, {Label: "Cleanup policies", Value: cleanup},
-			{Label: "VPC-SC policy (location)", Value: vpcsc}, {Label: "Project settings", Value: settings}},
+			{Label: "VPC-SC policy (location)", Value: vpcsc}, {Label: "Project settings", Value: settings},
+			{Label: "Platform logs (location)", Value: platformLogs}},
 		Sections: []console.Section{{ID: "images", Label: "Images", Listing: images}, {ID: "rules", Label: "Rules", Listing: rules},
 			{ID: "attachments", Label: "Attachments", Listing: attachments}},
 	}
@@ -245,6 +250,11 @@ func (p artifactRegistryProvider) DetailActions(ctx context.Context, project str
 			{ID: "vpcsc", Label: "Set VPC-SC policy", Fields: []console.Field{
 				{Name: "policy", Label: "Policy", Type: "select", Options: []string{"DENY", "ALLOW"}, Default: "DENY",
 					Help: "the location's policy for remote repositories' upstream fetches, as UpdateVPCSCConfig sets it"}}},
+			{ID: "platform-logs", Label: "Set platform logs", Fields: []console.Field{
+				{Name: "state", Label: "Logging state", Type: "select", Options: []string{"ENABLED", "DISABLED", "LOGGING_STATE_UNSPECIFIED"}, Default: "ENABLED",
+					Help: "the location's projectConfig platformLogsConfig, as updateProjectConfig sets it (#1519); stored: this instance writes no platform logs"},
+				{Name: "severity", Label: "Severity level", Type: "select", Options: []string{"SEVERITY_LEVEL_UNSPECIFIED", "DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"},
+					Default: "SEVERITY_LEVEL_UNSPECIFIED"}}},
 			{ID: "delete", Label: "Delete repository", Destructive: true, Leaves: true,
 				Confirm: "The repository and every image it holds are deleted, as DeleteRepository does."}}...)
 	case 2:
@@ -359,6 +369,8 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 			SourceArtifact: &arpb.ExportArtifactRequest_SourceVersion{SourceVersion: packageName(repo, path[1]) + "/versions/" + path[2]},
 			Destination:    &arpb.ExportArtifactRequest_GcsPath{GcsPath: strings.TrimSpace(values["path"])}})
 		return err
+	case len(path) == 1 && action == "platform-logs":
+		return runadapter.SetProjectPlatformLogs(repo.Project, repo.Location, values["state"], values["severity"])
 	case len(path) == 1 && action == "vpcsc":
 		_, err := cs.UpdateVPCSCConfig(ctx, &arpb.UpdateVPCSCConfigRequest{VpcscConfig: &arpb.VPCSCConfig{
 			Name:        "projects/" + repo.Project + "/locations/" + repo.Location + "/vpcscConfig",
