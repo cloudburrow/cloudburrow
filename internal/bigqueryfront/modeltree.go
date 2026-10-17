@@ -41,8 +41,18 @@ import (
 // rather than label encoding of a categorical feature; the mean, not a
 // learned default direction, for a NULL; float64 values, where XGBoost
 // keeps float32; the loss of an iteration (the mean squared error, or the
-// mean log loss). Refused 501: num_parallel_tree, subsample or colsample_*
-// other than 1, booster_type DART, and tree_method APPROX or HIST.
+// mean log loss). Refused 501 for a boosted tree model: num_parallel_tree,
+// subsample or colsample_* other than 1, booster_type DART, and
+// tree_method APPROX or HIST.
+//
+// RANDOM_FOREST_REGRESSOR and RANDOM_FOREST_CLASSIFIER (#1504,
+// https://cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-random-forest)
+// are XGBoost's random forest: one round of num_parallel_tree (100) trees
+// grown as above on the documented sampling (subsample 0.8, colsample_bynode
+// 0.8, colsample_bytree and colsample_bylevel 1, max_tree_depth 15), each
+// leaf's weight divided among the trees, so the forest predicts their mean.
+// UNVERIFIED: the draws come from a fixed seed (1504), so a forest is the
+// same each run but not Google's draw.
 
 // mlNode is one node of a tree: a split (Feat the encoded column, without
 // the intercept, Thr the value, Left and Right the children's indexes) or a
