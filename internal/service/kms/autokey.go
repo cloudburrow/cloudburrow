@@ -478,15 +478,6 @@ func (o *OperationsServer) GetOperation(_ context.Context, req *longrunningpb.Ge
 	return op, nil
 }
 
-// HsmManagementServer answers every google.cloud.kms.v1.HsmManagement
-// method UNIMPLEMENTED (each is the embedded default): a single-tenant HSM instance is hardware Google
-// provisions, administered through quorum-approved proposals whose
-// challenges are signed with the administrators' two-factor keys, and none
-// of it exists locally (#1452).
-type HsmManagementServer struct {
-	kmspb.UnimplementedHsmManagementServer
-}
-
 // KeyHandlesInProject returns every KeyHandle of project, in every location,
 // ordered by name, for the console.
 func (s *Server) KeyHandlesInProject(project string) ([]*kmspb.KeyHandle, error) {

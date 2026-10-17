@@ -164,6 +164,9 @@ func (s *Server) CreateImportJob(_ context.Context, req *kmspb.CreateImportJobRe
 	if isExternal(level) {
 		return nil, apierror.Wrap(apierror.Unimplemented("import_job.protection_level %s is not implemented: Google documents importing into SOFTWARE and HSM keys only", level))
 	}
+	if level == kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
+		return nil, apierror.Wrap(apierror.Unimplemented("import_job.protection_level HSM_SINGLE_TENANT is not implemented: importing into a SingleTenantHsmInstance is not"))
+	}
 	if in.GetCryptoKeyBackend() != "" {
 		return nil, apierror.Wrap(apierror.Unimplemented("import_job.crypto_key_backend is not implemented"))
 	}

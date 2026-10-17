@@ -20,21 +20,19 @@ import (
 // rather than faked. No quota is applied to either level.
 //
 // EXTERNAL and EXTERNAL_VPC keys are served with the instance acting as
-// the external key manager (external.go, #1469). HSM_SINGLE_TENANT needs a
-// single-tenant HSM instance, which the HsmManagement service would create;
-// it is UNIMPLEMENTED.
+// the external key manager (external.go, #1469). HSM_SINGLE_TENANT keys
+// name an ACTIVE SingleTenantHsmInstance in crypto_key_backend (hsm.go,
+// #1469), and are otherwise served as HSM keys are.
 
 // protectionLevelOf validates a requested protection level: unset is
-// SOFTWARE; SOFTWARE, HSM, EXTERNAL and EXTERNAL_VPC are served, and
-// HSM_SINGLE_TENANT is UNIMPLEMENTED naming field.
+// SOFTWARE; SOFTWARE, HSM, EXTERNAL, EXTERNAL_VPC and HSM_SINGLE_TENANT are
+// served.
 func protectionLevelOf(field string, pl kmspb.ProtectionLevel) (kmspb.ProtectionLevel, error) {
 	switch pl {
 	case kmspb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED, kmspb.ProtectionLevel_SOFTWARE:
 		return kmspb.ProtectionLevel_SOFTWARE, nil
-	case kmspb.ProtectionLevel_HSM, kmspb.ProtectionLevel_EXTERNAL, kmspb.ProtectionLevel_EXTERNAL_VPC:
+	case kmspb.ProtectionLevel_HSM, kmspb.ProtectionLevel_EXTERNAL, kmspb.ProtectionLevel_EXTERNAL_VPC, kmspb.ProtectionLevel_HSM_SINGLE_TENANT:
 		return pl, nil
-	case kmspb.ProtectionLevel_HSM_SINGLE_TENANT:
-		return 0, apierror.Unimplemented("%s %s is not implemented: it needs a single-tenant HSM instance, which CloudBurrow does not provide", field, pl)
 	}
 	return 0, apierror.InvalidArgument("%s %d is not a ProtectionLevel", field, pl)
 }

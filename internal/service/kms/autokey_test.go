@@ -130,9 +130,10 @@ func TestHSMKeysBehaveAsSoftwareOnesWithoutAttestation(t *testing.T) {
 		t.Errorf("the same level = %v", err)
 	}
 	// EXTERNAL needs skip_initial_version_creation, and EXTERNAL_VPC a
-	// connection (external_test.go, #1469); HSM_SINGLE_TENANT stays 501.
+	// connection (external_test.go, #1469), and HSM_SINGLE_TENANT a
+	// SingleTenantHsmInstance (hsm_test.go).
 	for pl, want := range map[kmspb.ProtectionLevel]codes.Code{kmspb.ProtectionLevel_EXTERNAL: codes.InvalidArgument,
-		kmspb.ProtectionLevel_EXTERNAL_VPC: codes.InvalidArgument, kmspb.ProtectionLevel_HSM_SINGLE_TENANT: codes.Unimplemented} {
+		kmspb.ProtectionLevel_EXTERNAL_VPC: codes.InvalidArgument, kmspb.ProtectionLevel_HSM_SINGLE_TENANT: codes.InvalidArgument} {
 		_, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "x", CryptoKey: &kmspb.CryptoKey{
 			Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, VersionTemplate: &kmspb.CryptoKeyVersionTemplate{ProtectionLevel: pl}}})
 		if status.Code(err) != want {

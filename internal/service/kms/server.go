@@ -14,7 +14,9 @@
 // connections and configuration are stored (ekm.go), and Autokey creates
 // keys on demand (autokey.go, #1452). EXTERNAL and EXTERNAL_VPC keys are
 // served with the instance acting as their external key manager
-// (external.go, #1469). Single-tenant HSMs, trusted key wrapping and IAM on
+// (external.go, #1469). Single-tenant HSM instances and their
+// quorum-approved proposals are served by HsmManagement, and keys in them
+// as HSM keys are (hsm.go, #1469). Trusted key wrapping and IAM on
 // anything else are UNIMPLEMENTED. Automatic rotation (rotation_period, next_rotation_time) is
 // served on the Server's clock (rotation.go, #816).
 package kms
@@ -194,7 +196,7 @@ func (s *Server) Register(g grpc.ServiceRegistrar) {
 	kmspb.RegisterEkmServiceServer(g, s.Ekm())
 	kmspb.RegisterAutokeyServer(g, s.Autokey())
 	kmspb.RegisterAutokeyAdminServer(g, s.AutokeyAdmin())
-	kmspb.RegisterHsmManagementServer(g, HsmManagementServer{})
+	kmspb.RegisterHsmManagementServer(g, s.HsmManagement())
 	iampb.RegisterIAMPolicyServer(g, s.IAMPolicy())
 	locations.Register(g, s.Locations())
 }
@@ -458,11 +460,11 @@ func unsupportedKey(k *kmspb.CryptoKey) error {
 	if err != nil {
 		return err
 	}
-	// crypto_key_backend is "only applicable" to EXTERNAL_VPC (and
-	// HSM_SINGLE_TENANT, refused above) keys (resources.proto); Google's
-	// answer for another level is not documented.
-	if k.GetCryptoKeyBackend() != "" && pl != kmspb.ProtectionLevel_EXTERNAL_VPC {
-		return apierror.Unimplemented("crypto_key.crypto_key_backend is not implemented for protection level %s: it applies to EXTERNAL_VPC keys, naming their EkmConnection", pl)
+	// crypto_key_backend is "only applicable" to EXTERNAL_VPC and
+	// HSM_SINGLE_TENANT keys (resources.proto); Google's answer for another
+	// level is not documented.
+	if k.GetCryptoKeyBackend() != "" && pl != kmspb.ProtectionLevel_EXTERNAL_VPC && pl != kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
+		return apierror.Unimplemented("crypto_key.crypto_key_backend is not implemented for protection level %s: it applies to EXTERNAL_VPC keys, naming their EkmConnection, and HSM_SINGLE_TENANT keys, naming their SingleTenantHsmInstance", pl)
 	}
 	if k.GetImportOnly() {
 		return apierror.Unimplemented("crypto_key.import_only is not implemented")
@@ -567,6 +569,11 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 			return nil, apierror.Wrap(err)
 		}
 		k.Backend, k.Coordinated = c.Name, c.mode() == kmspb.EkmConnection_CLOUD_KMS
+	}
+	if level == kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
+		if k.Backend, err = s.hsmBackend("crypto_key.crypto_key_backend", in.GetCryptoKeyBackend(), req.GetParent()); err != nil {
+			return nil, apierror.Wrap(err)
+		}
 	}
 	if k.manualExternal() {
 		// create-external-key creates these keys with
@@ -702,6 +709,9 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 	defer s.mu.Unlock()
 	var k cryptoKey
 	if err := s.load(dbKey(keyPrefix, req.GetParent()), &k, "CryptoKey", req.GetParent()); err != nil {
+		return nil, err
+	}
+	if err := s.backendUsable(k); err != nil {
 		return nil, err
 	}
 	n := k.Next
