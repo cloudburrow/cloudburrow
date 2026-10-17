@@ -415,21 +415,26 @@ func (p functionsProvider) ListActions(context.Context, string) []console.Action
 	return []console.Action{p.createAction()}
 }
 
-// DetailActions offers Test function on a 1st-gen HTTP function, which the
+// DetailActions offers Edit function and Download source on every
+// function (#1491), and Test function on a 1st-gen HTTP function, which the
 // v1 API's call reaches (#1428). A 2nd-gen function has no call method:
 // it is reached at its URL.
-func (p functionsProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
+func (p functionsProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	if len(path) != 1 {
 		return nil
 	}
 	fn, err := p.find(project, path[0])
-	if err != nil || fn.GetEnvironment() != functionspb.Environment_GEN_1 || fn.GetEventTrigger() != nil {
+	if err != nil {
 		return nil
 	}
-	return []console.Action{{ID: functionsTestAction, Label: "Test function", Fields: []console.Field{
+	acts := p.functionDetailActions(ctx, fn)
+	if fn.GetEnvironment() != functionspb.Environment_GEN_1 || fn.GetEventTrigger() != nil {
+		return acts
+	}
+	return append(acts, console.Action{ID: functionsTestAction, Label: "Test function", Fields: []console.Field{
 		{Name: "data", Label: "Triggering event", Type: "textarea", Default: "{}",
 			Help: "The request body sent to the function, as gcloud functions call --data sends it; JSON is sent as application/json"},
-	}}}
+	}})
 }
 
 func (p functionsProvider) ActAt(ctx context.Context, project string, path []string, action string, values map[string]string) error {
@@ -443,12 +448,21 @@ func (p functionsProvider) ActAtResult(ctx context.Context, project string, path
 	if action == functionsCreateAction {
 		return nil, errors.New("Create function takes a source archive")
 	}
-	if action != functionsTestAction || len(path) != 1 {
+	if len(path) != 1 {
 		return nil, fmt.Errorf("unknown action %q", action)
 	}
 	fn, err := p.find(project, path[0])
 	if err != nil {
 		return nil, err
+	}
+	switch action {
+	case functionsEditAction:
+		return nil, p.editFunction(ctx, fn, values)
+	case functionsDownloadAction:
+		return p.downloadSource(ctx, fn)
+	case functionsTestAction:
+	default:
+		return nil, fmt.Errorf("unknown action %q", action)
 	}
 	if fn.GetEnvironment() != functionspb.Environment_GEN_1 {
 		return nil, errors.New("Test function calls a 1st gen function; a 2nd gen function is reached at its URL")
