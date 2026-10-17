@@ -20,7 +20,7 @@ tracks it; a closed issue is named only where it says what was built.
 
 | Service | Gaps | Not built yet | No emulator support | Not documented by Google | Needs live GCP |
 |---|---|---|---|---|---|
-| Cloud Storage | 5 | 0 | 4 | 1 | 0 |
+| Cloud Storage | 2 | 0 | 1 | 1 | 0 |
 | Pub/Sub | 2 | 0 | 0 | 1 | 1 |
 | Cloud Tasks | 1 | 0 | 1 | 0 | 0 |
 | Cloud Run | 2 | 0 | 1 | 0 | 1 |
@@ -44,14 +44,12 @@ and `objects.watchAll` (#1281), watchAll's listing parameters (#1393), channel d
 instance (#1290), the XML API's bucket `PUT`, service `GET` and form `POST` (#1258), the gRPC
 `google.storage.v2` API (#1321), and its customer-supplied encryption keys, ACLs, managed-folder
 IAM, `ComposeObject.delete_source_objects`, object contexts and `ListObjects.filter` (#1345). ACLs
-and object IAM on the JSON API are excluded (below).
+and object IAM on the JSON API are excluded (below). Bucket IP filters (enforced for public sources),
+Rapid Caches and `managedFolders.update` are built (#1505).
 
 | Gap | Why open | Size |
 |---|---|---|
-| gRPC `google.storage.v2`: `Bucket.ip_filter` stays `UNIMPLEMENTED` (and `ipFilter` 400 on the JSON API): enforcing it needs the caller's VPC network and the `storage.buckets.exemptFromIpFilter` permission, which are not modelled, and a filter stored without effect would look like a control that is not there. Appendable objects, `custom_placement_config` and `SetIamPolicy`'s `update_mask` are built (#1443) | no emulator support: enforcement needs what is not modelled | S |
-| `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) | no emulator support (no cache tier) | S |
-| `rapidCaches.*` (#1444; Anywhere Caches, as records with no cache tier, `buckets.relocate`, `advanceRelocateBucket` and `operations.cancel` are built) | no emulator support (no cache tier) | M |
-| Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444) | no emulator support (needs Pub/Sub) | S |
+| Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444). Google documents no error for a topic that does not exist (reporting-changes says only to create the topic first; gcloud and Terraform create it), so there is no documented refusal to answer instead; the 501 names the reason (#1505) | no emulator support (needs Pub/Sub) | S |
 | UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
 
 ## Pub/Sub
