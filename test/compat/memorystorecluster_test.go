@@ -55,6 +55,15 @@ func waitClusterOp(t *testing.T, h *Harness, op *cluster.UpdateClusterOperation)
 	return nil, fmt.Errorf("operation %s is still running after 5 minutes", op.Name())
 }
 
+// memorystoreWait is a context for waiting on one Memorystore operation: a
+// cluster's or instance's creation, starting its nodes and forming it, can
+// outlast h.Context()'s minute on a loaded machine (#1568).
+func memorystoreWait(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 // primariesOnly reads CLUSTER NODES until it names n primaries and no
 // replica, for up to 30 seconds: the client's view of the cluster can still
 // hold the replicas just removed, and a reload from them came back with no

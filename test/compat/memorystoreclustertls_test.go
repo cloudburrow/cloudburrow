@@ -68,7 +68,7 @@ func TestMemorystoreRedisClusterInTransitEncryption(t *testing.T) {
 			_ = op.Wait(h.Context())
 		}
 	})
-	cl, err := op.Wait(h.Context())
+	cl, err := op.Wait(memorystoreWait(t))
 	if err != nil {
 		t.Fatalf("CreateCluster operation: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestMemorystoreValkeyInTransitEncryption(t *testing.T) {
 				_ = op.Wait(h.Context())
 			}
 		})
-		inst, err := op.Wait(h.Context())
+		inst, err := op.Wait(memorystoreWait(t))
 		if err != nil {
 			t.Fatalf("CreateInstance %s operation: %v", id, err)
 		}

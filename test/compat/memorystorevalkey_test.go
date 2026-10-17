@@ -250,7 +250,7 @@ func TestMemorystoreValkeyClusterDisabled(t *testing.T) {
 			_ = op.Wait(h.Context())
 		}
 	})
-	inst, err := op.Wait(h.Context())
+	inst, err := op.Wait(memorystoreWait(t))
 	if err != nil {
 		t.Fatalf("CreateInstance operation: %v", err)
 	}

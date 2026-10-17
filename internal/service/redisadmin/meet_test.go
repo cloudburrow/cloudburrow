@@ -23,3 +23,14 @@ func TestKnowsAll(t *testing.T) {
 		}
 	}
 }
+
+// TestOnlineReplicas (#1568): only the replicas a primary counts online.
+func TestOnlineReplicas(t *testing.T) {
+	const info = "# Replication\r\nrole:master\r\nconnected_slaves:2\r\n" +
+		"slave0:ip=10.0.0.2,port=6379,state=online,offset=10,lag=0\r\n" +
+		"slave1:ip=10.0.0.3,port=6379,state=wait_bgsave,offset=0,lag=0\r\n" +
+		"master_repl_offset:10\r\n"
+	if got := onlineReplicas(info); got != 1 {
+		t.Errorf("onlineReplicas = %d, want 1", got)
+	}
+}

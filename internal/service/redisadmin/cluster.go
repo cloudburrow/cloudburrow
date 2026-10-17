@@ -1136,16 +1136,31 @@ func (c *clusters) replicate(ctx context.Context, r *clusterRecord, these, all [
 	return nil
 }
 
-// settle waits until every node says the cluster is ok, and every replica
-// is linked to its primary.
+// settle waits until every node says the cluster is ok, every replica is
+// linked to its primary, and every primary counts its shard's replicas
+// online: a primary that does not yet answers a slot move's CLUSTER SETSLOT
+// with NOREPLICAS (Valkey 8 replicates it and waits for the replicas, #1568).
 func (c *clusters) settle(ctx context.Context, r *clusterRecord, nodes []*clusterNode) error {
+	replicas := map[int]int{}
+	for _, n := range r.Nodes {
+		if !n.Primary {
+			replicas[n.Shard]++
+		}
+	}
 	return c.until(ctx, "cluster_state:ok on every node", func() bool {
 		for _, n := range r.Nodes {
 			cl := c.dial(n.addr, r.password(), r.TransitCA)
 			ok := r.standalone() || known(ctx, cl, "cluster_state") == "ok"
-			if ok && !n.Primary {
+			if ok && (!n.Primary || replicas[n.Shard] > 0) {
 				info, err := cl.Do(ctx, "INFO", "replication")
-				ok = err == nil && clusterInfoField(fmt.Sprint(info), "master_link_status") == "up"
+				switch {
+				case err != nil:
+					ok = false
+				case n.Primary:
+					ok = onlineReplicas(fmt.Sprint(info)) >= replicas[n.Shard]
+				default:
+					ok = clusterInfoField(fmt.Sprint(info), "master_link_status") == "up"
+				}
 			}
 			cl.Close()
 			if !ok {
@@ -1154,6 +1169,19 @@ func (c *clusters) settle(ctx context.Context, r *clusterRecord, nodes []*cluste
 		}
 		return true
 	})
+}
+
+// onlineReplicas counts a primary's INFO replication slaveN lines in state
+// online.
+func onlineReplicas(info string) int {
+	n := 0
+	for _, line := range strings.Split(info, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && strings.HasPrefix(k, "slave") && strings.Contains(","+v+",", ",state=online,") {
+			n++
+		}
+	}
+	return n
 }
 
 // known is a CLUSTER INFO field.
@@ -1270,7 +1298,21 @@ func (c *clusters) setslots(ctx context.Context, r *clusterRecord, n *clusterNod
 			defer wg.Done()
 			cl := c.dial(n.addr, r.password(), r.TransitCA)
 			defer cl.Close()
-			_, errs[i] = cl.Pipe(ctx, cmds[lo:hi])
+			// NOREPLICAS: Valkey 8 replicates a SETSLOT and waits for the
+			// node's replicas, briefly; on a loaded machine they can miss
+			// that wait. A SETSLOT is idempotent, so the batch runs again
+			// until the move's deadline (#1568).
+			for {
+				_, errs[i] = cl.Pipe(ctx, cmds[lo:hi])
+				if errs[i] == nil || !strings.Contains(errs[i].Error(), "NOREPLICAS") || ctx.Err() != nil {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(500 * time.Millisecond):
+				}
+			}
 		}()
 	}
 	wg.Wait()
