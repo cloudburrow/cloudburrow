@@ -34,6 +34,9 @@ type fakeRows struct {
 	mu      sync.Mutex
 	rows    map[string]string // "ds.t" -> the "rows" JSON
 	queries []string
+	// internal is, for each query, whether it was sent as the front's own
+	// (internaljobs.go, #1555).
+	internal []bool
 }
 
 func (f *fakeRows) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +62,7 @@ func (f *fakeRows) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	b, _ := io.ReadAll(r.Body)
 	_ = json.Unmarshal(b, &q)
 	f.queries = append(f.queries, q.Query)
+	f.internal = append(f.internal, isInternalRequest(r.Context()))
 	if !q.FormatOptions["useInt64Timestamp"] {
 		writeError(w, 400, "invalid", "no useInt64Timestamp")
 		return
@@ -342,8 +346,8 @@ func TestStorageReadRowsAreWrittenByTheFront(t *testing.T) {
 	if want := "SELECT `i`, `f`, `n`, `bn`, `b`, `s`, `y`, `d`, `dt`, `tm`, `ts`, `rec`, `r`, `rr` FROM `ds.t` WHERE (i > 0)"; rest.queries[0] != want {
 		t.Errorf("the query: %s\nwant %s", rest.queries[0], want)
 	}
-	if !records.isInternal("p-1", "job1") {
-		t.Error("the front's query is not left out of jobs.list")
+	if !rest.internal[0] {
+		t.Error("the front's query is not sent as its own, to be left out of jobs.list")
 	}
 
 	// Offset.

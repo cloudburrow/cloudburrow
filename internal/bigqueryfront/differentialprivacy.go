@@ -1100,18 +1100,13 @@ func (f front) dpRows(r *http.Request, q queryOptions, sql string) ([]field, [][
 	if err != nil {
 		return nil, nil, http.StatusInternalServerError, err.Error()
 	}
-	req = req.WithContext(context.WithValue(req.Context(), privacyCheckedKey{}, true))
+	// The front's own query (internaljobs.go, #1555).
+	req = req.WithContext(asInternal(context.WithValue(req.Context(), privacyCheckedKey{}, true)))
 	rec := newRecorder()
 	f.runQuery(rec, req, opts, false)
 	var job map[string]any
 	_ = json.Unmarshal(rec.body.Bytes(), &job)
-	project, id := jobRef(job)
-	if project == "" {
-		project = projectOf(f.base)
-	}
-	if id != "" {
-		f.records.markInternal(project, id)
-	}
+	_, id := jobRef(job)
 	if msg, failed := queryFailure(rec, job); failed {
 		code := rec.status
 		if code == http.StatusOK || code == 0 {

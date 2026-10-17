@@ -27,6 +27,9 @@ type jobsEmulator struct {
 	order  []string
 	log    []string
 	n      int
+	// prefix is the request's job ID prefix, which the engine begins the
+	// IDs it makes with (bigquery-emulator patch 0057, #1555).
+	prefix string
 }
 
 func (e *jobsEmulator) record(job map[string]any) map[string]any {
@@ -38,7 +41,7 @@ func (e *jobsEmulator) record(job map[string]any) map[string]any {
 	}
 	ref["projectId"] = "p"
 	if id, _ := ref["jobId"].(string); id == "" {
-		ref["jobId"] = fmt.Sprintf("auto%d", e.n)
+		ref["jobId"] = fmt.Sprintf("%sauto%d", e.prefix, e.n)
 	}
 	id := ref["jobId"].(string)
 	job["status"] = map[string]any{"state": "DONE"}
@@ -52,7 +55,14 @@ func (e *jobsEmulator) record(job map[string]any) map[string]any {
 	return job
 }
 
+// ServeHTTP serves r as the engine does behind the front's path to it,
+// which names the front's own jobs (JobIDPrefix).
 func (e *jobsEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	JobIDPrefix(http.HandlerFunc(e.serve)).ServeHTTP(w, r)
+}
+
+func (e *jobsEmulator) serve(w http.ResponseWriter, r *http.Request) {
+	e.prefix = r.Header.Get(jobIDPrefixHeader)
 	path := r.URL.Path
 	switch {
 	case r.Method == http.MethodGet && strings.Contains(path, "/tables/"):
