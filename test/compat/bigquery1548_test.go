@@ -84,7 +84,8 @@ func TestBigQueryScriptsUndropAndAlterSchema(t *testing.T) {
 
 		// ALTER SCHEMA … SET OPTIONS, read by the next statement.
 		got := read("ALTER SCHEMA `" + ds.DatasetID + "` SET OPTIONS (description = 'set in a script'); " +
-			"SELECT option_value FROM `" + ds.DatasetID + "`.INFORMATION_SCHEMA.SCHEMATA_OPTIONS WHERE option_name = 'description'")
+			"SELECT option_value FROM `region-us`.INFORMATION_SCHEMA.SCHEMATA_OPTIONS WHERE schema_name = '" + ds.DatasetID +
+			"' AND option_name = 'description'")
 		if !reflect.DeepEqual(got, []string{`"set in a script"`}) {
 			t.Errorf("insert %v: the description the next statement read: %v", insert, got)
 		}

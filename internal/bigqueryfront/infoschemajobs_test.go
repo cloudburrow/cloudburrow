@@ -45,7 +45,7 @@ func TestJobRowHasEveryColumn(t *testing.T) {
 		"status":{"state":"DONE","errorResult":{"reason":"invalidQuery","message":"bad"}}}`), &job); err != nil {
 		t.Fatal(err)
 	}
-	row := jobRow("p", job)
+	row := jobRow("p", job, nil)
 	want := len(splitTop(mustLex(t, jobsColumns[len("STRUCT<"):len(jobsColumns)-1])))
 	if len(row) != want {
 		t.Fatalf("%d values for %d columns: %v", len(row), want, row)
@@ -53,5 +53,25 @@ func TestJobRowHasEveryColumn(t *testing.T) {
 	if row[7] != "'j1'" || row[8] != "'QUERY'" || row[21] != "'DONE'" || row[22] != "'SELECT'" || row[24] != "1" ||
 		row[5] != "('invalidQuery', NULL, NULL, 'bad')" || row[32] != "'GOOGLE_SQL'" {
 		t.Errorf("row %v", row)
+	}
+}
+
+// TestJobRowQueryDialect (#1595): a query job that asked no dialect is
+// DEFAULT_GOOGLE_SQL when it was recorded as defaulting to GoogleSQL by
+// its region's default_sql_dialect_option, else DEFAULT_LEGACY_SQL.
+func TestJobRowQueryDialect(t *testing.T) {
+	job := func(id string) map[string]any {
+		return map[string]any{"jobReference": map[string]any{"jobId": id, "projectId": "p"},
+			"configuration": map[string]any{"jobType": "QUERY", "query": map[string]any{"query": "SELECT 1"}}}
+	}
+	settings := &projectOptions{}
+	settings.markGoogleDefault("p", "g")
+	for id, want := range map[string]string{"g": "'DEFAULT_GOOGLE_SQL'", "l": "'DEFAULT_LEGACY_SQL'"} {
+		if got := jobRow("p", job(id), settings)[32]; got != want {
+			t.Errorf("job %s: query_dialect %s, want %s", id, got, want)
+		}
+	}
+	if got := jobRow("p", job("g"), nil)[32]; got != "'DEFAULT_LEGACY_SQL'" {
+		t.Errorf("no settings: query_dialect %s", got)
 	}
 }

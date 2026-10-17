@@ -140,7 +140,8 @@ func TestExtractOverOneFile(t *testing.T) {
 
 // TestParquetExtractOfIntervalRangeAndWKT (#957): INTERVAL as a STRING,
 // RANGE as a group of start and end, and GEOGRAPHY without
-// nativeGeographyExportEnabled as a WKT STRING, read back by Arrow.
+// nativeGeographyExportEnabled as GeoParquet (#1595): WKB, named in the
+// file's "geo" metadata, read back by Arrow.
 func TestParquetExtractOfIntervalRangeAndWKT(t *testing.T) {
 	fields := []field{{Name: "i", Type: "INTERVAL"}, {Name: "g", Type: "GEOGRAPHY"},
 		{Name: "r", Type: "RANGE", RangeElementType: &struct {
@@ -164,7 +165,7 @@ func TestParquetExtractOfIntervalRangeAndWKT(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tbl.Release()
-	if s := tbl.Schema().String(); !strings.Contains(s, "i: type=utf8") || !strings.Contains(s, "g: type=utf8") ||
+	if s := tbl.Schema().String(); !strings.Contains(s, "i: type=utf8") || !strings.Contains(s, "g: type=binary") ||
 		// arrow-go v18's reader: the bounds are written isAdjustedToUTC false
 		// (extractparquet.go), which v18 reads as no time zone and v15 read
 		// as UTC; the file is the same.
@@ -175,7 +176,20 @@ func TestParquetExtractOfIntervalRangeAndWKT(t *testing.T) {
 	for i := 0; i < int(tbl.NumCols()); i++ {
 		got = append(got, tbl.Column(i).Data().Chunk(0).String())
 	}
-	if j := strings.Join(got, " | "); j != `["1-2 3 4:5:6.789" (null)] | ["POINT(1 2)" (null)] | {[1577836800000000 (null)] [(null) (null)]}` {
+	if j := strings.Join(got, " | "); j != `["1-2 3 4:5:6.789" (null)] | ["\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\x00@" (null)] | {[1577836800000000 (null)] [(null) (null)]}` {
 		t.Errorf("values %s", j)
+	}
+	geo := pf.MetaData().KeyValueMetadata().FindValue("geo")
+	if geo == nil || *geo != `{"columns":{"g":{"edges":"spherical","encoding":"WKB","geometry_types":[]}},"primary_column":"g","version":"1.1.0"}` {
+		t.Errorf("geo metadata %v", geo)
+	}
+	// One inside a RECORD stays WKT: GeoParquet has no nested column.
+	nested := []field{{Name: "s", Type: "RECORD", Fields: []field{{Name: "g", Type: "GEOGRAPHY"}}}}
+	data, msg = encodeExtract(writtenExtract{parquet: true, fields: nested}, [][]any{{map[string]any{"f": []any{map[string]any{"v": "POINT(1 2)"}}}}})
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	if !bytes.Contains(data, []byte("POINT(1 2)")) || bytes.Contains(data, []byte(`"geo"`)) {
+		t.Errorf("a nested GEOGRAPHY is not WKT without geo metadata")
 	}
 }

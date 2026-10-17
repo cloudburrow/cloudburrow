@@ -50,11 +50,15 @@ func (n nativeGeographyTransport) RoundTrip(r *http.Request) (*http.Response, er
 // TestBigQueryParquetExtractOfNativeGeography (#957), through the official
 // Go client: a PARQUET extract of a GEOGRAPHY column with
 // nativeGeographyExportEnabled writes Parquet's GEOGRAPHY logical type
-// (edges spherical) with WKB values; without it (GeoParquet metadata,
-// whose form BigQuery does not document) it is 501. Arrow Go v15 has no
+// (edges spherical) with WKB values; without it, GeoParquet: WKB values
+// and the file's "geo" metadata naming the column (#1595, exporting-data:
+// "The GEOGRAPHY logical type is represented with GeoParquet metadata added
+// to the exported file(s)", read 2026-10-17). Arrow Go v15 has no
 // GEOGRAPHY logical type, so the footer's SchemaElement is checked by its
 // bytes; CLOUDBURROW_GEO_PARQUET_OUT names a file to save the export to,
 // to read it with Arrow C++ (pyarrow) by hand.
+//
+// covers: bigquery.jobs.insert, bigquery.jobs.get
 func TestBigQueryParquetExtractOfNativeGeography(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)
@@ -94,8 +98,7 @@ func TestBigQueryParquetExtractOfNativeGeography(t *testing.T) {
 		}
 		return err
 	}
-	// Without the flag (#957): a WKT STRING, as "GEOGRAPHY column values
-	// are always formatted as WKT strings" (gis-data).
+	// Without the flag (#1595): GeoParquet, WKB and the "geo" metadata.
 	if err := extract(c); err != nil {
 		t.Fatalf("a PARQUET extract of GEOGRAPHY without nativeGeographyExportEnabled: %v", err)
 	}
@@ -104,8 +107,11 @@ func TestBigQueryParquetExtractOfNativeGeography(t *testing.T) {
 	} else {
 		b, _ := io.ReadAll(r)
 		r.Close()
-		if !bytes.Contains(b, []byte("POINT(1 2)")) {
-			t.Errorf("the PARQUET extract without the flag does not hold the WKT POINT(1 2)")
+		if !bytes.Contains(b, []byte("\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\xf0\x3f\x00\x00\x00\x00\x00\x00\x00\x40")) {
+			t.Errorf("the PARQUET extract without the flag holds no WKB POINT(1 2)")
+		}
+		if !bytes.Contains(b, []byte(`"primary_column":"g"`)) || !bytes.Contains(b, []byte(`"encoding":"WKB"`)) {
+			t.Errorf("the PARQUET extract without the flag has no GeoParquet metadata for g")
 		}
 	}
 	if err := extract(nc); err != nil {

@@ -167,6 +167,38 @@ type projectOptions struct {
 	opts map[string]map[string]string
 	path string
 	logf func(string, ...any)
+	// googleDefault are the query jobs, "project/jobID", that asked no
+	// dialect when their region's default_sql_dialect_option made
+	// GoogleSQL the default: JOBS' query_dialect DEFAULT_GOOGLE_SQL
+	// (#1595, infoschemajobs.go). Not kept across restarts.
+	googleDefault map[string]bool
+}
+
+// maxGoogleDefault bounds googleDefault; past it the oldest are not
+// told apart (the set starts again).
+const maxGoogleDefault = 100000
+
+// markGoogleDefault records that project's job id defaulted to GoogleSQL.
+func (p *projectOptions) markGoogleDefault(project, id string) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.googleDefault == nil || len(p.googleDefault) >= maxGoogleDefault {
+		p.googleDefault = map[string]bool{}
+	}
+	p.googleDefault[project+"/"+id] = true
+}
+
+// googleDefaulted reports whether markGoogleDefault recorded the job.
+func (p *projectOptions) googleDefaulted(project, id string) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.googleDefault[project+"/"+id]
 }
 
 // projectOptionsStateFile is the file the options are kept in, in dir.
@@ -611,21 +643,44 @@ func (f front) alterProjectOptions(w http.ResponseWriter, r *http.Request, q que
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return true
 	}
-	f.forward(w, r, jobText{query: q.Query})
+	// The job's statementType is the one the REST reference lists for the
+	// statement (ALTER_PROJECT, ALTER_ORGANIZATION; #1595), not the no-op's,
+	// and the no-op's DDL target is left out: the statement has none.
+	st := "ALTER_PROJECT"
+	if len(all) == 1 && all[0].scope == orgScope {
+		st = "ALTER_ORGANIZATION"
+	}
+	f.forward(w, r, jobText{query: q.Query, ddl: &ownDDL{statementType: st}})
 	return true
 }
 
 // onlyGoogleSQL reports whether the job's region has
 // default_sql_dialect_option only_google_sql, which "rejects legacy SQL".
 func (f front) onlyGoogleSQL(r *http.Request, insert bool) bool {
+	return strings.EqualFold(f.dialectOption(r, insert), "only_google_sql")
+}
+
+// googleSQLDefault reports whether a query asking no dialect is GoogleSQL
+// by its region's default_sql_dialect_option (default_google_sql or
+// only_google_sql) rather than legacy SQL, BigQuery's default.
+func (f front) googleSQLDefault(r *http.Request, insert bool) bool {
+	switch strings.ToLower(f.dialectOption(r, insert)) {
+	case "default_google_sql", "only_google_sql":
+		return true
+	}
+	return false
+}
+
+// dialectOption is the job's region's default_sql_dialect_option, or "".
+func (f front) dialectOption(r *http.Request, insert bool) string {
 	if f.settings == nil || !f.settings.hasAny("default_sql_dialect_option") {
-		return false
+		return ""
 	}
 	loc := queryLocation(r, insert)
 	if loc == "" {
 		loc = f.settings.defaultLocation(projectOf(f.base))
 	}
-	return strings.EqualFold(f.settings.effective(projectOf(f.base), loc, "default_sql_dialect_option"), "only_google_sql")
+	return f.settings.effective(projectOf(f.base), loc, "default_sql_dialect_option")
 }
 
 // Project option views (#1375, #1417): region-qualified, like the job views.

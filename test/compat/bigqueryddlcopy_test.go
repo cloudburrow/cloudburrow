@@ -466,7 +466,9 @@ func TestBigQueryCopyJobs(t *testing.T) {
 // snapshotDefinition, and every write to which is refused while it keeps
 // its rows; RESTORE copies it into a standard, writable table. Measured
 // first: the emulator keeps a table's snapshotDefinition but answers it
-// type TABLE, writable.
+// type TABLE, writable. Each refused write is 403 accessDenied (#1595).
+//
+// covers: bigquery.jobs.insert, bigquery.jobs.query, bigquery.tabledata.insertAll, bigquery.tables.get, bigquery.tables.list, bigquery.tables.patch
 func TestBigQuerySnapshotAndRestore(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)
@@ -556,6 +558,11 @@ func TestBigQuerySnapshotAndRestore(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "read-only") {
 			t.Errorf("%s into the snapshot: %v, want the read-only refusal", what, err)
+		}
+		// 403 accessDenied, the error-messages page's reason for "when you
+		// try to modify a read-only object" (#1595).
+		if r := errReason(err); r != "accessDenied" {
+			t.Errorf("%s into the snapshot: reason %q, want accessDenied", what, r)
 		}
 	}
 	for _, sql := range []string{

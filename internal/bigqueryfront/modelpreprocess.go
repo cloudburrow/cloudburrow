@@ -3,6 +3,7 @@ package bigqueryfront
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -41,8 +42,8 @@ import (
 // Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-standard-scaler
 // constant column, or ML.NORMALIZER of a zero array); CloudBurrow gives
 // NULL. ML.BUCKETIZE of NULL is NULL.
-// The order of ML.POLYNOMIAL_EXPAND's fields is the input fields, then the
-// products degree by degree.
+// ML.POLYNOMIAL_EXPAND's fields are feature by feature, as its page's
+// example gives them (#1595).
 //
 // #1548 adds, as BigQuery documents them:
 //
@@ -273,18 +274,26 @@ func mlPreprocessSQL(fn string, args []string, window string, learn mlLearn) (st
 			degree = d
 		}
 		var fields []string
-		for k := lo; k <= degree; k++ {
-			if fn == "POLYNOMIAL_EXPAND" {
-				for _, comb := range combinations(len(names), k, true) {
-					var ns, fs []string
-					for _, j := range comb {
-						ns = append(ns, names[j])
-						fs = append(fs, "CAST("+exprs[j]+" AS FLOAT64)")
-					}
-					fields = append(fields, strings.Join(fs, " * ")+" AS "+sqlIdent(strings.Join(ns, "_")))
-				}
-				continue
+		if fn == "POLYNOMIAL_EXPAND" {
+			// Feature by feature, as the page's example orders them
+			// (f1, f1_f1, f1_f2, f2, f2_f2; read 2026-10-17, #1595): the
+			// products in the order of their fields' positions, a
+			// product before those it is a prefix of.
+			var combs [][]int
+			for k := 1; k <= degree; k++ {
+				combs = append(combs, combinations(len(names), k, true)...)
 			}
+			slices.SortStableFunc(combs, slices.Compare[[]int])
+			for _, comb := range combs {
+				var ns, fs []string
+				for _, j := range comb {
+					ns = append(ns, names[j])
+					fs = append(fs, "CAST("+exprs[j]+" AS FLOAT64)")
+				}
+				fields = append(fields, strings.Join(fs, " * ")+" AS "+sqlIdent(strings.Join(ns, "_")))
+			}
+		}
+		for k := lo; k <= degree && fn != "POLYNOMIAL_EXPAND"; k++ {
 			for _, comb := range combinations(len(names), k, false) {
 				var ns, fs []string
 				for _, j := range comb {

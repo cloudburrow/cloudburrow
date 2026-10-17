@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -15,8 +16,10 @@ func TestRewritePreprocess(t *testing.T) {
 			t.Errorf("POLYNOMIAL_EXPAND: %s lacks %s", got, want)
 		}
 	}
-	if strings.Index(got, "AS `bb`") > strings.Index(got, "AS `a_a`") {
-		t.Errorf("POLYNOMIAL_EXPAND: degree 1 first: %s", got)
+	// Feature by feature, as BigQuery's example (#1595): a, a_a, a_bb, bb, bb_bb.
+	if i := []int{strings.Index(got, "AS `a`"), strings.Index(got, "AS `a_a`"), strings.Index(got, "AS `a_bb`"),
+		strings.Index(got, "AS `bb`"), strings.Index(got, "AS `bb_bb`")}; !slices.IsSorted(i) || i[0] < 0 {
+		t.Errorf("POLYNOMIAL_EXPAND: not feature by feature: %s", got)
 	}
 	if got, _, _ := rewritePreprocess("SELECT ML.STANDARD_SCALER(x) OVER (PARTITION BY g) FROM t", nil); !strings.Contains(got, "STDDEV_SAMP(CAST((x) AS FLOAT64)) OVER (PARTITION BY g)") {
 		t.Errorf("STANDARD_SCALER: %s", got)

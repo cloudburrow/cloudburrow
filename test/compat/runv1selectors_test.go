@@ -16,7 +16,7 @@ import (
 // it has no commas, so gcloud's --args can carry it too.
 const v1FailingTaskScript = `test "$CLOUD_RUN_TASK_INDEX" != 1`
 
-// covers: run.projects.locations.jobs.getIamPolicy, run.projects.locations.jobs.setIamPolicy, run.projects.locations.jobs.testIamPermissions
+// covers: run.projects.locations.jobs.getIamPolicy, run.projects.locations.jobs.setIamPolicy, run.projects.locations.jobs.testIamPermissions, run.namespaces.executions.list, run.namespaces.services.list
 //
 // TestRunV1SelectorsDelayAndJobIAM (#1420, #1450): the official v1 client
 // creates a job of two tasks, one failing, with the job's own
@@ -25,9 +25,10 @@ const v1FailingTaskScript = `test "$CLOUD_RUN_TASK_INDEX" != 1`
 // executions it runs; replaces it without the flag, which clears it; runs
 // it with overrides.delayExecution, which starts it at once and reads back
 // on that execution; lists its tasks with set-based label selectors (in,
-// notin, !=, existence and !key) and its executions with in and a
-// fieldSelector on metadata.name; is refused a gt selector and an
-// unsupported field as INVALID_ARGUMENT; and stores, reads and tests the
+// notin, !=, existence and !key) and its executions with in; ignores a
+// fieldSelector on executions.list and services.list, as Cloud Run
+// documents (#1595); is refused a gt label selector as INVALID_ARGUMENT;
+// and stores, reads and tests the
 // job's IAM policy through projects.locations.jobs, the policy v2's Jobs
 // IAM serves.
 func TestRunV1SelectorsDelayAndJobIAM(t *testing.T) {
@@ -129,15 +130,28 @@ func TestRunV1SelectorsDelayAndJobIAM(t *testing.T) {
 	if err != nil || len(list.Items) != 1 || list.Items[0].Metadata.Name != exec || !list.Items[0].Spec.DelayExecution {
 		t.Errorf("executions.list with in = %+v, %v; want the delayed execution", list, err)
 	}
-	list, err = c.Namespaces.Executions.List(ns).FieldSelector("metadata.name=" + exec).Do()
-	if err != nil || len(list.Items) != 1 || list.Items[0].Metadata.Name != exec {
-		t.Errorf("executions.list with fieldSelector metadata.name = %+v, %v", list, err)
+	// fieldSelector: "Not supported, and ignored by Cloud Run" (services.list)
+	// and "Not supported by Cloud Run" (every other v1 list), read
+	// 2026-10-17 (#1595): whatever it names, a list is the one without it.
+	allExec, err := c.Namespaces.Executions.List(ns).Do()
+	if err != nil || len(allExec.Items) == 0 {
+		t.Fatalf("executions.list = %+v, %v", allExec, err)
 	}
-	if list, err = c.Namespaces.Executions.List(ns).FieldSelector("metadata.name=nope").Do(); err != nil || len(list.Items) != 0 {
-		t.Errorf("executions.list with fieldSelector of no execution = %+v, %v", list, err)
+	for _, fs := range []string{"metadata.name=" + exec, "metadata.name=nope", "status.succeededCount=1", "metadata.name"} {
+		got, err := c.Namespaces.Executions.List(ns).FieldSelector(fs).Do()
+		if err != nil || len(got.Items) != len(allExec.Items) {
+			t.Errorf("executions.list with fieldSelector %q = %+v, %v; want the %d executions of a list without it", fs, got, err, len(allExec.Items))
+		}
 	}
-	if _, err := c.Namespaces.Executions.List(ns).FieldSelector("status.succeededCount=1").Do(); !errors.As(err, &ge) || ge.Code != http.StatusBadRequest {
-		t.Errorf("executions.list with fieldSelector on a status field = %v; want 400", err)
+	allSvc, err := c.Namespaces.Services.List(ns).Do()
+	if err != nil {
+		t.Fatalf("services.list = %v", err)
+	}
+	for _, fs := range []string{"metadata.name=nope", "spec.template=x"} {
+		got, err := c.Namespaces.Services.List(ns).FieldSelector(fs).Do()
+		if err != nil || len(got.Items) != len(allSvc.Items) {
+			t.Errorf("services.list with fieldSelector %q = %+v, %v; want the %d services of a list without it", fs, got, err, len(allSvc.Items))
+		}
 	}
 	jobs, err := c.Namespaces.Jobs.List(ns).LabelSelector("cloud.googleapis.com/location in (us-central1),!nope").Do()
 	if err != nil || len(jobs.Items) == 0 {
@@ -179,7 +193,8 @@ func TestRunV1SelectorsDelayAndJobIAM(t *testing.T) {
 // run.googleapis.com/runningState selectors); adds, reads and removes an IAM
 // binding on the job (projects.locations.jobs); and, for a service,
 // `gcloud beta run services describe` with no region finds the service's
-// region through projects.locations.services.list's fieldSelector.
+// region through projects.locations.services.list, whose fieldSelector
+// Cloud Run ignores (gcloud matches the name itself).
 func TestGcloudRunJobsTaskFiltersAndIAM(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvRun)
@@ -236,7 +251,7 @@ func TestGcloudRunJobsTaskFiltersAndIAM(t *testing.T) {
 	runV1Service(t, runV1Client(t, h), g.project, "gcloud-field-sel")
 	out, err = g.run(nil, "beta", "run", "services", "describe", "gcloud-field-sel", "--quiet")
 	if err == nil || !strings.Contains(out, "found in region us-central1") {
-		t.Errorf("gcloud beta run services describe with no region = %v:\n%s\nwant the region found through fieldSelector", err, out)
+		t.Errorf("gcloud beta run services describe with no region = %v:\n%s\nwant the region found through services.list", err, out)
 	}
 }
 

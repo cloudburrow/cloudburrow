@@ -144,7 +144,7 @@ func TestProjectOptionsDefault(t *testing.T) {
 func TestSchemataInTurnAndCollate(t *testing.T) {
 	for sql, want := range map[string]bool{
 		"CREATE SCHEMA d; SELECT * FROM `region-us`.INFORMATION_SCHEMA.SCHEMATA":                        true,
-		"CREATE SCHEMA d; SELECT * FROM d.INFORMATION_SCHEMA.SCHEMATA_OPTIONS":                          true,
+		"CREATE SCHEMA d; SELECT * FROM `region-us`.INFORMATION_SCHEMA.SCHEMATA_OPTIONS":                true,
 		"SELECT * FROM `region-us`.INFORMATION_SCHEMA.SCHEMATA; CREATE SCHEMA d":                        false,
 		"SELECT * FROM `region-us`.INFORMATION_SCHEMA.SCHEMATA":                                         false,
 		"CREATE TEMP TABLE x AS SELECT 1; CREATE SCHEMA d; SELECT * FROM d.INFORMATION_SCHEMA.SCHEMATA": false,

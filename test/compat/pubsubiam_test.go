@@ -105,6 +105,14 @@ func TestPubSubIAMHandle(t *testing.T) {
 	if _, err := c.SubscriptionAdminClient.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: "projects/" + h.Project() + "/subscriptions/none"}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetIamPolicy on a missing subscription: %v, want NOT_FOUND", err)
 	}
+	// iam_policy.proto: "If the resource does not exist, this will return an
+	// empty set of permissions, not a `NOT_FOUND` error" (#1595).
+	for _, missing := range []string{"projects/" + h.Project() + "/topics/none", "projects/" + h.Project() + "/subscriptions/none"} {
+		tp, err := c.SubscriptionAdminClient.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: missing, Permissions: []string{"pubsub.topics.get", "pubsub.subscriptions.get"}})
+		if err != nil || len(tp.GetPermissions()) != 0 {
+			t.Errorf("TestIamPermissions on missing %s = %v, %v; want no permissions and no error", missing, tp.GetPermissions(), err)
+		}
+	}
 
 	// Deleting the resources deletes their policies: made again, they have none.
 	if err := c.SubscriptionAdminClient.DeleteSubscription(ctx, &pubsubpb.DeleteSubscriptionRequest{Subscription: sub}); err != nil {
@@ -176,6 +184,9 @@ func TestPubSubIAMOnASnapshotAndASchema(t *testing.T) {
 	}
 	if _, err := sc.GetIamPolicy(ctx, &iampb.GetIamPolicyRequest{Resource: snap}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetIamPolicy on a deleted snapshot: %v, want NOT_FOUND", err)
+	}
+	if tp, err := c.SubscriptionAdminClient.TestIamPermissions(ctx, &iampb.TestIamPermissionsRequest{Resource: snap, Permissions: []string{"pubsub.snapshots.seek"}}); err != nil || len(tp.GetPermissions()) != 0 {
+		t.Errorf("TestIamPermissions on a deleted snapshot = %v, %v; want no permissions and no error", tp.GetPermissions(), err)
 	}
 }
 

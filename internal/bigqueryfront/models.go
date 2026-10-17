@@ -57,6 +57,13 @@ type bqModel struct {
 	// Transform is the TRANSFORM clause's items, * expanded
 	// (modeltransform.go).
 	Transform []string `json:"transform,omitempty"`
+	// TransformSQL is the TRANSFORM's items as the statement wrote them,
+	// * expanded, before learnTransform wrote its ML functions out; and
+	// Inputs the training query's columns they read, not the label's
+	// (#1595): the model's transformColumns' transformSql and its
+	// featureColumns. A model made before either was kept has neither.
+	TransformSQL []string   `json:"transformSql,omitempty"`
+	Inputs       []mlColumn `json:"inputs,omitempty"`
 }
 
 func modelKey(project, dataset, id string) string { return project + "\x00" + dataset + "\x00" + id }
@@ -279,6 +286,19 @@ func (md bqModel) resource(full bool) map[string]any {
 	for _, ft := range md.Trained.Features {
 		feats = append(feats, map[string]any{"name": ft.Name, "type": map[string]string{"typeKind": bqTypeName(ft.Type)}})
 	}
+	if len(md.Transform) > 0 && len(md.Inputs) > 0 {
+		// "Input feature columns for the model inference" (the REST
+		// reference, read 2026-10-17; #1595): with a TRANSFORM, the
+		// columns it reads, not its outputs.
+		feats = nil
+		for _, c := range md.Inputs {
+			ty := mlTypeOf(c.Type)
+			if ty == "" {
+				ty = c.Type
+			}
+			feats = append(feats, map[string]any{"name": c.Name, "type": map[string]string{"typeKind": bqTypeName(ty)}})
+		}
+	}
 	res["featureColumns"] = feats
 	o := md.Options
 	t := md.Trained
@@ -464,12 +484,22 @@ func (md bqModel) resource(full bool) map[string]any {
 		}
 	}
 	if len(md.Transform) > 0 {
-		// The TRANSFORM's output features (UNVERIFIED: BigQuery's
-		// featureColumns are then the input's, and it gives transformSql).
-		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/models
+		// The TRANSFORM's output features, each with "the SQL expression
+		// used in the column transform" (TransformColumn.transformSql, the
+		// REST reference, read 2026-10-17; #1595): the item as the
+		// statement wrote it, without its AS.
+		exprs := map[string]string{}
+		for _, it := range md.TransformSQL {
+			expr, name := transformItemName(it)
+			exprs[strings.ToLower(name)] = expr
+		}
 		var tc []map[string]any
 		for _, ft := range t.Features {
-			tc = append(tc, map[string]any{"name": ft.Name, "type": map[string]string{"typeKind": bqTypeName(ft.Type)}})
+			col := map[string]any{"name": ft.Name, "type": map[string]string{"typeKind": bqTypeName(ft.Type)}}
+			if e, ok := exprs[strings.ToLower(ft.Name)]; ok {
+				col["transformSql"] = e
+			}
+			tc = append(tc, col)
 		}
 		res["transformColumns"] = tc
 	}
@@ -1507,14 +1537,17 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		return true
 	default:
 		trainSQL := d.query
+		var transformSQL []string
+		var queryCols []mlColumn
 		if len(d.transform) > 0 {
+			qc, _, c, m := f.queryAllRows(r, q, "SELECT * FROM ("+d.query+") LIMIT 0")
+			if c != 0 {
+				fail(c, m)
+				return true
+			}
+			queryCols = qc
 			for _, it := range d.transform {
 				if strings.HasPrefix(it, "*") {
-					qc, _, c, m := f.queryAllRows(r, q, "SELECT * FROM ("+d.query+") LIMIT 0")
-					if c != 0 {
-						fail(c, m)
-						return true
-					}
 					items, why := expandTransform(d.transform, qc)
 					if why != "" {
 						fail(501, why)
@@ -1524,6 +1557,7 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 					break
 				}
 			}
+			transformSQL = append([]string(nil), d.transform...)
 			items, c, m := f.learnTransform(r, q, d.transform, d.query)
 			if c != 0 {
 				fail(c, m)
@@ -1549,7 +1583,8 @@ func (f front) modelStatements(w http.ResponseWriter, r *http.Request, q queryOp
 		if !dry {
 			now := f.now().UnixMilli()
 			f.models.put(bqModel{Project: project, Dataset: dataset, ID: id, Type: d.opts.ModelType, Created: now, Modified: now,
-				Location: loc, Options: d.opts, Trained: trained, Query: d.query, Transform: d.transform})
+				Location: loc, Options: d.opts, Trained: trained, Query: d.query, Transform: d.transform,
+				TransformSQL: transformSQL, Inputs: transformInputs(transformSQL, queryCols, trained.Label)})
 		}
 	}
 	// The emulator runs a statement that does nothing in its place, which

@@ -42,8 +42,8 @@ import (
 // read and listed. A push of a .cloudbuild/triggers.yaml whose trigger
 // names the link in devConnectGitRepositoryLink runs its build; a trigger
 // naming a missing link is skipped. FetchGitRefs lists the pushed branch.
-// A connection with links is not deleted; the link, then the connection,
-// are. The JSON API's BuildTrigger developerConnectEventConfig, sent with
+// A connection with links is not deleted; an update or delete with a
+// stale etag is ABORTED (#1595); the link, then the connection, are. The JSON API's BuildTrigger developerConnectEventConfig, sent with
 // the official REST client, is UNIMPLEMENTED with the reason.
 func TestDeveloperConnectSourceManagerTrigger(t *testing.T) {
 	h := New(t)
@@ -283,7 +283,22 @@ func TestDeveloperConnectSourceManagerTrigger(t *testing.T) {
 	if _, err := dc.DeleteConnection(ctx, &dcpb.DeleteConnectionRequest{Name: conn.GetName()}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("DeleteConnection with a link: %v; want FailedPrecondition", err)
 	}
-	dop, err := dc.DeleteGitRepositoryLink(ctx, &dcpb.DeleteGitRepositoryLinkRequest{Name: link.GetName()})
+	// An etag that is not the resource's is ABORTED, as
+	// developer_connect.proto documents (#1595); reads carry none.
+	if link.GetEtag() != "" || conn.GetEtag() != "" {
+		t.Errorf("etags: link %q, connection %q; want none (Terraform's schema, #1304)", link.GetEtag(), conn.GetEtag())
+	}
+	if _, err := dc.DeleteGitRepositoryLink(ctx, &dcpb.DeleteGitRepositoryLinkRequest{Name: link.GetName(), Etag: "stale"}); status.Code(err) != codes.Aborted {
+		t.Errorf("DeleteGitRepositoryLink with a stale etag: %v; want Aborted", err)
+	}
+	if _, err := dc.DeleteConnection(ctx, &dcpb.DeleteConnectionRequest{Name: conn.GetName(), Etag: "stale"}); status.Code(err) != codes.Aborted {
+		t.Errorf("DeleteConnection with a stale etag: %v; want Aborted", err)
+	}
+	if _, err := dc.UpdateConnection(ctx, &dcpb.UpdateConnectionRequest{Connection: &dcpb.Connection{Name: conn.GetName(), Etag: "stale", Disabled: true},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"disabled"}}}); status.Code(err) != codes.Aborted {
+		t.Errorf("UpdateConnection with a stale etag: %v; want Aborted", err)
+	}
+	dop, err := dc.DeleteGitRepositoryLink(ctx, &dcpb.DeleteGitRepositoryLinkRequest{Name: link.GetName(), Etag: link.GetEtag()})
 	if err != nil {
 		t.Fatalf("DeleteGitRepositoryLink: %v", err)
 	}

@@ -34,6 +34,7 @@ import (
 	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -162,9 +163,14 @@ func (f *Front) SetIamPolicy(ctx context.Context, req *iampb.SetIamPolicyRequest
 
 // TestIamPermissions answers, of the permissions asked, the ones Pub/Sub
 // defines on the resource, in the order asked: nothing is enforced, so
-// nothing is denied.
+// nothing is denied. On a resource that does not exist it answers no
+// permissions: iam_policy.proto says "If the resource does not exist, this
+// will return an empty set of permissions, not a `NOT_FOUND` error" (#1595).
 func (f *Front) TestIamPermissions(ctx context.Context, req *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
 	kind, err := f.iamTarget(ctx, req.GetResource())
+	if err != nil && apierror.From(err).Code == codes.NotFound {
+		return &iampb.TestIamPermissionsResponse{}, nil
+	}
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}

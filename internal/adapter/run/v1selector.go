@@ -27,17 +27,15 @@ import (
 // Kubernetes, != and notin match an object without the label. Anything else
 // (Kubernetes' gt and lt, a malformed term) is INVALID_ARGUMENT.
 //
-// fieldSelector is documented as "Not supported by Cloud Run" on most v1
-// list calls, and on services.list as "Allows to filter resources based on a
-// specific value for a field name ... i.e. 'metadata.name%3Dlorem'". gcloud
-// beta sends metadata.name={service} to projects.locations.services.list to
-// find a service's region. It is served here with Kubernetes' field
-// selector grammar (=, ==, !=, comma-joined) on the two fields every object
-// has, metadata.name and metadata.namespace; any other field is
-// INVALID_ARGUMENT, with the Kubernetes API server's wording ("field label
-// not supported"). Whether Google filters on it or ignores it is
-// UNVERIFIED; gcloud matches the name again itself.
-// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/run/docs/reference/rest/v1/namespaces.services/list
+// fieldSelector is ignored. services.list documents it as "Not supported,
+// and ignored by Cloud Run", and every other v1 list as "Not supported by
+// Cloud Run" (docs read 2026-10-17:
+// https://docs.cloud.google.com/run/docs/reference/rest/v1/namespaces.services/list,
+// https://docs.cloud.google.com/run/docs/reference/rest/v1/namespaces.executions/list),
+// so a list returns what its labelSelector alone selects, whatever the
+// fieldSelector says. gcloud beta sends metadata.name={service} to
+// projects.locations.services.list to find a service's region, and matches
+// the name again itself.
 
 // v1Requirement is one term of a selector.
 type v1Requirement struct {
@@ -47,9 +45,9 @@ type v1Requirement struct {
 	values []string
 }
 
-// v1Selector is a list call's label and field selectors.
+// v1Selector is a list call's label selector.
 type v1Selector struct {
-	labels, fields []v1Requirement
+	labels []v1Requirement
 }
 
 var (
@@ -59,18 +57,14 @@ var (
 	v1LabelValueRE = regexp.MustCompile(`^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$`)
 )
 
-// labelSelector parses a list request's labelSelector and fieldSelector.
+// labelSelector parses a list request's labelSelector; its fieldSelector
+// is ignored, as Cloud Run documents.
 func labelSelector(r *http.Request) (v1Selector, error) {
-	q := r.URL.Query()
-	var sel v1Selector
-	var err error
-	if sel.labels, err = parseLabelSelector(q.Get("labelSelector")); err != nil {
+	labels, err := parseLabelSelector(r.URL.Query().Get("labelSelector"))
+	if err != nil {
 		return v1Selector{}, err
 	}
-	if sel.fields, err = parseFieldSelector(q.Get("fieldSelector")); err != nil {
-		return v1Selector{}, err
-	}
-	return sel, nil
+	return v1Selector{labels: labels}, nil
 }
 
 // splitSelector splits a selector at the commas outside parentheses.
@@ -160,33 +154,6 @@ func parseLabelSelector(s string) ([]v1Requirement, error) {
 	return out, nil
 }
 
-// v1Fields are the fields a fieldSelector may name.
-var v1Fields = map[string]bool{"metadata.name": true, "metadata.namespace": true}
-
-func parseFieldSelector(s string) ([]v1Requirement, error) {
-	if strings.TrimSpace(s) == "" {
-		return nil, nil
-	}
-	var out []v1Requirement
-	for _, term := range strings.Split(s, ",") {
-		op := "="
-		k, v, ok := strings.Cut(term, "!=")
-		if ok {
-			op = "!="
-		} else if k, v, ok = strings.Cut(term, "="); ok {
-			v = strings.TrimPrefix(v, "=")
-		} else {
-			return nil, apierror.InvalidArgument("fieldSelector %q: invalid selector: %q; can't understand %q", s, s, term)
-		}
-		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
-		if !v1Fields[k] {
-			return nil, apierror.InvalidArgument("fieldSelector %q: field label not supported: %s", s, k)
-		}
-		out = append(out, v1Requirement{key: k, op: op, values: []string{v}})
-	}
-	return out, nil
-}
-
 func (q v1Requirement) matches(m map[string]string) bool {
 	v, has := m[q.key]
 	switch q.op {
@@ -223,14 +190,6 @@ func selected(meta *runv1.ObjectMeta, sel v1Selector) bool {
 	for _, q := range sel.labels {
 		if !q.matches(meta.Labels) {
 			return false
-		}
-	}
-	if len(sel.fields) > 0 {
-		f := map[string]string{"metadata.name": meta.Name, "metadata.namespace": meta.Namespace}
-		for _, q := range sel.fields {
-			if !q.matches(f) {
-				return false
-			}
 		}
 	}
 	return true
