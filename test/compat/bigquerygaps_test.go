@@ -276,8 +276,14 @@ func TestBigQueryExceptionHandlersRaiseAndCreateOrReplace(t *testing.T) {
 	if md, err := ds.Table("r").Metadata(ctx); err != nil || len(md.Schema) != 1 || md.Schema[0].Name != "c" {
 		t.Errorf("a failed replacement changed the table: %+v %v", md, err)
 	}
-	sql = "DECLARE z INT64 DEFAULT 1; CREATE OR REPLACE TABLE " + path("r") + " (d INT64)" // not a query first (#1249)
-	wantReason(t, sql, bqRun(ctx, c, sql, false), http.StatusNotImplemented, "notImplemented")
+	// In a script, carried out in its turn as it is alone (#1459; before, 501).
+	sql = "DECLARE z INT64 DEFAULT 1; CREATE OR REPLACE TABLE " + path("r") + " (d INT64)"
+	if err := bqRun(ctx, c, sql, false); err != nil {
+		t.Errorf("%s: %v", sql, err)
+	}
+	if md, err := ds.Table("r").Metadata(ctx); err != nil || len(md.Schema) != 1 || md.Schema[0].Name != "d" {
+		t.Errorf("the table replaced in a script: %+v %v", md, err)
+	}
 	it := ds.Tables(ctx)
 	var names []string
 	for {

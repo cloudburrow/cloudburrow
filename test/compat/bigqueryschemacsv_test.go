@@ -38,9 +38,11 @@ func datasetExists(t *testing.T, ctx context.Context, ds *bigquery.Dataset) (*bi
 // dataset that does not exist makes it, through jobs.query and
 // jobs.insert, with its description, friendly_name, labels and location;
 // a script that makes a dataset and then a table in it runs, also after a
-// DROP SCHEMA IF EXISTS of it; a script that fails leaves no dataset; an
-// option the front cannot apply, or a CREATE SCHEMA an earlier statement
-// already names, is 501 and makes nothing. Measured first: the emulator
+// DROP SCHEMA IF EXISTS of it; a script that fails after its CREATE SCHEMA
+// keeps the dataset, as BigQuery keeps what the statements before the
+// failing one did (#1459: before, it left none); an option the front cannot
+// apply is 501 and makes nothing; a CREATE SCHEMA after a statement naming
+// the dataset fails at that statement (#1459; before, 501). Measured first: the emulator
 // ran CREATE SCHEMA of a new dataset as done and made none.
 func TestBigQueryCreateSchemaMakesTheDataset(t *testing.T) {
 	h := New(t)
@@ -93,14 +95,16 @@ func TestBigQueryCreateSchemaMakesTheDataset(t *testing.T) {
 	if err := bqRun(ctx, c, "CREATE SCHEMA "+failed.DatasetID+"; SELECT * FROM "+failed.DatasetID+".missing", false); err == nil {
 		t.Error("a script reading a missing table succeeded")
 	}
-	if _, ok := datasetExists(t, ctx, failed); ok {
-		t.Error("the failed script left its dataset")
+	// BigQuery keeps what the statements before the failing one did, and
+	// the front carries the script out a statement at a time (#1459).
+	if _, ok := datasetExists(t, ctx, failed); !ok {
+		t.Error("the failed script lost the dataset its first statement made")
 	}
+	_ = failed.DeleteWithContents(ctx)
 
 	for what, sql := range map[string]string{
-		"an option the front does not apply":   "CREATE SCHEMA %s OPTIONS(default_table_expiration_days=1)",
-		"DEFAULT COLLATE":                      "CREATE SCHEMA %s DEFAULT COLLATE 'und:ci'",
-		"a dataset an earlier statement names": "INSERT INTO %[1]s.t VALUES (1); CREATE SCHEMA %[1]s",
+		"an option the front does not apply": "CREATE SCHEMA %s OPTIONS(default_table_expiration_days=1)",
+		"DEFAULT COLLATE":                    "CREATE SCHEMA %s DEFAULT COLLATE 'und:ci'",
 	} {
 		ds := c.Dataset(prefix + "_refused")
 		sql = strings.ReplaceAll(strings.ReplaceAll(sql, "%[1]s", ds.DatasetID), "%s", ds.DatasetID)
@@ -111,6 +115,18 @@ func TestBigQueryCreateSchemaMakesTheDataset(t *testing.T) {
 		if _, ok := datasetExists(t, ctx, ds); ok {
 			t.Errorf("%s made the dataset", what)
 		}
+	}
+	// A script whose earlier statement names the dataset is carried out a
+	// statement at a time (#1459; before, 501): it fails there, not found.
+	refused := c.Dataset(prefix + "_refused")
+	for _, insert := range []bool{false, true} {
+		err := bqRun(ctx, c, "INSERT INTO "+refused.DatasetID+".t VALUES (1); CREATE SCHEMA "+refused.DatasetID, insert)
+		if err == nil || !strings.Contains(err.Error(), "not found") {
+			t.Errorf("a dataset an earlier statement names (query job %v): %v, want not found", insert, err)
+		}
+	}
+	if _, ok := datasetExists(t, ctx, refused); ok {
+		t.Error("the script that failed first made the dataset")
 	}
 }
 
