@@ -34,6 +34,10 @@ import (
 //     "Setting the value replaces the existing value of that option for the
 //     table, if there was one. Setting the value to NULL clears the table's
 //     value for that option"; labels are replaced as a whole;
+//   - SET DEFAULT COLLATE 'und:ci' or '' (#1516): the table's
+//     defaultCollation, which the columns added after it take; "The
+//     updated collation specification only applies to columns added
+//     afterwards";
 //   - ALTER COLUMN [IF EXISTS] name SET OPTIONS (description = ...,
 //     rounding_mode = ..., #1416) and ALTER COLUMN [IF EXISTS] name DROP
 //     NOT NULL.
@@ -77,7 +81,7 @@ type alterStmt struct {
 
 // alterAction is one action of an ALTER TABLE.
 type alterAction struct {
-	kind        string // "add", "options", "column options", "drop not null", "set default", "drop default", "rename table", "rename column", "drop column", "set type", "add primary key", "add foreign key", "drop primary key", "drop constraint"
+	kind        string // "add", "default collate" (newName its collation), "options", "column options", "drop not null", "set default", "drop default", "rename table", "rename column", "drop column", "set type", "add primary key", "add foreign key", "drop primary key", "drop constraint"
 	ifExists    bool   // ADD COLUMN IF NOT EXISTS, ALTER COLUMN IF EXISTS, ADD CONSTRAINT IF NOT EXISTS, DROP ... IF EXISTS
 	column      string
 	newName     string         // RENAME TO's table, RENAME COLUMN's new name, a constraint's name
@@ -116,7 +120,7 @@ func alterNotImplemented(what string) string {
 		"reports ALTER TABLE done and leaves the table unchanged (measured), and CloudBurrow carries out only ADD COLUMN, " +
 		"SET OPTIONS (description, friendly_name, labels, expiration_timestamp, partition_expiration_days, kms_key_name, " +
 		"max_staleness, default_rounding_mode, tags, require_partition_filter, enable_change_history, storage_uri, privacy_policy, enable_fine_grained_mutations), " +
-		"ALTER COLUMN SET OPTIONS (description, rounding_mode, data_policies), " +
+		"SET DEFAULT COLLATE, ALTER COLUMN SET OPTIONS (description, rounding_mode, data_policies), " +
 		"ALTER COLUMN DROP NOT NULL, ALTER COLUMN SET DATA TYPE, ALTER COLUMN SET DEFAULT and DROP DEFAULT, RENAME TO, RENAME COLUMN, " +
 		"DROP COLUMN and primary and foreign keys, " +
 		"so nothing of the statement was run."
@@ -196,6 +200,15 @@ func parseAlter(t []token) (st alterStmt, unsupported, msg string) {
 				return st, "", msg
 			}
 			act.field = f
+		case len(a) > 2 && a[0].is("SET") && a[1].is("DEFAULT") && a[2].is("COLLATE"): // #1516
+			if len(a) != 4 {
+				return st, "", "Syntax error: SET DEFAULT COLLATE takes a string literal"
+			}
+			spec, ok := stringLiteral(a[3])
+			if !ok {
+				return st, "", "Syntax error: SET DEFAULT COLLATE takes a string literal"
+			}
+			act.kind, act.newName = "default collate", spec
 		case len(a) > 1 && a[0].is("SET") && a[1].is("OPTIONS"):
 			opts, ok := readOptions(a[1:])
 			if !ok {
@@ -570,6 +583,16 @@ func fieldTypeOf(t []token, i int, exprs bool) (map[string]any, int, string) {
 		}
 		i = end + 1
 	}
+	// A STRING's COLLATE, which a STRUCT's field and an ARRAY's element
+	// carry too (#1516, collationddl.go).
+	if typ == "STRING" && i+1 < len(t) && t[i].is("COLLATE") {
+		spec, ok := stringLiteral(t[i+1])
+		if !ok {
+			return nil, i, "COLLATE other than a string literal"
+		}
+		f["collation"] = spec
+		i += 2
+	}
 	return f, i, ""
 }
 
@@ -703,8 +726,25 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 		cons = &tableConstraints{}
 	}
 	consChanged := false
+	defaultCollation := current.DefaultCollation // SET DEFAULT COLLATE changes it for the columns added after (#1516)
 	for _, a := range st.actions {
 		switch a.kind {
+		case "default collate": // #1516
+			// tables.patch keeps no empty defaultCollation: '' clears it.
+			defaultCollation = a.newName
+			delete(patch, "defaultCollation")
+			kept := clears[:0]
+			for _, k := range clears {
+				if k != "defaultCollation" {
+					kept = append(kept, k)
+				}
+			}
+			clears = kept
+			if a.newName == "" {
+				clears = append(clears, "defaultCollation")
+			} else {
+				patch["defaultCollation"] = a.newName
+			}
 		case "add primary key", "add foreign key", "drop primary key", "drop constraint":
 			changed, flow := s.applyKey(cons, a, func(c string) bool { return find(c) != nil }, name, text)
 			if flow != nil {
@@ -733,11 +773,10 @@ func (s *scriptRun) alterRun(st alterStmt, ds, table, text string) *scriptFlow {
 			}
 			// "When a new column is added to the table without an
 			// explicit collation specification, the column inherits this
-			// collation specification for STRING types" (#1508); a
-			// STRING inside a RECORD has none here (collationddl.go).
-			if _, named := a.field["collation"]; !named && current.DefaultCollation != "" &&
-				a.field["type"] == "STRING" && a.field["mode"] != "REPEATED" {
-				a.field["collation"] = current.DefaultCollation
+			// collation specification for STRING types" (#1508), a
+			// REPEATED STRING and a STRING inside a RECORD too (#1516).
+			if defaultCollation != "" {
+				inheritCollation(a.field, defaultCollation)
 			}
 			fields = append(fields, a.field)
 			schemaChanged = true
