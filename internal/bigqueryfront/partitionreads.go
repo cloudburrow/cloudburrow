@@ -248,7 +248,7 @@ func (f front) partitionReads(w http.ResponseWriter, r *http.Request, q queryOpt
 			}
 			edits = append(edits, edit{tr.stmt[k].pos, tr.stmt[end-1].end, ""})
 			if past != 0 {
-				continue // historyRead refuses a decorator
+				continue // historyRead read the decorator too (#1458)
 			}
 		}
 		// table$partition (#1273).
