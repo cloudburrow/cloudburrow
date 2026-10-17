@@ -326,6 +326,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 		d.Summary = append(d.Summary, console.Property{Label: "Server CAs", Value: strings.Join(fps, ", ")})
 	}
 	d.Sections = []console.Section{{ID: "backups", Label: "Backups", Kind: console.KindListing, Listing: runs},
+		{ID: "project-backups", Label: "Project backups", Kind: console.KindListing, Listing: projectBackupsListing(ctx, svc, project, name)},
 		{ID: "client-certificates", Label: "Client certificates", Kind: console.KindListing, Listing: certs}}
 	d.Actions = append(append(append(p.backupActions(ids), replicaActions(in)...), transferActions()...), certActions(fps)...)
 	d.Actions = append(d.Actions, upgradeActions(in)...)
