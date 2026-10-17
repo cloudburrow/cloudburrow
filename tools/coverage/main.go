@@ -216,14 +216,14 @@ var areas = []area{
 // answers 501 (a Cloud SQL backup is restored by Cloud SQL). Patches,
 // plan revisions, the fetch and reference views and operations.cancel and
 // delete are served since #1462, resourceBackupConfigs.list (Cloud SQL
-// instances) since #1501, resourceBackupConfigs.fetch, trials and
-// msComplianceMetadata since #1536; management servers, the appliance's
-// data source methods, a folder's or organization's fetch and
+// instances) since #1501, resourceBackupConfigs.fetch (a project's, a
+// folder's and the organization's), trials and msComplianceMetadata since
+// #1536; management servers, the appliance's data source methods and
 // serviceConfig.initialize answer 501 naming what they need
 // (reasons.json says why).
 var backupdrStatuses = map[string]bool{
-	"backupdr.folders.locations.resourceBackupConfigs.fetch":                            false,
-	"backupdr.organizations.locations.resourceBackupConfigs.fetch":                      false,
+	"backupdr.folders.locations.resourceBackupConfigs.fetch":                            true,
+	"backupdr.organizations.locations.resourceBackupConfigs.fetch":                      true,
 	"backupdr.projects.locations.backupPlanAssociations.create":                         true,
 	"backupdr.projects.locations.backupPlanAssociations.delete":                         true,
 	"backupdr.projects.locations.backupPlanAssociations.fetchForResourceType":           true,

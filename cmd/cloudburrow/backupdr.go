@@ -4,9 +4,11 @@ import (
 	"net"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/cloudburrow/cloudburrow/internal/config"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
+	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
 	"github.com/cloudburrow/cloudburrow/internal/service/sqladmin"
 )
 
@@ -53,4 +55,43 @@ func (b backupDRSQL) DeleteRun(id string) error { return b.s.DeleteBackupDRRun(i
 // backupDREnabled is whether `up` binds the Backup and DR port.
 func backupDREnabled(cfg config.Config) bool {
 	return serviceEnabled(cfg, config.ServiceBackupDR) && sqlAdminEnabled(cfg) && cfg.Endpoints.BackupDR >= 0
+}
+
+// backupDRHierarchy is backupdr.Hierarchy over Resource Manager's registry
+// (#1536): the active projects whose ancestry (Registry.Ancestry, as Cloud
+// Logging and Autokey read it) passes through the folder or reaches the
+// organization. A project with no parent is under neither.
+type backupDRHierarchy struct{ reg *resourcemanager.Registry }
+
+func (h backupDRHierarchy) ProjectsUnder(parent string) ([]string, error) {
+	kind, id, _ := strings.Cut(parent, "/")
+	switch {
+	case parent == resourcemanager.OrganizationName:
+	case kind == "folders" && id != "":
+		f, err := h.reg.Folder(parent)
+		if err != nil || f.State != resourcemanager.StateActive {
+			return nil, backupdr.ErrNoParent
+		}
+	default:
+		return nil, backupdr.ErrNoParent
+	}
+	want := strings.TrimSuffix(kind, "s")
+	projects, err := h.reg.Active()
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, p := range projects {
+		chain, err := h.reg.Ancestry(p.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range chain[1:] {
+			if a.Type == want && a.ID == id {
+				out = append(out, p.ProjectID)
+				break
+			}
+		}
+	}
+	return out, nil
 }
