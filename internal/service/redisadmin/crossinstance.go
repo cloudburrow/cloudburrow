@@ -6,6 +6,7 @@ import (
 	"net"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	longrunningpb "cloud.google.com/go/longrunning/autogen/longrunningpb"
@@ -30,9 +31,17 @@ import (
 // from it) and detaches (a secondary updated to NONE stops replicating; a
 // primary updated to NONE, or to fewer secondary_instances, detaches
 // them). A primary with secondaries is not deleted until they are
-// detached. In CLUSTER mode it keeps its 501: a cluster-mode replica
-// follows only a primary of its own cluster (CLUSTER REPLICATE takes a node
-// ID its gossip knows), so another cluster's shards cannot be replicated.
+// detached. With in-transit encryption (SERVER_AUTHENTICATION, #1563),
+// which a secondary takes from its primary, each member keeps its own CA
+// and its nodes trust every member's (cirConfig.PeerCAs, given to a node
+// at its start and to the running ones by CONFIG SET tls-ca-cert-file
+// before a switchover), so they replicate over TLS (tls-replication)
+// whichever member is the primary. In CLUSTER mode it keeps its 501: a
+// cluster-mode node refuses REPLICAOF ("REPLICAOF not allowed in cluster
+// mode", measured by TestMemorystoreValkeyClusterUpgradeKeepsWrites), and a
+// cluster-mode replica follows only a primary of its own cluster (CLUSTER
+// REPLICATE takes a node ID its gossip knows), so another cluster's shards
+// cannot be replicated, even with the same slot layout.
 //
 // Migration (StartMigration, FinishMigration) from a self-managed Valkey or
 // Redis server into a CLUSTER_DISABLED instance is the same replication:
@@ -45,13 +54,21 @@ import (
 // Valkey instance or Redis cluster) is named by the host address its
 // clients use, which is reached inside the cluster at its own address;
 // any other address is replicated from as it is. A source with AUTH is
-// not served: self_managed_source has no credentials.
+// not served: self_managed_source has no credentials (rechecked against
+// googleapis' memorystore/v1 proto, #1563), as Google's guide asks for
+// AUTH and TLS to be turned off on the source. Migration into CLUSTER mode
+// keeps its 501: Google's replicates each source shard into the target's
+// shard of the same slots, continuously until FinishMigration, which a
+// cluster-mode node cannot do (it refuses REPLICAOF); a keyspace scan
+// would copy the keys once and lose the writes made during the migration.
 //
 // An engine_version update to a later version (VALKEY_7_2, VALKEY_8_0,
-// VALKEY_9_0) takes an RDB snapshot of each shard's primary, forms new
-// nodes of the new version's image, loads the snapshots into them, and
-// only then removes the old nodes, which serve until then: writes made
-// during the upgrade, after the snapshot, are not carried over.
+// VALKEY_9_0) is a rolling upgrade (#1563): new nodes of the new version's
+// image join as replicas of the old ones, the first of each shard is
+// promoted once synced (CLUSTER FAILOVER in CLUSTER mode; in CLUSTER_
+// DISABLED mode the old primary's writes are paused until the new node has
+// its offset, and it then replicates the new one), and the old nodes are
+// removed: every write the old nodes acknowledged is kept.
 
 // remoteInstance is a member of cross-instance replication.
 type remoteInstance struct {
@@ -67,6 +84,9 @@ type cirConfig struct {
 	// secondary_instances, and the membership of each.
 	Secondaries []remoteInstance `json:"secondaries,omitempty"`
 	Updated     time.Time        `json:"updated"`
+	// PeerCAs, PEM, are the members' CAs with in-transit encryption,
+	// which each member's nodes trust besides their own.
+	PeerCAs string `json:"peerCas,omitempty"`
 }
 
 // migration is an instance's migration_config.
@@ -138,7 +158,7 @@ func renderCIR(r *clusterRecord, out *memorystorepb.Instance) {
 
 // cirPrimary is the primary instance a create asks to be a secondary of,
 // "" for none.
-func cirPrimary(in *memorystorepb.Instance, mode memorystorepb.Instance_Mode, tlsOn bool) (string, error) {
+func cirPrimary(in *memorystorepb.Instance, mode memorystorepb.Instance_Mode) (string, error) {
 	cfg := in.GetCrossInstanceReplicationConfig()
 	switch cfg.GetInstanceRole() {
 	case memorystorepb.CrossInstanceReplicationConfig_INSTANCE_ROLE_UNSPECIFIED, memorystorepb.CrossInstanceReplicationConfig_NONE:
@@ -151,9 +171,6 @@ func cirPrimary(in *memorystorepb.Instance, mode memorystorepb.Instance_Mode, tl
 	}
 	if mode == memorystorepb.Instance_CLUSTER {
 		return "", checkCrossCluster(true)
-	}
-	if tlsOn {
-		return "", apierror.Unimplemented("cross-instance replication with in-transit encryption is not served here: a secondary's nodes would have to trust the primary's CA (CLUSTER_DISABLED instances without in-transit encryption are served)")
 	}
 	p := cfg.GetPrimaryInstance().GetInstance()
 	if instanceRE.FindStringSubmatch(p) == nil {
@@ -175,15 +192,86 @@ func (c *clusters) checkPrimary(r *clusterRecord, name string) error {
 		return apierror.FailedPrecondition("primary instance %s is %s, not ACTIVE", name, p.state)
 	case p.Valkey.role() == memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String():
 		return apierror.FailedPrecondition("instance %s is itself a secondary: a secondary's primary_instance must be a primary", name)
-	case p.TransitCA != "":
-		return apierror.Unimplemented("cross-instance replication with in-transit encryption is not served here: primary instance %s has it", name)
+	case (p.TransitCA != "") != (r.TransitCA != ""):
+		return apierror.InvalidArgument("a secondary's transit_encryption_mode must be its primary's: primary instance %s has %s", name, transitMode(p))
 	case p.Valkey.AuthMode != r.Valkey.AuthMode:
 		return apierror.InvalidArgument("a secondary's authorization_mode must be its primary's, %s", p.Valkey.AuthMode)
 	case p.Valkey.Migration.migrating():
 		return apierror.FailedPrecondition("primary instance %s is migrating", name)
 	}
+	if r.TransitCA != "" {
+		if _, ok := c.rt.(Shell); !ok {
+			return apierror.Unimplemented("cross-instance replication with in-transit encryption is not supported by this instance's servers")
+		}
+	}
 	r.Valkey.CIR = &cirConfig{Role: memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String(),
-		Primary: &remoteInstance{p.Name, p.UID}, Updated: c.now()}
+		Primary: &remoteInstance{p.Name, p.UID}, Updated: c.now(), PeerCAs: trustOf(append(c.membersOf(p), r))}
+	return nil
+}
+
+func transitMode(r *clusterRecord) memorystorepb.Instance_TransitEncryptionMode {
+	if r.TransitCA != "" {
+		return memorystorepb.Instance_SERVER_AUTHENTICATION
+	}
+	return memorystorepb.Instance_TRANSIT_ENCRYPTION_DISABLED
+}
+
+// membersOf is p, a primary, and its secondaries. Call with mu held.
+func (c *clusters) membersOf(p *clusterRecord) []*clusterRecord {
+	return append([]*clusterRecord{p}, c.secondariesOf(p.Name)...)
+}
+
+// trustOf is the CAs of every member of rs with in-transit encryption, one
+// PEM bundle: what each member's nodes trust, so a node replicates over TLS
+// from whichever member is the primary, before and after a switchover.
+func trustOf(rs []*clusterRecord) string {
+	var b strings.Builder
+	seen := map[string]bool{}
+	for _, x := range rs {
+		if x.TransitCA != "" && !seen[x.TransitCA] {
+			seen[x.TransitCA] = true
+			b.WriteString(x.TransitCA)
+		}
+	}
+	return b.String()
+}
+
+// peerCAs is what r's nodes trust besides r's own CA: the CAs of its
+// cross-instance replication's members.
+func (r *clusterRecord) peerCAs() string {
+	if r.Valkey == nil || r.Valkey.CIR == nil {
+		return ""
+	}
+	return r.Valkey.CIR.PeerCAs
+}
+
+// trustFile is where a node's CA bundle with its peers' CAs is written.
+const trustFile = "/tmp/tls/trust.crt"
+
+// shareTrust makes every node of rs trust bundle, every member's CA, on
+// its running server (CONFIG SET tls-ca-cert-file); a node started later
+// is given it by spec. A no-op without in-transit encryption.
+func (c *clusters) shareTrust(ctx context.Context, rs []*clusterRecord, bundle string) error {
+	if bundle == "" {
+		return nil
+	}
+	sh, ok := c.rt.(Shell)
+	if !ok {
+		return fmt.Errorf("the servers cannot be given their peers' CAs")
+	}
+	for _, r := range rs {
+		if r.TransitCA == "" {
+			continue
+		}
+		for _, n := range r.Nodes {
+			if out, err := sh.Exec(ctx, n.Server, nil, "sh", "-c", `printf '%s' "$1" > `+trustFile, "sh", bundle); err != nil {
+				return fmt.Errorf("write node %s's CAs: %v: %s", n.Server, err, out)
+			}
+			if err := c.do(ctx, r, n, "CONFIG", "SET", "tls-ca-cert-file", trustFile); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -195,15 +283,16 @@ func (c *clusters) setMembership(p *clusterRecord, secs []*clusterRecord) {
 	for _, s := range secs {
 		rs = append(rs, remoteInstance{s.Name, s.UID})
 	}
+	trust := trustOf(append([]*clusterRecord{p}, secs...))
 	if len(secs) == 0 {
 		p.Valkey.CIR = nil
 	} else {
-		p.Valkey.CIR = &cirConfig{Role: memorystorepb.CrossInstanceReplicationConfig_PRIMARY.String(), Secondaries: rs, Updated: now}
+		p.Valkey.CIR = &cirConfig{Role: memorystorepb.CrossInstanceReplicationConfig_PRIMARY.String(), Secondaries: rs, Updated: now, PeerCAs: trust}
 	}
 	_ = c.save(p)
 	for _, s := range secs {
 		s.Valkey.CIR = &cirConfig{Role: memorystorepb.CrossInstanceReplicationConfig_SECONDARY.String(),
-			Primary: &remoteInstance{p.Name, p.UID}, Secondaries: rs, Updated: now}
+			Primary: &remoteInstance{p.Name, p.UID}, Secondaries: rs, Updated: now, PeerCAs: trust}
 		_ = c.save(s)
 	}
 }
@@ -395,14 +484,22 @@ func (s *MemorystoreServer) updateCIR(c *clusters, r *clusterRecord, want *memor
 	}
 	pp := primary.firstPrimary()
 	host, port, pw := pp.podIP, pp.port, primary.password()
+	var linked []*clusterRecord
+	for _, x := range st.link {
+		linked = append(linked, snaps[x])
+	}
+	trust := trustOf(append([]*clusterRecord{primary}, members...))
 	go func() {
 		ctx, cancel := context.WithTimeout(c.bg, clusterWait)
 		defer cancel()
-		var err error
+		// Over TLS, the members that will replicate the new primary trust
+		// its CA first.
+		err := c.shareTrust(ctx, append([]*clusterRecord{snaps[primary]}, linked...), trust)
 		for _, x := range st.unlink {
-			if err = c.unlink(ctx, snaps[x]); err != nil {
+			if err != nil {
 				break
 			}
+			err = c.unlink(ctx, snaps[x])
 		}
 		for _, x := range st.link {
 			if err != nil {
@@ -493,7 +590,7 @@ func (s *MemorystoreServer) StartMigration(ctx context.Context, req *memorystore
 	defer c.mu.Unlock()
 	switch {
 	case !r.standalone():
-		return nil, apierror.Unimplemented("migration into an instance in CLUSTER mode is not served here: each source shard would have to replicate to a shard of the instance, whose cluster-mode replicas follow only primaries of their own cluster (CLUSTER_DISABLED instances are served)")
+		return nil, apierror.Unimplemented("migration into an instance in CLUSTER mode is not served here: each source shard would have to replicate to a shard of the instance, and a cluster-mode node refuses REPLICAOF (CLUSTER_DISABLED instances are served)")
 	case r.Valkey.Migration.migrating():
 		return nil, apierror.FailedPrecondition("instance %s is already migrating", r.Name)
 	case r.Valkey.role() != memorystorepb.CrossInstanceReplicationConfig_NONE.String():
@@ -603,8 +700,10 @@ func (c *clusters) caughtUp(ctx context.Context, r *clusterRecord, source string
 // valkeyVersions orders the engine versions.
 var valkeyVersions = map[string]int{"VALKEY_7_2": 1, "VALKEY_8_0": 2, "VALKEY_9_0": 3}
 
-// upgrade moves instance name to version: new nodes of its image, loaded
-// with a snapshot of the old ones, which are removed once they serve.
+// upgrade moves instance name to version as a rolling upgrade does: new
+// nodes of the version's image join as replicas of the old ones, each
+// shard's first new node is promoted once it has caught up, and the old
+// nodes, which serve and replicate every write until then, are removed.
 func (c *clusters) upgrade(name, op, version string) {
 	ctx, cancel := context.WithTimeout(c.bg, 2*clusterWait)
 	defer cancel()
@@ -612,30 +711,25 @@ func (c *clusters) upgrade(name, op, version string) {
 	r := c.byName[name]
 	snap := *r
 	vf := *r.Valkey
+	vf.EngineVersion = version
 	snap.Valkey = &vf
 	old := append([]*clusterNode(nil), r.Nodes...)
-	c.mu.Unlock()
-	var files [][]byte
-	var err error
-	for _, n := range primariesOf(old) {
-		var d []byte
-		if d, err = c.snapshotNode(ctx, &snap, n); err != nil {
-			err = fmt.Errorf("snapshot shard %d: %w", n.Shard, err)
-			break
+	snap.Nodes = append([]*clusterNode(nil), old...)
+	var fresh []*clusterNode
+	for sh := 0; sh < int(snap.ShardCount); sh++ {
+		for k := 0; k <= int(snap.ReplicaCount); k++ {
+			fresh = append(fresh, c.newNode(&snap, sh, false))
 		}
-		files = append(files, d)
 	}
-	if err == nil {
-		vf.EngineVersion = version
-		err = c.rebuild(ctx, &snap, files)
-	}
+	c.mu.Unlock()
+	err := c.roll(ctx, &snap, old, fresh)
 	c.mu.Lock()
 	delete(c.busy, name)
 	r.state, r.message = clusterpb.Cluster_ACTIVE, ""
 	if err == nil {
 		v := *r.Valkey
 		v.EngineVersion, v.Updated = version, c.now()
-		r.Valkey, r.Nodes, r.NextNode = &v, snap.Nodes, snap.NextNode
+		r.Valkey, r.Nodes, r.NextNode = &v, fresh, snap.NextNode
 		err = c.save(r)
 	}
 	secs := c.secondariesOf(name)
@@ -653,7 +747,115 @@ func (c *clusters) upgrade(name, op, version string) {
 			}
 		}
 	} else {
+		c.removeNodes(fresh)
 		err = fmt.Errorf("the engine upgrade did not complete: %w", err)
 	}
 	c.finish(op, out, err)
+}
+
+// roll moves r's data from its old nodes onto fresh ones: fresh replicate
+// old, the first of each shard is promoted when it has caught up with its
+// shard's primary, and the old nodes leave. r.Nodes are old and fresh;
+// fresh's Primary is set on the promoted ones.
+func (c *clusters) roll(ctx context.Context, r *clusterRecord, old, fresh []*clusterNode) error {
+	if err := c.startNodes(ctx, r, fresh); err != nil {
+		return err
+	}
+	if !r.standalone() {
+		if err := c.meet(ctx, r, r.firstPrimaryOf(old), fresh); err != nil {
+			return err
+		}
+	}
+	if err := c.replicate(ctx, r, fresh, old); err != nil {
+		return err
+	}
+	if err := c.settle(ctx, r, r.Nodes); err != nil {
+		return err
+	}
+	primary := map[int]*clusterNode{}
+	for _, n := range old {
+		if n.Primary {
+			primary[n.Shard] = n
+		}
+	}
+	lead := map[int]*clusterNode{}
+	for _, n := range fresh {
+		if lead[n.Shard] == nil {
+			lead[n.Shard] = n
+		}
+	}
+	for sh, n := range lead {
+		if err := c.promote(ctx, r, primary[sh], n); err != nil {
+			return fmt.Errorf("promote shard %d's new node: %w", sh, err)
+		}
+		c.mu.Lock()
+		n.Primary = true
+		c.mu.Unlock()
+	}
+	if err := c.replicate(ctx, r, fresh, fresh); err != nil {
+		return err
+	}
+	return c.forget(ctx, r, fresh, old)
+}
+
+// firstPrimaryOf is the primary of the lowest shard among nodes.
+func (r *clusterRecord) firstPrimaryOf(nodes []*clusterNode) *clusterNode {
+	ps := primariesOf(nodes)
+	if len(ps) == 0 {
+		return nodes[0]
+	}
+	return ps[0]
+}
+
+// promote makes n, a replica of old, its shard's primary without losing a
+// write: in CLUSTER mode a CLUSTER FAILOVER, which pauses old's clients
+// until n has its offset; in CLUSTER_DISABLED mode old's writes are paused
+// (CLIENT PAUSE WRITE) until n has caught up, n stops replicating, and old
+// becomes its replica, so a write sent to old after it is refused
+// (READONLY) rather than lost.
+func (c *clusters) promote(ctx context.Context, r *clusterRecord, old, n *clusterNode) error {
+	if old == nil {
+		return fmt.Errorf("node %s's shard has no primary", n.Server)
+	}
+	role := func(x *clusterNode) string {
+		cl := c.dial(x.addr, r.password(), r.TransitCA)
+		defer cl.Close()
+		info, err := cl.Do(ctx, "INFO", "replication")
+		if err != nil {
+			return ""
+		}
+		return clusterInfoField(fmt.Sprint(info), "role")
+	}
+	if !r.standalone() {
+		if err := c.do(ctx, r, n, "CLUSTER", "FAILOVER"); err != nil {
+			return err
+		}
+		return c.until(ctx, "node "+n.Server+" to take over its shard", func() bool {
+			return role(n) == "master" && role(old) == "slave"
+		})
+	}
+	if err := c.do(ctx, r, old, "CLIENT", "PAUSE", int(clusterWait/time.Millisecond), "WRITE"); err != nil {
+		return err
+	}
+	defer func() { _ = c.do(context.WithoutCancel(ctx), r, old, "CLIENT", "UNPAUSE") }()
+	offset := func(x *clusterNode, field string) int64 {
+		cl := c.dial(x.addr, r.password(), r.TransitCA)
+		defer cl.Close()
+		info, err := cl.Do(ctx, "INFO", "replication")
+		if err != nil {
+			return -1
+		}
+		v, _ := strconv.ParseInt(clusterInfoField(fmt.Sprint(info), field), 10, 64)
+		return v
+	}
+	want := offset(old, "master_repl_offset")
+	if err := c.until(ctx, "node "+n.Server+" to catch up with its shard's primary", func() bool {
+		return offset(n, "slave_repl_offset") >= want
+	}); err != nil {
+		return err
+	}
+	if err := c.do(ctx, r, n, "REPLICAOF", "NO", "ONE"); err != nil {
+		return err
+	}
+	return c.do(ctx, r, old, "REPLICAOF", n.podIP, n.port)
 }

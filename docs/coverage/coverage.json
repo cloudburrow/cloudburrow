@@ -5172,17 +5172,22 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
+          "test/compat/gcloudmemorystore1563_test.go:22 TestGcloudMemorystore1563",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/gcloudmemorystoretls_test.go:24 TestGcloudMemorystoreInTransitEncryption",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
+          "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
+          "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
           "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
+          "test/compat/terraform_memorystore1563_test.go:21 TestTerraformMemorystore1563",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
           "test/compat/terraform_memorystoretls_test.go:23 TestTerraformMemorystoreInTransitEncryption"
@@ -5211,6 +5216,7 @@
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
+          "test/compat/terraform_memorystore1563_test.go:21 TestTerraformMemorystore1563",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
       },
@@ -5263,6 +5269,7 @@
         "method": "google.cloud.memorystore.v1.Memorystore/GetCertificateAuthority",
         "status": "Verified",
         "tests": [
+          "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
           "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals"
         ]
@@ -5271,11 +5278,14 @@
         "method": "google.cloud.memorystore.v1.Memorystore/GetInstance",
         "status": "Verified",
         "tests": [
+          "test/compat/gcloudmemorystore1563_test.go:22 TestGcloudMemorystore1563",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
+          "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
+          "test/compat/terraform_memorystore1563_test.go:21 TestTerraformMemorystore1563",
           "test/compat/terraform_memorystore_test.go:26 TestTerraformMemorystoreInstance"
         ]
       },
@@ -5339,7 +5349,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
-          "test/compat/memorystore1557_test.go:381 TestMemorystoreValkeyMigration"
+          "test/compat/memorystore1557_test.go:381 TestMemorystoreValkeyMigration",
+          "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites"
         ]
       },
       {
@@ -5347,9 +5358,13 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudmemorystore1557_test.go:27 TestGcloudMemorystore1557",
+          "test/compat/gcloudmemorystore1563_test.go:22 TestGcloudMemorystore1563",
           "test/compat/gcloudmemorystore_test.go:24 TestGcloudMemorystoreValkey",
           "test/compat/memorystore1557_test.go:104 TestMemorystoreValkeyCrossInstanceReplication",
           "test/compat/memorystore1557_test.go:183 TestMemorystoreValkeyEngineVersions",
+          "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
+          "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
+          "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:85 TestMemorystoreValkeyInstance",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
