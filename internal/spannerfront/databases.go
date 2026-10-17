@@ -27,6 +27,7 @@ var databaseClaimed = map[string]bool{"GetDatabase": true, "ListDatabases": true
 	"CreateDatabase": true, "UpdateDatabaseDdl": true, "GetDatabaseDdl": true, "ListDatabaseRoles": true, "ListDatabaseOperations": true,
 	"CreateBackup": true, "CopyBackup": true, "GetBackup": true, "UpdateBackup": true, "DeleteBackup": true, "ListBackups": true,
 	"ListBackupOperations": true, "RestoreDatabase": true,
+	"AddSplitPoints":       true,
 	"CreateBackupSchedule": true, "GetBackupSchedule": true, "UpdateBackupSchedule": true, "DeleteBackupSchedule": true, "ListBackupSchedules": true}
 
 var databaseNameRe = regexp.MustCompile(`^(projects/[^/]+/instances/[^/]+)/databases/[^/]+$`)
@@ -78,6 +79,7 @@ func (d databases) DropDatabase(ctx context.Context, req *databasepb.DropDatabas
 	d.s.mu.Lock()
 	delete(d.s.protected, req.GetDatabase())
 	delete(d.s.restored, req.GetDatabase())
+	d.s.dropSplitPoints(req.GetDatabase())
 	d.s.mu.Unlock()
 	d.s.dropPolicies(req.GetDatabase())
 	d.s.dropRoles(req.GetDatabase())

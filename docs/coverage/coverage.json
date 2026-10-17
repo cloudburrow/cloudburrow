@@ -7349,17 +7349,16 @@
     "Key": "spanner",
     "Title": "Spanner",
     "counts": {
-      "Refused": 3,
-      "Verified": 62
+      "Refused": 2,
+      "Verified": 63
     },
     "rows": [
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints",
-        "status": "Refused",
+        "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:276 TestSpannerAdminRefusals"
-        ],
-        "note": "an official-SDK test proves it is refused"
+          "test/compat/spannersplitpoints_test.go:28 TestSpannerAddSplitPoints"
+        ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup",
@@ -7413,7 +7412,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/DropDatabase",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:216 TestSpannerDatabaseAdminSchemaListAndDrop"
+          "test/compat/spanneradmin_test.go:215 TestSpannerDatabaseAdminSchemaListAndDrop"
         ]
       },
       {
@@ -7465,7 +7464,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/InternalUpdateGraphOperation",
         "status": "Refused",
         "tests": [
-          "test/compat/spanneradmin_test.go:276 TestSpannerAdminRefusals"
+          "test/compat/spanneradmin_test.go:275 TestSpannerAdminRefusals"
         ],
         "note": "an official-SDK test proves it is refused"
       },
@@ -7510,7 +7509,7 @@
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/ListDatabases",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:216 TestSpannerDatabaseAdminSchemaListAndDrop"
+          "test/compat/spanneradmin_test.go:215 TestSpannerDatabaseAdminSchemaListAndDrop"
         ]
       },
       {
@@ -7559,14 +7558,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:271 TestConsoleSpannerEditInstance",
-          "test/compat/spanneradmin_test.go:391 TestSpannerDatabaseDropProtection"
+          "test/compat/spanneradmin_test.go:383 TestSpannerDatabaseDropProtection"
         ]
       },
       {
         "method": "google.spanner.admin.database.v1.DatabaseAdmin/UpdateDatabaseDdl",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:216 TestSpannerDatabaseAdminSchemaListAndDrop"
+          "test/compat/spanneradmin_test.go:215 TestSpannerDatabaseAdminSchemaListAndDrop"
         ]
       },
       {
@@ -7590,14 +7589,14 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/CreateInstancePartition",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:139 TestSpannerInstancePartitionLifecycle"
+          "test/compat/spanneradmin_test.go:138 TestSpannerInstancePartitionLifecycle"
         ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstance",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes"
+          "test/compat/spanneradmin_test.go:73 TestSpannerInstanceAdminListsAndDeletes"
         ]
       },
       {
@@ -7612,7 +7611,7 @@
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstancePartition",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:139 TestSpannerInstancePartitionLifecycle"
+          "test/compat/spanneradmin_test.go:138 TestSpannerInstancePartitionLifecycle"
         ]
       },
       {
@@ -7641,7 +7640,7 @@
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
           "test/compat/frontstate1514_test.go:415 TestResetClearsTheFrontsState",
           "test/compat/frontstate1514_test.go:50 TestSpannerFrontRestartKeepsItsState",
-          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes",
+          "test/compat/spanneradmin_test.go:73 TestSpannerInstanceAdminListsAndDeletes",
           "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups",
           "test/compat/spannerbackupstools_test.go:74 TestTerraformSpannerBackupScheduleAndInstanceConfig"
@@ -7652,7 +7651,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
-          "test/compat/spanneradmin_test.go:139 TestSpannerInstancePartitionLifecycle"
+          "test/compat/spanneradmin_test.go:138 TestSpannerInstancePartitionLifecycle"
         ]
       },
       {
@@ -7667,7 +7666,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
-          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes",
+          "test/compat/spanneradmin_test.go:73 TestSpannerInstanceAdminListsAndDeletes",
           "test/compat/spannerbackups_test.go:305 TestSpannerInstanceConfigs",
           "test/compat/spannerbackupstools_test.go:26 TestGcloudSpannerBackups"
         ]
@@ -7677,14 +7676,14 @@
         "status": "Verified",
         "tests": [
           "test/compat/consolespanneradmin_test.go:75 TestConsoleSpannerSchemaConfigurationsAndPartitions",
-          "test/compat/spanneradmin_test.go:139 TestSpannerInstancePartitionLifecycle"
+          "test/compat/spanneradmin_test.go:138 TestSpannerInstancePartitionLifecycle"
         ]
       },
       {
         "method": "google.spanner.admin.instance.v1.InstanceAdmin/ListInstancePartitions",
         "status": "Verified",
         "tests": [
-          "test/compat/spanneradmin_test.go:139 TestSpannerInstancePartitionLifecycle"
+          "test/compat/spanneradmin_test.go:138 TestSpannerInstancePartitionLifecycle"
         ]
       },
       {
@@ -7692,7 +7691,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances",
-          "test/compat/spanneradmin_test.go:74 TestSpannerInstanceAdminListsAndDeletes"
+          "test/compat/spanneradmin_test.go:73 TestSpannerInstanceAdminListsAndDeletes"
         ]
       },
       {
@@ -7725,7 +7724,7 @@
         "tests": [
           "test/compat/consolespanneradmin_test.go:271 TestConsoleSpannerEditInstance",
           "test/compat/gcloudspannerfirestore_test.go:53 TestGcloudSpannerInstances",
-          "test/compat/spanneradmin_test.go:326 TestSpannerUpdateInstance"
+          "test/compat/spanneradmin_test.go:318 TestSpannerUpdateInstance"
         ]
       },
       {

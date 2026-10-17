@@ -19,7 +19,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // spannerAdminFixture holds the official instance and database admin clients
@@ -266,25 +265,18 @@ func TestSpannerDatabaseAdminSchemaListAndDrop(t *testing.T) {
 // empty message; the call front refuses them itself since #1461, naming
 // the reason (internal/spannerfront). The backups, schedules, instance
 // configurations, partition updates, roles and operation listings it
-// refused before #1498 it serves (spannerbackups_test.go).
+// refused before #1498 it serves (spannerbackups_test.go), and
+// AddSplitPoints since #1523 (TestSpannerAddSplitPoints).
 //
 // A method the front starts serving fails this test, which is the signal
 // to move it to a test that verifies it.
 //
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/InternalUpdateGraphOperation (unimplemented)
 func TestSpannerAdminRefusals(t *testing.T) {
 	f := newSpannerAdmin(t, "cb-refuse", "refusedb")
 	da := f.db
 
 	calls := map[string]func(context.Context) error{
-		"DatabaseAdmin/AddSplitPoints": func(ctx context.Context) error {
-			_, err := da.AddSplitPoints(ctx, &databasepb.AddSplitPointsRequest{
-				Database: f.database,
-				SplitPoints: []*databasepb.SplitPoints{{Table: "Items", Keys: []*databasepb.SplitPoints_Key{{
-					KeyParts: &structpb.ListValue{Values: []*structpb.Value{structpb.NewStringValue("100")}}}}}}})
-			return err
-		},
 		"DatabaseAdmin/InternalUpdateGraphOperation": func(ctx context.Context) error {
 			_, err := da.InternalUpdateGraphOperation(ctx, &databasepb.InternalUpdateGraphOperationRequest{
 				Database: f.database, OperationId: "op1"})
@@ -310,7 +302,7 @@ func TestSpannerAdminRefusals(t *testing.T) {
 		}
 		t.Logf("%s: %v", n, err)
 	}
-	if want := 2; len(calls) != want {
+	if want := 1; len(calls) != want {
 		t.Errorf("%d refusals are called, want %d, one per covers line", len(calls), want)
 	}
 }

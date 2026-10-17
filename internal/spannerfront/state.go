@@ -64,6 +64,9 @@ type savedState struct {
 	EmuOpNames []string                     `json:"emuOpNames,omitempty"`
 	Configs    map[string][]byte            `json:"configs,omitempty"`
 	Partitions map[string]savedPartition    `json:"partitions,omitempty"`
+	// SplitPoints are each database's split points (#1523), in their wire
+	// form.
+	SplitPoints map[string][][]byte `json:"splitPoints,omitempty"`
 }
 
 // snapshotHead is a backup's copy without its rows, the first part of its
@@ -237,6 +240,16 @@ func (s *Instances) restoreState(st *frontstate.Store, in *savedState) error {
 		}
 		partitions[name] = &partitionChange{part: part, paths: p.Paths}
 	}
+	splits := make(map[string][]*databasepb.SplitPoints, len(in.SplitPoints))
+	for db, raw := range in.SplitPoints {
+		for _, b := range raw {
+			sp := &databasepb.SplitPoints{}
+			if err := proto.Unmarshal(b, sp); err != nil {
+				return fmt.Errorf("the split points of %s: %w", db, err)
+			}
+			splits[db] = append(splits[db], sp)
+		}
+	}
 	policies := make(map[string]*iampolicy.Stored, len(in.Policies))
 	for name, p := range in.Policies {
 		if p != nil {
@@ -253,6 +266,7 @@ func (s *Instances) restoreState(st *frontstate.Store, in *savedState) error {
 		s.roleStmts[db] = stmts
 	}
 	s.emuOpNames, s.configs, s.partitions = in.EmuOpNames, configs, partitions
+	s.splitPoints = splits
 	return nil
 }
 
@@ -337,6 +351,18 @@ func (s *Instances) snapshotState() (*savedState, map[string]frontstate.Copy, er
 		}
 		out.Schedules[name] = savedSchedule{Schedule: b, Last: sc.last}
 	}
+	if len(s.splitPoints) > 0 {
+		out.SplitPoints = make(map[string][][]byte, len(s.splitPoints))
+		for db, sps := range s.splitPoints {
+			for _, sp := range sps {
+				b, err := proto.Marshal(sp)
+				if err != nil {
+					return nil, nil, err
+				}
+				out.SplitPoints[db] = append(out.SplitPoints[db], b)
+			}
+		}
+	}
 	if len(s.roleStmts) > 0 {
 		out.RoleStmts = make(map[string][]string, len(s.roleStmts))
 		for db, stmts := range s.roleStmts {
@@ -387,6 +413,7 @@ func (s *Instances) ResetState() error {
 	s.emuOpNames = nil
 	s.configs = map[string]*instancepb.InstanceConfig{}
 	s.partitions = map[string]*partitionChange{}
+	s.splitPoints = map[string][]*databasepb.SplitPoints{}
 	st := s.state
 	s.mu.Unlock()
 	if st == nil {

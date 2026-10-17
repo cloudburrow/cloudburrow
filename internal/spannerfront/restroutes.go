@@ -142,6 +142,14 @@ var routes = []route{
 	{http.MethodGet, rx(`(` + pDB + `)/ddl`), func(ctx context.Context, s *Instances, r restReq) (proto.Message, error) {
 		return databases{s: s}.GetDatabaseDdl(ctx, &databasepb.GetDatabaseDdlRequest{Database: r.m[1]})
 	}},
+	{http.MethodPost, rx(`(` + pDB + `):addSplitPoints`), func(ctx context.Context, s *Instances, r restReq) (proto.Message, error) {
+		req := &databasepb.AddSplitPointsRequest{}
+		if err := r.into(req); err != nil {
+			return nil, err
+		}
+		req.Database = r.m[1]
+		return databases{s: s}.AddSplitPoints(ctx, req)
+	}},
 	{http.MethodGet, rx(`(` + pDB + `)/databaseRoles`), func(ctx context.Context, s *Instances, r restReq) (proto.Message, error) {
 		return databases{s: s}.ListDatabaseRoles(ctx, &databasepb.ListDatabaseRolesRequest{Parent: r.m[1], PageSize: r.size(), PageToken: r.q.Get("pageToken")})
 	}},
