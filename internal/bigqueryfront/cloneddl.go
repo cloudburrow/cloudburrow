@@ -324,7 +324,7 @@ func (f front) serveCloneDDL(w http.ResponseWriter, r *http.Request, q queryOpti
 			return
 		}
 	}
-	start := time.Now().UTC().Format(time.RFC3339Nano)
+	start := f.now().UTC().Format(time.RFC3339Nano)
 	base := map[string]string{"projectId": project, "datasetId": src.DatasetID, "tableId": src.TableID}
 	var extra map[string]any
 	switch {

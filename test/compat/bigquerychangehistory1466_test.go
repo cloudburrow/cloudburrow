@@ -192,10 +192,9 @@ func TestBigQueryChangeHistoryLimits(t *testing.T) {
 	}
 
 	// The front's clock: the engine's CURRENT_TIMESTAMP() and change
-	// times follow it (a minute here; a day would leave every later test
-	// a day ahead of the tables' creation times, which the emulator
-	// keeps by the system's clock).
-	before := time.Now()
+	// times follow it (a minute here), as every time BigQuery reports
+	// does (#1487).
+	before := advanceBigQueryClock(t, h, 0)
 	after := advanceBigQueryClock(t, h, time.Minute)
 	got := rows(t, ctx, c, "SELECT UNIX_SECONDS(CURRENT_TIMESTAMP())")
 	if len(got) != 1 || got[0][0].(int64) < before.Add(time.Minute).Unix() || got[0][0].(int64) > after.Add(time.Minute).Unix() {

@@ -1797,6 +1797,9 @@ func (p spannerProvider) ActAt(ctx context.Context, project string, path []strin
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 
+	if len(path) == 0 && action == spannerCreateInstanceAction {
+		return p.createInstance(ctx, project, values)
+	}
 	if handled, err := p.spannerAdminAct(ctx, project, path, action, values); handled {
 		return err
 	}

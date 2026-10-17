@@ -12,7 +12,9 @@ import (
 // TestBigQueryResourceTimesInMilliseconds (#1310), official Go client: a
 // dataset's, a table's, a view's and a routine's CreationTime and
 // LastModifiedTime, and a query job's statistics' CreationTime, StartTime
-// and EndTime, are within a minute of now. BigQuery gives them in
+// and EndTime, are within a minute of now by the instance's clock
+// (advanceBigQueryClock, which earlier tests move forward, #1487). BigQuery
+// gives them in
 // milliseconds since the epoch; the engine gave a table's and a job's in
 // seconds, which the client read as January 1970, and a dataset none.
 //
@@ -23,8 +25,9 @@ func TestBigQueryResourceTimesInMilliseconds(t *testing.T) {
 	ctx := h.Context()
 	near := func(what string, got time.Time) {
 		t.Helper()
-		if d := time.Since(got); d < -time.Minute || d > time.Minute {
-			t.Errorf("%s = %v, want within a minute of now", what, got)
+		now := advanceBigQueryClock(t, h, 0) // the instance's clock, #1487
+		if d := now.Sub(got); d < -time.Minute || d > time.Minute {
+			t.Errorf("%s = %v, want within a minute of now, %v", what, got, now)
 		}
 	}
 

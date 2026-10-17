@@ -50,7 +50,7 @@ func TestBqCopySnapshotCloneAndRestore(t *testing.T) {
 	if md.Type != bigquery.Snapshot || md.SnapshotDefinition == nil || md.SnapshotDefinition.BaseTableReference.TableID != "base" {
 		t.Errorf("bq cp --snapshot made type %q, %+v", md.Type, md.SnapshotDefinition)
 	}
-	if want := time.Now().Add(time.Hour); md.ExpirationTime.Before(want.Add(-5*time.Minute)) || md.ExpirationTime.After(want.Add(5*time.Minute)) {
+	if want := advanceBigQueryClock(t, h, 0).Add(time.Hour); md.ExpirationTime.Before(want.Add(-5*time.Minute)) || md.ExpirationTime.After(want.Add(5*time.Minute)) {
 		t.Errorf("bq cp --expiration=3600: the snapshot expires %v, want about %v", md.ExpirationTime, want)
 	}
 

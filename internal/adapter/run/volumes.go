@@ -126,6 +126,15 @@ func renderVolumes(b *strings.Builder, volumes []*runpb.Volume, o containerRende
 				if err != nil {
 					return err
 				}
+				if secretName != "" && name != secretName {
+					// Versions under a customer-managed key are mounted from
+					// a decrypted copy (#1489), the others from the Secret
+					// that stores them, and one secret volume reads one
+					// Kubernetes Secret.
+					return apierror.Unimplemented("volume %q mounts versions of secret %q with and without a "+
+						"customer-managed key, which CloudBurrow mounts from different Kubernetes Secrets; "+
+						"mount them in two volumes", v.GetName(), s.GetSecret())
+				}
 				secretName = name
 				fmt.Fprintf(&lines, "              - key: %s\n                path: %q\n", key, it.GetPath())
 				if it.GetMode() != 0 {

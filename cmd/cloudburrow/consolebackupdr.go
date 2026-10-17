@@ -334,25 +334,39 @@ func (p backupDRProvider) DetailActions(ctx context.Context, project string, pat
 					Help: "An RFC 3339 time, such as 2026-12-31T00:00:00Z; empty keeps it. It cannot be before the enforced retention ends."},
 				{Name: "enforced", Label: "Enforced retention ends", Type: "text",
 					Help: "An RFC 3339 time; empty keeps it. Enforced retention can be extended, not reduced."}}})
+			// Not "delete…": the console leaves a page after an action whose
+			// ID starts so, and this one deletes a backup, not the page's
+			// data source. Delete association and Delete backup plan alike.
+			acts = append(acts, console.Action{ID: "backupdelete", Label: "Delete backup", Destructive: true,
+				Confirm: "The backup and its dump are deleted; it can no longer be restored.",
+				Fields:  []console.Field{{Name: "backup", Label: "Backup", Type: "select", Required: true, Options: all}}})
 		}
 		return acts
 	}
-	var plans, allPlans, assocs, rules []string
+	var plans, allPlans, assocs, rules, triggers []string
+	planRules := map[string][]string{}
 	if out, err := p.get(ctx, loc+"/backupPlans"); err == nil {
 		for _, x := range bdrItems(out, "backupPlans") {
 			allPlans = append(allPlans, lastSegment(str(x, "name")))
+			for _, r := range bdrItems(x, "backupRules") {
+				planRules[str(x, "name")] = append(planRules[str(x, "name")], str(r, "ruleId"))
+			}
 			if str(x, "backupVault") == vault {
 				plans = append(plans, lastSegment(str(x, "name")))
-				for _, r := range bdrItems(x, "backupRules") {
-					rules = append(rules, str(r, "ruleId"))
-				}
+				rules = append(rules, planRules[str(x, "name")]...)
 			}
 		}
 	}
 	if out, err := p.get(ctx, loc+"/backupPlanAssociations"); err == nil {
 		for _, x := range bdrItems(out, "backupPlanAssociations") {
 			if strings.HasPrefix(str(x, "dataSource"), vault+"/") {
-				assocs = append(assocs, lastSegment(str(x, "name")))
+				a := lastSegment(str(x, "name"))
+				assocs = append(assocs, a)
+				// Trigger backup offers each association with its own
+				// plan's rules only (#1491): another plan's rule fails.
+				for _, r := range planRules[str(x, "backupPlan")] {
+					triggers = append(triggers, a+bdrTriggerSep+r)
+				}
 			}
 		}
 	}
@@ -389,10 +403,20 @@ func (p backupDRProvider) DetailActions(ctx context.Context, project string, pat
 			{Name: "plan", Label: "New backup plan", Type: "select", Required: true, Options: allPlans,
 				Help: "A plan storing into another vault gives the instance a data source there."}}})
 	}
-	if len(assocs) > 0 && len(rules) > 0 {
+	if len(triggers) > 0 {
 		acts = append(acts, console.Action{ID: "trigger", Label: "Trigger backup", Fields: []console.Field{
-			{Name: "association", Label: "Association", Type: "select", Required: true, Options: assocs},
-			{Name: "rule", Label: "Rule", Type: "select", Required: true, Options: rules}}})
+			{Name: "target", Label: "Association and rule", Type: "select", Required: true, Options: triggers,
+				Help: "Each association with the rules of the backup plan it applies."}}})
+	}
+	if len(assocs) > 0 {
+		acts = append(acts, console.Action{ID: "assocdelete", Label: "Delete association", Destructive: true,
+			Confirm: "The association is deleted: its instance is no longer backed up. Its data source and backups stay in the vault.",
+			Fields:  []console.Field{{Name: "association", Label: "Association", Type: "select", Required: true, Options: assocs}}})
+	}
+	if len(plans) > 0 {
+		acts = append(acts, console.Action{ID: "plandelete", Label: "Delete backup plan", Destructive: true,
+			Confirm: "The backup plan is deleted. A plan an association uses cannot be.",
+			Fields:  []console.Field{{Name: "plan", Label: "Backup plan", Type: "select", Required: true, Options: plans}}})
 	}
 	if v, err := p.get(ctx, vault); err == nil {
 		acts = append(acts, console.Action{ID: "editvault", Label: "Edit vault", Fields: []console.Field{
@@ -557,7 +581,22 @@ func (p backupDRProvider) ActAt(ctx context.Context, project string, path []stri
 		}
 		_, err = p.call(ctx, p.bdr, http.MethodPatch, "/v1/"+vault+"/dataSources/"+path[1]+"/backups/"+v["backup"]+
 			"?updateMask="+strings.Join(mask, ","), body)
+	case "plandelete":
+		_, err = p.call(ctx, p.bdr, http.MethodDelete, "/v1/"+loc+"/backupPlans/"+url.PathEscape(v["plan"]), nil)
+	case "assocdelete":
+		_, err = p.call(ctx, p.bdr, http.MethodDelete, "/v1/"+loc+"/backupPlanAssociations/"+url.PathEscape(v["association"]), nil)
+	case "backupdelete":
+		if len(path) != 2 {
+			return errors.New("delete backup is offered on a data source's page")
+		}
+		_, err = p.call(ctx, p.bdr, http.MethodDelete, "/v1/"+vault+"/dataSources/"+path[1]+"/backups/"+url.PathEscape(v["backup"]), nil)
 	case "trigger":
+		if a, r, ok := strings.Cut(v["target"], bdrTriggerSep); ok {
+			v = map[string]string{"association": a, "rule": r}
+		}
+		if err := p.checkTriggerRule(ctx, loc, v["association"], v["rule"]); err != nil {
+			return err
+		}
 		_, err = p.call(ctx, p.bdr, http.MethodPost, "/v1/"+loc+"/backupPlanAssociations/"+v["association"]+":triggerBackup",
 			map[string]any{"ruleId": v["rule"]})
 	case "restore":
@@ -576,4 +615,29 @@ func (p backupDRProvider) ActAt(ctx context.Context, project string, path []stri
 		return fmt.Errorf("unknown action %q", action)
 	}
 	return err
+}
+
+// bdrTriggerSep joins an association and a rule in Trigger backup's choice.
+const bdrTriggerSep = " / "
+
+// checkTriggerRule refuses a rule that is not in the association's plan,
+// naming the plan's rules, before triggerBackup would fail on it.
+func (p backupDRProvider) checkTriggerRule(ctx context.Context, loc, assoc, rule string) error {
+	a, err := p.get(ctx, loc+"/backupPlanAssociations/"+url.PathEscape(assoc))
+	if err != nil {
+		return err
+	}
+	plan, err := p.get(ctx, strings.TrimPrefix(str(a, "backupPlan"), "/"))
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for _, r := range bdrItems(plan, "backupRules") {
+		if str(r, "ruleId") == rule {
+			return nil
+		}
+		ids = append(ids, str(r, "ruleId"))
+	}
+	return fmt.Errorf("rule %q is not in backup plan %s, which association %s applies; its rules are %s",
+		rule, lastSegment(str(a, "backupPlan")), assoc, strings.Join(ids, ", "))
 }

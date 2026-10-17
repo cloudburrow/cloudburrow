@@ -56,7 +56,10 @@ COMPAT_BROWSER_SQL_SHARD_TESTS='^Test(CloudSQL|BackupDR)'
 # Browser tests no shard runs: the Studio's local models (#1396) need a
 # -tags onnx build started with -local-ai-embeddings, which no shard builds;
 # they run locally, as the compat suite's local AI tests do (ci.yml never=).
-COMPAT_BROWSER_NEVER_TESTS='^TestStudioManagesLocalModelsAndTestsEmbeddings$'
+# Functions' Edit, Download and Permissions builds a function from source with
+# Google's builder, as the compat suite's Functions tests do, so it runs only
+# when asked for (CLOUDBURROW_TEST_FUNCTIONS) on amd64 nodes.
+COMPAT_BROWSER_NEVER_TESTS='^Test(StudioManagesLocalModelsAndTestsEmbeddings|CloudRunFunctionsEditDownloadAndPermissionsThroughThePage)$'
 
 # compat_shard <shard>: sets, for that shard,
 #   SERVICES     the instance's --services

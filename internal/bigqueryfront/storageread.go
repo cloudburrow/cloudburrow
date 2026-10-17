@@ -168,6 +168,9 @@ func serveStorageRead(ctx context.Context, l net.Listener, upstream string, rest
 	}
 	if front != nil {
 		s.write = newStorageWrite(front)
+		if records != nil {
+			s.write.now = records.nowTime // the instance's clock, #1487
+		}
 		if wo != nil && wo.logf != nil {
 			s.write.logf = wo.logf
 		}

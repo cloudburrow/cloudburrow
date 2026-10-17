@@ -210,7 +210,6 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	if records == nil {
 		records = &jobRecords{}
 	}
-	functions := &knownFunctions{started: time.Now().UnixMilli()}
 	views := &viewTexts{}  // #1014
 	policies := o.policies // #1218, shared with the Storage Read front
 	if policies == nil {
@@ -224,6 +223,18 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 	linked := &linkedDatasets{}                     // loglinks.go, #1423
 	icebergs := &icebergTables{}                    // iceberg.go, #1427
 	models := &bqModels{}                           // models.go, #1465
+	// Every time the front reports, and the engine's (bigquery-emulator
+	// patches 0034, 0041), is the instance's clock, the front's, which
+	// clock:advance moves (#1487).
+	clock := buffers.clock
+	if records.now == nil {
+		records.now = clock
+	}
+	if policies.now == nil {
+		policies.now = clock
+	}
+	models.now = clock
+	functions := &knownFunctions{started: clock().UnixMilli(), now: clock}
 	if o.stateDir != "" {
 		icebergs.keep(o.stateDir, o.logf)                          // iceberg.go, #1427
 		models.keep(modelsStateFile(o.stateDir), o.logf)           // models.go, #1465
@@ -260,6 +271,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			tables.reset()
 			linked.reset()
 			models.reset()
+			buffers.syncEngine(next, o.logf) // #1487: a restarted engine's clock is the system's
 		})
 	}
 	// listJobs serves jobs.list, r a GET of a project's jobs: here, and
@@ -309,7 +321,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		if (front{next: next, records: records, policies: policies}).serveRowPolicies(w, r) { // rowpolicies.go, #1218
 			return
 		}
-		if (front{next: next, records: records, models: models}).serveModels(w, r) { // models.go, #1465
+		if (front{next: next, records: records, models: models, buffers: buffers}).serveModels(w, r) { // models.go, #1465
 			return
 		}
 		if tableIDsMayChange(r) {
@@ -380,7 +392,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			return
 		}
 		if m := routinesRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil && (r.Method == http.MethodPost || r.Method == http.MethodGet) {
-			f := front{next: next, base: m[1] + "/projects/" + m[2], functions: functions, records: records, configs: configs}
+			f := front{next: next, base: m[1] + "/projects/" + m[2], functions: functions, records: records, configs: configs, buffers: buffers}
 			if r.Method == http.MethodPost {
 				f.insertRoutine(w, r, projectOf(f.base)) // #1001
 				return
@@ -391,7 +403,7 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			}
 		}
 		if m := routineRoute.FindStringSubmatch(r.URL.EscapedPath()); m != nil {
-			f := front{next: next, base: m[1] + "/projects/" + m[2], functions: functions, records: records, configs: configs}
+			f := front{next: next, base: m[1] + "/projects/" + m[2], functions: functions, records: records, configs: configs, buffers: buffers}
 			ds, err1 := url.PathUnescape(m[3])
 			id, err2 := url.PathUnescape(m[4])
 			if err1 == nil && err2 == nil {
@@ -497,6 +509,11 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 		}
 	})
 }
+
+// now is the instance's clock (#1487): the front's, which the CloudBurrow
+// extension clock:advance moves and the engine follows (streamingbuffer.go).
+// Every time the front reports is read from it.
+func (f front) now() time.Time { return f.buffers.clock() }
 
 type front struct {
 	next http.Handler

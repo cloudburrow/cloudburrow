@@ -219,10 +219,17 @@ func (p artifactRegistryProvider) versionDetail(st *registry.Store, repo registr
 
 // DetailActions are Delete at each level, and Add tag and Remove tag on a
 // version.
-func (p artifactRegistryProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
+func (p artifactRegistryProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
 	switch len(path) {
 	case 1:
-		return []console.Action{
+		var acts []console.Action
+		if r, _, err := p.repository(project, path[0]); err == nil {
+			acts = append(acts, editRepositoryAction(r), editCleanupAction(r))
+			if a, ok := editRuleAction(ctx, r.GetName()); ok {
+				acts = append(acts, a)
+			}
+		}
+		return append(acts, []console.Action{
 			{ID: "add-rule", Label: "Add rule", Fields: []console.Field{
 				{Name: "id", Label: "Rule ID", Type: "text", Required: true, Pattern: "^[a-z0-9]([a-z0-9._\\-]{0,126}[a-z0-9])?$"},
 				{Name: "action", Label: "Action", Type: "select", Options: []string{"DENY", "ALLOW"}, Default: "DENY"},
@@ -239,7 +246,7 @@ func (p artifactRegistryProvider) DetailActions(_ context.Context, project strin
 				{Name: "policy", Label: "Policy", Type: "select", Options: []string{"DENY", "ALLOW"}, Default: "DENY",
 					Help: "the location's policy for remote repositories' upstream fetches, as UpdateVPCSCConfig sets it"}}},
 			{ID: "delete", Label: "Delete repository", Destructive: true, Leaves: true,
-				Confirm: "The repository and every image it holds are deleted, as DeleteRepository does."}}
+				Confirm: "The repository and every image it holds are deleted, as DeleteRepository does."}}...)
 	case 2:
 		return []console.Action{
 			{ID: "display-name", Label: "Set display name", Fields: []console.Field{
@@ -277,9 +284,18 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 	if len(path) == 1 && action == "delete" {
 		return p.Delete(ctx, project, path[0])
 	}
-	_, repo, err := p.repository(project, path[0])
+	r, repo, err := p.repository(project, path[0])
 	if err != nil {
 		return err
+	}
+	if len(path) == 1 && action == "edit-repository" {
+		return p.editRepository(ctx, r.GetName(), values)
+	}
+	if len(path) == 1 && action == "edit-cleanup" {
+		return p.editCleanup(ctx, r.GetName(), values)
+	}
+	if len(path) == 1 && action == "edit-rule" {
+		return editRule(ctx, r.GetName(), values)
 	}
 	st := runadapter.RegistryStore()
 	if st == nil {
