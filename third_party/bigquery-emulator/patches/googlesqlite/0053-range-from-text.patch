@@ -1,0 +1,85 @@
+CloudBurrow patch 53 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1492).
+
+The bug: a STRING cast to RANGE at run time (CAST(? AS RANGE<DATE>) of a
+bound parameter, which is how the emulator writes a streamed or loaded
+RANGE value) was kept the STRING it was: CastValue had no RANGE case. The
+column then held text, which RANGE_START and the other RANGE functions
+refused ("expected RANGE, got value.StringValue"), and a TIMESTAMP bound
+read back as it was written ("2024-04-11 10:30:00 UTC"), not as BigQuery's
+microseconds. A RANGE literal (RANGE<DATE> '[...)') was not affected: the
+analyzer folds it.
+
+The patch reads the text "[start, end)", each bound UNBOUNDED, NULL or a
+value of the element type, and casts each bound to the element type
+(https://cloud.google.com/bigquery/docs/reference/standard-sql/conversion_functions#cast_range).
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/googlesqlite.LICENSE). This patch
+is offered under the same MIT License, Copyright (c) 2026 The CloudBurrow
+Authors.
+
+--- a/internal/encoder.go
++++ b/internal/encoder.go
+@@ -436,6 +436,43 @@
+ // arrayElementType returns the declared element type of an ARRAY type,
+ // or nil when t is not an ArrayType handle or the element type cannot
+ // be resolved.
++// rangeValueFromText is text, a RANGE's "[start, end)" with each bound
++// UNBOUNDED, NULL or a value of t's element type, as a *value.RangeValue,
++// each bound cast to the element type. CloudBurrow patch
++// (cloudburrow/cloudburrow#1492).
++func rangeValueFromText(t googlesql.Googlesql_TypeNode, text string) (value.Value, error) {
++	rt, err := t.AsRange()
++	if err != nil || rt == nil {
++		return nil, fmt.Errorf("RANGE %q: the type has no element type", text)
++	}
++	elem, err := rt.ElementType()
++	if err != nil || elem == nil {
++		return nil, fmt.Errorf("RANGE %q: the type has no element type", text)
++	}
++	s := strings.TrimSpace(text)
++	inner, ok := strings.CutPrefix(s, "[")
++	if ok {
++		inner, ok = strings.CutSuffix(inner, ")")
++	}
++	parts := strings.Split(inner, ",")
++	if !ok || len(parts) != 2 {
++		return nil, fmt.Errorf("invalid RANGE value %q: want [start, end)", text)
++	}
++	var bounds [2]value.Value
++	for i, p := range parts {
++		p = strings.TrimSpace(p)
++		if strings.EqualFold(p, "UNBOUNDED") || strings.EqualFold(p, "NULL") {
++			continue
++		}
++		b, err := castValueWithSpec(elem, nil, value.StringValue(p))
++		if err != nil {
++			return nil, fmt.Errorf("invalid RANGE value %q: %w", text, err)
++		}
++		bounds[i] = b
++	}
++	return &value.RangeValue{Start: bounds[0], End: bounds[1]}, nil
++}
++
+ func arrayElementType(t googlesql.Googlesql_TypeNode) googlesql.Googlesql_TypeNode {
+ 	at, ok := t.(*googlesql.ArrayType)
+ 	if !ok || at == nil {
+@@ -787,6 +824,16 @@
+ 	case googlesql.TypeKindTypeGeography:
+ 		return v, nil
+ 	case googlesql.TypeKindTypeRange:
++		// CloudBurrow patch (cloudburrow/cloudburrow#1492): a RANGE given
++		// as its text, "[start, end)" (a bound parameter cast to RANGE, as
++		// the emulator writes a streamed or loaded RANGE value), was kept
++		// a STRING, so the column held text that RANGE_START and the other
++		// RANGE functions refused ("expected RANGE, got
++		// value.StringValue") and a TIMESTAMP bound read back as written.
++		// It is a RANGE of its element type.
++		if sv, ok := v.(value.StringValue); ok {
++			return rangeValueFromText(t, string(sv))
++		}
+ 		return v, nil
+ 	case googlesql.TypeKindTypeProto:
+ 		// CAST(STRING AS Proto) feeds the literal as a proto-text

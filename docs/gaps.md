@@ -26,16 +26,16 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Run | 2 | 0 | 1 | 0 | 1 |
 | Cloud Scheduler | 2 | 0 | 1 | 0 | 1 |
 | Cloud Logging | 1 | 0 | 0 | 1 | 0 |
-| Cloud KMS | 6 | 0 | 3 | 2 | 1 |
+| Cloud KMS | 5 | 0 | 2 | 2 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 0 | 0 | 0 | 0 | 0 |
-| Vertex AI | 2 | 0 | 2 | 0 | 0 |
-| BigQuery | 29 | 9 | 12 | 8 | 0 |
+| Vertex AI | 1 | 0 | 1 | 0 | 0 |
+| BigQuery | 29 | 10 | 11 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
-| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 1 | 1 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **61** | **13** | **29** | **13** | **6** |
+| **Total** | **58** | **13** | **26** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -48,10 +48,10 @@ and object IAM on the JSON API are excluded (below).
 
 | Gap | Why open | Size |
 |---|---|---|
-| gRPC `google.storage.v2`: `Bucket.ip_filter` stays `UNIMPLEMENTED` (and `ipFilter` 400 on the JSON API): enforcing it needs the caller's VPC network and the `storage.buckets.exemptFromIpFilter` permission, which are not modelled, and a filter stored without effect would look like a control that is not there. Appendable objects, `custom_placement_config` and `SetIamPolicy`'s `update_mask` are built (#1443) | no emulator support: enforcement needs what is not modelled | S |
-| `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) | no emulator support (no cache tier) | S |
-| `rapidCaches.*` (#1444; Anywhere Caches, as records with no cache tier, `buckets.relocate`, `advanceRelocateBucket` and `operations.cancel` are built) | no emulator support (no cache tier) | M |
-| Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444) | no emulator support (needs Pub/Sub) | S |
+| gRPC `google.storage.v2`: `Bucket.ip_filter` stays `UNIMPLEMENTED` (and `ipFilter` 400 on the JSON API): enforcing it needs the caller's VPC network and the `storage.buckets.exemptFromIpFilter` permission, which are not modelled, and a filter stored without effect would look like a control that is not there. Appendable objects, `custom_placement_config` and `SetIamPolicy`'s `update_mask` are built (#1443) (#1505) | no emulator support: enforcement needs what is not modelled | S |
+| `managedFolders.update`: its only settable field is `rapidCacheConfig`, and an insert carrying it is 501 (#1444) (#1505) | no emulator support (no cache tier) | S |
+| `rapidCaches.*` (#1444; Anywhere Caches, as records with no cache tier, `buckets.relocate`, `advanceRelocateBucket` and `operations.cancel` are built) (#1505) | no emulator support (no cache tier) | M |
+| Notifications: the server with no Pub/Sub refuses a configuration 501, as it has no topic to verify or deliver to (#1444) (#1505) | no emulator support (needs Pub/Sub) | S |
 | UNVERIFIED error codes (a non-empty bucket delete, a repeat retention lock, managed-folder and folder refusals, batch limits, CORS on JSON endpoints and others; [storage.md](coverage/storage.md)) (#1445) | not documented by Google | S |
 
 ## Pub/Sub
@@ -74,7 +74,7 @@ field (#1255), `stackdriver_logging_config`, with each sampled dispatch written 
 
 | Gap | Why open | Size |
 |---|---|---|
-| Delivery to an App Engine target (#1447) | no emulator support (no App Engine): tasks and `app_engine_routing_override` are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
+| Delivery to an App Engine target (#1447) (#1506) | no emulator support (no App Engine): tasks and `app_engine_routing_override` are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
 
 ## Cloud Run
 
@@ -98,7 +98,7 @@ and the default logs bucket (#1430); NFS volumes, Cloud Run's `K_*` and `CLOUD_R
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud Build: triggers with a repository or Pub/Sub source or a `filename` are refused 501 with the reason (they need a hosted git service or a Google-owned subscription). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) | no emulator support: built; the rest is refused with its reason (a hosted git service, a Google-owned subscription, or package formats not served) | M |
+| Cloud Build: triggers with a repository or Pub/Sub source or a `filename` are refused 501 with the reason (they need a hosted git service or a Google-owned subscription). Artifact Registry: Maven, npm, Python, Apt and Yum methods (8) `UNIMPLEMENTED` with the reason, as only `DOCKER` repositories are served; remote and virtual repositories need upstream registries. Built in #1449: `dynamicSubstitutions`, `secretEnv` on docker and pack steps, `ApproveBuild` and `approvalRequired`, and 19 Artifact Registry methods (rules, attachments, project and VPC-SC settings, package, version and file updates, `BatchDeleteVersions`, `ExportArtifact`; [artifactregistry.md](coverage/artifactregistry.md)) (#1449) (#1506) | no emulator support: built; the rest is refused with its reason (a hosted git service, a Google-owned subscription, or package formats not served) | M |
 | A stale `etag` on a job is `ABORTED`; a failed `RunJob` is `FAILED_PRECONDITION`; `CancelExecution` of an ended execution is `FAILED_PRECONDITION` (#1445) | needs live GCP | S |
 
 ## Cloud Scheduler
@@ -107,7 +107,7 @@ Closed by the sweep: Locations (#1237).
 
 | Gap | Why open | Size |
 |---|---|---|
-| Delivery to an App Engine target (#1447) | no emulator support (no App Engine): jobs are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
+| Delivery to an App Engine target (#1447) (#1506) | no emulator support (no App Engine): jobs are stored as documented and every attempt fails `NOT_FOUND` (HTTP 404), since no App Engine runs locally and Google documents no mapping to Cloud Run | — |
 | `ResumeJob` on an enabled job and the default `retry_config` are inferred from the Terraform provider (#1445) | needs live GCP | S |
 
 ## Cloud Logging
@@ -124,7 +124,7 @@ on folder and organization buckets, as Google refuses them (#1435).
 
 | Gap | Why open | Size |
 |---|---|---|
-| A BigQuery sink's `export_errors` column types and `schemaErrorDetail` text, the types of `httpRequest.latency` and other `Duration` and `Any` fields (left out), and the sink error codes but `topic_not_found` are CloudBurrow's (#1451; `export_errors` and `protoPayload` are built) | not documented by Google; needs a live sink | S |
+| A BigQuery sink's `export_errors` column types and `schemaErrorDetail` text, the types of `httpRequest.latency` and other `Duration` and `Any` fields (left out), and the sink error codes but `topic_not_found` are CloudBurrow's (#1451; `export_errors` and `protoPayload` are built) (#1506) | not documented by Google; needs a live sink | S |
 
 ## Cloud KMS
 
@@ -133,9 +133,8 @@ methods (#1212), and their console (#1219). Closed by the sweep: Locations (#129
 
 | Gap | Why open | Size |
 |---|---|---|
-| EXTERNAL, EXTERNAL_VPC and HSM_SINGLE_TENANT protection levels, `crypto_key_backend`, `external_protection_level_options` (#1469; HSM is served since #1452, without an HSM or an attestation; no open-source key manager speaks Google's Cloud EKM protocol, and Google publishes none, checked 2026-10-16) | no emulator support | L |
-| HsmManagement and `EkmService/VerifyConnectivity` (#1469; EkmService CRUD, Autokey and AutokeyAdmin are served since #1452, and IAM on `ekmConfig` and `ekmConnections`, stored and not enforced, since #1469) | no emulator support | L |
-| `key_access_justifications_policy` is stored and returned, not enforced (#1452): no call carries an access justification locally | no emulator support | S |
+| Single-tenant HSM (#1469): `upgrade_key_trust` proposals and import jobs at HSM_SINGLE_TENANT are UNIMPLEMENTED, as trusted key wrapping is; instances and proposals never pass through their transitional states, since nothing is provisioned (HsmManagement and HSM_SINGLE_TENANT keys are served since #1469; HSM since #1452, without an HSM or an attestation; EXTERNAL and EXTERNAL_VPC since #1469, the instance acting as the EKM) | no emulator support | M |
+| `key_access_justifications_policy` is stored and returned, not enforced (#1452): no call carries an access justification locally (#1506) | no emulator support | S |
 | REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` (#1445) | not documented by Google | S |
 | UNVERIFIED error codes ([kms.md](coverage/kms.md)) (#1445) | not documented by Google | S |
 | Project-number parents are refused; whether Google accepts them, and whether an empty key ring can be deleted (#1445) | needs live GCP | S |
@@ -166,12 +165,13 @@ Closed: `PredictionService.EmbedContent`, over gRPC and REST `:embedContent` (#1
 `PredictionService.StreamGenerateContent` over gRPC, and an official-SDK test of `GenerateContent`
 over gRPC (#1257); `RawPredict` on a publisher model (#1284); `StreamRawPredict`, `DirectPredict`,
 `ServerStreamingPredict`, `StreamingPredict` and `StreamDirectPredict` (#1285); `DirectRawPredict`,
-`StreamDirectRawPredict` and `StreamingRawPredict`, relayed to a model's gRPC server on its `h2c` port (#1477).
+`StreamDirectRawPredict` and `StreamingRawPredict`, relayed to a model's gRPC server on its `h2c` port (#1477); `Explain` with integrated gradients, XRAI or
+examples, now `INVALID_ARGUMENT` on a custom container as Vertex documents (they are for TensorFlow
+models only; Sampled Shapley, the custom-container method, is served) (#1454).
 
 | Gap | Why open | Size |
 |---|---|---|
-| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are refused, because the one embedding model served is text-only (#1454) | no emulator support (one text-only model) | S |
-| `Explain` with integrated gradients, XRAI or examples (#1454); Sampled Shapley is served | no emulator support: they need the model's gradients or an Example index, which a custom container's predict route does not expose | L |
+| `EmbedContent` embeds text only: a non-text part, `document_ocr` and `audio_track_extraction` are `INVALID_ARGUMENT`, because the one embedding model served (EmbeddingGemma) is text-only, as Google's text-only `gemini-embedding-001` is; multimodal input needs a multimodal model (Google's `gemini-embedding-2`) run locally: an image, video, audio and PDF encoder sharing one vector space, which no local model here provides (#1454) | no emulator support (one text-only model) | L |
 
 ## BigQuery
 
@@ -209,11 +209,11 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | `ALTER TABLE` is 501 for a foreign key to another project's table (an instance serves one project), the table options not built, `ALTER COLUMN SET OPTIONS (data_policies, data_governance_tags)`, an `ALTER TABLE` in a dry run of a script (one in a script with a `TEMP` table or function is carried out in its turn, #1459), and legacy SQL; a statement of several actions is carried out a step at a time, so a later refusal leaves the earlier steps done; a nested field's `ALTER COLUMN SET DEFAULT`, and a `WRITE_TRUNCATE_DATA` query job whose result lacks a column with a default, are 501 (#1456) | not built yet | S |
 | A dry run of `CREATE VIEW` with a column list, without `OR REPLACE` or `IF NOT EXISTS`, of a view that exists is 501, as what BigQuery's dry run answers for it is not known (#1456) | not documented by Google | S |
 | Table options and materialized views: `ALTER COLUMN … SET OPTIONS (rounding_mode)` is 501 where the Table OPTIONS row says so; `require_partition_filter` checks that the column is named in a `WHERE`, not that it prunes; smart tuning's rewrite of a base-table query to read a materialized view is not built (#1456); `storage_uri` (#1427) is tracked on its own, and what #1426 and #1418 leave in the rows below | not built yet | M |
-| What #1426, #1455 and #1482 leave of `privacy_policy`: a read of an aggregation threshold or join restriction table or view in a subquery, CTE, another view, a script or a non-INNER join is 501; of differential privacy (#1455, #1482 built: `HAVING`, subqueries, CTEs, scripts, `PUBLIC_GROUPS`), `COUNT(DISTINCT)` and `max_rows_contributed` (documented by neither BigQuery nor GoogleSQL) and a DP aggregate inside an expression are 501 | not built yet | L |
-| What #1418 leaves of change history: an ALTER TABLE that rebuilds the table and CREATE OR REPLACE TABLE start the history over; CHANGES in a multi-statement transaction and on a change-data-capture table are not refused; every table's rows are recorded twice, whatever its options (#1466) | not built yet | M |
+| What #1426, #1455 and #1482 leave of `privacy_policy`: a read of an aggregation threshold or join restriction table or view in a subquery, CTE, another view, a script or a non-INNER join is 501; of differential privacy (#1455, #1482 built: `HAVING`, subqueries, CTEs, scripts, `PUBLIC_GROUPS`), `COUNT(DISTINCT)` and `max_rows_contributed` (documented by neither BigQuery nor GoogleSQL) and a DP aggregate inside an expression are 501 (#1502) | not built yet | L |
+| What #1418 leaves of change history: an ALTER TABLE that rebuilds the table and CREATE OR REPLACE TABLE start the history over; CHANGES in a multi-statement transaction and on a change-data-capture table are not refused; every table's rows are recorded twice, whatever its options (#1466) (#1503) | not built yet | M |
 | Project configurations: `default_time_zone` does not reach a string literal the analyzer coerces to a `TIMESTAMP` (`ts > '2020-01-01 00:00:00'` reads it in UTC); `default_kms_key_name` reaches `tables.insert` and a lone `CREATE TABLE`, not a table a script or a query, load or copy job makes; `ALTER PROJECT` / `ALTER ORGANIZATION` inside a block, `IF` or loop of a script is carried out in its turn (#1459), and 501 only in a dry run; `EFFECTIVE_PROJECT_OPTIONS` gives no `DEFAULT` rows, which Google does not document (#1456) | not built yet | S |
-| What #1426 leaves of `privacy_policy`: differential privacy (`SELECT WITH DIFFERENTIAL_PRIVACY`, a `differential_privacy_policy`) is 501, no noise mechanism or epsilon/delta budget (#1455); a read of a policy table or view in a subquery, CTE, another view, a script or a non-INNER join is 501 | not built yet | L |
-| What #1466 leaves of change history: `CHANGES` of a table that had a multi-statement transaction committed to it within the range is not refused; changes are kept seven days whatever the dataset's time travel window (only the window's are read) | not built yet | S |
+| What #1426 leaves of `privacy_policy`: differential privacy (`SELECT WITH DIFFERENTIAL_PRIVACY`, a `differential_privacy_policy`) is 501, no noise mechanism or epsilon/delta budget (#1455); a read of a policy table or view in a subquery, CTE, another view, a script or a non-INNER join is 501 (#1502) | not built yet | L |
+| What #1466 leaves of change history: `CHANGES` of a table that had a multi-statement transaction committed to it within the range is not refused; changes are kept seven days whatever the dataset's time travel window (only the window's are read) (#1503) | not built yet | S |
 | `columnNameCharacterMap` `V1` / `V2` when a detected CSV or Parquet name is still refused once its characters are replaced (a `V1` leading digit, a reserved prefix, an empty or too long name, a Parquet name with a period) and names the same once replaced are 501: BigQuery documents only that "invalid column names will be normalized" (#1457) | not documented by Google | S |
 | Autodetect: a JSON column whose values mix types BigQuery does not document detecting (into a `JSON` column the schema gives, mixed values load since #1457), `skipLeadingRows` other than 1 into a new table, and a sample with a format or `timeZone` that BigQuery's detection is not documented for, are 501; CSV header detection where BigQuery and the emulator disagree (every column `STRING`, a name that reads as a number, boolean, date or timestamp) is 501 (#1457) | not documented by Google | S |
 | CSV: a quote outside ISO-8859-1, a delimiter of several bytes or outside ASCII in UTF-16 or UTF-32 data, a `maxBadRecords` load the emulator still fails on a value the front passes (a number written as a fraction into an INTEGER, a DATETIME or TIMESTAMP), `sourceColumnMatch` `NAME` with no row skipped (ISO-8859-1 delimiters and quotes, a quote's first byte, `skipLeadingRows` N and the header with `autodetect`, `NAME` after skipped rows, and, in #1457's second part, a delimiter's first byte, a delimiter or quote outside ASCII in UTF-8 data and an empty `STRING` with a `nullMarker` and, under `maxBadRecords`, a BOOL, DATE, TIME or number its column refuses as a bad record are built); JSON: a null field outside the schema (the reference does not say whether a null is an "extra value"), a `maxBadRecords` load the emulator still fails on a value the front passes (a value its column refuses is a bad record since #1457) | no emulator support | M |
@@ -230,9 +230,9 @@ options and materialized views (#1389, #1390, #1401, #1409, #1415), `JOBS_BY_FOL
 | `DROP SCHEMA` where the script's other statements see the dataset; `CREATE SCHEMA` options other than the supported strings, and `DEFAULT COLLATE` (#1459) | no emulator support | M |
 | `CREATE TEMP TABLE … AS SELECT` whose query cannot run alone, after one that changes data; a dry run of a script with a `TEMP` table or function, beyond what the emulator's own dry run checks (#1459) | not built yet | S |
 | A failed script after a statement that wrote: the emulator does not roll back (#1459) | no emulator support | L |
-| A snapshot or clone `FOR SYSTEM_TIME AS OF` a past time (a query reads one since #1460); `FOR SYSTEM_TIME AS OF` a past time of an ingestion-time partitioned table, or with a partition decorator (#1460) | not built yet | M |
-| `datasets.undelete`, `UNDROP SCHEMA`, and restoring a dropped table by a copy of `table@time`: the emulator drops a table's rows and change history with it, and a dataset's tables (#1460) | no emulator support | M |
-| BQML: `LINEAR_REG`, binary and multiclass `LOGISTIC_REG`, `KMEANS` and `PCA` are trained by the front, with `TRANSFORM`, ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO and models.* (#1465, #1481); every other model type, remote models, ML preprocessing functions in TRANSFORM and the other ML functions are 501 with the reason | no emulator support: training Google does not document, or Google's infrastructure | L |
+| `FOR SYSTEM_TIME AS OF` a past time of an ingestion-time partitioned table, or with a partition decorator, in a query, a snapshot or clone, or a copy of `table@time` (#1483) | not built yet | M |
+| What #1483 leaves of undelete: an external table, and a function made by `routines.insert` before the front started, are not kept by a deletion; `UNDROP SCHEMA` in a script with control flow, or whose other statements name the dataset, and in a dry run of a script (#1483) | not built yet | M |
+| BQML: `LINEAR_REG`, binary and multiclass `LOGISTIC_REG`, `KMEANS` and `PCA` are trained by the front, with `TRANSFORM`, ML.PREDICT, ML.EVALUATE, ML.WEIGHTS, ML.FEATURE_INFO, ML.TRAINING_INFO, ML.CONFUSION_MATRIX, ML.ROC_CURVE, ML.CENTROIDS, ML.PRINCIPAL_COMPONENTS, ML.PRINCIPAL_COMPONENT_INFO and models.* (#1465, #1481); every other model type, remote models, ML preprocessing functions in TRANSFORM and the other ML functions are 501 with the reason (#1504) | no emulator support: training Google does not document, or Google's infrastructure | L |
 | Script variable named as an alias, a column or a table; `WRITE_TRUNCATE_DATA` of a result of another type (#1445) | not documented by Google | S |
 | BigQuery's wording of every front refusal (UNVERIFIED throughout the BigQuery rows) (#1445) | not documented by Google | S |
 
@@ -242,10 +242,10 @@ Closed: Datastore structured aggregations and Firestore `PartitionQuery` (#1405)
 
 | Gap | Why open | Size |
 |---|---|---|
-| Spanner: 30 RPCs refused, each naming why (backups, backup schedules, IAM, instance configurations, partition updates, `FetchCacheUpdate`; [spanner.md](coverage/spanner.md)); `UpdateInstance` and `UpdateDatabase` (drop protection) are served by the call front since #1461 (#1461) | no emulator support: the emulator cannot snapshot a database and has one instance configuration | L |
-| Bigtable: 48 RPCs refused (authorized, logical and materialized views, memory layers, snapshots, backups, schema bundles, table IAM, `ExecuteQuery`, change streams, …; [bigtable.md](coverage/bigtable.md)) (#1461) | no emulator support | L |
-| Firestore: `ExecutePipeline`; Firestore Admin: backups, restore, clone, user credentials, `ExportDocuments`, `ImportDocuments`, `BulkDeleteDocuments` (15 methods, each naming why; [firestoreadmin.md](coverage/firestoreadmin.md)); backup schedules are served since #1461 and take no backups (#1461) | no emulator support: it cannot snapshot or export a database, and is not Firestore with MongoDB compatibility | L |
-| Datastore `explain_options` are 501; GQL aggregation queries are served since #1461 (#1461) | no emulator support: the emulator plans no query | S |
+| Spanner: 30 RPCs refused, each naming why (backups, backup schedules, IAM, instance configurations, partition updates, `FetchCacheUpdate`; [spanner.md](coverage/spanner.md)); `UpdateInstance` and `UpdateDatabase` (drop protection) are served by the call front since #1461 (#1461) (#1498) | no emulator support: the emulator cannot snapshot a database and has one instance configuration | L |
+| Bigtable: 48 RPCs refused (authorized, logical and materialized views, memory layers, snapshots, backups, schema bundles, table IAM, `ExecuteQuery`, change streams, …; [bigtable.md](coverage/bigtable.md)) (#1461) (#1499) | no emulator support | L |
+| Firestore: `ExecutePipeline`; Firestore Admin: backups, restore, clone, user credentials, `ExportDocuments`, `ImportDocuments`, `BulkDeleteDocuments` (15 methods, each naming why; [firestoreadmin.md](coverage/firestoreadmin.md)); backup schedules are served since #1461 and take no backups (#1461) (#1500) | no emulator support: it cannot snapshot or export a database, and is not Firestore with MongoDB compatibility | L |
+| Datastore `explain_options` are 501; GQL aggregation queries are served since #1461 (#1461) (#1500) | no emulator support: the emulator plans no query | S |
 | Whether production reorders an array's excluded values after its indexed ones, as the emulator does (#941) | needs live GCP | S |
 
 ## Cloud SQL, Memorystore
@@ -262,9 +262,9 @@ encryption (#1413), and customer-managed keys and server CA rotation (#1463). IA
 
 | Gap | Why open | Size |
 |---|---|---|
-| Cloud SQL: external-primary replicas (no source representation instance is kept); `MYSQL_5_6`, `MYSQL_5_7` and SQL Server versions, and `BAK` and `TDE` files (their images are linux/amd64 only); upgrading a PostgreSQL replica on its own (streaming replication does not cross major versions); high availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (no `pg_promote()` or `recovery.signal`), each 501 naming why (PostgreSQL 9.6 to 12, a MySQL replica's own upgrade, Cloud SQL's 400 for a legacy failover replica and for a PostgreSQL database's charset change are built since #1462); 24 methods 501, each naming what is missing (blue-green deployments and `connect.resolve`, server and Entra ID certificates, `demote` and external sync, `switchover`, `reencrypt`, disk shrink and others; project `Backups`, `executeSql`, `preCheckMajorVersionUpgrade`, `truncateLog` and final backups are built since #1462; [sqladmin.md](coverage/sqladmin.md)) (#1462) | not built yet | L |
-| Backup and DR: workload types other than Cloud SQL instances, `encryptionConfig`, resource backup configs, management servers and trials (23 methods 501, each naming what is missing; `patch`, plan revisions, data source references and `fetchUsable` are built since #1462; [backupdr.md](coverage/backupdr.md)) (#1462) | not built yet | L |
-| Memorystore for Redis: `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image (the Docker official `redis` image last built them in 2018, 2020 and 2022); with a customer-managed key, the RDB snapshots and AOF Valkey writes on a server's own volume are not encrypted with it, and are served only while the key can be used (#1463) | no emulator support: no maintained image; Valkey writes its own files | S |
+| Cloud SQL: external-primary replicas (no source representation instance is kept); `MYSQL_5_6`, `MYSQL_5_7` and SQL Server versions, and `BAK` and `TDE` files (their images are linux/amd64 only); upgrading a PostgreSQL replica on its own (streaming replication does not cross major versions); high availability, read replicas and point-in-time recovery on PostgreSQL 9.6 to 11 (no `pg_promote()` or `recovery.signal`), each 501 naming why (PostgreSQL 9.6 to 12, a MySQL replica's own upgrade, Cloud SQL's 400 for a legacy failover replica and for a PostgreSQL database's charset change are built since #1462); 24 methods 501, each naming what is missing (blue-green deployments and `connect.resolve`, server and Entra ID certificates, `demote` and external sync, `switchover`, `reencrypt`, disk shrink and others; project `Backups`, `executeSql`, `preCheckMajorVersionUpgrade`, `truncateLog` and final backups are built since #1462; [sqladmin.md](coverage/sqladmin.md)) (#1462) (#1501) | not built yet | L |
+| Backup and DR: workload types other than Cloud SQL instances, `encryptionConfig`, resource backup configs, management servers and trials (23 methods 501, each naming what is missing; `patch`, plan revisions, data source references and `fetchUsable` are built since #1462; [backupdr.md](coverage/backupdr.md)) (#1462) (#1501) | not built yet | L |
+| Memorystore for Redis: `REDIS_3_2`, `REDIS_4_0` and `REDIS_5_0` stay 501, as they are end of life with no maintained image (the Docker official `redis` image last built them in 2018, 2020 and 2022); with a customer-managed key, the RDB snapshots and AOF Valkey writes on a server's own volume are not encrypted with it, and are served only while the key can be used (#1463) (#1501) | no emulator support: no maintained image; Valkey writes its own files | S |
 
 ## Functions, credentials, tooling
 
@@ -274,8 +274,7 @@ Cloud Functions v2 and v1 APIs (#1377, #1428); Pub/Sub and project IAM in Terraf
 
 | Gap | Why open | Size |
 |---|---|---|
-| The gated full-lifecycle Functions tests are not yet run: the v2 and v1 APIs' build and serve, event triggers, `gcloud functions deploy --gen2`, and the full apply of Terraform's `google_cloudfunctions2_function` and `google_cloudfunctions_function`, and `TestFunctionsSecretsBuildsAndMounts`, a build that mounts Secret Manager secrets; `repo_source` and VPC connectors, and event types no served service emits (audit logs, Firestore, Firebase), stay `UNIMPLEMENTED` with the reason (#1464) | the builder's amd64 images cannot run on arm64 nodes; no dated amd64 run yet | M |
-| Terraform resources beyond the verified set (#1304): the other `google_spanner_*` resources (instance configs, backup schedules), a worker pool's `scaling_mode` (Google publishes no such field), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_secret_manager_regional_secret` and `google_bigquery_data_transfer_config` (their endpoints are not set: not served), the resources whose API refuses them (Bigtable authorized views, log bucket CMEK; audit configs, tag IAM, Bigtable table IAM and Spanner IAM are stored since #1486), and the other resources of the served services | partly verified (the eight batches of #1304 and the verified rows of compatibility.md) | L |
+| Terraform resources beyond the verified set (#1304): the other `google_spanner_*` resources (instance configs, backup schedules), a worker pool's `scaling_mode` (Google publishes no such field), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_folder_organization_policy` and `google_organization_policy` (folder and organization org policies are refused 501), `google_secret_manager_regional_secret` and `google_bigquery_data_transfer_config` (their endpoints are not set: not served), the resources whose API refuses them (Bigtable authorized views, log bucket CMEK; audit configs, tag IAM, Bigtable table IAM and Spanner IAM are stored since #1486), and the other resources of the served services | partly verified (the nine batches of #1304 and the verified rows of compatibility.md) | L |
 
 ## Console
 

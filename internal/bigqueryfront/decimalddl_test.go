@@ -62,7 +62,8 @@ func TestReadDecimalColumns(t *testing.T) {
 	}
 	x := "x"
 	want := []decimalColumn{{name: "a", precision: "5", scale: "2"}, {name: "b", precision: "3"},
-		{name: "c", rounding: "ROUND_HALF_EVEN", description: &x}, {name: "s", fields: []decimalColumn{{name: "x", precision: "2"}}}}
+		{name: "c", rounding: "ROUND_HALF_EVEN", description: &x}, {name: "s", fields: []decimalColumn{{name: "x", precision: "2"}}},
+		{name: "d", maxLength: "4"}} // #1493
 	if !reflect.DeepEqual(d.decimals, want) {
 		t.Errorf("decimals %+v, want %+v", d.decimals, want)
 	}
@@ -181,6 +182,12 @@ func TestWithoutFieldRounding(t *testing.T) {
 	want := "CREATE TABLE ds.t (a NUMERIC(2) , " +
 		"s STRUCT<e NUMERIC , d STRING >, x ARRAY<STRUCT<e NUMERIC >>, r ARRAY<BIGDECIMAL>)"
 	if !ok || d.sent != want {
+		t.Errorf("sent %q, want %q", d.sent, want)
+	}
+	// A STRING's or BYTES's length inside a STRUCT or ARRAY is cut too
+	// (#1493), a column's kept.
+	d, _, _ = parseDDLOptions("CREATE TABLE ds.t (p STRING(9), s STRUCT<a STRING(3), b BYTES(2)>, r ARRAY<STRING(4)>)")
+	if want := "CREATE TABLE ds.t (p STRING(9), s STRUCT<a STRING, b BYTES>, r ARRAY<STRING>)"; d.sent != want {
 		t.Errorf("sent %q, want %q", d.sent, want)
 	}
 	if d, _, _ := parseDDLOptions("CREATE TABLE ds.t (a NUMERIC(2))"); d.sent != "" {

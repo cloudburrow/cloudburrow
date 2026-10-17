@@ -116,7 +116,7 @@ func (x *tableIDs) lookup(project string, read func() (map[string][]string, bool
 // frontDataset reports whether a dataset is the front's own, whose tables
 // are left out of tableIDs.
 func frontDataset(id string) bool {
-	return id == resultsDataset
+	return id == resultsDataset || id == droppedDatasetID // #1460, dropped.go
 }
 
 // sharedID reports whether a dataset other than dataset has a table (or

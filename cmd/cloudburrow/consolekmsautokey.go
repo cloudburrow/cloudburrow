@@ -26,8 +26,9 @@ func (kmsEkmProvider) ID() string    { return "kms-ekm" }
 func (kmsEkmProvider) Title() string { return "Cloud KMS EKM connections" }
 
 // kmsEkmNote is what a stored connection is, and is not.
-const kmsEkmNote = "Connections are stored and returned as an SDK wrote them; nothing dials the external key manager. " +
-	"EXTERNAL_VPC keys, which use a connection, and Verify connectivity are not implemented."
+const kmsEkmNote = "Connections are stored and returned as an SDK wrote them; nothing dials the external key manager: " +
+	"CloudBurrow acts as every connection's EKM, keeping EXTERNAL_VPC keys' material itself, so Verify connectivity " +
+	"succeeds for any connection (#1469)."
 
 func (p kmsEkmProvider) ekm() *kms.EkmServer {
 	api := p.svc.API()
@@ -232,6 +233,7 @@ func (p kmsEkmProvider) DetailActions(ctx context.Context, project string, path 
 			{Name: "cryptoSpacePath", Label: "Crypto space path", Type: "text", Default: space, Help: "Required when the key management mode is CLOUD_KMS."},
 		}},
 		{ID: "setdefault", Label: "Set as default", Confirm: "The location's EkmConfig names this connection as its default."},
+		{ID: "verifyconnectivity", Label: "Verify connectivity"},
 	}
 }
 
@@ -251,6 +253,9 @@ func (p kmsEkmProvider) ActAt(ctx context.Context, project string, path []string
 		_, err := e.UpdateEkmConnection(ctx, &kmspb.UpdateEkmConnectionRequest{
 			EkmConnection: &kmspb.EkmConnection{Name: path[0], KeyManagementMode: kmsEkmMode(values["keyManagementMode"]), CryptoSpacePath: strings.TrimSpace(values["cryptoSpacePath"])},
 			UpdateMask:    &fieldmaskpb.FieldMask{Paths: []string{"key_management_mode", "crypto_space_path"}}})
+		return err
+	case "verifyconnectivity":
+		_, err := e.VerifyConnectivity(ctx, &kmspb.VerifyConnectivityRequest{Name: path[0]})
 		return err
 	case "setdefault":
 		_, err := e.UpdateEkmConfig(ctx, &kmspb.UpdateEkmConfigRequest{

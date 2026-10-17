@@ -129,11 +129,15 @@ func TestHSMKeysBehaveAsSoftwareOnesWithoutAttestation(t *testing.T) {
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"version_template.protection_level"}}}); err != nil {
 		t.Errorf("the same level = %v", err)
 	}
-	for _, pl := range []kmspb.ProtectionLevel{kmspb.ProtectionLevel_EXTERNAL, kmspb.ProtectionLevel_EXTERNAL_VPC, kmspb.ProtectionLevel_HSM_SINGLE_TENANT} {
+	// EXTERNAL needs skip_initial_version_creation, and EXTERNAL_VPC a
+	// connection (external_test.go, #1469), and HSM_SINGLE_TENANT a
+	// SingleTenantHsmInstance (hsm_test.go).
+	for pl, want := range map[kmspb.ProtectionLevel]codes.Code{kmspb.ProtectionLevel_EXTERNAL: codes.InvalidArgument,
+		kmspb.ProtectionLevel_EXTERNAL_VPC: codes.InvalidArgument, kmspb.ProtectionLevel_HSM_SINGLE_TENANT: codes.InvalidArgument} {
 		_, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "x", CryptoKey: &kmspb.CryptoKey{
 			Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, VersionTemplate: &kmspb.CryptoKeyVersionTemplate{ProtectionLevel: pl}}})
-		if status.Code(err) != codes.Unimplemented {
-			t.Errorf("%s = %v, want UNIMPLEMENTED", pl, err)
+		if status.Code(err) != want {
+			t.Errorf("%s = %v, want %s", pl, err, want)
 		}
 	}
 }
@@ -200,8 +204,11 @@ func TestEkmConnectionsAndConfig(t *testing.T) {
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"default_ekm_connection"}}}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("a missing default = %v", err)
 	}
-	if _, err := c.VerifyConnectivity(ctx, &kmspb.VerifyConnectivityRequest{Name: conn.GetName()}); status.Code(err) != codes.Unimplemented {
+	if _, err := c.VerifyConnectivity(ctx, &kmspb.VerifyConnectivityRequest{Name: conn.GetName()}); err != nil {
 		t.Errorf("VerifyConnectivity = %v", err)
+	}
+	if _, err := c.VerifyConnectivity(ctx, &kmspb.VerifyConnectivityRequest{Name: loc + "/ekmConnections/absent"}); status.Code(err) != codes.NotFound {
+		t.Errorf("VerifyConnectivity of an absent connection = %v", err)
 	}
 }
 

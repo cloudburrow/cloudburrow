@@ -56,7 +56,27 @@ func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref s
 	switch {
 	case tr.decorator != "":
 		return notBuilt("CloudBurrow does not read a partition decorator with FOR SYSTEM_TIME AS OF")
-	case m.ingestion():
+	}
+	text, code, msg := f.historySubquery(r, tr.dataset, tr.table, m, ref, past, expr)
+	if code != 0 {
+		return "", code, msg
+	}
+	if n := tr.next; n >= len(tr.stmt) || !tr.stmt[n].is("AS") && (tr.stmt[n].kind != tokWord && tr.stmt[n].kind != tokQuoted ||
+		tr.stmt[n].kind == tokWord && reservedWords[strings.ToUpper(tr.stmt[n].text)] || tr.stmt[n].is("FOR")) {
+		text += " AS " + quotePath([]string{tr.table})
+	}
+	return text, 0, ""
+}
+
+// historySubquery is historyRead's subquery of dataset.table, without an
+// alias; a CREATE SNAPSHOT TABLE or CLONE and a copy job of table@time
+// read a past time through it too (#1460, cloneddl.go, dropped.go).
+func (f front) historySubquery(r *http.Request, dataset, table string, m partitionMeta, ref string, past int64, expr string) (string, int, string) {
+	notBuilt := func(why string) (string, int, string) {
+		return "", http.StatusNotImplemented, "Not implemented here: FOR SYSTEM_TIME AS OF a past time of " + ref + ": " + why +
+			" (docs/compatibility.md). Nothing was run."
+	}
+	if m.ingestion() {
 		return notBuilt("the history CloudBurrow keeps of an ingestion-time partitioned table has no _PARTITIONTIME")
 	}
 	project := projectOf(f.base)
@@ -68,7 +88,7 @@ func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref s
 		return notBuilt("the table has no columns")
 	}
 	list := strings.Join(cols, ", ")
-	changes := quotePath([]string{project, tr.dataset, tr.table + changeTableSuffix})
+	changes := quotePath([]string{project, dataset, table + changeTableSuffix})
 	legacy := false
 	body, err := json.Marshal(queryOptions{UseLegacySQL: &legacy, Query: fmt.Sprintf(
 		"SELECT COUNTIF(_CHANGE_TYPE = 'START' AND googlesqlite_change_micros > %d), COUNT(googlesqlite_change_rowid) + COUNT(rowid) "+
@@ -79,7 +99,7 @@ func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref s
 	status, got := f.send(r, http.MethodPost, "/queries", body)
 	if status != http.StatusOK {
 		return notBuilt("CloudBurrow keeps no history of the table that it can read at that time; it records a table's " +
-			"changes from when it was made, and from when an ALTER TABLE last rebuilt it")
+			"changes from when it was made")
 	}
 	var res struct {
 		Rows []struct {
@@ -92,16 +112,12 @@ func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref s
 		return "", http.StatusInternalServerError, "cloudburrow: could not read the history of " + ref
 	}
 	if *res.Rows[0].F[0].V != "0" {
-		return notBuilt("CloudBurrow's history of the table starts after that time: an ALTER TABLE that rebuilds a table, " +
-			"and CREATE OR REPLACE TABLE, start it over")
+		return notBuilt("CloudBurrow's history of the table starts after that time (a table made before " +
+			"CloudBurrow recorded changes)")
 	}
 	text := fmt.Sprintf("(SELECT %s FROM (SELECT %s, _CHANGE_TYPE AS _cloudburrow_change, "+
 		"ROW_NUMBER() OVER (PARTITION BY googlesqlite_change_rowid ORDER BY rowid DESC) AS _cloudburrow_last "+
 		"FROM %s WHERE _CHANGE_TYPE != 'START' AND googlesqlite_change_micros <= %d AND (%s) IS NOT NULL) "+
 		"WHERE _cloudburrow_last = 1 AND _cloudburrow_change NOT IN ('DELETE', '"+changeEnd+"'))", list, list, changes, past, expr)
-	if n := tr.next; n >= len(tr.stmt) || !tr.stmt[n].is("AS") && (tr.stmt[n].kind != tokWord && tr.stmt[n].kind != tokQuoted ||
-		tr.stmt[n].kind == tokWord && reservedWords[strings.ToUpper(tr.stmt[n].text)] || tr.stmt[n].is("FOR")) {
-		text += " AS " + quotePath([]string{tr.table})
-	}
 	return text, 0, ""
 }

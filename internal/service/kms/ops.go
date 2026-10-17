@@ -58,6 +58,9 @@ func (s *Server) usableVersion(field, name string, want ...kmspb.CryptoKey_Crypt
 	if err := wantPurpose(k, want...); err != nil {
 		return keyVersion{}, err
 	}
+	if err := s.backendUsable(k); err != nil {
+		return keyVersion{}, err
+	}
 	var v keyVersion
 	if err := s.load(dbKey(versionPrefix, name), &v, "CryptoKeyVersion", name); err != nil {
 		return keyVersion{}, err
