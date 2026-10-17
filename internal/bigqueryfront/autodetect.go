@@ -79,6 +79,7 @@ func (f front) autodetectLoad(w http.ResponseWriter, r *http.Request, job jobBod
 			"load a schema, or create the table first.")
 		return
 	}
+	props, _ := loadTableProps(r) // #1457, loadtable.go: read before the body is sent
 	rec := newRecorder()
 	f.next.ServeHTTP(rec, r)
 	if rec.status != http.StatusOK {
@@ -121,7 +122,16 @@ func (f front) autodetectLoad(w http.ResponseWriter, r *http.Request, job jobBod
 		var raw struct {
 			Schema json.RawMessage `json:"schema"`
 		}
-		if json.Unmarshal(got, &raw) == nil && hasFloat(meta.Schema.Fields) && loadSucceeded(rec.body.Bytes()) {
+		if json.Unmarshal(got, &raw) == nil && props != nil && loadSucceeded(rec.body.Bytes()) {
+			// The table made again with the load's properties for it,
+			// which the emulator drops (#1457, loadtable.go); createTable
+			// makes a FLOAT column FLOAT64 as remakeFloat does.
+			if why := f.remakeTable(r, *dest, raw.Schema, props); why != "" {
+				f.failLoaded(w, rec, job, "CloudBurrow could not make the loaded table with the load's "+
+					"timePartitioning, rangePartitioning, clustering or destinationTableProperties: "+why)
+				return
+			}
+		} else if json.Unmarshal(got, &raw) == nil && hasFloat(meta.Schema.Fields) && loadSucceeded(rec.body.Bytes()) {
 			if why := f.remakeFloat(r, *dest, raw.Schema); why != "" {
 				f.failLoadedFloat(w, rec, job, why)
 				return

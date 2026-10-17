@@ -40,8 +40,11 @@ func TestParseAlter(t *testing.T) {
 		t.Errorf("ADD COLUMN with rounding_mode: %+v, %q, %q", st.actions, unsupported, msg)
 	}
 	for sql, want := range map[string]string{
-		"ALTER TABLE ds.t SET OPTIONS (enable_fine_grained_mutations=true)": "enable_fine_grained_mutations",
-		"ALTER TABLE ds.t ADD COLUMN a INT64 OPTIONS (x = 1) y":             "after the column's type",
+		"ALTER TABLE ds.t SET OPTIONS (enable_fine_grained_mutations=true)":                              "", // #1456
+		"ALTER TABLE ds.t SET OPTIONS (not_an_option=true)":                                              "not_an_option",
+		"ALTER TABLE ds.t ALTER COLUMN a SET OPTIONS (data_governance_tags=[(\"p/k\", \"v\")])":          "data_governance_tags",
+		"ALTER TABLE ds.t ALTER COLUMN a SET OPTIONS (data_policies += [\"{'name':'p.region-us.dp'}\"])": "",
+		"ALTER TABLE ds.t ADD COLUMN a INT64 OPTIONS (x = 1) y":                                          "after the column's type",
 	} {
 		toks, _ := lex(sql)
 		if got := alterUnsupported(toks); !strings.Contains(got, want) {
@@ -220,6 +223,21 @@ func TestCoercion(t *testing.T) {
 
 // TestDefaultChange (#1340): a schema update that changes a column's
 // default makes the table again; a column added with one is refused.
+func TestNestedDefaultRefused(t *testing.T) {
+	deep := []field{{Name: "r", Type: "RECORD", DefaultValueExpression: "STRUCT(STRUCT(1 AS y) AS q)", Fields: []field{{Name: "q",
+		Type: "RECORD", Fields: []field{{Name: "y", Type: "INTEGER", DefaultValueExpression: "1"}}}}}}
+	if got := checkSchema(deep, ""); !strings.Contains(got, "field r.q.y") {
+		t.Errorf("checkSchema: %q", got)
+	}
+	if got := nestedDefault(deep); !strings.Contains(got, "field r.q.y") {
+		t.Errorf("nestedDefault: %q", got)
+	}
+	deep[0].Fields[0].Fields[0].DefaultValueExpression = ""
+	if got := checkSchema(deep, ""); got != "" {
+		t.Errorf("a STRUCT column's own default: %q", got)
+	}
+}
+
 func TestDefaultChange(t *testing.T) {
 	old := []field{{Name: "id", Type: "INTEGER"}, {Name: "s", Type: "STRING", DefaultValueExpression: "'x'"}}
 	for _, c := range []struct {
@@ -232,6 +250,9 @@ func TestDefaultChange(t *testing.T) {
 		{[]field{{Name: "id", Type: "INTEGER", DefaultValueExpression: "1"}, {Name: "s", Type: "STRING"}}, true, false},
 		{append(append([]field{}, old...), field{Name: "n", Type: "INTEGER"}), false, false},
 		{append(append([]field{}, old...), field{Name: "n", Type: "INTEGER", DefaultValueExpression: "7"}), false, true},
+		// #1456: a STRUCT's field has no default of its own.
+		{append(append([]field{}, old...), field{Name: "r", Type: "RECORD", Fields: []field{{Name: "x", Type: "INTEGER",
+			DefaultValueExpression: "1"}}}), false, true},
 	} {
 		changed, refused := defaultChange(old, c.next)
 		if changed != c.changed || (refused != "") != c.refused {

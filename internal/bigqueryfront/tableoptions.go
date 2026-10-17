@@ -34,8 +34,9 @@ import (
 // What they do:
 //   - require_partition_filter: a query that reads the table with no
 //     filter on its partitioning column fails 400 as BigQuery's does
-//     (partitionFilterRefusal); the check is that the column is named in a
-//     WHERE of the statement that reads it, not that the filter can prune.
+//     (partitionFilterRefusal): a WHERE of the statement that reads it
+//     must have a predicate of the column alone that can prune its
+//     partitions, as BigQuery documents (partitionfilter.go, #1456).
 //   - max_staleness: a query reads the table as it is, never older data.
 //   - default_rounding_mode: kept; the engine rounds a value written to a
 //     parameterized NUMERIC or BIGNUMERIC column to its scale by the
@@ -68,7 +69,8 @@ type moreOption struct {
 // moreOptionNames are the options readMoreOption reads.
 var moreOptionNames = map[string]bool{"max_staleness": true, "default_rounding_mode": true, "tags": true,
 	"require_partition_filter": true, "enable_change_history": true, "storage_uri": true, "privacy_policy": true,
-	"file_format": true, "table_format": true} // #1427, iceberg.go
+	"file_format": true, "table_format": true, // #1427, iceberg.go
+	"enable_fine_grained_mutations": true} // #1456
 
 // readMoreOption reads name = val, one of moreOptionNames, of the statement
 // text sql. msg is why it cannot be read, a 400's.
@@ -144,11 +146,11 @@ func readMoreOption(name string, val []token, sql string) (o moreOption, msg str
 		}
 		k := map[string]string{"file_format": "fileFormat", "table_format": "tableFormat"}[name]
 		o.value = map[string]any{k: strings.ToUpper(v.(string))}
-	case "enable_change_history":
+	case "enable_change_history", "enable_fine_grained_mutations":
 		o.setting = true
 		v, ok := boolean()
 		if !ok {
-			return o, "the option enable_change_history must be a BOOL literal"
+			return o, "the option " + name + " must be a BOOL literal"
 		}
 		if v != nil {
 			o.value = strings.ToLower(fmt.Sprint(v))
@@ -199,7 +201,11 @@ func (o moreOption) put(meta map[string]json.RawMessage) {
 type tableSetting struct {
 	Created       string  `json:"created,omitempty"`
 	ChangeHistory *string `json:"changeHistory,omitempty"`
-	PrivacyPolicy *string `json:"privacyPolicy,omitempty"`
+	// FineGrainedMutations is enable_fine_grained_mutations (#1456):
+	// BigQuery's "fine-grained DML optimization", which changes how DML
+	// stores its writes, not what they write, so it is kept and read back.
+	FineGrainedMutations *string `json:"fineGrainedMutations,omitempty"`
+	PrivacyPolicy        *string `json:"privacyPolicy,omitempty"`
 	// MVChanged marks a materialized view whose base tables changed
 	// since its last refresh, its backing table already brought up to
 	// date by a read (materializedviews.go, #1415).
@@ -300,6 +306,8 @@ func (s *tableSettings) set(key, created string, o moreOption) {
 	switch o.name {
 	case "enable_change_history":
 		t.ChangeHistory = v
+	case "enable_fine_grained_mutations":
+		t.FineGrainedMutations = v
 	case "privacy_policy":
 		t.PrivacyPolicy = v
 		if v != nil {
@@ -400,6 +408,9 @@ func moreTableOptions(t infoTable, add func(name, typ, value string)) {
 	st, _ := t[settingsKey].(tableSetting)
 	if st.ChangeHistory != nil {
 		add("enable_change_history", "BOOL", *st.ChangeHistory)
+	}
+	if st.FineGrainedMutations != nil {
+		add("enable_fine_grained_mutations", "BOOL", *st.FineGrainedMutations)
 	}
 	if mv, _ := t["materializedView"].(map[string]any); mv != nil { // materializedviews.go
 		add("enable_refresh", "BOOL", strconv.FormatBool(mv["enableRefresh"] == true))
@@ -535,7 +546,8 @@ func (f front) checkReads(w http.ResponseWriter, r *http.Request, q queryOptions
 
 // partitionFilterRefusal is BigQuery's 400 of tr, a read of a table with
 // require_partition_filter, whose resource is meta, when its statement
-// names none of the partitioning columns in a WHERE clause, or "".
+// has no WHERE filter on a partitioning column that can prune
+// (partitionfilter.go), or "".
 func partitionFilterRefusal(tr tableRead, meta map[string]any, name string) string {
 	tp, _ := meta["timePartitioning"].(map[string]any)
 	rp, _ := meta["rangePartitioning"].(map[string]any)
@@ -553,21 +565,8 @@ func partitionFilterRefusal(tr tableRead, meta map[string]any, name string) stri
 	default:
 		return ""
 	}
-	where := false
-	for _, t := range tr.stmt {
-		if t.is("WHERE") {
-			where = true
-			continue
-		}
-		if !where || t.kind != tokWord && t.kind != tokQuoted {
-			continue
-		}
-		name := strings.Trim(t.text, "`")
-		for _, c := range columns {
-			if strings.EqualFold(name, c) {
-				return ""
-			}
-		}
+	if prunes(tr.stmt, columns, tp == nil) { // #1456, partitionfilter.go
+		return ""
 	}
 	quoted := make([]string, len(columns))
 	for i, c := range columns {

@@ -207,9 +207,11 @@ func TestQueryJobWriteDispositions(t *testing.T) {
 		{"WRITE_TRUNCATE_DATA, ALLOW_FIELD_RELAXATION", "WRITE_TRUNCATE_DATA", `[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`,
 			`[{"name":"a","type":"INTEGER"}]`, false, false, 501, "", `[{"name":"a","type":"INTEGER","mode":"REQUIRED"}]`, "",
 			`,"schemaUpdateOptions":["ALLOW_FIELD_RELAXATION"]`, "", ""},
+		// #1456: the INSERT leaves b out, and the engine writes its default.
 		{"WRITE_TRUNCATE_DATA, a missing column with a default", "WRITE_TRUNCATE_DATA",
 			`[{"name":"a","type":"INTEGER"},{"name":"b","type":"STRING","defaultValueExpression":"'x'"}]`, `[{"name":"a","type":"INTEGER"}]`,
-			false, false, 501, "", same, "", "", "", ""},
+			false, false, 200, "result", `[{"name":"a","type":"INTEGER"},{"name":"b","type":"STRING","defaultValueExpression":"'x'"}]`,
+			"", "", "", "(`a`) SELECT `a` FROM"},
 		{"a failed script", "WRITE_TRUNCATE_DATA", same, same, true, false, 200, "", same, "backendError", "", "", ""},
 		{"a failed query", "WRITE_TRUNCATE", same, same, false, true, 200, "", same, "invalidQuery", "", "", ""},
 	} {
