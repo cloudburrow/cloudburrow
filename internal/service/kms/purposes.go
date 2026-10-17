@@ -49,6 +49,10 @@ type algSpec struct {
 
 var algorithms = map[algo]algSpec{
 	kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION: {purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, keyLen: 32},
+	// EXTERNAL_SYMMETRIC_ENCRYPTION is AES-256-GCM (the algorithms page),
+	// computed by the instance acting as the EKM, and only at the external
+	// protection levels (external.go, #1469).
+	kmspb.CryptoKeyVersion_EXTERNAL_SYMMETRIC_ENCRYPTION: {purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, keyLen: 32},
 
 	kmspb.CryptoKeyVersion_RSA_SIGN_PSS_2048_SHA256:   {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, rsaBits: 2048, hash: crypto.SHA256, pss: true},
 	kmspb.CryptoKeyVersion_RSA_SIGN_PSS_3072_SHA256:   {purpose: kmspb.CryptoKey_ASYMMETRIC_SIGN, rsaBits: 3072, hash: crypto.SHA256, pss: true},
@@ -95,8 +99,8 @@ var algorithms = map[algo]algSpec{
 // algorithmPurpose is the purpose of an implemented algorithm. The documented
 // algorithms missing from the table are UNIMPLEMENTED: Go's standard library
 // has no secp256k1, ML-DSA, SLH-DSA or X-Wing, and AES_256_KWP
-// (AES_WRAPPING) and EXTERNAL_SYMMETRIC_ENCRYPTION need trusted wrapping or
-// EKM. ML-KEM is crypto/mlkem.
+// (AES_WRAPPING) needs trusted wrapping. EXTERNAL_SYMMETRIC_ENCRYPTION is
+// served for external keys only (levelAlgorithm). ML-KEM is crypto/mlkem.
 func algorithmPurpose(a algo) (kmspb.CryptoKey_CryptoKeyPurpose, bool) {
 	if s, ok := algorithms[a]; ok {
 		return s.purpose, true
@@ -213,11 +217,12 @@ func storedAlgorithm(a algo) string {
 }
 
 // Algorithms lists the implemented algorithms of purpose, by name, sorted,
-// for the console's Create key form.
+// for the console's Create key form, at SOFTWARE and HSM; ExternalAlgorithms
+// lists the external levels'.
 func Algorithms(purpose kmspb.CryptoKey_CryptoKeyPurpose) []string {
 	var out []string
 	for a, s := range algorithms {
-		if s.purpose == purpose {
+		if s.purpose == purpose && a != kmspb.CryptoKeyVersion_EXTERNAL_SYMMETRIC_ENCRYPTION {
 			out = append(out, a.String())
 		}
 	}

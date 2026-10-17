@@ -156,6 +156,10 @@ func TestExplainRefusals(t *testing.T) {
 	ctx := context.Background()
 	ig := &aiplatformpb.ExplanationSpecOverride{Parameters: &aiplatformpb.ExplanationParameters{
 		Method: &aiplatformpb.ExplanationParameters_IntegratedGradientsAttribution{IntegratedGradientsAttribution: &aiplatformpb.IntegratedGradientsAttribution{StepCount: 50}}}}
+	xrai := &aiplatformpb.ExplanationSpecOverride{Parameters: &aiplatformpb.ExplanationParameters{
+		Method: &aiplatformpb.ExplanationParameters_XraiAttribution{XraiAttribution: &aiplatformpb.XraiAttribution{StepCount: 50}}}}
+	examples := shapley(1, map[string][]any{"x": nil})
+	examples.ExamplesOverride = &aiplatformpb.ExamplesOverride{NeighborCount: 3}
 	for _, tt := range []struct {
 		name string
 		req  *aiplatformpb.ExplainRequest
@@ -163,7 +167,9 @@ func TestExplainRefusals(t *testing.T) {
 		want string
 	}{
 		{"no spec", &aiplatformpb.ExplainRequest{Endpoint: endpointName, Instances: numbers(t, 1)}, codes.FailedPrecondition, "explanation_spec_override"},
-		{"integrated gradients", &aiplatformpb.ExplainRequest{Endpoint: endpointName, Instances: numbers(t, 1), ExplanationSpecOverride: ig}, codes.Unimplemented, "gradients"},
+		{"integrated gradients", &aiplatformpb.ExplainRequest{Endpoint: endpointName, Instances: numbers(t, 1), ExplanationSpecOverride: ig}, codes.InvalidArgument, "prebuilt TensorFlow container"},
+		{"xrai", &aiplatformpb.ExplainRequest{Endpoint: endpointName, Instances: numbers(t, 1), ExplanationSpecOverride: xrai}, codes.InvalidArgument, "prebuilt TensorFlow container"},
+		{"examples", &aiplatformpb.ExplainRequest{Endpoint: endpointName, Instances: numbers(t, 1), ExplanationSpecOverride: examples}, codes.InvalidArgument, "output an embedding"},
 		{"path count", &aiplatformpb.ExplainRequest{Endpoint: endpointName, Instances: numbers(t, 1), ExplanationSpecOverride: shapley(51, map[string][]any{"x": nil})}, codes.InvalidArgument, "path_count"},
 		{"no inputs", &aiplatformpb.ExplainRequest{Endpoint: endpointName, Instances: numbers(t, 1), ExplanationSpecOverride: shapley(1, nil)}, codes.InvalidArgument, "metadata.inputs"},
 		{"no instances", &aiplatformpb.ExplainRequest{Endpoint: endpointName, ExplanationSpecOverride: shapley(1, map[string][]any{"x": nil})}, codes.InvalidArgument, "instances"},

@@ -43,7 +43,7 @@ func kmsOptions(h *Harness, variant string) []option.ClientOption {
 // attestation, since no HSM made one. key_access_justifications_policy is
 // stored at create, changed and cleared by UpdateCryptoKey, and not
 // enforced: Encrypt and Decrypt carry no justification and succeed.
-// EXTERNAL and EXTERNAL_VPC stay UNIMPLEMENTED naming the field.
+// EXTERNAL and EXTERNAL_VPC keys are TestKMSExternalKeys' (#1469).
 //
 // covers: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey, google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey, google.cloud.kms.v1.KeyManagementService/Encrypt, google.cloud.kms.v1.KeyManagementService/Decrypt, google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions, google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion
 func TestKMSHSMKeysAndKeyAccessJustifications(t *testing.T) {
@@ -113,13 +113,6 @@ func TestKMSHSMKeysAndKeyAccessJustifications(t *testing.T) {
 			if err != nil || upd.GetKeyAccessJustificationsPolicy() != nil {
 				t.Errorf("clearing the policy = %v, %v", upd, err)
 			}
-			for _, pl := range []kmspb.ProtectionLevel{kmspb.ProtectionLevel_EXTERNAL, kmspb.ProtectionLevel_EXTERNAL_VPC} {
-				_, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "ext", CryptoKey: &kmspb.CryptoKey{
-					Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT, VersionTemplate: &kmspb.CryptoKeyVersionTemplate{ProtectionLevel: pl}}})
-				if kmsCode(variant, err) != codes.Unimplemented || !strings.Contains(err.Error(), "protection_level") {
-					t.Errorf("%s = %v, want UNIMPLEMENTED naming protection_level", pl, err)
-				}
-			}
 		})
 	}
 }
@@ -145,10 +138,11 @@ func ekmCertificate(t *testing.T) []byte {
 // is created with one service resolver and a server certificate, which comes
 // back parsed; it is listed, read, and updated with its etag (a stale etag is
 // ABORTED); the location's EkmConfig takes it as the default connection.
-// VerifyConnectivity is UNIMPLEMENTED, since nothing reaches an EKM.
+// VerifyConnectivity succeeds, the instance acting as every connection's
+// EKM (#1469).
 //
 // covers: google.cloud.kms.v1.EkmService/CreateEkmConnection, google.cloud.kms.v1.EkmService/GetEkmConnection, google.cloud.kms.v1.EkmService/ListEkmConnections, google.cloud.kms.v1.EkmService/UpdateEkmConnection, google.cloud.kms.v1.EkmService/GetEkmConfig, google.cloud.kms.v1.EkmService/UpdateEkmConfig
-// covers: google.cloud.kms.v1.EkmService/VerifyConnectivity (unimplemented)
+// covers: google.cloud.kms.v1.EkmService/VerifyConnectivity
 func TestKMSEkmConnectionsAreStored(t *testing.T) {
 	h := New(t)
 	// Asked here, not first inside a subtest: an unserved KMS skips this
@@ -212,11 +206,11 @@ func TestKMSEkmConnectionsAreStored(t *testing.T) {
 			if err != nil || cfg.GetDefaultEkmConnection() != conn.GetName() {
 				t.Errorf("UpdateEkmConfig = %v, %v", cfg, err)
 			}
-			cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-			_, err = c.VerifyConnectivity(cctx, &kmspb.VerifyConnectivityRequest{Name: conn.GetName()})
-			cancel()
-			if kmsCode(variant, err) != codes.Unimplemented {
-				t.Errorf("VerifyConnectivity = %v, want UNIMPLEMENTED", err)
+			if _, err := c.VerifyConnectivity(ctx, &kmspb.VerifyConnectivityRequest{Name: conn.GetName()}); err != nil {
+				t.Errorf("VerifyConnectivity = %v", err)
+			}
+			if _, err := c.VerifyConnectivity(ctx, &kmspb.VerifyConnectivityRequest{Name: loc + "/ekmConnections/absent"}); kmsCode(variant, err) != codes.NotFound {
+				t.Errorf("VerifyConnectivity of an absent connection = %v, want NOT_FOUND", err)
 			}
 		})
 	}
