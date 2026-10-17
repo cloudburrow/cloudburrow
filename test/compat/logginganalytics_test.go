@@ -257,6 +257,9 @@ func TestLoggingLogAnalyticsLinkedDataset(t *testing.T) {
 func TestGcloudLoggingLinks(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
+	// gcloud logging's override is Cloud Logging's: SINK_LOGGING in the
+	// emulators shard, beside BigQuery (#1304).
+	runShardEndpoint(h, envSinkLogging, EnvLogging)
 	bq, project := bigqueryClient(t, h)
 	g := newGcloudSession(t, h)
 	n := time.Now().UnixNano()

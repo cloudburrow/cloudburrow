@@ -63,6 +63,7 @@ func TestConsoleRunCreateServiceFromSource(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: SubmitBuild builds with the host's Docker")
 	}
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage) // the source archive is uploaded to a bucket
 	addr := consoleAddr(t, h)
 	rc := runClient(t, h)
 	project := h.Project()

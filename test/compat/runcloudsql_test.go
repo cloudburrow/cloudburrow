@@ -11,6 +11,8 @@ import (
 	"time"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
+	"google.golang.org/api/option"
+	sqladmin "google.golang.org/api/sqladmin/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -29,6 +31,18 @@ func runCloudSQLConn(t *testing.T, h *Harness) string {
 	if strings.TrimSpace(os.Getenv("CLOUDBURROW_TEST_RUN_SQLADMIN")) == "" &&
 		(strings.TrimSpace(os.Getenv(EnvSQLAdmin)) == "" || strings.TrimSpace(os.Getenv(EnvCloudSQL)) == "") {
 		t.Skip("Cloud SQL is not enabled on this instance; run with --services run,cloudsql")
+	}
+	// The Admin API serves either engine: an instance with only Cloud SQL
+	// for MySQL has no postgres instance, and skips (#1304).
+	svc, err := sqladmin.NewService(h.Context(), option.WithoutAuthentication(),
+		option.WithEndpoint("http://"+runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_SQLADMIN", EnvSQLAdmin)+"/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Instances.Get(h.Project(), "postgres").Do(); httpCode(err) == http.StatusNotFound {
+		t.Skip("Cloud SQL for PostgreSQL is not enabled on this instance; run with --services run,cloudsql")
+	} else if err != nil {
+		t.Fatalf("the postgres instance: %v", err)
 	}
 	return h.Project() + ":us-central1:postgres"
 }

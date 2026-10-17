@@ -214,6 +214,8 @@ resource "google_secret_manager_secret" "s" {
 func TestTerraformCloudFunctionsFunctionIAM(t *testing.T) {
 	h := New(t)
 	c := functionsV1Client(t, h) // asks for the Run endpoint first
+	// The upload URL is a bucket's.
+	runShardEndpoint(h, "CLOUDBURROW_TEST_RUN_STORAGE", EnvStorage)
 	m := newTFModule(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
