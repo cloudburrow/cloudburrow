@@ -4561,6 +4561,7 @@
           "test/compat/consoleappengine1447_test.go:76 TestConsoleSchedulerEditAppEngineJob",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/schedulermissingtopic_test.go:20 TestSchedulerPubSubJobToAMissingTopicFails",
           "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens",
           "test/compat/terraform_more_test.go:291 TestTerraformSchedulerHTTPTarget",
           "test/compat/terraform_scheduler_test.go:40 TestTerraformSchedulerAndSubscription"
@@ -4600,6 +4601,7 @@
           "test/compat/appengine1506_test.go:156 TestSchedulerAppEngineDelivery",
           "test/compat/gcloudschedulerlogging_test.go:28 TestGcloudScheduler",
           "test/compat/scheduler_test.go:43 TestSchedulerHTTPAndPubSubJobs",
+          "test/compat/schedulermissingtopic_test.go:20 TestSchedulerPubSubJobToAMissingTopicFails",
           "test/compat/tasktokens_test.go:180 TestSchedulerJobTokens"
         ]
       },
@@ -4992,6 +4994,7 @@
         "method": "google.logging.v2.LoggingServiceV2/WriteLogEntries",
         "status": "Verified",
         "tests": [
+          "test/compat/consolelogseverity_test.go:25 TestConsoleFoldsLoggingSeverities",
           "test/compat/gcloudschedulerlogging_test.go:79 TestGcloudLogging",
           "test/compat/logging1404_test.go:111 TestLoggingSinksDeliverToTheirDestinations",
           "test/compat/logging1451_test.go:115 TestLoggingBigQuerySinkExportErrorsAndProtoPayload",
@@ -9272,6 +9275,7 @@
         "tests": [
           "test/compat/bigquery1548_test.go:37 TestBigQueryScriptsUndropAndAlterSchema",
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
+          "test/compat/bigquerydefaultkeyloads1576_test.go:102 TestBigQueryAlterSchemaSetsEveryOption",
           "test/compat/bigquerydefaultlocation_test.go:23 TestBigQueryProjectDefaultLocation",
           "test/compat/bigqueryfromitems1459_test.go:119 TestBigQueryCreateSchemaOptionsAndCollation",
           "test/compat/bigqueryhistory1522_test.go:335 TestBigQueryAlterSchemaTimeTravelLetsGoFirst",
@@ -9469,6 +9473,8 @@
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigqueryddlrest_test.go:124 TestBigQueryPartitionFilterThatPrunes",
           "test/compat/bigqueryddlrest_test.go:28 TestBigQueryNestedDefaultsAndTruncateDataDefaults",
+          "test/compat/bigquerydefaultkeyloads1576_test.go:102 TestBigQueryAlterSchemaSetsEveryOption",
+          "test/compat/bigquerydefaultkeyloads1576_test.go:23 TestBigQueryDefaultKeyOfResumableAndCloudStorageLoads",
           "test/compat/bigquerydefaultkeymore1456_test.go:25 TestBigQueryDefaultKeyOfScriptAndUploadTables",
           "test/compat/bigquerydefaultlocation_test.go:111 TestBigQueryRegionViewsListTheRegionsDatasets",
           "test/compat/bigquerydefaultlocation_test.go:23 TestBigQueryProjectDefaultLocation",
@@ -9657,6 +9663,7 @@
           "test/compat/bigqueryddloptions_test.go:27 TestBigQueryDDLOptionsReadBack",
           "test/compat/bigqueryddlrest_test.go:124 TestBigQueryPartitionFilterThatPrunes",
           "test/compat/bigqueryddlrest_test.go:28 TestBigQueryNestedDefaultsAndTruncateDataDefaults",
+          "test/compat/bigquerydefaultkeyloads1576_test.go:102 TestBigQueryAlterSchemaSetsEveryOption",
           "test/compat/bigquerydefaultkeymore1456_test.go:25 TestBigQueryDefaultKeyOfScriptAndUploadTables",
           "test/compat/bigquerydefaultlocation_test.go:111 TestBigQueryRegionViewsListTheRegionsDatasets",
           "test/compat/bigquerydefaultlocation_test.go:23 TestBigQueryProjectDefaultLocation",
