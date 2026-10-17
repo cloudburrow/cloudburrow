@@ -20,7 +20,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/structpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // spannerAdminFixture holds the official instance and database admin clients
@@ -30,6 +29,7 @@ import (
 // reported by the operation rather than the call is seen too.
 type spannerAdminFixture struct {
 	ctx               context.Context
+	addr              string // the Spanner endpoint
 	project, instance string // instance is the full resource name
 	database          string // the full resource name
 	inst              *instance.InstanceAdminClient
@@ -55,7 +55,7 @@ func newSpannerAdmin(t *testing.T, instanceID, dbID string) *spannerAdminFixture
 	}
 	t.Cleanup(func() { dc.Close() })
 	return &spannerAdminFixture{
-		ctx: ctx, project: h.Project(),
+		ctx: ctx, addr: addr, project: h.Project(),
 		instance: fmt.Sprintf("projects/%s/instances/%s", h.Project(), instanceID),
 		database: db, inst: ic, db: dc,
 	}
@@ -259,127 +259,25 @@ func TestSpannerDatabaseAdminSchemaListAndDrop(t *testing.T) {
 	}
 }
 
-// TestSpannerAdminRefusals records what Google's emulator answers for the
-// admin RPCs it does not implement, as its README documents for backups,
-// backup schedules, instance configurations and instance partition
-// updates: each is called through the official admin client, with a
-// well-formed request on a real instance and database, and must answer
-// UNIMPLEMENTED, saying why. The partition update is the emulator's own
-// refusal ("... updating instance partitions."); the rest, which the
-// emulator answers with an empty message, the call front refuses itself
-// since #1461, naming the reason (internal/spannerfront). Instance updates,
-// which the emulator refuses too, the front serves (TestSpannerUpdateInstance),
-// and so it does IAM policies, stored and not enforced (TestSpannerIAM, #1486).
+// TestSpannerAdminRefusals records the admin RPCs neither Google's emulator
+// nor the call front serves: each is called through the official admin
+// client, with a well-formed request on a real instance and database, and
+// must answer UNIMPLEMENTED, saying why. The emulator answers them with an
+// empty message; the call front refuses them itself since #1461, naming
+// the reason (internal/spannerfront). The backups, schedules, instance
+// configurations, partition updates, roles and operation listings it
+// refused before #1498 it serves (spannerbackups_test.go).
 //
 // A method the front starts serving fails this test, which is the signal
 // to move it to a test that verifies it.
 //
-// covers: google.spanner.admin.instance.v1.InstanceAdmin/MoveInstance (unimplemented)
-// covers: google.spanner.admin.instance.v1.InstanceAdmin/CreateInstanceConfig (unimplemented)
-// covers: google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstanceConfig (unimplemented)
-// covers: google.spanner.admin.instance.v1.InstanceAdmin/DeleteInstanceConfig (unimplemented)
-// covers: google.spanner.admin.instance.v1.InstanceAdmin/ListInstanceConfigOperations (unimplemented)
-// covers: google.spanner.admin.instance.v1.InstanceAdmin/UpdateInstancePartition (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseOperations (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/ListDatabaseRoles (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/AddSplitPoints (unimplemented)
 // covers: google.spanner.admin.database.v1.DatabaseAdmin/InternalUpdateGraphOperation (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/CreateBackup (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/CopyBackup (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/GetBackup (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackup (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackup (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/ListBackups (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/ListBackupOperations (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/RestoreDatabase (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/CreateBackupSchedule (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/GetBackupSchedule (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/UpdateBackupSchedule (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/DeleteBackupSchedule (unimplemented)
-// covers: google.spanner.admin.database.v1.DatabaseAdmin/ListBackupSchedules (unimplemented)
 func TestSpannerAdminRefusals(t *testing.T) {
 	f := newSpannerAdmin(t, "cb-refuse", "refusedb")
-	project := "projects/" + f.project
-	customConfig := project + "/instanceConfigs/custom-cb"
-	partition := f.instance + "/instancePartitions/p1"
-	backup := f.instance + "/backups/b1"
-	schedule := f.database + "/backupSchedules/s1"
-	expire := timestamppb.New(time.Now().Add(48 * time.Hour))
-	mask := func(paths ...string) *fieldmaskpb.FieldMask { return &fieldmaskpb.FieldMask{Paths: paths} }
-	fullDaily := &databasepb.BackupSchedule{
-		Name: schedule,
-		Spec: &databasepb.BackupScheduleSpec{ScheduleSpec: &databasepb.BackupScheduleSpec_CronSpec{
-			CronSpec: &databasepb.CrontabSpec{Text: "0 2 * * *"}}},
-		BackupTypeSpec: &databasepb.BackupSchedule_FullBackupSpec{FullBackupSpec: &databasepb.FullBackupSpec{}},
-	}
-	ia, da := f.inst, f.db
+	da := f.db
 
 	calls := map[string]func(context.Context) error{
-		"InstanceAdmin/MoveInstance": func(ctx context.Context) error {
-			op, err := ia.MoveInstance(ctx, &instancepb.MoveInstanceRequest{Name: f.instance, TargetConfig: f.config()})
-			if err != nil {
-				return err
-			}
-			_, err = op.Wait(ctx)
-			return err
-		},
-		"InstanceAdmin/CreateInstanceConfig": func(ctx context.Context) error {
-			op, err := ia.CreateInstanceConfig(ctx, &instancepb.CreateInstanceConfigRequest{
-				Parent: project, InstanceConfigId: "custom-cb",
-				InstanceConfig: &instancepb.InstanceConfig{Name: customConfig, BaseConfig: f.config(), DisplayName: "custom"}})
-			if err != nil {
-				return err
-			}
-			_, err = op.Wait(ctx)
-			return err
-		},
-		"InstanceAdmin/UpdateInstanceConfig": func(ctx context.Context) error {
-			op, err := ia.UpdateInstanceConfig(ctx, &instancepb.UpdateInstanceConfigRequest{
-				InstanceConfig: &instancepb.InstanceConfig{Name: f.config(), DisplayName: "renamed"},
-				UpdateMask:     mask("display_name")})
-			if err != nil {
-				return err
-			}
-			_, err = op.Wait(ctx)
-			return err
-		},
-		"InstanceAdmin/DeleteInstanceConfig": func(ctx context.Context) error {
-			return ia.DeleteInstanceConfig(ctx, &instancepb.DeleteInstanceConfigRequest{Name: customConfig})
-		},
-		"InstanceAdmin/ListInstanceConfigOperations": func(ctx context.Context) error {
-			_, err := ia.ListInstanceConfigOperations(ctx, &instancepb.ListInstanceConfigOperationsRequest{Parent: project}).Next()
-			return err
-		},
-		"InstanceAdmin/UpdateInstancePartition": func(ctx context.Context) error {
-			// The partition exists, so the refusal is not a NOT_FOUND in
-			// disguise.
-			cop, err := ia.CreateInstancePartition(ctx, &instancepb.CreateInstancePartitionRequest{
-				Parent: f.instance, InstancePartitionId: "p1",
-				InstancePartition: &instancepb.InstancePartition{Name: partition, Config: f.config(), DisplayName: "p1",
-					ComputeCapacity: &instancepb.InstancePartition_NodeCount{NodeCount: 1}}})
-			if err != nil {
-				return fmt.Errorf("creating the partition to update: %w", err)
-			}
-			if _, err := cop.Wait(ctx); err != nil {
-				return fmt.Errorf("creating the partition to update: %w", err)
-			}
-			op, err := ia.UpdateInstancePartition(ctx, &instancepb.UpdateInstancePartitionRequest{
-				InstancePartition: &instancepb.InstancePartition{Name: partition, DisplayName: "renamed"},
-				FieldMask:         mask("display_name")})
-			if err != nil {
-				return err
-			}
-			_, err = op.Wait(ctx)
-			return err
-		},
-		"DatabaseAdmin/ListDatabaseOperations": func(ctx context.Context) error {
-			_, err := da.ListDatabaseOperations(ctx, &databasepb.ListDatabaseOperationsRequest{Parent: f.instance}).Next()
-			return err
-		},
-		"DatabaseAdmin/ListDatabaseRoles": func(ctx context.Context) error {
-			_, err := da.ListDatabaseRoles(ctx, &databasepb.ListDatabaseRolesRequest{Parent: f.database}).Next()
-			return err
-		},
 		"DatabaseAdmin/AddSplitPoints": func(ctx context.Context) error {
 			_, err := da.AddSplitPoints(ctx, &databasepb.AddSplitPointsRequest{
 				Database: f.database,
@@ -390,77 +288,6 @@ func TestSpannerAdminRefusals(t *testing.T) {
 		"DatabaseAdmin/InternalUpdateGraphOperation": func(ctx context.Context) error {
 			_, err := da.InternalUpdateGraphOperation(ctx, &databasepb.InternalUpdateGraphOperationRequest{
 				Database: f.database, OperationId: "op1"})
-			return err
-		},
-		"DatabaseAdmin/CreateBackup": func(ctx context.Context) error {
-			op, err := da.CreateBackup(ctx, &databasepb.CreateBackupRequest{
-				Parent: f.instance, BackupId: "b1",
-				Backup: &databasepb.Backup{Database: f.database, ExpireTime: expire}})
-			if err != nil {
-				return err
-			}
-			_, err = op.Wait(ctx)
-			return err
-		},
-		"DatabaseAdmin/CopyBackup": func(ctx context.Context) error {
-			op, err := da.CopyBackup(ctx, &databasepb.CopyBackupRequest{
-				Parent: f.instance, BackupId: "b2", SourceBackup: backup, ExpireTime: expire})
-			if err != nil {
-				return err
-			}
-			_, err = op.Wait(ctx)
-			return err
-		},
-		"DatabaseAdmin/GetBackup": func(ctx context.Context) error {
-			_, err := da.GetBackup(ctx, &databasepb.GetBackupRequest{Name: backup})
-			return err
-		},
-		"DatabaseAdmin/UpdateBackup": func(ctx context.Context) error {
-			_, err := da.UpdateBackup(ctx, &databasepb.UpdateBackupRequest{
-				Backup:     &databasepb.Backup{Name: backup, ExpireTime: expire},
-				UpdateMask: mask("expire_time")})
-			return err
-		},
-		"DatabaseAdmin/DeleteBackup": func(ctx context.Context) error {
-			return da.DeleteBackup(ctx, &databasepb.DeleteBackupRequest{Name: backup})
-		},
-		"DatabaseAdmin/ListBackups": func(ctx context.Context) error {
-			_, err := da.ListBackups(ctx, &databasepb.ListBackupsRequest{Parent: f.instance}).Next()
-			return err
-		},
-		"DatabaseAdmin/ListBackupOperations": func(ctx context.Context) error {
-			_, err := da.ListBackupOperations(ctx, &databasepb.ListBackupOperationsRequest{Parent: f.instance}).Next()
-			return err
-		},
-		"DatabaseAdmin/RestoreDatabase": func(ctx context.Context) error {
-			op, err := da.RestoreDatabase(ctx, &databasepb.RestoreDatabaseRequest{
-				Parent: f.instance, DatabaseId: "restored",
-				Source: &databasepb.RestoreDatabaseRequest_Backup{Backup: backup}})
-			if err != nil {
-				return err
-			}
-			_, err = op.Wait(ctx)
-			return err
-		},
-		"DatabaseAdmin/CreateBackupSchedule": func(ctx context.Context) error {
-			_, err := da.CreateBackupSchedule(ctx, &databasepb.CreateBackupScheduleRequest{
-				Parent: f.database, BackupScheduleId: "s1", BackupSchedule: fullDaily})
-			return err
-		},
-		"DatabaseAdmin/GetBackupSchedule": func(ctx context.Context) error {
-			_, err := da.GetBackupSchedule(ctx, &databasepb.GetBackupScheduleRequest{Name: schedule})
-			return err
-		},
-		"DatabaseAdmin/UpdateBackupSchedule": func(ctx context.Context) error {
-			_, err := da.UpdateBackupSchedule(ctx, &databasepb.UpdateBackupScheduleRequest{
-				BackupSchedule: fullDaily, UpdateMask: mask("spec")})
-			return err
-		},
-		"DatabaseAdmin/DeleteBackupSchedule": func(ctx context.Context) error {
-			return da.DeleteBackupSchedule(ctx, &databasepb.DeleteBackupScheduleRequest{Name: schedule})
-		},
-		"DatabaseAdmin/ListBackupSchedules": func(ctx context.Context) error {
-			_, err := da.ListBackupSchedules(ctx, &databasepb.ListBackupSchedulesRequest{Parent: f.database}).Next()
 			return err
 		},
 	}
@@ -483,7 +310,7 @@ func TestSpannerAdminRefusals(t *testing.T) {
 		}
 		t.Logf("%s: %v", n, err)
 	}
-	if want := 23; len(calls) != want {
+	if want := 2; len(calls) != want {
 		t.Errorf("%d refusals are called, want %d, one per covers line", len(calls), want)
 	}
 }

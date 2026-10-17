@@ -167,17 +167,17 @@ func TestUpdateInstanceOverREST(t *testing.T) {
 func TestRefusalsNameWhy(t *testing.T) {
 	addr, _ := serve(t)
 	ctx := context.Background()
-	_, err := databasepb.NewDatabaseAdminClient(lastConn).GetBackup(ctx, &databasepb.GetBackupRequest{Name: "projects/p/instances/i/backups/b"})
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "snapshot") {
-		t.Errorf("GetBackup: %v, want UNIMPLEMENTED naming why", err)
+	_, err := databasepb.NewDatabaseAdminClient(lastConn).AddSplitPoints(ctx, &databasepb.AddSplitPointsRequest{Database: "projects/p/instances/i/databases/d"})
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(status.Convert(err).Message(), "split") {
+		t.Errorf("AddSplitPoints: %v, want UNIMPLEMENTED naming why", err)
 	}
-	req, _ := http.NewRequest("GET", "http://"+addr+"/v1/projects/p/instances/i/databases/d/backupSchedules", nil)
+	req, _ := http.NewRequest("POST", "http://"+addr+"/v1/projects/p/instances/i/databases/d:addSplitPoints", strings.NewReader("{}"))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 501 {
-		t.Errorf("REST backup schedules = %d, want 501", resp.StatusCode)
+		t.Errorf("REST addSplitPoints = %d, want 501", resp.StatusCode)
 	}
 }

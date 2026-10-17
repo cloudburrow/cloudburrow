@@ -47,9 +47,11 @@ func TestSpannerDDLSplitter(t *testing.T) {
 // partition on an instance's; Delete instance partition on a partition's,
 // leaving it; nothing on a table's page or the partitions page (#1207). A
 // partition's path cannot be read as a database's: no database ID has a
-// capital letter.
+// capital letter. Since #1498 an instance's page also has Create backup,
+// Create custom configuration and Move instance, a database's Create backup
+// schedule, and a partition's Edit instance partition.
 func TestSpannerAdminActionsAreOfferedWhereTheyBelong(t *testing.T) {
-	p := spannerProvider{}
+	_, p := startFakeSpannerAdmin(t)
 	ids := func(path ...string) []string {
 		var out []string
 		for _, a := range p.DetailActions(context.Background(), "proj", path) {
@@ -57,16 +59,16 @@ func TestSpannerAdminActionsAreOfferedWhereTheyBelong(t *testing.T) {
 		}
 		return out
 	}
-	if got := ids("inst"); !slices.Equal(got, []string{"createpartition", "dropinstance"}) {
+	if got := ids("inst"); !slices.Equal(got, []string{"editinstance", "createpartition", "createbackup", "createconfig", "moveinstance", "dropinstance"}) {
 		t.Errorf("an instance's actions = %v", got)
 	}
-	if got := ids("inst", "db"); !slices.Equal(got, []string{"updateddl", "dropdatabase"}) {
+	if got := ids("inst", "db"); !slices.Equal(got, []string{"updateddl", "createschedule", "dropdatabase", "dropprotection"}) {
 		t.Errorf("a database's actions = %v", got)
 	}
 	if got := ids("inst", spannerPartitions); len(got) != 0 {
 		t.Errorf("the partitions page offers %v, want nothing", got)
 	}
-	if got := ids("inst", spannerPartitions, "p1"); !slices.Equal(got, []string{"deletepartition"}) {
+	if got := ids("inst", spannerPartitions, "p1"); !slices.Equal(got, []string{"editpartition", "deletepartition"}) {
 		t.Errorf("a partition's actions = %v", got)
 	}
 	if got := ids("inst", "db", "Table"); len(got) != 0 {
