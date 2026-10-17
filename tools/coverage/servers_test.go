@@ -69,6 +69,8 @@ func TestTheRegistryMatchesTheServers(t *testing.T) {
 	redis.Register(srv)
 	redis.EnableClusters(context.Background(), nil, nil, nil)
 	redisadmin.NewClusterServer(redis).Register(srv)
+	redis.EnableValkey(context.Background(), nil, nil, nil)
+	redisadmin.NewMemorystoreServer(redis).Register(srv)
 	vertexai.NewServer(nil).RegisterGRPC(srv)
 	adminpb.RegisterFirestoreAdminServer(srv, firestoreadmin.New(""))
 	logging.NewAdmin(store.NewMemory()).Register(srv)

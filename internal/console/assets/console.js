@@ -117,6 +117,8 @@ const ROUTES = [
   // Memorystore for Redis Cluster (#1519), a page of its own beside the
   // instances, as the Memorystore console's Redis Cluster tab is.
   { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Memorystore Redis Cluster", section: "Databases" },
+  // Memorystore for Valkey (#1519), memorystore.googleapis.com's instances.
+  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Memorystore for Valkey", section: "Databases" },
   { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", section: "Storage" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading

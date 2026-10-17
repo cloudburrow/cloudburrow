@@ -254,6 +254,8 @@ func consoleProviders(d consoleDeps, metrics console.MetricsSource, series *cons
 		{config.ServiceMemorystore, func(a string) console.Provider { return newMemorystoreProvider(d.cfg, a, d.memorystore) }},
 		// Memorystore for Redis Cluster's page (#1519).
 		{config.ServiceMemorystore, func(string) console.Provider { return redisClusterProvider{svc: d.memorystore} }},
+		// Memorystore for Valkey's page (#1519).
+		{config.ServiceMemorystore, func(string) console.Provider { return newValkeyProvider(d.memorystore) }},
 		// The emulator serves the instance's default project and no other, so
 		// the screen is told which one that is (#698).
 		{config.ServiceBigQuery, func(a string) console.Provider {

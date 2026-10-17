@@ -73,6 +73,7 @@ import (
 	_ "cloud.google.com/go/iam/apiv1/iampb"
 	_ "cloud.google.com/go/kms/apiv1/kmspb"
 	_ "cloud.google.com/go/logging/apiv2/loggingpb"
+	_ "cloud.google.com/go/memorystore/apiv1/memorystorepb"
 	_ "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	_ "cloud.google.com/go/redis/apiv1/redispb"
 	_ "cloud.google.com/go/redis/cluster/apiv1/clusterpb"
@@ -153,8 +154,8 @@ var areas = []area{
 	{Key: "vertexai", Title: "Vertex AI PredictionService", Own: true, Services: []string{"google.cloud.aiplatform.v1.PredictionService"}},
 	// The Memorystore for Redis admin API (#1302), over the one Valkey
 	// server --services memorystore runs, and Memorystore for Redis
-	// Cluster (#1519) on the same port.
-	{Key: "memorystore", Title: "Memorystore for Redis", Own: true, Services: []string{"google.cloud.redis.v1.CloudRedis", "google.cloud.redis.cluster.v1.CloudRedisCluster"}},
+	// Cluster and Memorystore for Valkey (#1519) on the same port.
+	{Key: "memorystore", Title: "Memorystore for Redis", Own: true, Services: []string{"google.cloud.redis.v1.CloudRedis", "google.cloud.redis.cluster.v1.CloudRedisCluster", "google.cloud.memorystore.v1.Memorystore"}},
 	// Pub/Sub's IAM (#1367) is the google.iam.v1.IAMPolicy mixin, which the
 	// kms area lists (mixin keys are global), served by the Pub/Sub front
 	// over gRPC and REST: its rows are named by the REST methods' discovery

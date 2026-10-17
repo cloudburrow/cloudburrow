@@ -292,5 +292,44 @@ policies, cross-cluster replication and CMEK. `AUTH_MODE_IAM_AUTH` is kept and r
 IAM token is checked: the nodes take connections without AUTH. After a restart of CloudBurrow a
 cluster is formed again, empty.
 
-Memorystore for Valkey (`memorystore.googleapis.com`) is not served yet: its official Go client
-is not a dependency of CloudBurrow (#1519).
+## 9. Memorystore for Valkey (#1519)
+
+`google.cloud.memorystore.v1.Memorystore` (memorystore.googleapis.com) is served on the same
+admin port: gRPC beside CloudRedis, so `cloud.google.com/go/memorystore/apiv1` takes
+`CLOUDBURROW_MEMORYSTORE_ENDPOINT` as it is; its JSON API under `/memorystore`, since its paths
+are CloudRedis's (`/v1/projects/*/locations/*/instances`). `cloudburrow gcloud-setup` writes
+`api_endpoint_overrides/memorystore = http://HOST:PORT/memorystore/`, and `cloudburrow
+terraform` sets `memorystore_custom_endpoint = http://HOST:PORT/memorystore/v1/`.
+
+```sh
+gcloud memorystore instances create cache --location=us-central1 --shard-count=3 --replica-count=1 \
+  --node-type=shared-core-nano --psc-auto-connections=network=projects/PROJECT/global/networks/default,projectId=PROJECT
+```
+
+An instance is built as a Redis cluster is (§8), of the same Valkey 8.1 image:
+
+- **`CLUSTER` mode** (the default): `shard_count` primaries (1 to 250) with `replica_count`
+  replicas each (0 to 5), the slots spread over the primaries. `endpoints` asked with a
+  `psc_auto_connection` come back with a `CONNECTION_TYPE_DISCOVERY` connection, the first
+  primary's host address and port, which `discovery_endpoints[0]` repeats; start a cluster client
+  there.
+- **`CLUSTER_DISABLED` mode**: one primary (`shard_count` 1) and `replica_count` replicas, plain
+  Valkey servers kept in step by `REPLICAOF`. The connections are `CONNECTION_TYPE_PRIMARY` (the
+  primary) and `CONNECTION_TYPE_READER`, which here is the first replica's address, not a balancer
+  over all of them. There is no automatic failover (§5's is the Redis instances').
+- Connections come back in the form they were asked in: `endpoints`, or the deprecated
+  `psc_auto_connections`; the Terraform provider reads each back as what it was configured with.
+
+`UpdateInstance` changes `shard_count` (slots and keys move), `replica_count`, `node_type` (1.4,
+6.5, 13 or 58 GB of `maxmemory`), `engine_configs` and `persistence_config`, set on every running
+node, and keeps `labels`, `deletion_protection_enabled`, `endpoints`, zone distribution and
+maintenance policy. `persistence_config` RDB is `save <period> 1`, AOF `appendonly yes` with its
+`appendfsync`; but as for a Redis cluster, after a restart of CloudBurrow an instance is formed
+again, empty. The console's **Memorystore for Valkey** page lists, creates (either mode), edits
+and deletes instances.
+
+Not served: `engine_version` other than `VALKEY_8_0` (one image, Valkey 8.1, runs; `VALKEY_7_2`
+and `VALKEY_9_0` are 501), in-transit encryption (`SERVER_AUTHENTICATION` is 501: the nodes serve
+plain TCP), `TOKEN_AUTH`, node types whose size is not modelled here, CMEK, backups,
+cross-instance replication, migration and server CA modes, each 501 with the reason. `IAM_AUTH`
+is kept and returned, but no token is checked.
