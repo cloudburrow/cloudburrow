@@ -654,8 +654,31 @@ func loadRegistry(root string) (map[string]string, error) {
 	return r, nil
 }
 
+// loadReasons reads tools/coverage/reasons.json: why a method CloudBurrow
+// refuses (Unimplemented), or serves with no official-SDK test that can
+// reach it (Implemented), stays so (#1530). The coverage page shows it, so
+// a gap names its cause. A reason on any other row is an error.
+func loadReasons(root string) (map[string]string, error) {
+	b, err := os.ReadFile(filepath.Join(root, "tools", "coverage", "reasons.json"))
+	if os.IsNotExist(err) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var r map[string]string
+	if err := json.Unmarshal(b, &r); err != nil {
+		return nil, fmt.Errorf("reasons.json: %w", err)
+	}
+	return r, nil
+}
+
 func build(root string) ([]Page, error) {
 	reg, err := loadRegistry(root)
+	if err != nil {
+		return nil, err
+	}
+	reasons, err := loadReasons(root)
 	if err != nil {
 		return nil, err
 	}
@@ -738,9 +761,24 @@ func build(root string) ([]Page, error) {
 			default:
 				row.Status = "Unknown"
 			}
+			if why, ok := reasons[m]; ok {
+				switch row.Status {
+				case "Unimplemented":
+					row.Note = "returns UNIMPLEMENTED (in-process check): " + why
+				case "Implemented":
+					row.Note = "no official-SDK test can reach it: " + why
+				default:
+					problems = append(problems, fmt.Sprintf("reasons.json gives %s a reason, but it is %s: only an Unimplemented or Implemented method has one", m, row.Status))
+				}
+			}
 			p.Rows = append(p.Rows, row)
 		}
 		pages = append(pages, p)
+	}
+	for m := range reasons {
+		if !known[m] {
+			problems = append(problems, fmt.Sprintf("reasons.json entry %s names no method in the proto surface", m))
+		}
 	}
 	for m := range reg {
 		if !known[m] {
@@ -790,6 +828,8 @@ func render(pages []Page) map[string][]byte {
 		"(`tools/coverage/registry.json`) and `// covers:` annotations on `test/compat` tests. CI runs\n" +
 		"`go run ./tools/coverage -check` and fails when this is stale or an annotation is wrong, and\n" +
 		"`tools/coverage/servers_test.go` proves every Unimplemented method returns `codes.Unimplemented`.\n" +
+		"Where a method stays Unimplemented, or Implemented with no official-SDK test that can reach it,\n" +
+		"`tools/coverage/reasons.json` says why, and its row shows the reason.\n" +
 		"Do not edit these files by hand.\n\n")
 	readme.WriteString("| Service | RPCs | " + strings.Join(statusOrder, " | ") + " | Unverified codes |\n|---|---|" + strings.Repeat("---|", len(statusOrder)+1) + "\n")
 	for _, p := range pages {

@@ -55,7 +55,7 @@ var consoleCoverages = map[config.Service]consoleCoverage{
 // clusterScreens are the registry's screens that belong to no selectable
 // service: Resource Manager, the AI catalogue and CloudBurrow's own cluster.
 var clusterScreens = []string{
-	"projects", "hierarchy", "tags", "iam", "serviceusage", "ai",
+	"projects", "hierarchy", "tags", "iam", "serviceusage", "serviceusage-operations", "ai",
 	"workloads", "pods", "k8sservices", "jobs", "nodes", "k8sstorage", "events",
 }
 

@@ -139,6 +139,14 @@ methods #1462 refuses and why.
 - **`instances.truncateLog`** truncates MySQL's `mysql.general_log` (`MYSQL_GENERAL_TABLE`) or
   `mysql.slow_log` (`MYSQL_SLOW_TABLE`); on PostgreSQL it is 400, as on Cloud SQL.
 
+- **Storage shrink (#1535)**: `projects.instances.getDiskShrinkConfig` answers
+  `minimalTargetSizeGb`, measured from the server's databases' size on disk (rounded up to a GB,
+  at least 10 GB); `performDiskShrink` sets a created primary's `settings.dataDiskSizeGb` to a
+  smaller `targetSizeGb`, no smaller than that; `resetReplicaSize` sets a read replica's to its
+  primary's. `dataDiskSizeGb` is recorded as given: the server's volume has no fixed size.
+  Through `gcloud sql instances get-storage-shrink-config` and `perform-storage-shrink`, and the
+  console's Storage shrink config, Shrink storage and Reset replica size.
+
 Refused with 501, each naming what is missing:
 
 | Methods | Why |
@@ -150,7 +158,6 @@ Refused with 501, each naming what is missing:
 | `demote`, `demoteMaster` | they make a Cloud SQL instance a replica of an external primary, to migrate back out of Cloud SQL; the other direction, `startExternalSync`, is served (#1501) |
 | `instances.switchover` | swaps the primary with a cross-region disaster recovery replica of an Enterprise Plus replication cluster; CloudBurrow has one region |
 | `reencrypt` | the server's volume is not encrypted with a customer-managed Cloud KMS key |
-| `getDiskShrinkConfig`, `performDiskShrink`, `resetReplicaSize` | storage is the server's volume in the cluster, not a provisioned persistent disk |
 | `rescheduleMaintenance` | no Google-managed maintenance is ever scheduled |
 
 ### Imports and exports (#1380)

@@ -244,3 +244,72 @@ func TestGcloudServices(t *testing.T) {
 		t.Errorf("gcloud services enable compute = %v; want the refusal:\n%s", err, out)
 	}
 }
+
+// covers: serviceusage.operations.list, serviceusage.operations.cancel, serviceusage.operations.delete, serviceusage.operations.get
+//
+// TestServiceUsageOperations (#1530), with google.golang.org/api/serviceusage/v1:
+// operations.list answers the operations a disable and an enable returned,
+// in order and paged; cancel of a done operation answers Empty and leaves
+// it done; delete forgets it, so get and a second delete are 404; and a
+// filter, whose grammar Google does not document for this API, is refused
+// 501 saying so.
+func TestServiceUsageOperations(t *testing.T) {
+	h := New(t)
+	c := serviceUsageClient(t, h)
+	ctx := h.Context()
+	p := "projects/" + h.Project()
+	dis, err := c.Services.Disable(p+"/services/storage.googleapis.com", &su.DisableServiceRequest{}).Context(ctx).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	en, err := c.Services.Enable(p+"/services/storage.googleapis.com", &su.EnableServiceRequest{}).Context(ctx).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Other tests share the instance, so look for these two among them.
+	var listed []string
+	call := c.Operations.List().PageSize(1)
+	if err := call.Pages(ctx, func(r *su.ListOperationsResponse) error {
+		if len(r.Operations) > 1 {
+			return fmt.Errorf("a page of size 1 held %d operations", len(r.Operations))
+		}
+		for _, op := range r.Operations {
+			if op.Name == dis.Name || op.Name == en.Name {
+				listed = append(listed, op.Name)
+				if !op.Done {
+					return fmt.Errorf("%s is listed not done", op.Name)
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("operations.list: %v", err)
+	}
+	if len(listed) != 2 || listed[0] != dis.Name || listed[1] != en.Name {
+		t.Fatalf("operations.list held %v; want the disable then the enable", listed)
+	}
+
+	if _, err := c.Operations.Cancel(dis.Name, &su.CancelOperationRequest{}).Context(ctx).Do(); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if op, err := c.Operations.Get(dis.Name).Context(ctx).Do(); err != nil || !op.Done || op.Error != nil {
+		t.Errorf("get after cancel = %+v, %v; want it done", op, err)
+	}
+	if _, err := c.Operations.Delete(dis.Name).Context(ctx).Do(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := c.Operations.Get(dis.Name).Context(ctx).Do(); httpCode(err) != http.StatusNotFound {
+		t.Errorf("get of a deleted operation = %v; want 404", err)
+	}
+	if _, err := c.Operations.Delete(dis.Name).Context(ctx).Do(); httpCode(err) != http.StatusNotFound {
+		t.Errorf("second delete = %v; want 404", err)
+	}
+	// The change the deleted operation made stays.
+	if st := serviceState(t, h, c, h.Project(), "storage.googleapis.com"); st != "ENABLED" {
+		t.Errorf("after deleting an operation storage is %s", st)
+	}
+	if _, err := c.Operations.List().Filter("done=true").Context(ctx).Do(); httpCode(err) != http.StatusNotImplemented ||
+		!strings.Contains(err.Error(), "filter") {
+		t.Errorf("list with a filter = %v; want 501 naming the filter", err)
+	}
+}

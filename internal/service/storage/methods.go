@@ -102,6 +102,19 @@ var methodStatus = map[string]status{
 	"storage.rapidCaches.update":                       built,
 }
 
+// objectIAMReason is why object IAM stays 501, excluded by ADR-0006 as
+// amended by #504 (#1530).
+const objectIAMReason = "excluded by ADR-0006: Google's JSON API reference documents no object-level IAM; " +
+	"an object's access is its bucket's or managed folder's IAM policy and its ACLs"
+
+// unimplementedReason is the reason an unbuilt method's 501 gives, beside
+// its name, where one is known.
+var unimplementedReason = map[string]string{
+	"storage.objects.getIamPolicy":       objectIAMReason,
+	"storage.objects.setIamPolicy":       objectIAMReason,
+	"storage.objects.testIamPermissions": objectIAMReason,
+}
+
 // MethodStatuses reports every discovery method and whether it is built,
 // for the coverage report (tools/coverage, #520): a built method is served,
 // and any other answers 501 notImplemented naming it.

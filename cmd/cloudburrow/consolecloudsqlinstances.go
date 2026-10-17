@@ -361,6 +361,7 @@ func (p cloudSQLInstancesProvider) Detail(ctx context.Context, project string, p
 	d.Actions = append(d.Actions, failoverActions(in)...)
 	d.Actions = append(d.Actions, externalSyncActions(in, externalReplica(ctx, svc, project, in))...)
 	d.Actions = append(d.Actions, dataAPIActions(ctx, svc, project, in)...)
+	d.Actions = append(d.Actions, storageActions(in)...)
 	if pitr == "On" && strings.HasPrefix(in.DatabaseVersion, "MYSQL_") {
 		d.Actions = append(d.Actions, console.Action{ID: "binlog-clone", Label: "Clone to binary log position", Fields: []console.Field{
 			{Name: "destination", Label: "New instance ID", Type: "text", Required: true, Pattern: "^[a-z][a-z0-9\\-]{0,53}[a-z0-9]$",
@@ -735,6 +736,14 @@ func (p cloudSQLInstancesProvider) ActAtResult(ctx context.Context, project stri
 		out.Total = len(out.Items)
 		return out, nil
 	}
+	if action == "storage-shrink-config" && len(path) == 1 {
+		svc, err := p.api(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out, _, err := storageResult(ctx, svc, project, path[0], action)
+		return out, err
+	}
 	if (action == "run-sql" || action == "precheck-upgrade") && len(path) == 1 {
 		svc, err := p.api(ctx)
 		if err != nil {
@@ -883,6 +892,9 @@ func (p cloudSQLInstancesProvider) actAt(ctx context.Context, project string, pa
 			return err
 		}
 		if ok, err := dataAPIAct(ctx, svc, project, name, action, v); ok {
+			return err
+		}
+		if ok, err := storageAct(ctx, svc, project, name, action, v); ok {
 			return err
 		}
 		return fmt.Errorf("unknown action %q", action)
