@@ -110,6 +110,9 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	s.prov = newMemorystoreProvisioner(s.cfg, bg)
 	s.api.EnableCreate(bg, s.prov, redisadmin.Dial, db, nil)
 	s.api.PersistentMode(s.cfg.Mode == config.ModePersistent)
+	// Memorystore for Redis Cluster (#1519): a real Redis Cluster per
+	// cluster, its nodes Valkey servers in cluster mode.
+	s.api.EnableClusters(bg, s.prov, redisadmin.DialCluster, db)
 	// Import and export (#1384) read and write this instance's Cloud
 	// Storage, so without it they say so.
 	if serviceEnabled(s.cfg, config.ServiceStorage) {
@@ -132,12 +135,15 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	if err := s.api.Restore(); err != nil {
 		return fmt.Errorf("Memorystore instances: %w", err)
 	}
+	if err := s.api.RestoreClusters(); err != nil {
+		return fmt.Errorf("Memorystore clusters: %w", err)
+	}
 	// The cluster comes up after this API does: servers are provisioned,
 	// and the ones no instance keeps any more removed, once the server
 	// `up` runs answers through its tunnel.
 	go func() {
 		if s.prov.waitCluster(bg, s.tunnel) {
-			s.prov.tidy(bg, s.api.Servers())
+			s.prov.tidy(bg, append(s.api.Servers(), s.api.ClusterServers()...))
 		}
 	}()
 	addr := net.JoinHostPort(s.cfg.BindAddress, strconv.Itoa(s.cfg.Endpoints.MemorystoreAdmin))
@@ -148,8 +154,14 @@ func (s *memorystoreAdminService) Start(ctx context.Context) error {
 	}
 	ops := redisadmin.NewOperationsServer(s.api)
 	locs := redisadmin.NewLocationsServer(s.api)
-	register := func(g grpc.ServiceRegistrar) { s.api.Register(g); ops.Register(g); locs.Register(g) }
-	var jsonAPI http.Handler = redisadmin.NewRESTHandler(register)
+	clusters := redisadmin.NewClusterServer(s.api)
+	register := func(g grpc.ServiceRegistrar) {
+		s.api.Register(g)
+		clusters.Register(g)
+		ops.Register(g)
+		locs.Register(g)
+	}
+	var jsonAPI http.Handler = s.api.ClusterLabels(redisadmin.NewRESTHandler(register))
 	if s.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, s.requests)
 	}
@@ -272,6 +284,52 @@ func (p *memorystoreProvisioner) Provision(ctx context.Context, spec redisadmin.
 	p.tunnels[spec.Server] = f
 	p.mu.Unlock()
 	return f.HostAddr(), nil
+}
+
+// StartClusterNode runs a Redis Cluster node (#1519): the server of spec
+// in cluster mode, serving on one port that is the same in the cluster and
+// on the host, so the port the node announces to cluster clients is the
+// one its tunnel listens on, and returns its host address, pod IP and port.
+func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redisadmin.Spec) (string, string, int, error) {
+	select {
+	case <-p.ready:
+	case <-ctx.Done():
+		return "", "", 0, ctx.Err()
+	}
+	f := netfwd.New(netfwd.Target{Name: spec.Server, Namespace: p.cfg.Cluster.Namespace}, p.cfg.KubeconfigPath(), p.cfg.BindAddress)
+	_, ps, err := net.SplitHostPort(f.HostAddr())
+	if err != nil {
+		return "", "", 0, fmt.Errorf("reserve a port for %s: %w", spec.Server, err)
+	}
+	port, _ := strconv.Atoi(ps)
+	cfg := map[string]string{"port": ps}
+	for k, v := range spec.Configs {
+		cfg[k] = v
+	}
+	b := components.MemorystoreServerOf(components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
+		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg})
+	b.Port = port
+	if err := p.installer.InstallBackends(ctx, []components.Backend{b}, memorystoreReadyTimeout); err != nil {
+		return "", "", 0, err
+	}
+	ip, err := p.installer.Kubectl(ctx, "-n", p.cfg.Cluster.Namespace, "get", "pods", "-l", "app="+spec.Server,
+		"--field-selector", "status.phase=Running", "-o", "jsonpath={.items[0].status.podIP}")
+	if err != nil || strings.TrimSpace(ip) == "" {
+		return "", "", 0, fmt.Errorf("pod IP of %s: %v", spec.Server, err)
+	}
+	f = netfwd.New(netfwd.Target{Name: spec.Server, Namespace: p.cfg.Cluster.Namespace, ServicePort: port, HostPort: port},
+		p.cfg.KubeconfigPath(), p.cfg.BindAddress)
+	if err := f.Start(p.bg); err != nil {
+		return "", "", 0, fmt.Errorf("tunnel to %s: %w", spec.Server, err)
+	}
+	p.mu.Lock()
+	old := p.tunnels[spec.Server]
+	p.tunnels[spec.Server] = f
+	p.mu.Unlock()
+	if old != nil {
+		_ = old.Stop(ctx)
+	}
+	return f.HostAddr(), strings.TrimSpace(ip), port, nil
 }
 
 // memorystoreNodeSuffix ends a Standard tier node's server name.

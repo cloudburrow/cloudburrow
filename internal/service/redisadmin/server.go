@@ -92,6 +92,9 @@ type Server struct {
 	// created are the instances CreateInstance made, when EnableCreate
 	// was called; nil otherwise, and CreateInstance is UNIMPLEMENTED.
 	created *instances
+	// clusters are the Redis clusters CreateCluster made, when
+	// EnableClusters was called (#1519); nil otherwise.
+	clusters *clusters
 }
 
 // NewServer returns the API over backend, describing inst.

@@ -10,7 +10,8 @@ import (
 )
 
 // The JSON API shares the gRPC port, as redis.googleapis.com serves both:
-// the google.api.http bindings of google.cloud.redis.v1, read from the
+// the google.api.http bindings of google.cloud.redis.v1 and, for Redis
+// Cluster (#1519), google.cloud.redis.cluster.v1, read from the
 // generated descriptors, transcoded to the same Server gRPC calls. A bound
 // method the server does not implement answers 501 UNIMPLEMENTED.
 
@@ -33,7 +34,7 @@ var mixins = []*annotations.HttpRule{
 
 // Transcoder returns the JSON API's configuration, with nothing registered.
 func Transcoder() *rest.Transcoder {
-	return &rest.Transcoder{Packages: []string{"google.cloud.redis.v1"}, Mixins: mixins, SnakeCaseMasks: true}
+	return &rest.Transcoder{Packages: []string{"google.cloud.redis.v1", "google.cloud.redis.cluster.v1"}, Mixins: mixins, SnakeCaseMasks: true}
 }
 
 // NewRESTHandler returns the JSON API for what register adds.
