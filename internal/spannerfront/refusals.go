@@ -14,15 +14,17 @@ import (
 // by the front UNIMPLEMENTED with the reason (#1461): the emulator refuses
 // them with an empty message (measured: TestSpannerAdminRefusals). The
 // backups, schedules, configurations, roles and operations it refused are
-// served by the front since #1498, and AddSplitPoints since #1523
-// (splitpoints.go).
+// served by the front since #1498, and AddSplitPoints and
+// FetchCacheUpdate since #1523 (splitpoints.go, cacheupdate.go).
 const databaseService = "/google.spanner.admin.database.v1.DatabaseAdmin/"
 
 var refusedMethods = map[string]string{
-	databaseService + "InternalUpdateGraphOperation": "it is an internal method of Google's own services",
-	// The data API's location-aware routing stream, which the emulator
-	// answers UNIMPLEMENTED with an empty message on the first receive.
-	"/google.spanner.v1.Spanner/FetchCacheUpdate": "location-aware routing has nowhere to route: the emulator is one server, with no splits or replicas to send a client to",
+	// Google documents it as "an internal API called by Spanner Graph
+	// jobs. You should never need to call this API directly", and each
+	// of its fields as "Internal field, do not use directly"
+	// (google/spanner/admin/database/v1/spanner_database_admin.proto):
+	// there is no documented behaviour to serve.
+	databaseService + "InternalUpdateGraphOperation": "it is an internal API called by Spanner Graph jobs, which Google documents no behaviour of (\"You should never need to call this API directly\")",
 }
 
 // refusedREST are the same methods' REST bindings.

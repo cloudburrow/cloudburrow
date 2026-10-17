@@ -8,8 +8,8 @@
 // (tableiam.go), backups and snapshots (backups.go), authorized views and
 // the data calls through them (authviews.go), logical and materialized views
 // (sqlviews.go), schema bundles (schemabundles.go), memory layers and hot
-// tablets (memlayers.go), SQL (query.go) and change streams
-// (changestreams.go). It answers the Refused methods UNIMPLEMENTED, and
+// tablets (memlayers.go), SQL (query.go), change streams
+// (changestreams.go) and the session data plane (sessions.go). It answers the Refused methods UNIMPLEMENTED, and
 // forwards every other call to the emulator, each message passed through
 // undecoded but the writes to a table with a change stream, which it
 // decodes to log them.
@@ -125,6 +125,13 @@ func New(upstream string, logf func(format string, args ...any)) (*Front, error)
 		for name, m := range ms {
 			f.served[name] = m
 		}
+	}
+	sessionUnary, sessionStreams := f.sessionMethods()
+	for name, m := range sessionUnary {
+		f.served[name] = m
+	}
+	for name, serve := range sessionStreams {
+		f.streams[name] = serve
 	}
 	// A deleted table's change log goes with it.
 	deleteTable := f.served[admin+"DeleteTable"]
@@ -462,11 +469,13 @@ func firstName(m any) string {
 	return ""
 }
 
-// streaming reports Bigtable's server-streaming methods.
+// streaming reports Bigtable's streaming methods: the server-streaming
+// ones and the sessions (sessions.go).
 func streaming(method string) bool {
 	switch method {
 	case data + "ReadRows", data + "MutateRows", data + "SampleRowKeys", data + "ReadChangeStream",
-		data + "GenerateInitialChangeStreamPartitions", data + "ExecuteQuery":
+		data + "GenerateInitialChangeStreamPartitions", data + "ExecuteQuery",
+		openTable, openAuthorizedView, openMaterializedView:
 		return true
 	}
 	return false

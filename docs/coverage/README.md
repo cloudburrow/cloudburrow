@@ -33,8 +33,8 @@ Do not edit these files by hand.
 | [Firestore](firestore.md) | 17 | 16 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [Firestore Admin API](firestoreadmin.md) | 32 | 25 | 0 | 7 | 0 | 0 | 0 | 0 |
 | [Datastore](datastore.md) | 8 | 8 | 0 | 0 | 0 | 0 | 0 | 0 |
-| [Bigtable](bigtable.md) | 84 | 80 | 4 | 0 | 0 | 0 | 0 | 0 |
-| [Spanner](spanner.md) | 65 | 63 | 2 | 0 | 0 | 0 | 0 | 0 |
+| [Bigtable](bigtable.md) | 84 | 83 | 1 | 0 | 0 | 0 | 0 | 0 |
+| [Spanner](spanner.md) | 65 | 64 | 1 | 0 | 0 | 0 | 0 | 0 |
 | [BigQuery (REST API v2)](bigquery.md) | 47 | 47 | 0 | 0 | 0 | 0 | 0 | 0 |
 | [Cloud SQL Admin API (v1)](sqladmin.md) | 80 | 61 | 0 | 19 | 0 | 0 | 0 | 0 |
 | [Service Usage API (v1)](serviceusage.md) | 10 | 10 | 0 | 0 | 0 | 0 | 0 | 0 |
