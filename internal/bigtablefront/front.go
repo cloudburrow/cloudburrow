@@ -3,10 +3,14 @@
 //
 // The emulator (cbtemulator, bttest) embeds a nil server interface for the
 // RPCs it does not implement, so any of them panics it: the pod restarts and
-// every table, all in memory, is lost. The front answers those RPCs
-// UNIMPLEMENTED itself, as the emulator answers the ones it does refuse
-// (authorized views, snapshots), and forwards every other call to the
-// emulator unchanged, each message passed through undecoded.
+// every table, all in memory, is lost. The front serves what the emulator
+// lacks itself: the instance admin API (instances.go), table IAM
+// (tableiam.go), backups and snapshots (backups.go), authorized views and
+// the data calls through them (authviews.go), logical and materialized views
+// (sqlviews.go), schema bundles (schemabundles.go), memory layers and hot
+// tablets (memlayers.go) and SQL (query.go). It answers the Refused methods
+// UNIMPLEMENTED, and forwards every other call to the emulator unchanged,
+// each message passed through undecoded.
 //
 // It serves gRPC and, on the same port, the admin REST API (rest.go) and the readiness path the emulator's
 // container is probed through (internal/frontready), since the emulator
@@ -46,8 +50,9 @@ const (
 )
 
 // Refused are the methods the emulator has no implementation of and would
-// panic on, measured one by one (#1206), each with the message the front
-// answers it UNIMPLEMENTED with.
+// panic on, measured one by one (#1206), that the front does not serve
+// either (#1499), each with the message the front answers it UNIMPLEMENTED
+// with.
 var Refused = map[string]string{
 	admin + "UndeleteTable":                        "the emulator does not currently support undeleting tables",
 	data + "GenerateInitialChangeStreamPartitions": changeStreams,

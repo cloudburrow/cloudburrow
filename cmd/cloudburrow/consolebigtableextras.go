@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/bigtable"
 	btapb "cloud.google.com/go/bigtable/admin/apiv2/adminpb"
@@ -194,12 +195,22 @@ func (p bigtableInstancesProvider) backupsListing(ctx context.Context, project, 
 func backupActions() []console.Action {
 	return []console.Action{
 		{ID: "restorebackup", Label: "Restore", Fields: []console.Field{{Name: "table", Label: "New table ID", Type: "text", Required: true}}},
+		{ID: "editexpiry", Label: "Edit expiry", Fields: []console.Field{{Name: "days", Label: "Expire after (days)", Type: "text", Required: true, Default: "7", Help: "From now; 1 to 90."}}},
+		{ID: "copybackup", Label: "Copy", Fields: []console.Field{
+			{Name: "cluster", Label: "Destination cluster ID", Type: "text", Required: true},
+			{Name: "backup", Label: "New backup ID", Type: "text", Required: true},
+			{Name: "days", Label: "Expire after (days)", Type: "text", Default: "7"}}},
 		{ID: "deletebackup", Label: "Delete backup", Destructive: true},
 	}
 }
 
-func sqlViewActions() []console.Action {
-	return []console.Action{{ID: "deleteview", Label: "Delete view", Destructive: true}}
+func sqlViewActions(materialized bool) []console.Action {
+	edit := console.Action{ID: "editview", Label: "Edit query", Fields: []console.Field{{Name: "query", Label: "Query", Type: "textarea", Required: true}}}
+	if materialized {
+		// Google does not change a materialized view's query.
+		edit = console.Action{ID: "editview", Label: "Edit deletion protection", Fields: []console.Field{{Name: "protected", Label: "Deletion protection", Type: "checkbox"}}}
+	}
+	return []console.Action{edit, {ID: "deleteview", Label: "Delete view", Destructive: true}}
 }
 
 func (p bigtableInstancesProvider) sqlViewsListing(ctx context.Context, c *bigtable.InstanceAdminClient, instance string, materialized bool) console.Listing {
@@ -235,7 +246,7 @@ func (p bigtableInstancesProvider) sqlViewsListing(ctx context.Context, c *bigta
 	for _, v := range views {
 		list.Items = append(list.Items, console.Resource{Name: lastSegment(v.id),
 			Fields:  map[string]string{"Query": v.query, "Deletion protection": strconv.FormatBool(v.protected)},
-			Actions: sqlViewActions(), ActsOn: []string{instance, segment, lastSegment(v.id)}})
+			Actions: sqlViewActions(materialized), ActsOn: []string{instance, segment, lastSegment(v.id)}})
 	}
 	list.Total = len(list.Items)
 	list.Note = "The query is kept as written; the emulator does not run views, so a view is never read."
@@ -271,6 +282,9 @@ func memoryLayerEnabled(ctx context.Context, c *bigtable.InstanceAdminClient, na
 // actInstanceExtra performs the extra instance page actions; ok is false
 // for any other.
 func (p bigtableInstancesProvider) actInstanceExtra(ctx context.Context, c *bigtable.InstanceAdminClient, project string, path []string, action string, values map[string]string) (bool, error) {
+	if ok, err := p.actTableExtrasRow(ctx, project, path, action, values); ok {
+		return true, err
+	}
 	inst := path[0]
 	name := "projects/" + project + "/instances/" + inst
 	switch {
@@ -278,6 +292,14 @@ func (p bigtableInstancesProvider) actInstanceExtra(ctx context.Context, c *bigt
 		return true, c.CreateLogicalView(ctx, inst, &bigtable.LogicalViewInfo{LogicalViewID: strings.TrimSpace(values["view"]), Query: values["query"]})
 	case len(path) == 1 && action == "creatematerialized":
 		return true, c.CreateMaterializedView(ctx, inst, &bigtable.MaterializedViewInfo{MaterializedViewID: strings.TrimSpace(values["view"]), Query: values["query"]})
+	case len(path) == 3 && path[1] == bigtableLogicalSegment && action == "editview":
+		return true, c.UpdateLogicalView(ctx, inst, bigtable.LogicalViewInfo{LogicalViewID: path[2], Query: values["query"]})
+	case len(path) == 3 && path[1] == bigtableMaterializedSegment && action == "editview":
+		protection := bigtable.Unprotected
+		if values["protected"] == "true" {
+			protection = bigtable.Protected
+		}
+		return true, c.UpdateMaterializedView(ctx, inst, bigtable.MaterializedViewInfo{MaterializedViewID: path[2], DeletionProtection: protection})
 	case len(path) == 3 && path[1] == bigtableLogicalSegment && action == "deleteview":
 		return true, c.DeleteLogicalView(ctx, inst, path[2])
 	case len(path) == 3 && path[1] == bigtableMaterializedSegment && action == "deleteview":
@@ -312,6 +334,190 @@ func (p bigtableInstancesProvider) actInstanceExtra(ctx context.Context, c *bigt
 		}
 		_, err = op.Wait(ctx)
 		return true, err
+	}
+	return false, nil
+}
+
+const (
+	bigtableSnapshotsSegment = "snapshots"
+	bigtableAuthViewsSegment = "authorizedViews"
+	bigtableBundlesSegment   = "schemaBundles"
+)
+
+func snapshotActions() []console.Action {
+	return []console.Action{
+		{ID: "tablefromsnapshot", Label: "Create table", Fields: []console.Field{{Name: "table", Label: "New table ID", Type: "text", Required: true}}},
+		{ID: "deletesnapshot", Label: "Delete snapshot", Destructive: true},
+	}
+}
+
+func authViewRowActions() []console.Action {
+	return []console.Action{
+		{ID: "editauthview", Label: "Edit authorized view", Fields: []console.Field{
+			{Name: "prefixes", Label: "Row key prefixes", Type: "text", Help: "Comma-separated; empty for every row."},
+			{Name: "columns", Label: "Columns", Type: "text", Required: true, Help: "Comma-separated family:qualifier, family:prefix* or family:*."}}},
+		{ID: "deleteauthview", Label: "Delete authorized view", Destructive: true},
+	}
+}
+
+func bundleRowActions() []console.Action {
+	return []console.Action{
+		{ID: "editbundle", Label: "Edit schema bundle", Fields: []console.Field{
+			{Name: "descriptors", Label: "Descriptor set (base64)", Type: "textarea", Required: true}}},
+		{ID: "deletebundle", Label: "Delete schema bundle", Destructive: true},
+	}
+}
+
+// subsetText is an authorized view's subset in the console's words.
+func subsetText(sv *btapb.AuthorizedView_SubsetView) (prefixes, columns string) {
+	var ps, cs []string
+	for _, p := range sv.GetRowPrefixes() {
+		ps = append(ps, string(p))
+	}
+	fams := make([]string, 0, len(sv.GetFamilySubsets()))
+	for f := range sv.GetFamilySubsets() {
+		fams = append(fams, f)
+	}
+	sort.Strings(fams)
+	for _, f := range fams {
+		fs := sv.GetFamilySubsets()[f]
+		for _, q := range fs.GetQualifiers() {
+			cs = append(cs, f+":"+string(q))
+		}
+		for _, q := range fs.GetQualifierPrefixes() {
+			cs = append(cs, f+":"+string(q)+"*")
+		}
+	}
+	return strings.Join(ps, ", "), strings.Join(cs, ", ")
+}
+
+// tableExtrasListings are an instance's Snapshots, Authorized views and
+// Schema bundles tabs, read with the generated table admin client.
+func (p bigtableInstancesProvider) tableExtrasListings(ctx context.Context, project, instance string) []console.Section {
+	snaps := console.Listing{Columns: []string{"Cluster", "Source table", "Deletes"}, NameColumn: "Snapshot ID", Noun: "snapshots"}
+	views := console.Listing{Columns: []string{"Table", "Row prefixes", "Columns"}, NameColumn: "Authorized view ID", Noun: "authorized views"}
+	bundles := console.Listing{Columns: []string{"Table", "Size"}, NameColumn: "Schema bundle ID", Noun: "schema bundles"}
+	sections := func() []console.Section {
+		snaps.Total, views.Total, bundles.Total = len(snaps.Items), len(views.Items), len(bundles.Items)
+		return []console.Section{
+			{ID: "snapshots", Label: "Snapshots", Listing: snaps},
+			{ID: "authorizedviews", Label: "Authorized views", Listing: views},
+			{ID: "schemabundles", Label: "Schema bundles", Listing: bundles},
+		}
+	}
+	admin, err := bigtable.NewAdminClient(ctx, project, instance, localOpts(p.endpoint)...)
+	if err != nil {
+		snaps.Unavailable, views.Unavailable, bundles.Unavailable = err.Error(), err.Error(), err.Error()
+		return sections()
+	}
+	defer admin.Close()
+	a := admin.TableAdminClientV2()
+	parent := "projects/" + project + "/instances/" + instance
+	sit := a.ListSnapshots(ctx, &btapb.ListSnapshotsRequest{Parent: parent + "/clusters/-"})
+	for {
+		s, err := sit.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			snaps.Unavailable = "listing snapshots: " + err.Error()
+			break
+		}
+		parts := strings.Split(s.GetName(), "/")
+		if len(parts) != 8 {
+			continue
+		}
+		snaps.Items = append(snaps.Items, console.Resource{Name: parts[7],
+			Fields:  map[string]string{"Cluster": parts[5], "Source table": lastSegment(s.GetSourceTable().GetName()), "Deletes": s.GetDeleteTime().AsTime().UTC().Format("2006-01-02 15:04 MST")},
+			Actions: snapshotActions(), ActsOn: []string{instance, bigtableSnapshotsSegment, parts[5] + ":" + parts[7]}})
+	}
+	tables, err := admin.Tables(ctx)
+	if err != nil {
+		views.Unavailable, bundles.Unavailable = "listing tables: "+err.Error(), "listing tables: "+err.Error()
+		return sections()
+	}
+	sort.Strings(tables)
+	for _, t := range tables {
+		vit := a.ListAuthorizedViews(ctx, &btapb.ListAuthorizedViewsRequest{Parent: parent + "/tables/" + t, View: btapb.AuthorizedView_FULL})
+		for {
+			v, err := vit.Next()
+			if err != nil {
+				break
+			}
+			ps, cs := subsetText(v.GetSubsetView())
+			views.Items = append(views.Items, console.Resource{Name: lastSegment(v.GetName()),
+				Fields:  map[string]string{"Table": t, "Row prefixes": ps, "Columns": cs},
+				Actions: authViewRowActions(), ActsOn: []string{instance, bigtableAuthViewsSegment, t + ":" + lastSegment(v.GetName())}})
+		}
+		bit := a.ListSchemaBundles(ctx, &btapb.ListSchemaBundlesRequest{Parent: parent + "/tables/" + t})
+		for {
+			b, err := bit.Next()
+			if err != nil {
+				break
+			}
+			bundles.Items = append(bundles.Items, console.Resource{Name: lastSegment(b.GetName()),
+				Fields:  map[string]string{"Table": t, "Size": strconv.Itoa(len(b.GetProtoSchema().GetProtoDescriptors())) + " bytes"},
+				Actions: bundleRowActions(), ActsOn: []string{instance, bigtableBundlesSegment, t + ":" + lastSegment(b.GetName())}})
+		}
+	}
+	return sections()
+}
+
+// actTableExtrasRow performs the Snapshots, Authorized views and Schema
+// bundles rows' actions, and the Backups rows' Edit expiry and Copy.
+func (p bigtableInstancesProvider) actTableExtrasRow(ctx context.Context, project string, path []string, action string, values map[string]string) (bool, error) {
+	if len(path) != 3 {
+		return false, nil
+	}
+	owner, id, ok := strings.Cut(path[2], ":")
+	switch path[1] {
+	case bigtableSnapshotsSegment, bigtableAuthViewsSegment, bigtableBundlesSegment, bigtableBackupsSegment:
+	default:
+		return false, nil
+	}
+	if !ok {
+		return true, fmt.Errorf("%q is not owner:id", path[2])
+	}
+	admin, err := bigtable.NewAdminClient(ctx, project, path[0], localOpts(p.endpoint)...)
+	if err != nil {
+		return true, err
+	}
+	defer admin.Close()
+	switch {
+	case path[1] == bigtableSnapshotsSegment && action == "tablefromsnapshot":
+		return true, admin.CreateTableFromSnapshot(ctx, strings.TrimSpace(values["table"]), owner, id)
+	case path[1] == bigtableSnapshotsSegment && action == "deletesnapshot":
+		return true, admin.DeleteSnapshot(ctx, owner, id)
+	case path[1] == bigtableAuthViewsSegment && action == "editauthview":
+		sv, err := parseSubsetView(values["prefixes"], values["columns"])
+		if err != nil {
+			return true, err
+		}
+		return true, admin.UpdateAuthorizedView(ctx, bigtable.UpdateAuthorizedViewConf{AuthorizedViewConf: bigtable.AuthorizedViewConf{TableID: owner, AuthorizedViewID: id, AuthorizedView: sv}})
+	case path[1] == bigtableAuthViewsSegment && action == "deleteauthview":
+		return true, admin.DeleteAuthorizedView(ctx, owner, id)
+	case path[1] == bigtableBundlesSegment && action == "editbundle":
+		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(values["descriptors"]))
+		if err != nil {
+			return true, fmt.Errorf("the descriptor set is not base64: %v", err)
+		}
+		return true, admin.UpdateSchemaBundle(ctx, bigtable.UpdateSchemaBundleConf{SchemaBundleConf: bigtable.SchemaBundleConf{TableID: owner, SchemaBundleID: id,
+			ProtoSchema: &bigtable.ProtoSchemaInfo{ProtoDescriptors: raw}}})
+	case path[1] == bigtableBundlesSegment && action == "deletebundle":
+		return true, admin.DeleteSchemaBundle(ctx, owner, id)
+	case path[1] == bigtableBackupsSegment && action == "editexpiry":
+		days, err := strconv.Atoi(strings.TrimSpace(values["days"]))
+		if err != nil || days < 1 || days > 90 {
+			return true, fmt.Errorf("expire after %q days: want a whole number of days from 1 to 90", values["days"])
+		}
+		return true, admin.UpdateBackup(ctx, owner, id, time.Now().Add(time.Duration(days)*24*time.Hour))
+	case path[1] == bigtableBackupsSegment && action == "copybackup":
+		days, err := strconv.Atoi(strings.TrimSpace(values["days"]))
+		if err != nil || days < 1 || days > 90 {
+			return true, fmt.Errorf("expire after %q days: want a whole number of days from 1 to 90", values["days"])
+		}
+		return true, admin.CopyBackup(ctx, owner, id, project, path[0], strings.TrimSpace(values["cluster"]), strings.TrimSpace(values["backup"]),
+			time.Now().Add(time.Duration(days)*24*time.Hour))
 	}
 	return false, nil
 }

@@ -160,6 +160,54 @@ func TestConsoleBigtableSQLSnapshotsBundlesAndViews(t *testing.T) {
 	if _, err := admin.TableInfo(ctx, "items2"); err != nil {
 		t.Errorf("the restored table: %v", err)
 	}
+	if code, out := iact([]string{"shop-inst", "backups", "shop-c1:bk"}, "editexpiry", map[string]string{"days": "30"}); code != http.StatusOK {
+		t.Errorf("Edit expiry = %d: %s", code, out)
+	}
+	if b, err := admin.BackupInfo(ctx, "shop-c1", "bk"); err != nil || time.Until(b.ExpireTime) < 29*24*time.Hour {
+		t.Errorf("BackupInfo after Edit expiry = %+v, %v", b, err)
+	}
+	if code, out := iact([]string{"shop-inst", "backups", "shop-c1:bk"}, "copybackup", map[string]string{"cluster": "shop-c1", "backup": "bk2", "days": "7"}); code != http.StatusOK {
+		t.Errorf("Copy = %d: %s", code, out)
+	}
+	if _, err := admin.BackupInfo(ctx, "shop-c1", "bk2"); err != nil {
+		t.Errorf("the copy: %v", err)
+	}
+	// Snapshots, authorized views and schema bundles are tabs of the
+	// instance, each row with its actions.
+	if err := admin.CreateAuthorizedView(ctx, &bigtable.AuthorizedViewConf{TableID: "items", AuthorizedViewID: "av",
+		AuthorizedView: &bigtable.SubsetViewConf{RowPrefixes: [][]byte{[]byte("i#")}, FamilySubsets: map[string]bigtable.FamilySubset{"cf": {QualifierPrefixes: [][]byte{[]byte("")}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if out := detail(); !strings.Contains(out, `"s1"`) || !strings.Contains(out, `"av"`) || !strings.Contains(out, `"b1"`) {
+		t.Errorf("the Snapshots, Authorized views and Schema bundles tabs: %s", out)
+	}
+	if code, out := iact([]string{"shop-inst", "snapshots", "shop-c1:s1"}, "tablefromsnapshot", map[string]string{"table": "items3"}); code != http.StatusOK {
+		t.Errorf("Create table from the snapshot = %d: %s", code, out)
+	}
+	if _, err := admin.TableInfo(ctx, "items3"); err != nil {
+		t.Errorf("the table from the snapshot: %v", err)
+	}
+	if code, out := iact([]string{"shop-inst", "snapshots", "shop-c1:s1"}, "deletesnapshot", nil); code != http.StatusOK {
+		t.Errorf("Delete snapshot = %d: %s", code, out)
+	}
+	if code, out := iact([]string{"shop-inst", "authorizedViews", "items:av"}, "editauthview", map[string]string{"prefixes": "j#", "columns": "cf:*"}); code != http.StatusOK {
+		t.Errorf("Edit authorized view = %d: %s", code, out)
+	}
+	if info, err := admin.AuthorizedViewInfo(ctx, "items", "av"); err != nil || string(info.AuthorizedView.(*bigtable.SubsetViewInfo).RowPrefixes[0]) != "j#" {
+		t.Errorf("AuthorizedViewInfo after Edit = %+v, %v", info, err)
+	}
+	if code, out := iact([]string{"shop-inst", "authorizedViews", "items:av"}, "deleteauthview", nil); code != http.StatusOK {
+		t.Errorf("Delete authorized view = %d: %s", code, out)
+	}
+	if code, out := iact([]string{"shop-inst", "schemaBundles", "items:b1"}, "editbundle", map[string]string{"descriptors": base64.StdEncoding.EncodeToString(set)}); code != http.StatusOK {
+		t.Errorf("Edit schema bundle = %d: %s", code, out)
+	}
+	if code, out := iact([]string{"shop-inst", "schemaBundles", "items:b1"}, "deletebundle", nil); code != http.StatusOK {
+		t.Errorf("Delete schema bundle = %d: %s", code, out)
+	}
+	if names, err := admin.SchemaBundles(ctx, "items"); err != nil || len(names) != 0 {
+		t.Errorf("SchemaBundles after Delete = %v, %v", names, err)
+	}
 	if code, out := iact([]string{"shop-inst", "backups", "shop-c1:bk"}, "deletebackup", nil); code != http.StatusOK {
 		t.Errorf("Delete backup = %d: %s", code, out)
 	}
@@ -170,6 +218,15 @@ func TestConsoleBigtableSQLSnapshotsBundlesAndViews(t *testing.T) {
 	}
 	if lv, err := iac.LogicalViewInfo(ctx, "shop-inst", "logical-v"); err != nil || lv.Query != "SELECT _key FROM items" {
 		t.Errorf("LogicalViewInfo = %+v, %v", lv, err)
+	}
+	if code, out := iact([]string{"shop-inst", "logicalViews", "logical-v"}, "editview", map[string]string{"query": "SELECT _key FROM items2"}); code != http.StatusOK {
+		t.Errorf("Edit query = %d: %s", code, out)
+	}
+	if lv, err := iac.LogicalViewInfo(ctx, "shop-inst", "logical-v"); err != nil || lv.Query != "SELECT _key FROM items2" {
+		t.Errorf("LogicalViewInfo after Edit query = %+v, %v", lv, err)
+	}
+	if code, out := iact([]string{"shop-inst", "materializedViews", "materialized-v"}, "editview", map[string]string{"protected": "false"}); code != http.StatusOK {
+		t.Errorf("Edit deletion protection = %d: %s", code, out)
 	}
 	if out := detail(); !strings.Contains(out, "materialized-v") {
 		t.Errorf("the Materialized views tab lists no view: %s", out)

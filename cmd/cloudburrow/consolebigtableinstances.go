@@ -181,14 +181,14 @@ func (p bigtableInstancesProvider) Detail(ctx context.Context, project string, p
 		{Label: "Labels", Value: labelsText(in.Labels)},
 	}
 	clusters, cerr := c.Clusters(ctx, path[0])
-	return console.Detail{Summary: summary, Sections: []console.Section{
+	return console.Detail{Summary: summary, Sections: append([]console.Section{
 		{ID: "clusters", Label: "Clusters", Listing: clustersListing(path[0], clusters, cerr)},
 		{ID: "appprofiles", Label: "App profiles", Listing: p.profilesListing(ctx, c, path[0], clusters)},
 		{ID: "tables", Label: "Tables", Listing: p.tablesListing(ctx, project, path[0])},
 		{ID: "backups", Label: "Backups", Listing: p.backupsListing(ctx, project, path[0])},
 		{ID: "logicalviews", Label: "Logical views", Listing: p.sqlViewsListing(ctx, c, path[0], false)},
 		{ID: "materializedviews", Label: "Materialized views", Listing: p.sqlViewsListing(ctx, c, path[0], true)},
-	}}, nil
+	}, p.tableExtrasListings(ctx, project, path[0])...)}, nil
 }
 
 // tablesListing is an instance's Tables tab: its tables, each a link to its
@@ -567,8 +567,16 @@ func (p bigtableInstancesProvider) DetailActions(ctx context.Context, project st
 	switch path[1] {
 	case bigtableBackupsSegment:
 		return backupActions()
-	case bigtableLogicalSegment, bigtableMaterializedSegment:
-		return sqlViewActions()
+	case bigtableLogicalSegment:
+		return sqlViewActions(false)
+	case bigtableMaterializedSegment:
+		return sqlViewActions(true)
+	case bigtableSnapshotsSegment:
+		return snapshotActions()
+	case bigtableAuthViewsSegment:
+		return authViewRowActions()
+	case bigtableBundlesSegment:
+		return bundleRowActions()
 	case bigtableClustersSegment:
 		for _, cl := range clusters {
 			if cl.Name == path[2] {
