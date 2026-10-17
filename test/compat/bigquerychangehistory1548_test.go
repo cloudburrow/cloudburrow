@@ -18,7 +18,7 @@ import (
 // CHANGES each change, through an ALTER TABLE that makes the table
 // again too. A column under a reserved prefix is still refused.
 //
-// covers: bigquery.tables.insert bigquery.jobs.query
+// covers: bigquery.tables.insert, bigquery.jobs.query
 func TestBigQueryChangeHistoryForUpdateColumn(t *testing.T) {
 	h := New(t)
 	c, _ := bigqueryClient(t, h)

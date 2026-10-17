@@ -131,7 +131,8 @@ func TestBigQueryMLTransformPreprocess(t *testing.T) {
 // examples (https://cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-quantile-bucketize,
 // .../bigqueryml-syntax-robust-scaler, .../bigqueryml-syntax-ngrams), in a
 // query and in a TRANSFORM, whose quantiles are learned over the training
-// rows and kept. The vocabulary functions and ML.HASH_BUCKETIZE stay 501.
+// rows and kept. ML.HASH_BUCKETIZE stays 501 (the vocabulary functions are
+// TestBigQueryMLVocabularyPreprocess's).
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
 func TestBigQueryMLQuantilePreprocess(t *testing.T) {
@@ -200,8 +201,6 @@ func TestBigQueryMLQuantilePreprocess(t *testing.T) {
 		t.Errorf("ML.PREDICT quantile-bucketized: %v; want 1.5 and 6.5", pred)
 	}
 	for _, sql := range []string{
-		"SELECT ML.LABEL_ENCODER(v) OVER () FROM UNNEST(['a', 'b']) AS v",
-		"SELECT ML.ONE_HOT_ENCODER(v) OVER () FROM UNNEST(['a', 'b']) AS v",
 		"SELECT ML.QUANTILE_BUCKETIZE(v, 2, 'bucket_ranges') OVER () FROM UNNEST([1.0, 2.0]) AS v",
 	} {
 		_, err := c.Query(sql).Read(ctx)

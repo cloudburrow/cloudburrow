@@ -62,8 +62,11 @@ import (
 // examples (UNVERIFIED beyond them: an approximate quantile of many rows
 // may differ). In a TRANSFORM they are learned over the training rows.
 //
-// Refused 501 with the reason: the other preprocessing functions (their
-// vocabularies, or a hash function BigQuery does not name), the
+// The vocabulary functions, ML.LABEL_ENCODER, ML.ONE_HOT_ENCODER,
+// ML.MULTI_HOT_ENCODER, ML.BAG_OF_WORDS and ML.TF_IDF, are modelvocab.go's.
+//
+// Refused 501 with the reason: ML.HASH_BUCKETIZE (a hash function BigQuery
+// does not name), the
 // output_format argument of ML.BUCKETIZE and ML.QUANTILE_BUCKETIZE other
 // than bucket_names, and IMPUTER strategies other than mean. Any other
 // ML.<name>(...) of no MODEL is left to the engine.
@@ -71,12 +74,7 @@ import (
 // mlPreprocessUnserved are the ML functions of no model CloudBurrow
 // refuses, and why.
 var mlPreprocessUnserved = map[string]string{
-	"ONE_HOT_ENCODER":   "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
-	"MULTI_HOT_ENCODER": "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
-	"LABEL_ENCODER":     "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
-	"HASH_BUCKETIZE":    "its hash function is BigQuery's, which its documentation does not name",
-	"BAG_OF_WORDS":      "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
-	"TF_IDF":            "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
+	"HASH_BUCKETIZE": "its hash function is BigQuery's, which its documentation does not name",
 }
 
 // mlStats are a column's statistics a TRANSFORM learned: quant its
@@ -94,6 +92,12 @@ type mlLearn func(expr string, quantiles []float64) (mlStats, int, string)
 // the SQL that computes it. With learn, analytic calls (which must then
 // be OVER ()) use the statistics it learns, as constants.
 func rewritePreprocess(sql string, learn mlLearn) (string, int, string) {
+	return rewritePreprocessWith(sql, learn, nil)
+}
+
+// rewritePreprocessWith is rewritePreprocess, with vocab learning the
+// vocabulary functions' vocabularies (modelvocab.go) where learn is set.
+func rewritePreprocessWith(sql string, learn mlLearn, vocab mlVocabLearn) (string, int, string) {
 	if !strings.Contains(strings.ToUpper(sql), "ML") {
 		return sql, 0, ""
 	}
@@ -109,7 +113,8 @@ func rewritePreprocess(sql string, learn mlLearn) (string, int, string) {
 			continue
 		}
 		fn := strings.ToUpper(toks[i+2].text)
-		if _, refused := mlPreprocessUnserved[fn]; !mlPreprocessServed[fn] && !refused {
+		_, isVocab := mlVocab[fn]
+		if _, refused := mlPreprocessUnserved[fn]; !mlPreprocessServed[fn] && !refused && !isVocab {
 			// Not a preprocessing function BigQuery documents (a function
 			// of a dataset named ML, say): the engine's to answer.
 			continue
@@ -123,7 +128,7 @@ func rewritePreprocess(sql string, learn mlLearn) (string, int, string) {
 			if len(a) == 0 {
 				return "", 400, "Syntax error: empty argument in ML." + fn
 			}
-			s, c, m := rewritePreprocess(sql[a[0].pos:a[len(a)-1].end], learn)
+			s, c, m := rewritePreprocessWith(sql[a[0].pos:a[len(a)-1].end], learn, vocab)
 			if c != 0 {
 				return "", c, m
 			}
@@ -139,7 +144,14 @@ func rewritePreprocess(sql string, learn mlLearn) (string, int, string) {
 			window = sql[toks[end+2].pos:toks[we].end]
 			stop = we
 		}
-		out, c, m := mlPreprocessSQL(fn, args, window, learn)
+		var out string
+		var c int
+		var m string
+		if isVocab {
+			out, c, m = mlVocabSQL(fn, args, window, vocab, learn != nil)
+		} else {
+			out, c, m = mlPreprocessSQL(fn, args, window, learn)
+		}
 		if c != 0 {
 			return "", c, m
 		}
@@ -189,7 +201,8 @@ var mlAnalytic = map[string]bool{"STANDARD_SCALER": true, "MIN_MAX_SCALER": true
 
 // mlServedList names the preprocessing functions CloudBurrow answers.
 const mlServedList = "ML.BUCKETIZE, ML.QUANTILE_BUCKETIZE, ML.POLYNOMIAL_EXPAND, ML.FEATURE_CROSS, ML.NGRAMS, ML.STANDARD_SCALER, " +
-	"ML.MIN_MAX_SCALER, ML.MAX_ABS_SCALER, ML.ROBUST_SCALER, ML.IMPUTER (mean), ML.DISTANCE, ML.LP_NORM and ML.NORMALIZER"
+	"ML.MIN_MAX_SCALER, ML.MAX_ABS_SCALER, ML.ROBUST_SCALER, ML.IMPUTER (mean), ML.DISTANCE, ML.LP_NORM, ML.NORMALIZER, " +
+	"ML.LABEL_ENCODER, ML.ONE_HOT_ENCODER, ML.MULTI_HOT_ENCODER, ML.BAG_OF_WORDS and ML.TF_IDF"
 
 // mlPreprocessSQL is the SQL of one call of fn, its arguments rewritten.
 func mlPreprocessSQL(fn string, args []string, window string, learn mlLearn) (string, int, string) {
@@ -497,9 +510,26 @@ func (f front) learnTransform(r *http.Request, q queryOptions, items []string, q
 		}
 		return st, 0, ""
 	}
+	ensured := false
+	vocab := func(expr string) (string, int, string) {
+		if !ensured {
+			if msg := f.ensureMLVocab(r); msg != "" {
+				return "", 500, "cloudburrow: could not make the vocabulary functions: " + msg
+			}
+			ensured = true
+		}
+		_, rows, c, m := f.queryAllRows(r, q, "SELECT "+expr+" FROM ("+query+")")
+		if c != 0 {
+			return "", c, m
+		}
+		if len(rows) != 1 || len(rows[0]) != 1 || rows[0][0] == nil {
+			return "", 500, "cloudburrow: could not read a TRANSFORM's vocabulary"
+		}
+		return *rows[0][0], 0, ""
+	}
 	var out []string
 	for _, it := range items {
-		s, c, m := rewritePreprocess(it, learn)
+		s, c, m := rewritePreprocessWith(it, learn, vocab)
 		if c != 0 {
 			return nil, c, m
 		}
@@ -508,7 +538,7 @@ func (f front) learnTransform(r *http.Request, q queryOptions, items []string, q
 				if t.is("OVER") {
 					return nil, 501, "Not implemented here: a TRANSFORM item with a window (" + it + "): it is analytic over the training rows. " +
 						"CloudBurrow carries out TRANSFORM items that read their own row, and ML.STANDARD_SCALER, ML.MIN_MAX_SCALER, " +
-						"ML.MAX_ABS_SCALER, ML.ROBUST_SCALER, ML.QUANTILE_BUCKETIZE and ML.IMPUTER (mean) OVER (). Nothing was run."
+						"ML.MAX_ABS_SCALER, ML.ROBUST_SCALER, ML.QUANTILE_BUCKETIZE, ML.IMPUTER (mean) and the vocabulary functions OVER (). Nothing was run."
 				}
 			}
 		}

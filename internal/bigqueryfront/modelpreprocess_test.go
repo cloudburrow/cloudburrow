@@ -36,7 +36,11 @@ func TestRewritePreprocess(t *testing.T) {
 	}
 	for sql, want := range map[string]int{
 		"SELECT ML.HASH_BUCKETIZE(x, 4) FROM t":                              501,
-		"SELECT ML.LABEL_ENCODER(x) OVER () FROM t":                          501,
+		"SELECT ML.LABEL_ENCODER(x) FROM t":                                  400,
+		"SELECT ML.ONE_HOT_ENCODER(x, 'all') OVER () FROM t":                 400,
+		"SELECT ML.ONE_HOT_ENCODER(x, d) OVER () FROM t":                     501,
+		"SELECT ML.BAG_OF_WORDS(x, 1000000) OVER () FROM t":                  400,
+		"SELECT ML.TF_IDF(x) OVER (ORDER BY y) FROM t":                       400,
 		"SELECT ML.QUANTILE_BUCKETIZE(x, 4) FROM t":                          400,
 		"SELECT ML.QUANTILE_BUCKETIZE(x, 4, 'bucket_ranges') OVER () FROM t": 501,
 		"SELECT ML.QUANTILE_BUCKETIZE(x, 4) OVER (ORDER BY x) FROM t":        400,
@@ -73,5 +77,42 @@ func TestRewritePreprocess(t *testing.T) {
 	}
 	if c := combinations(3, 2, false); len(c) != 3 {
 		t.Errorf("combinations: %v", c)
+	}
+}
+
+func TestRewriteVocab(t *testing.T) {
+	got, code, msg := rewritePreprocess("SELECT ML.TF_IDF(f, 3, 1) OVER (PARTITION BY g) AS r FROM t", nil)
+	if code != 0 {
+		t.Fatalf("%d %s", code, msg)
+	}
+	for _, want := range []string{mlVocabPrefix + "tf_idf", mlVocabPrefix + "idf", "COUNT(*) OVER (PARTITION BY g)", "ARRAY_CONCAT_AGG("} {
+		if !strings.Contains(got, want) {
+			t.Errorf("TF_IDF: %s lacks %s", got, want)
+		}
+	}
+	// In a TRANSFORM, the vocabulary learned is written as constants.
+	asked := ""
+	got, code, msg = rewritePreprocessWith("ML.ONE_HOT_ENCODER(c, 'most_frequent', 10, 0) OVER () AS o", func(string, []float64) (mlStats, int, string) {
+		return mlStats{}, 500, "no statistics"
+	}, func(expr string) (string, int, string) {
+		asked = expr
+		return `{"v":["a","it's"],"d":"a","i":[0.5,null]}`, 0, ""
+	})
+	if code != 0 {
+		t.Fatalf("%d %s", code, msg)
+	}
+	if !strings.Contains(asked, "ARRAY_AGG((c) IGNORE NULLS)") || strings.Contains(asked, "OVER") {
+		t.Errorf("learned over: %s", asked)
+	}
+	for _, want := range []string{`ARRAY<STRING>['a', 'it\'s']`, "= 'a', 0.0, 1.0"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("ONE_HOT_ENCODER in a TRANSFORM: %s lacks %s", got, want)
+		}
+	}
+	if strings.Contains(got, "OVER") || strings.Contains(got, mlVocabPrefix) {
+		t.Errorf("ONE_HOT_ENCODER in a TRANSFORM reads the window or a function: %s", got)
+	}
+	if len(mlVocabFunctions()) != 9 {
+		t.Errorf("vocabulary functions: %d", len(mlVocabFunctions()))
 	}
 }

@@ -215,6 +215,12 @@ func (f front) mlFunctions(w http.ResponseWriter, r *http.Request, q queryOption
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", code, rowError{Reason: "invalidQuery", Message: msg})
 		return true
 	}
+	if strings.Contains(text, mlVocabPrefix) {
+		if msg := f.ensureMLVocab(r); msg != "" {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not make the vocabulary functions: "+msg)
+			return true
+		}
+	}
 	calls, msg := findMLCalls(text)
 	if msg != "" {
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", http.StatusBadRequest, rowError{Reason: "invalidQuery", Message: msg})
