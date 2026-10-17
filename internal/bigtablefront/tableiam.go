@@ -27,8 +27,8 @@ import (
 // instance's deletion, drop it, so a table made again starts with none.
 // Policies are kept in memory, as the emulator keeps its tables.
 //
-// Authorized views and backups, which the emulator does not keep, answer
-// the three methods UNIMPLEMENTED with the emulator's own reason.
+// Authorized views and backups, which the front keeps (#1499), have
+// policies too, under the same rules.
 
 var (
 	tableNameRe      = regexp.MustCompile(`^projects/[^/]+/instances/[^/]+/tables/[^/]+$`)
@@ -40,7 +40,10 @@ var (
 type tableIAM struct {
 	upstream *grpc.ClientConn
 	mu       sync.Mutex
-	policies map[string]*iampolicy.Stored // by table name
+	policies map[string]*iampolicy.Stored // by table, view or backup name
+	views    *authViews
+	copies   *copies
+	bundles  *schemaBundles
 }
 
 func (t *tableIAM) methods() map[string]method {
@@ -59,9 +62,15 @@ func (t *tableIAM) target(ctx context.Context, resource string) error {
 		_, err := btapb.NewBigtableTableAdminClient(t.upstream).GetTable(ctx, &btapb.GetTableRequest{Name: resource, View: btapb.Table_NAME_ONLY})
 		return err
 	case authorizedViewRe.MatchString(resource):
-		return status.Error(codes.Unimplemented, "the emulator does not currently support authorized views")
+		if !t.views.exists(resource) {
+			return notFound("AuthorizedView", resource)
+		}
+		return nil
 	case backupNameRe.MatchString(resource):
-		return status.Error(codes.Unimplemented, backups)
+		t.copies.mu.Lock()
+		defer t.copies.mu.Unlock()
+		_, err := t.copies.backup(resource)
+		return err
 	}
 	return status.Errorf(codes.InvalidArgument, "invalid resource %q: want projects/{project}/instances/{instance}/tables/{table}", resource)
 }
@@ -100,11 +109,21 @@ func (t *tableIAM) test(ctx context.Context, req *iampb.TestIamPermissionsReques
 // deleteTable forwards DeleteTable to the emulator and drops the table's
 // policy.
 func (t *tableIAM) deleteTable(ctx context.Context, req *btapb.DeleteTableRequest) (proto.Message, error) {
+	// The copy UndeleteTable restores (undelete.go, #1511).
+	kept, err := t.copies.read(ctx, req.GetName())
+	if err != nil && status.Code(err) != codes.NotFound {
+		return nil, err
+	}
 	resp, err := btapb.NewBigtableTableAdminClient(t.upstream).DeleteTable(ctx, req)
 	if err != nil {
 		return nil, err
 	}
+	if kept != nil {
+		t.copies.keepDeleted(req.GetName(), kept)
+	}
 	t.drop(req.GetName())
+	t.views.drop(req.GetName())
+	t.bundles.drop(req.GetName())
 	return resp, nil
 }
 

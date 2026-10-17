@@ -131,56 +131,9 @@ func TestFrontRefusesWhatWouldCrashTheEmulator(t *testing.T) {
 	a := adminpb.NewBigtableTableAdminClient(conn)
 	d := bigtablepb.NewBigtableClient(conn)
 	inst := "projects/p/instances/i"
-	tbl, cl := inst+"/tables/kept", inst+"/clusters/c"
-	backup, bundle := cl+"/backups/b", tbl+"/schemaBundles/s"
+	tbl := inst + "/tables/kept"
 
 	calls := map[string]func() error{
-		"CreateBackup": func() error {
-			_, err := a.CreateBackup(ctx, &adminpb.CreateBackupRequest{Parent: cl, BackupId: "b", Backup: &adminpb.Backup{SourceTable: tbl}})
-			return err
-		},
-		"CopyBackup": func() error {
-			_, err := a.CopyBackup(ctx, &adminpb.CopyBackupRequest{Parent: cl, BackupId: "b2", SourceBackup: backup})
-			return err
-		},
-		"GetBackup": func() error { _, err := a.GetBackup(ctx, &adminpb.GetBackupRequest{Name: backup}); return err },
-		"ListBackups": func() error {
-			_, err := a.ListBackups(ctx, &adminpb.ListBackupsRequest{Parent: cl})
-			return err
-		},
-		"UpdateBackup": func() error {
-			_, err := a.UpdateBackup(ctx, &adminpb.UpdateBackupRequest{Backup: &adminpb.Backup{Name: backup}})
-			return err
-		},
-		"DeleteBackup": func() error { _, err := a.DeleteBackup(ctx, &adminpb.DeleteBackupRequest{Name: backup}); return err },
-		"RestoreTable": func() error {
-			_, err := a.RestoreTable(ctx, &adminpb.RestoreTableRequest{Parent: inst, TableId: "r", Source: &adminpb.RestoreTableRequest_Backup{Backup: backup}})
-			return err
-		},
-		"CreateSchemaBundle": func() error {
-			_, err := a.CreateSchemaBundle(ctx, &adminpb.CreateSchemaBundleRequest{Parent: tbl, SchemaBundleId: "s", SchemaBundle: &adminpb.SchemaBundle{}})
-			return err
-		},
-		"GetSchemaBundle": func() error {
-			_, err := a.GetSchemaBundle(ctx, &adminpb.GetSchemaBundleRequest{Name: bundle})
-			return err
-		},
-		"ListSchemaBundles": func() error {
-			_, err := a.ListSchemaBundles(ctx, &adminpb.ListSchemaBundlesRequest{Parent: tbl})
-			return err
-		},
-		"UpdateSchemaBundle": func() error {
-			_, err := a.UpdateSchemaBundle(ctx, &adminpb.UpdateSchemaBundleRequest{SchemaBundle: &adminpb.SchemaBundle{Name: bundle}})
-			return err
-		},
-		"DeleteSchemaBundle": func() error {
-			_, err := a.DeleteSchemaBundle(ctx, &adminpb.DeleteSchemaBundleRequest{Name: bundle})
-			return err
-		},
-		"UndeleteTable": func() error {
-			_, err := a.UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl})
-			return err
-		},
 		"GenerateInitialChangeStreamPartitions": func() error {
 			s, err := d.GenerateInitialChangeStreamPartitions(ctx, &bigtablepb.GenerateInitialChangeStreamPartitionsRequest{TableName: tbl})
 			if err != nil {
@@ -217,6 +170,41 @@ func TestFrontRefusesWhatWouldCrashTheEmulator(t *testing.T) {
 	}
 	if _, err := ac.TableInfo(ctx, "kept"); err != nil {
 		t.Errorf("the table after the refusals: %v", err)
+	}
+
+	// UndeleteTable (#1511) brings back a table deleted through the front,
+	// with its families and cells, and refuses one never deleted.
+	if _, err := a.UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl}); status.Code(err) != codes.NotFound {
+		t.Errorf("UndeleteTable of a live table = %v, want NotFound", err)
+	}
+	if err := ac.CreateColumnFamily(ctx, "kept", "cf"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := bigtable.NewClient(ctx, "p", "i", option.WithGRPCConn(conn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := bigtable.NewMutation()
+	m.Set("cf", "q", bigtable.Timestamp(5000), []byte("v"))
+	if err := c.Open("kept").Apply(ctx, "r1", m); err != nil {
+		t.Fatal(err)
+	}
+	if err := ac.DeleteTable(ctx, "kept"); err != nil {
+		t.Fatal(err)
+	}
+	op, err := ac.TableAdminClientV2().UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl})
+	if err != nil {
+		t.Fatalf("UndeleteTable: %v", err)
+	}
+	if got, err := op.Wait(ctx); err != nil || got.GetName() != tbl {
+		t.Fatalf("UndeleteTable.Wait = %v, %v", got, err)
+	}
+	r, err := c.Open("kept").ReadRow(ctx, "r1")
+	if err != nil || len(r["cf"]) != 1 || string(r["cf"][0].Value) != "v" || r["cf"][0].Timestamp != 5000 {
+		t.Errorf("the undeleted row = %v, %v", r, err)
+	}
+	if _, err := a.UndeleteTable(ctx, &adminpb.UndeleteTableRequest{Name: tbl}); status.Code(err) != codes.NotFound {
+		t.Errorf("UndeleteTable twice = %v, want NotFound", err)
 	}
 }
 

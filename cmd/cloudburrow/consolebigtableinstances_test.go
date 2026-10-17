@@ -113,7 +113,7 @@ func TestConsoleBigtableInstancesScreen(t *testing.T) {
 		t.Fatalf("List = %+v, %v", list, err)
 	}
 	d, err := p.Detail(ctx, "demo", []string{"orders-inst"})
-	if err != nil || d.Unavailable != "" || len(d.Sections) != 3 {
+	if err != nil || d.Unavailable != "" || len(d.Sections) != 9 {
 		t.Fatalf("Detail = %+v, %v", d, err)
 	}
 	if cl := d.Sections[0].Listing.Items; len(cl) != 1 || cl[0].Fields["Nodes"] != "2" || cl[0].Fields["Storage type"] != "HDD" {

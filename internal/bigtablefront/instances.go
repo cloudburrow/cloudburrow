@@ -72,6 +72,9 @@ type instances struct {
 	byNm map[string]*instance // by instance name
 	ops  map[string]*longrunningpb.Operation
 	opsQ []string
+	// layers is the clusters' memory layers (memlayers.go), by cluster
+	// name.
+	layers map[string]*btapb.MemoryLayer
 	// dropTables deletes every table of an instance in the emulator.
 	dropTables func(ctx context.Context, instance string) error
 }
@@ -407,6 +410,11 @@ func (s *instances) deleteInstance(ctx context.Context, req *btapb.DeleteInstanc
 		return nil, err
 	}
 	delete(s.byNm, req.GetName())
+	for c := range s.layers {
+		if strings.HasPrefix(c, req.GetName()+"/") {
+			delete(s.layers, c)
+		}
+	}
 	s.mu.Unlock()
 	if s.dropTables != nil {
 		if err := s.dropTables(ctx, req.GetName()); err != nil {
@@ -615,6 +623,7 @@ func (s *instances) deleteCluster(_ context.Context, req *btapb.DeleteClusterReq
 		}
 	}
 	delete(in.clusters, id)
+	delete(s.layers, req.GetName())
 	return &emptypb.Empty{}, nil
 }
 
