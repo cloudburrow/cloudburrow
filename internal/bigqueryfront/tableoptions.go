@@ -462,8 +462,8 @@ func moreTableOptions(t infoTable, add func(name, typ, value string)) {
 	if v := str(t, "maxStaleness"); v != "" {
 		add("max_staleness", "INTERVAL", `INTERVAL "`+v+`" YEAR TO SECOND`)
 	}
-	if st.PrivacyPolicy != nil {
-		add("privacy_policy", "JSON", strconv.Quote(*st.PrivacyPolicy))
+	if v := privacyPolicyOption(t, st); v != "" { // #1580
+		add("privacy_policy", "STRING", strconv.Quote(v))
 	}
 	if b, _ := t["biglakeConfiguration"].(map[string]any); str(b, "storageUri") != "" {
 		add("storage_uri", "STRING", strconv.Quote(str(b, "storageUri")))
@@ -627,4 +627,60 @@ func partitionFilterRefusal(tr tableRead, meta map[string]any, name string) stri
 	}
 	return fmt.Sprintf("Cannot query over table '%s' without a filter over column(s) %s that can be used for "+
 		"partition elimination", name, strings.Join(quoted, ", "))
+}
+
+// privacyPolicyOption is the privacy_policy TABLE_OPTIONS lists of t (#1580):
+// the DDL's JSON text the front keeps, else a view's privacyPolicy set by
+// tables.insert or tables.patch, as the DDL's JSON (its keys in snake case).
+// TABLE_OPTIONS' documentation lists no privacy_policy; the DDL documents
+// its value as a "JSON-formatted STRING", so it is a STRING option, its
+// value the quoted JSON (UNVERIFIED).
+func privacyPolicyOption(t infoTable, st tableSetting) string {
+	if st.PrivacyPolicy != nil {
+		return *st.PrivacyPolicy
+	}
+	v, _ := t["view"].(map[string]any)
+	pp, ok := v["privacyPolicy"].(map[string]any)
+	if !ok || len(pp) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(snakeKeys(pp))
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// snakeKeys is v with each object key in snake case: joinAllowedColumns,
+// join_allowed_columns.
+func snakeKeys(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[snakeCase(k)] = snakeKeys(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = snakeKeys(e)
+		}
+		return out
+	}
+	return v
+}
+
+func snakeCase(s string) string {
+	var b strings.Builder
+	for i, r := range s {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			r += 'a' - 'A'
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
