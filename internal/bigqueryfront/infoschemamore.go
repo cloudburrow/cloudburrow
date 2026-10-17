@@ -27,9 +27,16 @@ import (
 // UNVERIFIED), counted by a
 // query of the table, its partition_id as the partition decorator names it
 // (partitionreads.go: YYYYMMDD by the time unit, an integer range's start,
-// __NULL__, __UNPARTITIONED__). Left out, since the emulator keeps none of
-// them faithfully: total_logical_bytes, total_billable_bytes and
-// last_modified_time (it keeps no time per partition). storage_tier is
+// __NULL__, __UNPARTITIONED__). total_logical_bytes is the partition's
+// rows' logical bytes by BigQuery's documented data type sizes
+// (logicalbytes.go, #1458), and so is total_billable_bytes but in a
+// dataset billed by physical bytes, where it is NULL. last_modified_time,
+// "the most recent time that data was written to the partition", is the
+// latest change to its rows in the engine's change table (changeWrites),
+// the engine's transaction time; NULL where that table holds none (it
+// keeps seven days, and none of a table made before the engine kept
+// them), and for an ingestion-time partitioned table, whose change table
+// keeps no _PARTITIONTIME. storage_tier is
 // ACTIVE for a table made in the last 90 days (no partition of it can have
 // gone 90 days unmodified, https://cloud.google.com/bigquery/pricing#storage),
 // and NULL otherwise. An ingestion-time partitioned table's partitions are
@@ -76,7 +83,7 @@ func emptyRows(columns string) func(front, *http.Request, string, *datasetMeta) 
 }
 
 const partitionsColumns = "STRUCT<table_catalog STRING, table_schema STRING, table_name STRING, partition_id STRING, " +
-	"total_rows INT64, storage_tier STRING>"
+	"total_rows INT64, total_logical_bytes INT64, total_billable_bytes INT64, last_modified_time TIMESTAMP, storage_tier STRING>"
 
 // partitionIDExpr is the SQL of a row's partition_id in a table with m, or
 // "" for a table that is not partitioned.
@@ -127,6 +134,13 @@ func (f front) partitionsRows(r *http.Request, dataset string, m *datasetMeta) (
 		return "", st, msg
 	}
 	project := projectOf(f.base)
+	now := f.buffers.clock()
+	// total_billable_bytes is the logical bytes but in a dataset billed by
+	// physical bytes, where it is NULL (physical bytes are not kept).
+	billable := "p.b"
+	if f.physicalBilling(r, dataset) {
+		billable = "CAST(NULL AS INT64)"
+	}
 	var selects []string
 	for _, t := range tables {
 		if str(t, "type") != "TABLE" && str(t, "type") != "" {
@@ -143,24 +157,59 @@ func (f front) partitionsRows(r *http.Request, dataset string, m *datasetMeta) (
 			return "", http.StatusInternalServerError, "cloudburrow: could not read the range partitioning of " + name
 		}
 		tier := "CAST(NULL AS STRING)"
-		if ms, err := strconv.ParseInt(fmt.Sprint(t["creationTime"]), 10, 64); err == nil && time.Since(time.UnixMilli(ms)) < 90*24*time.Hour {
+		if ms, err := strconv.ParseInt(fmt.Sprint(t["creationTime"]), 10, 64); err == nil && now.Sub(time.UnixMilli(ms)) < 90*24*time.Hour {
 			tier = "'ACTIVE'"
 		}
 		head := sqlString(project) + " AS table_catalog, " + sqlString(dataset) + " AS table_schema, " + sqlString(name) +
 			" AS table_name, "
-		from := " FROM `" + project + "." + dataset + "." + name + "`"
-		if id == "" {
-			selects = append(selects, "SELECT "+head+"CAST(NULL AS STRING) AS partition_id, COUNT(*) AS total_rows, "+tier+
-				" AS storage_tier"+from)
-		} else {
-			selects = append(selects, "SELECT "+head+id+" AS partition_id, COUNT(*) AS total_rows, "+tier+" AS storage_tier"+
-				from+" GROUP BY 1, 2, 3, 4, 6")
+		path := quotePath([]string{project, dataset, name})
+		pid := id
+		if pid == "" {
+			pid = "CAST(NULL AS STRING)"
 		}
+		bytes := "IFNULL(SUM(" + logicalBytesExpr(pm.Schema.Fields) + "), 0)"
+		parts := "SELECT " + pid + " AS pid, COUNT(*) AS n, " + bytes + " AS b FROM " + path
+		if id != "" {
+			parts += " GROUP BY 1"
+		}
+		// last_modified_time: the partition's latest change in the
+		// engine's change table (changeWrites), NULL where it has none.
+		changed := "SELECT CAST(NULL AS STRING) AS pid, CAST(NULL AS TIMESTAMP) AS t"
+		if c := f.changeWrites(r, project, dataset, name); c != "" && (id == "" || !pm.ingestion()) {
+			changed = "SELECT " + pid + " AS pid, MAX(_CHANGE_TIMESTAMP) AS t FROM " + c + " GROUP BY 1"
+		}
+		selects = append(selects, "SELECT "+head+"p.pid AS partition_id, p.n AS total_rows, p.b AS total_logical_bytes, "+
+			billable+" AS total_billable_bytes, c.t AS last_modified_time, "+tier+" AS storage_tier FROM ("+parts+") AS p LEFT JOIN ("+
+			changed+") AS c ON p.pid = c.pid OR p.pid IS NULL AND c.pid IS NULL")
 	}
 	if len(selects) == 0 {
 		return rowsSubquery(partitionsColumns, nil), 0, ""
 	}
 	return "(SELECT * FROM (" + strings.Join(selects, " UNION ALL ") + "))", 0, ""
+}
+
+// physicalBilling reports whether dataset's storageBillingModel is
+// PHYSICAL.
+func (f front) physicalBilling(r *http.Request, dataset string) bool {
+	st, got := f.get(r, "/datasets/"+url.PathEscape(dataset))
+	var ds struct {
+		Model string `json:"storageBillingModel"`
+	}
+	return st == http.StatusOK && json.Unmarshal(got, &ds) == nil && strings.EqualFold(ds.Model, "PHYSICAL")
+}
+
+// changeWrites is the subquery of the changes the engine's change table of
+// a table holds (googlesqlite patch 0036, changehistory.go): every row
+// inserted, deleted or updated, with its column values and
+// _CHANGE_TIMESTAMP, the time of its transaction, kept seven days. It is
+// "" for a table that has no change table (one made before the engine
+// kept them).
+func (f front) changeWrites(r *http.Request, project, dataset, table string) string {
+	path := quotePath([]string{project, dataset, table + changeTableSuffix})
+	if _, msg := f.scalar(r, "SELECT COUNT(*) FROM "+path+" WHERE FALSE"); msg != "" {
+		return ""
+	}
+	return "(SELECT * FROM " + path + " WHERE _CHANGE_TYPE != 'START')"
 }
 
 const routineOptionsColumns = "STRUCT<specific_catalog STRING, specific_schema STRING, specific_name STRING, " +
