@@ -1,0 +1,125 @@
+CloudBurrow patch 66 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1560).
+
+A SQL function's body was written with its columns by name, where a
+query is written with them by ID, so a scalar subquery's computed column
+$col1 and the STRUCT or ARRAY built over it, also $col1, were taken for
+one column: a call failed "no such column: $col1" where the same
+expression outside a function worked. Write the body by column ID too.
+
+--- a/internal/spec.go
++++ b/internal/spec.go
+@@ -624,7 +624,11 @@
+ 	default:
+ 		funcExpr, _ := stmt.FunctionExpression()
+ 		if funcExpr != nil {
+-			bodyQuery, err := newNode(funcExpr).FormatSQL(ctx)
++			// CloudBurrow patch (cloudburrow/cloudburrow#1560): the body's
++			// columns by ID, as a query's; by name, a scalar subquery's
++			// $col1 and the STRUCT or ARRAY built over it were one column,
++			// and a call failed "no such column: $col1".
++			bodyQuery, err := newNode(funcExpr).FormatSQL(withUseColumnID(ctx))
+ 			if err != nil {
+ 				return nil, fmt.Errorf("failed to format function expression: %w", err)
+ 			}
+@@ -693,7 +697,8 @@
+ 	funcExpr, _ := stmt.FunctionExpression()
+ 	var body string
+ 	if funcExpr != nil {
+-		bodyQuery, err := newNode(funcExpr).FormatSQL(ctx)
++		// CloudBurrow patch (#1560): by column ID, as newFunctionSpec's.
++		bodyQuery, err := newNode(funcExpr).FormatSQL(withUseColumnID(ctx))
+ 		if err != nil {
+ 			return nil, fmt.Errorf("failed to format function expression: %w", err)
+ 		}
+--- /dev/null
++++ b/function_body_column_ids_test.go
+@@ -0,0 +1,88 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++)
++
++// TestFunctionBodyColumnIDs is a CloudBurrow regression test
++// (cloudburrow/cloudburrow#1560): a SQL function's body was written with
++// its columns' names, not their IDs, as a query's is, so two computed
++// columns of one name ($col1: a scalar subquery's, and the STRUCT or
++// ARRAY built over it) were taken for one, and a call failed "no such
++// column: $col1", where the same expression outside a function worked.
++func TestFunctionBodyColumnIDs(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:?_test=function_body_column_ids")
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { db.Close() })
++	ctx := context.Background()
++	conn, err := db.Conn(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { conn.Close() })
++
++	// The vocabulary indices of BigQuery ML's encoders (#1548): each
++	// element's index in voc, from 1, or 0, each once, in the order they
++	// first appear.
++	index := "IFNULL((SELECT o + 1 FROM UNNEST(voc) AS w WITH OFFSET o WHERE w = e), 0)"
++	indices := "ARRAY(SELECT i FROM (SELECT i, MIN(p) AS q FROM (SELECT " + index +
++		" AS i, p FROM UNNEST(x) AS e WITH OFFSET p) GROUP BY i) ORDER BY q)"
++	for _, tc := range []struct {
++		name, params, body, args, want string
++	}{
++		{"scalar_subquery_in_array", "", "(SELECT [i] FROM (SELECT (SELECT 7) AS i))", "", "[7]"},
++		{"scalar_subquery_in_struct", "", "(SELECT STRUCT(i AS a, i AS b) FROM (SELECT (SELECT 7) AS i))", "", `{"a":7,"b":7}`},
++		{"struct_over_group_by", "voc ARRAY<STRING>, x ARRAY<STRING>",
++			"ARRAY(SELECT STRUCT(i AS index, 1.0 AS value) FROM UNNEST(" + indices + ") AS i WITH OFFSET p ORDER BY p)",
++			"['a', 'b'], ['b', 'c', 'b']", `[{"index":2,"value":1},{"index":0,"value":1}]`},
++		{"struct_of_a_count_over_group_by", "voc ARRAY<STRING>, x ARRAY<STRING>",
++			"ARRAY(SELECT STRUCT(i AS index, (SELECT COUNT(*) FROM UNNEST(x) AS e WHERE " + index + " = i) AS n) FROM UNNEST(" + indices + ") AS i ORDER BY i)",
++			"['a', 'b'], ['b', 'c', 'b']", `[{"index":0,"n":1},{"index":2,"n":2}]`},
++		{"array_of_struct", "x ARRAY<STRING>",
++			"ARRAY(SELECT STRUCT(v AS k, (SELECT COUNT(*) FROM UNNEST(x) AS w WHERE w = v) AS n) FROM UNNEST(x) AS v GROUP BY v ORDER BY v)",
++			"['a', 'b', 'a']", `[{"k":"a","n":2},{"k":"b","n":1}]`},
++		{"struct_over_window", "x ARRAY<STRING>",
++			"ARRAY(SELECT STRUCT(v AS k, (SELECT 1) + ROW_NUMBER() OVER (ORDER BY v) AS n) FROM UNNEST(x) AS v ORDER BY v)",
++			"['b', 'a']", `[{"k":"a","n":2},{"k":"b","n":3}]`},
++		{"nested_struct", "x INT64",
++			"(SELECT STRUCT(STRUCT(i AS b) AS a, [STRUCT(i AS c)] AS d) FROM (SELECT (SELECT x + 1) AS i))",
++			"6", `{"a":{"b":7},"d":[{"c":7}]}`},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			create := "CREATE FUNCTION " + tc.name + "(" + tc.params + ") AS (" + tc.body + ")"
++			if _, err := conn.ExecContext(ctx, create); err != nil {
++				t.Fatalf("%s: %v", create, err)
++			}
++			for _, q := range []string{
++				"SELECT TO_JSON_STRING(" + tc.name + "(" + tc.args + "))",
++				// A TEMP function in a script.
++				"CREATE TEMP FUNCTION tmp_" + tc.name + "(" + tc.params + ") AS (" + tc.body + "); SELECT TO_JSON_STRING(tmp_" + tc.name + "(" + tc.args + "))",
++			} {
++				var got string
++				if err := conn.QueryRowContext(ctx, q).Scan(&got); err != nil {
++					t.Fatalf("%s: %v", q, err)
++				}
++				if got != tc.want {
++					t.Errorf("%s = %s, want %s", q, got, tc.want)
++				}
++			}
++		})
++	}
++
++	// A table function's nested STRUCT, of a scalar subquery.
++	if _, err := conn.ExecContext(ctx, "CREATE TABLE FUNCTION nested_tf(x INT64) AS "+
++		"SELECT STRUCT(STRUCT(i AS b) AS a, [STRUCT(i AS c)] AS d) AS s FROM (SELECT (SELECT x + 1) AS i)"); err != nil {
++		t.Fatal(err)
++	}
++	var got string
++	if err := conn.QueryRowContext(ctx, "SELECT TO_JSON_STRING(s) FROM nested_tf(6)").Scan(&got); err != nil {
++		t.Fatal(err)
++	}
++	if want := `{"a":{"b":7},"d":[{"c":7}]}`; got != want {
++		t.Errorf("nested_tf(6) = %s, want %s", got, want)
++	}
++}

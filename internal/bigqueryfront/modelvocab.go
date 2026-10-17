@@ -60,7 +60,7 @@ var mlVocab = map[string]bool{"LABEL_ENCODER": false, "ONE_HOT_ENCODER": true, "
 // mlVocabPrefix begins the names of the vocabulary SQL functions; its
 // number goes up when one of them changes, since they are made only when
 // missing.
-const mlVocabPrefix = "_cbml1_"
+const mlVocabPrefix = "_cbml2_"
 
 // mlVocabFn is the path of the vocabulary SQL function name.
 func mlVocabFn(name string) string {
@@ -102,10 +102,8 @@ func mlEncodedSQL(fn, voc, drop, idf, x, indices string) string {
 // mlVocabFunctions are the SQL functions a query's vocabulary functions
 // are written as: vocab, the vocabulary of the terms vs (one for each row
 // that has it); top, its most frequent; idf, the inverse document
-// frequency of each term of voc, of n rows; indices (mlIndicesSQL); and
-// one for each function, of the vocabulary. A STRUCT built over a GROUP
-// BY in a SQL function fails in the engine, so indices is a function of
-// its own.
+// frequency of each term of voc, of n rows; and one for each function,
+// of the vocabulary.
 func mlVocabFunctions() []string {
 	ranked := "(SELECT _cbml_v, _cbml_n, ROW_NUMBER() OVER (ORDER BY _cbml_n DESC, _cbml_v) AS _cbml_r FROM " +
 		"(SELECT _cbml_v, COUNT(*) AS _cbml_n FROM UNNEST(vs) AS _cbml_v GROUP BY _cbml_v))"
@@ -117,7 +115,6 @@ func mlVocabFunctions() []string {
 		def("top", "vs ARRAY<STRING>, k INT64, t INT64", "(SELECT _cbml_v FROM "+ranked+" WHERE _cbml_n >= t AND _cbml_r <= k AND _cbml_r = 1)"),
 		def("idf", "vs ARRAY<STRING>, n INT64, voc ARRAY<STRING>", "ARRAY(SELECT LN(1 + n / (1 + (SELECT COUNT(*) FROM UNNEST(vs) AS _cbml_w "+
 			"WHERE _cbml_w = _cbml_v))) FROM UNNEST(voc) AS _cbml_v WITH OFFSET _cbml_o ORDER BY _cbml_o)"),
-		def("indices", "voc ARRAY<STRING>, x ARRAY<STRING>", mlIndicesSQL("voc", "x")),
 	}
 	for _, fn := range []string{"LABEL_ENCODER", "ONE_HOT_ENCODER", "MULTI_HOT_ENCODER", "BAG_OF_WORDS", "TF_IDF"} {
 		params := "voc ARRAY<STRING>, x ARRAY<STRING>"
@@ -129,7 +126,7 @@ func mlVocabFunctions() []string {
 		case "TF_IDF":
 			params = "voc ARRAY<STRING>, idf ARRAY<FLOAT64>, x ARRAY<STRING>"
 		}
-		out = append(out, def(strings.ToLower(fn), params, mlEncodedSQL(fn, "voc", "drop_value", "idf", "x", mlVocabFn("indices")+"(voc, x)")))
+		out = append(out, def(strings.ToLower(fn), params, mlEncodedSQL(fn, "voc", "drop_value", "idf", "x", mlIndicesSQL("voc", "x"))))
 	}
 	return out
 }
