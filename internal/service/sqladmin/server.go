@@ -286,7 +286,9 @@ const instanceWhy = "this server was started without instance writes (docs/cloud
 const (
 	externalPrimaryWhy = "demoting makes a Cloud SQL instance a replica of an external primary, a server outside Cloud SQL, which a migration back out of Cloud SQL " +
 		"replicates to; CloudBurrow serves the other direction, a replica of a source representation instance (ON_PREMISES_INSTANCE) " +
-		"synced with startExternalSync and promoted with promoteReplica, but does not turn a primary into a replica (docs/cloudsql.md)"
+		"synced with startExternalSync (or seeded from dumpFilePath) and promoted with promoteReplica, but does not turn a primary into a replica: " +
+		"Google's custom import demotes a promoted instance and then sets its replication up with Cloud SQL's mysql.* stored procedures, " +
+		"which a MySQL server's own mysql schema does not take (docs/cloudsql.md)"
 	sqlServerWhy = "it is a SQL Server feature, and CloudBurrow runs PostgreSQL and MySQL servers only"
 	diskWhy      = "an instance's storage is its server's volume in the cluster, not a provisioned Compute Engine persistent disk, " +
 		"so it has no provisioned size (settings.dataDiskSizeGb) to shrink or reset"
