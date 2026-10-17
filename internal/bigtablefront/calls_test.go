@@ -53,7 +53,7 @@ func TestCallLogRecordsBigtableCalls(t *testing.T) {
 	if c := byMethod[admin+"CreateTable"]; c.Code != int(codes.OK) || c.Resource != "projects/p/instances/i" || c.Duration <= 0 {
 		t.Errorf("CreateTable recorded as %+v", c)
 	}
-	if c := byMethod[admin+"ListBackups"]; c.Code != int(codes.Unimplemented) {
+	if c := byMethod[admin+"ListBackups"]; c.Code != int(codes.OK) || c.Method == "" {
 		t.Errorf("ListBackups recorded as %+v", c)
 	}
 	if c := byMethod[data+"ReadRows"]; !c.Stream || c.Resource != "projects/p/instances/i/tables/logged" || c.Transport != "grpc" {

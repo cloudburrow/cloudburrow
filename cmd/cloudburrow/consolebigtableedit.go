@@ -396,6 +396,29 @@ func (p bigtableProvider) ActAt(ctx context.Context, project string, path []stri
 		return p.admin(ctx, project, func(a *bigtable.AdminClient) error {
 			return a.DropAllRows(ctx, path[0])
 		})
+	case action == "backup" && len(path) == 1:
+		days, err := strconv.Atoi(strings.TrimSpace(values["days"]))
+		if err != nil || days < 1 || days > 90 {
+			return fmt.Errorf("expire after %q days: want a whole number of days from 1 to 90", values["days"])
+		}
+		return p.admin(ctx, project, func(a *bigtable.AdminClient) error {
+			return a.CreateBackup(ctx, path[0], strings.TrimSpace(values["cluster"]), strings.TrimSpace(values["backup"]), time.Now().Add(time.Duration(days)*24*time.Hour))
+		})
+	case action == "restore" && len(path) == 1:
+		return p.admin(ctx, project, func(a *bigtable.AdminClient) error {
+			return a.RestoreTable(ctx, strings.TrimSpace(values["table"]), strings.TrimSpace(values["cluster"]), strings.TrimSpace(values["backup"]))
+		})
+	case action == "authview" && len(path) == 1:
+		sv, err := parseSubsetView(values["prefixes"], values["columns"])
+		if err != nil {
+			return err
+		}
+		return p.admin(ctx, project, func(a *bigtable.AdminClient) error {
+			return a.CreateAuthorizedView(ctx, &bigtable.AuthorizedViewConf{TableID: path[0], AuthorizedViewID: strings.TrimSpace(values["view"]), AuthorizedView: sv})
+		})
+	case len(path) == 1 && (action == "snapshot" || action == "schemabundle"):
+		_, err := p.actTableExtra(ctx, project, path[0], action, values)
+		return err
 	case action == "protection" && len(path) == 1:
 		protection := bigtable.Unprotected
 		if values["protected"] == "true" {
@@ -406,6 +429,41 @@ func (p bigtableProvider) ActAt(ctx context.Context, project string, path []stri
 		})
 	}
 	return fmt.Errorf("unknown action %q", action)
+}
+
+// bigtableBackupCluster is the cluster the console's backup forms offer.
+const bigtableBackupCluster = "cloudburrow-c1"
+
+// parseSubsetView reads an authorized view's subset from the console's
+// comma-separated row prefixes and family:qualifier columns.
+func parseSubsetView(prefixes, columns string) (*bigtable.SubsetViewConf, error) {
+	sv := &bigtable.SubsetViewConf{}
+	if strings.TrimSpace(prefixes) == "" {
+		sv.AddRowPrefix([]byte(""))
+	}
+	for _, p := range strings.Split(prefixes, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			sv.AddRowPrefix([]byte(p))
+		}
+	}
+	for _, c := range strings.Split(columns, ",") {
+		if c = strings.TrimSpace(c); c == "" {
+			continue
+		}
+		family, qualifier, ok := strings.Cut(c, ":")
+		if !ok || family == "" {
+			return nil, fmt.Errorf("column %q: want family:qualifier", c)
+		}
+		if q, isPrefix := strings.CutSuffix(qualifier, "*"); isPrefix {
+			sv.AddFamilySubsetQualifierPrefix(family, []byte(q))
+		} else {
+			sv.AddFamilySubsetQualifier(family, []byte(qualifier))
+		}
+	}
+	if len(sv.FamilySubsets) == 0 {
+		return nil, errors.New("an authorized view needs at least one column")
+	}
+	return sv, nil
 }
 
 // admin runs one call with an admin client.
@@ -518,7 +576,23 @@ func (p bigtableProvider) tableActions(ctx context.Context, project, table strin
 				Name: "prefix", Label: "Row key prefix", Type: "text", Required: true,
 				Help: "Every row whose key starts with this is deleted."}}},
 		{ID: "deleteallrows", Label: "Delete all rows", Destructive: true},
+		// Backups and authorized views (#1499), which the Bigtable front
+		// keeps beside the emulator's tables.
+		{ID: "backup", Label: "Create backup", Fields: []console.Field{
+			{Name: "cluster", Label: "Cluster ID", Type: "text", Required: true, Default: bigtableBackupCluster},
+			{Name: "backup", Label: "Backup ID", Type: "text", Required: true},
+			{Name: "days", Label: "Expire after (days)", Type: "text", Default: "7", Help: "Between 1 and 90 days."}}},
+		{ID: "restore", Label: "Restore backup to a new table", Fields: []console.Field{
+			{Name: "cluster", Label: "Cluster ID", Type: "text", Required: true, Default: bigtableBackupCluster},
+			{Name: "backup", Label: "Backup ID", Type: "text", Required: true},
+			{Name: "table", Label: "New table ID", Type: "text", Required: true}}},
+		{ID: "authview", Label: "Create authorized view", Fields: []console.Field{
+			{Name: "view", Label: "Authorized view ID", Type: "text", Required: true},
+			{Name: "prefixes", Label: "Row key prefixes", Type: "text", Help: "Comma-separated; empty for every row."},
+			{Name: "columns", Label: "Columns", Type: "text", Required: true,
+				Help: "Comma-separated family:qualifier, or family:prefix* for a qualifier prefix, family:* for a whole family."}}},
 	}
+	out = append(out, bigtableTableExtraActions()...)
 	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
 	defer cancel()
 	var info *bigtable.TableInfo

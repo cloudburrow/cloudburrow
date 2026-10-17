@@ -20,6 +20,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	listen := fs.String("listen", "0.0.0.0:8086", "address the front serves Bigtable on")
 	upstream := fs.String("upstream", "127.0.0.1:8096", "the Bigtable emulator's address")
+	// Where the front keeps its records and data copies (state.go,
+	// #1514): the pod's emptyDir.
+	stateDir := fs.String("state-dir", "", "directory the front keeps its state in")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
 	}
@@ -33,6 +36,11 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	defer f.Close()
+	if *stateDir != "" {
+		if err := f.KeepState(ctx, *stateDir); err != nil {
+			return fmt.Errorf("the front's state: %w", err)
+		}
+	}
 	l, err := net.Listen("tcp", *listen)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", *listen, err)

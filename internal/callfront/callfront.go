@@ -154,11 +154,17 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	restUpstream := fs.String("rest-upstream", "", "the emulator's second (REST) address, on the pod's loopback")
 	// The Firestore Admin API, served by the front itself (#1331).
 	firestoreAdmin := fs.Bool("firestore-admin", false, "serve the Firestore Admin API in front of the Firestore emulator")
+	// The instance's Cloud Storage, which Firestore exports are written to
+	// and imports read from (#1500).
+	storage := fs.String("storage", "", "the instance's Cloud Storage base URL, for Firestore exports and imports")
 	// The query RPCs the emulator does not serve, answered by the front
 	// from calls it does (#1405).
 	// The Spanner instance updates the emulator refuses, answered by the
 	// front over both ports (#1461).
 	spannerInstances := fs.Bool("spanner-instances", false, "answer the Spanner instance updates the emulator does not serve")
+	// Where the Firestore Admin API and the Spanner front keep their
+	// records and data copies (#1514): the pod's emptyDir.
+	stateDir := fs.String("state-dir", "", "directory the Firestore Admin API or the Spanner front keeps its state in")
 	queries := fs.String("queries", "", "answer the query RPCs the emulator does not serve: datastore (RunAggregationQuery) or firestore (PartitionQuery)")
 	if err := fs.Parse(args); err != nil {
 		return ErrUsage
@@ -187,12 +193,25 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		icpts = append(icpts, queryfront.NewFirestore(*upstream))
 	}
 	if *firestoreAdmin {
-		icpts = append(icpts, firestoreadmin.New(*upstream))
+		fa := firestoreadmin.New(*upstream)
+		fa.SetStorage(*storage)
+		if *stateDir != "" {
+			if err := fa.KeepState(ctx, *stateDir, logger.Printf); err != nil {
+				return fmt.Errorf("the Firestore Admin API's state: %w", err)
+			}
+		}
+		fa.Start(ctx)
+		icpts = append(icpts, fa)
 	}
 	if *spannerInstances {
 		si, err := spannerfront.New(*upstream)
 		if err != nil {
 			return fmt.Errorf("the Spanner instance front: %w", err)
+		}
+		if *stateDir != "" {
+			if err := si.KeepState(ctx, *stateDir, logger.Printf); err != nil {
+				return fmt.Errorf("the Spanner front's state: %w", err)
+			}
 		}
 		icpts = append(icpts, si, spannerfront.NewRefusals())
 	}

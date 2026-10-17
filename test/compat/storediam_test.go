@@ -221,8 +221,8 @@ func TestBigtableTableIAM(t *testing.T) {
 	ac, _ := bigtableTable(t, h, "iam-table") // skips without CLOUDBURROW_TEST_BIGTABLE
 	ctx := h.Context()
 	policyRoundTrip(t, ctx, "table", bigtableTableHandle(ac, "iam-table"), "roles/bigtable.reader", "bigtable.tables.readRows")
-	if _, err := ac.AuthorizedViewIAM("iam-table", "v").Policy(ctx); status.Code(err) != codes.Unimplemented {
-		t.Errorf("an authorized view's policy = %v; want Unimplemented", err)
+	if _, err := ac.AuthorizedViewIAM("iam-table", "v").Policy(ctx); status.Code(err) != codes.NotFound {
+		t.Errorf("a missing authorized view's policy = %v; want NotFound", err)
 	}
 	if err := ac.DeleteTable(ctx, "iam-table"); err != nil {
 		t.Fatal(err)
