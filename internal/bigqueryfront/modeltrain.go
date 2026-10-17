@@ -200,6 +200,7 @@ type mlTrained struct {
 	// Trees are a boosted tree model's trees, BaseScore its starting score
 	// (modeltree.go).
 	Trees     [][]mlNode `json:"trees,omitempty"`
+	TreeClass []int      `json:"treeClass,omitempty"`
 	BaseScore float64    `json:"baseScore,omitempty"`
 	// MF is a MATRIX_FACTORIZATION model's weights (modelmf.go).
 	MF *mfTrained `json:"mf,omitempty"`
@@ -412,10 +413,11 @@ func trainModel(opts mlOptions, cols []mlColumn, rows [][]*string) (mlTrained, *
 		EX, EY = append(EX, encode(i)), append(EY, y[i])
 	}
 	if isBoostedTree(opts.ModelType) {
+		K := 1
 		if len(t.Classes) > 2 {
-			return t, mlUnimplemented("a multiclass BOOSTED_TREE_CLASSIFIER (%d labels): CloudBurrow trains binary boosted tree classifiers", len(t.Classes))
+			K = len(t.Classes)
 		}
-		t.trainBoosted(opts, X, Y, EX, EY, logistic)
+		t.trainBoosted(opts, X, Y, EX, EY, logistic, K)
 		return t, nil
 	}
 	dim := len(X[0])
@@ -1181,6 +1183,9 @@ func (t mlTrained) encodeRow(vals map[string]*string) []float64 {
 
 // classProbs is a multiclass model's class probabilities for a row.
 func (t mlTrained) classProbs(vals map[string]*string) []float64 {
+	if len(t.Trees) > 0 {
+		return softmaxOf(t.treeMargins(t.encodeRow(vals), len(t.Classes)))
+	}
 	return softmax(t.ClassWeights, t.encodeRow(vals))
 }
 

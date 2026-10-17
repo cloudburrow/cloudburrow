@@ -505,7 +505,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 	// the encoded columns: its weights', or its trees' (modeltree.go).
 	lin := func(enc []string) string {
 		if len(t.Trees) > 0 {
-			return t.treesSQL(enc)
+			return t.treesSQL(enc, 0)
 		}
 		return dotSQL(t.weightVector(), enc)
 	}
@@ -557,7 +557,13 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 			K := len(t.Classes)
 			var zs, helpersZ, ps, cases []string
 			for k := 0; k < K; k++ {
-				zs = append(zs, fmt.Sprintf("%s AS _cbml_z%d", dotSQL(t.ClassWeights[k], enc), k))
+				z := ""
+				if len(t.Trees) > 0 {
+					z = t.treesSQL(enc, k)
+				} else {
+					z = dotSQL(t.ClassWeights[k], enc)
+				}
+				zs = append(zs, fmt.Sprintf("%s AS _cbml_z%d", z, k))
 				helpersZ = append(helpersZ, fmt.Sprintf("_cbml_z%d", k))
 			}
 			mx := "GREATEST(" + strings.Join(helpersZ, ", ") + ")"

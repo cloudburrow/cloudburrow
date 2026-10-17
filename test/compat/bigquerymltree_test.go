@@ -86,6 +86,22 @@ func TestBigQueryMLBoostedTree(t *testing.T) {
 	if len(cm) != 2 || cm[0]["false"] != int64(5) || cm[1]["true"] != int64(5) {
 		t.Errorf("ML.CONFUSION_MATRIX: %v", cm)
 	}
+	// Multiclass, one round (x 0..2 a, 3..5 b, 6..8 c), by hand: every p is
+	// 1/3 and h 4/9; a's tree splits at 2.5, its leaves 0.3·2/(7/3) and
+	// −0.3·2/(11/3); b's splits all three apart, b's leaf 0.3·2/(7/3), the
+	// others −0.3/(7/3); c's mirrors a's.
+	if err := mlRun(h, c, fmt.Sprintf("CREATE MODEL `%s.bm` OPTIONS(model_type='boosted_tree_classifier', max_iterations=1) "+
+		"AS SELECT CAST(x AS FLOAT64) AS x, ['a', 'b', 'c'][OFFSET(DIV(x, 3))] AS label FROM UNNEST(GENERATE_ARRAY(0, 8)) AS x", name)); err != nil {
+		t.Fatalf("CREATE MODEL multiclass boosted_tree_classifier: %v", err)
+	}
+	za, zb, zc := 0.5+0.3*2/(7.0/3), 0.5-0.3/(7.0/3), 0.5-0.3*2/(11.0/3)
+	den := math.Exp(za) + math.Exp(zb) + math.Exp(zc)
+	mp := mlQuery(t, h, c, fmt.Sprintf("SELECT x, predicted_label, (SELECT prob FROM UNNEST(predicted_label_probs) WHERE label = 'a') AS pa "+
+		"FROM ML.PREDICT(MODEL `%s.bm`, (SELECT 1.0 AS x UNION ALL SELECT 4.0 UNION ALL SELECT 7.0)) ORDER BY x", name))
+	if len(mp) != 3 || mp[0]["predicted_label"] != "a" || mp[1]["predicted_label"] != "b" || mp[2]["predicted_label"] != "c" ||
+		!near(mp[0]["pa"], math.Exp(za)/den, 1e-9) {
+		t.Errorf("ML.PREDICT multiclass: %v; want a, b, c and P(a | 1) %v", mp, math.Exp(za)/den)
+	}
 	_, err = c.Query(fmt.Sprintf("SELECT * FROM ML.WEIGHTS(MODEL `%s.bt`)", name)).Read(ctx)
 	wantHTTPStatus(t, "ML.WEIGHTS of a boosted tree model", err, http.StatusBadRequest)
 	for _, sql := range []string{

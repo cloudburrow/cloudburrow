@@ -76,4 +76,30 @@ func TestTrainBoostedTree(t *testing.T) {
 	if got := tr.predictRow(map[string]*string{"x": &seven}); math.Abs(got-sigmoid(m1)) > 1e-12 {
 		t.Errorf("classifier predict(7) = %v; want %v", got, sigmoid(m1))
 	}
+	// Multiclass, one round: x 0..2 a, 3..5 b, 6..8 c. By hand, every
+	// p is 1/3 and h 2·(1/3)(2/3) = 4/9: a's tree splits at 2.5 (gain
+	// 12/7 + 12/11), its leaves 0.3·2/(7/3) and −0.3·2/(11/3); b's splits
+	// a, b and c apart, b's leaf 0.3·2/(7/3) and the others −0.3·1/(7/3).
+	mcols := []mlColumn{{"x", "FLOAT"}, {"label", "STRING"}}
+	var mrows [][]*string
+	for x := 0; x < 9; x++ {
+		xs, ls := strconv.Itoa(x), []string{"a", "b", "c"}[x/3]
+		mrows = append(mrows, []*string{&xs, &ls})
+	}
+	o.LabelCols, o.MaxIterations = nil, 1
+	tr, fe = trainModel(o, mcols, mrows)
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	if len(tr.Trees) != 3 || len(tr.TreeClass) != 3 {
+		t.Fatalf("multiclass trees: %d", len(tr.Trees))
+	}
+	one := "1"
+	want := softmaxOf([]float64{0.5 + 0.3*2/(7.0/3), 0.5 - 0.3/(7.0/3), 0.5 - 0.3*2/(11.0/3)})
+	got := tr.classProbs(map[string]*string{"x": &one})
+	for k := range want {
+		if math.Abs(got[k]-want[k]) > 1e-12 {
+			t.Errorf("multiclass probs(1) = %v; want %v", got, want)
+		}
+	}
 }

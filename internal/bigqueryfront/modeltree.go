@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// BOOSTED_TREE_REGRESSOR and binary BOOSTED_TREE_CLASSIFIER models (#1504,
+// BOOSTED_TREE_REGRESSOR and BOOSTED_TREE_CLASSIFIER models (#1504,
 // https://cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-boosted-tree),
 // trained by the front with XGBoost's exact greedy algorithm (gbtree, as
 // XGBoost documents it: https://xgboost.readthedocs.io/en/stable/tutorials/model.html),
@@ -41,8 +41,7 @@ import (
 // learned default direction, for a NULL; float64 values, where XGBoost
 // keeps float32; the loss of an iteration (the mean squared error, or the
 // mean log loss). Refused 501: num_parallel_tree, subsample or colsample_*
-// other than 1, booster_type DART, tree_method APPROX or HIST, and a
-// multiclass classifier.
+// other than 1, booster_type DART, and tree_method APPROX or HIST.
 
 // mlNode is one node of a tree: a split (Feat the encoded column, without
 // the intercept, Thr the value, Left and Right the children's indexes) or a
@@ -96,99 +95,81 @@ func softL1(g, alpha float64) float64 {
 }
 
 // trainBoosted fits the trees on X (each row's encoded columns, the
-// intercept's 1 first) and Y, and the metrics on EX, EY (or X, Y).
-func (t *mlTrained) trainBoosted(o mlOptions, X [][]float64, Y []float64, EX [][]float64, EY []float64, classifier bool) {
+// intercept's 1 first) and Y, and the metrics on EX, EY (or X, Y). K is
+// the classes of a multiclass classifier (softmax: a tree a class a
+// round, g = p_k − y_k, h = 2p_k(1 − p_k), as XGBoost's multi:softprob
+// computes them), else 1.
+func (t *mlTrained) trainBoosted(o mlOptions, X [][]float64, Y []float64, EX [][]float64, EY []float64, classifier bool, K int) {
 	t.Strategy = "BOOSTED_TREE"
-	if classifier {
+	t.BaseScore = 0.5
+	if classifier && K == 1 {
 		t.BaseScore = 0
-	} else {
-		t.BaseScore = 0.5
 	}
 	n := len(X)
-	margin := make([]float64, n)
+	margin := make([][]float64, n)
 	for i := range margin {
-		margin[i] = t.BaseScore
+		margin[i] = make([]float64, K)
+		for k := range margin[i] {
+			margin[i][k] = t.BaseScore
+		}
 	}
 	loss := func(X [][]float64, Y []float64) float64 {
 		var s float64
 		for i, x := range X {
-			p := t.treeMargin(x)
-			if classifier {
-				q := sigmoid(p)
+			switch {
+			case K > 1:
+				p := softmaxOf(t.treeMargins(x, K))[int(Y[i])]
+				s -= math.Log(math.Max(p, 1e-15))
+			case classifier:
+				q := sigmoid(t.treeMargins(x, 1)[0])
 				q = math.Min(math.Max(q, 1e-15), 1-1e-15)
 				s -= Y[i]*math.Log(q) + (1-Y[i])*math.Log(1-q)
-			} else {
+			default:
+				p := t.treeMargins(x, 1)[0]
 				s += (p - Y[i]) * (p - Y[i])
 			}
 		}
 		return s / float64(len(X))
 	}
 	g, h := make([]float64, n), make([]float64, n)
+	all := make([]int, n)
+	for i := range all {
+		all[i] = i
+	}
 	prev := math.Inf(1)
 	for round := 0; round < o.MaxIterations; round++ {
 		start := time.Now()
-		for i := range X {
-			if classifier {
-				p := sigmoid(margin[i])
-				g[i], h[i] = p-Y[i], p*(1-p)
-			} else {
-				g[i], h[i] = margin[i]-Y[i], 1
+		var probs [][]float64
+		if K > 1 {
+			probs = make([][]float64, n)
+			for i := range margin {
+				probs[i] = softmaxOf(margin[i])
 			}
 		}
-		all := make([]int, n)
-		for i := range all {
-			all[i] = i
-		}
-		var tree []mlNode
-		var grow func(idx []int, depth int) int
-		grow = func(idx []int, depth int) int {
-			var G, H float64
-			for _, i := range idx {
-				G, H = G+g[i], H+h[i]
-			}
-			me := len(tree)
-			tree = append(tree, mlNode{Feat: -1, Value: -softL1(G, o.L1) / (H + o.L2) * o.LearnRate, Cover: H})
-			if depth >= o.MaxTreeDepth || len(idx) < 2 {
-				return me
-			}
-			parent := math.Pow(softL1(G, o.L1), 2) / (H + o.L2)
-			best, bestF, bestThr := 0.0, -1, 0.0
-			for f := 1; f < len(X[0]); f++ {
-				s := append([]int(nil), idx...)
-				sort.SliceStable(s, func(a, b int) bool { return X[s[a]][f] < X[s[b]][f] })
-				var GL, HL float64
-				for k := 0; k < len(s)-1; k++ {
-					GL, HL = GL+g[s[k]], HL+h[s[k]]
-					v, next := X[s[k]][f], X[s[k+1]][f]
-					if v == next || HL < o.MinChildWeight || H-HL < o.MinChildWeight {
-						continue
+		for k := 0; k < K; k++ {
+			for i := range X {
+				switch {
+				case K > 1:
+					p, y := probs[i][k], 0.0
+					if int(Y[i]) == k {
+						y = 1
 					}
-					gain := math.Pow(softL1(GL, o.L1), 2)/(HL+o.L2) + math.Pow(softL1(G-GL, o.L1), 2)/(H-HL+o.L2) - parent
-					if gain > best+1e-12 {
-						best, bestF, bestThr = gain, f, (v+next)/2
-					}
+					g[i], h[i] = p-y, math.Max(2*p*(1-p), 1e-16)
+				case classifier:
+					p := sigmoid(margin[i][0])
+					g[i], h[i] = p-Y[i], p*(1-p)
+				default:
+					g[i], h[i] = margin[i][0]-Y[i], 1
 				}
 			}
-			if bestF < 0 || best <= o.MinSplitLoss || best <= 1e-6 {
-				return me
+			tree := growTree(o, X, g, h, all)
+			t.Trees = append(t.Trees, tree)
+			if K > 1 {
+				t.TreeClass = append(t.TreeClass, k)
 			}
-			var left, right []int
-			for _, i := range idx {
-				if X[i][bestF] < bestThr {
-					left = append(left, i)
-				} else {
-					right = append(right, i)
-				}
+			for i, x := range X {
+				margin[i][k] += treeValue(tree, x)
 			}
-			l := grow(left, depth+1)
-			r := grow(right, depth+1)
-			tree[me] = mlNode{Feat: bestF - 1, Thr: bestThr, Left: l, Right: r, Gain: best, Cover: H}
-			return me
-		}
-		grow(all, 0)
-		t.Trees = append(t.Trees, tree)
-		for i, x := range X {
-			margin[i] += treeValue(tree, x)
 		}
 		it := mlIteration{Index: round, Loss: loss(X, Y), LearnRate: o.LearnRate, DurationMs: time.Since(start).Milliseconds()}
 		if len(EX) > 0 {
@@ -210,9 +191,21 @@ func (t *mlTrained) trainBoosted(o mlOptions, X [][]float64, Y []float64, EX [][
 	if len(evX) == 0 {
 		evX, evY = X, Y
 	}
+	if K > 1 {
+		probs := make([][]float64, len(evX))
+		for i, x := range evX {
+			probs[i] = softmaxOf(t.treeMargins(x, K))
+		}
+		t.Eval = multiclassMetrics(evY, probs)
+		t.EvalY = evY
+		for _, p := range probs {
+			t.EvalScore = append(t.EvalScore, float64(argmax(p)))
+		}
+		return
+	}
 	pred := make([]float64, len(evX))
 	for i, x := range evX {
-		pred[i] = t.treeMargin(x)
+		pred[i] = t.treeMargins(x, 1)[0]
 		if classifier {
 			pred[i] = sigmoid(pred[i])
 		}
@@ -223,6 +216,77 @@ func (t *mlTrained) trainBoosted(o mlOptions, X [][]float64, Y []float64, EX [][
 	} else {
 		t.Eval = regressionMetrics(evY, pred)
 	}
+}
+
+// growTree grows one tree on the rows idx of X for gradients g and
+// hessians h, by the exact greedy method.
+func growTree(o mlOptions, X [][]float64, g, h []float64, idx []int) []mlNode {
+	var tree []mlNode
+	var grow func(idx []int, depth int) int
+	grow = func(idx []int, depth int) int {
+		var G, H float64
+		for _, i := range idx {
+			G, H = G+g[i], H+h[i]
+		}
+		me := len(tree)
+		tree = append(tree, mlNode{Feat: -1, Value: -softL1(G, o.L1) / (H + o.L2) * o.LearnRate, Cover: H})
+		if depth >= o.MaxTreeDepth || len(idx) < 2 {
+			return me
+		}
+		parent := math.Pow(softL1(G, o.L1), 2) / (H + o.L2)
+		best, bestF, bestThr := 0.0, -1, 0.0
+		for f := 1; f < len(X[0]); f++ {
+			s := append([]int(nil), idx...)
+			sort.SliceStable(s, func(a, b int) bool { return X[s[a]][f] < X[s[b]][f] })
+			var GL, HL float64
+			for k := 0; k < len(s)-1; k++ {
+				GL, HL = GL+g[s[k]], HL+h[s[k]]
+				v, next := X[s[k]][f], X[s[k+1]][f]
+				if v == next || HL < o.MinChildWeight || H-HL < o.MinChildWeight {
+					continue
+				}
+				gain := math.Pow(softL1(GL, o.L1), 2)/(HL+o.L2) + math.Pow(softL1(G-GL, o.L1), 2)/(H-HL+o.L2) - parent
+				if gain > best+1e-12 {
+					best, bestF, bestThr = gain, f, (v+next)/2
+				}
+			}
+		}
+		if bestF < 0 || best <= o.MinSplitLoss || best <= 1e-6 {
+			return me
+		}
+		var left, right []int
+		for _, i := range idx {
+			if X[i][bestF] < bestThr {
+				left = append(left, i)
+			} else {
+				right = append(right, i)
+			}
+		}
+		l := grow(left, depth+1)
+		r := grow(right, depth+1)
+		tree[me] = mlNode{Feat: bestF - 1, Thr: bestThr, Left: l, Right: r, Gain: best, Cover: H}
+		return me
+	}
+	grow(idx, 0)
+	return tree
+}
+
+// softmaxOf is the softmax of z.
+func softmaxOf(z []float64) []float64 {
+	m := math.Inf(-1)
+	for _, v := range z {
+		m = math.Max(m, v)
+	}
+	out := make([]float64, len(z))
+	var sum float64
+	for k, v := range z {
+		out[k] = math.Exp(v - m)
+		sum += out[k]
+	}
+	for k := range out {
+		out[k] /= sum
+	}
+	return out
 }
 
 // treeValue is a tree's leaf weight for x, the encoded row with the
@@ -239,27 +303,42 @@ func treeValue(tree []mlNode, x []float64) float64 {
 	return tree[k].Value
 }
 
-// treeMargin is the trees' sum for x, from the starting score.
-func (t mlTrained) treeMargin(x []float64) float64 {
-	z := t.BaseScore
-	for _, tr := range t.Trees {
-		z += treeValue(tr, x)
+// treeMargins are the trees' sums for x of each of K classes (1 for a
+// regressor or binary classifier), from the starting score.
+func (t mlTrained) treeMargins(x []float64, K int) []float64 {
+	z := make([]float64, K)
+	for k := range z {
+		z[k] = t.BaseScore
+	}
+	for j, tr := range t.Trees {
+		k := 0
+		if j < len(t.TreeClass) {
+			k = t.TreeClass[j]
+		}
+		z[k] += treeValue(tr, x)
 	}
 	return z
 }
 
-// treesSQL is the SQL of the trees' sum for the encoded columns enc.
-func (t mlTrained) treesSQL(enc []string) string {
-	var node func(tree []mlNode, k int) string
-	node = func(tree []mlNode, k int) string {
-		nd := tree[k]
+// treeMargin is a regressor's or binary classifier's trees' sum for x.
+func (t mlTrained) treeMargin(x []float64) float64 { return t.treeMargins(x, 1)[0] }
+
+// treesSQL is the SQL of class k's trees' sum (every tree's, for a
+// regressor or binary classifier) for the encoded columns enc.
+func (t mlTrained) treesSQL(enc []string, k int) string {
+	var node func(tree []mlNode, j int) string
+	node = func(tree []mlNode, j int) string {
+		nd := tree[j]
 		if nd.Feat < 0 {
 			return sqlF(nd.Value)
 		}
 		return fmt.Sprintf("IF(%s < %s, %s, %s)", enc[nd.Feat], sqlF(nd.Thr), node(tree, nd.Left), node(tree, nd.Right))
 	}
 	terms := []string{sqlF(t.BaseScore)}
-	for _, tr := range t.Trees {
+	for j, tr := range t.Trees {
+		if j < len(t.TreeClass) && t.TreeClass[j] != k {
+			continue
+		}
 		terms = append(terms, node(tr, 0))
 	}
 	return "(" + strings.Join(terms, " + ") + ")"
