@@ -101,12 +101,9 @@ Each answers 501 UNIMPLEMENTED with the reason:
   and recovery appliance VM on Compute Engine, reached over VPC peering.
 - **The appliance protocol** (`dataSources.initiateBackup`, `finalizeBackup`, `abandonBackup`,
   `fetchAccessToken`, `setInternalStatus`, `remove`): what an appliance's agents call.
-- **Trials** (`getTrial`, `trial.subscribe`, `trial.end`): billing-account state, and CloudBurrow
-  has no billing accounts.
-- **Resource backup configs' `fetch`** (`resourceBackupConfigs.fetch`, and the folder and
-  organization `fetch`): they inventory every resource of a project, folder or organization, of
-  every type, through Cloud Asset Inventory. A `filter` on `resourceBackupConfigs.list` is 501
-  too: every config of the location is answered.
+- **A folder's or organization's `resourceBackupConfigs.fetch`**: it answers every project under
+  the folder or organization, and the Backup and DR Service is not wired to Resource Manager's
+  hierarchy, so it cannot tell which projects those are. Fetch each project's instead.
 - **`serviceConfig.initialize`**: it creates Google's default vault and plan, whose names, rules
   and retention Google does not document; create them with `backupVaults.create` and
   `backupPlans.create`.
@@ -129,15 +126,44 @@ IAM is not enforced on any of it, as elsewhere (ADR-0004).
   of the project in the location (`-` for every one): `targetResource`
   (`//sqladmin.googleapis.com/projects/P/instances/I`), `targetResourceType`
   `CLOUD_SQL_INSTANCE`, and `backupConfigsDetails`: `CLOUD_SQL_INSTANCE_BACKUP_CONFIG` when the
-  instance's automated backups are on, and `BACKUPDR` for each backup plan association protecting
+  instance's automated backups are on, and `BACKUPDR_BACKUP_PLAN` for each backup plan association protecting
   it, with its vault, its rules and their last successful backups; `backupConfigured` and
   `vaulted` follow. Cloud SQL instances are the one workload served, so no other resource is
   listed. A vault's page in the console lists them as Protected resources.
 
+## Fetching resource backup configs, trials and compliance metadata (#1536)
+
+- **`resourceBackupConfigs.fetch`** answers the configs `list` does, in a
+  `FetchResourceBackupConfigsResponse`. Both take the `filter` and `orderBy` that
+  `gcloud backup-dr resource-backup-config list` sends: the keys `target_resource_display_name`,
+  `target_resource_type`, `backup_configured`, `vaulted`,
+  `backup_configs_details.backup_config_source_display_name` and `backup_configs_details.type`
+  (camelCase too), compared with `=`, `!=` or `:` (a `backup_configs_details` key matches when any
+  of the config's details does), joined by `AND` and `OR` (`OR` binding tighter, as in AIP-160) and
+  negated with `NOT` or `-`. Parentheses, other keys and other operators are 400. `orderBy` is
+  `target_resource_display_name`, with `desc` for the reverse; any other field is 400. `pageSize`
+  is 100 by default and at most 500.
+- **Trials** (`getTrial`, `trial.subscribe`, `trial.end`): the reference's states, per project
+  and multi-region (`us`, `eu` or `asia`; another location is 400). A trial is `ELIGIBLE` until
+  subscribed, then `SUBSCRIBED` with its `startTime` and an `endTime` 30 days later, after which it
+  is `EXPIRED`. `trial.end` with an `endReason` (`MOVE_TO_PAID` or `DISCONTINUED`, required) makes
+  it `UNSUBSCRIBED`, ending now. A project subscribes once: subscribing a trial that is not
+  `ELIGIBLE`, or ending one that is not `SUBSCRIBED`, is `FAILED_PRECONDITION`. Trials are kept in
+  `backupdr.json`. CloudBurrow bills nothing, so a trial changes no other answer.
+- **`managementServers.msComplianceMetadata`** answers `isAssuredWorkload: false`: CloudBurrow runs
+  no Assured Workloads, so no project is one. `projectId` is required.
+
+The console's Backup and DR page has them as its own actions: **Find protected resources** (a
+region, a filter and an order), **Show trial**, **Subscribe to trial**, **End trial** and **Check
+Assured Workloads**.
+
 ## gcloud and Terraform
 
 `gcloud backup-dr backup-vaults`, `backup-plans`, `backup-plan-associations`, `data-sources` and
-`backups` reach the server through the configuration `gcloud-setup` writes (`TestGcloudBackupDR`).
+`backups` reach the server through the configuration `gcloud-setup` writes (`TestGcloudBackupDR`),
+and so does `resource-backup-config list` with its `--filter` and `--sort-by`
+(`TestGcloudBackupDRResourceBackupConfigFilter`). gcloud has no command for trials or compliance
+metadata, and the Terraform provider no resource for them.
 The Terraform provider's `google_backup_dr_backup_vault`, `google_backup_dr_backup_plan` and
 `google_backup_dr_backup_plan_association` apply, plan clean and destroy through
 `backup_dr_custom_endpoint` (`TestTerraformBackupDR`).

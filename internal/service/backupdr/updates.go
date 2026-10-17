@@ -21,10 +21,10 @@ const (
 	applianceWhy = "this is the backup/recovery appliance's and agent's protocol for workloads on Compute Engine " +
 		"(the appliance streams a backup in and finalizes it); CloudBurrow runs no appliance and no Compute Engine, " +
 		"and a Cloud SQL data source's backups are taken by the Cloud SQL Admin API (docs/backupdr.md)"
-	trialWhy = "a Backup and DR trial is billing-account state (a subscription with its end date), and CloudBurrow " +
-		"has no billing accounts; every method it serves is available without one (docs/backupdr.md)"
-	hierarchyWhy = "fetching resource backup configs for a folder or an organization inventories every project " +
-		"under it through Cloud Asset Inventory, which CloudBurrow does not run (docs/backupdr.md)"
+	hierarchyWhy = "fetching resource backup configs for a folder or an organization answers every project under it, " +
+		"and CloudBurrow's Backup and DR Service answers one project's own Cloud SQL instances: it is not wired to " +
+		"Resource Manager's folders and organizations, so it cannot tell which projects are under one; fetch each " +
+		"project's with projects.locations.resourceBackupConfigs.fetch (docs/backupdr.md)"
 	inventoryWhy = "resource backup configs inventory every resource of a project (Compute Engine instances and " +
 		"disks, Cloud Storage buckets, Cloud SQL instances) through Cloud Asset Inventory, which CloudBurrow does not " +
 		"run; a Cloud SQL instance's protection is its backup plan association and data source (docs/backupdr.md)"

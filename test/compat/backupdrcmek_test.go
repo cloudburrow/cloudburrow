@@ -104,7 +104,7 @@ func TestBackupDRVaultEncryptionConfig(t *testing.T) {
 			t.Errorf("the instance's resource backup config: %+v", c)
 		}
 		for _, d := range c.BackupConfigsDetails {
-			if d.Type == "BACKUPDR" && d.BackupConfigSource == assocName && d.BackupVault == vaultName && d.LatestSuccessfulBackupTime != "" &&
+			if d.Type == "BACKUPDR_BACKUP_PLAN" && d.BackupConfigSource == assocName && d.BackupVault == vaultName && d.LatestSuccessfulBackupTime != "" &&
 				d.BackupDrPlanConfig != nil && len(d.BackupDrPlanConfig.BackupDrPlanRules) == 1 {
 				found = true
 			}
