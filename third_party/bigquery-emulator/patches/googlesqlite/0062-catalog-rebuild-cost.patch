@@ -70,7 +70,7 @@ Authors.
  	// propertyGraphs records property-graph definitions registered
  	// through CREATE PROPERTY GRAPH. Currently a metadata-only
  	// store; full GRAPH_EXPAND / AGG integration is not yet wired.
-@@ -1778,7 +1804,7 @@
+@@ -1781,7 +1807,7 @@
  		if c.existsTable(cat, path[0]) {
  			return
  		}
@@ -79,7 +79,7 @@ Authors.
  		return
  	}
  	subName := path[0]
-@@ -2014,14 +2040,22 @@
+@@ -2017,14 +2043,22 @@
  }
  
  func (c *Catalog) DeleteTableSpec(ctx context.Context, conn *Conn, name string) error {
@@ -105,7 +105,7 @@ Authors.
  	}
  	return nil
  }
-@@ -2057,15 +2091,18 @@
+@@ -2060,15 +2094,18 @@
  	return spec, exists
  }
  
@@ -130,7 +130,7 @@ Authors.
  			continue
  		}
  		tables = append(tables, table)
-@@ -2174,7 +2211,16 @@
+@@ -2177,7 +2214,16 @@
  	// pressure that pins thousands of catalogs in the wasm heap until
  	// it exhausts and `wasm_alloc` starts returning OOB.
  	c.subCatalogs = map[*googlesql.SimpleCatalog]map[string]*googlesql.SimpleCatalog{}
@@ -147,7 +147,7 @@ Authors.
  		if err := c.addTableSpec(spec); err != nil {
  			return err
  		}
-@@ -2381,12 +2427,19 @@
+@@ -2384,12 +2430,19 @@
  }
  
  func (c *Catalog) addTableSpecRecursive(cat *googlesql.SimpleCatalog, spec *TableSpec) error {
@@ -172,7 +172,7 @@ Authors.
  	}
  	return c.addTableSpecRecursiveImpl(cat, spec, table)
  }
-@@ -2413,7 +2466,7 @@
+@@ -2416,7 +2469,7 @@
  		}
  		fullTableName := strings.Join(spec.NamePath, ".")
  		if !c.existsTable(cat, fullTableName) {
@@ -181,7 +181,7 @@ Authors.
  				return fmt.Errorf("failed to register table %q: %w", fullTableName, err)
  			}
  		}
-@@ -2436,7 +2489,7 @@
+@@ -2439,7 +2492,7 @@
  	if c.existsTable(cat, tableName) {
  		return nil
  	}
@@ -190,7 +190,7 @@ Authors.
  		return fmt.Errorf("failed to register table %q: %w", tableName, err)
  	}
  	return nil
-@@ -2449,9 +2502,10 @@
+@@ -2452,9 +2505,10 @@
  // through, so handle.Name() is the storage name everywhere — no
  // side map / pointer-identity machinery needed at format time.
  //
@@ -203,7 +203,7 @@ Authors.
  func (c *Catalog) tableHandleForSpec(spec *TableSpec) (*googlesql.SimpleTable, error) {
  	storageName := spec.TableName()
  	columns := []*googlesql.SimpleColumn{}
-@@ -2782,24 +2836,50 @@
+@@ -2794,24 +2848,50 @@
  }
  
  func (c *Catalog) existsTable(cat *googlesql.SimpleCatalog, name string) bool {
