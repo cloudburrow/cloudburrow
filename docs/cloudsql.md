@@ -804,7 +804,10 @@ Proxy), so `--port-base` does not move it. What Cloud SQL varies between instanc
 address, and that is what a second CloudBurrow instance varies too (#1364):
 `--cloudsql-connector host:port` (`CLOUDBURROW_CLOUDSQL_CONNECTOR`, `cloudsqlConnector` in the
 file) is where the listener binds, and `connectSettings` reports its host. When it is set,
-`cloudburrow env` exports it as `CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT`.
+`cloudburrow env` exports it as `CLOUDBURROW_CLOUDSQL_CONNECTOR_ENDPOINT`. `up` records the
+address in the instance's state directory (`cloudsql-connector.json`), so
+`cloudburrow env --name … --state-dir …` reports it without the flag being passed again (#1571);
+an `up` at the default removes the record.
 
 - **Linux: another loopback address, nothing else changes.** All of `127.0.0.0/8` is routed to
   `lo` with no setup, so `--cloudsql-connector 127.0.0.2:3307` binds without root, and an
