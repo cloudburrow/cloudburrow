@@ -261,8 +261,12 @@ func (c *Cluster) Ensure(ctx context.Context, configPath string) (created bool, 
 		"--name", c.opts.Name,
 		"--image", c.opts.NodeImage,
 		"--kubeconfig", c.opts.Kubeconfig,
-		"--wait", "180s",
 	}
+	// No --wait: kind returns once the API server is up, and the node
+	// becomes Ready (its CNI up) while the images load and Knative's
+	// manifests apply, which need only the API and the node's container.
+	// WaitNodesReady, which the cluster component runs in the background
+	// and its NodesReady joins, keeps what --wait 180s guaranteed (#1588).
 	if configPath != "" {
 		args = append(args, "--config", configPath)
 	}
@@ -393,6 +397,64 @@ func (c *Cluster) WaitReady(ctx context.Context, timeout time.Duration) error {
 		}
 	}
 	return fmt.Errorf("cluster %s did not become ready within %s: %w", c.opts.Name, timeout, last)
+}
+
+// NodesReadyTimeout bounds WaitNodesReady: what `kind create --wait` was
+// given before the wait moved out of the create (#1588).
+const NodesReadyTimeout = 180 * time.Second
+
+// WaitNodesReady polls until the cluster lists at least one node and every
+// node's Ready condition is True, or the deadline elapses: what `kind
+// create cluster --wait` waited for, done after the create so the work
+// that needs only the API overlaps it (#1588).
+func (c *Cluster) WaitNodesReady(ctx context.Context, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	last := errors.New("no node reported")
+	for time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		out, err := c.runner.Run(ctx, "kubectl", "--kubeconfig", c.opts.Kubeconfig,
+			"get", "nodes", "-o", `jsonpath={range .items[*]}{.metadata.name}={.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}`)
+		if err == nil {
+			last = nodesReady(out)
+			if last == nil {
+				return nil
+			}
+		} else {
+			last = err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("cluster %s: nodes not Ready within %s: %w", c.opts.Name, timeout, last)
+}
+
+// nodesReady reads WaitNodesReady's name=status lines: nil when there is at
+// least one and every status is True.
+func nodesReady(out string) error {
+	n := 0
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		n++
+		name, status, _ := strings.Cut(line, "=")
+		if status != "True" {
+			if status == "" {
+				status = "unknown"
+			}
+			return fmt.Errorf("node %s Ready is %s", name, status)
+		}
+	}
+	if n == 0 {
+		return errors.New("no node reported")
+	}
+	return nil
 }
 
 // ServerVersion returns the Kubernetes server version reported by the cluster.

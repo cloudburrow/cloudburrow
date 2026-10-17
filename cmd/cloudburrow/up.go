@@ -421,6 +421,10 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		imageComps = append(imageComps, newBigQueryImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
 	}
 	coord.RegisterConcurrent(imageComps...)
+	// `kind create` returns before its node is Ready (#1588), so the
+	// images above and Knative's manifests overlap the node's start; the
+	// backends are scheduled only once it is Ready, as with --wait.
+	coord.Register(clusterComp.NodesReady())
 	coord.Register(comps)
 	// Once the cluster answers: Cloud KMS and Secret Manager drop what --mode
 	// says must not survive (#481, #483).

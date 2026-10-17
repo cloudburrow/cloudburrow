@@ -21,6 +21,18 @@ type Component struct {
 
 	// serverVersion is recorded on a successful start, for reporting.
 	serverVersion string
+
+	// nodes is the wait for a created cluster's nodes to be Ready, running
+	// in the background from the create; nil when Start found the cluster
+	// rather than creating it (#1588).
+	nodes *nodesWait
+}
+
+// nodesWait is WaitNodesReady running in the background.
+type nodesWait struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+	err    error
 }
 
 // NewComponent returns a lifecycle component for the given cluster.
@@ -47,6 +59,18 @@ func (c *Component) Start(ctx context.Context) error {
 	created, err := c.cluster.Ensure(ctx, c.configPath)
 	if err != nil {
 		return err
+	}
+	if created {
+		// `kind create` no longer waits for the node (#1588): it becomes
+		// Ready while what needs only the API runs, and NodesReady,
+		// registered before anything is scheduled, waits for it.
+		wctx, cancel := context.WithCancel(ctx)
+		w := &nodesWait{cancel: cancel, done: make(chan struct{})}
+		c.nodes = w
+		go func() {
+			defer close(w.done)
+			w.err = c.cluster.WaitNodesReady(wctx, NodesReadyTimeout)
+		}()
 	}
 
 	if c.out != nil {
@@ -78,9 +102,53 @@ func (c *Component) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop is a no-op.
+// Stop leaves the cluster running.
 //
 // Shutting down the CLI must not stop the cluster: `stop` and `delete` are
 // explicit commands, and a Ctrl-C that silently tore down the developer's
 // environment would be a serious surprise.
-func (c *Component) Stop(context.Context) error { return nil }
+//
+// It does end a node wait still running, as when startup unwinds before
+// NodesReady.
+func (c *Component) Stop(context.Context) error {
+	if w := c.nodes; w != nil {
+		w.cancel()
+		<-w.done
+	}
+	return nil
+}
+
+// NodesReady is the component that waits for the nodes of a cluster Start
+// created to be Ready, what `kind create --wait` waited for (#1588).
+// Registered after the work that needs only the API (the images, Knative's
+// manifests) and before the backends, so that work overlaps the node's
+// start and nothing is scheduled before it is Ready. Against a cluster
+// Start found, it returns at once, as `up` always has.
+func (c *Component) NodesReady() *NodesReadyPhase { return &NodesReadyPhase{c: c} }
+
+// NodesReadyPhase is the lifecycle component NodesReady returns.
+type NodesReadyPhase struct{ c *Component }
+
+func (p *NodesReadyPhase) Name() string { return "cluster-nodes" }
+
+func (p *NodesReadyPhase) Start(ctx context.Context) error {
+	w := p.c.nodes
+	if w == nil {
+		return nil
+	}
+	select {
+	case <-w.done:
+		return w.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Stop cancels a wait still running when startup unwinds.
+func (p *NodesReadyPhase) Stop(context.Context) error {
+	if w := p.c.nodes; w != nil {
+		w.cancel()
+		<-w.done
+	}
+	return nil
+}

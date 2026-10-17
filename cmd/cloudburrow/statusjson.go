@@ -221,7 +221,9 @@ func buildStatusReport(cfg config.Config, live *liveState, clusterState, kuberne
 			svc.Reason = "the instance is starting; readiness is not answering yet"
 		default:
 			var waiting []string
-			for _, c := range append([]string{"cluster"}, componentsOf(s)...) {
+			// cluster-nodes: a created cluster's nodes Ready, which `kind
+			// create --wait` covered when it was part of cluster (#1588).
+			for _, c := range append([]string{"cluster", "cluster-nodes"}, componentsOf(s)...) {
 				if ok, known := ready[c]; known && !ok {
 					waiting = append(waiting, c)
 				}
