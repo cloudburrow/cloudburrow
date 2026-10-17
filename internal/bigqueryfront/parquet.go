@@ -300,6 +300,11 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 			raw = json.RawMessage("[]")
 		}
 	}
+	if plan.kind == pqLoadNew {
+		if plan.props, _ = loadTableProps(r); plan.props != nil {
+			passes = false // #1457, loadtable.go
+		}
+	}
 	if !passes {
 		f.parquetOwnLoad(w, r, plan)
 		return false

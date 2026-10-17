@@ -107,6 +107,9 @@ type pqPlan struct {
 	raw    []any
 	files  []pqFile
 	upload *spooled // the upload's data, for a load of one
+	// props are the new table's properties the load names (#1457,
+	// loadtable.go).
+	props map[string]any
 }
 
 // pqFile is one file of a load: an upload's data, or an object in Cloud
@@ -238,7 +241,7 @@ func (f front) carryOutParquet(r *http.Request, plan *pqPlan, rows *os.File) str
 	ds := plan.dest.DatasetID
 	schema := map[string]any{"fields": plan.raw}
 	if plan.kind == pqLoadNew {
-		if msg := f.makeParquetTable(r, plan.dest, schema, nil); msg != "" {
+		if msg := f.makeParquetTable(r, plan.dest, schema, plan.props); msg != "" {
 			return msg
 		}
 		if msg := f.insertRows(r, plan.dest, plan.target, rows); msg != "" {

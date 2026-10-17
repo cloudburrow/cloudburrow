@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -567,6 +568,9 @@ func (f front) avroLoad(w http.ResponseWriter, r *http.Request, job *jobBody) bo
 	if l == nil || !strings.EqualFold(l.SourceFormat, "AVRO") || l.DestinationTable == nil {
 		return true
 	}
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); len(l.SourceURIs) == 0 && !strings.HasPrefix(mt, "multipart/") {
+		return true // no data to load: the emulator's answer stands
+	}
 	dest := l.DestinationTable
 	name := dest.DatasetID + "." + dest.TableID
 	var upload *spooled
@@ -680,6 +684,7 @@ func (f front) avroLoad(w http.ResponseWriter, r *http.Request, job *jobBody) bo
 	switch {
 	case status == http.StatusNotFound:
 		plan.kind = pqLoadNew
+		plan.props, _ = loadTableProps(r) // #1457, loadtable.go
 		plan.target = file
 		if l.Schema != nil {
 			plan.target = l.Schema.Fields

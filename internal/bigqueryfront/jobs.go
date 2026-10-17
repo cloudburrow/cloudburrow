@@ -143,6 +143,10 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 	var afterLoad func() // #1000, loadFloat
 	switch {
 	case c.Load != nil:
+		if why := loadNotHere(r); why != "" { // #1457, loadtable.go
+			writeError(w, http.StatusNotImplemented, "notImplemented", "Not implemented here: "+why+". Nothing was loaded.")
+			return
+		}
 		if d := c.Load.DestinationTable; d != nil && strings.Index(d.TableID, "$") > 0 { // a partition, #1273
 			if msg := checkTableID(d.TableID[:strings.Index(d.TableID, "$")]); msg != "" {
 				writeError(w, http.StatusBadRequest, "invalid", msg)
@@ -284,6 +288,23 @@ func (f front) checkJob(w http.ResponseWriter, r *http.Request, job jobBody, pro
 	if msg != "" {
 		writeError(w, http.StatusBadRequest, reason, msg)
 		return
+	}
+	if c.Load != nil {
+		undo, ok := f.makeLoadTable(w, r, c.Load.DestinationTable) // #1457, loadtable.go
+		if !ok {
+			return
+		}
+		if undo != nil {
+			rec := newRecorder()
+			next.ServeHTTP(rec, r)
+			if loadFailed(rec) {
+				undo()
+			} else if afterLoad != nil {
+				afterLoad()
+			}
+			rec.copyTo(w)
+			return
+		}
 	}
 	if afterLoad != nil {
 		rec := newRecorder()
