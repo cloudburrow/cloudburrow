@@ -219,28 +219,129 @@ func TestJobsTableReadByFilteredQueries(t *testing.T) {
 	}
 }
 
-// TestJobsTableBackgroundWaitsAfterASlowSync (#1525): a background sync
-// runs no sooner than jobsTableIdle times as long as the last one took
-// after it ended, so syncs that list many jobs never run back to back.
-func TestJobsTableBackgroundWaitsAfterASlowSync(t *testing.T) {
+// TestJobsTableSyncsIncrementally (#1528): a background sync lists only
+// the jobs made since the last and those not DONE then (bigquery-emulator
+// patch 0064's parameters), never every job, and leaves the table as a
+// full rebuild writes it: after jobs made, one RUNNING that then finished, and one
+// deleted, the next unfiltered JOBS query, which lists every job and
+// writes every row that differs, writes nothing.
+func TestJobsTableSyncsIncrementally(t *testing.T) {
 	saved := jobsTableDelay
-	jobsTableDelay = time.Millisecond
+	jobsTableDelay = 10 * time.Millisecond
 	t.Cleanup(func() { jobsTableDelay = saved })
-	var j jobsTable
-	j.setMade("p", true)
-	const took = 40 * time.Millisecond
-	ran := make(chan [2]time.Time, 2)
-	sync := func() {
-		start := time.Now()
-		time.Sleep(took)
-		ran <- [2]time.Time{start, time.Now()}
+	emu := &lockedEmulator{e: tableEmulator{&jobsEmulator{tables: map[string]string{}}}}
+	var full, some, uncut int // jobs.list of every job, of some, of some with no cursor
+	marked := false
+	emu.h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/jobs") {
+			if r.URL.Query().Has("cloudburrowAfterJobId") {
+				some++
+				if r.URL.Query().Get("cloudburrowAfterJobId") == "" {
+					uncut++
+				}
+			} else {
+				full++
+			}
+		}
+		emu.e.ServeHTTP(w, r)
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/queries") {
+			for _, job := range emu.e.jobs {
+				conf, _ := job["configuration"].(map[string]any)
+				qc, _ := conf["query"].(map[string]any)
+				if qc["query"] == "SELECT 'running'" && !marked {
+					job["status"] = map[string]any{"state": "RUNNING"}
+					marked = true
+				}
+			}
+		}
+	})
+	h := Wrap(emu)
+	query := func(sql string) {
+		t.Helper()
+		if code, got := do(t, h, "POST", base+"/queries", `{"query":"`+sql+`"}`); code != 200 {
+			t.Fatalf("%s: %d %v", sql, code, got)
+		}
 	}
-	j.soon("p", sync)
-	first := <-ran
-	time.Sleep(5 * time.Millisecond) // the first sync's wait is recorded
-	j.soon("p", sync)
-	second := <-ran
-	if gap := second[0].Sub(first[1]); gap < jobsTableIdle*took {
-		t.Errorf("the second sync started %v after the first ended, want at least %v", gap, jobsTableIdle*took)
+	const count = "SELECT COUNT(*) FROM `region-us`.INFORMATION_SCHEMA.JOBS"
+	table := "`" + resultsDataset + "`.`" + jobsTableName + "`"
+	query("SELECT 1")
+	query("SELECT 2")
+	query(count) // makes the table
+	locked := func(f func()) {
+		emu.mu.Lock()
+		defer emu.mu.Unlock()
+		f()
+	}
+	waitFor := func(what string, done func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+			ok := false
+			locked(func() { ok = done() })
+			if ok {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("no background sync %s", what)
+			}
+		}
+	}
+	insertOf := func(text string) func() bool {
+		return func() bool {
+			for _, q := range emu.e.sentSince(0) {
+				if strings.HasPrefix(q, "INSERT INTO "+table) && strings.Contains(q, text) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	locked(func() { full, some = 0, 0 })
+	query("SELECT 'running'")
+	query("SELECT 4")
+	waitFor("wrote the new jobs", insertOf("SELECT 4"))
+	var running string
+	locked(func() {
+		if full != 0 || some == 0 || uncut != 0 {
+			t.Errorf("the background sync sent %d jobs.list of every job and %d of some, %d with no job to list after, want only some after one", full, some, uncut)
+		}
+		for id, job := range emu.e.jobs {
+			if job["status"].(map[string]any)["state"] == "RUNNING" {
+				running = id
+				job["status"] = map[string]any{"state": "DONE", "errorResult": map[string]any{"reason": "stopped", "message": "finished late"}}
+			}
+		}
+		// A job deleted (jobs.delete).
+		delete(emu.e.jobs, "auto2")
+		for i, id := range emu.e.order {
+			if id == "auto2" {
+				emu.e.order = append(emu.e.order[:i:i], emu.e.order[i+1:]...)
+				break
+			}
+		}
+	})
+	if running == "" {
+		t.Fatal("no job was RUNNING when the background synced")
+	}
+	if code, got := do(t, h, "DELETE", base+"/jobs/auto2/delete", ""); code/100 != 2 {
+		t.Fatalf("jobs.delete: %d %v", code, got)
+	}
+	query("SELECT 5")
+	waitFor("wrote the job that finished", insertOf("finished late"))
+	waitFor("deleted the job gone", func() bool {
+		for _, q := range emu.e.sentSince(0) {
+			if strings.HasPrefix(q, "DELETE FROM "+table) && strings.Contains(q, "'auto2'") {
+				return true
+			}
+		}
+		return false
+	})
+	waitFor("wrote the last job", insertOf("SELECT 5"))
+	from := 0
+	locked(func() { from = len(emu.e.log) })
+	query(count)
+	var sent []string
+	locked(func() { sent = emu.e.sentSince(from) })
+	if len(sent) != 1 || sent[0] != "SELECT COUNT(*) FROM (SELECT * FROM "+table+") AS JOBS" {
+		t.Fatalf("the JOBS query after the background syncs sent %q, want only its read of the table: its rows differ from a full rebuild", sent)
 	}
 }

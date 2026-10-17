@@ -66,9 +66,20 @@ func (e *jobsEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		delete(e.tables, path)
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodGet && strings.HasSuffix(path, "/jobs"):
+		// bigquery-emulator patch 0064's parameters (jobstable.go).
+		q := r.URL.Query()
+		some := q.Has("cloudburrowAfterJobId") || q.Has("cloudburrowJobIds")
+		after, named := q.Get("cloudburrowAfterJobId"), map[string]bool{}
+		for _, id := range strings.Split(q.Get("cloudburrowJobIds"), ",") {
+			named[id] = true
+		}
+		past := after == "" || e.jobs[after] == nil
 		var list []any
 		for _, id := range e.order {
-			list = append(list, e.jobs[id])
+			if !some || past || named[id] {
+				list = append(list, e.jobs[id])
+			}
+			past = past || id == after
 		}
 		writeJSON(w, 200, map[string]any{"jobs": list})
 	case r.Method == http.MethodGet && strings.Contains(path, "/jobs/"):

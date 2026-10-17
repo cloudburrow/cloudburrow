@@ -1,0 +1,260 @@
+CloudBurrow patch 64 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1528).
+
+The bug: jobs.list reads every job of the project, whatever was asked
+(its source, jobsListHandler; patches 0002 and 0022 read each job's
+metadata and configuration from the jobs table for it). CloudBurrow's
+front keeps a table of INFORMATION_SCHEMA.JOBS rows, which it brings up
+to date in the background after each job is made (#1419); each such
+sync listed every job, which with some 5,000 jobs took 0.3 to 1.4 s, so
+the syncs were spaced out (#1525) and the table fell behind in a burst
+of jobs.
+
+The patch reads two parameters of jobs.list, CloudBurrow's own, which
+BigQuery's jobs.list does not have and no client sends: with
+cloudburrowAfterJobId it lists only the jobs added after that one (every
+job when no job has that ID), and with cloudburrowJobIds (a
+comma-separated list) those jobs too, in the order they were added, each
+as jobs.list lists it. Without either, jobs.list lists every job as
+before.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -2011,6 +2011,11 @@
+ 		// CloudBurrow patch (cloudburrow/cloudburrow#1419): "full" lists
+ 		// each job with its configuration, as BigQuery does.
+ 		full: r.URL.Query().Get("projection") == "full",
++		// CloudBurrow patch (cloudburrow/cloudburrow#1528): the jobs
++		// added after one, and the jobs named, alone.
++		after: r.URL.Query().Get("cloudburrowAfterJobId"),
++		ids:   splitJobIDs(r.URL.Query().Get("cloudburrowJobIds")),
++		some:  r.URL.Query().Has("cloudburrowAfterJobId") || r.URL.Query().Has("cloudburrowJobIds"),
+ 	})
+ 	if err != nil {
+ 		errorResponse(ctx, w, errJobInternalError(err.Error()))
+@@ -2023,6 +2028,21 @@
+ 	server  *Server
+ 	project *metadata.Project
+ 	full    bool
++	after   string
++	ids     []string
++	some    bool
++}
++
++// splitJobIDs reads a comma-separated list of job IDs. CloudBurrow patch
++// (cloudburrow/cloudburrow#1528).
++func splitJobIDs(s string) []string {
++	var ids []string
++	for _, id := range strings.Split(s, ",") {
++		if id != "" {
++			ids = append(ids, id)
++		}
++	}
++	return ids
+ }
+ 
+ func (h *jobsListHandler) Handle(ctx context.Context, r *jobsListRequest) (*bigqueryv2.JobList, error) {
+@@ -2030,6 +2050,10 @@
+ 	// CloudBurrow patch (cloudburrow/cloudburrow#1086): their metadata is
+ 	// read here, not with the project.
+ 	all, err := r.project.Jobs(ctx)
++	if r.some {
++		// CloudBurrow patch (cloudburrow/cloudburrow#1528).
++		all, err = r.project.JobsAfter(ctx, r.after, r.ids)
++	}
+ 	if err != nil {
+ 		return nil, err
+ 	}
+--- a/internal/metadata/project.go
++++ b/internal/metadata/project.go
+@@ -61,6 +61,17 @@
+ 	return p.repo.findProjectJobs(ctx, p.ID)
+ }
+ 
++// JobsAfter returns, as Jobs does, the jobs of the project added after
++// the job after (all of them when after is "" or no job of the project),
++// and those of ids (those added before after first), in the order they
++// were added. CloudBurrow patch
++// (cloudburrow/cloudburrow#1528): a client that has listed the jobs reads
++// only the ones new or changed since, which costs what they cost, not
++// what every job of the project does.
++func (p *Project) JobsAfter(ctx context.Context, after string, ids []string) ([]*Job, error) {
++	return p.repo.findProjectJobsAfter(ctx, p.ID, after, ids)
++}
++
+ func (p *Project) Dataset(id string) *Dataset {
+ 	p.mu.RLock()
+ 	defer p.mu.RUnlock()
+--- a/internal/metadata/repository.go
++++ b/internal/metadata/repository.go
+@@ -5,6 +5,7 @@
+ 	"database/sql"
+ 	"errors"
+ 	"fmt"
++	"strings"
+ 	"sync"
+ 	"time"
+ 
+@@ -748,8 +749,156 @@
+ 		jobs = append(jobs, NewJob(r, projectID, id, &content, nil, resErr))
+ 	}
+ 	return jobs, nil
++}
++
++// findProjectJobsAfter reads the jobs of projectID added after the job
++// after (Project.JobsAfter), and those of ids, as findProjectJobs reads
++// every job: those of ids added before after first, in the order of ids. CloudBurrow patch (cloudburrow/cloudburrow#1528).
++func (r *Repository) findProjectJobsAfter(ctx context.Context, projectID, after string, ids []string) ([]*Job, error) {
++	conn, err := r.getConnection(ctx)
++	if err != nil {
++		return nil, err
++	}
++	defer conn.Close()
++	named := map[string]bool{}
++	for _, id := range ids {
++		named[id] = true
++	}
++	tx, err := conn.BeginTx(ctx, nil)
++	if err != nil {
++		return nil, err
++	}
++	defer tx.Commit()
++	seq := int64(-1) // every job is after none
++	if after != "" {
++		if err := tx.QueryRowContext(ctx,
++			"SELECT seq FROM cloudburrow_job_order WHERE projectID = @projectID AND id = @id",
++			sql.Named("projectID", projectID), sql.Named("id", after)).Scan(&seq); err != nil && !errors.Is(err, sql.ErrNoRows) {
++			return nil, err
++		}
++	}
++	rows, err := tx.QueryContext(ctx,
++		"SELECT id FROM cloudburrow_job_order WHERE projectID = @projectID AND seq > @seq ORDER BY seq",
++		sql.Named("projectID", projectID), sql.Named("seq", seq))
++	if err != nil {
++		return nil, err
++	}
++	var order []string
++	for rows.Next() {
++		var id string
++		if err := rows.Scan(&id); err != nil {
++			rows.Close()
++			return nil, err
++		}
++		order = append(order, id)
++		delete(named, id)
++	}
++	if err := rows.Err(); err != nil {
++		rows.Close()
++		return nil, err
++	}
++	rows.Close()
++	if err := tx.Commit(); err != nil {
++		return nil, err
++	}
++	if len(named) > 0 {
++		// The jobs named before after, in the order they were added.
++		var earlier []string
++		for _, id := range ids {
++			if named[id] {
++				earlier = append(earlier, id)
++				delete(named, id)
++			}
++		}
++		older, err := r.findJobsMetadata(ctx, projectID, earlier)
++		if err != nil {
++			return nil, err
++		}
++		newer, err := r.findJobRowsByID(ctx, conn, projectID, order)
++		if err != nil {
++			return nil, err
++		}
++		return append(older, newer...), nil
++	}
++	return r.findJobRowsByID(ctx, conn, projectID, order)
+ }
+ 
++// findJobRowsByID reads the jobs of ids, in their order, with their
++// metadata and error, as findProjectJobs does, with one SQLite query of
++// their rows. CloudBurrow patch (cloudburrow/cloudburrow#1528).
++func (r *Repository) findJobRowsByID(ctx context.Context, conn *sql.Conn, projectID string, ids []string) ([]*Job, error) {
++	jobs := make([]*Job, 0, len(ids))
++	for len(ids) > 0 {
++		n := min(len(ids), 500)
++		batch := ids[:n]
++		ids = ids[n:]
++		byID := map[string]*jobRow{}
++		err := conn.Raw(func(c interface{}) error {
++			gsqlConn, ok := c.(*googlesqlite.Conn)
++			if !ok {
++				return fmt.Errorf("failed to get *googlesqlite.Conn from %T", c)
++			}
++			encProject, err := googlesqlite.EncodeString(projectID)
++			if err != nil {
++				return err
++			}
++			args := []any{encProject}
++			marks := make([]string, len(batch))
++			for i, id := range batch {
++				enc, err := googlesqlite.EncodeString(id)
++				if err != nil {
++					return err
++				}
++				args = append(args, enc)
++				marks[i] = "?"
++			}
++			rows, err := gsqlConn.QueryRawContext(ctx,
++				"SELECT `id`, `metadata`, `error` FROM `jobs` WHERE `projectID` = ? AND `id` IN ("+strings.Join(marks, ", ")+")", args...)
++			if err != nil {
++				return fmt.Errorf("failed to read the jobs of %s: %w", projectID, err)
++			}
++			defer rows.Close()
++			for rows.Next() {
++				var cols [3]any
++				if err := rows.Scan(&cols[0], &cols[1], &cols[2]); err != nil {
++					return err
++				}
++				var dec [3]string
++				for i, v := range cols {
++					s, _, err := googlesqlite.DecodeString(v)
++					if err != nil {
++						return fmt.Errorf("failed to decode a job of %s: %w", projectID, err)
++					}
++					dec[i] = s
++				}
++				byID[dec[0]] = &jobRow{metadata: dec[1], err: dec[2]}
++			}
++			return rows.Err()
++		})
++		if err != nil {
++			return nil, err
++		}
++		for _, id := range batch {
++			row, ok := byID[id]
++			if !ok {
++				continue
++			}
++			var content bigqueryv2.Job
++			if len(row.metadata) > 0 {
++				if err := json.Unmarshal([]byte(row.metadata), &content); err != nil {
++					return nil, fmt.Errorf("failed to decode metadata content %s: %w", row.metadata, err)
++				}
++			}
++			var resErr error
++			if row.err != "" {
++				resErr = errors.New(row.err)
++			}
++			jobs = append(jobs, NewJob(r, projectID, id, &content, nil, resErr))
++		}
++	}
++	return jobs, nil
++}
++
+ // findProjectJobRows reads the metadata and error of every row of the jobs
+ // table of projectID, by job ID, as SQLite SQL (googlesqlite patch 0019),
+ // as findJobRow reads one.

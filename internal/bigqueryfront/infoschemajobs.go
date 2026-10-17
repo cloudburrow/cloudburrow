@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -311,12 +312,13 @@ func modelTypeSQL(qs map[string]any) string {
 // message of why it cannot.
 func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, string) {
 	project := projectOf(f.base)
-	jobs, status, msg := f.allJobs(r, filter)
+	listed := &engineList{}
+	jobs, status, msg := f.listedJobs(r, filter, listed)
 	if status != 0 {
 		return "", status, msg
 	}
 	if filter == nil { // nothing pushed down: the table of rows (jobstable.go, #1378)
-		if sub := f.tableJobsRows(r, project, jobs, true); sub != "" {
+		if sub := f.tableJobsRows(r, project, jobs, listed.last, nil, true); sub != "" {
 			return sub, 0, ""
 		}
 	}
@@ -326,12 +328,13 @@ func (f front) jobsRows(r *http.Request, filter *jobsFilter) (string, int, strin
 		// WHERE filters as it filters the literal. Its rows are every
 		// job's, so a list cut by creation_time is read again whole.
 		if filter.bounded() {
-			jobs, status, msg = f.allJobs(r, nil)
+			listed = &engineList{}
+			jobs, status, msg = f.listedJobs(r, nil, listed)
 			if status != 0 {
 				return "", status, msg
 			}
 		}
-		if sub := f.tableJobsRows(r, project, jobs, true); sub != "" {
+		if sub := f.tableJobsRows(r, project, jobs, listed.last, nil, true); sub != "" {
 			return sub, 0, ""
 		}
 	}
@@ -357,6 +360,13 @@ var jobsLiteralMax = 100
 // bounds of creation_time filter gives, or the status and message of why
 // it cannot.
 func (f front) allJobs(r *http.Request, filter *jobsFilter) ([]map[string]any, int, string) {
+	return f.listedJobs(r, filter, &engineList{})
+}
+
+// listedJobs is allJobs, of the engine's jobs some names (engineJobs,
+// jobstable.go), and the front's own; some has the engine's last job
+// after.
+func (f front) listedJobs(r *http.Request, filter *jobsFilter, some *engineList) ([]map[string]any, int, string) {
 	if f.listJobs == nil {
 		return nil, http.StatusInternalServerError, "cloudburrow: the job list cannot be read here"
 	}
@@ -371,7 +381,8 @@ func (f front) allJobs(r *http.Request, filter *jobsFilter) ([]map[string]any, i
 		if token != "" {
 			q.Set("pageToken", token)
 		}
-		req := r.Clone(withAllJobLevels(r.Context())) // children too (#1353)
+		// Children too (#1353).
+		req := r.Clone(context.WithValue(withAllJobLevels(r.Context()), engineListKey{}, some))
 		u := *r.URL
 		u.Path, u.RawPath = "", ""
 		p := f.base + "/jobs"

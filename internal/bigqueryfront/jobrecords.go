@@ -90,6 +90,9 @@ type jobRecords struct {
 	parents    map[string]int
 	// now is the clock, for tests; nil is time.Now.
 	now func() time.Time
+	// made is told of each job timed and each script's jobs
+	// (jobstable.go's noteMade).
+	made func(project, id string)
 }
 
 // nowTime is the time now by j.now.
@@ -110,6 +113,9 @@ func (j *jobRecords) clock() int64 {
 func (j *jobRecords) setTime(project, id string, t jobTime) {
 	if j == nil || id == "" {
 		return
+	}
+	if j.made != nil {
+		defer j.made(project, id)
 	}
 	key := project + "/" + id
 	j.mu.Lock()
