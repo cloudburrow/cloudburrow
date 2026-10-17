@@ -20,6 +20,7 @@ import (
 // engine's marks. The check is made where the client's text enters the
 // front, jobs.query and jobs.insert, before any rewrite of the front's
 // that names them.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/schemas
 
 // enginePseudoColumns are the engine's pseudo-columns (above), upper case.
 var enginePseudoColumns = map[string]bool{bufferedRows: true, streamedAt: true}

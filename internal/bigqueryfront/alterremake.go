@@ -45,6 +45,7 @@ import (
 // table with constraints whose columns change, and renaming a
 // partitioning or clustering column (BigQuery's rule for it is not
 // documented).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language
 func (s *scriptRun) remakeTable(st alterStmt, ds, table, name string, got []byte, text string) *scriptFlow {
 	var meta map[string]any
 	if json.Unmarshal(got, &meta) != nil {
@@ -348,6 +349,7 @@ func (s *scriptRun) renameTable(src tableRef, to string, raw []any, meta map[str
 // restrictive one ("increase the maximum length of a string type or
 // increase the precision or scale of a numeric type"). It returns 400 and
 // the refusal (wording UNVERIFIED), 501 and what is not documented, or 0.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language
 func coercion(old, next map[string]any) (int, string) {
 	ot, nt := canonicalType(str(old, "type")), canonicalType(str(next, "type"))
 	refused := fmt.Sprintf("ALTER TABLE ALTER COLUMN SET DATA TYPE requires that the existing column type (%s) "+
@@ -414,6 +416,7 @@ func coercion(old, next map[string]any) (int, string) {
 			// restrictive" is one that holds every INT64, of 19 digits,
 			// so one of at least 19 digits before its point (UNVERIFIED:
 			// the reference documents the unparameterized types only).
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language
 			np, _ := num(next, "precision")
 			ns, _ := num(next, "scale")
 			if np-ns < 19 {
@@ -556,6 +559,7 @@ func recordType(f map[string]any) string {
 // partitioning column's DATE, TIMESTAMP or DATETIME has no coercion to
 // another type (coercion refuses it). The wording is CloudBurrow's,
 // UNVERIFIED.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language
 func keyedRetype(meta map[string]any, column string, next map[string]any) string {
 	nt := canonicalType(str(next, "type"))
 	if rp, ok := meta["rangePartitioning"].(map[string]any); ok {

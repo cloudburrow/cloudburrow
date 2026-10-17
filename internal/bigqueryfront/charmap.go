@@ -200,6 +200,7 @@ func (f front) failLoadedRename(w http.ResponseWriter, rec *recorder, job jobBod
 // column_name_character_map "Applies to CSV and Parquet data". The
 // option is any value given but COLUMN_NAME_CHARACTER_MAP_UNSPECIFIED.
 // The error's wording is CloudBurrow's (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/schemas
 func charMapFormat(charMap, format string) string {
 	m := strings.ToUpper(charMap)
 	if m == "" || m == "COLUMN_NAME_CHARACTER_MAP_UNSPECIFIED" {
@@ -241,6 +242,7 @@ func parquetCharMapNames(file []field, charMap string) (int, string) {
 			// read 2026-10-17), a period is not a supported character
 			// ("A period (.)"), and "Load jobs with unsupported characters
 			// in column names fail with an error message": the load fails.
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/schemas
 			return http.StatusBadRequest, fmt.Sprintf("Invalid field name %q of the Parquet file: under "+
 				"columnNameCharacterMap %s, \"Periods are not replaced by underscores in Parquet file column names\", "+
 				"and a column name cannot hold a period.", name, m)

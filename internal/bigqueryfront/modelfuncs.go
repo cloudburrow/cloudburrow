@@ -478,6 +478,7 @@ func (f front) mlFeatureRows(r *http.Request, q queryOptions, md bqModel, input 
 // else with each character a column name cannot hold made _, and _
 // before a leading digit (BigQuery documents "0" becoming "_0"; the rest
 // is UNVERIFIED), made unique with a _<n> suffix.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-confusion
 func columnNames(labels []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, len(labels))
@@ -586,6 +587,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 			// Softmax over the class scores, the most probable class
 			// predicted (the first on a tie); _probs lists the classes in
 			// their sorted order (UNVERIFIED).
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-predict
 			K := len(t.Classes)
 			var zs, helpersZ, ps, cases []string
 			for k := 0; k < K; k++ {
@@ -779,6 +781,7 @@ func (f front) mlSubquery(r *http.Request, q queryOptions, md bqModel, c mlCall)
 		if thresholds == nil {
 			// The percentile values of the predictions (documented), each
 			// whole percentile's nearest-rank value, distinct (UNVERIFIED).
+			// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-roc
 			s := append([]float64(nil), p...)
 			sortFloats(s)
 			seen := map[float64]bool{}

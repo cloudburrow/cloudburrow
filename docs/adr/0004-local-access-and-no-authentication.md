@@ -164,7 +164,7 @@ a rule for `*` would otherwise open the server to every site.
 `Access-Control-Allow-Credentials` is **dropped**. It was never observed from Google: the storage
 oracle is storage-testbench and records no CORS behaviour, and the harness never calls Google.
 CloudBurrow reads no cookies, so nothing depended on it. The echoed `Access-Control-Allow-Headers`
-stays, still marked UNVERIFIED in the compatibility matrix, because a browser upload with a JSON
+stays, still marked UNVERIFIED (docs re-read 2026-10-17: <https://docs.cloud.google.com/storage/docs/cross-origin>) in the compatibility matrix, because a browser upload with a JSON
 body needs it.
 
 **What remains.** A page served from a loopback origin, which includes any other local dev server

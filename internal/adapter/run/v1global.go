@@ -31,6 +31,7 @@ import (
 // holds a service is listed too. Which fields Google sets on each Location
 // (here name and locationId, which is what gcloud reads) is UNVERIFIED: no
 // response was observed.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/run/docs/reference/rest/v1/projects.locations
 var Regions = []string{
 	"africa-south1",
 	"asia-east1", "asia-east2", "asia-northeast1", "asia-northeast2", "asia-northeast3",

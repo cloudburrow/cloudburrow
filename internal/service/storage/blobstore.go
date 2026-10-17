@@ -295,6 +295,7 @@ func (nopCloser) Close() error { return nil }
 // read 2026-10-17). A local disk quota has no Google equivalent, so 507
 // insufficientStorage is CloudBurrow's choice (UNVERIFIED; the same page
 // lists no 507).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/json_api/v1/status-codes
 func storeStatus(err error) (status int, reason string, ok bool) {
 	switch {
 	case errors.Is(err, ErrObjectTooLarge):

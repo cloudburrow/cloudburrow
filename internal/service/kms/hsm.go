@@ -70,6 +70,7 @@ import (
 // a required signature from the 2FA key it names (trusted.go). The error codes Google returns for a refused
 // transition are not documented, and are UNVERIFIED: a request made in the
 // wrong state is FAILED_PRECONDITION, a malformed one INVALID_ARGUMENT.
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/hsm_management.proto
 
 const (
 	hsmInstancePrefix = "kms/hsminstance/"

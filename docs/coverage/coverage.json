@@ -348,7 +348,7 @@
           {
             "code": "NOT_FOUND",
             "case": "a secret that did not survive an ephemeral restart",
-            "test": "test/compat/secretsdurability_test.go:53 TestSecretManagerAcrossRestart"
+            "test": "test/compat/secretsdurability_test.go:54 TestSecretManagerAcrossRestart"
           }
         ]
       },
@@ -5647,7 +5647,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "the instance `up` runs (CloudBurrow's own)",
-            "test": "test/compat/memorystoreadmin_test.go:39 TestMemorystoreAdminDescribesTheServer"
+            "test": "test/compat/memorystoreadmin_test.go:40 TestMemorystoreAdminDescribesTheServer"
           }
         ]
       },
@@ -5677,7 +5677,7 @@
           "test/compat/gcloudredis_test.go:105 TestGcloudRedisInTransitEncryption",
           "test/compat/gcloudredis_test.go:143 TestGcloudRedisCustomerManagedKey",
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
-          "test/compat/memorystoreadmin_test.go:39 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystoreadmin_test.go:40 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystoreautofailover_test.go:29 TestMemorystoreAutomaticFailover",
           "test/compat/memorystorecmek_test.go:48 TestMemorystoreCustomerManagedKey",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
@@ -5695,7 +5695,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
-          "test/compat/memorystoreadmin_test.go:39 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystoreadmin_test.go:40 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystorecreate_test.go:195 TestMemorystoreCreatedAcrossRestart",
           "test/compat/terraform_redis_test.go:28 TestTerraformRedisInstance"
         ],
@@ -5703,7 +5703,7 @@
           {
             "code": "FAILED_PRECONDITION",
             "case": "an instance with AUTH disabled",
-            "test": "test/compat/memorystoreadmin_test.go:39 TestMemorystoreAdminDescribesTheServer"
+            "test": "test/compat/memorystoreadmin_test.go:40 TestMemorystoreAdminDescribesTheServer"
           }
         ]
       },
@@ -5720,7 +5720,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/gcloudredis_test.go:24 TestGcloudRedis",
-          "test/compat/memorystoreadmin_test.go:39 TestMemorystoreAdminDescribesTheServer",
+          "test/compat/memorystoreadmin_test.go:40 TestMemorystoreAdminDescribesTheServer",
           "test/compat/memorystoretls_test.go:45 TestMemorystoreInTransitEncryption"
         ]
       },
@@ -7061,7 +7061,7 @@
           {
             "code": "200",
             "case": "the JSON API's defaults beyond Allow-Origin, Allow-Methods and Max-Age (Allow-Headers echoed)",
-            "test": "internal/service/storage/cors_test.go:111 TestStorageJSONAllowsAllowedOriginsInProcess"
+            "test": "internal/service/storage/cors_test.go:112 TestStorageJSONAllowsAllowedOriginsInProcess"
           }
         ]
       },
@@ -7111,7 +7111,7 @@
           {
             "code": "200",
             "case": "the JSON API's CORS defaults beyond Allow-Origin, Allow-Methods and Max-Age (the requested headers echoed)",
-            "test": "test/compat/storagecors_test.go:126 TestStorageJSONAlwaysAllowsCORS"
+            "test": "test/compat/storagecors_test.go:127 TestStorageJSONAlwaysAllowsCORS"
           },
           {
             "code": "403",
@@ -9344,7 +9344,7 @@
           "test/compat/bigquerycsvtimes_test.go:32 TestBigQueryCSVLoadTimeFormatsAndEncodings",
           "test/compat/bigquerydml_test.go:31 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigqueryenginereasons_test.go:34 TestBigQueryEngineErrorReasons",
-          "test/compat/bigqueryexecimmediate_test.go:156 TestBigQueryExecuteImmediateChildJobs",
+          "test/compat/bigqueryexecimmediate_test.go:157 TestBigQueryExecuteImmediateChildJobs",
           "test/compat/bigqueryextractdecimal_test.go:37 TestBigQueryExtractOfParameterizedDecimals",
           "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
           "test/compat/bigqueryextracttypes_test.go:36 TestBigQueryExtractOfEveryType",
@@ -9358,7 +9358,7 @@
           "test/compat/bigqueryloadtable_test.go:29 TestBigQueryLoadMakesItsTableWithItsProperties",
           "test/compat/bigqueryloadvariants_test.go:33 TestBigQueryHivePartitionedAndGeoJSONLoads",
           "test/compat/bigquerylocation_test.go:25 TestBigQueryDatasetWithoutLocationIsInTheDefault",
-          "test/compat/bigqueryparquetcharmap_test.go:67 TestBigQueryParquetColumnNameCharacterMap",
+          "test/compat/bigqueryparquetcharmap_test.go:68 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
           "test/compat/bigquerypartitionrest_test.go:145 TestBigQueryPartitionDestinationsRest",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
@@ -9455,8 +9455,8 @@
           "test/compat/bigquerydml_test.go:31 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:335 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryenginereasons_test.go:34 TestBigQueryEngineErrorReasons",
-          "test/compat/bigqueryexecimmediate_test.go:109 TestBigQueryExecuteImmediateErrors",
-          "test/compat/bigqueryexecimmediate_test.go:156 TestBigQueryExecuteImmediateChildJobs",
+          "test/compat/bigqueryexecimmediate_test.go:110 TestBigQueryExecuteImmediateErrors",
+          "test/compat/bigqueryexecimmediate_test.go:157 TestBigQueryExecuteImmediateChildJobs",
           "test/compat/bigqueryexecimmediate_test.go:29 TestBigQueryExecuteImmediateForms",
           "test/compat/bigqueryextractdecimal_test.go:37 TestBigQueryExtractOfParameterizedDecimals",
           "test/compat/bigqueryextractformats_test.go:129 TestConsoleBigQueryParquetAndSeveralURIExports",
@@ -9518,7 +9518,7 @@
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigqueryoneclock_test.go:22 TestBigQueryWriteTimesByTheInstanceClock",
-          "test/compat/bigqueryparquetcharmap_test.go:67 TestBigQueryParquetColumnNameCharacterMap",
+          "test/compat/bigqueryparquetcharmap_test.go:68 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
           "test/compat/bigquerypartitionreads_test.go:142 TestBigQueryTimeTravelReads",
@@ -9579,7 +9579,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquerydml_test.go:31 TestBigQueryPlainDMLThroughTheFront",
-          "test/compat/bigqueryexecimmediate_test.go:156 TestBigQueryExecuteImmediateChildJobs",
+          "test/compat/bigqueryexecimmediate_test.go:157 TestBigQueryExecuteImmediateChildJobs",
           "test/compat/bigqueryfailedjobs_test.go:27 TestBigQueryFailedQueriesAreJobs",
           "test/compat/bigqueryinternaljobs_test.go:33 TestBigQueryFrontsOwnJobsStayUnlisted",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
@@ -9651,7 +9651,7 @@
           "test/compat/bigquerydml_test.go:31 TestBigQueryPlainDMLThroughTheFront",
           "test/compat/bigquerydml_test.go:335 TestBigQueryCreateViewReadsBackAsWritten",
           "test/compat/bigqueryenginereasons_test.go:34 TestBigQueryEngineErrorReasons",
-          "test/compat/bigqueryexecimmediate_test.go:109 TestBigQueryExecuteImmediateErrors",
+          "test/compat/bigqueryexecimmediate_test.go:110 TestBigQueryExecuteImmediateErrors",
           "test/compat/bigqueryexecimmediate_test.go:29 TestBigQueryExecuteImmediateForms",
           "test/compat/bigqueryextractdecimal_test.go:37 TestBigQueryExtractOfParameterizedDecimals",
           "test/compat/bigqueryextracttypes_test.go:36 TestBigQueryExtractOfEveryType",
@@ -9722,7 +9722,7 @@
           "test/compat/bigquerypartitionsrest_test.go:32 TestBigQueryIngestionPartitionHistory",
           "test/compat/bigquerypartitionwrites_test.go:263 TestConsoleBigQueryPartitions",
           "test/compat/bigquerypastingestion1458_test.go:28 TestBigQueryPastIngestionTimeCopies",
-          "test/compat/bigqueryprivacyoptions_test.go:21 TestBigQueryPrivacyPolicyTableOptions",
+          "test/compat/bigqueryprivacyoptions_test.go:22 TestBigQueryPrivacyPolicyTableOptions",
           "test/compat/bigqueryprivacypolicy_test.go:190 TestBigQueryPrivacyPolicyJoinRestriction",
           "test/compat/bigqueryprivacypolicy_test.go:77 TestBigQueryPrivacyPolicyAggregationThreshold",
           "test/compat/bigqueryprivacyreads_test.go:33 TestBigQueryPrivacyPolicyReads",
@@ -9849,7 +9849,7 @@
         "method": "bigquery.routines.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:124 TestBigQueryRoutineIAMIsStoredNotEnforced",
+          "test/compat/bigqueryiam_test.go:125 TestBigQueryRoutineIAMIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
       },
@@ -9877,7 +9877,7 @@
         "method": "bigquery.routines.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:124 TestBigQueryRoutineIAMIsStoredNotEnforced",
+          "test/compat/bigqueryiam_test.go:125 TestBigQueryRoutineIAMIsStoredNotEnforced",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
       },
@@ -9885,7 +9885,7 @@
         "method": "bigquery.routines.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:124 TestBigQueryRoutineIAMIsStoredNotEnforced"
+          "test/compat/bigqueryiam_test.go:125 TestBigQueryRoutineIAMIsStoredNotEnforced"
         ]
       },
       {
@@ -9922,7 +9922,7 @@
         "method": "bigquery.rowAccessPolicies.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:191 TestBigQueryRowAccessPolicyIAMIsItsGrantees"
+          "test/compat/bigqueryiam_test.go:193 TestBigQueryRowAccessPolicyIAMIsItsGrantees"
         ]
       },
       {
@@ -9945,7 +9945,7 @@
         "method": "bigquery.rowAccessPolicies.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:191 TestBigQueryRowAccessPolicyIAMIsItsGrantees"
+          "test/compat/bigqueryiam_test.go:193 TestBigQueryRowAccessPolicyIAMIsItsGrantees"
         ]
       },
       {
@@ -9995,7 +9995,7 @@
           "test/compat/bigqueryingestiontime_test.go:32 TestBigQueryIngestionTime",
           "test/compat/bigqueryintervalarith_test.go:119 TestBigQueryStorageWriteArrowIntervalStrings",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
-          "test/compat/bigqueryparquetcharmap_test.go:67 TestBigQueryParquetColumnNameCharacterMap",
+          "test/compat/bigqueryparquetcharmap_test.go:68 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
           "test/compat/bigquerypartitionwrites_test.go:263 TestConsoleBigQueryPartitions",
           "test/compat/bigquerypartitionwrites_test.go:35 TestBigQueryPartitionDestinations",
@@ -10081,7 +10081,7 @@
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
           "test/compat/bigqueryoneclock_test.go:22 TestBigQueryWriteTimesByTheInstanceClock",
-          "test/compat/bigqueryparquetcharmap_test.go:67 TestBigQueryParquetColumnNameCharacterMap",
+          "test/compat/bigqueryparquetcharmap_test.go:68 TestBigQueryParquetColumnNameCharacterMap",
           "test/compat/bigquerypartitionddl_test.go:30 TestBigQueryPartitionByAndClusterByReadBack",
           "test/compat/bigquerypartitionlast_test.go:35 TestBigQueryPartitionLast",
           "test/compat/bigquerypartitionreads_test.go:80 TestBigQueryPartitionDecorators",
@@ -10114,7 +10114,7 @@
         "method": "bigquery.tables.getIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:40 TestBigQueryTableIAMIsStoredNotEnforced",
+          "test/compat/bigqueryiam_test.go:41 TestBigQueryTableIAMIsStoredNotEnforced",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
         ]
@@ -10178,7 +10178,7 @@
           "test/compat/bigquerydml_test.go:286 TestBigQueryTableUpdateAddsAColumnAndLabelsAtOnce",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
           "test/compat/bigquerynumericrounding_test.go:34 TestBigQueryNumericRounding",
-          "test/compat/bigqueryprivacyoptions_test.go:21 TestBigQueryPrivacyPolicyTableOptions",
+          "test/compat/bigqueryprivacyoptions_test.go:22 TestBigQueryPrivacyPolicyTableOptions",
           "test/compat/bigqueryprivacypolicy_test.go:77 TestBigQueryPrivacyPolicyAggregationThreshold",
           "test/compat/bigquerysilent_test.go:594 TestBigQueryTableUpdateAddsColumns",
           "test/compat/bigquerytimes_test.go:22 TestBigQueryResourceTimesInMilliseconds",
@@ -10190,7 +10190,7 @@
         "method": "bigquery.tables.setIamPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:40 TestBigQueryTableIAMIsStoredNotEnforced",
+          "test/compat/bigqueryiam_test.go:41 TestBigQueryTableIAMIsStoredNotEnforced",
           "test/compat/bigqueryobjectprivileges_test.go:26 TestBigQueryObjectPrivilegesAndSchemataLinks",
           "test/compat/bigqueryundelete1483_test.go:41 TestBigQueryUndeleteKeepsMore",
           "test/compat/terraform_iam_test.go:224 TestTerraformBigQueryIAM"
@@ -10200,7 +10200,7 @@
         "method": "bigquery.tables.testIamPermissions",
         "status": "Verified",
         "tests": [
-          "test/compat/bigqueryiam_test.go:40 TestBigQueryTableIAMIsStoredNotEnforced"
+          "test/compat/bigqueryiam_test.go:41 TestBigQueryTableIAMIsStoredNotEnforced"
         ]
       },
       {

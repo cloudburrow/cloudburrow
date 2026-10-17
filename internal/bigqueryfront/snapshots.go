@@ -42,6 +42,7 @@ import (
 // into a new table makes a snapshot, as "the source and destination table
 // have the same table type" (OperationType, BigQuery's REST reference).
 // copyjob.go carries them out.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/table-snapshots-intro
 
 // snapshotDefinitionOf returns the snapshotDefinition of a table's
 // tables.get answer, or nil when it has none.
@@ -63,6 +64,7 @@ func (f front) isSnapshot(r *http.Request, dataset, table string) bool {
 
 // snapshotWriteMessage is the message a write to a snapshot is refused
 // with (BigQuery's wording UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/table-snapshots-intro
 func snapshotWriteMessage(project, dataset, table, what string) string {
 	return fmt.Sprintf("%s is a table snapshot, which is read-only: %s cannot write to it. Restore it to a "+
 		"standard table (a copy job with operationType RESTORE) to change its data.",

@@ -41,6 +41,7 @@ import (
 // is solved for the minimum-norm weights. The weights so differ from
 // Google's in their last digits, and more where the problem is
 // ill-conditioned or gradient descent stops early.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-create-glm
 
 // mlOptions are a model's training options, as CREATE MODEL gives them.
 type mlOptions struct {
@@ -751,6 +752,7 @@ func softmaxGradient(w []float64, X [][]float64, Y []float64, K int, l2 float64)
 // class one against the rest, and accuracy the fraction predicted right,
 // as BigQuery documents. A class's metric that is undefined (no row
 // predicted or labeled it) is left out of the average (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/bigqueryml-syntax-evaluate
 func multiclassMetrics(y []float64, probs [][]float64) map[string]*float64 {
 	K := len(probs[0])
 	pred := make([]int, len(y))

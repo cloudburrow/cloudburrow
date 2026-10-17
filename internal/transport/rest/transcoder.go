@@ -61,6 +61,7 @@ type Transcoder struct {
 	// the path binds that the body also sets to another value is
 	// INVALID_ARGUMENT. For any other method the path's value wins. What
 	// Google does is UNVERIFIED and may differ by method.
+	// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/api/http.proto
 	RefuseBodyConflicts []string
 	// SnakeCaseMasks accepts a FieldMask query parameter of snake_case
 	// (proto) paths too, such as updateMask=labels,memory_size_gb, which

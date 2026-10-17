@@ -155,6 +155,7 @@ func (s *Server) DeleteCryptoKey(_ context.Context, req *kmspb.DeleteCryptoKeyRe
 	// scheduled." and "The key wasn't created by Cloud KMS Autokey."
 	// (https://cloud.google.com/kms/docs/delete-kms-resources, read
 	// 2026-10-17); the code is UNVERIFIED, as for the versions above.
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/kms/docs/delete-kms-resources
 	if k.RotationPeriod > 0 {
 		return nil, apierror.Wrap(apierror.FailedPrecondition(
 			"CryptoKey %s has automatic rotation scheduled: clear its rotation schedule before deleting it", k.Name))

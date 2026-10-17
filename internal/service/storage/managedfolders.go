@@ -74,6 +74,7 @@ const maxManagedFolderName = 1024
 
 // managedFolderName validates a name and returns it ending in "/".
 // UNVERIFIED: the naming rules are the object name rules the managed
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/managed-folders
 // folders page points to, with no empty segment; Google's exact messages
 // are not stated.
 func managedFolderName(name string) (string, error) {

@@ -636,6 +636,7 @@ func partitionFilterRefusal(tr tableRead, meta map[string]any, name string) stri
 // TABLE_OPTIONS' documentation lists no privacy_policy; the DDL documents
 // its value as a "JSON-formatted STRING", so it is a STRING option, its
 // value the quoted JSON (UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-table-options
 func privacyPolicyOption(t infoTable, st tableSetting) string {
 	if st.PrivacyPolicy != nil {
 		return *st.PrivacyPolicy

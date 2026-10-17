@@ -39,6 +39,7 @@ import (
 // LinkedEntriesTable, which the views read, is left out of tables.list, as
 // a linked dataset lists only its views (one per log view of the bucket,
 // #1435).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/analyze/query-linked-dataset
 
 const (
 	// linkedLabel is logging.LinkedDatasetLabel.
@@ -189,6 +190,7 @@ func (f front) isLinked(_ *http.Request, dataset string) bool {
 
 // linkedWriteMessage is the message a write to a linked dataset is refused
 // with (Google's wording UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/logging/docs/analyze/query-linked-dataset
 func linkedWriteMessage(project, dataset, what string) string {
 	return fmt.Sprintf("Access Denied: Dataset %s:%s is a Log Analytics linked dataset, which is read-only: %s cannot write to it. "+
 		"Its views read the Cloud Logging bucket it is linked to; write log entries with Cloud Logging instead.", project, dataset, what)

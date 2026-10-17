@@ -27,6 +27,7 @@ import (
 //
 // Not built: the region-qualified form (`region-us`.INFORMATION_SCHEMA.VIEWS),
 // and the other views #1274 lists.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-views
 
 // viewsRef is a reference to a dataset's INFORMATION_SCHEMA view in a
 // query's text.

@@ -1785,6 +1785,7 @@ func (s *scriptRun) setColumns(names []string, q, stmt string, into bool) *scrip
 		// BigQuery: "an error is thrown if you attempt to return more
 		// than one row"; the columns are assigned "by position", which
 		// needs one per variable (the wording of both errors UNVERIFIED).
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language
 		if len(rows) > 1 {
 			return &scriptFlow{failed: true, status: http.StatusBadRequest,
 				msg: "EXECUTE IMMEDIATE ... INTO: the query returned more than one row", text: stmt}

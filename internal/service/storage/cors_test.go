@@ -108,6 +108,7 @@ func TestStorageXMLPreflightMismatch200NoHeadersInProcess(t *testing.T) {
 // send no Allow-Credentials (#677).
 //
 // unverified: storage.objects.get 200: the JSON API's defaults beyond Allow-Origin, Allow-Methods and Max-Age (Allow-Headers echoed)
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/cross-origin
 func TestStorageJSONAllowsAllowedOriginsInProcess(t *testing.T) {
 	base := corsBucket(t)
 	for _, origin := range []string{"https://app.example", "http://localhost:5173", "http://127.0.0.1:3000", "http://[::1]:8080", "https://my-app.localhost"} {

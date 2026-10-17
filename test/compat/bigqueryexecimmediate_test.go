@@ -106,6 +106,7 @@ func TestBigQueryExecuteImmediateForms(t *testing.T) {
 // error is UNVERIFIED.
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/procedural-language
 func TestBigQueryExecuteImmediateErrors(t *testing.T) {
 	h := New(t)
 	c, project := bigqueryClient(t, h)

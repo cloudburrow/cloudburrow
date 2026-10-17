@@ -44,6 +44,7 @@ import (
 // bi_engine_statistics, session_info, continuous_query_info and
 // ml_statistics are given (#1458); destination_table, referenced_tables and labels
 // are read from the job record.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/information-schema-jobs
 
 // The nine JOBS columns of statistics the emulator never makes (#1458):
 // the INFORMATION_SCHEMA.JOBS page (read again 2026-10-16) gives

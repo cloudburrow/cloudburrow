@@ -60,6 +60,7 @@ var allowlist = map[string]string{
 	"resumable one-shot start header:Location": "as resumable start header:Location",
 	"resumable query with X-GUploader-No-308 status": "the builtin server honours X-GUploader-No-308 on a status query as on a " +
 		"chunk (200 with X-Http-Status-Code-Override: 308); the testbench honours it on a chunk only (rest_server.py:1232-1236). " +
+		// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/performing-resumable-uploads
 		"Google does not document the header; the builtin behaviour is UNVERIFIED",
 	"resumable query with X-GUploader-No-308 header:X-Http-Status-Code-Override": "as resumable query with X-GUploader-No-308 status",
 	"* header:Accept-Ranges": "the builtin server sends Accept-Ranges: bytes on a download (RFC 9110 §14.3); the testbench " +

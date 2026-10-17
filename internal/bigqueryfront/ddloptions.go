@@ -420,6 +420,7 @@ func partitionExpirationMs(val []token) (string, bool) {
 
 // partitionExpirationRefused is the 400 of partition_expiration_days on a
 // table that is not time-partitioned (wording CloudBurrow's, UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language
 const partitionExpirationRefused = "partition_expiration_days is only valid for a table partitioned by a date or time column " +
 	"or by ingestion time."
 

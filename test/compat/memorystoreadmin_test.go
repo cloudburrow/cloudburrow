@@ -34,6 +34,7 @@ const (
 // AUTH is off, and it cannot be deleted.
 //
 // unverified: google.cloud.redis.v1.CloudRedis/GetInstanceAuthString FAILED_PRECONDITION: an instance with AUTH disabled
+// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/redis/v1/cloud_redis.proto
 // unverified: google.cloud.redis.v1.CloudRedis/DeleteInstance FAILED_PRECONDITION: the instance `up` runs (CloudBurrow's own)
 // Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/redis/v1/cloud_redis.proto
 func TestMemorystoreAdminDescribesTheServer(t *testing.T) {

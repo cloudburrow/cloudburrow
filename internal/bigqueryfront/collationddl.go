@@ -26,6 +26,7 @@ import (
 // ARRAY<STRING COLLATE 'und:ci'>) and in a Table resource (a RECORD's
 // field, a REPEATED STRING); since #1516 the engine compares it by its
 // collation (googlesqlite patch 0061, bigquery-emulator patch 0051).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/collation-concepts
 
 // collationSpecRefused returns BigQuery's refusal of spec, or "" for the
 // two it supports.
@@ -193,6 +194,7 @@ func tableDefaultCollate(sql string) (spec string, named bool, at int, ok bool) 
 // (https://cloud.google.com/bigquery/docs/reference/standard-sql/data-definition-language#alter_table_collate_statement).
 // A type that names none keeps the column's (#1516; the wording is
 // CloudBurrow's, UNVERIFIED).
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/collation-concepts
 func collationRetypeRefused(old, next map[string]any, name string) string {
 	if c, named := next["collation"].(string); named {
 		if was, _ := old["collation"].(string); c != was {

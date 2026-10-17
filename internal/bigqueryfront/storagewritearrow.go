@@ -58,6 +58,7 @@ import (
 // BigQuery). Any other Arrow type is INVALID_ARGUMENT before a row is
 // read. A NULL element of a list is a row error, as an array cannot hold
 // one.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/supported-data-types
 
 // arrowConv writes the rows of one Arrow writer schema for one table's
 // columns.

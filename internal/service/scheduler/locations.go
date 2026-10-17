@@ -22,6 +22,7 @@ import (
 // listed too, and GetLocation finds it. Which fields Google sets on each
 // Location (here name, location_id and display_name) is UNVERIFIED: no
 // response was observed.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/scheduler/docs/reference/rest/v1/projects.locations/list
 var Regions = locations.Regions
 
 var (

@@ -78,6 +78,7 @@ import (
 // table to read a materialized view instead), an optimization whose
 // results are the same. tables.delete of a materialized view leaves its backing
 // table in the hidden dataset.
+// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/bigquery/docs/materialized-views-intro
 
 // mvOptions are a materialized view's own options.
 type mvOptions struct {

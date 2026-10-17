@@ -259,6 +259,7 @@ func formKnown(name string) bool {
 // policyFail is a policy check's failure.
 func policyFail(w http.ResponseWriter, msg string, a ...any) {
 	// UNVERIFIED: the AccessDenied code for a failed condition or an
+	// Docs re-read 2026-10-17, still unanswered: https://docs.cloud.google.com/storage/docs/xml-api/post-object-forms
 	// expired policy follows the XML API's interoperable behaviour.
 	writeXMLError(w, http.StatusForbidden, "AccessDenied", "Invalid according to Policy: "+fmt.Sprintf(msg, a...))
 }

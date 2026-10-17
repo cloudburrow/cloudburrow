@@ -9,6 +9,7 @@ package oracle
 var divergences = map[string]string{
 	"GetCryptoKeyVersion malformed code": "the version ID 01 has a leading zero. CloudBurrow parses names before any " +
 		"lookup and answers INVALID_ARGUMENT for a malformed one (#394); fakekms treats it as a missing version, " +
+		// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 		"NOT_FOUND. Neither code is stated on any KMS page (council report §6, \"Codes for bad names\"), so both stay UNVERIFIED",
 	"CreateCryptoKey with labels code": "fakekms's CreateCryptoKey field allowlist leaves out crypto_key.labels, so it " +
 		"answers UNIMPLEMENTED. labels is a documented CryptoKey field that Terraform sets on every key " +
@@ -16,6 +17,7 @@ var divergences = map[string]string{
 	"update a DESTROY_SCHEDULED version code": "fakekms moves a DESTROY_SCHEDULED version to ENABLED through " +
 		"UpdateCryptoKeyVersion; CloudBurrow refuses with FAILED_PRECONDITION, because UpdateCryptoKeyVersion may only " +
 		"move a version between ENABLED and DISABLED (S:316-326; council report §4, UpdateCryptoKeyVersion) and leaving " +
+		// Docs re-read 2026-10-17, still unanswered: https://raw.githubusercontent.com/googleapis/googleapis/master/google/cloud/kms/v1/service.proto
 		"DESTROY_SCHEDULED is RestoreCryptoKeyVersion's job (S:378-389). CloudBurrow's code is UNVERIFIED",
 	"get v2 .response.state": "follows from the step above: fakekms re-enabled the version, CloudBurrow left it DESTROY_SCHEDULED",
 	"CreateCryptoKey with a 24h schedule code": "fakekms refuses destroy_scheduled_duration as UNIMPLEMENTED, so every key " +
