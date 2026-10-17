@@ -8672,7 +8672,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigtablechangestreams_test.go:128 TestBigtableChangeStreams",
-          "test/compat/bigtablechangestreams_test.go:286 TestBigtableChangeLogSurvivesAFrontRestart"
+          "test/compat/bigtablechangestreams_test.go:290 TestBigtableChangeLogSurvivesAFrontRestart"
         ]
       },
       {
