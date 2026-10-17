@@ -229,8 +229,12 @@ func TestBigQueryExecuteImmediateChildJobs(t *testing.T) {
 			if qs, ok := st.Details.(*bigquery.QueryStatistics); !ok || qs.NumDMLAffectedRows != 2 {
 				t.Errorf("the INSERT child's statistics: %+v, want 2 rows", st.Details)
 			}
-		case ss.EvaluationKind == "EXPRESSION" && strings.HasPrefix(f.Text, "SELECT CAST((FORMAT("):
+		case ss.EvaluationKind == "EXPRESSION" && strings.HasPrefix(q, "SELECT CAST((FORMAT("):
+			// Its frame is in the script, as written (#1569).
 			found["format"] = true
+			if f.StartLine != 2 || f.StartColumn != 1 || !strings.HasPrefix(f.Text, "EXECUTE IMMEDIATE FORMAT(") {
+				t.Errorf("the FORMAT expression child's frame: %+v, want at 2:1, the EXECUTE IMMEDIATE", f)
+			}
 		}
 	}
 	for _, w := range []string{"create", "insert", "format"} {

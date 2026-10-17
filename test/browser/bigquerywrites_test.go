@@ -128,8 +128,9 @@ func TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms(t *te
 // table. An INSERT of two rows is confirmed and answered with "This
 // statement added 2 rows." (#1024), and the table has them; an UPDATE … FROM
 // a subquery (#1027) is answered "This statement modified 1 row.", and a
-// script whose DELETE reads a DECLAREd variable (#1567) with its job and
-// "This statement removed 1 row.", and the table loses that row.
+// script whose last statement, a DELETE, reads a DECLAREd variable (#1567)
+// with its job and "Line 2: This statement removed 1 row.", numbered by its
+// child job's stack frame (#1569), and the table loses that row.
 func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 	needService(t, "bigquery")
 	p := open(t)
@@ -213,7 +214,7 @@ func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 	p.clickText("#view .query-pane button.primary", "Run statement")
 	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
 	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
-	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("The script ran as job ") && document.querySelector("#view .query-results").textContent.includes("This statement removed 1 row.")`)
+	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("The script ran as job ") && document.querySelector("#view .query-results").textContent.includes("Line 2: This statement removed 1 row.")`)
 	preview := readDataPage(t, "bigquery", project, ds, "totals").rows("preview")
 	if len(preview) != 2 {
 		t.Errorf("after the script's DELETE the table previews %v, want its 2 other rows", preview)

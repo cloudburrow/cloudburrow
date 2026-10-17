@@ -129,7 +129,7 @@ func TestBigQueryWriteReportSendsJobsQuery(t *testing.T) {
 			listed = append(listed, r.URL.Query().Get("parentJobId"))
 			mu.Unlock()
 			child := func(id, typ, kind string, line int, counts string) string {
-				frame := `{"text":"x"}` // the front's last statement has no position
+				frame := `{"text":"x"}` // a child that names no position
 				if line > 0 {
 					frame = `{"startLine":` + strconv.Itoa(line) + `,"startColumn":1,"text":"x"}`
 				}
@@ -138,7 +138,7 @@ func TestBigQueryWriteReportSendsJobsQuery(t *testing.T) {
 					`"query":{"statementType":"` + typ + `"` + counts + `}}}`
 			}
 			_, _ = io.WriteString(w, `{"jobs":[`+strings.Join([]string{
-				child("c5", "DELETE", "STATEMENT", 0, `,"numDmlAffectedRows":"3"`),
+				child("c5", "DELETE", "STATEMENT", 5, `,"numDmlAffectedRows":"3"`),
 				child("c4", "SELECT", "STATEMENT", 4, ""),
 				child("c3", "MERGE", "STATEMENT", 3, `,"numDmlAffectedRows":"2","dmlStats":{"insertedRowCount":"1","updatedRowCount":"1"}`),
 				child("c2", "INSERT", "STATEMENT", 2, `,"numDmlAffectedRows":"1"`),
@@ -199,11 +199,12 @@ func TestBigQueryWriteReportSendsJobsQuery(t *testing.T) {
 		t.Errorf("a DELETE = %q, %v after %d requests, want it sent and its rows said", msg, err, len(sent))
 	}
 	// DML in a script is sent (#1567), and answered with what each DML
-	// child job changed, in the script's order.
+	// child job changed, in the script's order, each after its line, the
+	// last statement's too (#1569).
 	msg, err = p.WriteReport(ctx, "served-project", []string{"ds"},
 		"DECLARE x INT64 DEFAULT 1;\nINSERT t (x) VALUES (x);\nMERGE t USING s ON t.x = s.x WHEN MATCHED THEN UPDATE SET x = 2 WHEN NOT MATCHED THEN INSERT (x) VALUES (3);\nSELECT * FROM t;\nDELETE FROM t WHERE x = 3")
 	if want := "The script ran as job script_1. Line 2: This statement added 1 row. " +
-		"Line 3: This statement modified 2 rows: 1 inserted, 1 updated, 0 deleted. This statement removed 3 rows."; err != nil || msg != want || len(sent) != 4 ||
+		"Line 3: This statement modified 2 rows: 1 inserted, 1 updated, 0 deleted. Line 5: This statement removed 3 rows."; err != nil || msg != want || len(sent) != 4 ||
 		!slices.Equal(listed, []string{"script_1"}) {
 		t.Errorf("DML in a script = %q, %v after %d requests and listing %v; want %q", msg, err, len(sent), listed, want)
 	}

@@ -445,6 +445,7 @@ func (s *scriptRun) call(toks []token) *scriptFlow {
 			if s.notImpl != "" {
 				return &scriptFlow{}
 			}
+			s.place(arg)
 			v, flow := s.evaluate(text, a.Type)
 			if flow != nil {
 				return flow
@@ -477,7 +478,9 @@ func (s *scriptRun) call(toks []token) *scriptFlow {
 	}
 	loc := project + "." + p[0] + "." + p[1]
 	// The body runs in a frame of its own: its own text, its own scopes.
-	sql, scopes, handlers, oldLoc := s.sql, s.scopes, s.inHandler, s.loc
+	// Its child jobs' frames are the body's, then this CALL's (#1569).
+	sql, scopes, handlers, oldLoc, callers := s.sql, s.scopes, s.inHandler, s.loc, s.callers
+	s.callers = s.framesOf(toks)
 	s.sql, s.scopes, s.inHandler, s.loc = proc.Body, []map[string]scriptVar{scope}, nil, loc
 	s.depth++
 	out := s.run(nodes)
@@ -488,7 +491,7 @@ func (s *scriptRun) call(toks []token) *scriptFlow {
 		out.frames = append(out.frames, stackFrame{line, col, loc})
 		out.hasPos = false
 	}
-	s.sql, s.scopes, s.inHandler, s.loc = sql, scopes, handlers, oldLoc
+	s.sql, s.scopes, s.inHandler, s.loc, s.callers = sql, scopes, handlers, oldLoc, callers
 	switch {
 	case out == nil, out.brk && out.label == "\x00return":
 	default:
