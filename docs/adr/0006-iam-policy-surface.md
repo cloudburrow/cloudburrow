@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-25
 - Issue: #308
-- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16)
+- **Amended by:** #421 (Cloud KMS), #504 (Cloud Storage), #1233 (Cloud Storage ACLs, 2026-10-15), #1216 (Cloud Run), #1231 (BigQuery), #1367 (Pub/Sub), #1368 (Resource Manager projects, folders and the organization, 2026-10-15), #1304 (Artifact Registry repositories, 2026-10-16), #1486 (Spanner, Bigtable tables, tags and audit configs, 2026-10-16)
 - **Reaffirms:** the no-authorization clause of [ADR-0004](0004-local-access-and-no-authentication.md).
   It supersedes nothing.
 
@@ -374,11 +374,49 @@ repository alone. Required test: `TestTerraformArtifactRegistryRepositoryIAM`
 (`google_artifact_registry_repository_iam_member`, `_binding` and `_policy`, read back with the
 official `artifactregistry` client).
 
+### Spanner, Bigtable tables, tags and audit configs (amended by #1486)
+
+The decision is unchanged: option (b), no enforcement. #1304's Terraform batches found these IAM
+methods still refused where every other service stores the policy; the maintainer's #1486 stores
+them, and so reverses rule 3 for audit configs on the resources Google keeps them on.
+
+1. **Which methods.** `InstanceAdmin` and `DatabaseAdmin` `GetIamPolicy`, `SetIamPolicy` and
+   `TestIamPermissions` on Spanner instances and databases, answered by the call front in the
+   Spanner pod (`internal/spannerfront/iam.go`), over gRPC and REST, since the emulator refuses
+   them; `BigtableTableAdmin`'s on tables, answered by the Bigtable front
+   (`internal/bigtablefront/tableiam.go`), over gRPC and REST; and `TagKeys` and `TagValues`' on
+   tag keys and values (`internal/service/resourcemanager/iam.go`). A Spanner backup's or database
+   role's, and a Bigtable authorized view's or backup's, stay **UNIMPLEMENTED**: the emulators keep
+   none of those resources.
+2. **Rules 1-4 apply.** The shared `internal/iampolicy`: a new etag on every set, a stale one
+   ABORTED, conditions UNIMPLEMENTED, version 3 accepted. `TestIamPermissions` answers every
+   permission asked on a Spanner or Bigtable resource that exists (NOT_FOUND on one that does not,
+   as Spanner documents), and on a tag the tag permissions alone (UNVERIFIED).
+3. **Audit configs, rule 3 amended.** On projects, folders and the organization (#1368's
+   resources) a policy's `audit_configs` are **stored and returned, not acted on**: no audit log
+   is written or withheld because of one. They change only as `update_mask` says
+   (`iam_policy.proto`: only the fields in the mask change, and no mask means
+   `bindings, etag`), so a set whose mask leaves them out keeps them, and Terraform's
+   `bindings,etag,auditConfigs` with none clears them. Every other resource still refuses them
+   UNIMPLEMENTED, naming the field.
+4. **Where it is kept (rule 5).** Spanner's and Bigtable's in their fronts' memory, as the
+   emulators keep their data, and gone with the resource: DropDatabase, DeleteInstance and
+   DeleteTable through the front, and a Bigtable instance's deletion, drop them, so a resource made
+   again starts with none. A tag's in the registry's store beside it, with the registry's
+   persistence, `state save` and `/admin/reset`, and dropped when the tag is deleted.
+5. **Required tests:** official-SDK compat tests (`TestSpannerIAM`, `TestBigtableTableIAM`,
+   `TestResourceManagerTagIAM`, `TestResourceManagerAuditConfigs`), Terraform
+   (`TestTerraformSpannerIAM`, `TestTerraformBigtableTableIAM`, `TestTerraformTagIAM`,
+   `TestTerraformProjectIAMAuditConfig`), gcloud `add-iam-policy-binding` for each resource, and
+   the console's Permissions tab on a Spanner instance's and database's, a Bigtable table's and a
+   tag key's and value's page.
+6. Every compatibility.md row for these methods reads ***Stored, not enforced***.
+
 Every service other than these nine (Secret Manager, Cloud Tasks, Cloud KMS, Cloud
 Storage's buckets and their ACLs, Cloud Run's services and jobs, BigQuery's tables, routines and row
 access policies, Pub/Sub's topics, subscriptions, snapshots and schemas, Resource Manager's
-projects, folders and organization, and Artifact Registry's repositories) keeps its current behaviour; Resource Manager's tag keys and
-values keep their IAM UNIMPLEMENTED.
+projects, folders and organization, and Artifact Registry's repositories), and Spanner's instances and databases, Bigtable's
+tables and Resource Manager's tag keys and values (#1486), keeps its current behaviour.
 
 ## Consequences
 

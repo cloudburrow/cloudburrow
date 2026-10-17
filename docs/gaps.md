@@ -33,9 +33,9 @@ tracks it; a closed issue is named only where it says what was built.
 | BigQuery | 29 | 9 | 12 | 8 | 0 |
 | Spanner, Bigtable, Firestore, Datastore | 5 | 0 | 4 | 0 | 1 |
 | Cloud SQL, Memorystore | 3 | 2 | 1 | 0 | 0 |
-| Functions, credentials, tooling | 2 | 2 | 0 | 0 | 0 |
+| Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **62** | **14** | **29** | **13** | **6** |
+| **Total** | **60** | **12** | **29** | **13** | **6** |
 
 ## Cloud Storage
 
@@ -277,6 +277,8 @@ Cloud Functions v2 and v1 APIs (#1377, #1428); Pub/Sub and project IAM in Terraf
 |---|---|---|
 | The gated full-lifecycle Functions tests are not yet run: the v2 and v1 APIs' build and serve, event triggers, `gcloud functions deploy --gen2`, and the full apply of Terraform's `google_cloudfunctions2_function` and `google_cloudfunctions_function`, and `TestFunctionsSecretsBuildsAndMounts`, a build that mounts Secret Manager secrets; `repo_source` and VPC connectors, and event types no served service emits (audit logs, Firestore, Firebase), stay `UNIMPLEMENTED` with the reason (#1464) | the builder's amd64 images cannot run on arm64 nodes; no dated amd64 run yet | M |
 | Terraform resources beyond the verified set (#1304): the other `google_spanner_*` resources (instance configs, backup schedules, IAM), a worker pool's `scaling_mode` (Google publishes no such field), `google_cloudfunctions_function_iam_*` (untested), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_secret_manager_regional_secret` and `google_bigquery_data_transfer_config` (their endpoints are not set: not served), the other Cloud Run v1 resources (pointed here, untested), the IAM, audit-config and other resources whose API refuses them (audit configs, tag IAM, Bigtable table IAM and authorized views, log bucket CMEK), and the other resources of the served services | partly verified (the seven batches of #1304 and the verified rows of compatibility.md) | L |
+| The gated full-lifecycle Functions tests are not yet run: the v2 and v1 APIs' build and serve, event triggers, `gcloud functions deploy --gen2`, and the full apply of Terraform's `google_cloudfunctions2_function` and `google_cloudfunctions_function`; `buildpack_build.runtime` and the v2 and v1 fields refused `UNIMPLEMENTED` (`repo_source`, worker pools, VPC connectors, secrets, KMS, binary authorization, other event types) (#1464) | the builder's amd64 images cannot run on arm64 nodes; no dated amd64 run yet | M |
+| Terraform resources beyond the verified set (#1304): the other `google_spanner_*` resources (instance configs, backup schedules), a worker pool's `scaling_mode` (Google publishes no such field), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_secret_manager_regional_secret` and `google_bigquery_data_transfer_config` (their endpoints are not set: not served), the resources whose API refuses them (Bigtable authorized views, log bucket CMEK; audit configs, tag IAM, Bigtable table IAM and Spanner IAM are stored since #1486), and the other resources of the served services | partly verified (the eight batches of #1304 and the verified rows of compatibility.md) | L |
 
 ## Console
 
@@ -292,8 +294,9 @@ Not gaps to close; each stays until its decision is amended.
 
 - **Cloud Storage ACLs and object IAM** (`bucketAccessControls.*`, `objectAccessControls.*`,
   `defaultObjectAccessControls.*`, `objects.*IamPolicy`): 501 by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #504.
-- **IAM Conditions and audit configs** on every policy (Tasks, Secret Manager, KMS, Storage, the
-  console): refused by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #365.
+- **IAM Conditions** on every policy (Tasks, Secret Manager, KMS, Storage, the console): refused
+  by [ADR-0006](adr/0006-iam-policy-surface.md), amended by #365. **Audit configs** are refused
+  too, except on projects, folders and the organization, where they are stored, not acted on (#1486).
 - **IAM enforcement**: [ADR-0006](adr/0006-iam-policy-surface.md) stores policies, never enforces them.
 - **IAM Credentials `signBlob`**: refused because a local signature makes signed URLs no Google
   service accepts ([ADR-0004](adr/0004-local-access-and-no-authentication.md)).

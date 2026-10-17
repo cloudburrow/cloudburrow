@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"strings"
 
-	"cloud.google.com/go/iam/apiv1/iampb"
 	"cloud.google.com/go/longrunning/autogen/longrunningpb"
 	rmpb "cloud.google.com/go/resourcemanager/apiv3/resourcemanagerpb"
 	"google.golang.org/protobuf/proto"
@@ -22,10 +21,6 @@ import (
 	"github.com/cloudburrow/cloudburrow/internal/paging"
 	"github.com/cloudburrow/cloudburrow/internal/transport/rest"
 )
-
-// tagIAMRefusal is why tag key and value IAM stays UNIMPLEMENTED.
-const tagIAMRefusal = ": tag key and tag value IAM policies (ADR-0006 stores policies only on the resources it names, " +
-	"and tags are referenced by no IAM condition here)"
 
 // pageProtos pages items by name.
 func pageProtos[T proto.Message](scope string, items []T, name func(T) string, token string, size int) ([]T, string, error) {
@@ -103,18 +98,6 @@ func (s *TagKeysServer) DeleteTagKey(_ context.Context, req *rmpb.DeleteTagKeyRe
 	return doneOperation("dtk", idOf(k.GetName()), k)
 }
 
-func (s *TagKeysServer) GetIamPolicy(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("GetIamPolicy" + tagIAMRefusal))
-}
-
-func (s *TagKeysServer) SetIamPolicy(context.Context, *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("SetIamPolicy" + tagIAMRefusal))
-}
-
-func (s *TagKeysServer) TestIamPermissions(context.Context, *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("TestIamPermissions" + tagIAMRefusal))
-}
-
 // --- TagValues -------------------------------------------------------------
 
 // TagValuesServer serves google.cloud.resourcemanager.v3.TagValues.
@@ -167,18 +150,6 @@ func (s *TagValuesServer) DeleteTagValue(_ context.Context, req *rmpb.DeleteTagV
 		return nil, apierror.Wrap(err)
 	}
 	return doneOperation("dtv", idOf(v.GetName()), v)
-}
-
-func (s *TagValuesServer) GetIamPolicy(context.Context, *iampb.GetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("GetIamPolicy" + tagIAMRefusal))
-}
-
-func (s *TagValuesServer) SetIamPolicy(context.Context, *iampb.SetIamPolicyRequest) (*iampb.Policy, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("SetIamPolicy" + tagIAMRefusal))
-}
-
-func (s *TagValuesServer) TestIamPermissions(context.Context, *iampb.TestIamPermissionsRequest) (*iampb.TestIamPermissionsResponse, error) {
-	return nil, apierror.Wrap(ErrNotImplemented("TestIamPermissions" + tagIAMRefusal))
 }
 
 // --- TagBindings -----------------------------------------------------------
@@ -352,9 +323,13 @@ func (t *tagServers) restRoutes(r *rest.Router) {
 		}
 		return writeProto(w, op)
 	})
+	// The three IAM methods (#1486): POST /v3/tagKeys/{id}:{verb}.
 	r.Handle("POST /v3/tagKeys/{id}", func(w http.ResponseWriter, req *http.Request) error {
-		_, verb, _ := strings.Cut(req.PathValue("id"), ":")
-		return ErrNotImplemented(verb + tagIAMRefusal)
+		id, verb, _ := strings.Cut(req.PathValue("id"), ":")
+		if !isIAMVerb(verb) {
+			return apierror.NotFound("no method %s on tagKeys", verb)
+		}
+		return serveIAM(w, req, t.keys, "tagKeys/"+id, verb)
 	})
 
 	r.Handle("GET /v3/tagValues", func(w http.ResponseWriter, req *http.Request) error {
@@ -415,9 +390,13 @@ func (t *tagServers) restRoutes(r *rest.Router) {
 		}
 		return writeProto(w, op)
 	})
+	// The three IAM methods (#1486): POST /v3/tagValues/{id}:{verb}.
 	r.Handle("POST /v3/tagValues/{id}", func(w http.ResponseWriter, req *http.Request) error {
-		_, verb, _ := strings.Cut(req.PathValue("id"), ":")
-		return ErrNotImplemented(verb + tagIAMRefusal)
+		id, verb, _ := strings.Cut(req.PathValue("id"), ":")
+		if !isIAMVerb(verb) {
+			return apierror.NotFound("no method %s on tagValues", verb)
+		}
+		return serveIAM(w, req, t.values, "tagValues/"+id, verb)
 	})
 	r.Handle("GET /v3/tagValues/{id}/tagHolds", func(w http.ResponseWriter, req *http.Request) error {
 		tok, size, err := pageArgs(req)

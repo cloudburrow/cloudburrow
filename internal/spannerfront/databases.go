@@ -72,6 +72,7 @@ func (d databases) DropDatabase(ctx context.Context, req *databasepb.DropDatabas
 	d.s.mu.Lock()
 	delete(d.s.protected, req.GetDatabase())
 	d.s.mu.Unlock()
+	d.s.dropPolicies(req.GetDatabase())
 	return resp, nil
 }
 
