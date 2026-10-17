@@ -588,6 +588,11 @@ type scriptRun struct {
 	// stack frames; pendingAt pending's; callers the frames of the CALLs
 	// running (scriptjobs.go, #1569).
 	at, pendingAt, callers []childFrame
+	// atPos is the offset in sql of the statement or expression running,
+	// pendingPos of pending in the script's text (-1 when pending is a
+	// procedure's): where the positions of its errors start
+	// (scripterrors.go, #1585).
+	atPos, pendingPos int
 	// dry: the run is a dry run's, which checks an ALTER TABLE and
 	// changes nothing (altertabledry.go, #1416).
 	dry bool
@@ -664,35 +669,7 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 		return
 	}
 	if flow != nil && flow.failed {
-		if !insert {
-			if len(flow.body) == 0 {
-				// A failure of the front's own, with its message only.
-				writeError(w, flow.status, "invalidQuery", flow.msg)
-				return
-			}
-			writeRaw(w, flow.status, flow.body)
-			return
-		}
-		// A query job fails as the statement did: a table not found is
-		// 404 notFound (#1227), a statement the front refused with a
-		// reason of BigQuery's (duplicate, resourceInUse) with it (#1459),
-		// anything else 400 invalidQuery.
-		status, reason := http.StatusBadRequest, "invalidQuery"
-		var e struct {
-			Error struct {
-				Errors []struct {
-					Reason string `json:"reason"`
-				} `json:"errors"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(flow.body, &e)
-		if flow.status == http.StatusNotFound && len(e.Error.Errors) > 0 && e.Error.Errors[0].Reason == "notFound" {
-			status, reason = http.StatusNotFound, "notFound"
-		} else if len(e.Error.Errors) > 0 && (flow.status == http.StatusConflict || flow.status == http.StatusBadRequest) &&
-			(e.Error.Errors[0].Reason == "duplicate" || e.Error.Errors[0].Reason == "resourceInUse") {
-			status, reason = flow.status, e.Error.Errors[0].Reason
-		}
-		f.failBeforeRun(w, r, q, insert, "_cloudburrow", status, rowError{Reason: reason, Message: flow.msg})
+		f.failScript(w, r, q, insert, flow)
 		return
 	}
 	client := jobText{query: q.Query}
@@ -700,7 +677,19 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 		// The last query is a child job too: run once more, as it only
 		// reads (scriptjobs.go). Its failure is the client's request's.
 		s.at = s.pendingAt
-		s.sendStatement(s.pending)
+		_, fl := s.sendStatement(s.pending)
+		if fl != nil && fl.failed && insert && s.pendingPos >= 0 && s.depth == 0 {
+			// A query job's failure is recorded as the engine gave it,
+			// its position in the statement: the job fails here, with
+			// its position in the script (#1585).
+			msg := fl.msg
+			fl.pos, fl.hasPos = s.pendingPos, true
+			s.inScript(fl)
+			if fl.msg != msg {
+				f.failScript(w, r, q, insert, fl)
+				return
+			}
+		}
 	}
 	if s.pending == "" && s.lastQuery != "" {
 		// A query job child's answer is a Job (sendStatement): the
@@ -721,6 +710,13 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 		q2 := q
 		q2.Query = s.pending
 		f.runQuery(rec, r, q2, insert)
+		if s.pendingPos >= 0 && (rec.status >= 400 || bytes.Contains(rec.body.Bytes(), []byte(`"errorResult"`))) {
+			// Its error's position is in the script (#1585).
+			b := errorsInScript(rec.body.Bytes(), s.sql, s.pendingPos, s.pending)
+			rec.body.Reset()
+			rec.body.Write(b)
+			rec.header.Del("Content-Length")
+		}
 		f.clientText(w, rec, client)
 		return
 	}
@@ -1034,6 +1030,7 @@ func (s *scriptRun) run(nodes []scriptNode) *scriptFlow {
 			if flow.failed && !flow.hasPos {
 				if pos := nodePos(n); pos >= 0 {
 					flow.pos, flow.hasPos = pos, true
+					s.inScript(flow) // #1585, scripterrors.go
 				}
 			}
 			return flow
@@ -1268,13 +1265,19 @@ func (s *scriptRun) flush() *scriptFlow {
 	if s.pending == "" {
 		return nil
 	}
-	text, dml := s.pending, s.pendingDML
+	text, dml, pos := s.pending, s.pendingDML, s.pendingPos
 	s.pending, s.pendingDML = "", false
 	at := s.at
 	s.at = s.pendingAt
 	rec, flow := s.sendStatement(text)
 	s.at = at
 	if flow != nil {
+		if flow.failed && !flow.hasPos && pos >= 0 && s.depth == 0 {
+			// The statement that failed is the one pending, not the one
+			// running (#1585).
+			flow.pos, flow.hasPos = pos, true
+			s.inScript(flow)
+		}
 		return flow
 	}
 	s.noteRowCount(text, rec)
@@ -1335,6 +1338,10 @@ func (s *scriptRun) runText(text string) *scriptFlow {
 	if (query || dml) && s.guarded == 0 {
 		s.pending, s.pendingDML, s.last, s.lastQuery = text, dml, nil, ""
 		s.pendingAt = s.at
+		s.pendingPos = s.atPos
+		if s.depth != 0 {
+			s.pendingPos = -1
+		}
 		return nil
 	}
 	rec, flow := s.sendStatement(text)
@@ -2221,4 +2228,37 @@ func unquoteRaised(lit string) string {
 		b.WriteByte(c)
 	}
 	return b.String()
+}
+
+// failScript answers w with flow, the failure of the script q.
+func (f front) failScript(w http.ResponseWriter, r *http.Request, q queryOptions, insert bool, flow *scriptFlow) {
+	if !insert {
+		if len(flow.body) == 0 {
+			// A failure of the front's own, with its message only.
+			writeError(w, flow.status, "invalidQuery", flow.msg)
+			return
+		}
+		writeRaw(w, flow.status, flow.body)
+		return
+	}
+	// A query job fails as the statement did: a table not found is
+	// 404 notFound (#1227), a statement the front refused with a
+	// reason of BigQuery's (duplicate, resourceInUse) with it (#1459),
+	// anything else 400 invalidQuery.
+	status, reason := http.StatusBadRequest, "invalidQuery"
+	var e struct {
+		Error struct {
+			Errors []struct {
+				Reason string `json:"reason"`
+			} `json:"errors"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(flow.body, &e)
+	if flow.status == http.StatusNotFound && len(e.Error.Errors) > 0 && e.Error.Errors[0].Reason == "notFound" {
+		status, reason = http.StatusNotFound, "notFound"
+	} else if len(e.Error.Errors) > 0 && (flow.status == http.StatusConflict || flow.status == http.StatusBadRequest) &&
+		(e.Error.Errors[0].Reason == "duplicate" || e.Error.Errors[0].Reason == "resourceInUse") {
+		status, reason = flow.status, e.Error.Errors[0].Reason
+	}
+	f.failBeforeRun(w, r, q, insert, "_cloudburrow", status, rowError{Reason: reason, Message: flow.msg})
 }

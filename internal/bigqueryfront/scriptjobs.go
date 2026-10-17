@@ -286,6 +286,10 @@ func statementTypeOf(text string) string {
 // the expression alone (a DECLARE's DEFAULT, a condition) is UNVERIFIED.
 func (s *scriptRun) place(toks []token) {
 	s.at = s.framesOf(toks)
+	s.atPos = -1
+	if len(toks) > 0 && toks[len(toks)-1].end <= len(s.sql) {
+		s.atPos = toks[0].pos
+	}
 }
 
 // framesOf is toks' frame in the text running, then the callers'.
@@ -343,6 +347,9 @@ func (s *scriptRun) failedChild(text string, rec *recorder, msg string) {
 	}
 	if json.Unmarshal(rec.body.Bytes(), &e) == nil && len(e.Error.Errors) > 0 && e.Error.Errors[0].Reason != "" {
 		reason = e.Error.Errors[0].Reason
+	}
+	if reason == "jobInternalError" && strings.Contains(rec.body.String(), errorFunctionPrefix) {
+		reason = "invalidQuery" // ERROR()'s, whose mark msg no longer has (#1585)
 	}
 	legacy := false
 	body, err := json.Marshal(map[string]any{"jobReference": map[string]any{"projectId": projectOf(s.f.base), "jobId": jobIDFor(s.r.Context())},
