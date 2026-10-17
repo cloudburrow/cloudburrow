@@ -1388,6 +1388,299 @@
     ]
   },
   {
+    "Key": "securesourcemanager",
+    "Title": "Secure Source Manager",
+    "counts": {
+      "Unimplemented": 44,
+      "Verified": 9
+    },
+    "rows": [
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/BatchCreatePullRequestComments",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CloseIssue",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ClosePullRequest",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateBranchRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateHook",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateIssue",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateIssueComment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreatePullRequest",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreatePullRequestComment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/CreateRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteBranchRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteHook",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteIssue",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteIssueComment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeletePullRequestComment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/DeleteRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/FetchBlob",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/FetchRefs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/FetchTree",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetBranchRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetHook",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetIamPolicyRepo",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetInstance",
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetIssue",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetIssueComment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetPullRequest",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetPullRequestComment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/GetRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListBranchRules",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListHooks",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListInstances",
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListIssueComments",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListIssues",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListPullRequestComments",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListPullRequestFileDiffs",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListPullRequests",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ListRepositories",
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/MergePullRequest",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/OpenIssue",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/OpenPullRequest",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/ResolvePullRequestComments",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/SetIamPolicyRepo",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/TestIamPermissionsRepo",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UnresolvePullRequestComments",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateBranchRule",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateHook",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateIssue",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateIssueComment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdatePullRequest",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdatePullRequestComment",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.securesourcemanager.v1.SecureSourceManager/UpdateRepository",
+        "status": "Verified",
+        "tests": [
+          "test/compat/securesourcemanager_test.go:36 TestSecureSourceManagerPushTrigger"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "functions",
     "Title": "Cloud Functions v2",
     "counts": {

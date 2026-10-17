@@ -69,6 +69,13 @@ type parityRow struct {
 }
 
 var parityRows = []parityRow{
+	// Secure Source Manager (#1521): served on the Run port; its console
+	// page is #1527's.
+	{Resource: "Secure Source Manager instances and repositories", Service: "securesourcemanager",
+		Methods: []string{"SecureSourceManager/CreateInstance", "SecureSourceManager/GetInstance", "SecureSourceManager/ListInstances",
+			"SecureSourceManager/DeleteInstance", "SecureSourceManager/CreateRepository", "SecureSourceManager/GetRepository",
+			"SecureSourceManager/ListRepositories", "SecureSourceManager/UpdateRepository", "SecureSourceManager/DeleteRepository"},
+		Issue: 1527},
 	// Backup and DR (#1433).
 	{Resource: "Cloud SQL point-in-time restore from a Backup and DR data source", Service: "sqladmin",
 		Methods:  []string{"sql.instances.pointInTimeRestore"},
