@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"cloud.google.com/go/bigquery"
-	"cloud.google.com/go/civil"
 	bq "google.golang.org/api/bigquery/v2"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
@@ -157,20 +156,28 @@ func TestBigQueryDDLMoreOptionsAndWholeAlter(t *testing.T) {
 
 // TestBigQueryRangeInARecordReadsBack (#1456): a RANGE<TIMESTAMP> and a
 // RANGE<DATETIME> field of a RECORD, and one in a REPEATED RECORD inside
-// it, read back through the official Go client, through jobs.query and
-// tabledata.list, as the values written. Before, such a value was in
-// GoogleSQL's text (a TIMESTAMP bound "2020-01-01 00:00:00+00"), which the
-// client cannot parse; a top-level RANGE was already read (#1111, #1492).
+// it, read back in BigQuery's REST form, a TIMESTAMP bound as int64
+// microseconds and a DATETIME one with a "T", the forms a top-level RANGE
+// has (#1111, #1492), through the generated client's jobs.query and
+// tabledata.list. The official Go client does not read a RANGE inside a
+// RECORD at all (convertRow: "we don't propagate range element type more
+// deeply"), so the cells are read as the REST API gives them. Before, such
+// a value was in GoogleSQL's text, a TIMESTAMP bound
+// "2020-01-01 00:00:00+00".
 //
 // covers: bigquery.jobs.query, bigquery.tabledata.list
 func TestBigQueryRangeInARecordReadsBack(t *testing.T) {
 	h := New(t)
-	c, _ := bigqueryClient(t, h)
+	c, project := bigqueryClient(t, h)
 	ds := validationDataset(t, h, c)
 	ctx := h.Context()
+	svc, err := bq.NewService(ctx, option.WithEndpoint(h.Endpoint(EnvBigQuery)), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
 	ref := "`" + ds.DatasetID + ".rec`"
 	if err := bqRun(ctx, c, "CREATE TABLE "+ref+" (id INT64, st STRUCT<ts RANGE<TIMESTAMP>, dt RANGE<DATETIME>, "+
-		"inner ARRAY<STRUCT<r RANGE<TIMESTAMP>>>>)", false); err != nil {
+		"nest ARRAY<STRUCT<r RANGE<TIMESTAMP>>>>)", false); err != nil {
 		t.Fatal(err)
 	}
 	if err := bqRun(ctx, c, "INSERT INTO "+ref+" (id, st) VALUES (1, STRUCT(RANGE(TIMESTAMP '2020-01-01 00:00:00+00', NULL), "+
@@ -178,48 +185,51 @@ func TestBigQueryRangeInARecordReadsBack(t *testing.T) {
 		"[STRUCT(RANGE(TIMESTAMP '2021-06-01 12:30:00+00', TIMESTAMP '2021-06-02 00:00:00+00'))]))", false); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"[2020-01-01T00:00:00Z, UNBOUNDED)", "[2020-01-01T10:00:00, 2020-01-02T00:00:00)",
-		"[2021-06-01T12:30:00Z, 2021-06-02T00:00:00Z)"}
-	check := func(how string, row []bigquery.Value) {
+	ts := func(y, m, d, hh, mm int) string {
+		return fmt.Sprint(time.Date(y, time.Month(m), d, hh, mm, 0, 0, time.UTC).UnixMicro())
+	}
+	want := []string{"[" + ts(2020, 1, 1, 0, 0) + ", UNBOUNDED)", "[2020-01-01T10:00:00, 2020-01-02T00:00:00)",
+		"[" + ts(2021, 6, 1, 12, 30) + ", " + ts(2021, 6, 2, 0, 0) + ")"}
+	// cells reads a REST RECORD value, {"f": [{"v": ...}, ...]}.
+	cells := func(v any) []any {
+		m, _ := v.(map[string]any)
+		f, _ := m["f"].([]any)
+		out := make([]any, len(f))
+		for i, c := range f {
+			cm, _ := c.(map[string]any)
+			out[i] = cm["v"]
+		}
+		return out
+	}
+	check := func(how string, st any) {
 		t.Helper()
-		st, ok := row[1].([]bigquery.Value)
-		if !ok || len(st) != 3 {
-			t.Fatalf("%s: st %#v", how, row[1])
+		f := cells(st)
+		if len(f) != 3 {
+			t.Fatalf("%s: st %#v", how, st)
 		}
-		inner, ok := st[2].([]bigquery.Value)
-		if !ok || len(inner) != 1 {
-			t.Fatalf("%s: inner %#v", how, st[2])
+		nest, _ := f[2].([]any)
+		if len(nest) != 1 {
+			t.Fatalf("%s: nest %#v", how, f[2])
 		}
-		r, _ := inner[0].([]bigquery.Value)
+		el, _ := nest[0].(map[string]any)
+		r := cells(el["v"])
 		if len(r) != 1 {
-			t.Fatalf("%s: inner[0] %#v", how, inner[0])
+			t.Fatalf("%s: nest[0] %#v", how, nest[0])
 		}
-		got := []string{rangeText(st[0]), rangeText(st[1]), rangeText(r[0])}
-		if dt, ok := st[1].(*bigquery.RangeValue); !ok || dt.Start != (civil.DateTime{Date: civil.Date{Year: 2020, Month: 1, Day: 1}, Time: civil.Time{Hour: 10}}) {
-			t.Errorf("%s: st.dt %#v", how, st[1])
-		}
-		if fmt.Sprint(got) != fmt.Sprint(want) {
+		if got := []any{f[0], f[1], r[0]}; fmt.Sprint(got) != fmt.Sprint(want) {
 			t.Errorf("%s: %v, want %v", how, got, want)
 		}
-		if ts, ok := st[0].(*bigquery.RangeValue); !ok || !ts.Start.(time.Time).Equal(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)) {
-			t.Errorf("%s: st.ts %#v", how, st[0])
-		}
 	}
-	it, err := c.Query("SELECT id, st FROM " + ref).Read(ctx)
-	if err != nil {
-		t.Fatal(err)
+	res, err := svc.Jobs.Query(project, &bq.QueryRequest{Query: "SELECT id, st FROM " + ref, UseLegacySql: new(bool)}).Context(ctx).Do()
+	if err != nil || len(res.Rows) != 1 {
+		t.Fatalf("jobs.query: %+v (%v)", res, err)
 	}
-	var row []bigquery.Value
-	if err := it.Next(&row); err != nil {
-		t.Fatalf("jobs.query: %v", err)
+	check("jobs.query", res.Rows[0].F[1].V)
+	list, err := svc.Tabledata.List(project, ds.DatasetID, "rec").Context(ctx).Do()
+	if err != nil || len(list.Rows) != 1 {
+		t.Fatalf("tabledata.list: %+v (%v)", list, err)
 	}
-	check("jobs.query", row)
-	tit := ds.Table("rec").Read(ctx)
-	row = nil
-	if err := tit.Next(&row); err != nil {
-		t.Fatalf("tabledata.list: %v", err)
-	}
-	check("tabledata.list", row)
+	check("tabledata.list", list.Rows[0].F[1].V)
 }
 
 // TestBigQueryDefaultKeyOfJobTables (#1456): a project's

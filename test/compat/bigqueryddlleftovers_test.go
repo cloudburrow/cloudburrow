@@ -258,7 +258,7 @@ func TestBigQueryAlterTableDryRun(t *testing.T) {
 		"ALTER TABLE `" + ds.DatasetID + ".nosuch` ADD COLUMN b STRING":              {http.StatusNotFound, "notFound"},
 		"ALTER TABLE " + ref + " ADD COLUMN a STRING":                                {http.StatusBadRequest, "invalidQuery"},
 		"ALTER TABLE " + ref + " ALTER COLUMN a SET DATA TYPE STRING":                {http.StatusBadRequest, "invalidQuery"},
-		"ALTER TABLE " + ref + " SET OPTIONS (enable_fine_grained_mutations = TRUE)": {http.StatusNotImplemented, "notImplemented"},
+		"ALTER TABLE " + ref + " SET OPTIONS (not_an_option = TRUE)": {http.StatusNotImplemented, "notImplemented"},
 	} {
 		_, err := dry(sql)
 		wantReason(t, sql, err, want.code, want.reason)
