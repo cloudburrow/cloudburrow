@@ -141,8 +141,9 @@ func TestBigQueryModelPageResults(t *testing.T) {
 				`{"name":"confidence_level","type":"FLOAT"},{"name":"prediction_interval_lower_bound","type":"FLOAT"},{"name":"prediction_interval_upper_bound","type":"FLOAT"}`,
 				`{"f":[{"v":"1704931200000000"},{"v":"19.5"},{"v":"0.75"},{"v":"0.95"},{"v":"18"},{"v":"21"}]}`))
 		case strings.Contains(q, "ML.ARIMA_EVALUATE"):
-			fmt.Fprint(w, rows(`{"name":"f0_","type":"STRING"},{"name":"log_likelihood","type":"FLOAT"},{"name":"AIC","type":"FLOAT"},{"name":"variance","type":"FLOAT"}`,
-				`{"f":[{"v":"ARIMA(0, 1, 0) with drift"},{"v":"-9.5"},{"v":"23"},{"v":"0.6"}]}`))
+			fmt.Fprint(w, rows(`{"name":"f0_","type":"STRING"},{"name":"log_likelihood","type":"FLOAT"},{"name":"AIC","type":"FLOAT"},{"name":"variance","type":"FLOAT"},`+
+				`{"name":"f1_","type":"STRING"},{"name":"has_spikes_and_dips","type":"BOOLEAN"},{"name":"has_step_changes","type":"BOOLEAN"}`,
+				`{"f":[{"v":"ARIMA(0, 1, 0) with drift"},{"v":"-9.5"},{"v":"23"},{"v":"0.6"},{"v":"WEEKLY"},{"v":"true"},{"v":"false"}]}`))
 		case strings.Contains(q, "ML.RECOMMEND"):
 			fmt.Fprint(w, rows(`{"name":"predicted_rating","type":"FLOAT"},{"name":"user","type":"INTEGER"},{"name":"item","type":"STRING"}`,
 				`{"f":[{"v":"4.5"},{"v":"7"},{"v":"film"}]}`))
@@ -170,7 +171,7 @@ func TestBigQueryModelPageResults(t *testing.T) {
 		"pc": {"Components", "Eigenvalue:1.5", "x=0.6", "Total explained variance ratio"},
 		"bt": {"Feature importance", "Splits:20", "Mean gain:3.5", "Mean cover:10"},
 		"rf": {"Feature importance", "Splits:20", "Global explanation", "Attribution:1.25"},
-		"ar": {"Forecast", "Name:2024-01-11T00:00:00Z", "Forecast:19.5", "Interval:18 – 21", "Candidate models", "AIC:23"},
+		"ar": {"Forecast", "Name:2024-01-11T00:00:00Z", "Forecast:19.5", "Interval:18 – 21", "Candidate models", "AIC:23", "Seasonal periods:WEEKLY", "Spikes and dips:true", "Step changes:false"},
 		"mf": {"Recommendations", "Name:4.5", "user:7", "item:film", "Factors", "Intercept:0.25", "Factor weights:1.5, -2"},
 	} {
 		d, err := p.Detail(context.Background(), "p", []string{"d", "models", id})

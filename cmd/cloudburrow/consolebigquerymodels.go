@@ -412,12 +412,19 @@ func (p bigqueryProvider) modelTypeSections(ctx context.Context, c *bigquery.Cli
 			out = append(out, console.Section{ID: "forecast", Label: "Forecast", Listing: l})
 		}
 		_, ev := read("SELECT FORMAT('ARIMA(%d, %d, %d)%s', non_seasonal_p, non_seasonal_d, non_seasonal_q, IF(has_drift, ' with drift', '')), " +
-			"log_likelihood, AIC, variance FROM ML.ARIMA_EVALUATE(" + model + ") WHERE error_message IS NULL")
+			"log_likelihood, AIC, variance, ARRAY_TO_STRING(seasonal_periods, ', '), has_spikes_and_dips, has_step_changes " +
+			"FROM ML.ARIMA_EVALUATE(" + model + ") WHERE error_message IS NULL")
 		if len(ev) > 0 {
-			l := console.Listing{Columns: []string{"Log likelihood", "AIC", "Variance"}, NameColumn: "Model", Noun: "candidate models"}
+			// The pipeline's stages too: the seasonal periods found, and
+			// whether spikes and dips or step changes were (#1518).
+			l := console.Listing{Columns: []string{"Log likelihood", "AIC", "Variance", "Seasonal periods", "Spikes and dips", "Step changes"},
+				NameColumn: "Model", Noun: "candidate models"}
 			for _, r := range ev {
-				l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: map[string]string{"Log likelihood": num(r[1]),
-					"AIC": num(r[2]), "Variance": num(r[3])}})
+				f := map[string]string{"Log likelihood": num(r[1]), "AIC": num(r[2]), "Variance": num(r[3])}
+				if len(r) >= 7 {
+					f["Seasonal periods"], f["Spikes and dips"], f["Step changes"] = fmt.Sprint(r[4]), fmt.Sprint(r[5]), fmt.Sprint(r[6])
+				}
+				l.Items = append(l.Items, console.Resource{Name: fmt.Sprint(r[0]), Fields: f})
 			}
 			l.Total = len(l.Items)
 			out = append(out, console.Section{ID: "candidates", Label: "Candidate models", Listing: l})
