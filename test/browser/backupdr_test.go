@@ -58,3 +58,44 @@ func TestBackupDRVaultAndPlanThroughThePage(t *testing.T) {
 		t.Errorf("the plan made in the browser is %+v; want rule nightly, 3 days, in %s", got, vault)
 	}
 }
+
+// TestBackupDRDeletesThroughThePage, in the sql shard: Delete backup plan
+// on a vault's page, confirmed by the vault's name, deletes a plan
+// backupPlans.get then reports gone, and the page stays the vault's. Delete
+// association and Delete backup, which need a Cloud SQL instance and a
+// backup of it, are exercised by TestConsoleBackupDRDeletes.
+func TestBackupDRDeletesThroughThePage(t *testing.T) {
+	needService(t, "backupdr")
+	bdr, err := backupdr.NewService(context.Background(), option.WithEndpoint("http://"+endpoint(t, envBackupDR)+"/"),
+		option.WithoutAuthentication(), option.WithHTTPClient(http.DefaultClient))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := servedProject(t)
+	loc := "projects/" + project + "/locations/us-central1"
+	suffix := fmt.Sprint(time.Now().UnixNano() % 1e6)
+	vault, plan := "browser-delvault-"+suffix, "browser-delplan-"+suffix
+	t.Cleanup(func() {
+		_, _ = bdr.Projects.Locations.BackupPlans.Delete(loc + "/backupPlans/" + plan).Do()
+		_, _ = bdr.Projects.Locations.BackupVaults.Delete(loc + "/backupVaults/" + vault).Force(true).Do()
+	})
+	if _, err := bdr.Projects.Locations.BackupVaults.Create(loc, &backupdr.BackupVault{BackupMinimumEnforcedRetentionDuration: "86400s"}).
+		BackupVaultId(vault).Do(); err != nil {
+		t.Fatalf("backupVaults.create: %v", err)
+	}
+	if _, err := bdr.Projects.Locations.BackupPlans.Create(loc, &backupdr.BackupPlan{BackupVault: loc + "/backupVaults/" + vault,
+		ResourceType: "sqladmin.googleapis.com/Instance",
+		BackupRules: []*backupdr.BackupRule{{RuleId: "daily", BackupRetentionDays: 7,
+			StandardSchedule: &backupdr.StandardSchedule{RecurrenceType: "DAILY", TimeZone: "UTC",
+				BackupWindow: &backupdr.BackupWindow{StartHourOfDay: 0, EndHourOfDay: 24}}}}}).BackupPlanId(plan).Do(); err != nil {
+		t.Fatalf("backupPlans.create: %v", err)
+	}
+
+	p := open(t)
+	p.navigate("/backupdr/" + vault + "?project=" + project)
+	p.pageAction("Delete backup plan", map[string]string{"plan": plan}, vault)
+	if _, err := bdr.Projects.Locations.BackupPlans.Get(loc + "/backupPlans/" + plan).Do(); err == nil {
+		t.Errorf("backupPlans.get after Delete backup plan found %s", plan)
+	}
+	p.waitFor(fmt.Sprintf(`location.pathname === %q`, "/backupdr/"+vault))
+}

@@ -123,6 +123,18 @@ func TestKMSEkmConnectionsThroughTheBrowser(t *testing.T) {
 	if err != nil || got.GetKeyManagementMode() != kmspb.EkmConnection_CLOUD_KMS || got.GetCryptoSpacePath() != "v0/longlived/browser" {
 		t.Fatalf("GetEkmConnection after Edit = %v, %v; want CLOUD_KMS and the crypto space path", got, err)
 	}
+	// Edit opens again on what it saved: a form left as it opened would
+	// otherwise reset the connection to MANUAL and clear its path.
+	p.clickText("#view .page-actions button", "Edit")
+	p.waitFor(`document.querySelector(".modal.is-open #f-keyManagementMode") !== null`)
+	var opened struct{ Mode, Path string }
+	p.eval(`({ Mode: document.querySelector(".modal.is-open #f-keyManagementMode").value,
+		Path: document.querySelector(".modal.is-open #f-cryptoSpacePath").value })`, &opened)
+	if opened.Mode != "CLOUD_KMS" || opened.Path != "v0/longlived/browser" {
+		t.Errorf("Edit reopened on %+v; want CLOUD_KMS and v0/longlived/browser", opened)
+	}
+	p.clickText(".modal.is-open button", "Cancel")
+	p.waitFor(`document.querySelector(".modal") === null`)
 
 	// Set as default changes the location's EkmConfig: it is not sent until
 	// the connection's name is typed back, as its confirmation promises.

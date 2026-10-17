@@ -211,14 +211,25 @@ func kmsLocationOf(name string) string {
 	return strings.Join(parts[:4], "/")
 }
 
-func (p kmsEkmProvider) DetailActions(_ context.Context, project string, path []string) []console.Action {
-	if len(path) != 1 || p.ekm() == nil || kmsOwned(project, path[0]) != nil {
+func (p kmsEkmProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	e := p.ekm()
+	if len(path) != 1 || e == nil || kmsOwned(project, path[0]) != nil {
 		return nil
+	}
+	// Edit starts from the connection's own mode and path: both are in its
+	// update mask, so a form left as it opened changes nothing, where a
+	// MANUAL default used to reset a CLOUD_KMS connection and clear its path.
+	mode, space := "MANUAL", ""
+	if c, err := e.GetEkmConnection(ctx, &kmspb.GetEkmConnectionRequest{Name: path[0]}); err == nil {
+		if c.GetKeyManagementMode() == kmspb.EkmConnection_CLOUD_KMS {
+			mode = "CLOUD_KMS"
+		}
+		space = c.GetCryptoSpacePath()
 	}
 	return []console.Action{
 		{ID: "edit", Label: "Edit", Fields: []console.Field{
-			{Name: "keyManagementMode", Label: "Key management mode", Type: "select", Default: "MANUAL", Options: []string{"MANUAL", "CLOUD_KMS"}},
-			{Name: "cryptoSpacePath", Label: "Crypto space path", Type: "text", Help: "Required when the key management mode is CLOUD_KMS."},
+			{Name: "keyManagementMode", Label: "Key management mode", Type: "select", Default: mode, Options: []string{"MANUAL", "CLOUD_KMS"}},
+			{Name: "cryptoSpacePath", Label: "Crypto space path", Type: "text", Default: space, Help: "Required when the key management mode is CLOUD_KMS."},
 		}},
 		{ID: "setdefault", Label: "Set as default", Confirm: "The location's EkmConfig names this connection as its default."},
 	}

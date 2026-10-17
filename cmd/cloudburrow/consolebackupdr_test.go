@@ -110,7 +110,7 @@ func TestConsoleBackupDRVaultPlanAssociationRestore(t *testing.T) {
 		dd, _ := p.Detail(ctx, project, path)
 		t.Fatalf("the triggered backup never became ACTIVE on the data source's page: %+v", dd)
 	}
-	if acts := bdrActionIDs(p.DetailActions(ctx, project, path)); acts != "restore,pitr,editbackup" {
+	if acts := bdrActionIDs(p.DetailActions(ctx, project, path)); acts != "restore,pitr,editbackup,backupdelete" {
 		t.Errorf("data source actions: %s", acts)
 	}
 	if err := p.ActAt(ctx, project, path, "restore", map[string]string{"backup": backup, "target": "pg-restored"}); err != nil {
@@ -170,7 +170,7 @@ func TestConsoleBackupDREdits(t *testing.T) {
 		t.Errorf("an edit that changes nothing: no error")
 	}
 	acts := bdrActionIDs(p.DetailActions(ctx, project, []string{"vault-1"}))
-	if acts != "createplan,associate,editplan,moveassoc,trigger,editvault,delete" {
+	if acts != "createplan,associate,editplan,moveassoc,trigger,assocdelete,plandelete,editvault,delete" {
 		t.Errorf("vault actions: %s", acts)
 	}
 	v, err := p.get(ctx, "projects/"+project+"/locations/us-central1/backupVaults/vault-1")
@@ -223,5 +223,73 @@ func TestConsoleBackupDREdits(t *testing.T) {
 	if err != nil || len(d2.Sections[3].Listing.Items) != 1 || d2.Sections[3].Listing.Items[0].Fields["Backup plan"] != "plan-2" ||
 		len(d2.Sections[0].Listing.Items) != 1 {
 		t.Errorf("vault-2 after Move association: %v %+v", err, d2.Sections)
+	}
+}
+
+// The Backup and DR page's deletes: Delete backup on a data source's page,
+// and Delete association and Delete backup plan on a vault's, each through
+// the Backup and DR Service's delete; a plan an association applies is
+// refused until the association is gone.
+func TestConsoleBackupDRDeletes(t *testing.T) {
+	srv := backupdr.NewServer("127.0.0.1:0", &fakeBackupDRSQL{runs: map[string]bool{}}, "")
+	p := backupDRProvider{bdr: srv}
+	ctx := context.Background()
+	const project = "bdr-deletes"
+	if _, err := p.Create(ctx, project, map[string]string{"id": "vault-1", "location": "us-central1", "retention": "86400s"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct {
+		action string
+		values map[string]string
+	}{
+		{"createplan", map[string]string{"id": "plan-1", "rule": "daily", "recurrence": "DAILY", "retention": "7"}},
+		{"associate", map[string]string{"id": "assoc-1", "plan": "plan-1", "instance": "pg"}},
+		{"trigger", map[string]string{"association": "assoc-1", "rule": "daily"}},
+	} {
+		if err := p.ActAt(ctx, project, []string{"vault-1"}, step.action, step.values); err != nil {
+			t.Fatalf("%s: %v", step.action, err)
+		}
+	}
+	d, err := p.Detail(ctx, project, []string{"vault-1"})
+	if err != nil || len(d.Sections[0].Listing.Items) != 1 {
+		t.Fatalf("vault page: %v %+v", err, d)
+	}
+	path := []string{"vault-1", d.Sections[0].Listing.Items[0].Name}
+	var backup string
+	for deadline := time.Now().Add(5 * time.Second); backup == "" && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		dd, _ := p.Detail(ctx, project, path)
+		if b := dd.Sections[0].Listing.Items; len(b) == 1 && b[0].Status == "ACTIVE" {
+			backup = b[0].Name
+		}
+	}
+	if backup == "" {
+		t.Fatal("no backup on the data source's page")
+	}
+	if err := p.ActAt(ctx, project, path, "backupdelete", map[string]string{"backup": backup}); err != nil {
+		t.Fatal(err)
+	}
+	if dd, _ := p.Detail(ctx, project, path); len(dd.Sections[0].Listing.Items) != 0 {
+		t.Errorf("backups after Delete backup: %+v", dd.Sections[0].Listing.Items)
+	}
+	if acts := bdrActionIDs(p.DetailActions(ctx, project, path)); strings.Contains(acts, "backupdelete") {
+		t.Errorf("Delete backup offered with no backup: %s", acts)
+	}
+
+	if err := p.ActAt(ctx, project, []string{"vault-1"}, "plandelete", map[string]string{"plan": "plan-1"}); err == nil ||
+		!strings.Contains(err.Error(), "delete the association first") {
+		t.Errorf("deleting a plan an association applies: %v", err)
+	}
+	if err := p.ActAt(ctx, project, []string{"vault-1"}, "assocdelete", map[string]string{"association": "assoc-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ActAt(ctx, project, []string{"vault-1"}, "plandelete", map[string]string{"plan": "plan-1"}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ = p.Detail(ctx, project, []string{"vault-1"})
+	if n, m := len(d.Sections[1].Listing.Items), len(d.Sections[3].Listing.Items); n != 0 || m != 0 {
+		t.Errorf("plans %d and associations %d after the deletes", n, m)
+	}
+	if acts := bdrActionIDs(p.DetailActions(ctx, project, []string{"vault-1"})); acts != "createplan,editvault,delete" {
+		t.Errorf("the vault's actions after the deletes: %s", acts)
 	}
 }

@@ -9,8 +9,9 @@ import (
 // TestBigQueryInformationSchemaRegionViews (#1329): the region-qualified
 // forms of a dataset's views list every dataset's rows, and
 // `region-us`.INFORMATION_SCHEMA.TABLE_STORAGE gives each table's row
-// count (its byte counts left out) and its total_partitions: 0 for a
-// table not partitioned, 2 for one whose rows are in two days (#1458).
+// count, its total_partitions: 0 for a table not partitioned, 2 for one
+// whose rows are in two days, and its logical bytes (three INT64s, three
+// DATEs: 24), all active, and a storage_last_modified_time (#1458).
 // Measured first: each was 400 "Table not found".
 //
 // covers: bigquery.jobs.query, bigquery.jobs.insert
@@ -44,12 +45,15 @@ func TestBigQueryInformationSchemaRegionViews(t *testing.T) {
 			t.Fatalf("insert=%v: TABLE_STORAGE: %v", insert, err)
 		}
 		if want := "project_id STRING, project_number INTEGER, table_catalog STRING, table_schema STRING, table_name STRING, " +
-			"creation_time TIMESTAMP, total_rows INTEGER, total_partitions INTEGER, deleted BOOLEAN, table_type STRING, managed_table_type STRING, " +
+			"creation_time TIMESTAMP, total_rows INTEGER, total_partitions INTEGER, total_logical_bytes INTEGER, active_logical_bytes INTEGER, " +
+			"long_term_logical_bytes INTEGER, storage_last_modified_time TIMESTAMP, deleted BOOLEAN, table_type STRING, managed_table_type STRING, " +
 			"last_metadata_index_refresh_time TIMESTAMP, table_deletion_reason STRING, table_deletion_time TIMESTAMP"; infoSchemaColumns(schema) != want {
 			t.Errorf("TABLE_STORAGE columns:\n got %s\nwant %s", infoSchemaColumns(schema), want)
 		}
-		if len(rows) != 2 || rows[0][4] != "t" || rows[0][6] != int64(3) || rows[0][7] != int64(0) || rows[0][8] != false ||
-			rows[0][9] != "BASE TABLE" || rows[1][4] != "p" || rows[1][6] != int64(3) || rows[1][7] != int64(2) {
+		if len(rows) != 2 || rows[0][4] != "t" || rows[0][6] != int64(3) || rows[0][7] != int64(0) || rows[0][12] != false ||
+			rows[0][13] != "BASE TABLE" || rows[1][4] != "p" || rows[1][6] != int64(3) || rows[1][7] != int64(2) ||
+			rows[0][8] != int64(24) || rows[0][9] != int64(24) || rows[0][10] != int64(0) || rows[0][11] == nil ||
+			rows[1][8] != int64(24) || rows[1][9] != int64(24) || rows[1][10] != int64(0) || rows[1][11] == nil {
 			t.Errorf("insert=%v: TABLE_STORAGE rows %v", insert, rows)
 		}
 	}

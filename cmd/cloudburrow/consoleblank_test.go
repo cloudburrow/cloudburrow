@@ -3,6 +3,7 @@ package main
 import (
 	functionspb "cloud.google.com/go/functions/apiv2/functionspb"
 	"cloud.google.com/go/kms/apiv1/kmspb"
+	"google.golang.org/grpc"
 	"time"
 
 	cbpb "cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
@@ -376,6 +377,19 @@ func blankCheckDeps(t *testing.T) consoleDeps {
 	// Cloud Run jobs (#785): the Jobs and Executions API, with a job never
 	// executed and one whose execution carries only its name and job.
 	jobs := newFakeRunJobs()
+	// Cloud Build on the same port, for a trigger's page, with the
+	// sparsest trigger CreateBuildTrigger takes: one step, nothing else.
+	cb := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute).Builds(stubSource{}, stubBuilder{}).CloudBuild()
+	jobs.also = func(g *grpc.Server) { cb.Register(g) }
+	trig, err := cb.CreateBuildTrigger(ctx, &cbpb.CreateBuildTriggerRequest{ProjectId: blankProject,
+		Parent: "projects/" + blankProject + "/locations/global", Trigger: &cbpb.BuildTrigger{Name: "blank-trigger",
+			BuildTemplate: &cbpb.BuildTrigger_Build{Build: &cbpb.Build{Steps: []*cbpb.BuildStep{{Name: "alpine:3.20"}}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = cb.DeleteBuildTrigger(context.Background(), &cbpb.DeleteBuildTriggerRequest{Name: trig.GetResourceName(), ProjectId: blankProject, TriggerId: trig.GetId()})
+	})
 	d.run = fixedRunAdapter(jobs.serve(t))
 	for _, id := range []string{"blank-job", "blank-ran"} {
 		name := "projects/" + blankProject + "/locations/us-central1/jobs/" + id
