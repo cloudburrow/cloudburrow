@@ -381,6 +381,7 @@ func (OrganizationsServer) SearchOrganizations(_ context.Context, req *rmpb.Sear
 // --- v3 REST -----------------------------------------------------------
 
 func (s *FoldersServer) restRoutes(r *rest.Router, orgs OrganizationsServer, v1ops *v1Ops) {
+	s.capabilityRoutes(r, v1ops)
 	r.Handle("GET /v3/folders", func(w http.ResponseWriter, req *http.Request) error {
 		size, err := rest.QueryInt(req, "pageSize", 0)
 		if err != nil {
@@ -427,11 +428,11 @@ func (s *FoldersServer) restRoutes(r *rest.Router, orgs OrganizationsServer, v1o
 		if err != nil {
 			return err
 		}
-		f, err := s.GetFolder(req.Context(), &rmpb.GetFolderRequest{Name: "folders/" + id})
+		f, err := s.reg.Folder("folders/" + id)
 		if err != nil {
 			return err
 		}
-		return writeProto(w, f)
+		return writeFolderJSON(w, f)
 	})
 	r.Handle("PATCH /v3/folders/{folder}", func(w http.ResponseWriter, req *http.Request) error {
 		id, err := rest.PathValue(req, "folder")

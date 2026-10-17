@@ -3,7 +3,10 @@ package storage
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
+
+	"github.com/cloudburrow/cloudburrow/internal/resource"
 )
 
 // Reset (#510) clears the server's state from its store directly, not
@@ -18,11 +21,11 @@ import (
 const resetPath = "/_cloudburrow/reset"
 
 // bucketScoped are the prefixes keyed by bucket name: <prefix><bucket>/...
-var bucketScoped = []string{objectPrefix, noncurrentPrefix, softObjectPrefix, notificationPrefix, mpuPrefix, managedFolderPrefix, folderPrefix, operationPrefix, cachePrefix}
+var bucketScoped = []string{objectPrefix, noncurrentPrefix, softObjectPrefix, notificationPrefix, mpuPrefix, managedFolderPrefix, folderPrefix, operationPrefix, cachePrefix, intelligencePrefix}
 
 // everyPrefix is all the state the server keeps.
 var everyPrefix = []string{bucketPrefix, objectPrefix, noncurrentPrefix, softObjectPrefix, softBucketPrefix,
-	sessionPrefix, rewritePrefix, notificationPrefix, outboxPrefix, mpuPrefix, hmacPrefix, managedFolderPrefix, folderPrefix, operationPrefix, cachePrefix}
+	sessionPrefix, rewritePrefix, notificationPrefix, outboxPrefix, mpuPrefix, hmacPrefix, managedFolderPrefix, folderPrefix, operationPrefix, cachePrefix, intelligencePrefix}
 
 // Reset removes every bucket, object version (live, noncurrent and
 // soft-deleted), soft-deleted bucket, upload session, rewrite token,
@@ -100,6 +103,7 @@ func (s *Server) ResetProject(project string) error {
 		for _, k := range tx.List(hmacPrefix + project + "/") {
 			tx.Delete(k)
 		}
+		tx.Delete(intelligenceTarget{kind: "projects", id: strconv.FormatInt(resource.ProjectNumber(project), 10)}.key())
 		return nil
 	})
 }

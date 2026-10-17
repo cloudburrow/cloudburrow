@@ -46,6 +46,11 @@ type terraformEndpoint struct {
 
 var terraformEndpoints = []terraformEndpoint{
 	{config.ServiceStorage, "storage_custom_endpoint", "GOOGLE_STORAGE_CUSTOM_ENDPOINT", "/storage/v1/", true, ""},
+	// The Storage Control API's REST mapping (#1519), on the storage port:
+	// google_storage_control_project_, _folder_ and
+	// _organization_intelligence_config apply, plan clean, change and
+	// destroy in TestTerraformStorageIntelligenceConfigs.
+	{config.ServiceStorage, "storage_control_custom_endpoint", "GOOGLE_STORAGE_CONTROL_CUSTOM_ENDPOINT", "/v2/", true, ""},
 	{config.ServicePubSub, "pubsub_custom_endpoint", "GOOGLE_PUBSUB_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	// Cloud Tasks (#366): a queue and its *_iam_member apply, plan clean and
 	// destroy through the JSON API in TestTerraformAppliesAndDestroysThroughTheWrapper.
@@ -53,6 +58,13 @@ var terraformEndpoints = []terraformEndpoint{
 	// Secret Manager (#365): a secret and its *_iam_member apply, plan clean
 	// and destroy in TestTerraformAppliesAndDestroysThroughTheWrapper.
 	{config.ServiceSecrets, "secret_manager_custom_endpoint", "GOOGLE_SECRET_MANAGER_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Regional secrets (#1519): the provider's base path is
+	// secretmanager.{{location}}.rep.googleapis.com, and the resources'
+	// URLs carry projects/{project}/locations/{location}, so the one port
+	// serves every location. google_secret_manager_regional_secret, its
+	// _version and _iam_member, _binding and _policy apply, plan clean,
+	// update and destroy in TestTerraformRegionalSecret.
+	{config.ServiceSecrets, "secret_manager_regional_custom_endpoint", "GOOGLE_SECRET_MANAGER_REGIONAL_CUSTOM_ENDPOINT", "/v1/", true, ""},
 	{config.ServiceRun, "cloud_run_v2_custom_endpoint", "GOOGLE_CLOUD_RUN_V2_CUSTOM_ENDPOINT", "/v2/", true, ""},
 	// Cloud Run v1 (#1293, #1304), the Knative-style API on the same port:
 	// google_cloud_run_domain_mapping applies, becomes Ready, plans clean
@@ -139,6 +151,11 @@ var terraformEndpoints = []terraformEndpoint{
 	// API's JSON on its port (Endpoints.MemorystoreAdmin), each instance a
 	// Valkey server of its own.
 	{memorystoreAdminEndpoint, "redis_custom_endpoint", "GOOGLE_REDIS_CUSTOM_ENDPOINT", "/v1/", true, ""},
+	// Memorystore for Valkey (#1519): google_memorystore_instance applies,
+	// plans clean, changes and destroys in TestTerraformMemorystoreInstance,
+	// over memorystore.googleapis.com's JSON, served under /memorystore/ on
+	// the same port.
+	{memorystoreAdminEndpoint, "memorystore_custom_endpoint", "GOOGLE_MEMORYSTORE_CUSTOM_ENDPOINT", "/memorystore/v1/", true, ""},
 	// google_project_service (#1352): the Service Usage API v1 on its own
 	// port, in TestTerraformProjectService.
 	{serviceUsageService, "service_usage_custom_endpoint", "GOOGLE_SERVICE_USAGE_CUSTOM_ENDPOINT", "/v1/", true, ""},
@@ -147,6 +164,10 @@ var terraformEndpoints = []terraformEndpoint{
 	// google_folder (#1294): Resource Manager v3 Folders, on the same port,
 	// in TestTerraformGoogleFolder.
 	{resourceManagerEndpoint, "resource_manager_v3_custom_endpoint", "GOOGLE_RESOURCE_MANAGER_V3_CUSTOM_ENDPOINT", "/v3/", true, ""},
+	// google_resource_manager_capability (#1519): v3 folders.capabilities,
+	// which the provider reaches through its resource_manager3_ endpoint, in
+	// TestTerraformResourceManagerCapability.
+	{resourceManagerEndpoint, "resource_manager3_custom_endpoint", "GOOGLE_RESOURCE_MANAGER3_CUSTOM_ENDPOINT", "/v3/", true, ""},
 	// google_tags_tag_key, _tag_value and _tag_binding (#1295): the tags
 	// services are Resource Manager v3, which the provider reaches through
 	// its own tags_ endpoint, in TestTerraformTagsAndLien.
@@ -264,7 +285,8 @@ type unpointedPrefix struct{ prefix, why string }
 //
 // Firestore, Spanner and Bigtable, and Artifact Registry and Cloud Build,
 // when the instance does not serve them (Spanner's REST port among it),
-// since nothing then points them here; Cloud Functions and Cloud Build v2
+// since nothing then points them here; Cloud Build v2 and the
+// google_storage_buckets, google_projects and google_folders data sources
 // always.
 func unpointedResources(cfg config.Config) []unpointedPrefix {
 	var out []unpointedPrefix
@@ -298,8 +320,18 @@ func unpointedResources(cfg config.Config) []unpointedPrefix {
 	// Whatever is enabled: no instance serves Cloud Build v2's repository
 	// connections, so the provider has no local endpoint for them (#1304).
 	// Cloud Functions v2 (#1377) and v1 (#1428) are served on the Run port.
+	// Three list data sources call a fixed Google URL whatever the
+	// provider's custom endpoints say (measured with hashicorp/google 8.4.0,
+	// #1304): google_storage_buckets lists at
+	// https://storage.googleapis.com/storage/v1/b, google_projects at
+	// https://cloudresourcemanager.googleapis.com/v1/projects and
+	// google_folders at https://cloudresourcemanager.googleapis.com/v3/folders,
+	// so no setting points them here.
 	out = append(out,
-		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"})
+		unpointedPrefix{"google_cloudbuildv2_", "CloudBurrow does not serve Cloud Build v2 connections"},
+		unpointedPrefix{"google_storage_buckets", "the provider lists buckets at storage.googleapis.com, ignoring storage_custom_endpoint"},
+		unpointedPrefix{"google_projects", "the provider lists projects at cloudresourcemanager.googleapis.com, ignoring resource_manager_custom_endpoint"},
+		unpointedPrefix{"google_folders", "the provider lists folders at cloudresourcemanager.googleapis.com, ignoring resource_manager_v3_custom_endpoint"})
 	return out
 }
 

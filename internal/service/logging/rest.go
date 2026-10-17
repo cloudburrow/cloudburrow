@@ -21,12 +21,14 @@ import (
 // array, at its JSON binding by tailjson.go (#1410). A path Google does not bind answers 404.
 // Of logging_v2.yaml's mixins, Operations' bindings are, for CopyLogEntries'
 // operations: projects' (#1394), and organizations', folders' and billing
-// accounts' (#1411). Locations is not bound.
+// accounts' (#1411). IAMPolicy's are, on log views (#1519). Locations is not
+// bound.
 
 // Transcoder returns the Cloud Logging JSON API's configuration, with nothing
 // registered: register the same server with it as with gRPC.
 func Transcoder() *rest.Transcoder {
-	return &rest.Transcoder{Packages: []string{"google.logging.v2"}, Mixins: operationsMixins}
+	return &rest.Transcoder{Packages: []string{"google.logging.v2"},
+		Mixins: append(append([]*annotations.HttpRule(nil), operationsMixins...), viewIAMMixins...)}
 }
 
 // Routes returns every bound route.

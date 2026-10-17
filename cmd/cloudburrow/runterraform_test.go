@@ -67,8 +67,10 @@ func TestRequestEventsNameTheProjectUnderAnyVersion(t *testing.T) {
 // TestTerraformSetsArtifactRegistryAndCloudBuild (#1304): with Cloud Run
 // served, Artifact Registry and Cloud Build are pointed at the Run port;
 // without it their resources are refused, as are Cloud Functions v2's
-// (#1377) and v1's (#1428), and Cloud Build v2, which no instance serves, is
-// refused whatever is enabled.
+// (#1377) and v1's (#1428); Cloud Build v2, which no instance serves, and
+// the google_storage_buckets, google_projects and google_folders data
+// sources, which ignore the custom endpoints, are refused whatever is
+// enabled.
 func TestTerraformSetsArtifactRegistryAndCloudBuild(t *testing.T) {
 	cfg := config.Default()
 	cfg.Services = []config.Service{config.ServiceRun}
@@ -89,17 +91,29 @@ resource "google_cloudbuild_trigger" "t" {}
 resource "google_cloudfunctions2_function" "f" {}
 resource "google_cloudfunctions_function" "g" {}
 resource "google_cloudbuildv2_connection" "c" {}
+data "google_storage_buckets" "b" {}
+data "google_storage_bucket" "b" {}
+data "google_projects" "p" {}
+data "google_project" "p" {}
+data "google_folders" "f" {}
+data "google_folder" "f" {}
 `
 	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(module), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got := unpointed(dir, unpointedResources(cfg))
-	if len(got) != 1 || !strings.HasPrefix(got[0], "google_cloudbuildv2_connection ") {
-		t.Errorf("with Cloud Run: unpointed = %q, want the v2 connection", got)
+	want := []string{"google_cloudbuildv2_connection", "google_storage_buckets", "google_projects", "google_folders"}
+	if len(got) != len(want) {
+		t.Errorf("with Cloud Run: unpointed = %q, want %q", got, want)
+	}
+	for i := 0; i < len(got) && i < len(want); i++ {
+		if !strings.HasPrefix(got[i], want[i]+" ") {
+			t.Errorf("with Cloud Run: unpointed[%d] = %q, want %s", i, got[i], want[i])
+		}
 	}
 	noRun := config.Default()
 	noRun.Services = []config.Service{config.ServiceStorage}
-	if got := unpointed(dir, unpointedResources(noRun)); len(got) != 5 {
-		t.Errorf("without Cloud Run: unpointed = %q, want all five", got)
+	if got := unpointed(dir, unpointedResources(noRun)); len(got) != 8 {
+		t.Errorf("without Cloud Run: unpointed = %q, want all eight", got)
 	}
 }

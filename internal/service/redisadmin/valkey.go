@@ -261,3 +261,34 @@ func parseReplication(raw string) Replication {
 	st.Offset, _ = strconv.ParseInt(f[key], 10, 64)
 	return st
 }
+
+// DialCluster is the ClusterDialer of a cluster's nodes: a go-redis client
+// of one node, not following redirections, since the cluster is being
+// formed or changed through each node in turn.
+func DialCluster(addr, password string) ClusterNode {
+	return clusterNodeClient{redis.NewClient(&redis.Options{Addr: addr, Password: password, MaxRetries: -1, PoolSize: 1})}
+}
+
+type clusterNodeClient struct{ c *redis.Client }
+
+func (n clusterNodeClient) Do(ctx context.Context, args ...any) (any, error) {
+	return n.c.Do(ctx, args...).Result()
+}
+
+func (n clusterNodeClient) Pipe(ctx context.Context, cmds [][]any) ([]any, error) {
+	p := n.c.Pipeline()
+	out := make([]*redis.Cmd, len(cmds))
+	for i, args := range cmds {
+		out[i] = p.Do(ctx, args...)
+	}
+	if _, err := p.Exec(ctx); err != nil {
+		return nil, err
+	}
+	res := make([]any, len(out))
+	for i, c := range out {
+		res[i] = c.Val()
+	}
+	return res, nil
+}
+
+func (n clusterNodeClient) Close() error { return n.c.Close() }

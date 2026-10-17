@@ -15,19 +15,30 @@ import (
 // gets the same answer over gRPC and REST.
 
 // checkCreatable refuses a Secret whose fields this server would not keep.
-func checkCreatable(sec *secretmanagerpb.Secret) error {
+//
+// regional is true for a regional secret (#1519), which takes a
+// customer_managed_encryption and no replication.
+func checkCreatable(sec *secretmanagerpb.Secret, regional bool) error {
 	unsupported := []struct {
 		field string
 		set   bool
 	}{
 		{"version_aliases", len(sec.GetVersionAliases()) > 0},
-		{"customer_managed_encryption", sec.GetCustomerManagedEncryption() != nil},
+		{"customer_managed_encryption", !regional && sec.GetCustomerManagedEncryption() != nil},
 		{"tags", len(sec.GetTags()) > 0},
 	}
 	for _, u := range unsupported {
 		if u.set {
 			return apierror.Unimplemented("Secret.%s is not implemented by CloudBurrow's Secret Manager; "+
 				"the secret would be stored without it, so the request is refused", u.field)
+		}
+	}
+	if regional {
+		if sec.GetReplication() != nil {
+			return apierror.InvalidArgument("a regional secret takes no replication policy; its replica is its location")
+		}
+		if c := sec.GetCustomerManagedEncryption(); c != nil && c.GetKmsKeyName() == "" {
+			return apierror.InvalidArgument("customer_managed_encryption.kms_key_name is required")
 		}
 	}
 	if err := checkCMEKFields(sec.GetReplication()); err != nil {

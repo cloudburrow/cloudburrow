@@ -201,14 +201,25 @@ const (
 // regional resource has. Passing it through the regional parser would reject
 // every valid secret name. The traversal checks that parser applies are
 // applied here too, via resource.ValidID.
+//
+// A regional secret (#1519), projects/{project}/locations/{location}/secrets/{secret},
+// parses too: its project is then the scope RegionalScope returns, which
+// every Store method takes where it takes a project.
 func ParseSecretName(name string) (project, secret string, err error) {
 	parts := strings.Split(name, "/")
+	if len(parts) == 6 && parts[0] == "projects" && parts[2] == "locations" && parts[4] == "secrets" {
+		if !resource.ValidID(parts[3]) {
+			return "", "", apierror.InvalidArgument("location %q is not a valid location ID", parts[3])
+		}
+		parts = []string{parts[0], RegionalScope(parts[1], parts[3]), parts[4], parts[5]}
+	}
 	if len(parts) != 4 || parts[0] != "projects" || parts[2] != "secrets" {
 		return "", "", apierror.InvalidArgument(
-			"%q is not a secret name; want projects/{project}/secrets/{secret}", name)
+			"%q is not a secret name; want projects/{project}/secrets/{secret} "+
+				"or projects/{project}/locations/{location}/secrets/{secret}", name)
 	}
 	project, secret = parts[1], parts[3]
-	if !resource.ValidID(project) {
+	if p, _ := SplitScope(project); !resource.ValidID(p) {
 		return "", "", apierror.InvalidArgument("project %q is not a valid resource ID", project)
 	}
 	if !resource.ValidID(secret) {
@@ -267,9 +278,51 @@ func ValidateSecretID(id string) error {
 	return nil
 }
 
-// SecretName renders a secret's resource name.
+// SecretName renders a secret's resource name; a regional scope renders
+// projects/{project}/locations/{location}/secrets/{secret}.
 func SecretName(project, secret string) string {
+	if p, l := SplitScope(project); l != "" {
+		return fmt.Sprintf("projects/%s/locations/%s/%s%s", p, l, secretPrefix, secret)
+	}
 	return fmt.Sprintf("projects/%s/%s%s", project, secretPrefix, secret)
+}
+
+// regionalSep joins a project and a location into a regional secret's
+// scope (#1519). No project ID or location contains it, and it is not a
+// "/", so the storage keys keep their shape: a project's global listing
+// (prefix secret/{project}/) never sees its regional secrets, and a
+// location's listing (secret/{project}@{location}/) sees only its own.
+const regionalSep = "@"
+
+// RegionalScope is the scope of a project's regional secrets in location
+// (secretmanager.{location}.rep.googleapis.com), which the Store takes
+// wherever it takes a project.
+func RegionalScope(project, location string) string { return project + regionalSep + location }
+
+// SplitScope splits a scope into its project and, for a regional one, its
+// location ("" for global).
+func SplitScope(scope string) (project, location string) {
+	project, location, _ = strings.Cut(scope, regionalSep)
+	return project, location
+}
+
+// Regional reports whether s is a regional secret (#1519).
+func (s Secret) Regional() bool {
+	_, l := SplitScope(scopeOfName(s.Name))
+	return l != ""
+}
+
+// scopeOfName is the scope of a secret's (or version's) name, "" if it is
+// not one.
+func scopeOfName(name string) string {
+	p := strings.Split(name, "/")
+	switch {
+	case len(p) >= 6 && p[0] == "projects" && p[2] == "locations" && p[4] == "secrets":
+		return RegionalScope(p[1], p[3])
+	case len(p) >= 4 && p[0] == "projects" && p[2] == "secrets":
+		return p[1]
+	}
+	return ""
 }
 
 // VersionName renders a version's resource name.
@@ -656,6 +709,34 @@ func (s *Store) ListSecrets(project string) ([]Secret, error) {
 			if err := s.deleteSecret(project, id); err != nil {
 				return nil, err
 			}
+			continue
+		}
+		out = append(out, sec)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// ListRegionalSecrets returns a project's regional secrets in every
+// location (#1519), ordered by name. An expired one is left out; the sweep
+// deletes it.
+func (s *Store) ListRegionalSecrets(project string) ([]Secret, error) {
+	if project == "" {
+		return nil, apierror.InvalidArgument("project must not be empty")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values, err := s.scan("secret/" + project + regionalSep)
+	if err != nil {
+		return nil, apierror.Internal(err, "list regional secrets")
+	}
+	out := make([]Secret, 0, len(values))
+	for _, raw := range values {
+		var sec Secret
+		if json.Unmarshal(raw, &sec) != nil || sec.Expired(s.now()) {
+			continue
+		}
+		if p, l := SplitScope(scopeOfName(sec.Name)); p != project || l == "" {
 			continue
 		}
 		out = append(out, sec)

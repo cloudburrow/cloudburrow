@@ -54,6 +54,46 @@ func (h *RESTServer) Routes(r *rest.Router) {
 	r.Handle("GET /v1/projects/{project}/secrets/{secret}/versions", h.listVersions)
 	r.Handle("GET /v1/projects/{project}/secrets/{secret}/versions/{version}", h.getOrAccessVersion)
 	r.Handle("POST /v1/projects/{project}/secrets/{secret}/versions/{version}", h.versionVerb)
+
+	// Regional secrets (#1519), which Google serves at
+	// secretmanager.{location}.rep.googleapis.com: the same methods under
+	// projects/{project}/locations/{location}. The handlers read the
+	// location through scope.
+	const loc = "/v1/projects/{project}/locations/{location}/secrets"
+	r.Handle("POST "+loc, h.createSecret)
+	r.Handle("GET "+loc, h.listSecrets)
+	r.Handle("GET "+loc+"/{secret}", h.getSecret)
+	r.Handle("DELETE "+loc+"/{secret}", h.deleteSecret)
+	r.Handle("PATCH "+loc+"/{secret}", h.patchSecret)
+	r.Handle("POST "+loc+"/{secret}", h.secretVerb)
+	r.Handle("GET "+loc+"/{secret}/versions", h.listVersions)
+	r.Handle("GET "+loc+"/{secret}/versions/{version}", h.getOrAccessVersion)
+	r.Handle("POST "+loc+"/{secret}/versions/{version}", h.versionVerb)
+}
+
+// scope is the request's project, or for a regional path (#1519) the
+// RegionalScope of its project and location.
+func scope(r *http.Request) (string, error) {
+	project, err := rest.PathValue(r, "project")
+	if err != nil {
+		return "", err
+	}
+	if r.PathValue("location") == "" {
+		return project, nil
+	}
+	location, err := rest.PathValue(r, "location")
+	if err != nil {
+		return "", err
+	}
+	return RegionalScope(project, location), nil
+}
+
+// parentName renders a scope as the parent of its secrets.
+func parentName(scope string) string {
+	if p, l := SplitScope(scope); l != "" {
+		return "projects/" + p + "/locations/" + l
+	}
+	return "projects/" + scope
 }
 
 // splitVerb separates a custom method from the resource ID it was appended
@@ -135,15 +175,18 @@ func (h *RESTServer) versionVerb(w http.ResponseWriter, r *http.Request) error {
 // marshalled from the proto because the JSON API uses its own casing and
 // omits fields the proto always carries.
 type jsonSecret struct {
-	Name        string            `json:"name"`
-	Replication map[string]any    `json:"replication"`
-	CreateTime  string            `json:"createTime"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Annotations map[string]string `json:"annotations,omitempty"`
-	Etag        string            `json:"etag,omitempty"`
-	ExpireTime  string            `json:"expireTime,omitempty"`
-	Topics      []jsonTopic       `json:"topics,omitempty"`
-	Rotation    *jsonRotation     `json:"rotation,omitempty"`
+	Name string `json:"name"`
+	// Replication is absent only from a regional secret (#1519), which
+	// has CustomerManagedEncryption instead.
+	Replication               map[string]any    `json:"replication,omitempty"`
+	CustomerManagedEncryption map[string]any    `json:"customerManagedEncryption,omitempty"`
+	CreateTime                string            `json:"createTime"`
+	Labels                    map[string]string `json:"labels,omitempty"`
+	Annotations               map[string]string `json:"annotations,omitempty"`
+	Etag                      string            `json:"etag,omitempty"`
+	ExpireTime                string            `json:"expireTime,omitempty"`
+	Topics                    []jsonTopic       `json:"topics,omitempty"`
+	Rotation                  *jsonRotation     `json:"rotation,omitempty"`
 	// VersionDestroyTTL is a google.protobuf.Duration in JSON: seconds
 	// with an "s" (#1278).
 	VersionDestroyTTL string `json:"versionDestroyTtl,omitempty"`
@@ -179,6 +222,9 @@ type jsonVersion struct {
 	// ReplicationStatus reports the key version that encrypted each
 	// replica (#1453).
 	ReplicationStatus map[string]any `json:"replicationStatus,omitempty"`
+	// CustomerManagedEncryption is a regional secret version's key
+	// version (#1519).
+	CustomerManagedEncryption map[string]any `json:"customerManagedEncryption,omitempty"`
 }
 
 // protoJSONMap is m in the JSON mapping, as a map for a hand-written body.
@@ -195,14 +241,22 @@ func protoJSONMap(m proto.Message) map[string]any {
 }
 
 func renderSecret(s Secret) jsonSecret {
-	repl := protoJSONMap(toProtoReplication(s))
+	p := toProtoSecret(s)
+	var repl, cmek map[string]any
+	if p.GetReplication() != nil {
+		repl = protoJSONMap(p.GetReplication())
+	}
+	if p.GetCustomerManagedEncryption() != nil {
+		cmek = protoJSONMap(p.GetCustomerManagedEncryption())
+	}
 	out := jsonSecret{
-		Name:        s.Name,
-		Replication: repl,
-		CreateTime:  s.Created.UTC().Format(time.RFC3339Nano),
-		Labels:      s.Labels,
-		Annotations: s.Annotations,
-		Etag:        s.Etag,
+		Name:                      s.Name,
+		Replication:               repl,
+		CustomerManagedEncryption: cmek,
+		CreateTime:                s.Created.UTC().Format(time.RFC3339Nano),
+		Labels:                    s.Labels,
+		Annotations:               s.Annotations,
+		Etag:                      s.Etag,
 	}
 	if !s.Expire.IsZero() {
 		out.ExpireTime = s.Expire.UTC().Format(time.RFC3339Nano)
@@ -234,8 +288,12 @@ func renderVersion(v Version) jsonVersion {
 
 		ClientSpecifiedPayloadChecksum: v.ClientChecksum,
 	}
-	if rs := toProtoReplicationStatus(v); rs != nil {
+	pv := toProtoVersion(v)
+	if rs := pv.GetReplicationStatus(); rs != nil {
 		out.ReplicationStatus = protoJSONMap(rs)
+	}
+	if c := pv.GetCustomerManagedEncryption(); c != nil {
+		out.CustomerManagedEncryption = protoJSONMap(c)
 	}
 	if !v.Destroyed.IsZero() {
 		out.DestroyTime = v.Destroyed.UTC().Format(time.RFC3339Nano)
@@ -247,7 +305,7 @@ func renderVersion(v Version) jsonVersion {
 }
 
 func (h *RESTServer) parts(r *http.Request) (project, secret string, err error) {
-	project, err = rest.PathValue(r, "project")
+	project, err = scope(r)
 	if err != nil {
 		return "", "", err
 	}
@@ -263,7 +321,7 @@ func (h *RESTServer) parts(r *http.Request) (project, secret string, err error) 
 }
 
 func (h *RESTServer) createSecret(w http.ResponseWriter, r *http.Request) error {
-	project, err := rest.PathValue(r, "project")
+	project, err := scope(r)
 	if err != nil {
 		return err
 	}
@@ -282,7 +340,7 @@ func (h *RESTServer) createSecret(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	if _, err := NewGRPCServer(h.store).CreateSecret(r.Context(), &secretmanagerpb.CreateSecretRequest{
-		Parent: "projects/" + project, SecretId: id, Secret: sec}); err != nil {
+		Parent: parentName(project), SecretId: id, Secret: sec}); err != nil {
 		return err
 	}
 	created, err := h.store.GetSecret(project, id)
@@ -341,7 +399,8 @@ func (h *RESTServer) patchSecret(w http.ResponseWriter, r *http.Request) error {
 		Secret: &secretmanagerpb.Secret{Name: SecretName(project, secret), Labels: body.GetLabels(),
 			Annotations: body.GetAnnotations(), Etag: body.GetEtag(), Replication: body.GetReplication(),
 			Expiration: body.GetExpiration(), Topics: body.GetTopics(),
-			Rotation: body.GetRotation(), VersionDestroyTtl: body.GetVersionDestroyTtl()},
+			Rotation: body.GetRotation(), VersionDestroyTtl: body.GetVersionDestroyTtl(),
+			CustomerManagedEncryption: body.GetCustomerManagedEncryption()},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: paths},
 	}); err != nil {
 		return err
@@ -366,7 +425,7 @@ func (h *RESTServer) deleteSecret(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (h *RESTServer) listSecrets(w http.ResponseWriter, r *http.Request) error {
-	project, err := rest.PathValue(r, "project")
+	project, err := scope(r)
 	if err != nil {
 		return err
 	}
@@ -451,7 +510,7 @@ func (h *RESTServer) versionRef(r *http.Request) (project, secret, version strin
 	// Reuse the same validation the gRPC surface applies, so the two agree
 	// on what a version reference is.
 	if _, _, _, err := ParseVersionName(
-		fmt.Sprintf("projects/%s/secrets/%s/versions/%s", project, secret, version)); err != nil {
+		fmt.Sprintf("%s/versions/%s", SecretName(project, secret), version)); err != nil {
 		return "", "", "", err
 	}
 	return project, secret, version, nil

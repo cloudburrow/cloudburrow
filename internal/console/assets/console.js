@@ -84,6 +84,8 @@ const ROUTES = [
     product: "storage", productTitle: "Cloud Storage" },
   { path: "/storage/settings", service: "storage-settings", icon: "storage", title: "Settings",        section: "Storage",
     product: "storage", productTitle: "Cloud Storage" },
+  { path: "/storage/intelligence", service: "storage-intelligence", icon: "storage", title: "Storage Intelligence", section: "Storage",
+    product: "storage", productTitle: "Cloud Storage" },
 
   { path: "/firestore", service: "firestore", title: "Firestore", section: "Databases" },
   // The project's Firestore databases, each with its settings, indexes and
@@ -114,6 +116,11 @@ const ROUTES = [
   // /backupdr were "No such screen", so nothing of either was reachable from
   // the console (found by TestMemorystoreRotateServerCAThroughThePage).
   { path: "/memorystore", service: "memorystore", title: "Memorystore", section: "Databases" },
+  // Memorystore for Redis Cluster (#1519), a page of its own beside the
+  // instances, as the Memorystore console's Redis Cluster tab is.
+  { path: "/memorystore-clusters", service: "memorystore-clusters", icon: "memorystore", title: "Memorystore Redis Cluster", section: "Databases" },
+  // Memorystore for Valkey (#1519), memorystore.googleapis.com's instances.
+  { path: "/memorystore-valkey", service: "memorystore-valkey", icon: "memorystore", title: "Memorystore for Valkey", section: "Databases" },
   { path: "/backupdr", service: "backupdr", icon: "storage", title: "Backup and DR", section: "Storage" },
   // Google files BigQuery under Analytics, a category with no vendored icon
   // here, so it sits with the other data stores rather than under a heading
@@ -190,6 +197,11 @@ const ROUTES = [
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   // Logs Storage's Settings (#1311): GetSettings, UpdateSettings, GetCmekSettings.
   { path: "/logs/settings",   service: "logging-settings",   icon: "logs", title: "Logs Storage settings",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  // Saved queries and log scopes (#1519).
+  { path: "/logs/saved-queries", service: "logging-saved-queries", icon: "logs", title: "Saved queries",
+    section: "Operations", product: "logging", productTitle: "Cloud Logging" },
+  { path: "/logs/log-scopes", service: "logging-log-scopes", icon: "logs", title: "Log scopes",
     section: "Operations", product: "logging", productTitle: "Cloud Logging" },
   { path: "/activity", service: null, screen: "activity", title: "Activity",      section: "Operations" },
   { path: "/requests", service: null, screen: "requests", title: "Request Log",   section: "Operations" },
@@ -5084,6 +5096,8 @@ const DELETE_DETAIL = {
   "logging-metrics": "The metric's definition is deleted. No log entry is removed.",
   "logging-sinks": "The sink's definition is deleted. It delivered nothing, so nothing downstream changes.",
   "logging-exclusions": "Entries it matches are stored again from now on. Entries it dropped are not brought back.",
+  "logging-saved-queries": "The saved query is deleted. No log entry is removed.",
+  "logging-log-scopes": "The log scope is deleted. The projects and views it named are not changed.",
   "logging-buckets": "The bucket is kept as Delete requested for 7 days and can be undeleted until then. No log entry is removed.",
   "pubsub-schemas": "Every revision is deleted with it. A topic that uses it keeps its " +
             "schema settings, which then name _deleted-schema_.",

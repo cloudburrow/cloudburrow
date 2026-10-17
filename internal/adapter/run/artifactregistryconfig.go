@@ -42,8 +42,11 @@ var arConfig = struct {
 	annotations map[string]map[string]string
 	// displayNames are packages' display names set by UpdatePackage.
 	displayNames map[string]string
+	// projectConfigs are locations' projectConfig (#1519), by name.
+	projectConfigs map[string]*arProjectConfig
 }{rules: map[string]*arpb.Rule{}, attachments: map[string]*arpb.Attachment{}, settings: map[string]*arpb.ProjectSettings{},
-	vpcsc: map[string]*arpb.VPCSCConfig{}, annotations: map[string]map[string]string{}, displayNames: map[string]string{}}
+	vpcsc: map[string]*arpb.VPCSCConfig{}, annotations: map[string]map[string]string{}, displayNames: map[string]string{},
+	projectConfigs: map[string]*arProjectConfig{}}
 
 type arConfigState struct {
 	Rules        map[string]json.RawMessage   `json:"rules,omitempty"`
@@ -52,6 +55,8 @@ type arConfigState struct {
 	VPCSC        map[string]json.RawMessage   `json:"vpcsc,omitempty"`
 	Annotations  map[string]map[string]string `json:"annotations,omitempty"`
 	DisplayNames map[string]string            `json:"displayNames,omitempty"`
+	// ProjectConfigs are hand-served JSON resources (#1519).
+	ProjectConfigs map[string]*arProjectConfig `json:"projectConfigs,omitempty"`
 }
 
 func marshalAll[T proto.Message](m map[string]T) map[string]json.RawMessage {
@@ -82,7 +87,7 @@ func saveARConfigLocked() {
 	}
 	b, err := json.Marshal(arConfigState{Rules: marshalAll(arConfig.rules), Attachments: marshalAll(arConfig.attachments),
 		Settings: marshalAll(arConfig.settings), VPCSC: marshalAll(arConfig.vpcsc),
-		Annotations: arConfig.annotations, DisplayNames: arConfig.displayNames})
+		Annotations: arConfig.annotations, DisplayNames: arConfig.displayNames, ProjectConfigs: arConfig.projectConfigs})
 	if err != nil {
 		return
 	}
@@ -110,6 +115,9 @@ func loadARConfig(st *registry.Store) {
 	}
 	for k, v := range s.DisplayNames {
 		arConfig.displayNames[k] = v
+	}
+	for k, v := range s.ProjectConfigs {
+		arConfig.projectConfigs[k] = v
 	}
 }
 
