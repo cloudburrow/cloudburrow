@@ -255,6 +255,11 @@ func parseDDLOptionsOf(sql string, mv bool) (d ddlOptions, msg string, ok bool) 
 	if opt < 0 {
 		return d, "", false
 	}
+	if k := skipTo(t, opt+2, ")") + 1; !d.alter && !d.view && d.query == "" && k+1 < end && t[k].is("AS") {
+		// The query after OPTIONS, whose columns a PARTITION BY or
+		// CLUSTER BY names (partitionddl.go, #1512).
+		d.query = sql[t[k].end:t[end-1].end]
+	}
 	msg = d.readOptions(sql, t[opt+2:skipTo(t, opt+2, ")")])
 	if msg == "" && d.invalid == "" {
 		d.invalid = d.checkIceberg() // #1427, iceberg.go
