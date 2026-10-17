@@ -523,6 +523,12 @@ API allows the origin whatever they say. A request with no `Origin`, which is ho
 `--cors-allow-origin`. The threat model is in
 [ADR-0004](adr/0004-local-access-and-no-authentication.md) (#677).
 
+Every other listener, the service APIs, the tunnels to the upstream emulators, the metadata
+server, the control port and the console, applies the same origin rule to browser requests
+(#1586): a loopback origin, the listener's own, or one named with `--cors-allow-origin`. Any other
+gets 403 before the request runs, so a page on another site can neither read nor change local
+state. See [security.md](security.md).
+
 ## Credentials and metadata
 
 `--port-metadata` (default `9005`, `CLOUDBURROW_PORT_METADATA`) serves a local GCE metadata
@@ -611,7 +617,7 @@ surfacing later as an opaque `ImagePullBackOff`.
 | `--log-level` | `CLOUDBURROW_LOG_LEVEL` | `logLevel` | `info` | `trace`, `debug`, `info`, `warn`, `error`. See [Request logging](#request-logging). |
 | `--hooks-dir` | `CLOUDBURROW_HOOKS_DIR` | `hooksDir` | `.cloudburrow/hooks` | Directory of `ready.d` and `shutdown.d` scripts. The default, or a `hooksDir` from a discovered file, needs [trust](#trust). See [Lifecycle hooks](#lifecycle-hooks). |
 | `--hook-timeout` | `CLOUDBURROW_HOOK_TIMEOUT` | `hookTimeout` | `5m` | Time limit for each hook script; one that runs past it is killed. |
-| `--cors-allow-origin` | `CLOUDBURROW_CORS_ALLOW_ORIGIN` | `storage.corsAllowOrigins` | none (loopback origins only) | A web origin, `scheme://host[:port]`, whose browser requests Cloud Storage answers beyond loopback ones. Repeatable or comma-separated; the variable is comma-separated and the file key a list. A discovered `./cloudburrow.json` cannot set it. See [Browser access to Cloud Storage](#browser-access-to-cloud-storage). |
+| `--cors-allow-origin` | `CLOUDBURROW_CORS_ALLOW_ORIGIN` | `storage.corsAllowOrigins` | none (loopback origins only) | A web origin, `scheme://host[:port]`, whose browser requests Cloud Storage, and every other listener, answer beyond loopback ones. Repeatable or comma-separated; the variable is comma-separated and the file key a list. A discovered `./cloudburrow.json` cannot set it. See [Browser access to Cloud Storage](#browser-access-to-cloud-storage). |
 | `--hook-env` | `CLOUDBURROW_HOOK_ENV` | `hookEnv` | none | Comma-separated variables of `up`'s environment passed to hooks beyond the minimal set. |
 | `--seed-file` | `CLOUDBURROW_SEED_FILE` | `seedFile` | unset | Seed document (the `/admin/seed` body) applied every time `up` starts. See [Admin API](#admin-api). |
 | `--local-ai-model` | — | `localAI.modelPath` | unset | Host path to a `.litertlm` model. Setting it enables the local generation endpoint; unset, nothing is bound. `up` fails at startup if the file does not exist (#602). See [generation.md](generation.md). |

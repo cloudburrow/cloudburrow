@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cloudburrow/cloudburrow/internal/hostguard"
 	"github.com/cloudburrow/cloudburrow/internal/metrics"
 	"github.com/cloudburrow/cloudburrow/internal/service/backupdr"
 	"github.com/cloudburrow/cloudburrow/internal/service/resourcemanager"
@@ -92,7 +93,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		// so a line from each cannot interleave mid-stamp.
 		sw := newStampedWriter(stdout)
 		stdout, stderr = sw, sw
-	} else if err := os.MkdirAll(cfg.InstanceDir(), 0o700); err == nil {
+	} else if err := privateInstanceDir(cfg); err == nil {
 		if f, err := os.OpenFile(upLogPath(cfg), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600); err == nil {
 			defer func() { _ = f.Close() }()
 			sw := newStampedWriter(f)
@@ -281,6 +282,12 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	adminToken, err := newAdminToken()
 	if err != nil {
 		return err
+	}
+	// Every guarded listener serves browser requests from loopback origins,
+	// its own, and these (#1586); storage's in-cluster server takes the same
+	// list as its own flag (#677).
+	if err := hostguard.AllowOrigins(cfg.Storage.CORSAllowOrigins); err != nil {
+		return fmt.Errorf("--cors-allow-origin: %w", err)
 	}
 	adminAPI := mountAdmin(control, recorder, cfg, adminDeps{
 		tasks: tasksSvc, secrets: secretsSvc, forwarders: forwarders,

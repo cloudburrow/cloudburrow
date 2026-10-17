@@ -150,7 +150,7 @@ func (r *runtimeFile) Start(context.Context) error {
 		r.info.Log = upLogPath(r.cfg)
 	}
 	if r.token != "" {
-		if err := os.MkdirAll(r.cfg.InstanceDir(), 0o700); err != nil {
+		if err := privateInstanceDir(r.cfg); err != nil {
 			return err
 		}
 		if err := os.WriteFile(adminTokenPath(r.cfg), []byte(r.token+"\n"), 0o600); err != nil {

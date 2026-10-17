@@ -309,7 +309,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
 	fs.BoolVar(&r.cbHostSteps, "cloudbuild-host-steps", false, "let Cloud Build run steps other than docker build, docker push and pack, for builds submitted from this machine's loopback only; each runs as a container with the host's Docker socket, which gives it control of the host (unsafe)")
 	fs.StringVar(&r.appEngineURL, "appengine-url", "", "base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)")
-	fs.Var(&r.corsOrigins, "cors-allow-origin", "web origin (scheme://host[:port]) whose browser requests Cloud Storage answers, beyond loopback ones; repeatable or comma-separated (default: loopback origins only)")
+	fs.Var(&r.corsOrigins, "cors-allow-origin", "web origin (scheme://host[:port]) whose browser requests Cloud Storage and every other listener answer, beyond loopback ones; repeatable or comma-separated (default: loopback origins only)")
 
 	return fs, r
 }
