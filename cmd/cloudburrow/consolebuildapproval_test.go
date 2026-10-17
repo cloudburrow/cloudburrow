@@ -36,6 +36,7 @@ func (noopWorkspace) Close() {}
 // shows the approval and the comment.
 func TestConsoleBuildApproval(t *testing.T) {
 	ctx := context.Background()
+	proj := freshProject("console-appr")
 	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
 	g := grpc.NewServer()
 	s.Builds(stubSource{}, noopSteps{}).AllowHostSteps(true).CloudBuild().Register(g)
@@ -46,7 +47,7 @@ func TestConsoleBuildApproval(t *testing.T) {
 	}
 	go func() { _ = g.Serve(ln) }()
 	t.Cleanup(g.Stop)
-	b := runBuildsProvider{defaultProject: "console-appr", runAddr: func() string { return ln.Addr().String() }}
+	b := runBuildsProvider{defaultProject: proj, runAddr: func() string { return ln.Addr().String() }}
 	p := buildTriggersProvider{b: b}
 	if _, err := p.Create(ctx, "", map[string]string{"name": "gated", "region": "global", "image": "alpine:3.20",
 		"command": "echo hi", "approval": "true"}); err != nil {
@@ -60,7 +61,7 @@ func TestConsoleBuildApproval(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	var id string
-	for _, x := range runadapter.CloudBuilds("console-appr", "") {
+	for _, x := range runadapter.CloudBuilds(proj, "") {
 		id = x.GetId()
 	}
 	acts := b.DetailActions(ctx, "", []string{id})

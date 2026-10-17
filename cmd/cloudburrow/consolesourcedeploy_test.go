@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +21,26 @@ import (
 
 	runadapter "github.com/cloudburrow/cloudburrow/internal/adapter/run"
 )
+
+// freshProjects counts the runs of each freshProject base.
+var freshProjects = struct {
+	mu   sync.Mutex
+	runs map[string]int
+}{runs: map[string]int{}}
+
+// freshProject is base on a test's first run and base-N on its Nth: the
+// run adapter's stores (builds, triggers, functions, worker pools,
+// repositories) are process-wide, so a test that creates fixed names in a
+// fixed project fails when -count runs it again (#1529).
+func freshProject(base string) string {
+	freshProjects.mu.Lock()
+	defer freshProjects.mu.Unlock()
+	freshProjects.runs[base]++
+	if n := freshProjects.runs[base]; n > 1 {
+		return fmt.Sprintf("%s-%d", base, n)
+	}
+	return base
+}
 
 type stubSource struct{}
 
@@ -36,26 +58,27 @@ func (stubBuilder) Build(context.Context, runadapter.BuildSpec) error { return n
 // image and digest.
 func TestConsoleSourceDeployScreens(t *testing.T) {
 	ctx := context.Background()
+	proj := freshProject("console-sd")
 	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
 	if _, err := s.ArtifactRegistry().CreateRepository(ctx, &arpb.CreateRepositoryRequest{
-		Parent: "projects/console-sd/locations/us-central1", RepositoryId: "console-repo",
+		Parent: "projects/" + proj + "/locations/us-central1", RepositoryId: "console-repo",
 		Repository: &arpb.Repository{Format: arpb.Repository_DOCKER, Description: "from the API"}}); err != nil {
 		t.Fatal(err)
 	}
-	repos, _ := artifactRegistryProvider{defaultProject: "console-sd"}.List(ctx, "")
+	repos, _ := artifactRegistryProvider{defaultProject: proj}.List(ctx, "")
 	if len(repos.Items) != 1 || repos.Items[0].Name != "console-repo" ||
-		repos.Items[0].Fields["URL"] != "us-central1-docker.pkg.dev/console-sd/console-repo" {
+		repos.Items[0].Fields["URL"] != "us-central1-docker.pkg.dev/"+proj+"/console-repo" {
 		t.Errorf("repositories = %+v", repos.Items)
 	}
 	// UpdateRepository (#1304) changes the description and labels the page
 	// shows; another path is refused; the page's Delete removes it.
-	repo := "projects/console-sd/locations/us-central1/repositories/console-repo"
+	repo := "projects/" + proj + "/locations/us-central1/repositories/console-repo"
 	if _, err := s.ArtifactRegistry().UpdateRepository(ctx, &arpb.UpdateRepositoryRequest{
 		Repository: &arpb.Repository{Name: repo, Description: "changed", Labels: map[string]string{"env": "x"}},
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"description", "labels"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if repos, _ = (artifactRegistryProvider{defaultProject: "console-sd"}).List(ctx, ""); len(repos.Items) != 1 || repos.Items[0].Fields["Description"] != "changed" {
+	if repos, _ = (artifactRegistryProvider{defaultProject: proj}).List(ctx, ""); len(repos.Items) != 1 || repos.Items[0].Fields["Description"] != "changed" {
 		t.Errorf("after the update, repositories = %+v", repos.Items)
 	}
 	if _, err := s.ArtifactRegistry().UpdateRepository(ctx, &arpb.UpdateRepositoryRequest{
@@ -63,7 +86,7 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"kms_key_name"}}}); status.Code(err) != codes.Unimplemented {
 		t.Errorf("an update of kms_key_name = %v; want Unimplemented", err)
 	}
-	p := artifactRegistryProvider{defaultProject: "console-sd"}
+	p := artifactRegistryProvider{defaultProject: proj}
 	if err := p.Delete(ctx, "", "console-repo"); err != nil {
 		t.Fatal(err)
 	}
@@ -73,9 +96,9 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 	if err := p.Delete(ctx, "", "console-repo"); err == nil {
 		t.Error("deleting a deleted repository succeeded")
 	}
-	image := "us-central1-docker.pkg.dev/console-sd/console-repo/svc"
+	image := "us-central1-docker.pkg.dev/" + proj + "/console-repo/svc"
 	resp, err := s.Builds(stubSource{}, stubBuilder{}).SubmitBuild(ctx, &runpb.SubmitBuildRequest{
-		Parent: "projects/console-sd/locations/us-central1", ImageUri: image,
+		Parent: "projects/" + proj + "/locations/us-central1", ImageUri: image,
 		Source:    &runpb.SubmitBuildRequest_StorageSource{StorageSource: &runpb.StorageSource{Bucket: "b", Object: "o.zip"}},
 		BuildType: &runpb.SubmitBuildRequest_DockerBuild_{DockerBuild: &runpb.SubmitBuildRequest_DockerBuild{}}})
 	if err != nil {
@@ -87,7 +110,7 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	builds, _ := runBuildsProvider{}.List(ctx, "console-sd")
+	builds, _ := runBuildsProvider{}.List(ctx, proj)
 	if len(builds.Items) != 1 || builds.Items[0].Status != "Succeeded" || builds.Items[0].Fields["Image"] != image+":latest" ||
 		!strings.HasPrefix(builds.Items[0].Fields["Digest"], "sha256:") || builds.Items[0].Fields["Source"] != "gs://b/o.zip" {
 		t.Errorf("builds = %+v", builds.Items)
@@ -95,7 +118,7 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 
 	// A CreateBuild build's page shows each step's status and the log.
 	op, err := s.Builds(stubSource{}, stubBuilder{}).CloudBuild().CreateBuild(ctx, &cbpb.CreateBuildRequest{
-		Parent: "projects/console-sd/locations/us-central1", Build: &cbpb.Build{
+		Parent: "projects/" + proj + "/locations/us-central1", Build: &cbpb.Build{
 			Source: &cbpb.Source{Source: &cbpb.Source_StorageSource{StorageSource: &cbpb.StorageSource{Bucket: "b", Object: "o.tgz"}}},
 			Steps: []*cbpb.BuildStep{{Id: "img", Name: "gcr.io/cloud-builders/docker", Args: []string{"build", "-t", image + ":v2", "."}},
 				{Name: "gcr.io/cloud-builders/docker", Args: []string{"push", image + ":v2"}}}, Images: []string{image + ":v2"}}})
@@ -109,7 +132,7 @@ func TestConsoleSourceDeployScreens(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	id := op.GetName()[strings.LastIndex(op.GetName(), "/")+1:]
-	d, err := runBuildsProvider{}.Detail(ctx, "console-sd", []string{id})
+	d, err := runBuildsProvider{}.Detail(ctx, proj, []string{id})
 	if err != nil || len(d.Sections) != 2 || len(d.Sections[0].Listing.Items) != 2 ||
 		d.Sections[0].Listing.Items[0].Status != "Succeeded" || d.Sections[0].Listing.Items[0].Name != "#0 img" ||
 		!strings.Contains(d.Sections[1].Text, "Starting Step #0") || !strings.Contains(d.Sections[1].Text, "DONE") {
@@ -131,6 +154,7 @@ func (blockingBuilder) Build(ctx context.Context, _ runadapter.BuildSpec) error 
 // Retry reruns a finished build (#1382).
 func TestConsoleRunBuildAndCancel(t *testing.T) {
 	ctx := context.Background()
+	proj := freshProject("console-cb")
 	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
 	g := grpc.NewServer()
 	s.Builds(stubSource{}, blockingBuilder{}).CloudBuild().Register(g)
@@ -141,8 +165,8 @@ func TestConsoleRunBuildAndCancel(t *testing.T) {
 	}
 	go func() { _ = g.Serve(ln) }()
 	t.Cleanup(g.Stop)
-	p := runBuildsProvider{defaultProject: "console-cb", runAddr: func() string { return ln.Addr().String() }}
-	id, err := p.Create(ctx, "", map[string]string{"source": "gs://b/src.tgz", "image": "gcr.io/console-cb/img:v1", "region": "us-central1"})
+	p := runBuildsProvider{defaultProject: proj, runAddr: func() string { return ln.Addr().String() }}
+	id, err := p.Create(ctx, "", map[string]string{"source": "gs://b/src.tgz", "image": "gcr.io/" + proj + "/img:v1", "region": "us-central1"})
 	if err != nil || id == "" {
 		t.Fatalf("Create = %q, %v", id, err)
 	}

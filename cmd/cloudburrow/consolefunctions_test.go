@@ -254,6 +254,7 @@ func TestConsoleFunctionsCreateGenerations(t *testing.T) {
 func TestConsoleFunctionsCreateFields(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	proj := freshProject("console-fields")
 	uploads := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer uploads.Close()
 	s := runadapter.NewServer(&runadapter.Knative{}, "t", time.Minute)
@@ -268,9 +269,9 @@ func TestConsoleFunctionsCreateFields(t *testing.T) {
 	}
 	go func() { _ = srv.Serve(ln) }()
 	defer srv.Stop()
-	p := functionsProvider{defaultProject: "console-fields", runAddr: func() string { return ln.Addr().String() }, storage: true}
-	pool := "projects/console-fields/locations/us-central1/workerPools/fields-pool"
-	if _, err := builds.CloudBuild().CreateWorkerPool(ctx, &cbpb.CreateWorkerPoolRequest{Parent: "projects/console-fields/locations/us-central1",
+	p := functionsProvider{defaultProject: proj, runAddr: func() string { return ln.Addr().String() }, storage: true}
+	pool := "projects/" + proj + "/locations/us-central1/workerPools/fields-pool"
+	if _, err := builds.CloudBuild().CreateWorkerPool(ctx, &cbpb.CreateWorkerPoolRequest{Parent: "projects/" + proj + "/locations/us-central1",
 		WorkerPoolId: "fields-pool", WorkerPool: &cbpb.WorkerPool{}}); err != nil {
 		t.Fatalf("CreateWorkerPool: %v", err)
 	}
@@ -283,7 +284,7 @@ func TestConsoleFunctionsCreateFields(t *testing.T) {
 			t.Errorf("Create function has no %s field", name)
 		}
 	}
-	const key = "projects/console-fields/locations/us/keyRings/r/cryptoKeys/k"
+	key := "projects/" + proj + "/locations/us/keyRings/r/cryptoKeys/k"
 	for _, env := range []string{functionGen2, functionGen1} {
 		id := map[string]string{functionGen2: "fields-gen2", functionGen1: "fields-gen1"}[env]
 		values := map[string]string{"name": id, "environment": env, "region": "us-central1", "runtime": "go123", "entryPoint": "Hello",
