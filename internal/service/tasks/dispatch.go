@@ -408,6 +408,19 @@ func (w *Worker) startDue(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	w.startAll(ctx, now, due)
+}
+
+// startAll starts the tasks of due, a list read at now, as startDue says.
+//
+// The list can be stale by the time a task's turn comes: an attempt that
+// was in flight when it was read may have ended since, deleting the task
+// (a 2xx) or rescheduling it (a retry), and cleared its in-flight mark. So
+// each task is read again once it is marked in flight, when no other
+// attempt of it can be out, and is started only if it is still there and
+// still due. Without that a soak saw 340 of 33,141 tasks that answered 200
+// delivered twice, the more as the store grew slower (#1594).
+func (w *Worker) startAll(ctx context.Context, now time.Time, due []Task) {
 	// Read once a pass, so a queue's new limits apply from the next pass.
 	limits := map[string]RateLimits{}
 	for _, task := range due {
@@ -436,9 +449,14 @@ func (w *Worker) startDue(ctx context.Context) {
 			w.inflight[task.Name] = true
 			w.perQueue[task.Queue]++
 			w.mu.Unlock()
-			w.store.TakeRun(task.Name, task.RunRequested)
-			task.RunRequested = time.Time{}
-			w.start(ctx, task)
+			fresh, ok := w.current(task.Name, time.Time{})
+			if !ok || !fresh.RunRequested.Equal(task.RunRequested) {
+				w.release(task)
+				continue
+			}
+			w.store.TakeRun(fresh.Name, fresh.RunRequested)
+			fresh.RunRequested = time.Time{}
+			w.start(ctx, fresh)
 			continue
 		}
 		if forced || w.inflight[task.Name] || w.perQueue[task.Queue] >= limit.MaxConcurrentDispatches {
@@ -459,8 +477,35 @@ func (w *Worker) startDue(ctx context.Context) {
 		w.inflight[task.Name] = true
 		w.perQueue[task.Queue]++
 		w.mu.Unlock()
-		w.start(ctx, task)
+		fresh, ok := w.current(task.Name, now)
+		if !ok {
+			w.release(task)
+			continue
+		}
+		w.start(ctx, fresh)
 	}
+}
+
+// current is the stored task named name, and whether it is still to be
+// dispatched: it exists and, when due is not zero, is scheduled at or
+// before due. The caller has marked it in flight.
+func (w *Worker) current(name string, due time.Time) (Task, bool) {
+	t, err := w.store.GetTask(name)
+	if err != nil {
+		return Task{}, false
+	}
+	if !due.IsZero() && t.ScheduleTime.After(due) && t.RunRequested.IsZero() {
+		return Task{}, false
+	}
+	return t, true
+}
+
+// release clears the in-flight mark of a task that was not started.
+func (w *Worker) release(task Task) {
+	w.mu.Lock()
+	delete(w.inflight, task.Name)
+	w.perQueue[task.Queue]--
+	w.mu.Unlock()
 }
 
 // start runs one attempt of a task already marked in flight.
