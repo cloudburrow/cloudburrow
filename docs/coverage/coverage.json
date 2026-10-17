@@ -29,6 +29,7 @@
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
+          "test/compat/terraform_batch9_test.go:36 TestTerraformCloudTasksQueueIAM",
           "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
         ]
       },
@@ -49,6 +50,7 @@
         "tests": [
           "test/compat/appengine1447_test.go:208 TestTerraformAppEngineTargets",
           "test/compat/gcloudsecrets_test.go:53 TestGcloudTasks",
+          "test/compat/terraform_batch9_test.go:36 TestTerraformCloudTasksQueueIAM",
           "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
         ]
       },
@@ -73,6 +75,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:208 TestConsolePermissionsOnAQueue",
           "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_batch9_test.go:36 TestTerraformCloudTasksQueueIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM"
         ]
       },
@@ -88,6 +91,7 @@
           "test/compat/tasks_test.go:64 TestTasksQueueLifecycle",
           "test/compat/taskshttptarget_test.go:33 TestTasksQueueHTTPTarget",
           "test/compat/taskslogging_test.go:35 TestTasksStackdriverLoggingConfig",
+          "test/compat/terraform_batch9_test.go:36 TestTerraformCloudTasksQueueIAM",
           "test/compat/terraform_tasks_secrets_test.go:24 TestTerraformTasksQueueHTTPTarget"
         ]
       },
@@ -155,6 +159,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:208 TestConsolePermissionsOnAQueue",
           "test/compat/tasksiam_test.go:21 TestQueueIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_batch9_test.go:36 TestTerraformCloudTasksQueueIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM"
         ]
       },
@@ -1385,7 +1390,8 @@
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
           "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
-          "test/compat/functionsfields_test.go:62 TestFunctionsFields"
+          "test/compat/functionsfields_test.go:62 TestFunctionsFields",
+          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM"
         ]
       },
       {
@@ -1397,7 +1403,8 @@
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
           "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
           "test/compat/functionsfields_test.go:265 TestFunctionsSecretsBuildsAndMounts",
-          "test/compat/functionsfields_test.go:62 TestFunctionsFields"
+          "test/compat/functionsfields_test.go:62 TestFunctionsFields",
+          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM"
         ]
       },
       {
@@ -1412,7 +1419,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
-          "test/compat/functionsfields_test.go:62 TestFunctionsFields"
+          "test/compat/functionsfields_test.go:62 TestFunctionsFields",
+          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM"
         ]
       },
       {
@@ -1422,7 +1430,8 @@
           "test/compat/functionsapi_test.go:76 TestFunctionsAPI",
           "test/compat/functionsevents_test.go:212 TestFunctionsEventTriggers",
           "test/compat/functionsevents_test.go:516 TestGcloudFunctionsEventTriggers",
-          "test/compat/functionsfields_test.go:62 TestFunctionsFields"
+          "test/compat/functionsfields_test.go:62 TestFunctionsFields",
+          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM"
         ]
       },
       {
@@ -2946,6 +2955,7 @@
           "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnAnEkmConnection",
           "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
         ],
         "unverified": [
@@ -2974,6 +2984,7 @@
           "test/compat/consolepermissions_test.go:287 TestConsolePermissionsOnAnEkmConnection",
           "test/compat/kms_ekm_iam_test.go:29 TestKMSEkmIamPolicyIsStoredNotEnforced",
           "test/compat/kms_iam_test.go:32 TestKMSIamPolicyIsStoredNotEnforced",
+          "test/compat/terraform_batch9_test.go:125 TestTerraformCloudFunctions2FunctionIAM",
           "test/compat/terraform_iam_more_test.go:119 TestTerraformKMSStoredIAM"
         ],
         "unverified": [
@@ -3015,7 +3026,8 @@
           "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
           "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
+          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -3025,7 +3037,8 @@
           "test/compat/resourcemanagerfolders_test.go:234 TestTerraformGoogleFolder",
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
           "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
+          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -3033,7 +3046,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
+          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -3041,7 +3055,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
+          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -3063,7 +3078,8 @@
         "method": "google.cloud.resourcemanager.v3.Folders/SearchFolders",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders"
+          "test/compat/resourcemanagerfolders_test.go:98 TestResourceManagerV3Folders",
+          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -3071,7 +3087,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanageriam_test.go:135 TestResourceManagerFolderAndOrgIAM",
-          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM"
+          "test/compat/terraform_batch4_test.go:295 TestTerraformFolderAndOrganizationIAM",
+          "test/compat/terraform_batch9_test.go:205 TestTerraformFolderIAMAuditConfig"
         ]
       },
       {
@@ -3155,7 +3172,8 @@
           "test/compat/resourcemanageriam_test.go:275 TestConsoleProjectIAM",
           "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
           "test/compat/storediam_test.go:516 TestResourceManagerAuditConfigs",
-          "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig"
+          "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig",
+          "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
         ]
       },
       {
@@ -3195,7 +3213,8 @@
         "tests": [
           "test/compat/resourcemanageriam_test.go:275 TestConsoleProjectIAM",
           "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
-          "test/compat/storediam_test.go:516 TestResourceManagerAuditConfigs"
+          "test/compat/storediam_test.go:516 TestResourceManagerAuditConfigs",
+          "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
         ]
       },
       {
@@ -3595,7 +3614,8 @@
         "method": "cloudresourcemanager.projects.clearOrgPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy",
+          "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
         ]
       },
       {
@@ -3603,7 +3623,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
-          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
+          "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
         ]
       },
       {
@@ -3611,7 +3632,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
-          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects"
+          "test/compat/resourcemanagerv1_test.go:50 TestResourceManagerV1Projects",
+          "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
         ]
       },
       {
@@ -3645,14 +3667,16 @@
           "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
           "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
           "test/compat/storediam_test.go:516 TestResourceManagerAuditConfigs",
-          "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig"
+          "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig",
+          "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
         ]
       },
       {
         "method": "cloudresourcemanager.projects.getOrgPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy",
+          "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
         ]
       },
       {
@@ -3684,14 +3708,16 @@
           "test/compat/resourcemanageriam_test.go:249 TestTerraformProjectIAM",
           "test/compat/resourcemanageriam_test.go:69 TestResourceManagerProjectIAM",
           "test/compat/resterrorstatus_test.go:126 TestGcloudResourceManagerErrorStatus",
-          "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig"
+          "test/compat/storediam_test.go:561 TestTerraformProjectIAMAuditConfig",
+          "test/compat/terraform_batch9_test.go:354 TestTerraformProjectIAMMemberRemove"
         ]
       },
       {
         "method": "cloudresourcemanager.projects.setOrgPolicy",
         "status": "Verified",
         "tests": [
-          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy"
+          "test/compat/resourcemanagerorgpolicy_test.go:23 TestResourceManagerV1OrgPolicy",
+          "test/compat/terraform_batch9_test.go:279 TestTerraformProjectOrganizationPolicy"
         ]
       },
       {
@@ -5208,6 +5234,7 @@
         "tests": [
           "test/compat/storage_test.go:65 TestStorageBucketLifecycle",
           "test/compat/storagesoftdelete_test.go:137 TestStorageBucketDeleteIgnoresSoftDeleted",
+          "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources",
           "test/compat/terraformstorage_test.go:236 TestTerraformForceDestroyVersionedBucket"
         ],
@@ -5240,6 +5267,7 @@
           "test/compat/storagecors_test.go:77 TestStorageCORSRoundTrip",
           "test/compat/storagelifecycle_test.go:18 TestStorageLifecycleConfigRoundTrip",
           "test/compat/storageretention_test.go:61 TestStorageLockRetentionPolicy",
+          "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
@@ -5249,6 +5277,7 @@
         "tests": [
           "test/compat/consolepermissions_test.go:319 TestConsolePermissionsOnABucket",
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
+          "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
@@ -5269,6 +5298,7 @@
           "test/compat/storagebucketfields_test.go:21 TestStorageBucketLabelsAndStorageClassRoundTrip",
           "test/compat/storageretention_test.go:170 TestStorageObjectRetentionRequiresEnabledBucket",
           "test/compat/storagexmlpost_test.go:33 TestStorageXMLBucketPutAndServiceGet",
+          "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ]
       },
@@ -5390,6 +5420,7 @@
           "test/compat/consolepermissions_test.go:319 TestConsolePermissionsOnABucket",
           "test/compat/storageiam_test.go:31 TestStorageBucketIAMRoundTrip",
           "test/compat/storageiam_test.go:59 TestStorageBucketIAMStaleEtag",
+          "test/compat/terraform_batch9_test.go:77 TestTerraformStorageBucketIAM",
           "test/compat/terraform_iam_more_test.go:32 TestTerraformStoredIAM",
           "test/compat/terraformstorage_test.go:104 TestTerraformStorageResources"
         ],
