@@ -1,0 +1,41 @@
+CloudBurrow patch 38 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1457).
+
+The bug: a CSV load stored every empty value as NULL, where BigQuery,
+with a nullMarker set, "interprets the empty string as an empty value"
+for STRING and BYTES columns (JobConfigurationLoad.nullMarker,
+https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobConfigurationLoad).
+Its reader, encoding/csv, cannot tell "" from nothing, so CloudBurrow's
+front, which reads a load's data by its options, could not load one.
+
+The patch loads one value, U+FDD0 "cloudburrow:empty-string" U+FDD0, as
+an empty string. The front writes an empty STRING or BYTES value under a
+nullMarker as that value, and refuses a load whose data holds it.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the MIT
+License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+
+--- a/server/handler.go
++++ b/server/handler.go
+@@ -550,6 +550,8 @@
+ 				colData := record[i]
+ 				if colData == "" {
+ 					rowData[columns[i].Name] = nil
++				} else if colData == cloudburrowEmptyString {
++					rowData[columns[i].Name] = ""
+ 				} else {
+ 					rowData[columns[i].Name] = colData
+ 				}
+@@ -3468,3 +3470,8 @@
+ 	ctx := r.Context()
+ 	errorResponse(ctx, w, errInternalError(fmt.Sprintf("unexpected request path: %s", html.EscapeString(r.URL.Path))))
+ }
++
++// cloudburrowEmptyString is how CloudBurrow's front writes an empty
++// string in the CSV it sends a load as, where an empty value is NULL
++// (CloudBurrow patch 38, cloudburrow/cloudburrow#1457).
++const cloudburrowEmptyString = "\uFDD0cloudburrow:empty-string\uFDD0"

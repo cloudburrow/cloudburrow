@@ -37,7 +37,8 @@
         "patches/bigquery-emulator/0021-round-nested-decimal-fields.patch",
         "patches/bigquery-emulator/0022-list-job-configurations.patch",
         "patches/bigquery-emulator/0034-front-clock.patch",
-        "patches/bigquery-emulator/0037-default-time-zone-header.patch"
+        "patches/bigquery-emulator/0037-default-time-zone-header.patch",
+        "patches/bigquery-emulator/0038-csv-empty-string-mark.patch"
       ]
     },
     {
