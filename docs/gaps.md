@@ -266,7 +266,7 @@ Cloud Functions v2 and v1 APIs (#1377, #1428); Pub/Sub and project IAM in Terraf
 
 | Gap | Why open | Size |
 |---|---|---|
-| Terraform resources beyond the verified set (#1304): the other `google_spanner_*` resources (instance configs, backup schedules), a worker pool's `scaling_mode` (Google publishes no such field), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_secret_manager_regional_secret` and `google_bigquery_data_transfer_config` (their endpoints are not set: not served), the resources whose API refuses them (Bigtable authorized views, log bucket CMEK; audit configs, tag IAM, Bigtable table IAM and Spanner IAM are stored since #1486), and the other resources of the served services | partly verified (the nine batches of #1304 and the verified rows of compatibility.md) | L |
+| Terraform resources beyond the verified set (#1304): a worker pool's `scaling_mode` (Google publishes no such field), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_bigquery_data_transfer_config` (its endpoint is not set: not served), log bucket CMEK (refused), the Artifact Registry data sources and `google_artifact_registry_project_config`, Secure Source Manager's `_iam_binding` and `_iam_policy`, the Backup and DR and Cloud SQL data sources, and the other resources of the served services | partly verified (the eleven batches of #1304 and the verified rows of compatibility.md) | L |
 
 ## Console
 
