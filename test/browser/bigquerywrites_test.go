@@ -126,9 +126,10 @@ func TestBigQueryFlexibleNamesInsertOptionsEditTableAndViewThroughTheForms(t *te
 // project and dataset and showing the statement; Cancel sends nothing.
 // Confirmed, it answers that the statement ran, and the dataset has the
 // table. An INSERT of two rows is confirmed and answered with "This
-// statement added 2 rows." (#1024), and the table has them; a DELETE inside
-// a script is refused on the page with the reason and #1028, and deletes
-// nothing.
+// statement added 2 rows." (#1024), and the table has them; an UPDATE … FROM
+// a subquery (#1027) is answered "This statement modified 1 row.", and a
+// script whose DELETE reads a DECLAREd variable (#1567) with its job and
+// "This statement removed 1 row.", and the table loses that row.
 func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 	needService(t, "bigquery")
 	p := open(t)
@@ -166,7 +167,7 @@ func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 	p.waitFor(`document.querySelector("#view .query-pane button.primary").textContent === "Run statement"`)
 	var hint string
 	p.eval(`document.querySelector("#view .query-pane .card > p.unavailable").textContent`, &hint)
-	if !strings.Contains(hint, "jobs.query") || !strings.Contains(hint, "TRUNCATE TABLE") || !strings.Contains(hint, "#1028") {
+	if !strings.Contains(hint, "jobs.query") || !strings.Contains(hint, "TRUNCATE TABLE") || !strings.Contains(hint, "inside a script") {
 		t.Errorf("the Read-write hint is %q", hint)
 	}
 	before := len(p.posts("/api/query/bigquery"))
@@ -202,15 +203,20 @@ func TestBigQueryReadWriteEditorThroughTheForms(t *testing.T) {
 		t.Errorf("after the INSERT the table previews %v, want its 3 rows", preview)
 	}
 
+	statement("UPDATE totals t SET n = s.n FROM (SELECT 'ap' AS region, 9 AS n) s WHERE t.region = s.region")
+	p.clickText("#view .query-pane button.primary", "Run statement")
+	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
+	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
+	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("This statement modified 1 row.")`)
+
 	statement("DECLARE k INT64 DEFAULT 1;\nDELETE FROM totals WHERE n = k")
 	p.clickText("#view .query-pane button.primary", "Run statement")
 	p.waitFor(`document.querySelector("#dml-confirm-title") !== null`)
 	p.run(chromedp.Click(`.modal button[type=submit]`, chromedp.ByQuery))
-	if got := alert(); !strings.Contains(got, "DELETE is DML inside a script") || !strings.Contains(got, "#1028") {
-		t.Errorf("a DELETE in a script was answered %q, want the refusal naming #1028", got)
-	}
-	if preview := readDataPage(t, "bigquery", project, ds, "totals").rows("preview"); len(preview) != 3 {
-		t.Errorf("after the refused DELETE the table previews %v, want its 3 rows", preview)
+	p.waitFor(`document.querySelector("#view .query-results").textContent.includes("The script ran as job ") && document.querySelector("#view .query-results").textContent.includes("This statement removed 1 row.")`)
+	preview := readDataPage(t, "bigquery", project, ds, "totals").rows("preview")
+	if len(preview) != 2 {
+		t.Errorf("after the script's DELETE the table previews %v, want its 2 other rows", preview)
 	}
 }
 
