@@ -1,6 +1,8 @@
 package bigqueryfront
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,6 +44,59 @@ func TestPrivacyViewOfPolicyView(t *testing.T) {
 		handled := f.checkReads(w, r, queryOptions{Query: sql}, false)
 		if code == 0 && handled || code != 0 && (!handled || w.Code != code) {
 			t.Errorf("%s: handled %v, %d %s; want %d", sql, handled, w.Code, w.Body, code)
+		}
+	}
+}
+
+// TestPrivacySubqueries (#1502): SELECT WITH AGGREGATION_THRESHOLD in a
+// subquery, a CTE's query, after a WITH list or as CREATE TABLE ... AS's
+// query is rewritten in its place; a read outside its own clause is still
+// refused.
+func TestPrivacySubqueries(t *testing.T) {
+	s := &tableSettings{}
+	s.set(streamKey("p", "ds", "p"), "1", moreOption{name: "privacy_policy",
+		value: `{"aggregation_threshold_policy": {"threshold": 2, "privacy_unit_column": "u"}}`})
+	var sent []string
+	emu := privacyEmulator()
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			q, _ := body["query"].(string)
+			sent = append(sent, q)
+			writeError(w, http.StatusTeapot, "sent", "sent")
+			return
+		}
+		emu.ServeHTTP(w, r)
+	})
+	f := front{next: next, base: "/bigquery/v2/projects/p", tables: s}
+	for _, c := range []struct {
+		sql, want string
+		code      int
+	}{
+		{"SELECT * FROM (SELECT WITH AGGREGATION_THRESHOLD x, COUNT(*) AS n FROM ds.p AS e GROUP BY x) WHERE n > 1",
+			"SELECT * FROM (SELECT x, COUNT(*) AS n FROM ds.p AS e GROUP BY x HAVING COUNT(DISTINCT `e`.`u`) >= 2) WHERE n > 1", 0},
+		{"WITH c AS (SELECT WITH AGGREGATION_THRESHOLD x, COUNT(*) AS n FROM ds.p AS e GROUP BY x) SELECT * FROM c",
+			"WITH c AS (SELECT x, COUNT(*) AS n FROM ds.p AS e GROUP BY x HAVING COUNT(DISTINCT `e`.`u`) >= 2) SELECT * FROM c", 0},
+		{"WITH c AS (SELECT 1 AS k) SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM ds.p AS e",
+			"WITH c AS (SELECT 1 AS k) SELECT COUNT(*) FROM ds.p AS e GROUP BY CAST(NULL AS BOOL)  HAVING COUNT(DISTINCT `e`.`u`) >= 2", 0},
+		{"SELECT * FROM (SELECT WITH AGGREGATION_THRESHOLD OPTIONS(threshold=1) COUNT(*) FROM ds.p AS e)", "", http.StatusBadRequest},
+		{"SELECT * FROM (SELECT * FROM ds.p)", "", http.StatusNotImplemented},
+		{"WITH c AS (SELECT * FROM ds.p) SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM c", "", http.StatusNotImplemented},
+		{"SELECT * FROM (SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM (SELECT * FROM ds.p))", "", http.StatusNotImplemented},
+		{"SELECT (SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM ds.p e), (SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM ds.p e)",
+			"", http.StatusNotImplemented},
+	} {
+		sent = nil
+		w := httptest.NewRecorder()
+		body, _ := json.Marshal(map[string]any{"query": c.sql})
+		r := httptest.NewRequest("POST", "/bigquery/v2/projects/p/queries", bytes.NewReader(body))
+		handled := f.checkReads(w, r, queryOptions{Query: c.sql}, false)
+		switch {
+		case c.code != 0 && (!handled || w.Code != c.code):
+			t.Errorf("%s: handled %v, %d %s; want %d", c.sql, handled, w.Code, w.Body, c.code)
+		case c.code == 0 && (len(sent) == 0 || sent[len(sent)-1] != c.want):
+			t.Errorf("%s:\n sent %q (%d %s)\nwant %q", c.sql, sent, w.Code, w.Body, c.want)
 		}
 	}
 }
@@ -129,13 +184,34 @@ func TestCheckJoinRestriction(t *testing.T) {
 		{"SELECT * FROM ds.v JOIN ds.o USING (a)", "JOIN_BLOCKED", nil, "Join occurring on a restricted column."},
 		{"SELECT * FROM ds.v", "JOIN_BLOCKED", nil, ""},
 		{"SELECT * FROM ds.v, ds.o", "JOIN_BLOCKED", nil, "Join occurring on a restricted column."},
+		// #1502: joins that are not INNER, and a read in a subquery.
+		{"SELECT * FROM ds.v LEFT JOIN ds.o USING (a)", "JOIN_BLOCKED", nil, "Join occurring on a restricted column."},
+		{"SELECT * FROM ds.v LEFT JOIN ds.o USING (a)", "JOIN_ALL", []string{"a"}, "Joining must occur on all"},
+		{"SELECT * FROM ds.v x FULL OUTER JOIN ds.o ON x.a = o.a", "JOIN_ALL", []string{"a"}, "Joining must occur on all"},
+		{"SELECT * FROM ds.v CROSS JOIN ds.o", "JOIN_ALL", []string{"a"}, "Joining must occur on all"},
+		{"SELECT * FROM ds.v LEFT JOIN ds.o USING (c)", "JOIN_ANY", []string{"a"}, "Joining must occur on at least one"},
+		{"SELECT * FROM ds.v RIGHT JOIN ds.o USING (a, c)", "JOIN_ANY", []string{"a"}, "Join occurring on a restricted column."},
+		{"SELECT * FROM ds.v LEFT JOIN ds.o USING (a)", "JOIN_NOT_REQUIRED", []string{"a"}, ""},
+		{"SELECT * FROM ds.v LEFT OUTER JOIN ds.o USING (b)", "JOIN_NOT_REQUIRED", []string{"a"}, "Join occurring on a restricted column."},
+		{"SELECT * FROM ds.v CROSS JOIN ds.o", "JOIN_NOT_REQUIRED", []string{"a"}, "Join occurring on a restricted column."},
+		{"SELECT * FROM ds.v, ds.o", "JOIN_NOT_REQUIRED", []string{"a"}, "Join occurring on a restricted column."},
+		{"SELECT * FROM ds.o LEFT JOIN (SELECT WITH AGGREGATION_THRESHOLD a, COUNT(*) FROM ds.v JOIN ds.p USING (a) GROUP BY a) USING (a)",
+			"JOIN_ANY", []string{"a"}, ""},
+		{"SELECT * FROM (SELECT WITH AGGREGATION_THRESHOLD a, COUNT(*) FROM ds.v GROUP BY a) JOIN ds.o USING (a)",
+			"JOIN_ANY", []string{"a"}, "Joining must occur on at least one"},
 	} {
 		msg, uns := check(c.sql, c.cond, c.allowed...)
 		if uns || c.want == "" && msg != "" || c.want != "" && !strings.HasPrefix(msg, c.want) {
 			t.Errorf("%s %s %v: %q (unsupported %v), want %q", c.sql, c.cond, c.allowed, msg, uns, c.want)
 		}
 	}
-	if _, uns := check("SELECT * FROM ds.v LEFT JOIN ds.o USING (a)", "JOIN_ANY", "a"); !uns {
-		t.Error("LEFT JOIN: not refused 501")
+	for _, c := range []struct{ sql, cond string }{
+		{"SELECT * FROM ds.v LEFT JOIN ds.o USING (a)", "JOIN_ANY"},
+		{"SELECT * FROM ds.v JOIN ds.o USING (a) LEFT JOIN ds.q USING (a)", "JOIN_ALL"},
+		{"SELECT * FROM ds.v NATURAL JOIN ds.o", "JOIN_ANY"},
+	} {
+		if _, uns := check(c.sql, c.cond, "a"); !uns {
+			t.Errorf("%s %s: not refused 501", c.sql, c.cond)
+		}
 	}
 }
