@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ func keptAdmin(t *testing.T, docs, dir string) (c *admin.FirestoreAdminClient, a
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	a = firestoreadmin.New(docs)
-	if err := a.KeepState(ctx, dir, t.Logf); err != nil {
+	if err := a.KeepState(ctx, dir, quietLogf(t)); err != nil {
 		t.Fatal(err)
 	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -146,5 +147,20 @@ func TestAdminResetClearsItsState(t *testing.T) {
 	}
 	if _, err := c2.GetDatabase(ctx, &adminpb.GetDatabaseRequest{Name: "projects/p/databases/nope"}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetDatabase of an unknown database = %v", err)
+	}
+}
+
+// quietLogf is t.Logf until the test's cleanups start: the state's saver
+// writes once more when its context ends, and may run after the test.
+func quietLogf(t *testing.T) func(string, ...any) {
+	var mu sync.Mutex
+	done := false
+	t.Cleanup(func() { mu.Lock(); done = true; mu.Unlock() })
+	return func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !done {
+			t.Logf(format, args...)
+		}
 	}
 }

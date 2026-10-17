@@ -80,9 +80,10 @@ func TestResetProjectClearsDatabasesCallsNamed(t *testing.T) {
 	}))
 	t.Cleanup(emu.Close)
 	dir := t.TempDir()
+	logf := quietLogf(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	a := New(strings.TrimPrefix(emu.URL, "http://"))
-	if err := a.KeepState(ctx, dir, t.Logf); err != nil {
+	if err := a.KeepState(ctx, dir, logf); err != nil {
 		t.Fatal(err)
 	}
 	a.SawResource("projects/gone/databases/never-made")
@@ -91,8 +92,10 @@ func TestResetProjectClearsDatabasesCallsNamed(t *testing.T) {
 	a.SawResource("projects/gone")
 	cancel()
 
+	bctx, bcancel := context.WithCancel(context.Background())
+	t.Cleanup(bcancel)
 	b := New(strings.TrimPrefix(emu.URL, "http://"))
-	if err := b.KeepState(context.Background(), dir, t.Logf); err != nil {
+	if err := b.KeepState(bctx, dir, logf); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.ResetProject(context.Background(), "gone"); err != nil {
@@ -108,5 +111,20 @@ func TestResetProjectClearsDatabasesCallsNamed(t *testing.T) {
 	defer b.mu.Unlock()
 	if len(b.seen) != 1 || !b.seen["projects/kept/databases/other"] {
 		t.Errorf("seen after the reset: %v", b.seen)
+	}
+}
+
+// quietLogf is t.Logf until the test's cleanups start: the state's saver
+// writes once more when its context ends, and may run after the test.
+func quietLogf(t *testing.T) func(string, ...any) {
+	var mu sync.Mutex
+	done := false
+	t.Cleanup(func() { mu.Lock(); done = true; mu.Unlock() })
+	return func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !done {
+			t.Logf(format, args...)
+		}
 	}
 }
