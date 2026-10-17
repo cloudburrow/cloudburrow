@@ -57,15 +57,27 @@ import (
 // that is not INNER follows each join_condition's documented wording
 // (checkJoinRestriction).
 //
+// #1517: more than one SELECT WITH AGGREGATION_THRESHOLD in a query (each
+// subquery's or CTE's) is rewritten each in its place; one inside another
+// is a multi-level aggregation, 400. A query with no privacy clause at all
+// that reads a table with an aggregation threshold or differential privacy
+// policy in a subquery, a CTE or through another view is BigQuery's 400
+// "You must use SELECT WITH ..." (UNVERIFIED: the analysis rules say only
+// that such a table "can be queried with" the clause). JOIN_ANY met by an
+// outer join and JOIN_ALL alongside one follow each join_condition's
+// wording, a NATURAL join is a syntax error (checkJoinRestriction).
+//
 // What the front cannot check is refused 501, never run as if the table
-// had no policy, BigQuery documenting none of it: a read of the table in a
-// subquery or CTE other than in its own SELECT WITH AGGREGATION_THRESHOLD's
-// FROM clause (its rows, not aggregated, would leave the subquery), in
-// another view's query, a decorator of it, a JOIN_ANY met only by an outer
-// join, a NATURAL join, a set operation, QUALIFY, WINDOW, an analytic
-// function or a function called through a path (a UDF) in a SELECT WITH
-// AGGREGATION_THRESHOLD; and tabledata.list, copy, extract and Storage Read
-// of the table (protectedRead).
+// had no policy, BigQuery documenting none of it (analysis-rules,
+// query-syntax#agg_threshold_clause, the join operation, read for #1517):
+// a read of the table in a subquery or CTE other than in its own SELECT
+// WITH AGGREGATION_THRESHOLD's FROM clause (its rows, not aggregated, would
+// leave the subquery) in a query with a privacy clause, a join restricted
+// table in a subquery or CTE, a read through another view's query in a
+// query with a privacy clause, a decorator of it, a set operation, QUALIFY,
+// WINDOW, an analytic function or a function called through a path (a UDF)
+// in a SELECT WITH AGGREGATION_THRESHOLD; and tabledata.list, copy, extract
+// and Storage Read of the table (protectedRead).
 
 // privacyPolicy is a privacy_policy, read from the DDL's JSON or the
 // resource's.
@@ -290,7 +302,11 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 				// part of every SELECT's syntax (query-syntax#select_list).
 				end := -1
 				switch {
-				case len(stmts) > 1 || clause(s) != "" || len(atSpans) > 0:
+				case clause(s) == "AGGREGATION_THRESHOLD" || len(atSpans) > 0 && i < atSpans[len(atSpans)-1][1]:
+					// "You can't use the AGGREGATION_THRESHOLD clause with a
+					// multi-level aggregation query" (query-syntax#agg_threshold_clause).
+					return fail("SELECT WITH AGGREGATION_THRESHOLD cannot be used with a multi-level aggregation query")
+				case len(stmts) > 1 || clause(s) != "":
 				case s[i-1].punct("("):
 					for j := i + 3; j < len(s); j++ {
 						if depth[j] < depth[i] {
@@ -303,8 +319,7 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 				}
 				if end < 0 {
 					return refuse("Not implemented here: SELECT WITH AGGREGATION_THRESHOLD other than as a query, a " +
-						"parenthesized subquery, a CTE's query or CREATE TABLE ... AS's, or more than one in a query. " +
-						"Nothing was run.")
+						"parenthesized subquery, a CTE's query or CREATE TABLE ... AS's. Nothing was run.")
 				}
 				atSpans = append(atSpans, [2]int{i, end})
 			}
@@ -313,6 +328,10 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 	if len(atSpans) > 0 && len(spans) > 0 {
 		return refuse("Not implemented here: SELECT WITH AGGREGATION_THRESHOLD and SELECT WITH DIFFERENTIAL_PRIVACY " +
 			"in one query. Nothing was run.")
+	}
+	anyClause := len(atSpans) > 0 || len(spans) > 0
+	for _, s := range stmts {
+		anyClause = anyClause || clause(s) != ""
 	}
 	var atReads, dpReads []privacyRead
 	for _, p := range prot {
@@ -337,6 +356,14 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 		}
 		inSpan := dpSpanOf(atSpans, p) >= 0
 		if !inSpan && (privacyDepths(s)[p.tr.at] != 0 || len(s) > 0 && s[0].is("WITH")) {
+			if want := mustUseClause(p.pol); want != "" && !anyClause {
+				// #1517, UNVERIFIED: a query with no privacy clause at all
+				// reads it in a subquery or CTE. The analysis rules say the
+				// table "can be queried with" the clause; BigQuery's
+				// documented error for a read without one is followed.
+				return fail("You must use SELECT WITH " + want + " for this query because a privacy policy is set on " +
+					p.name + ".")
+			}
 			return refuse(privacyRefusal("a read in a subquery or CTE outside its own SELECT WITH AGGREGATION_THRESHOLD", p.name))
 		}
 		if p.pol.hasJoin {
@@ -408,64 +435,87 @@ func (f front) enforcePrivacy(w http.ResponseWriter, r *http.Request, q queryOpt
 		return true
 	}
 	var rewrite []token
-	span := [2]int{0, 0}
 	for _, s := range stmts {
 		if clause(s) == "AGGREGATION_THRESHOLD" {
-			rewrite, span = s, [2]int{0, len(s)}
+			rewrite = s
 		}
 	}
-	if len(atSpans) == 1 {
-		rewrite, span = stmts[0], atSpans[0]
-	}
-	if rewrite == nil {
+	if rewrite == nil && len(atSpans) == 0 {
 		return false
 	}
 	if len(stmts) > 1 {
 		return refuse("Not implemented here: SELECT WITH AGGREGATION_THRESHOLD in a script; CloudBurrow carries it " +
 			"out as a lone query. Nothing was run.")
 	}
-	if len(atReads) > 1 {
-		return refuse("Not implemented here: a SELECT WITH AGGREGATION_THRESHOLD of more than one table or view " +
-			"with an aggregation threshold policy. Nothing was run.")
+	// Each SELECT WITH AGGREGATION_THRESHOLD of the query (#1517: the clause
+	// is part of every SELECT's syntax, query-syntax#select_list, so two
+	// subqueries or CTEs may each have one), rewritten in its place from the
+	// last to the first, so the earlier ones' tokens keep their places.
+	spansAT := atSpans
+	if len(spansAT) == 0 {
+		spansAT = [][2]int{{0, len(rewrite)}}
 	}
-	var at *privacyRead
 	text := q.Query
-	if len(atReads) == 1 {
-		at = &atReads[0]
-		if implicitAlias(at.tr) {
-			// The engine takes no implicit alias of a quoted path
-			// (measured: "Unrecognized name"), so the read is given its
-			// table's name as BigQuery's implicit alias.
-			e := at.tr.stmt[at.tr.next-1].end
-			text = text[:e] + " AS " + quotePath([]string{at.tr.table}) + text[e:]
-			toks, ok := lex(text)
-			split := splitStatements(toks)
-			if !ok || len(split) != 1 {
-				return refuse(privacyRefusal("a query CloudBurrow could not read", at.name))
+	for k := len(spansAT) - 1; k >= 0; k-- {
+		var reads []privacyRead
+		for _, p := range atReads {
+			if len(atSpans) == 0 || dpSpanOf(atSpans, p) == k {
+				reads = append(reads, p)
 			}
-			grown := len(rewrite)
-			rewrite, _, _ = stripControlFlow(split[0])
-			// The alias's two tokens are at the read's next.
-			span[1] += len(rewrite) - grown
-			a := *at
-			a.tr.stmt = rewrite
-			at = &a
 		}
-	}
-	sql, msg, unsupported := rewriteAggregationThreshold(text, rewrite[span[0]:span[1]], at)
-	switch {
-	case unsupported:
-		return refuse(msg)
-	case msg != "":
-		return fail(msg)
+		if len(reads) > 1 {
+			return refuse("Not implemented here: a SELECT WITH AGGREGATION_THRESHOLD of more than one table or view " +
+				"with an aggregation threshold policy. Nothing was run.")
+		}
+		toks, ok := lex(text)
+		split := splitStatements(toks)
+		if !ok || len(split) != 1 {
+			return refuse("Not implemented here: a SELECT WITH AGGREGATION_THRESHOLD CloudBurrow could not read. Nothing was run.")
+		}
+		stmt, _, _ := stripControlFlow(split[0])
+		span := spansAT[k]
+		if len(atSpans) == 0 {
+			span = [2]int{0, len(stmt)}
+		}
+		var at *privacyRead
+		if len(reads) == 1 {
+			a := reads[0]
+			a.tr.stmt = stmt
+			at = &a
+			if implicitAlias(at.tr) {
+				// The engine takes no implicit alias of a quoted path
+				// (measured: "Unrecognized name"), so the read is given its
+				// table's name as BigQuery's implicit alias.
+				e := stmt[at.tr.next-1].end
+				text = text[:e] + " AS " + quotePath([]string{at.tr.table}) + text[e:]
+				toks, ok := lex(text)
+				split := splitStatements(toks)
+				if !ok || len(split) != 1 {
+					return refuse(privacyRefusal("a query CloudBurrow could not read", at.name))
+				}
+				grown := len(stmt)
+				stmt, _, _ = stripControlFlow(split[0])
+				// The alias's two tokens are at the read's next.
+				span[1] += len(stmt) - grown
+				at.tr.stmt = stmt
+			}
+		}
+		sql, msg, unsupported := rewriteAggregationThreshold(text, stmt[span[0]:span[1]], at)
+		switch {
+		case unsupported:
+			return refuse(msg)
+		case msg != "":
+			return fail(msg)
+		}
+		text = sql
 	}
 	r = r.WithContext(context.WithValue(r.Context(), privacyCheckedKey{}, true))
-	if !setQueryText(r, insert, sql) {
+	if !setQueryText(r, insert, text) {
 		writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: could not rewrite the query")
 		return true
 	}
 	client := jobText{query: q.Query}
-	q.Query = sql
+	q.Query = text
 	rec := newRecorder()
 	f.runQuery(rec, r, q, insert)
 	f.clientText(w, rec, client)
@@ -754,9 +804,17 @@ func readAlias(tr tableRead) string {
 // whose columns are join_allowed_columns ("If a join is used, only the
 // columns in join_allowed_columns can be used"), a CROSS JOIN or comma join
 // using none of them; JOIN_ALL's columns "must be inner joined upon", so an
-// outer join's do not count. JOIN_ANY's "must be joined upon" met only by
-// an outer join is not documented (the list overlap rule keeps "only
-// overlapping rows"), 501; so is a NATURAL join, whose columns are implicit.
+// outer join's do not count.
+//
+// #1517: JOIN_ANY's "At least one column in join_allowed_columns must be
+// joined upon" names no kind of join, so a LEFT, RIGHT or FULL join upon an
+// allowed column meets it (UNVERIFIED: the list overlap rule's summary,
+// "Only overlapping rows can be queried after a join operation", is not
+// measured against an outer join); JOIN_ALL met by its INNER JOIN allows
+// other joins too, by the same wording, each still checked against the
+// restricted columns (UNVERIFIED). A NATURAL join is BigQuery's syntax
+// error: NATURAL is a reserved keyword (lexical#reserved_keywords) and the
+// join operation has no NATURAL form (query-syntax#join_types).
 func checkJoinRestriction(p privacyRead) (msg string, unsupported bool) {
 	s := p.tr.stmt
 	depth := privacyDepths(s)
@@ -814,10 +872,7 @@ func checkJoinRestriction(p privacyRead) (msg string, unsupported bool) {
 		case t.punct(","):
 			crossJoin = true
 		case t.is("NATURAL"):
-			if p.pol.join == "JOIN_BLOCKED" {
-				return "Join occurring on a restricted column.", false
-			}
-			return privacyRefusal("a NATURAL JOIN", p.name), true
+			return "Syntax error: Unexpected keyword NATURAL", false
 		case t.is("LEFT") || t.is("RIGHT") || t.is("FULL") || t.is("CROSS"):
 			kind = strings.ToUpper(t.text)
 		case t.is("JOIN"):
@@ -884,10 +939,6 @@ func checkJoinRestriction(p privacyRead) (msg string, unsupported bool) {
 		if restricted {
 			return "Join occurring on a restricted column.", false
 		}
-		if outerJoin || crossJoin {
-			return privacyRefusal("a JOIN_ANY join restriction met by a join that is not INNER, which BigQuery does "+
-				"not document,", p.name), true
-		}
 	case "JOIN_ALL":
 		for c := range allowed {
 			if !used[c] || !joined {
@@ -897,18 +948,15 @@ func checkJoinRestriction(p privacyRead) (msg string, unsupported bool) {
 		if restricted {
 			return "Join occurring on a restricted column.", false
 		}
-		if outerJoin || crossJoin {
-			return privacyRefusal("a JOIN_ALL join restriction met by its INNER JOIN alongside a join that is not "+
-				"INNER, which BigQuery does not document,", p.name), true
-		}
 	}
 	return "", false
 }
 
 // viewReadsPrivate returns why a read of dataset.table, a view, is refused
 // when its query reads a table or view with a privacy policy, directly or
-// through other views, or "".
-func (f front) viewReadsPrivate(r *http.Request, project, dataset, table string, meta map[string]any, depth int) string {
+// through other views, or "": a 501's message, and the clause BigQuery
+// requires of that table's reads (mustUseClause), with the table's name.
+func (f front) viewReadsPrivate(r *http.Request, project, dataset, table string, meta map[string]any, depth int) viewPrivacy {
 	q := ""
 	if v, _ := meta["view"].(map[string]any); v != nil {
 		q = str(v, "query")
@@ -916,21 +964,21 @@ func (f front) viewReadsPrivate(r *http.Request, project, dataset, table string,
 		q = str(v, "query")
 	}
 	if q == "" {
-		return ""
+		return viewPrivacy{}
 	}
 	if t, ok := f.views.get(viewKey(project, dataset, table)); ok && t.engine == q {
 		q = t.client
-	} else if why := f.engineTextPrivate(r, project, q, dataset+"."+table); why != "" {
+	} else if why := f.engineTextPrivate(r, project, q, dataset+"."+table); why.msg != "" {
 		// The emulator's text of a view made by CREATE VIEW names its
 		// engine's tables, and has the views it reads inlined (views.go).
 		return why
 	}
 	if depth > 4 {
-		return privacyRefusal("a read through views nested this deep", dataset+"."+table)
+		return viewPrivacy{msg: privacyRefusal("a read through views nested this deep", dataset+"."+table)}
 	}
 	toks, ok := lex(q)
 	if !ok {
-		return ""
+		return viewPrivacy{}
 	}
 	for j := 0; j < len(toks); j++ {
 		if toks[j].kind != tokWord && toks[j].kind != tokQuoted {
@@ -945,17 +993,32 @@ func (f front) viewReadsPrivate(r *http.Request, project, dataset, table string,
 				t = t[:i]
 			}
 			if m, ok := f.metaOf(r, ds, t); ok {
-				if f.tables.watched(streamKey(project, ds, t)) && f.privacyOf(project, ds, t, m) != "" {
-					return privacyRefusal("a read of the view "+dataset+"."+table+", whose query reads it,", ds+"."+t)
+				if text := f.privacyOf(project, ds, t, m); f.tables.watched(streamKey(project, ds, t)) && text != "" {
+					return viewPrivacyOf(dataset+"."+table, ds+"."+t, text)
 				}
-				if why := f.viewReadsPrivate(r, project, ds, t, m, depth+1); why != "" {
+				if why := f.viewReadsPrivate(r, project, ds, t, m, depth+1); why.msg != "" {
 					return why
 				}
 			}
 		}
 		j = next - 1
 	}
-	return ""
+	return viewPrivacy{}
+}
+
+// viewPrivacy is why a read of a view whose query reads a table with a
+// privacy policy is refused: msg a 501's, and clause the clause that
+// table's reads need (mustUseClause), with its name.
+type viewPrivacy struct {
+	msg, clause, name string
+}
+
+// viewPrivacyOf is the refusal of a read of view, whose query reads name,
+// whose privacy policy is text.
+func viewPrivacyOf(view, name, text string) viewPrivacy {
+	pol, _ := parsePrivacyPolicy(text)
+	return viewPrivacy{msg: privacyRefusal("a read of the view "+view+", whose query reads it,", name),
+		clause: mustUseClause(pol), name: name}
 }
 
 // metaOf is dataset.table's resource, ok false when it is not there.
@@ -997,14 +1060,18 @@ func schemaColumns(meta map[string]any) map[string]bool {
 // emulator keeps it, is refused when q names the engine table of a table
 // with a privacy policy, or holds the emulator's query of a view with one
 // (inlined), or "".
-func (f front) engineTextPrivate(r *http.Request, project, q, view string) string {
+func (f front) engineTextPrivate(r *http.Request, project, q, view string) viewPrivacy {
 	for _, key := range f.tables.watchedKeys() {
 		parts := strings.Split(key, "\x00")
 		if len(parts) != 3 || parts[0] != project || parts[1]+"."+parts[2] == view {
 			continue
 		}
 		m, ok := f.metaOf(r, parts[1], parts[2])
-		if !ok || f.privacyOf(project, parts[1], parts[2], m) == "" {
+		text := ""
+		if ok {
+			text = f.privacyOf(project, parts[1], parts[2], m)
+		}
+		if text == "" {
 			continue
 		}
 		hit := strings.Contains(q, "`"+project+"_"+parts[1]+"_"+parts[2]+"`")
@@ -1014,10 +1081,10 @@ func (f front) engineTextPrivate(r *http.Request, project, q, view string) strin
 			}
 		}
 		if hit {
-			return privacyRefusal("a read of the view "+view+", whose query reads it,", parts[1]+"."+parts[2])
+			return viewPrivacyOf(view, parts[1]+"."+parts[2], text)
 		}
 	}
-	return ""
+	return viewPrivacy{}
 }
 
 // watchedKeys are the tables whose reads the front checks.
@@ -1032,4 +1099,17 @@ func (s *tableSettings) watchedKeys() []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// mustUseClause is the clause a read of a table with policy p must be made
+// in: AGGREGATION_THRESHOLD, DIFFERENTIAL_PRIVACY, or "" when its policy is a
+// join restriction alone (list overlap), which needs no clause.
+func mustUseClause(p privacyPolicy) string {
+	switch {
+	case p.dp:
+		return "DIFFERENTIAL_PRIVACY"
+	case p.hasAT:
+		return "AGGREGATION_THRESHOLD"
+	}
+	return ""
 }

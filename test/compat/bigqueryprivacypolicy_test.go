@@ -134,11 +134,12 @@ func TestBigQueryPrivacyPolicyAggregationThreshold(t *testing.T) {
 		_, err := privacyRows(t, c, h, sql, false)
 		wantReason(t, what, err, http.StatusBadRequest, "invalidQuery")
 	}
-	// What the front cannot check is 501, never answered.
-	_, err = privacyRows(t, c, h, "SELECT * FROM (SELECT * FROM `"+d+".ExamView`)", false)
+	// What the front cannot check is 501, never answered; with no clause
+	// at all, BigQuery's 400 (#1517, TestBigQueryPrivacyPolicyRest).
+	_, err = privacyRows(t, c, h, "SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM (SELECT * FROM `"+d+".ExamView`)", false)
 	wantReason(t, "a read in a subquery", err, http.StatusNotImplemented, "notImplemented")
 	run("CREATE VIEW `" + d + ".Around` AS SELECT * FROM `" + d + ".ExamView`")
-	_, err = privacyRows(t, c, h, "SELECT * FROM `"+d+".Around`", false)
+	_, err = privacyRows(t, c, h, "SELECT WITH AGGREGATION_THRESHOLD COUNT(*) FROM `"+d+".Around`", false)
 	wantReason(t, "a view reading the view", err, http.StatusNotImplemented, "notImplemented")
 
 	// The clause on a table with no policy, the docs' first example.
@@ -257,6 +258,8 @@ func TestBigQueryPrivacyPolicyJoinRestriction(t *testing.T) {
 			t.Errorf("%s: %v, want %q", c2.what, err, c2.want)
 		}
 	}
-	_, err = privacyRows(t, c, h, "SELECT * FROM `"+anyV+"` e LEFT JOIN "+student+" USING (test_score)", false)
-	wantReason(t, "a LEFT JOIN", err, http.StatusNotImplemented, "notImplemented")
+	// #1517: JOIN_ANY met by a LEFT JOIN is served (TestBigQueryPrivacyPolicyRest).
+	if _, err := privacyRows(t, c, h, "SELECT * FROM `"+anyV+"` e LEFT JOIN "+student+" USING (test_score)", false); err != nil {
+		t.Errorf("JOIN_ANY by a LEFT JOIN: %v", err)
+	}
 }

@@ -101,7 +101,21 @@ type dpItem struct {
 	// hidden an aggregate only HAVING calls, not in the select list.
 	key    string
 	hidden bool
+	// expr is an expression over DP aggregates (#1517): its text, with
+	// each aggregate call a reference to a hidden item, evaluated on the
+	// noisy values; nil for any other item.
+	expr []dpPart
 }
+
+// dpExprMarker is dpParseItem's msg for an item that is an expression over
+// differentially private aggregates, which parseDPQuery reads with dpParts.
+const dpExprMarker = "\x00dp-expression"
+
+// isExpr reports whether it is an expression over DP aggregates.
+func (it dpItem) isExpr() bool { return it.expr != nil }
+
+// grouping reports whether it is a grouping expression of the select list.
+func (it dpItem) grouping() bool { return it.agg == nil && it.expr == nil }
 
 // dpPart is a piece of a HAVING condition: text as it is, or a reference
 // to an item (an aggregate call, or a select list name), item >= 0.
@@ -279,6 +293,27 @@ func parseDPQuery(sql string, s []token) (q dpQuery, msg string, unsupported boo
 			break // a trailing comma
 		}
 		item, m, unsup := dpParseItem(sql, s[start:j], depth[start:j])
+		if m == dpExprMarker {
+			// An expression over DP aggregates (#1517): UNVERIFIED. Neither
+			// BigQuery's reference nor GoogleSQL's documents it; the front
+			// follows what both document of HAVING, a condition on the
+			// aggregates' noisy values, and evaluates the expression on
+			// them, each call one more aggregate taking its share of the
+			// epsilon (query-syntax#dp_epsilon). Post-processing a
+			// differentially private result keeps it so.
+			k := len(q.items)
+			q.items = append(q.items, dpItem{})
+			it, m2, unsup2 := q.dpExprItem(sql, s[start:j], depth[start:j])
+			if m2 != "" {
+				if unsup2 {
+					return no(m2)
+				}
+				return bad(m2)
+			}
+			q.items[k] = it
+			start = j + 1
+			continue
+		}
 		if m != "" {
 			if unsup {
 				return no(m)
@@ -335,10 +370,45 @@ func dpKey(t []token) string {
 // any other (query-syntax#dp_epsilon); a name of the select list (an alias, a
 // grouping column) is that column.
 func (q *dpQuery) parseHaving(sql string, t []token, d []int) (msg string, unsupported bool) {
-	names := map[string]int{}
+	q.having, msg, unsupported = q.dpParts(sql, t, d, true)
+	return msg, unsupported
+}
+
+// dpExprItem reads t (depths d), an item of the select list that is an
+// expression over DP aggregates, and its alias (#1517).
+func (q *dpQuery) dpExprItem(sql string, t []token, d []int) (it dpItem, msg string, unsupported bool) {
+	n := len(t)
+	switch {
+	case n >= 3 && t[n-2].is("AS") && (t[n-1].kind == tokWord || t[n-1].kind == tokQuoted):
+		it.alias, t, d = t[n-1].text, t[:n-2], d[:n-2]
+	case n >= 2 && (t[n-1].kind == tokQuoted || t[n-1].kind == tokWord && !reservedWords[strings.ToUpper(t[n-1].text)]) &&
+		d[n-1] == d[0] && (t[n-2].punct(")") || t[n-2].kind == tokWord && !reservedWords[strings.ToUpper(t[n-2].text)]):
+		it.alias, t, d = t[n-1].text, t[:n-1], d[:n-1]
+	}
+	parts, msg, unsupported := q.dpParts(sql, t, d, false)
+	if msg != "" {
+		return it, msg, unsupported
+	}
+	if len(parts) == 0 {
+		parts = []dpPart{}
+	}
+	it.expr = parts
+	return it, "", false
+}
+
+// dpParts reads t (depths d), a condition or expression over the select
+// list's aggregates: each DP aggregate call is the select list's same call,
+// else a hidden aggregate of the query, which takes its share of the
+// epsilon as any other; with names, a name of the select list (an alias,
+// a grouping column) is that column.
+func (q *dpQuery) dpParts(sql string, t []token, d []int, names bool) (parts []dpPart, msg string, unsupported bool) {
+	byName := map[string]int{}
 	for i, it := range q.items {
 		n := it.alias
-		if it.agg == nil {
+		if !names && it.agg != nil || it.isExpr() && !names {
+			continue
+		}
+		if it.grouping() {
 			n = ""
 			if !strings.ContainsAny(it.text, " ()") {
 				n = it.text
@@ -349,18 +419,18 @@ func (q *dpQuery) parseHaving(sql string, t []token, d []int) (msg string, unsup
 			}
 		}
 		if n != "" {
-			if _, dup := names[strings.ToLower(n)]; !dup {
-				names[strings.ToLower(n)] = i
+			if _, dup := byName[strings.ToLower(n)]; !dup {
+				byName[strings.ToLower(n)] = i
 			}
 		}
 	}
 	last := t[0].pos
 	add := func(upTo int, item int) {
 		if upTo > last {
-			q.having = append(q.having, dpPart{text: sql[last:upTo], item: -1})
+			parts = append(parts, dpPart{text: sql[last:upTo], item: -1})
 		}
 		if item >= 0 {
-			q.having = append(q.having, dpPart{item: item})
+			parts = append(parts, dpPart{item: item})
 		}
 	}
 	for k := 0; k < len(t); k++ {
@@ -372,7 +442,7 @@ func (q *dpQuery) parseHaving(sql string, t []token, d []int) (msg string, unsup
 			n := strings.ToUpper(tk.text)
 			if !dpFunctions[n] {
 				if otherAggregates[n] || aggregationThresholdFunctions[n] || strings.HasPrefix(n, "ANON_") {
-					return "Aggregate function " + n + " is not supported in SELECT WITH DIFFERENTIAL_PRIVACY; use AVG, COUNT, PERCENTILE_CONT or SUM", false
+					return nil, "Aggregate function " + n + " is not supported in SELECT WITH DIFFERENTIAL_PRIVACY; use AVG, COUNT, PERCENTILE_CONT or SUM", false
 				}
 				continue
 			}
@@ -384,7 +454,7 @@ func (q *dpQuery) parseHaving(sql string, t []token, d []int) (msg string, unsup
 				}
 			}
 			if closeAt < 0 {
-				return "Syntax error: expected ) after " + n + " in HAVING", false
+				return nil, "Syntax error: expected ) after " + n, false
 			}
 			call := t[k : closeAt+1]
 			key := dpKey(call)
@@ -397,8 +467,11 @@ func (q *dpQuery) parseHaving(sql string, t []token, d []int) (msg string, unsup
 			}
 			if at < 0 {
 				it, m, unsup := dpParseItem(sql, call, d[k:closeAt+1])
+				if m == dpExprMarker {
+					m, unsup = "SELECT WITH DIFFERENTIAL_PRIVACY cannot be used with a multi-level aggregation query", false
+				}
 				if m != "" {
-					return m, unsup
+					return nil, m, unsup
 				}
 				it.hidden = true
 				q.items = append(q.items, it)
@@ -409,13 +482,13 @@ func (q *dpQuery) parseHaving(sql string, t []token, d []int) (msg string, unsup
 			k = closeAt
 			continue
 		}
-		if i, ok := names[strings.ToLower(tk.text)]; ok {
+		if i, ok := byName[strings.ToLower(tk.text)]; ok {
 			add(tk.pos, i)
 			last = tk.end
 		}
 	}
 	add(t[len(t)-1].end, -1)
-	return "", false
+	return parts, "", false
 }
 
 // dpParseItem reads one item of the select list, t, whose depths are d.
@@ -435,7 +508,17 @@ func dpParseItem(sql string, t []token, d []int) (it dpItem, msg string, unsuppo
 		name = strings.ToUpper(t[0].text)
 		isAgg = dpFunctions[name]
 	}
+	callEnd := len(t) // the first call's closing parenthesis, when it is a DP aggregate
+	if isAgg {
+		for k := 2; k < len(t); k++ {
+			if d[k] == base && t[k].punct(")") {
+				callEnd = k
+				break
+			}
+		}
+	}
 	// An aggregate anywhere else: in an expression, or another function.
+	expr := false
 	for k := 0; k+1 < len(t); k++ {
 		if t[k].kind != tokWord || !t[k+1].punct("(") || k > 0 && t[k-1].punct(".") {
 			continue
@@ -446,15 +529,18 @@ func dpParseItem(sql string, t []token, d []int) (it dpItem, msg string, unsuppo
 		}
 		switch {
 		case dpFunctions[n]:
-			if isAgg {
+			if isAgg && k < callEnd {
 				return it, "SELECT WITH DIFFERENTIAL_PRIVACY cannot be used with a multi-level aggregation query", false
 			}
-			return it, "a differentially private aggregate inside an expression (" + n + ")", true
+			expr = true // an expression over DP aggregates (#1517)
 		case strings.HasPrefix(n, "ANON_"):
 			return it, "the function " + n + " (the deprecated ANONYMIZATION clause's)", true
 		case otherAggregates[n] || aggregationThresholdFunctions[n]:
 			return it, "Aggregate function " + n + " is not supported in SELECT WITH DIFFERENTIAL_PRIVACY; use AVG, COUNT, PERCENTILE_CONT or SUM", false
 		}
+	}
+	if expr {
+		return it, dpExprMarker, false
 	}
 	if !isAgg {
 		it.text = sql[t[0].pos:t[len(t)-1].end]
@@ -480,7 +566,7 @@ func dpParseItem(sql string, t []token, d []int) (it dpItem, msg string, unsuppo
 	case len(rest) == 1 && (rest[0].kind == tokWord || rest[0].kind == tokQuoted):
 		it.alias = rest[0].text
 	default:
-		return it, "a differentially private aggregate inside an expression (" + name + ")", true
+		return it, dpExprMarker, false // an expression over it (#1517)
 	}
 	// Its arguments, split at the commas of its depth.
 	var args [][]token
@@ -1052,6 +1138,11 @@ func (dq dpQuery) innerSQL(unitRef string) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
+		if it.isExpr() {
+			// Evaluated on the noisy values (resultSQL).
+			fmt.Fprintf(&b, "CAST(NULL AS INT64) AS `__dp_x%d`", i)
+			continue
+		}
 		if it.agg == nil {
 			b.WriteString(it.text)
 			continue
@@ -1197,7 +1288,7 @@ func (dq dpQuery) compute(rows [][]any) ([]dpOut, string) {
 		}
 		var key []any
 		for i, it := range dq.items {
-			if it.agg == nil {
+			if it.grouping() {
 				key = append(key, row[i])
 			}
 		}
@@ -1314,6 +1405,9 @@ func (dq dpQuery) compute(rows [][]any) ([]dpOut, string) {
 		}
 		row := make(dpOut, len(dq.items))
 		for i, it := range dq.items {
+			if it.isExpr() {
+				continue
+			}
 			if it.agg == nil {
 				row[i] = g.cells[i]
 				continue
@@ -1521,6 +1615,15 @@ func (dq dpQuery) resultSQL(schema []field, out []dpOut) (string, string) {
 			cols, types = append(cols, ""), append(types, typ)
 			continue
 		}
+		if it.isExpr() {
+			name := it.alias
+			if name == "" {
+				name = fmt.Sprintf("f%d_", anon)
+				anon++
+			}
+			cols, types = append(cols, name), append(types, "INT64")
+			continue
+		}
 		if it.agg == nil {
 			if i >= len(schema) {
 				return "", "cloudburrow: the differentially private query's columns could not be read"
@@ -1555,7 +1658,10 @@ func (dq dpQuery) resultSQL(schema []field, out []dpOut) (string, string) {
 	for i := range cols {
 		c := fmt.Sprintf("`__dp_c%d`", i)
 		st = append(st, c+" "+types[i])
-		if !dq.items[i].hidden {
+		switch {
+		case dq.items[i].isExpr():
+			sel = append(sel, "("+dq.partsSQL(dq.items[i].expr)+") AS "+quotePath([]string{cols[i]}))
+		case !dq.items[i].hidden:
 			sel = append(sel, c+" AS "+quotePath([]string{cols[i]}))
 		}
 	}
@@ -1565,6 +1671,10 @@ func (dq dpQuery) resultSQL(schema []field, out []dpOut) (string, string) {
 		var vs []string
 		for i, it := range dq.items {
 			v := row[i]
+			if it.isExpr() {
+				vs = append(vs, "CAST(NULL AS INT64)")
+				continue
+			}
 			if it.agg == nil {
 				lit, msg := literalOf(schema[i], v)
 				if msg != "" {
@@ -1594,18 +1704,27 @@ func (dq dpQuery) resultSQL(schema []field, out []dpOut) (string, string) {
 	}
 	sql := "SELECT " + strings.Join(sel, ", ") + " FROM UNNEST(ARRAY<" + structType + ">[" + strings.Join(lits, ", ") + "])"
 	if len(dq.having) > 0 {
-		var b strings.Builder
-		for _, p := range dq.having {
-			if p.item >= 0 {
-				fmt.Fprintf(&b, "`__dp_c%d`", p.item)
-				continue
-			}
-			b.WriteString(p.text)
-		}
-		sql += " WHERE " + b.String()
+		sql += " WHERE " + dq.partsSQL(dq.having)
 	}
 	if dq.tail != "" {
 		sql += " " + dq.tail
 	}
 	return sql, ""
+}
+
+// partsSQL is parts' text over resultSQL's rows: an item's reference its
+// column, an expression item's its expression.
+func (dq dpQuery) partsSQL(parts []dpPart) string {
+	var b strings.Builder
+	for _, p := range parts {
+		switch {
+		case p.item >= 0 && dq.items[p.item].isExpr():
+			b.WriteString("(" + dq.partsSQL(dq.items[p.item].expr) + ")")
+		case p.item >= 0:
+			fmt.Fprintf(&b, "`__dp_c%d`", p.item)
+		default:
+			b.WriteString(p.text)
+		}
+	}
+	return b.String()
 }
