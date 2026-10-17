@@ -70,12 +70,12 @@ func TestTheBigQueryReadWriteEditorScreensStatements(t *testing.T) {
 		}
 	}
 	for stmt, want := range map[string]string{
-		"SELECT * FROM t":                                                     "switch the editor to Read-only",
-		"WITH a AS (SELECT 1) SELECT * FROM a;":                               "switch the editor to Read-only",
-		"(SELECT 1)":                                                          "switch the editor to Read-only",
-		"":                                                                    "a statement is required",
-		"-- nothing":                                                          "a statement is required",
-		strings.Repeat("-", maxBigQueryScriptBytes+1):                         "at most",
+		"SELECT * FROM t":                       "switch the editor to Read-only",
+		"WITH a AS (SELECT 1) SELECT * FROM a;": "switch the editor to Read-only",
+		"(SELECT 1)":                            "switch the editor to Read-only",
+		"":                                      "a statement is required",
+		"-- nothing":                            "a statement is required",
+		strings.Repeat("-", maxBigQueryScriptBytes+1): "at most",
 	} {
 		if _, err := writableBigQuery(stmt); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%.40q = %v, want a refusal naming %q", stmt, err, want)
