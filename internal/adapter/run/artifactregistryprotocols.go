@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -55,7 +56,7 @@ var arServer atomic.Pointer[ArtifactRegistryServer]
 // A VIRTUAL repository serves the reads from its upstream repositories,
 // highest priority first, and refuses writes, as Google's does.
 
-var pkgHostRE = regexp.MustCompile(`^([a-z0-9-]+)-(python|npm|maven)\.pkg\.(dev|localhost)$`)
+var pkgHostRE = regexp.MustCompile(`^([a-z0-9-]+)-(python|npm|maven|apt)\.pkg\.(dev|localhost)$`)
 
 // pkgRequest is a protocol request resolved to its repository.
 type pkgRequest struct {
@@ -86,6 +87,9 @@ func resolvePkgRequest(r *http.Request) (*pkgRequest, string, bool) {
 		}
 		prefix += "/" + seg
 		p = "/" + rest
+	}
+	if m[2] == "apt" {
+		return resolveAptRequest(m[1], prefix, p)
 	}
 	parts := strings.SplitN(strings.TrimPrefix(p, "/"), "/", 3)
 	if len(parts) < 2 {
@@ -147,6 +151,8 @@ func servePackages(w http.ResponseWriter, r *http.Request) bool {
 		serveNpm(w, r, pr)
 	case arpb.Repository_MAVEN:
 		serveMaven(w, r, pr)
+	case arpb.Repository_APT:
+		serveApt(w, r, pr)
 	}
 	return true
 }
@@ -866,4 +872,107 @@ func multipartBoundary(ct string) (string, bool) {
 	}
 	b = strings.Trim(strings.TrimSpace(b), `'"`)
 	return b, b != ""
+}
+
+// Apt (#1531): an APT repository's archive, as Google's
+// {location}-apt.pkg.dev/projects/{project} serves it to
+// `deb [trusted=yes] URL REPOSITORY main`: dists/{repository}/Release,
+// dists/{repository}/main/binary-{arch}/Packages[.gz] from the imported
+// packages' control files, and their pool files. The Release is not
+// signed, so apt needs [trusted=yes].
+
+// resolveAptRequest reads /projects/{project}/dists/{repository}/... and
+// /projects/{project}/pool/{repository}/....
+func resolveAptRequest(location, prefix, p string) (*pkgRequest, string, bool) {
+	parts := strings.SplitN(strings.TrimPrefix(p, "/"), "/", 5)
+	if len(parts) < 4 || parts[0] != "projects" || (parts[2] != "dists" && parts[2] != "pool") {
+		return nil, "the apt archive is /projects/{project}/dists/{repository}/ and /projects/{project}/pool/{repository}/", true
+	}
+	name := "projects/" + parts[1] + "/locations/" + location + "/repositories/" + parts[3]
+	repo, ok := repoFormat(name)
+	if !ok || repo.GetFormat() != arpb.Repository_APT {
+		return nil, fmt.Sprintf("repository %s was not found, or is not an APT repository", name), true
+	}
+	pr := &pkgRequest{repo: repo, prefix: prefix + "/projects/" + parts[1], rest: parts[2] + "/"}
+	if len(parts) == 5 {
+		pr.rest += parts[4]
+	}
+	return pr, "", true
+}
+
+func aptPackages(repoName, repoID, arch string) []byte {
+	var b bytes.Buffer
+	for _, f := range repoFilesOf(repoName) {
+		if f.Meta["arch"] != arch && f.Meta["arch"] != "all" {
+			continue
+		}
+		b.WriteString(strings.TrimRight(f.Meta["control"], "\n"))
+		fmt.Fprintf(&b, "\nFilename: pool/%s/%s\nSize: %d\nMD5sum: %s\nSHA256: %s\n\n",
+			repoID, strings.TrimPrefix(f.ID, "pool/"), f.Size, f.MD5, strings.TrimPrefix(f.Digest, "sha256:"))
+	}
+	return b.Bytes()
+}
+
+func aptArchitectures(repoName string) []string {
+	seen := map[string]bool{}
+	for _, f := range repoFilesOf(repoName) {
+		if a := f.Meta["arch"]; a != "" && a != "all" {
+			seen[a] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for a := range seen {
+		out = append(out, a)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func serveApt(w http.ResponseWriter, r *http.Request, p *pkgRequest) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "an apt archive is read-only: import packages with ImportAptArtifacts", http.StatusMethodNotAllowed)
+		return
+	}
+	repoName := p.repo.GetName()
+	repoID := repoName[strings.LastIndex(repoName, "/")+1:]
+	rest, _ := url.PathUnescape(p.rest)
+	if f, ok := strings.CutPrefix(rest, "pool/"); ok {
+		if x, found := fileByID(repoName, "pool/"+f); found {
+			serveBlob(w, r, x, "application/vnd.debian.binary-package")
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
+	idx, _ := strings.CutPrefix(rest, "dists/")
+	if idx == "Release" {
+		var b strings.Builder
+		archs := aptArchitectures(repoName)
+		fmt.Fprintf(&b, "Origin: Artifact Registry\nLabel: %s\nSuite: %s\nCodename: %s\nDate: %s\nArchitectures: %s\nComponents: main\nSHA256:\n",
+			repoID, repoID, repoID, time.Now().UTC().Format(time.RFC1123), strings.Join(archs, " "))
+		for _, a := range archs {
+			body := aptPackages(repoName, repoID, a)
+			fmt.Fprintf(&b, " %s %d main/binary-%s/Packages\n", sha256Hex(body), len(body), a)
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, b.String())
+		return
+	}
+	if comp, ok := strings.CutPrefix(idx, "main/binary-"); ok {
+		arch, file, _ := strings.Cut(comp, "/")
+		body := aptPackages(repoName, repoID, arch)
+		switch file {
+		case "Packages":
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write(body)
+			return
+		case "Packages.gz":
+			w.Header().Set("Content-Type", "application/gzip")
+			zw := gzip.NewWriter(w)
+			_, _ = zw.Write(body)
+			_ = zw.Close()
+			return
+		}
+	}
+	http.NotFound(w, r)
 }

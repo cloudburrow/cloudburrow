@@ -31,7 +31,10 @@ func packageUse(r *arpb.Repository) string {
 	case arpb.Repository_GENERIC:
 		return "gcloud artifacts generic upload, or POST /upload/v1/" + r.GetName() + "/genericArtifacts:create"
 	}
-	return "ImportAptArtifacts or ImportYumArtifacts from this instance's Cloud Storage"
+	if r.GetFormat() == arpb.Repository_APT {
+		return "Import from Cloud Storage, then deb [trusted=yes] " + base + " " + r.GetName()[strings.LastIndex(r.GetName(), "/")+1:] + " main"
+	}
+	return "Import from Cloud Storage; files download through /v1/FILE:download?alt=media"
 }
 
 func (p artifactRegistryProvider) packageRepoDetail(ctx context.Context, r *arpb.Repository, path []string) (console.Detail, error) {

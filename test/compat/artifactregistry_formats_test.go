@@ -572,8 +572,9 @@ func rpmPackage(name, version, release, arch string) []byte {
 // to this instance's Cloud Storage import into an APT and a YUM
 // repository; the operations' responses name each package with its
 // architecture (and a .deb's control file); an object that is not a
-// package is reported in the response's errors; the official client then
-// lists each as a package and version with its file.
+// package is reported in the response's errors; the APT repository's
+// archive serves its Release, Packages index and pool file; the official
+// client then lists each as a package and version with its file.
 func TestArtifactRegistryAptAndYumImports(t *testing.T) {
 	h := New(t)
 	ar, ctx := arClient(t, h)
@@ -621,6 +622,26 @@ func TestArtifactRegistryAptAndYumImports(t *testing.T) {
 	if vs := collectAll(t, ar.ListVersions(ctx, &arpb.ListVersionsRequest{Parent: apt.GetName() + "/packages/hello"}).Next); len(vs) != 1 ||
 		!strings.HasSuffix(vs[0].GetName(), "/versions/1.0-1") {
 		t.Errorf("APT versions = %v", vs)
+	}
+
+	// The archive apt reads with `deb [trusted=yes] URL apt-local main`
+	// (apt is not on this machine: Go HTTP to its documented paths).
+	archive := "http://" + h.Endpoint(EnvRun) + "/us-central1-apt.pkg.dev/projects/" + h.Project()
+	packages := string(mustHTTP(t, "GET", archive+"/dists/apt-local/main/binary-amd64/Packages", "", nil))
+	release := string(mustHTTP(t, "GET", archive+"/dists/apt-local/Release", "", nil))
+	ps := sha256.Sum256([]byte(packages))
+	if !strings.Contains(packages, "Package: hello\n") || !strings.Contains(release, "Architectures: amd64") ||
+		!strings.Contains(release, hex.EncodeToString(ps[:])+" ") {
+		t.Fatalf("Release:\n%s\nPackages:\n%s", release, packages)
+	}
+	filename := ""
+	for _, line := range strings.Split(packages, "\n") {
+		if v, ok := strings.CutPrefix(line, "Filename: "); ok {
+			filename = v
+		}
+	}
+	if got := mustHTTP(t, "GET", archive+"/"+filename, "", nil); !bytes.Equal(got, debPackage("hello", "1.0-1", "amd64")) {
+		t.Errorf("the pool file %s is not the imported .deb", filename)
 	}
 
 	yum := formatRepo(t, ctx, ar, parent, "yum-local", &arpb.Repository{Format: arpb.Repository_YUM})
