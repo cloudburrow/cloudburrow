@@ -32,8 +32,11 @@ import (
 // creation and modification times among them, and puts the procedures and
 // models back as they were.
 //
-// Not kept: a function the front does not know the definition of (one
-// routines.insert made before the front started).
+// A function routines.insert made before the front started (#1522), whose
+// definition the front never saw, is read from the emulator, which keeps
+// each Routine routines.insert makes (bigquery-emulator patch 0053):
+// routines.list of the dataset, for each routine the front does not know
+// and the engine still has.
 
 // keepRoutines records in d the dataset's routines and models.
 func (f front) keepRoutines(r *http.Request, d *droppedDataset) {
@@ -46,6 +49,7 @@ func (f front) keepRoutines(r *http.Request, d *droppedDataset) {
 			d.Routines = append(d.Routines, b)
 		}
 	}
+	d.Routines = append(d.Routines, f.emulatorRoutines(r, d.Dataset, d.Routines)...)
 	if procs := f.functions.procsIn(project, d.Dataset); len(procs) > 0 {
 		d.Procedures = procs
 	}
@@ -111,4 +115,53 @@ func (f front) restoreRoutines(r *http.Request, d droppedDataset) string {
 		}
 	}
 	return ""
+}
+
+// emulatorRoutines are the Routine resources the emulator keeps of the
+// functions of dataset (bigquery-emulator patch 0053) that are not among
+// known, the front's, and that the engine still has (above, #1522).
+func (f front) emulatorRoutines(r *http.Request, dataset string, known []json.RawMessage) []json.RawMessage {
+	have := map[string]bool{}
+	for _, raw := range known {
+		have[routineIDOf(raw)] = true
+	}
+	st, got := f.get(r, "/datasets/"+url.PathEscape(dataset)+"/routines")
+	var list struct {
+		Routines []json.RawMessage `json:"routines"`
+	}
+	if st != http.StatusOK || json.Unmarshal(got, &list) != nil {
+		return nil
+	}
+	var out []json.RawMessage
+	for _, raw := range list.Routines {
+		var def map[string]any
+		if json.Unmarshal(raw, &def) != nil {
+			continue
+		}
+		id := routineIDOf(raw)
+		typ, _ := def["routineType"].(string)
+		if id == "" || have[id] || typ == "PROCEDURE" {
+			continue
+		}
+		if p, ok := f.functions.proc(projectOf(f.base), []string{dataset, id}); ok && p.Routine != nil {
+			continue // the front's own procedure (procedures.go)
+		}
+		if !f.routineExists(r, dataset, id) {
+			continue // dropped since, by DDL or routines.delete
+		}
+		have[id] = true
+		out = append(out, raw)
+	}
+	return out
+}
+
+// routineIDOf is the routineId of a Routine resource.
+func routineIDOf(raw json.RawMessage) string {
+	var def struct {
+		Ref struct {
+			ID string `json:"routineId"`
+		} `json:"routineReference"`
+	}
+	_ = json.Unmarshal(raw, &def)
+	return def.Ref.ID
 }

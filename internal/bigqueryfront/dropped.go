@@ -63,8 +63,8 @@ import (
 // copies. Kept since #1483 (droppedkeep.go): a materialized view, a table
 // snapshot, the settings the front keeps of a table (enable_change_history,
 // privacy_policy, tableoptions.go), its IAM policy and row access
-// policies; and a dataset's routines and models (droppedroutines.go). Not
-// kept: an external table, whose definition the front does not keep.
+// policies; and a dataset's routines and models (droppedroutines.go).
+// Kept since #1522: an external table, as its definition (droppedkeep.go).
 
 // droppedDatasetID is the front's dataset of the copies.
 const droppedDatasetID = "_cloudburrow_dropped"
@@ -89,7 +89,7 @@ type droppedTable struct {
 	WithDataset bool `json:"withDataset,omitempty"`
 	// Kind is the table's type when it is not a TABLE or VIEW:
 	// MATERIALIZED_VIEW (its resource only) or SNAPSHOT (its rows, Final)
-	// (#1483, droppedkeep.go).
+	// (#1483, droppedkeep.go), or EXTERNAL (its resource only, #1522).
 	Kind string `json:"kind,omitempty"`
 	// ForUpdate: Copy keeps each change's _CHANGE_IS_FOR_UPDATE (#1483).
 	ForUpdate bool `json:"forUpdate,omitempty"`
@@ -334,6 +334,10 @@ func (f front) keepTable(r *http.Request, dataset, table string, hours int64) (d
 		return d, true
 	case "MATERIALIZED_VIEW":
 		d.Kind = "MATERIALIZED_VIEW"
+		return d, true
+	case "EXTERNAL":
+		// Its definition alone (#1522, droppedkeep.go).
+		d.Kind = "EXTERNAL"
 		return d, true
 	case "SNAPSHOT":
 		snapshot = true
@@ -989,7 +993,11 @@ func (f front) copySourceAt(r *http.Request, s tableRef) (copyTable, int, string
 			"Cannot read before %d", at, name, at, earliest)
 	}
 	if t.Copy == "" {
-		return copyTable{ref: ref, exists: true, kind: "VIEW"}, 0, "", ""
+		kind := "VIEW"
+		if t.Kind == "EXTERNAL" { // #1522: a copy job refuses it, as of a live one
+			kind = "EXTERNAL"
+		}
+		return copyTable{ref: ref, exists: true, kind: kind}, 0, "", ""
 	}
 	if f.droppedStartsAfter(r, t, at*1000+999) {
 		return copyTable{}, http.StatusNotImplemented, "notImplemented", "Not implemented here: a copy job of " + name + "@" +

@@ -62,7 +62,8 @@ func (f front) historySource(ds, table string) string {
 }
 
 // hasHistory reports whether ds.table has a change table (googlesqlite
-// patch 0036 gives none to a table of a column named _CHANGE_...).
+// patch 0036 gives none to a table of a column of a change column's
+// name, _CHANGE_IS_FOR_UPDATE say, patch 0063).
 func (f front) hasHistory(r *http.Request, ds, table string) bool {
 	return f.runDML(r, "SELECT COUNT(*) FROM "+quotePath([]string{projectOf(f.base), ds, table + changeTableSuffix})) == ""
 }

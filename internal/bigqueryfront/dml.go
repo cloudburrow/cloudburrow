@@ -232,6 +232,9 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.undropSchema(w, r, q, insert) { // #1460, dropped.go
 		return
 	}
+	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.alterSchema(w, r, q, insert) { // #1522, alterschema.go
+		return
+	}
 	if (q.UseLegacySQL == nil || !*q.UseLegacySQL) && !dryRun(r, insert) && f.keepQueryDrops(w, r, q, insert) { // #1460, dropped.go
 		return
 	}

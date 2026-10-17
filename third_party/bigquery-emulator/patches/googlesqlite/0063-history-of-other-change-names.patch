@@ -1,0 +1,138 @@
+CloudBurrow patch 63 to github.com/goccy/googlesqlite v0.3.1
+(cloudburrow/cloudburrow#1522). Applies after patch 0054.
+
+Patch 0036 gave no change table to a table with any column whose name
+starts _CHANGE_ (a query's results may name a change column so), and
+patch 0044 left such columns out of the history a CREATE OR REPLACE
+carries. BigQuery reserves only the prefixes _CHANGE_TYPE,
+_CHANGE_TIMESTAMP and _CHANGE_SEQUENCE_NUMBER
+(https://cloud.google.com/bigquery/docs/schemas, "Column names", read
+2026-10-17), which CloudBurrow's front refuses; another column so named,
+_CHANGE_NOTE say, is the table's own, and its history is kept as any
+table's. The patch leaves out of the change history only a table with a
+column of one of the change table's own names (_CHANGE_TYPE,
+_CHANGE_TIMESTAMP, _CHANGE_IS_FOR_UPDATE, without case), and carries
+every other column.
+
+Licence: a modification of goccy/googlesqlite, which is under the MIT
+License (third_party/bigquery-emulator/licenses/googlesqlite.LICENSE).
+This patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- a/internal/change_history.go
++++ b/internal/change_history.go
+@@ -70,8 +70,11 @@
+ 	}
+ 	for _, c := range spec.Columns {
+ 		// A table with a column of a change column's name (a query's
+-		// results may name one so) has no change table.
+-		if strings.HasPrefix(strings.ToUpper(c.Name), "_CHANGE_") {
++		// results may name one so) has no change table. CloudBurrow
++		// patch (cloudburrow/cloudburrow#1522): only of one of their
++		// names; another column whose name starts _CHANGE_ is the
++		// table's own, and its history is kept.
++		if isChangeColumn(c.Name) {
+ 			return nil
+ 		}
+ 	}
+@@ -96,6 +99,17 @@
+ 		&ColumnSpec{Name: "_CHANGE_IS_FOR_UPDATE", Type: &Type{Kind: int(googlesql.TypeKindTypeBool)}},
+ 	)
+ 	return cs
++}
++
++// isChangeColumn reports whether name is one of the columns a change
++// table adds to its table's (changeTableSpec), as column names are
++// compared, without case (CloudBurrow patch, cloudburrow/cloudburrow#1522).
++func isChangeColumn(name string) bool {
++	switch strings.ToUpper(name) {
++	case "_CHANGE_TYPE", "_CHANGE_TIMESTAMP", "_CHANGE_IS_FOR_UPDATE":
++		return true
++	}
++	return false
+ }
+ 
+ // encodedLiteral is v as the SQL literal of its stored form.
+--- a/internal/change_history_replace.go
++++ b/internal/change_history_replace.go
+@@ -56,7 +56,7 @@
+ 	}
+ 	rep := &replacedHistory{table: change + replacedSuffix}
+ 	for _, c := range old.Columns {
+-		if !strings.HasPrefix(c.Name, "_CHANGE_") {
++		if !isChangeColumn(c.Name) { // CloudBurrow patch (#1522)
+ 			rep.columns = append(rep.columns, c)
+ 		}
+ 	}
+@@ -79,7 +79,7 @@
+ 	change := cs.TableName()
+ 	var common []string
+ 	for _, c := range cs.Columns {
+-		if strings.HasPrefix(c.Name, "_CHANGE_") {
++		if isChangeColumn(c.Name) { // CloudBurrow patch (#1522)
+ 			continue
+ 		}
+ 		for _, o := range rep.columns {
+--- /dev/null
++++ b/change_history_change_names_test.go
+@@ -0,0 +1,60 @@
++package googlesqlite_test
++
++import (
++	"context"
++	"database/sql"
++	"testing"
++
++	_ "github.com/goccy/googlesqlite"
++)
++
++// TestChangeHistoryChangeNames is CloudBurrow's regression test of its
++// patch 0063 (cloudburrow/cloudburrow#1522): a table with a column whose
++// name starts _CHANGE_ but is not one of the change table's own
++// (_CHANGE_TYPE, _CHANGE_TIMESTAMP, _CHANGE_IS_FOR_UPDATE) keeps its
++// history, the column among it, through a CREATE OR REPLACE too; one with
++// a column of a change column's name keeps none.
++func TestChangeHistoryChangeNames(t *testing.T) {
++	db, err := sql.Open("googlesqlite", ":memory:")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	db.SetMaxOpenConns(1)
++	ctx := context.Background()
++	exec := func(q string) {
++		t.Helper()
++		if _, err := db.ExecContext(ctx, q); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++	}
++	count := func(q string) int64 {
++		t.Helper()
++		var n int64
++		if err := db.QueryRowContext(ctx, q).Scan(&n); err != nil {
++			t.Fatalf("%s: %v", q, err)
++		}
++		return n
++	}
++	exec("CREATE TABLE `p.d.t` (id INT64, _CHANGE_NOTE STRING)")
++	exec("INSERT INTO `p.d.t` VALUES (1, 'a'), (2, 'b')")
++	exec("UPDATE `p.d.t` SET _CHANGE_NOTE = 'c' WHERE id = 2")
++	if n := count("SELECT COUNT(*) FROM `p.d.t$changes` WHERE _CHANGE_TYPE != 'START'"); n != 4 {
++		t.Errorf("changes of a table with a column _CHANGE_NOTE: %d, want 4", n)
++	}
++	if n := count("SELECT COUNT(*) FROM `p.d.t$changes` WHERE _CHANGE_TYPE = 'UPDATE' AND _CHANGE_NOTE = 'c'"); n != 1 {
++		t.Errorf("the UPDATE's _CHANGE_NOTE: %d rows of 'c', want 1", n)
++	}
++	exec("CREATE OR REPLACE TABLE `p.d.t` (id INT64, _CHANGE_NOTE STRING)")
++	exec("INSERT INTO `p.d.t` VALUES (3, 'd')")
++	if n := count("SELECT COUNT(*) FROM `p.d.t$changes` WHERE _CHANGE_NOTE = 'd'"); n != 1 {
++		t.Errorf("after CREATE OR REPLACE, changes of _CHANGE_NOTE 'd': %d, want 1", n)
++	}
++	if n := count("SELECT COUNT(*) FROM `p.d.t$changes` WHERE _CHANGE_NOTE = 'a'"); n == 0 {
++		t.Errorf("after CREATE OR REPLACE, the replaced table's history of _CHANGE_NOTE was not carried")
++	}
++	exec("CREATE TABLE `p.d.u` (id INT64, _change_is_for_update BOOL)")
++	if _, err := db.ExecContext(ctx, "SELECT COUNT(*) FROM `p.d.u$changes`"); err == nil {
++		t.Errorf("a table with a column _change_is_for_update has a change table")
++	}
++}
