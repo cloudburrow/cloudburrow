@@ -142,6 +142,8 @@ func kmsProposalOp(p *kmspb.SingleTenantHsmInstanceProposal) string {
 		return "remove_quorum_member"
 	case *kmspb.SingleTenantHsmInstanceProposal_RefreshSingleTenantHsmInstance_:
 		return "refresh_sthi"
+	case *kmspb.SingleTenantHsmInstanceProposal_UpgradeKeyTrust_:
+		return "upgrade_key_trust " + p.GetUpgradeKeyTrust().GetName()
 	}
 	return "—"
 }
@@ -241,14 +243,16 @@ func (p kmsHsmProvider) DetailActions(ctx context.Context, project string, path 
 		{ID: "propose", Label: "Create proposal", Fields: []console.Field{
 			{Name: "proposal", Label: "Proposal ID", Type: "text", Pattern: `^[A-Za-z0-9_\-]{1,63}$`, Help: "Optional; empty is a UUID."},
 			{Name: "operationType", Label: "Operation", Type: "select", Required: true, Default: "register_2fa_keys",
-				Options: []string{"register_2fa_keys", "disable_sthi", "enable_sthi", "delete_sthi", "add_quorum_member", "remove_quorum_member", "refresh_sthi"}},
+				Options: []string{"register_2fa_keys", "disable_sthi", "enable_sthi", "delete_sthi", "add_quorum_member", "remove_quorum_member", "refresh_sthi", "upgrade_key_trust"}},
 			{Name: "requiredApproverCount", Label: "Required approvers (M)", Type: "text", Pattern: `^[0-9]{0,2}$`, Help: "register_2fa_keys only: 2 to N-1."},
 			{Name: "twoFactorPublicKeyPems", Label: "Two-factor public keys (PEM)", Type: "textarea",
-				Help: "register_2fa_keys: all N RSA 2048 public keys, concatenated. add_quorum_member and remove_quorum_member: the one member's key."},
+				Help: "register_2fa_keys: all N RSA 2048 public keys, concatenated. add_quorum_member, remove_quorum_member and upgrade_key_trust: the one member's key."},
+			{Name: "cryptoKeyVersion", Label: "Crypto key version", Type: "text",
+				Help: "upgrade_key_trust only: the AES_WRAPPING version (in this instance) to make a trusted wrapping key."},
 		}},
 		{ID: "approve", Label: "Approve", Fields: []console.Field{proposal,
 			{Name: "kind", Label: "Challenge", Type: "select", Default: "quorum", Options: []string{"quorum", "required"},
-				Help: "required: add_quorum_member's challenge for the new key."},
+				Help: "required: add_quorum_member's challenge for the new key, or upgrade_key_trust's for its two-factor key."},
 			{Name: "publicKeyPem", Label: "Public key (PEM)", Type: "textarea", Required: true},
 			{Name: "signedChallenge", Label: "Signed challenge (base64)", Type: "textarea", Required: true}}},
 		{ID: "execute", Label: "Execute", Fields: []console.Field{proposal}},
@@ -307,6 +311,9 @@ func (p kmsHsmProvider) ActAt(ctx context.Context, project string, path []string
 			pr.Operation = &kmspb.SingleTenantHsmInstanceProposal_RemoveQuorumMember_{RemoveQuorumMember: &kmspb.SingleTenantHsmInstanceProposal_RemoveQuorumMember{TwoFactorPublicKeyPem: one}}
 		case "refresh_sthi":
 			pr.Operation = &kmspb.SingleTenantHsmInstanceProposal_RefreshSingleTenantHsmInstance_{RefreshSingleTenantHsmInstance: &kmspb.SingleTenantHsmInstanceProposal_RefreshSingleTenantHsmInstance{}}
+		case "upgrade_key_trust":
+			pr.Operation = &kmspb.SingleTenantHsmInstanceProposal_UpgradeKeyTrust_{UpgradeKeyTrust: &kmspb.SingleTenantHsmInstanceProposal_UpgradeKeyTrust{
+				Name: strings.TrimSpace(values["cryptoKeyVersion"]), TwoFactorPublicKeyPem: one}}
 		default:
 			return fmt.Errorf("operation: %q is not one of the proposal operations", values["operationType"])
 		}

@@ -65,8 +65,9 @@ import (
 // return done operations, and the transitional states (CREATING, DISABLING,
 // DELETING, proposal CREATING and RUNNING) are never observed. Keys whose
 // crypto_key_backend is an instance are SOFTWARE keys underneath, as HSM
-// ones are (protection.go). upgrade_key_trust is UNIMPLEMENTED: trusted key
-// wrapping is (import.go). The error codes Google returns for a refused
+// ones are (protection.go). upgrade_key_trust (#1521) promotes an AES_WRAPPING
+// version of a key in the instance to hsm_trusted, with M of the N keys and
+// a required signature from the 2FA key it names (trusted.go). The error codes Google returns for a refused
 // transition are not documented, and are UNVERIFIED: a request made in the
 // wrong state is FAILED_PRECONDITION, a malformed one INVALID_ARGUMENT.
 
@@ -97,6 +98,7 @@ const (
 	opAdd      = "add_quorum_member"
 	opRemove   = "remove_quorum_member"
 	opRefresh  = "refresh_sthi"
+	opUpgrade  = "upgrade_key_trust"
 )
 
 type hsmInstance struct {
@@ -158,6 +160,9 @@ type hsmProposal struct {
 	RegisterRequired int      `json:"registerRequiredApproverCount,omitempty"`
 	RegisterPems     []string `json:"registerTwoFactorPublicKeyPems,omitempty"`
 	MemberPem        string   `json:"memberPublicKeyPem,omitempty"`
+	// Version is upgrade_key_trust's CryptoKeyVersion; its 2FA key is
+	// MemberPem.
+	Version string `json:"cryptoKeyVersion,omitempty"`
 	// Required is M; Quorum the quorum challenges, and Must the challenges
 	// that must all be signed (required_action_quorum_parameters, which a
 	// proposal has exactly when Must is not empty).
@@ -226,6 +231,8 @@ func (p hsmProposal) proto() *kmspb.SingleTenantHsmInstanceProposal {
 		out.Operation = &kmspb.SingleTenantHsmInstanceProposal_RemoveQuorumMember_{RemoveQuorumMember: &kmspb.SingleTenantHsmInstanceProposal_RemoveQuorumMember{TwoFactorPublicKeyPem: p.MemberPem}}
 	case opRefresh:
 		out.Operation = &kmspb.SingleTenantHsmInstanceProposal_RefreshSingleTenantHsmInstance_{RefreshSingleTenantHsmInstance: &kmspb.SingleTenantHsmInstanceProposal_RefreshSingleTenantHsmInstance{}}
+	case opUpgrade:
+		out.Operation = &kmspb.SingleTenantHsmInstanceProposal_UpgradeKeyTrust_{UpgradeKeyTrust: &kmspb.SingleTenantHsmInstanceProposal_UpgradeKeyTrust{Name: p.Version, TwoFactorPublicKeyPem: p.MemberPem}}
 	}
 	return out
 }
@@ -489,6 +496,18 @@ func needState(op string) []kmspb.SingleTenantHsmInstance_State {
 	return []kmspb.SingleTenantHsmInstance_State{kmspb.SingleTenantHsmInstance_ACTIVE}
 }
 
+// checkProposal is checkOperation, with upgrade_key_trust's checks of the
+// version it names.
+func (s *Server) checkProposal(i hsmInstance, p hsmProposal) *apierror.Error {
+	if e := checkOperation(i, p); e != nil {
+		return e
+	}
+	if p.Op == opUpgrade {
+		return s.checkUpgrade(i, p)
+	}
+	return nil
+}
+
 // checkOperation is whether op can run on i now, for proposal p.
 func checkOperation(i hsmInstance, p hsmProposal) *apierror.Error {
 	ok := false
@@ -585,7 +604,13 @@ func (h *HsmManagementServer) CreateSingleTenantHsmInstanceProposal(_ context.Co
 	case *kmspb.SingleTenantHsmInstanceProposal_RefreshSingleTenantHsmInstance_:
 		p.Op = opRefresh
 	case *kmspb.SingleTenantHsmInstanceProposal_UpgradeKeyTrust_:
-		return nil, apierror.Wrap(apierror.Unimplemented("upgrade_key_trust is not implemented: trusted key wrapping (AES_WRAPPING keys promoted to trusted wrapping keys) is not implemented"))
+		p.Op, p.Version, p.MemberPem = opUpgrade, op.UpgradeKeyTrust.GetName(), op.UpgradeKeyTrust.GetTwoFactorPublicKeyPem()
+		if _, _, err := parseCryptoKeyVersion("upgrade_key_trust.name", p.Version); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		if _, _, err := twoFactorKey("upgrade_key_trust.two_factor_public_key_pem", p.MemberPem); err != nil {
+			return nil, apierror.Wrap(err)
+		}
 	default:
 		return nil, apierror.Wrap(apierror.InvalidArgument("single_tenant_hsm_instance_proposal.operation is required"))
 	}
@@ -612,7 +637,7 @@ func (h *HsmManagementServer) CreateSingleTenantHsmInstanceProposal(_ context.Co
 	if err != nil {
 		return nil, err
 	}
-	if e := checkOperation(i, p); e != nil {
+	if e := s.checkProposal(i, p); e != nil {
 		return nil, apierror.Wrap(e)
 	}
 	if _, found, err := s.getProposal(p.Name); err != nil {
@@ -641,7 +666,7 @@ func (h *HsmManagementServer) CreateSingleTenantHsmInstanceProposal(_ context.Co
 	if p.Quorum, err = newChallenges(keys); err != nil {
 		return nil, apierror.Wrap(err)
 	}
-	if p.Op == opAdd {
+	if p.Op == opAdd || p.Op == opUpgrade {
 		if p.Must, err = newChallenges([]string{p.MemberPem}); err != nil {
 			return nil, apierror.Wrap(err)
 		}
@@ -853,7 +878,7 @@ func (h *HsmManagementServer) ExecuteSingleTenantHsmInstanceProposal(_ context.C
 	md := &kmspb.ExecuteSingleTenantHsmInstanceProposalMetadata{}
 	// The instance may have changed since the proposal was made (an
 	// unrefreshed instance disables itself): the proposal then FAILS.
-	if e := checkOperation(i, p); e != nil {
+	if e := s.checkProposal(i, p); e != nil {
 		p.State, p.Failure = kmspb.SingleTenantHsmInstanceProposal_FAILED.String(), e.Message
 		if err := s.put(dbKey(hsmProposalPrefix, p.Name), p); err != nil {
 			return nil, apierror.Wrap(err)
@@ -881,6 +906,10 @@ func (h *HsmManagementServer) ExecuteSingleTenantHsmInstanceProposal(_ context.C
 		i.Pems, i.Total = keep, len(keep)
 	case opRefresh:
 		i.DisableAt = now.Add(hsmUnrefreshed)
+	case opUpgrade:
+		if err := s.upgradeTrust(p.Version); err != nil {
+			return nil, apierror.Wrap(err)
+		}
 	}
 	if err := s.put(dbKey(hsmInstancePrefix, i.Name), i); err != nil {
 		return nil, apierror.Wrap(err)
@@ -926,7 +955,7 @@ func (h *HsmManagementServer) DeleteSingleTenantHsmInstanceProposal(_ context.Co
 // "projects/INSTANCE_PROJECT/..."), which must be ACTIVE.
 func (s *Server) hsmBackend(field, named, keyRing string) (string, error) {
 	if named == "" {
-		return "", apierror.InvalidArgument("%s is required for an HSM_SINGLE_TENANT key: it names the SingleTenantHsmInstance", field)
+		return "", apierror.InvalidArgument("%s is required at protection level HSM_SINGLE_TENANT: it names the SingleTenantHsmInstance", field)
 	}
 	loc, err := parseHsmInstance(field, named)
 	if err != nil {
@@ -945,7 +974,7 @@ func (s *Server) hsmBackend(field, named, keyRing string) (string, error) {
 		return "", apierror.InvalidArgument("%s %s does not exist", field, named)
 	}
 	if st := i.effective(s.now()).state(); st != kmspb.SingleTenantHsmInstance_ACTIVE {
-		return "", apierror.FailedPrecondition("%s %s is %s: keys can be created only in an ACTIVE SingleTenantHsmInstance", field, named, st)
+		return "", apierror.FailedPrecondition("%s %s is %s: keys and import jobs can be created only in an ACTIVE SingleTenantHsmInstance", field, named, st)
 	}
 	return named, nil
 }

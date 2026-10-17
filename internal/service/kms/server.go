@@ -134,6 +134,11 @@ type keyVersion struct {
 	ExternalKeyURI string `json:"externalKeyUri,omitempty"`
 	KeyPath        string `json:"ekmConnectionKeyPath,omitempty"`
 	Backend        string `json:"ekmConnectionBackendOverride,omitempty"`
+	// TrustedWrapping is trusted_wrapping_enabled, and HsmTrusted an
+	// AES_WRAPPING version's hsm_trusted, set by upgrade_key_trust
+	// (trusted.go, #1521).
+	TrustedWrapping bool `json:"trustedWrappingEnabled,omitempty"`
+	HsmTrusted      bool `json:"hsmTrusted,omitempty"`
 }
 
 // effective returns the version as it is at now: a DESTROY_SCHEDULED version
@@ -389,8 +394,11 @@ func (s *Server) toVersion(v keyVersion) *kmspb.CryptoKeyVersion {
 		GenerateTime:    timestamppb.New(v.Created),
 
 		ExternalProtectionLevelOptions: v.externalOptions(),
+		TrustedWrappingEnabled:         v.TrustedWrapping,
+		HsmTrusted:                     v.HsmTrusted,
 	}
-	if v.ImportJob != "" {
+	// A trusted-wrapped import has an import_time but no import_job.
+	if v.ImportJob != "" || !v.Imported.IsZero() {
 		out.ImportJob = v.ImportJob
 		out.ImportTime = timestamppb.New(v.Imported)
 	}
@@ -586,11 +594,20 @@ func (s *Server) CreateCryptoKey(_ context.Context, req *kmspb.CreateCryptoKeyRe
 			return nil, apierror.Wrap(apierror.Unimplemented("automatic rotation is not implemented for %s keys whose versions name their own external key: Google documents it for symmetric coordinated external keys only", level))
 		}
 	}
+	if req.GetTrustedWrappingEnabled() {
+		if err := trustedWrappingAllowed("trusted_wrapping_enabled", k); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+		if req.GetSkipInitialVersionCreation() {
+			return nil, apierror.Wrap(apierror.Unimplemented("trusted_wrapping_enabled with skip_initial_version_creation is not implemented: it applies to the first version created, and Google does not document which later version that is; set crypto_key_version.trusted_wrapping_enabled on CreateCryptoKeyVersion, or trusted_wrapping_enabled on ImportCryptoKeyVersion"))
+		}
+	}
 	if !req.GetSkipInitialVersionCreation() {
 		v, err := s.newVersion(k, 1, now, kmspb.CryptoKeyVersion_ENABLED, nil)
 		if err != nil {
 			return nil, apierror.Wrap(err)
 		}
+		v.TrustedWrapping = req.GetTrustedWrappingEnabled()
 		if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 			return nil, apierror.Wrap(err)
 		}
@@ -714,11 +731,18 @@ func (s *Server) CreateCryptoKeyVersion(_ context.Context, req *kmspb.CreateCryp
 	if err := s.backendUsable(k); err != nil {
 		return nil, err
 	}
+	trusted := req.GetCryptoKeyVersion().GetTrustedWrappingEnabled()
+	if trusted {
+		if err := trustedWrappingAllowed("crypto_key_version.trusted_wrapping_enabled", k); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+	}
 	n := k.Next
 	v, err := s.newVersion(k, n, s.now(), initial, req.GetCryptoKeyVersion().GetExternalProtectionLevelOptions())
 	if err != nil {
 		return nil, apierror.Wrap(err)
 	}
+	v.TrustedWrapping = trusted
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}

@@ -24,41 +24,19 @@ const kmsService = "google.cloud.kms.v1.KeyManagementService/"
 // against the running instance, and requires UNIMPLEMENTED (#396). The
 // registry drives it: an unimplemented method with no request here, or a
 // request here for a method that is no longer unimplemented, fails the test,
-// so a feature issue that implements a method must update the table.
-//
-// covers: google.cloud.kms.v1.KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion (unimplemented)
-// covers: google.cloud.kms.v1.KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion (unimplemented)
+// so a feature issue that implements a method must update the table. Since
+// trusted key wrapping was built (#1521) the registry lists none, and the
+// table is empty.
 func TestKMSUnimplementedContract(t *testing.T) {
 	h := New(t)
 	ctx := h.Context()
-	c := kmsClients(t, h)["grpc"]
-	loc := "projects/" + h.Project() + "/locations/global"
-	ring, err := c.CreateKeyRing(ctx, &kmspb.CreateKeyRingRequest{Parent: loc, KeyRingId: "unimplemented"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	key, err := c.CreateCryptoKey(ctx, &kmspb.CreateCryptoKeyRequest{Parent: ring.GetName(), CryptoKeyId: "k",
-		CryptoKey: &kmspb.CryptoKey{Purpose: kmspb.CryptoKey_ENCRYPT_DECRYPT}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	k, v := key.GetName(), key.GetName()+"/cryptoKeyVersions/1"
-	data := []byte("cloudburrow")
-	calls := map[string]func(context.Context) error{
-		"ExportTrustedKeyWrappedCryptoKeyVersion": func(ctx context.Context) error {
-			_, err := c.ExportTrustedKeyWrappedCryptoKeyVersion(ctx, &kmspb.ExportTrustedKeyWrappedCryptoKeyVersionRequest{Name: v})
-			return err
-		},
-		"ImportTrustedKeyWrappedCryptoKeyVersion": func(ctx context.Context) error {
-			_, err := c.ImportTrustedKeyWrappedCryptoKeyVersion(ctx, &kmspb.ImportTrustedKeyWrappedCryptoKeyVersionRequest{Parent: k,
-				Algorithm: kmspb.CryptoKeyVersion_GOOGLE_SYMMETRIC_ENCRYPTION, WrappedKey: data})
-			return err
-		},
-	}
+	// Asked for first, so a shard without KMS skips.
+	_ = kmsClients(t, h)["grpc"]
+	calls := map[string]func(context.Context) error{}
 
 	unimplemented := registryUnimplemented(t, kmsService)
-	if len(unimplemented) == 0 {
-		t.Fatal("the registry lists no unimplemented KMS methods; is it being read?")
+	if _, err := os.Stat("../../tools/coverage/registry.json"); err != nil {
+		t.Fatalf("the registry is not readable: %v", err)
 	}
 	for _, m := range unimplemented {
 		call, ok := calls[m]

@@ -36,8 +36,12 @@ import (
 //   - The key is plain bytes for symmetric algorithms and PKCS #8 DER for
 //     asymmetric ones, and must be what the algorithm names.
 //
-// A SOFTWARE job is generated at once, so it is ACTIVE when created, and it
-// expires three days after creation (resources.proto ImportJob.expire_time).
+// A job is generated at once, so it is ACTIVE when created, and it expires
+// three days after creation (resources.proto ImportJob.expire_time). An
+// HSM_SINGLE_TENANT job (#1521) names its ACTIVE SingleTenantHsmInstance in
+// crypto_key_backend, takes the same import methods, and imports into that
+// instance's keys; an imported version may ask for trusted_wrapping_enabled
+// (trusted.go).
 // The HPKE methods are UNIMPLEMENTED: they need ML-KEM or X-Wing.
 // The codes for refused imports are UNVERIFIED.
 
@@ -56,6 +60,9 @@ type importJob struct {
 	// ProtectionLevel is empty for SOFTWARE; an HSM job is generated as a
 	// SOFTWARE one is, with no attestation (protection.go, #1452).
 	ProtectionLevel string `json:"protectionLevel,omitempty"`
+	// Backend is an HSM_SINGLE_TENANT job's crypto_key_backend, its
+	// SingleTenantHsmInstance (#1521).
+	Backend string `json:"cryptoKeyBackend,omitempty"`
 }
 
 type importSpec struct {
@@ -107,14 +114,15 @@ func (s *Server) toImportJob(j importJob) (*kmspb.ImportJob, error) {
 	}
 	now := s.now()
 	out := &kmspb.ImportJob{
-		Name:            j.Name,
-		ImportMethod:    j.method(),
-		ProtectionLevel: j.protectionLevel(),
-		CreateTime:      timestamppb.New(j.Created),
-		GenerateTime:    timestamppb.New(j.Created),
-		ExpireTime:      timestamppb.New(j.Created.Add(importJobTTL)),
-		State:           j.state(now),
-		PublicKey:       &kmspb.ImportJob_WrappingPublicKey{Pem: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))},
+		Name:             j.Name,
+		ImportMethod:     j.method(),
+		ProtectionLevel:  j.protectionLevel(),
+		CreateTime:       timestamppb.New(j.Created),
+		GenerateTime:     timestamppb.New(j.Created),
+		ExpireTime:       timestamppb.New(j.Created.Add(importJobTTL)),
+		State:            j.state(now),
+		CryptoKeyBackend: j.Backend,
+		PublicKey:        &kmspb.ImportJob_WrappingPublicKey{Pem: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))},
 	}
 	if out.State == kmspb.ImportJob_EXPIRED {
 		out.ExpireEventTime = out.ExpireTime
@@ -164,11 +172,12 @@ func (s *Server) CreateImportJob(_ context.Context, req *kmspb.CreateImportJobRe
 	if isExternal(level) {
 		return nil, apierror.Wrap(apierror.Unimplemented("import_job.protection_level %s is not implemented: Google documents importing into SOFTWARE and HSM keys only", level))
 	}
-	if level == kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
-		return nil, apierror.Wrap(apierror.Unimplemented("import_job.protection_level HSM_SINGLE_TENANT is not implemented: importing into a SingleTenantHsmInstance is not"))
-	}
-	if in.GetCryptoKeyBackend() != "" {
-		return nil, apierror.Wrap(apierror.Unimplemented("import_job.crypto_key_backend is not implemented"))
+	// crypto_key_backend names the SingleTenantHsmInstance of an
+	// HSM_SINGLE_TENANT job ("only populated for keys stored in
+	// HSM_SINGLE_TENANT"; gcloud's --single-tenant-hsm-instance, required
+	// at that level); another level's is not documented.
+	if in.GetCryptoKeyBackend() != "" && level != kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
+		return nil, apierror.Wrap(apierror.Unimplemented("import_job.crypto_key_backend is not implemented for protection level %s: it names the SingleTenantHsmInstance of an HSM_SINGLE_TENANT import job", level))
 	}
 	name := req.GetParent() + "/importJobs/" + req.GetImportJobId()
 	priv, err := rsa.GenerateKey(rand.Reader, spec.bits)
@@ -192,6 +201,11 @@ func (s *Server) CreateImportJob(_ context.Context, req *kmspb.CreateImportJobRe
 		return nil, apierror.Wrap(apierror.AlreadyExists("ImportJob %s already exists", name))
 	}
 	j := importJob{Name: name, Method: m.String(), Created: s.now().UTC(), Private: der, ProtectionLevel: storedLevel(level)}
+	if level == kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
+		if j.Backend, err = s.hsmBackend("import_job.crypto_key_backend", in.GetCryptoKeyBackend(), req.GetParent()); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+	}
 	if err := s.put(dbKey(importJobPrefix, name), j); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -429,6 +443,19 @@ func (s *Server) ImportCryptoKeyVersion(_ context.Context, req *kmspb.ImportCryp
 	if j.protectionLevel() != k.protectionLevel() {
 		return nil, apierror.Wrap(apierror.InvalidArgument("ImportJob %s is %s, but CryptoKey %s is %s: the protection levels must match", j.Name, j.protectionLevel(), k.Name, k.protectionLevel()))
 	}
+	// An HSM_SINGLE_TENANT job imports into keys of its own instance; the
+	// code is UNVERIFIED.
+	if j.Backend != k.Backend && k.protectionLevel() == kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
+		return nil, apierror.Wrap(apierror.InvalidArgument("ImportJob %s is in the SingleTenantHsmInstance %s, but CryptoKey %s is in %s", j.Name, j.Backend, k.Name, k.Backend))
+	}
+	if err := s.backendUsable(k); err != nil {
+		return nil, err
+	}
+	if req.GetTrustedWrappingEnabled() {
+		if err := trustedWrappingAllowed("trusted_wrapping_enabled", k); err != nil {
+			return nil, apierror.Wrap(err)
+		}
+	}
 	now := s.now().UTC()
 	if st := j.state(now); st != kmspb.ImportJob_ACTIVE {
 		return nil, apierror.Wrap(apierror.FailedPrecondition("ImportJob %s is %s: only an ACTIVE import job can be used", j.Name, st))
@@ -443,7 +470,7 @@ func (s *Server) ImportCryptoKeyVersion(_ context.Context, req *kmspb.ImportCryp
 	}
 	n := k.Next
 	v := keyVersion{Name: versionName(k.Name, n), Created: now, Material: mat, Algorithm: storedAlgorithm(a),
-		ImportJob: j.Name, Imported: now, ProtectionLevel: k.ProtectionLevel}
+		ImportJob: j.Name, Imported: now, ProtectionLevel: k.ProtectionLevel, TrustedWrapping: req.GetTrustedWrappingEnabled()}
 	if err := s.put(dbKey(versionPrefix, v.Name), v); err != nil {
 		return nil, apierror.Wrap(err)
 	}
@@ -452,21 +479,6 @@ func (s *Server) ImportCryptoKeyVersion(_ context.Context, req *kmspb.ImportCryp
 		return nil, apierror.Wrap(err)
 	}
 	return s.toVersion(v), nil
-}
-
-// errTrustedKeyWrapping is why the trusted-key methods are UNIMPLEMENTED:
-// service.proto ties them to keys with trusted_wrapping_enabled, which is
-// supported only at protection level HSM_SINGLE_TENANT, wrapped with an
-// AES_WRAPPING key (AES_256_KWP). Neither that protection level nor that
-// purpose exists locally, so no version could satisfy their preconditions.
-const errTrustedKeyWrapping = "%s is not implemented: trusted key wrapping needs HSM_SINGLE_TENANT protection and an AES_WRAPPING key, which CloudBurrow does not provide"
-
-func (s *Server) ExportTrustedKeyWrappedCryptoKeyVersion(context.Context, *kmspb.ExportTrustedKeyWrappedCryptoKeyVersionRequest) (*kmspb.ExportTrustedKeyWrappedCryptoKeyVersionResponse, error) {
-	return nil, apierror.Wrap(apierror.Unimplemented(errTrustedKeyWrapping, "ExportTrustedKeyWrappedCryptoKeyVersion"))
-}
-
-func (s *Server) ImportTrustedKeyWrappedCryptoKeyVersion(context.Context, *kmspb.ImportTrustedKeyWrappedCryptoKeyVersionRequest) (*kmspb.CryptoKeyVersion, error) {
-	return nil, apierror.Wrap(apierror.Unimplemented(errTrustedKeyWrapping, "ImportTrustedKeyWrappedCryptoKeyVersion"))
 }
 
 // WrapForImport wraps key under an import job's wrapping public key (its

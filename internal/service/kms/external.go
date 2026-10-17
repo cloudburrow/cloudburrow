@@ -94,6 +94,11 @@ func isExternal(pl kmspb.ProtectionLevel) bool {
 // external levels take the algorithms page's list for them, the others
 // everything but EXTERNAL_SYMMETRIC_ENCRYPTION.
 func levelAlgorithm(level kmspb.ProtectionLevel, p kmspb.CryptoKey_CryptoKeyPurpose, a algo) (algo, error) {
+	// AES_WRAPPING keys are trusted wrapping keys, which Google documents in
+	// a single-tenant HSM only (trusted.go, #1521).
+	if p == kmspb.CryptoKey_AES_WRAPPING && level != kmspb.ProtectionLevel_HSM_SINGLE_TENANT {
+		return 0, apierror.Unimplemented("crypto_key.purpose AES_WRAPPING is not implemented at protection level %s: Google documents AES_WRAPPING keys as trusted wrapping keys in a single-tenant HSM (HSM_SINGLE_TENANT) only", level)
+	}
 	if !isExternal(level) {
 		if a == kmspb.CryptoKeyVersion_EXTERNAL_SYMMETRIC_ENCRYPTION {
 			return 0, apierror.InvalidArgument("crypto_key.version_template.algorithm %s is only for the EXTERNAL and EXTERNAL_VPC protection levels, not %s", a, level)

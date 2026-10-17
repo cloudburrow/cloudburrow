@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -331,6 +332,8 @@ func (p kmsProvider) versionDetail(ctx context.Context, name string) (console.De
 					{Label: "State", Value: kmsState(v)},
 					{Label: "Algorithm", Value: v.GetAlgorithm().String()},
 					{Label: "Protection level", Value: v.GetProtectionLevel().String()},
+					{Label: "Trusted wrapping enabled", Value: strconv.FormatBool(v.GetTrustedWrappingEnabled())},
+					{Label: "HSM trusted", Value: strconv.FormatBool(v.GetHsmTrusted())},
 					{Label: "Generated", Value: kmsTime(v.GetGenerateTime())},
 					{Label: "Destroy time", Value: kmsTime(v.GetDestroyTime())},
 					{Label: "Destroyed", Value: kmsTime(v.GetDestroyEventTime())},
@@ -451,6 +454,7 @@ func kmsCreateKeyFields() []console.Field {
 				"HSM_SINGLE_TENANT (required): projects/P/locations/L/singleTenantHsmInstances/I, an ACTIVE instance in the key ring's location."},
 		{Name: "skipInitialVersionCreation", Label: "Create without a version", Type: "checkbox",
 			Help: "Required for an EXTERNAL key and for an EXTERNAL_VPC key on a MANUAL connection, whose versions each name their external key."},
+		kmsTrustedWrappingField("the first version"),
 		{Name: "labels", Label: "Labels", Type: "map",
 			Help: "Optional. Lowercase keys and values."},
 		// Both of these are read back by GetCryptoKey as CreateCryptoKey set
@@ -544,6 +548,7 @@ func kmsCreateKeyRequest(ring string, values map[string]string) (*kmspb.CreateCr
 	return &kmspb.CreateCryptoKeyRequest{
 		Parent: ring, CryptoKeyId: strings.TrimSpace(values["cryptoKeyId"]), CryptoKey: key,
 		SkipInitialVersionCreation: checked(values, "skipInitialVersionCreation"),
+		TrustedWrappingEnabled:     checked(values, "trustedWrappingEnabled"),
 	}, nil
 }
 
@@ -569,9 +574,17 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 		if err != nil {
 			return nil
 		}
-		out := []console.Action{{ID: "addversion", Label: "Add version", Fields: kmsExternalFields(k.GetVersionTemplate().GetProtectionLevel(), nil)}}
+		addFields := kmsExternalFields(k.GetVersionTemplate().GetProtectionLevel(), nil)
+		trustable := kmsTrustable(k)
+		if trustable {
+			addFields = append(addFields, kmsTrustedWrappingField("the new version"))
+		}
+		out := []console.Action{{ID: "addversion", Label: "Add version", Fields: addFields}}
 		if a, ok := kmsImportVersionAction(ctx, api, ring, k); ok {
 			out = append(out, a)
+		}
+		if trustable {
+			out = append(out, kmsImportTrustedAction(k))
 		}
 		// DeleteCryptoKey needs every version deleted first (service.proto).
 		if vs, err := api.ListCryptoKeyVersions(ctx, &kmspb.ListCryptoKeyVersionsRequest{Parent: key, PageSize: 1}); err == nil && len(vs.GetCryptoKeyVersions()) == 0 {
@@ -613,6 +626,9 @@ func (p kmsProvider) DetailActions(ctx context.Context, project string, path []s
 		switch v.GetState() {
 		case kmspb.CryptoKeyVersion_ENABLED:
 			out := kmsVersionCryptoActions(k.GetPurpose())
+			if v.GetTrustedWrappingEnabled() {
+				out = append(out, kmsExportTrustedAction)
+			}
 			if k.GetPurpose() == kmspb.CryptoKey_ENCRYPT_DECRYPT && k.GetPrimary().GetName() != name {
 				out = append(out, console.Action{ID: "makeprimary", Label: "Make primary"})
 			}
@@ -702,9 +718,16 @@ func (p kmsProvider) ActAtResult(ctx context.Context, project string, path []str
 
 	case action == "addversion" && len(path) == 2:
 		_, err := api.CreateCryptoKeyVersion(ctx, &kmspb.CreateCryptoKeyVersionRequest{
-			Parent: key, CryptoKeyVersion: &kmspb.CryptoKeyVersion{ExternalProtectionLevelOptions: kmsExternalOptions(values)},
+			Parent: key, CryptoKeyVersion: &kmspb.CryptoKeyVersion{ExternalProtectionLevelOptions: kmsExternalOptions(values),
+				TrustedWrappingEnabled: checked(values, "trustedWrappingEnabled")},
 		})
 		return nil, err
+
+	case action == "importtrusted" && len(path) == 2:
+		return nil, kmsImportTrusted(ctx, api, key, values)
+
+	case action == "exporttrusted" && len(path) == 3:
+		return kmsExportTrusted(ctx, api, version, values)
 
 	case action == "encrypt" && len(path) == 2:
 		resp, err := api.Encrypt(ctx, &kmspb.EncryptRequest{

@@ -299,7 +299,7 @@ func TestSingleTenantHsmLifecycle(t *testing.T) {
 	if len(insts.GetSingleTenantHsmInstances()) != 0 || len(withDeleted.GetSingleTenantHsmInstances()) != 1 || withDeleted.GetSingleTenantHsmInstances()[0].GetDeleteTime() == nil {
 		t.Errorf("after delete: %v / %v", insts, withDeleted)
 	}
-	if _, err := propose("upg", &kmspb.SingleTenantHsmInstanceProposal{Operation: &kmspb.SingleTenantHsmInstanceProposal_UpgradeKeyTrust_{}}); code(err) != codes.Unimplemented {
+	if _, err := propose("upg", &kmspb.SingleTenantHsmInstanceProposal{Operation: &kmspb.SingleTenantHsmInstanceProposal_UpgradeKeyTrust_{}}); code(err) != codes.InvalidArgument {
 		t.Errorf("upgrade_key_trust = %v", err)
 	}
 }

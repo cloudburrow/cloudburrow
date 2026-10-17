@@ -20,7 +20,6 @@ func TestRESTAnswersGoogleBindingsAndNothingElse(t *testing.T) {
 		method, path string
 		want         int
 	}{
-		{"POST", kr + "/cryptoKeys/k/cryptoKeyVersions:importTrustedKeyWrappedCryptoKeyVersion", 501},
 		// Transcoded (#415): they reach the server, which answers for a
 		// key that does not exist.
 		{"POST", "/v1/projects/demo-project/locations/global/keyRings/r/cryptoKeys/k:encrypt", 404},

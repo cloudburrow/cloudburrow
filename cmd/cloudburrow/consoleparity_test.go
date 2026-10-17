@@ -348,9 +348,9 @@ var parityRows = []parityRow{
 	{Resource: "Cloud KMS import jobs", Service: "kms",
 		Methods: []string{"KeyManagementService/CreateImportJob", "KeyManagementService/GetImportJob", "KeyManagementService/ListImportJobs",
 			"KeyManagementService/ImportCryptoKeyVersion"},
-		Provider: "kms", Offers: "Import jobs tab on a ring's page, an import job's page with its wrapping public key, Create import job (import method, protection level), " +
+		Provider: "kms", Offers: "Import jobs tab on a ring's page, an import job's page with its wrapping public key, Create import job (import method, protection level, and the single-tenant HSM instance of an HSM_SINGLE_TENANT job, #1521), " +
 			"Import version on a key's page: key material as a file or base64, already wrapped or plain and wrapped in the console under the job's public key (#1219)",
-		Tests: []string{"TestConsoleKMSImportJobsAndImportVersion", "TestConsoleKMSImportJobsAndRetiredResources", "TestKMSImportJobAndVersionThroughTheForm"}},
+		Tests: []string{"TestConsoleKMSImportJobsAndImportVersion", "TestConsoleKMSImportJobsAndRetiredResources", "TestKMSImportJobAndVersionThroughTheForm", "TestConsoleKMSTrustedKeyWrapping"}},
 	{Resource: "Cloud KMS retired resources", Service: "kms",
 		Methods:  []string{"KeyManagementService/ListRetiredResources", "KeyManagementService/GetRetiredResource"},
 		Provider: "kms", Offers: "Retired resources tab on a ring's page, listing its deleted keys, and a retired resource's page (#1219)",
@@ -372,8 +372,14 @@ var parityRows = []parityRow{
 		Methods: []string{"HsmManagement/CreateSingleTenantHsmInstance", "HsmManagement/GetSingleTenantHsmInstance", "HsmManagement/ListSingleTenantHsmInstances",
 			"HsmManagement/CreateSingleTenantHsmInstanceProposal", "HsmManagement/ApproveSingleTenantHsmInstanceProposal", "HsmManagement/ExecuteSingleTenantHsmInstanceProposal",
 			"HsmManagement/GetSingleTenantHsmInstanceProposal", "HsmManagement/ListSingleTenantHsmInstanceProposals", "HsmManagement/DeleteSingleTenantHsmInstanceProposal"},
-		Provider: "kms-hsm", Offers: "Single-tenant HSM page (/kms/hsm): a project's instances with state, quorum and disable time; Create instance (location, total approvers, key portability); an instance's page with its configuration, proposals (operation, state, approvals, expiry), the PENDING proposals' challenges as base64url with the key each is for, and the registered two-factor keys; Create proposal (every operation but upgrade_key_trust), Approve (one challenge signed with a two-factor key, quorum or required), Execute and Delete proposal (#1469); Create key offers HSM_SINGLE_TENANT with the instance as its backend",
-		Tests: []string{"TestConsoleKMSSingleTenantHsm"}},
+		Provider: "kms-hsm", Offers: "Single-tenant HSM page (/kms/hsm): a project's instances with state, quorum and disable time; Create instance (location, total approvers, key portability); an instance's page with its configuration, proposals (operation, state, approvals, expiry), the PENDING proposals' challenges as base64url with the key each is for, and the registered two-factor keys; Create proposal (every operation; upgrade_key_trust with the AES_WRAPPING version it promotes, #1521), Approve (one challenge signed with a two-factor key, quorum or required), Execute and Delete proposal (#1469); Create key offers HSM_SINGLE_TENANT with the instance as its backend",
+		Tests: []string{"TestConsoleKMSSingleTenantHsm", "TestConsoleKMSTrustedKeyWrapping"}},
+	{Resource: "Cloud KMS trusted key wrapping", Service: "kms",
+		Methods:  []string{"KeyManagementService/ExportTrustedKeyWrappedCryptoKeyVersion", "KeyManagementService/ImportTrustedKeyWrappedCryptoKeyVersion"},
+		Provider: "kms", Offers: "Create key's AES_WRAPPING purpose (AES_256_KWP) and Trusted wrapping checkbox, also on Add version and Import version of an HSM_SINGLE_TENANT key; " +
+			"a version's page shows Trusted wrapping enabled and HSM trusted; Export trusted-wrapped on the page of a version with trusted wrapping (the wrapped key shown base64), " +
+			"Import trusted-wrapped version on an HSM_SINGLE_TENANT key's page (importing key, algorithm, wrapped key) (#1521)",
+		Tests: []string{"TestConsoleKMSTrustedKeyWrapping"}},
 	{Resource: "Cloud KMS key handle read", Service: "kms",
 		Methods:  []string{"Autokey/GetKeyHandle"},
 		Excluded: "a read of one key handle; the project's Autokey page lists every key handle with its key and resource type"},

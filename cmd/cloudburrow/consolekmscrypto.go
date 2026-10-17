@@ -258,7 +258,7 @@ func kmsAlgorithmField() console.Field {
 	}
 	return console.Field{Name: "algorithm", Label: "Algorithm", Type: "select", Options: opts,
 		Help: "Empty is GOOGLE_SYMMETRIC_ENCRYPTION, for ENCRYPT_DECRYPT. Another purpose needs one of its own: " +
-			"EC_SIGN_* and RSA_SIGN_* sign, RSA_DECRYPT_OAEP_* decrypt, HMAC_* MAC, AES_* raw encryption, ML_KEM_* key encapsulation."}
+			"EC_SIGN_* and RSA_SIGN_* sign, RSA_DECRYPT_OAEP_* decrypt, HMAC_* MAC, AES_* raw encryption, ML_KEM_* key encapsulation, AES_256_KWP (AES_WRAPPING, HSM_SINGLE_TENANT only) trusted key wrapping."}
 }
 
 // Import jobs and retired resources (#1219). An import job's page is
@@ -286,7 +286,10 @@ func kmsCreateImportJobAction() console.Action {
 		{Name: "importMethod", Label: "Import method", Type: "select", Default: kmsImportMethods[0], Options: kmsImportMethods,
 			Help: "How key material is wrapped for this job. The *_AES_256 methods wrap an ephemeral AES-256 key with RSA-OAEP and the key with " +
 				"AES-KWP, and carry any key; the others wrap the key with RSA-OAEP alone, so cannot carry an RSA key. The HPKE methods are not implemented."},
-		kmsProtectionField("It must match the protection level of the key imported into."),
+		kmsProtectionField("It must match the protection level of the key imported into.", "HSM_SINGLE_TENANT"),
+		{Name: "cryptoKeyBackend", Label: "Single-tenant HSM instance", Type: "text",
+			Help: "HSM_SINGLE_TENANT (required): projects/P/locations/L/singleTenantHsmInstances/I, an ACTIVE instance in the key ring's location, " +
+				"as gcloud's --single-tenant-hsm-instance; the job imports into that instance's keys."},
 	}}
 }
 
@@ -305,7 +308,8 @@ func kmsCreateImportJob(ctx context.Context, api *kms.Server, ring string, value
 	}
 	_, err := api.CreateImportJob(ctx, &kmspb.CreateImportJobRequest{
 		Parent: ring, ImportJobId: strings.TrimSpace(values["importJobId"]),
-		ImportJob: &kmspb.ImportJob{ImportMethod: kmspb.ImportJob_ImportMethod(m), ProtectionLevel: kmspb.ProtectionLevel(lvl)},
+		ImportJob: &kmspb.ImportJob{ImportMethod: kmspb.ImportJob_ImportMethod(m), ProtectionLevel: kmspb.ProtectionLevel(lvl),
+			CryptoKeyBackend: strings.TrimSpace(values["cryptoKeyBackend"])},
 	})
 	return err
 }
@@ -365,6 +369,7 @@ func kmsImportJobDetail(ctx context.Context, api *kms.Server, ring, id string) c
 					{Label: "State", Value: j.GetState().String()},
 					{Label: "Import method", Value: j.GetImportMethod().String()},
 					{Label: "Protection level", Value: j.GetProtectionLevel().String()},
+					{Label: "Single-tenant HSM instance", Value: kmsOrDash(j.GetCryptoKeyBackend())},
 					{Label: "Created", Value: kmsTime(j.GetCreateTime())},
 					{Label: "Generated", Value: kmsTime(j.GetGenerateTime())},
 					{Label: "Expires", Value: kmsTime(j.GetExpireTime())},
@@ -398,7 +403,7 @@ func kmsImportVersionAction(ctx context.Context, api *kms.Server, ring string, k
 	if a := k.GetVersionTemplate().GetAlgorithm().String(); slices.Contains(algs, a) {
 		def = a
 	}
-	return console.Action{ID: "importversion", Label: "Import version", Fields: []console.Field{
+	fields := []console.Field{
 		{Name: "importJob", Label: "Import job", Type: "select", Required: true, Default: jobs[0], Options: jobs,
 			Help: "An ACTIVE import job of this key ring."},
 		{Name: "algorithm", Label: "Algorithm", Type: "select", Required: true, Default: def, Options: algs,
@@ -411,7 +416,11 @@ func kmsImportVersionAction(ctx context.Context, api *kms.Server, ring string, k
 			Help: "The key material as a binary file. Leave empty to give it as base64 below."},
 		{Name: "material", Label: "Key material (base64)", Type: "textarea",
 			Help: "Used when no file is chosen. Shown nowhere and recorded nowhere."},
-	}}, true
+	}
+	if kmsTrustable(k) {
+		fields = append(fields, kmsTrustedWrappingField("the imported version"))
+	}
+	return console.Action{ID: "importversion", Label: "Import version", Fields: fields}, true
 }
 
 const (
@@ -450,9 +459,74 @@ func kmsImportVersion(ctx context.Context, api *kms.Server, key string, values m
 	}
 	_, err := api.ImportCryptoKeyVersion(ctx, &kmspb.ImportCryptoKeyVersionRequest{
 		Parent: key, ImportJob: job, Algorithm: kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm(a),
-		WrappedKey: wrapped,
+		WrappedKey: wrapped, TrustedWrappingEnabled: checked(values, "trustedWrappingEnabled"),
 	})
 	return err
+}
+
+// Trusted key wrapping (#1521): an HSM_SINGLE_TENANT key of any purpose but
+// ENCRYPT_DECRYPT may have versions with trusted_wrapping_enabled, which are
+// exported, and imported, wrapped with AES-KWP under an hsm_trusted
+// AES_WRAPPING version.
+
+// kmsTrustable is whether k's versions may have trusted_wrapping_enabled.
+func kmsTrustable(k *kmspb.CryptoKey) bool {
+	return k.GetVersionTemplate().GetProtectionLevel() == kmspb.ProtectionLevel_HSM_SINGLE_TENANT && k.GetPurpose() != kmspb.CryptoKey_ENCRYPT_DECRYPT
+}
+
+func kmsTrustedWrappingField(what string) console.Field {
+	return console.Field{Name: "trustedWrappingEnabled", Label: "Trusted wrapping", Type: "checkbox",
+		Help: "trusted_wrapping_enabled on " + what + ": it may then be exported wrapped by a trusted AES_WRAPPING key. " +
+			"HSM_SINGLE_TENANT keys of any purpose but ENCRYPT_DECRYPT; it cannot be changed later."}
+}
+
+// kmsImportTrustedAction is Import trusted-wrapped version on a key's page.
+func kmsImportTrustedAction(k *kmspb.CryptoKey) console.Action {
+	algs := kms.Algorithms(k.GetPurpose())
+	def := algs[0]
+	if a := k.GetVersionTemplate().GetAlgorithm().String(); slices.Contains(algs, a) {
+		def = a
+	}
+	return console.Action{ID: "importtrusted", Label: "Import trusted-wrapped version", Fields: []console.Field{
+		{Name: "importingKey", Label: "Importing key", Type: "text", Required: true,
+			Help: "An hsm_trusted AES_WRAPPING version (or its key, whose newest trusted version is used): " +
+				"projects/P/locations/L/keyRings/R/cryptoKeys/K/cryptoKeyVersions/N."},
+		{Name: "algorithm", Label: "Algorithm", Type: "select", Required: true, Default: def, Options: algs,
+			Help: "What the key material is; it must suit the key's purpose."},
+		{Name: "material", Label: "Wrapped key (base64)", Type: "textarea", Required: true,
+			Help: "The key wrapped with AES-KWP (RFC 5649) under the importing key: raw bytes for a symmetric key, PKCS #8 DER for an asymmetric one. Recorded nowhere."},
+	}}
+}
+
+func kmsImportTrusted(ctx context.Context, api *kms.Server, key string, values map[string]string) error {
+	wrapped, err := kmsB64("the wrapped key", values["material"])
+	if err != nil {
+		return err
+	}
+	a, ok := kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm_value[strings.TrimSpace(values["algorithm"])]
+	if !ok {
+		return fmt.Errorf("algorithm: %q is not a key algorithm", values["algorithm"])
+	}
+	_, err = api.ImportTrustedKeyWrappedCryptoKeyVersion(ctx, &kmspb.ImportTrustedKeyWrappedCryptoKeyVersionRequest{
+		Parent: key, ImportingKey: strings.TrimSpace(values["importingKey"]), WrappedKey: wrapped,
+		Algorithm: kmspb.CryptoKeyVersion_CryptoKeyVersionAlgorithm(a)})
+	return err
+}
+
+// kmsExportTrustedAction is Export trusted-wrapped on the page of a version
+// with trusted_wrapping_enabled.
+var kmsExportTrustedAction = console.Action{ID: "exporttrusted", Label: "Export trusted-wrapped", Fields: []console.Field{
+	{Name: "wrappingKey", Label: "Wrapping key version", Type: "text", Required: true,
+		Help: "An hsm_trusted AES_256_KWP version: projects/P/locations/L/keyRings/R/cryptoKeys/K/cryptoKeyVersions/N. " +
+			"The wrapped key is shown base64-encoded in the dialog and recorded nowhere."}}}
+
+func kmsExportTrusted(ctx context.Context, api *kms.Server, version string, values map[string]string) (*console.Listing, error) {
+	r, err := api.ExportTrustedKeyWrappedCryptoKeyVersion(ctx, &kmspb.ExportTrustedKeyWrappedCryptoKeyVersionRequest{
+		Name: version, WrappingKey: strings.TrimSpace(values["wrappingKey"])})
+	if err != nil {
+		return nil, err
+	}
+	return kmsB64Result("Wrapped key", r.GetWrappedKey()), nil
 }
 
 // kmsRingOf returns the ring a key name belongs to.

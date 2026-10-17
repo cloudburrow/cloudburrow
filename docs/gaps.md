@@ -26,7 +26,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud Run | 4 | 0 | 3 | 0 | 1 |
 | Cloud Scheduler | 1 | 0 | 0 | 0 | 1 |
 | Cloud Logging | 2 | 0 | 0 | 2 | 0 |
-| Cloud KMS | 7 | 0 | 2 | 4 | 1 |
+| Cloud KMS | 8 | 0 | 3 | 4 | 1 |
 | Secret Manager | 1 | 0 | 0 | 0 | 1 |
 | Resource Manager | 1 | 0 | 0 | 1 | 0 |
 | Vertex AI | 1 | 0 | 1 | 0 | 0 |
@@ -35,7 +35,7 @@ tracks it; a closed issue is named only where it says what was built.
 | Cloud SQL, Memorystore | 10 | 7 | 3 | 0 | 0 |
 | Functions, credentials, tooling | 0 | 0 | 0 | 0 | 0 |
 | Console | 0 | 0 | 0 | 0 | 0 |
-| **Total** | **88** | **22** | **37** | **23** | **6** |
+| **Total** | **89** | **22** | **38** | **23** | **6** |
 
 ## Cloud Storage
 
@@ -140,6 +140,7 @@ methods (#1212), and their console (#1219). Closed by the sweep: Locations (#129
 |---|---|---|
 | Single-tenant HSM (#1469): `upgrade_key_trust` proposals and import jobs at HSM_SINGLE_TENANT are UNIMPLEMENTED, as trusted key wrapping is; instances and proposals never pass through their transitional states, since nothing is provisioned (HsmManagement and HSM_SINGLE_TENANT keys are served since #1469; HSM since #1452, without an HSM or an attestation; EXTERNAL and EXTERNAL_VPC since #1469, the instance acting as the EKM) (#1506) (#1521) | no emulator support | M |
 | Single-tenant HSM (#1469): `upgrade_key_trust` proposals and import jobs at HSM_SINGLE_TENANT are UNIMPLEMENTED, as trusted key wrapping is; instances and proposals never pass through their transitional states, since nothing is provisioned (HsmManagement and HSM_SINGLE_TENANT keys are served since #1469; HSM since #1452, without an HSM or an attestation; EXTERNAL and EXTERNAL_VPC since #1469, the instance acting as the EKM); rechecked (#1521), still open there: the proto (kms v1.35.0) does define `SingleTenantHsmInstanceProposal.UpgradeKeyTrust` (an ACTIVE `AES_WRAPPING` version's name and a 2FA public key) and `Import`/`ExportTrustedKeyWrappedCryptoKeyVersion` ("the target key pre-wrapped on premises"), and the single-tenant guide names RFC 5649 (`aes-256-kwp`) wrapping, though the REST reference's proposal operations leave `upgradeKeyTrust` out and nothing states the wrapped material's encoding for asymmetric keys; not built yet | no emulator support | M |
+| Single-tenant HSM (#1469): instances and proposals never pass through their transitional states, since nothing is provisioned (HsmManagement and HSM_SINGLE_TENANT keys are served since #1469; HSM since #1452, without an HSM or an attestation; EXTERNAL and EXTERNAL_VPC since #1469, the instance acting as the EKM). Built in #1521, as kms v1.35.0's protos and the single-tenant guide define them: `upgrade_key_trust` proposals through the quorum approval, AES_WRAPPING (`AES_256_KWP`) keys, `trusted_wrapping_enabled`/`hsm_trusted`, HSM_SINGLE_TENANT import jobs, and `Import`/`ExportTrustedKeyWrappedCryptoKeyVersion` with RFC 5649 AES-KWP; the asymmetric material is PKCS #8 DER as for ordinary key import (UNVERIFIED: nothing states its encoding under trusted wrapping), and the key portability requirement is CloudBurrow's reading (UNVERIFIED). Still refused 501 with the reason: trusted re-import into an existing version, and ML-KEM keys, whose material encoding Google documents for no import | no emulator support (no HSM); the asymmetric encoding not documented by Google | S |
 | `key_access_justifications_policy` is enforced (#1506): encrypt, decrypt and sign fail under a policy with no reasons, as documented, or without `CUSTOMER_INITIATED_ACCESS`, a local call's reason; the refusal's code and text (`FAILED_PRECONDITION`) are CloudBurrow's, and project and organization default policies are not served (#1452) | not documented by Google | S |
 | REST: `alt` other than JSON, and `fields`/`$fields`, are `UNIMPLEMENTED` (#1445) | not documented by Google | S |
 | UNVERIFIED error codes ([kms.md](coverage/kms.md)) (#1445) | not documented by Google | S |
