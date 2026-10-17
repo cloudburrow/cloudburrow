@@ -86,7 +86,33 @@ func (p hierarchyProvider) List(context.Context, string) (console.Listing, error
 			"Name": f.DisplayName, "Path": rmFolderPath(byName, f), "Parent": parentText(byName, f.Parent), "Created": consoleTime(f.CreateTime)}})
 	}
 	l.Total = len(l.Items)
+	l.Summary = []console.PropertyGroup{p.organizationPolicies()}
 	return l, nil
+}
+
+// organizationPolicies is the organization's own organization policies
+// (#1534), drawn above the folders, where Set and Clear organization policy
+// on the organization are offered (ListActions).
+func (p hierarchyProvider) organizationPolicies() console.PropertyGroup {
+	g := console.PropertyGroup{Heading: "Organization policies on " + resourcemanager.OrganizationDomain}
+	all, err := p.registry.OrgPolicies(resourcemanager.OrganizationName)
+	if err != nil {
+		g.Properties = []console.Property{{Label: "Unavailable", Value: consoleErr(err)}}
+		return g
+	}
+	for _, op := range all {
+		g.Properties = append(g.Properties, console.Property{Label: op.Constraint, Value: orgPolicyText(op)})
+	}
+	if len(g.Properties) == 0 {
+		g.Properties = []console.Property{{Label: "Policies", Value: "None set"}}
+	}
+	return g
+}
+
+// ListActions implements console.ListActor: the organization's Set and
+// Clear organization policy (#1534).
+func (p hierarchyProvider) ListActions(context.Context, string) []console.Action {
+	return orgPolicyActions(p.registry, resourcemanager.OrganizationName, " on the organization")
 }
 
 // parentOptions are the parents a folder or project can be placed under: the
@@ -182,6 +208,7 @@ func (p hierarchyProvider) Detail(_ context.Context, _ string, path []string) (c
 			{ID: "details", Label: "Details", Kind: console.KindProperties, Groups: []console.PropertyGroup{{Heading: "Folder", Properties: props}}},
 			{ID: "folders", Label: "Folders", Listing: children},
 			{ID: "projects", Label: "Projects", Listing: projects},
+			{ID: "org-policies", Label: "Organization policies", Listing: orgPolicyListing(p.registry, f.Name)},
 			tagSection(p.registry, resourcemanager.CRMPrefix+f.Name),
 		},
 	}
@@ -223,12 +250,20 @@ func (p hierarchyProvider) DetailActions(_ context.Context, _ string, path []str
 	return append([]console.Action{{ID: folderMove, Label: "Move folder", Fields: []console.Field{
 		{Name: "parent", Label: "Destination", Type: "select", Required: true, Options: p.parentOptions(f.Name), Default: f.Parent,
 			Help: "The organization, or a folder that is not this one or under it."},
-	}}}, tagActions(p.registry, resourcemanager.CRMPrefix+f.Name)...)
+	}}}, append(orgPolicyActions(p.registry, f.Name, ""), tagActions(p.registry, resourcemanager.CRMPrefix+f.Name)...)...)
 }
 
 func (p hierarchyProvider) ActAt(_ context.Context, _ string, path []string, action string, values map[string]string) error {
+	if len(path) == 0 {
+		if ok, err := orgPolicyAct(p.registry, resourcemanager.OrganizationName, action, values); ok {
+			return err
+		}
+	}
 	if len(path) != 1 {
 		return fmt.Errorf("unknown action %q", action)
+	}
+	if ok, err := orgPolicyAct(p.registry, "folders/"+strings.TrimPrefix(path[0], "folders/"), action, values); ok {
+		return err
 	}
 	if ok, err := tagAct(p.registry, resourcemanager.CRMPrefix+"folders/"+strings.TrimPrefix(path[0], "folders/"), action, values); ok {
 		return err
@@ -246,6 +281,7 @@ func (p hierarchyProvider) ActAt(_ context.Context, _ string, path []string, act
 }
 
 var _ console.PathActor = hierarchyProvider{}
+var _ console.ListActor = hierarchyProvider{}
 var _ console.Creator = hierarchyProvider{}
 var _ console.Deleter = hierarchyProvider{}
 var _ console.Driller = hierarchyProvider{}

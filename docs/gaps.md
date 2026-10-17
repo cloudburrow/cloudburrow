@@ -155,7 +155,8 @@ delayed destruction (#1278). IAM conditions are excluded (below).
 Closed: IAM policy methods, `MoveProject`, `UndeleteProject` (#1216); v1 org policy on projects
 (#1296), and regional tag bindings and effective tags through the
 `{location}-cloudresourcemanager` endpoints (#1350); project, folder and organization IAM, stored
-and never enforced (#1368).
+and never enforced (#1368); v1 org policy on folders and the organization, with the effective
+policy evaluated down the hierarchy (#1534).
 
 No gap is left open here.
 
@@ -275,7 +276,7 @@ Cloud Functions v2 and v1 APIs (#1377, #1428); Pub/Sub and project IAM in Terraf
 
 | Gap | Why open | Size |
 |---|---|---|
-| Terraform resources beyond the verified set (#1304): the other `google_spanner_*` resources (instance configs, backup schedules), a worker pool's `scaling_mode` (Google publishes no such field), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_folder_organization_policy` and `google_organization_policy` (folder and organization org policies are refused 501), `google_secret_manager_regional_secret` and `google_bigquery_data_transfer_config` (their endpoints are not set: not served), the resources whose API refuses them (Bigtable authorized views, log bucket CMEK; audit configs, tag IAM, Bigtable table IAM and Spanner IAM are stored since #1486), and the other resources of the served services | partly verified (the nine batches of #1304 and the verified rows of compatibility.md) | L |
+| Terraform resources beyond the verified set (#1304): the other `google_spanner_*` resources (instance configs, backup schedules), a worker pool's `scaling_mode` (Google publishes no such field), `google_logging_folder_settings` (refused, as Google documents), `google_organization_iam_policy` (authoritative over the shared organization), `google_sql_source_representation_instance` (refused 501), `google_secret_manager_regional_secret` and `google_bigquery_data_transfer_config` (their endpoints are not set: not served), the resources whose API refuses them (Bigtable authorized views, log bucket CMEK; audit configs, tag IAM, Bigtable table IAM and Spanner IAM are stored since #1486), and the other resources of the served services | partly verified (the nine batches of #1304 and the verified rows of compatibility.md) | L |
 
 ## Console
 

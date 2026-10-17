@@ -731,18 +731,16 @@ func (s *ProjectsServer) v1OrgRoutes(r *rest.Router, orgs OrganizationsServer) {
 		if isIAMVerb(verb) {
 			return serveIAM(w, req, orgs, "organizations/"+id, verb)
 		}
-		return ErrNotImplemented("organizations." + verb)
+		return s.v1OrgPolicy(w, req, "organizations/"+id, verb)
 	})
-	// v1 has six folder methods, all org policy, which is stored on projects
-	// alone: each is 501, as the organization's are, not the 404 of a path
-	// nothing serves.
+	// v1 has six folder methods, all org policy (#1534, orgpolicy.go).
 	r.Handle("POST /v1/folders/{folder}", func(w http.ResponseWriter, req *http.Request) error {
 		raw, err := rest.PathValue(req, "folder")
 		if err != nil {
 			return err
 		}
-		_, verb, _ := strings.Cut(raw, ":")
-		return ErrNotImplemented("folders." + verb)
+		id, verb, _ := strings.Cut(raw, ":")
+		return s.v1OrgPolicy(w, req, "folders/"+id, verb)
 	})
 }
 

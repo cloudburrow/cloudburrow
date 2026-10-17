@@ -88,6 +88,77 @@ func TestConsoleProjectOrgPolicies(t *testing.T) {
 	}
 }
 
+// TestConsoleFolderAndOrganizationOrgPolicies (#1534): Set organization
+// policy on the organization (the Resource hierarchy screen's own action)
+// and on a folder, through the registry the v1 methods use; the folder's
+// and a project's pages show the inherited policy and the effective one, and
+// Clear organization policy on the folder unsets its own.
+func TestConsoleFolderAndOrganizationOrgPolicies(t *testing.T) {
+	ctx := context.Background()
+	reg := resourcemanager.New(store.NewMemory())
+	h := hierarchyProvider{registry: reg}
+	p := projectsProvider{registry: reg}
+	eng, err := h.Create(ctx, "", map[string]string{"displayName": "Engineering", "parent": resourcemanager.OrganizationName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Create(ctx, "", map[string]string{"projectId": "eng-proj", "parent": "folders/" + eng}); err != nil {
+		t.Fatal(err)
+	}
+	const boolC, listC = "constraints/compute.requireOsLogin", "constraints/gcp.resourceLocations"
+	if a := h.ListActions(ctx, ""); len(a) != 1 || a[0].ID != orgPolicySet {
+		t.Fatalf("the hierarchy screen offers %+v; want Set organization policy on the organization", a)
+	}
+	if err := h.ActAt(ctx, "", nil, orgPolicySet, map[string]string{"constraint": boolC, "enforced": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.ActAt(ctx, "", nil, orgPolicySet, map[string]string{"constraint": listC, "allowed": "in:eu-locations"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := reg.OrgPolicy(resourcemanager.OrganizationName, boolC); err != nil || got.BooleanPolicy == nil || !got.BooleanPolicy.Enforced {
+		t.Fatalf("the organization's %s = %+v, %v", boolC, got, err)
+	}
+	l, _ := h.List(ctx, "")
+	if len(l.Summary) != 1 || len(l.Summary[0].Properties) != 2 || l.Summary[0].Properties[0].Value != "Enforced" {
+		t.Errorf("the hierarchy screen's organization policies = %+v", l.Summary)
+	}
+	if a := h.ListActions(ctx, ""); len(a) != 2 || a[1].ID != orgPolicyClear {
+		t.Errorf("with policies set, the hierarchy screen offers %+v; want Set and Clear", a)
+	}
+	if err := h.ActAt(ctx, "", []string{eng}, orgPolicySet, map[string]string{"constraint": listC, "allowed": "in:us-locations", "inherit": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := h.Detail(ctx, "", []string{eng})
+	var sec *console.Listing
+	for i := range d.Sections {
+		if d.Sections[i].ID == "org-policies" {
+			sec = &d.Sections[i].Listing
+		}
+	}
+	if sec == nil || sec.Total != 2 {
+		t.Fatalf("the folder's Organization policies = %+v", sec)
+	}
+	byName := map[string]map[string]string{}
+	for _, it := range sec.Items {
+		byName[it.Name] = it.Fields
+	}
+	if f := byName[boolC]; f["Policy"] != "Inherited" || f["Effective"] != "Enforced" {
+		t.Errorf("the folder's %s row = %v", boolC, f)
+	}
+	if f := byName[listC]; f["Effective"] != "allow in:eu-locations, in:us-locations" {
+		t.Errorf("the folder's %s row = %v", listC, f)
+	}
+	if pl := p.orgPolicies("eng-proj"); pl.Total != 2 {
+		t.Errorf("the project's Organization policies = %+v; want both inherited", pl.Items)
+	}
+	if err := h.ActAt(ctx, "", []string{eng}, orgPolicyClear, map[string]string{"constraint": listC}); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := reg.OrgPolicies("folders/" + eng); len(all) != 0 {
+		t.Errorf("after Clear on the folder, its policies are %+v", all)
+	}
+}
+
 // TestConsoleResourceHierarchy (#1294): Create folder under the organization
 // and under a folder, a project created in a folder, Move folder and Move
 // project, Rename folder, Delete refused while the folder holds a project,
@@ -127,7 +198,7 @@ func TestConsoleResourceHierarchy(t *testing.T) {
 	}
 	// Move folder offers neither the folder itself nor one under it.
 	moves := h.DetailActions(ctx, "", []string{eng})
-	if len(moves) != 1 || len(moves[0].Fields[0].Options) != 1 {
+	if len(moves) == 0 || moves[0].ID != folderMove || len(moves[0].Fields[0].Options) != 1 {
 		t.Errorf("Engineering's Move folder = %+v; want only the organization", moves)
 	}
 	if err := h.ActAt(ctx, "", []string{team}, folderMove, map[string]string{"parent": resourcemanager.OrganizationName}); err != nil {
