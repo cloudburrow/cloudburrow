@@ -1061,12 +1061,15 @@ func (f front) arimaSubquery(r *http.Request, q queryOptions, md bqModel, c mlCa
 		if len(keys) == 0 {
 			keys = nil
 		}
-		except := []string{sqlIdent(ts.TimestampCol), sqlIdent(ts.DataCol)}
-		if ii >= 0 {
-			except = append(except, sqlIdent(ts.IDCol))
+		// The input's other columns follow.
+		var rest string
+		for i, col := range qcols {
+			if i != ti && i != di && i != ii {
+				rest += ", _cbml_in." + sqlIdent(col.Name)
+			}
 		}
 		return "(SELECT " + idSel + "CAST(_cbml_in." + tsName + " AS TIMESTAMP) AS " + tsName + ", CAST(_cbml_in." + dataName + " AS FLOAT64) AS " + dataName +
-			", _cbml_s.is_anomaly, _cbml_s.lower_bound, _cbml_s.upper_bound, _cbml_s.anomaly_probability, _cbml_in.* EXCEPT (" + strings.Join(except, ", ") + ")" +
+			", _cbml_s.is_anomaly, _cbml_s.lower_bound, _cbml_s.upper_bound, _cbml_s.anomaly_probability" + rest +
 			" FROM (" + c.input + ") AS _cbml_in LEFT JOIN " + mlRowsSubquery(scoredCols, keys) + " AS _cbml_s ON _cbml_s._cbml_t = UNIX_MICROS(CAST(_cbml_in." + tsName +
 			" AS TIMESTAMP)) AND _cbml_s._cbml_y = CAST(_cbml_in." + dataName + " AS FLOAT64)" + idJoin + ")", 0, ""
 	}
