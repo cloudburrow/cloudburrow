@@ -99,45 +99,12 @@ func TestOrgNumberIsResourceManagers(t *testing.T) {
 	}
 }
 
-func TestRewriteTimeZone(t *testing.T) {
-	for in, want := range map[string]string{
-		"SELECT CURRENT_DATE()":                                                "SELECT CURRENT_DATE('America/Chicago')",
-		"SELECT CURRENT_DATETIME, current_time()":                              "SELECT CURRENT_DATETIME('America/Chicago'), current_time('America/Chicago')",
-		"SELECT CURRENT_DATE('UTC')":                                           "",
-		"SELECT FORMAT_TIMESTAMP('%H', ts) FROM d.t":                           "SELECT FORMAT_TIMESTAMP('%H', ts, 'America/Chicago') FROM d.t",
-		"SELECT FORMAT_TIMESTAMP('%H', ts, 'UTC') FROM d.t":                    "",
-		"SELECT TIMESTAMP('2020-01-01 00:00:00')":                              "SELECT TIMESTAMP('2020-01-01 00:00:00', 'America/Chicago')",
-		"SELECT DATE(ts) FROM d.t":                                             "",
-		"SELECT DATE(TIMESTAMP '2020-01-01 03:00:00+00')":                      "SELECT DATE(TIMESTAMP '2020-01-01 03:00:00+00', 'America/Chicago')",
-		"SELECT EXTRACT(HOUR FROM CURRENT_TIMESTAMP())":                        "SELECT EXTRACT(HOUR FROM CURRENT_TIMESTAMP() AT TIME ZONE 'America/Chicago')",
-		"SELECT EXTRACT(HOUR FROM ts) FROM d.t":                                "",
-		"SELECT CAST(x AS DATE), DATE '2020-01-01', d.date(1) AS current_date": "",
-		"SELECT STRING(CAST('2020-01-01 00:00:00+00' AS TIMESTAMP))":           "SELECT STRING(CAST('2020-01-01 00:00:00+00' AS TIMESTAMP), 'America/Chicago')",
-		"SELECT 'CURRENT_DATE()'":                                              "",
-		// #1456: a TIMESTAMP literal with no zone is read in the default.
-		"SELECT TIMESTAMP '2020-01-01 03:00:00'":             "SELECT TIMESTAMP '2020-01-01 03:00:00 America/Chicago'",
-		"SELECT TIMESTAMP '2020-01-01'":                      "SELECT TIMESTAMP '2020-01-01 00:00:00 America/Chicago'",
-		"SELECT TIMESTAMP '2020-01-01 03:00:00Z'":            "",
-		"SELECT TIMESTAMP '2020-01-01 03:00:00 UTC'":         "",
-		"SELECT DATE(TIMESTAMP '2020-01-01 03:00:00.5')":     "SELECT DATE(TIMESTAMP '2020-01-01 03:00:00.5 America/Chicago', 'America/Chicago')",
-		"SELECT * FROM d.t WHERE ts > '2020-01-01 03:00:00'": "",
-	} {
-		got, ok := rewriteTimeZone(in, "America/Chicago")
-		if want == "" {
-			if ok {
-				t.Errorf("%s: rewritten %s", in, got)
-			}
-			continue
+func TestTimeZone(t *testing.T) {
+	for in, want := range map[string]string{"America/Chicago": "America/Chicago", "+05:30": "+05:30", "-08": "-08:00",
+		"UTC+3": "+03:00", "+0530": "+05:30"} {
+		if got := engineZone(in); got != want {
+			t.Errorf("engineZone(%s) = %s, want %s", in, got, want)
 		}
-		if !ok || got != want {
-			t.Errorf("%s: %s, want %s", in, got, want)
-		}
-		if _, again := rewriteTimeZone(got, "America/Chicago"); again {
-			t.Errorf("%s: rewritten twice", got)
-		}
-	}
-	if got, _ := rewriteTimeZone("SELECT TIMESTAMP '2020-01-01 03:00'", "UTC+3"); got != "SELECT TIMESTAMP '2020-01-01 03:00+3'" {
-		t.Errorf("offset zone: %s", got)
 	}
 	for _, z := range []string{"America/Los_Angeles", "UTC", "+05:30", "-08"} {
 		if !validTimeZone(z) {

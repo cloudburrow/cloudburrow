@@ -1,6 +1,7 @@
 package bigqueryfront
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -213,7 +214,11 @@ func (s *streamBuffers) recentFile() string {
 // clock forward (above), POST /cloudburrow/bigquery/v2/clock:advance
 // with {"seconds": n}, n not negative (0 reads the clock). It answers
 // {"time": RFC 3339}. Windows due by then flush before the next request.
-func (s *streamBuffers) serveClock(w http.ResponseWriter, r *http.Request) bool {
+// The engine's clock follows (#1466): engine, when not nil, is sent the
+// offset (bigquery-emulator patch 0034, googlesqlite patch 0044), so that
+// CURRENT_TIMESTAMP() and the times of a table's change history, which
+// time travel, APPENDS and CHANGES read, are the front's clock too.
+func (s *streamBuffers) serveClock(w http.ResponseWriter, r *http.Request, engine http.Handler) bool {
 	if r.URL.Path != "/cloudburrow/bigquery/v2/clock:advance" {
 		return false
 	}
@@ -229,6 +234,12 @@ func (s *streamBuffers) serveClock(w http.ResponseWriter, r *http.Request) bool 
 		return true
 	}
 	s.offset.Add(int64(body.Seconds * float64(time.Second)))
+	if engine != nil {
+		if msg := syncEngineClock(r, engine, s.offset.Load()); msg != "" {
+			writeError(w, http.StatusInternalServerError, "internalError", "cloudburrow: the front's clock moved, but the engine's did not: "+msg)
+			return true
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"time": s.clock().Format(time.RFC3339Nano)})
 	return true
 }
@@ -380,7 +391,7 @@ func (f front) flushWindow(r *http.Request, w streamWindow) string {
 	t := "TIMESTAMP '" + w.Target.Format(sqlTimestamp) + "'"
 	set := "_PARTITIONTIME = " + t
 	if w.Unit == "DAY" {
-		set += ", _PARTITIONDATE = DATE(" + t + ")"
+		set += ", _PARTITIONDATE = DATE(" + t + ", 'UTC')"
 	}
 	return f.runDML(r, "UPDATE "+quotePath([]string{projectOf(f.base), w.Dataset, w.Table})+" SET "+set+
 		" WHERE _PARTITIONTIME IS NULL")
@@ -652,4 +663,26 @@ func plainTable(got []byte) bool {
 		Type string `json:"type"`
 	}
 	return json.Unmarshal(got, &t) == nil && (t.Type == "" || t.Type == "TABLE")
+}
+
+// syncEngineClock sets the engine's clock offset to offset nanoseconds
+// (serveClock), or says why it could not.
+func syncEngineClock(r *http.Request, engine http.Handler, offset int64) string {
+	body, err := json.Marshal(map[string]int64{"offsetNanos": offset})
+	if err != nil {
+		return err.Error()
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "/cloudburrow/clock", bytes.NewReader(body))
+	if err != nil {
+		return err.Error()
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Host = r.Host
+	req.RemoteAddr = r.RemoteAddr
+	rec := newRecorder()
+	engine.ServeHTTP(rec, req)
+	if rec.status != 0 && rec.status != http.StatusOK {
+		return fmt.Sprintf("%d %s", rec.status, strings.TrimSpace(rec.body.String()))
+	}
+	return ""
 }

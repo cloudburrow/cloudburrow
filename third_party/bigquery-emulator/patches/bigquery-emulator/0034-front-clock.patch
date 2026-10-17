@@ -1,0 +1,66 @@
+CloudBurrow patch 34 to github.com/goccy/bigquery-emulator v0.8.1
+(cloudburrow/cloudburrow#1466). Applies after patch 0022; needs
+googlesqlite patch 0044.
+
+CloudBurrow's front advances its own clock in tests (POST
+/cloudburrow/bigquery/v2/clock:advance); the engine's clock was the
+system's, so CURRENT_TIMESTAMP() and the times of a table's change
+history read another clock than the front's. The patch serves POST
+/cloudburrow/clock {"offsetNanos": n}, which sets the engine's clock
+offset (googlesqlite.SetClockOffset), and the front sets it to its own
+offset each time it advances.
+
+Licence: a modification of goccy/bigquery-emulator, which is under the
+MIT License, Copyright (c) 2022 Masaaki Goshima
+(third_party/bigquery-emulator/licenses/bigquery-emulator.LICENSE). This
+patch is offered under the same MIT License, Copyright (c) 2026 The
+CloudBurrow Authors.
+
+--- /dev/null
++++ b/server/cloudburrow_clock.go
+@@ -0,0 +1,33 @@
++package server
++
++import (
++	"encoding/json"
++	"net/http"
++	"time"
++
++	"github.com/goccy/googlesqlite"
++)
++
++// cloudburrowClockPath is CloudBurrow's endpoint that sets how far the
++// engine's clock reads ahead of the system's (CloudBurrow patch,
++// cloudburrow/cloudburrow#1466; googlesqlite patch 0044): POST
++// {"offsetNanos": n}, n not negative. CloudBurrow's front advances its
++// own clock in tests (POST /cloudburrow/bigquery/v2/clock:advance) and
++// sets the engine's to match, so that CURRENT_TIMESTAMP() and the times
++// of a table's change history read the front's clock.
++const cloudburrowClockPath = "/cloudburrow/clock"
++
++type cloudburrowClockHandler struct{}
++
++func (cloudburrowClockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
++	var body struct {
++		OffsetNanos int64 `json:"offsetNanos"`
++	}
++	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.OffsetNanos < 0 {
++		http.Error(w, `the body must be {"offsetNanos": n}, n not negative`, http.StatusBadRequest)
++		return
++	}
++	googlesqlite.SetClockOffset(time.Duration(body.OffsetNanos))
++	w.Header().Set("Content-Type", "application/json")
++	_ = json.NewEncoder(w).Encode(map[string]int64{"offsetNanos": int64(googlesqlite.ClockOffset())})
++}
+--- a/server/server.go
++++ b/server/server.go
+@@ -91,6 +91,9 @@
+ 	r.Handle(newDiscoveryAPIEndpoint, newDiscoveryHandler(server)).Methods("GET")
+ 	r.Handle(uploadAPIEndpoint, &uploadHandler{}).Methods("POST")
+ 	r.Handle(uploadAPIEndpoint, &uploadContentHandler{}).Methods("PUT")
++	// CloudBurrow patch (cloudburrow/cloudburrow#1466): the engine's clock
++	// follows the front's (cloudburrow_clock.go).
++	r.Handle(cloudburrowClockPath, cloudburrowClockHandler{}).Methods("POST")
+ 	r.PathPrefix("/").Handler(&defaultHandler{})
+ 	r.Use(sequentialAccessMiddleware())
+ 	r.Use(recoveryMiddleware(server))
