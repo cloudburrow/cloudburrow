@@ -143,6 +143,28 @@ func (j *jobRecords) time(project, id string) (jobTime, bool) {
 	return t, ok
 }
 
+// internalText reports whether a job of jobs.list is one of the
+// statements that write the table of JOBS rows (jobstable.go), known by
+// its text, which the engine keeps (#1553). internal, which markInternal
+// writes, keeps the last maxJobRecords of the front's own jobs, in memory
+// alone: one evicted from it, and every one after the front restarts,
+// was listed by jobs.list as the client's, and so was a row of
+// INFORMATION_SCHEMA.JOBS. The table's INSERTs are literals of up to a
+// thousand rows, and the next sync wrote each one's text into a row of
+// its own, which the INSERT after it carried again: measured in the
+// BigQuery compat suite (shuffled, seed 1792237754362941000, --services
+// bigquery,storage), once TestBigQueryStorageWriteStreamsOutliveAFrontRestart
+// had restarted the front, jobs.list listed 3,684 jobs, not 1,306, 114
+// of them the table's INSERTs (one of 674 KB), and some 100 tests later
+// an unfiltered JOBS query compiled to a 40.7 MB SQLite statement, which
+// ran the engine's WebAssembly heap out of memory.
+func internalText(job map[string]any) bool {
+	conf, _ := job["configuration"].(map[string]any)
+	q, _ := conf["query"].(map[string]any)
+	s, _ := q["query"].(string)
+	return isJobsTableStatement(s)
+}
+
 // markInternal records a job the front ran itself (front.send).
 func (j *jobRecords) markInternal(project, id string) {
 	if j == nil || id == "" {
@@ -440,7 +462,7 @@ func (j *jobRecords) serveJobList(w http.ResponseWriter, r *http.Request, projec
 		if p == "" {
 			p = project
 		}
-		if j.isInternal(p, id) {
+		if j.isInternal(p, id) || internalText(job) {
 			continue
 		}
 		j.patch(job, p)

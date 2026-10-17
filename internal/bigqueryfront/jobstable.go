@@ -80,8 +80,30 @@ import (
 // the emulator may read a table by its bare ID (#1015).
 const jobsTableName = "cloudburrow_information_schema_jobs"
 
-// jobsTableBatch is how many rows one INSERT writes.
-const jobsTableBatch = 1000
+// jobsTableBatch is how many rows one INSERT writes at most, and
+// jobsTableBatchBytes how many bytes of their literals, past the first
+// row: a row's query text may be long (BigQuery takes up to 1 MB of
+// text), and the engine compiles a statement in its WebAssembly heap,
+// whose size is fixed, at about three bytes of SQLite for each byte of
+// GoogleSQL (#1553).
+const (
+	jobsTableBatch      = 1000
+	jobsTableBatchBytes = 1 << 20
+)
+
+// jobsBatch returns how many of rows, from the first, one INSERT writes
+// (jobsTableBatch, jobsTableBatchBytes); one at least.
+func jobsBatch(rows []string) int {
+	n, size := 0, 0
+	for n < len(rows) && n < jobsTableBatch {
+		size += len(rows[n])
+		if n > 0 && size > jobsTableBatchBytes {
+			break
+		}
+		n++
+	}
+	return n
+}
 
 // jobsTableDelay is how long after a job is made the background sync
 // (above) runs: the jobs made meanwhile are written with it. A sync takes
@@ -220,6 +242,20 @@ func jobsTablePath() string {
 	return "`" + resultsDataset + "`.`" + jobsTableName + "`"
 }
 
+// jobsTableStatements are how each statement sync sends begins.
+var jobsTableStatements = []string{"DROP TABLE IF EXISTS ", "CREATE TABLE ", "DELETE FROM ", "INSERT INTO "}
+
+// isJobsTableStatement reports whether sql is one of the statements sync
+// sends, which write the table (internalText).
+func isJobsTableStatement(sql string) bool {
+	for _, s := range jobsTableStatements {
+		if strings.HasPrefix(sql, s+jobsTablePath()) {
+			return true
+		}
+	}
+	return false
+}
+
 // sync writes the project's table so that it holds rows (job ID to the
 // row's SQL), new ones in the order of ids, and reports whether it does;
 // a table not made is made only when create is true. open are the IDs of
@@ -289,11 +325,12 @@ func (j *jobsTable) sync(f front, r *http.Request, project string, ids []string,
 		gone = gone[n:]
 	}
 	for len(add) > 0 {
-		n := min(len(add), jobsTableBatch)
-		lits := make([]string, n)
-		for i, id := range add[:n] {
+		lits := make([]string, min(len(add), jobsTableBatch))
+		for i, id := range add[:len(lits)] {
 			lits[i] = rows[id]
 		}
+		n := jobsBatch(lits)
+		lits = lits[:n]
 		if !run("INSERT INTO " + jobsTablePath() + " SELECT * FROM " + literalRows(jobsColumns, lits)) {
 			return fail()
 		}
