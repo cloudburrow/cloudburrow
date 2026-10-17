@@ -26,9 +26,10 @@ import (
 // covers: sql.instances.executeSql, sql.instances.preCheckMajorVersionUpgrade, sql.instances.truncateLog, sql.instances.delete, sql.instances.restoreBackup, sql.Backups.CreateBackup, sql.Backups.ListBackups, sql.Backups.GetBackup, sql.Backups.UpdateBackup, sql.Backups.DeleteBackup
 func TestConsoleCloudSQLDataAPIAndProjectBackups(t *testing.T) {
 	h := New(t)
-	if os.Getenv(EnvCloudSQL) == "" || os.Getenv(EnvSecrets) == "" {
+	if os.Getenv(EnvCloudSQL) == "" {
 		t.Skip("needs --services cloudsql,secretmanager")
 	}
+	sqlShardSecrets(t, h) // the password's secret version
 	addr := consoleAddr(t, h)
 	svc := sqlAdminService(t, h)
 	project := h.Project()

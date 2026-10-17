@@ -57,6 +57,9 @@ func TestOneSeedDocumentIsReadBackByTheOfficialSDKs(t *testing.T) {
 	project := h.Project()
 	bucket := project + "-seed"
 	sc := storageClient(t, h)
+	// The document seeds Pub/Sub and Secret Manager too.
+	h.Endpoint(EnvPubSub)
+	h.Endpoint(EnvSecrets)
 	t.Cleanup(func() {
 		it := sc.Bucket(bucket).Objects(h.Context(), nil)
 		for {

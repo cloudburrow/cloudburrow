@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -40,6 +41,12 @@ func TestSettingsAndLinksOverREST(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != 200 || !strings.Contains(string(body), `"projects/proj-1/settings"`) {
 		t.Fatalf("GET settings = %d %s", resp.StatusCode, body)
+	}
+	// The JSON API's loggingServiceAccountId, which the proto has no field
+	// for, is the Log Router account (#1304).
+	var js struct{ KmsServiceAccountId, LoggingServiceAccountId string }
+	if err := json.Unmarshal(body, &js); err != nil || js.LoggingServiceAccountId == "" || js.LoggingServiceAccountId != js.KmsServiceAccountId {
+		t.Errorf("GET settings names the accounts %+v (%v); want loggingServiceAccountId, kmsServiceAccountId's", js, err)
 	}
 	if _, err := c.UpdateSettings(ctx, &loggingpb.UpdateSettingsRequest{Name: "projects/proj-1",
 		Settings: &loggingpb.Settings{StorageLocation: "us-east1"}, UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"storage_location"}}}); err != nil {

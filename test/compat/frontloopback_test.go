@@ -67,6 +67,11 @@ func TestEmulatorsBehindAFrontRefuseOtherPods(t *testing.T) {
 		if err := json.Unmarshal([]byte(out), &list); err != nil {
 			t.Fatalf("read the %s pods: %v", app, err)
 		}
+		if len(list.Items) == 0 {
+			// Pub/Sub's pod, which the emulators shard runs without
+			// exporting PUBSUB: an instance without it skips (#1304).
+			t.Skipf("the instance runs no %s pod", app)
+		}
 		for _, it := range list.Items {
 			if it.Metadata.DeletionTimestamp == nil && it.Status.PodIP != "" {
 				return it.Status.PodIP

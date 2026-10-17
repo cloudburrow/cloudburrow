@@ -136,9 +136,10 @@ func TestCloudSQLProjectBackups(t *testing.T) {
 // covers: sql.instances.executeSql, sql.instances.preCheckMajorVersionUpgrade, sql.instances.truncateLog, sql.instances.insert, sql.instances.delete, sql.users.insert, sql.Backups.ListBackups, sql.Backups.UpdateBackup, sql.Backups.DeleteBackup, sql.operations.get
 func TestCloudSQLDataAPIAndFinalBackup(t *testing.T) {
 	h := New(t)
-	if os.Getenv(EnvCloudSQL) == "" || os.Getenv(EnvSecrets) == "" {
+	if os.Getenv(EnvCloudSQL) == "" {
 		t.Skip("needs --services cloudsql,secretmanager")
 	}
+	sqlShardSecrets(t, h) // the password's secret version
 	svc := sqlAdminService(t, h)
 	project := h.Project()
 	name := fmt.Sprintf("data-pg-%d", time.Now().UnixNano()%1e6)

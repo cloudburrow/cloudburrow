@@ -72,6 +72,7 @@ func triggeredBuild(ctx context.Context, t *testing.T, cb *cloudbuild.Client, pa
 //     missing pool is NOT_FOUND.
 func TestCloudBuildTriggersAndWorkerPools(t *testing.T) {
 	h := New(t)
+	h.Endpoint(EnvSecrets) // a trigger's build reads a secret (buildSecret)
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}
@@ -291,6 +292,7 @@ func TestCloudBuildTriggersAndWorkerPools(t *testing.T) {
 func TestGcloudBuildsTriggersAndWorkerPools(t *testing.T) {
 	h := New(t)
 	h.Endpoint(EnvRun)
+	h.Endpoint(EnvSecrets) // a trigger's build reads a secret (buildSecret)
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker is required: builds run with the host's Docker")
 	}
