@@ -369,5 +369,5 @@ func checkCrossCluster(asked bool) error {
 	if !asked {
 		return nil
 	}
-	return apierror.Unimplemented("cross-cluster replication is not served here: a Valkey cluster-mode replica replicates only a primary of its own cluster (CLUSTER REPLICATE), so one cluster cannot be a secondary of another")
+	return apierror.Unimplemented("cross-cluster replication is not served here: a Valkey cluster-mode node refuses REPLICAOF and its replicas replicate only a primary of its own cluster (CLUSTER REPLICATE), so one cluster cannot be a secondary of another")
 }
