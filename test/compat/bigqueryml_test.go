@@ -294,8 +294,10 @@ func TestBigQueryMLRandomSplit(t *testing.T) {
 			t.Fatalf("CREATE MODEL %s: %v", m, err)
 		}
 	}
-	evalRows := fmt.Sprintf("SELECT x, y FROM `%s.noisy` WHERE MOD(ABS(FARM_FINGERPRINT(CONCAT('x INT64=\"', CAST(x AS STRING), "+
-		"'\",y INT64=\"', CAST(y AS STRING), '\"'))), 100) < 30", name)
+	// ABS(f) % 100 as ABS(f − DIV(f, 100)·100): the engine's ABS and MOD
+	// of an INT64 this large lose its low digits (#1599), its DIV does not.
+	fp := "FARM_FINGERPRINT(CONCAT('x INT64=\"', CAST(x AS STRING), '\",y INT64=\"', CAST(y AS STRING), '\"'))"
+	evalRows := fmt.Sprintf("SELECT x, y FROM `%s.noisy` WHERE ABS(%s - DIV(%s, 100) * 100) < 30", name, fp, fp)
 	n := mlQuery(t, h, c, "SELECT COUNT(*) AS n FROM ("+evalRows+")")
 	if len(n) != 1 || n[0]["n"].(int64) < 120 || n[0]["n"].(int64) > 240 {
 		t.Fatalf("evaluation rows: %v; want about 30%% of 600", n)
