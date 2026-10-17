@@ -69,7 +69,7 @@ Authors.
  		return fmt.Sprintf("%s#%d", colName, colID)
  	}
  	return colName
-@@ -1567,6 +1570,12 @@
+@@ -1572,6 +1575,12 @@
  	}
  	columnNames := &arraySubqueryColumnNames{}
  	ctx = withArraySubqueryColumnName(ctx, columnNames)
@@ -82,7 +82,7 @@ Authors.
  	sql, err := newNode(m1(n.node.Subquery())).FormatSQL(ctx)
  	if err != nil {
  		return "", err
-@@ -3108,6 +3117,7 @@
+@@ -3113,6 +3122,7 @@
  	if n == nil {
  		return "", nil
  	}
@@ -90,7 +90,7 @@ Authors.
  	table, err := getTableName(ctx, m1(n.node.TableScan()))
  	if err != nil {
  		return "", err
-@@ -3215,6 +3225,7 @@
+@@ -3220,6 +3230,7 @@
  	if n == nil {
  		return "", nil
  	}
