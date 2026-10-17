@@ -177,7 +177,7 @@ func TestCMEKEncryptsAndFailsWhenTheKeyIsDisabled(t *testing.T) {
 		t.Errorf("access after re-enable: %v", err)
 	}
 
-	// Mounting reads the stored bytes, which are ciphertext.
+	// Without a cluster there is nowhere to mount the decrypted copy.
 	_, _, err = s.ResolveSecretRef("p", "a", "1")
 	wantCode(t, err, codes.Unimplemented)
 

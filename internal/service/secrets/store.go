@@ -698,6 +698,9 @@ func (s *Store) deleteSecret(project, id string) error {
 	if err := s.db.Delete(secretKey(project, id)); err != nil {
 		return apierror.Internal(err, "delete secret")
 	}
+	if err := s.deleteMounts(project, id); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -915,6 +918,12 @@ func (s *Store) SetVersionState(project, id, version string, state VersionState)
 			return Version{}, err
 		}
 	}
+	if state == StateDisabled {
+		// A disabled version cannot be read by an instance that starts.
+		if err := s.dropMount(project, id, v); err != nil {
+			return Version{}, err
+		}
+	}
 	event := EventSecretVersionEnable
 	if state == StateDisabled {
 		event = EventSecretVersionDisable
@@ -1083,11 +1092,12 @@ func (s *Store) ResolveSecretRef(project, secret, version string) (secretName, d
 			"secret version %s is %s and cannot be mounted", v.Name, v.State)
 	}
 	// The Kubernetes Secret holds what is stored, which for a version
-	// under a customer-managed key is ciphertext (#1453).
+	// under a customer-managed key (#1453) is ciphertext: the instance
+	// decrypts it into the mount Secret instead (#1489).
 	if v.encrypted() {
-		return "", "", apierror.Unimplemented("secret version %s is encrypted with a customer-managed key, and "+
-			"CloudBurrow mounts a version from the stored bytes, which are ciphertext; "+
-			"read it with AccessSecretVersion instead", v.Name)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.resolveEncrypted(project, id, v)
 	}
 	return KubernetesSecretName(project, id), VersionKey(number), nil
 }
