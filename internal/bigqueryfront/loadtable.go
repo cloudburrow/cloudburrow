@@ -162,17 +162,15 @@ func loadFailed(rec *recorder) bool {
 // loadNotHere is why the front does not carry out the load in r's body,
 // or "" (#1457). The pinned emulator answered an ORC and a
 // DATASTORE_BACKUP load 500 "runtime error: invalid memory address or nil
-// pointer dereference", and loaded a JSON load with hivePartitioningOptions
-// or jsonExtension GEOJSON as if neither were given (measured), so each is
-// 501 with its reason.
+// pointer dereference" (measured), so each is 501 with its reason. A load
+// with hivePartitioningOptions or jsonExtension GEOJSON, which it loaded
+// as if neither were given, is read by the front (#1547, loadvariants.go).
 func loadNotHere(r *http.Request) string {
 	var job struct {
 		Configuration struct {
 			Load struct {
-				SourceFormat            string          `json:"sourceFormat"`
-				HivePartitioningOptions json.RawMessage `json:"hivePartitioningOptions"`
-				JSONExtension           string          `json:"jsonExtension"`
-				FileSetSpecType         string          `json:"fileSetSpecType"`
+				SourceFormat    string `json:"sourceFormat"`
+				FileSetSpecType string `json:"fileSetSpecType"`
 			} `json:"load"`
 		} `json:"configuration"`
 	}
@@ -186,12 +184,6 @@ func loadNotHere(r *http.Request) string {
 			"module reads Parquet and Avro, not ORC)"
 	case strings.EqualFold(l.SourceFormat, "DATASTORE_BACKUP"):
 		return "a DATASTORE_BACKUP load: CloudBurrow does not read Datastore or Firestore managed exports"
-	case len(l.HivePartitioningOptions) > 0 && string(l.HivePartitioningOptions) != "null":
-		return "a load with hivePartitioningOptions: CloudBurrow does not read partition keys from the files' paths, and " +
-			"would load the rows without those columns"
-	case l.JSONExtension != "" && !strings.EqualFold(l.JSONExtension, "JSON_EXTENSION_UNSPECIFIED"):
-		return "a load with jsonExtension " + l.JSONExtension + ": CloudBurrow reads newline-delimited JSON only, and " +
-			"would load GeoJSON features as plain records"
 	case l.FileSetSpecType != "" && !strings.EqualFold(l.FileSetSpecType, "FILE_SET_SPEC_TYPE_FILE_SYSTEM_MATCH"):
 		return "a load with fileSetSpecType " + l.FileSetSpecType + ": CloudBurrow reads the sourceUris as the files " +
 			"themselves, not as manifests"

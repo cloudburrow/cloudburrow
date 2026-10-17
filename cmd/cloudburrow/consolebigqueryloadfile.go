@@ -79,6 +79,10 @@ func (p bigqueryProvider) loadFile(ctx context.Context, project, datasetID, tabl
 	if err != nil {
 		return nil, err
 	}
+	extras, err := loadExtrasOf(values, false) // #1547
+	if err != nil {
+		return nil, err
+	}
 	write := values["writeDisposition"]
 	if write == "" {
 		write = "WRITE_APPEND"
@@ -88,7 +92,7 @@ func (p bigqueryProvider) loadFile(ctx context.Context, project, datasetID, tabl
 	}
 	ctx, cancel := context.WithTimeout(ctx, bigqueryFileLoadTimeout)
 	defer cancel()
-	c, err := p.client(ctx)
+	c, err := p.loadClient(ctx, extras)
 	if err != nil {
 		return nil, err
 	}

@@ -20,8 +20,10 @@ package main
 //     sourceColumnMatch, timeZone and the date, datetime, time and
 //     timestamp formats (#1325); for Avro, useAvroLogicalTypes (#1457);
 //     and, for a table the load makes, time partitioning by a column or
-//     by ingestion time, and clustering columns (#1457). WRITE_EMPTY and
-//     ORC are not offered (the front refuses ORC, 501).
+//     by ingestion time, and clustering columns (#1457); jsonExtension
+//     GEOJSON and hivePartitioningOptions (mode and sourceUriPrefix), for
+//     newline-delimited JSON (#1547, consolebigqueryloadextras.go).
+//     WRITE_EMPTY and ORC are not offered (the front refuses ORC, 501).
 //   - an export: a URI and More URIs (the front shares the rows out
 //     between them), CSV, NEWLINE_DELIMITED_JSON, AVRO or PARQUET (the front
 //     writes the Avro object container and Parquet files,
@@ -177,7 +179,7 @@ func bigqueryLoadFields(withTable bool) []console.Field {
 			Type: "checkbox", Section: "CSV options",
 			Help: "CSV only: control characters other than tab and newline are loaded as they are."},
 	)
-	return fields
+	return append(fields, bigqueryLoadExtraFields()...) // #1547
 }
 
 // bigqueryExportFields are Export to Cloud Storage's inputs.
@@ -378,6 +380,10 @@ func (p bigqueryProvider) loadJob(ctx context.Context, project, datasetID, table
 	if err != nil {
 		return nil, err
 	}
+	extras, err := loadExtrasOf(values, true) // #1547
+	if err != nil {
+		return nil, err
+	}
 	write := values["writeDisposition"]
 	if write == "" {
 		write = "WRITE_APPEND"
@@ -387,7 +393,7 @@ func (p bigqueryProvider) loadJob(ctx context.Context, project, datasetID, table
 	}
 	ctx, cancel := context.WithTimeout(ctx, bigqueryJobTimeout)
 	defer cancel()
-	c, err := p.client(ctx)
+	c, err := p.loadClient(ctx, extras)
 	if err != nil {
 		return nil, err
 	}

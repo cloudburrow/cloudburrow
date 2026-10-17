@@ -22,8 +22,8 @@ import (
 // none): a JSON upload with a schema, a CSV with autodetect, a Parquet
 // load (ingestion-time partitioned) and an Avro one (from Cloud Storage),
 // WRITE_TRUNCATE into a new table too; a load that fails leaves no table;
-// a table that exists keeps its own properties. ORC, DATASTORE_BACKUP,
-// hivePartitioningOptions and jsonExtension GEOJSON are 501.
+// a table that exists keeps its own properties. ORC and DATASTORE_BACKUP
+// are 501 (hivePartitioningOptions and GEOJSON: bigqueryloadvariants_test.go).
 //
 // covers: bigquery.jobs.insert, bigquery.jobs.get, bigquery.tables.get, bigquery.jobs.query
 func TestBigQueryLoadMakesItsTableWithItsProperties(t *testing.T) {
@@ -149,16 +149,13 @@ func TestBigQueryLoadMakesItsTableWithItsProperties(t *testing.T) {
 		t.Errorf("the existing table: %+v %q", md.Clustering, md.Description)
 	}
 
-	// 501: ORC, DATASTORE_BACKUP, hivePartitioningOptions, GEOJSON.
+	// 501: ORC, DATASTORE_BACKUP.
 	for _, tc := range []struct {
 		what string
 		load *bq.JobConfigurationLoad
 	}{
 		{"ORC", &bq.JobConfigurationLoad{SourceFormat: "ORC"}},
 		{"DATASTORE_BACKUP", &bq.JobConfigurationLoad{SourceFormat: "DATASTORE_BACKUP"}},
-		{"hive", &bq.JobConfigurationLoad{SourceFormat: "NEWLINE_DELIMITED_JSON",
-			HivePartitioningOptions: &bq.HivePartitioningOptions{Mode: "AUTO", SourceUriPrefix: "gs://" + bucket.BucketName() + "/"}}},
-		{"GEOJSON", &bq.JobConfigurationLoad{SourceFormat: "NEWLINE_DELIMITED_JSON", JsonExtension: "GEOJSON"}},
 	} {
 		tc.load.DestinationTable = &bq.TableReference{ProjectId: project, DatasetId: ds.DatasetID, TableId: "refused"}
 		tc.load.SourceUris = []string{"gs://" + bucket.BucketName() + "/a.avro"}
