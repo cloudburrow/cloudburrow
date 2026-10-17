@@ -158,7 +158,14 @@ func TestStorageXMLFormPostPolicyInProcess(t *testing.T) {
 	f = nil
 	for _, kv := range ordered(p) {
 		if kv[0] == "x-goog-signature" {
-			kv[1] = "00" + kv[1][2:]
+			// Change the first byte whatever it is: a signature that already
+			// began "00" left this a no-op, 1 run in 256 (main's CI run
+			// 39059362725).
+			if strings.HasPrefix(kv[1], "00") {
+				kv[1] = "ff" + kv[1][2:]
+			} else {
+				kv[1] = "00" + kv[1][2:]
+			}
 		}
 		f = append(f, kv)
 	}

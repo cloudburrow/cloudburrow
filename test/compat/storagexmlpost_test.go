@@ -165,7 +165,12 @@ func TestStorageXMLFormPostPolicyV4(t *testing.T) {
 		t.Errorf("a field the policy does not name = %d %s; want 403", resp.StatusCode, body)
 	}
 	delete(changed, "x-goog-meta-unsigned")
-	changed["x-goog-signature"] = "00" + p.Fields["x-goog-signature"][2:]
+	// Change the first byte whatever it is ("00" was a no-op 1 run in 256).
+	if sig := p.Fields["x-goog-signature"]; strings.HasPrefix(sig, "00") {
+		changed["x-goog-signature"] = "ff" + sig[2:]
+	} else {
+		changed["x-goog-signature"] = "00" + sig[2:]
+	}
 	if resp, body := submitForm(t, h, p.URL, changed, "x"); resp.StatusCode != http.StatusForbidden || xmlErrorCode(body) != "SignatureDoesNotMatch" {
 		t.Errorf("a tampered signature = %d %s; want 403 SignatureDoesNotMatch", resp.StatusCode, body)
 	}
