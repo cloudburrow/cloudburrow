@@ -63,3 +63,60 @@ func TestRowsSubqueryUnionsAreCapped(t *testing.T) {
 		t.Errorf("not nested twice: %.200s", got)
 	}
 }
+
+// structArity is the number of top-level fields of a STRUCT<...> type.
+func structArity(typ string) int {
+	body := strings.TrimSuffix(strings.TrimPrefix(typ, "STRUCT<"), ">")
+	n, depth := 1, 0
+	for _, r := range body {
+		switch r {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case ',':
+			if depth == 0 {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// TestColumnsRowsArity (#1490): every COLUMNS and COLUMN_FIELD_PATHS row,
+// of an ingestion-time partitioned table's pseudo-columns too, has a
+// value per field of the view's row type. A pseudo-column row one short
+// failed COLUMNS 400 "Array element type STRUCT<STRING, ...> does not
+// coerce" for every dataset holding such a table.
+func TestColumnsRowsArity(t *testing.T) {
+	tables := []infoTable{
+		{"tableId": "ing", "timePartitioning": map[string]any{"type": "DAY"},
+			"schema": map[string]any{"fields": []any{map[string]any{"name": "x", "type": "INTEGER"}}}},
+		{"tableId": "hourly", "timePartitioning": map[string]any{"type": "HOUR"}},
+		{"tableId": "nested", "timePartitioning": map[string]any{"type": "DAY", "field": "d"},
+			"clustering": map[string]any{"fields": []any{"g"}},
+			"schema": map[string]any{"fields": []any{
+				map[string]any{"name": "d", "type": "DATE", "mode": "REQUIRED"},
+				map[string]any{"name": "g", "type": "GEOGRAPHY"},
+				map[string]any{"name": "j", "type": "JSON"},
+				map[string]any{"name": "r", "type": "RECORD", "mode": "REPEATED", "fields": []any{
+					map[string]any{"name": "a", "type": "STRING", "collation": "und:ci"}}},
+			}}},
+	}
+	for name, v := range map[string]struct {
+		columns string
+		rows    func(project, dataset string, t infoTable) [][]string
+	}{"COLUMNS": {columnsColumns, columnsRows}, "COLUMN_FIELD_PATHS": {fieldPathsColumns, fieldPathsRows}} {
+		want := structArity(v.columns)
+		for _, tb := range tables {
+			for _, row := range v.rows("p", "d", tb) {
+				if len(row) != want {
+					t.Errorf("%s of %s: %d values, want %d: %v", name, tb["tableId"], len(row), want, row)
+				}
+			}
+		}
+	}
+	if n := len(columnsRows("p", "d", tables[0])); n != 3 {
+		t.Errorf("COLUMNS of an ingestion-time DAY table: %d rows, want x, _PARTITIONTIME and _PARTITIONDATE", n)
+	}
+}
