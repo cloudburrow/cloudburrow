@@ -265,11 +265,15 @@ func (r *runService) Start(ctx context.Context) error {
 	// (its v1 paths are Artifact Registry's), and its repositories' git URLs,
 	// whose pushes run the triggers file's builds.
 	ssm := adapter.SecureSourceManager(func() string { return hostURL(r.server.Addr()) })
+	// Developer Connect (#1546): connections to that Secure Source Manager
+	// and links to its repositories, under /developerconnect/v1/.
+	devConnect := adapter.DeveloperConnect()
 	cloudBuild := builds.CloudBuild()
 	var jsonAPI http.Handler = runadapter.RegistryHandlerOr(runadapter.SourceManagerHandlerOr(ssm, cloudBuild,
 		func(g grpc.ServiceRegistrar) { ssm.Register(g); ops.Register(g) },
-		functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
-			adapter.V1Handler(runadapter.NewRESTHandler(register))))))
+		runadapter.DeveloperConnectHandlerOr(func(g grpc.ServiceRegistrar) { devConnect.Register(g); ops.Register(g) },
+			functions.FunctionsHandler(runadapter.SourceDeployHandler(sourceDeploy,
+				adapter.V1Handler(runadapter.NewRESTHandler(register)))))))
 	if r.requests != nil {
 		jsonAPI = rest.Observe(jsonAPI, r.requests)
 	}
@@ -279,6 +283,7 @@ func (r *runService) Start(ctx context.Context) error {
 		adapter.ArtifactRegistry().Register(g)
 		builds.CloudBuild().Register(g)
 		ssm.Register(g)
+		devConnect.Register(g)
 		functions.Register(g)
 	}); err != nil {
 		return err

@@ -31,7 +31,10 @@ import (
 // "Connect to Cloud Build" and "Triggers file schema" pages document it:
 // .cloudbuild/triggers.yaml on the repository's default branch, a list of
 // triggers, each with a name, a project (the repository's by default), a
-// configFilePath (.cloudbuild/cloudbuild.yaml by default), an eventType
+// configFilePath (.cloudbuild/cloudbuild.yaml by default), an optional
+// devConnectGitRepositoryLink (a Developer Connect link to this repository,
+// developerconnect.go; a trigger whose link is missing, disabled or names
+// another repository is skipped and logged), an eventType
 // (push by default; pull_request triggers never run, as no pull request is
 // served), RE2 includedGitRefs and ignoredGitRefs (ignored first; an empty
 // filter does not restrict), includedFiles and ignoredFiles over the
@@ -127,6 +130,10 @@ type ssmTrigger struct {
 	ServiceAccount  string            `yaml:"serviceAccount"`
 	Disabled        bool              `yaml:"disabled"`
 	Substitutions   map[string]string `yaml:"substitutions"`
+	// DevConnectGitRepositoryLink names the Developer Connect link the
+	// trigger runs through (#1546), as Google's "Connect to Secure Source
+	// Manager" page documents it: the link must name this repository.
+	DevConnectGitRepositoryLink string `yaml:"devConnectGitRepositoryLink"`
 }
 
 var (
@@ -247,6 +254,16 @@ func (m *SecureSourceManagerServer) runPushTriggers(ctx context.Context, builds 
 		if t.ServiceAccount == "" {
 			slog.Warn("securesourcemanager: trigger skipped: serviceAccount is required", "repository", repo.GetName(), "trigger", t.Name)
 			continue
+		}
+		if link := t.DevConnectGitRepositoryLink; link != "" {
+			named, err := devConnectLinkRepo(link)
+			if err == nil && named != repo.GetName() {
+				err = fmt.Errorf("git repository link %q names %q, not this repository", link, named)
+			}
+			if err != nil {
+				slog.Warn("securesourcemanager: trigger skipped", "repository", repo.GetName(), "trigger", t.Name, "err", err)
+				continue
+			}
 		}
 		if err := m.runPushTrigger(ctx, builds, repo, dir, project, location, id, ref, sha, t); err != nil {
 			slog.Warn("securesourcemanager: trigger's build was refused", "repository", repo.GetName(), "trigger", t.Name, "err", err)

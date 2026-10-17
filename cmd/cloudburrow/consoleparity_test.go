@@ -81,6 +81,16 @@ var parityRows = []parityRow{
 		Methods:  []string{"SecureSourceManager/GetIamPolicyRepo", "SecureSourceManager/SetIamPolicyRepo", "SecureSourceManager/TestIamPermissionsRepo"},
 		Provider: "secure-source-manager", Offers: "the Permissions tab on an instance's page and a repository's: the stored policy (ADR-0006, never enforced), its bindings added and removed, and which permissions TestIamPermissions answers (#1527)",
 		Tests: []string{"TestConsoleSourceManagerInstancesAndRepositories"}},
+	// Developer Connect (#1546): on Secure Source Manager's pages.
+	{Resource: "Developer Connect connections and git repository links", Service: "developerconnect",
+		Methods: []string{"DeveloperConnect/CreateConnection", "DeveloperConnect/GetConnection", "DeveloperConnect/ListConnections",
+			"DeveloperConnect/DeleteConnection", "DeveloperConnect/CreateGitRepositoryLink", "DeveloperConnect/GetGitRepositoryLink",
+			"DeveloperConnect/ListGitRepositoryLinks", "DeveloperConnect/DeleteGitRepositoryLink"},
+		Provider: "secure-source-manager", Offers: "an instance's page lists the Developer Connect connections to it (location, links, state), with Connect to Developer Connect (connection ID, in the instance's region) and Delete connection; a repository's page lists the git repository links to it, with Link repository (connection, link ID) and Delete link, and its Triggers show each trigger's devConnectGitRepositoryLink (#1546)",
+		Tests: []string{"TestConsoleSourceManagerInstancesAndRepositories"}},
+	{Resource: "Developer Connect reads the console does not need", Service: "developerconnect",
+		Methods:  []string{"DeveloperConnect/UpdateConnection", "DeveloperConnect/FetchLinkableGitRepositories", "DeveloperConnect/FetchGitRefs"},
+		Excluded: "a connection's labels, annotations and disabled flag, which no CloudBurrow page shows; the linkable repositories, which are the instance page's Repositories, where Link repository is offered; and a link's branches and tags, which are the repository's own (#1546)"},
 	// Backup and DR (#1433).
 	{Resource: "Cloud SQL point-in-time restore from a Backup and DR data source", Service: "sqladmin",
 		Methods:  []string{"sql.instances.pointInTimeRestore"},

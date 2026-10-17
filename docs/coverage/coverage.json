@@ -1744,6 +1744,168 @@
     ]
   },
   {
+    "Key": "developerconnect",
+    "Title": "Developer Connect",
+    "counts": {
+      "Unimplemented": 15,
+      "Verified": 11
+    },
+    "rows": [
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateAccountConnector",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/CreateGitRepositoryLink",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteAccountConnector",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteGitRepositoryLink",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteSelf",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/DeleteUser",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchAccessToken",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchGitHubInstallations",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchGitRefs",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchLinkableGitRepositories",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchReadToken",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchReadWriteToken",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FetchSelf",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/FinishOAuth",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetAccountConnector",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/GetGitRepositoryLink",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListAccountConnectors",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListConnections",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListGitRepositoryLinks",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/ListUsers",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/StartOAuth",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateAccountConnector",
+        "status": "Unimplemented",
+        "note": "returns UNIMPLEMENTED (in-process check)"
+      },
+      {
+        "method": "google.cloud.developerconnect.v1.DeveloperConnect/UpdateConnection",
+        "status": "Verified",
+        "tests": [
+          "test/compat/developerconnect_test.go:48 TestDeveloperConnectSourceManagerTrigger"
+        ]
+      }
+    ]
+  },
+  {
     "Key": "functions",
     "Title": "Cloud Functions v2",
     "counts": {
