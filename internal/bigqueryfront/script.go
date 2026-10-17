@@ -602,15 +602,25 @@ func queryFailure(rec *recorder, job map[string]any) (string, bool) {
 		if e.Error.Message == "" {
 			e.Error.Message = fmt.Sprintf("HTTP %d", rec.status)
 		}
-		return e.Error.Message, true
+		return errorFunctionMessage(e.Error.Message), true
 	}
 	if status, ok := job["status"].(map[string]any); ok {
 		if res, ok := status["errorResult"].(map[string]any); ok {
 			msg, _ := res["message"].(string)
-			return msg, true
+			return errorFunctionMessage(msg), true
 		}
 	}
 	return "", false
+}
+
+// errorFunctionMessage is msg without the mark googlesqlite patch 0072
+// puts before ERROR()'s message (engineerrors.go, #1585): a script's
+// @@error.message, and what the front passes on, is the message.
+func errorFunctionMessage(msg string) string {
+	if i := strings.LastIndex(msg, errorFunctionPrefix); i >= 0 {
+		return msg[i+len(errorFunctionPrefix):]
+	}
+	return msg
 }
 
 // fail answers a query as failed with e: a query job (job, from

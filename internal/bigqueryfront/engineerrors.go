@@ -164,8 +164,8 @@ func (c *engineContext) mapError(e rowError) (rowError, bool) {
 // runtimeError is BigQuery's message of msg, the engine's error of a query
 // it ran, when it is one of those above.
 func (c *engineContext) runtimeError(msg string) (string, bool) {
-	if i := strings.LastIndex(msg, errorFunctionPrefix); i >= 0 {
-		return msg[i+len(errorFunctionPrefix):], true
+	if plain := errorFunctionMessage(msg); plain != msg {
+		return plain, true
 	}
 	if i := strings.Index(msg, "division by zero: "); i >= 0 {
 		return msg[i:], true

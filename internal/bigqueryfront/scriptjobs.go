@@ -348,6 +348,9 @@ func (s *scriptRun) failedChild(text string, rec *recorder, msg string) {
 	if json.Unmarshal(rec.body.Bytes(), &e) == nil && len(e.Error.Errors) > 0 && e.Error.Errors[0].Reason != "" {
 		reason = e.Error.Errors[0].Reason
 	}
+	if reason == "jobInternalError" && strings.Contains(rec.body.String(), errorFunctionPrefix) {
+		reason = "invalidQuery" // ERROR()'s, whose mark msg no longer has (#1585)
+	}
 	legacy := false
 	body, err := json.Marshal(map[string]any{"jobReference": map[string]any{"projectId": projectOf(s.f.base), "jobId": jobIDFor(s.r.Context())},
 		"configuration": map[string]any{"query": map[string]any{
