@@ -24,8 +24,9 @@ import (
 //   - ML.FEATURE_CROSS(STRUCT(...) [, degree]): a STRUCT of every
 //     combination of 2 to degree (2) of the STRING fields, the values
 //     joined with _;
-//   - ML.DISTANCE(a, b [, 'EUCLIDEAN' | 'MANHATTAN' | 'COSINE']) and
-//     ML.LP_NORM(a, p) of numeric arrays.
+//   - ML.DISTANCE(a, b [, 'EUCLIDEAN' | 'MANHATTAN' | 'COSINE']),
+//     ML.LP_NORM(a, p) and ML.NORMALIZER(a [, p]) (a / its p-norm, p 2 by
+//     default) of numeric arrays.
 //
 // Analytic, x's statistics over the window (OVER (...)) in a query, and in
 // a TRANSFORM over the training rows, learned at CREATE MODEL and kept as
@@ -37,7 +38,8 @@ import (
 //   - ML.IMPUTER(x, 'mean'): x, or the mean where it is NULL.
 //
 // UNVERIFIED: what BigQuery gives where a scaler divides by zero (a
-// constant column); CloudBurrow gives NULL. ML.BUCKETIZE of NULL is NULL.
+// constant column, or ML.NORMALIZER of a zero array); CloudBurrow gives
+// NULL. ML.BUCKETIZE of NULL is NULL.
 // The order of ML.POLYNOMIAL_EXPAND's fields is the input fields, then the
 // products degree by degree.
 //
@@ -51,7 +53,6 @@ import (
 var mlPreprocessUnserved = map[string]string{
 	"QUANTILE_BUCKETIZE": "its quantiles are BigQuery's approximate ones",
 	"ROBUST_SCALER":      "its quantiles are BigQuery's approximate ones",
-	"NORMALIZER":         "CloudBurrow does not carry it out yet",
 	"ONE_HOT_ENCODER":    "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
 	"MULTI_HOT_ENCODER":  "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
 	"LABEL_ENCODER":      "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
@@ -158,7 +159,7 @@ var mlAnalytic = map[string]bool{"STANDARD_SCALER": true, "MIN_MAX_SCALER": true
 func mlPreprocessSQL(fn string, args []string, window string, learn mlLearn) (string, int, string) {
 	if why, ok := mlPreprocessUnserved[fn]; ok {
 		return "", 501, "Not implemented here: ML." + fn + ": " + why + ". CloudBurrow answers ML.BUCKETIZE, ML.POLYNOMIAL_EXPAND, " +
-			"ML.FEATURE_CROSS, ML.STANDARD_SCALER, ML.MIN_MAX_SCALER, ML.MAX_ABS_SCALER, ML.IMPUTER (mean), ML.DISTANCE and ML.LP_NORM. Nothing was run."
+			"ML.FEATURE_CROSS, ML.STANDARD_SCALER, ML.MIN_MAX_SCALER, ML.MAX_ABS_SCALER, ML.IMPUTER (mean), ML.DISTANCE, ML.LP_NORM and ML.NORMALIZER. Nothing was run."
 	}
 	nargs := func(lo, hi int) (int, string) {
 		if len(args) < lo || len(args) > hi {
@@ -274,6 +275,22 @@ func mlPreprocessSQL(fn string, args []string, window string, learn mlLearn) (st
 		}
 		return fmt.Sprintf("IF(%s IS NULL OR %s IS NULL, CAST(NULL AS FLOAT64), IF(ARRAY_LENGTH(%s) != ARRAY_LENGTH(%s), ERROR('ML.DISTANCE: the two arrays must have the same length'), %s))",
 			a, bv, a, bv, body), 0, ""
+	case "NORMALIZER":
+		if c, m := nargs(1, 2); c != 0 {
+			return "", c, m
+		}
+		p := 2.0
+		if len(args) == 2 {
+			v, err := strconv.ParseFloat(strings.TrimSpace(strings.ReplaceAll(args[1], " ", "")), 64)
+			if err != nil || v < 1 {
+				return "", 501, "Not implemented here: ML.NORMALIZER of a p that is not a number literal of at least 1 (0 and infinity are not carried out). Nothing was run."
+			}
+			p = v
+		}
+		a := "(" + args[0] + ")"
+		norm := fmt.Sprintf("(SELECT POW(SUM(POW(ABS(CAST(_cbml_b AS FLOAT64)), %s)), 1 / %s) FROM UNNEST(%s) AS _cbml_b)", sqlF(p), sqlF(p), a)
+		return fmt.Sprintf("IF(%s IS NULL, NULL, ARRAY(SELECT SAFE_DIVIDE(CAST(_cbml_a AS FLOAT64), %s) FROM UNNEST(%s) AS _cbml_a WITH OFFSET _cbml_o ORDER BY _cbml_o))",
+			a, norm, a), 0, ""
 	case "LP_NORM":
 		if c, m := nargs(2, 2); c != 0 {
 			return "", c, m
@@ -338,7 +355,7 @@ func mlPreprocessSQL(fn string, args []string, window string, learn mlLearn) (st
 		}
 	}
 	return "", 501, "Not implemented here: ML." + fn + ". CloudBurrow answers ML.BUCKETIZE, ML.POLYNOMIAL_EXPAND, ML.FEATURE_CROSS, " +
-		"ML.STANDARD_SCALER, ML.MIN_MAX_SCALER, ML.MAX_ABS_SCALER, ML.IMPUTER (mean), ML.DISTANCE and ML.LP_NORM, and the ML functions of a MODEL. Nothing was run."
+		"ML.STANDARD_SCALER, ML.MIN_MAX_SCALER, ML.MAX_ABS_SCALER, ML.IMPUTER (mean), ML.DISTANCE, ML.LP_NORM and ML.NORMALIZER, and the ML functions of a MODEL. Nothing was run."
 }
 
 // structFields reads a STRUCT(expr [AS name], ...) argument into its

@@ -8122,7 +8122,7 @@
           "test/compat/bigquerymlmore_test.go:225 TestBigQueryMLTransform",
           "test/compat/bigquerymlmore_test.go:38 TestBigQueryMLMulticlassConfusionAndROC",
           "test/compat/bigquerymlpreprocess_test.go:21 TestBigQueryMLPreprocessFunctions",
-          "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
+          "test/compat/bigquerymlpreprocess_test.go:76 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
@@ -8270,7 +8270,7 @@
           "test/compat/bigquerymlmore_test.go:225 TestBigQueryMLTransform",
           "test/compat/bigquerymlmore_test.go:38 TestBigQueryMLMulticlassConfusionAndROC",
           "test/compat/bigquerymlpreprocess_test.go:21 TestBigQueryMLPreprocessFunctions",
-          "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
+          "test/compat/bigquerymlpreprocess_test.go:76 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
           "test/compat/bigquerymvtempscripts_test.go:33 TestBigQueryMaterializedViewsInTempScripts",
           "test/compat/bigquerynestedrounding_test.go:40 TestBigQueryNestedNumericRounding",
@@ -8336,7 +8336,7 @@
           "test/compat/bigquerymlmore_test.go:125 TestBigQueryMLKMeans",
           "test/compat/bigquerymlmore_test.go:185 TestBigQueryMLPCA",
           "test/compat/bigquerymlmore_test.go:38 TestBigQueryMLMulticlassConfusionAndROC",
-          "test/compat/bigquerymlpreprocess_test.go:75 TestBigQueryMLTransformPreprocess",
+          "test/compat/bigquerymlpreprocess_test.go:76 TestBigQueryMLTransformPreprocess",
           "test/compat/bigquerymltree_test.go:21 TestBigQueryMLBoostedTree",
           "test/compat/bigqueryundeleteroutines_test.go:43 TestBigQueryUndeleteKeepsRoutinesAndModels"
         ]

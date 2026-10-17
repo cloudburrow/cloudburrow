@@ -26,7 +26,8 @@ func TestBigQueryMLPreprocessFunctions(t *testing.T) {
 		"ML.BUCKETIZE(0.5, [1.0, 2.0, 3.0]) AS low, ML.BUCKETIZE(2.0, [1.0, 2.0, 3.0]) AS edge, ML.BUCKETIZE(CAST(NULL AS FLOAT64), [1.0]) AS n, "+
 		"p.a, p.b, p.a_a, p.a_b, p.b_b, q.a_a_b, q.b_b_b, x.f1_f2, x.f1_f3, x.f2_f3, "+
 		"ML.DISTANCE([1.0, 2.0], [4.0, 6.0]) AS de, ML.DISTANCE([1.0, 2.0], [4.0, 6.0], 'MANHATTAN') AS dm, "+
-		"ML.DISTANCE([1.0, 0.0], [0.0, 1.0], 'COSINE') AS dc, ML.LP_NORM([3.0, -4.0], 2) AS l2, ML.LP_NORM([3.0, -4.0], 1) AS l1 "+
+		"ML.DISTANCE([1.0, 0.0], [0.0, 1.0], 'COSINE') AS dc, ML.LP_NORM([3.0, -4.0], 2) AS l2, ML.LP_NORM([3.0, -4.0], 1) AS l1, "+
+		"ML.NORMALIZER([3.0, -4.0])[OFFSET(1)] AS n2, ML.NORMALIZER([3.0, -4.0], 1)[OFFSET(0)] AS n1 "+
 		"FROM (SELECT ML.POLYNOMIAL_EXPAND(STRUCT(2 AS a, 3 AS b)) AS p, ML.POLYNOMIAL_EXPAND(STRUCT(2 AS a, 3 AS b), 3) AS q, "+
 		"ML.FEATURE_CROSS(STRUCT('a' AS f1, 'b' AS f2, 'c' AS f3)) AS x)")
 	if len(row) != 1 {
@@ -41,7 +42,7 @@ func TestBigQueryMLPreprocessFunctions(t *testing.T) {
 	if r["n"] != nil {
 		t.Errorf("ML.BUCKETIZE(NULL) = %v; want NULL", r["n"])
 	}
-	for k, want := range map[string]float64{"a": 2, "b": 3, "a_a": 4, "a_b": 6, "b_b": 9, "a_a_b": 12, "b_b_b": 27, "de": 5, "dm": 7, "dc": 1, "l2": 5, "l1": 7} {
+	for k, want := range map[string]float64{"a": 2, "b": 3, "a_a": 4, "a_b": 6, "b_b": 9, "a_a_b": 12, "b_b_b": 27, "de": 5, "dm": 7, "dc": 1, "l2": 5, "l1": 7, "n2": -0.8, "n1": 3.0 / 7} {
 		if !near(r[k], want, 1e-9) {
 			t.Errorf("%s = %v; want %v", k, r[k], want)
 		}
