@@ -18,9 +18,10 @@ import (
 // isolated configuration, behind egressGuard), send copy jobs with
 // operationType SNAPSHOT, CLONE and RESTORE (and destinationExpirationTime),
 // and the official Go client reads each result back: a SNAPSHOT of the base
-// with its snapshotDefinition and an expiration about an hour away, a
-// writable clone with its cloneDefinition, and a standard table restored from
-// the snapshot with its rows.
+// with its snapshotDefinition and an expiration about an hour from the
+// time bq sent (this machine's clock), a writable clone with its
+// cloneDefinition, and a standard table restored from the snapshot with its
+// rows.
 func TestBqCopySnapshotCloneAndRestore(t *testing.T) {
 	h := New(t)
 	endpoint := strings.TrimSuffix(h.Endpoint(EnvBigQuery), "/")
@@ -50,7 +51,12 @@ func TestBqCopySnapshotCloneAndRestore(t *testing.T) {
 	if md.Type != bigquery.Snapshot || md.SnapshotDefinition == nil || md.SnapshotDefinition.BaseTableReference.TableID != "base" {
 		t.Errorf("bq cp --snapshot made type %q, %+v", md.Type, md.SnapshotDefinition)
 	}
-	if want := advanceBigQueryClock(t, h, 0).Add(time.Hour); md.ExpirationTime.Before(want.Add(-5*time.Minute)) || md.ExpirationTime.After(want.Add(5*time.Minute)) {
+	// bq cp computes destinationExpirationTime itself, from this machine's
+	// clock: int(self.expiration + time.time()) (bq's command_copy.py), and
+	// BigQuery keeps the time it is given. So the snapshot expires an hour
+	// from this machine's now, not the instance's, which an earlier test's
+	// clock:advance may have moved ahead (#1558).
+	if want := time.Now().Add(time.Hour); md.ExpirationTime.Before(want.Add(-5*time.Minute)) || md.ExpirationTime.After(want.Add(5*time.Minute)) {
 		t.Errorf("bq cp --expiration=3600: the snapshot expires %v, want about %v", md.ExpirationTime, want)
 	}
 

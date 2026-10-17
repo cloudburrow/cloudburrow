@@ -515,7 +515,8 @@ func TestBigQueryCopyTableSendsTheOperation(t *testing.T) {
 
 // TestBigQuerySnapshotCloneAndRestoreSendTheirOperation (#1002): Snapshot,
 // Clone and Restore are each one copy job with their operationType;
-// Snapshot's expiration is then patched onto the snapshot, and a bad one is
+// Snapshot's expiration is then patched onto the snapshot, its hours from
+// the snapshot's creationTime (the instance's clock, #1558), and a bad one is
 // refused before anything is sent.
 func TestBigQuerySnapshotCloneAndRestoreSendTheirOperation(t *testing.T) {
 	var sent []string
@@ -529,6 +530,9 @@ func TestBigQuerySnapshotCloneAndRestoreSendTheirOperation(t *testing.T) {
 		case r.Method == http.MethodPatch:
 			sent = append(sent, "patch "+r.URL.Path+" "+string(b))
 			_, _ = io.WriteString(w, `{"tableReference":{"projectId":"p","datasetId":"d2","tableId":"t2"}}`)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/tables/t2"):
+			// The instance's clock, days ahead of this machine's (#1558).
+			_, _ = io.WriteString(w, `{"tableReference":{"projectId":"p","datasetId":"d2","tableId":"t2"},"type":"SNAPSHOT","creationTime":"4102444800000"}`)
 		default:
 			_, _ = io.WriteString(w, `{"jobReference":{"projectId":"p","jobId":"c1","location":"US"},"status":{"state":"DONE"}}`)
 		}
@@ -552,7 +556,7 @@ func TestBigQuerySnapshotCloneAndRestoreSendTheirOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(sent) != 2 || !strings.HasPrefix(sent[1], "patch ") || !strings.Contains(sent[1], "/tables/t2") ||
-		!strings.Contains(sent[1], `"expirationTime"`) {
+		!strings.Contains(sent[1], `"expirationTime":"4102531200000"`) {
 		t.Errorf("Snapshot with an expiration sent %v", sent)
 	}
 	sent = nil
