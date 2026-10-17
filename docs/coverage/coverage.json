@@ -838,8 +838,7 @@
     "Key": "artifactregistry",
     "Title": "Artifact Registry",
     "counts": {
-      "Unimplemented": 8,
-      "Verified": 42
+      "Verified": 50
     },
     "rows": [
       {
@@ -860,6 +859,9 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateRepository",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
+          "test/compat/artifactregistry_formats_test.go:654 TestGcloudArtifactsPackageFormats",
+          "test/compat/artifactregistry_formats_test.go:709 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -876,6 +878,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/CreateTag",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
           "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
@@ -891,6 +894,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteFile",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistryconfig_test.go:78 TestArtifactRegistryConfigAndMetadata"
         ]
       },
@@ -898,6 +902,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeletePackage",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -905,6 +910,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteRepository",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:709 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -921,6 +927,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteTag",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -928,6 +935,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/DeleteVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry",
           "test/compat/artifactregistryconfig_test.go:266 TestGcloudArtifactsVPCSCAndVersions"
         ]
@@ -958,6 +966,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetFile",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -971,18 +980,23 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetMavenArtifact",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): only DOCKER repositories are served: CreateRepository refuses MAVEN, so no repository here holds Maven artifacts; serving one means serving that format's own upload and download protocol"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetNpmPackage",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): only DOCKER repositories are served: CreateRepository refuses NPM, so no repository here holds npm packages; serving one means serving that format's own upload and download protocol"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetPackage",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -995,13 +1009,16 @@
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetPythonPackage",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): only DOCKER repositories are served: CreateRepository refuses PYTHON, so no repository here holds Python packages; serving one means serving that format's own upload and download protocol"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetRepository",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:709 TestTerraformArtifactRegistryRepositoryFormats",
           "test/compat/gclouddeploysource_test.go:89 TestSourceDeployArtifactRegistryAndCloudBuild",
           "test/compat/terraform_cicd_test.go:30 TestTerraformArtifactRegistryRepository"
         ]
@@ -1018,6 +1035,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetTag",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:317 TestGcloudArtifactsDockerImages",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
@@ -1034,18 +1052,23 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/GetVersion",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportAptArtifacts",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): only DOCKER repositories are served: CreateRepository refuses APT, so no repository here holds Debian packages to import into; serving one means serving that format's own upload and download protocol"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:577 TestArtifactRegistryAptAndYumImports"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ImportYumArtifacts",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): only DOCKER repositories are served: CreateRepository refuses YUM, so no repository here holds RPM packages to import into; serving one means serving that format's own upload and download protocol"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:577 TestArtifactRegistryAptAndYumImports"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListAttachments",
@@ -1066,30 +1089,40 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListFiles",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
+          "test/compat/artifactregistry_formats_test.go:654 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListMavenArtifacts",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): only DOCKER repositories are served: CreateRepository refuses MAVEN, so no repository here holds Maven artifacts; serving one means serving that format's own upload and download protocol"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:381 TestArtifactRegistryMavenRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListNpmPackages",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): only DOCKER repositories are served: CreateRepository refuses NPM, so no repository here holds npm packages; serving one means serving that format's own upload and download protocol"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:285 TestArtifactRegistryNpmRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListPackages",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
+          "test/compat/artifactregistry_formats_test.go:654 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListPythonPackages",
-        "status": "Unimplemented",
-        "note": "returns UNIMPLEMENTED (in-process check): only DOCKER repositories are served: CreateRepository refuses PYTHON, so no repository here holds Python packages; serving one means serving that format's own upload and download protocol"
+        "status": "Verified",
+        "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository"
+        ]
       },
       {
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListRepositories",
@@ -1109,6 +1142,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListTags",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -1116,6 +1150,8 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/ListVersions",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:158 TestArtifactRegistryPythonRepository",
+          "test/compat/artifactregistry_formats_test.go:654 TestGcloudArtifactsPackageFormats",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },
@@ -1176,6 +1212,7 @@
         "method": "google.devtools.artifactregistry.v1.ArtifactRegistry/UpdateTag",
         "status": "Verified",
         "tests": [
+          "test/compat/artifactregistry_formats_test.go:464 TestArtifactRegistryGenericRepository",
           "test/compat/artifactregistry_registry_test.go:99 TestArtifactRegistryDockerRegistry"
         ]
       },

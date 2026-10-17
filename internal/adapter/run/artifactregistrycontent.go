@@ -64,6 +64,9 @@ func RegistryHandler() http.Handler {
 // request to next.
 func RegistryHandlerOr(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if RegistryStore() != nil && servePackages(w, r) {
+			return
+		}
 		if registry.IsRegistryPath(r.URL.Path) {
 			if h := RegistryHandler(); h != nil {
 				h.ServeHTTP(w, r)
@@ -194,6 +197,12 @@ func (a *ArtifactRegistryServer) packageOf(st *registry.Store, repoName, image s
 
 // ListPackages lists a repository's images.
 func (a *ArtifactRegistryServer) ListPackages(_ context.Context, req *arpb.ListPackagesRequest) (*arpb.ListPackagesResponse, error) {
+	if isPackageRepo(req.GetParent()) {
+		if err := noFilter(req.GetFilter(), req.GetOrderBy()); err != nil {
+			return nil, err
+		}
+		return a.fmtListPackages(req)
+	}
 	if err := noFilter(req.GetFilter(), req.GetOrderBy()); err != nil {
 		return nil, err
 	}
@@ -216,6 +225,9 @@ func (a *ArtifactRegistryServer) ListPackages(_ context.Context, req *arpb.ListP
 
 // GetPackage reads an image as a package.
 func (a *ArtifactRegistryServer) GetPackage(_ context.Context, req *arpb.GetPackageRequest) (*arpb.Package, error) {
+	if isPackageRepo(req.GetName()) {
+		return a.fmtGetPackage(req.GetName())
+	}
 	repoName, image, err := parsePackageName(req.GetName())
 	if err != nil {
 		return nil, err
@@ -229,6 +241,9 @@ func (a *ArtifactRegistryServer) GetPackage(_ context.Context, req *arpb.GetPack
 
 // DeletePackage deletes an image: every manifest and tag it holds.
 func (a *ArtifactRegistryServer) DeletePackage(_ context.Context, req *arpb.DeletePackageRequest) (*longrunningpb.Operation, error) {
+	if isPackageRepo(req.GetName()) {
+		return a.fmtDeletePackage(req.GetName())
+	}
 	repoName, image, err := parsePackageName(req.GetName())
 	if err != nil {
 		return nil, err
@@ -282,6 +297,12 @@ func parseVersionName(name string) (pkgName, repoName, image, digest string, err
 
 // ListVersions lists an image's manifests as versions, newest first.
 func (a *ArtifactRegistryServer) ListVersions(_ context.Context, req *arpb.ListVersionsRequest) (*arpb.ListVersionsResponse, error) {
+	if isPackageRepo(req.GetParent()) {
+		if err := noFilter(req.GetFilter(), req.GetOrderBy()); err != nil {
+			return nil, err
+		}
+		return a.fmtListVersions(req)
+	}
 	if err := noFilter(req.GetFilter(), req.GetOrderBy()); err != nil {
 		return nil, err
 	}
@@ -310,6 +331,9 @@ func (a *ArtifactRegistryServer) ListVersions(_ context.Context, req *arpb.ListV
 
 // GetVersion reads one manifest as a version.
 func (a *ArtifactRegistryServer) GetVersion(_ context.Context, req *arpb.GetVersionRequest) (*arpb.Version, error) {
+	if isPackageRepo(req.GetName()) {
+		return a.fmtGetVersion(req)
+	}
 	pkgName, repoName, image, digest, err := parseVersionName(req.GetName())
 	if err != nil {
 		return nil, err
@@ -328,6 +352,9 @@ func (a *ArtifactRegistryServer) GetVersion(_ context.Context, req *arpb.GetVers
 // DeleteVersion deletes a manifest. A tagged one is refused unless force
 // is set, which deletes its tags too, as Artifact Registry's does.
 func (a *ArtifactRegistryServer) DeleteVersion(_ context.Context, req *arpb.DeleteVersionRequest) (*longrunningpb.Operation, error) {
+	if isPackageRepo(req.GetName()) {
+		return a.fmtDeleteVersion(req)
+	}
 	_, repoName, image, digest, err := parseVersionName(req.GetName())
 	if err != nil {
 		return nil, err
@@ -363,8 +390,9 @@ func parseTagName(name string) (pkgName, repoName, image, tag string, err error)
 // ListTags lists an image's tags, by name. The filter Artifact Registry
 // documents for tags, version="<version name>", is applied.
 func (a *ArtifactRegistryServer) ListTags(_ context.Context, req *arpb.ListTagsRequest) (*arpb.ListTagsResponse, error) {
+	pkgRepo := isPackageRepo(req.GetParent())
 	repoName, image, err := parsePackageName(req.GetParent())
-	if err != nil {
+	if err != nil && !pkgRepo {
 		return nil, err
 	}
 	wantVersion := ""
@@ -374,6 +402,9 @@ func (a *ArtifactRegistryServer) ListTags(_ context.Context, req *arpb.ListTagsR
 			return nil, apierror.Unimplemented("ListTags filter %q is not supported: only version=\"...\"", f)
 		}
 		wantVersion = strings.Trim(strings.TrimSpace(v), `"`)
+	}
+	if isPackageRepo(req.GetParent()) {
+		return a.fmtListTags(req, wantVersion)
 	}
 	st, err := contentStore(repoName)
 	if err != nil {
@@ -404,6 +435,9 @@ func (a *ArtifactRegistryServer) ListTags(_ context.Context, req *arpb.ListTagsR
 
 // GetTag reads a tag.
 func (a *ArtifactRegistryServer) GetTag(_ context.Context, req *arpb.GetTagRequest) (*arpb.Tag, error) {
+	if isPackageRepo(req.GetName()) {
+		return a.fmtGetTag(req.GetName())
+	}
 	pkgName, repoName, image, tag, err := parseTagName(req.GetName())
 	if err != nil {
 		return nil, err
@@ -444,6 +478,9 @@ func (a *ArtifactRegistryServer) setTag(pkgName, repoName, image, tag, version s
 
 // CreateTag tags a version; an existing tag is refused.
 func (a *ArtifactRegistryServer) CreateTag(ctx context.Context, req *arpb.CreateTagRequest) (*arpb.Tag, error) {
+	if isPackageRepo(req.GetParent()) {
+		return a.fmtSetTag(req.GetParent()+"/tags/"+esc(req.GetTagId()), req.GetTag().GetVersion(), true)
+	}
 	repoName, image, err := parsePackageName(req.GetParent())
 	if err != nil {
 		return nil, err
@@ -464,6 +501,9 @@ func (a *ArtifactRegistryServer) UpdateTag(ctx context.Context, req *arpb.Update
 			return nil, apierror.InvalidArgument("update_mask path %q is not a tag field: only version can change", p)
 		}
 	}
+	if isPackageRepo(req.GetTag().GetName()) {
+		return a.fmtSetTag(req.GetTag().GetName(), req.GetTag().GetVersion(), false)
+	}
 	pkgName, repoName, image, tag, err := parseTagName(req.GetTag().GetName())
 	if err != nil {
 		return nil, err
@@ -476,6 +516,9 @@ func (a *ArtifactRegistryServer) UpdateTag(ctx context.Context, req *arpb.Update
 
 // DeleteTag removes a tag; its version stays.
 func (a *ArtifactRegistryServer) DeleteTag(_ context.Context, req *arpb.DeleteTagRequest) (*emptypb.Empty, error) {
+	if isPackageRepo(req.GetName()) {
+		return a.fmtDeleteTag(req.GetName())
+	}
 	_, repoName, image, tag, err := parseTagName(req.GetName())
 	if err != nil {
 		return nil, err
@@ -510,6 +553,9 @@ func dockerImageOf(repoName, image string, m registry.ManifestInfo) *arpb.Docker
 
 // ListDockerImages lists every manifest of every image in a repository.
 func (a *ArtifactRegistryServer) ListDockerImages(_ context.Context, req *arpb.ListDockerImagesRequest) (*arpb.ListDockerImagesResponse, error) {
+	if isPackageRepo(req.GetParent()) {
+		return nil, apierror.FailedPrecondition("%s is not a DOCKER repository", req.GetParent())
+	}
 	if req.GetOrderBy() != "" {
 		return nil, apierror.Unimplemented("order_by is not supported")
 	}
@@ -608,6 +654,9 @@ func (a *ArtifactRegistryServer) ListFiles(_ context.Context, req *arpb.ListFile
 		}
 		owner = strings.Trim(strings.TrimSpace(v), `"`)
 	}
+	if isPackageRepo(req.GetParent()) {
+		return a.fmtListFiles(req, owner)
+	}
 	st, err := contentStore(req.GetParent())
 	if err != nil {
 		return nil, err
@@ -627,6 +676,9 @@ func (a *ArtifactRegistryServer) ListFiles(_ context.Context, req *arpb.ListFile
 
 // GetFile reads one file, named by its digest.
 func (a *ArtifactRegistryServer) GetFile(_ context.Context, req *arpb.GetFileRequest) (*arpb.File, error) {
+	if isPackageRepo(req.GetName()) {
+		return a.fmtGetFile(req.GetName())
+	}
 	repoName, _, ok := splitChild(req.GetName(), "files")
 	if !ok {
 		return nil, apierror.InvalidArgument("invalid file name %q", req.GetName())

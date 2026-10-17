@@ -51,10 +51,13 @@ func (p artifactRegistryProvider) repository(project, id string) (*arpb.Reposito
 }
 
 // Detail opens a repository, an image in it, or one of its versions.
-func (p artifactRegistryProvider) Detail(_ context.Context, project string, path []string) (console.Detail, error) {
+func (p artifactRegistryProvider) Detail(ctx context.Context, project string, path []string) (console.Detail, error) {
 	r, repo, err := p.repository(project, path[0])
 	if err != nil {
 		return console.Detail{}, err
+	}
+	if r.GetFormat() != arpb.Repository_DOCKER {
+		return p.packageRepoDetail(ctx, r, path)
 	}
 	st := runadapter.RegistryStore()
 	if st == nil {
@@ -220,12 +223,18 @@ func (p artifactRegistryProvider) versionDetail(st *registry.Store, repo registr
 // DetailActions are Delete at each level, and Add tag and Remove tag on a
 // version.
 func (p artifactRegistryProvider) DetailActions(ctx context.Context, project string, path []string) []console.Action {
+	if r, _, err := p.repository(project, path[0]); err == nil && r.GetFormat() != arpb.Repository_DOCKER && len(path) > 1 {
+		return packageRepoActions(r, path)
+	}
 	switch len(path) {
 	case 1:
 		var acts []console.Action
 		if r, _, err := p.repository(project, path[0]); err == nil {
 			acts = append(acts, editRepositoryAction(r), editCleanupAction(r))
 			if a, ok := editRuleAction(ctx, r.GetName()); ok {
+				acts = append(acts, a)
+			}
+			if a, ok := importAction(r); ok {
 				acts = append(acts, a)
 			}
 		}
@@ -296,6 +305,12 @@ func (p artifactRegistryProvider) ActAt(ctx context.Context, project string, pat
 	}
 	if len(path) == 1 && action == "edit-rule" {
 		return editRule(ctx, r.GetName(), values)
+	}
+	if r.GetFormat() != arpb.Repository_DOCKER && len(path) > 1 {
+		return packageRepoAct(ctx, r, path, action, values)
+	}
+	if len(path) == 1 && action == "import" {
+		return importPackages(ctx, r, values["uris"])
 	}
 	st := runadapter.RegistryStore()
 	if st == nil {

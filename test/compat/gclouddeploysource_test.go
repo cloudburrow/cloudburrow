@@ -133,9 +133,9 @@ func TestSourceDeployArtifactRegistryAndCloudBuild(t *testing.T) {
 		Repository: &arpb.Repository{Format: arpb.Repository_DOCKER}}); status.Code(err) != codes.AlreadyExists {
 		t.Errorf("a second CreateRepository = %v; want ALREADY_EXISTS", err)
 	}
-	if _, err := ar.CreateRepository(ctx, &arpb.CreateRepositoryRequest{Parent: parent, RepositoryId: "sdk-npm",
-		Repository: &arpb.Repository{Format: arpb.Repository_NPM}}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("an NPM repository = %v; want UNIMPLEMENTED", err)
+	if _, err := ar.CreateRepository(ctx, &arpb.CreateRepositoryRequest{Parent: parent, RepositoryId: "sdk-kfp",
+		Repository: &arpb.Repository{Format: arpb.Repository_KFP}}); status.Code(err) != codes.Unimplemented {
+		t.Errorf("a KFP repository = %v; want UNIMPLEMENTED", err)
 	}
 	if _, err := ar.GetRepository(ctx, &arpb.GetRepositoryRequest{Name: parent + "/repositories/missing"}); status.Code(err) != codes.NotFound {
 		t.Errorf("GetRepository of a missing repository = %v; want NOT_FOUND", err)

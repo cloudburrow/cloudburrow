@@ -35,16 +35,21 @@ import (
 // for Cloud Run's fast path. A repository's IAM policy is stored, never
 // enforced (ADR-0006; artifactregistryiam.go). Rules, attachments, project
 // settings, VPC-SC config and annotations are stored (#1449,
-// artifactregistryconfig.go). Other formats, and remote and virtual
-// repositories, are UNIMPLEMENTED: they need upstream registries or
-// package formats nothing here serves.
+// artifactregistryconfig.go). PYTHON, NPM, MAVEN, GENERIC, APT and YUM
+// repositories serve their own protocols, and virtual repositories over
+// them read from their upstreams (#1531, artifactregistryformats.go);
+// remote repositories are refused, as they pull from public upstreams.
 type ArtifactRegistryServer struct {
 	arpb.UnimplementedArtifactRegistryServer
 	s *Server
 }
 
 // ArtifactRegistry returns the Artifact Registry repository service.
-func (s *Server) ArtifactRegistry() *ArtifactRegistryServer { return &ArtifactRegistryServer{s: s} }
+func (s *Server) ArtifactRegistry() *ArtifactRegistryServer {
+	a := &ArtifactRegistryServer{s: s}
+	arServer.Store(a)
+	return a
+}
 
 // Register adds the service to a gRPC server or a JSON transcoder.
 func (a *ArtifactRegistryServer) Register(g grpc.ServiceRegistrar) {
@@ -122,10 +127,10 @@ func (a *ArtifactRegistryServer) ListRepositories(_ context.Context, req *arpb.L
 	return out, nil
 }
 
-// CreateRepository stores a DOCKER repository and returns its operation,
-// already done with the repository, as Artifact Registry's completes in
-// moments. Other formats, and remote or virtual repositories, are refused:
-// nothing here serves their packages.
+// CreateRepository stores a repository and returns its operation, already
+// done with the repository, as Artifact Registry's completes in moments.
+// Every format but KFP and GO is served (#1531, artifactregistryformats.go);
+// a remote repository is refused (checkMode).
 func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.CreateRepositoryRequest) (*longrunningpb.Operation, error) {
 	if _, _, err := resource.ParseLocation(req.GetParent()); err != nil {
 		return nil, apierror.InvalidArgument("%v", err)
@@ -137,21 +142,29 @@ func (a *ArtifactRegistryServer) CreateRepository(_ context.Context, req *arpb.C
 	if r == nil {
 		r = &arpb.Repository{}
 	}
-	if r.GetFormat() != arpb.Repository_DOCKER {
-		return nil, apierror.Unimplemented("only DOCKER repositories are supported: images built on this instance are its only artifacts")
+	if _, ok := servedFormats[r.GetFormat()]; !ok {
+		return nil, apierror.Unimplemented("format %v is not supported: DOCKER, PYTHON, NPM, MAVEN, GENERIC, APT and YUM repositories are", r.GetFormat())
 	}
-	if m := r.GetMode(); m != arpb.Repository_MODE_UNSPECIFIED && m != arpb.Repository_STANDARD_REPOSITORY {
-		return nil, apierror.Unimplemented("repository mode %v is not supported", m)
+	if err := checkMode(req.GetParent(), r); err != nil {
+		return nil, err
 	}
 	// Cleanup policies are stored and read back, as documented; nothing
 	// here runs them, as Artifact Registry runs them only daily.
-	if r.GetKmsKeyName() != "" || r.GetFormatConfig() != nil || r.GetModeConfig() != nil {
-		return nil, apierror.Unimplemented("kms_key_name and format or mode configs are not supported")
+	if r.GetKmsKeyName() != "" {
+		return nil, apierror.Unimplemented("kms_key_name is not supported")
+	}
+	if fc := r.GetFormatConfig(); fc != nil {
+		if _, maven := fc.(*arpb.Repository_MavenConfig); !maven || r.GetFormat() != arpb.Repository_MAVEN {
+			return nil, apierror.Unimplemented("format config %T is not supported: only a MAVEN repository's maven_config is", fc)
+		}
 	}
 	name := req.GetParent() + "/repositories/" + req.GetRepositoryId()
 	now := timestamppb.New(time.Now())
-	r.Name, r.Mode, r.CreateTime, r.UpdateTime = name, arpb.Repository_STANDARD_REPOSITORY, now, now
-	r.RegistryUri = RepositoryURL(name)
+	if r.Mode == arpb.Repository_MODE_UNSPECIFIED {
+		r.Mode = arpb.Repository_STANDARD_REPOSITORY
+	}
+	r.Name, r.CreateTime, r.UpdateTime = name, now, now
+	r.RegistryUri = formatURL(name, r.GetFormat())
 	repositories.mu.Lock()
 	if _, ok := repositories.repos[name]; ok {
 		repositories.mu.Unlock()
@@ -245,6 +258,7 @@ func RemoveRepository(name string) bool {
 	if st := RegistryStore(); st != nil {
 		_ = st.DeleteRepository(repoOf(name))
 	}
+	dropFormatRepo(name)
 	forgetUnder(name)
 	return true
 }
@@ -301,4 +315,46 @@ func loadRepositories(st *registry.Store) {
 	}
 	loadRepositoryPoliciesLocked(st)
 	loadARConfig(st)
+	loadFormats(st)
+}
+
+// checkMode accepts a standard repository, and a virtual one whose
+// upstreams are standard repositories of its format in its location. A
+// remote repository is refused: Google's pulls from a public upstream
+// (Docker Hub, PyPI, npmjs, Maven Central, Debian), and this instance
+// makes no calls off the machine.
+func checkMode(parent string, r *arpb.Repository) error {
+	switch r.GetMode() {
+	case arpb.Repository_MODE_UNSPECIFIED, arpb.Repository_STANDARD_REPOSITORY:
+		if r.GetModeConfig() != nil {
+			return apierror.InvalidArgument("a standard repository takes no remote or virtual repository config")
+		}
+		return nil
+	case arpb.Repository_REMOTE_REPOSITORY:
+		return apierror.Unimplemented("remote repositories are not supported: they pull from public upstreams (Docker Hub, PyPI, npmjs, Maven Central), and this instance makes no calls off the machine")
+	case arpb.Repository_VIRTUAL_REPOSITORY:
+	default:
+		return apierror.Unimplemented("repository mode %v is not supported", r.GetMode())
+	}
+	switch r.GetFormat() {
+	case arpb.Repository_PYTHON, arpb.Repository_NPM, arpb.Repository_MAVEN:
+	default:
+		return apierror.Unimplemented("virtual %v repositories are not supported: PYTHON, NPM and MAVEN ones are", r.GetFormat())
+	}
+	ups := r.GetVirtualRepositoryConfig().GetUpstreamPolicies()
+	if len(ups) == 0 {
+		return apierror.InvalidArgument("a virtual repository needs virtual_repository_config.upstream_policies")
+	}
+	repositories.mu.Lock()
+	defer repositories.mu.Unlock()
+	for _, u := range ups {
+		up, ok := repositories.repos[u.GetRepository()]
+		if !ok || !strings.HasPrefix(u.GetRepository(), parent+"/repositories/") {
+			return apierror.InvalidArgument("upstream %q is not a repository in %s", u.GetRepository(), parent)
+		}
+		if up.GetFormat() != r.GetFormat() || up.GetMode() != arpb.Repository_STANDARD_REPOSITORY {
+			return apierror.InvalidArgument("upstream %q must be a standard %v repository", u.GetRepository(), r.GetFormat())
+		}
+	}
+	return nil
 }
