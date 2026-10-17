@@ -5188,7 +5188,7 @@
           "test/compat/memorystore1563_test.go:169 TestMemorystoreValkeyUpgradeKeepsWrites",
           "test/compat/memorystore1563_test.go:202 TestMemorystoreValkeyClusterUpgradeKeepsWrites",
           "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
-          "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystoreclustertls_test.go:135 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/memorystorevalkey_test.go:229 TestMemorystoreValkeyClusterDisabled",
           "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals",
@@ -5277,7 +5277,7 @@
         "status": "Verified",
         "tests": [
           "test/compat/memorystore1563_test.go:57 TestMemorystoreValkeyCrossInstanceReplicationTLS",
-          "test/compat/memorystoreclustertls_test.go:128 TestMemorystoreValkeyInTransitEncryption",
+          "test/compat/memorystoreclustertls_test.go:135 TestMemorystoreValkeyInTransitEncryption",
           "test/compat/memorystorevalkey_test.go:304 TestMemorystoreValkeyRefusals"
         ]
       },
@@ -5417,7 +5417,7 @@
           "test/compat/memorystore1557_test.go:270 TestMemorystoreValkeyKmsKey",
           "test/compat/memorystorecluster_test.go:107 TestMemorystoreRedisCluster",
           "test/compat/memorystorecluster_test.go:233 TestMemorystoreRedisClusterRefusals",
-          "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption",
+          "test/compat/memorystoreclustertls_test.go:53 TestMemorystoreRedisClusterInTransitEncryption",
           "test/compat/memorystorerestart1557_test.go:74 TestMemorystoreClustersAcrossRestart",
           "test/compat/terraform_memorystore1557_test.go:26 TestTerraformMemorystore1557",
           "test/compat/terraform_memorystorebackups_test.go:22 TestTerraformMemorystoreAutomatedBackups",
@@ -5520,7 +5520,7 @@
         "method": "google.cloud.redis.cluster.v1.CloudRedisCluster/GetClusterCertificateAuthority",
         "status": "Verified",
         "tests": [
-          "test/compat/memorystoreclustertls_test.go:52 TestMemorystoreRedisClusterInTransitEncryption"
+          "test/compat/memorystoreclustertls_test.go:53 TestMemorystoreRedisClusterInTransitEncryption"
         ]
       },
       {
