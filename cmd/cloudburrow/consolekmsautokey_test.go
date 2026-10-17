@@ -89,6 +89,22 @@ func TestConsoleKMSEkmConnections(t *testing.T) {
 	if err := p.ActAt(ctx, project, []string{name}, "edit", map[string]string{"keyManagementMode": "CLOUD_KMS", "cryptoSpacePath": "v0/space"}); err != nil {
 		t.Fatalf("Edit: %v", err)
 	}
+	// Edit opens on the connection's mode and path, so saving it as it
+	// opened keeps them.
+	defaults := map[string]string{}
+	for _, a := range p.DetailActions(ctx, project, []string{name}) {
+		if a.ID == "edit" {
+			for _, f := range a.Fields {
+				defaults[f.Name] = f.Default
+			}
+		}
+	}
+	if defaults["keyManagementMode"] != "CLOUD_KMS" || defaults["cryptoSpacePath"] != "v0/space" {
+		t.Errorf("Edit opens on %v; want the connection's CLOUD_KMS and v0/space", defaults)
+	}
+	if err := p.ActAt(ctx, project, []string{name}, "edit", defaults); err != nil {
+		t.Fatalf("Edit as it opened: %v", err)
+	}
 	if err := p.ActAt(ctx, project, []string{name}, "setdefault", nil); err != nil {
 		t.Fatalf("Set as default: %v", err)
 	}
