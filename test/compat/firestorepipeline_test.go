@@ -129,9 +129,9 @@ func TestFirestorePipelines(t *testing.T) {
 		t.Errorf("explain stats = %q, %v", text, err)
 	}
 
-	_, err = c.Pipeline().Collection("books").RawStage("search", nil).Execute(ctx).Results().GetAll()
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), `"search"`) {
-		t.Errorf("a search stage = %v, want UNIMPLEMENTED naming it", err)
+	_, err = c.Pipeline().Collection("books").RawStage("subcollection", []any{"x"}).Execute(ctx).Results().GetAll()
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), `"subcollection"`) {
+		t.Errorf("a subcollection stage = %v, want UNIMPLEMENTED naming it", err)
 	}
 
 	// Over REST, the stream is a JSON array of the responses.

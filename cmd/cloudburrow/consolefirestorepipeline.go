@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	admin "cloud.google.com/go/firestore/apiv1/admin"
@@ -41,6 +42,12 @@ func runPipelineFields() []console.Field {
 		{Name: "orderBy", Label: "Sort by (optional)", Type: "text"},
 		{Name: "direction", Label: "Direction", Type: "select", Options: []string{"ascending", "descending"}, Default: "ascending"},
 		{Name: "limit", Label: "Limit", Type: "text", Pattern: `^[0-9]*$`, Default: "100"},
+		{Name: "readTime", Label: "Read time (optional)", Type: "text",
+			Help: "An RFC 3339 time, such as 2026-10-17T14:00:00Z: the documents are read as they were then. Not with update or delete."},
+		{Name: "output", Label: "Output", Type: "select", Options: []string{"results", "update", "delete"}, Default: "results",
+			Help: "results shows the documents; update writes each one back, with Update: set field set to its value (the update stage); delete deletes each one (the delete stage). Limit applies first."},
+		{Name: "setField", Label: "Update: set field (optional)", Type: "text"},
+		{Name: "setValue", Label: "Update: set value", Type: "text", Help: "Typed as the Where value is."},
 		{Name: "explain", Label: "Explain (analyze)", Type: "checkbox", Help: "Also show the explain stats the pipeline returns."},
 	}
 }
@@ -230,6 +237,30 @@ func (p firestoreDatabasesProvider) runPipeline(ctx context.Context, project, id
 		limit = n
 	}
 	pl = pl.Limit(limit)
+	if rt := strings.TrimSpace(values["readTime"]); rt != "" {
+		t, err := time.Parse(time.RFC3339Nano, rt)
+		if err != nil {
+			return nil, fmt.Errorf("read time %q is not an RFC 3339 time", rt)
+		}
+		pl = pl.WithReadOptions(firestore.ReadTime(t))
+	}
+	switch values["output"] {
+	case "results", "":
+	case "update":
+		var opts []firestore.UpdateOption
+		if f := strings.TrimSpace(values["setField"]); f != "" {
+			v, err := typedValue(values["setValue"], "==")
+			if err != nil {
+				return nil, err
+			}
+			opts = append(opts, firestore.WithUpdateTransformations(firestore.ConstantOf(v).As(f)))
+		}
+		pl = pl.Update(opts...)
+	case "delete":
+		pl = pl.Delete()
+	default:
+		return nil, fmt.Errorf("output %q is not results, update or delete", values["output"])
+	}
 	var opts []firestore.ExecuteOption
 	if values["explain"] == "true" {
 		opts = append(opts, firestore.WithExplainMode(firestore.ExplainModeAnalyze))

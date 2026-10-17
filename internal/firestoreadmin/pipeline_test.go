@@ -168,8 +168,13 @@ func TestPipelineStages(t *testing.T) {
 		t.Errorf("pipeline on (default) = %v, want INVALID_ARGUMENT", err)
 	}
 	// A stage that is not served is refused naming it.
-	_, err = c.Pipeline().Collection("books").RawStage("search", nil).Execute(ctx).Results().GetAll()
-	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), `"search"`) {
-		t.Errorf("search stage = %v, want UNIMPLEMENTED naming it", err)
+	_, err = c.Pipeline().Collection("books").RawStage("subcollection", []any{"x"}).Execute(ctx).Results().GetAll()
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), `"subcollection"`) {
+		t.Errorf("subcollection stage = %v, want UNIMPLEMENTED naming it", err)
+	}
+	// Full-text search stays refused, saying why.
+	_, err = c.Pipeline().Collection("books").Search(firestore.WithSearchQuery("alpha")).Execute(ctx).Results().GetAll()
+	if status.Code(err) != codes.Unimplemented || !strings.Contains(err.Error(), "full-text search") {
+		t.Errorf("full-text search = %v, want UNIMPLEMENTED", err)
 	}
 }
