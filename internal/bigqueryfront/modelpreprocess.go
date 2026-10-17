@@ -43,32 +43,52 @@ import (
 // The order of ML.POLYNOMIAL_EXPAND's fields is the input fields, then the
 // products degree by degree.
 //
+// #1548 adds, as BigQuery documents them:
+//
+//   - ML.NGRAMS(array_input, range [, separator]), row-local: every run of
+//     n consecutive tokens, n in range ([lo, hi] or one INT64), joined by
+//     separator (a space), by starting token and then n;
+//   - ML.QUANTILE_BUCKETIZE(x, num_buckets [, 'bucket_names']) OVER (...):
+//     'bin_<n>', n = 1 + the number of the window's num_buckets - 1
+//     quantile boundaries (the k/num_buckets ones) <= x;
+//   - ML.ROBUST_SCALER(x [, quantile_range [, with_median [,
+//     with_quantile_range]]]) OVER (...): (x - median) / (q_hi - q_lo),
+//     quantile_range [25, 75], each step as with_median and
+//     with_quantile_range (TRUE) say.
+//
+// BigQuery's quantiles are approximate (APPROX_QUANTILES); CloudBurrow's
+// are exact, PERCENTILE_DISC's (the smallest value whose cumulative
+// distribution reaches the fraction), which give BigQuery's documented
+// examples (UNVERIFIED beyond them: an approximate quantile of many rows
+// may differ). In a TRANSFORM they are learned over the training rows.
+//
 // Refused 501 with the reason: the other preprocessing functions (their
-// quantiles are approximate, their vocabularies or hashing Google's), the
-// output_format argument of ML.BUCKETIZE, and IMPUTER strategies other than
-// mean. Any other ML.<name>(...) of no MODEL is left to the engine.
+// vocabularies, or a hash function BigQuery does not name), the
+// output_format argument of ML.BUCKETIZE and ML.QUANTILE_BUCKETIZE other
+// than bucket_names, and IMPUTER strategies other than mean. Any other
+// ML.<name>(...) of no MODEL is left to the engine.
 
 // mlPreprocessUnserved are the ML functions of no model CloudBurrow
 // refuses, and why.
 var mlPreprocessUnserved = map[string]string{
-	"QUANTILE_BUCKETIZE": "its quantiles are BigQuery's approximate ones",
-	"ROBUST_SCALER":      "its quantiles are BigQuery's approximate ones",
-	"ONE_HOT_ENCODER":    "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
-	"MULTI_HOT_ENCODER":  "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
-	"LABEL_ENCODER":      "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
-	"HASH_BUCKETIZE":     "its hashing is BigQuery's",
-	"NGRAMS":             "CloudBurrow does not carry it out yet",
-	"BAG_OF_WORDS":       "CloudBurrow does not carry it out yet",
-	"TF_IDF":             "CloudBurrow does not carry it out yet",
+	"ONE_HOT_ENCODER":   "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
+	"MULTI_HOT_ENCODER": "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
+	"LABEL_ENCODER":     "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
+	"HASH_BUCKETIZE":    "its hash function is BigQuery's, which its documentation does not name",
+	"BAG_OF_WORDS":      "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
+	"TF_IDF":            "its vocabulary (top_k, frequency_threshold) is learned over the rows, which CloudBurrow does not carry out yet",
 }
 
-// mlStats are a column's statistics a TRANSFORM learned.
+// mlStats are a column's statistics a TRANSFORM learned: quant its
+// quantiles at the fractions asked for (PERCENTILE_DISC's).
 type mlStats struct {
 	mean, sd, min, max, maxAbs *float64
+	quant                      []*float64
 }
 
-// mlLearn computes the statistics of an expression over the training rows.
-type mlLearn func(expr string) (mlStats, int, string)
+// mlLearn computes the statistics of an expression over the training
+// rows, and its quantiles at the fractions quantiles.
+type mlLearn func(expr string, quantiles []float64) (mlStats, int, string)
 
 // rewritePreprocess writes each ML function call of no model in sql as
 // the SQL that computes it. With learn, analytic calls (which must then
@@ -161,15 +181,20 @@ func splitTopLevel(toks []token) [][]token {
 // mlPreprocessServed are the ML functions of no model CloudBurrow writes
 // as SQL.
 var mlPreprocessServed = map[string]bool{"BUCKETIZE": true, "POLYNOMIAL_EXPAND": true, "FEATURE_CROSS": true, "DISTANCE": true, "LP_NORM": true,
-	"NORMALIZER": true, "STANDARD_SCALER": true, "MIN_MAX_SCALER": true, "MAX_ABS_SCALER": true, "IMPUTER": true}
+	"NORMALIZER": true, "STANDARD_SCALER": true, "MIN_MAX_SCALER": true, "MAX_ABS_SCALER": true, "IMPUTER": true,
+	"QUANTILE_BUCKETIZE": true, "ROBUST_SCALER": true, "NGRAMS": true}
 
-var mlAnalytic = map[string]bool{"STANDARD_SCALER": true, "MIN_MAX_SCALER": true, "MAX_ABS_SCALER": true, "IMPUTER": true}
+var mlAnalytic = map[string]bool{"STANDARD_SCALER": true, "MIN_MAX_SCALER": true, "MAX_ABS_SCALER": true, "IMPUTER": true,
+	"QUANTILE_BUCKETIZE": true, "ROBUST_SCALER": true}
+
+// mlServedList names the preprocessing functions CloudBurrow answers.
+const mlServedList = "ML.BUCKETIZE, ML.QUANTILE_BUCKETIZE, ML.POLYNOMIAL_EXPAND, ML.FEATURE_CROSS, ML.NGRAMS, ML.STANDARD_SCALER, " +
+	"ML.MIN_MAX_SCALER, ML.MAX_ABS_SCALER, ML.ROBUST_SCALER, ML.IMPUTER (mean), ML.DISTANCE, ML.LP_NORM and ML.NORMALIZER"
 
 // mlPreprocessSQL is the SQL of one call of fn, its arguments rewritten.
 func mlPreprocessSQL(fn string, args []string, window string, learn mlLearn) (string, int, string) {
 	if why, ok := mlPreprocessUnserved[fn]; ok {
-		return "", 501, "Not implemented here: ML." + fn + ": " + why + ". CloudBurrow answers ML.BUCKETIZE, ML.POLYNOMIAL_EXPAND, " +
-			"ML.FEATURE_CROSS, ML.STANDARD_SCALER, ML.MIN_MAX_SCALER, ML.MAX_ABS_SCALER, ML.IMPUTER (mean), ML.DISTANCE, ML.LP_NORM and ML.NORMALIZER. Nothing was run."
+		return "", 501, "Not implemented here: ML." + fn + ": " + why + ". CloudBurrow answers " + mlServedList + ". Nothing was run."
 	}
 	nargs := func(lo, hi int) (int, string) {
 		if len(args) < lo || len(args) > hi {
@@ -185,6 +210,8 @@ func mlPreprocessSQL(fn string, args []string, window string, learn mlLearn) (st
 		return "", 400, "ML." + fn + " is not an analytic function: it takes no OVER clause"
 	}
 	switch fn {
+	case "QUANTILE_BUCKETIZE", "ROBUST_SCALER", "NGRAMS":
+		return mlQuantileSQL(fn, args, window, learn)
 	case "BUCKETIZE":
 		if c, m := nargs(2, 4); c != 0 {
 			return "", c, m
@@ -327,7 +354,7 @@ func mlPreprocessSQL(fn string, args []string, window string, learn mlLearn) (st
 			if strings.Join(strings.Fields(window), "") != "()" {
 				return "", 400, "ML." + fn + " in a TRANSFORM must be OVER ()"
 			}
-			st, c, m := learn(args[0])
+			st, c, m := learn(args[0], nil)
 			if c != 0 {
 				return "", c, m
 			}
@@ -364,8 +391,7 @@ func mlPreprocessSQL(fn string, args []string, window string, learn mlLearn) (st
 			return fmt.Sprintf("IFNULL(%s, AVG(%s)%s)", x, x, over), 0, ""
 		}
 	}
-	return "", 501, "Not implemented here: ML." + fn + ". CloudBurrow answers ML.BUCKETIZE, ML.POLYNOMIAL_EXPAND, ML.FEATURE_CROSS, " +
-		"ML.STANDARD_SCALER, ML.MIN_MAX_SCALER, ML.MAX_ABS_SCALER, ML.IMPUTER (mean), ML.DISTANCE, ML.LP_NORM and ML.NORMALIZER, and the ML functions of a MODEL. Nothing was run."
+	return "", 501, "Not implemented here: ML." + fn + ". CloudBurrow answers " + mlServedList + ", and the ML functions of a MODEL. Nothing was run."
 }
 
 // structFields reads a STRUCT(expr [AS name], ...) argument into its
@@ -424,7 +450,7 @@ func combinations(n, k int, rep bool) [][]int {
 // analytic ones with the statistics they learn over the training query's
 // rows, and refuses any other window.
 func (f front) learnTransform(r *http.Request, q queryOptions, items []string, query string) ([]string, int, string) {
-	learn := func(expr string) (mlStats, int, string) {
+	learn := func(expr string, quantiles []float64) (mlStats, int, string) {
 		_, rows, c, m := f.queryAllRows(r, q, "SELECT AVG(_cbml_x), STDDEV_SAMP(_cbml_x), MIN(_cbml_x), MAX(_cbml_x), MAX(ABS(_cbml_x)) FROM (SELECT CAST(("+
 			expr+") AS FLOAT64) AS _cbml_x FROM ("+query+"))")
 		if c != 0 {
@@ -444,7 +470,32 @@ func (f front) learnTransform(r *http.Request, q queryOptions, items []string, q
 			}
 			v[k] = &x
 		}
-		return mlStats{mean: v[0], sd: v[1], min: v[2], max: v[3], maxAbs: v[4]}, 0, ""
+		st := mlStats{mean: v[0], sd: v[1], min: v[2], max: v[3], maxAbs: v[4]}
+		if len(quantiles) > 0 {
+			var ps []string
+			for _, qf := range quantiles {
+				ps = append(ps, "PERCENTILE_DISC(_cbml_x, "+sqlF(qf)+") OVER ()")
+			}
+			_, rows, c, m := f.queryAllRows(r, q, "SELECT "+strings.Join(ps, ", ")+" FROM (SELECT CAST(("+expr+") AS FLOAT64) AS _cbml_x FROM ("+
+				query+")) LIMIT 1")
+			if c != 0 {
+				return mlStats{}, c, m
+			}
+			st.quant = make([]*float64, len(quantiles))
+			if len(rows) == 1 {
+				for k, s := range rows[0] {
+					if s == nil {
+						continue
+					}
+					x, err := strconv.ParseFloat(*s, 64)
+					if err != nil {
+						return mlStats{}, 500, "cloudburrow: could not read a TRANSFORM's quantiles: " + *s
+					}
+					st.quant[k] = &x
+				}
+			}
+		}
+		return st, 0, ""
 	}
 	var out []string
 	for _, it := range items {
@@ -457,11 +508,165 @@ func (f front) learnTransform(r *http.Request, q queryOptions, items []string, q
 				if t.is("OVER") {
 					return nil, 501, "Not implemented here: a TRANSFORM item with a window (" + it + "): it is analytic over the training rows. " +
 						"CloudBurrow carries out TRANSFORM items that read their own row, and ML.STANDARD_SCALER, ML.MIN_MAX_SCALER, " +
-						"ML.MAX_ABS_SCALER and ML.IMPUTER (mean) OVER (). Nothing was run."
+						"ML.MAX_ABS_SCALER, ML.ROBUST_SCALER, ML.QUANTILE_BUCKETIZE and ML.IMPUTER (mean) OVER (). Nothing was run."
 				}
 			}
 		}
 		out = append(out, s)
+	}
+	return out, 0, ""
+}
+
+// mlQuantileSQL is the SQL of ML.QUANTILE_BUCKETIZE, ML.ROBUST_SCALER and
+// ML.NGRAMS (#1548, above).
+func mlQuantileSQL(fn string, args []string, window string, learn mlLearn) (string, int, string) {
+	nargs := func(lo, hi int) (int, string) {
+		if len(args) < lo || len(args) > hi {
+			return 400, fmt.Sprintf("ML.%s takes %d to %d arguments; it was given %d", fn, lo, hi, len(args))
+		}
+		return 0, ""
+	}
+	intArray := func(a string) ([]int, bool) {
+		toks, ok := lex(a)
+		if !ok {
+			return nil, false
+		}
+		if len(toks) == 1 {
+			v, err := strconv.Atoi(toks[0].text)
+			return []int{v}, err == nil
+		}
+		if len(toks) < 2 || !toks[0].punct("[") || !toks[len(toks)-1].punct("]") {
+			return nil, false
+		}
+		var out []int
+		for _, t := range toks[1 : len(toks)-1] {
+			if t.punct(",") {
+				continue
+			}
+			v, err := strconv.Atoi(t.text)
+			if err != nil {
+				return nil, false
+			}
+			out = append(out, v)
+		}
+		return out, true
+	}
+	if fn == "NGRAMS" {
+		if c, m := nargs(2, 3); c != 0 {
+			return "", c, m
+		}
+		rng, ok := intArray(args[1])
+		if !ok || len(rng) == 0 || len(rng) > 2 {
+			return "", 501, "Not implemented here: ML.NGRAMS of a range that is not an INT64 literal or an array of two. Nothing was run."
+		}
+		lo, hi := rng[0], rng[len(rng)-1]
+		if lo < 1 || hi < lo {
+			return "", 400, "ML.NGRAMS range must be positive and in order, lower to higher"
+		}
+		sep := "' '"
+		if len(args) == 3 {
+			sep = "(" + args[2] + ")"
+		}
+		a := "(" + args[0] + ")"
+		return fmt.Sprintf("IF(%s IS NULL, NULL, ARRAY(SELECT ARRAY_TO_STRING(ARRAY(SELECT _cbml_t FROM UNNEST(%s) AS _cbml_t WITH OFFSET _cbml_q "+
+			"WHERE _cbml_q >= _cbml_o AND _cbml_q < _cbml_o + _cbml_n ORDER BY _cbml_q), %s) FROM UNNEST(%s) AS _cbml_s WITH OFFSET _cbml_o, "+
+			"UNNEST(GENERATE_ARRAY(%d, %d)) AS _cbml_n WHERE _cbml_o + _cbml_n <= ARRAY_LENGTH(%s) ORDER BY _cbml_o, _cbml_n))",
+			a, a, sep, a, lo, hi, a), 0, ""
+	}
+	// The window: OVER () or OVER (PARTITION BY ...), as BigQuery's
+	// analytic preprocessing functions take.
+	if toks, ok := lex(window); ok && len(toks) > 2 {
+		inner := toks[1 : len(toks)-1]
+		if !inner[0].is("PARTITION") {
+			return "", 400, "ML." + fn + " takes OVER () or OVER (PARTITION BY ...): no ORDER BY or window frame"
+		}
+		for _, t := range inner {
+			if t.is("ORDER") || t.is("ROWS") || t.is("RANGE") {
+				return "", 400, "ML." + fn + " takes OVER () or OVER (PARTITION BY ...): no ORDER BY or window frame"
+			}
+		}
+	}
+	x := "CAST((" + args[0] + ") AS FLOAT64)"
+	var fracs []float64
+	scaleMedian, scaleRange := true, true
+	if fn == "QUANTILE_BUCKETIZE" {
+		if c, m := nargs(2, 3); c != 0 {
+			return "", c, m
+		}
+		b, err := strconv.Atoi(strings.TrimSpace(args[1]))
+		if err != nil {
+			return "", 501, "Not implemented here: ML.QUANTILE_BUCKETIZE of a num_buckets that is not an INT64 literal. Nothing was run."
+		}
+		if b < 1 {
+			return "", 400, "ML.QUANTILE_BUCKETIZE num_buckets must be positive"
+		}
+		if len(args) == 3 {
+			if s, ok := unquoteString(strings.TrimSpace(args[2])); !ok || !strings.EqualFold(s, "bucket_names") {
+				return "", 501, "Not implemented here: ML.QUANTILE_BUCKETIZE output_format " + args[2] + "; CloudBurrow gives bucket_names. Nothing was run."
+			}
+		}
+		for k := 1; k < b; k++ {
+			fracs = append(fracs, float64(k)/float64(b))
+		}
+	} else {
+		if c, m := nargs(1, 4); c != 0 {
+			return "", c, m
+		}
+		lo, hi := 25, 75
+		if len(args) >= 2 {
+			r, ok := intArray(args[1])
+			if !ok || len(r) != 2 {
+				return "", 501, "Not implemented here: ML.ROBUST_SCALER of a quantile_range that is not an array of two INT64 literals. Nothing was run."
+			}
+			if r[0] <= 0 || r[1] <= r[0] || r[1] >= 100 {
+				return "", 400, "ML.ROBUST_SCALER quantile_range must be [lower, upper] with 0 < lower < upper < 100"
+			}
+			lo, hi = r[0], r[1]
+		}
+		for k, p := range []*bool{&scaleMedian, &scaleRange} {
+			if len(args) < 3+k {
+				break
+			}
+			switch strings.ToUpper(strings.TrimSpace(args[2+k])) {
+			case "TRUE":
+			case "FALSE":
+				*p = false
+			default:
+				return "", 501, "Not implemented here: ML.ROBUST_SCALER with_median or with_quantile_range that is not TRUE or FALSE. Nothing was run."
+			}
+		}
+		fracs = []float64{0.5, float64(lo) / 100, float64(hi) / 100}
+	}
+	quant := make([]string, len(fracs))
+	if learn != nil {
+		if strings.Join(strings.Fields(window), "") != "()" {
+			return "", 400, "ML." + fn + " in a TRANSFORM must be OVER ()"
+		}
+		st, c, m := learn(args[0], fracs)
+		if c != 0 {
+			return "", c, m
+		}
+		for k, v := range st.quant {
+			quant[k] = sqlFloat(v)
+		}
+	} else {
+		for k, p := range fracs {
+			quant[k] = "PERCENTILE_DISC(" + x + ", " + sqlF(p) + ") OVER " + window
+		}
+	}
+	if fn == "QUANTILE_BUCKETIZE" {
+		terms := []string{"1"}
+		for _, s := range quant {
+			terms = append(terms, fmt.Sprintf("IF(%s >= %s, 1, 0)", x, s))
+		}
+		return fmt.Sprintf("IF(%s IS NULL, CAST(NULL AS STRING), CONCAT('bin_', CAST(%s AS STRING)))", x, strings.Join(terms, " + ")), 0, ""
+	}
+	out := x
+	if scaleMedian {
+		out = "(" + out + " - " + quant[0] + ")"
+	}
+	if scaleRange {
+		out = "SAFE_DIVIDE(" + out + ", " + quant[2] + " - " + quant[1] + ")"
 	}
 	return out, 0, ""
 }
