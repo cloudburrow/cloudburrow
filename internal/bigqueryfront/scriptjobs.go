@@ -40,14 +40,22 @@ import (
 // its statement's (statementTypeOf), where the emulator answers SELECT
 // for every statement but DML.
 
-// scriptChild is one child job a script ran.
+// scriptChild is one child job a script ran: text is what it ran, and
+// frames where in the script, innermost first (scriptRun.place).
 type scriptChild struct {
 	project, id string
 	kind        string // STATEMENT or EXPRESSION
 	text        string
-	line, col   int // where text starts in the script, 0 when unknown
-	endLine     int
-	endCol      int
+	frames      []childFrame
+}
+
+// childFrame is one of a child job's scriptStatistics.stackFrames: the
+// 1-based line and column, in characters, where text starts and ends (its
+// last character) in the script, or in the procedure's body, procedureId
+// then naming the procedure (project.dataset.name); line 0 when unknown.
+type childFrame struct {
+	line, col, endLine, endCol int
+	proc, text                 string
 }
 
 // childInfo is what jobRecords keeps of a child job.
@@ -153,12 +161,23 @@ func (j *jobRecords) patchScript(job map[string]any, project string) bool {
 	}
 	if isChild {
 		stats["parentJobId"] = child.parent
-		frame := map[string]any{"text": child.text}
-		if child.line > 0 {
-			frame["startLine"], frame["startColumn"] = child.line, child.col
-			frame["endLine"], frame["endColumn"] = child.endLine, child.endCol
+		frames := child.frames
+		if len(frames) == 0 {
+			frames = []childFrame{{text: child.text}}
 		}
-		stats["scriptStatistics"] = map[string]any{"evaluationKind": child.kind, "stackFrames": []any{frame}}
+		var stack []any
+		for _, f := range frames {
+			frame := map[string]any{"text": f.text}
+			if f.line > 0 {
+				frame["startLine"], frame["startColumn"] = f.line, f.col
+				frame["endLine"], frame["endColumn"] = f.endLine, f.endCol
+			}
+			if f.proc != "" {
+				frame["procedureId"] = f.proc
+			}
+			stack = append(stack, frame)
+		}
+		stats["scriptStatistics"] = map[string]any{"evaluationKind": child.kind, "stackFrames": stack}
 		if typ := statementTypeOf(child.text); typ != "" && child.kind == "STATEMENT" {
 			// The emulator answers SELECT for every statement but DML
 			// (#1459); BigQuery's child job has its statement's own.
@@ -260,15 +279,34 @@ func statementTypeOf(text string) string {
 	return ""
 }
 
-// childAt places text in the script sql, when it is there as written.
-func childAt(sql, text string) (line, col, endLine, endCol int) {
-	i := strings.Index(sql, text)
-	if i < 0 || text == "" {
-		return 0, 0, 0, 0
+// place makes toks, a statement or an expression of the text running,
+// where the child jobs that follow are (child): its frame, then the CALLs
+// it is in, innermost first (#1569). BigQuery documents a frame per
+// statement or expression, with its text; that an expression's frame is
+// the expression alone (a DECLARE's DEFAULT, a condition) is UNVERIFIED.
+func (s *scriptRun) place(toks []token) {
+	s.at = s.framesOf(toks)
+}
+
+// framesOf is toks' frame in the text running, then the callers'.
+func (s *scriptRun) framesOf(toks []token) []childFrame {
+	if len(toks) == 0 || toks[len(toks)-1].end > len(s.sql) {
+		return s.callers
 	}
-	line, col = lineColumn(sql, i)
-	endLine, endCol = lineColumn(sql, i+len(text)-1)
-	return line, col, endLine, endCol
+	start, end := toks[0].pos, toks[len(toks)-1].end
+	f := childFrame{text: s.sql[start:end], proc: s.loc}
+	f.line, f.col = lineColumn(s.sql, start)
+	f.endLine, f.endCol = lineColumn(s.sql, end-1)
+	if sess := sessionOf(s.r); sess != nil && s.depth == 0 {
+		// The script's own text, its TEMP names (tempsession.go): where
+		// it is written so, as the client sent it.
+		f.text = sess.restore(f.text)
+		if i := strings.Index(sess.orig, f.text); i >= 0 {
+			f.line, f.col = lineColumn(sess.orig, i)
+			f.endLine, f.endCol = lineColumn(sess.orig, i+len(f.text)-1)
+		}
+	}
+	return append([]childFrame{f}, s.callers...)
 }
 
 // allJobLevels marks a jobs.list of the front's own that lists child jobs

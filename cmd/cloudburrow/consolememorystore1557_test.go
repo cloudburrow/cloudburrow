@@ -107,3 +107,40 @@ func TestConsoleValkeyReplicationMigrationVersions(t *testing.T) {
 		t.Errorf("Edit has no Engine version field: %+v", d.Edit.Fields)
 	}
 }
+
+// TestConsoleValkeySecondaryWithTLS (#1563): Create instance makes a
+// secondary with in-transit encryption of a primary with it (Enable
+// in-transit encryption and Secondary of), and the page shows both; a
+// secondary without the primary's in-transit encryption is refused.
+func TestConsoleValkeySecondaryWithTLS(t *testing.T) {
+	srv := redisadmin.NewServer(redisadmin.Instance{Project: "p", Host: "127.0.0.1", Port: 9016, Created: time.Unix(100, 0)}, valkeyNoBackend{})
+	srv.EnableCreate(context.Background(), valkeyNoProv{}, func(string, string, string) redisadmin.DataPlane { return nil }, nil, nil)
+	nodes := &fakeValkeyNodes{running: map[string]string{}}
+	srv.EnableValkey(context.Background(), nodes, func(addr, _, _ string) redisadmin.ClusterNode { return fakeValkeyNode{nodes, addr} }, nil)
+	p := valkeyProvider{server: func() *redisadmin.Server { return srv }}
+	ctx := context.Background()
+	create := func(id string, extra map[string]string) error {
+		v := map[string]string{"id": id, "region": redisadmin.Region, "mode": "CLUSTER_DISABLED", "shardCount": "1", "replicaCount": "0",
+			"nodeType": "SHARED_CORE_NANO", "network": "projects/p/global/networks/default"}
+		for k, x := range extra {
+			v[k] = x
+		}
+		_, err := p.Create(ctx, "p", v)
+		return err
+	}
+	primary := "projects/p/locations/" + redisadmin.Region + "/instances/vk-tls-pri"
+	if err := create("vk-tls-pri", map[string]string{"transitEncryption": "true"}); err != nil {
+		t.Fatalf("Create the primary: %v", err)
+	}
+	if err := create("vk-plain-sec", map[string]string{"primaryInstance": primary}); err == nil {
+		t.Error("Create of a secondary without the primary's in-transit encryption succeeded")
+	}
+	if err := create("vk-tls-sec", map[string]string{"transitEncryption": "true", "primaryInstance": primary}); err != nil {
+		t.Fatalf("Create the secondary: %v", err)
+	}
+	_, props := valkeyPageProps(t, p, "vk-tls-sec")
+	if props["Cross-instance replication"] != "SECONDARY" || props["Primary instance"] != primary ||
+		props["In-transit encryption"] != "SERVER_AUTHENTICATION" {
+		t.Errorf("secondary's page shows %v", props)
+	}
+}

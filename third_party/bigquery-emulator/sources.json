@@ -46,7 +46,8 @@
         "patches/bigquery-emulator/0064-list-jobs-after-one.patch",
         "patches/bigquery-emulator/0051-nested-collation.patch",
         "patches/bigquery-emulator/0053-routines-kept-in-metadata.patch",
-        "patches/bigquery-emulator/0057-job-id-prefix.patch"
+        "patches/bigquery-emulator/0057-job-id-prefix.patch",
+        "patches/bigquery-emulator/0060-jobs-list-by-index-and-time.patch"
       ]
     },
     {

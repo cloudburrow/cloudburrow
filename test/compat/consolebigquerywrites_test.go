@@ -27,11 +27,8 @@ import (
 // TABLE, a CREATE TABLE IF NOT EXISTS of a table that exists (which changes
 // nothing), a script with DECLARE whose CREATE TABLE … AS SELECT reads the
 // variable, and DROP TABLE; and no query leaves a job-named dataset behind.
-// DML inside a script (after DECLARE, or in a BEGIN block) is refused before
-// anything is sent, with the reason and #1028, and so is UPDATE … FROM, with
-// the emulator's reason and #1027, and they change no row (a DML statement of
-// its own is TestConsoleBigQueryReadWriteEditorRunsDML); a lone SELECT is sent back to
-// Read-only; ALTER TABLE ADD COLUMN and SET OPTIONS run (#1227), RENAME
+// DML, of its own or inside a script, is TestConsoleBigQueryReadWriteEditorRunsDML;
+// a lone SELECT is sent back to Read-only; ALTER TABLE ADD COLUMN and SET OPTIONS run (#1227), RENAME
 // COLUMN and DROP COLUMN too (#1322), and ALTER COLUMN of a nested field is
 // refused in the API's own words (the front's 501),
 // without the client library's envelope. Read-only mode still refuses a DDL
@@ -155,12 +152,6 @@ func TestConsoleBigQueryReadWriteEditorRunsDDLAndScripts(t *testing.T) {
 		t.Errorf("after DROP TABLE the client reads %v, want NOT_FOUND", err)
 	}
 
-	refused("read-write", "DECLARE x INT64 DEFAULT 1;\nDELETE FROM orders WHERE id >= x", "(#1028)")
-	refused("read-write", "BEGIN\n  UPDATE orders SET region = 'z' WHERE true;\nEND", "UPDATE is DML inside a script")
-	refused("read-write", "UPDATE orders SET region = t.region FROM totals t WHERE true", "Update with joins not supported")
-	if n := countRows(t, h, orders); n != 4 {
-		t.Errorf("after refused DML the table has %d rows, want 4", n)
-	}
 	refused("read-write", "SELECT * FROM orders", "switch the editor to Read-only")
 	// ALTER TABLE is carried out (#1227); what the front does not carry
 	// out is refused in the API's own words (its 501).
@@ -394,10 +385,14 @@ func TestConsoleBigQueryEditTableViewsAndInsertOptions(t *testing.T) {
 // through jobs.query, and the answer says what it changed, from the rows
 // the front reports (#1008): an INSERT of two rows added 2, an UPDATE by an
 // unqualified name modified 2, a DELETE removed 1, a MERGE from a subquery
-// inserted 1 and updated 1, a DELETE of nothing removed 0, and TRUNCATE
-// TABLE removed the rest; each change is read back through the official Go
-// client. The hint names DML, #1028 and #1027. No statement leaves a
-// job-named dataset behind.
+// inserted 1 and updated 1, a DELETE of nothing removed 0, an UPDATE … FROM
+// a subquery (#1027) modified 1, a script whose INSERT and DELETE read a
+// DECLAREd variable is answered with each statement's rows, in order, from
+// its child jobs (and the line of each but the last, which the front gives
+// no position), as is a BEGIN block's UPDATE (#1567), and TRUNCATE TABLE
+// removed the rest; each change is read back through the official Go
+// client. The hint names DML, UPDATE … FROM and DML inside a script. No
+// statement leaves a job-named dataset behind.
 //
 // covers: bigquery.jobs.query
 func TestConsoleBigQueryReadWriteEditorRunsDML(t *testing.T) {
@@ -415,9 +410,9 @@ func TestConsoleBigQueryReadWriteEditorRunsDML(t *testing.T) {
 		Query struct{ Write struct{ Hint string } }
 	}
 	consoleJSON(t, addr, http.MethodGet, "/api/detail/bigquery"+q+"&name="+ds.DatasetID+"&name=orders", "", &page)
-	if hint := page.Query.Write.Hint; !strings.Contains(hint, "INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE") ||
-		!strings.Contains(hint, "#1028") || !strings.Contains(hint, "#1027") {
-		t.Errorf("the Read-write hint is %q; want DML and what is not run", hint)
+	if hint := page.Query.Write.Hint; !strings.Contains(hint, "including UPDATE … FROM") ||
+		!strings.Contains(hint, "inside a script") || strings.Contains(hint, "not run") {
+		t.Errorf("the Read-write hint is %q; want DML, UPDATE … FROM and DML inside a script", hint)
 	}
 	before := datasetIDs(t, h, c)
 
@@ -466,6 +461,34 @@ func TestConsoleBigQueryReadWriteEditorRunsDML(t *testing.T) {
 		t.Errorf("after the MERGE the client reads %v", r)
 	}
 	dml("DELETE FROM orders WHERE id = 42", "This statement removed 0 rows.")
+	// UPDATE … FROM (#1027) is sent as it is, and the front runs it.
+	dml("UPDATE orders o SET region = s.region FROM (SELECT 7 AS id, 'au' AS region) s WHERE o.id = s.id",
+		"This statement modified 1 row.")
+	if r := rows(); len(r) != 6 || r[7] != "au" {
+		t.Errorf("after the UPDATE … FROM the client reads %v", r)
+	}
+	// DML inside a script (#1567) is sent, and answered from the script's
+	// child jobs (#1353), each DML statement by its line.
+	script := func(statement, want string) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"Path": []string{ds.DatasetID, "orders"}, "Statement": statement, "Mode": "read-write"})
+		code, out := consoleDo(t, addr, http.MethodPost, "/api/query/bigquery"+q, string(body))
+		var got struct{ Message string }
+		_ = json.Unmarshal([]byte(out), &got)
+		if code != http.StatusOK || !strings.HasPrefix(got.Message, "The script ran as job ") || !strings.HasSuffix(got.Message, want) {
+			t.Fatalf("console read-write %q = %d: %s; want the script's job and %q", statement, code, out, want)
+		}
+	}
+	script("DECLARE k INT64 DEFAULT 7;\nINSERT INTO orders (id, region, amount) VALUES (8, 'ap', 1);\nDELETE FROM orders WHERE id = k;",
+		". Line 2: This statement added 1 row. This statement removed 1 row.")
+	if r := rows(); len(r) != 6 || r[8] != "ap" || r[7] != "" {
+		t.Errorf("after the script the client reads %v", r)
+	}
+	script("BEGIN\n  UPDATE orders SET region = 'z' WHERE id = 8;\nEND",
+		". Line 2: This statement modified 1 row.")
+	if r := rows(); r[8] != "z" {
+		t.Errorf("after the BEGIN block the client reads %v", r)
+	}
 	dml("TRUNCATE TABLE orders", "This statement removed 6 rows.")
 	if r := rows(); len(r) != 0 {
 		t.Errorf("after TRUNCATE TABLE the client reads %v", r)

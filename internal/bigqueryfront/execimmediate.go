@@ -1144,29 +1144,23 @@ func (s *scriptRun) noteRowCount(text string, rec *recorder) {
 // child is the child job id the statement or expression text ran as
 // (scriptjobs.go): an EXPRESSION while an expression is evaluated, and a
 // STATEMENT otherwise, as EXECUTE IMMEDIATE ... INTO's query is. Its stack
-// frame places it in the script; a statement EXECUTE IMMEDIATE ran is at
-// that EXECUTE IMMEDIATE, with its text (frames; BigQuery's frame of such
-// a statement UNVERIFIED).
+// frames are where the script is (place): a statement EXECUTE IMMEDIATE
+// ran is at that EXECUTE IMMEDIATE, with its text (BigQuery's frame of
+// such a statement UNVERIFIED).
 func (s *scriptRun) child(project, id, text string) scriptChild {
 	kind := "STATEMENT"
 	if s.expr > 0 && !s.intoQuery {
 		kind = "EXPRESSION"
 	}
-	sql := s.sql
 	if sess := sessionOf(s.r); sess != nil { // #1434, tempsession.go: the script's own names
-		text, sql = sess.restore(text), sess.orig
+		text = sess.restore(text)
 		if s.f.texts != nil && id != "" {
 			t, _ := s.f.texts.get(project, id)
 			t.merge(jobText{query: text})
 			s.f.texts.add(project, id, t)
 		}
 	}
-	c := scriptChild{project: project, id: id, kind: kind, text: text}
-	c.line, c.col, c.endLine, c.endCol = childAt(sql, text)
-	if f, ok := s.frames[text]; ok && kind == "STATEMENT" && c.line == 0 {
-		c.text, c.line, c.col, c.endLine, c.endCol = f.text, f.line, f.col, f.endLine, f.endCol
-	}
-	return c
+	return scriptChild{project: project, id: id, kind: kind, text: text, frames: s.at}
 }
 
 // restrictedImmediate is the error for a statement BigQuery does not run
@@ -1204,21 +1198,6 @@ func restrictedImmediate(toks []token) string {
 	}
 	return word + " is restricted from being executed dynamically as a nested element: it can't be nested in an " +
 		"EXECUTE IMMEDIATE statement."
-}
-
-// frameAt places the statement text EXECUTE IMMEDIATE runs at that
-// EXECUTE IMMEDIATE, toks, with its text in the script (child).
-func (s *scriptRun) frameAt(text string, toks []token) {
-	if len(toks) == 0 || toks[len(toks)-1].end > len(s.sql) {
-		return
-	}
-	if s.frames == nil {
-		s.frames = map[string]scriptChild{}
-	}
-	c := scriptChild{text: s.sql[toks[0].pos:toks[len(toks)-1].end]}
-	c.line, c.col = lineColumn(s.sql, toks[0].pos)
-	c.endLine, c.endCol = lineColumn(s.sql, toks[len(toks)-1].end-1)
-	s.frames[text] = c
 }
 
 // rowCountInOneRequest reports whether sql reads @@row_count but has a

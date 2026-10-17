@@ -283,6 +283,10 @@ func (a *Admin) CloneDatabase(ctx context.Context, req *adminpb.CloneDatabaseReq
 	}
 	srcName := src.Name
 	db, err := a.newDatabase(req.GetParent(), req.GetDatabaseId(), src.LocationId, req.GetTags())
+	if err == nil {
+		// A clone keeps its source's edition, as on Google.
+		db.DatabaseEdition = src.DatabaseEdition
+	}
 	a.mu.Unlock()
 	if err != nil {
 		return nil, err

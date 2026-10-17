@@ -28,16 +28,28 @@ package main
 // a subquery, so the editor refused DML. Since #1008 the front reports a lone
 // DML statement's rows in jobs.query's answer (numDmlAffectedRows and
 // dmlStats) and runs a MERGE from a subquery, so the editor sends one and
-// answers with what it changed, from that answer (dmlSentence). What the
-// front does not report is still refused before anything is sent, with the
-// reason: DML inside a script of several statements (or a BEGIN block),
-// whose rows the front does not count (#1028), and UPDATE … FROM, which the
-// emulator refuses ("Update with joins not supported", #1027).
+// answers with what it changed, from that answer (dmlSentence).
+//
+// The editor refused two more forms until #1567, both of which the front
+// serves now, and sends them as Google's console does:
+//   - UPDATE … FROM, which the emulator refuses ("Update with joins not
+//     supported") and the front runs as a MERGE since #1027 and #1459, and
+//     reports as an UPDATE with its rows;
+//   - DML inside a script of several statements or a BEGIN block, which the
+//     front carries out a statement at a time since #1353 and #1459, each
+//     statement a child job of the SCRIPT parent with its own counts. The
+//     answer names what each DML child changed, read from jobs.list with
+//     parentJobId (scriptDMLSentences), as Google's console lists a
+//     script's statements; a script the emulator runs whole (one with a
+//     TEMP table or function) makes no child jobs, and the answer then says
+//     only that it ran.
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	bqv2 "google.golang.org/api/bigquery/v2"
@@ -50,14 +62,6 @@ import (
 // room for a script of many statements, and under the query route's 64 KiB
 // request body, so the refusal names this limit rather than the body's.
 const maxBigQueryScriptBytes = 32 << 10
-
-// The issues the read-write editor's DML refusals name: DML inside a
-// script, whose rows the front does not count, and UPDATE … FROM, which the
-// emulator refuses.
-const (
-	bigqueryScriptDMLIssue  = "#1028"
-	bigqueryUpdateFromIssue = "#1027"
-)
 
 // bigqueryDML are the statements that change a table's rows. TRUNCATE TABLE
 // is DML in BigQuery's reference, and the front counts it as a write.
@@ -134,10 +138,12 @@ func updateHasFrom(stmt []string) bool {
 }
 
 // writableBigQuery refuses, before anything is sent, what the read-write
-// editor does not run: DML inside a script, UPDATE … FROM, a lone query, and
-// text past the limit. Everything else goes to the API, which decides. For a
-// DML statement of its own it returns the statement's keyword (INSERT,
-// UPDATE, DELETE, MERGE or TRUNCATE), which the answer is worded for.
+// editor does not run: a lone query, which belongs in Read-only, and text
+// past the limit. Everything else goes to the API, which decides. For a DML
+// statement of its own it returns the statement's keyword (INSERT, UPDATE,
+// DELETE, MERGE or TRUNCATE), which the answer is worded for, and for a
+// script of several statements (or a BEGIN block) that holds DML it returns
+// "SCRIPT", whose answer names what each of its DML statements changed.
 func writableBigQuery(statement string) (string, error) {
 	if len(statement) > maxBigQueryScriptBytes {
 		return "", fmt.Errorf("the statement is %d bytes; the read-write editor accepts at most %d",
@@ -153,18 +159,11 @@ func writableBigQuery(statement string) (string, error) {
 	if len(stmts) == 0 {
 		return "", errors.New("a statement is required")
 	}
-	reads := true
+	reads, dml := true, false
 	for _, stmt := range stmts {
 		h := strings.ToUpper(stmt[0])
-		if bigqueryDML[h] && len(stmts) > 1 {
-			return "", fmt.Errorf("%s is DML inside a script of several statements, which the read-write editor "+
-				"does not run: the rows it changes there are not reported (%s). Run the DML "+
-				"statement on its own, and the rest of the script before or after it", h, bigqueryScriptDMLIssue)
-		}
-		if h == "UPDATE" && updateHasFrom(stmt) {
-			return "", fmt.Errorf("UPDATE … FROM is refused by the emulator, \"Update with joins not supported\" "+
-				"(%s). Use a MERGE whose WHEN MATCHED clause updates the rows, or an UPDATE whose WHERE "+
-				"reads the other table in a subquery", bigqueryUpdateFromIssue)
+		if bigqueryDML[h] {
+			dml = true
 		}
 		if h != "SELECT" && h != "WITH" {
 			reads = false
@@ -173,10 +172,52 @@ func writableBigQuery(statement string) (string, error) {
 	if reads {
 		return "", fmt.Errorf("%s reads data: switch the editor to Read-only, where it runs as a query", strings.ToUpper(stmts[0][0]))
 	}
-	if h := strings.ToUpper(stmts[0][0]); bigqueryDML[h] {
+	script := len(stmts) > 1 || strings.EqualFold(tokens[0], "BEGIN")
+	switch h := strings.ToUpper(stmts[0][0]); {
+	case dml && script:
+		return "SCRIPT", nil
+	case bigqueryDML[h]:
 		return h, nil
 	}
 	return "", nil
+}
+
+// scriptDMLSentences says what each DML statement of a script changed, in
+// the order the script ran them, from its child jobs (#1353): each DML
+// child's statementType and counts, worded as dmlSentence words a statement
+// of its own, after the line it starts on, its innermost stack frame's
+// (#1569: the last statement's too), where the child names it. jobs.list
+// lists the newest job first.
+func scriptDMLSentences(children []*bqv2.JobListJobs) []string {
+	type stmt struct {
+		created int64
+		text    string
+	}
+	var found []stmt
+	for _, c := range slices.Backward(children) {
+		st := c.Statistics
+		if st == nil || st.Query == nil || st.ScriptStatistics == nil || st.ScriptStatistics.EvaluationKind != "STATEMENT" {
+			continue
+		}
+		kind := st.Query.StatementType
+		if kind == "TRUNCATE_TABLE" {
+			kind = "TRUNCATE"
+		}
+		if !bigqueryDML[kind] {
+			continue
+		}
+		s := dmlSentence(kind, &bqv2.QueryResponse{NumDmlAffectedRows: st.Query.NumDmlAffectedRows, DmlStats: st.Query.DmlStats})
+		if fr := st.ScriptStatistics.StackFrames; len(fr) > 0 && fr[0].StartLine > 0 {
+			s = fmt.Sprintf("Line %d: %s", fr[0].StartLine, s)
+		}
+		found = append(found, stmt{st.CreationTime, s})
+	}
+	slices.SortStableFunc(found, func(a, b stmt) int { return cmp.Compare(a.created, b.created) })
+	out := make([]string, len(found))
+	for i, f := range found {
+		out[i] = f.text
+	}
+	return out
 }
 
 // dmlSentence says what a DML statement changed, from jobs.query's answer:
@@ -217,11 +258,10 @@ func (p bigqueryProvider) WriteSpec(path []string) *console.WriteSpec {
 	return &console.WriteSpec{
 		Label: "Read-write",
 		Hint: fmt.Sprintf("Changes datasets, tables and rows: DDL (CREATE SCHEMA, CREATE TABLE, with columns or AS "+
-			"SELECT, CREATE VIEW, with or without a column list, CREATE OR REPLACE, IF NOT EXISTS, DROP), scripts with DECLARE and SET, and a DML "+
-			"statement of its own (INSERT, UPDATE, DELETE, MERGE, TRUNCATE TABLE), answered with the rows it "+
-			"changed, all sent with jobs.query. Unqualified names resolve in dataset %s. DML inside a script (%s) "+
-			"and UPDATE … FROM (%s) are not run here. What the API refuses is shown in its words.",
-			path[0], bigqueryScriptDMLIssue, bigqueryUpdateFromIssue),
+			"SELECT, CREATE VIEW, with or without a column list, CREATE OR REPLACE, IF NOT EXISTS, DROP), scripts with DECLARE and SET, and DML "+
+			"(INSERT, UPDATE, including UPDATE … FROM, DELETE, MERGE, TRUNCATE TABLE), of its own or inside a script, answered with the rows it "+
+			"changed, all sent with jobs.query. Unqualified names resolve in dataset %s. What the API refuses is shown in its words.",
+			path[0]),
 		Target:      fmt.Sprintf("project %s (default dataset %s)", p.project, path[0]),
 		Run:         "Run statement",
 		Confirm:     "BigQuery has no transaction to undo it: what the statement creates, replaces, drops, adds, changes or deletes is changed when it runs.",
@@ -272,6 +312,26 @@ func (p bigqueryProvider) WriteReport(ctx context.Context, project string, path 
 	}
 	if !resp.JobComplete {
 		return fmt.Sprintf("The statement is still running%s; Job history shows how it ends.", job), nil
+	}
+	if dml == "SCRIPT" {
+		// Each DML statement of the script is a child job with its counts
+		// (#1353); a script the emulator runs whole has none.
+		msg := "The script ran" + job + "."
+		if resp.JobReference != nil && resp.JobReference.JobId != "" {
+			var children []*bqv2.JobListJobs
+			err := svc.Jobs.List(p.project).ParentJobId(resp.JobReference.JobId).Projection("full").
+				Pages(ctx, func(l *bqv2.JobList) error {
+					children = append(children, l.Jobs...)
+					return nil
+				})
+			if err != nil {
+				return msg + " Its statements' jobs could not be listed: " + bigqueryRefusal(err).Error(), nil
+			}
+			if lines := scriptDMLSentences(children); len(lines) > 0 {
+				msg += " " + strings.Join(lines, " ")
+			}
+		}
+		return msg, nil
 	}
 	if dml != "" {
 		// The front reports a lone DML statement's rows (#1008).

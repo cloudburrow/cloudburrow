@@ -38,17 +38,21 @@ func Routes() []rest.Route { return Transcoder().Routes() }
 // with the transcoder as it is with the gRPC server, so both transports serve
 // the same set.
 //
-// POST /v2/entries:tail is served beside the transcoder (tailjson.go).
+// POST /v2/entries:tail is served beside the transcoder (tailjson.go), and
+// sink requests carry interceptChildren around it (intercept.go).
 func NewRESTHandler(register func(grpc.ServiceRegistrar)) http.Handler {
 	t := Transcoder()
 	rec := &tailRecorder{next: t}
 	register(rec)
-	if rec.srv == nil {
+	if rec.srv == nil && rec.admin == nil {
 		return t
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == tailJSONPath {
+		if rec.srv != nil && r.Method == http.MethodPost && r.URL.Path == tailJSONPath {
 			rec.srv.serveTailJSON(w, r)
+			return
+		}
+		if serveSinkJSON(rec.admin, t, w, r) { // interceptChildren, intercept.go
 			return
 		}
 		t.ServeHTTP(w, r)

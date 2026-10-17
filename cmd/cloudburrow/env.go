@@ -109,6 +109,10 @@ func exportedEnv(cfg config.Config, info runtimeInfo, live bool) (config.Config,
 	// both.
 	proj := cfg.DefaultProject()
 
+	// The connector address `up` recorded, unless --cloudsql-connector was
+	// passed here too (#1571).
+	cfg = withRecordedCloudSQLConnector(cfg)
+
 	creds, err := metadata.LoadOrCreate(cfg.InstanceDir(), proj, tokenURI(cfg))
 	if err != nil {
 		return cfg, nil, err

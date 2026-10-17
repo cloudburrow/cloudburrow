@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,6 +26,11 @@ func TestCreateSecretRefusesFieldsItWouldDrop(t *testing.T) {
 	ctx := context.Background()
 	cases := map[string]*secretmanagerpb.Secret{
 		"version_aliases": {Replication: automatic(), VersionAliases: map[string]int64{"current": 1}},
+		"tags":            {Replication: automatic(), Tags: map[string]string{"tagKeys/1": "tagValues/1"}},
+		// A top-level key is a regional secret's (#1519); on a global
+		// secret it is refused, not dropped.
+		"customer_managed_encryption": {Replication: automatic(),
+			CustomerManagedEncryption: &secretmanagerpb.CustomerManagedEncryption{KmsKeyName: "projects/demo/locations/global/keyRings/r/cryptoKeys/k"}},
 	}
 	for field, sec := range cases {
 		_, err := g.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{Parent: "projects/demo", SecretId: "s-" + strings.ReplaceAll(field, "_", "-"), Secret: sec})
@@ -143,5 +149,37 @@ func TestPayloadChecksums(t *testing.T) {
 	// 0x982827d8 is CRC32C("s3cret"), computed outside this package.
 	if got.GetPayload().DataCrc32C == nil || got.GetPayload().GetDataCrc32C() != 0x982827d8 {
 		t.Errorf("access data_crc32c = %v; want %d", got.GetPayload().DataCrc32C, 0x982827d8)
+	}
+}
+
+// ListSecrets pages in name order, whatever order the secrets were made in
+// (#1567): two pages of two and one, each a token from the last.
+func TestListSecretsPagesInNameOrder(t *testing.T) {
+	t.Parallel()
+	g, s := newGRPC(t)
+	for _, id := range []string{"c", "a", "b"} {
+		if _, err := s.CreateSecret("demo", id, nil, nil, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	var pages [][]string
+	token := ""
+	for {
+		resp, err := g.ListSecrets(ctx, &secretmanagerpb.ListSecretsRequest{Parent: "projects/demo", PageSize: 2, PageToken: token})
+		if err != nil {
+			t.Fatalf("ListSecrets: %v", err)
+		}
+		var names []string
+		for _, sec := range resp.GetSecrets() {
+			names = append(names, strings.TrimPrefix(sec.GetName(), "projects/demo/secrets/"))
+		}
+		pages = append(pages, names)
+		if token = resp.GetNextPageToken(); token == "" {
+			break
+		}
+	}
+	if fmt.Sprint(pages) != "[[a b] [c]]" {
+		t.Errorf("ListSecrets pages = %v, want [[a b] [c]]", pages)
 	}
 }

@@ -3,6 +3,7 @@
 package compat
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -65,10 +66,16 @@ func TestMemorystoreRedisClusterInTransitEncryption(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if op, err := c.DeleteCluster(h.Context(), &clusterpb.DeleteClusterRequest{Name: name}); err == nil {
-			_ = op.Wait(h.Context())
+			wctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			_ = op.Wait(wctx)
 		}
 	})
-	cl, err := op.Wait(h.Context())
+	// A CI runner takes longer than h.Context()'s minute to start a
+	// TLS cluster (main's run 39049056201), so the wait has its own.
+	wctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	cl, err := op.Wait(wctx)
 	if err != nil {
 		t.Fatalf("CreateCluster operation: %v", err)
 	}
@@ -139,10 +146,16 @@ func TestMemorystoreValkeyInTransitEncryption(t *testing.T) {
 		}
 		t.Cleanup(func() {
 			if op, err := c.DeleteInstance(h.Context(), &memorystorepb.DeleteInstanceRequest{Name: name}); err == nil {
-				_ = op.Wait(h.Context())
+				wctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				defer cancel()
+				_ = op.Wait(wctx)
 			}
 		})
-		inst, err := op.Wait(h.Context())
+		// Longer than h.Context()'s minute on a CI runner (main's run
+		// 39049056201), so the wait has its own.
+		wctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		inst, err := op.Wait(wctx)
 		if err != nil {
 			t.Fatalf("CreateInstance %s operation: %v", id, err)
 		}

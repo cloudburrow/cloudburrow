@@ -93,8 +93,37 @@ func TestCloudSQLConsoleExternalPrimary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if b := bodies["POST /v1/projects/proj/instances/rep/startExternalSync"]; !strings.Contains(b, `"syncMode":"ONLINE"`) ||
-		!strings.Contains(b, `"skipVerification":true`) {
+		!strings.Contains(b, `"skipVerification":true`) || strings.Contains(b, "migrationType") {
 		t.Errorf("startExternalSync body %s", b)
+	}
+
+	// The migration type (#1570): a MySQL replica's sync forms offer
+	// LOGICAL and PHYSICAL, and PHYSICAL reaches both methods.
+	for _, a := range d.Actions {
+		if a.ID != "verify-external-sync" && a.ID != "start-external-sync" {
+			continue
+		}
+		var found bool
+		for _, f := range a.Fields {
+			if f.Name == "migrationType" && strings.Join(f.Options, ",") == "LOGICAL,PHYSICAL" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s has no migrationType choice: %+v", a.ID, a.Fields)
+		}
+	}
+	if err := p.ActAt(ctx, "proj", []string{"rep"}, "start-external-sync", map[string]string{"migrationType": "PHYSICAL"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/rep/startExternalSync"]; !strings.Contains(b, `"migrationType":"PHYSICAL"`) {
+		t.Errorf("startExternalSync PHYSICAL body %s", b)
+	}
+	if _, err := p.ActAtResult(ctx, "proj", []string{"rep"}, "verify-external-sync", map[string]string{"migrationType": "PHYSICAL"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/rep/verifyExternalSyncSettings"]; !strings.Contains(b, `"migrationType":"PHYSICAL"`) {
+		t.Errorf("verifyExternalSyncSettings PHYSICAL body %s", b)
 	}
 }
 
@@ -147,10 +176,77 @@ func TestCloudSQLConsoleExternalPostgres(t *testing.T) {
 	if !ids["verify-external-sync"] || !ids["start-external-sync"] {
 		t.Errorf("a PostgreSQL external replica's actions: %v", ids)
 	}
+	for _, a := range d.Actions {
+		for _, f := range a.Fields {
+			if f.Name == "migrationType" {
+				t.Errorf("%s of a PostgreSQL replica offers a migration type; PHYSICAL is for MySQL", a.ID)
+			}
+		}
+	}
 	if err := p.ActAt(ctx, "proj", []string{"pgrep"}, "start-external-sync", map[string]string{"syncMode": "OFFLINE"}); err != nil {
 		t.Fatal(err)
 	}
 	if b := bodies["POST /v1/projects/proj/instances/pgrep/startExternalSync"]; !strings.Contains(b, `"syncMode":"OFFLINE"`) {
 		t.Errorf("startExternalSync body %s", b)
+	}
+}
+
+// TestCloudSQLConsoleDemote (#1524): a standalone MySQL instance offers
+// Demote, which sends demoteMaster with the replication user and the GTID
+// check, or demote; a replica does not offer it.
+func TestCloudSQLConsoleDemote(t *testing.T) {
+	var mu sync.Mutex
+	bodies := map[string]string{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies[r.Method+" "+r.URL.Path] = string(b)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/solo"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "solo", "state": "RUNNABLE", "databaseVersion": "MYSQL_8_4",
+				"instanceType": "CLOUD_SQL_INSTANCE", "settings": map[string]any{"tier": "db-custom-1-3840"}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/instances/rep"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "rep", "state": "RUNNABLE", "databaseVersion": "MYSQL_8_4",
+				"instanceType": "READ_REPLICA_INSTANCE", "masterInstanceName": "proj:solo",
+				"settings": map[string]any{"tier": "db-custom-1-3840", "databaseReplicationEnabled": true}})
+		case r.Method == http.MethodGet:
+			_, _ = io.WriteString(w, `{}`)
+		default:
+			_, _ = io.WriteString(w, `{"kind":"sql#operation","name":"op","status":"DONE"}`)
+		}
+	}))
+	defer ts.Close()
+	p := cloudSQLInstancesProvider{endpoint: strings.TrimPrefix(ts.URL, "http://"), versions: []string{"MYSQL_8_4"}}
+	ctx := context.Background()
+	has := func(name string) bool {
+		d, err := p.Detail(ctx, "proj", []string{name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range d.Actions {
+			if a.ID == "demote" {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("solo") || has("rep") {
+		t.Errorf("Demote offered on solo %v, on a replica %v", has("solo"), has("rep"))
+	}
+	if err := p.ActAt(ctx, "proj", []string{"solo"}, "demote", map[string]string{"source": "ext", "method": "demoteMaster",
+		"username": "repl", "password": "pw", "skipGtidCheck": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/solo/demoteMaster"]; !strings.Contains(b, `"masterInstanceName":"ext"`) ||
+		!strings.Contains(b, `"verifyGtidConsistency":false`) || !strings.Contains(b, `"username":"repl"`) {
+		t.Errorf("demoteMaster body %s", b)
+	}
+	if err := p.ActAt(ctx, "proj", []string{"solo"}, "demote", map[string]string{"source": "ext", "method": "demote"}); err != nil {
+		t.Fatal(err)
+	}
+	if b := bodies["POST /v1/projects/proj/instances/solo/demote"]; !strings.Contains(b, `"sourceRepresentativeInstanceName":"ext"`) {
+		t.Errorf("demote body %s", b)
 	}
 }

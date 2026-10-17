@@ -37,15 +37,22 @@ import (
 //   - a change table made before patch 0041, which has no row identities;
 //   - an ingestion-time partitioned table whose change table was made
 //     before googlesqlite patch 0050, which keeps each change's
-//     _PARTITIONTIME (#1458), and a snapshot, clone or copy of a past time
-//     of one: a copy keeps no _PARTITIONTIME (copyjob.go);
-//   - a query that reads _PARTITIONTIME or _PARTITIONDATE of a past time
-//     and also has a *: the past rows are a subquery, whose SELECT * would
-//     give the pseudo-columns.
+//     _PARTITIONTIME (#1458);
+//   - a query that reads _PARTITIONTIME or _PARTITIONDATE of a past time,
+//     has a * and names the time by a query parameter (below).
 //
 // An ingestion-time partitioned table's past rows have their
 // _PARTITIONTIME (and, by day, _PARTITIONDATE) when the query names them
-// (#1458). A partition decorator with FOR SYSTEM_TIME AS OF reads the
+// (#1458). A query that names them and has a * in a select list reads
+// the past rows from a scratch table (scratch.go) the front fills with
+// them first, partitioned as the table is, each row in its partition of
+// then, so that * gives the table's columns and not the pseudo-columns,
+// as of the table itself; the scratch table is deleted once the query is
+// answered. A snapshot, clone or copy of a past time of such a table
+// (CREATE SNAPSHOT TABLE, CREATE TABLE ... CLONE, a copy job of
+// table@time) is made partitioned as the table is, with each row's
+// _PARTITIONTIME of then (#1458): its subquery gives each row's
+// _PARTITIONTIME as _cb_pt, which insertSelect writes (copyjob.go). A partition decorator with FOR SYSTEM_TIME AS OF reads the
 // partition's rows of then: those of the past rows the decorator's
 // condition holds of (partitionRows); the streaming buffer of then is not
 // kept, so a row in it then reads in its partition.
@@ -54,12 +61,19 @@ import (
 // does not have (it is made again with the table's new columns) leaves
 // the read 501 as above.
 
+// pastPartitionTime names the column of a copy's past rows that holds
+// each row's _PARTITIONTIME (pastRows).
+const pastPartitionTime = "_cb_pt"
+
 // historyRead returns the subquery that reads the table of tr, with m, as
 // it was at past (microseconds since the epoch), the value of expr, or the
 // status and message of why it cannot (above). ref names the table in a
 // message. The subquery keeps expr, which may name a query parameter the
 // engine fails a query for leaving unused.
-func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref string, past int64, expr string) (string, int, string) {
+// A scratch table it fills is added to scratches, for the caller to
+// delete.
+func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref string, past int64, expr string,
+	scratches *[]string) (string, int, string) {
 	notBuilt := func(why string) (string, int, string) {
 		return "", http.StatusNotImplemented, "Not implemented here: FOR SYSTEM_TIME AS OF a past time of " + ref + ": " + why +
 			" (docs/compatibility.md). Nothing was run."
@@ -74,20 +88,22 @@ func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref s
 	}
 	pseudo := false
 	if m.ingestion() {
-		star := false
-		for i, t := range tr.stmt {
+		for _, t := range tr.stmt {
 			pseudo = pseudo || t.is("_PARTITIONTIME") || t.is("_PARTITIONDATE")
-			// A select list's * (SELECT *, x.*), not COUNT(*) or a product.
-			if t.kind != tokWord && t.kind != tokQuoted && t.text == "*" && i > 0 {
-				p := tr.stmt[i-1]
-				star = star || p.is("SELECT") || p.is("DISTINCT") || p.is("ALL") || p.text == "," || p.text == "."
-			}
 		}
-		if pseudo && star {
-			return notBuilt("CloudBurrow does not read _PARTITIONTIME or _PARTITIONDATE of a past time in a query whose select list has a *")
+		if pseudo && hasSelectStar(tr.stmt) && strings.Contains(expr, "@") {
+			return notBuilt("CloudBurrow does not read _PARTITIONTIME or _PARTITIONDATE of a past time named by a query " +
+				"parameter in a query whose select list has a *")
 		}
 	}
-	text, code, msg := f.pastRows(r, tr.dataset, tr.table, m, ref, past, expr, true, pseudo, where)
+	var text string
+	var code int
+	var msg string
+	if pseudo && m.ingestion() && hasSelectStar(tr.stmt) {
+		text, code, msg = f.pastScratch(r, tr, m, ref, past, where, scratches)
+	} else {
+		text, code, msg = f.pastRows(r, tr.dataset, tr.table, m, ref, past, expr, true, pseudo, where)
+	}
 	if code != 0 {
 		return "", code, msg
 	}
@@ -98,18 +114,60 @@ func (f front) historyRead(r *http.Request, tr tableRead, m partitionMeta, ref s
 	return text, 0, ""
 }
 
+// hasSelectStar reports whether stmt has a select list's * (SELECT *,
+// x.*), not COUNT(*) or a product.
+func hasSelectStar(stmt []token) bool {
+	for i, t := range stmt {
+		if t.kind != tokWord && t.kind != tokQuoted && t.text == "*" && i > 0 {
+			p := stmt[i-1]
+			if p.is("SELECT") || p.is("DISTINCT") || p.is("ALL") || p.text == "," || p.text == "." {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// pastScratch writes the rows of the ingestion-time partitioned table of
+// tr, with m, as it was at past into a scratch table partitioned as it
+// is, each row in its partition of then, and returns the scratch table's
+// path to read in its place (above).
+func (f front) pastScratch(r *http.Request, tr tableRead, m partitionMeta, ref string, past int64, where string,
+	scratches *[]string) (string, int, string) {
+	sub, code, msg := f.pastRows(r, tr.dataset, tr.table, m, ref, past, "TRUE", false, false, where)
+	if code != 0 {
+		return "", code, msg
+	}
+	schema, err := json.Marshal(m.Schema)
+	if err != nil {
+		return "", http.StatusInternalServerError, err.Error()
+	}
+	scratch := tableRef{DatasetID: resultsDataset, TableID: strings.Replace(scratchTable(), "_replace_", "_past_", 1)}
+	if why := f.makeTableWith(r, scratch, schema, map[string]any{"timePartitioning": m.TimePartitioning}); why != "" {
+		return "", http.StatusInternalServerError, "cloudburrow: could not hold the past rows of " + ref + ": " + why
+	}
+	*scratches = append(*scratches, scratch.TableID)
+	if why := f.insertSelect(r, scratch, []copyTable{{ref: scratch, fields: m.Schema.Fields, from: sub,
+		partitionTime: m.TimePartitioning}}); why != "" {
+		return "", http.StatusInternalServerError, "cloudburrow: could not hold the past rows of " + ref + ": " + why
+	}
+	return quotePath([]string{projectOf(f.base), resultsDataset, scratch.TableID}), 0, ""
+}
+
 // historySubquery is historyRead's subquery of dataset.table, without an
 // alias; a CREATE SNAPSHOT TABLE or CLONE and a copy job of table@time
-// read a past time through it too (#1460, cloneddl.go, dropped.go).
+// read a past time through it too (#1460, cloneddl.go, dropped.go). Of an
+// ingestion-time partitioned table, it gives each row's _PARTITIONTIME as
+// _cb_pt too (#1458), and the caller sets its copyTable's partitionTime.
 func (f front) historySubquery(r *http.Request, dataset, table string, m partitionMeta, ref string, past int64, expr string) (string, int, string) {
 	return f.pastRows(r, dataset, table, m, ref, past, expr, false, false, "")
 }
 
-// pastRows is historySubquery. inQuery is a query's read, which may read
-// an ingestion-time partitioned table (a copy may not: it keeps no
-// _PARTITIONTIME); pseudo gives the subquery that table's _PARTITIONTIME
-// (and, by day, _PARTITIONDATE) columns; where, when not "", is a
-// partition decorator's condition the rows must hold (#1458).
+// pastRows is historySubquery. inQuery is a query's read; pseudo gives
+// its subquery an ingestion-time partitioned table's _PARTITIONTIME (and,
+// by day, _PARTITIONDATE) columns, and any other read of one is given
+// _PARTITIONTIME as _cb_pt (#1458); where, when not "", is a partition
+// decorator's condition the rows must hold (#1458).
 func (f front) pastRows(r *http.Request, dataset, table string, m partitionMeta, ref string, past int64, expr string,
 	inQuery, pseudo bool, where string) (string, int, string) {
 	notBuilt := func(why string) (string, int, string) {
@@ -117,9 +175,6 @@ func (f front) pastRows(r *http.Request, dataset, table string, m partitionMeta,
 			" (docs/compatibility.md). Nothing was run."
 	}
 	ingestion := m.ingestion()
-	if ingestion && !inQuery {
-		return notBuilt("a snapshot, clone or copy of an ingestion-time partitioned table keeps no _PARTITIONTIME")
-	}
 	project := projectOf(f.base)
 	var cols []string
 	for _, fl := range m.Schema.Fields {
@@ -135,7 +190,9 @@ func (f front) pastRows(r *http.Request, dataset, table string, m partitionMeta,
 		// The change table keeps each change's _PARTITIONTIME
 		// (googlesqlite patch 0050).
 		inner += ", _PARTITIONTIME"
-		if pseudo {
+		if !inQuery {
+			out += ", _PARTITIONTIME AS " + pastPartitionTime
+		} else if pseudo {
 			out += ", _PARTITIONTIME"
 			if m.ingestionUnit() == "DAY" {
 				out += ", DATE(_PARTITIONTIME) AS _PARTITIONDATE"

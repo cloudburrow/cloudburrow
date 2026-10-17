@@ -33,15 +33,20 @@ import (
 const tailJSONPath = "/v2/entries:tail"
 
 // tailRecorder registers services with the transcoder and keeps the
-// LoggingServiceV2 server, for entries:tail.
+// LoggingServiceV2 server, for entries:tail, and the ConfigServiceV2's
+// Admin, for interceptChildren (intercept.go).
 type tailRecorder struct {
-	next grpc.ServiceRegistrar
-	srv  *Server
+	next  grpc.ServiceRegistrar
+	srv   *Server
+	admin *Admin
 }
 
 func (r *tailRecorder) RegisterService(desc *grpc.ServiceDesc, impl any) {
 	if s, ok := impl.(*Server); ok {
 		r.srv = s
+	}
+	if c, ok := impl.(configServer); ok {
+		r.admin = c.a
 	}
 	r.next.RegisterService(desc, impl)
 }

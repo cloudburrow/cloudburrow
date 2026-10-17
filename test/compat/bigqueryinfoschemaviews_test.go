@@ -19,7 +19,8 @@ import (
 // INFORMATION_SCHEMA.VIEWS, through jobs.query and jobs.insert, has one row
 // per view, made by CREATE VIEW or tables.insert, with BigQuery's columns:
 // its project, dataset, name and query, check_option NULL and
-// use_standard_sql YES; a table is not in it; a WHERE and an alias work; a
+// use_standard_sql YES; a table is not in it; a WHERE and an alias work;
+// `region-us`.INFORMATION_SCHEMA.VIEWS has the same two (#1329); a
 // dataset that does not exist is 404. Measured first: the engine failed it
 // 400 "Table not found".
 //
@@ -91,6 +92,13 @@ func TestBigQueryInformationSchemaViews(t *testing.T) {
 			"WHERE v.table_name = 'v_ddl'", insert)
 		if err != nil || len(rows) != 1 || rows[0][0] != "v_ddl" {
 			t.Errorf("insert=%v: an aliased, filtered read gave %v, %v", insert, rows, err)
+		}
+		// The region-qualified form (#1329) lists the views of every
+		// dataset in the region; this dataset's are the same two.
+		rows, err = read("SELECT table_schema, table_name, view_definition FROM `region-us`.INFORMATION_SCHEMA.VIEWS "+
+			"WHERE table_schema = '"+ds.DatasetID+"' ORDER BY table_name", insert)
+		if err != nil || len(rows) != 2 || rows[0][1] != "v_api" || rows[0][2] != apiQuery || rows[1][1] != "v_ddl" {
+			t.Errorf("insert=%v: `region-us`.INFORMATION_SCHEMA.VIEWS gave %v, %v; want v_api and v_ddl", insert, rows, err)
 		}
 		_, err = read("SELECT * FROM no_such_dataset_1274.INFORMATION_SCHEMA.VIEWS", insert)
 		var e *googleapi.Error
