@@ -378,6 +378,27 @@ func (k memorystoreKMS) Encrypt(ctx context.Context, key string, plaintext []byt
 	return r.GetCiphertext(), nil
 }
 
+// sqlAdminKMS is memorystoreKMS for the Cloud SQL Admin API (#1538),
+// whose Encrypt also answers the CryptoKeyVersion that wrapped the key, for
+// diskEncryptionStatus.
+type sqlAdminKMS struct{ svc *kmsService }
+
+func (k sqlAdminKMS) Encrypt(ctx context.Context, key string, plaintext []byte) ([]byte, string, error) {
+	api := k.svc.API()
+	if api == nil {
+		return nil, "", errors.New("Cloud KMS has not started yet")
+	}
+	r, err := api.Encrypt(ctx, &kmspb.EncryptRequest{Name: key, Plaintext: plaintext})
+	if err != nil {
+		return nil, "", err
+	}
+	return r.GetCiphertext(), r.GetName(), nil
+}
+
+func (k sqlAdminKMS) Decrypt(ctx context.Context, key string, ciphertext []byte) ([]byte, error) {
+	return buildKMSDecrypter(k).Decrypt(ctx, key, ciphertext)
+}
+
 func (k memorystoreKMS) Decrypt(ctx context.Context, key string, ciphertext []byte) ([]byte, error) {
 	return buildKMSDecrypter(k).Decrypt(ctx, key, ciphertext)
 }
