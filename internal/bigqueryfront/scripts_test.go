@@ -259,7 +259,7 @@ func TestScriptVariablesDoNotOutliveTheScript(t *testing.T) {
 	sql := "DECLARE zz INT64 DEFAULT 5; SELECT zz"
 	for _, path := range []string{"/queries", "/jobs"} {
 		emu := &jobsEmulator{}
-		h := Wrap(emu)
+		h := Wrap(withExprs{emu})
 		code, got := do(t, h, "POST", base+path, queryBody(path, sql))
 		sent := emu.sentQuery(t)
 		if code != 200 || sent == sql || strings.Contains(sent, " zz") {
@@ -284,19 +284,22 @@ func TestScriptVariablesDoNotOutliveTheScript(t *testing.T) {
 		name := regexp.MustCompile(`cbvar_[0-9a-f]+_zz`).FindString(q)
 		return 400, `{"error":{"code":400,"message":"Unrecognized name: ` + name + `","errors":[{"reason":"invalidQuery"}]}}`
 	}}
-	_, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "DECLARE zz INT64; SELECT zz + nope"))
+	// A script with a TEMP function is sent whole, its variables renamed
+	// (#1459: another is carried out a statement at a time).
+	_, got := do(t, Wrap(withExprs{emu}), "POST", base+"/queries", queryBody("/queries",
+		"DECLARE zz INT64; CREATE TEMP FUNCTION f() AS (1); SELECT zz + nope"))
 	if msg, _ := got["error"].(map[string]any)["message"].(string); msg != "Unrecognized name: zz" {
 		t.Errorf("the error: %v", got)
 	}
 }
 
-// TestFailedScriptThatWroteIs501 (#935): the emulator rolls a failed
-// script back whole, where BigQuery keeps what the statements before the
-// failing one did, so a failed script with a statement that changes data
-// and another after it is 501, naming the emulator's error; through
-// jobs.insert the job is failed so. A syntax error, and a failed script
-// that changes nothing kept, are answered as the emulator answered them.
-func TestFailedScriptThatWroteIs501(t *testing.T) {
+// TestFailedScriptKeepsWhatItWrote (#935, #1459): BigQuery keeps what the
+// statements before a failing one did. The emulator rolls a failed script
+// given to jobs.query back whole, so since #1459 the front carries out a
+// script of several statements a statement at a time: it fails at the
+// failing one, with its error, the earlier ones kept. A syntax error is
+// answered as the emulator answered it.
+func TestFailedScriptKeepsWhatItWrote(t *testing.T) {
 	fail := func(q string) (int, string) {
 		if strings.Contains(q, probeSentinel) {
 			// A transaction's probe fails at its end (transactions.go).
@@ -314,8 +317,10 @@ func TestFailedScriptThatWroteIs501(t *testing.T) {
 		// Run statement by statement (#1249, earlierQuery): it fails at the
 		// SELECT, keeping ds.e1, as BigQuery does.
 		{"CREATE TABLE ds.e1 AS SELECT 1 AS a; SELECT * FROM nope.nope; CREATE TABLE ds.e2 AS SELECT 1 AS a", 400},
-		{"INSERT INTO ds.t VALUES (1); SELECT * FROM nope.nope", 501},
-		{"DROP TABLE ds.t; SELECT * FROM nope.nope", 501},
+		// Carried out a statement at a time (#1459): the INSERT and the
+		// DROP are kept.
+		{"INSERT INTO ds.t VALUES (1); SELECT * FROM nope.nope", 400},
+		{"DROP TABLE ds.t; SELECT * FROM nope.nope", 400},
 		// Carried out by the front (transactions.go): the COMMIT is
 		// kept, and the script fails at the SELECT, as in BigQuery.
 		{"BEGIN TRANSACTION; CREATE TEMP TABLE tt AS SELECT 1 AS a; INSERT INTO ds.t VALUES (1); COMMIT TRANSACTION; SELECT * FROM nope.nope", 400},
@@ -327,7 +332,7 @@ func TestFailedScriptThatWroteIs501(t *testing.T) {
 		{"CREATE TABLE ds.e AS SELECT * FROM nope.nope", 400},
 	} {
 		emu := &jobsEmulator{run: fail}
-		code, got := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", c.sql))
+		code, got := do(t, Wrap(withExprs{emu}), "POST", base+"/queries", queryBody("/queries", c.sql))
 		msg, _ := got["error"].(map[string]any)["message"].(string)
 		if code != c.want || !strings.Contains(msg, "Table not found: nope.nope") {
 			t.Errorf("%s: %d %v, want %d", c.sql, code, got, c.want)

@@ -341,6 +341,15 @@ func (f front) runQuery(w http.ResponseWriter, r *http.Request, q queryOptions, 
 		f.serveQuery(w, r, q, insert)
 		return
 	}
+	if v.statements > 1 && !txnRequest(r) && sessionOf(r) == nil && splitCures(q.Query) {
+		// #1459, scriptflow.go: every other script of several statements
+		// with no TEMP table or function is carried out a statement at a
+		// time too, as BigQuery runs a script: each statement a child job,
+		// and a failure keeps what the statements before it did, through
+		// jobs.query as through a query job.
+		f.runScript(w, r, q, insert)
+		return
+	}
 	if !txnRequest(r) { // #1249, scriptflow.go; after checkDDL, which refuses what runScript would
 		switch earlierQuery(q.Query) {
 		case scriptSplits:

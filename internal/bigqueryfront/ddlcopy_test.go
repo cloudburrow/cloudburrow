@@ -354,27 +354,30 @@ func TestCreateFunctionOfAnExistingFunction(t *testing.T) {
 			}
 		}
 
-		sqls := []string{"CREATE FUNCTION IF NOT EXISTS ds.f(x INT64) AS (x + 9)", "CREATE FUNCTION ds.g(x INT64) AS (x + 9)"}
-		if path == "/jobs" {
-			// (A DROP FUNCTION in a script given to jobs.query is 501, #976.)
-			sqls = append(sqls, "DROP FUNCTION ds.f; CREATE FUNCTION ds.f(x INT64) AS (x + 9)")
-		}
-		for _, sql := range sqls {
+		// (#1459) A script of several statements is carried out a
+		// statement at a time, each as it runs alone, its DROP FUNCTION
+		// too; before, it was 501.
+		for _, sql := range []string{"CREATE FUNCTION IF NOT EXISTS ds.f(x INT64) AS (x + 9)", "CREATE FUNCTION ds.g(x INT64) AS (x + 9)",
+			"DROP FUNCTION ds.f; CREATE FUNCTION ds.f(x INT64) AS (x + 9)"} {
 			e = setup()
-			if code, got := do(t, Wrap(e), "POST", base+path, queryBody(path, sql)); code != 200 || !e.sent(regexp.QuoteMeta(sql)) {
+			if code, got := do(t, Wrap(e), "POST", base+path, queryBody(path, sql)); code != 200 || !e.sent(regexp.QuoteMeta("CREATE FUNCTION")) {
 				t.Errorf("%s %q: %d %v, sent %v", path, sql, code, got, e.log)
 			}
 		}
-		for _, sql := range []string{
-			"DECLARE z INT64 DEFAULT 1; CREATE FUNCTION ds.f(x INT64) AS (x + 2)",
-			"CREATE OR REPLACE FUNCTION ds.f(x INT64) AS (x + 2); SELECT 1",
-			"CREATE FUNCTION ds.g(x INT64) AS (x + 2); CREATE FUNCTION ds.g(x INT64) AS (x + 3)",
-			"CREATE OR REPLACE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y); SELECT 1",
+		for _, c := range []struct{ sql, reason, fn, want string }{
+			{"DECLARE z INT64 DEFAULT 1; CREATE FUNCTION ds.f(x INT64) AS (x + 2)", "duplicate", "ds.f", "x + 1"},
+			{"CREATE OR REPLACE FUNCTION ds.f(x INT64) AS (x + 2); SELECT 1", "", "ds.f", "x + 2"},
+			{"CREATE FUNCTION ds.g(x INT64) AS (x + 2); CREATE FUNCTION ds.g(x INT64) AS (x + 3)", "duplicate", "ds.g", "x + 2"},
+			{"CREATE OR REPLACE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y); SELECT 1", "", "ds.tf", "TABLE"},
 		} {
 			e = setup()
-			code, got := do(t, Wrap(e), "POST", base+path, queryBody(path, sql))
-			if code != 501 || errorReason(got) != "notImplemented" || e.sent(`CREATE|DROP`) {
-				t.Errorf("%s %q: %d %v, sent %v", path, sql, code, got, e.log)
+			code, got := do(t, Wrap(withExprs{e}), "POST", base+path, queryBody(path, c.sql))
+			reason := errorReason(got)
+			if path == "/jobs" && code == 200 {
+				reason, _ = jobState(got)
+			}
+			if reason != c.reason || e.funcs[c.fn] != c.want {
+				t.Errorf("%s %q: %d %v, functions %v, want %q and %s %q", path, c.sql, code, got, e.funcs, c.reason, c.fn, c.want)
 			}
 		}
 	}
@@ -383,8 +386,9 @@ func TestCreateFunctionOfAnExistingFunction(t *testing.T) {
 // TestDropSchema (#990): DROP SCHEMA is carried out through
 // datasets.delete after the query, which the emulator is sent with a
 // statement that does nothing in its place; failed as BigQuery fails it
-// when it is the first statement; 501 in a script where the other
-// statements could see the dataset.
+// when it is the first statement; carried out in its turn in a script of
+// several statements (#1459), and 501 in one with a TEMP table or function
+// where the other statements could see the dataset.
 func TestDropSchema(t *testing.T) {
 	setup := func() *stateEmulator {
 		e := newStateEmulator()
@@ -406,14 +410,17 @@ func TestDropSchema(t *testing.T) {
 			{"DROP SCHEMA IF EXISTS nope CASCADE", "", ""},
 			{"DROP SCHEMA full CASCADE; SELECT 1", "", "full"},
 			{"SELECT 1; DROP SCHEMA empty", "", "empty"},
-			{"DECLARE z INT64 DEFAULT 1; DROP SCHEMA full", "notImplemented", ""},
-			{"DECLARE z INT64 DEFAULT 1; DROP SCHEMA nope", "notImplemented", ""},
-			{"CREATE TABLE full.u (a INT64); DROP SCHEMA full CASCADE", "notImplemented", ""},
-			{"DROP SCHEMA full CASCADE; SELECT * FROM full.t", "notImplemented", ""},
+			// (#1459) Carried out a statement at a time, each DROP SCHEMA
+			// as it is alone; before, 501.
+			{"DECLARE z INT64 DEFAULT 1; DROP SCHEMA full", "resourceInUse", ""},
+			{"DECLARE z INT64 DEFAULT 1; DROP SCHEMA nope", "notFound", ""},
+			{"CREATE TABLE full.u (a INT64); DROP SCHEMA full CASCADE", "", "full"},
+			// With a TEMP function the script is sent whole: 501.
+			{"CREATE TEMP FUNCTION tf() AS (1); DROP SCHEMA full CASCADE; SELECT * FROM full.t", "notImplemented", ""},
 			{"DROP SCHEMA full SOMETHING", "notImplemented", ""},
 		} {
 			e := setup()
-			code, got := do(t, Wrap(e), "POST", base+path, queryBody(path, c.sql))
+			code, got := do(t, Wrap(withExprs{e}), "POST", base+path, queryBody(path, c.sql))
 			reason := errorReason(got)
 			if path == "/jobs" && code == 200 {
 				reason, _ = jobState(got)
@@ -462,19 +469,21 @@ func TestDropSchema(t *testing.T) {
 		t.Errorf("the table function outlived its dataset: %v", e.funcs)
 	}
 
-	// A failed script keeps the dataset; a failed query job says so.
+	// A script that fails after its DROP SCHEMA keeps the drop, as
+	// BigQuery keeps what the statements before the failing one did, and
+	// fails with the failing one's error (#1459; before, 501).
 	for _, path := range []string{"/queries", "/jobs"} {
 		e := setup()
 		e.fail = regexp.MustCompile(`SELECT 2`)
 		code, got := do(t, Wrap(e), "POST", base+path, queryBody(path, "DROP SCHEMA full CASCADE; SELECT 2"))
-		if !e.datasets["full"] {
-			t.Errorf("%s: a failed script dropped the dataset", path)
+		if e.datasets["full"] {
+			t.Errorf("%s: a failed script kept the dataset it dropped first", path)
 		}
 		reason := errorReason(got)
 		if path == "/jobs" {
 			reason, _ = jobState(got)
 		}
-		if reason != "notImplemented" {
+		if reason != "invalidQuery" && !(path == "/queries" && code == 400) {
 			t.Errorf("%s: a failed script: %d %v", path, code, got)
 		}
 	}

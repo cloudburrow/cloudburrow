@@ -137,3 +137,110 @@ func TestBigQueryStatementsLaterInAScript(t *testing.T) {
 		}
 	}
 }
+
+// TestBigQueryEveryScriptInTurn (#1459): a multi-statement script with no
+// TEMP table or function, no control flow and no query before its last
+// statement, which the emulator ran whole, is carried out by the front a
+// statement at a time, as BigQuery runs a script: "each statement in the
+// script creates a child job"
+// (https://cloud.google.com/bigquery/docs/multi-statement-queries), and a
+// failing statement fails the script, keeping what the statements before it
+// did. Read back, through jobs.query and jobs.insert: the parent's
+// statementType SCRIPT and its child jobs, one per statement; a script
+// failing after an INSERT keeps the row and does not run the INSERT after
+// it; CREATE SCHEMA of a dataset that exists later in a script fails it
+// "Already Exists", keeping the table made before; CREATE FUNCTION of one
+// that exists fails it, and DROP FUNCTION then CREATE FUNCTION of its name
+// replaces it; DROP SCHEMA ... CASCADE of a dataset an earlier statement of
+// the script made a table in drops it. Measured first: the parent had
+// numChildJobs 0; the failed script through jobs.query, DROP FUNCTION in a
+// script and the DROP SCHEMA were 501; the CREATE SCHEMA and CREATE
+// FUNCTION were 501.
+//
+// covers: bigquery.jobs.query, bigquery.jobs.insert, bigquery.jobs.get, bigquery.jobs.list, bigquery.tables.get, bigquery.datasets.get
+func TestBigQueryEveryScriptInTurn(t *testing.T) {
+	h := New(t)
+	c, _ := bigqueryClient(t, h)
+	ds := validationDataset(t, h, c)
+	ctx := h.Context()
+	path := func(name string) string { return "`" + ds.DatasetID + "." + name + "`" }
+	for _, insert := range []bool{false, true} {
+		// A plain script: its children.
+		plain := fmt.Sprintf("tplain%v", insert)
+		job, it := runScriptJob(t, c, "CREATE TABLE "+path(plain)+" (a INT64);\nINSERT INTO "+path(plain)+" VALUES (1), (2);\n"+
+			"SELECT COUNT(*) AS n FROM "+path(plain), insert)
+		var out []bigquery.Value
+		if err := it.Next(&out); err != nil || fmt.Sprint(out) != "[2]" {
+			t.Errorf("insert %v: the script's rows %v (%v), want [2]", insert, out, err)
+		}
+		types, texts := childTypes(t, job)
+		if !types["INSERT"] || !strings.Contains(texts, "CREATE TABLE "+path(plain)) || !strings.Contains(texts, "SELECT COUNT(*) AS n FROM") {
+			t.Errorf("insert %v: the child jobs: %v\n%s", insert, types, texts)
+		}
+		if parent, err := c.JobFromID(ctx, job.ID()); err != nil {
+			t.Errorf("insert %v: jobs.get of the script: %v", insert, err)
+		} else if st := parent.LastStatus(); st == nil || st.Statistics == nil || st.Statistics.NumChildJobs < 3 {
+			t.Errorf("insert %v: the script's job has %+v, want 3 children", insert, st)
+		} else if qs, ok := st.Statistics.Details.(*bigquery.QueryStatistics); !ok || qs.StatementType != "SCRIPT" {
+			t.Errorf("insert %v: the script's statementType %+v, want SCRIPT", insert, st.Statistics.Details)
+		}
+
+		// A failure after an INSERT keeps its row.
+		kept := fmt.Sprintf("tkeep%v", insert)
+		if err := bqRun(ctx, c, "CREATE TABLE "+path(kept)+" (v INT64)", false); err != nil {
+			t.Fatal(err)
+		}
+		err := bqRun(ctx, c, "INSERT INTO "+path(kept)+" VALUES (5);\nINSERT INTO "+path("nope")+" VALUES (1);\n"+
+			"INSERT INTO "+path(kept)+" VALUES (6)", insert)
+		if err == nil || !strings.Contains(err.Error(), "nope") {
+			t.Errorf("insert %v: a script failing at its second statement: %v", insert, err)
+		}
+		it, err = c.Query("SELECT ARRAY_AGG(v ORDER BY v) FROM " + path(kept)).Read(ctx)
+		if err == nil {
+			err = it.Next(&out)
+		}
+		if err != nil || fmt.Sprint(out) != "[[5]]" {
+			t.Errorf("insert %v: the rows kept: %v (%v), want [[5]]", insert, out, err)
+		}
+
+		// CREATE SCHEMA of a dataset that exists, later in a script.
+		made := fmt.Sprintf("tmade%v", insert)
+		err = bqRun(ctx, c, "CREATE TABLE "+path(made)+" (a INT64);\nCREATE SCHEMA `"+ds.DatasetID+"`", insert)
+		if err == nil || !strings.Contains(err.Error(), "Already Exists") {
+			t.Errorf("insert %v: CREATE SCHEMA of an existing dataset in a script: %v, want Already Exists", insert, err)
+		}
+		if _, err := ds.Table(made).Metadata(ctx); err != nil {
+			t.Errorf("insert %v: the table made before the failing CREATE SCHEMA: %v", insert, err)
+		}
+
+		// CREATE FUNCTION of one that exists; DROP FUNCTION and a new one.
+		fn := path(fmt.Sprintf("fn%v", insert))
+		if err := bqRun(ctx, c, "CREATE FUNCTION "+fn+"(x INT64) AS (x + 1)", false); err != nil {
+			t.Fatal(err)
+		}
+		err = bqRun(ctx, c, "CREATE TABLE "+path(made+"2")+" (a INT64);\nCREATE FUNCTION "+fn+"(x INT64) AS (x + 5)", insert)
+		if err == nil || !strings.Contains(err.Error(), "Already Exists") {
+			t.Errorf("insert %v: CREATE FUNCTION of an existing function in a script: %v, want Already Exists", insert, err)
+		}
+		if err := bqRun(ctx, c, "DROP FUNCTION "+fn+";\nCREATE FUNCTION "+fn+"(x INT64) AS (x + 2)", insert); err != nil {
+			t.Errorf("insert %v: DROP FUNCTION and CREATE FUNCTION in a script: %v", insert, err)
+		}
+		it, err = c.Query("SELECT " + fn + "(1)").Read(ctx)
+		if err == nil {
+			err = it.Next(&out)
+		}
+		if err != nil || fmt.Sprint(out) != "[3]" {
+			t.Errorf("insert %v: the function after the script: %v (%v), want [3]", insert, out, err)
+		}
+
+		// DROP SCHEMA of a dataset the script made a table in.
+		other := fmt.Sprintf("%s_s%v", ds.DatasetID, insert)
+		if err := bqRun(ctx, c, "CREATE SCHEMA `"+other+"`;\nCREATE TABLE `"+other+".t` (a INT64);\nDROP SCHEMA `"+other+"` CASCADE", insert); err != nil {
+			t.Errorf("insert %v: a script that drops the dataset it made: %v", insert, err)
+		}
+		if _, err := c.Dataset(other).Metadata(ctx); err == nil {
+			t.Errorf("insert %v: dataset %s outlived its DROP SCHEMA", insert, other)
+			_ = c.Dataset(other).DeleteWithContents(ctx)
+		}
+	}
+}

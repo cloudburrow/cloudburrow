@@ -282,6 +282,10 @@ func TestCSVExtractOfAnEmptyString(t *testing.T) {
 // function is 501 before it runs; a query job is left as it is.
 func TestFailedScriptFunctions(t *testing.T) {
 	const fail = "SELECT * FROM nope.nope"
+	// Each script has a TEMP function, so it is sent whole (#1459: another
+	// is carried out a statement at a time, which keeps what a statement
+	// before a failing one did, as BigQuery does).
+	const tf = "CREATE TEMP FUNCTION tf() AS (1); "
 	run := func(exists bool) func(string) (int, string) {
 		return func(q string) (int, string) {
 			switch {
@@ -306,11 +310,13 @@ func TestFailedScriptFunctions(t *testing.T) {
 		return false
 	}
 	// A function that exists is not made again: CREATE FUNCTION of it
-	// fails before anything runs (#986), and it is not taken out.
+	// is refused before anything runs (#986), and it is not taken out.
 	for _, exists := range []bool{false, true} {
 		emu := &jobsEmulator{run: run(exists)}
-		code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE FUNCTION ds.f(x INT64) AS (x + 1); "+fail))
-		if want := map[bool]int{false: 501, true: 409}[exists]; code != want {
+		code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", tf+"CREATE FUNCTION ds.f(x INT64) AS (x + 1); "+fail))
+		// (Of one that exists, later in a script sent whole, 501; without
+		// the TEMP function, 409 as it runs alone, TestCreateFunctionOfAnExistingFunction.)
+		if want := map[bool]int{false: 501, true: 501}[exists]; code != want {
 			t.Errorf("exists=%v: %d, want %d", exists, code, want)
 		}
 		if uncataloged(emu) == exists {
@@ -319,26 +325,26 @@ func TestFailedScriptFunctions(t *testing.T) {
 	}
 	// It succeeds: nothing is taken out.
 	emu := &jobsEmulator{run: run(false)}
-	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE FUNCTION ds.f(x INT64) AS (x + 1); SELECT 1")); code != 200 || uncataloged(emu) {
+	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", tf+"CREATE FUNCTION ds.f(x INT64) AS (x + 1); SELECT 1")); code != 200 || uncataloged(emu) {
 		t.Errorf("a script that succeeds: %d, sent %v", code, emu.log)
 	}
 	// As a query job, which the emulator commits, nothing is taken out;
 	// the function is only looked up (#986).
 	emu = &jobsEmulator{run: run(false)}
-	do(t, Wrap(emu), "POST", base+"/jobs", queryBody("/jobs", "CREATE FUNCTION ds.f(x INT64) AS (x + 1); "+fail))
+	do(t, Wrap(emu), "POST", base+"/jobs", queryBody("/jobs", tf+"CREATE FUNCTION ds.f(x INT64) AS (x + 1); "+fail))
 	if uncataloged(emu) || len(emu.log) != 2 || !strings.HasPrefix(emu.log[1], "jobs ") {
 		t.Errorf("a query job: sent %v", emu.log)
 	}
 	// A table function a failed script made is taken out with DROP TABLE
 	// FUNCTION, which the engine CloudBurrow builds carries out (#1061).
 	emu = &jobsEmulator{run: run(false)}
-	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y); "+fail)); code != 501 ||
+	if code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", tf+"CREATE TABLE FUNCTION ds.tf(x INT64) AS (SELECT x AS y); "+fail)); code != 501 ||
 		!strings.Contains(strings.Join(emu.log, "\n"), "DROP TABLE FUNCTION IF EXISTS `ds`.`tf`; SELECT * FROM") {
 		t.Errorf("a failed script that makes a table function: %d, sent %v", code, emu.log)
 	}
 	for _, sql := range []string{"DROP FUNCTION ds.g; SELECT 1", "DROP TABLE FUNCTION IF EXISTS ds.g; " + fail} {
 		emu := &jobsEmulator{run: run(false)}
-		code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", sql))
+		code, _ := do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", tf+sql))
 		ran := false
 		for _, l := range emu.log {
 			ran = ran || !strings.Contains(l, `"SELECT `+"`ds`.")

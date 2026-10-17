@@ -656,7 +656,9 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 			return
 		}
 		// A query job fails as the statement did: a table not found is
-		// 404 notFound (#1227), anything else 400 invalidQuery.
+		// 404 notFound (#1227), a statement the front refused with a
+		// reason of BigQuery's (duplicate, resourceInUse) with it (#1459),
+		// anything else 400 invalidQuery.
 		status, reason := http.StatusBadRequest, "invalidQuery"
 		var e struct {
 			Error struct {
@@ -665,9 +667,12 @@ func (f front) runScriptIn(w http.ResponseWriter, r *http.Request, q queryOption
 				} `json:"errors"`
 			} `json:"error"`
 		}
-		if flow.status == http.StatusNotFound && json.Unmarshal(flow.body, &e) == nil && len(e.Error.Errors) > 0 &&
-			e.Error.Errors[0].Reason == "notFound" {
+		_ = json.Unmarshal(flow.body, &e)
+		if flow.status == http.StatusNotFound && len(e.Error.Errors) > 0 && e.Error.Errors[0].Reason == "notFound" {
 			status, reason = http.StatusNotFound, "notFound"
+		} else if len(e.Error.Errors) > 0 && (flow.status == http.StatusConflict || flow.status == http.StatusBadRequest) &&
+			(e.Error.Errors[0].Reason == "duplicate" || e.Error.Errors[0].Reason == "resourceInUse") {
+			status, reason = flow.status, e.Error.Errors[0].Reason
 		}
 		f.failBeforeRun(w, r, q, insert, "_cloudburrow", status, rowError{Reason: reason, Message: flow.msg})
 		return

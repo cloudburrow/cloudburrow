@@ -127,9 +127,11 @@ func TestCreateSchemaMakesTheDataset(t *testing.T) {
 	// IF EXISTS of it first, which does nothing, is sent as a statement
 	// that does nothing.
 	for _, sql := range []string{
-		"CREATE SCHEMA fresh; CREATE TABLE fresh.t (a INT64); SELECT 1",
-		"DECLARE x INT64 DEFAULT 1; BEGIN CREATE SCHEMA fresh; END; CREATE TABLE fresh.t (a INT64)",
-		"DROP SCHEMA IF EXISTS fresh CASCADE; CREATE SCHEMA fresh; CREATE TABLE fresh.t (a INT64)",
+		// Each with a TEMP function, so sent whole (#1459: another is
+		// carried out a statement at a time).
+		"CREATE SCHEMA fresh; CREATE TABLE fresh.t (a INT64); CREATE TEMP FUNCTION tf() AS (1); SELECT 1",
+		"DECLARE x INT64 DEFAULT 1; CREATE TEMP FUNCTION tf() AS (1); BEGIN CREATE SCHEMA fresh; END; CREATE TABLE fresh.t (a INT64)",
+		"DROP SCHEMA IF EXISTS fresh CASCADE; CREATE SCHEMA fresh; CREATE TEMP FUNCTION tf() AS (1); CREATE TABLE fresh.t (a INT64)",
 	} {
 		emu := &datasetEmulator{datasets: map[string]string{}}
 		if code, got := do(t, Wrap(emu), "POST", base+"/queries", schemaQuery(sql)); code != 200 {
@@ -157,11 +159,13 @@ func TestCreateSchemaNotCarriedOut(t *testing.T) {
 		{"CREATE SCHEMA fresh OPTIONS(labels=[('k', 1)])", "labels"},
 		{"CREATE SCHEMA fresh OPTIONS(description=b'x')", "description"},
 		// A script whose earlier statement is a query is run statement by
-		// statement (#1249, earlierQuery), so these have DML first.
-		{"INSERT INTO fresh.t VALUES (1); CREATE SCHEMA fresh", "name it"},
-		{"INSERT INTO ds.t VALUES (1); RETURN; CREATE SCHEMA fresh", "RETURN"},
-		{"DROP SCHEMA taken CASCADE; CREATE SCHEMA taken", "DROP SCHEMA"},
-		{"CREATE SCHEMA fresh; DROP SCHEMA fresh; CREATE SCHEMA fresh", "DROP SCHEMA"},
+		// statement (#1249, earlierQuery), so these have DML first; and
+		// one with no TEMP table or function so too (#1459), so these
+		// have a TEMP function, which keeps the script whole.
+		{"CREATE TEMP FUNCTION tf() AS (1); INSERT INTO fresh.t VALUES (1); CREATE SCHEMA fresh", "name it"},
+		{"CREATE TEMP FUNCTION tf() AS (1); INSERT INTO ds.t VALUES (1); RETURN; CREATE SCHEMA fresh", "RETURN"},
+		{"CREATE TEMP FUNCTION tf() AS (1); DROP SCHEMA taken CASCADE; CREATE SCHEMA taken", "DROP SCHEMA"},
+		{"CREATE TEMP FUNCTION tf() AS (1); CREATE SCHEMA fresh; DROP SCHEMA fresh; CREATE SCHEMA fresh", "DROP SCHEMA"},
 	} {
 		emu := &datasetEmulator{datasets: map[string]string{"taken": "{}"}}
 		code, got := do(t, Wrap(emu), "POST", base+"/queries", schemaQuery(c.sql))
@@ -182,8 +186,8 @@ func TestCreateSchemaUndoneWhenTheQueryFails(t *testing.T) {
 		name, path, body, answer string
 		code                     int
 	}{
-		{"jobs.query", base + "/queries", schemaQuery("CREATE SCHEMA fresh; SELECT 1/0"), `{"error":{"code":400,"message":"division by zero"}}`, 400},
-		{"jobs.insert", base + "/jobs", `{"jobReference":{"projectId":"p","jobId":"j"},"configuration":{"query":{"query":"CREATE SCHEMA fresh; SELECT 1/0","useLegacySql":false}}}`,
+		{"jobs.query", base + "/queries", schemaQuery("CREATE SCHEMA fresh; CREATE TEMP FUNCTION tf() AS (1); SELECT 1/0"), `{"error":{"code":400,"message":"division by zero"}}`, 400},
+		{"jobs.insert", base + "/jobs", `{"jobReference":{"projectId":"p","jobId":"j"},"configuration":{"query":{"query":"CREATE SCHEMA fresh; CREATE TEMP FUNCTION tf() AS (1); SELECT 1/0","useLegacySql":false}}}`,
 			`{"jobReference":{"projectId":"p","jobId":"j"},"status":{"state":"DONE","errorResult":{"reason":"invalidQuery","message":"division by zero"}}}`, 0},
 	} {
 		emu := &datasetEmulator{datasets: map[string]string{}, code: c.code, answer: c.answer}

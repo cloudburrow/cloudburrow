@@ -83,8 +83,8 @@ func TestFunctionNamesInTheDefaultDataset(t *testing.T) {
 		{"SELECT fn(1)", "other", "SELECT fn(1)"},
 		{"SELECT upper('a'), ds.fn(1), a.fn(1), @fn, 'fn(1)' -- fn(1)\n", "ds", "SELECT upper('a'), ds.fn(1), a.fn(1), @fn, 'fn(1)' -- fn(1)\n"},
 		{"CREATE TEMP FUNCTION fn(x INT64) AS (x); SELECT fn(1)", "ds", "CREATE TEMP FUNCTION fn(x INT64) AS (x); SELECT fn(1)"},
-		{"CREATE FUNCTION ds.g(x INT64) AS (fn(x)); SELECT g(1), fn(2)", "ds",
-			"CREATE FUNCTION ds.g(x INT64) AS (fn(x)); SELECT `ds`.`g`(1), `ds`.`fn`(2)"},
+		// Carried out a statement at a time (#1459): the last is the SELECT.
+		{"CREATE FUNCTION ds.g(x INT64) AS (fn(x)); SELECT g(1), fn(2)", "ds", "SELECT `ds`.`g`(1), `ds`.`fn`(2)"},
 		{"SELECT nosuch(1)", "ds", "SELECT nosuch(1)"},
 	} {
 		if got := query(c.sql, c.dataset); got != c.want {

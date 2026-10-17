@@ -189,10 +189,17 @@ func TestCreateOrReplaceExistingTable(t *testing.T) {
 		t.Error("the table was deleted though its replacement failed")
 	}
 
+	// Inside a script it is carried out in its turn, as alone (#1459);
+	// in one with a TEMP function, sent whole, it is 501.
 	emu = &scriptEmulator{tables: map[string]string{tablesBase + "t": `{"type":"TABLE"}`}}
-	code, got = do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "DECLARE z INT64 DEFAULT 1; CREATE OR REPLACE TABLE ds.t (a INT64)"))
-	if code != 501 || errorReason(got) != "notImplemented" || len(emu.tables) != 1 {
+	code, got = do(t, Wrap(withExprs{emu}), "POST", base+"/queries", queryBody("/queries", "DECLARE z INT64 DEFAULT 1; CREATE OR REPLACE TABLE ds.t (a INT64)"))
+	if code != 200 || !strings.Contains(strings.Join(emu.log, "\n"), "QUERY CREATE OR REPLACE TABLE") {
 		t.Errorf("a replacement inside a script: %d %v", code, got)
+	}
+	emu = &scriptEmulator{tables: map[string]string{tablesBase + "t": `{"type":"TABLE"}`}}
+	code, got = do(t, Wrap(emu), "POST", base+"/queries", queryBody("/queries", "CREATE TEMP FUNCTION tf() AS (1); CREATE OR REPLACE TABLE ds.t (a INT64)"))
+	if code != 501 || errorReason(got) != "notImplemented" || len(emu.tables) != 1 {
+		t.Errorf("a replacement inside a script with a TEMP function: %d %v", code, got)
 	}
 
 	emu = &scriptEmulator{tables: map[string]string{tablesBase + "v": `{"type":"VIEW"}`}}
@@ -261,7 +268,9 @@ func (e *listingEmulator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // table that was there before is not checked; a TEMP table is checked
 // before the script (TestTempTableColumnsAreChecked).
 func TestCreateTableAsSelectCheckedAfterTheScript(t *testing.T) {
-	sql := "DECLARE x INT64 DEFAULT 1; CREATE TABLE ds.s AS SELECT x AS `a!`; SELECT 2"
+	// With a TEMP function, so sent whole (#1459: another is carried out a
+	// statement at a time, each CREATE TABLE checked as it is alone).
+	sql := "DECLARE x INT64 DEFAULT 1; CREATE TEMP FUNCTION tf() AS (1); CREATE TABLE ds.s AS SELECT x AS `a!`; SELECT 2"
 	for _, path := range []string{"/queries", "/jobs"} {
 		emu := &scriptEmulator{tables: map[string]string{}}
 		emu.run = func(q string) (int, string) {
