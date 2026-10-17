@@ -3,6 +3,7 @@ package bigqueryfront
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -65,8 +66,10 @@ import (
 //     invalid.
 //   - "Currently supported formats are: JSON, CSV, ORC, Avro and Parquet",
 //     and "Requesting hive partitioning on an unsupported format will lead
-//     to an error": another format is 400 invalid. CSV, Avro and Parquet
-//     are 501 here: the front adds the keys to JSON records only.
+//     to an error": another format is 400 invalid. CSV and Avro are 501
+//     here: the front adds the keys to JSON records, and to the rows of a
+//     Parquet load it carries out itself (hiveFiles, parquetload.go), one
+//     with no schema in the job (the keys are columns after the file's).
 //
 // UNVERIFIED: the keys are columns after the file's columns (the page does
 // not say where; HivePartitioningOptions.fields lists them "in the order
@@ -160,9 +163,14 @@ func (f front) loadVariant(w http.ResponseWriter, r *http.Request) (*http.Reques
 	if h := l.Hive; h != nil {
 		switch format {
 		case "NEWLINE_DELIMITED_JSON":
-		case "CSV", "AVRO", "PARQUET", "ORC":
+		case "PARQUET":
+			if l.Schema != nil && len(l.Schema.Fields) > 0 {
+				return fail(http.StatusNotImplemented, "a hive-partitioned PARQUET load with a schema: CloudBurrow reads "+
+					"a Parquet file by its own schema, with the keys after its columns.")
+			}
+		case "CSV", "AVRO", "ORC":
 			return fail(http.StatusNotImplemented, "a hive-partitioned "+format+" load: CloudBurrow adds the partition "+
-				"keys to NEWLINE_DELIMITED_JSON records only.")
+				"keys to NEWLINE_DELIMITED_JSON records and Parquet rows only.")
 		default:
 			return fail(http.StatusBadRequest, "Hive partitioning is not supported for sourceFormat "+l.SourceFormat+
 				": \"Currently supported formats are: JSON, CSV, ORC, Avro and Parquet.\"")
@@ -299,6 +307,16 @@ func (f front) loadVariant(w http.ResponseWriter, r *http.Request) (*http.Reques
 					"values must validly parse as the specified type.\"", k.name, s.loc, s.vals[i], k.typ))
 			}
 		}
+	}
+
+	if format == "PARQUET" {
+		// The Parquet load the front carries out adds the keys to each
+		// file's rows (parquet.go, parquetload.go).
+		h := &hiveFiles{keys: keys, vals: map[string][]string{}}
+		for _, s := range srcs {
+			h.vals[s.loc] = s.vals
+		}
+		return r.WithContext(context.WithValue(r.Context(), hiveFilesKey{}, h)), nil, nil, true
 	}
 
 	// The records, read now, so that a record BigQuery refuses fails the
@@ -739,4 +757,52 @@ func firstByte(b []byte) byte {
 		return 0
 	}
 	return b[0]
+}
+
+// hiveFiles are a hive-partitioned Parquet load's keys, and each file's
+// values of them by its gs:// URI, kept in its request's context.
+type hiveFiles struct {
+	keys []hiveKey
+	vals map[string][]string
+}
+
+type hiveFilesKey struct{}
+
+// hiveFilesOf is the hiveFiles of r's load, or nil.
+func hiveFilesOf(r *http.Request) *hiveFiles {
+	h, _ := r.Context().Value(hiveFilesKey{}).(*hiveFiles)
+	return h
+}
+
+// fields are the keys as NULLABLE columns.
+func (h *hiveFiles) fields() []field {
+	out := make([]field, len(h.keys))
+	for i, k := range h.keys {
+		out[i] = field{Name: k.name, Type: k.typ, Mode: "NULLABLE"}
+	}
+	return out
+}
+
+// literal is the SQL literal of key name's value in the file at uri, and
+// whether name is a key.
+func (h *hiveFiles) literal(uri, name string) (string, bool) {
+	for i, k := range h.keys {
+		if !strings.EqualFold(k.name, name) {
+			continue
+		}
+		v := h.vals[uri][i]
+		switch k.typ {
+		case "INTEGER":
+			return v, true
+		case "DATE":
+			return "DATE " + sqlString(v), true
+		case "TIMESTAMP":
+			b, _ := hiveValue(v, k.typ)
+			var ts string
+			_ = json.Unmarshal(b, &ts)
+			return "TIMESTAMP " + sqlString(ts), true
+		}
+		return sqlString(v), true
+	}
+	return "", false
 }

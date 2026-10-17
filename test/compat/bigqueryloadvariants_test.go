@@ -3,11 +3,14 @@
 package compat
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
 	bq "google.golang.org/api/bigquery/v2"
 	"google.golang.org/api/googleapi"
 )
@@ -19,7 +22,8 @@ import (
 // the prefix encodes them, into a given schema too); a key layout that is
 // not key=value, keys in another order, a value that is not CUSTOM's
 // type, a file column that is a key, requirePartitionFilter and a missing
-// prefix are 400; Parquet with hive partitioning is 501. jsonExtension
+// prefix are 400; CSV with hive partitioning is 501. A Parquet load adds
+// the keys after the file's columns. jsonExtension
 // GEOJSON loads Features, by autodetect and with a schema, from Cloud
 // Storage and as an upload; a Feature that is not one is 400, as is
 // GEOJSON with CSV. The generated client: the official one has no
@@ -45,6 +49,20 @@ func TestBigQueryHivePartitionedAndGeoJSONLoads(t *testing.T) {
 		"geo/bad.json": `{"type":"FeatureCollection","features":[]}` + "\n",
 	})
 	gs := "gs://" + bucket.BucketName() + "/"
+	pq := func(v int64) string {
+		return arrowParquet(t, arrow.NewSchema([]arrow.Field{{Name: "v", Type: arrow.PrimitiveTypes.Int64, Nullable: true}}, nil),
+			func(b *array.RecordBuilder) { b.Field(0).(*array.Int64Builder).Append(v) })
+	}
+	for name, data := range map[string]string{"pq/dt=2024-01-02/n=7/a.parquet": pq(1), "pq/dt=2024-01-03/n=8/b.parquet": pq(2)} {
+		w := bucket.Object(name).NewWriter(ctx)
+		if _, err := w.Write([]byte(data)); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = bucket.Object(name).Delete(context.Background()) })
+	}
 	svc := generatedBigQuery(t, h)
 	q := func(sql string) string {
 		return fmt.Sprint(rows(t, ctx, c, strings.ReplaceAll(sql, "DS.", ds.DatasetID+".")))
@@ -127,6 +145,15 @@ func TestBigQueryHivePartitionedAndGeoJSONLoads(t *testing.T) {
 	}
 	want("CUSTOM's columns", types("custom"), "v:STRING,dt:STRING,n:INTEGER")
 
+	// Parquet, AUTO: the keys after the file's columns.
+	if err := run("pqhive", &bq.JobConfigurationLoad{SourceFormat: "PARQUET",
+		SourceUris: []string{gs + "pq/*"}, HivePartitioningOptions: hive("AUTO", "pq")}, ""); err != nil {
+		t.Fatalf("Parquet AUTO: %v", err)
+	}
+	want("Parquet's columns", types("pqhive"), "v:INTEGER,dt:DATE,n:INTEGER")
+	want("Parquet's rows", q("SELECT v, CAST(dt AS STRING), n FROM DS.pqhive ORDER BY v"),
+		"[[1 2024-01-02 7] [2 2024-01-03 8]]")
+
 	// 400 and 501.
 	for _, tc := range []struct {
 		what string
@@ -140,7 +167,7 @@ func TestBigQueryHivePartitionedAndGeoJSONLoads(t *testing.T) {
 		{"requirePartitionFilter", 400, &bq.JobConfigurationLoad{SourceUris: []string{gs + "t/*"},
 			HivePartitioningOptions: &bq.HivePartitioningOptions{Mode: "AUTO", SourceUriPrefix: gs + "t", RequirePartitionFilter: true}}},
 		{"no prefix", 400, &bq.JobConfigurationLoad{SourceUris: []string{gs + "t/*"}, HivePartitioningOptions: &bq.HivePartitioningOptions{Mode: "AUTO"}}},
-		{"hive Parquet", 501, &bq.JobConfigurationLoad{SourceFormat: "PARQUET", SourceUris: []string{gs + "t/*"}, HivePartitioningOptions: hive("AUTO", "t")}},
+		{"hive CSV", 501, &bq.JobConfigurationLoad{SourceFormat: "CSV", SourceUris: []string{gs + "t/*"}, HivePartitioningOptions: hive("AUTO", "t")}},
 		{"GEOJSON with CSV", 400, &bq.JobConfigurationLoad{SourceFormat: "CSV", JsonExtension: "GEOJSON", SourceUris: []string{gs + "geo/f.json"}}},
 		{"a FeatureCollection", 400, &bq.JobConfigurationLoad{JsonExtension: "GEOJSON", Autodetect: true, SourceUris: []string{gs + "geo/bad.json"}}},
 	} {

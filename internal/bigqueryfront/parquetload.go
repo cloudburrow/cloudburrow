@@ -167,9 +167,16 @@ func (f front) parquetOwnLoad(w http.ResponseWriter, r *http.Request, plan *pqPl
 		for i, c := range pf.cols {
 			index[strings.ToLower(c.Name)] = i
 		}
+		hive := hiveFilesOf(r) // #1547, loadvariants.go
 		got, err := readParquetRows(data, pf.elems, pf.cols, func(vals []any) error {
 			parts := make([]string, len(plan.target))
 			for i, t := range plan.target {
+				if hive != nil {
+					if lit, ok := hive.literal(pf.uri, t.Name); ok {
+						parts[i] = lit
+						continue
+					}
+				}
 				var v any
 				if k, ok := index[strings.ToLower(t.Name)]; ok {
 					v = vals[k]

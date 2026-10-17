@@ -22,7 +22,8 @@ package main
 //     and, for a table the load makes, time partitioning by a column or
 //     by ingestion time, and clustering columns (#1457); jsonExtension
 //     GEOJSON and hivePartitioningOptions (mode and sourceUriPrefix), for
-//     newline-delimited JSON (#1547, consolebigqueryloadextras.go).
+//     newline-delimited JSON (and hive partitioning for Parquet) (#1547,
+//     consolebigqueryloadextras.go).
 //     WRITE_EMPTY and ORC are not offered (the front refuses ORC, 501).
 //   - an export: a URI and More URIs (the front shares the rows out
 //     between them), CSV, NEWLINE_DELIMITED_JSON, AVRO or PARQUET (the front
