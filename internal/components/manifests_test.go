@@ -420,3 +420,20 @@ func TestStorageServerReachesResourceManager(t *testing.T) {
 	}
 	t.Fatal("no storage backend")
 }
+
+// TestMemorystoreNodeDir (#1557): a Redis Cluster or Valkey node keeps its
+// files in its formation's directory on its volume, made before the server
+// starts, with the node's own persistence; ephemeral mode has none.
+func TestMemorystoreNodeDir(t *testing.T) {
+	b := MemorystoreServerOf(MemorystoreSettings{Name: "n", Persistent: true, MaxMemory: 1 << 30, Dir: "/data/g3",
+		Settings: map[string]string{"appendonly": "no", "save": "3600 1"}})
+	args := strings.Join(b.Args, " ")
+	if b.Args[0] != "sh" || !strings.Contains(args, `mkdir -p "$0"`) || !strings.Contains(args, "/data/g3 valkey-server") ||
+		!strings.Contains(args, "--dir /data/g3") || strings.Contains(args, "--appendonly yes") {
+		t.Errorf("persistent node args = %q", b.Args)
+	}
+	e := MemorystoreServerOf(MemorystoreSettings{Name: "n", MaxMemory: 1 << 30, Dir: "/data/g3"})
+	if strings.Contains(strings.Join(e.Args, " "), "/data/g3") || e.Args[0] == "sh" {
+		t.Errorf("ephemeral node args = %q", e.Args)
+	}
+}

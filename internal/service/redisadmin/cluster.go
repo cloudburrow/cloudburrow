@@ -169,6 +169,10 @@ type clusterRecord struct {
 	// KeyChecked when it was last checked.
 	KeyState   string    `json:"-"`
 	KeyChecked time.Time `json:"-"`
+	// DataGen is the formation the nodes' data directories are of
+	// (restart.go): 1 at create, one more each time CloudBurrow forms the
+	// nodes again after a restart; 0 for a record kept before formations.
+	DataGen int `json:"dataGen,omitempty"`
 	// restore is the RDB files a create loads once the nodes serve.
 	restore         [][]byte
 	state           clusterpb.Cluster_State
@@ -630,8 +634,13 @@ func (r *clusterRecord) spec(server string) Spec {
 		}
 		return s
 	}
+	// The persistence_config's settings, on the formation's directory
+	// (restart.go).
+	for _, kv := range r.persistenceSettings() {
+		cfg[kv[0]] = kv[1]
+	}
 	if r.standalone() {
-		return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg, Version: r.engineVersion()})
+		return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg, Version: r.engineVersion(), Dir: dataDir(r.DataGen)})
 	}
 	if r.TransitCA != "" {
 		// The cluster bus, and MIGRATE between nodes, over TLS too.
@@ -642,7 +651,7 @@ func (r *clusterRecord) spec(server string) Spec {
 	cfg["cluster-config-file"] = "/tmp/nodes.conf"
 	cfg["cluster-node-timeout"] = "5000"
 	cfg["cluster-require-full-coverage"] = "yes"
-	return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg, Version: r.engineVersion()})
+	return tls(Spec{Server: server, MaxMemory: r.maxMemory(), Configs: cfg, Version: r.engineVersion(), Dir: dataDir(r.DataGen)})
 }
 
 // engineVersion is the Valkey version r's nodes run (#1557): a Valkey
@@ -849,12 +858,31 @@ func (c *clusters) create(name, op string) {
 		c.mu.Unlock()
 	}
 	c.mu.Lock()
+	// Formed again after a restart: the nodes start empty in the next
+	// formation's directory, and with persistence the previous one's
+	// data is loaded into them (restart.go).
+	prev, mode := "", ""
+	if op == "" {
+		prev, mode = dataDir(r.DataGen), r.persistenceMode()
+		r.DataGen++
+	} else if r.DataGen == 0 {
+		r.DataGen = 1
+	}
+	_ = c.save(r)
 	nodes := append([]*clusterNode(nil), r.Nodes...)
 	snap := *r
 	c.mu.Unlock()
 	err := c.startNodes(ctx, &snap, nodes)
 	if err == nil {
 		err = c.form(ctx, &snap, nodes)
+	}
+	if err == nil && prev != "" && mode != "" {
+		if err = c.reloadData(ctx, &snap, prev, mode); err != nil {
+			err = fmt.Errorf("load the data kept before the restart: %w", err)
+		}
+	}
+	if err == nil && prev != "" {
+		c.dropDir(ctx, nodes, prev)
 	}
 	if err == nil && op != "" && len(snap.restore) > 0 {
 		// Created from a backup or gs:// RDB files (backups.go).
@@ -922,11 +950,11 @@ func (c *clusters) startNodes(ctx context.Context, r *clusterRecord, nodes []*cl
 			return err
 		}
 	}
-	if r.Valkey != nil {
-		// Persistence (memorystore.go) is set on the running server, as an
-		// update sets it, after the arguments of CloudBurrow's own mode.
+	{
+		// Persistence (restart.go) is set on the running server too, as an
+		// update sets it.
 		for _, n := range nodes {
-			for _, kv := range r.Valkey.persistenceSettings() {
+			for _, kv := range r.persistenceSettings() {
 				if err := c.do(ctx, r, n, "CONFIG", "SET", kv[0], kv[1]); err != nil {
 					return err
 				}
@@ -1376,7 +1404,7 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 		}
 		syncACL = true
 	}
-	if set["node_type"] || set["redis_configs"] {
+	if set["node_type"] || set["redis_configs"] || set["persistence_config"] {
 		settings := serverConfigs(next.RedisConfigs)
 		for k := range serverConfigs(r.RedisConfigs) {
 			if _, kept := settings[k]; !kept {
@@ -1384,6 +1412,10 @@ func (s *ClusterServer) UpdateCluster(ctx context.Context, req *clusterpb.Update
 			}
 		}
 		settings["maxmemory"] = strconv.FormatInt(next.maxMemory(), 10)
+		// persistence_config's settings (restart.go).
+		for _, kv := range next.persistenceSettings() {
+			settings[kv[0]] = kv[1]
+		}
 		for _, n := range r.Nodes {
 			for k, v := range settings {
 				if err := c.do(ctx, r, n, "CONFIG", "SET", k, v); err != nil {

@@ -531,6 +531,13 @@ type MemorystoreSettings struct {
 	// TLSPort is the port the server serves TLS on: 0 is
 	// MemorystoreTLSPort. A Redis Cluster node serves its own (#1549).
 	TLSPort int
+	// Dir, in persistent mode, is the server's data directory on its
+	// volume in place of /data itself, made before the server starts: a
+	// Redis Cluster or Valkey node's, one per formation (#1557), so a node
+	// never loads files a previous formation left. When Settings has
+	// appendonly, it is the node's persistence and the mode's own
+	// append-only file is not added.
+	Dir string
 }
 
 // MemorystoreTLSPort is the port a Memorystore server with in-transit
@@ -602,7 +609,16 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 	if h, p, err := net.SplitHostPort(o.ReplicaOf); err == nil {
 		args = append(args, "--replicaof", h, p)
 	}
+	dir := ""
+	if persistent && o.Dir != "" && strings.HasPrefix(o.Dir, "/data/") {
+		dir = o.Dir
+	}
+	_, ownPersistence := settings["appendonly"]
 	switch {
+	case dir != "" && ownPersistence:
+		args = append(args, "--dir", dir)
+	case dir != "":
+		args = append(args, "--dir", dir, "--appendonly", "yes", "--appendfsync", "everysec")
 	case o.RDBSeconds > 0 && persistent:
 		args = append(args, "--dir", "/data", "--appendonly", "no", "--save", fmt.Sprintf("%d 1", o.RDBSeconds))
 	case o.RDBSeconds > 0:
@@ -621,6 +637,11 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		MountPath:  "/data",
 		OwnsClaim:  persistent,
 	}
+	if dir != "" && o.TLSCert == "" {
+		// The directory is made, then the image's own entrypoint starts
+		// the server as it always does, owning it.
+		b.Args = append([]string{"sh", "-c", `set -e; mkdir -p "$0"; exec docker-entrypoint.sh "$@"`, dir}, args...)
+	}
 	if o.TLSCert != "" {
 		// TLS only (--port 0), clients not asked for a certificate
 		// (SERVER_AUTHENTICATION), replication over TLS. The files are
@@ -634,7 +655,11 @@ func MemorystoreServerOf(o MemorystoreSettings) Backend {
 		args = append(args, "--port", "0", "--tls-port", fmt.Sprint(tlsPort),
 			"--tls-cert-file", d+"/server.crt", "--tls-key-file", d+"/server.key", "--tls-ca-cert-file", d+"/ca.crt",
 			"--tls-auth-clients", "no", "--tls-replication", "yes")
-		script := `set -e; mkdir -p ` + d + `; printf '%s' "$MEMORYSTORE_TLS_CERT" > ` + d + `/server.crt; ` +
+		mk := ""
+		if dir != "" {
+			mk = `mkdir -p ` + dir + `; `
+		}
+		script := `set -e; ` + mk + `mkdir -p ` + d + `; printf '%s' "$MEMORYSTORE_TLS_CERT" > ` + d + `/server.crt; ` +
 			`printf '%s' "$MEMORYSTORE_TLS_KEY" > ` + d + `/server.key; printf '%s' "$MEMORYSTORE_TLS_CA" > ` + d + `/ca.crt; ` +
 			`chmod 0755 ` + d + `; chmod 0644 ` + d + `/*; exec docker-entrypoint.sh "$@"`
 		b.Args = append([]string{"sh", "-c", script, "sh"}, args...)

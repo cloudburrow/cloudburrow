@@ -326,7 +326,7 @@ func (p *memorystoreProvisioner) StartClusterNode(ctx context.Context, spec redi
 		cfg[k] = v
 	}
 	settings := components.MemorystoreSettings{Name: spec.Server, Persistent: p.cfg.Mode == config.ModePersistent,
-		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg, Image: memorystoreImages[spec.Version]}
+		MaxMemory: spec.MaxMemory, Password: spec.Password, Settings: cfg, Image: memorystoreImages[spec.Version], Dir: spec.Dir}
 	if spec.TransitCA != "" {
 		// In-transit encryption (#1549): TLS only, on the node's one port,
 		// with a certificate of the cluster's CA for the host's address,
