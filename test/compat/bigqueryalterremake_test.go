@@ -128,15 +128,12 @@ func TestBigQueryAlterTableRenameAndDropColumn(t *testing.T) {
 			t.Fatal(err)
 		}
 		err = bqRun(ctx, c, "ALTER TABLE "+ref+" RENAME TO taken_"+name, insert)
+		// A failed query job's error is read through getQueryResults, with
+		// the code its reason documents, as jobs.query's (#1581): 409
+		// duplicate.
 		var e *googleapi.Error
-		if insert {
-			// A failed query job's error is read through getQueryResults,
-			// 400 with the job's message.
-			if !errors.As(err, &e) || e.Code != http.StatusBadRequest || !strings.Contains(e.Message, "Already Exists") {
-				t.Errorf("RENAME TO a taken name (job): %v, want 400 Already Exists", err)
-			}
-		} else {
-			wantHTTPStatus(t, "RENAME TO a taken name", err, http.StatusConflict)
+		if !errors.As(err, &e) || e.Code != http.StatusConflict || !strings.Contains(e.Message, "Already Exists") {
+			t.Errorf("RENAME TO a taken name (insert %v): %v, want 409 Already Exists", insert, err)
 		}
 
 		run("ALTER TABLE " + ref + " RENAME TO " + renamed)
