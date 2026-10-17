@@ -204,6 +204,8 @@ type BuildsServer struct {
 	// and secrets (#1407); nil refuses a build that names one.
 	secretManager SecretAccessor
 	kms           KMSDecrypter
+	// events subscribes Pub/Sub triggers (#1506); nil refuses one.
+	events *triggerEvents
 }
 
 // Builds returns the Builds service. fetch or builder nil leaves SubmitBuild

@@ -42,6 +42,10 @@ type Dispatcher struct {
 	// logs writes the attempts a queue's stackdriver_logging_config samples
 	// to Cloud Logging (#1256); nil when logging is not served.
 	logs LogWriter
+	// appEngine is the base URL of the local server standing in for the
+	// App Engine app (--appengine-url, #1506); "" fails App Engine
+	// attempts 404.
+	appEngine string
 }
 
 // WithTokens mints the tokens of tasks with oidcToken or oauthToken with m
@@ -146,7 +150,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 			sent.HTTPRequest = &hr
 		}
 	}
-	if task.AppEngineHTTPRequest != nil {
+	if task.AppEngineHTTPRequest != nil && d.appEngine == "" {
 		// No App Engine here: the attempt fails (#1447).
 		if task.FirstAttempt.IsZero() {
 			task.FirstAttempt = d.clock.Now()
@@ -217,6 +221,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, task Task) error {
 }
 
 func (d *Dispatcher) buildRequest(ctx context.Context, task Task) (*http.Request, error) {
+	if task.AppEngineHTTPRequest != nil {
+		return d.appEngineRequest(ctx, task)
+	}
 	if task.HTTPRequest == nil {
 		return nil, fmt.Errorf("task %s has no httpRequest", task.Name)
 	}

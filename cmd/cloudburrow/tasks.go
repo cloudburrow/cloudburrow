@@ -186,6 +186,10 @@ func (t *tasksService) Start(ctx context.Context) error {
 	if t.logs != nil {
 		dispatcher = dispatcher.WithLogging(t.logs)
 	}
+	// App Engine targets go to the server standing in for the app (#1506).
+	if t.cfg.AppEngineURL != "" {
+		dispatcher = dispatcher.WithAppEngine(t.cfg.AppEngineURL)
+	}
 	t.worker = tasks.NewWorker(st, dispatcher, clock, 200*time.Millisecond)
 	return nil
 }

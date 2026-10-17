@@ -84,7 +84,7 @@ type cryptoKey struct {
 	// (#1452); new versions get it.
 	ProtectionLevel string `json:"protectionLevel,omitempty"`
 	// KAJPolicy is key_access_justifications_policy, stored and returned,
-	// never enforced (protection.go).
+	// enforced on encrypt, decrypt and sign (protection.go, #1506).
 	KAJPolicy *kajPolicy `json:"keyAccessJustificationsPolicy,omitempty"`
 	// Backend is crypto_key_backend, the EkmConnection of an EXTERNAL_VPC
 	// key, and Coordinated whether that connection was CLOUD_KMS-mode when

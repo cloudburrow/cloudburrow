@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
@@ -41,8 +42,11 @@ func kmsOptions(h *Harness, variant string) []option.ClientOption {
 // used and listed as a SOFTWARE one is, over gRPC and REST, reporting HSM
 // on the key, its versions and every crypto response; the FULL view has no
 // attestation, since no HSM made one. key_access_justifications_policy is
-// stored at create, changed and cleared by UpdateCryptoKey, and not
-// enforced: Encrypt and Decrypt carry no justification and succeed.
+// stored at create, changed and cleared by UpdateCryptoKey, and enforced
+// (#1506): a call is the customer's own, CUSTOMER_INITIATED_ACCESS, so
+// Encrypt and Decrypt succeed while the policy allows that reason, are
+// FAILED_PRECONDITION when it does not or allows none, and succeed again
+// once it is cleared.
 // EXTERNAL and EXTERNAL_VPC keys are TestKMSExternalKeys' (#1469).
 //
 // covers: google.cloud.kms.v1.KeyManagementService/CreateCryptoKey, google.cloud.kms.v1.KeyManagementService/UpdateCryptoKey, google.cloud.kms.v1.KeyManagementService/Encrypt, google.cloud.kms.v1.KeyManagementService/Decrypt, google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions, google.cloud.kms.v1.KeyManagementService/CreateCryptoKeyVersion
@@ -103,15 +107,27 @@ func TestKMSHSMKeysAndKeyAccessJustifications(t *testing.T) {
 			if err != nil || len(upd.GetKeyAccessJustificationsPolicy().GetAllowedAccessReasons()) != 2 {
 				t.Fatalf("UpdateCryptoKey(policy) = %v, %v", upd, err)
 			}
-			// Not enforced: CUSTOMER_INITIATED_ACCESS is no longer allowed,
-			// and a decrypt still succeeds.
-			if _, err := c.Decrypt(ctx, &kmspb.DecryptRequest{Name: key.GetName(), Ciphertext: enc.GetCiphertext()}); err != nil {
-				t.Errorf("Decrypt under a narrower policy = %v; the policy is not enforced", err)
+			// CUSTOMER_INITIATED_ACCESS is no longer allowed: refused.
+			if _, err := c.Decrypt(ctx, &kmspb.DecryptRequest{Name: key.GetName(), Ciphertext: enc.GetCiphertext()}); status.Code(err) != codes.FailedPrecondition ||
+				!strings.Contains(err.Error(), "CUSTOMER_INITIATED_ACCESS") {
+				t.Errorf("Decrypt under a policy without CUSTOMER_INITIATED_ACCESS = %v; want FailedPrecondition", err)
+			}
+			// No reasons: every encrypt, decrypt and sign operation fails.
+			if _, err := c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{CryptoKey: &kmspb.CryptoKey{Name: key.GetName(),
+				KeyAccessJustificationsPolicy: &kmspb.KeyAccessJustificationsPolicy{}},
+				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"key_access_justifications_policy"}}}); err != nil {
+				t.Fatalf("UpdateCryptoKey(empty policy): %v", err)
+			}
+			if _, err := c.Encrypt(ctx, &kmspb.EncryptRequest{Name: key.GetName(), Plaintext: []byte("x")}); status.Code(err) != codes.FailedPrecondition {
+				t.Errorf("Encrypt under a policy allowing no reasons = %v; want FailedPrecondition", err)
 			}
 			upd, err = c.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{CryptoKey: &kmspb.CryptoKey{Name: key.GetName()},
 				UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"key_access_justifications_policy"}}})
 			if err != nil || upd.GetKeyAccessJustificationsPolicy() != nil {
 				t.Errorf("clearing the policy = %v, %v", upd, err)
+			}
+			if _, err := c.Decrypt(ctx, &kmspb.DecryptRequest{Name: key.GetName(), Ciphertext: enc.GetCiphertext()}); err != nil {
+				t.Errorf("Decrypt with the policy cleared = %v", err)
 			}
 		})
 	}

@@ -67,8 +67,9 @@ func triggeredBuild(ctx context.Context, t *testing.T, cb *cloudbuild.Client, pa
 //     secret is 403 over HTTP, the right one runs a build whose
 //     $(body.message) binding is the payload's; ReceiveTriggerWebhook over
 //     gRPC runs one too;
-//   - GitHub, filename and Pub/Sub triggers are UNIMPLEMENTED with the
-//     reason; a build on a missing pool is NOT_FOUND.
+//   - GitHub, filename and repository triggers are UNIMPLEMENTED with the
+//     reason (Pub/Sub triggers: TestCloudBuildPubsubTrigger); a build on a
+//     missing pool is NOT_FOUND.
 func TestCloudBuildTriggersAndWorkerPools(t *testing.T) {
 	h := New(t)
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -249,7 +250,6 @@ func TestCloudBuildTriggersAndWorkerPools(t *testing.T) {
 	for name, tr := range map[string]*cbpb.BuildTrigger{
 		"github":   {Name: "gh-" + suffix, Github: &cbpb.GitHubEventsConfig{Owner: "o", Name: "r"}, BuildTemplate: build},
 		"filename": {Name: "fn-" + suffix, BuildTemplate: &cbpb.BuildTrigger_Filename{Filename: "cloudbuild.yaml"}},
-		"pubsub":   {Name: "ps-" + suffix, PubsubConfig: &cbpb.PubsubConfig{Topic: "projects/" + h.Project() + "/topics/x"}, BuildTemplate: build},
 		"repo":     {Name: "rp-" + suffix, SourceToBuild: &cbpb.GitRepoSource{Uri: "file:///tmp/repo", Ref: "refs/heads/main", RepoType: cbpb.GitFileSource_UNKNOWN}, BuildTemplate: build},
 	} {
 		_, err := cb.CreateBuildTrigger(ctx, &cbpb.CreateBuildTriggerRequest{Parent: parent, ProjectId: h.Project(), Trigger: tr})

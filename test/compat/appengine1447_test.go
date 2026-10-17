@@ -34,6 +34,7 @@ import (
 // spent the task is gone, as on Google.
 func TestTasksAppEngineTargets(t *testing.T) {
 	h := New(t)
+	skipWithAppEngine(t)
 	c := tasksClient(t, h)
 	ctx := h.Context()
 	q := queue(t, h, c, fmt.Sprintf("ae-%d", time.Now().UnixNano()))
@@ -113,6 +114,7 @@ func TestTasksAppEngineTargets(t *testing.T) {
 // RunJob's attempt sets Job.status to NOT_FOUND naming it.
 func TestSchedulerAppEngineTarget(t *testing.T) {
 	h := New(t)
+	skipWithAppEngine(t)
 	c := schedulerClient(t, h)
 	ctx := h.Context()
 	parent := "projects/" + h.Project() + "/locations/us-central1"

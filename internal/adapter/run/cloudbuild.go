@@ -259,6 +259,9 @@ func SourceDeployHandler(register func(grpc.ServiceRegistrar), next http.Handler
 	reg := &captureCloudBuild{ServiceRegistrar: t}
 	register(reg)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if servePush(reg.c, w, r) {
+			return // a Pub/Sub trigger's subscription (#1506)
+		}
 		if isSourceDeployPath(r.URL.Path) && serveWebhook(reg.c, w, r) {
 			return // ReceiveTriggerWebhook's raw body (#1422)
 		}

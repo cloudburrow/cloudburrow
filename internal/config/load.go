@@ -182,6 +182,7 @@ type rawFlags struct {
 	cloudsqlConn     string
 	allowRemote      bool
 	cbHostSteps      bool
+	appEngineURL     string
 	portBase         int
 	control          int
 	storage          int
@@ -307,6 +308,7 @@ func newFlagSet(out io.Writer) (*flag.FlagSet, *rawFlags) {
 	fs.DurationVar(&r.readyTimeout, "ready-timeout", 0, "bounded time to wait for cluster components to become ready")
 	fs.StringVar(&r.logLevel, "log-level", "", "log level: trace, debug, info, warn, error")
 	fs.BoolVar(&r.cbHostSteps, "cloudbuild-host-steps", false, "let Cloud Build run steps other than docker build, docker push and pack, for builds submitted from this machine's loopback only; each runs as a container with the host's Docker socket, which gives it control of the host (unsafe)")
+	fs.StringVar(&r.appEngineURL, "appengine-url", "", "base URL of a local HTTP server standing in for the App Engine app, such as http://localhost:8080: Cloud Tasks and Cloud Scheduler deliver App Engine targets there (default: none, and every App Engine attempt fails 404)")
 	fs.Var(&r.corsOrigins, "cors-allow-origin", "web origin (scheme://host[:port]) whose browser requests Cloud Storage answers, beyond loopback ones; repeatable or comma-separated (default: loopback origins only)")
 
 	return fs, r
@@ -534,6 +536,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	}
 
 	str("LOG_LEVEL", &cfg.LogLevel)
+	str("APPENGINE_URL", &cfg.AppEngineURL)
 	if v := getenv(EnvPrefix + "CLOUDBUILD_HOST_STEPS"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -660,6 +663,9 @@ func applyFlags(cfg *Config, raw *rawFlags, set map[string]bool) {
 	}
 	if set["cloudbuild-host-steps"] {
 		cfg.CloudBuildHostSteps = raw.cbHostSteps
+	}
+	if set["appengine-url"] {
+		cfg.AppEngineURL = raw.appEngineURL
 	}
 	if set["cors-allow-origin"] {
 		cfg.Storage.CORSAllowOrigins = append([]string(nil), raw.corsOrigins...)
