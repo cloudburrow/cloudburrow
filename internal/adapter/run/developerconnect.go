@@ -136,7 +136,13 @@ func parseLinkName(name string) (parent string, err error) {
 	return parent, nil
 }
 
-func dcEtag(t *timestamppb.Timestamp) string { return fmt.Sprintf("%x", t.AsTime().UnixNano()) }
+// A connection and a link carry no etag (#1304): Terraform's
+// google_developer_connect_connection and _git_repository_link declare etag
+// an optional argument that is not computed, the link's forcing
+// replacement, so an etag in a read is a diff on every plan; the provider's
+// acceptance tests plan clean against Google, which therefore answers none
+// (UNVERIFIED beyond that). An etag a caller sends is accepted and not
+// compared, as there is none to compare it with.
 
 func (d *DeveloperConnectServer) done(parent, target, verb string, resp proto.Message) (*longrunningpb.Operation, error) {
 	// Operations are a location's, a link's too.
@@ -209,7 +215,7 @@ func (d *DeveloperConnectServer) CreateConnection(_ context.Context, req *dcpb.C
 	name := req.GetParent() + "/connections/" + req.GetConnectionId()
 	now := timestamppb.New(time.Now())
 	c.Name, c.CreateTime, c.UpdateTime, c.Uid = name, now, now, uuid.NewString()
-	c.Etag, c.Reconciling = dcEtag(now), false
+	c.Etag, c.Reconciling = "", false
 	c.InstallationState = &dcpb.InstallationState{Stage: dcpb.InstallationState_COMPLETE}
 	ssmState.mu.Lock()
 	defer ssmState.mu.Unlock()
@@ -279,9 +285,12 @@ func (d *DeveloperConnectServer) UpdateConnection(_ context.Context, req *dcpb.U
 	if len(paths) == 0 {
 		paths = []string{"labels", "annotations", "disabled"}
 	}
+	// etag is not a field that changes: Terraform's
+	// google_developer_connect_connection names it in every update's mask
+	// (#1304).
 	for _, p := range paths {
 		switch p {
-		case "labels", "annotations", "disabled":
+		case "labels", "annotations", "disabled", "etag":
 		default:
 			return nil, apierror.Unimplemented("update_mask path %q is not supported: only labels, annotations and disabled can change", p)
 		}
@@ -295,9 +304,6 @@ func (d *DeveloperConnectServer) UpdateConnection(_ context.Context, req *dcpb.U
 			return nil, apierror.Unimplemented("UpdateConnection allow_missing is not supported: create the connection")
 		}
 		return nil, apierror.NotFound("connection %q not found", in.GetName())
-	}
-	if in.GetEtag() != "" && in.GetEtag() != c.GetEtag() {
-		return nil, apierror.Aborted("connection %q etag %q does not match %q", in.GetName(), in.GetEtag(), c.GetEtag())
 	}
 	next := proto.Clone(c).(*dcpb.Connection)
 	for _, p := range paths {
@@ -314,7 +320,6 @@ func (d *DeveloperConnectServer) UpdateConnection(_ context.Context, req *dcpb.U
 		return d.done(parent, in.GetName(), "update", next)
 	}
 	next.UpdateTime = timestamppb.Now()
-	next.Etag = dcEtag(next.UpdateTime)
 	dcState.connections[in.GetName()] = next
 	saveDCLocked()
 	return d.done(parent, in.GetName(), "update", proto.Clone(next))
@@ -330,12 +335,9 @@ func (d *DeveloperConnectServer) DeleteConnection(_ context.Context, req *dcpb.D
 	ssmState.mu.Lock()
 	defer ssmState.mu.Unlock()
 	loadDCLocked()
-	c, ok := dcState.connections[req.GetName()]
+	_, ok := dcState.connections[req.GetName()]
 	if !ok {
 		return nil, apierror.NotFound("connection %q not found", req.GetName())
-	}
-	if req.GetEtag() != "" && req.GetEtag() != c.GetEtag() {
-		return nil, apierror.Aborted("connection %q etag %q does not match %q", req.GetName(), req.GetEtag(), c.GetEtag())
 	}
 	for name := range dcState.links {
 		if strings.HasPrefix(name, req.GetName()+"/gitRepositoryLinks/") {
@@ -410,7 +412,7 @@ func (d *DeveloperConnectServer) CreateGitRepositoryLink(_ context.Context, req 
 		return nil, apierror.AlreadyExists("git repository link %q already exists", name)
 	}
 	now := timestamppb.New(time.Now())
-	l.Name, l.CreateTime, l.UpdateTime, l.Uid, l.Etag = name, now, now, uuid.NewString(), dcEtag(now)
+	l.Name, l.CreateTime, l.UpdateTime, l.Uid, l.Etag = name, now, now, uuid.NewString(), ""
 	l.CloneUri, l.GitProxyUri, l.Reconciling, l.WebhookId = r.GetUris().GetGitHttps(), r.GetUris().GetGitHttps(), false, ""
 	if req.GetValidateOnly() {
 		return d.done(req.GetParent(), name, "create", proto.Clone(l))
@@ -469,12 +471,9 @@ func (d *DeveloperConnectServer) DeleteGitRepositoryLink(_ context.Context, req 
 	ssmState.mu.Lock()
 	defer ssmState.mu.Unlock()
 	loadDCLocked()
-	l, ok := dcState.links[req.GetName()]
+	_, ok := dcState.links[req.GetName()]
 	if !ok {
 		return nil, apierror.NotFound("git repository link %q not found", req.GetName())
-	}
-	if req.GetEtag() != "" && req.GetEtag() != l.GetEtag() {
-		return nil, apierror.Aborted("git repository link %q etag %q does not match %q", req.GetName(), req.GetEtag(), l.GetEtag())
 	}
 	if !req.GetValidateOnly() {
 		delete(dcState.links, req.GetName())
