@@ -121,7 +121,9 @@ func componentsOf(s config.Service) []string {
 	case config.ServiceTasks, config.ServiceSecrets:
 		return []string{string(s)}
 	case config.ServiceRun:
-		return []string{"components", "run"}
+		// Knative installs in the background beside the backends, and the
+		// knative component is when it is ready (#1588).
+		return []string{"components", "knative", "run"}
 	case config.ServiceBigQuery:
 		return []string{"components", "forward:bigquery", "forward:bigquery-storage"}
 	case config.ServiceSpanner:

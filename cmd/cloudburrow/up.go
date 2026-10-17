@@ -400,25 +400,41 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// Docker before kind creates the node, and the backend and Knative
 	// images in the node before anything runs them.
 	coord.Register(control, runtime, metaSrv, offlineHostComponent{cached}, clusterComp, offlineNodesComponent{cached})
+	// Knative's install, the longest step of a cold start, begins as soon
+	// as the cluster (and, offline, its images) is there, and runs while
+	// the images load, the backends roll out and their tunnels bind; the
+	// knative component below waits for it (#1588). Nothing without Cloud
+	// Run.
+	coord.Register(comps.KnativeStart())
+	// The images are built and loaded at the same time (#1588): neither
+	// needs the other, only the components after them need both.
+	var imageComps []lifecycle.Component
 	if needsStorageImage(cfg) {
 		// Between the cluster and the components: the image must be in the
 		// cluster before its Deployment is (#514). BigQuery's front (#902)
 		// and Pub/Sub's front (#873) run from it too.
-		coord.Register(newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
+		imageComps = append(imageComps, newStorageImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
 	}
 	if serviceEnabled(cfg, config.ServiceBigQuery) {
 		// The emulator's image, built from the patched build this CLI
 		// embeds (#1061), in the cluster before its Deployment.
-		coord.Register(newBigQueryImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
+		imageComps = append(imageComps, newBigQueryImageComponent(cfg.KubeconfigPath(), cfg.ClusterName(), comps, stdout))
 	}
+	coord.RegisterConcurrent(imageComps...)
 	coord.Register(comps)
 	// Once the cluster answers: Cloud KMS and Secret Manager drop what --mode
 	// says must not survive (#481, #483).
 	kmsSvc.registerForget(coord)
 	secretsSvc.registerForget(coord)
+	// Every tunnel at once (#1588): each binds its own pod and proves it
+	// carries a connection, which no other tunnel needs.
+	tunnels := make([]lifecycle.Component, 0, len(forwarders))
 	for _, f := range forwarders {
-		coord.Register(f)
+		tunnels = append(tunnels, f)
 	}
+	coord.RegisterConcurrent(tunnels...)
+	// Ready only once Knative is, before anything that could deploy to it.
+	coord.Register(comps.KnativeReady())
 	if f := forwarderFor(forwarders, "storage"); f != nil {
 		coord.Register(newStorageEventScraper(f, recorder, requestMetrics))
 		coord.Register(newStorageChannelRelay(f, stdout))

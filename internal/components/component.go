@@ -45,6 +45,11 @@ type LifecycleComponent struct {
 	// from (#1392), and the storage server a project's and a folder's
 	// parents (#1532), or "".
 	resourceManager string
+	// knative is the Knative install running in the background, nil
+	// before it starts; knativeJoined says KnativeReady waits for it
+	// rather than Start (#1588).
+	knative       *knativeRun
+	knativeJoined bool
 }
 
 // SetResourceManager records Resource Manager's in-cluster address, for
@@ -200,13 +205,111 @@ func (c *LifecycleComponent) Start(ctx context.Context) error {
 	if _, err := c.installer.RemoveRetired(ctx, c.timeout); err != nil {
 		return err
 	}
+	// The backends and Knative share nothing but the node, so they are
+	// installed at the same time (#1588). With KnativeStart registered,
+	// Knative began right after the cluster and KnativeReady joins it;
+	// otherwise it runs beside the backends here. Either way `up` is ready
+	// only once both are, and the first failure is the one reported.
+	if c.NeedsKnative() && c.knative == nil {
+		c.startKnative(ctx)
+		defer c.stopKnative()
+	}
+	var err error
 	if backends := c.Backends(); len(backends) > 0 {
-		if err := c.installer.InstallBackends(ctx, backends, c.timeout); err != nil {
+		err = c.installer.InstallBackends(ctx, backends, c.timeout)
+	}
+	if c.NeedsKnative() && !c.knativeJoined {
+		if err != nil {
+			// A backend that failed stops the Knative install rather
+			// than waiting out its bound.
+			c.stopKnative()
 			return err
 		}
+		return c.joinKnative(ctx)
 	}
-	if c.NeedsKnative() {
-		return c.ensureKnative(ctx)
+	return err
+}
+
+// knativeRun is a Knative install running in the background.
+type knativeRun struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+	err    error
+}
+
+// startKnative begins ensureKnative in the background.
+func (c *LifecycleComponent) startKnative(ctx context.Context) {
+	kctx, cancel := context.WithCancel(ctx)
+	run := &knativeRun{cancel: cancel, done: make(chan struct{})}
+	c.knative = run
+	go func() {
+		defer close(run.done)
+		run.err = c.ensureKnative(kctx)
+	}()
+}
+
+// joinKnative waits for the background install and returns its result.
+func (c *LifecycleComponent) joinKnative(ctx context.Context) error {
+	run := c.knative
+	if run == nil {
+		return nil
+	}
+	select {
+	case <-run.done:
+		return run.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// stopKnative cancels a background install and waits for it to return.
+func (c *LifecycleComponent) stopKnative() {
+	if run := c.knative; run != nil {
+		run.cancel()
+		<-run.done
+	}
+}
+
+// KnativeStart is the component that begins installing Knative, or
+// bringing it to the pin, in the background (#1588). Registered straight
+// after the cluster, Knative's install, its longest step, runs while the
+// images load, the backends roll out and their tunnels bind; KnativeReady,
+// registered after those, waits for it. Without Cloud Run both do nothing.
+func (c *LifecycleComponent) KnativeStart() *KnativePhase {
+	return &KnativePhase{c: c, name: "knative-start", start: true}
+}
+
+// KnativeReady is the component that waits for the install KnativeStart
+// began, so `up` is not ready until Knative is.
+func (c *LifecycleComponent) KnativeReady() *KnativePhase {
+	c.knativeJoined = true
+	return &KnativePhase{c: c, name: "knative"}
+}
+
+// KnativePhase is one end of the background Knative install.
+type KnativePhase struct {
+	c     *LifecycleComponent
+	name  string
+	start bool
+}
+
+func (k *KnativePhase) Name() string { return k.name }
+
+func (k *KnativePhase) Start(ctx context.Context) error {
+	if !k.c.NeedsKnative() {
+		return nil
+	}
+	if k.start {
+		k.c.startKnative(ctx)
+		return nil
+	}
+	return k.c.joinKnative(ctx)
+}
+
+// Stop cancels an install still running when startup unwinds.
+func (k *KnativePhase) Stop(context.Context) error {
+	if k.start {
+		k.c.stopKnative()
 	}
 	return nil
 }

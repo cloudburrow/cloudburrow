@@ -247,3 +247,33 @@ func TestStatusPrintsStampedVersions(t *testing.T) {
 		}
 	}
 }
+
+// Cloud Run waits for Knative, which installs in the background beside the
+// backends and is ready as its own component (#1588).
+func TestStatusJSONRunWaitsForKnative(t *testing.T) {
+	cfg, err := config.Load(config.Options{
+		Args:   []string{"--name", "golden", "--state-dir", t.TempDir(), "--services", "run"},
+		Getenv: func(string) string { return "" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(comps map[string]bool) statusService {
+		t.Helper()
+		r, _ := buildStatusReport(cfg, &liveState{info: runtimeInfo{PID: 1, Control: "x"},
+			readiness: &readiness{State: "starting", Components: comps}}, "running", "")
+		for _, s := range r.Services {
+			if s.ID == "run" {
+				return s
+			}
+		}
+		t.Fatal("no run service in the report")
+		return statusService{}
+	}
+	if s := run(map[string]bool{"cluster": true, "components": true, "knative": false, "run": true}); s.Ready || s.Reason != "not ready: knative" {
+		t.Errorf("run before Knative = %+v, want waiting for knative", s)
+	}
+	if s := run(map[string]bool{"cluster": true, "components": true, "knative": true, "run": true}); !s.Ready {
+		t.Errorf("run with Knative = %+v, want ready", s)
+	}
+}
