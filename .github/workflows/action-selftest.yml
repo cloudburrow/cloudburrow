@@ -79,7 +79,7 @@ jobs:
           fi
           changed=$(git diff --name-only "$BASE...$HEAD")
           printf 'changed files:\n%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -qE '^(action\.yml$|action/|scripts/install\.sh$|test/actionselftest/|\.github/workflows/action-selftest\.yml$)'; then
+          if grep -qE '^(action\.yml$|action/|scripts/install\.sh$|test/actionselftest/|\.github/workflows/action-selftest\.yml$)' <<<"$changed"; then
             action=true
           else
             action=false
@@ -251,5 +251,9 @@ jobs:
           # And the failing job really did fail a step before its post step.
           [ "$ACTION" = true ] || exit 0
           fid=$(awk '/failing test step/ {print $1}' <<<"$jobs")
-          gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${fid}/logs" | grep -q 'failing on purpose' ||
+          # The log is read whole before matching: piped into grep -q under
+          # pipefail, grep's early exit could fail gh with SIGPIPE and fail
+          # this check although the line was there (run 38988381388).
+          flog=$(gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${fid}/logs")
+          grep -q 'failing on purpose' <<<"$flog" ||
             { echo "::error::the failing job never ran its failing step"; exit 1; }

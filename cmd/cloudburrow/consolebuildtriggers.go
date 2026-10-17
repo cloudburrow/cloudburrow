@@ -29,7 +29,7 @@ func (p buildTriggersProvider) project(project string) string {
 	return project
 }
 
-func (p buildTriggersProvider) List(_ context.Context, project string) (console.Listing, error) {
+func (p buildTriggersProvider) List(ctx context.Context, project string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Region", "Event", "Description", "Pool", "Approval", "Age"},
 		NameColumn: "Trigger", Noun: "triggers", AlwaysStatus: true,
 		Note: "Manual and webhook triggers run an inline build. GitHub, GitLab, Bitbucket and Cloud Source Repositories " +
@@ -49,6 +49,7 @@ func (p buildTriggersProvider) List(_ context.Context, project string) (console.
 			"Age": stampAge(t.GetCreateTime())}})
 	}
 	out.Total = len(out.Items)
+	out.Summary = p.defaultServiceAccount(ctx, project)
 	return out, nil
 }
 
@@ -170,7 +171,7 @@ func (p buildWorkerPoolsProvider) project(project string) string {
 
 func (p buildWorkerPoolsProvider) List(_ context.Context, project string) (console.Listing, error) {
 	out := console.Listing{Columns: []string{"Region", "Machine type", "Disk (GB)", "Display name", "Age"},
-		NameColumn: "Pool", Noun: "worker pools", AlwaysStatus: true,
+		NameColumn: "Pool", Noun: "worker pools", AlwaysStatus: true, RowsOpenable: true,
 		Note: "A build that names a pool runs on the host's Docker, like every build here; the pool is recorded on the build."}
 	for _, w := range runadapter.WorkerPools(p.project(project)) {
 		parts := strings.Split(w.GetName(), "/")

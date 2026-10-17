@@ -151,6 +151,9 @@ func ekmCertificate(t *testing.T) []byte {
 // covers: google.cloud.kms.v1.EkmService/VerifyConnectivity (unimplemented)
 func TestKMSEkmConnectionsAreStored(t *testing.T) {
 	h := New(t)
+	// Asked here, not first inside a subtest: an unserved KMS skips this
+	// test, where the harness's Skip from a subtest failed it (#1362).
+	h.Endpoint(EnvKMS)
 	ctx := h.Context()
 	der := ekmCertificate(t)
 	for _, variant := range []string{"grpc", "rest"} {
