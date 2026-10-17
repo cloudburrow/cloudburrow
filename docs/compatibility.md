@@ -922,6 +922,29 @@ The test fails rather than passes if the endpoint does not return, because an un
 address is not evidence about durability. It is on CI's [retry-once list](#retried-once), so this
 evidence tolerates one retry.
 
+**What the Spanner, Bigtable and Firestore fronts keep lives as long as the emulator's data (#1514).**
+Each front keeps what its emulator does not: Spanner's backups and their rows, backup schedules,
+database roles, drop protection, instance updates, custom instance configurations, partition
+updates, IAM policies and operations; Bigtable's instances, clusters, app profiles, memory layers,
+backups and snapshots with their cells, the tables kept for `UndeleteTable`, authorized, logical
+and materialized views, schema bundles and IAM policies; Firestore's databases, indexes, field
+overrides, backup schedules, backups with their documents, and operations. None of it is in the
+front's memory alone: it is in a state directory on an **emptyDir of the pod, limited to 1 GiB**
+(`internal/frontstate`), the records in one file replaced whole and each data copy in a file of
+its own, written as the call that made it returns. So a restart of the front's container alone,
+the emulator still running, loses none of it, and a restart of the pod loses it together with the
+emulator's data, as the Pub/Sub (#898) and BigQuery (#1115) fronts' state does: none of it
+survives `stop` and `up`, and none of it is in a `state save` archive. A pod whose copies grow past
+the limit is evicted by the kubelet, and starts empty. `TestSpannerFrontRestartKeepsItsState`,
+`TestBigtableFrontRestartKeepsItsState` and `TestFirestoreFrontRestartKeepsItsState` make each kind
+of resource with the official clients, restart the front's container alone, and read them back:
+a Spanner backup is restored into a database with its rows, a Bigtable backup into a table and a
+deleted table is undeleted, each with its cells, and a Firestore backup is restored with its
+documents. **`reset` clears it** (`TestResetClearsTheFrontsState`): `service=spanner`, `bigtable` and
+`firestore` forget what each front keeps, and Bigtable's also drops the tables of the instances it
+forgets; the Spanner emulator's instances and databases and the Firestore emulator's documents are
+not reset, as before.
+
 **Datastore keeps its data in persistent mode, measured (#307).** In persistent mode the
 emulator's on-disk store is on a PersistentVolumeClaim, and the emulator's JVM is the container's
 main process. The Cloud SDK emulator writes its store only when it shuts down cleanly, and both
