@@ -55,8 +55,11 @@ func arrowParquet(t *testing.T, schema *arrow.Schema, build func(*array.RecordBu
 // the rows read back by the new names through a query and
 // tabledata.list. As for a CSV (TestBigQueryColumnNameCharacterMap), names
 // the same once replaced ("a!", "a?") and a name still refused once
-// replaced (a period, kept: "x.y"; a V1 leading digit, "1a") stay 501
-// with no table, BigQuery not documenting how it names them. A flexible
+// replaced (a V1 leading digit, "1a") stay 501 with no table, BigQuery
+// not documenting how it names them; a period, kept ("x.y"), is 400
+// (#1547: "Periods are not replaced by underscores in Parquet file column
+// names when a column name character map is used", UNVERIFIED that the
+// load then fails). A flexible
 // name loads under STRICT, the default, as it is. Measured first: each of
 // the V1 and V2 loads was 501.
 //
@@ -152,7 +155,6 @@ func TestBigQueryParquetColumnNameCharacterMap(t *testing.T) {
 		charMap bigquery.ColumnNameCharacterMap
 	}{
 		{"pqmap_same", ints("a!", "a?"), bigquery.V1ColumnNameCharacterMap},
-		{"pqmap_period", ints("x.y"), bigquery.V2ColumnNameCharacterMap},
 		{"pqmap_digit", ints("1a"), bigquery.V1ColumnNameCharacterMap},
 	} {
 		_, err := load(tc.table, tc.data, tc.charMap)
@@ -161,6 +163,15 @@ func TestBigQueryParquetColumnNameCharacterMap(t *testing.T) {
 		if tableExists(t, ctx, ds.Table(tc.table)) {
 			t.Errorf("the refused load left %s", tc.table)
 		}
+	}
+
+	// #1547: a period, kept ("Periods are not replaced by underscores in
+	// Parquet file column names when a column name character map is
+	// used"), fails the load, as an unsupported character does.
+	_, err := load("pqmap_period", ints("x.y"), bigquery.V2ColumnNameCharacterMap)
+	wantHTTPStatus(t, "a Parquet name with a period under V2", err, http.StatusBadRequest)
+	if tableExists(t, ctx, ds.Table("pqmap_period")) {
+		t.Errorf("the refused load left pqmap_period")
 	}
 
 	job, err := load("pqmap_strict", ints("first name", "n"), "")

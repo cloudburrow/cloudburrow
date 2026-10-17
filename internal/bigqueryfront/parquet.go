@@ -220,6 +220,17 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 			"; the file's is " + describeFields(file) + "). BigQuery reads a Parquet file by the file's schema, and its " +
 			"documentation does not say how it reads one by another; CloudBurrow does not guess. Leave the schema out")
 	}
+	if h := hiveFilesOf(r); h != nil { // #1547, loadvariants.go
+		for _, k := range h.keys {
+			for _, fl := range file {
+				if strings.EqualFold(fl.Name, k.name) {
+					return invalid("The Parquet file's column " + fl.Name + " is a partition key: \"Hive partitioning " +
+						"keys and the columns in the underlying files cannot overlap.\"")
+				}
+			}
+		}
+		file = append(file, h.fields()...)
+	}
 	plan := &pqPlan{dest: tableRef{DatasetID: dest.DatasetID, TableID: dest.TableID}, files: files, upload: upload,
 		createNever: strings.EqualFold(el.CreateDisposition, "CREATE_NEVER")}
 	// passes: the emulator's own load would carry this one out as BigQuery
@@ -325,6 +336,9 @@ func (f front) parquetSchema(w http.ResponseWriter, r *http.Request, job *jobBod
 		if plan.props, _ = loadTableProps(r); plan.props != nil {
 			passes = false // #1457, loadtable.go
 		}
+	}
+	if hiveFilesOf(r) != nil {
+		passes = false // the keys are the front's to add (#1547)
 	}
 	if !passes {
 		f.parquetOwnLoad(w, r, plan)
