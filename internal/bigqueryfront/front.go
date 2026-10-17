@@ -488,6 +488,8 @@ func Wrap(next http.Handler, opts ...Option) http.Handler {
 			f.deleteWatched(w, r, dataset, table) // #1390, materializedviews.go
 		case r.Method == http.MethodDelete && m[4] != "" && m[5] == "":
 			f.deleteTableKeeping(w, r, dataset, table) // #1460, dropped.go
+		case r.Method == http.MethodDelete && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables") && r.Header.Get(PurgeHeader) != "":
+			f.deleteDatasetPurging(w, r, dataset) // #1540, purge.go
 		case r.Method == http.MethodDelete && m[3] != "" && m[4] == "" && !strings.HasSuffix(r.URL.EscapedPath(), "/tables"):
 			f.deleteDatasetKeeping(w, r, dataset) // #1460, dropped.go
 		default:

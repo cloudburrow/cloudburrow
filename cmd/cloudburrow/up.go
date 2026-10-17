@@ -277,6 +277,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		scheduler:    schedulerSvc,
 		logging:      loggingSvc,
 		run:          runSvc,
+		memorystore:  memorystoreAdminSvc,
 		projects:     func() []string { return registered() },
 		registry:     func() *resourcemanager.Registry { return projectRegistry },
 		serviceUsage: func() *serviceusage.Server { return serviceUsageRef },
@@ -424,6 +425,7 @@ func runUp(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err == nil && projects != nil {
 		projectRegistry = projects
 		wirePurge(adminAPI, projects)
+		wireProjectNumbers(ctx, projects, func() *netfwd.Forwarder { return forwarderFor(forwarders, "storage") })
 		registered = func() []string {
 			list, err := projects.List()
 			if err != nil {

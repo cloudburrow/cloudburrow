@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -454,5 +455,55 @@ func (f *Front) ResetState(ctx context.Context) error {
 
 // serveReset answers frontstate.ResetPath.
 func (f *Front) serveReset(w http.ResponseWriter, r *http.Request) {
-	frontstate.ServeReset(w, r, func() error { return f.ResetState(r.Context()) })
+	frontstate.ServeReset(w, r, func(project string) error {
+		if project == "" {
+			return f.ResetState(r.Context())
+		}
+		return f.ResetProject(r.Context(), project)
+	})
+}
+
+// ResetProject deletes one project's Bigtable state, as Google does when the
+// project is purged (#1540): its instances, which only the front holds,
+// with their clusters' memory layers and their operations, and every table
+// of them in the emulator, with the backups, snapshots, deleted tables,
+// authorized and SQL views, schema bundles and table IAM policies the front
+// keeps for those tables.
+func (f *Front) ResetProject(ctx context.Context, project string) error {
+	if project == "" {
+		return fmt.Errorf("a project is required")
+	}
+	prefix := "projects/" + project + "/"
+	f.instances.mu.Lock()
+	var names []string
+	for name := range f.instances.byNm {
+		if strings.HasPrefix(name, prefix) {
+			names = append(names, name)
+			delete(f.instances.byNm, name)
+		}
+	}
+	for name := range f.instances.ops {
+		if strings.HasPrefix(name, "operations/"+prefix) {
+			delete(f.instances.ops, name)
+		}
+	}
+	var q []string
+	for _, name := range f.instances.opsQ {
+		if !strings.HasPrefix(name, "operations/"+prefix) {
+			q = append(q, name)
+		}
+	}
+	f.instances.opsQ = q
+	frontstate.DropProject(f.instances.layers, project)
+	f.instances.mu.Unlock()
+	var dropErr error
+	for _, name := range names {
+		if err := f.dropTables(ctx, name); err != nil && dropErr == nil {
+			dropErr = fmt.Errorf("drop the tables of %s: %w", name, err)
+		}
+	}
+	if err := f.save(); err != nil {
+		return err
+	}
+	return dropErr
 }

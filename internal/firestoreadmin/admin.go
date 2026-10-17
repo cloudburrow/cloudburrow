@@ -161,7 +161,12 @@ var documentsPath = regexp.MustCompile(`^/v1/projects/[^/]+/databases/[^/]+/docu
 // ServeHTTP answers an admin call Claims claimed.
 func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == frontstate.ResetPath {
-		frontstate.ServeReset(w, r, a.ResetState)
+		frontstate.ServeReset(w, r, func(project string) error {
+			if project == "" {
+				return a.ResetState()
+			}
+			return a.ResetProject(r.Context(), project)
+		})
 		return
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
