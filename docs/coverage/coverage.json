@@ -213,6 +213,7 @@
           "test/compat/resterrorstatus_test.go:94 TestGcloudSecretManagerErrorStatus",
           "test/compat/secretcmek_test.go:244 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
+          "test/compat/secretmanyversions_test.go:26 TestSecretTwoThousandVersions",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/terraform_batch10_test.go:162 TestTerraformDataSourcesBatch10",
@@ -227,6 +228,7 @@
         "tests": [
           "test/compat/secretcmek_test.go:244 TestTerraformSecretCMEK",
           "test/compat/secretcmek_test.go:74 TestSecretManagerCMEK",
+          "test/compat/secretmanyversions_test.go:26 TestSecretTwoThousandVersions",
           "test/compat/secretregional_test.go:38 TestSecretManagerRegionalSecrets",
           "test/compat/secrets_test.go:119 TestSecretVersionLifecycle",
           "test/compat/secrettopics_test.go:33 TestSecretManagerTopicNotifications",

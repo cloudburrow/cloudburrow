@@ -19,6 +19,9 @@ func (r *forgetRunner) Run(_ context.Context, stdin string, args ...string) (str
 	r.calls = append(r.calls, strings.Join(args, " "))
 	r.stdin = append(r.stdin, stdin)
 	if len(args) > 2 && args[2] == "get" {
+		if strings.Contains(strings.Join(args, " "), " -l ") {
+			return `{"items":[]}`, nil
+		}
 		return "", errNotFoundForTest
 	}
 	return "", nil
