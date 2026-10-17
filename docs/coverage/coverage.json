@@ -9400,8 +9400,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery1548_test.go:36 TestBigQueryScriptsUndropAndAlterSchema",
-          "test/compat/bigquery1562_test.go:174 TestBigQueryMLHashBucketize",
-          "test/compat/bigquery1562_test.go:228 TestBigQueryMLDNNOptions1562",
+          "test/compat/bigquery1562_test.go:175 TestBigQueryMLHashBucketize",
+          "test/compat/bigquery1562_test.go:229 TestBigQueryMLDNNOptions1562",
           "test/compat/bigquery1562_test.go:34 TestBigQueryTempScriptsUndropAndAlterSchema",
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
           "test/compat/bigqueryalterremake_test.go:30 TestBigQueryAlterTableRenameAndDropColumn",
@@ -9581,8 +9581,8 @@
         "status": "Verified",
         "tests": [
           "test/compat/bigquery1548_test.go:36 TestBigQueryScriptsUndropAndAlterSchema",
-          "test/compat/bigquery1562_test.go:174 TestBigQueryMLHashBucketize",
-          "test/compat/bigquery1562_test.go:228 TestBigQueryMLDNNOptions1562",
+          "test/compat/bigquery1562_test.go:175 TestBigQueryMLHashBucketize",
+          "test/compat/bigquery1562_test.go:229 TestBigQueryMLDNNOptions1562",
           "test/compat/bigquery1562_test.go:34 TestBigQueryTempScriptsUndropAndAlterSchema",
           "test/compat/bigquery_test.go:94 TestBigQueryDatasetTableInsertAndQuery",
           "test/compat/bigqueryalterfields_test.go:34 TestBigQueryAlterTableFieldsKeysAndPolicies",
@@ -9752,8 +9752,8 @@
         "method": "bigquery.models.get",
         "status": "Verified",
         "tests": [
-          "test/compat/bigquery1562_test.go:174 TestBigQueryMLHashBucketize",
-          "test/compat/bigquery1562_test.go:228 TestBigQueryMLDNNOptions1562",
+          "test/compat/bigquery1562_test.go:175 TestBigQueryMLHashBucketize",
+          "test/compat/bigquery1562_test.go:229 TestBigQueryMLDNNOptions1562",
           "test/compat/bigquerymethods_test.go:144 TestBigQueryModelsOfADatasetWithNone",
           "test/compat/bigqueryml_test.go:93 TestBigQueryMLLinearAndLogisticModels",
           "test/compat/bigquerymlarima_test.go:140 TestBigQueryMLArimaPlusPipeline",

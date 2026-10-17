@@ -484,27 +484,45 @@ func schemaDDL(project, dataset string, ds map[string]any) string {
 // SCHEMATA_OPTIONS, with no TEMP table or function, which runScript cannot
 // keep between its requests (#1417).
 func schemataInTurn(sql string) bool {
+	in, temp := schemataRead(sql)
+	return in && !temp
+}
+
+// schemataInTurnTemp is schemataInTurn of a script with a TEMP table or
+// function, which the front runs a statement at a time in its session
+// (#1562, runTempScript): substituted into the whole script before it
+// runs, the view would be read as it was before the script's statements.
+func schemataInTurnTemp(sql string) bool {
+	in, temp := schemataRead(sql)
+	return in && temp
+}
+
+// schemataRead reports whether sql is a script that makes, alters, drops
+// or undrops a dataset and then reads INFORMATION_SCHEMA.SCHEMATA or
+// SCHEMATA_OPTIONS, and whether it has a TEMP table or function.
+func schemataRead(sql string) (bool, bool) {
 	upper := strings.ToUpper(sql)
 	if !strings.Contains(upper, "SCHEMATA") || !strings.Contains(upper, "SCHEMA") {
-		return false
+		return false, false
 	}
 	toks, ok := lex(sql)
-	if !ok || tokensHaveTemp(toks) || len(splitStatements(trimSemicolons(toks))) < 2 {
-		return false
+	if !ok || len(splitStatements(trimSemicolons(toks))) < 2 {
+		return false, false
 	}
+	temp := tokensHaveTemp(toks)
 	changed := false
 	for i, t := range toks {
 		switch {
-		case (t.is("CREATE") || t.is("ALTER") || t.is("DROP")) && i+1 < len(toks) && toks[i+1].is("SCHEMA"):
+		case (t.is("CREATE") || t.is("ALTER") || t.is("DROP") || t.is("UNDROP")) && i+1 < len(toks) && toks[i+1].is("SCHEMA"):
 			changed = true
 		case t.is("CREATE") && i+3 < len(toks) && toks[i+1].is("OR") && toks[i+2].is("REPLACE") && toks[i+3].is("SCHEMA"):
 			changed = true
 		case changed && (t.is("SCHEMATA") || t.is("SCHEMATA_OPTIONS")):
-			return true
+			return true, temp
 		case changed && t.kind == tokQuoted && (strings.HasSuffix(strings.ToUpper(t.text), "INFORMATION_SCHEMA.SCHEMATA") ||
 			strings.HasSuffix(strings.ToUpper(t.text), "INFORMATION_SCHEMA.SCHEMATA_OPTIONS")):
-			return true
+			return true, temp
 		}
 	}
-	return false
+	return false, temp
 }

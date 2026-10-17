@@ -91,12 +91,13 @@ func TestBigQueryTempScriptsUndropAndAlterSchema(t *testing.T) {
 		run("INSERT INTO " + tbl + " VALUES (1), (2)")
 
 		// ALTER SCHEMA beside a TEMP table, read by the next statement.
-		// INFORMATION_SCHEMA.SCHEMATA_OPTIONS read inside such a script is
-		// empty (a follow-up), so the description is read after it.
+		// The next statement reads the option from INFORMATION_SCHEMA in
+		// its turn (#1565: it read the view as before the script).
 		got := read("CREATE TEMP TABLE tt AS SELECT 'temp' AS x; "+
 			"ALTER SCHEMA `"+ds.DatasetID+"` SET OPTIONS (description = 'beside a temp table'); "+
-			"SELECT x FROM tt", insert)
-		if !reflect.DeepEqual(got, []string{"temp"}) {
+			"SELECT CONCAT(x, ':', option_value) FROM tt, `"+ds.DatasetID+"`.INFORMATION_SCHEMA.SCHEMATA_OPTIONS "+
+			"WHERE option_name = 'description'", insert)
+		if !reflect.DeepEqual(got, []string{`temp:"beside a temp table"`}) {
 			t.Errorf("insert %v: ALTER SCHEMA beside a TEMP table: %v", insert, got)
 		}
 		if md, err := ds.Metadata(ctx); err != nil || md.Description != "beside a temp table" {
